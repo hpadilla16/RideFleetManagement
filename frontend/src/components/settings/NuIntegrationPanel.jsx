@@ -84,9 +84,11 @@ function statusTone(status) {
 }
 
 const NOTE_STYLE = {
+  // No hardcoded color: .surface-note already sets #433b63 in light mode, and the
+  // inline value was overriding the dark-theme .surface-note override (unreadable).
   padding: '12px 14px', borderRadius: 14,
   background: 'linear-gradient(180deg, rgba(135,82,254,.08), rgba(31,199,170,.06))',
-  border: '1px solid rgba(135,82,254,.12)', color: '#433b63', lineHeight: 1.6, fontSize: 13,
+  border: '1px solid rgba(135,82,254,.12)', lineHeight: 1.6, fontSize: 13,
 };
 
 export function NuIntegrationPanel({ token, me, isSuper, isAdmin, tenantName, activeSettingsTenantId, scopedSettingsPath, onPageMsg }) {
@@ -435,7 +437,7 @@ export function NuIntegrationPanel({ token, me, isSuper, isAdmin, tenantName, ac
             <button type="button" disabled={testing || loading || !configured} onClick={handleTestAuth}>
               {testing ? 'Testing…' : 'Test connection'}
             </button>
-            <button type="submit" className="subtle" disabled={saving}>
+            <button type="submit" className="button-subtle" disabled={saving}>
               {saving ? 'Saving…' : 'Save credentials'}
             </button>
             <span className="ui-muted" style={{ fontSize: 13 }}>
@@ -571,7 +573,7 @@ export function NuIntegrationPanel({ token, me, isSuper, isAdmin, tenantName, ac
                 style={{ width: 110 }}
               />
             </label>
-            <button type="submit" className="subtle" disabled={addBusy}>{addBusy ? 'Saving…' : 'Save mapping'}</button>
+            <button type="submit" className="button-subtle" disabled={addBusy}>{addBusy ? 'Saving…' : 'Save mapping'}</button>
           </form>
         )}
 

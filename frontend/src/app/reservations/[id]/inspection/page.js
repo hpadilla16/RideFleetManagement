@@ -118,7 +118,7 @@ function Inner({ token, me, logout }) {
           </div>
           <img src="/inspection-car-reference.jpg" alt="Inspection reference car" style={{ maxWidth: 320, width: '100%', borderRadius: 8, border: '1px solid var(--border)' }} />
 
-          <div className="grid-2" style={{ marginTop: 10 }}>
+          <div className="grid2" style={{ marginTop: 10 }}>
             {[
               ['front', 'Front Photo'],
               ['rear', 'Rear Photo'],

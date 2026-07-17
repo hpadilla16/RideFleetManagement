@@ -1343,6 +1343,18 @@ label input[type="radio"],
 :root[data-theme='dark'] .btn-void { background: #2a1416; color: #fca5a5; border-color: #fca5a5; }
 :root[data-theme='dark'] .btn-void:hover:not(:disabled) { background: #3a1a1d; }
 
+/* .button-danger — canonical danger SECONDARY for emergency-only actions
+   (Force re-login / Remove in the booking-source integration panels). Promoted
+   from AdvantageIntegrationPanel's inline DANGER_BUTTON_STYLE (beta.320): white
+   fill, red hairline border, dark red text. The explicit fill (not a translucent
+   tint) keeps the contrast deterministic over .glass surfaces.
+   Contrast: light #991b1b on #fff = 8.31:1; dark #fca5a5 on #2a1416 = 9.14:1
+   (both pass WCAG AA/AAA for normal text). */
+.button-danger { background: #fff; color: #991b1b; border-color: #f5c6c8; box-shadow: none; }
+.button-danger:hover:not(:disabled) { background: #fef2f2; box-shadow: none; }
+:root[data-theme='dark'] .button-danger { background: #2a1416; color: #fca5a5; border-color: #5f2a2e; }
+:root[data-theme='dark'] .button-danger:hover:not(:disabled) { background: #3a1a1d; }
+
 /* .switch — reusable iOS-style on/off toggle (track + sliding knob). Brand-purple
    when ON, neutral when OFF. Rendered as a <button role="switch" aria-checked>.
    Used by the Economy integration panel (master + per-area Import toggles). */

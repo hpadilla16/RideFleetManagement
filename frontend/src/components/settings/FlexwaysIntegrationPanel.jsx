@@ -121,9 +121,11 @@ function statusTone(status) {
 }
 
 const NOTE_STYLE = {
+  // No hardcoded color: .surface-note already sets #433b63 in light mode, and the
+  // inline value was overriding the dark-theme .surface-note override (unreadable).
   padding: '12px 14px', borderRadius: 14,
   background: 'linear-gradient(180deg, rgba(135,82,254,.08), rgba(31,199,170,.06))',
-  border: '1px solid rgba(135,82,254,.12)', color: '#433b63', lineHeight: 1.6, fontSize: 13,
+  border: '1px solid rgba(135,82,254,.12)', lineHeight: 1.6, fontSize: 13,
 };
 
 // Renders the Recent-runs status cell: SUCCESS (green, optional "(re-login)"),
@@ -621,7 +623,7 @@ export function FlexwaysIntegrationPanel({ token, me, isSuper, isAdmin, tenantNa
             <button type="button" disabled={testing || loading || !configured} onClick={handleTestAuth}>
               {testing ? 'Testing…' : 'Test connection'}
             </button>
-            <button type="submit" className="subtle" disabled={saving}>
+            <button type="submit" className="button-subtle" disabled={saving}>
               {saving ? 'Saving…' : 'Save credentials'}
             </button>
             <span className="ui-muted" style={{ fontSize: 13 }}>
@@ -653,7 +655,7 @@ export function FlexwaysIntegrationPanel({ token, me, isSuper, isAdmin, tenantNa
       <section className="glass card section-card" style={{ borderLeft: '4px solid var(--brand-purple, #8752FE)' }}>
         <div className="row-between">
           <h3 style={{ margin: 0 }}>Connection health</h3>
-          <button type="button" className="subtle" disabled={relogging || !configured} onClick={handleForceRelogin} title="Emergency only — the worker re-authenticates on its own">
+          <button type="button" className="button-danger" disabled={relogging || !configured} onClick={handleForceRelogin} title="Emergency only — the worker re-authenticates on its own">
             {relogging ? 'Re-logging in…' : 'Force re-login'}
           </button>
         </div>
@@ -767,7 +769,7 @@ export function FlexwaysIntegrationPanel({ token, me, isSuper, isAdmin, tenantNa
                     </div>
                   </td>
                   <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                    <button type="button" className="ghost" style={{ color: '#991b1b' }} onClick={() => removeSede(row)}>Remove</button>
+                    <button type="button" className="button-danger" onClick={() => removeSede(row)}>Remove</button>
                   </td>
                 </tr>
               ))}
@@ -794,7 +796,7 @@ export function FlexwaysIntegrationPanel({ token, me, isSuper, isAdmin, tenantNa
               ))}
             </select>
           </label>
-          <button type="submit" className="subtle" disabled={addBusy}>{addBusy ? 'Adding…' : '+ Add sede'}</button>
+          <button type="submit" className="button-subtle" disabled={addBusy}>{addBusy ? 'Adding…' : '+ Add sede'}</button>
         </form>
         <div className="ui-muted" style={{ fontSize: 12 }}>
           Import window blank = the platform default{platformDefault

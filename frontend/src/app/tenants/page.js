@@ -301,7 +301,7 @@ function Inner({ token, me, logout }) {
 
         <div id="tenant-create-card" className="glass card" style={{ padding: 12 }}>
           <h3 className="section-title">Create Tenant</h3>
-          <div className="grid-2">
+          <div className="grid2">
             <input placeholder="Name" value={tenantForm.name} onChange={(e) => setTenantForm((f) => ({ ...f, name: e.target.value }))} />
             <input placeholder="Slug (e.g. acme-fleet)" value={tenantForm.slug} onChange={(e) => setTenantForm((f) => ({ ...f, slug: e.target.value }))} />
             <select value={tenantForm.status} onChange={(e) => setTenantForm((f) => ({ ...f, status: e.target.value }))}>
@@ -386,7 +386,7 @@ function Inner({ token, me, logout }) {
 
         <div id="tenant-admin-card" className="glass card" style={{ padding: 12 }}>
           <h3 className="section-title">Create Tenant Admin</h3>
-          <div className="grid-2">
+          <div className="grid2">
             <select value={activeTenantId} onChange={(e) => setActiveTenantId(e.target.value)}>
               <option value="">Select Tenant</option>
               {(rows || []).map((r) => <option key={r.id} value={r.id}>{r.name} ({r.slug})</option>)}

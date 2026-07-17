@@ -124,9 +124,11 @@ function statusTone(status) {
 }
 
 const NOTE_STYLE = {
+  // No hardcoded color: .surface-note already sets #433b63 in light mode, and the
+  // inline value was overriding the dark-theme .surface-note override (unreadable).
   padding: '12px 14px', borderRadius: 14,
   background: 'linear-gradient(180deg, rgba(135,82,254,.08), rgba(31,199,170,.06))',
-  border: '1px solid rgba(135,82,254,.12)', color: '#433b63', lineHeight: 1.6, fontSize: 13,
+  border: '1px solid rgba(135,82,254,.12)', lineHeight: 1.6, fontSize: 13,
 };
 
 // Warn variant of the run strip (mockup .strip.warn). Used when the last run did
@@ -139,22 +141,10 @@ const NOTE_STYLE_WARN = {
   color: '#8a5a0f',
 };
 
-/**
- * Bordered danger treatment (mockup .btn.danger: white fill, red text, red hairline
- * border) for the emergency-only destructive actions. Secondary to Save by
- * construction — no fill, no shadow.
- *
- * The mockup's --bad (#e5484d) on white is only 3.9:1, BELOW WCAG AA for normal
- * text, so we carry the darker #991b1b this panel already used: 8.3:1 on #fff.
- * The explicit white background (rather than a translucent tint) is what makes
- * that ratio deterministic instead of dependent on the .glass surface behind it.
- */
-const DANGER_BUTTON_STYLE = {
-  background: '#fff',
-  color: '#991b1b',
-  borderColor: '#f5c6c8',
-  boxShadow: 'none',
-};
+// Danger treatment for the emergency-only destructive actions now lives in
+// globals.css as `.button-danger` (promoted from this panel's inline
+// DANGER_BUTTON_STYLE — it was the third panel-local reinvention). White fill,
+// red hairline border, #991b1b text (8.31:1 on #fff), theme-aware in dark.
 
 /**
  * Recent-runs status cell (mockup AD-2). SUCCESS is green; a session expiry is
@@ -737,7 +727,7 @@ export function AdvantageIntegrationPanel({ token, me, isSuper, isAdmin, tenantN
             <button type="button" className="button-subtle" disabled={testing || loading || !configured} onClick={handleTestAuth}>
               {testing ? 'Testing…' : 'Test connection'}
             </button>
-            <button type="button" style={DANGER_BUTTON_STYLE} disabled={relogging || !configured} onClick={handleForceRelogin} title="Emergency only — the worker re-authenticates on its own">
+            <button type="button" className="button-danger" disabled={relogging || !configured} onClick={handleForceRelogin} title="Emergency only — the worker re-authenticates on its own">
               {relogging ? 'Re-logging in…' : 'Force re-login'}
             </button>
             <span className="ui-muted" style={{ fontSize: 13 }}>
@@ -875,7 +865,7 @@ export function AdvantageIntegrationPanel({ token, me, isSuper, isAdmin, tenantN
                     </div>
                   </td>
                   <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                    <button type="button" style={DANGER_BUTTON_STYLE} onClick={() => removeConfig(row)}>Remove</button>
+                    <button type="button" className="button-danger" onClick={() => removeConfig(row)}>Remove</button>
                   </td>
                 </tr>
               ))}

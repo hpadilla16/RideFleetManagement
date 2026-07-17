@@ -429,7 +429,7 @@ export function EconomyIntegrationPanel({ token, me, isSuper, isAdmin, activeSet
             <button type="button" disabled={testing || loading || !configured} onClick={handleTestAuth}>
               {testing ? 'Testing…' : 'Test connection'}
             </button>
-            <button type="submit" className="subtle" disabled={saving}>
+            <button type="submit" className="button-subtle" disabled={saving}>
               {saving ? 'Saving…' : 'Save credentials'}
             </button>
             <span className="ui-muted" style={{ fontSize: 13 }}>
@@ -439,7 +439,7 @@ export function EconomyIntegrationPanel({ token, me, isSuper, isAdmin, activeSet
             </span>
           </div>
         </form>
-        <div className="surface-note" style={{ padding: '12px 14px', borderRadius: 14, background: 'linear-gradient(180deg, rgba(135,82,254,.08), rgba(31,199,170,.06))', border: '1px solid rgba(135,82,254,.12)', color: '#433b63', lineHeight: 1.6, fontSize: 13 }}>
+        <div className="surface-note" style={{ padding: '12px 14px', borderRadius: 14, background: 'linear-gradient(180deg, rgba(135,82,254,.08), rgba(31,199,170,.06))', border: '1px solid rgba(135,82,254,.12)', lineHeight: 1.6, fontSize: 13 }}>
           🔒 Encrypted at rest with AES-256-GCM. Because Economy has no CloudFlare and no hourly-expiring cookie, the panel re-logs in on its own — you rarely need to touch this again.
         </div>
       </section>
@@ -534,7 +534,7 @@ export function EconomyIntegrationPanel({ token, me, isSuper, isAdmin, activeSet
                     </div>
                   </td>
                   <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                    <button type="button" className="ghost" style={{ color: '#991b1b' }} onClick={() => removeArea(row)}>Remove</button>
+                    <button type="button" className="button-danger" onClick={() => removeArea(row)}>Remove</button>
                   </td>
                 </tr>
               ))}
@@ -561,7 +561,7 @@ export function EconomyIntegrationPanel({ token, me, isSuper, isAdmin, activeSet
               ))}
             </select>
           </label>
-          <button type="submit" className="subtle" disabled={addBusy}>{addBusy ? 'Adding…' : '+ Add area'}</button>
+          <button type="submit" className="button-subtle" disabled={addBusy}>{addBusy ? 'Adding…' : '+ Add area'}</button>
         </form>
         <div className="ui-muted" style={{ fontSize: 12 }}>
           Import window blank = the platform default{platformDefault
@@ -602,7 +602,7 @@ export function EconomyIntegrationPanel({ token, me, isSuper, isAdmin, activeSet
           </div>
         </div>
 
-        <div className="surface-note" style={{ padding: '12px 14px', borderRadius: 14, background: 'linear-gradient(180deg, rgba(135,82,254,.08), rgba(31,199,170,.06))', border: '1px solid rgba(135,82,254,.12)', color: '#433b63', lineHeight: 1.6, fontSize: 13 }}>
+        <div className="surface-note" style={{ padding: '12px 14px', borderRadius: 14, background: 'linear-gradient(180deg, rgba(135,82,254,.08), rgba(31,199,170,.06))', border: '1px solid rgba(135,82,254,.12)', lineHeight: 1.6, fontSize: 13 }}>
           ⚙️ Runs autonomously (~every 15 minutes) once credentials and at least one area are enabled. Use <strong>Run sync now</strong> only if you need the latest reservations immediately.
         </div>
 
@@ -657,7 +657,7 @@ export function EconomyIntegrationPanel({ token, me, isSuper, isAdmin, activeSet
             Open review tray →
           </Link>
         </div>
-        <div className="surface-note" style={{ padding: '12px 14px', borderRadius: 14, background: 'linear-gradient(180deg, rgba(135,82,254,.08), rgba(31,199,170,.06))', border: '1px solid rgba(135,82,254,.12)', color: '#433b63', lineHeight: 1.6, fontSize: 13 }}>
+        <div className="surface-note" style={{ padding: '12px 14px', borderRadius: 14, background: 'linear-gradient(180deg, rgba(135,82,254,.08), rgba(31,199,170,.06))', border: '1px solid rgba(135,82,254,.12)', lineHeight: 1.6, fontSize: 13 }}>
           The review tray also appears at the top of <strong>Reservations</strong> whenever there are Economy or TL imports waiting. Same tray, source-aware.
         </div>
       </section>

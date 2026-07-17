@@ -198,7 +198,7 @@ function MaintenanceInner({ token, me, logout }) {
           <Field label="Vendor / shop"><input value={newRO.vendor} onChange={(e) => setNewRO({ ...newRO, vendor: e.target.value })} /></Field>
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
             <button disabled={busy} onClick={createRO}>Create</button>
-            <button className="ghost" onClick={() => setNewRO(null)}>Cancel</button>
+            <button className="button-subtle" onClick={() => setNewRO(null)}>Cancel</button>
           </div>
         </Modal>
       )}
@@ -218,7 +218,7 @@ function MaintenanceInner({ token, me, logout }) {
             {(selected.lines || []).map((l) => (
               <tr key={l.id}>
                 <td>{l.type}</td><td>{l.description}</td><td>{l.qty}</td><td>{money(l.unitCost)}</td><td>{money(l.amount)}</td>
-                <td style={{ textAlign: 'right' }}>{selected.status === 'OPEN' || selected.status === 'IN_PROGRESS' ? <button className="ghost" onClick={() => delLine(l.id)}>✕</button> : null}</td>
+                <td style={{ textAlign: 'right' }}>{selected.status === 'OPEN' || selected.status === 'IN_PROGRESS' ? <button className="button-subtle" onClick={() => delLine(l.id)}>✕</button> : null}</td>
               </tr>
             ))}
             {(selected.lines || []).length === 0 && <tr><td colSpan={6} style={{ opacity: 0.6, padding: 10 }}>No lines yet.</td></tr>}
@@ -248,10 +248,10 @@ function MaintenanceInner({ token, me, logout }) {
             {selected.status !== 'COMPLETED' && selected.status !== 'CANCELLED' && (
               <>
                 <button disabled={busy} onClick={() => act('complete', 'Completed')}>Complete</button>
-                <button className="ghost" disabled={busy} onClick={() => act('cancel', 'Cancelled')}>Cancel RO</button>
+                <button className="button-danger" disabled={busy} onClick={() => act('cancel', 'Cancelled')}>Cancel RO</button>
               </>
             )}
-            <button className="ghost" onClick={() => setSelected(null)} style={{ marginLeft: 'auto' }}>Close</button>
+            <button className="button-subtle" onClick={() => setSelected(null)} style={{ marginLeft: 'auto' }}>Close</button>
           </div>
         </Modal>
       )}
@@ -282,7 +282,7 @@ function Modal({ title, children, onClose }) {
       <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--card-bg, #1b1830)', color: 'inherit', border: '1px solid rgba(128,128,128,0.3)', borderRadius: 14, padding: 18, width: 'min(680px, 96vw)', maxHeight: '86vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <h3 style={{ margin: 0 }}>{title}</h3>
-          <button className="ghost" onClick={onClose}>✕</button>
+          <button className="button-subtle" onClick={onClose}>✕</button>
         </div>
         {children}
       </div>
