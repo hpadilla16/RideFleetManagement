@@ -607,6 +607,7 @@ model Tenant {
   economyLocationConfigs   EconomyLocationConfig[]
   nuLocationConfigs        NuLocationConfig[]
   flexwaysLocationConfigs  FlexwaysLocationConfig[]
+  advantageLocationConfigs AdvantageLocationConfig[]
   loanerAgreements         LoanerAgreement[]
   longTermPlans            LongTermPlan[]
 }
@@ -4132,6 +4133,52 @@ model FlexwaysLocationConfig {
 
   // One config row per (tenant, portal sede).
   @@unique([tenantId, idSede])
+  @@index([tenantId, enabled])
+}
+
+// ============================================================================
+// Advantage (TSD RezCentral) franchise integration (2026-07-16)
+//
+// FIFTH autonomous booking-source (TL → Economy → NU → Flexways → Advantage).
+// Reuses ExternalReservation / ExternalSyncRun / IntegrationCredential /
+// AcrissCategoryMap as-is (their sourceSystem is a free string → 'ADVANTAGE').
+// The ONLY new table is AdvantageLocationConfig.
+//
+// Advantage lives inside TSD RezCentral (rezcentral.tsdasp.net/WebRezClient), an
+// ASP.NET WebForms back-office. Its report screen keys inventory by TWO fields:
+// `lstTSDNumber` (the account — 61302 = Advantage Orlando) and `lstBranch` (MCO).
+// The report grid echoes the pair back in ONE cell, `Loc` = "61302.MCO". So a
+// config row is per (tsdNumber, branch) → Ride location; a tenant may map N such
+// pairs (Flexways' multi-row shape, keyed by two columns instead of one).
+//
+// NO hardcoded tenant/location: Corpusa is the first operator in practice, but
+// every mapping is data (recon 2026-07-14 / Hector's decision).
+//
+// One Advantage credential per tenant (IntegrationCredential unique
+// (tenantId, sourceSystem)) covers the whole RezCentral account.
+//
+// See doc/advantage-integration-plan-2026-07-13.md
+// ============================================================================
+model AdvantageLocationConfig {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  // TSD account number as it appears in `lstTSDNumber` and in the grid's `Loc`
+  // cell prefix (e.g. "61302"). Stored as text — it is an identifier, not a
+  // number to do math on, and the portal renders it zero-padded.
+  tsdNumber     String
+  // Branch code as it appears in `lstBranch` / the grid's `Loc` suffix ("MCO").
+  branch        String
+  locationId    String // Ride location this (tsdNumber, branch) maps to
+  enabled       Boolean @default(true)
+  // Per-config import window override (mirrors Economy/NU/Flexways). NULL → fall
+  // back to ADVANTAGE_DATE_WINDOW_LOOKBACK_DAYS / _LOOKAHEAD_DAYS.
+  lookbackDays  Int?
+  lookaheadDays Int?
+  createdAt     DateTime @default(now())
+
+  // One config row per (tenant, TSD account, branch).
+  @@unique([tenantId, tsdNumber, branch])
   @@index([tenantId, enabled])
 }
 

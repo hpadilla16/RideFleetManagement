@@ -105,6 +105,22 @@ async function registerAllHandlers() {
     }
   }
 
+  // Advantage (TSD RezCentral) franchise sync (2026-07-16).
+  // Feature-flagged — registers only if ADVANTAGE_INTEGRATION_ENABLED=true.
+  // Same posture as NU/Flexways: keep the flag guard so a failed import can't
+  // break the whole worker.
+  if (String(process.env.ADVANTAGE_INTEGRATION_ENABLED || 'false').toLowerCase() === 'true') {
+    try {
+      const advMod = await import('./modules/integrations/advantage/advantage.worker.js');
+      advMod.registerAdvantageSyncWorker();
+      logger.info('[worker] registered handler: advantage.sync');
+    } catch (err) {
+      logger.warn('[worker] advantage sync worker not registered', {
+        message: err.message, stack: err.stack
+      });
+    }
+  }
+
   // Future handlers go here. Each in its own try/catch so a broken one
   // doesn't poison the others.
 }
@@ -257,6 +273,19 @@ async function main() {
     });
   }
 
+  // Advantage (TSD RezCentral) autonomous sync scheduler (2026-07-16).
+  // Gated by the same ADVANTAGE_INTEGRATION_ENABLED flag (checked inside start...).
+  // Dynamic import so a broken import chain can't kill the worker boot.
+  try {
+    const advSchedMod = await import('./modules/integrations/advantage/advantage.scheduler.js');
+    advSchedMod.startAdvantageSyncScheduler();
+    logger.info('[worker] started: advantage sync scheduler (if enabled)');
+  } catch (err) {
+    logger.warn('[worker] advantage sync scheduler not started', {
+      message: err.message,
+    });
+  }
+
   const shutdown = async (signal) => {
     logger.info('[worker] shutting down', { signal });
     stopAutochargePoll();
@@ -289,6 +318,10 @@ async function main() {
     try {
       const flexSchedMod = await import('./modules/integrations/flexways/flexways.scheduler.js');
       flexSchedMod.stopFlexwaysSyncScheduler();
+    } catch {}
+    try {
+      const advSchedMod = await import('./modules/integrations/advantage/advantage.scheduler.js');
+      advSchedMod.stopAdvantageSyncScheduler();
     } catch {}
     // Close the Chromium singleton if a toll sweep ever launched it here.
     // Lazy import keeps puppeteer out of the boot graph.

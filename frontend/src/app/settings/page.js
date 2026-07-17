@@ -30,6 +30,7 @@ import { TLIntegrationPanel } from '../../components/settings/TLIntegrationPanel
 import { EconomyIntegrationPanel } from '../../components/settings/EconomyIntegrationPanel';
 import { NuIntegrationPanel } from '../../components/settings/NuIntegrationPanel';
 import { FlexwaysIntegrationPanel } from '../../components/settings/FlexwaysIntegrationPanel';
+import { AdvantageIntegrationPanel } from '../../components/settings/AdvantageIntegrationPanel';
 import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettings';
 import { LoanerRatesTab } from './LoanerRatesTab';
 import { API_BASE, api } from '../../lib/client';
@@ -3460,6 +3461,13 @@ function SettingsInner({ token, me, logout }) {
               >
                 Flexways
               </button>
+              <button
+                type="button"
+                className={activeIntegration === 'advantage' ? '' : 'subtle'}
+                onClick={() => setActiveIntegration('advantage')}
+              >
+                Advantage (TSD)
+              </button>
             </div>
 
             {activeIntegration === 'tl' ? (
@@ -3484,6 +3492,17 @@ function SettingsInner({ token, me, logout }) {
               />
             ) : activeIntegration === 'nu' ? (
               <NuIntegrationPanel
+                token={token}
+                me={me}
+                isSuper={isSuper}
+                isAdmin={isAdmin}
+                tenantName={isSuper ? (activeSettingsTenant?.name || 'Tenant') : (me?.tenant?.name || 'Current tenant')}
+                activeSettingsTenantId={activeSettingsTenantId}
+                scopedSettingsPath={scopedSettingsPath}
+                onPageMsg={setMsg}
+              />
+            ) : activeIntegration === 'advantage' ? (
+              <AdvantageIntegrationPanel
                 token={token}
                 me={me}
                 isSuper={isSuper}

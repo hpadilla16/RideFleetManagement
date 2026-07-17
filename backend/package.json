@@ -49,6 +49,7 @@
     "test:economy": "node --test --test-force-exit src/modules/integrations/economy/economy.test.mjs src/modules/integrations/economy/economy.routes.test.mjs",
     "test:nu": "node --test --test-force-exit src/modules/integrations/nu/nu.test.mjs src/modules/integrations/nu/nu.routes.test.mjs",
     "test:flexways": "node --test --test-force-exit src/modules/integrations/flexways/flexways.test.mjs src/modules/integrations/flexways/flexways.routes.test.mjs",
+    "test:advantage": "node --test --test-force-exit src/modules/integrations/advantage/advantage.test.mjs src/modules/integrations/advantage/advantage.routes.test.mjs src/modules/integrations/advantage/advantage-worker.test.mjs",
     "verify": "npm run test",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev --name init",

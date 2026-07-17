@@ -86,6 +86,7 @@ import { tlInternationalRouter } from './modules/integrations/tl-international/t
 import { economyRouter } from './modules/integrations/economy/economy.routes.js';
 import { nuRouter } from './modules/integrations/nu/nu.routes.js';
 import { flexwaysRouter } from './modules/integrations/flexways/flexways.routes.js';
+import { advantageRouter } from './modules/integrations/advantage/advantage.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
 import { closeBrowser } from './lib/puppeteer-browser.js';
@@ -253,6 +254,13 @@ app.use('/api/admin/integrations/nu', tenantRateLimit, nuRouter);
 // (flexways.scheduler.js), which stays dark until the flag is flipped. Flexways is
 // MULTI-SEDE (per-idSede FlexwaysLocationConfig rows).
 app.use('/api/admin/integrations/flexways', tenantRateLimit, flexwaysRouter);
+// Advantage (TSD RezCentral) booking-source integration (Fase 5, 2026-07-16) —
+// mounted identically to TL/Economy/NU/Flexways. Routes/config always available;
+// ADVANTAGE_INTEGRATION_ENABLED gates only the autonomous scheduler
+// (advantage.scheduler.js), which stays dark until the flag is flipped. Advantage
+// is MULTI-CONFIG keyed by a PAIR: AdvantageLocationConfig rows are unique on
+// (tenantId, tsdNumber, branch) — the portal's `Loc` column, "61302.MCO".
+app.use('/api/admin/integrations/advantage', tenantRateLimit, advantageRouter);
 // Round 26 (2026-06-01) — reservation status override + smart rewind.
 // 2026-07-10: widened from SUPER_ADMIN-only to ADMIN + SUPER_ADMIN (Hector). ADMIN
 // gets the same power (all target statuses + the smart rewind); SUPER_ADMIN still

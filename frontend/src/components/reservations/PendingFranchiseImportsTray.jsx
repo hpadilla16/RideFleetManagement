@@ -29,6 +29,7 @@ function sourceLabelFor(source) {
     case 'economy': return 'Economy (RezLight)';
     case 'nu': return 'NU Car Rentals';
     case 'flexways': return 'Flexways';
+    case 'advantage': return 'Advantage';
     case 'tl-international':
     default: return 'TL International';
   }
