@@ -35,6 +35,29 @@ import {
 
 export const reservationsRouter = Router();
 
+/**
+ * Honor an explicit 4xx `statusCode` set by the service layer.
+ *
+ * The service's `ensureNoVehicleConflict` guards both set `err.statusCode = 409`,
+ * but the open-rental guard's message ("Vehicle is still out on open rental …")
+ * does NOT match the `/vehicle conflict/i` string test the route catches on, so
+ * it fell through to `next(e)` -> 500 instead of the intended 409 (Sentry -1P on
+ * both the reservations PATCH and pre-check-in staff-complete).
+ *
+ * Shared rather than duplicated per-handler: the mapping is identical and string
+ * -matching on messages is exactly what caused this bug — an explicit statusCode
+ * is the contract.
+ *
+ * @returns {boolean} true if the error was handled and a response was sent.
+ */
+function sendExplicitStatusError(res, e) {
+  if (Number.isInteger(e?.statusCode) && e.statusCode >= 400 && e.statusCode < 500) {
+    res.status(e.statusCode).json({ error: e.message, ...(e.code ? { code: e.code } : {}) });
+    return true;
+  }
+  return false;
+}
+
 // VozIA Fase 6 re-scope — CAP 3+4 uses kind:'charge' idempotency. A charge/credit
 // is a balance mutation (no gateway money), so a stuck key past its TTL may be
 // safely recycled like a note — only 'payment'/'refund' get the no-recycle 409.
@@ -1047,6 +1070,7 @@ reservationsRouter.patch('/:id', async (req, res, next) => {
 
     res.json(row);
   } catch (e) {
+    if (sendExplicitStatusError(res, e)) return;
     if (/vehicle conflict/i.test(e.message)) {
       return res.status(409).json({ error: e.message });
     }
@@ -1602,6 +1626,10 @@ reservationsRouter.post('/:id/precheckin/staff-complete', async (req, res, next)
 
     res.json({ ok: true, reservation: row });
   } catch (e) {
+    // updateReservation re-validates the assigned vehicle on EVERY patch, so
+    // completing pre-check-in while the vehicle is still out on an open rental
+    // threw the 409 guard here and fell through to next(e) -> 500.
+    if (sendExplicitStatusError(res, e)) return;
     next(e);
   }
 });

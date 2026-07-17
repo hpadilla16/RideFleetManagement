@@ -305,7 +305,9 @@ export async function sendLongTermEmail(kind, { plan, cycle, config = null }) {
     await sendEmail({ to: ctx.toEmail, subject, text, html });
 
     logger.info('[long-term-emails] sent', {
-      kind, planId: plan.id, cycleId: cycle?.id || null, to: ctx.toEmail,
+      // `email` (not `to`) so the Winston redactor masks the recipient —
+      // `to` is not in logger.js REDACT_KEYS and would log in cleartext.
+      kind, planId: plan.id, cycleId: cycle?.id || null, email: ctx.toEmail,
     });
     return { sent: true };
   } catch (err) {

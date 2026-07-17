@@ -3570,7 +3570,10 @@ export const rentalAgreementsService = {
         Promise.resolve()
           .then(() => runEmail(id, payload, actorUserId))
           .then((result) => {
-            log?.info?.(`[email-agreement] sent to ${result?.to || toFinal} for agreement ${id}`);
+            // Recipient address goes in the meta object under key `email` so the
+            // Winston redactor (logger.js REDACT_KEYS) masks it — never in the
+            // message string, which bypasses key-based redaction (PII-in-logs).
+            log?.info?.('[email-agreement] sent', { agreementId: id, email: result?.to || toFinal });
           })
           .catch(async (err) => {
             safeCapture(err, { context: 'emailAgreement async', agreementId: id, actorUserId, tenantId });

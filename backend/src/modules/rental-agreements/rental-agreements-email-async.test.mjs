@@ -178,6 +178,40 @@ describe('scheduleEmailDelivery', () => {
     assert.equal(auditWritten, true, 'audit log must still fire even if captureException throws');
   });
 
+  it('logs the recipient as REDACTABLE META, never inside the message string (PII-in-logs)', async () => {
+    // Regression for the 2026-07-16 PII fix. logger.js redacts meta by KEY;
+    // the message string bypasses redaction entirely (see logger-redact.test.mjs).
+    // So the success log MUST pass the address as meta `email` — the old
+    // `[email-agreement] sent to ${to} for agreement ${id}` template wrote the
+    // customer's real address to prod logs in cleartext.
+    const infoCalls = [];
+    await rentalAgreementsService.scheduleEmailDelivery(
+      'agr-pii',
+      { to: 'juan@example.com' },
+      'actor',
+      'ten-1',
+      {
+        runEmail: async () => ({ ok: true, to: 'juan@example.com' }),
+        findAgreement: async () => ({ reservationId: 'r', tenantId: 'ten-1' }),
+        writeAudit: async () => {},
+        captureException: () => {},
+        scheduler: setImmediate,
+        logger: { info: (msg, meta) => infoCalls.push({ msg, meta }) }
+      }
+    );
+    await drainEventLoop(10);
+
+    const sent = infoCalls.find((c) => /\[email-agreement\] sent/.test(c.msg || ''));
+    assert.ok(sent, 'the success path must emit an [email-agreement] sent log');
+    assert.doesNotMatch(
+      sent.msg, /juan@example\.com/,
+      'recipient address must NOT be interpolated into the log message string'
+    );
+    assert.ok(sent.meta, 'the log must carry a meta object');
+    assert.equal(sent.meta.email, 'juan@example.com', 'recipient must be passed under the redactable meta key `email`');
+    assert.equal(sent.meta.agreementId, 'agr-pii', 'agreement id stays as meta for debuggability');
+  });
+
   it('passes tenantId to the default findAgreement so the async path is tenant-scoped', async () => {
     // Defense-in-depth contract: when payload has no `to`, the service must
     // look up the agreement via findAgreement(id, tenantId). If tenantId is

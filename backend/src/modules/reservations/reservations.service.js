@@ -1896,11 +1896,16 @@ export const reservationsService = {
       data
     });
 
-    // Bug #44 — if this admin PATCH changed the reservation status, keep
-    // Vehicle.status in step (respects IN_MAINTENANCE/OUT_OF_SERVICE/SOLD).
-    if (patch.status !== undefined && updated.status !== current.status) {
+    // Bug #44 / drift fix — keep Vehicle.status in step when this admin PATCH
+    // changed the reservation status OR reassigned the vehicle. A vehicle change
+    // on a CHECKED_OUT reservation must flip the new car to ON_RENT and free the
+    // swapped-out car; passing the PRE-PATCH vehicleId lets the sync release the
+    // stale one (respects IN_MAINTENANCE/OUT_OF_SERVICE/SOLD).
+    const statusChanged = patch.status !== undefined && updated.status !== current.status;
+    const vehicleChanged = patch.vehicleId !== undefined && updated.vehicleId !== current.vehicleId;
+    if (statusChanged || vehicleChanged) {
       await syncVehicleStatusForReservation(prisma, {
-        vehicleId: updated.vehicleId,
+        vehicleId: current.vehicleId,
         reservationId: updated.id,
         toStatus: updated.status
       });

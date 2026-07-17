@@ -16,7 +16,7 @@
     "test:booking-engine": "node --test src/modules/booking-engine/booking-engine.test.mjs",
     "test:stop-sales": "node --test src/modules/stop-sales/stop-sales.test.mjs",
     "test:review-email": "node --test src/modules/reservations/review-email.test.mjs",
-    "test:reservations": "node --test src/modules/reservations/reservation-extend.test.mjs src/modules/reservations/reservation-id-resolver.test.mjs src/modules/reservations/vozia-note.test.mjs src/modules/reservations/swap-vehicle-status-sync.test.mjs",
+    "test:reservations": "node --test --test-force-exit src/modules/reservations/reservation-extend.test.mjs src/modules/reservations/reservation-id-resolver.test.mjs src/modules/reservations/vozia-note.test.mjs src/modules/reservations/swap-vehicle-status-sync.test.mjs src/modules/reservations/update-vehicle-change-status-sync.test.mjs src/modules/reservations/open-rental-409.test.mjs",
     "test:service-auth": "node --test --test-force-exit src/lib/service-account-allowlist.test.mjs src/modules/auth/service-auth.test.mjs",
     "test:idempotency": "node --test --test-force-exit src/middleware/idempotency.test.mjs",
     "test:vozia-payments": "node --test --test-force-exit src/modules/rental-agreements/service-payment-guards.test.mjs",

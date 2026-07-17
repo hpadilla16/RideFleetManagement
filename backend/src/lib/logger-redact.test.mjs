@@ -11,9 +11,36 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { redactSensitive } from './logger.js';
+import winston from 'winston';
+import logger, { redactSensitive } from './logger.js';
 
 const REDACTED = '[redacted]';
+
+// ── 2026-07-16 PII-in-log-MESSAGE hardening ────────────────────────────────
+// redactSensitive() only sees the META object. The Winston `redactFormat`
+// scrubs meta by KEY; it does NOT scrub the human-readable message string
+// (beyond base64 blobs). So PII interpolated into a message template literal
+// reaches the log in cleartext. These helpers drive the REAL logger through a
+// capture transport so we assert the actual end-to-end behavior, not a
+// reimplementation of it.
+function captureLogEntry(fn) {
+  const entries = [];
+  class CaptureTransport extends winston.Transport {
+    log(info, next) { entries.push(info); next(); }
+  }
+  const capture = new CaptureTransport();
+  // Mute the real Console transport so the assertions below don't spam output.
+  const previouslySilent = logger.transports.map((t) => t.silent);
+  logger.transports.forEach((t) => { t.silent = true; });
+  logger.add(capture);
+  try {
+    fn();
+  } finally {
+    logger.remove(capture);
+    logger.transports.forEach((t, i) => { t.silent = previouslySilent[i]; });
+  }
+  return entries[0];
+}
 
 test('person object: name redacted when email is present', () => {
   const out = redactSensitive({ name: 'Juan del Pueblo', email: 'juan@x.com' });
@@ -84,6 +111,48 @@ test('data URLs / long base64 strings are truncated', () => {
   assert.match(out.photo, /^\[base64 image \d+ bytes redacted\]$/);
   assert.match(out.blob, /^\[base64 image \d+ bytes redacted\]$/);
   assert.equal(out.short, 'ok');
+});
+
+// ── The two halves of the PII-in-logs contract ─────────────────────────────
+
+test('logger: an email passed as a META key is masked end-to-end', () => {
+  const entry = captureLogEntry(() => {
+    logger.info('[email-agreement] sent', { agreementId: 'agr-1', email: 'juan@example.com' });
+  });
+  assert.equal(entry.email, REDACTED, 'meta key `email` must be masked by redactFormat');
+  assert.equal(entry.agreementId, 'agr-1', 'non-PII meta must survive for debuggability');
+  assert.doesNotMatch(
+    JSON.stringify(entry), /juan@example\.com/,
+    'the address must not survive anywhere in the serialized entry'
+  );
+});
+
+test('logger: an email INTERPOLATED INTO THE MESSAGE STRING is NOT masked (the bug)', () => {
+  // This is the whole reason the call sites must pass the recipient as meta.
+  // redactFormat scrubs meta by key and only strips base64 from the message —
+  // it has no way to find an address embedded in free text. This test pins
+  // that limitation so nobody "fixes" a leak by rewording the message.
+  const entry = captureLogEntry(() => {
+    logger.info('[email-agreement] sent to juan@example.com for agreement agr-1');
+  });
+  assert.match(
+    entry.message, /juan@example\.com/,
+    'message strings bypass key-based redaction — PII must never be interpolated into them'
+  );
+});
+
+test('logger: unredacted meta key `to` would leak — recipients must use `email`', () => {
+  // Guards the checkin-emails / long-term-emails / sms-providers rename.
+  // `to` is NOT in REDACT_KEYS, so it logs in cleartext.
+  const leaky = captureLogEntry(() => {
+    logger.info('[checkin-emails] invoice sent', { agreementId: 'a', to: 'juan@example.com' });
+  });
+  assert.equal(leaky.to, 'juan@example.com', '`to` is not a redacted key — hence the rename to `email`');
+
+  const safe = captureLogEntry(() => {
+    logger.info('[checkin-emails] invoice sent', { agreementId: 'a', email: 'juan@example.com' });
+  });
+  assert.equal(safe.email, REDACTED);
 });
 
 test('non-object scalars pass through; circulars are bounded', () => {

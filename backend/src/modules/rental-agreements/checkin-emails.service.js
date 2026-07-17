@@ -268,7 +268,7 @@ export async function sendInvoiceAfterCheckin({ reservationId, agreementId }) {
 
   await sendEmail({ to: customerEmail, subject, html, text, attachments });
   logger.info('[checkin-emails] invoice sent', {
-    reservationId, agreementId, to: customerEmail, withPdf: Boolean(pdfBuffer)
+    reservationId, agreementId, email: customerEmail, withPdf: Boolean(pdfBuffer)
   });
   return { sent: true, withPdf: Boolean(pdfBuffer) };
 }
@@ -289,7 +289,7 @@ export async function sendReceiptPaidInFull({ reservationId, agreementId }) {
 
   await sendEmail({ to: customerEmail, subject, html, text, attachments });
   logger.info('[checkin-emails] receipt sent', {
-    reservationId, agreementId, to: customerEmail, withPdf: Boolean(pdfBuffer)
+    reservationId, agreementId, email: customerEmail, withPdf: Boolean(pdfBuffer)
   });
   return { sent: true, withPdf: Boolean(pdfBuffer) };
 }

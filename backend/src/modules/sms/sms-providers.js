@@ -91,7 +91,9 @@ export async function sendSms({ to, from, body, provider, credentials }) {
 
   const providerName = String(provider || 'telnyx').toLowerCase();
 
-  logger.info('SMS sending', { provider: providerName, to: cleanTo, bodyLength: cleanBody.length });
+  // `phone` (not `to`) so the Winston redactor masks the destination number —
+  // `to` is not in logger.js REDACT_KEYS and would log the full number.
+  logger.info('SMS sending', { provider: providerName, phone: cleanTo, bodyLength: cleanBody.length });
 
   let result;
   switch (providerName) {
@@ -108,6 +110,6 @@ export async function sendSms({ to, from, body, provider, credentials }) {
       throw new Error(`Unknown SMS provider: ${providerName}`);
   }
 
-  logger.info('SMS sent', { provider: providerName, messageId: result.messageId, to: cleanTo, status: result.status });
+  logger.info('SMS sent', { provider: providerName, messageId: result.messageId, phone: cleanTo, status: result.status });
   return result;
 }
