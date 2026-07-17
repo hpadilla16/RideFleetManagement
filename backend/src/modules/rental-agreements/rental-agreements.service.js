@@ -1836,7 +1836,10 @@ function normalizeSwapInspectionPayload(raw, at = null) {
     cleanliness: parsed.cleanliness ?? null,
     damages: parsed.damages || null,
     notes: parsed.notes || null,
-    photos: parsed.photos && typeof parsed.photos === 'object' ? parsed.photos : {}
+    photos: parsed.photos && typeof parsed.photos === 'object' ? parsed.photos : {},
+    // Mandatory swap photos (2026-07-16): swaps persist REFS, not base64.
+    // Legacy swap rows (pre-2026-07-16) only have `photos` and pass through.
+    photoStorageRefs: Array.isArray(parsed.photoStorageRefs) ? parsed.photoStorageRefs : null
   };
 }
 
@@ -1855,6 +1858,40 @@ function normalizeVehicleSwapRow(row) {
   };
 }
 
+/**
+ * Resolve a swap inspection's storage refs into signed URLs, mirroring
+ * normalizeInspectionRowAsync. Swap photos became mandatory + storage-backed on
+ * 2026-07-16; without this the 16 photos would be stored but never viewable in
+ * the inspection report.
+ */
+async function resolveSwapInspectionPhotos(inspection) {
+  if (!inspection) return null;
+  const refs = inspection.photoStorageRefs;
+  if (Array.isArray(refs) && refs.length > 0) {
+    try {
+      const resolved = await materializeInspectionStorageRefs(refs);
+      const aligned = {};
+      for (const [k, v] of Object.entries(resolved || {})) aligned[canonicalPhotoKey(k)] = v;
+      inspection.photos = { ...(inspection.photos || {}), ...aligned };
+    } catch {
+      // Best effort — a signing failure must not break the report.
+    }
+  }
+  // Don't leak internal storage paths to clients.
+  delete inspection.photoStorageRefs;
+  return inspection;
+}
+
+async function normalizeVehicleSwapRowAsync(row) {
+  const base = normalizeVehicleSwapRow(row);
+  if (!base) return null;
+  await Promise.all([
+    resolveSwapInspectionPhotos(base.previousInspection),
+    resolveSwapInspectionPhotos(base.nextInspection)
+  ]);
+  return base;
+}
+
 async function inspectionReportFromAgreement(agreement) {
   const structured = Array.isArray(agreement?.inspections) ? agreement.inspections : [];
   const swaps = Array.isArray(agreement?.vehicleSwaps) ? agreement.vehicleSwaps : [];
@@ -1871,7 +1908,7 @@ async function inspectionReportFromAgreement(agreement) {
       checkout: checkoutNorm,
       checkin: checkinNorm
     }),
-    swaps: swaps.map(normalizeVehicleSwapRow).filter(Boolean)
+    swaps: (await Promise.all(swaps.map(normalizeVehicleSwapRowAsync))).filter(Boolean)
   };
 }
 

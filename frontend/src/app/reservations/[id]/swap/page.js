@@ -2,25 +2,22 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useTranslation } from 'react-i18next';
 import { AuthGate } from '../../../../components/AuthGate';
 import { AppShell } from '../../../../components/AppShell';
 import { api } from '../../../../lib/client';
-
-const FUEL_OPTIONS = ['0.000', '0.125', '0.250', '0.375', '0.500', '0.625', '0.750', '0.875', '1.000'];
-const CONDITION_OPTIONS = ['GOOD', 'FAIR', 'POOR'];
-
-const emptyInspection = {
-  exterior: 'GOOD',
-  interior: 'GOOD',
-  tires: 'GOOD',
-  lights: 'GOOD',
-  windshield: 'GOOD',
-  fuelLevel: '1.000',
-  odometer: '',
-  cleanliness: '5',
-  damages: '',
-  notes: ''
-};
+// The capture card lives in components/ (2026-07-17) so the dealership-loaner
+// swap uses the IDENTICAL grid rather than a second implementation.
+import { SwapInspectionCard, emptySwapInspection } from '../../../../components/reservations/SwapInspectionCard';
+import { SwapPhotoOverridePanel } from '../../../../components/reservations/SwapPhotoOverridePanel';
+import {
+  PHOTOS_PER_VEHICLE,
+  PHOTOS_TOTAL,
+  SWAP_BLOCKERS,
+  shouldFlagMissing,
+  swapPhotoGate,
+  swapReadiness
+} from '../../../../lib/swap-photos';
 
 function vehicleLabel(vehicle) {
   if (!vehicle) return '-';
@@ -29,61 +26,28 @@ function vehicleLabel(vehicle) {
     .join(' • ');
 }
 
-export default function Page() {
-  return <AuthGate>{({ token, me, logout }) => <Inner token={token} me={me} logout={logout} />}</AuthGate>;
+function plateLabel(vehicle) {
+  return vehicle?.plate || vehicle?.internalNumber || '';
 }
 
-function InspectionCard({ title, value, onChange }) {
-  return (
-    <section className="glass card stack">
-      <div style={{ fontWeight: 700 }}>{title}</div>
-      <div className="grid2">
-        {['exterior', 'interior', 'tires', 'lights', 'windshield'].map((key) => (
-          <div key={key} className="stack">
-            <label className="label">{key[0].toUpperCase() + key.slice(1)}</label>
-            <select value={value[key]} onChange={(e) => onChange({ ...value, [key]: e.target.value })}>
-              {CONDITION_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </div>
-        ))}
-        <div className="stack">
-          <label className="label">Fuel</label>
-          <select value={value.fuelLevel} onChange={(e) => onChange({ ...value, fuelLevel: e.target.value })}>
-            {FUEL_OPTIONS.map((option, index) => <option key={option} value={option}>{index}/8</option>)}
-          </select>
-        </div>
-        <div className="stack">
-          <label className="label">Odometer</label>
-          <input type="number" min="0" value={value.odometer} onChange={(e) => onChange({ ...value, odometer: e.target.value })} />
-        </div>
-        <div className="stack">
-          <label className="label">Cleanliness (1-5)</label>
-          <input type="number" min="1" max="5" value={value.cleanliness} onChange={(e) => onChange({ ...value, cleanliness: e.target.value })} />
-        </div>
-        <div className="stack">
-          <label className="label">Damages</label>
-          <input value={value.damages} onChange={(e) => onChange({ ...value, damages: e.target.value })} />
-        </div>
-      </div>
-      <div className="stack">
-        <label className="label">Notes</label>
-        <textarea rows={3} value={value.notes} onChange={(e) => onChange({ ...value, notes: e.target.value })} />
-      </div>
-    </section>
-  );
+export default function Page() {
+  return <AuthGate>{({ token, me, logout }) => <Inner token={token} me={me} logout={logout} />}</AuthGate>;
 }
 
 function Inner({ token, me, logout }) {
   const { id } = useParams();
   const router = useRouter();
+  const { t } = useTranslation();
   const [row, setRow] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [vehicles, setVehicles] = useState([]);
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   const [vehicleId, setVehicleId] = useState('');
   const [note, setNote] = useState('');
-  const [currentCheckin, setCurrentCheckin] = useState(emptyInspection);
-  const [nextCheckout, setNextCheckout] = useState(emptyInspection);
+  const [currentCheckin, setCurrentCheckin] = useState(emptySwapInspection);
+  const [nextCheckout, setNextCheckout] = useState(emptySwapInspection);
 
   const choices = useMemo(() => {
     return (Array.isArray(vehicles) ? vehicles : []).filter((vehicle) => String(vehicle?.id || '') !== String(row?.vehicleId || ''));
@@ -91,24 +55,96 @@ function Inner({ token, me, logout }) {
 
   const selectedVehicle = choices.find((vehicle) => String(vehicle.id) === String(vehicleId)) || null;
 
+  // SW-1/2/3: the 16/16 gate. Same rule the backend enforces — the button is a
+  // courtesy, swapVehicle refuses without the photos either way.
+  const gate = useMemo(
+    () => swapPhotoGate(currentCheckin.photos, nextCheckout.photos),
+    [currentCheckin.photos, nextCheckout.photos]
+  );
+
+  const previousPlate = plateLabel(row?.vehicle);
+  const nextPlate = plateLabel(selectedVehicle);
+
+  const photoText = useMemo(() => {
+    if (gate.complete) return t('vehicleSwap.readyToSwap');
+    if (gate.previousMissing.length && gate.nextMissing.length) {
+      return t('vehicleSwap.missingBoth', { count: PHOTOS_TOTAL - gate.total });
+    }
+    if (gate.previousMissing.length) {
+      return t('vehicleSwap.missingOne', {
+        count: gate.previousMissing.length,
+        vehicle: previousPlate || t('vehicleSwap.currentVehicle'),
+        role: t('vehicleSwap.roleIncoming')
+      });
+    }
+    return t('vehicleSwap.missingOne', {
+      count: gate.nextMissing.length,
+      vehicle: nextPlate || t('vehicleSwap.replacement'),
+      role: t('vehicleSwap.roleOutgoing')
+    });
+  }, [gate, previousPlate, nextPlate, t]);
+
+  // GD-4: the disabled button must always explain ITSELF. `swapReadiness` (pure,
+  // unit-tested in lib/swap-photos.test.mjs) owns the rule; this only maps the
+  // first blocker to copy.
+  const readiness = useMemo(() => {
+    const state = swapReadiness({
+      vehicleSelected: Boolean(String(vehicleId || '').trim()),
+      photosComplete: gate.complete,
+      currentOdometer: currentCheckin.odometer,
+      nextOdometer: nextCheckout.odometer
+    });
+    const TEXT = {
+      [SWAP_BLOCKERS.VEHICLE]: () => t('vehicleSwap.selectReplacement'),
+      [SWAP_BLOCKERS.PHOTOS]: () => photoText,
+      [SWAP_BLOCKERS.ODOMETER_CURRENT]: () => t('vehicleSwap.odometerRequiredCurrent'),
+      [SWAP_BLOCKERS.ODOMETER_NEXT]: () => t('vehicleSwap.odometerRequiredNext')
+    };
+    return {
+      ready: state.ready,
+      blockedOnlyByPhotos: state.blockedOnlyByPhotos,
+      text: state.first ? TEXT[state.first]() : t('vehicleSwap.readyToSwap')
+    };
+  }, [vehicleId, gate.complete, photoText, currentCheckin.odometer, nextCheckout.odometer, t]);
+
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const reservation = await api(`/api/reservations/${id}`, {}, token);
+        if (cancelled) return;
         setRow(reservation);
         const available = await api(`/api/reservations/${id}/available-vehicles`, {}, token);
+        if (cancelled) return;
         setVehicles(Array.isArray(available) ? available : []);
       } catch (e) {
-        setMsg(String(e?.message || 'Unable to load vehicle swap'));
+        if (!cancelled) setMsg(String(e?.message || t('vehicleSwap.loadError')));
+      } finally {
+        // Until this resolves the page has no reservation and no vehicle list:
+        // rendering it raw shows "-" tiles and an empty picker, which reads as
+        // "this reservation has no car" rather than "still loading".
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, [id, token]);
+    return () => { cancelled = true; };
+  }, [id, token, t]);
 
-  const submit = async () => {
+  /**
+   * @param {string|null} overrideReason - set ONLY by the ADMIN override panel.
+   *   It relaxes the PHOTO precondition here exactly as it does on the backend;
+   *   every other precondition (vehicle chosen, both odometers) still applies,
+   *   because the override is about missing photos, not about skipping the form.
+   */
+  const submit = async (overrideReason = null) => {
+    setAttempted(true);
+    // `readiness` is the single source of truth for "can this submit?" — it is
+    // what disables the button, so re-deriving the checks here (as this used to)
+    // is how the two drifted apart in the first place. The backend re-validates
+    // regardless: the UI is a courtesy, swapVehicle is the gate.
+    if (!readiness.ready && !(overrideReason && readiness.blockedOnlyByPhotos)) {
+      return setMsg(readiness.text);
+    }
     const nextVehicleId = String(vehicleId || '').trim();
-    if (!nextVehicleId) return setMsg('Select the replacement vehicle');
-    if (!currentCheckin.odometer) return setMsg('Current vehicle odometer is required');
-    if (!nextCheckout.odometer) return setMsg('Replacement vehicle odometer is required');
     try {
       setSaving(true);
       setMsg('');
@@ -118,16 +154,31 @@ function Inner({ token, me, logout }) {
           vehicleId: nextVehicleId,
           note,
           currentCheckin,
-          nextCheckout
+          nextCheckout,
+          // Presence = "I am asking". The backend decides whether this user MAY,
+          // and refuses a blank reason. Omitted entirely on a normal swap so a
+          // complete set never looks like an override.
+          ...(overrideReason ? { photoOverride: { reason: overrideReason } } : {})
         })
       }, token);
       router.push(`/reservations/${id}/inspection-report`);
     } catch (e) {
-      setMsg(String(e?.message || 'Unable to swap vehicle'));
+      setMsg(String(e?.message || t('vehicleSwap.swapError')));
     } finally {
       setSaving(false);
     }
   };
+
+  if (loading) {
+    return (
+      <AppShell me={me} logout={logout}>
+        <section className="glass card-lg stack">
+          <span className="eyebrow">{t('vehicleSwap.eyebrow')}</span>
+          <p className="ui-muted" aria-live="polite">{t('vehicleSwap.loading')}</p>
+        </section>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell me={me} logout={logout}>
@@ -135,46 +186,54 @@ function Inner({ token, me, logout }) {
         <div className="app-banner">
           <div className="row-between" style={{ marginBottom: 0 }}>
             <div className="stack" style={{ gap: 6 }}>
-              <span className="eyebrow">Vehicle Swap</span>
+              <span className="eyebrow">{t('vehicleSwap.eyebrow')}</span>
               <h3 style={{ margin: 0 }}>{row?.reservationNumber || `Reservation ${id}`}</h3>
-              <p className="ui-muted">
-                Check the current vehicle back in, assign the replacement, and capture the new handoff in the inspection history.
-              </p>
+              <p className="ui-muted">{t('vehicleSwap.subtitle')}</p>
             </div>
-            <span className="status-chip warn">Swap Workflow</span>
+            {/* SW-1/2/3 header pill: live n/16 counter. aria-live because this
+                is the primary progress signal — a screen-reader user gets no
+                other confirmation that a capture landed. */}
+            <span className={`status-chip ${gate.complete ? 'good' : 'warn'}`} aria-live="polite">
+              {t('vehicleSwap.photoCount', { filled: gate.total, total: PHOTOS_TOTAL })}
+            </span>
           </div>
           <div className="app-card-grid compact">
             <div className="info-tile">
-              <span className="label">Current Vehicle</span>
+              <span className="label">{t('vehicleSwap.currentVehicle')}</span>
               <strong>{vehicleLabel(row?.vehicle)}</strong>
             </div>
             <div className="info-tile">
-              <span className="label">Replacement</span>
-              <strong>{vehicleLabel(selectedVehicle) || 'Select vehicle'}</strong>
+              <span className="label">{t('vehicleSwap.replacement')}</span>
+              <strong>{selectedVehicle ? vehicleLabel(selectedVehicle) : t('vehicleSwap.selectVehicle')}</strong>
             </div>
             <div className="info-tile">
-              <span className="label">Status</span>
+              <span className="label">{t('vehicleSwap.status')}</span>
               <strong>{row?.status || '-'}</strong>
             </div>
             <div className="info-tile">
-              <span className="label">Customer</span>
+              <span className="label">{t('vehicleSwap.customer')}</span>
               <strong>{[row?.customer?.firstName, row?.customer?.lastName].filter(Boolean).join(' ') || row?.customer?.email || '-'}</strong>
             </div>
           </div>
         </div>
 
         <div className="row-between">
-          <h2>Swap Vehicle</h2>
-          <button type="button" onClick={() => router.push(`/reservations/${id}`)}>Back</button>
+          <h2>{t('vehicleSwap.title')}</h2>
+          <button type="button" onClick={() => router.push(`/reservations/${id}`)}>{t('vehicleSwap.back')}</button>
         </div>
-        {msg ? <div className="label" style={{ color: '#b91c1c' }}>{msg}</div> : null}
+        {msg ? <div className="swap-alert" role="alert">{msg}</div> : null}
+
+        {/* SW-1 info strip / SW-3 success strip. */}
+        <div className={`surface-note${gate.complete ? ' swap-note-complete' : ''}`}>
+          {gate.complete ? t('vehicleSwap.completeStrip') : t('vehicleSwap.whyStrip', { count: PHOTOS_PER_VEHICLE })}
+        </div>
 
         <section className="glass card stack">
           <div className="grid2">
             <div className="stack">
-              <label className="label">Replacement Vehicle</label>
+              <label className="label">{t('vehicleSwap.replacementVehicle')}</label>
               <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)}>
-                <option value="">Select available vehicle</option>
+                <option value="">{t('vehicleSwap.selectAvailable')}</option>
                 {choices.map((vehicle) => (
                   <option key={vehicle.id} value={vehicle.id}>
                     {vehicleLabel(vehicle)}
@@ -183,20 +242,57 @@ function Inner({ token, me, logout }) {
               </select>
             </div>
             <div className="stack">
-              <label className="label">Swap Note</label>
-              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Reason for the swap, damage note, customer request, etc." />
+              <label className="label">{t('vehicleSwap.swapNote')}</label>
+              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('vehicleSwap.swapNotePlaceholder')} />
             </div>
           </div>
         </section>
 
-        <InspectionCard title="Current Vehicle Check-In" value={currentCheckin} onChange={setCurrentCheckin} />
-        <InspectionCard title="Replacement Vehicle Check-Out" value={nextCheckout} onChange={setNextCheckout} />
+        <SwapInspectionCard
+          title={t('vehicleSwap.cardIncoming')}
+          plate={previousPlate}
+          value={currentCheckin}
+          onChange={setCurrentCheckin}
+          flagMissing={shouldFlagMissing({ attempted, otherComplete: gate.nextComplete })}
+          onReadError={() => setMsg(t('vehicleSwap.photoReadError'))}
+        />
+        <SwapInspectionCard
+          title={t('vehicleSwap.cardOutgoing')}
+          plate={nextPlate}
+          value={nextCheckout}
+          onChange={setNextCheckout}
+          flagMissing={shouldFlagMissing({ attempted, otherComplete: gate.previousComplete })}
+          onReadError={() => setMsg(t('vehicleSwap.photoReadError'))}
+        />
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button className="ios-action-btn" type="button" disabled={saving} onClick={submit}>
-            {saving ? 'Swapping...' : 'Complete Vehicle Swap'}
+        {/* SW-1/2/3 footer: says exactly what is missing and from which car.
+            GD-3: the error also renders HERE, next to the button. On a tablet
+            the top-of-page `msg` is scrolled off by two long cards, so a failure
+            on the Confirm tap was invisible exactly when it mattered. */}
+        {msg ? <div className="swap-alert" role="alert">{msg}</div> : null}
+        <div className="row-between" style={{ marginBottom: 0 }}>
+          <span className={`swap-readiness ${readiness.ready ? 'good' : 'warn'}`} aria-live="polite">
+            {readiness.text}
+          </span>
+          <button className="ios-action-btn" type="button" disabled={saving || !readiness.ready} onClick={() => submit()}>
+            {saving ? t('vehicleSwap.swapping') : t('vehicleSwap.confirmSwap')}
           </button>
         </div>
+
+        {/* The emergency exit — ADMIN only, and only while photos are actually
+            missing. Rendered BELOW the primary action on purpose: it is a way
+            out when capture fails in the field, not a peer of "Confirm Swap".
+            `blockedOnlyByPhotos` keeps it honest — an admin who hasn't picked a
+            car or entered an odometer is still blocked, because the override
+            bypasses the PHOTO rule and nothing else. */}
+        <SwapPhotoOverridePanel
+          me={me}
+          missingCount={PHOTOS_TOTAL - gate.total}
+          disabled={!readiness.blockedOnlyByPhotos}
+          disabledText={readiness.text}
+          busy={saving}
+          onOverride={(reason) => submit(reason)}
+        />
       </section>
     </AppShell>
   );

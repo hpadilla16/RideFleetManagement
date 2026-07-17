@@ -2,6 +2,19 @@ import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { reservationsService } from '../reservations/reservations.service.js';
 import { LOANER_PROGRAM_FILTER } from '../../lib/program-category.js';
+// Mandatory swap photos (2026-07-16) — the SAME gate as the main swap path.
+// QA 2026-07-17: this path is a second, live, UI-driven mid-rental swap and it
+// had NO photo gate, which made the "hard block" not actually authoritative.
+// Everything here is imported, not reimplemented: one gate, two call sites.
+import {
+  SWAP_PHOTOS_PER_VEHICLE,
+  buildSwapPhotoOverrideAudit,
+  isAdminRole,
+  normalizeSwapInspectionPayload,
+  prepareSwapPhotos,
+  resolveSwapPhotoOverride,
+  vehicleDisplayLabel
+} from '../reservations/swap-photos.js';
 
 function tenantScope(user) {
   const role = String(user?.role || '').toUpperCase();
@@ -1314,6 +1327,21 @@ export const dealershipLoanerService = {
     return reservationCard(updated);
   },
 
+  /**
+   * Swap the loaner car mid-service.
+   *
+   * PHOTO GATE (2026-07-17): identical to the main swap path — 8 standard photos
+   * of the car coming back + 8 of the replacement (16), hard block, ADMIN-only
+   * override with a mandatory reason. Before this, THIS path was the hole in
+   * Hector's rule: a real, UI-driven mid-rental swap ("Swap Vehicle" in the
+   * Loaner Operations panel) that took `{vehicleId, note}` and moved a customer
+   * onto a different car with zero evidence captured. A gate on one of two live
+   * paths is not a gate.
+   *
+   * The gate runs BEFORE the mutation and uploads outside any transaction, so a
+   * refusal (missing photos, storage down, upload shortfall) leaves the
+   * reservation untouched.
+   */
   async swapVehicle(user, reservationId, payload = {}) {
     const scope = tenantScope(user);
     const current = await getLoanerReservationOrThrow(reservationId, scope);
@@ -1323,25 +1351,83 @@ export const dealershipLoanerService = {
       throw new Error('Select a different loaner vehicle to swap');
     }
 
+    const nextVehicle = await prisma.vehicle.findFirst({
+      where: { id: nextVehicleId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) }
+    });
+    if (!nextVehicle) throw new Error('Selected replacement vehicle not found');
+
+    const previousInspection = normalizeSwapInspectionPayload(payload?.currentCheckin || {});
+    const nextInspection = normalizeSwapInspectionPayload(payload?.nextCheckout || {});
+
+    // The ADMIN override bypasses the PHOTO requirement ONLY. Every rule above
+    // (loaner scope, vehicleId present, different car, vehicle exists) and the
+    // status sync inside reservationsService.update below are untouched by it.
+    const photoOverride = resolveSwapPhotoOverride({
+      requested: payload?.photoOverride != null,
+      reason: payload?.photoOverride?.reason,
+      isAdmin: isAdminRole(user?.role)
+    });
+
+    const prepared = await prepareSwapPhotos({
+      previousInspection,
+      nextInspection,
+      previousVehicleLabel: vehicleDisplayLabel(current.vehicle || {}),
+      nextVehicleLabel: vehicleDisplayLabel(nextVehicle),
+      tenantId: current.tenantId,
+      override: photoOverride
+    });
+
+    // Status sync is reservationsService.update's job on a vehicle change
+    // (update-vehicle-change-status-sync.test.mjs) — deliberately still routed
+    // through it so the override cannot bypass it.
     const updated = await reservationsService.update(reservationId, {
       vehicleId: nextVehicleId,
       loanerLastVehicleSwapAt: new Date().toISOString()
     }, scope);
 
+    const auditTenantId = current.tenantId || user?.tenantId || null;
+    const actorUserId = user?.sub || user?.id || null;
+
     await prisma.auditLog.create({
       data: {
-        tenantId: current.tenantId || user?.tenantId || null,
+        tenantId: auditTenantId,
         reservationId,
         action: 'UPDATE',
-        actorUserId: user?.sub || user?.id || null,
+        actorUserId,
         metadata: JSON.stringify({
           dealershipLoanerVehicleSwapped: true,
           previousVehicleId: current.vehicleId || null,
           nextVehicleId,
-          note: String(payload.note || '').trim() || null
+          note: String(payload.note || '').trim() || null,
+          // REFS ONLY — never the bytes (beta.310). `*Stored` is what
+          // prepareSwapPhotos already ran assertNoInlinePhotos over.
+          currentCheckin: prepared.previousStored,
+          nextCheckout: prepared.nextStored,
+          swapPhotos: {
+            previous: prepared.previousPhotoRefs.length,
+            next: prepared.nextPhotoRefs.length,
+            required: SWAP_PHOTOS_PER_VEHICLE,
+            overridden: !!prepared.override
+          }
         })
       }
     });
+
+    if (prepared.override) {
+      await prisma.auditLog.create({
+        data: buildSwapPhotoOverrideAudit({
+          tenantId: auditTenantId,
+          reservationId,
+          actorUserId,
+          previousVehicleId: current.vehicleId || null,
+          nextVehicleId,
+          previousVehicleLabel: vehicleDisplayLabel(current.vehicle || {}),
+          nextVehicleLabel: vehicleDisplayLabel(nextVehicle),
+          path: 'dealership_loaner_swap',
+          override: prepared.override
+        })
+      });
+    }
 
     return reservationCard(updated);
   },

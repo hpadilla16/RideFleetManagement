@@ -12,6 +12,18 @@ import { reservationProgramWhereForScope } from '../../lib/program-category.js';
 // ("RES-…"/"TL-…") or a cuid — pure resolver, unit-tested in
 // reservation-id-resolver.test.mjs. Re-exported for route-side callers.
 import { reservationIdWhere } from './reservation-id.js';
+// Mandatory swap photos (2026-07-16): the app's standard 8-photo set for BOTH
+// cars (16 total) is a HARD requirement of swapVehicle — enforced here, not in
+// the UI. Photos go to Supabase Storage; only slim refs are persisted.
+// ADMIN override with a mandatory reason + AuditLog (2026-07-17): see swap-photos.js.
+import {
+  SWAP_PHOTOS_PER_VEHICLE,
+  buildSwapPhotoOverrideAudit,
+  normalizeSwapInspectionPayload,
+  prepareSwapPhotos,
+  resolveSwapPhotoOverride,
+  vehicleDisplayLabel
+} from './swap-photos.js';
 
 export { reservationIdWhere };
 
@@ -362,29 +374,6 @@ function parseStartOfDay(raw) {
 
 function parseEndOfDay(raw) {
   return parseCalendarDate(raw, { endOfDay: true });
-}
-
-function vehicleDisplayLabel(vehicle = {}) {
-  return [
-    [vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(' ').trim(),
-    vehicle?.plate || vehicle?.internalNumber || ''
-  ].filter(Boolean).join(' • ');
-}
-
-function normalizeSwapInspectionPayload(payload = {}) {
-  return {
-    exterior: String(payload?.exterior || 'GOOD').trim().toUpperCase(),
-    interior: String(payload?.interior || 'GOOD').trim().toUpperCase(),
-    tires: String(payload?.tires || 'GOOD').trim().toUpperCase(),
-    lights: String(payload?.lights || 'GOOD').trim().toUpperCase(),
-    windshield: String(payload?.windshield || 'GOOD').trim().toUpperCase(),
-    fuelLevel: payload?.fuelLevel === '' || payload?.fuelLevel == null ? null : String(payload.fuelLevel),
-    odometer: payload?.odometer === '' || payload?.odometer == null ? null : Number(payload.odometer),
-    cleanliness: payload?.cleanliness === '' || payload?.cleanliness == null ? null : Number(payload.cleanliness),
-    damages: String(payload?.damages || '').trim() || null,
-    notes: String(payload?.notes || '').trim() || null,
-    photos: payload?.photos && typeof payload.photos === 'object' ? payload.photos : {}
-  };
 }
 
 function hasFeeAdvisoryFlag(notes) {
@@ -1929,7 +1918,13 @@ export const reservationsService = {
     return updated;
   },
 
-  async swapVehicle(id, payload = {}, scope = {}, actorUserId = null, actorIp = null) {
+  /**
+   * @param {object} options
+   * @param {boolean} options.isAdmin - computed by the ROUTE from the authenticated
+   *   user (canDoAdminCorrections). Never read from `payload` — that is caller
+   *   input. Defaults false, so any call site that forgets it gets the hard block.
+   */
+  async swapVehicle(id, payload = {}, scope = {}, actorUserId = null, actorIp = null, options = {}) {
     const current = await prisma.reservation.findFirst({
       where: {
         id,
@@ -1968,6 +1963,34 @@ export const reservationsService = {
 
     const previousInspection = normalizeSwapInspectionPayload(payload?.currentCheckin || {});
     const nextInspection = normalizeSwapInspectionPayload(payload?.nextCheckout || {});
+
+    // ── PHOTO GATE (Hector, 2026-07-16) ─────────────────────────────────────
+    // 8 standard photos per car, both cars, 16 total. The frontend disables its
+    // submit button, but THIS is the gate: nobody swaps a car over the API
+    // without the evidence.
+    //
+    // The ONLY way past it is an ADMIN override with a mandatory reason
+    // (2026-07-17). It bypasses the PHOTO requirement and nothing else: every
+    // business rule above (CHECKED_OUT, agreement exists, different vehicle,
+    // ensureNoVehicleConflict) and the syncVehicleStatusForReservation call below
+    // run identically. Planner `force` semantics (beta.311): bypass rules, never
+    // occupancy.
+    const photoOverride = resolveSwapPhotoOverride({
+      requested: payload?.photoOverride != null,
+      reason: payload?.photoOverride?.reason,
+      isAdmin: options?.isAdmin === true
+    });
+
+    const prepared = await prepareSwapPhotos({
+      previousInspection,
+      nextInspection,
+      previousVehicleLabel: vehicleDisplayLabel(current.vehicle),
+      nextVehicleLabel: vehicleDisplayLabel(nextVehicle),
+      tenantId: current.tenantId,
+      override: photoOverride
+    });
+    const { previousStored, nextStored, previousPhotoRefs, nextPhotoRefs } = prepared;
+
     const swapNote = String(payload?.note || '').trim() || null;
     const now = new Date();
 
@@ -2006,8 +2029,9 @@ export const reservationsService = {
           note: swapNote,
           previousCheckedInAt: now,
           nextCheckedOutAt: now,
-          previousInspectionJson: JSON.stringify(previousInspection),
-          nextInspectionJson: JSON.stringify(nextInspection)
+          // REFS ONLY — never the bytes. See swap-photos.js / beta.310.
+          previousInspectionJson: JSON.stringify(previousStored),
+          nextInspectionJson: JSON.stringify(nextStored)
         }
       });
 
@@ -2024,11 +2048,40 @@ export const reservationsService = {
             nextVehicleId,
             actorIp: actorIp || null,
             note: swapNote,
-            currentCheckin: previousInspection,
-            nextCheckout: nextInspection
+            // `*Stored` (refs, no bytes) — the raw payload would have dumped 16
+            // base64 blobs into AuditLog.metadata.
+            currentCheckin: previousStored,
+            nextCheckout: nextStored,
+            swapPhotos: {
+              previous: previousPhotoRefs.length,
+              next: nextPhotoRefs.length,
+              required: SWAP_PHOTOS_PER_VEHICLE,
+              overridden: !!prepared.override
+            }
           })
         }
       });
+
+      // The override's OWN row — action ADMIN_OVERRIDE, mandatory reason, and the
+      // missing slots. Written in the SAME transaction as the swap it authorized:
+      // a swap that happened without a matching audit row (or vice versa) would
+      // make the log unusable as the record of what was bypassed.
+      if (prepared.override) {
+        await tx.auditLog.create({
+          data: buildSwapPhotoOverrideAudit({
+            tenantId: current.tenantId,
+            reservationId: id,
+            actorUserId,
+            actorIp,
+            previousVehicleId: current.vehicleId,
+            nextVehicleId,
+            previousVehicleLabel: vehicleDisplayLabel(current.vehicle),
+            nextVehicleLabel: vehicleDisplayLabel(nextVehicle),
+            path: 'reservation_swap',
+            override: prepared.override
+          })
+        });
+      }
 
       // Drift fix (2026-06-10): swapVehicle moved the reservation + agreement to
       // the new vehicle but never synced Vehicle.status — the swapped-out car

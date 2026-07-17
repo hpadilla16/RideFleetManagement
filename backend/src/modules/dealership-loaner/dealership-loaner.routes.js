@@ -194,7 +194,11 @@ dealershipLoanerRouter.post('/reservations/:id/swap-vehicle', async (req, res, n
   try {
     res.json(await dealershipLoanerService.swapVehicle(req.user, req.params.id, req.body || {}));
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    // resolveSwapPhotoOverride tags its refusals (403 non-admin, 400 empty
+    // reason). Everything else keeps this route's existing 400-with-message
+    // behavior — including "Vehicle swap blocked: ..." from the photo gate,
+    // which is operator-actionable.
+    res.status(error?.status || 400).json({ error: error.message });
   }
 });
 

@@ -9,6 +9,7 @@ import { ReservationExtendDialog } from '../../../components/ReservationExtendDi
 import { ReservationOverridePanel } from '../../../components/admin/ReservationOverridePanel';
 import { IncidentReportsPanel } from '../../../components/incident/IncidentReportsPanel';
 import { ReportDamageWizard } from '../../../components/reservations/ReportDamageWizard';
+import { LoanerVehicleSwapModal } from '../../../components/reservations/LoanerVehicleSwapModal';
 import { api, API_BASE } from '../../../lib/client';
 import { utcToTenantLocalInput } from '../../../lib/tenant-time';
 import { FuelLevelInput, OdometerInput } from '../../../components/wizard/MetricInputs';
@@ -1789,20 +1790,19 @@ function ReservationDetailInner({ token, me, logout }) {
     }
   };
 
-  const swapLoanerVehicle = async () => {
-    try {
-      await api(`/api/dealership-loaner/reservations/${id}/swap-vehicle`, {
-        method: 'POST',
-        body: JSON.stringify({
-          vehicleId: loanerOpsForm.vehicleId,
-          note: loanerOpsForm.note
-        })
-      }, token);
-      await refresh();
-      setMsg('Loaner vehicle swapped');
-    } catch (e) {
-      setMsg(e.message);
+  // Mandatory swap photos (2026-07-17): this used to POST {vehicleId, note}
+  // straight through — a live mid-rental swap with NO photo evidence, the hole
+  // that made Hector's "no photos, no swap" rule not actually hold. The button
+  // now opens the capture modal, which posts the same 16 photos the main swap
+  // page does (and the backend refuses it without them either way).
+  const [loanerSwapOpen, setLoanerSwapOpen] = useState(false);
+
+  const openLoanerSwap = () => {
+    if (!String(loanerOpsForm.vehicleId || '').trim()) {
+      return setMsg('Select the replacement loaner vehicle first');
     }
+    setMsg('');
+    setLoanerSwapOpen(true);
   };
 
   const completeLoanerService = async () => {
@@ -2594,7 +2594,7 @@ token
                   <textarea rows={3} value={loanerOpsForm.loanerCloseoutNotes} onChange={(e) => setLoanerOpsForm({ ...loanerOpsForm, loanerCloseoutNotes: e.target.value })} placeholder="Closeout notes once the service is complete" />
                   <div className="inline-actions">
                     <button type="button" onClick={extendLoaner}>Extend Loaner</button>
-                    <button type="button" className="button-subtle" onClick={swapLoanerVehicle}>Swap Vehicle</button>
+                    <button type="button" className="button-subtle" onClick={openLoanerSwap}>Swap Vehicle</button>
                     <button type="button" className="button-subtle" onClick={completeLoanerService}>Complete Service</button>
                     <button type="button" className="button-subtle" onClick={handlePrintLoanerHandoff}>Print Handoff Packet</button>
                     <button type="button" className="button-subtle" onClick={handlePrintLoanerPurchaseOrder}>Print PO</button>
@@ -3513,6 +3513,25 @@ token
           onComplete={(result) => {
             // "Complete now" — point the incident panel at the freshly-created DRAFT.
             if (result?.incidentId) setFocusIncidentId(result.incidentId);
+          }}
+        />
+      ) : null}
+
+      {/* Mandatory swap photos on the LOANER path (2026-07-17). Same capture
+          grid + same ADMIN override as the main swap page — reused, not rebuilt. */}
+      {loanerSwapOpen && row?.id ? (
+        <LoanerVehicleSwapModal
+          open={loanerSwapOpen}
+          token={token}
+          me={me}
+          reservation={row}
+          vehicleId={loanerOpsForm.vehicleId}
+          vehicles={loanerVehicleChoices}
+          onClose={() => setLoanerSwapOpen(false)}
+          onDone={async () => {
+            setLoanerSwapOpen(false);
+            await refresh();
+            setMsg('Loaner vehicle swapped');
           }}
         />
       ) : null}

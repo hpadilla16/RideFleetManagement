@@ -25,9 +25,31 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PrismaClient } from '@prisma/client';
 import { reservationsService } from './reservations.service.js';
+import { SWAP_PHOTO_SLOTS, __test as swapPhotosTest } from './swap-photos.js';
 
 const prisma = new PrismaClient();
 const TAG = `SWP-${Date.now()}`;
+
+// Mandatory swap photos (2026-07-16): swapVehicle now HARD-BLOCKS without the 8
+// standard photos per car (16 total) and uploads them to Supabase Storage. These
+// status-sync scenarios are not about photos, so we satisfy the gate with a valid
+// minimal set and stub storage via the module's test seam (no Supabase creds
+// needed). The gate itself is covered in swap-photos.test.mjs (pure) and
+// swap-vehicle-photos.test.mjs (DB-backed).
+const objects = new Map();
+const previousStorageFlag = process.env.INSPECTION_PHOTOS_STORAGE_ENABLED;
+
+test.before(() => {
+  process.env.INSPECTION_PHOTOS_STORAGE_ENABLED = 'true';
+  swapPhotosTest.setStorageAdapter({
+    uploader: async ({ bucket, path, body }) => { objects.set(`${bucket}:${path}`, body); return { path }; },
+    downloader: async ({ bucket, path }) => ({ body: objects.get(`${bucket}:${path}`) || null })
+  });
+});
+
+const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 7)]);
+const photoSet = () =>
+  Object.fromEntries(SWAP_PHOTO_SLOTS.map((slot) => [slot, `data:image/jpeg;base64,${JPEG.toString('base64')}`]));
 
 const ids = {
   tenant: null,
@@ -43,6 +65,9 @@ let scope = null;
 let seq = 0;
 
 test.after(async () => {
+  swapPhotosTest.reset();
+  if (previousStorageFlag === undefined) delete process.env.INSPECTION_PHOTOS_STORAGE_ENABLED;
+  else process.env.INSPECTION_PHOTOS_STORAGE_ENABLED = previousStorageFlag;
   for (const agreementId of ids.agreements) {
     await prisma.rentalAgreementVehicleSwap.deleteMany({ where: { rentalAgreementId: agreementId } }).catch(() => {});
     await prisma.rentalAgreementCharge.deleteMany({ where: { rentalAgreementId: agreementId } }).catch(() => {});
@@ -134,8 +159,8 @@ async function seedScenario({ vehicleAStatus = 'ON_RENT' } = {}) {
 
 const swapPayload = (vehicleId) => ({
   vehicleId,
-  currentCheckin: { odometer: 41250, fuelLevel: '0.5', cleanliness: 4 },
-  nextCheckout: { odometer: 22000, fuelLevel: '1', cleanliness: 5 }
+  currentCheckin: { odometer: 41250, fuelLevel: '0.5', cleanliness: 4, photos: photoSet() },
+  nextCheckout: { odometer: 22000, fuelLevel: '1', cleanliness: 5, photos: photoSet() }
 });
 
 const statusOf = async (vehicleId) => {

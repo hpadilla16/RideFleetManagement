@@ -8,6 +8,7 @@ import { sendEmail } from '../../lib/mailer.js';
 import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { rentalAgreementsService } from '../rental-agreements/rental-agreements.service.js';
 import { reservationPricingService } from './reservation-pricing.service.js';
+import { isAdminRole } from './swap-photos.js';
 import { reservationAdditionalDriversService } from './reservation-additional-drivers.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { additionalServicesService } from '../additional-services/additional-services.service.js';
@@ -146,9 +147,11 @@ function canManagePricingOverrides(req) {
 }
 
 // Admin Corrections (Fase 1) — money-affecting fixes are ADMIN-only.
+// The predicate itself lives in swap-photos.js (`isAdminRole`) so the swap-photo
+// override, the dealership-loaner swap, and these routes cannot drift apart on
+// what "admin" means. Behavior is unchanged: SUPER_ADMIN or ADMIN.
 function canDoAdminCorrections(req) {
-  const role = String(req.user?.role || '').toUpperCase();
-  return role === 'SUPER_ADMIN' || role === 'ADMIN';
+  return isAdminRole(req.user?.role);
 }
 
 function buildPrecheckinChecklist(reservation) {
@@ -1762,12 +1765,21 @@ reservationsRouter.post('/:id/swap-vehicle', async (req, res, next) => {
       req.body || {},
       scopeFor(req),
       req.user?.sub || null,
-      req.ip || null
+      req.ip || null,
+      // The ADMIN photo-override capability, resolved from the AUTHENTICATED user
+      // — same gate as Admin Corrections. `payload.photoOverride` only ever says
+      // "I am asking"; this says whether the asker is allowed.
+      { isAdmin: canDoAdminCorrections(req) }
     );
     res.json(row);
   } catch (e) {
     if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
-    if (/required|different vehicle|checked out|assign a vehicle|conflict|available/i.test(String(e?.message || ''))) {
+    // resolveSwapPhotoOverride tags its refusals: 403 non-admin, 400 empty reason.
+    if (e?.status) return res.status(e.status).json({ error: e.message });
+    // "Vehicle swap blocked: ..." covers the mandatory-photo gate (missing/invalid
+    // slots, storage disabled, upload shortfall) — all operator-actionable, so they
+    // surface as a 400 with the message instead of a generic 500.
+    if (/required|different vehicle|checked out|assign a vehicle|conflict|available|swap blocked/i.test(String(e?.message || ''))) {
       return res.status(400).json({ error: e.message });
     }
     next(e);
