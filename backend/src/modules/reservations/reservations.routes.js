@@ -1896,10 +1896,33 @@ reservationsRouter.post('/:id/precheckin/ready', async (req, res, next) => {
   }
 });
 
-reservationsRouter.post('/:id/precheckin/staff-complete', async (req, res, next) => {
+reservationsRouter.post('/:id/precheckin/staff-complete', idempotency({ kind: 'vozia-precheckin' }), async (req, res, next) => {
   try {
     if (!canManagePrecheckin(req)) {
       return res.status(403).json({ error: 'Admin or ops role required' });
+    }
+
+    // S28 mini W-D bis (2026-07-19): the VozIA agent workspace completes the
+    // kiosk check-in on the customer's behalf ("Complete check-in for
+    // customer", video assist). Service accounts must attribute the action,
+    // and EMAIL stays excluded here — email changes go through the supervisor
+    // approval flow (vozia-customer-patch), never ride a completion payload.
+    let voziaPrecheckinMeta = null;
+    if (req.user?.isServiceAccount) {
+      const author = typeof req.body?.author === 'string' ? req.body.author.trim() : '';
+      const ticketId = typeof req.body?.ticketId === 'string' ? req.body.ticketId.trim() : '';
+      if (!author || !ticketId || !/^[A-Za-z0-9._-]{1,64}$/.test(ticketId)) {
+        return res.status(400).json({ error: 'author and ticketId are required for service accounts' });
+      }
+      if (req.body?.email !== undefined) {
+        return res.status(400).json({
+          error: 'email cannot be changed via staff-complete — use the contact approval flow',
+          code: 'EMAIL_NEEDS_APPROVAL'
+        });
+      }
+      voziaPrecheckinMeta = { author, ticketId };
+      delete req.body.author;
+      delete req.body.ticketId;
     }
 
     const current = await reservationsService.getById(req.params.id, scopeFor(req));
@@ -1970,7 +1993,10 @@ reservationsRouter.post('/:id/precheckin/staff-complete', async (req, res, next)
         metadata: JSON.stringify({
           staffPrecheckinComplete: true,
           completedAt: now.toISOString(),
-          fieldsUpdated: Object.keys(customerUpdate)
+          fieldsUpdated: Object.keys(customerUpdate),
+          ...(voziaPrecheckinMeta
+            ? { source: 'vozia', author: voziaPrecheckinMeta.author, ticketId: voziaPrecheckinMeta.ticketId }
+            : {})
         })
       }
     }));

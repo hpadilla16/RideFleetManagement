@@ -88,6 +88,11 @@ const ALLOWED = [
   ['GET', '/api/reservations/:id/available-services'],
   ['POST', '/api/reservations/:id/send-detail-email'],
   ['PATCH', '/api/customers/:id'],
+  // S28 mini W-D bis (Hector, 2026-07-19) — video assist del kiosk: el agente
+  // completa el pre-check-in POR el cliente desde el workspace. El route exige
+  // author+ticketId para service accounts, RECHAZA email (va por el approval
+  // flow) y audita ADMIN_OVERRIDE con source:vozia. idempotency vozia-precheckin.
+  ['POST', '/api/reservations/:id/precheckin/staff-complete'],
 ];
 
 // -----------------------------------------------------------------------------

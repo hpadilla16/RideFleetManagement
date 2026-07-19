@@ -160,3 +160,13 @@ test('W-D: adjacent surfaces stay denied', () => {
   denied('POST', '/api/reservations/abc123/reschedule/extra');
   denied('PATCH', '/api/customers/cus123/credit');
 });
+
+// ── S28 mini W-D bis (Hector, 2026-07-19) — kiosk video assist ──────────────
+
+test('S28: precheckin staff-complete is allowed; adjacent precheckin surfaces stay denied', () => {
+  allowed('POST', '/api/reservations/abc123/precheckin/staff-complete');
+  denied('POST', '/api/reservations/abc123/precheckin');          // customer-side flow
+  denied('POST', '/api/reservations/abc123/precheckin/reset');
+  denied('POST', '/api/reservations/abc123/precheckin/staff-complete/extra'); // nested sneak
+  denied('POST', '/api/reservations/abc123/agreement/payments/manual');       // sigue muerto
+});
