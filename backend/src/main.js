@@ -72,6 +72,7 @@ import { reportDamageRouter } from './modules/report-damage/report-damage.routes
 import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-center/issue-center.routes.js';
 import { tollsRouter, tollsInternalRouter } from './modules/tolls/tolls.routes.js';
 import { plannerRouter } from './modules/planner/planner.routes.js';
+import { quotesRouter } from './modules/quotes/quotes.routes.js';
 import { paymentGatewayRouter } from './modules/payment-gateway/payment-gateway.routes.js';
 // Phase 0 (2026-06-09): the toll auto-sync scheduler MOVED to the worker
 // process (src/worker.js) — its sweeps spawn headless Chromium pages and that
@@ -234,6 +235,8 @@ app.use('/api/issue-center', requireAuth, tenantRateLimit, requireModuleAccess('
 app.use('/api/tolls', requireAuth, tenantRateLimit, requireModuleAccess('tolls'), tollsRouter);
 app.use('/api/citations', requireAuth, tenantRateLimit, requireModuleAccess('citations'), citationsRouter);
 app.use('/api/planner', requireAuth, tenantRateLimit, requireModuleAccess('planner'), plannerRouter);
+// Quotes module (2026-07-17) — doc/quotes-module-plan-2026-07-17.md
+app.use('/api/quotes', requireAuth, tenantRateLimit, requireModuleAccess('quotes'), quotesRouter);
 app.use('/api/payment-gateway', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), paymentGatewayRouter);
 app.use('/api/sms', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), smsRouter);
 app.use('/api/knowledge-base', requireAuth, tenantRateLimit, knowledgeBaseRouter);

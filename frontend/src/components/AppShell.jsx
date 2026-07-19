@@ -11,6 +11,7 @@ import { setLanguage } from '../lib/i18n';
 const NAV_ITEMS = [
   { href: '/dashboard', labelKey: 'nav.dashboard', moduleKey: 'dashboard' },
   { href: '/reservations', labelKey: 'nav.reservations', moduleKey: 'reservations' },
+  { href: '/quotes', labelKey: 'nav.quotes', moduleKey: 'quotes' },
   { href: '/vehicles', labelKey: 'nav.vehicles', moduleKey: 'vehicles' },
   { href: '/vehicles/inventory-helper', labelKey: 'nav.inventoryHelper', moduleKey: 'vehicles' },
   { href: '/customers', labelKey: 'nav.customers', moduleKey: 'customers' },

@@ -4942,3 +4942,84 @@ model UpsellRule {
 
   @@unique([tenantId, channel])
 }
+
+// ============================================================================
+// Quotes module (2026-07-17) — native price quotes, Hector-approved plan:
+// doc/quotes-module-plan-2026-07-17.md
+//
+// A Quote is a SAVED, SPEAKABLE price estimate (Q-1042) computed by the SAME
+// engine the public site uses (bookingEngineService.searchRental → includes
+// revenue pricing). It never moves money, never holds inventory. Converting to
+// a reservation is an explicit call (quotes.service.convert) that re-checks
+// availability and honors the quoted price within the TTL.
+//
+// SELF-CONTAINED ON PURPOSE: tenantId/customerId/location/vehicleType ids are
+// plain strings (no @relation) so this model adds ZERO lines to Tenant/Customer
+// — several concurrent workstreams edit those blocks and a quotes ship must
+// never drag their halves along (the beta.315 lesson). Reads that need names
+// fetch them separately.
+//
+// REPORTING GUARDRAIL (beta.296 lesson): Quote rows are INTENT, not revenue.
+// They must never feed collected-payments, sales/taxes/commission reports, or
+// projectedRevenue.
+// ============================================================================
+
+enum QuoteStatus {
+  ACTIVE
+  EXPIRED
+  CONVERTED
+  CANCELLED
+}
+
+model Quote {
+  id          String @id @default(cuid())
+  // Voice-friendly sequential-ish number ("Q-1042"), unique PER TENANT
+  // (quote-number.js: 1000 + count, retry on race).
+  quoteNumber String
+  tenantId    String
+
+  // Who asked (customer optional — callers may not be customers yet)
+  customerId   String?
+  contactName  String?
+  contactPhone String?
+  contactEmail String?
+
+  // What was quoted
+  pickupLocationId String
+  returnLocationId String?
+  vehicleTypeId    String
+  pickupAt         DateTime
+  returnAt         DateTime
+
+  // Price SNAPSHOT copied from the engine at creation — never recomputed on
+  // read. The agent must see the price the caller was told; expiresAt is what
+  // protects the business from stale rates.
+  days                  Int
+  dailyRate             Decimal @db.Decimal(10, 2)
+  subtotal              Decimal @db.Decimal(10, 2)
+  fees                  Decimal @db.Decimal(10, 2)
+  taxes                 Decimal @db.Decimal(10, 2)
+  total                 Decimal @db.Decimal(10, 2)
+  currency              String  @default("USD")
+  pricingSource         String?
+  revenuePricingApplied Boolean @default(false)
+  engineSnapshotJson    String?
+
+  status                 QuoteStatus @default(ACTIVE)
+  expiresAt              DateTime
+  convertedReservationId String?
+
+  // Provenance
+  source          String  @default("STAFF") // STAFF | VOZIA | PORTAL
+  createdByUserId String?
+  author          String? // "USR-2 Hector (via VozIA)"
+  ticketId        String? // VozIA ticket/action reference
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, quoteNumber])
+  @@index([tenantId, status])
+  @@index([tenantId, customerId])
+  @@index([tenantId, createdAt])
+}

@@ -1,6 +1,7 @@
 export const MODULE_DEFINITIONS = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'reservations', label: 'Reservations' },
+  { key: 'quotes', label: 'Quotes' },
   { key: 'vehicles', label: 'Vehicles' },
   { key: 'maintenance', label: 'Maintenance' },
   { key: 'customers', label: 'Customers' },
@@ -33,6 +34,7 @@ export function pathnameToModule(pathname = '') {
   const path = String(pathname || '').toLowerCase();
   if (path.startsWith('/dashboard') || path === '/') return 'dashboard';
   if (path.startsWith('/reservations')) return 'reservations';
+  if (path.startsWith('/quotes')) return 'quotes';
   if (path.startsWith('/maintenance')) return 'maintenance';
   if (path.startsWith('/vehicles')) return 'vehicles';
   if (path.startsWith('/customers')) return 'customers';

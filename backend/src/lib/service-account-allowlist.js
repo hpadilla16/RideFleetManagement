@@ -36,6 +36,14 @@ const ALLOWED = [
   ['GET', '/api/customers/:id'],
   ['GET', '/api/rental-agreements/:id'],
   ['GET', '/api/locations/:id/hours'],
+  // Quotes module (Hector, 2026-07-17): VozIA can preview, create, read and
+  // CONVERT quotes (a conversion creates a NEW reservation at the quoted
+  // price — no payment, no vehicle hold). cancel stays humans-only.
+  ['GET', '/api/quotes/preview'],
+  ['GET', '/api/quotes'],
+  ['GET', '/api/quotes/:id'],
+  ['POST', '/api/quotes'],
+  ['POST', '/api/quotes/:id/convert'],
   ['POST', '/api/reservations/:id/notes'],
   // Fase 6 RE-SCOPE (Hector, 2026-07-04): VozIA NEVER captures a card directly.
   // It adjusts the balance and sends the customer a link to pay themselves. So

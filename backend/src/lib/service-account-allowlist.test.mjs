@@ -110,3 +110,25 @@ test('encoded-slash / dot-segment bypasses are denied (pre-Fase-6 hardening)', (
   // a normal encoded reservationNumber (no slash) still resolves fine
   allowed('GET', '/api/reservations/RES%2D00123'); // %2D = '-'
 });
+
+// ── Quotes module surface (Hector, 2026-07-17) ──────────────────────────────
+
+test('quotes: VozIA can preview, create, read, list, and convert', () => {
+  allowed('GET', '/api/quotes/preview');
+  allowed('GET', '/api/quotes/preview?pickupLocationId=loc1&pickupAt=a&returnAt=b');
+  allowed('GET', '/api/quotes');
+  allowed('GET', '/api/quotes?customerId=c1&status=ACTIVE');
+  allowed('GET', '/api/quotes/Q-1042');
+  allowed('GET', '/api/quotes/cmck0001xyz');
+  allowed('POST', '/api/quotes');
+  allowed('POST', '/api/quotes/Q-1042/convert');
+});
+
+test('quotes: cancel and everything else stay humans-only', () => {
+  denied('POST', '/api/quotes/Q-1042/cancel');
+  denied('POST', '/api/quotes/Q-1042/requote'); // humans-only (Hector 2026-07-17)
+  denied('PATCH', '/api/quotes/Q-1042');
+  denied('DELETE', '/api/quotes/Q-1042');
+  // convert is a single-segment param — a nested path must not sneak through
+  denied('POST', '/api/quotes/Q-1042/convert/extra');
+});

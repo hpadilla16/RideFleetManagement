@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Quotes Module — Mockups v1 (2026-07-17)</title>
+<style>
+  :root{
+    --brand-purple:#8752FE; --brand-violet:#6d3df2; --brand-mint:#1fc7aa;
+    --brand-ink:#211a38;
+    --bg-soft:#f4f1ff; --bg-soft-2:#fcfbff; --border-soft:#e6dfff; --border-strong:#d7cbff;
+    --ios-text:#1f1f28; --ios-muted:#6f668f; --ios-shadow:0 14px 32px rgba(35,21,80,.08);
+    --ios-radius:16px;
+    --ok:#18a97a; --warn:#e8a13c; --bad:#e5484d;
+  }
+  body{margin:0;color:var(--ios-text);font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;font-size:14px;line-height:1.5;
+    background:linear-gradient(180deg,#faf7ff 0%,var(--bg-soft) 100%);min-height:100vh;padding:34px 26px 80px;}
+  h1{font-size:24px;margin:0 0 6px;color:var(--brand-ink);}
+  h2{font-size:17px;margin:38px 0 10px;color:var(--brand-ink);}
+  .note{color:var(--ios-muted);font-size:12.5px;margin:0 0 18px;max-width:860px;}
+  .annot{color:var(--ios-muted);font-size:11.5px;margin:8px 2px 0;max-width:860px;}
+  .annot b{color:var(--brand-violet);}
+  .frame{background:#fff;border:1px solid var(--border-soft);border-radius:var(--ios-radius);box-shadow:var(--ios-shadow);
+    max-width:980px;overflow:hidden;}
+  .appbar{display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--border-soft);background:var(--bg-soft-2);}
+  .appbar .logo{width:26px;height:26px;border-radius:8px;background:var(--brand-purple);display:inline-block;}
+  .appbar .crumb{color:var(--ios-muted);font-size:12.5px;}
+  .appbar .crumb b{color:var(--brand-ink);}
+  .pad{padding:18px;}
+  .rowflex{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .btn{display:inline-block;border-radius:10px;padding:8px 14px;font-weight:600;font-size:13px;cursor:default;border:1px solid transparent;}
+  .btn.primary{background:var(--brand-purple);color:#fff;}
+  .btn.ghost{background:#fff;border-color:var(--border-strong);color:var(--brand-violet);}
+  .btn.danger{background:#fff;border-color:#f3c1c3;color:var(--bad);}
+  .btn.disabled{background:#f1eefc;color:#a79fc4;}
+  .pill{display:inline-block;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:700;letter-spacing:.02em;}
+  .pill.active{background:#e5f7f0;color:var(--ok);}
+  .pill.expired{background:#f4f2f7;color:#8a84a3;}
+  .pill.converted{background:#efe9ff;color:var(--brand-violet);}
+  .pill.cancelled{background:#fdeeee;color:var(--bad);}
+  .pill.vozia{background:#efe9ff;color:var(--brand-violet);}
+  .pill.staff{background:#eef3fb;color:#4a6591;}
+  .tabs{display:flex;gap:6px;margin:0 0 14px;}
+  .tab{padding:6px 13px;border-radius:999px;font-size:12.5px;font-weight:600;color:var(--ios-muted);background:#fff;border:1px solid var(--border-soft);}
+  .tab.on{background:var(--brand-purple);border-color:var(--brand-purple);color:#fff;}
+  table{border-collapse:collapse;width:100%;font-size:13px;}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ios-muted);text-align:left;padding:8px 10px;border-bottom:1px solid var(--border-soft);}
+  td{padding:10px;border-bottom:1px solid #f1eefc;vertical-align:middle;}
+  tr.sel td{background:#f8f5ff;}
+  .money{font-variant-numeric:tabular-nums;font-weight:700;color:var(--brand-ink);}
+  .search{border:1px solid var(--border-strong);border-radius:10px;padding:8px 12px;color:#a79fc4;background:#fff;min-width:250px;font-size:13px;}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .field label{display:block;font-size:11.5px;font-weight:700;color:var(--ios-muted);text-transform:uppercase;letter-spacing:.05em;margin:0 0 4px;}
+  .field .input{border:1px solid var(--border-strong);border-radius:10px;padding:9px 12px;background:#fff;font-size:13.5px;color:var(--brand-ink);}
+  .classcard{border:1.5px solid var(--border-soft);border-radius:14px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;background:#fff;}
+  .classcard.sel{border-color:var(--brand-purple);box-shadow:0 0 0 3px #8752fe22;}
+  .classcard.soldout{opacity:.55;}
+  .classcard .nm{font-weight:700;color:var(--brand-ink);}
+  .classcard .sub{font-size:11.5px;color:var(--ios-muted);}
+  .bigq{font-size:21px;font-weight:800;color:var(--brand-purple);letter-spacing:.01em;}
+  .split{display:grid;grid-template-columns:1.35fr 1fr;gap:0;}
+  .sidepanel{border-left:1px solid var(--border-soft);background:var(--bg-soft-2);padding:18px;}
+  .kv{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-bottom:1px dashed #ece7fb;}
+  .kv .k{color:var(--ios-muted);}
+  .kv .v{font-weight:600;color:var(--brand-ink);}
+  .kv.total .v{font-size:16px;font-weight:800;color:var(--brand-purple);}
+  .banner{border-radius:12px;padding:10px 14px;font-size:12.5px;margin:12px 0;}
+  .banner.info{background:#efe9ff;color:var(--brand-violet);}
+  .banner.warn{background:#fdf3e3;color:#a06b12;}
+  .banner.ok{background:#e5f7f0;color:var(--ok);}
+  .modal{max-width:520px;margin:10px 0;border:1px solid var(--border-strong);border-radius:var(--ios-radius);background:#fff;box-shadow:var(--ios-shadow);}
+  .modal .hd{padding:14px 18px;border-bottom:1px solid var(--border-soft);font-weight:800;color:var(--brand-ink);}
+  .modal .bd{padding:16px 18px;}
+  .modal .ft{padding:12px 18px;border-top:1px solid var(--border-soft);display:flex;justify-content:flex-end;gap:10px;background:var(--bg-soft-2);}
+  /* dark sample */
+  .dark{--ios-text:#e9e5f7;--brand-ink:#efeafc;--ios-muted:#9d94c0;background:#17122b;border-color:#2c2350;}
+  .dark .appbar{background:#1d1736;border-color:#2c2350;}
+  .dark td{border-color:#241d44;}
+  .dark th{border-color:#2c2350;}
+  .dark .search,.dark .tab{background:#1d1736;border-color:#342a5c;color:#9d94c0;}
+  .dark .tab.on{background:var(--brand-purple);color:#fff;}
+  .dark tr.sel td{background:#221a45;}
+  .dark .money{color:#efeafc;}
+</style>
+</head>
+<body>
+
+<h1>Quotes — mockups v1 <span style="font-size:13px;color:var(--ios-muted);font-weight:400">2026-07-17 · para aprobación de Hector ANTES de construir</span></h1>
+<p class="note">Módulo nuevo <b>Quotes</b> (toggle propio en People/Settings). Nav: entrada "Quotes" entre Reservations y Planner.
+Backend Fase 1 ya construido: precio del MISMO motor del sitio público (revenue pricing incluido), snapshot al crear, vence a las 72h,
+convertir crea la reservación al precio cotizado. Chloe (VozIA) crea y convierte por teléfono; esta pantalla es la cara staff.</p>
+
+<!-- ============ SCREEN 1: LIST ============ -->
+<h2>1 · Lista de quotes (la página del módulo)</h2>
+<div class="frame">
+  <div class="appbar"><span class="logo"></span><span class="crumb">Ride Fleet · <b>Quotes</b></span>
+    <span style="flex:1"></span><span class="search">🔍 Search Q-#, name, phone…</span><span class="btn primary">+ New quote</span></div>
+  <div class="pad">
+    <div class="tabs"><span class="tab on">Active (8)</span><span class="tab">Converted</span><span class="tab">Expired</span><span class="tab">All</span></div>
+    <table>
+      <tr><th>Quote</th><th>Contact</th><th>Class</th><th>Loc</th><th>Dates</th><th>Total</th><th>Valid until</th><th>Source</th><th>Status</th></tr>
+      <tr class="sel"><td class="money">Q-1042</td><td>Maria Hernandez<br><span style="color:var(--ios-muted);font-size:11.5px">(787) 555-1234</span></td>
+        <td>SUV</td><td>SJU</td><td>Aug 1 → Aug 6</td><td class="money">$265.88</td><td>Jul 20, 12:00 <span style="color:var(--warn);font-weight:700">· 2d left</span></td>
+        <td><span class="pill vozia">VozIA</span></td><td><span class="pill active">ACTIVE</span></td></tr>
+      <tr><td class="money">Q-1041</td><td>Jose Rivera<br><span style="color:var(--ios-muted);font-size:11.5px">jrivera@example.com</span></td>
+        <td>Economy</td><td>SJU</td><td>Jul 22 → Jul 25</td><td class="money">$142.10</td><td>Jul 19, 09:15</td>
+        <td><span class="pill staff">Staff</span></td><td><span class="pill active">ACTIVE</span></td></tr>
+      <tr><td class="money">Q-1039</td><td>Ana Colón</td><td>SUV</td><td>MCO</td><td>Jul 18 → Jul 21</td><td class="money">$198.40</td><td>—</td>
+        <td><span class="pill vozia">VozIA</span></td><td><span class="pill converted">CONVERTED</span><br><a style="font-size:11px;color:var(--brand-violet)" href="#">RES-45219880AB12 →</a></td></tr>
+      <tr><td class="money">Q-1035</td><td>Luis Ortiz</td><td>Pickup</td><td>SJU</td><td>Jul 15 → Jul 16</td><td class="money">$89.99</td><td>Jul 16, 17:00</td>
+        <td><span class="pill staff">Staff</span></td><td><span class="pill expired">EXPIRED</span></td></tr>
+    </table>
+  </div>
+</div>
+<p class="annot"><b>Notas:</b> el número Q-#### es CLICKEABLE → detalle (pantalla 3). "Valid until" muestra countdown cuando quedan &lt;3 días.
+CONVERTED enlaza a la reservación. Fila expirada en gris. El search matchea Q-#, nombre y teléfono (usa el phoneNormalized de beta.318).</p>
+
+<!-- ============ SCREEN 2: NEW QUOTE ============ -->
+<h2>2 · New quote — precio en vivo por clase</h2>
+<div class="frame"><div class="split">
+  <div class="pad">
+    <div class="grid2">
+      <div class="field"><label>Pickup location</label><div class="input">SJU — San Juan Airport ▾</div></div>
+      <div class="field"><label>Vehicle class</label><div class="input" style="color:#a79fc4">Pick from live prices →</div></div>
+      <div class="field"><label>Pickup</label><div class="input">Aug 1, 2026 · 10:00 AM</div></div>
+      <div class="field"><label>Return</label><div class="input">Aug 6, 2026 · 10:00 AM</div></div>
+      <div class="field"><label>Contact name</label><div class="input">Maria Hernandez</div></div>
+      <div class="field"><label>Phone</label><div class="input">(787) 555-1234</div></div>
+      <div class="field"><label>Email <span style="font-weight:400;text-transform:none">(optional)</span></label><div class="input" style="color:#a79fc4">maria@…</div></div>
+      <div class="field"></div>
+    </div>
+    <div class="banner info">💡 Prices come from the SAME engine as the public site (revenue pricing applied). Saving snapshots the price for <b>72 hours</b>.</div>
+    <div class="rowflex" style="justify-content:flex-end"><span class="btn primary">Save quote</span></div>
+  </div>
+  <div class="sidepanel">
+    <div style="font-weight:800;color:var(--brand-ink);margin-bottom:10px">Live prices · 5 days</div>
+    <div class="classcard sel" style="margin-bottom:8px"><div><div class="nm">SUV</div><div class="sub">3 available · $45.00/day</div></div><div class="money">$265.88</div></div>
+    <div class="classcard" style="margin-bottom:8px"><div><div class="nm">Economy</div><div class="sub">6 available · $28.40/day</div></div><div class="money">$168.90</div></div>
+    <div class="classcard soldout"><div><div class="nm">Pickup</div><div class="sub">Sold out for these dates</div></div><div class="money">—</div></div>
+    <p class="annot" style="margin-top:10px">Sold-out = no se puede cotizar (un quote nunca inventa disponibilidad).</p>
+  </div>
+</div></div>
+<p class="annot"><b>Notas:</b> el panel derecho llama <code>GET /api/quotes/preview</code> al cambiar location/fechas (debounced). El total mostrado
+incluye fees+taxes. El panel derecho ES el preview en vivo (no hay botón aparte). Al guardar, el backend asigna el número y el toast lo anuncia: "Quote Q-1043 saved — valid until Jul 20, 10:00 AM" con botón Copy.</p>
+
+<!-- ============ SCREEN 3: DETAIL ============ -->
+<h2>3 · Detalle del quote (slide-over)</h2>
+<div class="frame" style="max-width:560px"><div class="pad">
+  <div class="rowflex" style="justify-content:space-between">
+    <span class="bigq">Q-1042</span>
+    <span><span class="pill vozia">VozIA</span> <span class="pill active">ACTIVE</span></span>
+  </div>
+  <div class="annot" style="margin:2px 0 12px">Created Jul 17, 12:00 PM by <b>Chloe (AI) · ticket TKT-2041</b> · approved caller: Maria Hernandez</div>
+  <div class="kv"><span class="k">Class</span><span class="v">SUV · SJU San Juan Airport</span></div>
+  <div class="kv"><span class="k">Dates</span><span class="v">Aug 1, 10:00 AM → Aug 6, 10:00 AM (5 days)</span></div>
+  <div class="kv"><span class="k">Daily rate</span><span class="v">$45.00 <span style="color:var(--brand-violet);font-size:11px">· revenue pricing</span></span></div>
+  <div class="kv"><span class="k">Subtotal</span><span class="v">$225.00</span></div>
+  <div class="kv"><span class="k">Fees</span><span class="v">$15.00</span></div>
+  <div class="kv"><span class="k">Taxes</span><span class="v">$25.88</span></div>
+  <div class="kv total"><span class="k">Total (quoted)</span><span class="v">$265.88</span></div>
+  <div class="banner warn">⏳ Valid until <b>Jul 20, 12:00 PM</b> (2 days left). After that the quote expires and prices refresh.</div>
+  <div class="annot" style="margin:4px 2px 8px">🔒 Price locked at creation — never recalculated. A new price requires a new quote.</div>
+  <div class="rowflex" style="justify-content:flex-end;margin-top:6px">
+    <span class="btn danger">Cancel quote</span>
+    <span class="btn primary">Convert to reservation →</span>
+  </div>
+</div></div>
+<p class="annot"><b>Notas:</b> el breakdown es el SNAPSHOT guardado — nunca se recalcula al abrir. Email quote NO aparece (se esconde hasta Fase 3 — patrón COMING_SOON del app, no botones muertos). Cancel pide confirmación simple. En un quote CONVERTED este panel muestra el link a la reservación y esconde acciones.</p>
+
+<!-- ============ SCREEN 4: CONVERT ============ -->
+<h2>4 · Convert → reservación (modal de confirmación)</h2>
+<div class="modal">
+  <div class="hd">Convert Q-1042 to a reservation</div>
+  <div class="bd">
+    <div class="banner ok">✅ Availability re-checked: SUV still available for Aug 1 → Aug 6.</div>
+    <div class="kv"><span class="k">Customer</span><span class="v">Maria Hernandez · matched by phone ✓</span></div>
+    <div class="kv"><span class="k">Price</span><span class="v">$265.88 — <b>quoted price honored</b></span></div>
+    <div class="kv"><span class="k">Creates</span><span class="v">Reservation (status NEW, no vehicle assigned yet)</span></div>
+    <div class="annot" style="margin-top:10px">No payment is taken. No card required. Staff assigns the car and runs the normal
+    checkout flow later — same rules as any reservation (no-car-no-checkout).</div>
+  </div>
+  <div class="ft"><span class="btn ghost">Back</span><span class="btn primary">Create reservation</span></div>
+</div>
+<p class="annot"><b>Notas:</b> si la clase se agotó desde que se cotizó → banner rojo "No longer available" y el botón se deshabilita
+(el quote queda ACTIVE hasta expirar). Tras crear: toast con RES-# + navegación al detalle de la reservación. Si el quote no tiene
+customer, el modal pide nombre+teléfono (crea o matchea el Customer — mismo dedup del backend).</p>
+
+<!-- ============ SCREEN 4b: STATES ============ -->
+<h2>4b · Estados: vacío · cargando · error del motor</h2>
+<div class="frame" style="max-width:980px"><div class="pad">
+  <div class="grid2">
+    <div>
+      <div style="font-weight:800;color:var(--brand-ink);margin-bottom:8px">Lista vacía (día 1 del módulo)</div>
+      <div style="border:1.5px dashed var(--border-strong);border-radius:14px;padding:26px;text-align:center;color:var(--ios-muted)">
+        <div style="font-size:26px">💬</div>
+        <div style="font-weight:700;color:var(--brand-ink);margin:6px 0 2px">No quotes yet</div>
+        <div style="font-size:12.5px;max-width:340px;margin:0 auto 12px">Save a price for a caller and it lives here as a speakable Q-number, valid 72 hours.</div>
+        <span class="btn primary">+ New quote</span>
+      </div>
+    </div>
+    <div>
+      <div style="font-weight:800;color:var(--brand-ink);margin-bottom:8px">Panel de precios: cargando / caído</div>
+      <div class="classcard" style="margin-bottom:8px;opacity:.6"><div><div class="nm" style="background:#eee9fb;color:transparent;border-radius:6px">Loading…</div><div class="sub" style="background:#f4f1fd;color:transparent;border-radius:6px;margin-top:4px">skeleton</div></div><div class="money" style="background:#eee9fb;color:transparent;border-radius:6px">$000</div></div>
+      <div class="banner warn" style="margin:8px 0">⚠️ Couldn't load live prices. <b style="text-decoration:underline">Retry</b> — quotes can't be saved without a live price.</div>
+      <p class="annot">Skeleton mientras responde el motor (debounce 400ms). Si falla/timeout: banner con Retry explícito — nunca spinner infinito ni panel en blanco con el cliente en la línea. Guardar queda deshabilitado sin precio vivo.</p>
+    </div>
+  </div>
+</div></div>
+<p class="annot"><b>Notas de build (no perder):</b> copy vía en.json/es.json (el piso trabaja en español) · dark mode con las vars reales
+data-theme='dark' + .status-chip de globals.css (no hex ad-hoc) · "Valid until" en la timezone de la location (lección Intl beta.210) ·
+paginación/load-more igual que /reservations · EXPIRED detail muestra botón "Re-quote" (duplica con precios frescos del motor → nuevo Q-# —
+NO es edición de precio; decisión de Hector si entra en v1).</p>
+
+<!-- ============ DARK SAMPLE ============ -->
+<h2>5 · Dark mode (muestra de la lista)</h2>
+<div class="frame dark">
+  <div class="appbar"><span class="logo"></span><span class="crumb" style="color:#9d94c0">Ride Fleet · <b style="color:#efeafc">Quotes</b></span>
+    <span style="flex:1"></span><span class="search">🔍 Search</span><span class="btn primary">+ New quote</span></div>
+  <div class="pad">
+    <div class="tabs"><span class="tab on">Active (8)</span><span class="tab">All</span></div>
+    <table>
+      <tr><th>Quote</th><th>Contact</th><th>Total</th><th>Status</th></tr>
+      <tr class="sel"><td class="money">Q-1042</td><td style="color:#e9e5f7">Maria Hernandez</td><td class="money">$265.88</td><td><span class="pill active">ACTIVE</span></td></tr>
+      <tr><td class="money">Q-1041</td><td style="color:#e9e5f7">Jose Rivera</td><td class="money">$142.10</td><td><span class="pill active">ACTIVE</span></td></tr>
+    </table>
+  </div>
+</div>
+
+<h2>Qué NO está en estos mockups (a propósito)</h2>
+<p class="note">· Nada de dinero cobrado ni balances — un quote es intención, no revenue (guardarraíl beta.296).<br>
+· Sin edición de precio manual: el precio SIEMPRE sale del motor. Si quieres otro precio → otro quote.<br>
+· Car-sharing fuera (decisión: solo rental).<br>
+· El "customer 360 muestra quotes" y la vista en VozIA console van en el paquete de Fase 2 de VozIA, con sus propios mockups.</p>
+
+</body>
+</html>
