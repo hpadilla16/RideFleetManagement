@@ -126,6 +126,15 @@ function installStubs() {
     settingsJson: 'SECRET-DO-NOT-LEAK', websiteTokenHash: 'hash-DO-NOT-LEAK', integrationConfig: { key: 'x' },
   });
   Object.assign(prisma.tenant, delegateStub(() => db.tenants));
+  db.settings = [];
+  Object.assign(prisma.appSetting, delegateStub(() => db.settings));
+  prisma.appSetting.upsert = async ({ where, create, update }) => {
+    const existing = db.settings.find((r) => r.key === where.key);
+    if (existing) { Object.assign(existing, update); return existing; }
+    const row = { ...create };
+    db.settings.push(row);
+    return row;
+  };
   Object.assign(prisma.checkoutSession, delegateStub(() => db.checkoutSessions));
   Object.assign(prisma.kioskDevice, delegateStub(() => db.devices));
   Object.assign(prisma.kioskSession, delegateStub(() => db.sessions));
@@ -832,4 +841,115 @@ test('updateDevice: walk-up toggle + rename round-trip; cross-tenant 404; invali
   await rejects(kioskDeviceService.updateDevice('dev1', { name: 'x'.repeat(81) }, { tenantId: 't1' }), { status: 422, code: 'INVALID_DEVICE_PATCH' });
   await rejects(kioskDeviceService.updateDevice('dev1', {}, { tenantId: 't1' }), { status: 422, code: 'INVALID_DEVICE_PATCH' });
   assert.equal(device.name, 'Kiosk Lobby A');
+});
+
+// ---------------------------------------------------------------------------
+// B3f: VozIA "Get Help" embed config
+// ---------------------------------------------------------------------------
+
+test('vozia-config: validation 422s, https-only, trailing slash stripped, round-trip + clear', async () => {
+  // invalid hosts → 422, nothing stored
+  for (const host of ['http://vozia.example.com', 'not-a-url', '', undefined,
+    // R2: origin only — subpath-mounted hosts misconfigure the frontend's new URL(host).origin
+    'https://vozia.example.com/some/path', 'https://vozia.example.com/chat', 'https://vozia.example.com/?q=1']) {
+    await rejects(
+      kioskDeviceService.updateVoziaSettings({ host, widgetKey: 'k1' }, { tenantId: 't1' }),
+      { status: 422, code: 'INVALID_VOZIA_HOST' },
+    );
+  }
+  assert.equal(db.settings.length, 0);
+
+  // valid save: https enforced, trailing slash stripped, key stored
+  const saved = await kioskDeviceService.updateVoziaSettings(
+    { host: 'https://vozia.example.com/', widgetKey: ' kiosk-widget-123 ' },
+    { tenantId: 't1' },
+  );
+  assert.deepEqual(saved.config, { host: 'https://vozia.example.com', widgetKey: 'kiosk-widget-123' });
+
+  const read = await kioskDeviceService.getVoziaSettings({ tenantId: 't1' });
+  assert.deepEqual(read.config, saved.config, 'admins read the full config back');
+
+  // port is fine (origin-only rule rejects paths, not ports)
+  const withPort = await kioskDeviceService.updateVoziaSettings({ host: 'https://vozia.example.com:8443' }, { tenantId: 't1' });
+  assert.equal(withPort.config.host, 'https://vozia.example.com:8443');
+
+  // widgetKey optional (rate-limit budget only, per KIOSK-EMBED.md)
+  const noKey = await kioskDeviceService.updateVoziaSettings({ host: 'https://vozia.example.com' }, { tenantId: 't1' });
+  assert.deepEqual(noKey.config, { host: 'https://vozia.example.com', widgetKey: null });
+
+  // { host: null } clears
+  const cleared = await kioskDeviceService.updateVoziaSettings({ host: null }, { tenantId: 't1' });
+  assert.equal(cleared.config, null);
+  assert.equal((await kioskDeviceService.getVoziaSettings({ tenantId: 't1' })).config, null);
+});
+
+test('device views carry vozia when configured, null when absent — and nothing else leaks', async () => {
+  const device = seedDevice({
+    pairingCodeHash: sha256Hex('123456'),
+    pairingCodeExpiresAt: new Date(Date.now() + 5 * 60 * 1000),
+  });
+
+  // unconfigured → null (frontend goes dark/fail-soft)
+  let own = await kioskDeviceService.getOwnDevice(deviceCtx(device));
+  assert.equal(own.device.vozia, null);
+
+  await kioskDeviceService.updateVoziaSettings(
+    { host: 'https://vozia.example.com', widgetKey: 'kiosk-widget-123' },
+    { tenantId: 't1' },
+  );
+
+  const paired = await kioskDeviceService.pairDevice({ pairingCode: '123456', ip: '10.0.0.9' });
+  assert.deepEqual(paired.device.vozia, { host: 'https://vozia.example.com', widgetKey: 'kiosk-widget-123' });
+
+  own = await kioskDeviceService.getOwnDevice(deviceCtx(device));
+  assert.deepEqual(own.device.vozia, { host: 'https://vozia.example.com', widgetKey: 'kiosk-widget-123' });
+
+  // exactly {host, widgetKey} — nothing else from the setting row or tenant
+  assert.deepEqual(Object.keys(own.device.vozia).sort(), ['host', 'widgetKey']);
+  const serialized = JSON.stringify(own);
+  assert.ok(!serialized.includes('voziaKioskConfig') && !serialized.includes('DO-NOT-LEAK'));
+
+  // a corrupted/legacy setting value fails soft to null
+  db.settings.length = 0;
+  db.settings.push({ key: 'tenant:t1:voziaKioskConfig', value: '{not json' });
+  own = await kioskDeviceService.getOwnDevice(deviceCtx(device));
+  assert.equal(own.device.vozia, null);
+});
+
+test('vozia-config PUT is wired behind requireRole(ADMIN, SUPER_ADMIN); GET stays module-gated only', async () => {
+  const { kioskAdminRouter } = await import('./kiosk-admin.routes.js');
+  const findRoute = (method) => kioskAdminRouter.stack.find(
+    (layer) => layer.route?.path === '/vozia-config' && layer.route.methods[method],
+  )?.route;
+
+  const putRoute = findRoute('put');
+  const getRoute = findRoute('get');
+  assert.ok(putRoute && getRoute, 'both routes exist');
+  assert.equal(putRoute.stack.length, 2, 'PUT carries the role gate + handler');
+  assert.equal(getRoute.stack.length, 1, 'GET has no extra role gate');
+
+  // exercise the WIRED middleware: OPS → 403, ADMIN → next()
+  const roleGate = putRoute.stack[0].handle;
+  const makeRes = () => {
+    const res = { statusCode: null, body: null };
+    res.status = (c) => { res.statusCode = c; return res; };
+    res.json = (b) => { res.body = b; return res; };
+    return res;
+  };
+
+  let res = makeRes();
+  let nextCalled = false;
+  roleGate({ user: { role: 'OPS', tenantId: 't1' } }, res, () => { nextCalled = true; });
+  assert.equal(nextCalled, false, 'OPS blocked');
+  assert.equal(res.statusCode, 403);
+
+  res = makeRes();
+  nextCalled = false;
+  roleGate({ user: { role: 'ADMIN', tenantId: 't1' } }, res, () => { nextCalled = true; });
+  assert.equal(nextCalled, true, 'ADMIN passes');
+
+  res = makeRes();
+  nextCalled = false;
+  roleGate({ user: { role: 'SUPER_ADMIN' } }, res, () => { nextCalled = true; });
+  assert.equal(nextCalled, true, 'SUPER_ADMIN passes');
 });

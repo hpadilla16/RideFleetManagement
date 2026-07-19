@@ -49,7 +49,9 @@ import { LicenseScanner } from '../../components/loaner/LicenseScanner';
 import { SignaturePad } from '../../components/kiosk/SignaturePad';
 import { StaffAssistScreen } from '../../components/kiosk/StaffAssistScreen';
 import { NameUpdateFlow } from '../../components/kiosk/NameUpdateFlow';
+import { VoziaHelpOverlay } from '../../components/kiosk/VoziaHelpOverlay';
 import { CAMERA_ERR_IN_FLIGHT, acquireCameraStream, cameraGrantedOnce } from '../../lib/kioskCamera';
+import { ackKioskCommand, postKioskState, voziaStepForScreen } from '../../lib/voziaBridge';
 import { KIOSK_UNPAIRED_EVENT, useKioskUi } from '../../components/kiosk/KioskUiContext';
 
 const DONE_RESET_S = 30;
@@ -102,6 +104,29 @@ export default function KioskPage() {
   // B3e: 'NAME' = light name-only bypass (compact confirm card, no K-S2
   // manual form); 'FULL' = the escalated-session manual-entry flow.
   const [staffAssistMode, setStaffAssistMode] = useState('FULL');
+  // ── B3f VozIA embed (contract: voice-ai-customer-service/KIOSK-EMBED.md) ──
+  const [voziaOpen, setVoziaOpen] = useState(false);
+  const [agentMsg, setAgentMsg] = useState(''); // show_message banner (OK-dismiss)
+  const [agentToast, setAgentToast] = useState(''); // transient ~2.5s toast
+  // remount key for retry_step — bumping it re-enters the current screen clean
+  const [stepEpoch, setStepEpoch] = useState(0);
+  // Conversation identity — MEMORY ONLY (never localStorage). A stale secret
+  // must never write into the next customer's conversation: discarded on the
+  // iframe's null/null reset, on session wipe, and replaced on new identity.
+  const voziaIdentityRef = useRef({ conversationId: null, secret: null });
+  const voziaAppliedIdsRef = useRef(new Set());
+  const [voziaConvActive, setVoziaConvActive] = useState(false);
+  // Co-presence extras: client-side verify retry counter + last error code
+  // for the active step (strict enum, consumed by the next kiosk-state post).
+  const verifyAttemptsRef = useRef(0);
+  const voziaErrorRef = useRef(null);
+  // M1: has ANY identity path verified this session (scan confirm / selfie /
+  // name-update / staff-assist)? An agent skip of the ID family without this
+  // would strand a paid guest at /sign's un-forgeable idVerifiedAt gate.
+  const idVerifiedRef = useRef(false);
+  // Typed confirmation number (lookup success) — the iframe's `res` param;
+  // the masked stub intentionally never carries it back from the server.
+  const confirmationNumberRef = useRef('');
 
   const sessionRef = useRef(null);
   useEffect(() => { sessionRef.current = session; }, [session]);
@@ -144,6 +169,20 @@ export default function KioskPage() {
     setEscalatedInfo(null);
     setHelpOpen(false);
     setStaffAssistFrom('ESCALATED');
+    // B3f hygiene: the conversation identity dies with the session wipe —
+    // a stale secret must never reach the next customer's conversation.
+    // (restart_flow snapshots + restores around this call on purpose.)
+    voziaIdentityRef.current = { conversationId: null, secret: null };
+    voziaAppliedIdsRef.current = new Set();
+    setVoziaConvActive(false);
+    setVoziaOpen(false);
+    setAgentMsg('');
+    setAgentToast('');
+    verifyAttemptsRef.current = 0;
+    idVerifiedRef.current = false;
+    voziaErrorRef.current = null;
+    confirmationNumberRef.current = '';
+    setStepEpoch(0);
     setErr('');
     setBusy(false);
     ui.setSessionActive(false);
@@ -162,10 +201,19 @@ export default function KioskPage() {
     return () => window.removeEventListener(KIOSK_UNPAIRED_EVENT, onUnpaired);
   }, []);
 
-  // Shell integration: idle-reset handler + Help button.
+  // Shell integration: idle-reset handler + Help button. When the device
+  // carries VozIA config, Get Help opens the Chloe embed; without it (dark /
+  // fail-soft) the behavior is EXACTLY the pre-B3f escalate sheet.
   useEffect(() => { ui.onIdleReset(resetAll); }, [ui, resetAll]);
   useEffect(() => {
-    if (ui.helpTick > 0) setHelpOpen(true);
+    if (ui.helpTick <= 0) return;
+    if (ui.device?.vozia?.host) {
+      setVoziaOpen(true);
+      if (sessionRef.current?.id) sendEvents(sessionRef.current.id, { step: null, event: 'VOZIA_OPENED' });
+    } else {
+      setHelpOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ui.helpTick]);
 
   // Step-transition telemetry (fire-and-forget; offer shown/accept/decline
@@ -202,6 +250,160 @@ export default function KioskPage() {
     return false;
   }, [ui]);
 
+  // ── B3f VozIA bridge (contract: KIOSK-EMBED.md v2) ─────────────────────────
+
+  const vozia = ui.device?.vozia || null; // {host, widgetKey} — null-safe/dark
+
+  /** Immediate co-presence post (step transitions + notable errors). */
+  const postVoziaState = useCallback((screenName, errorCode = null) => {
+    if (!vozia?.host || !voziaIdentityRef.current.conversationId) return;
+    const step = voziaStepForScreen(screenName);
+    if (!step) return;
+    postKioskState(vozia.host, voziaIdentityRef.current, {
+      step,
+      stepNumber: screenName === 'DONE' ? 5 : (PROGRESS_OF[screenName] || 0),
+      totalSteps: 5,
+      attempts: Math.max(1, verifyAttemptsRef.current || 1),
+      errorCode: errorCode || voziaErrorRef.current || undefined,
+    });
+    voziaErrorRef.current = null;
+  }, [vozia?.host]);
+
+  /** Capture a strict-enum error + surface it to the agent right away. */
+  const reportVoziaError = useCallback((code) => {
+    voziaErrorRef.current = code;
+    postVoziaState(screenRef.current, code);
+  }, [postVoziaState]);
+
+  // Co-presence: every wizard step transition while a conversation is active.
+  useEffect(() => {
+    if (voziaConvActive) postVoziaState(screen);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, voziaConvActive]);
+
+  // Transient agent-action toast (~2.5s, non-blocking).
+  useEffect(() => {
+    if (!agentToast) return undefined;
+    const timer = setTimeout(() => setAgentToast(''), 2500);
+    return () => clearTimeout(timer);
+  }, [agentToast]);
+
+  const onVoziaConversation = useCallback(({ conversationId, secret }) => {
+    if (!conversationId || !secret) {
+      // Reset/close from the iframe → discard the identity INSTANTLY.
+      voziaIdentityRef.current = { conversationId: null, secret: null };
+      voziaAppliedIdsRef.current = new Set();
+      setVoziaConvActive(false);
+      return;
+    }
+    voziaIdentityRef.current = { conversationId, secret };
+    voziaAppliedIdsRef.current = new Set(); // applied-ids are per conversation
+    setVoziaConvActive(true);
+  }, []);
+
+  /**
+   * Agent → kiosk commands (§3). Redelivered ~2s until acked: apply is
+   * idempotent by command.id; commands for a non-active conversation are
+   * discarded without ack; everything no-ops if the session was wiped.
+   */
+  const applyAgentCommand = useCallback((cmd) => {
+    const current = screenRef.current;
+    if (!sessionRef.current?.id && cmd.command !== 'show_message') return;
+    switch (cmd.command) {
+      case 'retry_step':
+        // Re-enter the current step clean: clear errors/verify state and
+        // remount the screen component (stepEpoch is its render key).
+        setErr('');
+        setVerifyResult(null);
+        setStepEpoch((n) => n + 1);
+        setAgentToast(t('kiosk.voziaAppliedToast'));
+        break;
+      case 'skip_step':
+        if (current === 'SIGN' || current === 'PAYMENT') {
+          // Signature/payment are COMPLETED, never skipped (server rejects
+          // too) — polite security-framed refusal; still ack to stop redelivery.
+          setAgentMsg(t('kiosk.voziaSkipRefused'));
+          break;
+        }
+        if (['ID', 'SELFIE', 'NAME_UPDATE', 'STAFF_ASSIST'].includes(current)) {
+          if (!idVerifiedRef.current) {
+            // M1: no verified identity yet → skipping would strand the guest
+            // at /sign's idVerifiedAt gate after paying. Refuse (distinct
+            // copy pointing at on-site staff assist) and STILL ack.
+            setAgentMsg(t('kiosk.voziaSkipIdRefused'));
+            break;
+          }
+          setVerifyResult(null);
+          proceedAssign(); // → vehicle + OFFERS; hard backend gates still apply
+          setAgentToast(t('kiosk.voziaAppliedToast'));
+        } else if (current === 'OFFERS') {
+          chooseOffer([]);
+          setAgentToast(t('kiosk.voziaAppliedToast'));
+        } else {
+          setAgentMsg(t('kiosk.voziaSkipUnavailable'));
+        }
+        break;
+      case 'restart_flow': {
+        // Back to WELCOME but the conversation STAYS open (agent keeps
+        // talking): snapshot identity around the wipe, keep the overlay up.
+        const identity = { ...voziaIdentityRef.current };
+        const applied = voziaAppliedIdsRef.current;
+        resetAll();
+        voziaIdentityRef.current = identity;
+        voziaAppliedIdsRef.current = applied;
+        setVoziaConvActive(!!identity.conversationId);
+        setVoziaOpen(true);
+        break;
+      }
+      case 'show_message':
+        setAgentMsg(String(cmd.message || '').slice(0, 500));
+        break;
+      case 'flow_completed': {
+        // The agent finished the check-in from RFM — the shared checkout-
+        // session is CLOSED, so a real complete() returns the actual
+        // key-handoff info AND flips KioskSession to COMPLETED (honest
+        // KPIs). Fall back to the generic DONE screen if it fails.
+        ui.setSessionActive(false);
+        setDoneCountdown(DONE_RESET_S);
+        setVoziaOpen(false);
+        const gen = genRef.current;
+        (async () => {
+          try {
+            const out = await completeSession(sessionRef.current.id);
+            if (gen !== genRef.current) return;
+            setDoneData(out);
+          } catch { /* fallback: DONE with defaults (staff handoff) */ }
+          if (gen === genRef.current) setScreen('DONE');
+        })();
+        break;
+      }
+      default:
+        break; // unknown command — ack anyway so it stops redelivering
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t, resetAll, ui]);
+
+  const onVoziaCommands = useCallback((commands, envelopeConversationId) => {
+    const activeId = voziaIdentityRef.current.conversationId;
+    if (!activeId) return;
+    for (const cmd of commands) {
+      if (!cmd || cmd.id == null || !cmd.command) continue;
+      const cmdConversation = cmd.conversationId ?? envelopeConversationId ?? activeId;
+      if (cmdConversation !== activeId) continue; // stale conversation — discard, no ack
+      if (!voziaAppliedIdsRef.current.has(cmd.id)) {
+        voziaAppliedIdsRef.current.add(cmd.id);
+        applyAgentCommand(cmd);
+        if (sessionRef.current?.id) {
+          sendEvents(sessionRef.current.id, { step: null, event: 'VOZIA_COMMAND_APPLIED', data: { command: String(cmd.command).slice(0, 40) } });
+        }
+      }
+      // Ack every delivery (fire-and-forget) — a lost ack self-heals on the
+      // next redelivery because the apply above is idempotent by id.
+      ackKioskCommand(vozia?.host, voziaIdentityRef.current, cmd.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyAgentCommand, vozia?.host]);
+
   const escalate = useCallback(async (reason) => {
     setHelpOpen(false);
     setErr('');
@@ -237,6 +439,9 @@ export default function KioskPage() {
     try {
       const out = await lookupReservation(session.id, payload);
       if (gen !== genRef.current) return;
+      // B3f: keep the TYPED confirmation number for the VozIA `res` param —
+      // the masked stub never carries it back (lastName+phone path → none).
+      confirmationNumberRef.current = String(payload?.confirmationNumber || '');
       setStub(out);
       setScreen('SUMMARY');
     } catch (e) {
@@ -280,6 +485,11 @@ export default function KioskPage() {
       });
       if (gen !== genRef.current) return null;
       setVerifyResult(out);
+      if (out?.verified) idVerifiedRef.current = true;
+      if (out && !out.verified) {
+        verifyAttemptsRef.current += 1;
+        reportVoziaError(out.failureReasons?.includes('NAME_MISMATCH') ? 'ID_MISMATCH' : 'UNKNOWN');
+      }
       return out;
     } catch (e) {
       if (gen !== genRef.current) return null;
@@ -287,6 +497,7 @@ export default function KioskPage() {
       // 422 INVALID_PHOTO: junk/oversized image — retake, don't burn a verify
       // attempt on it.
       setErr(e.code === 'INVALID_PHOTO' ? t('kiosk.invalidPhoto') : (e.message || t('kiosk.genericError')));
+      if (e.code === 'INVALID_PHOTO') reportVoziaError('GLARE_ERROR');
       return null;
     } finally { setBusy(false); }
   };
@@ -332,9 +543,13 @@ export default function KioskPage() {
       if (gen !== genRef.current) return null;
       setVerifyResult(out);
       if (out?.verified) {
+        idVerifiedRef.current = true;
         setVerifyResult(null); // the selfie step starts fresh and re-verifies
         setSelfie(null);
         setScreen('SELFIE');
+      } else if (out) {
+        verifyAttemptsRef.current += 1;
+        reportVoziaError(out.failureReasons?.includes('NAME_MISMATCH') ? 'ID_MISMATCH' : 'UNKNOWN');
       }
       return out;
     } catch (e) {
@@ -472,6 +687,7 @@ export default function KioskPage() {
         licensePhoto: licensePhoto || undefined,
       });
       if (gen !== genRef.current) return { ok: false, code: 'STALE' };
+      if (out?.verified) idVerifiedRef.current = true;
       return { ok: true, ...out };
     } catch (e) {
       if (gen !== genRef.current) return { ok: false, code: 'STALE' };
@@ -489,6 +705,7 @@ export default function KioskPage() {
   // verified via STAFF_OVERRIDE — skip selfie and rejoin the wizard at the
   // next step (vehicle assign → OFFERS), exactly like a passed guest verify.
   const completeStaffAssist = async () => {
+    idVerifiedRef.current = true; // reached only after a verified staff attest
     if (sessionRef.current?.id) sendEvents(sessionRef.current.id, { step: 'ID', event: 'STAFF_ASSIST_COMPLETED' });
     setEscalatedInfo(null);
     setVerifyResult(null);
@@ -566,7 +783,11 @@ export default function KioskPage() {
       if (gen !== genRef.current) return;
       if (routeFatal(e)) return;
       if (e.code === 'SANDBOX_DISABLED') setPayState('DISABLED');
-      else { setPayState('FAILED'); setErr(e.message || t('kiosk.genericError')); }
+      else {
+        setPayState('FAILED');
+        setErr(e.message || t('kiosk.genericError'));
+        reportVoziaError('CARD_DECLINED');
+      }
     } finally { setBusy(false); }
   };
 
@@ -649,7 +870,7 @@ export default function KioskPage() {
             </div>
           </div>
         ) : (
-          <LookupScreen t={t} busy={busy} err={err} onSubmit={doLookup} onBack={resetAll} />
+          <LookupScreen key={`lookupscreen-${stepEpoch}`} t={t} busy={busy} err={err} onSubmit={doLookup} onBack={resetAll} />
         )
       ) : null}
       {screen === 'SUMMARY' && stub ? (
@@ -682,6 +903,7 @@ export default function KioskPage() {
       ) : null}
       {screen === 'ID' ? (
         <IdScreen
+          key={`idscreen-${stepEpoch}`}
           t={t}
           busy={busy}
           err={err}
@@ -701,6 +923,7 @@ export default function KioskPage() {
       ) : null}
       {screen === 'NAME_UPDATE' && session ? (
         <NameUpdateFlow
+          key={`nameupdateflow-${stepEpoch}`}
           t={t}
           onSendCode={nameUpdateSend}
           onGetDestinations={nameUpdateDestinationsLoad}
@@ -719,6 +942,7 @@ export default function KioskPage() {
       ) : null}
       {screen === 'SELFIE' ? (
         <SelfieScreen
+          key={`selfiescreen-${stepEpoch}`}
           t={t}
           busy={busy}
           err={err}
@@ -738,6 +962,7 @@ export default function KioskPage() {
       ) : null}
       {screen === 'OFFERS' ? (
         <OffersScreen
+          key={`offersscreen-${stepEpoch}`}
           t={t}
           busy={busy}
           err={err}
@@ -761,6 +986,7 @@ export default function KioskPage() {
       ) : null}
       {screen === 'SIGN' ? (
         <SignScreen
+          key={`signscreen-${stepEpoch}`}
           t={t}
           busy={busy}
           err={err}
@@ -801,6 +1027,7 @@ export default function KioskPage() {
       ) : null}
       {screen === 'STAFF_ASSIST' && session ? (
         <StaffAssistScreen
+          key={`staffassistscreen-${stepEpoch}`}
           t={t}
           prefillFields={aamva || undefined}
           nameContext={staffAssistMode === 'NAME' ? {
@@ -842,6 +1069,49 @@ export default function KioskPage() {
                 {t('kiosk.helpKeepGoing')}
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* B3f — VozIA "Get Help" embed (only when the device carries config). */}
+      {voziaOpen && vozia?.host ? (
+        <VoziaHelpOverlay
+          t={t}
+          vozia={vozia}
+          locationId={ui.device?.locationId}
+          reservationNumber={stub ? confirmationNumberRef.current : ''}
+          hasConversation={voziaConvActive}
+          onConversation={onVoziaConversation}
+          onCommands={onVoziaCommands}
+          onActivity={() => ui.noteActivity?.()}
+          onClose={() => {
+            // kiosk=1 is zero-persistence: unmounting the iframe ends the
+            // conversation for good — discard the identity refs immediately
+            // (the iframe's own end-call is its side of the contract).
+            voziaIdentityRef.current = { conversationId: null, secret: null };
+            voziaAppliedIdsRef.current = new Set();
+            setVoziaConvActive(false);
+            setVoziaOpen(false);
+          }}
+        />
+      ) : null}
+
+      {/* Agent show_message banner — outlives the chat overlay (zIndex above it). */}
+      {agentMsg ? (
+        <div className="kio-overlay" style={{ zIndex: 80, alignItems: 'flex-start', paddingTop: 90 }}>
+          <div className="kio-overlay-card" style={{ maxWidth: 620 }}>
+            <div className="kio-h2" style={{ fontSize: 20 }}>💬 {t('kiosk.voziaAgentMsgTitle')}</div>
+            <p className="kio-sub" style={{ margin: '6px auto 18px' }}>{agentMsg}</p>
+            <button type="button" className="kio-btn sm" onClick={() => setAgentMsg('')}>{t('kiosk.ok')}</button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Transient agent-action toast — auto-dismisses, never blocks. */}
+      {agentToast ? (
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 72, display: 'flex', justifyContent: 'center', zIndex: 85, pointerEvents: 'none' }}>
+          <div style={{ background: 'rgba(33,26,56,.92)', color: '#fff', borderRadius: 999, padding: '12px 22px', fontWeight: 750, fontSize: 15, boxShadow: '0 10px 24px rgba(35,21,80,.35)' }}>
+            {agentToast}
           </div>
         </div>
       ) : null}

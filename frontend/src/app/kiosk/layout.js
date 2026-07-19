@@ -114,6 +114,11 @@ export default function KioskLayout({ children }) {
       idleMsRef.current = Number(ms) > 0 ? Number(ms) : null;
       if (sessionActiveRef.current && !idleOpenRef.current) armIdle();
     },
+    // Same rearm rule as a physical touch, but never dismisses an open K-E1
+    // (that still requires an explicit "I'm still here").
+    noteActivity: () => {
+      if (sessionActiveRef.current && !idleOpenRef.current) armIdle();
+    },
     helpTick,
     online,
     setOnline,

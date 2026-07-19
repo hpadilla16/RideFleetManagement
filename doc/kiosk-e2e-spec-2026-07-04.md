@@ -278,6 +278,33 @@ Admin (auth normal + `requireModuleAccess('kiosk')`):
   (idVerifyMethod 'STAFF_NAME_OVERRIDE', AuditLog) — SIN re-teclear campos ni re-fotos
   (la licencia ya está OCR-verificada; el staff solo avala el nombre). Edad/expiry siguen
   hard-stop.
+- **B3f — Get Help ↔ VozIA embed (handoff 2026-07-19; contrato canónico:
+  `voice-ai-customer-service/KIOSK-EMBED.md` v2; lado VozIA TERMINADO y probado)**:
+  el botón Get Help abre el chat de VozIA (Chloe) en un iframe overlay
+  (`allow="camera; microphone"` obligatorio para video); escalación AI → agente humano
+  por chat/video (LiveKit) con CO-PRESENCIA (el agente ve el paso del check-in) y
+  comandos del agente al kiosk. Lado kiosk: (1) iframe con
+  `?embed=1&kiosk=1&location=<locationId>&res=<RES opcional>&key=<KIOSK_WIDGET_KEY>&
+  parentOrigin=<origin>`; (2) listener postMessage con verificación de e.origin —
+  identidad de conversación {conversationId, secret} (descartar AL INSTANTE en
+  reset/null; secret stale jamás escribe en la conversación del próximo cliente) +
+  comandos re-entregados cada ~2s hasta ack (idempotentes por command.id, ack
+  `POST /api/conversations/:id/kiosk-ack` header x-conversation-secret); (3)
+  co-presencia: en CADA transición de step `POST .../kiosk-state` con ENUMS estrictos
+  (find_reservation · verify_identity · license_scan · additional_drivers · upsells ·
+  signature · payment · done; errores GLARE_ERROR · SCAN_TIMEOUT · CARD_DECLINED ·
+  SIGNATURE_TIMEOUT · ID_MISMATCH · UNKNOWN) — mapping nuestro: LOOKUP/SUMMARY→
+  find_reservation, ID foto/scan→license_scan, SELFIE/NAME_UPDATE/STAFF_ASSIST→
+  verify_identity, OFFERS→upsells, PAYMENT→payment, SIGN→signature, DONE→done
+  (additional_drivers no aplica); (4) comandos: retry_step · skip_step(reason; rechazar
+  client-side skip de signature/payment — server también lo rechaza) · restart_flow ·
+  show_message · flow_completed→pantalla final; comandos con conversationId ≠ activo →
+  descartar; (5) video = 100% del iframe; (6) config server-provided
+  `voziaKioskConfig` por tenant {host, widgetKey} expuesta en el bootstrap del device —
+  **FAIL-SOFT/DARK: sin config, Get Help mantiene el comportamiento actual** (escalate +
+  staff). El kiosk NO persiste nada del cliente (iframe memory-only, auto-reset 90s).
+  El 🔧 staff-assist local queda intacto (canal paralelo). Infra pendiente de Hector:
+  hosting prod de VozIA antes del go-live.
 - **B4 — Walk-up**: availability + walkup-reservation + quote (K9). Tests: no crea
   reserva sin clase disponible; precios = pricing service.
 - **B5 — Pago real (MONEY, gate Hector doble)**: (pre-código) resolver contra docs iPOS
@@ -357,8 +384,20 @@ Hector antes de deploy.
 3. **Walk-up requiere teléfono + email** obligatorios.
 4. **Escalación v1 → staff del location** (patrón de notificaciones existente + banner
    en dashboard).
-5. Depósito RESUELTO por review: fuente de verdad = la reserva
-   (`securityDepositAmount`/cargos SECURITY_DEPOSIT, como spin-charge); `kioskDepositConfig`
-   solo fallback de walk-up.
+5. Depósito (ACTUALIZADO Hector 2026-07-16): el kiosk FUERZA un depósito vía
+   `kioskDepositConfig` por location (ej. $250 default) cuando la reserva trae
+   `securityDepositAmount` = 0; si la reserva ya trae depósito, ese gana (paridad counter).
+   Se construye con B5.
+6. **B5 GREENLIT (Hector 2026-07-16)** tras validar en prod que taxes cuadran (verificado:
+   tax = 11.5% del subtotal taxable en el motor real; la prueba RES-480304 dio $1.49 en
+   $12.99 toll — correcta, base $0 solo porque dailyRate era 0). PAGO REAL iPOS con QR.
+   Gate #1 (PRE-CÓDIGO, para OK de Hector antes de escribir nada): verificar contra docs
+   iPOSpays HPP — (a) el token del HPP sirve para deposit PreAuth (mismo orden rollback/
+   void que spin-charge) Y card-on-file post-renta (tolls/daños/citations); (b) void-vs-
+   refund en SETTLED (lección beta.155 — el sweep de dinero huérfano branchea según
+   settlement). Gate #2: review línea por línea del diff. Extiende paymentRequestToken/
+   /customer/pay con opción iPOS HPP (nunca form propio). Incluye: deposit auth por
+   kioskDepositConfig + captura de extras + webhook/poll → PAID (verificación server-side)
+   + sweep de dinero huérfano + retention sweep de fotos ID (rider pendiente de B3a).
 6. T&C en kiosk: renderizar initials por sección (recomendado) — decisión final en B1
    con diff a la vista.

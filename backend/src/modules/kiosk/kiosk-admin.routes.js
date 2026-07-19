@@ -9,6 +9,7 @@
 import { Router } from 'express';
 import logger from '../../lib/logger.js';
 import { scopeFor } from '../../lib/tenant-scope.js';
+import { requireRole } from '../../middleware/auth.js';
 import { kioskDeviceService, KioskError } from './kiosk-device.service.js';
 import { kioskSessionService } from './kiosk-session.service.js';
 import { kioskOffersService } from './kiosk-offers.service.js';
@@ -108,4 +109,21 @@ kioskAdminRouter.get('/key-handoff', ok(
 // key is one of the tenant's locations.
 kioskAdminRouter.put('/key-handoff', ok(
   (req) => kioskCheckoutService.updateKeyHandoffSettings(req.body || {}, scopeFor(req)),
+));
+
+// ── B3f: VozIA "Get Help" embed config ──────────────────────────────────────
+
+// GET /api/kiosk/vozia-config — { config: { host, widgetKey } | null }
+kioskAdminRouter.get('/vozia-config', ok(
+  (req) => kioskDeviceService.getVoziaSettings(scopeFor(req)),
+));
+
+// PUT /api/kiosk/vozia-config — { host, widgetKey? } (https, ORIGIN only —
+// no path) or { host: null } to clear. Full values returned — config, not
+// credentials. R3: ADMIN/SUPER_ADMIN only — the configured host receives a
+// camera/mic-enabled fullscreen iframe in the lobby plus the reservation
+// number; that's ADMIN-tier config. (New route from this phase — tightening
+// is the conservative call; Hector informed.) GET above stays module-gated.
+kioskAdminRouter.put('/vozia-config', requireRole('ADMIN', 'SUPER_ADMIN'), ok(
+  (req) => kioskDeviceService.updateVoziaSettings(req.body || {}, scopeFor(req)),
 ));

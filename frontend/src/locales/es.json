@@ -495,7 +495,19 @@
     "assistNameLicense": "Nombre en la licencia",
     "assistNameReservation": "Nombre en la reservación",
     "assistNameConfirmBtn": "Verifiqué que esta licencia es del cliente",
-    "assistNameHint": "Estás certificando que revisaste la licencia física y que pertenece a este cliente. Las reglas de edad y expiración siguen aplicando, y esta acción queda auditada."
+    "assistNameHint": "Estás certificando que revisaste la licencia física y que pertenece a este cliente. Las reglas de edad y expiración siguen aplicando, y esta acción queda auditada.",
+    "voziaTitle": "Chat de ayuda",
+    "voziaClose": "Cerrar el chat de ayuda",
+    "voziaSkipRefused": "Por tu seguridad, la firma y el pago solo los puedes completar tú, aquí en el kiosk.",
+    "voziaSkipIdRefused": "La verificación de identidad no se puede saltar de forma remota — un miembro del equipo en el local puede verificar el ID del cliente en el kiosk.",
+    "voziaSkipUnavailable": "Este paso no se puede saltar desde el chat — vamos a terminarlo juntos aquí.",
+    "voziaAgentMsgTitle": "Mensaje de nuestro equipo",
+    "voziaAppliedToast": "✓ Tu agente actualizó tu check-in",
+    "voziaEndTitle": "¿Cerrar el chat de ayuda?",
+    "voziaEndBody": "Tu conversación terminará.",
+    "voziaEndCancel": "Cancelar",
+    "voziaEndConfirm": "Cerrar el chat",
+    "ok": "OK"
   },
   "planner": {
     "title": "Planner",

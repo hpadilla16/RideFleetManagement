@@ -495,7 +495,19 @@
     "assistNameLicense": "License name",
     "assistNameReservation": "Reservation name",
     "assistNameConfirmBtn": "I verified this license matches the guest",
-    "assistNameHint": "You're attesting that you checked the physical license and it belongs to this guest. Age and expiration rules still apply, and this action is audited."
+    "assistNameHint": "You're attesting that you checked the physical license and it belongs to this guest. Age and expiration rules still apply, and this action is audited.",
+    "voziaTitle": "Help chat",
+    "voziaClose": "Close help chat",
+    "voziaSkipRefused": "For your security, signing and payment can only be completed by you, here at the kiosk.",
+    "voziaSkipIdRefused": "Identity verification can't be skipped remotely — a team member on site can verify the guest's ID at the kiosk.",
+    "voziaSkipUnavailable": "This step can't be skipped from the chat — let's finish it together here.",
+    "voziaAgentMsgTitle": "Message from our team",
+    "voziaAppliedToast": "✓ Your agent updated your check-in",
+    "voziaEndTitle": "End help chat?",
+    "voziaEndBody": "Your conversation will end.",
+    "voziaEndCancel": "Cancel",
+    "voziaEndConfirm": "End chat",
+    "ok": "OK"
   },
   "planner": {
     "title": "Planner",

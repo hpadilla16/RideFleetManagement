@@ -13,6 +13,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
+import { scopedSettingKey } from '../../lib/module-access.js';
 
 export class KioskError extends Error {
   constructor(message, status = 400, code = null, details = null) {
@@ -250,8 +251,11 @@ async function pairDevice({ pairingCode, ip } = {}) {
   logger.info('[kiosk] device paired', { deviceId: device.id, tenantId: device.tenantId });
   // Location + tenant joins so the kiosk header can render
   // "International Rental Corp — Orlando MCO · Kiosk 1" straight from the
-  // pair response (B3b + Graphic Design review).
-  const [location, tenant] = await Promise.all([deviceLocation(device), deviceTenant(device)]);
+  // pair response (B3b + Graphic Design review). vozia = B3f Get Help embed
+  // bootstrap (null → the frontend stays dark/fail-soft).
+  const [location, tenant, vozia] = await Promise.all([
+    deviceLocation(device), deviceTenant(device), deviceVozia(device),
+  ]);
   return {
     deviceToken: token,
     device: {
@@ -262,6 +266,7 @@ async function pairDevice({ pairingCode, ip } = {}) {
       walkupEnabled: device.walkupEnabled,
       location,
       tenant,
+      vozia,
     },
   };
 }
@@ -288,18 +293,105 @@ async function deviceTenant(device) {
   return tenant ? { name: tenant.name } : null;
 }
 
+// ── B3f: VozIA "Get Help" embed config ──────────────────────────────────────
+// AppSetting voziaKioskConfig per tenant: { host, widgetKey }. The widgetKey
+// is a RATE-LIMIT budget key that by contract travels in a public iframe URL
+// (KIOSK-EMBED.md: "el key NO es auth — el secret per-conversation lo es") —
+// stored server-side so rotating it is a config change, but it is NOT a
+// credential. Fail-soft everywhere: unset/invalid → null → the kiosk's Get
+// Help keeps today's escalate+staff behavior.
+
+function voziaSettingKey(tenantId) {
+  return scopedSettingKey('voziaKioskConfig', { tenantId });
+}
+
+function normalizeVoziaHost(rawHost) {
+  const raw = String(rawHost || '').trim().replace(/\/+$/, '');
+  if (!raw) return null;
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:') return null;
+  // R2: origin only — the frontend derives new URL(host).origin everywhere,
+  // so a subpath-mounted host would misconfigure silently. Reject any path/
+  // query/hash (port is fine).
+  if ((url.pathname !== '/' && url.pathname !== '') || url.search || url.hash) return null;
+  return raw;
+}
+
+async function readVoziaConfig(tenantId) {
+  if (!tenantId) return null;
+  const row = await prisma.appSetting.findUnique({ where: { key: voziaSettingKey(tenantId) } }).catch(() => null);
+  if (!row?.value) return null;
+  try {
+    const parsed = JSON.parse(row.value);
+    const host = normalizeVoziaHost(parsed?.host);
+    if (!host) return null;
+    return { host, widgetKey: parsed?.widgetKey ? String(parsed.widgetKey) : null };
+  } catch {
+    return null;
+  }
+}
+
+async function deviceVozia(device) {
+  return readVoziaConfig(device?.tenantId || null);
+}
+
+/** Admin GET /api/kiosk/vozia-config — full values (config, not credentials). */
+async function getVoziaSettings(scope = {}) {
+  const tenantId = requireTenantId(scope);
+  return { config: await readVoziaConfig(tenantId) };
+}
+
+/**
+ * Admin PUT /api/kiosk/vozia-config — { host, widgetKey? } (host must be an
+ * https URL; trailing slash stripped) or { host: null } to clear.
+ */
+async function updateVoziaSettings(body = {}, scope = {}) {
+  const tenantId = requireTenantId(scope);
+  const key = voziaSettingKey(tenantId);
+
+  if (body?.host === null) {
+    await prisma.appSetting.upsert({
+      where: { key },
+      create: { key, value: JSON.stringify(null) },
+      update: { value: JSON.stringify(null) },
+    });
+    return { config: null };
+  }
+
+  const host = normalizeVoziaHost(body?.host);
+  if (!host) {
+    throw new KioskError('host must be an https:// URL', 422, 'INVALID_VOZIA_HOST');
+  }
+  const widgetKey = body?.widgetKey ? String(body.widgetKey).trim().slice(0, 128) : null;
+  const config = { host, widgetKey };
+  await prisma.appSetting.upsert({
+    where: { key },
+    create: { key, value: JSON.stringify(config) },
+    update: { value: JSON.stringify(config) },
+  });
+  logger.info('[kiosk] vozia config updated', { tenantId, host, hasWidgetKey: !!widgetKey });
+  return { config };
+}
+
 /**
  * Device-authed GET /api/kiosk/device — a paired kiosk refreshes its own
- * display info (name, walk-up toggle, location + tenant labels) without
- * re-pairing.
+ * display info (name, walk-up toggle, location + tenant labels, Get Help
+ * embed config) without re-pairing.
  */
 async function getOwnDevice(deviceCtx) {
   const device = await prisma.kioskDevice.findFirst({
     where: { id: deviceCtx.id, tenantId: deviceCtx.tenantId },
   });
   if (!device) throw new KioskError('Kiosk device not found', 404, 'DEVICE_NOT_FOUND');
-  const [location, tenant] = await Promise.all([deviceLocation(device), deviceTenant(device)]);
-  return { device: { ...deviceView(device), location, tenant } };
+  const [location, tenant, vozia] = await Promise.all([
+    deviceLocation(device), deviceTenant(device), deviceVozia(device),
+  ]);
+  return { device: { ...deviceView(device), location, tenant, vozia } };
 }
 
 /**
@@ -375,4 +467,6 @@ export const kioskDeviceService = {
   listDevices,
   updateDevice,
   getOwnDevice,
+  getVoziaSettings,
+  updateVoziaSettings,
 };

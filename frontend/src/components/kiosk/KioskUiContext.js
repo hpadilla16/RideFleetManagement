@@ -35,6 +35,10 @@ export const KioskUiContext = createContext({
   // default idle wipe would kill the flow mid-wait. Scope overrides narrowly
   // and always reset to null on leave.
   setIdleMs: () => {},
+  // Programmatic activity signal — e.g. authenticated VozIA postMessage
+  // traffic (B3f): a guest chatting with Chloe generates no shell touches,
+  // and the idle wipe must not kill a genuinely live conversation.
+  noteActivity: () => {},
 });
 
 export function useKioskUi() {
