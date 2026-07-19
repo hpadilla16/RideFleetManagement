@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import logger from './logger.js';
 import { appendPoolParams } from './prisma-url.js';
+import { customerPhoneNormalizeExtension } from './customer-phone-normalize.js';
 
 export { appendPoolParams };
 
@@ -16,7 +17,9 @@ const logOptions = [
   { emit: 'stdout', level: 'warn' }
 ];
 
-export const prisma = new PrismaClient({
+// Base client owns the event stream ($on is not available on an $extends() result),
+// so slow-query logging attaches here; the exported `prisma` is the extended client.
+const basePrisma = new PrismaClient({
   log: logOptions,
   datasources: {
     db: {
@@ -35,7 +38,7 @@ export const prisma = new PrismaClient({
 const LOG_QUERY_PARAMS = process.env.NODE_ENV !== 'production';
 
 if (SLOW_QUERY_MS > 0) {
-  prisma.$on('query', (event) => {
+  basePrisma.$on('query', (event) => {
     if (typeof event?.duration === 'number' && event.duration > SLOW_QUERY_MS) {
       logger.warn(`prisma slow query ${event.duration}ms`, {
         durationMs: event.duration,
@@ -49,4 +52,9 @@ if (SLOW_QUERY_MS > 0) {
     }
   });
 }
+
+// VozIA gap #4 (2026-07-15): derive Customer.phoneNormalized on every write. The
+// extension only augments Customer create/update/upsert args — $transaction, $queryRaw,
+// $connect etc. all pass through unchanged, and no code uses $on/$use on this export.
+export const prisma = basePrisma.$extends(customerPhoneNormalizeExtension);
 

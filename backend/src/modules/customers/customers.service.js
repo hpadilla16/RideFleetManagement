@@ -279,6 +279,15 @@ export const customersService = {
 
     const tenantId = scope?.tenantId || null;
     const searchPattern = query ? `%${query.toLowerCase()}%` : null;
+    // VozIA gap #4 (2026-07-15): match the digits-only form of the query against the
+    // derived phoneNormalized column, so a spoken "7875551234" finds a stored
+    // "(787) 555-1234". Only set when the query actually carries digits.
+    const searchDigits = query ? query.replace(/\D/g, '') : '';
+    // Only engage the phone arm for phone-shaped queries (>= 7 digits). Shorter
+    // numeric fragments in name/address searches — and the "0000000000" auto-create
+    // placeholder — would otherwise flood results with unrelated customers. 7 also
+    // matches the smallest variant VozIA sends (raw / last-10 / last-7).
+    const phonePattern = searchDigits.length >= 7 ? `%${searchDigits}%` : null;
 
     // Tagged-template parameterization keeps this safe from SQL injection.
     return prisma.$queryRaw`
@@ -309,6 +318,8 @@ export const customersService = {
           OR (COALESCE("lastName", '') || ' ' || COALESCE("firstName", '')) ILIKE ${searchPattern}
           OR email ILIKE ${searchPattern}
           OR phone ILIKE ${searchPattern}
+          -- VozIA gap #4: digits-only phone match (served by the phoneNormalized trgm index)
+          OR (${phonePattern}::text IS NOT NULL AND "phoneNormalized" ILIKE ${phonePattern})
         )
       ORDER BY "createdAt" DESC
       LIMIT ${limit}

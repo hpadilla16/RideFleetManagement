@@ -1123,6 +1123,10 @@ model Customer {
   lastName                 String
   email                    String?
   phone                    String
+  // VozIA gap #4 (2026-07-15) — digits-only mirror of `phone`, derived on every
+  // write by the customerPhoneNormalize Prisma extension (lib/prisma.js). Lets the
+  // customer search match a spoken "7875551234" against a stored "(787) 555-1234".
+  phoneNormalized          String?
   licenseNumber            String?
   licenseState             String?
   dateOfBirth              DateTime?
