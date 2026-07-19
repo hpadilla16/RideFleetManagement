@@ -322,6 +322,9 @@ function NewQuotePanel({ token, locations, t, onClose, onSaved }) {
             style={{
               display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', marginBottom: 8,
               width: '100%', textAlign: 'left', background: 'transparent', boxSizing: 'border-box',
+              // Real <button> (GD a11y fix) — the app's global button style paints
+              // white text + gradient; inherit the panel's text color instead.
+              color: 'inherit', font: 'inherit', textShadow: 'none',
               border: `1.5px solid ${vehicleTypeId === r.vehicleTypeId ? '#8752FE' : 'rgba(135,82,254,.18)'}`,
               boxShadow: vehicleTypeId === r.vehicleTypeId ? '0 0 0 3px rgba(135,82,254,.13)' : 'none',
               borderRadius: 14, cursor: r.available ? 'pointer' : 'not-allowed', opacity: r.available ? 1 : 0.55,
