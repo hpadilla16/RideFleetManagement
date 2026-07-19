@@ -143,7 +143,10 @@ app.use(express.json({
   }
 }));
 
-app.get('/health', async (_req, res) => {
+// '/api/health' alias: the droplet's nginx only proxies /api/ to the backend,
+// so the public health URL is /api/health. Bare /health stays for the
+// container healthcheck and internal curls (localhost:4000/health).
+app.get(['/health', '/api/health'], async (_req, res) => {
   const checks = { database: false };
   try {
     await prisma.$queryRaw`SELECT 1`;
