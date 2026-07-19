@@ -65,6 +65,29 @@ const ALLOWED = [
   ['POST', '/api/reservations/:id/send-request-email'],
   ['POST', '/api/rental-agreements/:id/payments/:paymentId/refund'],
   ['POST', '/api/reservations/:id/charges'],
+  // S27 W-D (Hector, 2026-07-19) — the human-agent workspace operates through
+  // this same service account. Each write below has its own payload gate:
+  //   cancel        → rides PATCH /api/reservations/:id (already listed above);
+  //                   vozia-reservation-ops.js gates it to NEW/CONFIRMED + reason.
+  //   reprice-preview → READ-ONLY live-engine diff for a proposed date change.
+  //   reschedule    → pre-pickup date/location change; expectedNewTotal
+  //                   staleness guard (409 REPRICE_DRIFT) + idempotency.
+  //   extend        → existing extend service; author+ticketId + idempotency.
+  //   drivers       → replace-all additional drivers (existing service).
+  //   available-services → read-only catalog of the reservation's location.
+  //   send-detail-email  → on-file email ONLY (extraEmails stripped) + attribution.
+  //   customers PATCH    → field-whitelisted (email/address1/address2/city/state/zip)
+  //                        via vozia-customer-patch.js; email notifies the OLD
+  //                        address (blindaje). SENSITIVE surface — VozIA gates it
+  //                        behind supervisor approval on its side.
+  ['GET', '/api/reservations/:id/reprice-preview'],
+  ['POST', '/api/reservations/:id/reschedule'],
+  ['POST', '/api/reservations/:id/extend'],
+  ['GET', '/api/reservations/:id/additional-drivers'],
+  ['PUT', '/api/reservations/:id/additional-drivers'],
+  ['GET', '/api/reservations/:id/available-services'],
+  ['POST', '/api/reservations/:id/send-detail-email'],
+  ['PATCH', '/api/customers/:id'],
 ];
 
 // -----------------------------------------------------------------------------

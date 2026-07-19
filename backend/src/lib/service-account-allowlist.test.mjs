@@ -60,7 +60,7 @@ test('direct-charge + payment-write routes stay denied after the Fase 6 re-scope
   denied('POST', '/api/reservations/abc123/charge-card-on-file');
 });
 
-test('mutations are denied: PATCH reservations, void aliases, DELETE anything', () => {
+test('mutations are denied: void aliases, DELETE anything (PATCH reservations moved to ALLOWED in W1)', () => {
   allowed('PATCH', '/api/reservations/abc123'); // W1 2026-07-19: path open, FIELD gate en vozia-reservation-patch.js
   denied('POST', '/api/reservations/abc123/void');
   denied('POST', '/api/reservations/abc123/payments/pay1/void');
@@ -132,4 +132,31 @@ test('quotes: cancel and everything else stay humans-only', () => {
   denied('DELETE', '/api/quotes/Q-1042');
   // convert is a single-segment param — a nested path must not sneak through
   denied('POST', '/api/quotes/Q-1042/convert/extra');
+});
+
+// ── S27 W-D surface (Hector, 2026-07-19) — agent workspace ──────────────────
+
+test('W-D: reprice-preview, reschedule, extend, drivers, services, detail-email are allowed', () => {
+  allowed('GET', '/api/reservations/abc123/reprice-preview');
+  allowed('GET', '/api/reservations/abc123/reprice-preview?pickupAt=a&returnAt=b');
+  allowed('POST', '/api/reservations/abc123/reschedule');
+  allowed('POST', '/api/reservations/abc123/extend');
+  allowed('GET', '/api/reservations/abc123/additional-drivers');
+  allowed('PUT', '/api/reservations/abc123/additional-drivers');
+  allowed('GET', '/api/reservations/abc123/available-services');
+  allowed('POST', '/api/reservations/abc123/send-detail-email');
+  allowed('PATCH', '/api/customers/cus123');
+});
+
+test('W-D: adjacent surfaces stay denied', () => {
+  denied('DELETE', '/api/reservations/abc123/extension/ch1'); // extension revert = humans
+  denied('DELETE', '/api/reservations/abc123/additional-drivers');
+  denied('POST', '/api/customers');                            // create = humans/quotes flow
+  denied('DELETE', '/api/customers/cus123');
+  denied('POST', '/api/customers/cus123/password-reset');
+  denied('POST', '/api/reservations/abc123/admin-transition'); // forced status = admins
+  denied('GET', '/api/additional-services');                   // settings-module route = staff
+  // nested-path sneaks
+  denied('POST', '/api/reservations/abc123/reschedule/extra');
+  denied('PATCH', '/api/customers/cus123/credit');
 });

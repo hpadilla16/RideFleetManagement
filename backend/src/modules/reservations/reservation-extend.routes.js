@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { reservationExtendService } from './reservation-extend.service.js';
 import { crossTenantScopeFor as scopeFor } from '../../lib/tenant-scope.js';
+import { idempotency } from '../../middleware/idempotency.js';
 
 export const reservationExtendRouter = Router();
 
@@ -17,9 +18,24 @@ reservationExtendRouter.post(
   '/:id/extend',
   requireAuth,
   requireRole('ADMIN', 'OPS', 'AGENT'),
+  // S27 W-D: extend creates charge rows — replayed VozIA retries must not
+  // double-extend. The middleware only bites service accounts (humans keyless).
+  idempotency({ kind: 'vozia-extend' }),
   async (req, res) => {
     try {
-      const { newReturnAt, extensionDailyRate, note } = req.body || {};
+      let { newReturnAt, extensionDailyRate, note } = req.body || {};
+      // S27 W-D: service accounts must attribute the extension; the author +
+      // ticket ride the note so they land on the charge row / addendum trail.
+      if (req.user?.isServiceAccount) {
+        const author = typeof req.body?.author === 'string' ? req.body.author.trim() : '';
+        const ticketId = typeof req.body?.ticketId === 'string' ? req.body.ticketId.trim() : '';
+        if (!author || !ticketId || !/^[A-Za-z0-9._-]{1,64}$/.test(ticketId)) {
+          return res.status(400).json({
+            error: 'author and ticketId are required for service accounts'
+          });
+        }
+        note = [`[VozIA ${ticketId}] by ${author}`, note].filter(Boolean).join(' — ');
+      }
       const result = await reservationExtendService.extendReservation({
         reservationId: req.params.id,
         newReturnAt,

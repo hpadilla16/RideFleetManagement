@@ -1,5 +1,12 @@
 import { Router } from 'express';
 import { customersService } from './customers.service.js';
+import { prisma } from '../../lib/prisma.js';
+import { sendEmail } from '../../lib/mailer.js';
+import { idempotency } from '../../middleware/idempotency.js';
+import {
+  validateVoziaCustomerPatch,
+  applyVoziaCustomerPatch
+} from './vozia-customer-patch.js';
 // SECURITY (P0): use the shared FAIL-CLOSED tenant scope helper instead of a
 // local one. The previous local scopeFor returned { tenantId: null } for any
 // non-super-admin without a tenant claim, which made every downstream
@@ -68,8 +75,43 @@ customersRouter.post('/', async (req, res) => {
   res.status(201).json(row);
 });
 
-customersRouter.patch('/:id', async (req, res) => {
+customersRouter.patch('/:id', idempotency({ kind: 'vozia-customer' }), async (req, res) => {
   try {
+    // S27 W-D (2026-07-19): service accounts get a FIELD-whitelisted path —
+    // exactly one of email/address1/address2/city/state/zip + author + ticketId.
+    // Email changes notify the OLD address (blindaje de Hector) and everything
+    // lands in AuditLog. Humans below are completely unchanged. The idempotency
+    // middleware only bites service accounts (humans pass through keyless).
+    if (req.user?.isServiceAccount) {
+      const { errors, value } = validateVoziaCustomerPatch(req.body || {});
+      if (errors.length) {
+        return res.status(400).json({ error: 'Validation failed', details: errors });
+      }
+      const scope = scopeFor(req);
+      const customer = await prisma.customer.findFirst({
+        where: {
+          id: req.params.id,
+          ...(scope?.tenantId ? { tenantId: scope.tenantId } : {})
+        },
+        select: {
+          id: true, tenantId: true, firstName: true, email: true,
+          address1: true, address2: true, city: true, state: true, zip: true
+        }
+      });
+      if (!customer) return res.status(404).json({ error: 'Customer not found' });
+      try {
+        const out = await applyVoziaCustomerPatch(
+          value, customer, { prisma, sendEmail }, req.user?.sub || null
+        );
+        return res.json(out);
+      } catch (e) {
+        if (Number.isInteger(e?.status) && e.status < 500) {
+          return res.status(e.status).json({ error: e.message, ...(e.code ? { code: e.code } : {}) });
+        }
+        throw e;
+      }
+    }
+
     if (Object.prototype.hasOwnProperty.call(req.body || {}, 'creditBalance') && req.user?.role !== 'ADMIN') {
       return res.status(403).json({ error: 'Admin approval required to update credit balance' });
     }

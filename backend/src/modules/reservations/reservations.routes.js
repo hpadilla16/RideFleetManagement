@@ -29,6 +29,12 @@ import { maybeUploadCustomerDocument } from '../customers/customer-documents.js'
 import { idempotency } from '../../middleware/idempotency.js';
 import { validateVoziaNotePayload, buildVoziaNoteLine } from './vozia-note.js';
 import {
+  validateVoziaCancelPayload,
+  validateVoziaReschedulePayload,
+  assertPrePickup
+} from './vozia-reservation-ops.js';
+import { quotesService } from '../quotes/quotes.service.js';
+import {
   validateVoziaPatchPayload,
   applyVoziaReservationPatch
 } from './vozia-reservation-patch.js';
@@ -56,8 +62,14 @@ export const reservationsRouter = Router();
  * @returns {boolean} true if the error was handled and a response was sent.
  */
 function sendExplicitStatusError(res, e) {
-  if (Number.isInteger(e?.statusCode) && e.statusCode >= 400 && e.statusCode < 500) {
-    res.status(e.statusCode).json({ error: e.message, ...(e.code ? { code: e.code } : {}) });
+  // S27 W-D (QA minor-1): quotes.service errors carry `status`, not
+  // `statusCode` — honor both conventions so a bad pickupAt on
+  // reprice-preview/reschedule is a 400, not a 500 + Sentry noise.
+  const sc = Number.isInteger(e?.statusCode)
+    ? e.statusCode
+    : (Number.isInteger(e?.status) ? e.status : null);
+  if (sc !== null && sc >= 400 && sc < 500) {
+    res.status(sc).json({ error: e.message, ...(e.code ? { code: e.code } : {}) });
     return true;
   }
   return false;
@@ -779,6 +791,20 @@ reservationsRouter.put('/:id/additional-drivers', async (req, res, next) => {
     const current = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!current) return res.status(404).json({ error: 'Reservation not found' });
 
+    // S27 W-D: service accounts attribute the change (uniform audit trail);
+    // replace-all is content-idempotent so no idempotency middleware needed.
+    let voziaDriversMeta = null;
+    if (req.user?.isServiceAccount) {
+      const author = typeof req.body?.author === 'string' ? req.body.author.trim() : '';
+      const ticketId = typeof req.body?.ticketId === 'string' ? req.body.ticketId.trim() : '';
+      if (!author || !ticketId || !/^[A-Za-z0-9._-]{1,64}$/.test(ticketId)) {
+        return res.status(400).json({
+          error: 'author and ticketId are required for service accounts'
+        });
+      }
+      voziaDriversMeta = { author, ticketId };
+    }
+
     const out = await reservationAdditionalDriversService.replace(
       req.params.id,
       Array.isArray(req.body?.drivers) ? req.body.drivers : [],
@@ -797,7 +823,10 @@ reservationsRouter.put('/:id/additional-drivers', async (req, res, next) => {
         action: 'UPDATE',
         metadata: JSON.stringify({
           additionalDriversUpdated: true,
-          count: out.length
+          count: out.length,
+          ...(voziaDriversMeta
+            ? { source: 'vozia', author: voziaDriversMeta.author, ticketId: voziaDriversMeta.ticketId }
+            : {})
         })
       }
     }));
@@ -1054,6 +1083,51 @@ reservationsRouter.patch('/:id', idempotency({ kind: 'vozia-patch' }), async (re
     // below completely unchanged. The allowlist opens the PATH; this is the
     // field gate (defense in depth — money/status/dates can never ride through).
     if (req.user?.isServiceAccount) {
+      // S27 W-D: cancel rides the same PATCH (status: CANCELLED) but through its
+      // own validator — reason + attribution mandatory, PRE-PICKUP only
+      // (NEW/CONFIRMED; the human/admin flows for later statuses are untouched).
+      // Reuses reservationsService.update so vehicle-status-sync releases the
+      // car exactly like a staff cancel — no parallel status logic.
+      if ((req.body || {}).status !== undefined) {
+        const { errors, value } = validateVoziaCancelPayload(req.body || {});
+        if (errors.length) {
+          return res.status(400).json({ error: 'Validation failed', details: errors });
+        }
+        const gate = assertPrePickup(current.status, 'cancel');
+        if (gate) return res.status(gate.status).json({ error: gate.message, code: gate.code });
+
+        const cancelNote =
+          `[CANCELLED ${new Date().toISOString()}] by ${value.author} (VozIA ${value.ticketId}): ${value.reason}`;
+        const row = await reservationsService.update(
+          req.params.id,
+          { status: 'CANCELLED', notes: appendSystemNote(current.notes, cancelNote) },
+          scopeFor(req),
+          req.user?.sub || null
+        );
+        await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
+          data: {
+            tenantId: row.tenantId || req.user?.tenantId || null,
+            reservationId: row.id,
+            action: 'STATUS_CHANGE',
+            actorUserId: req.user?.sub || null,
+            fromStatus: current.status,
+            toStatus: row.status,
+            metadata: JSON.stringify({
+              source: 'vozia',
+              ticketId: value.ticketId,
+              author: value.author,
+              reason: value.reason
+            })
+          }
+        }));
+        return res.json({
+          ok: true,
+          reservationId: row.id,
+          before: current.status,
+          after: row.status
+        });
+      }
+
       const { errors, value } = validateVoziaPatchPayload(req.body || {});
       if (errors.length) {
         return res.status(400).json({ error: 'Validation failed', details: errors });
@@ -1415,10 +1489,237 @@ reservationsRouter.post('/:id/send-request-email', async (req, res, next) => {
   }
 });
 
+/**
+ * S27 W-D (2026-07-19) — reprice preview for a proposed date/location change.
+ * READ-ONLY, side-effect-free (quotesService.preview never writes a row). The
+ * agent workspace shows "current $X → new $Y (±$Z)" BEFORE applying; the
+ * returned newTotal is what the client must echo back as expectedNewTotal on
+ * POST /:id/reschedule (staleness guard). Uses the LIVE engine — tax-aware +
+ * revenue pricing — never UI math.
+ */
+reservationsRouter.get('/:id/reprice-preview', async (req, res, next) => {
+  try {
+    const current = await reservationsService.getById(req.params.id, scopeFor(req));
+    if (!current) return res.status(404).json({ error: 'Reservation not found' });
+    if (!current.vehicleTypeId) {
+      return res.status(422).json({
+        error: 'Reservation has no vehicle type — cannot reprice', code: 'NO_VEHICLE_TYPE'
+      });
+    }
+    const pickupAt = req.query.pickupAt ? String(req.query.pickupAt) : null;
+    const returnAt = req.query.returnAt ? String(req.query.returnAt) : null;
+    if (!pickupAt || !returnAt) {
+      return res.status(400).json({ error: 'pickupAt and returnAt query params are required' });
+    }
+    const pickupLocationId = req.query.pickupLocationId
+      ? String(req.query.pickupLocationId)
+      : current.pickupLocationId;
+
+    const previewOut = await quotesService.preview(
+      { pickupLocationId, vehicleTypeId: current.vehicleTypeId, pickupAt, returnAt },
+      scopeFor(req)
+    );
+    const row = (previewOut?.results || [])[0];
+    if (!row) {
+      return res.status(422).json({
+        error: 'No rate available for this vehicle class in the proposed window',
+        code: 'NO_RATE'
+      });
+    }
+    const currentTotal = current.estimatedTotal != null ? Number(current.estimatedTotal) : null;
+    return res.json({
+      reservationId: current.id,
+      vehicleTypeId: current.vehicleTypeId,
+      current: {
+        pickupAt: current.pickupAt, returnAt: current.returnAt,
+        pickupLocationId: current.pickupLocationId, total: currentTotal
+      },
+      proposed: {
+        pickupAt: previewOut.pickupAt, returnAt: previewOut.returnAt,
+        pickupLocationId, total: row.total, dailyRate: row.dailyRate,
+        days: row.days, available: row.available
+      },
+      difference: currentTotal != null ? Number((row.total - currentTotal).toFixed(2)) : null
+    });
+  } catch (e) {
+    if (sendExplicitStatusError(res, e)) return;
+    next(e);
+  }
+});
+
+/**
+ * S27 W-D — apply a date/location change WITH repricing. Pre-pickup only
+ * (NEW/CONFIRMED — later statuses go through extend/addendum or a human in
+ * RFM). Flow: re-price server-side → 409 REPRICE_DRIFT if it no longer
+ * matches what the agent previewed → reservationsService.update (runs the
+ * REAL gates: hours, vehicle conflict, agreement-immutable) → stamp
+ * dailyRate/estimatedTotal from the engine row → audit with before/after.
+ * Idempotency: service accounts must send Idempotency-Key (replay-safe).
+ */
+reservationsRouter.post('/:id/reschedule', idempotency({ kind: 'vozia-reschedule' }), async (req, res, next) => {
+  try {
+    const current = await reservationsService.getById(req.params.id, scopeFor(req));
+    if (!current) return res.status(404).json({ error: 'Reservation not found' });
+
+    const { errors, value } = validateVoziaReschedulePayload(req.body || {});
+    if (errors.length) {
+      return res.status(400).json({ error: 'Validation failed', details: errors });
+    }
+    const gate = assertPrePickup(current.status, 'reschedule');
+    if (gate) return res.status(gate.status).json({ error: gate.message, code: gate.code });
+    if (!current.vehicleTypeId) {
+      return res.status(422).json({
+        error: 'Reservation has no vehicle type — cannot reprice', code: 'NO_VEHICLE_TYPE'
+      });
+    }
+
+    const pickupLocationId = value.pickupLocationId || current.pickupLocationId;
+    // Raw strings straight through (Innovation MC-1): preview() parses them in
+    // TENANT wall-clock, exactly like reprice-preview and the staff PATCH do.
+    const previewOut = await quotesService.preview(
+      {
+        pickupLocationId,
+        vehicleTypeId: current.vehicleTypeId,
+        pickupAt: value.pickupAt,
+        returnAt: value.returnAt
+      },
+      scopeFor(req)
+    );
+    const row = (previewOut?.results || [])[0];
+    if (!row) {
+      return res.status(422).json({
+        error: 'No rate available for this vehicle class in the proposed window',
+        code: 'NO_RATE'
+      });
+    }
+    if (Math.abs(row.total - value.expectedNewTotal) > 0.01) {
+      // Price moved since the agent's preview — surface the fresh number, never
+      // silently charge something the customer wasn't shown.
+      return res.status(409).json({
+        error: `Price changed since preview: now $${row.total.toFixed(2)} (expected $${value.expectedNewTotal.toFixed(2)}). Re-preview and confirm with the customer.`,
+        code: 'REPRICE_DRIFT',
+        newTotal: row.total
+      });
+    }
+
+    const before = {
+      pickupAt: current.pickupAt,
+      returnAt: current.returnAt,
+      pickupLocationId: current.pickupLocationId,
+      estimatedTotal: current.estimatedTotal != null ? Number(current.estimatedTotal) : null,
+      dailyRate: current.dailyRate != null ? Number(current.dailyRate) : null
+    };
+
+    // The real gates live in update(): operating hours, vehicle conflict,
+    // AGREEMENT_IMMUTABLE/ADDENDUM_PENDING — same errors as the staff PATCH.
+    // dailyRate/estimatedTotal ride the SAME patch (Innovation MC-2): one
+    // atomic write — no window where dates moved but the price didn't. The
+    // plain update() path deliberately never recomputes totals; this endpoint's
+    // whole point is that it stamps the engine's numbers.
+    const patch = {
+      pickupAt: value.pickupAt,
+      returnAt: value.returnAt,
+      dailyRate: row.dailyRate,
+      estimatedTotal: row.total
+    };
+    if (pickupLocationId !== current.pickupLocationId) {
+      patch.pickupLocationId = pickupLocationId;
+      // Round-trip reservations move BOTH ends together; a true one-way
+      // change (distinct return location) escalates to a human in RFM.
+      if (current.returnLocationId === current.pickupLocationId) {
+        patch.returnLocationId = pickupLocationId;
+      }
+    }
+    const row2 = await reservationsService.update(req.params.id, patch, scopeFor(req), req.user?.sub || null);
+
+    await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
+      data: {
+        tenantId: row2.tenantId || req.user?.tenantId || null,
+        reservationId: row2.id,
+        action: 'UPDATE',
+        actorUserId: req.user?.sub || null,
+        metadata: JSON.stringify({
+          source: req.user?.isServiceAccount ? 'vozia' : 'staff',
+          kind: 'reschedule',
+          ticketId: value.ticketId,
+          author: value.author,
+          before,
+          after: {
+            pickupAt: row2.pickupAt, returnAt: row2.returnAt,
+            pickupLocationId, estimatedTotal: row.total, dailyRate: row.dailyRate
+          }
+        })
+      }
+    }));
+
+    return res.json({
+      ok: true,
+      reservationId: row2.id,
+      before,
+      after: {
+        pickupAt: row2.pickupAt,
+        returnAt: row2.returnAt,
+        pickupLocationId,
+        estimatedTotal: row.total,
+        dailyRate: row.dailyRate
+      },
+      difference: before.estimatedTotal != null
+        ? Number((row.total - before.estimatedTotal).toFixed(2))
+        : null
+    });
+  } catch (e) {
+    if (sendExplicitStatusError(res, e)) return;
+    if (/vehicle conflict/i.test(e.message)) return res.status(409).json({ error: e.message });
+    if (e.code === 'ADDENDUM_PENDING' || e.code === 'AGREEMENT_IMMUTABLE') {
+      return res.status(409).json({ error: e.message, code: e.code });
+    }
+    if (/outside operating hours|location is closed/i.test(e.message)) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
+/**
+ * S27 W-D — the additional-services catalog for THIS reservation's pickup
+ * location (active only). Read-only; lets the agent workspace list what the
+ * local actually offers, with prices, before drafting a charge.
+ */
+reservationsRouter.get('/:id/available-services', async (req, res, next) => {
+  try {
+    const current = await reservationsService.getById(req.params.id, scopeFor(req));
+    if (!current) return res.status(404).json({ error: 'Reservation not found' });
+    const services = await additionalServicesService.list({
+      locationId: current.pickupLocationId || undefined,
+      activeOnly: true,
+      tenantId: current.tenantId || req.user?.tenantId || null
+    });
+    return res.json({ reservationId: current.id, services });
+  } catch (e) {
+    if (sendExplicitStatusError(res, e)) return;
+    next(e);
+  }
+});
+
 reservationsRouter.post('/:id/send-detail-email', async (req, res, next) => {
   try {
     const current = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!current) return res.status(404).json({ error: 'Reservation not found' });
+
+    // S27 W-D: service accounts send ONLY to the on-file email (extraEmails is
+    // the link-redirection surface Fase 6 closed) and must attribute the send.
+    let voziaMeta = null;
+    if (req.user?.isServiceAccount) {
+      const author = typeof req.body?.author === 'string' ? req.body.author.trim() : '';
+      const ticketId = typeof req.body?.ticketId === 'string' ? req.body.ticketId.trim() : '';
+      if (!author || !ticketId || !/^[A-Za-z0-9._-]{1,64}$/.test(ticketId)) {
+        return res.status(400).json({
+          error: 'author and ticketId are required for service accounts'
+        });
+      }
+      voziaMeta = { author, ticketId };
+      if (req.body) req.body.extraEmails = [];
+    }
 
     const primary = String(current.customer?.email || '').trim();
     const extras = Array.isArray(req.body?.extraEmails) ? req.body.extraEmails : [];
@@ -1471,6 +1772,24 @@ reservationsRouter.post('/:id/send-detail-email', async (req, res, next) => {
 
     const note = `[RESERVATION DETAIL EMAIL ${new Date().toISOString()}] emailed to ${recipients.join(', ')}`;
     await reservationsService.update(req.params.id, { notes: appendSystemNote(current.notes, note) }, scopeFor(req));
+
+    if (voziaMeta) {
+      await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
+        data: {
+          tenantId: current.tenantId || req.user?.tenantId || null,
+          reservationId: current.id,
+          action: 'UPDATE',
+          actorUserId: req.user?.sub || null,
+          metadata: JSON.stringify({
+            source: 'vozia',
+            kind: 'detail-email',
+            ticketId: voziaMeta.ticketId,
+            author: voziaMeta.author,
+            sentTo: recipients
+          })
+        }
+      }));
+    }
 
     res.json({ ok: true, sentTo: recipients });
   } catch (e) {

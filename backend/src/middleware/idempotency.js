@@ -43,7 +43,11 @@ export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 //     WITHIN the TTL; a same-key retry >24h later (agent restart, queue replay)
 //     would double-apply. So 'charge' is NON-recyclable too (Innovation review
 //     2026-07-04). Only truly benign, content-idempotent kinds ('note') recycle.
-const NO_RECYCLE_KINDS = new Set(['payment', 'refund', 'charge']);
+// S27 W-D (Innovation 2026-07-19): 'vozia-extend' creates cumulative charge
+// rows — same class as 'charge'. The extend service self-guards (newReturnAt
+// must be after the current return), but that guard lives in another module;
+// the one-line hedge here costs nothing.
+const NO_RECYCLE_KINDS = new Set(['payment', 'refund', 'charge', 'vozia-extend']);
 
 async function defaultGetPrisma() {
   const mod = await import('../lib/prisma.js');
