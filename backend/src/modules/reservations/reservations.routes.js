@@ -28,6 +28,10 @@ import { compactStartRentalResponse } from './start-rental-compact.js';
 import { maybeUploadCustomerDocument } from '../customers/customer-documents.js';
 import { idempotency } from '../../middleware/idempotency.js';
 import { validateVoziaNotePayload, buildVoziaNoteLine } from './vozia-note.js';
+import {
+  validateVoziaPatchPayload,
+  applyVoziaReservationPatch
+} from './vozia-reservation-patch.js';
 // VozIA Fase 6 re-scope (2026-07-04) — CAP 3+4 charge/credit guard + ceiling.
 import {
   assertServiceAccountChargeAllowed,
@@ -1037,10 +1041,35 @@ reservationsRouter.post('/', async (req, res, next) => {
   }
 });
 
-reservationsRouter.patch('/:id', async (req, res, next) => {
+reservationsRouter.patch('/:id', idempotency({ kind: 'vozia-patch' }), async (req, res, next) => {
   try {
     const current = await reservationsService.getById(req.params.id, scopeFor(req));
     if (!current) return res.status(404).json({ error: 'Reservation not found' });
+
+    // VozIA Cap 6 / W1 (2026-07-19): service accounts get a FIELD-whitelisted
+    // path — exactly one of flightNumber/pickupInstructions/contactPhone +
+    // author + ticketId (contactEmail EXCLUDED — Hector 2026-07-19: email
+    // changes redirect token-gated links; they escalate to a human). Everything
+    // else 400s. Humans continue
+    // below completely unchanged. The allowlist opens the PATH; this is the
+    // field gate (defense in depth — money/status/dates can never ride through).
+    if (req.user?.isServiceAccount) {
+      const { errors, value } = validateVoziaPatchPayload(req.body || {});
+      if (errors.length) {
+        return res.status(400).json({ error: 'Validation failed', details: errors });
+      }
+      try {
+        const out = await applyVoziaReservationPatch(
+          value, current, scopeFor(req), { prisma }, req.user?.sub || null
+        );
+        return res.json(out);
+      } catch (e) {
+        if (Number.isInteger(e?.status) && e.status < 500) {
+          return res.status(e.status).json({ error: e.message, ...(e.code ? { code: e.code } : {}) });
+        }
+        throw e;
+      }
+    }
 
     const patch = { ...(req.body || {}) };
     const validationErrors = validateReservationPatch(current, patch, { role: req.user?.role });

@@ -1295,6 +1295,13 @@ model Reservation {
   paymentStatus  PaymentStatus @default(PENDING)
 
   sendConfirmationEmail        Boolean   @default(true)
+  // VozIA Cap 6 / W1 (2026-07-19) — caller-editable non-money fields, written via
+  // the service-account PATCH whitelist (vozia-reservation-patch.js). flightNumber
+  // finally readable at reservation level (before it only existed on
+  // ExternalReservation); pickupInstructions is PER-RESERVATION (distinct from the
+  // location-level pickupInstructions in locationConfig).
+  flightNumber                 String?
+  pickupInstructions           String?
   notes                        String?
   customerInfoToken            String?
   customerInfoTokenExpiresAt   DateTime?

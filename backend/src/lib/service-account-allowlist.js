@@ -45,6 +45,12 @@ const ALLOWED = [
   ['POST', '/api/quotes'],
   ['POST', '/api/quotes/:id/convert'],
   ['POST', '/api/reservations/:id/notes'],
+  // W1 (Hector, 2026-07-19): field-whitelisted PATCH — the route enforces that a
+  // service account can ONLY set flightNumber/pickupInstructions/contactPhone
+  // (vozia-reservation-patch.js). contactEmail is EXCLUDED by Hector's security
+  // decision (email changes redirect token-gated pay/sign links — escalate to a
+  // human instead). Path-level open, field-level gated.
+  ['PATCH', '/api/reservations/:id'],
   // Fase 6 RE-SCOPE (Hector, 2026-07-04): VozIA NEVER captures a card directly.
   // It adjusts the balance and sends the customer a link to pay themselves. So
   // the two direct-charge routes (payments/manual + payments/charge-card-on-file)
@@ -63,7 +69,7 @@ const ALLOWED = [
 
 // -----------------------------------------------------------------------------
 // RESERVED — still DENIED after the Fase 6 re-scope (Hector, 2026-07-04):
-//   ['PATCH', '/api/reservations/:id'],                              // field whitelist (Fase 5)
+//   (PATCH /api/reservations/:id moved to ALLOWED 2026-07-19 — W1 field whitelist)
 //   ['POST', '/api/rental-agreements/:id/payments/manual'],          // direct charge — removed
 //   ['POST', '/api/rental-agreements/:id/payments/charge-card-on-file'], // direct charge — removed
 // -----------------------------------------------------------------------------

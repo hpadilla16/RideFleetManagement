@@ -18,6 +18,7 @@ test('every allowlist entry matches with realistic params', () => {
   allowed('GET', '/api/rental-agreements/cmck11111111111111111111');
   allowed('GET', '/api/locations/loc123/hours');
   allowed('POST', '/api/reservations/RES-00123/notes');
+  allowed('PATCH', '/api/reservations/RES-00123'); // W1 field-whitelisted (2026-07-19)
   // Fase 6 RE-SCOPE (2026-07-04): the three link/adjust-only routes are allowed.
   allowed('POST', '/api/reservations/RES-00123/send-request-email');
   allowed('POST', '/api/rental-agreements/cmck11111111111111111111/payments/pay1/refund');
@@ -39,7 +40,7 @@ test('Fase 6 re-scope: link/refund/charge routes open — DIRECT-charge routes n
   denied('POST', '/api/rental-agreements/abc123/security-deposit/capture');
   denied('POST', '/api/rental-agreements/abc123/security-deposit/release');
   // Fase 5 PATCH still reserved/denied.
-  denied('PATCH', '/api/reservations/abc123');
+  allowed('PATCH', '/api/reservations/abc123'); // W1 2026-07-19: path open, FIELD gate en vozia-reservation-patch.js
 });
 
 test('method casing and trailing slash / query string are tolerated', () => {
@@ -60,7 +61,7 @@ test('direct-charge + payment-write routes stay denied after the Fase 6 re-scope
 });
 
 test('mutations are denied: PATCH reservations, void aliases, DELETE anything', () => {
-  denied('PATCH', '/api/reservations/abc123');
+  allowed('PATCH', '/api/reservations/abc123'); // W1 2026-07-19: path open, FIELD gate en vozia-reservation-patch.js
   denied('POST', '/api/reservations/abc123/void');
   denied('POST', '/api/reservations/abc123/payments/pay1/void');
   denied('POST', '/api/rental-agreements/abc123/payments/pay1/void');
