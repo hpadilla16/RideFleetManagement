@@ -93,6 +93,12 @@ const ALLOWED = [
   // author+ticketId para service accounts, RECHAZA email (va por el approval
   // flow) y audita ADMIN_OVERRIDE con source:vozia. idempotency vozia-precheckin.
   ['POST', '/api/reservations/:id/precheckin/staff-complete'],
+  // S30 (Hector, 2026-07-19) — smart lookup de confirmación: variantes por
+  // prefijo de booking-source + fallback nombre. READ-ONLY; los matches
+  // no-exactos vuelven ENMASCARADOS hasta verificar un dato (gate server-side
+  // en la ruta). Ya matcheaba vía GET /:id, la entrada explícita documenta la
+  // intención. Lib compartido con el kiosk: reservation-smart-match.js.
+  ['GET', '/api/reservations/smart-lookup'],
 ];
 
 // -----------------------------------------------------------------------------

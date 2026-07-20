@@ -54,3 +54,10 @@ export async function kioskSmartMatch(input) {
   const ranked = await matcher(input);
   return Array.isArray(ranked) ? ranked : [];
 }
+
+// ── S30 WIRE-IN (2026-07-19) — the lib landed; the seam goes LIVE ───────────
+// smartMatchReservation takes an injected prisma ({ prisma }) so its core
+// stays DB-free-testable; the seam's single-arg contract gets a closure.
+import { smartMatchReservation } from '../../lib/reservation-smart-match.js';
+import { prisma } from '../../lib/prisma.js';
+setKioskSmartMatcher((input) => smartMatchReservation(input, { prisma }));

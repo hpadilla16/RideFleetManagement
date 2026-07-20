@@ -28,6 +28,8 @@ import { compactStartRentalResponse } from './start-rental-compact.js';
 import { maybeUploadCustomerDocument } from '../customers/customer-documents.js';
 import { idempotency } from '../../middleware/idempotency.js';
 import { validateVoziaNotePayload, buildVoziaNoteLine } from './vozia-note.js';
+import { smartMatchReservation, maskCandidate, candidateMatchesVerification } from '../../lib/reservation-smart-match.js';
+import { verifyProbeThrottle } from '../../lib/verify-probe-throttle.js';
 import {
   validateVoziaCancelPayload,
   validateVoziaReschedulePayload,
@@ -398,6 +400,94 @@ reservationsRouter.get('/:id/agreement', async (req, res, next) => {
     res.json(agreement);
   } catch (e) {
     if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+// S30 (2026-07-19) — SMART LOOKUP: the customer's confirmation code doesn't
+// match our stored reservationNumber (OTA hands out the bare source ref,
+// imports store it prefixed: ZE… vs TL-ZE…). Shared matcher lib (also consumed
+// by the kiosk); read-only. PRIVACY GATE lives HERE, server-side: a non-exact
+// match returns a MASKED stub until the caller proves a datum (full lastName
+// or exact pickup date) — so a common name can never be used to pull someone
+// else's reservation details through Chloe. Registered BEFORE '/:id'.
+reservationsRouter.get('/smart-lookup', async (req, res, next) => {
+  try {
+    const scope = scopeFor(req);
+    const tenantId = scope.tenantId ? String(scope.tenantId) : null;
+    if (!tenantId) {
+      return res.status(400).json({ error: 'tenantId is required (pass ?tenantId= as SUPER_ADMIN)' });
+    }
+    const code = req.query.code ? String(req.query.code) : null;
+    const name = req.query.name ? String(req.query.name) : null;
+    if (!code && !(name && name.trim().length >= 3)) {
+      return res.status(400).json({ error: 'code or name (3+ chars) is required' });
+    }
+    const parseDay = (v) => {
+      if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return null;
+      const d = new Date(`${v}T00:00:00Z`);
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+    const from = parseDay(req.query.from);
+    const to = parseDay(req.query.to);
+
+    // S30 residual (Innovation): a scripted caller could brute-force the
+    // verify gate — ~10 verifyPickupDate probes cover the default 31-day
+    // window at the matcher's ±1-day tolerance. Per-principal throttle over
+    // FAILED verify attempts (10 per 10 min → 429); verified lookups and
+    // lookups without verify params never count. Fail-open on slow Redis.
+    const verify = {
+      lastName: req.query.verifyLastName ? String(req.query.verifyLastName) : undefined,
+      pickupDate: req.query.verifyPickupDate ? String(req.query.verifyPickupDate) : undefined
+    };
+    const hasVerifyParams = Boolean(verify.lastName || verify.pickupDate);
+    const throttlePrincipal = { tenantId, principalId: String(req.user?.sub || 'unknown') };
+    const throttleApplies = hasVerifyParams && req.user?.role !== 'SUPER_ADMIN';
+    if (throttleApplies) {
+      const gate = await verifyProbeThrottle.isBlocked(throttlePrincipal);
+      if (gate.blocked) {
+        res.setHeader('retry-after', String(gate.retryAfterSeconds));
+        return res.status(429).json({
+          error: 'Too many failed verification attempts. Try again later.',
+          retryAfterSeconds: gate.retryAfterSeconds
+        });
+      }
+    }
+
+    const matches = await smartMatchReservation(
+      {
+        code,
+        name,
+        tenantId,
+        ...(from && to ? { dateWindow: { from, to } } : {})
+      },
+      { prisma }
+    );
+
+    const candidates = matches.map((m) => {
+      const verified =
+        m.matchType === 'exact' || candidateMatchesVerification(m.reservation, verify);
+      if (!verified) return { ...maskCandidate(m), verified: false };
+      const c = m.reservation.customer || {};
+      return {
+        id: m.reservation.id,
+        matchType: m.matchType,
+        confidence: m.confidence,
+        verified: true,
+        reservationNumber: m.reservation.reservationNumber,
+        customerName: `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim(),
+        pickupAt: m.reservation.pickupAt,
+        status: m.reservation.status
+      };
+    });
+    if (throttleApplies && candidates.some((c) => c.verified === false)) {
+      // A verify attempt that left >=1 candidate masked = one failed probe.
+      // recordFailure is fail-open internally (never throws, times out fast).
+      await verifyProbeThrottle.recordFailure(throttlePrincipal);
+    }
+    res.json({ candidates });
+  } catch (e) {
+    if (sendExplicitStatusError(res, e)) return;
     next(e);
   }
 });

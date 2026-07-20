@@ -163,6 +163,16 @@ test('W-D: adjacent surfaces stay denied', () => {
 
 // ── S28 mini W-D bis (Hector, 2026-07-19) — kiosk video assist ──────────────
 
+// ── S30 (Hector, 2026-07-19) — smart lookup de confirmación ─────────────────
+
+test('S30: smart-lookup is allowed with query params; nested sneaks denied', () => {
+  allowed('GET', '/api/reservations/smart-lookup');
+  allowed('GET', '/api/reservations/smart-lookup?code=ZE40809640BA');
+  allowed('GET', '/api/reservations/smart-lookup?name=Juan%20Perez&from=2026-07-20&to=2026-08-20');
+  denied('POST', '/api/reservations/smart-lookup');           // read-only surface
+  denied('GET', '/api/reservations/smart-lookup/extra');
+});
+
 test('S28: precheckin staff-complete is allowed; adjacent precheckin surfaces stay denied', () => {
   allowed('POST', '/api/reservations/abc123/precheckin/staff-complete');
   denied('POST', '/api/reservations/abc123/precheckin');          // customer-side flow
