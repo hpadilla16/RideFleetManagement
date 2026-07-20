@@ -305,6 +305,29 @@ Admin (auth normal + `requireModuleAccess('kiosk')`):
   staff). El kiosk NO persiste nada del cliente (iframe memory-only, auto-reset 90s).
   El 🔧 staff-assist local queda intacto (canal paralelo). Infra pendiente de Hector:
   hosting prod de VozIA antes del go-live.
+- **B3g — Smart lookup de confirmación (S30 handoff 2026-07-19; problema: OTA da
+  `ZE40809640BA`, el import lo tiene `TL-ZE40809640BA` u otro formato por booking-source →
+  exact-match falla y mata el check-in autónomo)**. EL MATCHER LO ENTREGA S30/VozIA:
+  `backend/src/lib/reservation-smart-match.js` (`generateCodeVariants(raw)` +
+  `smartMatchReservation({code?, name?, dateWindow?, tenantId})` → candidatos rankeados
+  `{reservation, matchType:'exact'|'variant'|'name', confidence}`, tenant-scoped, read-only).
+  **REGLA DURA: el kiosk NO inventa su propio normalizador** (una sola fuente de verdad,
+  como vehicle-status-sync). Lado kiosk: (1) `lookupReservation` usa el matcher — exact
+  (como hoy) → variantes → fallback por nombre+fecha de pickup; **runtime interino
+  EXACT-ONLY** hasta que el lib esté en el árbol (cero fork; un solo wire-in point cuando
+  llegue; mock del contrato SOLO en tests). (2) Desambiguación: varios candidatos → pedir
+  UN dato más (fecha pickup o apellido completo), NUNCA lista de reservas. (3) PRIVACIDAD:
+  match no-exact-por-código → solo datos ENMASCARADOS pre-verify ("Reserva de Juan P*** ·
+  pickup mañana · MCO"); jamás número completo/phone/email/vehículo pre-verify; el gate
+  `idVerifiedAt` NO se relaja NADA (extiende el stub enmascarado de B1). (4) Anti-enum: YA
+  existe `MAX_LOOKUP_MISSES=5` per-DEVICE (sobrevive resets, más fuerte que per-session —
+  B1); el lookup por NOMBRE alimenta el MISMO lockout (mayor riesgo de enumeración); al cap
+  → Get Help/staff. (5) Telemetría: `matchType` (exact/variant/name/fail) por lookup para
+  afinar patrones con data real. (6) Get Help ya monta VozIA con `res=` vacío (B3f) — Chloe
+  tendrá el MISMO matcher vía su service account, el guest no repite la pelea.
+  **Coordinación:** el kiosk produce sus NECESIDADES de contrato para S30 (qué shape/campos
+  consume) → informa el freeze del contrato; patrones de variantes nuevos que descubramos →
+  al doc compartido, NO forks locales; additive, read-only, tenant-scoped.
 - **B4 — Walk-up**: availability + walkup-reservation + quote (K9). Tests: no crea
   reserva sin clase disponible; precios = pricing service.
 - **B5 — Pago real (MONEY, gate Hector doble)**: (pre-código) resolver contra docs iPOS

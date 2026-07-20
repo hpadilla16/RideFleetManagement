@@ -21,6 +21,10 @@ import { KioskError } from './kiosk-device.service.js';
 import { checkoutSessionService, CheckoutSessionError } from '../checkout-session/checkout-session.service.js';
 import { ensureNoVehicleConflict } from '../reservations/reservations.service.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
+import { kioskSmartMatch, isKioskSmartMatchEnabled } from './kiosk-smart-match.js';
+import { isoDayInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
+import { parseLocationConfig } from '../../lib/location-config.js';
+import { scopedSettingKey } from '../../lib/module-access.js';
 
 export const MAX_SESSION_EVENTS = 500;
 export const MAX_LOOKUP_MISSES = 5;
@@ -263,13 +267,128 @@ export async function registerDeviceLookupMiss(device) {
 }
 
 /**
- * Find the customer's reservation. Match is fully server-side and scoped to
- * this device's tenant + location + the pickup window; the response is the
- * masked stub ONLY. Miss lockout is per DEVICE (KioskDevice.lookupMisses /
- * lookupLockedUntil) and checked BEFORE any reservation query; a hit — or an
- * admin pairing-code reissue — resets it.
+ * The kiosk's Today/Tomorrow buttons compute pickupDate from the device's
+ * LOCAL (location) wall clock, so the day comparison MUST happen in the
+ * tenant/location timezone — not UTC. In PR (AST/UTC-4) a 10pm-local pickup
+ * is the NEXT UTC day, and a UTC compare would filter the guest's real
+ * reservation out of a "Today" tap (the exact failure B3g exists to kill).
  */
-async function lookupReservation(sessionId, device, { confirmationNumber, lastName, phone } = {}) {
+export function samePickupDay(pickupAt, pickupDate, tz) {
+  if (!pickupAt || !pickupDate) return false;
+  return isoDayInTz(pickupAt, tz || DEFAULT_TENANT_TIMEZONE) === String(pickupDate).slice(0, 10);
+}
+
+/**
+ * Resolve the wall-clock timezone for pickup-day matching: the device's
+ * location config timezone if set, else the tenant's configured timezone
+ * (reservationOptions), else the PR default. Read-only, one lookup each, and
+ * only called when a pickupDate disambiguator is actually in play.
+ */
+async function resolveLookupTimezone(device) {
+  try {
+    const [location, optRow] = await Promise.all([
+      prisma.location.findFirst({
+        where: { id: device.locationId, tenantId: device.tenantId },
+        select: { locationConfig: true },
+      }),
+      prisma.appSetting.findUnique({
+        where: { key: scopedSettingKey('reservationOptions', { tenantId: device.tenantId }) },
+      }),
+    ]);
+    const cfg = parseLocationConfig(location?.locationConfig) || {};
+    const locTz = String(cfg.timezone || cfg.timeZone || '').trim();
+    if (locTz) return locTz;
+    if (optRow?.value) {
+      try {
+        const tenantTz = String(JSON.parse(optRow.value)?.tenantTimeZone || '').trim();
+        if (tenantTz) return tenantTz;
+      } catch { /* fall through */ }
+    }
+  } catch { /* fall through */ }
+  return DEFAULT_TENANT_TIMEZONE;
+}
+
+/**
+ * Re-fetch matcher-returned candidate ids through the kiosk's OWN scoping
+ * (tenant + location + pickup window + status). The shared matcher is
+ * read-only and tenant-scoped, but it does NOT know the kiosk's location /
+ * window; treating its output as untrusted refs and re-fetching keeps the
+ * kiosk's privacy + scoping guarantees no matter what the matcher returns.
+ */
+async function rescopeCandidateIds(device, now, ids) {
+  const clean = [...new Set((ids || []).map((id) => String(id || '')).filter(Boolean))];
+  if (!clean.length) return [];
+  const rows = await prisma.reservation.findMany({
+    where: { ...lookupWhere(device, now), id: { in: clean } },
+    select: LOOKUP_SELECT,
+    orderBy: { pickupAt: 'asc' },
+    take: 25,
+  });
+  // Preserve the matcher's ranking order.
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return clean.map((id) => byId.get(id)).filter(Boolean);
+}
+
+/**
+ * Resolve a scoped candidate list + the resolving matchType.
+ * Confirmation path: exact (as today) → variant (shared matcher, DARK until
+ * the lib lands). Name path: name query + phone OR pickup-date disambiguator
+ * (both DB-only, work in the interim). Returns { candidates, matchType }.
+ */
+async function resolveLookupCandidates(device, now, { confirmation, cleanLastName, phone, pickupDate }) {
+  if (confirmation) {
+    // Exact by confirmation number — the fast path, no normalizer needed.
+    const exact = await prisma.reservation.findFirst({
+      where: { ...lookupWhere(device, now), reservationNumber: { equals: confirmation, mode: 'insensitive' } },
+      select: LOOKUP_SELECT,
+    });
+    if (exact) return { candidates: [exact], matchType: 'exact' };
+
+    // Variant match via the shared matcher (OTA/import code-format drift).
+    // DARK until S30's lib is wired — interim = exact-only (no fork).
+    if (isKioskSmartMatchEnabled()) {
+      const ranked = await kioskSmartMatch({ code: confirmation, tenantId: device.tenantId });
+      const candidates = await rescopeCandidateIds(device, now, (ranked || []).map((c) => c?.reservation?.id));
+      const topType = (ranked || [])[0]?.matchType || 'variant';
+      return { candidates, matchType: candidates.length ? topType : 'fail' };
+    }
+    return { candidates: [], matchType: 'fail' };
+  }
+
+  // Name path. lastName is required here; phone / pickupDate narrow it.
+  const named = await prisma.reservation.findMany({
+    where: {
+      ...lookupWhere(device, now),
+      customer: { is: { lastName: { equals: cleanLastName, mode: 'insensitive' } } },
+    },
+    select: LOOKUP_SELECT,
+    orderBy: { pickupAt: 'asc' },
+    take: 25,
+  });
+  let candidates = named;
+  if (phone) {
+    candidates = named.filter((r) => phonesMatch(phone, r.customer?.phone));
+  } else if (pickupDate) {
+    // Compare the pickup day in the LOCATION/tenant timezone (the frontend
+    // sends pickupDate as a local YYYY-MM-DD), never UTC.
+    const tz = await resolveLookupTimezone(device);
+    candidates = named.filter((r) => samePickupDay(r.pickupAt, pickupDate, tz));
+  }
+  return { candidates, matchType: candidates.length ? 'name' : 'fail' };
+}
+
+/**
+ * SMART lookup (B3g). Match is fully server-side and scoped to this device's
+ * tenant + location + pickup window; the response is the masked stub ONLY,
+ * for EVERY match type (exact and non-exact are equally masked — never a full
+ * confirmation number, phone, email, or vehicle pre-verify). Miss lockout is
+ * per DEVICE (survives session resets); name/pickup-date lookups feed the
+ * SAME counter (name-based is the larger enumeration vector). Multiple
+ * candidates → NEEDS_MORE_INFO (one more datum) — NEVER a list of
+ * reservations. The idVerifiedAt gate is untouched: attach/verify still
+ * re-validate server-side downstream.
+ */
+async function lookupReservation(sessionId, device, { confirmationNumber, lastName, phone, pickupDate } = {}) {
   const session = await getSessionForDevice(sessionId, device);
   requireInProgress(session);
 
@@ -284,34 +403,38 @@ async function lookupReservation(sessionId, device, { confirmationNumber, lastNa
 
   const confirmation = String(confirmationNumber || '').trim();
   const cleanLastName = String(lastName || '').trim();
-  let match = null;
-
-  if (confirmation) {
-    match = await prisma.reservation.findFirst({
-      where: { ...lookupWhere(device, now), reservationNumber: { equals: confirmation, mode: 'insensitive' } },
-      select: LOOKUP_SELECT,
-    });
-  } else if (cleanLastName && phone) {
-    const candidates = await prisma.reservation.findMany({
-      where: {
-        ...lookupWhere(device, now),
-        customer: { is: { lastName: { equals: cleanLastName, mode: 'insensitive' } } },
-      },
-      select: LOOKUP_SELECT,
-      orderBy: { pickupAt: 'asc' },
-      take: 25,
-    });
-    match = candidates.find((r) => phonesMatch(phone, r.customer?.phone)) || null;
-  } else {
-    throw new KioskError('confirmationNumber or lastName+phone is required', 400);
+  const cleanPickupDate = String(pickupDate || '').trim() || null;
+  if (!confirmation && !cleanLastName) {
+    throw new KioskError('confirmationNumber or lastName is required', 400);
   }
 
-  if (!match) {
+  const { candidates, matchType } = await resolveLookupCandidates(device, now, {
+    confirmation, cleanLastName, phone, pickupDate: cleanPickupDate,
+  });
+
+  // matchType telemetry (no PII — matchType + count only).
+  await recordSessionTelemetry(session, {
+    step: 'LOOKUP', event: 'LOOKUP_RESULT', data: { matchType, candidateCount: candidates.length },
+  });
+
+  if (candidates.length === 0) {
     await recordLookupMissEvent(session); // telemetry
-    const attemptsRemaining = await registerDeviceLookupMiss(device); // enforcement
+    const attemptsRemaining = await registerDeviceLookupMiss(device); // enforcement (per DEVICE)
     throw new KioskError('No matching reservation found', 404, 'RESERVATION_NOT_FOUND', { attemptsRemaining });
   }
 
+  if (candidates.length > 1) {
+    // Ambiguous — ask for ONE more datum, never leak a list. A code/variant
+    // match with no name → ask the last name; a name match → ask the pickup
+    // date (or the last name again if we already had the date). maskedHint is
+    // intentionally omitted: any per-candidate hint would leak which of the
+    // several this is.
+    const needs = confirmation ? 'lastName' : (!cleanPickupDate ? 'pickupDate' : 'lastName');
+    // Not a miss (real data matched) — don't feed the lockout, don't rearm.
+    return { status: 'NEEDS_MORE_INFO', needs };
+  }
+
+  // Single candidate → the masked stub, identical shape for every matchType.
   // Hit → rearm the device counter (and clear any expired lock).
   if (deviceRow && (deviceRow.lookupMisses > 0 || deviceRow.lookupLockedUntil)) {
     await prisma.kioskDevice.update({
@@ -320,7 +443,7 @@ async function lookupReservation(sessionId, device, { confirmationNumber, lastNa
     }).catch(() => {});
   }
 
-  return reservationStub(match);
+  return reservationStub(candidates[0]);
 }
 
 /**

@@ -31,6 +31,8 @@ import {
   MAX_SESSION_EVENTS,
   MAX_LOOKUP_MISSES,
 } from './kiosk-session.service.js';
+import { setKioskSmartMatcher } from './kiosk-smart-match.js';
+import { samePickupDay } from './kiosk-session.service.js';
 import { checkoutSessionService } from '../checkout-session/checkout-session.service.js';
 
 // ---------------------------------------------------------------------------
@@ -272,6 +274,7 @@ async function rejects(promise, { status, code } = {}) {
 beforeEach(() => {
   installStubs();
   resetPairMissTracking();
+  setKioskSmartMatcher(null); // default = interim runtime (no S30 lib)
 });
 
 // ---------------------------------------------------------------------------
@@ -952,4 +955,163 @@ test('vozia-config PUT is wired behind requireRole(ADMIN, SUPER_ADMIN); GET stay
   nextCalled = false;
   roleGate({ user: { role: 'SUPER_ADMIN' } }, res, () => { nextCalled = true; });
   assert.equal(nextCalled, true, 'SUPER_ADMIN passes');
+});
+
+// ---------------------------------------------------------------------------
+// B3g: smart confirmation lookup (matcher = S30 lib, mocked here)
+// ---------------------------------------------------------------------------
+
+// A contract-shaped MOCK of smartMatchReservation (NOT shipped logic — this
+// is the S30/VozIA lib's future output, faked so the kiosk's variant/rescope
+// branches are exercisable before the real lib lands). It returns ranked
+// [{ reservation:{id}, matchType, confidence }] for a set of code variants.
+function mockMatcher(variantMap) {
+  return async ({ code }) => {
+    const ids = variantMap[String(code || '').toUpperCase()] || [];
+    return ids.map((id, i) => ({ reservation: { id }, matchType: 'variant', confidence: 90 - i }));
+  };
+}
+
+test('B3g interim (no lib): exact code + name+phone still work; variant is dark (no fork)', async () => {
+  const device = seedDevice();
+  seedSession();
+  seedReservation({ reservationNumber: 'TL-ZE40809640BA' });
+
+  // exact still works
+  const exact = await kioskSessionService.lookupReservation('ks1', deviceCtx(device), { confirmationNumber: 'TL-ZE40809640BA' });
+  assert.equal(exact.reservationId, 'res1');
+
+  // name+phone still works
+  const byName = await kioskSessionService.lookupReservation('ks1', deviceCtx(device), { lastName: 'gonzalez', phone: '407-555-1234' });
+  assert.equal(byName.reservationId, 'res1');
+
+  // the OTA form (no TL- prefix) is a MISS in interim — no variant generation
+  await rejects(
+    kioskSessionService.lookupReservation('ks1', deviceCtx(device), { confirmationNumber: 'ZE40809640BA' }),
+    { status: 404, code: 'RESERVATION_NOT_FOUND' },
+  );
+});
+
+test('B3g variant: a wired matcher resolves the OTA form → single masked stub, matchType telemetry', async (t) => {
+  const device = seedDevice();
+  const session = seedSession();
+  seedReservation({ reservationNumber: 'TL-ZE40809640BA' });
+  // OTA gives "ZE40809640BA"; the lib maps it to the imported reservation id.
+  setKioskSmartMatcher(mockMatcher({ ZE40809640BA: ['res1'] }));
+  t.after(() => setKioskSmartMatcher(null));
+
+  const stub = await kioskSessionService.lookupReservation('ks1', deviceCtx(device), { confirmationNumber: 'ZE40809640BA' });
+
+  // masked stub ONLY — identical to today's exact shape
+  assert.deepEqual(Object.keys(stub).sort(), ['channel', 'maskedName', 'pickupWindow', 'reservationId', 'vehicleClassName']);
+  assert.equal(stub.reservationId, 'res1');
+  assert.equal(stub.maskedName, 'Maria G.');
+  // NO full confirmation number / phone / email / vehicle pre-verify
+  const s = JSON.stringify(stub);
+  assert.ok(!/ZE40809640BA|Gonzalez|555|KIA|plate/i.test(s), 'non-exact match stays fully masked');
+
+  // matchType telemetry recorded (no PII)
+  const ev = session.eventsJson.find((e) => e.event === 'LOOKUP_RESULT');
+  assert.deepEqual(ev.data, { matchType: 'variant', candidateCount: 1 });
+});
+
+test('B3g variant re-scoping: matcher candidates outside the kiosk window/location are dropped', async (t) => {
+  const device = seedDevice();
+  seedSession();
+  seedReservation({ id: 'resFar', reservationNumber: 'X1', pickupAt: new Date(Date.now() + 100 * HOUR) });
+  seedReservation({ id: 'resOther', reservationNumber: 'X2', pickupLocationId: 'loc2' });
+  // the matcher (which doesn't know the kiosk's window/location) returns both;
+  // the kiosk re-fetches through its own scoping and both fall out → miss.
+  setKioskSmartMatcher(mockMatcher({ ANYCODE: ['resFar', 'resOther'] }));
+  t.after(() => setKioskSmartMatcher(null));
+
+  await rejects(
+    kioskSessionService.lookupReservation('ks1', deviceCtx(device), { confirmationNumber: 'ANYCODE' }),
+    { status: 404, code: 'RESERVATION_NOT_FOUND' },
+  );
+});
+
+test('B3g disambiguation: multiple candidates → NEEDS_MORE_INFO, never a list of reservations', async (t) => {
+  const device = seedDevice();
+  const session = seedSession();
+  seedReservation({ id: 'resA', reservationNumber: 'CODEA', customer: { firstName: 'Juan', lastName: 'Perez', phone: '111' } });
+  seedReservation({ id: 'resB', reservationNumber: 'CODEB', customer: { firstName: 'Jose', lastName: 'Perez', phone: '222' } });
+
+  // (a) code/variant match with two candidates and no name → ask lastName
+  setKioskSmartMatcher(mockMatcher({ DUP: ['resA', 'resB'] }));
+  t.after(() => setKioskSmartMatcher(null));
+  const byCode = await kioskSessionService.lookupReservation('ks1', deviceCtx(device), { confirmationNumber: 'DUP' });
+  assert.deepEqual(byCode, { status: 'NEEDS_MORE_INFO', needs: 'lastName' });
+
+  // (b) name match with two Perez and no date → ask pickupDate; no leak
+  const byName = await kioskSessionService.lookupReservation('ks1', deviceCtx(device), { lastName: 'Perez' });
+  assert.deepEqual(byName, { status: 'NEEDS_MORE_INFO', needs: 'pickupDate' });
+  const serialized = JSON.stringify(byName);
+  assert.ok(!/resA|resB|CODEA|CODEB|Juan|Jose|111|222/.test(serialized), 'no reservation list leaked in disambiguation');
+
+  // ambiguity is NOT a miss — the device lockout counter is untouched
+  assert.equal(device.lookupMisses, 0);
+});
+
+// The frontend's Today/Tomorrow buttons send pickupDate as the LOCATION-local
+// (PR) wall-clock day — mirror that here (seeded loc1 has no tz config → PR).
+const prDayKey = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Puerto_Rico' }).format(d);
+
+test('B3g name+pickupDate: disambiguates to a single masked stub (interim, no lib needed)', async () => {
+  const device = seedDevice();
+  seedSession();
+  const day1 = new Date(Date.now() + 3 * HOUR);
+  const day2 = new Date(Date.now() + 27 * HOUR);
+  seedReservation({ id: 'resA', reservationNumber: 'CODEA', pickupAt: day1, customer: { firstName: 'Juan', lastName: 'Perez', phone: '111' } });
+  seedReservation({ id: 'resB', reservationNumber: 'CODEB', pickupAt: day2, customer: { firstName: 'Jose', lastName: 'Perez', phone: '222' } });
+
+  const stub = await kioskSessionService.lookupReservation('ks1', deviceCtx(device), {
+    lastName: 'Perez',
+    pickupDate: prDayKey(day2), // location-local day, as the frontend sends
+  });
+  assert.equal(stub.reservationId, 'resB');
+  assert.equal(stub.maskedName, 'Jose P.');
+});
+
+test('B3g samePickupDay compares in the LOCATION timezone, not UTC (PR AST edge)', () => {
+  const tz = 'America/Puerto_Rico';
+  // 2026-07-20 02:00 UTC = 2026-07-19 22:00 AST → the guest tapping "Today"
+  // (2026-07-19 local) must still match, even though the UTC date is the 20th.
+  const pickupAt = new Date('2026-07-20T02:00:00Z');
+  assert.equal(samePickupDay(pickupAt, '2026-07-19', tz), true, 'matches the PR local day');
+  assert.equal(samePickupDay(pickupAt, '2026-07-20', tz), false, 'does NOT match the UTC day');
+  // a normal midday pickup still matches its own local date
+  const midday = new Date('2026-07-19T16:00:00Z'); // 12:00 AST
+  assert.equal(samePickupDay(midday, '2026-07-19', tz), true);
+});
+
+test('B3g anti-enum: NAME lookups feed the SAME per-device lockout (5 → 429)', async () => {
+  const device = seedDevice();
+  seedSession();
+
+  for (let i = 0; i < MAX_LOOKUP_MISSES; i += 1) {
+    const err = await rejects(
+      kioskSessionService.lookupReservation('ks1', deviceCtx(device), { lastName: `Ghost${i}`, phone: '000' }),
+      { status: 404, code: 'RESERVATION_NOT_FOUND' },
+    );
+    assert.equal(err.details.attemptsRemaining, MAX_LOOKUP_MISSES - i - 1);
+  }
+  assert.ok(device.lookupLockedUntil instanceof Date && device.lookupLockedUntil > new Date(), 'name misses lock the device');
+
+  // and the lock blocks the next lookup regardless of type
+  await rejects(
+    kioskSessionService.lookupReservation('ks1', deviceCtx(device), { lastName: 'Real', pickupDate: '2030-01-01' }),
+    { status: 429, code: 'LOOKUP_LOCKED' },
+  );
+});
+
+test('B3g: fail matchType telemetry on a miss', async () => {
+  const device = seedDevice();
+  const session = seedSession();
+  await rejects(
+    kioskSessionService.lookupReservation('ks1', deviceCtx(device), { confirmationNumber: 'NOPE' }),
+    { status: 404 },
+  );
+  const ev = session.eventsJson.find((e) => e.event === 'LOOKUP_RESULT');
+  assert.deepEqual(ev.data, { matchType: 'fail', candidateCount: 0 });
 });

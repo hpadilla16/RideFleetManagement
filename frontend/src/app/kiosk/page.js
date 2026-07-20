@@ -96,6 +96,11 @@ export default function KioskPage() {
   const [doneData, setDoneData] = useState(null);
   const [doneCountdown, setDoneCountdown] = useState(DONE_RESET_S);
   const [lookupLocked, setLookupLocked] = useState(false);
+  // B3g smart lookup: multiple candidates → ask for ONE more datum (never a
+  // list). null | 'pickupDate' | 'lastName' | 'HELP' (rounds exhausted).
+  const [lookupNeeds, setLookupNeeds] = useState(null);
+  const lookupBaseRef = useRef(null); // the payload that triggered NEEDS_MORE_INFO
+  const lookupRoundsRef = useRef(0);
   const [escalatedInfo, setEscalatedInfo] = useState(null);
   const [helpOpen, setHelpOpen] = useState(false);
   // B3c Staff Assist: which screen to return to when the assist flow exits
@@ -166,6 +171,9 @@ export default function KioskPage() {
     setDoneData(null);
     setDoneCountdown(DONE_RESET_S);
     setLookupLocked(false);
+    setLookupNeeds(null);
+    lookupBaseRef.current = null;
+    lookupRoundsRef.current = 0;
     setEscalatedInfo(null);
     setHelpOpen(false);
     setStaffAssistFrom('ESCALATED');
@@ -416,6 +424,18 @@ export default function KioskPage() {
     setScreen('ESCALATED');
   }, [routeFatal, ui]);
 
+  // Get Help from any stuck state: VozIA embed when the device carries config
+  // (B3f — Chloe has the SAME matcher via her service account, so the guest
+  // doesn't repeat the lookup fight), else the escalate-to-staff flow.
+  const openHelp = useCallback((reason) => {
+    if (vozia?.host) {
+      setVoziaOpen(true);
+      if (sessionRef.current?.id) sendEvents(sessionRef.current.id, { step: null, event: 'VOZIA_OPENED' });
+    } else {
+      escalate(reason);
+    }
+  }, [vozia?.host, escalate]);
+
   // ── Flow actions ───────────────────────────────────────────────────────────
 
   const startPickup = async () => {
@@ -439,8 +459,22 @@ export default function KioskPage() {
     try {
       const out = await lookupReservation(session.id, payload);
       if (gen !== genRef.current) return;
-      // B3f: keep the TYPED confirmation number for the VozIA `res` param —
-      // the masked stub never carries it back (lastName+phone path → none).
+      // B3g: multiple candidates → the server asks for ONE more datum (never
+      // a list of reservations). Merge it into the base payload and re-submit.
+      if (out?.status === 'NEEDS_MORE_INFO') {
+        lookupBaseRef.current = payload;
+        lookupRoundsRef.current += 1;
+        // Cap the rounds sanely (the per-device lockout is the real backstop
+        // — don't loop the guest forever): after 2 asks, offer Get Help/staff.
+        setLookupNeeds(lookupRoundsRef.current > 2
+          ? 'HELP'
+          : (out.needs === 'lastName' ? 'lastName' : 'pickupDate'));
+        return;
+      }
+      // Single match (exact or smart) → the masked stub. Keep the TYPED
+      // confirmation number for the VozIA `res` param (B3f) — the masked stub
+      // never carries it back (name/date path → none).
+      setLookupNeeds(null);
       confirmationNumberRef.current = String(payload?.confirmationNumber || '');
       setStub(out);
       setScreen('SUMMARY');
@@ -448,8 +482,12 @@ export default function KioskPage() {
       if (gen !== genRef.current) return;
       if (routeFatal(e)) return;
       if (e.status === 429 || e.code === 'LOOKUP_LOCKED') {
+        setLookupNeeds(null);
         setLookupLocked(true);
       } else if (e.code === 'RESERVATION_NOT_FOUND') {
+        // Drop back to the full lookup screen so the guest can re-enter (a
+        // disambiguation datum landing on 404 means the base was wrong too).
+        setLookupNeeds(null);
         const left = e.data?.attemptsRemaining;
         setErr(Number.isFinite(Number(left))
           ? t('kiosk.lookupNotFoundAttempts', { count: Number(left) })
@@ -459,6 +497,9 @@ export default function KioskPage() {
       }
     } finally { setBusy(false); }
   };
+
+  // Re-submit with the extra disambiguation datum merged into the base.
+  const submitLookupExtra = (extra) => doLookup({ ...(lookupBaseRef.current || {}), ...extra });
 
   const confirmSummary = async () => {
     const gen = genRef.current;
@@ -865,10 +906,30 @@ export default function KioskPage() {
             <div className="kio-h2">{t('kiosk.lookupLockedTitle')}</div>
             <p className="kio-sub">{t('kiosk.lookupLockedBody')}</p>
             <div className="kio-row">
-              <button type="button" className="kio-btn sm" onClick={() => escalate('LOOKUP_FAILED')}>🎧 {t('kiosk.getHelp')}</button>
+              <button type="button" className="kio-btn sm" onClick={() => openHelp('LOOKUP_FAILED')}>🎧 {t('kiosk.getHelp')}</button>
               <button type="button" className="kio-btn ghost sm" onClick={resetAll}>{t('kiosk.startOver')}</button>
             </div>
           </div>
+        ) : lookupNeeds === 'HELP' ? (
+          <div className="kio-main center">
+            <div className="kio-h2">{t('kiosk.lookupTooManyTitle')}</div>
+            <p className="kio-sub">{t('kiosk.lookupTooManyBody')}</p>
+            <div className="kio-row">
+              <button type="button" className="kio-btn sm" onClick={() => openHelp('LOOKUP_FAILED')}>🎧 {t('kiosk.getHelp')}</button>
+              <button type="button" className="kio-btn ghost sm" onClick={() => { setLookupNeeds(null); lookupRoundsRef.current = 0; setErr(''); }}>{t('kiosk.startOver')}</button>
+            </div>
+          </div>
+        ) : lookupNeeds ? (
+          <LookupDisambiguation
+            key={`lookupdisambig-${lookupNeeds}`}
+            t={t}
+            needs={lookupNeeds}
+            repeat={lookupRoundsRef.current > 1}
+            busy={busy}
+            err={err}
+            onSubmit={submitLookupExtra}
+            onBack={() => { setLookupNeeds(null); setErr(''); }}
+          />
         ) : (
           <LookupScreen key={`lookupscreen-${stepEpoch}`} t={t} busy={busy} err={err} onSubmit={doLookup} onBack={resetAll} />
         )
@@ -1224,11 +1285,65 @@ function WelcomeScreen({ t, busy, walkupEnabled, onPickup, onWalkup, err }) {
 }
 
 // Alphanumeric confirmation keypad (mockup K2: digits + ABC toggle + ⌫).
+// Local-time YYYY-MM-DD (the kiosk sits in the store's timezone).
+function localISODate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Friendly pickup-date chooser (B3g): big Today / Tomorrow buttons + a
+ * "pick a date" reveal. Guests often lack phone/email on file, so the date
+ * is the PRIMARY disambiguator.
+ */
+function PickupDateChooser({ t, value, onChange }) {
+  const [custom, setCustom] = useState(false);
+  const today = localISODate(new Date());
+  const tomorrow = localISODate(new Date(Date.now() + 86400000));
+  const btn = (iso, label) => (
+    <button
+      type="button"
+      className={value === iso ? 'kio-btn sm' : 'kio-btn ghost sm'}
+      onClick={() => { setCustom(false); onChange(iso); }}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div style={{ display: 'grid', gap: 10, justifyItems: 'center' }}>
+      <div className="kio-row">
+        {btn(today, t('kiosk.lookupDateToday'))}
+        {btn(tomorrow, t('kiosk.lookupDateTomorrow'))}
+        <button
+          type="button"
+          className={custom ? 'kio-btn sm' : 'kio-btn ghost sm'}
+          onClick={() => setCustom(true)}
+        >
+          {t('kiosk.lookupDatePick')}
+        </button>
+      </div>
+      {custom ? (
+        <input
+          className="kio-input"
+          type="date"
+          value={value && value !== today && value !== tomorrow ? value : ''}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ maxWidth: 240, textAlign: 'center' }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function LookupScreen({ t, busy, err, onSubmit, onBack }) {
   const [mode, setMode] = useState('confirmation'); // confirmation | name
   const [alpha, setAlpha] = useState(false);
   const [value, setValue] = useState('');
   const [lastName, setLastName] = useState('');
+  const [byDate, setByDate] = useState(true); // date (primary) vs phone (secondary)
+  const [pickupDate, setPickupDate] = useState('');
   const [phone, setPhone] = useState('');
   const [qrNote, setQrNote] = useState(false);
 
@@ -1288,8 +1403,9 @@ function LookupScreen({ t, busy, err, onSubmit, onBack }) {
         </>
       ) : (
         <>
+          <p className="kio-sub" style={{ marginTop: -8, fontSize: 15 }}>{t('kiosk.lookupByNameSub')}</p>
           <div className="kio-panel" style={{ maxWidth: 520 }}>
-            <div style={{ display: 'grid', gap: 12 }}>
+            <div style={{ display: 'grid', gap: 14 }}>
               <input
                 className="kio-input"
                 placeholder={t('kiosk.lookupLastName')}
@@ -1297,14 +1413,29 @@ function LookupScreen({ t, busy, err, onSubmit, onBack }) {
                 autoComplete="off"
                 onChange={(e) => setLastName(e.target.value)}
               />
-              <input
-                className="kio-input"
-                placeholder={t('kiosk.lookupPhone')}
-                value={phone}
-                inputMode="tel"
-                autoComplete="off"
-                onChange={(e) => setPhone(e.target.value)}
-              />
+              {byDate ? (
+                <div style={{ display: 'grid', gap: 8, justifyItems: 'center' }}>
+                  <div className="kio-l" style={{ fontSize: 14 }}>{t('kiosk.lookupWhichDay')}</div>
+                  <PickupDateChooser t={t} value={pickupDate} onChange={setPickupDate} />
+                  <button type="button" className="kio-btn back" style={{ marginTop: 2 }} onClick={() => { setByDate(false); setPickupDate(''); }}>
+                    {t('kiosk.lookupUsePhone')}
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: 8, justifyItems: 'center' }}>
+                  <input
+                    className="kio-input"
+                    placeholder={t('kiosk.lookupPhone')}
+                    value={phone}
+                    inputMode="tel"
+                    autoComplete="off"
+                    onChange={(e) => setPhone(e.target.value)}
+                  />
+                  <button type="button" className="kio-btn back" onClick={() => { setByDate(true); setPhone(''); }}>
+                    {t('kiosk.lookupUseDate')}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
           {err ? <div className="kio-error">{err}</div> : null}
@@ -1312,8 +1443,10 @@ function LookupScreen({ t, busy, err, onSubmit, onBack }) {
             <button
               type="button"
               className="kio-btn"
-              disabled={!lastName.trim() || !phone.trim() || busy}
-              onClick={() => onSubmit({ lastName: lastName.trim(), phone: phone.trim() })}
+              disabled={busy || !lastName.trim() || (byDate ? !pickupDate : !phone.trim())}
+              onClick={() => onSubmit(byDate
+                ? { lastName: lastName.trim(), pickupDate }
+                : { lastName: lastName.trim(), phone: phone.trim() })}
             >
               {t('kiosk.lookupFind')} ›
             </button>
@@ -1325,6 +1458,53 @@ function LookupScreen({ t, busy, err, onSubmit, onBack }) {
       )}
 
       <div style={{ marginTop: 18 }}>
+        <button type="button" className="kio-btn back" onClick={onBack}>‹ {t('kiosk.back')}</button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * B3g disambiguation (K2b): the server found MORE THAN ONE candidate and asks
+ * for ONE more datum — never a list of reservations. Calm, single-question.
+ */
+function LookupDisambiguation({ t, needs, repeat, busy, err, onSubmit, onBack }) {
+  const [pickupDate, setPickupDate] = useState('');
+  const [lastName, setLastName] = useState('');
+  const isDate = needs === 'pickupDate';
+  const ready = isDate ? !!pickupDate : !!lastName.trim();
+  // Round 2+: a distinct reassuring title so the guest knows their first
+  // answer registered (instead of re-showing "We found more than one").
+  const title = repeat
+    ? t('kiosk.lookupAlmostThere')
+    : (isDate ? t('kiosk.lookupNeedDateTitle') : t('kiosk.lookupNeedNameTitle'));
+  return (
+    <div className="kio-main center">
+      <div className="kio-h2">{title}</div>
+      <p className="kio-sub">{isDate ? t('kiosk.lookupNeedDateBody') : t('kiosk.lookupNeedNameBody')}</p>
+      <div className="kio-panel" style={{ maxWidth: 460, textAlign: 'center' }}>
+        {isDate ? (
+          <PickupDateChooser t={t} value={pickupDate} onChange={setPickupDate} />
+        ) : (
+          <input
+            className="kio-input"
+            placeholder={t('kiosk.lookupLastName')}
+            value={lastName}
+            autoComplete="off"
+            onChange={(e) => setLastName(e.target.value)}
+          />
+        )}
+      </div>
+      {err ? <div className="kio-error">{err}</div> : null}
+      <div className="kio-row" style={{ marginTop: 16 }}>
+        <button
+          type="button"
+          className="kio-btn"
+          disabled={busy || !ready}
+          onClick={() => onSubmit(isDate ? { pickupDate } : { lastName: lastName.trim() })}
+        >
+          {t('kiosk.lookupFind')} ›
+        </button>
         <button type="button" className="kio-btn back" onClick={onBack}>‹ {t('kiosk.back')}</button>
       </div>
     </div>

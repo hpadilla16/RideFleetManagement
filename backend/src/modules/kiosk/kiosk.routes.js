@@ -81,7 +81,11 @@ kioskRouter.post('/sessions/:id/events', deviceGuards, ok(
   (req) => kioskSessionService.appendEvents(req.params.id, req.kioskDevice, req.body?.events ?? req.body),
 ));
 
-// POST /api/kiosk/sessions/:id/lookup — { confirmationNumber } | { lastName, phone }
+// POST /api/kiosk/sessions/:id/lookup — B3g smart lookup. Body:
+//   { confirmationNumber }              exact → variant (dark until S30 lib)
+//   { lastName, phone }                 name + phone disambiguator
+//   { lastName, pickupDate: 'YYYY-MM-DD' }  name + pickup-date disambiguator
+// Single match → masked stub; multiple → { status:'NEEDS_MORE_INFO', needs }.
 kioskRouter.post('/sessions/:id/lookup', deviceGuards, ok(
   (req) => kioskSessionService.lookupReservation(req.params.id, req.kioskDevice, req.body || {}),
 ));
