@@ -238,9 +238,28 @@ export async function runProfile(profileId, opts = {}) {
     data: profileUpdate
   });
 
+  // Auto-apply (Engine A → live RateDailyPrice) — best-effort, DARK by default.
+  // Fires only when BOTH the master kill switch (MARKET_AUTOAPPLY_ENABLED) AND
+  // the profile's autoApply flag are on; every write goes through the money
+  // guardrails (floor/ceiling/maxDeltaPct). Wrapped so a price-write failure can
+  // never fail the scrape run itself. See market-scrape-correction.service.js.
+  let autoApply = null;
+  if ((status === 'SUCCESS' || status === 'PARTIAL') && profile.autoApply) {
+    try {
+      const { runAutoApplyForProfile } = await import('./market-scrape-correction.service.js');
+      autoApply = await runAutoApplyForProfile(profile.id, {
+        scope: scope.tenantId ? { tenantId: scope.tenantId } : { tenantId: profile.tenantId },
+        runId: run.id,
+      });
+    } catch (e) {
+      autoApply = { skipped: true, reason: `apply_error: ${e.message}` };
+    }
+  }
+
   return {
     runId: run.id,
     status,
+    autoApply,
     durationSec,
     requestsOk,
     requestsErr,

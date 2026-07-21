@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
 import { loadCompetitorRows } from '../market-scraper/rate-offer-source.js';
+import { getEngineAManagedRateIds } from '../market-scraper/market-scrape-correction.service.js';
 
 /**
  * Pricing Suggestion Engine
@@ -55,7 +56,15 @@ export async function runPricingEngine({ rateIds = null, tenantId = null } = {})
     },
   });
 
-  const out = { rulesEvaluated: 0, suggestionsPending: 0, suggestionsAutoApplied: 0, suggestionsSkipped: 0, errors: [] };
+  const out = { rulesEvaluated: 0, suggestionsPending: 0, suggestionsAutoApplied: 0, suggestionsSkipped: 0, suggestionsRetired: 0, errors: [] };
+
+  // One engine per rate. When Market Intelligence auto-apply (Engine A) OWNS a
+  // rate and is actually able to write it (master switch on + autoApply profile +
+  // fully-configured guardrails), Engine B (PricingRule) must NOT also write that
+  // rate — Engine A's per-date RateDailyPrice override would otherwise mask B's
+  // Rate.daily base. When the master switch is off (DARK), this set is empty and
+  // Engine B behaves exactly as before. See getEngineAManagedRateIds().
+  const engineAManaged = await getEngineAManagedRateIds({ tenantId });
 
   // First, expire stale PENDING suggestions older than TTL.
   await prisma.pricingSuggestion.updateMany({
@@ -65,6 +74,11 @@ export async function runPricingEngine({ rateIds = null, tenantId = null } = {})
 
   for (const rule of rules) {
     out.rulesEvaluated += 1;
+    if (engineAManaged.has(rule.rateId)) {
+      // Retired in favor of Engine A for this rate.
+      out.suggestionsRetired += 1;
+      continue;
+    }
     try {
       const result = await evaluateRule(rule);
       if (result.skipped) {

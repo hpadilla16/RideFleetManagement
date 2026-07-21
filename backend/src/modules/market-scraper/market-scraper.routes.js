@@ -128,11 +128,13 @@ marketScraperRouter.get('/runs/:runId/export.xlsx', async (req, res, next) => {
 
 marketScraperRouter.post('/runs/:runId/apply', async (req, res, next) => {
   try {
-    // force=true bypasses the profile.autoApply gate — used by the manual
-    // "Apply now" button on the comparison UI. The cron-driven path never
-    // passes force; it relies on profile.autoApply being true.
+    // force=true bypasses the per-profile autoApply *enable* — used by the manual
+    // "Apply now" button. It does NOT bypass the money guardrails: floor/ceiling
+    // are still enforced (clamped) and a maxDeltaPct breach is surfaced as a
+    // warning (allowed on explicit human intent) rather than a hard HOLD. The
+    // cron path never passes force. See market-scrape-correction.service.js.
     const force = req.body?.force === true || req.query?.force === 'true';
-    const out = await applyRunSuggestions(req.params.runId, { scope: scopeFor(req), force });
+    const out = await applyRunSuggestions(req.params.runId, { scope: scopeFor(req), force, mode: 'manual' });
     res.json(out);
   } catch (e) { handle(e, res, next); }
 });

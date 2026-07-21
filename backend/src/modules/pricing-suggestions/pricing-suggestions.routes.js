@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
 import { scopeFor } from '../../lib/tenant-scope.js';
 import { pricingSuggestionEngine } from './pricing-suggestion-engine.service.js';
+import { runMarketAutoApplyAll, getEngineAManagedRateIds } from '../market-scraper/market-scrape-correction.service.js';
 
 /**
  * PricingRule CRUD + PricingSuggestion inbox routes.
@@ -201,6 +202,12 @@ pricingSuggestionsRouter.post('/:id/apply', async (req, res, next) => {
     if (item.status !== 'PENDING') {
       return res.status(409).json({ error: `Cannot apply suggestion in status ${item.status}` });
     }
+    // One engine per rate: if Market Intelligence auto-apply (Engine A) owns this
+    // rate, a human must not move its base via a stale Engine B suggestion either.
+    const managed = await getEngineAManagedRateIds({ tenantId: item.tenantId });
+    if (managed.has(item.rateId)) {
+      return res.status(409).json({ error: 'This rate is managed by Market Intelligence auto-apply; Engine B suggestions are retired for it.' });
+    }
     const [updated] = await prisma.$transaction([
       prisma.pricingSuggestion.update({
         where: { id: item.id },
@@ -263,7 +270,19 @@ function requireInternalToken(req, res, next) {
 pricingEngineInternalRouter.post('/run', requireInternalToken, async (req, res, next) => {
   try {
     const opts = req.body || {};
+    // Engine B (PricingRule → Rate.daily). Retires from any rate Engine A owns.
     const out = await pricingSuggestionEngine.runPricingEngine(opts);
-    res.json(out);
+    // Engine A (Market Intelligence → live RateDailyPrice). This is the real
+    // post-scrape hook in prod (the droplet cron POSTs here after scraping).
+    // DARK unless MARKET_AUTOAPPLY_ENABLED is on AND a profile has autoApply=true;
+    // every write goes through the money guardrails. Best-effort — a bad apply
+    // must not fail the pricing-engine run.
+    let marketAutoApply = null;
+    try {
+      marketAutoApply = await runMarketAutoApplyAll({ tenantId: opts.tenantId || null });
+    } catch (e) {
+      marketAutoApply = { error: e.message };
+    }
+    res.json({ ...out, marketAutoApply });
   } catch (e) { handle(e, res, next); }
 });

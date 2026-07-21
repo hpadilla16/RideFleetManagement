@@ -2704,6 +2704,12 @@ model RateDailyPrice {
   vehicleType   VehicleType @relation(fields: [vehicleTypeId], references: [id])
   date          DateTime
   daily         Decimal     @default(0) @db.Decimal(10, 2)
+  // Authorship of the per-date override. 'MARKET_A' = written by the Market
+  // Intelligence auto-apply engine (self-cleaning: the engine only clears its OWN
+  // overrides). null / anything else = OPERATOR-authored (holiday/event surge set
+  // by hand in the Rates UI) — NEVER touched by the engine; wins over the base per
+  // resolveForRental's override-wins logic.
+  source        String?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
@@ -3469,6 +3475,11 @@ model MarketPricingConfig {
   taxes          Json     @default("[]")             // [{ name: "PR tax", pct: 11.5 }, ...]
   brokeragePct   Decimal  @default(0) @db.Decimal(6, 3)
   floorBase      Decimal? @db.Decimal(10, 2)         // per-location floor (BASE rate); null = none
+  ceilingBase    Decimal? @db.Decimal(10, 2)         // per-location ceiling (BASE rate); null = none
+  // Max allowed |delta %| vs the CURRENT live resolved price for an AUTO write. A move beyond
+  // this band is HELD (never applied, never clamped) so a broken scrape can't push a live price
+  // out of band. null = NOT configured → AUTO writes fail-closed HOLD for this location.
+  maxDeltaPct    Decimal? @db.Decimal(6, 3)
   // Utilization-based dynamic tiers (Fase 2): [{ maxPct, adjustAmount?, adjustPct? }] applied
   // ON TOP of the base margin, using projected utilization from the Availability Forecast.
   utilizationRules Json   @default("[]")
@@ -3478,6 +3489,34 @@ model MarketPricingConfig {
 
   @@unique([tenantId, locationCode])
   @@index([tenantId])
+}
+
+// Money trail for every per-class rental price write the Market Intelligence engine makes
+// (auto OR manual). One row per (rate, vehicleType, pickup date) decision. This is the
+// audit of record for MI price changes — AuditLog can't be reused because it hard-requires
+// a reservationId (a price change has no reservation). Additive, no FK relations so it never
+// blocks a write and can't cascade-delete history.
+model PriceChangeLog {
+  id              String   @id @default(cuid())
+  tenantId        String?
+  locationCode    String?
+  rateId          String
+  vehicleTypeId   String?
+  date            DateTime                            // the pickup date the daily price applies to
+  oldDaily        Decimal? @db.Decimal(10, 2)         // current live resolved BASE for that class/date
+  newDaily        Decimal? @db.Decimal(10, 2)         // the value written (or the rejected suggestion when held)
+  deltaPct        Decimal? @db.Decimal(10, 3)
+  runId           String?                             // MarketScrapeRun that drove it (null for legacy/manual-adhoc)
+  competitorBasis String?                             // vendor + price that drove the suggestion, e.g. "Hertz @ $78.67 all-in"
+  engine          String                              // MARKET_A | manual
+  outcome         String                              // applied | held | clamped
+  reason          String?                             // held/clamped reason
+  oldFromFallback Boolean  @default(false)            // oldDaily came from the header fallback (pre-existing cross-price data gap)
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([rateId, date])
+  @@index([runId])
 }
 
 model MarketScrapeRun {
@@ -3498,10 +3537,14 @@ model MarketScrapeRun {
   // count of MarketObservation rows for this run.
   observationsCount Int @default(0)
 
-  // The number of (date, sipp) cells the Correction step actually wrote to
-  // RateDailyPrice. 0 means the profile was research-only or auto-apply
-  // produced no diff.
+  // The number of classes the Correction step actually wrote (base rate). 0 means
+  // the profile was research-only, everything was HELD, or there was no diff.
   pricesApplied Int @default(0)
+
+  // Set when the AUTO auto-apply orchestrator has processed this run. Guards the
+  // 15-min internal trigger from re-computing + re-logging an already-applied
+  // latest run when no newer scrape run exists (efficiency + audit-bloat).
+  autoApplyAt DateTime?
 
   errorMessage String?
 

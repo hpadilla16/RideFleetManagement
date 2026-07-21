@@ -481,7 +481,8 @@ a { color: inherit; text-decoration: none; }
 .qr-label-copy { display: grid; gap: 6px; color: #433b63; line-height: 1.55; }
 
 .badge { display: inline-block; padding: 5px 10px; border-radius: 999px; background: rgba(135,82,254,.15); color:#5a2fca; font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; border: 1px solid rgba(135,82,254,.22); }
-.error { color: #b91c1c; }
+.error { color: #991b1b; }
+:root[data-theme='dark'] .error { color: #fca5a5; }
 
 .card h2, .card-lg h2 { font-size: clamp(19px, 2vw, 26px); font-weight: 800; letter-spacing: .01em; margin: 0; }
 .card h3, .card-lg h3 { font-size: 15px; font-weight: 750; letter-spacing: .01em; margin: 0; }

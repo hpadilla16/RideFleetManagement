@@ -355,6 +355,9 @@ export async function computeRunComparison(runId, { scope = {} } = {}) {
       suggestedPrice: suggested,   // the BASE rate to upload (tax-aware) or the legacy suggestion
       suggestedAllIn,              // tax-aware: the target all-in the customer would see (else null)
       utilization,                 // 0..1 projected utilization that drove the tier (else null)
+      tier: tier                   // the utilization tier that set the target (else null) — for the money trail
+        ? { type: tier.type, fromPct: tier.fromPct ?? null, n: tier.n ?? null, pct: tier.pct ?? null, amount: tier.amount ?? null }
+        : null,
       deltaAbs,
       deltaPct,
       willUpdate: shouldUpdate

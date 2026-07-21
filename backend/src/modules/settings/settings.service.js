@@ -1196,6 +1196,8 @@ export const settingsService = {
         taxes: Array.isArray(r.taxes) ? r.taxes : [],
         brokeragePct: Number(r.brokeragePct),
         floorBase: r.floorBase != null ? Number(r.floorBase) : null,
+        ceilingBase: r.ceilingBase != null ? Number(r.ceilingBase) : null,
+        maxDeltaPct: r.maxDeltaPct != null ? Number(r.maxDeltaPct) : null,
         utilizationRules: Array.isArray(r.utilizationRules) ? r.utilizationRules : [],
         currency: r.currency,
       })),
@@ -1216,6 +1218,19 @@ export const settingsService = {
       .filter((t) => t.pct !== 0 || t.name !== 'Tax');
     const brokeragePct = Number(payload?.brokeragePct) || 0;
     const floorBase = (payload?.floorBase === '' || payload?.floorBase == null) ? null : Number(payload.floorBase);
+    // Auto-apply guardrails (nullable). ceilingBase = max BASE auto-apply may write;
+    // maxDeltaPct = max % a single run may move a live price (beyond it → HELD).
+    const ceilingBase = (payload?.ceilingBase === '' || payload?.ceilingBase == null) ? null : Number(payload.ceilingBase);
+    const maxDeltaPct = (payload?.maxDeltaPct === '' || payload?.maxDeltaPct == null) ? null : Number(payload.maxDeltaPct);
+    if (ceilingBase != null && (!Number.isFinite(ceilingBase) || ceilingBase < 0)) {
+      const e = new Error('ceilingBase must be a positive number'); e.httpStatus = 400; throw e;
+    }
+    if (floorBase != null && ceilingBase != null && ceilingBase < floorBase) {
+      const e = new Error('ceilingBase must be greater than or equal to floorBase'); e.httpStatus = 400; throw e;
+    }
+    if (maxDeltaPct != null && (!Number.isFinite(maxDeltaPct) || maxDeltaPct <= 0 || maxDeltaPct > 100)) {
+      const e = new Error('maxDeltaPct must be a percent between 0 and 100'); e.httpStatus = 400; throw e;
+    }
     const currency = String(payload?.currency || 'USD').trim().toUpperCase() || 'USD';
     // Utilization tiers (positional): { fromPct, type, n?|pct?|amount? }, sorted by fromPct.
     // type ∈ NTH_CHEAPEST | NTH_EXPENSIVE | MARKET | MARKET_PCT | CHEAPEST_MINUS.
@@ -1232,7 +1247,7 @@ export const settingsService = {
       })
       .filter((t) => TIER_TYPES.includes(t.type))
       .sort((a, b) => a.fromPct - b.fromPct);
-    const data = { connectionType, taxes, brokeragePct, floorBase, utilizationRules, currency };
+    const data = { connectionType, taxes, brokeragePct, floorBase, ceilingBase, maxDeltaPct, utilizationRules, currency };
     const row = await prisma.marketPricingConfig.upsert({
       where: { tenantId_locationCode: { tenantId: scope.tenantId, locationCode } },
       create: { tenantId: scope.tenantId, locationCode, ...data },
@@ -1242,6 +1257,8 @@ export const settingsService = {
       id: row.id, locationCode: row.locationCode, connectionType: row.connectionType,
       taxes: Array.isArray(row.taxes) ? row.taxes : [], brokeragePct: Number(row.brokeragePct),
       floorBase: row.floorBase != null ? Number(row.floorBase) : null,
+      ceilingBase: row.ceilingBase != null ? Number(row.ceilingBase) : null,
+      maxDeltaPct: row.maxDeltaPct != null ? Number(row.maxDeltaPct) : null,
       utilizationRules: Array.isArray(row.utilizationRules) ? row.utilizationRules : [],
       currency: row.currency,
     };

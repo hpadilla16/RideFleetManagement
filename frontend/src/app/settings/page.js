@@ -179,7 +179,8 @@ function SettingsInner({ token, me, logout }) {
   const [excludedVendorsText, setExcludedVendorsText] = useState('');
   // Tax-aware pricing config per location (Amadeus/Titanium, taxes, brokerage, floor)
   const [pricingConfigs, setPricingConfigs] = useState({ configs: [], connectionTypes: ['TITANIUM', 'AMADEUS'] });
-  const [pcDraft, setPcDraft] = useState({ locationCode: '', connectionType: 'TITANIUM', taxesText: '', brokeragePct: '', floorBase: '', utilTiersText: '' });
+  const [pcDraft, setPcDraft] = useState({ locationCode: '', connectionType: 'TITANIUM', taxesText: '', brokeragePct: '', floorBase: '', ceilingBase: '', maxDeltaPct: '', utilTiersText: '' });
+  const [pcError, setPcError] = useState('');
   const [revenuePricingConfig, setRevenuePricingConfig] = useState(DEFAULT_REVENUE_PRICING_CONFIG);
   const [revenuePricingPreview, setRevenuePricingPreview] = useState(DEFAULT_REVENUE_PRICING_PREVIEW);
   const [revenuePricingPreviewResult, setRevenuePricingPreviewResult] = useState(null);
@@ -880,19 +881,35 @@ function SettingsInner({ token, me, logout }) {
     .filter(Boolean);
 
   const savePricingConfig = async () => {
-    if (!pcDraft.locationCode.trim()) { setMsg('Location code is required'); return; }
+    if (!pcDraft.locationCode.trim()) { setPcError('Location code is required'); return; }
+    const floorBase = pcDraft.floorBase === '' ? null : Number(pcDraft.floorBase);
+    const ceilingBase = pcDraft.ceilingBase === '' ? null : Number(pcDraft.ceilingBase);
+    const maxDeltaPct = pcDraft.maxDeltaPct === '' ? null : Number(pcDraft.maxDeltaPct);
+    // Money-safety validation (mirrors the backend guardrail checks).
+    if (ceilingBase != null && (!Number.isFinite(ceilingBase) || ceilingBase < 0)) {
+      setPcError('Ceiling (base $) must be a positive number'); return;
+    }
+    if (floorBase != null && ceilingBase != null && ceilingBase < floorBase) {
+      setPcError('Ceiling (base $) must be greater than or equal to Floor (base $)'); return;
+    }
+    if (maxDeltaPct != null && (!Number.isFinite(maxDeltaPct) || maxDeltaPct <= 0 || maxDeltaPct > 100)) {
+      setPcError('Max move per run must be a percent greater than 0, up to 100'); return;
+    }
+    setPcError('');
     const body = {
       locationCode: pcDraft.locationCode.trim().toUpperCase(),
       connectionType: pcDraft.connectionType,
       taxes: parseTaxesText(pcDraft.taxesText),
       brokeragePct: Number(pcDraft.brokeragePct) || 0,
-      floorBase: pcDraft.floorBase === '' ? null : Number(pcDraft.floorBase),
+      floorBase,
+      ceilingBase,
+      maxDeltaPct,
       utilizationRules: parseTiersText(pcDraft.utilTiersText),
     };
     await api(scopedSettingsPath('/api/settings/market-pricing-config'), { method: 'PUT', body: JSON.stringify(body) }, token);
     const out = await api(scopedSettingsPath('/api/settings/market-pricing-config'), { bypassCache: true }, token);
     setPricingConfigs({ configs: out?.configs || [], connectionTypes: out?.connectionTypes || ['TITANIUM', 'AMADEUS'] });
-    setPcDraft({ locationCode: '', connectionType: 'TITANIUM', taxesText: '', brokeragePct: '', floorBase: '', utilTiersText: '' });
+    setPcDraft({ locationCode: '', connectionType: 'TITANIUM', taxesText: '', brokeragePct: '', floorBase: '', ceilingBase: '', maxDeltaPct: '', utilTiersText: '' });
     setMsg('Pricing config saved');
   };
 
@@ -902,6 +919,8 @@ function SettingsInner({ token, me, logout }) {
     taxesText: taxesToText(c.taxes),
     brokeragePct: String(c.brokeragePct ?? ''),
     floorBase: c.floorBase == null ? '' : String(c.floorBase),
+    ceilingBase: c.ceilingBase == null ? '' : String(c.ceilingBase),
+    maxDeltaPct: c.maxDeltaPct == null ? '' : String(c.maxDeltaPct),
     utilTiersText: tiersToText(c.utilizationRules),
   });
 
@@ -5449,7 +5468,7 @@ function SettingsInner({ token, me, logout }) {
                   {pricingConfigs.configs.map((c) => (
                     <div key={c.locationCode} className="row-between" style={{ alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
                       <div className="ui-muted" style={{ fontSize: 13 }}>
-                        <strong>{c.locationCode}</strong> · {c.connectionType} · taxes {taxesToText(c.taxes) || '—'} · brokerage {c.brokeragePct}% · floor {c.floorBase == null ? '—' : `$${c.floorBase}`} · tiers {Array.isArray(c.utilizationRules) && c.utilizationRules.length ? c.utilizationRules.length : '—'}
+                        <strong>{c.locationCode}</strong> · {c.connectionType} · taxes {taxesToText(c.taxes) || '—'} · brokerage {c.brokeragePct}% · floor {c.floorBase == null ? '—' : `$${c.floorBase}`} · ceiling {c.ceilingBase == null ? '—' : `$${c.ceilingBase}`} · max move {c.maxDeltaPct == null ? '—' : `${c.maxDeltaPct}%`} · tiers {Array.isArray(c.utilizationRules) && c.utilizationRules.length ? c.utilizationRules.length : '—'}
                       </div>
                       <div className="inline-actions">
                         <button type="button" className="button-subtle" onClick={() => editPricingConfig(c)}>Edit</button>
@@ -5480,8 +5499,23 @@ function SettingsInner({ token, me, logout }) {
                 </label>
                 <label className="stack" style={{ gap: 4 }}>
                   <span className="ui-muted">Floor (base $)</span>
-                  <input type="number" step="0.01" value={pcDraft.floorBase} onChange={(e) => setPcDraft({ ...pcDraft, floorBase: e.target.value })} placeholder="optional" />
+                  <input type="number" step="0.01" value={pcDraft.floorBase} onChange={(e) => setPcDraft({ ...pcDraft, floorBase: e.target.value })} placeholder="required for auto-apply" />
                 </label>
+                <label className="stack" style={{ gap: 4 }}>
+                  <span className="ui-muted">Ceiling (base $)</span>
+                  <input type="number" step="0.01" value={pcDraft.ceilingBase} onChange={(e) => setPcDraft({ ...pcDraft, ceilingBase: e.target.value })} placeholder="max auto-apply write" />
+                </label>
+                <label className="stack" style={{ gap: 4 }}>
+                  <span className="ui-muted">Max move per run (%)</span>
+                  <input type="number" step="0.001" min="0" max="100" value={pcDraft.maxDeltaPct} onChange={(e) => setPcDraft({ ...pcDraft, maxDeltaPct: e.target.value })} placeholder="e.g. 15" />
+                </label>
+              </div>
+              <div className="ui-muted" style={{ fontSize: 12, marginTop: 8 }}>
+                <strong>Auto-apply guardrails.</strong> Auto-apply stays <strong>on HOLD</strong> for a
+                location — it reads and suggests but <strong>will not write a live price</strong> — until
+                <strong> Floor</strong>, <strong>Ceiling</strong> and <strong>Max move per run</strong> are all
+                set. Floor/Ceiling clamp the base rate auto-apply may upload; a single run that would move a
+                live price by more than Max move per run is <strong>held for review</strong> instead of written.
               </div>
               <label className="stack" style={{ gap: 4, marginTop: 10 }}>
                 <span className="ui-muted">Utilization tiers (one per line, &quot;fromPct =&gt; target&quot;) — when projected utilization at pickup reaches fromPct, target this position on the competitive ladder</span>
@@ -5496,6 +5530,9 @@ function SettingsInner({ token, me, logout }) {
                   Targets: &quot;N cheapest&quot;, &quot;N expensive&quot;, &quot;market&quot; (median of competitors), &quot;market +15%&quot; / &quot;-10%&quot;, or &quot;cheapest -2&quot;. Below the lowest fromPct the base margin applies. Empty = no utilization tiers.
                 </span>
               </label>
+              {pcError && (
+                <div role="alert" className="error" style={{ marginTop: 10, fontWeight: 600, fontSize: 13 }}>{pcError}</div>
+              )}
               <div className="inline-actions" style={{ marginTop: 12 }}>
                 <button type="button" onClick={savePricingConfig}>Save location config</button>
               </div>
