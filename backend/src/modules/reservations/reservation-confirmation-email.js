@@ -19,9 +19,19 @@ import logger from '../../lib/logger.js';
  * outbound message without touching real SMTP/providers.
  */
 let _sendEmail = defaultSendEmail;
+
+// In-flight fire-and-forget confirmation sends (see fireConfirmationEmailOnCreate
+// below). Tracked ONLY so tests have a seam to await the background send —
+// production never awaits this; create() returns immediately.
+const _pending = new Set();
+
 export const __test = {
   setSender(fn) { _sendEmail = typeof fn === 'function' ? fn : defaultSendEmail; },
-  reset() { _sendEmail = defaultSendEmail; }
+  reset() { _sendEmail = defaultSendEmail; },
+  // Await every background confirmation send kicked off by
+  // fireConfirmationEmailOnCreate. Test-only — lets a test observe that create()
+  // returned BEFORE the send finished, then drain the send to assert its effect.
+  async flushPending() { await Promise.allSettled(Array.from(_pending)); }
 };
 
 function customerName(customer) {
@@ -300,4 +310,35 @@ export async function maybeSendConfirmationEmailOnCreate({ reservation, sendConf
     );
     return { sent: false, error: String(err?.message || err) };
   }
+}
+
+/**
+ * FIRE-AND-FORGET wrapper around maybeSendConfirmationEmailOnCreate for the
+ * reservationsService.create() hook.
+ *
+ * WHY: the SMTP send takes seconds. Awaiting it inside create() blocked the
+ * create response (and thus VozIA's quote-convert), and that latency made VozIA
+ * re-reserve → DUPLICATE reservations. So create() must NOT await the send: it
+ * kicks it off here and returns immediately; the email + confirmationEmailSentAt
+ * stamp land asynchronously in the background (the email was always best-effort).
+ *
+ * The underlying helper never throws (internal try/catch); the `.catch()` here is
+ * belt-and-suspenders so a floating rejection can never surface. The promise is
+ * registered in `_pending` purely so tests can await it via __test.flushPending()
+ * — production code never awaits the returned promise.
+ */
+export function fireConfirmationEmailOnCreate({ reservation, sendConfirmationEmail } = {}) {
+  const p = Promise.resolve()
+    .then(() => maybeSendConfirmationEmailOnCreate({ reservation, sendConfirmationEmail }))
+    .catch((err) => {
+      // best-effort — never break create
+      logger.warn(
+        { reservationId: reservation?.id || null, err: String(err?.message || err) },
+        '[reservation-confirmation] fire-and-forget confirmation email rejected (swallowed)'
+      );
+      return { sent: false, error: String(err?.message || err) };
+    })
+    .finally(() => { _pending.delete(p); });
+  _pending.add(p);
+  return p;
 }

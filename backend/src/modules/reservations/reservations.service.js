@@ -2,7 +2,7 @@ import { prisma } from '../../lib/prisma.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import { maybeSendReviewRequestEmail } from './review-email.service.js';
-import { maybeSendConfirmationEmailOnCreate } from './reservation-confirmation-email.js';
+import { fireConfirmationEmailOnCreate } from './reservation-confirmation-email.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
@@ -1725,12 +1725,18 @@ export const reservationsService = {
     // flag FALSE (and the public booking flow sends its own email), so this
     // never double-emails them. ON-FILE email only, best-effort, idempotent via
     // the confirmationEmailSentAt stamp — see reservation-confirmation-email.js.
-    // Awaited (not blocking on failure): the helper never throws and the stamp
-    // lands within this request, but a mail failure can NEVER roll back create.
-    await maybeSendConfirmationEmailOnCreate({
+    // FIRE-AND-FORGET (NOT awaited): the SMTP send takes seconds, and awaiting it
+    // here blocked the create response — which made VozIA's quote-convert slow
+    // enough (~4-5s) that it RE-RESERVED, creating DUPLICATE reservations. So we
+    // kick the send off in the background and return immediately (<1s); the email
+    // and the confirmationEmailSentAt stamp land asynchronously. The email was
+    // always best-effort, so an async stamp is fine and a mail failure can NEVER
+    // roll back or delay create. The `.catch()` is belt-and-suspenders (the
+    // wrapper/helper already never throw).
+    fireConfirmationEmailOnCreate({
       reservation: created,
       sendConfirmationEmail: data.sendConfirmationEmail
-    });
+    }).catch(() => { /* best-effort — never break create */ });
 
     return created;
   },

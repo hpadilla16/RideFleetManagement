@@ -115,6 +115,9 @@ test('CARE 1 + 6: default flag + on-file email → exactly ONE send to the ON-FI
     scope
   );
 
+  // The send is now fire-and-forget — drain the background send before asserting.
+  await confirmEmailTest.flushPending();
+
   assert.equal(sent.length, 1, 'exactly one confirmation email must be sent');
   assert.equal(sent[0].to, ON_FILE_EMAIL, 'recipient must be the ON-FILE customer email');
   assert.notEqual(sent[0].to, 'attacker-payload@evil.com', 'must never send to a payload-supplied address');
@@ -127,12 +130,45 @@ test('CARE 1 + 6: default flag + on-file email → exactly ONE send to the ON-FI
   assert.ok(row.confirmationEmailSentAt, 'confirmationEmailSentAt must be stamped after a successful send');
 });
 
+test('CARE 1b (FIRE-AND-FORGET): create RESOLVES before the (slow) confirmation send completes — the whole point of the fix', async () => {
+  // This is the regression this fix exists for: awaiting the SMTP send blocked
+  // the create response ~4-5s, which made VozIA re-reserve → duplicates. With a
+  // SLOW sender, create() must return BEFORE the send finishes.
+  let sendCompleted = false;
+  sent = [];
+  confirmEmailTest.setSender(async (msg) => {
+    await new Promise((r) => setTimeout(r, 200));
+    sent.push(msg);
+    sendCompleted = true;
+    return { ok: true };
+  });
+
+  const created = await reservationsService.create(baseCreateData(ids.customerWithEmail), scope);
+
+  // BITE: with the old `await`, create would block until the send finished, so
+  // sendCompleted would already be true here. Fire-and-forget returns first.
+  assert.equal(sendCompleted, false, 'create must resolve BEFORE the slow send completes (fire-and-forget)');
+  assert.equal(sent.length, 0, 'no email captured yet at the moment create returned');
+
+  // Now drain the background send and prove it still lands + stamps, just later.
+  await confirmEmailTest.flushPending();
+  assert.equal(sendCompleted, true, 'the background send completes AFTER create returned');
+  assert.equal(sent.length, 1, 'exactly one email once the background send drains');
+  assert.equal(sent[0].to, ON_FILE_EMAIL, 'still goes to the ON-FILE address');
+  const row = await prisma.reservation.findUnique({
+    where: { id: created.id },
+    select: { confirmationEmailSentAt: true }
+  });
+  assert.ok(row.confirmationEmailSentAt, 'stamp lands asynchronously after the background send');
+});
+
 test('CARE 2: sendConfirmationEmail:false → NOTHING sent, no stamp (integration/public paths unaffected)', async () => {
   installCapturingSender();
   const created = await reservationsService.create(
     baseCreateData(ids.customerWithEmail, { sendConfirmationEmail: false }),
     scope
   );
+  await confirmEmailTest.flushPending();
   assert.equal(sent.length, 0, 'a false flag must suppress the email entirely (no double-email for integration paths)');
   const row = await prisma.reservation.findUnique({
     where: { id: created.id },
@@ -144,6 +180,7 @@ test('CARE 2: sendConfirmationEmail:false → NOTHING sent, no stamp (integratio
 test('CARE 3: customer has no email → no send, no stamp, create still succeeds (no throw)', async () => {
   installCapturingSender();
   const created = await reservationsService.create(baseCreateData(ids.customerNoEmail), scope);
+  await confirmEmailTest.flushPending();
   assert.ok(created?.id, 'reservation must be created even without a customer email');
   assert.equal(sent.length, 0, 'no send when the customer has no email on file');
   const row = await prisma.reservation.findUnique({
@@ -156,6 +193,8 @@ test('CARE 3: customer has no email → no send, no stamp, create still succeeds
 test('CARE 4: mailer failure → reservation STILL commits (best-effort), no stamp', async () => {
   installThrowingSender();
   const created = await reservationsService.create(baseCreateData(ids.customerWithEmail), scope);
+  // Drain the background send so its failure has actually been attempted+swallowed.
+  await confirmEmailTest.flushPending();
   assert.ok(created?.id, 'a mailer failure must NEVER fail or roll back the reservation');
   const row = await prisma.reservation.findUnique({
     where: { id: created.id },
@@ -172,6 +211,7 @@ test('CARE 5a: exactly ONCE — a duplicate sourceRef create is rejected and doe
     baseCreateData(ids.customerWithEmail, { sourceRef }),
     scope
   );
+  await confirmEmailTest.flushPending();
   assert.equal(sent.length, 1, 'first create sends exactly one email');
 
   // Second create for the SAME sourceRef (VozIA/convert retry) must be rejected
