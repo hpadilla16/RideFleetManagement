@@ -812,7 +812,16 @@ export const ratesService = {
       }
     });
 
-    const chosen = scoped.find((r) => (r.rateItems || []).length > 0) || scoped[0] || null;
+    // Fail-closed on the ONLINE/public path: a class with NO class-specific
+    // RateItem for `vehicleTypeId` must NOT be cross-priced via another rate's
+    // header (`item?.daily ?? chosen.daily`) — that would quote a customer the
+    // wrong price. Return null so the class is simply dropped from availability
+    // (visible + safe). On the INTERNAL/staff path (displayOnline falsy) the
+    // `scoped[0]` fallback is preserved: staff may legitimately quote off a
+    // default rate and a human can catch a wrong number. (VozIA audit item c.)
+    const chosen = scoped.find((r) => (r.rateItems || []).length > 0)
+      || (options?.displayOnline ? null : scoped[0])
+      || null;
     if (!chosen) return null;
 
     const item = (chosen.rateItems || [])[0] || null;
