@@ -96,7 +96,12 @@ export function createQuotesService(deps = {}) {
       taxes: Number(q.taxes || 0),
       total: Number(q.total || 0),
       pricingSource: q.source || 'GLOBAL',
-      revenuePricingApplied: !!q.revenuePricingApplied
+      revenuePricingApplied: !!q.revenuePricingApplied,
+      // Pass through the engine's already-computed protection plans (each priced
+      // for the trip length by computeInsuranceLine) so preview consumers — the
+      // VozIA post-booking upsell (2026-07-20) and the public site — can offer
+      // insurance. Additive + display-only: no charge logic here.
+      insurancePlans: Array.isArray(row?.insurancePlans) ? row.insurancePlans : []
     };
   }
 

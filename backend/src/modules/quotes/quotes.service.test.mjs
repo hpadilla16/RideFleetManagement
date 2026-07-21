@@ -173,6 +173,32 @@ test('preview maps engine rows (price + availability) and filters by class', asy
   assert.equal(one.results[0].vehicleTypeId, 'vt-eco');
 });
 
+test('preview passes the engine insurance plans through (VozIA upsell source)', async () => {
+  const rowWithPlans = {
+    ...engineRow(),
+    insurancePlans: [
+      { code: 'CDW', name: 'Collision Protection', chargeBy: 'PER_DAY', amount: 29.99, total: 149.95 }
+    ]
+  };
+  const { svc } = makeService({ rows: [rowWithPlans] });
+  const out = await svc.preview(
+    { pickupLocationId: 'loc1', pickupAt: '2026-08-01T10:00:00Z', returnAt: '2026-08-06T10:00:00Z' },
+    SCOPE
+  );
+  assert.equal(out.results[0].insurancePlans.length, 1);
+  assert.equal(out.results[0].insurancePlans[0].name, 'Collision Protection');
+  assert.equal(out.results[0].insurancePlans[0].total, 149.95);
+});
+
+test('preview defaults insurancePlans to [] when the engine row carries none', async () => {
+  const { svc } = makeService({ rows: [engineRow()] });
+  const out = await svc.preview(
+    { pickupLocationId: 'loc1', pickupAt: '2026-08-01T10:00:00Z', returnAt: '2026-08-06T10:00:00Z' },
+    SCOPE
+  );
+  assert.deepEqual(out.results[0].insurancePlans, []);
+});
+
 test('preview requires tenant scope + required params', async () => {
   const { svc } = makeService();
   await assert.rejects(
