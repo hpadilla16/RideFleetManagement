@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import { maybeSendReviewRequestEmail } from './review-email.service.js';
+import { maybeSendConfirmationEmailOnCreate } from './reservation-confirmation-email.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
@@ -1640,7 +1641,7 @@ export const reservationsService = {
       pickupAt: data.pickupAt
     }, scope);
 
-    return prisma.$transaction(async (tx) => {
+    const created = await prisma.$transaction(async (tx) => {
       // Re-check conflict inside the transaction to prevent race conditions
       await ensureNoVehicleConflict({
         vehicleId: assignedVehicleId,
@@ -1717,6 +1718,21 @@ export const reservationsService = {
       }
       });
     });
+
+    // Consume the (historically DEAD) sendConfirmationEmail flag: fire an
+    // immediate customer confirmation email for staff- and quote-convert-created
+    // reservations. Every automated/public/integration create path passes the
+    // flag FALSE (and the public booking flow sends its own email), so this
+    // never double-emails them. ON-FILE email only, best-effort, idempotent via
+    // the confirmationEmailSentAt stamp — see reservation-confirmation-email.js.
+    // Awaited (not blocking on failure): the helper never throws and the stamp
+    // lands within this request, but a mail failure can NEVER roll back create.
+    await maybeSendConfirmationEmailOnCreate({
+      reservation: created,
+      sendConfirmationEmail: data.sendConfirmationEmail
+    });
+
+    return created;
   },
 
   async update(id, patch, scope = {}, actorUserId = null) {

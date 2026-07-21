@@ -314,6 +314,19 @@ test('convert honors the SNAPSHOT price, creates the customer, marks CONVERTED',
   assert.equal(db.customers[0].lastName, 'Hernandez');
 });
 
+test('convert does NOT suppress the confirmation email — flag falls through to default true', async () => {
+  // The dead-flag fix (2026-07-21): reservationsService.create now sends a
+  // customer confirmation email UNLESS sendConfirmationEmail is explicitly false.
+  // Quote-convert must leave the flag UNSET so the customer gets confirmed. If a
+  // future edit sets it false here, VozIA/staff conversions go silent again.
+  const db = fakeDb({ quotes: [activeQuote()] });
+  const reservations = fakeReservations();
+  const { svc } = makeService({ db, reservations });
+  await svc.convert('Q-1001', {}, SCOPE);
+  const r = reservations.created[0];
+  assert.equal(r.sendConfirmationEmail, undefined, 'convert must not set sendConfirmationEmail (would suppress the confirmation)');
+});
+
 test('convert is idempotent once converted (VozIA retry-safe)', async () => {
   const db = fakeDb({ quotes: [activeQuote({ status: 'CONVERTED', convertedReservationId: 'res9' })] });
   const reservations = fakeReservations();

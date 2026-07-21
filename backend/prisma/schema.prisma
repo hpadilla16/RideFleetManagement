@@ -1295,6 +1295,10 @@ model Reservation {
   paymentStatus  PaymentStatus @default(PENDING)
 
   sendConfirmationEmail        Boolean   @default(true)
+  // Durable marker that a customer confirmation email was sent for this
+  // reservation (reservations.create consumes the sendConfirmationEmail flag).
+  // NULL = not yet sent. Guarantees exactly-once send + observability.
+  confirmationEmailSentAt      DateTime?
   // VozIA Cap 6 / W1 (2026-07-19) — caller-editable non-money fields, written via
   // the service-account PATCH whitelist (vozia-reservation-patch.js). flightNumber
   // finally readable at reservation level (before it only existed on
