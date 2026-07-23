@@ -239,7 +239,7 @@ export async function sendReservationConfirmationEmail({
  * create time: fire an immediate customer confirmation email for staff- and
  * quote-convert-created reservations.
  *
- * Rules (see CLAUDE.local.md comms/money):
+ * Rules (this comment is the canonical source of truth — there is no external doc):
  *  - Opt-out: if the flag is explicitly FALSE, send NOTHING. Every automated /
  *    public / integration create path sets it false, so this NEVER double-emails
  *    them (the public booking flow sends its own confirmation).
@@ -313,6 +313,50 @@ export async function maybeSendConfirmationEmailOnCreate({ reservation, sendConf
 }
 
 /**
+ * Shared fire-and-forget MECHANICS for the two wrappers below. Deliberately holds
+ * no email POLICY — which email gets sent, and under what guards, stays in the
+ * wrappers, because the create path and the public-booking path answer that
+ * differently (opt-out flag + idempotency stamp vs. neither).
+ *
+ * Registers the promise in `_pending` so shutdown/tests can drain it, swallows
+ * rejections, and — importantly — escalates a resolved-but-FAILED send to
+ * logger.error. Before these paths went async the outcome travelled back to the
+ * caller in the response; now this log line is the ONLY trace that a customer
+ * never received their confirmation, so it must not hide at warn level.
+ *
+ * A `{ skipped: ... }` result is NOT a failure (opt-out flag, no e-mail on file,
+ * already sent) and stays silent — roughly half of VozIA reservations have no
+ * e-mail address, and those must not generate error noise.
+ */
+function fireAndForget(run, { reservationId = null, label = 'email', onReject } = {}) {
+  const p = Promise.resolve()
+    .then(run)
+    .then((result) => {
+      const failed = result?.emailSent === false || result?.sent === false;
+      if (failed) {
+        // winston takes (message, meta) — an object first makes `message` an
+        // object and drops the text, which would make this line ungreppable.
+        logger.error(
+          `[reservation-confirmation] ${label} did NOT send (background)`,
+          { reservationId, warning: result?.warning || result?.error || null }
+        );
+      }
+      return result;
+    })
+    .catch((err) => {
+      // best-effort — a background send can never break (or delay) its caller
+      logger.error(
+        `[reservation-confirmation] ${label} rejected in background (swallowed)`,
+        { reservationId, err: String(err?.message || err) }
+      );
+      return typeof onReject === 'function' ? onReject(err) : undefined;
+    })
+    .finally(() => { _pending.delete(p); });
+  _pending.add(p);
+  return p;
+}
+
+/**
  * FIRE-AND-FORGET wrapper around maybeSendConfirmationEmailOnCreate for the
  * reservationsService.create() hook.
  *
@@ -328,17 +372,44 @@ export async function maybeSendConfirmationEmailOnCreate({ reservation, sendConf
  * — production code never awaits the returned promise.
  */
 export function fireConfirmationEmailOnCreate({ reservation, sendConfirmationEmail } = {}) {
-  const p = Promise.resolve()
-    .then(() => maybeSendConfirmationEmailOnCreate({ reservation, sendConfirmationEmail }))
-    .catch((err) => {
-      // best-effort — never break create
-      logger.warn(
-        { reservationId: reservation?.id || null, err: String(err?.message || err) },
-        '[reservation-confirmation] fire-and-forget confirmation email rejected (swallowed)'
-      );
-      return { sent: false, error: String(err?.message || err) };
-    })
-    .finally(() => { _pending.delete(p); });
-  _pending.add(p);
-  return p;
+  return fireAndForget(
+    () => maybeSendConfirmationEmailOnCreate({ reservation, sendConfirmationEmail }),
+    {
+      reservationId: reservation?.id || null,
+      label: 'confirmation email',
+      onReject: (err) => ({ sent: false, error: String(err?.message || err) })
+    }
+  );
+}
+
+/**
+ * FIRE-AND-FORGET wrapper around sendReservationConfirmationEmail for the two
+ * PUBLIC BOOKING create paths in booking-engine.service.js (RENTAL + CAR_SHARING).
+ *
+ * WHY: both paths awaited the SMTP send inside the create request, adding ~4-5s
+ * to every booking made from the website. Unlike the VozIA quote-convert incident
+ * that motivated fireConfirmationEmailOnCreate, this never caused DUPLICATES —
+ * the website does not auto-retry — it was pure latency. The email is best-effort
+ * either way, so we kick the send off and let the request return immediately.
+ *
+ * DIFFERENCE vs fireConfirmationEmailOnCreate: that one wraps
+ * maybeSendConfirmationEmailOnCreate, which adds the sendConfirmationEmail opt-out
+ * flag and the confirmationEmailSentAt idempotency stamp (staff + quote-convert
+ * path). This one wraps the RAW sender, which is what the public paths have always
+ * called — no flag, no stamp. Kept deliberately separate: giving the public paths
+ * the stamp would change WHICH emails they send, and that is a behavior change,
+ * not a latency fix.
+ *
+ * sendReservationConfirmationEmail swallows MAIL errors internally, but its
+ * reservation re-fetch (~line 89) and its getEmailTemplates call (~line 157) both
+ * sit OUTSIDE that try/catch, so a DB blip in either can still reject despite the
+ * function's JSDoc. fireAndForget's `.catch()` makes the floating promise safe
+ * either way.
+ */
+export function firePublicBookingConfirmationEmail(input = {}) {
+  return fireAndForget(() => sendReservationConfirmationEmail(input), {
+    reservationId: input?.reservation?.id || null,
+    label: 'public booking confirmation email',
+    onReject: (err) => ({ emailSent: false, sentTo: [], warning: String(err?.message || err) })
+  });
 }

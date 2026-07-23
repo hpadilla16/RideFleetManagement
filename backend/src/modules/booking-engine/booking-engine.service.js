@@ -4,7 +4,7 @@ import { cache } from '../../lib/cache.js';
 import { tenantKey, globalKey } from '../../lib/cache/tenantKey.js';
 import { ratesService } from '../rates/rates.service.js';
 import { reservationsService } from '../reservations/reservations.service.js';
-import { sendReservationConfirmationEmail } from '../reservations/reservation-confirmation-email.js';
+import { firePublicBookingConfirmationEmail } from '../reservations/reservation-confirmation-email.js';
 import { carSharingService } from '../car-sharing/car-sharing.service.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
@@ -582,7 +582,32 @@ async function issueCustomerInfoRequest(reservation) {
 // ../reservations/reservation-confirmation-email.js so the staff + quote-convert
 // reservation create path can send the SAME branded confirmation. Reuse it here
 // (identical output) under the original local name to keep call sites unchanged.
-const sendPublicBookingConfirmationEmail = sendReservationConfirmationEmail;
+//
+// FIRE-AND-FORGET since the public-booking latency fix: the send is no longer
+// awaited inside createPublicBooking, so this returns a floating promise that the
+// call sites intentionally do NOT await. The rendered email is byte-identical —
+// only the timing changed.
+const sendPublicBookingConfirmationEmail = firePublicBookingConfirmationEmail;
+
+// What the create response reports for `confirmationEmail` now that the send is no
+// longer awaited. Same keys as the resolved result of the sender, so a consumer
+// reading `emailSent` / `sentTo` / `warning` still finds them; `pending: true` is
+// the new signal that means "not sent YET" as opposed to "failed" (which is
+// `emailSent: false` WITH a `warning`). The outcome is no longer knowable inside
+// the request — that is the whole point of not awaiting it.
+//
+// Deliberately NOT named `queued`: in this codebase a queue is the durable BullMQ
+// layer in lib/queue (retries, backoff, worker container). This send is an
+// in-process floating promise with none of that, and calling it `queued` would
+// promise retry semantics that do not exist.
+function pendingConfirmationEmail(customer) {
+  return {
+    emailSent: false,
+    pending: true,
+    sentTo: customer?.email ? [customer.email] : [],
+    warning: null
+  };
+}
 
 function existingPortalAction(kind, reservation) {
   const { tokenField, expiresField } = tokenFieldMap(kind);
@@ -1862,7 +1887,10 @@ export const bookingEngineService = {
         payment: paymentRequest,
         primaryStep: 'customer-info'
       };
-      const confirmationEmail = await sendPublicBookingConfirmationEmail({
+      // NOT awaited: the SMTP send took ~4-5s and every website booking paid it
+      // before the confirmation screen could render. Best-effort email, so it is
+      // kicked off here and the response returns immediately.
+      sendPublicBookingConfirmationEmail({
         reservation,
         customer,
         tenant,
@@ -1875,6 +1903,7 @@ export const bookingEngineService = {
         bookingType: 'RENTAL',
         vehicleLabel: selected?.vehicleType?.name || 'Vehicle'
       });
+      const confirmationEmail = pendingConfirmationEmail(customer);
       return {
         bookingType: 'RENTAL',
         tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
@@ -2064,21 +2093,25 @@ export const bookingEngineService = {
           payment: { kind: 'payment', link: '', expiresAt: null, emailSent: false, warning: 'Trip created without linked reservation workflow' },
           primaryStep: 'customer-info'
         };
+    // NOT awaited — same latency fix as the RENTAL path above.
+    if (trip?.reservation) {
+      sendPublicBookingConfirmationEmail({
+        reservation: trip.reservation,
+        customer,
+        tenant,
+        pricingBreakdown: {
+          dueNow: money(selected.quote?.amountDueNow),
+          websiteFeesTotal,
+          guestTotal: money(Number(trip.quotedTotal || 0) + normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0) + Number(websiteFeesTotal || 0))
+        },
+        nextActions,
+        bookingType: 'CAR_SHARING',
+        trip,
+        vehicleLabel: selected.listing?.vehicle?.label || selected.listing?.title || 'Vehicle'
+      });
+    }
     const confirmationEmail = trip?.reservation
-      ? await sendPublicBookingConfirmationEmail({
-          reservation: trip.reservation,
-          customer,
-          tenant,
-          pricingBreakdown: {
-            dueNow: money(selected.quote?.amountDueNow),
-            websiteFeesTotal,
-            guestTotal: money(Number(trip.quotedTotal || 0) + normalizedChosenServices.reduce((sum, service) => sum + Number(service.total || 0), 0) + Number(websiteFeesTotal || 0))
-          },
-          nextActions,
-          bookingType: 'CAR_SHARING',
-          trip,
-          vehicleLabel: selected.listing?.vehicle?.label || selected.listing?.title || 'Vehicle'
-        })
+      ? pendingConfirmationEmail(customer)
       : {
           emailSent: false,
           sentTo: customer?.email ? [customer.email] : [],
