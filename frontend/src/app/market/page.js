@@ -29,14 +29,13 @@
  *     pass days=14 to the history endpoint for the sparklines. The summary
  *     endpoint returns "latest snapshot" regardless of pill state.
  *   - "Sort by" dropdown is rendered but is local-only (no reorder yet).
- *   - "+ Add airport" button is a no-op placeholder.
  *   - SIPP → label map is static — derived from the standard ACRISS codes.
  *     For SIPPs returned by the API but not in our static list, we fall back
  *     to "Class {code}".
  */
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Line } from 'react-chartjs-2';
 import { AuthGate } from '../../components/AuthGate';
@@ -94,7 +93,12 @@ export default function MarketDashboardPage() {
 
 function Dashboard({ token, me, logout }) {
   const router = useRouter();
-  const [airport, setAirport] = useState('SJU');
+  // Airport starts NULL and is resolved from /api/market/airports below. It was
+  // hardcoded to 'SJU' behind a dead <select>, so any tenant that doesn't
+  // scrape SJU — i.e. everyone but the first one — got a permanently empty
+  // dashboard while their own data sat there unreachable.
+  const [airport, setAirport] = useState(null);
+  const [airports, setAirports] = useState([]);
   const [rangeDays, setRangeDays] = useState(14);
   const [summary, setSummary] = useState(null);
   const [historiesBySipp, setHistoriesBySipp] = useState({});
@@ -123,8 +127,47 @@ function Dashboard({ token, me, logout }) {
     return () => { cancelled = true; clearInterval(id); };
   }, [token]);
 
+  // Resolve which airports this tenant actually scrapes, then pick one. The
+  // stored preference is keyed the same way MarketIntelligenceCard keys it, so
+  // the dashboard card and this page stay on the same airport.
   useEffect(() => {
-    if (!token) return;
+    if (!token) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api('/api/market/airports', { bypassCache: true }, token);
+        if (cancelled) return;
+        const list = Array.isArray(data?.airports) ? data.airports : [];
+        setAirports(list);
+        const storageKey = `marketIntelligence.location:${me?.tenantId || 'anon'}`;
+        let saved = null;
+        try { saved = window.localStorage.getItem(storageKey); } catch { /* private mode */ }
+        const initial = (saved && list.some((a) => a.code === saved)) ? saved : (list[0]?.code || null);
+        setAirport(initial);
+        // No profiles at all → nothing will ever load; stop the spinner.
+        if (!initial) setLoading(false);
+      } catch (err) {
+        if (!cancelled) {
+          setAirports([]);
+          setAirport(null);
+          setLoading(false);
+          setError(err?.message || 'Failed to load airports');
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, me?.tenantId]);
+
+  const onAirportChange = useCallback((code) => {
+    if (!code) return;
+    setAirport(code);
+    try {
+      window.localStorage.setItem(`marketIntelligence.location:${me?.tenantId || 'anon'}`, code);
+    } catch { /* private mode — selection just won't persist */ }
+  }, [me?.tenantId]);
+
+  useEffect(() => {
+    if (!token || !airport) return;
     let cancelled = false;
     setLoading(true);
     setError('');
@@ -205,6 +248,8 @@ function Dashboard({ token, me, logout }) {
       <DarkPanel>
         <TopBar
           airport={airport}
+          airports={airports}
+          onAirportChange={onAirportChange}
           updatedAt={summary?.updatedAt}
           rangeDays={rangeDays}
           onRangeChange={setRangeDays}
@@ -228,7 +273,17 @@ function Dashboard({ token, me, logout }) {
 
         {loading && !summary && <DashboardSkeleton />}
 
-        {!loading && summary && (summary.sipps || []).length === 0 && (
+        {/* No profiles at all is a different problem from "profile exists but
+            hasn't produced rows yet" — telling someone to wait for a cron that
+            has nothing to run is a dead end. */}
+        {!loading && !airport && (
+          <EmptyState>
+            No scrape profiles yet. Create one under Profiles to start collecting
+            competitor prices for an airport.
+          </EmptyState>
+        )}
+
+        {!loading && airport && summary && (summary.sipps || []).length === 0 && (
           <EmptyState>
             No market observations yet for {airport}. Run the scraper or wait
             for the daily 4:01 AM ET cron to populate data.
@@ -249,7 +304,7 @@ function Dashboard({ token, me, logout }) {
                 data={card.data}
                 history={historiesBySipp[card.code]}
                 rangeDays={rangeDays}
-                onClick={() => router.push(`/market/${encodeURIComponent(card.code)}`)}
+                onClick={() => router.push(`/market/${encodeURIComponent(card.code)}?airport=${encodeURIComponent(airport)}`)}
               />
             ))}
           </div>
@@ -263,7 +318,10 @@ function Dashboard({ token, me, logout }) {
 // Top bar
 // ---------------------------------------------------------------------------
 
-function TopBar({ airport, updatedAt, rangeDays, onRangeChange, router, pendingCount, onExport }) {
+function TopBar({ airport, airports, onAirportChange, updatedAt, rangeDays, onRangeChange, router, pendingCount, onExport }) {
+  // Prefer the label the API built (e.g. "LAX — Los Angeles"); fall back to the
+  // bare code. Replaces a hardcoded 'SJU — San Juan, Puerto Rico' ternary.
+  const airportLabel = airports.find((a) => a.code === airport)?.label || airport || '—';
   return (
     <div style={{
       display: 'flex',
@@ -278,7 +336,7 @@ function TopBar({ airport, updatedAt, rangeDays, onRangeChange, router, pendingC
           Market Intelligence
         </h1>
         <div style={{ color: '#8a93a6', fontSize: 13, marginTop: 4 }}>
-          {airport === 'SJU' ? 'SJU — San Juan, Puerto Rico' : airport} · Last refresh: {fmtTimestamp(updatedAt)}
+          {airportLabel} · Last refresh: {fmtTimestamp(updatedAt)}
         </div>
       </div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -304,16 +362,21 @@ function TopBar({ airport, updatedAt, rangeDays, onRangeChange, router, pendingC
           style={topbarBtnStyle}
           title="Download prices + suggested by vehicle class and day (Excel)"
         >⬇ Export Excel</button>
-        <select
-          value={airport}
-          // V1: only SJU is active. Selecting placeholder is a no-op.
-          // TODO: when multi-airport ships, drive this from a /api/market/airports endpoint.
-          onChange={() => { /* TODO: enable when other airports go live */ }}
-          style={selectStyle}
-        >
-          <option value="SJU">SJU — San Juan</option>
-          <option value="MCO" disabled>MCO — Orlando (coming soon)</option>
-        </select>
+        {/* Driven by /api/market/airports = the tenant's ACTIVE scrape
+            profiles, so every option here has data behind it. Hidden when the
+            tenant only scrapes one airport — a one-option picker is noise. */}
+        {airports.length > 1 && (
+          <select
+            value={airport || ''}
+            onChange={(e) => onAirportChange(e.target.value)}
+            style={selectStyle}
+            aria-label="Airport"
+          >
+            {airports.map((a) => (
+              <option key={a.code} value={a.code}>{a.label}</option>
+            ))}
+          </select>
+        )}
         {RANGE_PILLS.map((p) => (
           <button
             key={p.value}
@@ -322,11 +385,14 @@ function TopBar({ airport, updatedAt, rangeDays, onRangeChange, router, pendingC
             style={rangeDays === p.value ? pillActiveStyle : pillStyle}
           >{p.label}</button>
         ))}
+        {/* Adding an airport IS creating a scrape profile for it — now that the
+            picker is fed by profiles, this goes where that happens instead of
+            being the no-op placeholder it was. */}
         <button
           type="button"
-          // TODO: hook up an Add Airport flow once we support more than SJU.
-          onClick={() => { /* placeholder */ }}
+          onClick={() => router.push('/market-intelligence')}
           style={addAirportStyle}
+          title="Add an airport by creating a scrape profile for it"
         >+ Add airport</button>
       </div>
     </div>

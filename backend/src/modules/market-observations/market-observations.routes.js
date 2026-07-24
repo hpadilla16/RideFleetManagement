@@ -4,6 +4,7 @@ import { scopeFor } from '../../lib/tenant-scope.js';
 
 /**
  * Read-only API surface for the Market Intelligence UI:
+ *   GET /api/market/airports
  *   GET /api/market/summary?airport=SJU
  *   GET /api/market/history?airport=SJU&sipp=IFAR&days=14
  *
@@ -17,6 +18,18 @@ function handle(err, res, next) {
   if (err?.httpStatus) return res.status(err.httpStatus).json({ error: err.message });
   return next(err);
 }
+
+// The airports this tenant scrapes — drives every airport picker in the UI.
+// Listed from the tenant's ACTIVE scrape profiles, not from Location, because
+// the key is the profile's IATA locationCode. See listMarketAirports().
+marketObservationsRouter.get('/airports', async (req, res, next) => {
+  try {
+    const out = await marketObservationsService.listMarketAirports({ scope: scopeFor(req) });
+    res.json(out);
+  } catch (e) {
+    handle(e, res, next);
+  }
+});
 
 marketObservationsRouter.get('/summary', async (req, res, next) => {
   try {

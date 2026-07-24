@@ -24,12 +24,15 @@ import { isModuleEnabled } from '../lib/moduleAccess';
  *      backend module-access middleware. When false the APIs return 403
  *      and this component degrades to hidden.
  *
- * Location selector behavior:
- *   - Only lists Locations belonging to the current tenant (the
- *     /api/locations response is also tenant-scoped).
- *   - For tenants with a single location (e.g. International Rental Corp
- *     today = only SJU) the dropdown still renders but with one option and
- *     is effectively a label.
+ * Airport selector behavior:
+ *   - Lists the airports the tenant actually SCRAPES, from
+ *     /api/market/airports (its active MarketScrapeProfiles) — not its
+ *     Locations. A Location's `code` is a free-form label that often isn't the
+ *     IATA code the market endpoints key on, so a Location-driven picker asks
+ *     for an airport no profile has and silently renders empty. See
+ *     listMarketAirports() in market-observations.service.js.
+ *   - For tenants that scrape a single airport the dropdown collapses to a
+ *     plain label.
  *   - The selected airport persists per tenant in localStorage so it
  *     doesn't bleed across tenants in the same browser session.
  */
@@ -123,22 +126,28 @@ export default function MarketIntelligenceCard({ me, token }) {
   const [loading, setLoading] = useState(true);
   const [hidden, setHidden] = useState(false);
 
-  // Fetch tenant's locations + restore selected airport from localStorage.
+  // Fetch the airports this tenant scrapes + restore the selection.
+  //
+  // Reads /api/market/airports (the tenant's ACTIVE scrape profiles), NOT
+  // /api/locations. `Location.code` is a free-form label that often isn't the
+  // IATA code the market endpoints key on — Corpusa's LAX branch is coded
+  // `LAXA01`, so this card asked for `?airport=LAXA01`, matched no profile, and
+  // rendered empty forever while 1,249 rows of LAX data sat in the table. It
+  // only worked for the first tenant because they named their location `SJU`.
   useEffect(() => {
     if (!enabled || !token) return undefined;
     let cancelled = false;
-    api('/api/locations', { bypassCache: true }, token)
+    api('/api/market/airports', { bypassCache: true }, token)
       .then((data) => {
         if (cancelled) return;
-        const arr = Array.isArray(data) ? data : (data?.data || data?.locations || []);
-        // Filter to those with a code — the airport selector only makes
-        // sense for codified locations. RH-style 3-letter codes (SJU, MCO, ...).
-        const usable = arr.filter((l) => l && typeof l.code === 'string' && l.code.length >= 2);
+        const usable = Array.isArray(data?.airports) ? data.airports : [];
         setLocations(usable);
         const storageKey = `marketIntelligence.location:${me?.tenantId || 'anon'}`;
         const saved = typeof window !== 'undefined' ? window.localStorage.getItem(storageKey) : null;
-        const initial = saved && usable.some((l) => l.code === saved) ? saved : (usable[0]?.code || null);
+        const initial = saved && usable.some((a) => a.code === saved) ? saved : (usable[0]?.code || null);
         setAirport(initial);
+        // No scrape profiles → nothing this card can ever show.
+        if (!initial) setHidden(true);
       })
       .catch(() => {
         // If the API returns 403 because the tenant doesn't have
@@ -257,15 +266,15 @@ export default function MarketIntelligenceCard({ me, token }) {
                 borderRadius: 6, fontSize: 12, cursor: 'pointer',
               }}
             >
+              {/* `label` is prebuilt by the API ("LAX — Los Angeles", or just
+                  the code when the tenant's Location doesn't carry that code). */}
               {locations.map((l) => (
-                <option key={l.id || l.code} value={l.code}>
-                  📍 {l.code}{l.name ? ` — ${l.name}` : ''}
-                </option>
+                <option key={l.code} value={l.code}>📍 {l.label || l.code}</option>
               ))}
             </select>
           ) : locations[0] ? (
             <span style={{ fontSize: 12, color: 'var(--muted, #6f668f)' }}>
-              📍 {locations[0].code}{locations[0].name ? ` — ${locations[0].name}` : ''}
+              📍 {locations[0].label || locations[0].code}
             </span>
           ) : null}
           <span style={{ fontSize: 11, color: 'var(--muted, #6f668f)' }}>

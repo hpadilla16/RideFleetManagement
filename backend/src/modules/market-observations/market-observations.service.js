@@ -31,6 +31,61 @@ function tenantFilter(scope) {
 }
 
 /**
+ * GET /api/market/airports
+ *
+ * The airports this tenant actually scrapes — the source of truth for every
+ * airport picker in the UI.
+ *
+ * WHY THIS IS DRIVEN BY PROFILES AND NOT BY `Location` (2026-07-24): the code
+ * this whole module keys on is `MarketScrapeProfile.locationCode`, which is
+ * ALSO what the scraper puts in the Kayak URL (`kayak.com/cars/<code>/...`), so
+ * it has to be a real IATA code. A tenant's `Location.code` is a free-form
+ * label and frequently isn't one — Corpusa's LAX branch is coded `LAXA01` (a
+ * Rightcars station code), so a picker built from `Location` asked for
+ * `LAXA01`, matched no profile, and silently rendered an empty dashboard. It
+ * only ever worked for the first tenant because they happened to name their
+ * location `SJU`.
+ *
+ * Listing profiles also means the picker can only offer airports that have data
+ * behind them — you can't select your way into an empty screen.
+ *
+ * `label` borrows the Location's name when the codes DO line up, and falls back
+ * to the bare code otherwise. Cosmetic only; `code` is the key.
+ */
+export async function listMarketAirports({ scope }) {
+  const where = { active: true };
+  if (scope?.tenantId === '__no_tenant__') where.tenantId = '__no_tenant__';
+  else if (scope?.tenantId) where.tenantId = scope.tenantId;
+
+  const profiles = await prisma.marketScrapeProfile.findMany({
+    where,
+    select: { locationCode: true },
+    distinct: ['locationCode'],
+  });
+  const codes = [...new Set(
+    profiles.map((p) => String(p.locationCode || '').trim().toUpperCase()).filter(Boolean)
+  )].sort();
+  if (!codes.length) return { airports: [] };
+
+  // Cosmetic join: only hits when the tenant's Location.code IS the airport
+  // code. A miss is expected and harmless — see the LAXA01 note above.
+  const locations = scope?.tenantId && scope.tenantId !== '__no_tenant__'
+    ? await prisma.location.findMany({
+        where: { tenantId: scope.tenantId, code: { in: codes } },
+        select: { code: true, name: true, city: true },
+      })
+    : [];
+  const byCode = new Map(locations.map((l) => [String(l.code).toUpperCase(), l]));
+
+  const airports = codes.map((code) => {
+    const loc = byCode.get(code);
+    const place = loc?.city || loc?.name || null;
+    return { code, label: place ? `${code} — ${place}` : code };
+  });
+  return { airports };
+}
+
+/**
  * GET /api/market/summary?airport=SJU
  *
  * For every SIPP class observed at the airport in the last 24h, return:
@@ -599,6 +654,7 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
 }
 
 export const marketObservationsService = {
+  listMarketAirports,
   getMarketSummary,
   getMarketHistory,
   buildAirportExportWorkbook,

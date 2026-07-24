@@ -21,7 +21,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Line } from 'react-chartjs-2';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
@@ -85,9 +85,22 @@ function SippDetail({ token, me, logout }) {
   const sipp = String(params?.sipp || '').toUpperCase();
   const label = SIPP_LABELS[sipp] || `Class ${sipp}`;
 
-  // V1: airport is always SJU. TODO: thread airport through the URL when
-  // multi-airport ships (e.g. /market/[airport]/[sipp]).
-  const airport = 'SJU';
+  // Airport rides in on ?airport= from the dashboard card the user clicked.
+  // It used to be the literal 'SJU', which meant this page showed San Juan's
+  // numbers under whatever class you opened, no matter which airport the
+  // dashboard was on. Falling back to the stored dashboard preference keeps a
+  // deep link / refresh working; `null` renders the empty state rather than
+  // silently querying somebody else's market.
+  const searchParams = useSearchParams();
+  const airport = useMemo(() => {
+    const fromUrl = String(searchParams?.get('airport') || '').trim().toUpperCase();
+    if (fromUrl) return fromUrl;
+    try {
+      return window.localStorage.getItem(`marketIntelligence.location:${me?.tenantId || 'anon'}`) || null;
+    } catch {
+      return null;
+    }
+  }, [searchParams, me?.tenantId]);
 
   const [days, setDays] = useState(14);
   const [summaryRow, setSummaryRow] = useState(null);
@@ -97,7 +110,12 @@ function SippDetail({ token, me, logout }) {
   const [modal, setModal] = useState('');
 
   useEffect(() => {
-    if (!token || !sipp) return;
+    // No airport = nothing to query. Guarding here (rather than sending
+    // `?airport=null`) keeps the 400 from the API off the screen.
+    if (!token || !sipp || !airport) {
+      if (!airport) setLoading(false);
+      return undefined;
+    }
     let cancelled = false;
     setLoading(true);
     setError('');
