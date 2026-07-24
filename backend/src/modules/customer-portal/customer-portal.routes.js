@@ -11,7 +11,7 @@ import { enrichPrecheckinCatalog } from '../../lib/precheckin-catalog.js';
 import { buildSelfServiceSnapshot } from './customer-portal-self-service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { normalizeDob } from '../../lib/dob.js';
-import { getCanonicalTermsHtml } from '../../lib/terms/index.js';
+import { getEffectiveTermsHtml } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 import {
   attachPublicRequestMeta,
@@ -1250,12 +1250,23 @@ customerPortalRouter.get('/signature/:token', portalRead, async (req, res, next)
       },
       breakdown,
       portal: await buildPortalSummary(reservation, 'signature', token),
-      // 16g — bilingual canonical T&C HTML (version TC_VERSION).
-      // termsText kept for backward compatibility w/ old portals that
-      // only know how to render plain text; new clients should render
-      // termsHtml (sanitized server-side) for the full bilingual layout.
+      // 16g — bilingual T&C HTML (version TC_VERSION). termsText is kept for
+      // backward compatibility with old portals that only render plain text.
+      //
+      // Resolved location → tenant → canonical (2026-07-24) — the SAME chain
+      // renderAgreementHtml uses. This endpoint is a real ACCEPTANCE surface:
+      // the customer reads this body, ticks "I accept" and signs (see the POST
+      // handler below, which stamps signatureSignedAt/By and termsVersion). It
+      // served the canonical text while the agreement of record printed the
+      // tenant's override, so the customer accepted one document and received
+      // another. The per-branch override would have widened that to a second
+      // axis, and Corpusa's LAX — on Rightcars' California agreement — is the
+      // first branch to use it.
       termsText: agreementCfg?.termsText || 'Standard rental terms apply.',
-      termsHtml: getCanonicalTermsHtml(),
+      termsHtml: await getEffectiveTermsHtml(
+        { tenantId: reservation.tenantId || null, locationId: reservation.pickupLocationId || null },
+        { prisma }
+      ),
       termsVersion: TC_VERSION
     });
   } catch (e) { next(e); }

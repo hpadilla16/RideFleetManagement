@@ -23,6 +23,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { TC_VERSION, TC_HTML_FILENAME } from './version.js';
+import logger from '../logger.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TC_PATH = join(__dirname, TC_HTML_FILENAME);
@@ -116,30 +117,85 @@ export function getCanonicalTermsPlainText() {
 
 export { TC_VERSION };
 
+/** Substitute the five {{INITIALS_*}} markers into an override body. */
+function applyInitials(html, initials = {}) {
+  let out = html;
+  for (const key of INITIALS_KEYS) {
+    const raw = initials[key];
+    const replacement = raw ? escapeHtml(String(raw).trim()) : DEFAULT_BLANK;
+    out = out.split(`{{${key}}}`).join(replacement);
+  }
+  return out;
+}
+
 /**
- * Per-tenant effective T&C HTML.
+ * Effective T&C HTML for a rental, resolved LOCATION → TENANT → CANONICAL.
  *
- * If the tenant has a non-empty `termsHtml` override stored on the
- * `Tenant` row, that body is used and the five `{{INITIALS_*}}`
- * markers are substituted using the same rules as the canonical
- * renderer. Otherwise we fall through to `getCanonicalTermsHtml()`,
- * which keeps default behaviour unchanged for every tenant that has
- * not set a custom T&C.
+ * The first non-empty override in that chain wins, and its five
+ * `{{INITIALS_*}}` markers are substituted with the same rules as the
+ * canonical renderer. A tenant or branch that has set nothing renders exactly
+ * what it renders today.
  *
- * @param {string} tenantId - id of the tenant whose rental agreement
- *     is being rendered. Required; if falsy we just return canonical.
+ * WHY THE LOCATION LAYER (2026-07-24): a multi-branch tenant can operate under
+ * different terms per branch. Corpusa's LAX runs on Rightcars' California
+ * agreement — 9.5% local tax, a 150-mile/day cap and a $2,000 deposit for
+ * California-licensed renters — while its Orlando, Miami and Fort Lauderdale
+ * branches do not. With only the tenant slot, loading LAX's terms would have
+ * silently rebound the other three to a California agreement.
+ *
+ * VERSIONING IS DELIBERATELY NOT PER-BRANCH. `TC_VERSION` stays global and is
+ * what gets stamped on the reservation — exactly as it already is for the
+ * tenant-level override, which has never bumped it either. Making the version
+ * branch-dependent would make `autochargeBlocked` mean something different
+ * depending on where a car was picked up, and that flag gates money.
+ *
+ * Fail-soft on DB errors at every level: a lookup hiccup falls through to the
+ * next layer rather than failing the render. An agreement that renders slightly
+ * generic terms beats an agreement that will not render.
+ *
+ * @param {object} target
+ * @param {string} [target.tenantId] - tenant whose agreement is rendering.
+ * @param {string} [target.locationId] - the rental's PICKUP location. Omit for
+ *     tenant-level resolution (the pre-2026-07-24 behaviour).
  * @param {object} deps
- * @param {import('@prisma/client').PrismaClient} deps.prisma - injected
- *     prisma client. Injected (not imported) so this module stays
- *     pure / mockable from tests.
+ * @param {import('@prisma/client').PrismaClient} deps.prisma - injected (not
+ *     imported) so this module stays pure / mockable from tests.
  * @param {object} [opts]
  * @param {Record<string,string>} [opts.initials] - same shape as
- *     getCanonicalTermsHtml; merged into both the override path and
- *     the canonical-fallback path.
- * @returns {Promise<string>} HTML string with markers replaced.
+ *     getCanonicalTermsHtml; merged into every path.
+ * @returns {Promise<string>} HTML with markers replaced.
  */
-export async function getEffectiveTermsHtmlForTenant(tenantId, { prisma } = {}, opts = {}) {
+export async function getEffectiveTermsHtml({ tenantId, locationId } = {}, { prisma } = {}, opts = {}) {
   const initials = opts.initials || {};
+
+  // 1. Branch override wins.
+  if (locationId && prisma && typeof prisma.location?.findUnique === 'function') {
+    let row = null;
+    try {
+      row = await prisma.location.findUnique({
+        where: { id: locationId },
+        select: { termsHtml: true }
+      });
+    } catch (err) {
+      // MUST be logged, not just swallowed. Without this line a stale Prisma
+      // client (one generated before Location.termsHtml existed — the dev
+      // Dockerfile does not run `prisma generate`), a migration that failed
+      // (startup-migrate.js is fail-open and does not record a failure, so a
+      // missing column throws forever), and a branch that genuinely has no
+      // override all produce BYTE-IDENTICAL output: the tenant's terms. That is
+      // a wrong legal document with no signal anywhere.
+      row = null;
+      logger.error('[terms] location override lookup failed — falling back to tenant/canonical terms', {
+        locationId,
+        tenantId: tenantId || null,
+        message: String(err?.message || err),
+      });
+    }
+    const override = typeof row?.termsHtml === 'string' ? row.termsHtml.trim() : '';
+    if (override) return applyInitials(override, initials);
+  }
+
+  // 2. Tenant override.
   if (tenantId && prisma && typeof prisma.tenant?.findUnique === 'function') {
     let row = null;
     try {
@@ -153,15 +209,18 @@ export async function getEffectiveTermsHtmlForTenant(tenantId, { prisma } = {}, 
       row = null;
     }
     const override = typeof row?.termsHtml === 'string' ? row.termsHtml.trim() : '';
-    if (override) {
-      let html = override;
-      for (const key of INITIALS_KEYS) {
-        const raw = initials[key];
-        const replacement = raw ? escapeHtml(String(raw).trim()) : DEFAULT_BLANK;
-        html = html.split(`{{${key}}}`).join(replacement);
-      }
-      return html;
-    }
+    if (override) return applyInitials(override, initials);
   }
+
+  // 3. Canonical.
   return getCanonicalTermsHtml({ initials });
+}
+
+/**
+ * Tenant-only resolution. Kept as the pre-2026-07-24 entry point so existing
+ * callers and tests are unaffected; new code should call getEffectiveTermsHtml
+ * and pass the pickup location so a branch override can win.
+ */
+export async function getEffectiveTermsHtmlForTenant(tenantId, { prisma } = {}, opts = {}) {
+  return getEffectiveTermsHtml({ tenantId }, { prisma }, opts);
 }

@@ -1,0 +1,28 @@
+-- Additive nullable column, no data change. Per-branch Terms & Conditions
+-- override (2026-07-24).
+--
+-- WHY: `Tenant.termsHtml` already lets a tenant replace the canonical agreement
+-- language, but a multi-branch tenant can operate under DIFFERENT terms per
+-- branch — Corpusa's LAX runs on Rightcars' California agreement (9.5% local
+-- tax, 150-mile cap and a $2,000 deposit for California-licensed renters) while
+-- its Orlando, Miami and Fort Lauderdale branches do not. Before this there was
+-- exactly one slot per tenant, so loading LAX's terms would have applied them to
+-- all four.
+--
+-- The resolver (lib/terms/index.js getEffectiveTermsHtml) reads
+-- location → tenant → canonical. NULL is the default and the value of every
+-- existing row, so this migration changes the rendered agreement for nobody:
+-- a location with no override falls through to exactly what it renders today.
+--
+-- NOT versioned per branch. TC_VERSION (lib/terms/version.js) stays global and
+-- is what gets stamped on the reservation, exactly as it already is for the
+-- tenant-level override. Making the version per-branch would change what
+-- `autochargeBlocked` means depending on where a car was picked up, and that
+-- flag gates money.
+--
+-- IF NOT EXISTS is required by src/lib/startup-migrate.js: it is fail-open and
+-- does NOT record a migration that errored, so an un-recorded migration is
+-- retried on every boot. Plain ADD COLUMN of a NULLable column with no default
+-- is a metadata-only operation in Postgres 11+ — no table rewrite, no backfill,
+-- safe inside the transaction `prisma migrate deploy` wraps around it.
+ALTER TABLE "Location" ADD COLUMN IF NOT EXISTS "termsHtml" TEXT;

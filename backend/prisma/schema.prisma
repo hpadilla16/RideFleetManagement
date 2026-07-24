@@ -625,6 +625,18 @@ model Location {
   taxRate        Decimal  @default(0) @db.Decimal(5, 2)
   isActive       Boolean  @default(true)
   locationConfig String?
+  // Per-branch Terms & Conditions override (2026-07-24). Mirrors
+  // Tenant.termsHtml one level down; the resolver in lib/terms/index.js reads
+  // location → tenant → canonical, so NULL here (the default, and every
+  // existing row) changes nothing. Set it when a branch operates under terms
+  // that differ from the rest of the tenant — Corpusa's LAX runs on Rightcars'
+  // California agreement while Orlando/Miami/FLL do not.
+  //
+  // Does NOT carry its own TC_VERSION. The tenant-level override already
+  // stamps the global version (lib/terms/version.js), and diverging here would
+  // make `autochargeBlocked` mean something different per branch. Same
+  // precedent, deliberately.
+  termsHtml      String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

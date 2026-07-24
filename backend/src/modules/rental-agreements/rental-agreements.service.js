@@ -21,7 +21,7 @@ import {
 import { downloadObject as inspectionDownloadObject } from '../../lib/storage/supabase-storage.js';
 import { normalizeInspectionPhotos, canonicalPhotoKey, fuelLevelToFraction } from './inspection-photos-normalize.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
-import { getEffectiveTermsHtmlForTenant } from '../../lib/terms/index.js';
+import { getEffectiveTermsHtml } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 import { refundCharge as payarcRefundCharge } from '../public-booking/payarc-hosted-fields.js';
 import {
@@ -3379,7 +3379,15 @@ export const rentalAgreementsService = {
       termsText: (String(agreement.reservation?.workflowMode || '').toUpperCase() === 'DEALERSHIP_LOANER' && String(cfg.loanerTermsHtml || '').trim())
         ? cfg.loanerTermsHtml
         : stripDeclineCoverageIfNotApplicable(
-            (await getEffectiveTermsHtmlForTenant(agreement?.tenantId || null, { prisma })),
+            // Resolved location → tenant → canonical (2026-07-24). The PICKUP
+            // location decides: that is the branch whose counter the customer
+            // signs at and whose local law the agreement is written under. A
+            // one-way rental returning elsewhere still signs the pickup
+            // branch's terms.
+            (await getEffectiveTermsHtml(
+              { tenantId: agreement?.tenantId || null, locationId: agreement?.pickupLocationId || null },
+              { prisma }
+            )),
             !!agreement?.declinedInsurance,
           ) + (cfg.termsText ? `<div class="tc-tenant-addendum"><h2>Tenant Addendum</h2><p>${esc(cfg.termsText)}</p></div>` : ''),
       signatureSignedBy: esc(agreement.reservation?.signatureSignedBy || '-'),

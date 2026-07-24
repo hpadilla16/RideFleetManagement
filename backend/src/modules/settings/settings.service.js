@@ -22,8 +22,10 @@ const DEFAULTS = {
     '1) Return vehicle clean and with agreed fuel level. 2) Report damage before handoff. 3) Return keys/documents to staff. 4) After-hours returns may include additional fees.',
   agreementHtmlTemplate: '',
   // Per-tenant override for the canonical T&C HTML. Empty string means
-  // "use the canonical lib/terms/tc-<TC_VERSION>.html"; any non-empty
-  // value supersedes it via getEffectiveTermsHtmlForTenant().
+  // "use the canonical lib/terms/tc-<TC_VERSION>.html"; any non-empty value
+  // supersedes it via getEffectiveTermsHtml(), which since 2026-07-24 resolves
+  // location → tenant → canonical — so a branch that sets its own
+  // Location.termsHtml outranks this tenant-level value.
   termsHtml: '',
   // Per-tenant loaner T&C override (2026-06-26). Used on loaner (DEALERSHIP_LOANER) agreements
   // instead of the rental T&C when set; empty = fall back to the rental T&C.

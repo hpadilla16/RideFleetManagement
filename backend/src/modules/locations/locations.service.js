@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
+import { scopeAllowedLocationIds } from '../../lib/tenant-scope.js';
 
 // 5-minute TTL on tenant-scoped location list. Locations change rarely;
 // staff opening multiple reservations in a row should hit cache. Writes
@@ -53,6 +54,17 @@ export const locationsService = {
     return out;
   },
   async update(id, patch, scope = {}) {
+    // Location scoping (2026-07-24). This used to filter by tenantId alone, so
+    // a branch-restricted ADMIN — a role that has existed since beta.338 — could
+    // PATCH ANY location in the tenant. That was already wrong for taxRate and
+    // locationConfig; it became sharper once `termsHtml` landed on this row,
+    // because that field REPLACES the entire rental agreement body for the
+    // branch. A LAX admin must not be able to rewrite Orlando's contract.
+    // Checked BEFORE the query, not spread into the `where`: a second `id` key
+    // in that object silently overwrites the first, which would have matched
+    // any allowed location instead of the requested one.
+    const allowed = scopeAllowedLocationIds(scope);
+    if (allowed && !allowed.includes(String(id))) throw new Error('Location not found');
     const current = await prisma.location.findFirst({
       where: { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
       select: { id: true, tenantId: true }
