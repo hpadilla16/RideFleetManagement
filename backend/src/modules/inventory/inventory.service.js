@@ -146,6 +146,17 @@ export const inventoryService = {
 
     // Snapshot the fleet (exclude SOLD — out of the rental fleet) with each
     // vehicle's current checkout (if any) so we can flag mismatches.
+    //
+    // DELIBERATELY STILL TENANT-WIDE, even though a branch-restricted caller
+    // has no business counting another branch's lot (2026-07-24). Scoping the
+    // snapshot alone would break a bigger invariant: there is ONE resumable
+    // IN_PROGRESS session per tenant and `InventorySession` carries no location,
+    // so a branch-scoped session would then be resumed by a tenant-wide admin
+    // who'd see a partial fleet — and completeSession would certify the whole
+    // count while a whole branch was never walked. Doing this properly needs a
+    // scope stamped on the session plus a decision on whether two branches may
+    // count concurrently. Tracked as a follow-up; the timeout below is what
+    // fixes the crash.
     const vehicles = await prisma.vehicle.findMany({
       where: { tenantId, status: { not: 'SOLD' } },
       select: {
@@ -191,10 +202,21 @@ export const inventoryService = {
       }
       await refreshTotals(tx, created.id);
       return created;
+    }, {
+      // Prisma's default interactive-transaction timeout is 5s, and this block
+      // writes one row per vehicle. Corpusa crossed it by 12ms at 702 vehicles
+      // (P2028, prod, 2026-07-24). The row count scales with fleet size and
+      // nothing here waits on user input, so a generous ceiling costs nothing
+      // and removes a cliff that reappears at every growth step.
+      timeout: 30_000,
+      maxWait: 10_000,
     });
 
     const full = await prisma.inventorySession.findUnique({ where: { id: session.id }, include: SESSION_INCLUDE });
-    logger.info('[inventory] session started', { tenantId, sessionId: session.id, vehicles: vehicles.length, wiped: !!(existing && wipeExisting) });
+    logger.info('[inventory] session started', {
+      tenantId, sessionId: session.id, vehicles: vehicles.length,
+      wiped: !!(existing && wipeExisting),
+    });
     return { session: full, resumed: false };
   },
 
