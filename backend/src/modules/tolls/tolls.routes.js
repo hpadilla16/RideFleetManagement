@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../../lib/prisma.js';
 import { requireRole, isSuperAdmin } from '../../middleware/auth.js';
-import { scopeFor } from '../../lib/tenant-scope.js';
+import { scopeFor, userAllowedLocationIds } from '../../lib/tenant-scope.js';
 import { tollsService } from './tolls.service.js';
 
 export const tollsRouter = Router();
@@ -60,6 +60,32 @@ async function ensureTollsEnabled(req, res, next) {
 
 tollsRouter.use(ensureTollsEnabled);
 
+/**
+ * Location scoping (2026-07-24). Some toll operations are inherently TENANT-WIDE
+ * and cannot be meaningfully narrowed to a branch:
+ *
+ *  - bulk-auto-match rewrites vehicleId/reservationId/status across every
+ *    pending row. Its whole purpose is to attribute rows that have NO vehicle
+ *    yet, so filtering its candidates by vehicle home location would make it a
+ *    silent no-op for a scoped caller while still reading tenant-wide.
+ *  - the provider-account routes are one credential + one sync per TENANT, not
+ *    per branch; a live/mock sync imports the whole account's activity.
+ *
+ * Leaving these open while the reads beside them are scoped is the worse of the
+ * two failures: a branch user would rewrite the entire tenant's toll matching
+ * and then not be able to see what they changed. Refuse explicitly instead —
+ * same shape as `rejectScopedUsers` in reports-v2.routes.js. `requireRole` does
+ * NOT cover this: a location ADMIN passes it (see userAllowedLocationIds).
+ */
+export function rejectLocationScopedUsers(req, res, next) {
+  if (userAllowedLocationIds(req.user)) {
+    return res.status(403).json({
+      error: 'This is a tenant-wide toll operation and is not available for location-restricted accounts',
+    });
+  }
+  next();
+}
+
 tollsRouter.get('/dashboard', async (req, res, next) => {
   try {
     res.json(await tollsService.getDashboard(scopeFor(req), {
@@ -84,7 +110,7 @@ tollsRouter.get('/provider-account', requireRole('ADMIN', 'OPS'), async (req, re
   }
 });
 
-tollsRouter.put('/provider-account', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
+tollsRouter.put('/provider-account', requireRole('ADMIN', 'OPS'), rejectLocationScopedUsers, async (req, res, next) => {
   try {
     res.json(await tollsService.saveProviderAccount(req.body || {}, scopeFor(req)));
   } catch (error) {
@@ -95,7 +121,7 @@ tollsRouter.put('/provider-account', requireRole('ADMIN', 'OPS'), async (req, re
   }
 });
 
-tollsRouter.post('/provider-account/health-check', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
+tollsRouter.post('/provider-account/health-check', requireRole('ADMIN', 'OPS'), rejectLocationScopedUsers, async (req, res, next) => {
   try {
     res.json(await tollsService.runProviderHealthCheck(scopeFor(req)));
   } catch (error) {
@@ -106,7 +132,7 @@ tollsRouter.post('/provider-account/health-check', requireRole('ADMIN', 'OPS'), 
   }
 });
 
-tollsRouter.post('/provider-account/mock-sync', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
+tollsRouter.post('/provider-account/mock-sync', requireRole('ADMIN', 'OPS'), rejectLocationScopedUsers, async (req, res, next) => {
   try {
     res.json(await tollsService.runMockSync(scopeFor(req), req.user?.id || req.user?.sub || null));
   } catch (error) {
@@ -117,7 +143,7 @@ tollsRouter.post('/provider-account/mock-sync', requireRole('ADMIN', 'OPS'), asy
   }
 });
 
-tollsRouter.post('/provider-account/live-sync', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
+tollsRouter.post('/provider-account/live-sync', requireRole('ADMIN', 'OPS'), rejectLocationScopedUsers, async (req, res, next) => {
   try {
     res.json(await tollsService.runLiveSync(scopeFor(req), req.user?.id || req.user?.sub || null));
   } catch (error) {
@@ -128,7 +154,14 @@ tollsRouter.post('/provider-account/live-sync', requireRole('ADMIN', 'OPS'), asy
   }
 });
 
-tollsRouter.post('/transactions/manual-import', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
+// Gated for the same reason as live-sync/mock-sync, which reach the IDENTICAL
+// service method (createManualTransactions). Matching is deliberately tenant-wide
+// — `listTenantVehiclesForMatch` / `listReservationCandidates` intentionally
+// ignore location so an import produces the same result whoever runs it — so an
+// import by a branch user creates TOLL_MODULE charges on reservations at every
+// branch, which they then cannot see. Gating live-sync but not this door would
+// read as covered while leaving the money-touching half open.
+tollsRouter.post('/transactions/manual-import', requireRole('ADMIN', 'OPS'), rejectLocationScopedUsers, async (req, res, next) => {
   try {
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
     const out = await tollsService.createManualTransactions(rows, scopeFor(req), req.user?.id || req.user?.sub || null);
@@ -189,7 +222,7 @@ tollsRouter.post('/transactions/bulk-confirm', requireRole('ADMIN', 'OPS'), asyn
   }
 });
 
-tollsRouter.post('/transactions/bulk-auto-match', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
+tollsRouter.post('/transactions/bulk-auto-match', requireRole('ADMIN', 'OPS'), rejectLocationScopedUsers, async (req, res, next) => {
   try {
     const result = await tollsService.autoMatchPendingTransactions(scopeFor(req), req.user?.id || req.user?.sub || null, {
       limit: Number(req.body?.limit || 500)

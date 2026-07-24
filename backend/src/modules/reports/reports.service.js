@@ -8,6 +8,7 @@ import { parseLocationConfig } from '../../lib/location-config.js';
 import { startOfDayInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 import { reservationProgramWhereForScope, vehicleProgramWhereForScope } from '../../lib/program-category.js';
+import { effectiveLocationIds } from '../../lib/tenant-scope.js';
 import { EXCLUDED_PAYMENT_METHODS } from './collected-payments.js';
 
 function toNumber(value, fallback = 0) {
@@ -199,11 +200,9 @@ export const reportsService = {
     const locationId = normalizeLocationId(query);
     // Location scoping (Fase 2c): a scoped user is limited to their allowed locations
     // (intersected with any selected locationId). Admins/unrestricted → use the selection.
-    const _allowedLoc = Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length
-      ? scope.allowedLocationIds : null;
-    const _effLocIds = _allowedLoc
-      ? (locationId && _allowedLoc.includes(locationId) ? [locationId] : _allowedLoc)
-      : (locationId ? [locationId] : null);
+    // `locationId` is already normalized above, so pass it through rather than
+    // letting the helper re-read the raw query.
+    const _effLocIds = effectiveLocationIds({ locationId }, scope);
     const pickupLoc = _effLocIds ? { pickupLocationId: { in: _effLocIds } } : {};
     const homeLoc = _effLocIds ? { homeLocationId: { in: _effLocIds } } : {};
     // Program scoping (2026-07-02): compose the employee's program fragment
@@ -763,11 +762,7 @@ export const reportsService = {
     const locationId = normalizeLocationId(query);
     const employeeUserId = normalizeEmployeeUserId(query);
     // Location scoping (Fase 2c): limit to the user's allowed locations (∩ selection).
-    const _allowedLoc = Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length
-      ? scope.allowedLocationIds : null;
-    const _effLocIds = _allowedLoc
-      ? (locationId && _allowedLoc.includes(locationId) ? [locationId] : _allowedLoc)
-      : (locationId ? [locationId] : null);
+    const _effLocIds = effectiveLocationIds({ locationId }, scope);
     const pickupLoc = _effLocIds ? { pickupLocationId: { in: _effLocIds } } : {};
     // Program scoping (2026-07-02): commission lines partition through their
     // agreement's reservation (workflowMode), same fragment as overview().

@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { vehicleProgramWhereForScope, reservationProgramWhereForScope } from '../../lib/program-category.js';
+import { effectiveLocationIds, scopeAllowedLocationIds } from '../../lib/tenant-scope.js';
 import { plannerRulesService } from './planner.rules.service.js';
 import { buildVehicleOperationalSignalsMap } from '../vehicles/vehicle-intelligence.service.js';
 import { settingsService } from '../settings/settings.service.js';
@@ -234,9 +235,10 @@ export async function loadPlannerReservations({ start, end, locationId = null, v
     });
   }
   // Location scoping (Fase 2c): a scoped user only sees reservations touching their
-  // allowed locations. ANDed on top of any selection. Admins/unrestricted → skip.
-  const _allowedLoc = Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length
-    ? scope.allowedLocationIds : null;
+  // allowed locations. ANDed on top of any selection (which is its own OR block
+  // above), so this is the caller's restriction ALONE — not the ∩ that
+  // `effectiveLocationIds` computes. Admins/unrestricted → skip.
+  const _allowedLoc = scopeAllowedLocationIds(scope);
   if (_allowedLoc) {
     and.push({
       OR: [
@@ -323,11 +325,7 @@ export async function loadPlannerReservations({ start, end, locationId = null, v
 
 export async function loadPlannerVehicles({ start, end, locationId = null, vehicleTypeId = null, scope = {} }) {
   // Location scoping (Fase 2c): effective home-location set = scope.allowedLocationIds ∩ selection.
-  const _allowedLoc = Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length
-    ? scope.allowedLocationIds : null;
-  const _effLocIds = _allowedLoc
-    ? (locationId && _allowedLoc.includes(locationId) ? [locationId] : _allowedLoc)
-    : (locationId ? [locationId] : null);
+  const _effLocIds = effectiveLocationIds({ locationId }, scope);
   const rows = await prisma.vehicle.findMany({
     where: {
       ...(tenantWhere(scope) || {}),

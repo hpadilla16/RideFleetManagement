@@ -10,6 +10,7 @@ import { uploadObject, getSignedUrl, safePath } from '../../lib/storage/index.js
 import { isStorageEnabled } from '../rental-agreements/inspection-photos.js';
 import { resolveRate } from '../fees/fee-engine.service.js';
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
+import { scopeAllowedLocationIds } from '../../lib/tenant-scope.js';
 
 // ── Fase D (MONEY) — bill a matched citation to the renter's agreement ────────
 // Mirrors the issue-center claim-charge path: create reservationCharge rows
@@ -125,6 +126,57 @@ function toDate(value) {
 function toMoney(value) {
   const n = Number(value);
   return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+}
+
+/**
+ * Location scoping for citations (2026-07-23). A Citation has NO Location FK —
+ * its `location` column is free text from the issuing agency — so the only
+ * reliable link to an RFM location is the vehicle the citation was matched to.
+ * We scope through `vehicle.homeLocationId`.
+ *
+ * Unmatched citations (vehicleId = null) have no resolvable location, so a
+ * location-scoped user does NOT see them (fail-closed, consistent with the rest
+ * of the scoping layer). They stay visible to tenant-wide admins — who are the
+ * ones that triage and match them anyway.
+ *
+ * Returns {} when the caller is unrestricted, so it composes into any `where`.
+ */
+export function citationLocationWhere(scope = {}) {
+  const ids = scopeAllowedLocationIds(scope);
+  if (!ids) return {};
+  return { vehicle: { is: { homeLocationId: { in: ids } } } };
+}
+
+/**
+ * Same scoping, one hop further out, for CitationDocument — the scanned notice
+ * itself. This exists because the document routes are a SIDE DOOR into exactly
+ * the file `getDocumentUrl` refuses: the OCR scheduler stamps
+ * `Citation.documentPath = CitationDocument.bucketPath` (citation-ocr.scheduler
+ * .js), so both point at the identical Supabase object, and `listDocuments`
+ * hands out the ids to try.
+ *
+ * `CitationDocument.citationId` is a bare scalar (no Prisma relation), so we
+ * can't express this as a relation filter — we resolve the visible ids out of
+ * `Citation` first and match on them. Only runs for location-restricted
+ * callers. Note the cost sits on `Citation`, which the daily scraper grows
+ * monotonically (87 rows at the largest tenant today, so this is fine now):
+ * the id list is unbounded, and `CitationDocument.citationId` carries no index
+ * — @@index is ([tenantId, status, createdAt]). Revisit both at ~10k citations.
+ *
+ * Returns null when the caller is unrestricted (= no filter). Otherwise an id
+ * list, possibly EMPTY: `{ citationId: { in: [] } }` matches nothing, which is
+ * the fail-closed answer, and it also excludes documents not yet matched to a
+ * citation (citationId = null) — same rule as unmatched citations, which the
+ * tenant-wide admin triages.
+ */
+async function visibleCitationIds(scope = {}) {
+  const locWhere = citationLocationWhere(scope);
+  if (!Object.keys(locWhere).length) return null;
+  const rows = await prisma.citation.findMany({
+    where: { tenantId: scope.tenantId, ...locWhere },
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
 }
 
 // Build a normalized-plate → vehicleId map for the tenant once per batch.
@@ -306,7 +358,7 @@ export const citationsService = {
   },
 
   async list(filters = {}, scope = {}) {
-    const where = { tenantId: scope.tenantId };
+    const where = { tenantId: scope.tenantId, ...citationLocationWhere(scope) };
     if (filters.plate) where.plateNormalized = normalizePlate(filters.plate);
     if (filters.plateState) where.plateState = String(filters.plateState).toUpperCase();
     if (filters.source && VALID_SOURCES.has(filters.source)) where.source = filters.source;
@@ -336,7 +388,9 @@ export const citationsService = {
 
   async getDetail(id, scope = {}) {
     const citation = await prisma.citation.findFirst({
-      where: { id, tenantId: scope.tenantId },
+      // Location-scoped too: without this a restricted user could open another
+      // branch's citation by guessing/holding its id, even though the list hides it.
+      where: { id, tenantId: scope.tenantId, ...citationLocationWhere(scope) },
       include: {
         vehicle: { select: { id: true, plate: true, year: true, make: true, model: true } },
         reservation: {
@@ -375,7 +429,9 @@ export const citationsService = {
   // Signed (1h) URL for the scanned notice behind a citation (its documentPath).
   async getDocumentUrl(id, scope = {}) {
     const citation = await prisma.citation.findFirst({
-      where: { id, tenantId: scope.tenantId },
+      // Scoped like getDetail — the document is the citation's content, so it
+      // must not be reachable by id from outside the caller's locations.
+      where: { id, tenantId: scope.tenantId, ...citationLocationWhere(scope) },
       select: { documentPath: true },
     });
     if (!citation) {
@@ -394,7 +450,7 @@ export const citationsService = {
 
   // Lightweight summary for the dashboard Citations tile.
   async dashboardSummary(scope = {}) {
-    const where = { tenantId: scope.tenantId };
+    const where = { tenantId: scope.tenantId, ...citationLocationWhere(scope) };
     const [needsReview, open] = await Promise.all([
       prisma.citation.count({ where: { ...where, status: 'NEEDS_REVIEW' } }),
       prisma.citation.findMany({
@@ -408,7 +464,7 @@ export const citationsService = {
 
   async getVehicleHistory(vehicleId, scope = {}) {
     return prisma.citation.findMany({
-      where: { tenantId: scope.tenantId, vehicleId },
+      where: { tenantId: scope.tenantId, vehicleId, ...citationLocationWhere(scope) },
       orderBy: { issuedAt: 'desc' },
       include: { reservation: { select: { id: true, reservationNumber: true } } },
     });
@@ -487,7 +543,9 @@ export const citationsService = {
    * Does NOT post charges (that is Phase E, money-gated).
    */
   async review(id, { decision, note, userId } = {}, scope = {}) {
-    const citation = await prisma.citation.findFirst({ where: { id, tenantId: scope.tenantId }, select: { id: true, reservationId: true } });
+    // Location-scoped: a restricted user must not be able to REVIEW (approve /
+    // dispute / void) another branch's citation, not just be unable to see it.
+    const citation = await prisma.citation.findFirst({ where: { id, tenantId: scope.tenantId, ...citationLocationWhere(scope) }, select: { id: true, reservationId: true } });
     if (!citation) {
       const err = new Error('Citation not found');
       err.status = 404;
@@ -550,6 +608,8 @@ export const citationsService = {
   /** List notice documents for the tenant (newest first). */
   async listDocuments(scope = {}, filters = {}) {
     const where = { tenantId: scope.tenantId };
+    const visibleIds = await visibleCitationIds(scope);
+    if (visibleIds) where.citationId = { in: visibleIds };
     if (filters.status) where.status = String(filters.status).toUpperCase();
     const take = Math.min(Number(filters.pageSize) || 50, 200);
     const skip = ((Math.max(Number(filters.page) || 1, 1)) - 1) * take;
@@ -571,8 +631,9 @@ export const citationsService = {
 
   /** Reset a FAILED/REVIEW notice document back to PENDING so the OCR worker retries it. */
   async retryDocument(id, scope = {}) {
+    const visibleIds = await visibleCitationIds(scope);
     const doc = await prisma.citationDocument.findFirst({
-      where: { id, tenantId: scope.tenantId },
+      where: { id, tenantId: scope.tenantId, ...(visibleIds ? { citationId: { in: visibleIds } } : {}) },
       select: { id: true, status: true },
     });
     if (!doc) {
@@ -592,8 +653,11 @@ export const citationsService = {
 
   /** Signed (1h) URL for a stored notice document. */
   async getDocumentSignedUrl(id, scope = {}) {
+    // The scoped guard that matters most: this returns a signed URL to the very
+    // same object `getDocumentUrl` protects. See visibleCitationIds() above.
+    const visibleIds = await visibleCitationIds(scope);
     const doc = await prisma.citationDocument.findFirst({
-      where: { id, tenantId: scope.tenantId },
+      where: { id, tenantId: scope.tenantId, ...(visibleIds ? { citationId: { in: visibleIds } } : {}) },
       select: { bucketPath: true },
     });
     if (!doc) {

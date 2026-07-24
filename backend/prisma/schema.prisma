@@ -766,6 +766,17 @@ model Vehicle {
   @@unique([tenantId, internalNumber])
   @@index([tenantId, status])
   @@index([tenantId, programCategory])
+  // Location scoping (2026-07-24). Serves the DIRECT filters —
+  // `WHERE tenantId = ? AND homeLocationId IN (...)` — in vehicles.service.js
+  // (list + availability), planner's loadPlannerVehicles, and the maintenance
+  // fleet counts. Verified against the emitted SQL + EXPLAIN.
+  //
+  // It does NOT serve the relation-hop filters (citations/tolls/schedules/
+  // damage reports). Those compile to a LEFT JOIN on Vehicle.id — the primary
+  // key — with homeLocationId applied to the joined row and NO Vehicle.tenantId
+  // predicate, so a composite led by tenantId cannot be used. Don't add this
+  // index expecting to speed those up; they ride the PK.
+  @@index([tenantId, homeLocationId])
 }
 
 // Per-vehicle odometer history (2026-06-09). Every check-out, check-in, manual

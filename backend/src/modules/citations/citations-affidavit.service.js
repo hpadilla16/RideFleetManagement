@@ -11,6 +11,7 @@
 
 import { prisma } from '../../lib/prisma.js';
 import { renderReportPdf } from '../reports/reports-export.js';
+import { citationLocationWhere } from './citations.service.js';
 
 function esc(v) {
   return String(v ?? '').replace(/[&<>"']/g, (c) => (
@@ -187,7 +188,11 @@ export function buildAffidavitHtml(citation, cfg = {}) {
  */
 export async function affidavitPdfBuffer(id, scope = {}) {
   const citation = await prisma.citation.findFirst({
-    where: { id, tenantId: scope.tenantId },
+    // Location-scoped like getDetail/getDocumentUrl (2026-07-23). This is the
+    // highest-value one to lock: the affidavit of non-liability names the
+    // responsible driver (renter name, licence, address), so an unscoped lookup
+    // by id let a branch-restricted user pull another branch's renter PII.
+    where: { id, tenantId: scope.tenantId, ...citationLocationWhere(scope) },
     include: {
       vehicle: { select: { id: true, plate: true, year: true, make: true, model: true } },
       reservation: {

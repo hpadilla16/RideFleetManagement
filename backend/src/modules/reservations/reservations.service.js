@@ -943,6 +943,28 @@ export const reservationsService = {
     // Program scoping (2026-07-02): KPIs for a program-scoped employee count
     // only their side's reservations. Admins/BOTH → no-op (empty fragment).
     Object.assign(where, reservationProgramWhereForScope(scope));
+    // Location scoping (2026-07-23): summary() was the ONE reservation read path
+    // with no location clause — listPage/list/getById all had it. That is why a
+    // LAX-scoped user saw the whole tenant's pickups/returns/total on the
+    // dashboard. Same pickup-OR-return semantics as listPage (~line 1334).
+    // Uses AND so it survives being spread into the per-counter `where` objects
+    // below (each of which adds its own top-level keys).
+    //
+    // Normalized ONCE here and reused by the counter-table guard below. Deriving
+    // the two independently let a scope of [null] filter the live query down to
+    // nothing while still qualifying as "unscoped" for the rollup — 153 pickups
+    // sitting next to 0 total reservations. Unreachable today (auth.service.js
+    // `parseLocationIds` Strings every element) but not a property to lean on.
+    const summaryLocIds = Array.isArray(scope?.allowedLocationIds)
+      ? scope.allowedLocationIds.filter(Boolean)
+      : [];
+    if (summaryLocIds.length) {
+      const locOr = { OR: [
+        { pickupLocationId: { in: summaryLocIds } },
+        { returnLocationId: { in: summaryLocIds } }
+      ] };
+      where.AND = Array.isArray(where.AND) ? [...where.AND, locOr] : (where.AND ? [where.AND, locOr] : [locOr]);
+    }
 
     // Phase 3 L-2: try the daily counter table first. On hit, we skip the
     // 5 expensive count() queries below and only run the 4 "next item"
@@ -960,8 +982,15 @@ export const reservationsService = {
     // tenant counts, which would leak the other program's numbers into their
     // KPIs (and their filtered counts must never be written back to it —
     // readFreshCounters/refreshCounters double-guard on programScope too).
+    // LOCATION-scoped employees skip the counter table for exactly the same
+    // reason as program-scoped ones (2026-07-23): the table stores WHOLE-TENANT
+    // counts, so a user restricted to one branch would read the entire tenant's
+    // pickups/returns as if they were their own — reported live, a LAX-only user
+    // saw the whole Corpusa numbers. They fall through to the live aggregation,
+    // which IS location-filtered.
     const counterTenantId = scope?.tenantId || null;
-    const cachedCounters = counterTenantId && !scope?.programScope
+    const isVisibilityScoped = Boolean(scope?.programScope || summaryLocIds.length);
+    const cachedCounters = counterTenantId && !isVisibilityScoped
       ? await readFreshCounters({ tenantId: counterTenantId, day: dayStart, programScope: scope?.programScope })
       : null;
 
@@ -1136,7 +1165,13 @@ export const reservationsService = {
     // can't dedupe NULL tenantId rows, so we must not write them.
     // Program-scoped requests never refresh the table either — their counts
     // are filtered, and the table must only ever hold whole-tenant numbers.
-    if (!cachedCounters && counterTenantId && !scope?.programScope) {
+    // Location-scoped requests skip the refresh too (2026-07-23) — but only for
+    // symmetry and to save the work, NOT because they could corrupt the table:
+    // refreshCounters recomputes purely from (tenantId, day) and never sees the
+    // caller's `where` (see reservation-summary-counters.service.js:96-114), so a
+    // scoped caller could not have written filtered numbers into it.
+    // `isVisibilityScoped` covers both axes.
+    if (!cachedCounters && counterTenantId && !isVisibilityScoped) {
       refreshCountersAsync({
         tenantId: counterTenantId,
         day: dayStart,

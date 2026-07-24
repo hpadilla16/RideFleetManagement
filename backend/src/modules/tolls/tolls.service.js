@@ -10,6 +10,7 @@ import {
   resolveReservationResponsibility
 } from './tolls-responsibility.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { scopeAllowedLocationIds, reservationLocationWhere, systemScope } from '../../lib/tenant-scope.js';
 
 const DEFAULT_PRE_PICKUP_GRACE_MINUTES = 120;
 const DEFAULT_POST_RETURN_GRACE_MINUTES = 180;
@@ -59,6 +60,32 @@ async function resolveActiveProvider(tenantId) {
 
 function tenantWhereForScope(scope = {}) {
   return scope?.tenantId ? { tenantId: scope.tenantId } : {};
+}
+
+/**
+ * Location scoping for tolls (2026-07-24). Exact mirror of
+ * `citationLocationWhere` in the citations module, and for the same reason: a
+ * TollTransaction has NO Location FK — its `location` column is the free-text
+ * plaza name off the provider feed ("PLAZA TEODORO MOSCOSO") — so the only
+ * reliable link to an RFM location is the vehicle the toll was matched to. We
+ * scope through `vehicle.homeLocationId`.
+ *
+ * UNMATCHED tolls (vehicleId = null) have no resolvable location and are
+ * therefore hidden from a location-scoped caller — fail-closed, and the same
+ * rule citations use. They stay visible to tenant-wide admins, who are the ones
+ * that triage and match them anyway. This matters more here than in citations:
+ * the needsReview queue is mostly unmatched rows, so a branch user sees an empty
+ * review list rather than another branch's plates.
+ *
+ * Returns {} when the caller is unrestricted, so it composes into any `where`.
+ *
+ * NOT applied to the money paths (`syncReservationTollCharges`,
+ * `voidTollTransaction`) — see the note on those.
+ */
+export function tollLocationWhere(scope = {}) {
+  const ids = scopeAllowedLocationIds(scope);
+  if (!ids) return {};
+  return { vehicle: { is: { homeLocationId: { in: ids } } } };
 }
 
 function toMoney(value, fallback = 0) {
@@ -1118,11 +1145,15 @@ async function replaceSuggestedAssignments(tx, transaction, suggestion, matchedB
   }
 }
 
+// Single gateway for every by-id toll mutation (confirmMatch, postToReservation,
+// applyReviewAction) — location scoping goes here so all three inherit it and a
+// branch user cannot reach another branch's toll by guessing/holding an id.
 async function getTransactionOrThrow(id, scope = {}) {
   const row = await prisma.tollTransaction.findFirst({
     where: {
       id,
-      ...tenantWhereForScope(scope)
+      ...tenantWhereForScope(scope),
+      ...tollLocationWhere(scope)
     },
     include: {
       vehicle: true,
@@ -1278,7 +1309,15 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
     };
   }
 
-  const effectiveScope = { tenantId };
+  // MONEY PATH — deliberately NOT location-scoped (2026-07-24). This rebuilds the
+  // reservation's TOLL_MODULE charges from the transactions it finds and PRUNES
+  // any charge whose transaction is missing from that set. Narrowing the query by
+  // the acting user's locations would therefore DELETE a real charge the moment a
+  // branch employee happened to trigger a pricing recompute on a reservation whose
+  // toll belongs to another branch's vehicle. Reservation visibility is the gate
+  // here, and it is already location-scoped upstream. Rebuilding scope as
+  // tenant-only keeps the reconciliation deterministic regardless of who triggers it.
+  const effectiveScope = systemScope({ tenantId });
   const policy = resolveReservationTollPolicy(reservation);
   const selectedServiceIds = tollPackageCandidateServiceIds(reservation.charges);
   const prepaidTollServiceCount = selectedServiceIds.length
@@ -1580,8 +1619,14 @@ export const tollsService = {
       ]
     } : {};
 
+    // Location scoping (2026-07-24). Applied to the list AND to every metric
+    // count below — the tiles are separate queries, and a scoped list under a
+    // tenant-wide tile is exactly the contradiction the maintenance board hit.
+    const locWhere = tollLocationWhere(scope);
+
     const where = {
       ...tenantWhereForScope(scope),
+      ...locWhere,
       ...(filters.status ? { status: String(filters.status).toUpperCase() } : {}),
       ...(filters.needsReview === true ? { needsReview: true } : {}),
       ...(filters.reservationId ? { reservationId: String(filters.reservationId) } : {}),
@@ -1611,30 +1656,35 @@ export const tollsService = {
       prisma.tollTransaction.count({
         where: {
           ...tenantWhereForScope(scope),
+          ...locWhere,
           createdAt: { gte: startOfDay(new Date()) }
         }
       }),
       prisma.tollTransaction.count({
         where: {
           ...tenantWhereForScope(scope),
+          ...locWhere,
           status: 'MATCHED'
         }
       }),
       prisma.tollTransaction.count({
         where: {
           ...tenantWhereForScope(scope),
+          ...locWhere,
           needsReview: true
         }
       }),
       prisma.tollTransaction.count({
         where: {
           ...tenantWhereForScope(scope),
+          ...locWhere,
           billingStatus: { in: ['POSTED_TO_RESERVATION', 'POSTED_TO_AGREEMENT'] }
         }
       }),
       prisma.tollTransaction.count({
         where: {
           ...tenantWhereForScope(scope),
+          ...locWhere,
           billingStatus: 'DISPUTED'
         }
       }),
@@ -2527,7 +2577,13 @@ export const tollsService = {
         return createdTransaction;
       });
 
-      const hydrated = await getTransactionOrThrow(row.id, scope);
+      // POST-WRITE HYDRATION, not a read — the row was just created above and is
+      // already committed. It must NOT go through the caller's location filter:
+      // an imported toll whose plate matches no vehicle lands with vehicleId =
+      // null, which `tollLocationWhere` excludes by design, so a location-scoped
+      // staffer pasting a CSV would throw on the first unmatched row — after the
+      // row committed, leaving the import run stuck at RUNNING.
+      const hydrated = await getTransactionOrThrow(row.id, systemScope(scope));
       created.push(hydrated);
       if (hydrated?.reservationId && String(hydrated.status || '').toUpperCase() === 'MATCHED') {
         reservationIdsToSync.add(String(hydrated.reservationId));
@@ -2574,15 +2630,20 @@ export const tollsService = {
     const reservationId = payload.reservationId ? String(payload.reservationId) : null;
     const reservationNumber = payload.reservationNumber ? String(payload.reservationNumber).trim() : '';
 
+    // The TARGET reservation is free-choice input, so the by-id gateway above
+    // does not cover it: without this gate a scoped caller could take an in-scope
+    // toll and post its money onto another branch's reservation, which they
+    // cannot even read. Same fragment listReservationTolls uses.
+    const resLocWhere = reservationLocationWhere(scope);
     let reservation = null;
     if (reservationId) {
       reservation = await prisma.reservation.findFirst({
-        where: { id: reservationId, ...tenantWhereForScope(scope) },
+        where: { id: reservationId, ...tenantWhereForScope(scope), ...resLocWhere },
         include: { vehicle: true, customer: { select: { id: true, firstName: true, lastName: true } } }
       });
     } else if (reservationNumber) {
       reservation = await prisma.reservation.findFirst({
-        where: { reservationNumber, ...tenantWhereForScope(scope) },
+        where: { reservationNumber, ...tenantWhereForScope(scope), ...resLocWhere },
         include: { vehicle: true, customer: { select: { id: true, firstName: true, lastName: true } } }
       });
     }
@@ -2625,7 +2686,11 @@ export const tollsService = {
 
     await syncReservationTollCharges(reservation.id, scope);
 
-    return serializeTransaction(await getTransactionOrThrow(transaction.id, scope));
+    // POST-WRITE HYDRATION. The update above may have re-pointed this toll at the
+    // reservation's vehicle, which can be homed at a different branch — re-reading
+    // through the caller's filter would 404 AFTER the match and the charge sync
+    // already committed.
+    return serializeTransaction(await getTransactionOrThrow(transaction.id, systemScope(scope)));
   },
 
   async postToReservation(id, payload = {}, scope = {}, actorUserId = null) {
@@ -2850,7 +2915,8 @@ export const tollsService = {
     const transactions = await prisma.tollTransaction.findMany({
       where: {
         id: { in: list },
-        ...tenantWhereForScope(scope)
+        ...tenantWhereForScope(scope),
+        ...tollLocationWhere(scope)
       },
       include: {
         vehicle: true,
@@ -2875,7 +2941,7 @@ export const tollsService = {
     for (const id of list) {
       const transaction = transactionById.get(id);
       if (!transaction) {
-        plans.push({ id, kind: 'SKIP', message: 'Transaction not found in tenant scope' });
+        plans.push({ id, kind: 'SKIP', message: 'Transaction not found in scope' });
         continue;
       }
       const latestAssignment = Array.isArray(transaction.assignments) && transaction.assignments.length
@@ -2917,12 +2983,31 @@ export const tollsService = {
     }
 
     // ---- Phase 3: load all referenced reservations + vehicles in one go --------
+    // Location-gated with the SAME fragment confirmMatch uses. This is the bulk
+    // door to the identical money path: a transaction can be in scope (its
+    // vehicle is homed here) while the reservation its assignment suggests is
+    // NOT, and confirming posts TOLL_MODULE charges onto that reservation. With
+    // only the tenant filter, bulk-confirm did what confirmMatch refuses —
+    // billed a rental the caller cannot even read. A reservation that fails this
+    // gate simply drops out of the map, and Phase 4 then reports the row as a
+    // SKIP rather than acting on it (same fail-closed shape as an out-of-scope
+    // transaction id).
+    //
+    // KNOWN GAP, deliberately not papered over here: a toll whose vehicle is
+    // homed at branch A but whose rental ran out of branch B is now confirmable
+    // by NEITHER — A sees the toll but not the reservation, B sees the
+    // reservation but not the toll (tollLocationWhere is vehicle-home only).
+    // Tenant-wide admins are unaffected. The real fix is to make toll visibility
+    // two-axis (vehicle home OR rental endpoints); that is a product decision
+    // about who owns a toll, so it is written up for Hector rather than decided
+    // here. Consistency + money safety first.
     const reservationsById = reservationIdsNeeded.size
       ? new Map(
         (await prisma.reservation.findMany({
           where: {
             id: { in: Array.from(reservationIdsNeeded) },
-            ...tenantWhereForScope(scope)
+            ...tenantWhereForScope(scope),
+            ...reservationLocationWhere(scope)
           },
           include: {
             vehicle: true,
@@ -3110,6 +3195,23 @@ export const tollsService = {
   // `transactionId` is the TOLL_MODULE charge's sourceRefId; the TOLL_POLICY charge
   // (sourceRefId `reservation:<id>`) has no single transaction, so callers void by
   // reservation instead (handled in voidAgreementCharge by re-syncing).
+  // MONEY PATH — deliberately NOT location-scoped, same reasoning as
+  // syncReservationTollCharges (2026-07-24). Adding the filter here would make a
+  // branch employee's void silently no-op (`voided: 0`) and the very next
+  // syncReservationTollCharges would re-create the charge from the still-MATCHED
+  // transaction — the "un-stick" this function exists to prevent.
+  //
+  // DO NOT read that as "the caller already passed a location check". The only
+  // caller is reservation-pricing.service.js:531, and its gate is
+  // `scopedReservationWhere` = `{ id, tenantId }` — TENANT-ONLY, no location
+  // clause (reservation-pricing.service.js:41). So a location admin can void a
+  // charge on a reservation whose detail page 404s for them, since
+  // reservationsService.getById IS location-gated. That asymmetry is
+  // PRE-EXISTING — Fase 2b never reached the pricing service, and before this
+  // ship an ADMIN bypassed location scoping everywhere anyway, so no new access
+  // is granted — but it is a real gap, not a covered one. The fix belongs in the
+  // pricing service (one place, all its money paths), not bolted on here where
+  // it would resurrect the un-stick bug. Tracked as follow-up.
   async voidTollTransaction(transactionId, scope = {}, options = {}) {
     if (!transactionId) return { voided: 0 };
     const note = String(options?.note || '').trim();
@@ -3130,10 +3232,15 @@ export const tollsService = {
   },
 
   async listReservationTolls(reservationId, scope = {}) {
+    // THE RESERVATION IS THE GATE. Authorize once, here, on the reservation's own
+    // rule (pickup OR return in the allowed set) — otherwise a branch user could
+    // confirm a neighbouring branch's reservation exists, and read its
+    // reservationNumber, by id.
     const reservation = await prisma.reservation.findFirst({
       where: {
         id: reservationId,
-        ...tenantWhereForScope(scope)
+        ...tenantWhereForScope(scope),
+        ...reservationLocationWhere(scope)
       },
       select: {
         id: true,
@@ -3142,6 +3249,12 @@ export const tollsService = {
     });
     if (!reservation) throw new Error('Reservation not found');
 
+    // Deliberately NOT filtered by tollLocationWhere. `reservationId` already
+    // binds every row to the reservation authorized above, so the filter adds no
+    // safety — but it filters on a DIFFERENT axis (vehicle home vs. rental
+    // endpoints), so on a one-way rental, or any car garaged outside the renting
+    // branch, it would blank this tab while TOLL_MODULE charges sit on the
+    // agreement. That is the screen an agent needs when a renter disputes a toll.
     const rows = await prisma.tollTransaction.findMany({
       where: {
         reservationId,

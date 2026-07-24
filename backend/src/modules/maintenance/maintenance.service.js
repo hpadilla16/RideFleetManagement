@@ -4,6 +4,7 @@
 
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
+import { effectiveLocationIds, scopeAllowedLocationIds } from '../../lib/tenant-scope.js';
 import { repairOrdersService } from './repair-orders.service.js';
 
 const MILE_SOON = 500;   // within 500 mi of the interval → "due soon"
@@ -62,10 +63,16 @@ export const maintenanceService = {
       include: { vehicle: { select: { id: true, plate: true, make: true, model: true, year: true, internalNumber: true, mileage: true, homeLocationId: true } } },
     });
     const now = Date.now();
-    const locationId = query.locationId ? String(query.locationId) : null;
+    // Honors BOTH the explicit ?locationId filter and the caller's own location
+    // restriction. Before 2026-07-23 only the query filter was applied, so a
+    // location-restricted user got every schedule in the tenant here (and via
+    // summary(), which delegates its due/overdue tiles to this method).
+    const effLocIds = effectiveLocationIds(query, scope);
     const items = [];
     for (const s of schedules) {
-      if (locationId && s.vehicle?.homeLocationId !== locationId) continue;
+      // Fail-closed: a vehicle with no home location is invisible to a scoped
+      // caller, matching the `homeLocationId: { in: [...] }` filters elsewhere.
+      if (effLocIds && !effLocIds.includes(s.vehicle?.homeLocationId)) continue;
       const ev = evalSchedule(s, s.vehicle?.mileage ?? null, now);
       if (!ev.overdue && !ev.soon) continue;
       items.push({
@@ -86,13 +93,8 @@ export const maintenanceService = {
 
   async summary(query = {}, scope = {}) {
     const where = { ...tenantWhere(scope) };
-    const locationId = query.locationId ? String(query.locationId) : null;
     // Location scoping (Fase 2c): limit to the user's allowed locations (∩ selection).
-    const _allowedLoc = Array.isArray(scope?.allowedLocationIds) && scope.allowedLocationIds.length
-      ? scope.allowedLocationIds : null;
-    const _effLocIds = _allowedLoc
-      ? (locationId && _allowedLoc.includes(locationId) ? [locationId] : _allowedLoc)
-      : (locationId ? [locationId] : null);
+    const _effLocIds = effectiveLocationIds(query, scope);
     const roWhere = { ...where, ...(_effLocIds ? { locationId: { in: _effLocIds } } : {}) };
     const fleetLoc = _effLocIds ? { homeLocationId: { in: _effLocIds } } : {};
 
@@ -142,12 +144,23 @@ export const maintenanceService = {
 
   // ── Service schedules (per-unit intervals) ──
   async listSchedules(vehicleId, scope = {}) {
+    // Location scoping (2026-07-24). A ServiceSchedule has no location of its
+    // own, so it inherits the vehicle's home location — the same hop `due()`
+    // makes in memory. Without this a branch-scoped caller could read any
+    // vehicle's service history by id, even though `due()` above already hid
+    // that vehicle from their list.
+    const allowedLoc = scopeAllowedLocationIds(scope);
+    const vehLoc = allowedLoc ? { homeLocationId: { in: allowedLoc } } : {};
     const [rows, veh] = await Promise.all([
       prisma.serviceSchedule.findMany({
-        where: { vehicleId: String(vehicleId), ...tenantWhere(scope) },
+        where: {
+          vehicleId: String(vehicleId),
+          ...tenantWhere(scope),
+          ...(allowedLoc ? { vehicle: { is: vehLoc } } : {}),
+        },
         orderBy: { serviceType: 'asc' },
       }),
-      prisma.vehicle.findFirst({ where: { id: String(vehicleId), ...tenantWhere(scope) }, select: { mileage: true } }),
+      prisma.vehicle.findFirst({ where: { id: String(vehicleId), ...tenantWhere(scope), ...vehLoc }, select: { mileage: true } }),
     ]);
     const now = Date.now();
     return {
@@ -164,8 +177,15 @@ export const maintenanceService = {
     // Super admins reach this without a tenant in scope (the profile UI doesn't
     // pass ?tenantId) — the vehicle row itself is the tenant source of truth.
     if (scope?.tenantId === '__no_tenant__') { const e = new Error('tenantId required'); e.status = 400; throw e; }
+    // Same location gate as listSchedules — writing another branch's schedule is
+    // strictly worse than reading it, so the two paths must not diverge.
+    const _allowedLoc = scopeAllowedLocationIds(scope);
     const veh = await prisma.vehicle.findFirst({
-      where: { id: String(vehicleId), ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      where: {
+        id: String(vehicleId),
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+        ...(_allowedLoc ? { homeLocationId: { in: _allowedLoc } } : {}),
+      },
       select: { id: true, tenantId: true },
     });
     if (!veh) { const e = new Error('Vehicle not found'); e.status = 404; throw e; }
@@ -212,8 +232,14 @@ export const maintenanceService = {
     if (scope?.tenantId === '__no_tenant__') { const e = new Error('tenantId required'); e.status = 400; throw e; }
     const type = String(serviceType || '').toUpperCase();
     if (!SERVICE_TYPES.includes(type)) { const e = new Error('Invalid serviceType'); e.status = 400; throw e; }
+    // Same location gate as listSchedules/upsertSchedule.
+    const _allowedLoc = scopeAllowedLocationIds(scope);
     const veh = await db.vehicle.findFirst({
-      where: { id: String(vehicleId), ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      where: {
+        id: String(vehicleId),
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+        ...(_allowedLoc ? { homeLocationId: { in: _allowedLoc } } : {}),
+      },
       select: { id: true, mileage: true, tenantId: true },
     });
     if (!veh) { const e = new Error('Vehicle not found'); e.status = 404; throw e; }
@@ -246,6 +272,30 @@ export const maintenanceService = {
   async deleteSchedule(vehicleId, serviceType, scope = {}) {
     const type = String(serviceType || '').toUpperCase();
     if (!SERVICE_TYPES.includes(type)) { const e = new Error('Invalid serviceType'); e.status = 400; throw e; }
+    // Deny-all scope must bail BEFORE the vehicle lookup below, exactly like
+    // upsertSchedule/logService. Without this the lookup omits the tenant
+    // predicate and runs across every tenant — harmless for data (the deleteMany
+    // still carries tenantId '__no_tenant__' and matches nothing) but it turns
+    // the 404-vs-200 answer into a cross-tenant existence oracle that did not
+    // exist before this gate was added.
+    if (scope?.tenantId === '__no_tenant__') { const e = new Error('tenantId required'); e.status = 400; throw e; }
+    // Same location gate as listSchedules/upsertSchedule/logService — this is the
+    // FOURTH sibling on this route group and the most destructive of them. A
+    // deleteMany scoped only by tenant let a branch user erase another branch's
+    // service interval and get back a cheerful 200 {ok:true}: the other branch's
+    // overdue car then vanishes from due()/summary() with no error and no audit
+    // row. Gate the VEHICLE (not just the rows) so an out-of-scope target 404s
+    // instead of silently deleting nothing.
+    const _allowedLoc = scopeAllowedLocationIds(scope);
+    const veh = await prisma.vehicle.findFirst({
+      where: {
+        id: String(vehicleId),
+        ...(scope?.tenantId && scope.tenantId !== '__no_tenant__' ? { tenantId: scope.tenantId } : {}),
+        ...(_allowedLoc ? { homeLocationId: { in: _allowedLoc } } : {}),
+      },
+      select: { id: true },
+    });
+    if (!veh) { const e = new Error('Vehicle not found'); e.status = 404; throw e; }
     await prisma.serviceSchedule.deleteMany({ where: { vehicleId: String(vehicleId), serviceType: type, ...tenantWhere(scope) } });
     return { ok: true };
   },

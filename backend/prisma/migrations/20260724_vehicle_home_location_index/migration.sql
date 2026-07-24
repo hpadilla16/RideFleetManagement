@@ -1,0 +1,32 @@
+-- Additive index, no data change. Location scoping (Fase 2 → 2026-07-24) made
+-- Vehicle.homeLocationId a hot filter column.
+--
+-- WHAT THIS SERVES (verified against the SQL Prisma actually emits, plus EXPLAIN):
+--   the DIRECT filters, `WHERE "tenantId" = $1 AND "homeLocationId" IN (...)` —
+--   vehicles.service.js list/availability, planner's loadPlannerVehicles, and the
+--   maintenance fleet counts. These match the composite exactly.
+--
+-- WHAT IT DOES NOT SERVE:
+--   the relation-hop filters (`vehicle: { is: { homeLocationId: ... } }` in
+--   citations / tolls / service schedules / damage reports). Prisma compiles
+--   those to a LEFT JOIN on "Vehicle"."id" — the primary key — with
+--   homeLocationId applied to the joined row and NO "Vehicle"."tenantId"
+--   predicate. A composite led by tenantId is unusable there (no skip scan
+--   before PG 18), and those queries ride the PK index instead. Recorded here so
+--   nobody "optimizes" the hop by widening this index.
+--
+-- Plain (non-CONCURRENT) CREATE INDEX. TWO runners apply this file and only one
+-- of them could take CONCURRENTLY:
+--   * src/lib/startup-migrate.js (every boot) uses node-postgres simple-query
+--     with NO wrapping transaction — CONCURRENTLY would work there;
+--   * `npx prisma migrate deploy`, which the deploy scripts run against the prod
+--     container (see .deploy-notes/*.sh), wraps each migration in a transaction —
+--     CONCURRENTLY is a hard error inside one.
+-- So the lowest common denominator wins. The brief write lock is acceptable
+-- because Vehicle is small — one row per car, hundreds at the largest tenant, not
+-- a growth table like TollTransaction. For an index on a big table, build it
+-- out-of-band with CONCURRENTLY first and let IF NOT EXISTS make the migration a
+-- no-op. IF NOT EXISTS is also required by startup-migrate.js's fail-open retry:
+-- an un-recorded migration is re-attempted on every boot.
+CREATE INDEX IF NOT EXISTS "Vehicle_tenantId_homeLocationId_idx"
+  ON "Vehicle" ("tenantId", "homeLocationId");

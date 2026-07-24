@@ -15,7 +15,7 @@
 // Billing/charge posting is NOT here — that is Phase E (money-gated).
 
 import { Router } from 'express';
-import { scopeFor } from '../../lib/tenant-scope.js';
+import { scopeFor, userAllowedLocationIds } from '../../lib/tenant-scope.js';
 import { citationsService } from './citations.service.js';
 import { affidavitPdfBuffer } from './citations-affidavit.service.js';
 
@@ -58,7 +58,15 @@ citationsRouter.get('/summary', async (req, res) => {
 // Registered BEFORE GET /:id so "/documents" isn't captured as an :id. Upload a
 // scanned/emailed notice (base64 data URL) → Supabase + CitationDocument(PENDING)
 // for the Fase B OCR worker. No money, no matching here.
-citationsRouter.post('/documents', async (req, res) => {
+// Gated for the SAME reason as /manual-import, which it feeds: the OCR worker
+// hands every uploaded notice to `ingestBatch` (citation-ocr.scheduler.js:80),
+// which posts money tenant-wide. Gating the manual door and leaving this one
+// open would read as covered while the async half of the money path stayed
+// open. It also removes a black hole: a scoped user's upload lands with
+// citationId = null, which the scoped document reads below exclude, so they
+// used to get a 201 for a document they could then never see, retry or
+// download. An explicit 403 is the honest answer.
+citationsRouter.post('/documents', rejectLocationScopedUsers, async (req, res) => {
   try {
     const scope = scopeFor(req);
     const doc = await citationsService.saveDocument({
@@ -141,8 +149,35 @@ citationsRouter.post('/:id/review', async (req, res) => {
   }
 });
 
+/**
+ * Location scoping (2026-07-24). Exact twin of `rejectLocationScopedUsers` in
+ * tolls.routes.js, gating the same class of operation for the same reason:
+ * `ingestBatch` builds a TENANT-WIDE plate map and auto-posts money
+ * (syncCitationCharges, "Fase D") onto matched reservations at ANY branch. A
+ * location-restricted caller importing here creates charges across the whole
+ * tenant and then cannot see what they created — the citation list, detail,
+ * documents and affidavit are all location-scoped.
+ *
+ * Guards BOTH intake doors: POST /manual-import (the synchronous one) and
+ * POST /documents (the asynchronous one — the OCR worker feeds every uploaded
+ * notice to the same `ingestBatch`). Gating only the first would leave the money
+ * path open through the second while looking closed.
+ *
+ * Matching is deliberately tenant-wide (the plate map ignores location so an
+ * import yields the same result whoever runs it), so this cannot be narrowed to
+ * a branch — it is refused instead.
+ */
+function rejectLocationScopedUsers(req, res, next) {
+  if (userAllowedLocationIds(req.user)) {
+    return res.status(403).json({
+      error: 'Citation intake is a tenant-wide operation and is not available for location-restricted accounts',
+    });
+  }
+  next();
+}
+
 // Staff manual entry / OCR upload result — scoped to the caller's tenant.
-citationsRouter.post('/manual-import', async (req, res) => {
+citationsRouter.post('/manual-import', rejectLocationScopedUsers, async (req, res) => {
   try {
     const scope = scopeFor(req);
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];

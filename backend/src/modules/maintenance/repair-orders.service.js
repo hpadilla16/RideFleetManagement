@@ -6,6 +6,7 @@
 // Vehicle.status transitions on open/complete are wired in Fase 4.
 
 import { prisma } from '../../lib/prisma.js';
+import { effectiveLocationIds, scopeAllowedLocationIds } from '../../lib/tenant-scope.js';
 
 function badRequest(msg) { const e = new Error(msg); e.status = 400; throw e; }
 function notFound(msg) { const e = new Error(msg || 'Not found'); e.status = 404; throw e; }
@@ -33,6 +34,25 @@ function tenantWhere(scope) {
   if (scope?.tenantId && scope.tenantId !== '__no_tenant__') return { tenantId: scope.tenantId };
   if (scope?.tenantId === '__no_tenant__') return { tenantId: '__no_tenant__' };
   return {};
+}
+
+/**
+ * Location filter for a by-id RepairOrder lookup (2026-07-24). RepairOrder has a
+ * real `locationId` column, so unlike tolls/citations this needs no relation hop.
+ *
+ * `list()` uses `effectiveLocationIds(query, scope)` because it also honors a
+ * `?locationId` selection; the by-id and mutation paths have no selection to
+ * intersect with, so they use the caller's restriction alone.
+ *
+ * Fail-closed on a null `locationId`: an RO with no location set is invisible to
+ * a scoped caller. `create` defaults locationId to the vehicle's homeLocationId,
+ * so this is only reachable for rows whose vehicle also had no home location.
+ *
+ * Returns {} for unrestricted callers, so it composes into any `where`.
+ */
+function roLocationWhere(scope) {
+  const ids = scopeAllowedLocationIds(scope);
+  return ids ? { locationId: { in: ids } } : {};
 }
 
 const num = (v) => (v == null ? 0 : Number(v) || 0);
@@ -98,7 +118,14 @@ export const repairOrdersService = {
     if (query.status) where.status = String(query.status).toUpperCase();
     if (query.source) where.source = String(query.source).toUpperCase();
     if (query.vehicleId) where.vehicleId = String(query.vehicleId);
-    if (query.locationId) where.locationId = String(query.locationId);
+    // Location scoping (2026-07-23). RepairOrder has a real `locationId`, so the
+    // caller's allowed locations ∩ ?locationId goes straight into the where.
+    // Without this the /maintenance board contradicted its own KPI tile: the
+    // tile (summary(), already scoped) said 3 open ROs while the board under it
+    // listed the whole tenant's 40. `get`, `vehicleHistory` and the mutations
+    // were closed the same way on 2026-07-24 (see roLocationWhere).
+    const effLocIds = effectiveLocationIds(query, scope);
+    if (effLocIds) where.locationId = { in: effLocIds };
     const rows = await prisma.repairOrder.findMany({
       where,
       include: { vehicle: { select: VEHICLE_SELECT }, location: { select: { id: true, code: true, name: true } }, lines: true, damageReports: { select: { id: true } } },
@@ -109,14 +136,14 @@ export const repairOrdersService = {
   },
 
   async get(id, scope = {}) {
-    const ro = await prisma.repairOrder.findFirst({ where: { id: String(id), ...tenantWhere(scope) }, include: DETAIL_INCLUDE });
+    const ro = await prisma.repairOrder.findFirst({ where: { id: String(id), ...tenantWhere(scope), ...roLocationWhere(scope) }, include: DETAIL_INCLUDE });
     if (!ro) notFound('Repair order not found');
     return shape(ro);
   },
 
   async vehicleHistory(vehicleId, scope = {}) {
     const rows = await prisma.repairOrder.findMany({
-      where: { vehicleId: String(vehicleId), ...tenantWhere(scope) },
+      where: { vehicleId: String(vehicleId), ...tenantWhere(scope), ...roLocationWhere(scope) },
       include: { lines: true, location: { select: { id: true, code: true, name: true } }, damageReports: { select: { id: true } } },
       orderBy: { openedAt: 'desc' },
     });
@@ -129,8 +156,21 @@ export const repairOrdersService = {
     if (!tenantId || tenantId === '__no_tenant__') badRequest('tenantId required');
     const vehicleId = String(body.vehicleId || '');
     if (!vehicleId) badRequest('vehicleId required');
-    const vehicle = await prisma.vehicle.findFirst({ where: { id: vehicleId, tenantId }, select: { id: true, mileage: true, homeLocationId: true } });
+    // Location scoping (2026-07-24). A scoped caller may only open an RO on a
+    // vehicle homed at one of their locations — otherwise they could create
+    // (and, through the roll-up below, mutate damages on) another branch's car.
+    const allowedLoc = scopeAllowedLocationIds(scope);
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { id: vehicleId, tenantId, ...(allowedLoc ? { homeLocationId: { in: allowedLoc } } : {}) },
+      select: { id: true, mileage: true, homeLocationId: true },
+    });
     if (!vehicle) notFound('Vehicle not found');
+    // Reject an out-of-scope explicit locationId up front. Without this the row
+    // would be created and then vanish behind the scoped `get()` below — a 404
+    // on a successful write, with an orphan RO left at the other branch.
+    if (allowedLoc && body.locationId && !allowedLoc.includes(String(body.locationId))) {
+      badRequest('locationId is outside your assigned locations');
+    }
 
     const source = ['SCHEDULED', 'DAMAGE', 'INCIDENT', 'MANUAL'].includes(String(body.source).toUpperCase())
       ? String(body.source).toUpperCase() : 'MANUAL';
@@ -173,11 +213,20 @@ export const repairOrdersService = {
   },
 
   async update(id, body = {}, scope = {}) {
-    const ro = await prisma.repairOrder.findFirst({ where: { id: String(id), ...tenantWhere(scope) }, select: { id: true, status: true } });
+    const ro = await prisma.repairOrder.findFirst({ where: { id: String(id), ...tenantWhere(scope), ...roLocationWhere(scope) }, select: { id: true, status: true } });
     if (!ro) notFound('Repair order not found');
     const data = {};
     for (const k of ['vendor', 'poNumber', 'notes']) if (body[k] !== undefined) data[k] = body[k] || null;
-    if (body.locationId !== undefined) data.locationId = body.locationId || null;
+    if (body.locationId !== undefined) {
+      // A scoped caller must not push an RO out of their own scope (including to
+      // null), which would silently hand it to another branch and 404 the
+      // `get()` on the way out.
+      const allowedLoc = scopeAllowedLocationIds(scope);
+      if (allowedLoc && !(body.locationId && allowedLoc.includes(String(body.locationId)))) {
+        badRequest('locationId is outside your assigned locations');
+      }
+      data.locationId = body.locationId || null;
+    }
     if (body.odometerAtOpen !== undefined) data.odometerAtOpen = body.odometerAtOpen == null ? null : Number(body.odometerAtOpen);
     if (body.status && ['OPEN', 'IN_PROGRESS'].includes(String(body.status).toUpperCase())) data.status = String(body.status).toUpperCase();
     await prisma.repairOrder.update({ where: { id: ro.id }, data });
@@ -186,7 +235,7 @@ export const repairOrdersService = {
 
   // ── Lines ──
   async addLine(id, body = {}, scope = {}) {
-    const ro = await prisma.repairOrder.findFirst({ where: { id: String(id), ...tenantWhere(scope) }, select: { id: true } });
+    const ro = await prisma.repairOrder.findFirst({ where: { id: String(id), ...tenantWhere(scope), ...roLocationWhere(scope) }, select: { id: true } });
     if (!ro) notFound('Repair order not found');
     const type = ['PART', 'LABOR', 'OTHER', 'TAX'].includes(String(body.type).toUpperCase()) ? String(body.type).toUpperCase() : 'PART';
     const qty = body.qty != null ? Number(body.qty) : 1;
@@ -198,7 +247,7 @@ export const repairOrdersService = {
   },
 
   async deleteLine(id, lineId, scope = {}) {
-    const ro = await prisma.repairOrder.findFirst({ where: { id: String(id), ...tenantWhere(scope) }, select: { id: true } });
+    const ro = await prisma.repairOrder.findFirst({ where: { id: String(id), ...tenantWhere(scope), ...roLocationWhere(scope) }, select: { id: true } });
     if (!ro) notFound('Repair order not found');
     await prisma.repairOrderLine.deleteMany({ where: { id: String(lineId), repairOrderId: ro.id } });
     return this.get(ro.id, scope);
@@ -207,7 +256,7 @@ export const repairOrdersService = {
   // Complete an RO → mark its grouped damages FIXED (reusing their repair photo if present).
   // Vehicle.status transition is wired in Fase 4.
   async complete(id, scope = {}) {
-    const ro = await prisma.repairOrder.findFirst({ where: { id: String(id), ...tenantWhere(scope) }, include: { damageReports: { select: { id: true, fixedPhotoJson: true, status: true } } } });
+    const ro = await prisma.repairOrder.findFirst({ where: { id: String(id), ...tenantWhere(scope), ...roLocationWhere(scope) }, include: { damageReports: { select: { id: true, fixedPhotoJson: true, status: true } } } });
     if (!ro) notFound('Repair order not found');
     if (ro.status === 'COMPLETED') return this.get(ro.id, scope);
     if (ro.status === 'CANCELLED') badRequest('Cannot complete a cancelled repair order');
@@ -225,7 +274,7 @@ export const repairOrdersService = {
   },
 
   async cancel(id, scope = {}) {
-    const ro = await prisma.repairOrder.findFirst({ where: { id: String(id), ...tenantWhere(scope) }, select: { id: true, status: true, vehicleId: true } });
+    const ro = await prisma.repairOrder.findFirst({ where: { id: String(id), ...tenantWhere(scope), ...roLocationWhere(scope) }, select: { id: true, status: true, vehicleId: true } });
     if (!ro) notFound('Repair order not found');
     if (ro.status !== 'COMPLETED') {
       await prisma.repairOrder.update({ where: { id: ro.id }, data: { status: 'CANCELLED' } });
@@ -241,7 +290,19 @@ export const repairOrdersService = {
     const ids = Array.isArray(body.damageReportIds) ? body.damageReportIds.map(String) : [];
     if (!ids.length) badRequest('damageReportIds required');
     const tenantId = scope?.tenantId;
-    const damages = await prisma.vehicleDamageReport.findMany({ where: { id: { in: ids }, ...(tenantId && tenantId !== '__no_tenant__' ? { tenantId } : {}) }, select: { id: true, vehicleId: true } });
+    // Location scoping (2026-07-24) hops through the damaged vehicle — a
+    // VehicleDamageReport has no location of its own. `create` below re-checks
+    // the vehicle anyway, so this mainly keeps the 404 honest instead of
+    // failing later with a confusing "Vehicle not found".
+    const allowedLoc = scopeAllowedLocationIds(scope);
+    const damages = await prisma.vehicleDamageReport.findMany({
+      where: {
+        id: { in: ids },
+        ...(tenantId && tenantId !== '__no_tenant__' ? { tenantId } : {}),
+        ...(allowedLoc ? { vehicle: { is: { homeLocationId: { in: allowedLoc } } } } : {}),
+      },
+      select: { id: true, vehicleId: true },
+    });
     if (!damages.length) notFound('Damage reports not found');
     const vehicleId = damages[0].vehicleId;
     if (damages.some((d) => d.vehicleId !== vehicleId)) badRequest('All damages must be on the same vehicle');
