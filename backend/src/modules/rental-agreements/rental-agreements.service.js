@@ -33,6 +33,8 @@ import { reservationProgramWhereForScope } from '../../lib/program-category.js';
 import { resolveCatalogEntry } from '../../lib/commission-catalog.js';
 import { spinClient } from '../payment-gateway/spin-client.js';
 import { iposTransactClient } from '../payment-gateway/ipos-transact-client.js';
+import { paymentOpsQueue } from '../payment-gateway/payment-ops-queue.service.js';
+import logger from '../../lib/logger.js';
 
 // Tenant Spin config loader — mirrors the helper in spin-charge.service.js.
 // Tenant.spin* columns don't exist on the Tenant model today; the Spin
@@ -49,6 +51,117 @@ async function loadTenantSpinConfig(tenantId) {
   } catch {
     return {};
   }
+}
+
+/**
+ * ⚠️ MONEY (2026-07-25, QA MAJOR). The one window in spinReauthDepositHold
+ * where a customer can silently end up with NO deposit hold at all.
+ *
+ * spinReauthDepositHold is: void-the-old-hold → pre-auth-the-new-one → persist.
+ * Until today's voidByRrn contract fix (it was sending uppercase `RRN` and
+ * amount '0'), step 1 never actually succeeded at the gateway — verified in
+ * prod: zero successful release/re-auth rows, ever. So a declined re-auth was
+ * harmless: the old hold stayed live and the merchant stayed covered.
+ *
+ * Now that the void really works, that inverts. Void succeeds → re-auth is
+ * declined (a routine card event) → the throw fires BEFORE the persist step, so
+ * the agreement is left pointing at a hold that no longer exists with
+ * `depositHoldVoidedAt` still null. Both the DB and the staff panel
+ * (`depositHoldActive = depositHoldId && !depositHoldVoidedAt`) claim a live
+ * hold while the card carries nothing. Silently unprotected.
+ *
+ * So before the error propagates: persist the truth about the OLD hold and make
+ * the gap loud. NOTHING in here may throw — the agent must see the real gateway
+ * error, never a bookkeeping failure that happened while recording it.
+ */
+async function recordDepositHoldVoidedWithoutReplacement(agreement, {
+  voidedRef = null, amount = null, error = null, actorUserId = null,
+} = {}) {
+  // No GATEWAY void happened — nothing attempted, a swallowed failure, or the
+  // MANUAL- bookkeeping shortcut (no gateway hold exists to lose). The old hold
+  // is untouched, so there is nothing to correct. Never stamp on an assumption:
+  // that is exactly the false-stamp bug beta.343 removed from the nightly
+  // sweep, where `depositHoldVoidedAt` was set without any gateway call.
+  if (!voidedRef) return;
+
+  const errMessage = error?.message || String(error || 'iPOSpays re-auth failed');
+
+  try {
+    // The SAME field triple spinReleaseDepositHold writes after a successful
+    // gateway void — because that is exactly what happened here; the release
+    // just has no replacement. `depositHoldId` is deliberately RETAINED: it is
+    // the RRN staff and the audit trail need to trace what was voided, and the
+    // paired `depositHoldVoidedAt` is what every read path (the payments panel,
+    // the nightly stale-preauth sweep) uses to know the hold is dead.
+    // `securityDepositCaptured:false` + `securityDepositReleasedAt` are what
+    // stop the Security Deposit block still rendering "Authorized".
+    await prisma.rentalAgreement.update({
+      where: { id: agreement.id },
+      data: {
+        depositHoldVoidedAt: new Date(),
+        securityDepositReleasedAt: new Date(),
+        securityDepositCaptured: false,
+      },
+    });
+  } catch (err) {
+    logger.error('[spin-reauth] FAILED to stamp a voided deposit hold — the record still claims a live hold', {
+      agreementId: agreement.id, voidedRef, err: err.message,
+    });
+  }
+
+  try {
+    if (!agreement.tenantId) {
+      // paymentOpsQueue.raise() requires a tenant; a flagless gap must still be
+      // loud somewhere rather than disappearing into a swallowed catch.
+      logger.error('[spin-reauth] deposit hold voided with no replacement and no tenantId — cannot raise a staff flag', {
+        agreementId: agreement.id, voidedRef,
+      });
+    } else {
+      await paymentOpsQueue.raise({
+        tenantId: agreement.tenantId,
+        // Reusing an existing kind on purpose — this ship stays migration-free.
+        // The old hold was surrendered as one leg of a replace that then failed,
+        // so the outstanding work is a compensating action that did not
+        // complete. STRANDED_DEPOSIT_HOLD is the OPPOSITE problem ("hold still
+        // live on the card") and would send staff to void something already
+        // voided; ORPHAN_PAYMENT/CARD_ON_FILE_FAILED/NAME_MISMATCH_REVIEW all
+        // presuppose money that moved, and no money moved here.
+        kind: 'ROLLBACK_FAILED',
+        // A gateway call WAS made and refused — never NOT_ATTEMPTED.
+        status: 'GATEWAY_FAILED',
+        reservationId: agreement.reservationId || null,
+        rentalAgreementId: agreement.id,
+        gatewayRef: voidedRef,
+        amount,
+        note: `Deposit hold ${voidedRef} was VOIDED at the gateway but its replacement `
+          + `$${Number(amount || 0).toFixed(2)} re-auth failed. There is NO deposit hold on this `
+          + 'rental — place a new hold on the card.',
+        lastError: errMessage,
+      });
+    }
+  } catch (err) {
+    logger.error('[spin-reauth] FAILED to raise the payment ops flag for a released deposit hold', {
+      agreementId: agreement.id, voidedRef, err: err.message,
+    });
+  }
+
+  try {
+    await prisma.auditLog.create({
+      data: {
+        tenantId: agreement.tenantId || null,
+        reservationId: agreement.reservationId,
+        actorUserId: actorUserId || null,
+        action: 'UPDATE',
+        reason: 'Spin deposit hold voided but the re-auth failed — no hold in place',
+        metadata: JSON.stringify({
+          voidedRef,
+          attemptedAmount: amount,
+          previousHoldId: agreement.depositHoldId || null,
+          error: errMessage,
+        }),
+      },
+    });
+  } catch {}
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -4642,6 +4755,12 @@ export const rentalAgreementsService = {
     //    by RRN first. Doing it in two steps so a void failure doesn't
     //    kill the new auth — the agent can release manually if needed.
     let voidedOldRef = null;
+    // Set ONLY when the gateway APPROVED a real void — i.e. the customer's hold
+    // is genuinely gone and the merchant is uncovered until the new one lands.
+    // The MANUAL- shortcut below (bookkeeping-only; no gateway hold exists) and
+    // a swallowed void failure both leave this null on purpose. Kept separate
+    // from `voidedOldRef`, which only feeds the human-readable note/audit text.
+    let gatewayVoidedRef = null;
     if (agreement.depositHoldId && !agreement.depositHoldVoidedAt) {
       const isManual = String(agreement.depositHoldId).startsWith('MANUAL-');
       if (!isManual) {
@@ -4651,7 +4770,10 @@ export const rentalAgreementsService = {
             agreementNumber: agreement.agreementNumber || agreement.id,
           }, tenantConfig);
           const voidNorm = iposTransactClient.normalizeResponse(voidResponse);
-          if (voidNorm.approved) voidedOldRef = voidNorm.rrn || agreement.depositHoldId;
+          if (voidNorm.approved) {
+            voidedOldRef = voidNorm.rrn || agreement.depositHoldId;
+            gatewayVoidedRef = voidedOldRef;
+          }
         } catch {
           // Swallow — surfaced via the new hold's audit log so the agent
           // can chase the orphan hold via the iPOSpays portal if needed.
@@ -4662,16 +4784,33 @@ export const rentalAgreementsService = {
     }
 
     // 2. New pre-auth via stored iPOS Token (CNP, no customer interaction).
-    const authResponse = await iposTransactClient.preAuthDeposit({
-      amount,
-      agreementNumber: agreement.agreementNumber || agreement.id,
-      cardToken: agreement.cardOnFileToken,
-      customer: customerInfo,
-    }, tenantConfig);
+    //
+    // ⚠️ MONEY: if step 1 really voided the old hold, ANY failure here —
+    // declined OR thrown (network/gateway error) — leaves the customer with no
+    // hold at all. Record that truth and flag it for staff BEFORE the error
+    // propagates, and let the original error through untouched so the failure
+    // stays loud for the agent.
+    let norm;
+    try {
+      const authResponse = await iposTransactClient.preAuthDeposit({
+        amount,
+        agreementNumber: agreement.agreementNumber || agreement.id,
+        cardToken: agreement.cardOnFileToken,
+        customer: customerInfo,
+      }, tenantConfig);
 
-    const norm = iposTransactClient.normalizeResponse(authResponse);
-    if (!norm.approved) {
-      throw new Error(norm.errMessage || norm.message || 'iPOSpays re-auth declined');
+      norm = iposTransactClient.normalizeResponse(authResponse);
+      if (!norm.approved) {
+        throw new Error(norm.errMessage || norm.message || 'iPOSpays re-auth declined');
+      }
+    } catch (err) {
+      await recordDepositHoldVoidedWithoutReplacement(agreement, {
+        voidedRef: gatewayVoidedRef,
+        amount,
+        error: err,
+        actorUserId,
+      });
+      throw err;
     }
 
     // Store the RRN — Transact uses RRN as the void key.

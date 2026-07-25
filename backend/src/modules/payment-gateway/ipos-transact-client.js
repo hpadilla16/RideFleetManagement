@@ -435,6 +435,30 @@ export const iposTransactClient = {
    */
   async voidByRrn({ rrn, agreementNumber }, tenantConfig = {}) {
     if (!rrn) throw new Error('voidByRrn requires rrn');
+    // ⚠️ CONTRACT-ALIGNED 2026-07-25 (MONEY). Two deltas were fixed against
+    // https://uatdocs.ipospays.tech/ipos-transact/apidocs :
+    //
+    //   1. The key is LOWERCASE `rrn`. Every doc sample and every validation
+    //      error string uses `transactionRequest.rrn` ("RRN cannot be empty").
+    //      We were sending uppercase `RRN`; the docs never state that the
+    //      binding is case-insensitive, so it was very likely dropped —
+    //      producing an "RRN cannot be empty" rejection on the first real call.
+    //   2. `amount` is EMPTY for a full void. The docs explicitly call out
+    //      "Do not set to 0", and the Jul-2026 release note removed amount
+    //      validation so an empty amount means "void the whole thing". `'0'`
+    //      is the single value the docs single out as wrong — and it is what
+    //      we were sending.
+    //
+    // This path had NEVER executed against the gateway (verified 2026-07-25:
+    // zero release/re-auth audit rows in prod), so there is no "it works
+    // today" evidence to weigh against the documented contract — this is the
+    // beta.155 shape exactly: a money path that looks fine only because
+    // nothing ever ran it. Pinned by ipos-transact-client.test.mjs.
+    //
+    // applySteamSettingTipFeeTax is NOT in the void docs, but it is sent on
+    // preAuthDeposit/chargeWithToken, and preAuthDeposit HAS succeeded in prod
+    // (383 gateway-issued holds), so the gateway demonstrably tolerates it.
+    // Kept for consistency with its siblings rather than dropped blind.
     const body = {
       merchantAuthentication: {
         merchantId: '',
@@ -442,8 +466,9 @@ export const iposTransactClient = {
       },
       transactionRequest: {
         transactionType: 2,
-        amount: '0',
-        RRN: String(rrn),
+        // Empty (never '0') = full void, per the documented sample.
+        amount: '',
+        rrn: String(rrn),
         applySteamSettingTipFeeTax: false,
       },
       preferences: { eReceipt: false },

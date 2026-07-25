@@ -124,15 +124,36 @@ describe('iPOSpays Transact client — request shape', () => {
     assert.equal(lastRequest.body.preferences.requestCardToken, false);
   });
 
-  it('voidByRrn uses transactionType 2 and the RRN field', async () => {
+  // CONTRACT PIN (MONEY, 2026-07-25). This request had never executed against
+  // the real gateway, so nothing but this test stops it drifting back to a
+  // shape the docs reject. Asserts the SERIALIZED body, because the bug being
+  // guarded (uppercase `RRN`, amount '0') is invisible to a shape-only check.
+  it('voidByRrn matches the documented contract: lowercase rrn, empty amount, type 2', async () => {
     await iposTransactClient.voidByRrn({
       rrn: '123456789012',
       agreementNumber: 'RA-2026-0001',
     });
-    assert.equal(lastRequest.body.transactionRequest.transactionType, 2);
-    assert.equal(lastRequest.body.transactionRequest.RRN, '123456789012');
-    assert.equal(lastRequest.body.transactionRequest.amount, '0');
+    const tr = lastRequest.body.transactionRequest;
+
+    assert.equal(tr.transactionType, 2, 'void is transactionType 2');
+    assert.equal(tr.rrn, '123456789012', 'the key MUST be lowercase `rrn` (docs + validation errors)');
+    assert.equal(tr.amount, '', 'full void sends an EMPTY amount — docs explicitly say "Do not set to 0"');
     assert.equal(lastRequest.body.preferences.eReceipt, false);
+
+    // The old, undocumented shape must never come back.
+    const serialized = JSON.stringify(lastRequest.body);
+    assert.ok(!Object.prototype.hasOwnProperty.call(tr, 'RRN'), 'uppercase RRN must not be sent');
+    assert.ok(!/"RRN"/.test(serialized), 'uppercase "RRN" must not appear anywhere in the body');
+    assert.ok(!/"amount":"0"/.test(serialized), 'amount "0" is the one value the docs call out as wrong');
+
+    // merchantAuthentication is required by the contract and injected downstream.
+    assert.ok(lastRequest.body.merchantAuthentication, 'merchantAuthentication block required');
+    assert.ok(
+      String(lastRequest.body.merchantAuthentication.transactionReferenceId || '').length > 0,
+      'transactionReferenceId required',
+    );
+    // 904 FORMAT ERROR lesson: the reference must stay strictly alphanumeric, <= 20.
+    assert.match(lastRequest.body.merchantAuthentication.transactionReferenceId, /^[A-Za-z0-9]{1,20}$/);
   });
 
   it('preAuth includes Auto Rental L3Data with PurchaseIdFormatCode "3"', async () => {

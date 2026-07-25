@@ -88,8 +88,34 @@ test('reference helpers: build/classify only known prefixes', () => {
 // M3 — the filtered unique index must actually exist in a reachable database
 // ---------------------------------------------------------------------------
 
-test('M3: the partial unique index exists in the database (Prisma cannot see it)', async (t) => {
+/**
+ * Resolve the prisma client ONLY when a DATABASE_URL is configured.
+ *
+ * CI regression (beta.343): guarding just the QUERY was not enough. With no
+ * DATABASE_URL at all — CI's real condition, since this step declares no
+ * `env:` block — the PrismaClient CONSTRUCTOR throws
+ * ("Invalid value undefined for datasource \"db\"") at import time, before any
+ * connect, so the try/catch around the query never ran and the test FAILED
+ * instead of skipping. Locally the failure was invisible because a
+ * DATABASE_URL was present (pointing at a dead port), which constructs fine
+ * and only fails on connect.
+ *
+ * So the env check must come BEFORE the dynamic import. Returns null when
+ * there is nothing to connect to.
+ */
+async function prismaIfConfigured() {
+  if (!String(process.env.DATABASE_URL || '').trim()) return null;
   const { prisma } = await import('./prisma.js');
+  return prisma;
+}
+
+const NO_DB_SKIP = 'no DATABASE_URL configured — cannot verify the index exists. '
+  + 'This assertion is the ONLY guard that the payment idempotency floor still exists; '
+  + 'run it against a migrated database (CI unit lane has no DB by design).';
+
+test('M3: the partial unique index exists in the database (Prisma cannot see it)', async (t) => {
+  const prisma = await prismaIfConfigured();
+  if (!prisma) { t.skip(NO_DB_SKIP); return; }
 
   let rows;
   try {
@@ -113,7 +139,8 @@ test('M3: the partial unique index exists in the database (Prisma cannot see it)
 });
 
 test('M3: KioskSession.paymentIntentRef is UNIQUE in the database (money-path binding)', async (t) => {
-  const { prisma } = await import('./prisma.js');
+  const prisma = await prismaIfConfigured();
+  if (!prisma) { t.skip(NO_DB_SKIP); return; }
   let rows;
   try {
     rows = await prisma.$queryRawUnsafe(
