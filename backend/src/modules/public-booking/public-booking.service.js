@@ -10,6 +10,11 @@ import { sendEmail } from '../../lib/mailer.js';
 import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { money } from '../../lib/money.js';
 import { publicVehicleProfile } from './vehicle-feature-catalog.js';
+import {
+  parseDepositRuleDecision,
+  decideIncludedMilesPerDay,
+  UNLIMITED_MILES,
+} from '../../lib/deposit-rules.js';
 import { maybeUploadCustomerDocument } from '../customers/customer-documents.js';
 import crypto from 'node:crypto';
 
@@ -1833,7 +1838,12 @@ async function _findReservationBySignatureToken(token, { allowSigned = false } =
         select: { firstName: true, lastName: true, email: true },
       },
       vehicle: { select: { year: true, make: true, model: true, color: true } },
-      vehicleType: { select: { label: true } },
+      vehicleType: {
+        select: { label: true, unlimitedMileage: true, freeMilesPerDay: true },
+      },
+      pricingSnapshot: {
+        select: { securityDepositAmount: true, securityDepositRuleJson: true },
+      },
       pickupLocation: { select: { name: true } },
       returnLocation: { select: { name: true } },
       carSharingTrip: { select: { tripCode: true } },
@@ -1897,10 +1907,32 @@ function _formatAgreementResponse(reservation) {
 }
 
 function _deriveKeyTerms(reservation) {
-  const pickupAt = reservation.pickupAt;
   const returnAt = reservation.returnAt;
-  const hasMileageCap = Number(reservation.dailyMileageCap || 0) > 0;
-  const depositAmount = Number(reservation.securityDepositAmount || 300);
+  const snapshot = reservation.pricingSnapshot;
+
+  // Deposit comes from the frozen pricing snapshot — the amount the payment
+  // flow actually authorizes. When the snapshot is absent or carries no
+  // deposit, the card shows NO figure: quoting a made-up dollar amount to
+  // a customer is worse than quoting none (2026-05-29 precedent — the $500
+  // silent default removal).
+  const depositAmount = Number(snapshot?.securityDepositAmount || 0);
+
+  // Mileage: the frozen local/non-local rule decision wins (it is the same
+  // decision the deposit was based on), then the vehicle type's own
+  // mileage profile. Mirrors resolveIncludedMilesPerDay minus the 200
+  // billing fallback — display shows nothing rather than a number the
+  // listing never promised.
+  const decision = parseDepositRuleDecision(snapshot?.securityDepositRuleJson);
+  let milesPerDay = decideIncludedMilesPerDay({ decision });
+  if (milesPerDay == null) {
+    const vehicleType = reservation.vehicleType;
+    if (vehicleType?.unlimitedMileage) {
+      milesPerDay = UNLIMITED_MILES;
+    } else if (Number(vehicleType?.freeMilesPerDay || 0) > 0) {
+      milesPerDay = Number(vehicleType.freeMilesPerDay);
+    }
+  }
+  const isUnlimited = milesPerDay === UNLIMITED_MILES;
 
   const returnFmt = returnAt
     ? new Date(returnAt).toLocaleString('en-US', {
@@ -1917,15 +1949,20 @@ function _deriveKeyTerms(reservation) {
     },
     {
       icon: 'road',
-      title: hasMileageCap
-        ? `${reservation.dailyMileageCap} miles/day included`
-        : 'Mileage included per listing',
-      detail:
-        'Overage billed at $0.45/mi against the Renter\'s card at return.',
+      title: isUnlimited
+        ? 'Unlimited mileage'
+        : milesPerDay != null
+          ? `${milesPerDay} miles/day included`
+          : 'Mileage included per listing',
+      detail: isUnlimited
+        ? 'No mileage cap applies to this rental.'
+        : 'Overage billed at $0.45/mi against the Renter\'s card at return.',
     },
     {
       icon: 'money',
-      title: `$${depositAmount.toFixed(0)} security deposit`,
+      title: depositAmount > 0
+        ? `$${depositAmount.toFixed(0)} security deposit`
+        : 'Security deposit',
       detail:
         'Authorized on the card at pickup, released within 3 business days after return.',
     },
