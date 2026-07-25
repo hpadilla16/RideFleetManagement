@@ -363,6 +363,9 @@ export const EMPTY_COMMISSION_PLAN = {
   tenantId: '',
   name: '',
   isActive: true,
+  // '' = standard employees; 'VIRTUAL_AGENT' = plan for virtual agents
+  // (percent of sold items — services + insurance — catalog never consulted).
+  personKind: '',
   defaultValueType: '',
   defaultPercentValue: '',
   defaultFixedAmount: ''

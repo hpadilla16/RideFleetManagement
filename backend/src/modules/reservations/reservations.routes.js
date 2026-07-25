@@ -1156,7 +1156,9 @@ reservationsRouter.post('/', async (req, res, next) => {
       paymentStatus: requireDeposit ? 'PENDING' : (req.body?.paymentStatus || 'PENDING'),
       notes,
       dailyRate: quote.dailyRate,
-      estimatedTotal: finalEstimate
+      estimatedTotal: finalEstimate,
+      // LAX #4: originator attribution — server-derived, never client-sent.
+      createdByUserId: req.user?.sub || req.user?.id || null
     }, scopeFor(req));
 
     await withTenantSchema(req.user.tenantId, (db) => db.reservationPricingSnapshot.upsert({

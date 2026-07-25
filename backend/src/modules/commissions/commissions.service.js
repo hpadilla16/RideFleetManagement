@@ -10,6 +10,13 @@ function normalizeDecimal(value, fallback = null) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+// LAX #4: plan targeting. Only 'VIRTUAL_AGENT' is meaningful; everything
+// else (including 'STANDARD') stores null = standard employees, so the
+// sync's standard-plan resolution stays a simple null/not-VIRTUAL_AGENT check.
+function normalizePlanPersonKind(value) {
+  return String(value || '').trim().toUpperCase() === 'VIRTUAL_AGENT' ? 'VIRTUAL_AGENT' : null;
+}
+
 function monthKey(value = new Date()) {
   const d = new Date(value);
   const year = d.getFullYear();
@@ -49,6 +56,10 @@ export const commissionsService = {
         tenantId: scope?.tenantId || data.tenantId || null,
         name: String(data.name || '').trim(),
         isActive: data.isActive ?? true,
+        // LAX #4: 'VIRTUAL_AGENT' targets the plan at virtual agents
+        // (percent of sold items, catalog never consulted). Anything else
+        // normalizes to null = standard employees.
+        personKind: normalizePlanPersonKind(data.personKind),
         defaultValueType: data.defaultValueType || null,
         defaultPercentValue: normalizeDecimal(data.defaultPercentValue),
         defaultFixedAmount: normalizeDecimal(data.defaultFixedAmount)
@@ -70,6 +81,7 @@ export const commissionsService = {
       where: { id },
       data: {
         ...data,
+        personKind: patch.personKind !== undefined ? normalizePlanPersonKind(patch.personKind) : undefined,
         defaultPercentValue: patch.defaultPercentValue !== undefined ? normalizeDecimal(patch.defaultPercentValue) : undefined,
         defaultFixedAmount: patch.defaultFixedAmount !== undefined ? normalizeDecimal(patch.defaultFixedAmount) : undefined
       }

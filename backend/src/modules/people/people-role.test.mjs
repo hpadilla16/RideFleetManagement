@@ -21,3 +21,9 @@ test('hosts can never be ADMIN (capped to OPS/AGENT)', () => {
 test('SUPER_ADMIN is not assignable via the module', () => {
   assert.equal(f('EMPLOYEE', 'SUPER_ADMIN'), 'AGENT');
 });
+test('virtual agents are ALWAYS AGENT — the kind never grants authorization (LAX #4)', () => {
+  assert.equal(f('VIRTUAL_AGENT', undefined), 'AGENT');
+  assert.equal(f('VIRTUAL_AGENT', 'ADMIN'), 'AGENT');
+  assert.equal(f('VIRTUAL_AGENT', 'OPS'), 'AGENT');
+  assert.equal(f('VIRTUAL_AGENT', 'SUPER_ADMIN'), 'AGENT');
+});

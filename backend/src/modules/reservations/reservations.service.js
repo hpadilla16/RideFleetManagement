@@ -1692,6 +1692,8 @@ export const reservationsService = {
         sourceRef: data.sourceRef ?? null,
         status: data.status ?? 'NEW',
         bookingChannel: data.bookingChannel ?? 'STAFF',
+        // LAX #4: originator attribution (drives the virtual-agent commission).
+        createdByUserId: data.createdByUserId ?? null,
         workflowMode: data.workflowMode ?? 'RENTAL',
         loanerBillingMode: data.loanerBillingMode ?? null,
         repairOrderNumber: data.repairOrderNumber ?? null,

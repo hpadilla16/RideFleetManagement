@@ -123,6 +123,7 @@ function metricSummary(people) {
     { label: 'People', value: people.length },
     { label: 'Admins', value: people.filter((row) => row.personType === 'ADMIN').length },
     { label: 'Employees', value: people.filter((row) => row.personType === 'EMPLOYEE').length },
+    { label: 'Virtual Agents', value: people.filter((row) => row.personType === 'VIRTUAL_AGENT').length },
     { label: 'Hosts', value: people.filter((row) => row.personType === 'HOST').length },
     { label: 'Login Enabled', value: people.filter((row) => row.hasLogin).length },
     { label: 'Profile Only', value: people.filter((row) => !row.hasLogin).length }
@@ -139,6 +140,7 @@ function personStatusClass(status) {
 function personTypeSummary(personType) {
   if (personType === 'ADMIN') return 'Tenant leaders with access and oversight.';
   if (personType === 'HOST') return 'Supply-side partner with optional login and payouts.';
+  if (personType === 'VIRTUAL_AGENT') return 'Remote seller — earns a percent of the services and insurance they sell on reservations they originate.';
   return 'Operations and sales teammate inside the tenant.';
 }
 
@@ -557,6 +559,7 @@ function Inner({ token, me, logout }) {
                 >
                   <option value="ADMIN">ADMIN</option>
                   <option value="EMPLOYEE">EMPLOYEE</option>
+                  <option value="VIRTUAL_AGENT">VIRTUAL AGENT</option>
                   <option value="HOST">HOST</option>
                 </select>
               </div>

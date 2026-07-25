@@ -236,6 +236,13 @@ enum EmployeeProgramScope {
   BOTH
 }
 
+// 2026-07-25 (LAX #4): persisted person kind. VIRTUAL_AGENT = remote seller,
+// auth role stays AGENT; drives commission-plan resolution only.
+enum EmployeePersonKind {
+  STANDARD
+  VIRTUAL_AGENT
+}
+
 enum ListingStatus {
   DRAFT
   PUBLISHED
@@ -1286,6 +1293,12 @@ model Reservation {
 
   bookingChannel String @default("STAFF")
 
+  // 2026-07-25 (LAX #4, QA B1): WHO originated this reservation (staff create
+  // route stamps req.user). Soft reference (no FK churn on User). Read at
+  // agreement creation to seed salesOwnerUserId when the originator is a
+  // VIRTUAL_AGENT — the attribution the commission sync pays the VA's 1% on.
+  createdByUserId String?
+
   // Structured prepaid signal for franchise imports that carry a prepaid MIX
   // (NU Car Rentals: PP/OP = prepaid, blank Code = pay-at-destination). Stamped
   // at promotion from ExternalReservation.isPrepaid. NULL for every other source
@@ -1748,6 +1761,12 @@ model User {
   // BOTH = no restriction (default, zero behavior change). ADMIN/SUPER_ADMIN
   // always bypass (see userProgramScope). Composes with locationIds.
   programScope     EmployeeProgramScope @default(BOTH)
+  // Person kind (2026-07-25, LAX meeting #4): VIRTUAL_AGENT sells remotely
+  // (auth role stays AGENT — UserRole is load-bearing for permissions) and
+  // earns a PERCENT-of-sold-items commission (services + insurance) on the
+  // agreements they originate, computed alongside — never instead of — the
+  // checkout employee's commission. STANDARD = zero behavior change.
+  personKind       EmployeePersonKind @default(STANDARD)
   // VozIA service integration (2026-07-03): machine identity + token
   // versioning. isServiceAccount gates the default-deny endpoint allowlist
   // (lib/service-account-allowlist.js) and the tv-claim check in requireAuth;
@@ -2322,6 +2341,12 @@ model CommissionPlan {
   tenant              Tenant?              @relation(fields: [tenantId], references: [id])
   name                String
   isActive            Boolean              @default(true)
+  // 2026-07-25 (LAX #4): which person kind this plan targets. NULL = standard
+  // employees (legacy behavior: catalog + rules). 'VIRTUAL_AGENT' = resolved
+  // by the sync for virtual agents: defaultPercentValue applied to SOLD-ITEM
+  // charges only (services + insurance, never taxes/fees/deposits); the
+  // flat-rate SERVICE_CATALOG is never consulted for these plans.
+  personKind          String?
   defaultValueType    CommissionValueType?
   defaultPercentValue Decimal?             @db.Decimal(5, 2)
   defaultFixedAmount  Decimal?             @db.Decimal(10, 2)

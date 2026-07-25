@@ -31,6 +31,7 @@ import {
 import { userProgramScope } from '../../lib/tenant-scope.js';
 import { reservationProgramWhereForScope } from '../../lib/program-category.js';
 import { resolveCatalogEntry } from '../../lib/commission-catalog.js';
+import { isSoldItemCharge, SERVICE_CHARGE_SOURCES } from '../../lib/sold-items.js';
 import { spinClient } from '../payment-gateway/spin-client.js';
 import { iposTransactClient } from '../payment-gateway/ipos-transact-client.js';
 import { paymentOpsQueue } from '../payment-gateway/payment-ops-queue.service.js';
@@ -1571,6 +1572,54 @@ function calculateCommissionLine({ charge, rule, plan, appliedFixedAgreementRule
   };
 }
 
+// 2026-07-25 (LAX #4) — virtual-agent commission lines. Pure so the money
+// math is unit-testable. The rule Hector gave: a virtual agent earns the
+// plan's percent of EVERYTHING they sell — additional services (all four
+// source spellings) + insurance — excluding taxes, fees and deposits. The
+// flat-rate SERVICE_CATALOG is deliberately NOT consulted: it would
+// short-circuit the percent (its entries win by design for standard
+// employees), and virtual-agent economics are percent-based.
+export function virtualAgentCommissionLines(charges = [], plan = null) {
+  if (String(plan?.defaultValueType || '').toUpperCase() !== 'PERCENT') return [];
+  const percent = Number(plan?.defaultPercentValue);
+  if (!Number.isFinite(percent) || !(percent > 0)) return [];
+  return (Array.isArray(charges) ? charges : [])
+    .filter(isSoldItemCharge)
+    .map((charge) => ({
+      rentalAgreementChargeId: charge.id || null,
+      serviceId: String(charge?.source || '').toUpperCase() === 'ADDITIONAL_SERVICE' && charge?.sourceRefId
+        ? String(charge.sourceRefId)
+        : null,
+      description: String(charge?.name || 'Line Item'),
+      quantity: Number(charge?.quantity || 1),
+      lineRevenue: roundMoney(charge?.total || 0),
+      valueType: 'PERCENT',
+      percentValue: percent,
+      fixedAmount: null,
+      commissionAmount: roundMoney(Number(charge?.total || 0) * (percent / 100))
+    }));
+}
+
+// Resolve the plan a VIRTUAL_AGENT earns under: their individually assigned
+// plan IF it is an active virtual-agent plan, else the tenant's active plan
+// tagged personKind VIRTUAL_AGENT. No plan → no commission (fail-closed:
+// never fall back to a standard plan whose catalog/default semantics were
+// designed for counter employees).
+async function resolveVirtualAgentPlan(tenantId, user) {
+  const assigned = user?.commissionPlan;
+  if (assigned?.isActive && String(assigned?.personKind || '').toUpperCase() === 'VIRTUAL_AGENT') {
+    return assigned;
+  }
+  return prisma.commissionPlan.findFirst({
+    where: {
+      tenantId: tenantId || null,
+      isActive: true,
+      personKind: 'VIRTUAL_AGENT'
+    },
+    orderBy: { createdAt: 'asc' }
+  });
+}
+
 function reservationAdditionalDrivers(reservation) {
   const structured = Array.isArray(reservation?.additionalDrivers) ? reservation.additionalDrivers : [];
   if (structured.length) return structured;
@@ -1707,6 +1756,7 @@ export async function syncAgreementCommissionSnapshot(rentalAgreementId) {
     where: { id: commissionEmployeeUserId },
     select: {
       id: true,
+      personKind: true,
       commissionPlanId: true,
       commissionPlan: {
         include: {
@@ -1719,6 +1769,21 @@ export async function syncAgreementCommissionSnapshot(rentalAgreementId) {
     }
   });
   if (!commissionEmployee) return null;
+
+  // 2026-07-25 (LAX #4): a VIRTUAL_AGENT sales owner earns their percent
+  // ALONGSIDE the checkout employee — a second AgreementCommission row, not
+  // a replacement. Loaded up front so the prune below can keep both.
+  const salesOwnerId = String(agreement.salesOwnerUserId || '').trim();
+  const virtualAgentUser = salesOwnerId && salesOwnerId !== commissionEmployeeUserId
+    ? await prisma.user.findFirst({
+        where: { id: salesOwnerId, personKind: 'VIRTUAL_AGENT', isActive: true },
+        select: {
+          id: true,
+          personKind: true,
+          commissionPlan: { select: { id: true, isActive: true, personKind: true, defaultValueType: true, defaultPercentValue: true } }
+        }
+      })
+    : null;
 
   const serviceIds = Array.from(new Set(
     (agreement.charges || [])
@@ -1746,53 +1811,93 @@ export async function syncAgreementCommissionSnapshot(rentalAgreementId) {
       .map((plan) => [String(plan.code).trim().toUpperCase(), plan])
   );
 
-  const employeePlan = commissionEmployee?.commissionPlan?.isActive ? commissionEmployee.commissionPlan : null;
-  const tenantPlan = employeePlan
-    ? null
-    : await prisma.commissionPlan.findFirst({
-        where: {
-          tenantId: agreement.tenantId || null,
-          isActive: true
-        },
-        include: {
-          rules: {
-            where: { isActive: true },
-            orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }]
-          }
-        },
-        orderBy: { createdAt: 'asc' }
-      });
-  const plan = employeePlan || tenantPlan;
-
-  const appliedFixedAgreementRules = new Set();
+  const counterIsVirtualAgent = String(commissionEmployee?.personKind || '').toUpperCase() === 'VIRTUAL_AGENT';
   const eligibleCharges = commissionChargeRows(agreement.charges);
-  const lines = eligibleCharges
-    .map((charge) => {
-      const rule = resolveCommissionRule(charge, plan?.rules || [], servicesById, insurancePlansByCode);
-      const calc = calculateCommissionLine({ charge, rule, plan, appliedFixedAgreementRules });
-      return {
-        rentalAgreementChargeId: charge.id,
-        serviceId: String(charge?.source || '').toUpperCase() === 'ADDITIONAL_SERVICE' && charge?.sourceRefId
-          ? String(charge.sourceRefId)
-          : null,
-        ...calc
-      };
-    })
-    .filter((line) => line.valueType);
+
+  let plan = null;
+  let lines = [];
+  if (counterIsVirtualAgent) {
+    // The checkout employee is themselves a VIRTUAL_AGENT (remote/own
+    // checkout): their row uses the percent-of-sold-items math — the
+    // flat-rate catalog was designed for counter staff and would
+    // short-circuit the percent (LAX #4).
+    plan = await resolveVirtualAgentPlan(agreement.tenantId, commissionEmployee);
+    lines = virtualAgentCommissionLines(agreement.charges, plan);
+  } else {
+    const employeePlan = commissionEmployee?.commissionPlan?.isActive
+      && String(commissionEmployee?.commissionPlan?.personKind || '').toUpperCase() !== 'VIRTUAL_AGENT'
+      ? commissionEmployee.commissionPlan
+      : null;
+    const tenantPlan = employeePlan
+      ? null
+      : await prisma.commissionPlan.findFirst({
+          where: {
+            tenantId: agreement.tenantId || null,
+            isActive: true,
+            // Never resolve a virtual-agent plan for a standard employee.
+            OR: [{ personKind: null }, { personKind: { not: 'VIRTUAL_AGENT' } }]
+          },
+          include: {
+            rules: {
+              where: { isActive: true },
+              orderBy: [{ priority: 'asc' }, { createdAt: 'asc' }]
+            }
+          },
+          orderBy: { createdAt: 'asc' }
+        });
+    plan = employeePlan || tenantPlan;
+
+    const appliedFixedAgreementRules = new Set();
+    lines = eligibleCharges
+      .map((charge) => {
+        const rule = resolveCommissionRule(charge, plan?.rules || [], servicesById, insurancePlansByCode);
+        const calc = calculateCommissionLine({ charge, rule, plan, appliedFixedAgreementRules });
+        return {
+          rentalAgreementChargeId: charge.id,
+          serviceId: String(charge?.source || '').toUpperCase() === 'ADDITIONAL_SERVICE' && charge?.sourceRefId
+            ? String(charge.sourceRefId)
+            : null,
+          ...calc
+        };
+      })
+      .filter((line) => line.valueType);
+  }
+
+  // Virtual-agent SECOND row (sales owner ≠ checkout employee): computed
+  // BEFORE the prune so the keep-list is exact — a VA with no active plan
+  // writes no row, and any stale row of theirs is pruned like anyone else's.
+  const vaPlan = virtualAgentUser ? await resolveVirtualAgentPlan(agreement.tenantId, virtualAgentUser) : null;
+  const vaLines = virtualAgentUser ? virtualAgentCommissionLines(agreement.charges, vaPlan) : [];
+  const writeVaRow = !!(virtualAgentUser && vaPlan && vaLines.length);
 
   const grossRevenue = roundMoney(agreement.total || 0);
+  // serviceRevenue is a reporting metric (never a commission base). It used
+  // to count only source ADDITIONAL_SERVICE, silently under-counting
+  // services sold via the booking engine, pre-check-in and kiosk — now it
+  // uses the shared service-source list (2026-07-25; insurance stays out —
+  // this is the SERVICES metric).
   const serviceRevenue = roundMoney(
     eligibleCharges
-      .filter((charge) => String(charge?.source || '').toUpperCase() === 'ADDITIONAL_SERVICE')
+      .filter((charge) => SERVICE_CHARGE_SOURCES.includes(String(charge?.source || '').toUpperCase()))
       .reduce((sum, charge) => sum + Number(charge?.total || 0), 0)
   );
   const eligibleRevenue = roundMoney(lines.reduce((sum, line) => sum + Number(line.lineRevenue || 0), 0));
   const commissionAmount = roundMoney(lines.reduce((sum, line) => sum + Number(line.commissionAmount || 0), 0));
 
+  // Keep the checkout employee's row AND (when earned) the virtual-agent
+  // sales owner's row. The old prune deleted everything but one owner — that
+  // exclusivity is exactly what LAX #4 removes. STATUS GUARD (QA M1): money
+  // already APPROVED/PAID is NEVER deleted by a re-sync — deactivating a VA
+  // plan or overriding the owner must not erase paid payout records (the
+  // nightly resync sweep would otherwise do it fleet-wide overnight).
+  const keepEmployeeIds = writeVaRow
+    ? [commissionEmployeeUserId, virtualAgentUser.id]
+    : [commissionEmployeeUserId];
   await prisma.agreementCommission.deleteMany({
     where: {
       rentalAgreementId: agreement.id,
-      employeeUserId: { not: commissionEmployeeUserId }
+      employeeUserId: { notIn: keepEmployeeIds },
+      status: { in: ['PENDING', 'VOID'] }
     }
   });
 
@@ -1839,6 +1944,60 @@ export async function syncAgreementCommissionSnapshot(rentalAgreementId) {
     await prisma.agreementCommissionLine.createMany({
       data: lines.map((line) => ({
         agreementCommissionId: snapshot.id,
+        rentalAgreementChargeId: line.rentalAgreementChargeId || null,
+        serviceId: line.serviceId || null,
+        description: line.description,
+        quantity: line.quantity,
+        lineRevenue: line.lineRevenue,
+        valueType: line.valueType,
+        percentValue: line.percentValue,
+        fixedAmount: line.fixedAmount,
+        commissionAmount: line.commissionAmount
+      }))
+    });
+  }
+
+  // 2026-07-25 (LAX #4) — the virtual-agent sales owner's SECOND row.
+  // Status semantics identical to the main row: sync refreshes amounts,
+  // approve/mark-paid own the workflow status.
+  if (writeVaRow) {
+    const vaEligibleRevenue = roundMoney(vaLines.reduce((sum, line) => sum + Number(line.lineRevenue || 0), 0));
+    const vaCommissionAmount = roundMoney(vaLines.reduce((sum, line) => sum + Number(line.commissionAmount || 0), 0));
+    const vaSnapshot = await prisma.agreementCommission.upsert({
+      where: {
+        rentalAgreementId_employeeUserId: {
+          rentalAgreementId: agreement.id,
+          employeeUserId: virtualAgentUser.id
+        }
+      },
+      update: {
+        tenantId: agreement.tenantId || null,
+        commissionPlanId: vaPlan.id,
+        monthKey: monthKey(checkoutCapturedAt || agreement.closedAt || new Date()),
+        grossRevenue,
+        serviceRevenue,
+        eligibleRevenue: vaEligibleRevenue,
+        commissionAmount: vaCommissionAmount,
+        calculatedAt: new Date()
+      },
+      create: {
+        tenantId: agreement.tenantId || null,
+        rentalAgreementId: agreement.id,
+        employeeUserId: virtualAgentUser.id,
+        commissionPlanId: vaPlan.id,
+        status: 'PENDING',
+        monthKey: monthKey(checkoutCapturedAt || agreement.closedAt || new Date()),
+        grossRevenue,
+        serviceRevenue,
+        eligibleRevenue: vaEligibleRevenue,
+        commissionAmount: vaCommissionAmount,
+        calculatedAt: new Date()
+      }
+    });
+    await prisma.agreementCommissionLine.deleteMany({ where: { agreementCommissionId: vaSnapshot.id } });
+    await prisma.agreementCommissionLine.createMany({
+      data: vaLines.map((line) => ({
+        agreementCommissionId: vaSnapshot.id,
         rentalAgreementChargeId: line.rentalAgreementChargeId || null,
         serviceId: line.serviceId || null,
         description: line.description,
@@ -2221,6 +2380,17 @@ export const rentalAgreementsService = {
     const existing = await prisma.rentalAgreement.findUnique({ where: { reservationId } });
     if (existing) return this.getById(existing.id);
 
+    // LAX #4 (QA B1): seed the sales owner from the ORIGINATOR when the
+    // reservation was created by a virtual agent. Non-VA originators seed
+    // nothing — the checkout inspector claims ownership exactly as before,
+    // so legacy attribution is byte-identical.
+    const vaOriginatorId = reservation.createdByUserId
+      ? (await prisma.user.findFirst({
+          where: { id: reservation.createdByUserId, personKind: 'VIRTUAL_AGENT' },
+          select: { id: true }
+        }))?.id || null
+      : null;
+
     let agreement;
     try {
       agreement = await prisma.rentalAgreement.create({
@@ -2228,6 +2398,7 @@ export const rentalAgreementsService = {
           tenantId: reservation.tenantId || null,
           agreementNumber: agreementNumber(),
           reservationId,
+          salesOwnerUserId: vaOriginatorId,
           vehicleId: reservation.vehicleId ?? null,
           pickupAt: reservation.pickupAt,
           returnAt: reservation.returnAt,
@@ -2697,6 +2868,14 @@ export const rentalAgreementsService = {
       return this.getById(existing.id);
     }
 
+    // LAX #4 (QA B1): same originator seeding as the sibling create above.
+    const vaOriginatorId = reservation.createdByUserId
+      ? (await prisma.user.findFirst({
+          where: { id: reservation.createdByUserId, personKind: 'VIRTUAL_AGENT' },
+          select: { id: true }
+        }))?.id || null
+      : null;
+
     let agreement;
     try {
       agreement = await prisma.rentalAgreement.create({
@@ -2704,6 +2883,7 @@ export const rentalAgreementsService = {
           tenantId: reservation.tenantId || null,
           agreementNumber: agreementNumber(),
           reservationId,
+          salesOwnerUserId: vaOriginatorId,
           vehicleId: reservation.vehicleId ?? null,
           pickupAt: reservation.pickupAt,
           returnAt: reservation.returnAt,
@@ -5191,8 +5371,15 @@ export const rentalAgreementsService = {
     });
 
     if (phase === 'CHECKOUT' && inspectionBlock.actorUserId) {
-      await prisma.rentalAgreement.update({
-        where: { id },
+      // 2026-07-25 (LAX #4, QA B1): the checkout inspector used to CLOBBER
+      // salesOwnerUserId unconditionally — which meant an ORIGINATOR (the
+      // virtual agent who created the reservation) lost their attribution
+      // at the exact moment the commission sync ran. The inspector now only
+      // claims ownership when nobody originated the sale; the inspector
+      // still earns the counter row either way (sync keys the main row on
+      // the inspection actor, not on salesOwner).
+      await prisma.rentalAgreement.updateMany({
+        where: { id, salesOwnerUserId: null },
         data: {
           salesOwnerUserId: inspectionBlock.actorUserId
         }
@@ -5308,7 +5495,9 @@ export const rentalAgreementsService = {
         locked: true,
         closedAt: new Date(),
         closedByUserId: actorUserId || agreement.closedByUserId || null,
-        salesOwnerUserId: report?.checkout?.actorUserId || agreement.salesOwnerUserId || actorUserId || null,
+        // LAX #4 (QA B1): an existing owner (VA originator) is never
+        // clobbered at close — the checkout actor only fills a vacancy.
+        salesOwnerUserId: agreement.salesOwnerUserId || report?.checkout?.actorUserId || actorUserId || null,
         odometerIn: payload.odometerIn ?? agreement.odometerIn,
         fuelIn: payload.fuelIn ?? agreement.fuelIn,
         cleanlinessIn: payload.cleanlinessIn ?? agreement.cleanlinessIn

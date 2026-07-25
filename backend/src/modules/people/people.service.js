@@ -124,6 +124,9 @@ function allowedRoleForPayload(personType, requestedRole) {
   const role = String(requestedRole || '').toUpperCase();
   if (type === 'ADMIN') return 'ADMIN';
   if (type === 'HOST') return role === 'OPS' ? 'OPS' : 'AGENT';
+  // Virtual agents (LAX #4) are always AGENT: the kind drives commission
+  // resolution, never authorization.
+  if (type === 'VIRTUAL_AGENT') return 'AGENT';
   // Internal (employee) users: honor an explicitly requested ADMIN/OPS/AGENT.
   // Previously ADMIN fell through to AGENT here, so promoting a staff member to
   // ADMIN via the People module silently downgraded to AGENT. SUPER_ADMIN is
@@ -139,7 +142,11 @@ function mapUserPerson(user) {
     userId: user.id,
     hostProfileId: user.hostProfile?.id || null,
     tenantId: user.tenantId || user.hostProfile?.tenantId || null,
-    personType: hasHostProfile ? 'HOST' : (String(user.role || '').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE'),
+    personType: hasHostProfile
+      ? 'HOST'
+      : String(user.personKind || '').toUpperCase() === 'VIRTUAL_AGENT'
+        ? 'VIRTUAL_AGENT'
+        : (String(user.role || '').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE'),
     accessRole: user.role,
     createdByUserId: user.createdByUserId || user.hostProfile?.createdByUserId || null,
     createdByName: user.createdByUser?.fullName || user.hostProfile?.createdByUser?.fullName || null,
@@ -247,9 +254,11 @@ export const peopleService = {
 
   async createPerson(payload = {}, scope = {}) {
     const personType = String(payload.personType || '').trim().toUpperCase();
-    if (!['ADMIN', 'EMPLOYEE', 'HOST'].includes(personType)) {
-      throw new Error('personType must be ADMIN, EMPLOYEE, or HOST');
+    if (!['ADMIN', 'EMPLOYEE', 'HOST', 'VIRTUAL_AGENT'].includes(personType)) {
+      throw new Error('personType must be ADMIN, EMPLOYEE, HOST, or VIRTUAL_AGENT');
     }
+    // Virtual agents are employees for every capacity/email/login rule below.
+    const isEmployeeKind = personType === 'ADMIN' || personType === 'EMPLOYEE' || personType === 'VIRTUAL_AGENT';
 
     const tenantId = scope?.tenantId || payload?.tenantId || null;
     const tenant = await resolveTenant(tenantId);
@@ -266,9 +275,9 @@ export const peopleService = {
 
     if (!fullName) throw new Error('fullName or displayName is required');
     if (enableLogin && !email) throw new Error('email is required when login is enabled');
-    if ((personType === 'ADMIN' || personType === 'EMPLOYEE') && !email) throw new Error('email is required');
+    if (isEmployeeKind && !email) throw new Error('email is required');
 
-    if (personType === 'ADMIN' || personType === 'EMPLOYEE') {
+    if (isEmployeeKind) {
       await assertTenantUserCapacity(tenantId, {
         userDelta: 1,
         adminDelta: personType === 'ADMIN' ? 1 : 0
@@ -295,6 +304,9 @@ export const peopleService = {
           email,
           fullName,
           role: allowedRoleForPayload(personType, payload.role),
+          // LAX #4: the kind is persisted (the ADMIN/EMPLOYEE/HOST triad is
+          // derived); VIRTUAL_AGENT drives commission-plan resolution.
+          personKind: personType === 'VIRTUAL_AGENT' ? 'VIRTUAL_AGENT' : 'STANDARD',
           passwordHash,
           // First-login onboarding (2026-07-25): the creator knows this
           // password (temp OR admin-typed), so the user must replace it.
@@ -430,7 +442,14 @@ export const peopleService = {
       };
 
       if (!user.hostProfile) {
-        userPatch.role = allowedRoleForPayload(payload.personType || 'EMPLOYEE', payload.role || user.role);
+        // QA M2: the "virtual agents are ALWAYS AGENT" invariant derives from
+        // the STORED personKind, never the client-sent personType — a PATCH
+        // claiming personType EMPLOYEE + role ADMIN on a VIRTUAL_AGENT row
+        // must not mint an admin that still earns under VA commission math.
+        const storedKind = String(user.personKind || '').toUpperCase() === 'VIRTUAL_AGENT'
+          ? 'VIRTUAL_AGENT'
+          : (payload.personType || 'EMPLOYEE');
+        userPatch.role = allowedRoleForPayload(storedKind, payload.role || user.role);
       } else if (payload.role) {
         userPatch.role = allowedRoleForPayload('HOST', payload.role);
       }

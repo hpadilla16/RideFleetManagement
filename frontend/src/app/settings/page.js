@@ -2120,6 +2120,7 @@ function SettingsInner({ token, me, logout }) {
       tenantId: plan.tenantId || '',
       name: plan.name || '',
       isActive: plan.isActive !== false,
+      personKind: plan.personKind || '',
       defaultValueType: plan.defaultValueType || '',
       defaultPercentValue: plan.defaultPercentValue ?? '',
       defaultFixedAmount: plan.defaultFixedAmount ?? ''
@@ -2143,6 +2144,7 @@ function SettingsInner({ token, me, logout }) {
       tenantId: tenantId || null,
       name: commissionPlanForm.name.trim(),
       isActive: !!commissionPlanForm.isActive,
+      personKind: commissionPlanForm.personKind || null,
       defaultValueType: commissionPlanForm.defaultValueType || null,
       defaultPercentValue: commissionPlanForm.defaultPercentValue,
       defaultFixedAmount: commissionPlanForm.defaultFixedAmount
@@ -5884,6 +5886,17 @@ function SettingsInner({ token, me, logout }) {
                   </div>
                 </div>
 
+                <div className="stack">
+                  <label className="label">Applies To</label>
+                  <select value={commissionPlanForm.personKind || ''} onChange={(e) => setCommissionPlanForm((prev) => ({ ...prev, personKind: e.target.value }))}>
+                    <option value="">Standard employees (catalog + rules)</option>
+                    <option value="VIRTUAL_AGENT">Virtual agents — % of sold items (services + insurance)</option>
+                  </select>
+                  {commissionPlanForm.personKind === 'VIRTUAL_AGENT' ? (
+                    <span className="label">Uses Default Percent on every service and insurance line the agent sells. Taxes, fees and deposits are always excluded. Set Default Rule Type to Percent.</span>
+                  ) : null}
+                </div>
+
                 <div className="grid2">
                   <div className="stack">
                     <label className="label">Default Percent</label>
@@ -5910,7 +5923,7 @@ function SettingsInner({ token, me, logout }) {
                       <tr key={plan.id}>
                         <td>
                           <div>{plan.name}</div>
-                          <div className="label">{plan.id === activeCommissionPlanId ? 'Selected plan' : ''}</div>
+                          <div className="label">{plan.personKind === 'VIRTUAL_AGENT' ? 'Virtual agents' : ''}{plan.personKind === 'VIRTUAL_AGENT' && plan.id === activeCommissionPlanId ? ' · ' : ''}{plan.id === activeCommissionPlanId ? 'Selected plan' : ''}</div>
                         </td>
                         <td>{tenantRows.find((tenant) => tenant.id === plan.tenantId)?.name || (plan.tenantId ? plan.tenantId : 'Current tenant')}</td>
                         <td>{plan.defaultValueType || '-'}{plan.defaultValueType === 'PERCENT' && plan.defaultPercentValue != null ? ` / ${Number(plan.defaultPercentValue).toFixed(2)}%` : ''}{plan.defaultValueType && plan.defaultValueType !== 'PERCENT' && plan.defaultFixedAmount != null ? ` / $${Number(plan.defaultFixedAmount).toFixed(2)}` : ''}</td>
