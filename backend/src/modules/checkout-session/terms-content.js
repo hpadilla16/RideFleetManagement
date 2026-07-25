@@ -80,6 +80,34 @@ export const DECLINED_INSURANCE_SECTION = {
         'confirmed coverage through my personal auto policy or another source.',
 };
 
+// 2026-07-25 — damage acknowledgement (LAX meeting item #3). Signed IN
+// PERSON in the Report Damage wizard when the customer is present and
+// accepts responsibility; optional — the wizard works unchanged without it.
+// NOT part of sectionsForAgreement (it is not an agreement-signing section;
+// it never lands in AgreementSectionInitial). Overrideable per location via
+// the same termsSectionsJson mechanism — see damageAcknowledgementSection().
+export const DAMAGE_ACKNOWLEDGEMENT_SECTION = {
+  key: 'damage_acknowledgement',
+  label: 'Damage acknowledgement',
+  body: 'I acknowledge that I caused the damage described in this report ' +
+        'during my rental, and I accept responsibility for it under the terms ' +
+        'of my rental agreement, up to the amounts and deductibles that apply ' +
+        'to the coverage I selected. I have reviewed the description and the ' +
+        'photographs included in this report and confirm they reflect the ' +
+        'damage accurately.',
+};
+
+/**
+ * Resolve the damage-acknowledgement statement for a branch. The TEXT the
+ * customer signs is snapshotted onto the damage report at signing time, so a
+ * later wording change never rewrites what someone already signed.
+ */
+export function damageAcknowledgementSection({ sectionOverrides } = {}) {
+  const overrides = parseSectionOverrides(sectionOverrides);
+  const o = overrides[DAMAGE_ACKNOWLEDGEMENT_SECTION.key];
+  return o ? { ...DAMAGE_ACKNOWLEDGEMENT_SECTION, ...o } : DAMAGE_ACKNOWLEDGEMENT_SECTION;
+}
+
 /**
  * Parse a Location.termsSectionsJson blob into a key → {label?, body?} map.
  *
@@ -116,7 +144,7 @@ export function parseSectionOverrides(raw) {
     }
     return {};
   }
-  const known = new Set([...TC_SECTIONS, DECLINED_INSURANCE_SECTION].map((s) => s.key));
+  const known = new Set([...TC_SECTIONS, DECLINED_INSURANCE_SECTION, DAMAGE_ACKNOWLEDGEMENT_SECTION].map((s) => s.key));
   const out = {};
   const unknown = [];
   for (const [key, val] of Object.entries(parsed)) {

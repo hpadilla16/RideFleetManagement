@@ -18,8 +18,9 @@
  *                    confirmation (opens the incident DRAFT). "Later" just closes.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/client';
+import { SignaturePad } from '../wizard/SignaturePad';
 import { diagramFor, DIAGRAM_VIEWBOX, DIAGRAM_W, DIAGRAM_H, VIEW_LABELS } from '../vehicleDiagrams';
 
 const VIEWS = ['LEFT', 'RIGHT', 'FRONT', 'REAR', 'INTERIOR'];
@@ -69,6 +70,15 @@ export function ReportDamageWizard({ reservation, token, onClose, onDone, onComp
   const [deductibleInput, setDeductibleInput] = useState(''); // dollars (Our insurance — the ONLY thing billed)
   const [fullEstimateInput, setFullEstimateInput] = useState(''); // dollars (Our insurance — full repair, filed on our policy, NOT billed)
   const [vehicleStatus, setVehicleStatus] = useState('IN_MAINTENANCE');
+  // Customer acknowledgement (2026-07-25) — OPTIONAL. When the customer is
+  // present and accepts responsibility, the agent flips the toggle, the
+  // customer reads the branch's statement and signs on this device. The
+  // statement TEXT comes from the backend (branch override or canonical) so
+  // what is displayed is exactly what gets snapshotted with the signature.
+  const [ackEnabled, setAckEnabled] = useState(false);
+  const [ackStatement, setAckStatement] = useState(null); // { label, body }
+  const [ackSignature, setAckSignature] = useState('');
+  const [ackSignerName, setAckSignerName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
@@ -83,7 +93,23 @@ export function ReportDamageWizard({ reservation, token, onClose, onDone, onComp
   const isOurInsurance = party === 'OUR_INSURANCE';
   const chargeDollars = isOurInsurance ? parseAmount(deductibleInput) : parseAmount(costInput);
   const fullEstimateDollars = parseAmount(fullEstimateInput); // OUR_INSURANCE full repair
-  const canSubmit = photos.length >= 1 && mark && chargeDollars > 0 && !submitting;
+  // With the acknowledgement toggled ON: signature + name + THE STATEMENT
+  // ITSELF are required to submit (QA M2 — the customer must never sign
+  // wording that failed to load; the backend snapshots what was displayed).
+  const [ackStatementFailed, setAckStatementFailed] = useState(false);
+  const ackReady = !ackEnabled || (ackSignature && ackSignerName.trim() && ackStatement?.body);
+  const canSubmit = photos.length >= 1 && mark && chargeDollars > 0 && ackReady && !submitting;
+
+  // Fetch the branch-resolved statement the first time the toggle turns on.
+  useEffect(() => {
+    if (!ackEnabled || ackStatement || ackStatementFailed || !reservation?.id) return;
+    api(`/api/report-damage/${reservation.id}/acknowledgement-statement`, {}, token)
+      .then((out) => {
+        if (out?.body) setAckStatement(out);
+        else setAckStatementFailed(true);
+      })
+      .catch(() => setAckStatementFailed(true));
+  }, [ackEnabled, ackStatement, ackStatementFailed, reservation?.id, token]);
 
   function onDiagramClick(e) {
     const r = e.currentTarget.getBoundingClientRect();
@@ -128,6 +154,9 @@ export function ReportDamageWizard({ reservation, token, onClose, onDone, onComp
       } else {
         body.damageCostCents = Math.round(chargeDollars * 100);
       }
+      if (ackEnabled && ackSignature && ackSignerName.trim()) {
+        body.customerAck = { signatureDataUrl: ackSignature, signerName: ackSignerName.trim() };
+      }
 
       const out = await api(`/api/report-damage/${reservation.id}/report-damage`, {
         method: 'POST', body: JSON.stringify(body),
@@ -163,7 +192,7 @@ export function ReportDamageWizard({ reservation, token, onClose, onDone, onComp
 
         <div style={{ padding: '18px 20px', display: 'grid', gap: 14 }}>
           {result ? (
-            <ResultView result={result} vehicle={vehicle} onClose={onClose} onComplete={() => { onComplete?.(result); onClose?.(); }} />
+            <ResultView result={result} vehicle={vehicle} ackSent={ackEnabled} onClose={onClose} onComplete={() => { onComplete?.(result); onClose?.(); }} />
           ) : (
             <>
               {/* summary */}
@@ -331,6 +360,56 @@ export function ReportDamageWizard({ reservation, token, onClose, onDone, onComp
                 </div>
               </div>
 
+              {/* customer acknowledgement (optional) */}
+              <Divider />
+              <div>
+                <div className="row-between" style={{ marginBottom: 8 }}>
+                  <strong style={{ fontSize: 14 }}>5 · Customer acknowledgement <span className="ui-muted" style={{ fontWeight: 500 }}>(optional)</span></strong>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={ackEnabled}
+                      onChange={(e) => {
+                        setAckEnabled(e.target.checked);
+                        if (!e.target.checked) setAckSignature('');
+                        // Prefill only a real NAME — never the email fallback.
+                        else if (!ackSignerName && (customer.firstName || customer.lastName)) setAckSignerName(custName);
+                      }} />
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: '#2d244d' }}>Customer is present and acknowledges</span>
+                  </label>
+                </div>
+                {ackEnabled ? (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {ackStatementFailed ? (
+                      <div style={{ borderRadius: 12, padding: '12px 14px', fontSize: 12.5, background: '#fee2e2', border: '1px solid #fca5a5', color: '#991b1b', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                        <span>The acknowledgement statement could not be loaded — the customer cannot sign without reading it.</span>
+                        <button type="button" onClick={() => setAckStatementFailed(false)} style={{ background: '#fff', border: '1px solid #fca5a5', color: '#991b1b', borderRadius: 8, padding: '5px 10px', fontWeight: 700, cursor: 'pointer' }}>Retry</button>
+                      </div>
+                    ) : (
+                      <div style={{ borderRadius: 12, padding: '12px 14px', fontSize: 12.5, lineHeight: 1.55, background: 'rgba(0,0,0,.03)', border: '1px solid var(--border-soft,#e6dfff)', color: '#33415c' }}>
+                        {ackStatement?.body || 'Loading the acknowledgement statement…'}
+                      </div>
+                    )}
+                    <SignaturePad
+                      label="Customer signature"
+                      signerName={ackSignerName}
+                      onSignerNameChange={setAckSignerName}
+                      onSignatureChange={setAckSignature}
+                      helperText="The customer signs above after reading the statement. This signature appears on the incident report."
+                    />
+                    {!ackReady ? (
+                      <div style={{ fontSize: 12, color: '#b45309', fontWeight: 600 }}>
+                        Signature and printed name are required to submit with the acknowledgement — or untick it to submit without one.
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="ui-muted" style={{ fontSize: 12.5 }}>
+                    If the customer is present and accepts responsibility, capture their signed acknowledgement here — it carries to the incident report.
+                  </div>
+                )}
+              </div>
+
               {error && <div style={{ color: '#b91c1c', fontSize: 13 }}>{error}</div>}
             </>
           )}
@@ -351,7 +430,7 @@ export function ReportDamageWizard({ reservation, token, onClose, onDone, onComp
   );
 }
 
-function ResultView({ result, vehicle, onClose, onComplete }) {
+function ResultView({ result, vehicle, ackSent, onClose, onComplete }) {
   return (
     <div style={{ display: 'grid', gap: 12 }}>
       <div style={{ display: 'grid', gap: 10 }}>
@@ -371,6 +450,15 @@ function ResultView({ result, vehicle, onClose, onComplete }) {
         <Consequence bg="rgba(245,158,11,.10)" border="rgba(245,158,11,.28)" color="#92400e">
           🔧 <span><b>Vehicle set to {result.vehicleStatus}</b>{vehicle?.plate ? ` — ${vehicle.plate}` : ''}.</span>
         </Consequence>
+        {result.customerAckSaved ? (
+          <Consequence bg="rgba(16,185,129,.10)" border="rgba(16,185,129,.28)" color="#047857">
+            ✍ <span><b>Customer acknowledgement signed</b> — it will appear on the incident report beside the staff certification.</span>
+          </Consequence>
+        ) : ackSent ? (
+          <Consequence bg="#fee2e2" border="#fca5a5" color="#991b1b">
+            ⚠ <span><b>The customer's signature was NOT saved.</b> The damage and charge are recorded, but the acknowledgement failed — capture it again from the vehicle profile or contact an admin.</span>
+          </Consequence>
+        ) : null}
         <div style={{ fontSize: 12, color: 'var(--ios-muted,#6f668f)', lineHeight: 1.5 }}>
           Entered by mistake? An admin can undo this and void the charge from the vehicle profile.
         </div>

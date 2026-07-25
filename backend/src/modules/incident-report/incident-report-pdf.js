@@ -74,6 +74,20 @@ export function buildIncidentReportHtml(r = {}) {
     ? `<img src="${escapeHtml(cert.signatureDataUrl)}" alt="signature" style="max-height:54px"/>`
     : `<div class="sig-script">${escapeHtml(cert.name || '')}</div>`;
 
+  // Renter damage acknowledgement (2026-07-25): rendered ABOVE the staff
+  // certification, with the EXACT statement text the renter signed (a
+  // snapshot from the damage report — never re-resolved). Absent → nothing
+  // renders; the §9 layout is unchanged for unsigned reports.
+  const ack = r.renterAcknowledgement || null;
+  const renterAckBlock = ack && ack.signatureDataUrl
+    ? `
+  ${ack.statementText ? `<div class="alert" style="background:#f3f4f7;border-color:var(--line);color:#33415c">${escapeHtml(ack.statementText)}</div>` : ''}
+  <div class="sigline" style="margin-top:14px">
+    <div><img src="${escapeHtml(ack.signatureDataUrl)}" alt="renter signature" style="max-height:54px"/><div class="l">Renter Acknowledgement Signature${ack.name ? ` — ${escapeHtml(ack.name)}` : ''}</div></div>
+    <div><div style="font-size:13px;padding-top:2px">${escapeHtml(ack.date || '')}</div><div class="l">Date</div></div>
+  </div>`
+    : '';
+
   return `<!doctype html>
 <html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>${escapeHtml(r.reportNumber || 'Incident Report')}</title>
@@ -158,6 +172,7 @@ export function buildIncidentReportHtml(r = {}) {
   ${photoCells ? `<div class="h">8. Photographic Evidence</div><div class="photogrid">${photoCells}</div>` : ''}
 
   <div class="h">9. Declaration &amp; Certification</div>
+  ${renterAckBlock}
   <div class="sigline">
     <div>${sigImg}<div class="l">Authorized Representative Signature</div></div>
     <div><div style="font-size:13px;padding-top:2px">${escapeHtml(cert.date || '')}</div><div class="l">Date</div></div>

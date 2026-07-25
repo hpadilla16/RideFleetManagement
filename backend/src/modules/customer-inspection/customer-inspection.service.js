@@ -737,6 +737,10 @@ async function getVehicleDamageHistory(vehicleId, scope = {}) {
     where: { vehicleId, status: { in: ['HARD_APPROVED', 'FIXED'] } },
     orderBy: { reviewedAt: 'desc' },
     take: 200,
+    // The acknowledgement signature (≤500KB data URL) and statement text are
+    // never projected into this response — don't haul 200 of them from the
+    // DB per vehicle-profile view (QA m4).
+    omit: { customerAckSignatureDataUrl: true, customerAckStatementText: true },
   });
   const project = async (d) => ({
     id: d.id,

@@ -43,6 +43,18 @@ function wrap(handler) {
   };
 }
 
+// GET /api/report-damage/:reservationId/acknowledgement-statement — the exact
+// statement text (branch override or canonical) the wizard shows next to the
+// signature pad. Resolved server-side so the displayed and the snapshotted
+// wording can never diverge.
+reportDamageRouter.get(
+  '/:reservationId/acknowledgement-statement',
+  requireRole('AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'),
+  wrap(async (req, res) => {
+    res.json(await reportDamageService.acknowledgementStatement(req.params.reservationId, scopeFor(req)));
+  })
+);
+
 // POST /api/report-damage/:reservationId/report-damage
 reportDamageRouter.post(
   '/:reservationId/report-damage',
@@ -52,6 +64,7 @@ reportDamageRouter.post(
     const out = await reportDamageService.reportDamage(req.params.reservationId, req.body || {}, {
       user: req.user,
       scope: scopeFor(req),
+      ip: req.ip || null,
     });
     res.status(201).json(out);
   })

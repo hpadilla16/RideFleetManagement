@@ -549,6 +549,22 @@ async function assembleReport(row, reservation) {
     ];
   }
 
+  // Renter damage acknowledgement (2026-07-25): read from the DAMAGE REPORT
+  // at assemble time. The damage record is the durable anchor — the incident
+  // link-back is best-effort — so the PDF finds the signature even when the
+  // link landed after a partial failure. Lookup failure renders no block
+  // (never blocks the print).
+  const ackReport = await prisma.vehicleDamageReport.findFirst({
+    where: { incidentId: row.id, customerAckSignatureDataUrl: { not: null } },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      customerAckSignatureDataUrl: true,
+      customerAckSignerName: true,
+      customerAckSignedAt: true,
+      customerAckStatementText: true
+    }
+  }).catch(() => null);
+
   const meta = TYPE_META[row.type] || TYPE_META.OTHER;
   return {
     company: { name: reservation?.tenant?.name || 'Ride Fleet' },
@@ -583,7 +599,15 @@ async function assembleReport(row, reservation) {
       : { lines: [] },
     rebuttalPoints,
     photos,
-    certification: { name: row.certifiedByName, title: row.certifiedByTitle, signatureDataUrl: row.signatureDataUrl, date: fmtDate(row.certifiedAt) }
+    certification: { name: row.certifiedByName, title: row.certifiedByTitle, signatureDataUrl: row.signatureDataUrl, date: fmtDate(row.certifiedAt) },
+    renterAcknowledgement: ackReport
+      ? {
+          name: ackReport.customerAckSignerName || renterName,
+          signatureDataUrl: ackReport.customerAckSignatureDataUrl,
+          statementText: ackReport.customerAckStatementText || '',
+          date: fmtDate(ackReport.customerAckSignedAt)
+        }
+      : null
   };
 }
 

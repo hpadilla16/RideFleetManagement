@@ -31,6 +31,7 @@ import { customerInspectionService } from '../customer-inspection/customer-inspe
 import { reservationPricingService } from '../reservations/reservation-pricing.service.js';
 import { incidentReportService } from '../incident-report/incident-report.service.js';
 import { resolveVoziaCeiling } from '../rental-agreements/service-payment-guards.js';
+import { damageAcknowledgementSection } from '../checkout-session/terms-content.js';
 
 const RESPONSIBLE_PARTIES = ['CUSTOMER', 'CUSTOMER_INSURANCE', 'OUR_INSURANCE'];
 // Hector's decision: the dropdown offers ALL VehicleStatus values, default IN_MAINTENANCE.
@@ -56,6 +57,27 @@ function toCents(v) { return (v == null || v === '' || !Number.isFinite(Number(v
 
 export const reportDamageService = {
   /**
+   * The acknowledgement statement the wizard DISPLAYS must be the same text
+   * the backend snapshots at submit — resolved per branch here, one source.
+   */
+  async acknowledgementStatement(reservationId, scope = {}) {
+    const tenantId = scope?.tenantId ?? null;
+    const reservation = await prisma.reservation.findFirst({
+      where: { id: String(reservationId), ...(tenantId ? { tenantId } : {}) },
+      select: { pickupLocationId: true }
+    });
+    if (!reservation) throw err('Reservation not found', 404);
+    const loc = reservation.pickupLocationId
+      ? await prisma.location.findUnique({
+          where: { id: reservation.pickupLocationId },
+          select: { termsSectionsJson: true }
+        }).catch(() => null)
+      : null;
+    const section = damageAcknowledgementSection({ sectionOverrides: loc?.termsSectionsJson });
+    return { key: section.key, label: section.label, body: section.body };
+  },
+
+  /**
    * Orchestrate a reservation-launched damage report. `ctx = { user, scope }`.
    * Returns { damageReportId, chargeId, chargeAmount, incidentId, vehicleStatus, responsibleParty }.
    */
@@ -66,7 +88,7 @@ export const reportDamageService = {
     // --- 0. Load + tenant-scope the reservation (existence + isolation) ---
     const reservation = await prisma.reservation.findFirst({
       where: { id: String(reservationId), ...(tenantId ? { tenantId } : {}) },
-      select: { id: true, tenantId: true, reservationNumber: true, vehicleId: true }
+      select: { id: true, tenantId: true, reservationNumber: true, vehicleId: true, pickupLocationId: true }
     });
     if (!reservation) throw err('Reservation not found', 404);
     if (!reservation.vehicleId) throw err('Reservation has no vehicle to record damage against', 400);
@@ -94,6 +116,41 @@ export const reportDamageService = {
 
     const actorUserId = user?.id || user?.sub || null;
     const description = body?.description ? String(body.description) : null;
+
+    // --- optional customer acknowledgement (2026-07-25, validated BEFORE any
+    // write — same convention as every other signature in this codebase) ---
+    let customerAck = null;
+    if (body?.customerAck) {
+      const signatureDataUrl = String(body.customerAck.signatureDataUrl || '');
+      const signerName = String(body.customerAck.signerName || '').trim();
+      if (!signatureDataUrl.startsWith('data:image')) {
+        throw err('customerAck.signatureDataUrl must be a data:image URL', 400);
+      }
+      if (signatureDataUrl.length < 200) throw err('Customer acknowledgement signature looks empty', 400);
+      if (signatureDataUrl.length > 500_000) throw err('Customer acknowledgement signature is too large', 400);
+      if (!signerName) throw err('customerAck.signerName is required', 400);
+      // Snapshot the EXACT statement wording (branch override or canonical)
+      // the customer is signing — resolved server-side, never trusted from
+      // the client.
+      // A LOOKUP FAILURE FAILS THE SUBMIT (QA M3): silently falling back to
+      // the canonical text would snapshot wording the customer never read —
+      // the exact legal defect this feature exists to prevent. (A null
+      // pickupLocation is fine: canonical IS what the wizard displayed.)
+      const loc = reservation.pickupLocationId
+        ? await prisma.location.findUnique({
+            where: { id: reservation.pickupLocationId },
+            select: { termsSectionsJson: true }
+          }).catch((e) => {
+            logger.error('[report-damage] statement resolution failed at submit', { err: e.message });
+            throw err('Could not resolve the acknowledgement statement — nothing was recorded, please retry', 500);
+          })
+        : null;
+      customerAck = {
+        signatureDataUrl,
+        signerName,
+        statementText: damageAcknowledgementSection({ sectionOverrides: loc?.termsSectionsJson }).body
+      };
+    }
 
     // --- FIX D: ceiling check (BEFORE any write, so an over-limit request never
     // leaves an orphan damage record). Only the amount that actually hits the
@@ -138,10 +195,40 @@ export const reportDamageService = {
         if (recentCharge) {
           const prior = await prisma.vehicleDamageReport.findFirst({
             where: { reservationChargeId: recentCharge.id },
-            select: { id: true, incidentId: true, responsibleParty: true }
+            select: {
+              id: true, incidentId: true, responsibleParty: true,
+              damageCostCents: true, ourDeductibleCents: true,
+              customerAckSignatureDataUrl: true
+            }
           });
+          // QA M1: a LATE-ARRIVING signature must not be silently discarded.
+          // The realistic flow: agent submits, the customer walks up, agent
+          // re-submits the same report WITH the acknowledgement inside the
+          // 60s window. Persist it onto the PRIOR report (never overwrite an
+          // existing signature). Persist failure → customerAckSaved:false so
+          // the wizard can tell the agent the truth.
+          let customerAckSaved = !!prior?.customerAckSignatureDataUrl;
+          if (customerAck && prior && !prior.customerAckSignatureDataUrl) {
+            try {
+              await prisma.vehicleDamageReport.update({
+                where: { id: prior.id },
+                data: {
+                  customerAckSignatureDataUrl: customerAck.signatureDataUrl,
+                  customerAckSignerName: customerAck.signerName,
+                  customerAckSignedAt: new Date(),
+                  customerAckIp: ctx.ip || null,
+                  customerAckStatementText: customerAck.statementText
+                }
+              });
+              customerAckSaved = true;
+            } catch (e) {
+              logger.error('[report-damage] late acknowledgement persist on duplicate submit FAILED — signature NOT saved', {
+                damageReportId: prior.id, err: e.message
+              });
+            }
+          }
           logger.warn('[report-damage] duplicate submit suppressed (returning prior result, no second charge)', {
-            reservationId: reservation.id, chargeId: recentCharge.id, damageReportId: prior?.id || null
+            reservationId: reservation.id, chargeId: recentCharge.id, damageReportId: prior?.id || null, customerAckSaved
           });
           return {
             damageReportId: prior?.id || null,
@@ -150,6 +237,9 @@ export const reportDamageService = {
             incidentId: prior?.incidentId || null,
             vehicleStatus,
             responsibleParty: prior?.responsibleParty || responsibleParty,
+            damageCostCents: prior?.damageCostCents ?? damageCostCents ?? null,
+            ourDeductibleCents: prior?.ourDeductibleCents ?? ourDeductibleCents ?? null,
+            customerAckSaved,
             duplicate: true,
           };
         }
@@ -172,6 +262,30 @@ export const reportDamageService = {
       responsibleParty,
     }, dmgScope);
     const damageReportId = damage.id;
+
+    // --- 1b. Persist the customer acknowledgement (BEFORE money moves, so a
+    // failure here fully unwinds the damage ROW — like the step-2 rollback,
+    // photos already uploaded to Storage stay orphaned, an accepted cost).
+    // A signed acknowledgement is legally load-bearing: committing the damage
+    // while silently dropping the signature is worse than failing the submit.
+    if (customerAck) {
+      try {
+        await prisma.vehicleDamageReport.update({
+          where: { id: damageReportId },
+          data: {
+            customerAckSignatureDataUrl: customerAck.signatureDataUrl,
+            customerAckSignerName: customerAck.signerName,
+            customerAckSignedAt: new Date(),
+            customerAckIp: ctx.ip || null,
+            customerAckStatementText: customerAck.statementText
+          }
+        });
+      } catch (e) {
+        await prisma.vehicleDamageReport.delete({ where: { id: damageReportId } }).catch(() => {});
+        logger.error('[report-damage] customer acknowledgement persist failed — submit unwound', { damageReportId, err: e.message });
+        throw err('Failed to save the customer acknowledgement — nothing was recorded, please retry', 500);
+      }
+    }
 
     // --- 2. Contract charge (agent-scoped exception; DAMAGE_CHARGE source) ---
     let chargeId = null;
@@ -260,6 +374,7 @@ export const reportDamageService = {
       damageReportId, chargeId, chargeAmount, incidentId, vehicleStatus, responsibleParty,
       damageCostCents: damageCostCents ?? null,
       ourDeductibleCents: ourDeductibleCents ?? null,
+      customerAckSaved: !!customerAck,
     };
   },
 
@@ -373,7 +488,11 @@ export const reportDamageService = {
 
     const report = await prisma.vehicleDamageReport.findFirst({
       where: { id: String(reportId), ...(tenantId ? { tenantId } : {}) },
-      select: { id: true, tenantId: true, vehicleId: true, reservationId: true, reservationChargeId: true, incidentId: true, status: true, description: true }
+      select: {
+        id: true, tenantId: true, vehicleId: true, reservationId: true, reservationChargeId: true,
+        incidentId: true, status: true, description: true,
+        customerAckSignerName: true, customerAckSignedAt: true, customerAckSignatureDataUrl: true
+      }
     });
     if (!report) throw err('Damage report not found', 404);
 
@@ -411,6 +530,12 @@ export const reportDamageService = {
         chargeVoided,
         chargeVoidError,
         incidentId: report.incidentId || null,
+        // A SIGNED acknowledgement is destroyed with this delete (the PDF
+        // anchor query finds nothing afterwards) — the audit trail records
+        // WHO had signed and WHEN, or a later dispute has no trace (QA m3).
+        hadCustomerAck: !!report.customerAckSignatureDataUrl,
+        customerAckSignerName: report.customerAckSignerName || null,
+        customerAckSignedAt: report.customerAckSignedAt || null,
         note: report.incidentId ? 'Linked incident DRAFT left intact — handle it separately.' : null
       })
     }});
