@@ -1127,7 +1127,31 @@ export const reservationPricingService = {
       notes: payload.notes ? String(payload.notes) : null
     };
 
-    const created = await prisma.reservationPayment.create({ data: paymentData });
+    // B5 Phase 1 idempotency floor (2026-07-24). A partial unique index covers
+    // MACHINE-generated references only (IPOS:/AUTHNET:/SPIN: — see migration
+    // 20260724_kiosk_b5_phase1; a blanket constraint is impossible because
+    // staff legitimately type the same manual reference twice on one
+    // reservation). If a concurrent webhook+poll pair races past the caller's
+    // findFirst dedupe, Postgres rejects the loser with P2002 and we return the
+    // row the winner created instead of double-posting.
+    //
+    // PURE SAFETY NET: on any non-P2002 error, and for every manual reference
+    // (not covered by the index), behavior is byte-identical to before.
+    let created;
+    try {
+      created = await prisma.reservationPayment.create({ data: paymentData });
+    } catch (err) {
+      if (err?.code !== 'P2002' || !trimmedReference) throw err;
+      const existing = await prisma.reservationPayment.findFirst({
+        where: { reservationId, reference: trimmedReference },
+        orderBy: { createdAt: 'asc' }
+      });
+      if (!existing) throw err;
+      logger.warn('reservation-pricing: duplicate gateway payment collapsed by unique index', {
+        reservationId, reference: trimmedReference, existingPaymentId: existing.id
+      });
+      return existing;
+    }
 
     try {
       const agreementPayment = await maybeCreateAgreementPayment({ reservation, payment: created });

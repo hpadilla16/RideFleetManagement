@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { paymentGatewayService } from './payment-gateway.service.js';
+import { paymentOpsQueue } from './payment-ops-queue.service.js';
 import { isSuperAdmin } from '../../middleware/auth.js';
 
 export const paymentGatewayRouter = Router();
@@ -132,5 +133,42 @@ paymentGatewayRouter.post('/callback', async (req, res) => {
     res.json({ ok: true, received: true });
   } catch (e) {
     res.status(500).json({ error: 'Callback processing failed' });
+  }
+});
+
+// ── B5 Phase 1 — payment ops staff queue (read + resolve) ───────────────────
+// Mounted under /api/payment-gateway (requireAuth + tenantRateLimit +
+// requireRole ADMIN/OPS in main.js) — the right audience for outstanding money
+// actions. Covers BOTH counter flows (stranded deposit holds) and kiosk flows
+// (orphan payments), so it deliberately does NOT sit behind the kiosk module
+// gate. No gateway calls: this is the visible surface, the action is manual
+// until the B5 gateway arm lands.
+
+// GET /api/payment-gateway/ops-queue?status=&kind=&take=
+paymentGatewayRouter.get('/ops-queue', async (req, res) => {
+  try {
+    const tenantId = tenantIdFor(req);
+    if (!tenantId) return res.status(400).json({ error: 'A tenant scope is required' });
+    res.json(await paymentOpsQueue.list({ tenantId }, {
+      status: req.query?.status ? String(req.query.status) : undefined,
+      kind: req.query?.kind ? String(req.query.kind) : undefined,
+      take: req.query?.take,
+    }));
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+// POST /api/payment-gateway/ops-queue/:id/resolve — { note? }
+paymentGatewayRouter.post('/ops-queue/:id/resolve', async (req, res) => {
+  try {
+    const tenantId = tenantIdFor(req);
+    if (!tenantId) return res.status(400).json({ error: 'A tenant scope is required' });
+    res.json(await paymentOpsQueue.resolve(req.params.id, {
+      actorUserId: req.user?.id || req.user?.sub || null,
+      note: req.body?.note || null,
+    }, { tenantId }));
+  } catch (e) {
+    res.status(e.status || 400).json({ error: e.message });
   }
 });

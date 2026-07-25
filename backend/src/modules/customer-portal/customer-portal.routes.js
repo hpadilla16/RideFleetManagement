@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import Stripe from 'stripe';
 import { prisma } from '../../lib/prisma.js';
+import { buildGatewayReference } from '../../lib/payment-references.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { rentalAgreementsService } from '../rental-agreements/rental-agreements.service.js';
@@ -639,7 +640,7 @@ async function postAuthNetPaymentToReservation({ reservation, transId, gatewayCo
   const cleanTransId = String(transId || '').trim();
   if (!reservation?.id || !cleanTransId) throw new Error('Reservation and Authorize.Net transId are required');
 
-  const reference = `AUTHNET:${cleanTransId}`;
+  const reference = buildGatewayReference('AUTHNET', cleanTransId);
   const existing = await prisma.reservationPayment.findFirst({
     where: {
       reservationId: reservation.id,
@@ -2107,7 +2108,7 @@ customerPortalRouter.post('/payment/:token/confirm', portalWrite, async (req, re
         return res.status(400).json({ error: extractAuthNetMessage(authnetResponse) || extractAuthNetMessage(authnetBody) || 'Authorize.Net payment failed' });
       }
       paidAmount = Number(tx?.authAmount || tx?.settleAmount || chargeAmount || 0);
-      reference = `AUTHNET:${tx.transId || 'UNKNOWN'}`;
+      reference = buildGatewayReference('AUTHNET', tx.transId || 'UNKNOWN');
       const existing = await prisma.reservationPayment.findFirst({
         where: {
           reservationId: reservation.id,
@@ -2142,7 +2143,7 @@ customerPortalRouter.post('/payment/:token/confirm', portalWrite, async (req, re
         return res.status(400).json({ error: 'Authorize.Net transId is required' });
       }
 
-      reference = `AUTHNET:${transId}`;
+      reference = buildGatewayReference('AUTHNET', transId);
       const existing = await prisma.reservationPayment.findFirst({
         where: {
           reservationId: reservation.id,

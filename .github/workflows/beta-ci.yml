@@ -47,6 +47,21 @@ jobs:
           JWT_SECRET: 'ci-resolve-only'
           NODE_ENV: 'test'
         run: node -e "import('./src/main.js').then(() => process.exit(0)).catch((err) => { console.error('Transitive import failed:', err?.message || err); process.exit(1); })"
+
+      - name: Money-path guard suites (B5 Phase 1)
+        # These three are DB-free and run in seconds. They exist to catch
+        # SILENT failures that no other CI step would notice:
+        #   test:payment-refs  — the partial unique index that IS the payment
+        #     idempotency floor is invisible to Prisma; this asserts the
+        #     migration predicate and the app's prefix constant cannot drift,
+        #     and that no kiosk file imports a gateway client unwrapped.
+        #   test:kiosk         — kiosk + payment guard/intent behavior.
+        #   test:stale-preauth — the sweep must never stamp a deposit hold as
+        #     voided without a real gateway void.
+        # NOTE: they are also wired into `npm test`, but that chain currently
+        # hangs at an early suite lacking --test-force-exit, so it cannot be
+        # relied on as the automatic gate. Run them explicitly here.
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:

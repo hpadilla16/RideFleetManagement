@@ -595,6 +595,7 @@ model Tenant {
   kioskDevices                KioskDevice[]
   kioskSessions               KioskSession[]
   upsellRules                 UpsellRule[]
+  paymentOpsFlags             PaymentOpsFlag[]
 
   // TL International franchise integration (round 5)
   integrationConfig        Json?
@@ -2631,6 +2632,18 @@ model ReservationCharge {
   @@index([reservationId, selected, sortOrder])
 }
 
+// ⚠️ IDEMPOTENCY FLOOR LIVES IN SQL, NOT HERE (B5 Phase 1, review M3).
+// A PARTIAL unique index — unique(reservationId, reference) WHERE reference is
+// a gateway reference — is created in
+//   prisma/migrations/20260724_kiosk_b5_phase1/migration.sql
+// Prisma cannot express a filtered unique index, so it is INVISIBLE to this
+// schema: `prisma migrate dev` / `db push` may try to DROP it and nothing here
+// would notice. If it disappears, the P2002 collapse in
+// reservation-pricing.service.js silently degrades to a no-op and a
+// webhook+poll race can double-post a payment.
+// Guard: payment-references.test.mjs asserts the index exists in any reachable
+// database. Do NOT add @@unique([reservationId, reference]) — it would be
+// unfiltered and break legitimate repeated MANUAL references.
 model ReservationPayment {
   id            String      @id @default(cuid())
   reservationId String
@@ -5017,6 +5030,27 @@ model KioskSession {
   nameUpdateCodeHash      String?
   nameUpdateCodeExpiresAt DateTime?
 
+  // B5 Phase 1 — ONE payment intent per kiosk session. paymentIntentRef is the
+  // transactionReferenceId minted once and REUSED by every payment-link retry
+  // (two live intents = two genuine charges the reference dedupe is
+  // structurally blind to). Survives the session wipe so a late payment can be
+  // resolved back to its reservation (design §6A).
+  //
+  // @unique is a MONEY-PATH guarantee, not a nicety (review M1): the inbound
+  // late-payment lookup resolves a gateway reference to a reservation. Without
+  // DB-enforced uniqueness a mint collision would not fail loudly — it would
+  // bind a real payment to the WRONG reservation. Postgres permits many NULLs
+  // under a unique index, so unpaid sessions are unaffected.
+  paymentIntentRef       String?   @unique
+  paymentIntentState     String? // PENDING | SUPERSEDED | PAID | TERMINAL
+  paymentIntentCreatedAt DateTime?
+  // Refs replaced by a supersede. RETAINED on purpose (review M4): there is no
+  // documented way to cancel an unpaid iPOS payment link, so a superseded link
+  // may STILL be payable by a guest holding the old QR. Keeping the old refs
+  // resolvable is what turns that late payment into a detected, queued item
+  // instead of an orphan nobody can trace back to a reservation.
+  paymentIntentPriorRefs String[]
+
   // Bumped by the events endpoint — clean staleness signal for the B5
   // orphaned-money / abandoned-session sweep.
   lastActivityAt DateTime  @default(now())
@@ -5026,6 +5060,70 @@ model KioskSession {
   @@index([tenantId, deviceId, startedAt])
   @@index([tenantId, outcome, lastActivityAt])
   @@index([reservationId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B5 Phase 1 — PaymentOpsFlag: the CONCRETE staff queue (QA M4/M18). Every
+// money path that cannot finish on its own lands here instead of failing
+// silently: a stranded deposit hold the nightly sweep can no longer pretend to
+// have released, an orphan payment that arrived after the kiosk session was
+// wiped, a rollback/card-on-file persist that failed.
+//
+// The three states are deliberately distinct — "we never called the gateway"
+// and "we called it and it failed" are different operational problems:
+//   NOT_ATTEMPTED  — needs a human/gateway action, nothing tried yet
+//   GATEWAY_FAILED — a gateway call was made and failed (lastError set)
+//   RESOLVED       — actioned (manually or by a future sweep)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PaymentOpsKind {
+  STRANDED_DEPOSIT_HOLD // hold still live on the card, needs a real void
+  ORPHAN_PAYMENT // payment with no live kiosk session (late-payment, §6A)
+  ROLLBACK_FAILED // a compensating void/refund itself failed
+  CARD_ON_FILE_FAILED // money moved but the token never persisted
+  NAME_MISMATCH_REVIEW // card name vs license — money already captured
+}
+
+enum PaymentOpsStatus {
+  NOT_ATTEMPTED
+  GATEWAY_FAILED
+  RESOLVED
+}
+
+model PaymentOpsFlag {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  kind   PaymentOpsKind
+  status PaymentOpsStatus @default(NOT_ATTEMPTED)
+
+  // Context — every field optional so any money path can raise a flag.
+  reservationId     String?
+  rentalAgreementId String?
+  kioskSessionId    String?
+  // The payment reference (IPOS:<ref> / AUTHNET:<id>) or the gateway handle
+  // (RRN / depositHoldId) the action must target.
+  reference         String?
+  gatewayRef        String?
+  amount            Decimal? @db.Decimal(10, 2)
+
+  note      String?
+  lastError String?
+  attempts  Int     @default(0)
+
+  raisedAt         DateTime  @default(now())
+  resolvedAt       DateTime?
+  resolvedByUserId String?
+  resolvedNote     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, status, raisedAt])
+  @@index([tenantId, kind, status])
+  @@index([reservationId])
+  @@index([reference])
 }
 
 // Per-channel/broker upsell rules (v1 approximation: prepaid is per-channel;
