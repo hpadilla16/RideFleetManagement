@@ -1,0 +1,11 @@
+{
+  "deposit_post_charges": {
+    "body": "I authorize a security deposit pre-authorization on my credit card of up to $1,000.00. If I hold a California licence or am a California resident, the hold is up to $2,000.00 and my mileage is limited to 150 miles per day. Deposits are accepted by credit card only, in the name of the main driver. I further authorize the merchant to charge the same card for unpaid tolls (plus a $25.00 service fee per violation), traffic and parking citations (plus a $50.00 administrative fee), fuel, cleaning, and damage assessed after the rental ends."
+  },
+  "mileage_fuel": {
+    "body": "I will return the vehicle with the fuel level it had at pickup. Missing fuel is billed at $7.00 per gallon plus a $50.00 administrative fee, and no refund is given for unused fuel. Mileage is unlimited if I present a non-local driver's licence, subject to fair use. If I hold a California licence, or cannot provide proof of return air travel, I am limited to 150 miles per day; unlimited mileage in California, Nevada and Arizona may be purchased for $25.00 per day."
+  },
+  "prohibited_use": {
+    "body": "I will not drive the vehicle off paved roads, race or test it, use it to tow, smoke or allow smoking in it, carry pets in it, or permit anyone other than authorized drivers listed on the agreement to operate it. I will not take the vehicle into Mexico. I understand that travel is permitted only within California, Nevada and Arizona, that crossing a state line incurs a $1,000.00 charge payable immediately, and that THE VEHICLE IS INSURED ONLY WITHIN THE STATE OF CALIFORNIA — outside California it is not insured. Violations void coverage and may incur penalties."
+  }
+}
