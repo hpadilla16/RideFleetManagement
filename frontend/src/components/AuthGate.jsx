@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { api, AUTH_EXPIRED_EVENT, TOKEN_KEY, USER_KEY, clearStoredAuth } from '../lib/client';
+import { api, AUTH_EXPIRED_EVENT, PASSWORD_CHANGE_REQUIRED_EVENT, TOKEN_KEY, USER_KEY, clearStoredAuth } from '../lib/client';
 
 function parseJwt(token) {
   try {
@@ -34,6 +34,22 @@ export function AuthGate({ children }) {
       setError(event?.detail?.message || 'Your session expired. Please sign in again.');
     };
     window.addEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+
+    // An admin reset this session's password mid-flight: the backend now
+    // 403s everything with PASSWORD_CHANGE_REQUIRED. Re-fetch /me (it is on
+    // the gate's allowlist) so `me.mustChangePassword` flips and the forced
+    // screen renders — no manual reload needed.
+    const handlePasswordChangeRequired = () => {
+      api('/api/auth/me')
+        .then((out) => {
+          if (out?.user) {
+            localStorage.setItem(USER_KEY, JSON.stringify(out.user));
+            setMe(out.user);
+          }
+        })
+        .catch(() => {});
+    };
+    window.addEventListener(PASSWORD_CHANGE_REQUIRED_EVENT, handlePasswordChangeRequired);
 
     const t = localStorage.getItem(TOKEN_KEY) || '';
     const rawUser = localStorage.getItem(USER_KEY);
@@ -86,6 +102,7 @@ export function AuthGate({ children }) {
 
     return () => {
       window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
+      window.removeEventListener(PASSWORD_CHANGE_REQUIRED_EVENT, handlePasswordChangeRequired);
       if (refreshTimer) clearTimeout(refreshTimer);
     };
   }, []);
@@ -108,6 +125,38 @@ export function AuthGate({ children }) {
     clearStoredAuth();
     setToken('');
     setMe(null);
+  };
+
+  // First-login onboarding (2026-07-25): while me.mustChangePassword the
+  // backend 403s everything (PASSWORD_CHANGE_REQUIRED) except the
+  // change-password endpoint, and this gate renders the forced screen
+  // instead of the app. Success returns a fresh token+user, which lifts the
+  // gate in one round trip.
+  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
+  const [pwBusy, setPwBusy] = useState(false);
+  const changePassword = async (e) => {
+    e.preventDefault();
+    if (pwForm.next !== pwForm.confirm) {
+      setError('New password and confirmation do not match');
+      return;
+    }
+    try {
+      setPwBusy(true);
+      const out = await api('/api/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword: pwForm.current, newPassword: pwForm.next })
+      });
+      localStorage.setItem(TOKEN_KEY, out.token);
+      localStorage.setItem(USER_KEY, JSON.stringify(out.user || {}));
+      setToken(out.token);
+      setMe(out.user);
+      setPwForm({ current: '', next: '', confirm: '' });
+      setError('');
+    } catch (e2) {
+      setError(e2.message);
+    } finally {
+      setPwBusy(false);
+    }
   };
 
   const requestGuestSignIn = async (e) => {
@@ -166,6 +215,58 @@ export function AuthGate({ children }) {
           <div className="auth-legal-row">
             <span className="ui-muted">By using Ride Fleet, you agree to the current platform policies.</span>
             <Link href="/privacy" className="legal-link-inline">Privacy Policy</Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (me?.mustChangePassword) {
+    return (
+      <main className="auth-wrap auth-animated-split">
+        <div className="auth-purple-half" aria-hidden />
+        <img src="/ride-logo.png" alt="Ride logo" className="intro-logo" />
+
+        <div className="glass card-lg login-card centered-login login-float-in">
+          <h1>Set your password</h1>
+          <p className="label">
+            Your account is using a temporary password. Choose your own to continue —
+            at least 12 characters with uppercase, lowercase, a number, and a special character.
+          </p>
+          {error ? <p className="error">{error}</p> : null}
+
+          <form onSubmit={changePassword} className="stack" style={{ marginTop: 12 }}>
+            <input
+              placeholder="Temporary password"
+              type="password"
+              autoComplete="current-password"
+              value={pwForm.current}
+              onChange={(e) => setPwForm({ ...pwForm, current: e.target.value })}
+              required
+            />
+            <input
+              placeholder="New password"
+              type="password"
+              autoComplete="new-password"
+              value={pwForm.next}
+              onChange={(e) => setPwForm({ ...pwForm, next: e.target.value })}
+              required
+            />
+            <input
+              placeholder="Confirm new password"
+              type="password"
+              autoComplete="new-password"
+              value={pwForm.confirm}
+              onChange={(e) => setPwForm({ ...pwForm, confirm: e.target.value })}
+              required
+            />
+            <button type="submit" disabled={pwBusy}>{pwBusy ? 'Saving…' : 'Save and continue'}</button>
+          </form>
+
+          <div className="auth-legal-row">
+            <button type="button" className="legal-link-inline" onClick={logout} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              Sign out
+            </button>
           </div>
         </div>
       </main>

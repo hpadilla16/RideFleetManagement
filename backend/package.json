@@ -42,7 +42,7 @@
     "test:tolls": "node --test src/modules/tolls/tolls-responsibility.test.mjs src/modules/tolls/tolls-billing-policy.test.mjs",
     "test:sms": "node --test src/modules/sms/sms-templates.test.mjs",
     "test:payments": "node --test src/modules/payment-gateway/spin-client.test.mjs",
-    "test:auth": "node --test --test-force-exit src/modules/auth/auth-validation.test.mjs",
+    "test:auth": "node --test --test-force-exit src/modules/auth/auth-validation.test.mjs src/modules/auth/password-gate.test.mjs",
     "test:cache": "node --test src/lib/cache.test.mjs src/lib/cache/tenantKey.test.mjs",
     "test:puppeteer": "node --test src/lib/puppeteer-browser.test.mjs",
     "test:rental-agreements": "node --test --test-force-exit src/modules/rental-agreements/rental-agreements-email-async.test.mjs src/modules/rental-agreements/rental-agreements-finalize-tx.test.mjs src/modules/rental-agreements/start-from-reservation-preserves-manual-charges.test.mjs src/modules/rental-agreements/start-from-reservation-branch3-preserves-manual-charges.test.mjs src/modules/rental-agreements/null-source-charge-dedup.test.mjs src/modules/rental-agreements/spin-reauth-deposit-hold.test.mjs",

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
@@ -51,7 +52,12 @@ function normalizeEmail(value) {
 }
 
 function randomTempPassword() {
-  return `Temp${Math.random().toString(36).slice(2, 8)}!9`;
+  // 2026-07-25: crypto-strong (was Math.random). Same 12-char shape, still
+  // satisfies the auth password policy (upper, lower, digit, special). These
+  // are one-shot secrets now — mustChangePassword forces replacement on
+  // first login — but they travel by email, so they should not be guessable.
+  // 64 bits of entropy — these travel by email and exist until first login.
+  return `Temp${crypto.randomBytes(8).toString('hex')}!9`;
 }
 
 function appBaseUrl() {
@@ -290,6 +296,10 @@ export const peopleService = {
           fullName,
           role: allowedRoleForPayload(personType, payload.role),
           passwordHash,
+          // First-login onboarding (2026-07-25): the creator knows this
+          // password (temp OR admin-typed), so the user must replace it.
+          // Covers the People UI, tenant admins, and seed scripts in one place.
+          mustChangePassword: true,
           isActive: true,
           ...(locationIdsValue !== undefined ? { locationIds: locationIdsValue } : {}),
           ...(programScopeValue !== undefined ? { programScope: programScopeValue } : {})
@@ -355,8 +365,12 @@ export const peopleService = {
     const passwordHash = await bcrypt.hash(tempPassword, SALT_ROUNDS);
     await prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash }
+      // First-login onboarding (2026-07-25): an admin reset is a temp
+      // password again — re-arm the forced change. Session cache busted so
+      // an open session on this worker gates immediately, not after the TTL.
+      data: { passwordHash, mustChangePassword: true }
     });
+    cache.del(globalKey('session', user.id));
 
     const sendInvite = payload?.sendInvite === false ? false : true;
     if (sendInvite && user.email) {

@@ -200,6 +200,10 @@ export const tenantsService = {
           fullName,
           role: 'ADMIN',
           passwordHash,
+          // First-login onboarding (2026-07-25): the creating SUPER_ADMIN
+          // knows this password (often the TempPass123! literal) — force
+          // the new admin to replace it.
+          mustChangePassword: true,
           tenant: { connect: { id: tenantId } }
         },
         select: { id: true, email: true, fullName: true, role: true, tenantId: true }
@@ -223,7 +227,11 @@ export const tenantsService = {
     const user = await prisma.user.findFirst({ where: { id: userId, tenantId } });
     if (!user) throw new Error('Tenant admin not found');
     const passwordHash = await bcrypt.hash(String(password), SALT_ROUNDS);
-    await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+    // First-login onboarding (2026-07-25): admin reset = temp password again.
+    // Session cache busted so an open session gates immediately on this
+    // worker (siblings converge within the 30s TTL).
+    await prisma.user.update({ where: { id: user.id }, data: { passwordHash, mustChangePassword: true } });
+    authService.invalidateSessionCache(user.id);
     return { ok: true, userId: user.id, email: user.email, tempPassword: password };
   },
 

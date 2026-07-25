@@ -1726,6 +1726,14 @@ model User {
   createdByUser    User?           @relation("UserCreatedBy", fields: [createdByUserId], references: [id])
   email            String          @unique
   passwordHash     String
+  // First-login onboarding (2026-07-25): mustChangePassword is true whenever
+  // someone OTHER than the user knows the password (temp password at create,
+  // any admin reset). While true, requireAuth 403s everything except the
+  // change-password allowlist (code PASSWORD_CHANGE_REQUIRED) and AuthGate
+  // renders the forced-change screen. passwordChangedAt records the last
+  // SELF-chosen password (null = never chose one).
+  mustChangePassword Boolean  @default(false)
+  passwordChangedAt  DateTime?
   lockPinHash      String?
   lockPinUpdatedAt DateTime?
   screenLockExempt Boolean         @default(false)

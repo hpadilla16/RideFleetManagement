@@ -3,6 +3,19 @@ import { getJwtSecret } from '../modules/auth/auth.config.js';
 import { authService } from '../modules/auth/auth.service.js';
 import { isAllowedForServiceAccount } from '../lib/service-account-allowlist.js';
 
+// First-login onboarding (2026-07-25): while User.mustChangePassword is
+// true (temp password at create, admin reset), a human session may reach
+// ONLY these endpoints. Everything else 403s with PASSWORD_CHANGE_REQUIRED,
+// which the frontend AuthGate turns into the forced-change screen. The list
+// is deliberately tiny: change-password (the way out), me (session
+// hydration), refresh (token keep-alive so the forced screen doesn't expire
+// mid-typing). Default-deny, mirroring the service-account allowlist.
+const PASSWORD_GATE_ALLOWLIST = new Set([
+  'POST /api/auth/change-password',
+  'GET /api/auth/me',
+  'POST /api/auth/refresh'
+]);
+
 export async function requireAuth(req, res, next) {
   const auth = req.headers.authorization || '';
   const [scheme, token] = auth.split(' ');
@@ -28,6 +41,19 @@ export async function requireAuth(req, res, next) {
       const path = String(req.originalUrl || req.url || '').split('?')[0];
       if (!isAllowedForServiceAccount(req.method, path)) {
         return res.status(403).json({ error: 'Endpoint not available for service accounts' });
+      }
+    }
+
+    // First-login onboarding (2026-07-25): humans with a temp password are
+    // boxed into the change-password allowlist. Service accounts are exempt
+    // (no interactive login; their own default-deny allowlist governs them).
+    if (!hydrated.isServiceAccount && hydrated.mustChangePassword) {
+      const gatePath = String(req.originalUrl || req.url || '').split('?')[0];
+      if (!PASSWORD_GATE_ALLOWLIST.has(`${req.method} ${gatePath}`)) {
+        return res.status(403).json({
+          error: 'You must change your temporary password before using the app',
+          code: 'PASSWORD_CHANGE_REQUIRED'
+        });
       }
     }
 

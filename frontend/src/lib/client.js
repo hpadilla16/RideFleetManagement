@@ -53,6 +53,11 @@ export const API_BASE = resolveApiBase();
 export const TOKEN_KEY = 'fleet_jwt';
 export const USER_KEY = 'fleet_user';
 export const AUTH_EXPIRED_EVENT = 'ridefleet:auth-expired';
+// First-login onboarding (2026-07-25): fired when the backend 403s with
+// code PASSWORD_CHANGE_REQUIRED (e.g. an admin reset the password of a LIVE
+// session). AuthGate listens and re-fetches /me so the forced-change screen
+// appears without a manual reload.
+export const PASSWORD_CHANGE_REQUIRED_EVENT = 'ridefleet:password-change-required';
 const GET_CACHE_TTL_MS = 15000;
 const getResponseCache = new Map();
 const inflightGetRequests = new Map();
@@ -79,6 +84,7 @@ function buildGetCacheKey(url, token) {
 async function parseApiResponse(res, path) {
   if (!res.ok) {
     let msg = `${path} failed (${res.status})`;
+    let code = null;
     try {
       const text = await res.text();
       if (text) {
@@ -86,6 +92,7 @@ async function parseApiResponse(res, path) {
           const j = JSON.parse(text);
           if (j?.error) msg = Array.isArray(j.details) && j.details.length ? j.details.join('. ') : j.error;
           else msg = `${msg}: ${text.slice(0, 300)}`;
+          if (j?.code) code = String(j.code);
         } catch {
           msg = `${msg}: ${text.slice(0, 300)}`;
         }
@@ -93,6 +100,10 @@ async function parseApiResponse(res, path) {
     } catch {}
     const error = new Error(msg);
     error.status = res.status;
+    error.code = code;
+    if (typeof window !== 'undefined' && res.status === 403 && code === 'PASSWORD_CHANGE_REQUIRED') {
+      window.dispatchEvent(new CustomEvent(PASSWORD_CHANGE_REQUIRED_EVENT, { detail: { path } }));
+    }
     if (
       typeof window !== 'undefined' &&
       res.status === 401 &&

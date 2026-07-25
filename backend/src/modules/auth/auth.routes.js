@@ -63,6 +63,35 @@ authRouter.post('/login', authRateLimit, async (req, res) => {
   }
 });
 
+// First-login onboarding (2026-07-25). Reachable while the
+// PASSWORD_CHANGE_REQUIRED gate is up (allowlisted in requireAuth). Enforces
+// the same policy as /register; returns a fresh token so the client swaps
+// its stored JWT and the gate lifts without re-login.
+authRouter.post('/change-password', requireAuth, pinRateLimit, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'currentPassword and newPassword are required' });
+    }
+    const pwError = validatePassword(newPassword);
+    if (pwError) return res.status(400).json({ error: pwError });
+    const result = await authService.changePassword({
+      userId: req.user?.id || req.user?.sub,
+      currentPassword,
+      newPassword
+    });
+    logger.info('[auth] password changed', { userId: req.user?.id || req.user?.sub });
+    res.json(result);
+  } catch (e) {
+    const msg = String(e?.message || '');
+    if (/current password is incorrect|must be different/i.test(msg)) {
+      return res.status(400).json({ error: msg });
+    }
+    if (/service accounts/i.test(msg)) return res.status(403).json({ error: msg });
+    res.status(400).json({ error: msg || 'Unable to change password' });
+  }
+});
+
 authRouter.get('/me', requireAuth, async (req, res, next) => {
   try {
     res.json({ user: req.user });

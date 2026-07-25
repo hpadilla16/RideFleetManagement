@@ -105,6 +105,9 @@ async function buildSessionUser(user) {
     // service-account allowlist + tv revocation check on hydrated sessions.
     isServiceAccount: !!user.isServiceAccount,
     tokenVersion: user.tokenVersion ?? 0,
+    // First-login onboarding (2026-07-25): requireAuth gates on this and the
+    // frontend AuthGate renders the forced-change screen while it is true.
+    mustChangePassword: !!user.mustChangePassword,
     moduleAccess: moduleAccess.effective,
     tenantModuleAccess: moduleAccess.tenantConfig,
     userModuleAccess: moduleAccess.userConfig
@@ -143,6 +146,7 @@ export const authService = {
           programScope: true,
           isServiceAccount: true,
           tokenVersion: true,
+          mustChangePassword: true,
           hostProfile: { select: { id: true } }
         }
       });
@@ -225,7 +229,9 @@ export const authService = {
         passwordHash,
         fullName,
         role: 'AGENT',
-        tenantId: tenantId || null
+        tenantId: tenantId || null,
+        // Self-registration = the user chose this password themselves.
+        passwordChangedAt: new Date()
       }
     });
 
@@ -246,6 +252,43 @@ export const authService = {
 
     const token = signToken(user);
     return { token, user: await buildSessionUser(user) };
+  },
+
+  // First-login onboarding (2026-07-25). Self-service password change — the
+  // ONLY endpoint that clears mustChangePassword. Requires the current
+  // password even mid-forced-flow: a walked-away unlocked session must not
+  // let a passerby take over the account. Re-issues the JWT and busts the
+  // session cache so the requireAuth gate lifts immediately on this worker
+  // (siblings converge within SESSION_CACHE_TTL_MS, same as every other
+  // session mutation).
+  async changePassword({ userId, currentPassword, newPassword }) {
+    const user = await prisma.user.findUnique({
+      where: { id: String(userId || '') },
+      include: { hostProfile: { select: { id: true } } }
+    });
+    if (!user || !user.isActive) throw new Error('User not found or inactive');
+    if (user.isServiceAccount) throw new Error('Service accounts cannot change passwords');
+
+    const ok = await bcrypt.compare(String(currentPassword || ''), user.passwordHash);
+    if (!ok) throw new Error('Current password is incorrect');
+    if (String(currentPassword) === String(newPassword)) {
+      throw new Error('New password must be different from the current password');
+    }
+
+    const passwordHash = await bcrypt.hash(String(newPassword), 10);
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        mustChangePassword: false,
+        passwordChangedAt: new Date()
+      },
+      include: { hostProfile: { select: { id: true } } }
+    });
+
+    cache.del(globalKey('session', user.id));
+    const token = signToken(updated);
+    return { token, user: await buildSessionUser(updated) };
   },
 
   async listUsers(scope = {}) {
