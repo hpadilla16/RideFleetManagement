@@ -10,14 +10,26 @@
  * src/lib/terms/tc-<VERSION>.html) and are written verbatim by Prisma.
  *
  * WHAT IT WRITES
+ *   Location.termsHtml          <- scripts/location-terms/<slug>-terms.html   (base, optional)
  *   Location.termsRiderHtml     <- scripts/location-terms/<slug>-rider.html
  *   Location.termsSectionsJson  <- scripts/location-terms/<slug>-sections.json
  *
- * The rider is APPENDED to the canonical agreement by
- * lib/terms/getEffectiveTermsHtml — it never replaces it, so the branch keeps
- * the card-on-file pre-authorization, liability release, indemnification and
- * governing law. The sections file overrides the TEXT of the acknowledgements the
- * customer initials, keyed by canonical sectionKey.
+ * getEffectiveTermsHtml resolves the BASE as
+ * location.termsHtml -> tenant.termsHtml -> canonical, then APPENDS
+ * location.termsRiderHtml. So a branch can either ride on the canonical agreement
+ * and add a rider, or — as LAX does — supply its own base document and append a
+ * rider to that.
+ *
+ * WHY LAX SUPPLIES A BASE. The "canonical" agreement is not generic: it names
+ * International Rental Corp as the Company, is governed by Puerto Rico law, and
+ * describes the AutoExpreso toll transponder 12 times. A Corpusa customer at LAX
+ * would have been signing another company's contract under the wrong
+ * jurisdiction. LAX's base is therefore its own Right-cars document (sections
+ * 1-13), and its rider carries the general legal clauses that document lacked,
+ * written for California (sections 14-19).
+ *
+ * The sections file overrides the TEXT of the acknowledgements the customer
+ * initials, keyed by canonical sectionKey.
  *
  * ⚠ TERMS RESOLVE AT PRINT TIME — THERE IS NO SNAPSHOT. Writing these columns
  * re-renders every ALREADY-SIGNED agreement at that branch: new text beside
@@ -61,8 +73,13 @@ async function main() {
     throw new Error('usage: --slug <name> --location-id <cuid|uuid> [--commit]');
   }
 
+  const basePath = join(HERE, 'location-terms', `${SLUG}-terms.html`);
   const riderPath = join(HERE, 'location-terms', `${SLUG}-rider.html`);
   const sectionsPath = join(HERE, 'location-terms', `${SLUG}-sections.json`);
+  // The base document is OPTIONAL: a branch that rides on the canonical (or on
+  // its tenant's) agreement ships only a rider.
+  let baseDoc = null;
+  try { baseDoc = readFileSync(basePath, 'utf8'); } catch { baseDoc = null; }
   const rider = readFileSync(riderPath, 'utf8');
   const sectionsRaw = readFileSync(sectionsPath, 'utf8');
 
@@ -78,7 +95,7 @@ async function main() {
 
   const loc = await prisma.location.findUnique({
     where: { id: LOCATION_ID },
-    select: { id: true, code: true, name: true, tenantId: true, termsRiderHtml: true, termsSectionsJson: true },
+    select: { id: true, code: true, name: true, tenantId: true, termsHtml: true, termsRiderHtml: true, termsSectionsJson: true },
   });
   if (!loc) throw new Error(`Location ${LOCATION_ID} not found`);
 
@@ -89,9 +106,10 @@ async function main() {
   });
 
   console.log(`Branch   : ${loc.code} — ${loc.name}`);
+  console.log(`Base doc : ${baseDoc ? `${basePath} (${baseDoc.length} bytes)` : 'none — inherits tenant/canonical'}`);
   console.log(`Rider    : ${riderPath} (${rider.length} bytes)`);
   console.log(`Sections : ${Object.keys(parsed).join(', ')}`);
-  console.log(`Currently: rider ${loc.termsRiderHtml ? `${loc.termsRiderHtml.length} bytes` : 'unset'}, sections ${loc.termsSectionsJson ? 'set' : 'unset'}`);
+  console.log(`Currently: base ${loc.termsHtml ? `${loc.termsHtml.length} bytes` : 'unset'}, rider ${loc.termsRiderHtml ? `${loc.termsRiderHtml.length} bytes` : 'unset'}, sections ${loc.termsSectionsJson ? 'set' : 'unset'}`);
   console.log(COMMIT ? 'Mode     : COMMIT' : 'Mode     : DRY RUN — nothing will be written');
   console.log('');
 
@@ -109,16 +127,24 @@ async function main() {
 
   if (!COMMIT) {
     // Prove the resolver composes correctly without writing anything.
-    const preview = await getEffectiveTermsHtml(
+    const inherited = await getEffectiveTermsHtml(
       { tenantId: loc.tenantId, locationId: null },
       { prisma },
     );
-    const withRider = `${preview}\n${rider}`;
+    const base = baseDoc || inherited;
+    const combined = `${base}\n${rider}`;
+    const nums = [...combined.matchAll(/<h2>(\d+)\./g)].map((m) => Number(m[1]));
+    const contiguous = nums.length > 0 && nums.every((n, i) => n === i + 1);
+    const ownBase = baseDoc ? 'this branch own document' : 'inherited';
     console.log('Dry-run checks against the real resolver:');
-    console.log(`  base document          : ${preview.length} bytes`);
-    console.log(`  card-on-file survives  : ${/CARD-ON-FILE PRE-AUTHORIZATION/.test(withRider)}`);
-    console.log(`  indemnification survives: ${/INDEMNIFICATION/.test(withRider)}`);
-    console.log(`  combined               : ${withRider.length} bytes`);
+    console.log(`  base document          : ${base.length} bytes (${ownBase})`);
+    console.log(`  combined               : ${combined.length} bytes`);
+    console.log(`  section numbering      : ${nums.length ? `1..${nums[nums.length - 1]}` : 'none'} ${contiguous ? '(contiguous)' : '(NOT CONTIGUOUS — gaps or repeats)'}`);
+    console.log(`  card authorization     : ${/PAYMENT CARD AUTHORIZATION|CARD-ON-FILE/i.test(combined)}`);
+    console.log(`  indemnification        : ${/INDEMNIFICATION/i.test(combined)}`);
+    console.log(`  governing law          : ${/GOVERNING LAW/i.test(combined)}`);
+    console.log(`  other company named    : ${/International Rental Corp/i.test(combined) ? 'PRESENT — WRONG COMPANY' : 'absent'}`);
+    console.log(`  wrong jurisdiction     : ${/Puerto Rico/i.test(combined) ? 'PRESENT — check' : 'absent'}`);
     const secs = sectionsForAgreement({ sectionOverrides: sectionsRaw });
     console.log(`  acknowledgement keys   : ${secs.length} (${secs.length === canonicalKeys.size ? 'canonical, unchanged' : 'CHANGED — bug'})`);
     for (const k of Object.keys(parsed)) {
@@ -131,13 +157,21 @@ async function main() {
 
   const out = await prisma.location.update({
     where: { id: LOCATION_ID },
-    data: { termsRiderHtml: rider, termsSectionsJson: sectionsRaw },
-    select: { code: true, termsRiderHtml: true, termsSectionsJson: true },
+    data: {
+      ...(baseDoc ? { termsHtml: baseDoc } : {}),
+      termsRiderHtml: rider,
+      termsSectionsJson: sectionsRaw,
+    },
+    select: { code: true, termsHtml: true, termsRiderHtml: true, termsSectionsJson: true },
   });
+  const okBase = !baseDoc || out.termsHtml === baseDoc;
   const okRider = out.termsRiderHtml === rider;
   const okSecs = out.termsSectionsJson === sectionsRaw;
-  console.log(`Wrote ${out.code}: rider ${out.termsRiderHtml.length} bytes (byte-identical: ${okRider}), sections ${out.termsSectionsJson.length} bytes (byte-identical: ${okSecs})`);
-  if (!okRider || !okSecs) throw new Error('round-trip mismatch — the stored text does not match the file');
+  console.log(`Wrote ${out.code}:`);
+  if (baseDoc) console.log(`  base     ${out.termsHtml.length} bytes (byte-identical: ${okBase})`);
+  console.log(`  rider    ${out.termsRiderHtml.length} bytes (byte-identical: ${okRider})`);
+  console.log(`  sections ${out.termsSectionsJson.length} bytes (byte-identical: ${okSecs})`);
+  if (!okBase || !okRider || !okSecs) throw new Error('round-trip mismatch — the stored text does not match the file');
   console.log('\nVerify: open an agreement at this branch and confirm the rider appears after');
   console.log('the canonical terms, and that the initialled sections show the branch figures.');
 }
