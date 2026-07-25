@@ -15,6 +15,8 @@
  * toggle controls this.
  */
 
+import logger from '../../lib/logger.js';
+
 export const TC_SECTIONS = [
   {
     key: 'rental_period',
@@ -79,17 +81,95 @@ export const DECLINED_INSURANCE_SECTION = {
 };
 
 /**
+ * Parse a Location.termsSectionsJson blob into a key → {label?, body?} map.
+ *
+ * Tolerant by design: a malformed blob yields {} and the canonical text renders.
+ * Failing the signing flow over bad config would strand a customer at the
+ * counter. Accepts an already-parsed object so callers can pass either form, and
+ * a bare string as shorthand for { body }.
+ */
+export function parseSectionOverrides(raw) {
+  let parsed = raw;
+  if (typeof raw === 'string') {
+    if (!raw.trim()) return {};
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      // MUST be logged. There is no admin UI for this column and
+      // PATCH /api/locations/:id validates nothing, so a truncated or mistyped
+      // blob would otherwise leave every renter at that branch signing the
+      // CANONICAL text while ops believes the branch wording is live — a wrong
+      // legal document with no signal anywhere. Same reason the resolver in
+      // lib/terms/index.js refuses to swallow its lookup failure.
+      logger.error('[terms] Location.termsSectionsJson is not valid JSON — falling back to canonical acknowledgement text', {
+        message: String(err?.message || err),
+        length: raw.length,
+      });
+      return {};
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    if (parsed !== undefined && parsed !== null) {
+      logger.error('[terms] Location.termsSectionsJson must be a JSON object keyed by sectionKey — falling back to canonical text', {
+        got: Array.isArray(parsed) ? 'array' : typeof parsed,
+      });
+    }
+    return {};
+  }
+  const known = new Set([...TC_SECTIONS, DECLINED_INSURANCE_SECTION].map((s) => s.key));
+  const out = {};
+  const unknown = [];
+  for (const [key, val] of Object.entries(parsed)) {
+    // A key outside the canonical set can never take effect (see
+    // sectionsForAgreement), so silence here would hide a typo that quietly
+    // leaves an acknowledgement on the canonical wording.
+    if (!known.has(key)) { unknown.push(key); continue; }
+    if (!val) continue;
+    const body = typeof val === 'string' ? val : val.body;
+    const label = typeof val === 'string' ? undefined : val.label;
+    const entry = {};
+    if (typeof body === 'string' && body.trim()) entry.body = body.trim();
+    if (typeof label === 'string' && label.trim()) entry.label = label.trim();
+    if (Object.keys(entry).length) out[key] = entry;
+  }
+  if (unknown.length) {
+    logger.error('[terms] Location.termsSectionsJson has keys that match no acknowledgement section — those sections keep the canonical text', {
+      unknownKeys: unknown,
+      validKeys: [...known],
+    });
+  }
+  return out;
+}
+
+/**
  * Build the actual section list for a given agreement, with the
  * declined-insurance addendum injected in the right spot when needed.
+ *
+ * `sectionOverrides` (from Location.termsSectionsJson) replaces the TEXT of
+ * sections by key. It can NOT add, remove or reorder them: `key` is persisted to
+ * AgreementSectionInitial and re-matched when the agreement PDF re-prints the
+ * initialled pages, so a branch-specific key would orphan initials a customer
+ * already signed. An unknown key is ignored on purpose — a typo must not
+ * silently drop an acknowledgement from the flow.
+ *
+ * This exists because these sections were hardcoded. LAX runs on Rightcars'
+ * California policies (a $2,000 deposit for California licences, 150 mi/day)
+ * while `deposit_post_charges` said "$500" — and that text is re-printed inside
+ * the same PDF, right beside the renter's own initials.
  */
-export function sectionsForAgreement({ declinedInsurance } = {}) {
-  if (!declinedInsurance) return TC_SECTIONS;
+export function sectionsForAgreement({ declinedInsurance, sectionOverrides } = {}) {
+  const overrides = parseSectionOverrides(sectionOverrides);
+  const apply = (s) => {
+    const o = overrides[s.key];
+    return o ? { ...s, ...o } : s;
+  };
+  if (!declinedInsurance) return TC_SECTIONS.map(apply);
   // Inject after insurance_coverage so the chain of insurance topics
   // stays contiguous.
   const out = [];
   for (const s of TC_SECTIONS) {
-    out.push(s);
-    if (s.key === 'insurance_coverage') out.push(DECLINED_INSURANCE_SECTION);
+    out.push(apply(s));
+    if (s.key === 'insurance_coverage') out.push(apply(DECLINED_INSURANCE_SECTION));
   }
   return out;
 }

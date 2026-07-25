@@ -19,6 +19,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PrismaClient } from '@prisma/client';
 import { locationsService } from './locations.service.js';
+import { cache } from '../../lib/cache.js';
 
 const prisma = new PrismaClient();
 const TAG = `LOCSCOPE-${Date.now()}`;
@@ -82,4 +83,44 @@ test('CARE 4: an unrestricted tenant admin still edits any branch — no regress
   await locationsService.update(ids.mco, { termsHtml: '<p>MCO terms</p>' }, unrestricted);
   const mco = await prisma.location.findUnique({ where: { id: ids.mco }, select: { termsHtml: true } });
   assert.equal(mco.termsHtml, '<p>MCO terms</p>');
+});
+
+// ── Terms columns must not ride along on the cached list (2026-07-24) ────────
+//
+// The three T&C columns hold DOCUMENTS (the canonical agreement they replace or
+// extend is ~70 KB). `list()` is cached in process AND is reached through
+// /api/reservations/create-options and /:id/pricing-options, which cache again —
+// so leaking them multiplies a full contract by (locations × cached reservations)
+// for screens that show a name and a code.
+test('CARE 5: list() omits the terms columns but keeps everything else', async () => {
+  // Give the branch all three so a leak would be visible.
+  await prisma.location.update({
+    where: { id: ids.lax },
+    data: {
+      termsHtml: '<p>full replacement</p>',
+      termsRiderHtml: '<h2>LAX rider</h2>',
+      termsSectionsJson: '{"deposit_post_charges":{"body":"$2,000"}}',
+    },
+  });
+  cache.clear();
+
+  const rows = await locationsService.list({ tenantId: ids.tenant });
+  const lax = rows.find((r) => r.id === ids.lax);
+  assert.ok(lax, 'the branch is still listed');
+
+  for (const field of ['termsHtml', 'termsRiderHtml', 'termsSectionsJson']) {
+    assert.equal(lax[field], undefined, `${field} must not be in the cached list payload`);
+  }
+  // The deny-list must not have taken anything else with it — these are the
+  // fields the pickers and the editor actually render.
+  for (const field of ['id', 'code', 'name', 'taxRate', 'isActive', 'locationConfig', 'tenantId']) {
+    assert.ok(field in lax, `${field} must survive the omit`);
+  }
+  assert.ok(Array.isArray(lax.locationFees), 'the locationFees include still resolves alongside omit');
+});
+
+test('CARE 6: getById DOES return the terms columns — the editor/resolver path', async () => {
+  const lax = await locationsService.getById(ids.lax, { tenantId: ids.tenant });
+  assert.equal(lax.termsRiderHtml, '<h2>LAX rider</h2>', 'omit is scoped to list(), not to reads by id');
+  assert.equal(lax.termsHtml, '<p>full replacement</p>');
 });

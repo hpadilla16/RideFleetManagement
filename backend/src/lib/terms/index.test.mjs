@@ -207,3 +207,82 @@ describe('getEffectiveTermsHtml — location → tenant → canonical', () => {
     assert.ok(html.includes('TENANT terms.'));
   });
 });
+
+// ── Branch RIDER (2026-07-24) ───────────────────────────────────────────────
+//
+// WHY A RIDER AND NOT THE REPLACEMENT: Corpusa's LAX source document is
+// Rightcars' "Country Level Rental Policies" — a policy sheet covering mileage,
+// deposits, driver age, fuel and fees. It contains NONE of the canonical
+// agreement's 24 sections: no authorized use, no §11 card-on-file
+// pre-authorization (the legal basis the tolls/citations modules rely on to bill
+// after a rental closes), no liability release, no indemnification, no governing
+// law. Loading it as a REPLACEMENT would have had every LAX renter sign an
+// agreement that cannot support a post-rental charge. So the branch keeps the
+// canonical base and appends only what varies locally.
+describe('getEffectiveTermsHtml — branch rider', () => {
+  const TENANTS = { t1: { id: 't1', termsHtml: '<p>TENANT terms.</p>' }, t2: { id: 't2', termsHtml: null } };
+  const RIDER = '<h2>LAX LOCAL POLICIES</h2><p>Deposit up to $2,000.</p>';
+  const LOCATIONS = {
+    lax:  { id: 'lax',  termsHtml: null, termsRiderHtml: RIDER },
+    both: { id: 'both', termsHtml: '<p>BRANCH replacement.</p>', termsRiderHtml: RIDER },
+    bare: { id: 'bare', termsHtml: null, termsRiderHtml: null },
+    ws:   { id: 'ws',   termsHtml: null, termsRiderHtml: '   ' },
+  };
+
+  it('CARE 1: rider is APPENDED to the canonical base, not a replacement', async () => {
+    const prisma = makePrismaWithLocations(TENANTS, LOCATIONS);
+    const html = await getEffectiveTermsHtml({ tenantId: 't2', locationId: 'lax' }, { prisma });
+    // The canonical agreement must survive in full — this is the whole point.
+    assert.ok(html.includes('CARD-ON-FILE PRE-AUTHORIZATION'), 'the §11 card-on-file authorization must still be there');
+    assert.ok(html.includes('INDEMNIFICATION'), 'indemnification must still be there');
+    assert.ok(html.includes('Deposit up to $2,000.'), 'and the branch rider is appended');
+    assert.ok(html.includes('tc-location-rider'), 'wrapped so the reader can see where local policy starts');
+    // Order matters: the rider reads last, so a branch figure restating a
+    // general term is the one the customer reads second.
+    assert.ok(html.indexOf('CARD-ON-FILE') < html.indexOf('Deposit up to $2,000.'));
+  });
+
+  it('CARE 2: rider is appended to a TENANT override too', async () => {
+    const prisma = makePrismaWithLocations(TENANTS, LOCATIONS);
+    const html = await getEffectiveTermsHtml({ tenantId: 't1', locationId: 'lax' }, { prisma });
+    assert.ok(html.includes('TENANT terms.'));
+    assert.ok(html.includes('Deposit up to $2,000.'));
+  });
+
+  it('CARE 3: rider is appended even when the branch ALSO replaces the base', async () => {
+    const prisma = makePrismaWithLocations(TENANTS, LOCATIONS);
+    const html = await getEffectiveTermsHtml({ tenantId: 't1', locationId: 'both' }, { prisma });
+    assert.ok(html.includes('BRANCH replacement.'));
+    assert.ok(html.includes('Deposit up to $2,000.'), 'replacement + rider compose');
+    assert.ok(!html.includes('TENANT terms.'));
+  });
+
+  it('CARE 4: no rider (null or whitespace) changes nothing at all', async () => {
+    const prisma = makePrismaWithLocations(TENANTS, LOCATIONS);
+    const canonical = getCanonicalTermsHtml({});
+    for (const loc of ['bare', 'ws']) {
+      const html = await getEffectiveTermsHtml({ tenantId: 't2', locationId: loc }, { prisma });
+      assert.equal(html, canonical, `${loc} must render byte-identical canonical`);
+      assert.ok(!html.includes('tc-location-rider'), 'no empty wrapper is emitted');
+    }
+  });
+
+  it('CARE 5: markers inside a rider are substituted — a rider may carry its own initials', async () => {
+    const prisma = makePrismaWithLocations(TENANTS, {
+      m: { id: 'm', termsHtml: null, termsRiderHtml: '<p>Local initials: {{INITIALS_S4_DECLINE}}</p>' },
+    });
+    const html = await getEffectiveTermsHtml({ tenantId: 't2', locationId: 'm' }, { prisma }, { initials: { INITIALS_S4_DECLINE: 'HP' } });
+    assert.ok(!html.includes('{{INITIALS_S4_DECLINE}}'), 'marker substituted in the rider');
+    assert.ok(html.includes('Local initials: HP'));
+  });
+
+  it('CARE 6: a DB error still yields a usable document, and no rider', async () => {
+    const prisma = {
+      ...makePrismaWithLocations(TENANTS, LOCATIONS),
+      location: { async findUnique() { throw new Error('connection reset'); } },
+    };
+    const html = await getEffectiveTermsHtml({ tenantId: 't1', locationId: 'lax' }, { prisma });
+    assert.ok(html.includes('TENANT terms.'), 'falls back to the tenant base');
+    assert.ok(!html.includes('tc-location-rider'), 'and no half-applied rider');
+  });
+});

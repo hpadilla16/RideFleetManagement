@@ -117,6 +117,23 @@ export function getCanonicalTermsPlainText() {
 
 export { TC_VERSION };
 
+/**
+ * Append a branch rider to the resolved base agreement.
+ *
+ * The rider is wrapped in its own <section> so the print CSS and anyone reading
+ * the contract can see where the branch's local policies begin. Its markers get
+ * substituted too — a rider may legitimately carry its own initials line.
+ *
+ * Order matters and is deliberate: the rider comes LAST so it reads as a rider,
+ * and so that where it restates a general term (mileage allowance, deposit
+ * tier) the branch-specific figure is the one the customer reads second.
+ */
+function withRider(baseHtml, riderHtml, initials = {}) {
+  const rider = typeof riderHtml === 'string' ? riderHtml.trim() : '';
+  if (!rider) return baseHtml;
+  return `${baseHtml}\n<section class="tc-location-rider">\n${applyInitials(rider, initials)}\n</section>`;
+}
+
 /** Substitute the five {{INITIALS_*}} markers into an override body. */
 function applyInitials(html, initials = {}) {
   let out = html;
@@ -167,6 +184,12 @@ function applyInitials(html, initials = {}) {
  */
 export async function getEffectiveTermsHtml({ tenantId, locationId } = {}, { prisma } = {}, opts = {}) {
   const initials = opts.initials || {};
+  // Branch RIDER, resolved alongside the branch override in the same read and
+  // appended to whichever base wins below. Not an override: the branch keeps the
+  // canonical agreement — including the §11 card-on-file pre-authorization the
+  // tolls/citations modules rely on to bill after a rental closes — and only ADDS
+  // its local policies. See the schema comment on Location.termsRiderHtml.
+  let riderHtml = '';
 
   // 1. Branch override wins.
   if (locationId && prisma && typeof prisma.location?.findUnique === 'function') {
@@ -174,7 +197,7 @@ export async function getEffectiveTermsHtml({ tenantId, locationId } = {}, { pri
     try {
       row = await prisma.location.findUnique({
         where: { id: locationId },
-        select: { termsHtml: true }
+        select: { termsHtml: true, termsRiderHtml: true }
       });
     } catch (err) {
       // MUST be logged, not just swallowed. Without this line a stale Prisma
@@ -191,8 +214,9 @@ export async function getEffectiveTermsHtml({ tenantId, locationId } = {}, { pri
         message: String(err?.message || err),
       });
     }
+    riderHtml = typeof row?.termsRiderHtml === 'string' ? row.termsRiderHtml.trim() : '';
     const override = typeof row?.termsHtml === 'string' ? row.termsHtml.trim() : '';
-    if (override) return applyInitials(override, initials);
+    if (override) return withRider(applyInitials(override, initials), riderHtml, initials);
   }
 
   // 2. Tenant override.
@@ -203,17 +227,22 @@ export async function getEffectiveTermsHtml({ tenantId, locationId } = {}, { pri
         where: { id: tenantId },
         select: { termsHtml: true }
       });
-    } catch {
-      // DB error: fall through to canonical so rendering never fails
-      // just because of a tenant-lookup hiccup.
+    } catch (err) {
+      // DB error: fall through to canonical so rendering never fails just
+      // because of a tenant-lookup hiccup. Logged for the same reason as the
+      // location lookup above — silence here is a wrong legal document.
       row = null;
+      logger.error('[terms] tenant override lookup failed — falling back to canonical terms', {
+        tenantId,
+        message: String(err?.message || err),
+      });
     }
     const override = typeof row?.termsHtml === 'string' ? row.termsHtml.trim() : '';
-    if (override) return applyInitials(override, initials);
+    if (override) return withRider(applyInitials(override, initials), riderHtml, initials);
   }
 
   // 3. Canonical.
-  return getCanonicalTermsHtml({ initials });
+  return withRider(getCanonicalTermsHtml({ initials }), riderHtml, initials);
 }
 
 /**

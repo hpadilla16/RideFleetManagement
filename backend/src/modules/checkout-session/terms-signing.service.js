@@ -24,7 +24,22 @@ async function loadToken(token) {
     include: {
       reservation: {
         include: {
-          rentalAgreement: { select: { id: true, declinedInsurance: true, agreementNumber: true } },
+          rentalAgreement: {
+            select: {
+              id: true, declinedInsurance: true, agreementNumber: true,
+              // Per-branch acknowledgement text (2026-07-24). Read off the
+              // AGREEMENT, not the reservation, even though both carry a
+              // pickupLocationId: reservationsService.update can move
+              // Reservation.pickupLocationId (reservations.service.js:1921) with
+              // no sync back to the agreement, and the PDF that re-prints these
+              // very sections beside the captured initials resolves them from
+              // RentalAgreement.pickupLocation. Reading the reservation here
+              // would let one signed document show two branches' wording.
+              // The agreement is the document of record and its
+              // pickupLocationId is non-null.
+              pickupLocation: { select: { id: true, termsSectionsJson: true } },
+            },
+          },
         },
       },
     },
@@ -42,7 +57,7 @@ async function loadToken(token) {
 async function loadSession(token) {
   const row = await loadToken(token);
   const ag = row.reservation.rentalAgreement;
-  const sections = sectionsForAgreement({ declinedInsurance: !!ag.declinedInsurance });
+  const sections = sectionsForAgreement({ declinedInsurance: !!ag.declinedInsurance, sectionOverrides: ag.pickupLocation?.termsSectionsJson });
 
   // Pull already-completed initials so the UI can show what's left.
   const initials = await prisma.agreementSectionInitial.findMany({
@@ -70,13 +85,13 @@ async function saveInitial({ token, sectionKey, initialDataUrl, customerIp }) {
   }
   const row = await loadToken(token);
   const ag = row.reservation.rentalAgreement;
-  const allowed = new Set(sectionsForAgreement({ declinedInsurance: !!ag.declinedInsurance }).map((s) => s.key));
+  const allowed = new Set(sectionsForAgreement({ declinedInsurance: !!ag.declinedInsurance, sectionOverrides: ag.pickupLocation?.termsSectionsJson }).map((s) => s.key));
   if (!allowed.has(sectionKey)) {
     throw new CheckoutSessionError(`Unknown sectionKey: ${sectionKey}`, 400);
   }
 
   // Upsert — customer can re-do a section before completing.
-  const sectionLabel = sectionsForAgreement({ declinedInsurance: !!ag.declinedInsurance })
+  const sectionLabel = sectionsForAgreement({ declinedInsurance: !!ag.declinedInsurance, sectionOverrides: ag.pickupLocation?.termsSectionsJson })
     .find((s) => s.key === sectionKey)?.label || sectionKey;
   await prisma.agreementSectionInitial.upsert({
     where: { agreementId_sectionKey: { agreementId: ag.id, sectionKey } },
@@ -104,7 +119,7 @@ async function complete({ token, signatureDataUrl, signerName, customerIp }) {
   }
   const row = await loadToken(token);
   const ag = row.reservation.rentalAgreement;
-  const expected = sectionsForAgreement({ declinedInsurance: !!ag.declinedInsurance });
+  const expected = sectionsForAgreement({ declinedInsurance: !!ag.declinedInsurance, sectionOverrides: ag.pickupLocation?.termsSectionsJson });
 
   // Verify every section has an initial. Catches the case where the UI
   // and backend disagree on what sections are required.

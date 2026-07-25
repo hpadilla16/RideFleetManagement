@@ -636,7 +636,38 @@ model Location {
   // stamps the global version (lib/terms/version.js), and diverging here would
   // make `autochargeBlocked` mean something different per branch. Same
   // precedent, deliberately.
+  //
+  // PREFER `termsRiderHtml` BELOW for a branch that merely operates under
+  // different local policies. This field REPLACES the whole agreement, so a
+  // copy of the canonical text pasted here goes stale — silently — the next
+  // time TC_VERSION is bumped.
   termsHtml      String?
+  // Per-branch RIDER, appended to whatever the resolver produced (2026-07-24).
+  // This is the right field for the ordinary case: the branch keeps inheriting
+  // the canonical 24-section agreement — authorized use, the card-on-file
+  // pre-authorization that is the legal basis for post-rental toll/citation/
+  // damage charges, liability releases, indemnification, governing law — and
+  // only ADDS what genuinely varies by location: mileage allowance, deposit
+  // tiers, fuel policy, cross-border limits, the local fee schedule.
+  //
+  // Corpusa's LAX is the first user. Its source document (Rightcars' "Country
+  // Level Rental Policies") is a POLICY SHEET, not a rental agreement — it has
+  // none of the sections above — so loading it into `termsHtml` as a
+  // replacement would have stripped the company's ability to bill anything
+  // after the rental closed.
+  termsRiderHtml String?
+  // Per-branch overrides for the acknowledgement sections the customer initials
+  // (checkout-session/terms-content.js TC_SECTIONS). JSON map keyed by the
+  // CANONICAL sectionKey: { "deposit_post_charges": { "body": "...", "label": "..." } }.
+  //
+  // Overrides text ONLY — never the key set. `sectionKey` is persisted to
+  // AgreementSectionInitial, so adding or renaming keys per branch would orphan
+  // initials that customers have already signed. An unknown key here is ignored.
+  //
+  // Exists because those sections were hardcoded: LAX's body says a $2,000
+  // deposit and 150 mi/day while the initialled page bound into the SAME PDF
+  // said $500, on the renter's own initials.
+  termsSectionsJson String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

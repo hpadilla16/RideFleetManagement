@@ -1,0 +1,43 @@
+-- Two additive nullable columns, no data change. Per-branch T&C RIDER +
+-- per-branch overrides for the acknowledgement sections the customer initials
+-- (2026-07-24).
+--
+-- WHY A RIDER AND NOT THE REPLACEMENT WE ALREADY SHIPPED. `Location.termsHtml`
+-- (20260724_location_terms_html) replaces the entire agreement body. That is the
+-- wrong tool for the case that actually came up. Corpusa's LAX source document
+-- is Rightcars' "Country Level Rental Policies"  -  a POLICY SHEET covering
+-- mileage, deposits, driver age, fuel and the fee schedule. It contains none of
+-- the canonical agreement's 24 sections: no authorized use, no card-on-file
+-- pre-authorization, no delayed-charges procedure, no liability release, no
+-- indemnification, no governing law.
+--
+-- Loading it as a REPLACEMENT would have had every LAX renter sign an agreement
+-- with no card-on-file authorization  -  the legal basis the tolls and citations
+-- modules rely on to bill anything after the rental closes. It would also have
+-- frozen a copy of the canonical text that goes stale the next time TC_VERSION
+-- is bumped, silently, for that branch only.
+--
+-- So: base document stays canonical (or the tenant's override), and the branch
+-- appends `termsRiderHtml` on top. The branch keeps inheriting agreement
+-- updates; only its local policies are location-specific.
+--
+-- `termsSectionsJson` fixes the other half. The acknowledgement sections the
+-- customer initials on their phone / at the kiosk were HARDCODED in
+-- checkout-session/terms-content.js, and those same sections are re-printed
+-- inside the agreement PDF next to the captured initial images. With a LAX rider
+-- stating a $2,000 deposit, one signed PDF would have carried "$500 security
+-- deposit hold" on the page bearing the renter's own initials. This column
+-- overrides the TEXT of existing sections, keyed by the canonical sectionKey  - 
+-- never the key set, because sectionKey is persisted to AgreementSectionInitial
+-- and renaming one would orphan initials already signed.
+--
+-- Both NULL by default and on every existing row, so this migration changes the
+-- rendered agreement, the signing flow and the PDF for nobody.
+--
+-- IF NOT EXISTS is required by src/lib/startup-migrate.js: it is fail-open and
+-- does NOT record a migration that errored, so an un-recorded one is retried on
+-- every boot. Plain ADD COLUMN of a NULLable column with no default is
+-- metadata-only in Postgres 11+  -  no table rewrite, no backfill, safe inside the
+-- transaction `prisma migrate deploy` wraps around it.
+ALTER TABLE "Location" ADD COLUMN IF NOT EXISTS "termsRiderHtml" TEXT;
+ALTER TABLE "Location" ADD COLUMN IF NOT EXISTS "termsSectionsJson" TEXT;

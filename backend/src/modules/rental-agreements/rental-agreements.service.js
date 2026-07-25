@@ -978,7 +978,15 @@ function stripDeclineCoverageIfNotApplicable(html, declined) {
 // agreement.sectionInitials[]; the final consolidated signature is on
 // agreement.tcSignatureDataUrl.
 function buildSignedTermsBlock(agreement, ctx) {
-  const sections = sectionsForAgreement({ declinedInsurance: !!agreement.declinedInsurance });
+  // Same override source the signing flows used (2026-07-24). These pages carry
+  // the customer's own initials next to each section's text, so printing the
+  // canonical text here while they initialled the branch's would put a
+  // contradiction inside one signed document — a $500 deposit acknowledgement
+  // beside a $2,000 branch body.
+  const sections = sectionsForAgreement({
+    declinedInsurance: !!agreement.declinedInsurance,
+    sectionOverrides: agreement.pickupLocation?.termsSectionsJson,
+  });
   const initials = Array.isArray(agreement.sectionInitials) ? agreement.sectionInitials : [];
   const initialsByKey = new Map(initials.map((i) => [i.sectionKey, i]));
 
@@ -2988,7 +2996,11 @@ export const rentalAgreementsService = {
         pickupAt: true,
         returnAt: true,
         pickupLocationId: true,
-        pickupLocation: { select: { id: true, name: true, address: true } },
+        // termsSectionsJson: the branch's acknowledgement text. buildSignedTermsBlock
+        // re-prints those sections beside the customer's captured initials, so it
+        // has to resolve them exactly as the phone/kiosk flow did when the
+        // customer signed — otherwise the PDF shows text they never agreed to.
+        pickupLocation: { select: { id: true, name: true, address: true, termsSectionsJson: true } },
         returnLocationId: true,
         returnLocation: { select: { id: true, name: true, address: true } },
         vehicleId: true,

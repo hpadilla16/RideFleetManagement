@@ -20,11 +20,25 @@ function invalidateListCacheForTenant(effectiveTenantId) {
   if (effectiveTenantId) cache.del('locations:list:global');
 }
 
+// The three Terms & Conditions columns on Location are DOCUMENTS — the canonical
+// agreement they replace or extend is ~70 KB. This list is cached in process and
+// is also reached through /api/reservations/create-options and
+// /api/reservations/:id/pricing-options, which cache again, so letting them ride
+// along multiplies a full contract by (locations × cached reservations) for
+// screens that only ever need a name and a code.
+//
+// `omit` rather than an explicit `select`: this row's fields are consumed all
+// over the app and by the location editor, so an allow-list would silently drop
+// whatever it forgot. A deny-list can only ever remove these three. Anything that
+// genuinely needs the terms reads them through getEffectiveTermsHtml or getById.
+const LIST_OMIT = { termsHtml: true, termsRiderHtml: true, termsSectionsJson: true };
+
 export const locationsService = {
   list(scope = {}) {
     return cache.getOrSet(listCacheKey(scope), () => prisma.location.findMany({
       where: scope?.tenantId ? { tenantId: scope.tenantId } : undefined,
       orderBy: { name: 'asc' },
+      omit: LIST_OMIT,
       include: { locationFees: { include: { fee: true } } }
     }), LIST_TTL_MS);
   },

@@ -556,6 +556,12 @@ async function getAgreement(sessionId, device) {
       select: {
         id: true, agreementNumber: true, declinedInsurance: true,
         subtotal: true, taxes: true, fees: true, total: true, securityDepositAmount: true,
+        // Branch acknowledgement text — read off the AGREEMENT, not the
+        // reservation. Both carry a pickupLocationId and they can diverge
+        // (reservations.service.js:1921 moves the reservation's with no sync),
+        // and the PDF that re-prints these sections beside the captured
+        // initials resolves them from the agreement. One document, one branch.
+        pickupLocation: { select: { id: true, termsSectionsJson: true } },
       },
     }),
     prisma.reservation.findFirst({
@@ -575,7 +581,10 @@ async function getAgreement(sessionId, device) {
   if (!agreement || !resv) throw new KioskError('Agreement not found', 404, 'NO_AGREEMENT');
 
   const signedKeys = new Set(initials.map((i) => i.sectionKey));
-  const sections = sectionsForAgreement({ declinedInsurance: !!agreement.declinedInsurance })
+  const sections = sectionsForAgreement({
+    declinedInsurance: !!agreement.declinedInsurance,
+    sectionOverrides: agreement.pickupLocation?.termsSectionsJson,
+  })
     .map((s) => ({ key: s.key, label: s.label, body: s.body, signed: signedKeys.has(s.key) }));
 
   return {
@@ -690,13 +699,24 @@ async function sign(sessionId, device, { sectionInitials, signature, signerName,
 
   const agreement = await prisma.rentalAgreement.findUnique({
     where: { id: cs.agreementId },
-    select: { id: true, declinedInsurance: true, agreementNumber: true },
+    select: {
+      id: true, declinedInsurance: true, agreementNumber: true,
+      // Needed for the branch acknowledgement text below. The key SET is
+      // identical with or without overrides — parseSectionOverrides only ever
+      // copies body/label — but `section.label` is persisted onto each
+      // AgreementSectionInitial row, so without this the initials record would
+      // carry the canonical label while the customer read the branch's.
+      pickupLocation: { select: { id: true, termsSectionsJson: true } },
+    },
   });
   if (!agreement) throw new KioskError('Agreement not found', 404, 'NO_AGREEMENT');
 
   // 1) Per-section initials — same rules as the phone signing flow
   // (terms-signing.service.js): every expected section must carry an initial.
-  const expected = sectionsForAgreement({ declinedInsurance: !!agreement.declinedInsurance });
+  const expected = sectionsForAgreement({
+    declinedInsurance: !!agreement.declinedInsurance,
+    sectionOverrides: agreement.pickupLocation?.termsSectionsJson,
+  });
   const provided = new Map(
     (Array.isArray(sectionInitials) ? sectionInitials : [])
       .filter((s) => s?.sectionKey && s?.initialDataUrl && String(s.initialDataUrl).length >= 200)
