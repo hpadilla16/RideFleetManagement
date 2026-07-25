@@ -5,7 +5,7 @@
  *
  * WHY A SCRIPT AND NOT SQL. `User.passwordHash` is NOT NULL, so a raw INSERT
  * means inventing credentials for 33 real people. This goes through
- * peopleService.create() instead, which is the same path the People UI uses:
+ * peopleService.createPerson() instead, which is the same path the People UI uses:
  * it generates a random temp password, bcrypts it, enforces the tenant's plan
  * capacity, and (optionally) emails the invite. Nothing here is reimplemented.
  *
@@ -117,7 +117,7 @@ async function main() {
     }
     if (!COMMIT) { created.push({ ...person, tempPassword: '(dry run)' }); continue; }
     try {
-      const out = await peopleService.create({
+      const out = await peopleService.createPerson({
         personType: 'EMPLOYEE',
         fullName: person.fullName,
         email,
