@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  grossupFactor, customerAllInFromBase, baseFromCustomerAllIn, taxesFraction,
+  grossupFactor, customerAllInFromBase, baseFromCustomerAllIn, taxesFraction, flatPerDay,
 } from './pricing-grossup.js';
 
 // SJU / ZezGo config Hector gave: Titanium, PR tax 11.5% + airport 10.5% = 22%, brokerage 20.1%.
@@ -57,4 +57,42 @@ test('bad inputs never throw', () => {
   assert.equal(customerAllInFromBase(null, SJU), null);
   assert.equal(baseFromCustomerAllIn('x', SJU), null);
   assert.equal(grossupFactor({}), 1); // no taxes/brokerage → factor 1
+});
+
+// LAX config Hector gave 2026-07-25: Vehicle License Fee is FLAT $2.00/day
+// (brokerage % still pending — 0 until he provides it).
+const LAX = {
+  connectionType: 'TITANIUM',
+  taxes: [{ name: 'Vehicle License Fee', amountPerDay: 2 }],
+  brokeragePct: 0,
+};
+
+test('flat per-day fee: SJU config (pct-only) sums to 0 — legacy math byte-identical', () => {
+  assert.equal(flatPerDay(SJU), 0);
+  assert.equal(customerAllInFromBase(53.69, SJU), 78.67); // unchanged
+});
+
+test('LAX VLF: forward adds the flat $2 after the factor', () => {
+  assert.equal(flatPerDay(LAX), 2);
+  // factor = 1 (no pct, no brokerage) → all_in = base + 2
+  assert.equal(customerAllInFromBase(20, LAX), 22);
+});
+
+test('LAX VLF: inverse subtracts the flat fee BEFORE dividing', () => {
+  assert.equal(baseFromCustomerAllIn(22, LAX), 20);
+  // Mixed pct + flat: all_in = base×1.1 + 2 → base = (target−2)/1.1
+  const MIX = { connectionType: 'TITANIUM', taxes: [{ pct: 10 }, { amountPerDay: 2 }], brokeragePct: 0 };
+  assert.equal(customerAllInFromBase(20, MIX), 24);
+  assert.equal(baseFromCustomerAllIn(24, MIX), 20);
+});
+
+test('a target at/below the flat fees yields NO base (fail-closed), never zero/negative money', () => {
+  assert.equal(baseFromCustomerAllIn(2, LAX), null);
+  assert.equal(baseFromCustomerAllIn(1.5, LAX), null);
+});
+
+test('flat fee round-trips under a real factor (undercut math stays exact)', () => {
+  const cfg = { connectionType: 'TITANIUM', taxes: [{ pct: 22 }, { amountPerDay: 2 }], brokeragePct: 20.1 };
+  const base = baseFromCustomerAllIn(77.67, cfg);
+  assert.ok(customerAllInFromBase(base, cfg) <= 77.68, `round trip ${customerAllInFromBase(base, cfg)}`);
 });

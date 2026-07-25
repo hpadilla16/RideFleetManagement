@@ -1406,11 +1406,20 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
     try {
       const snapshot = await prisma.reservationPricingSnapshot.findUnique({
         where: { reservationId: reservation.id },
-        select: { securityDepositRuleJson: true, source: true }
+        select: { securityDepositRuleJson: true, source: true, securityDepositAmount: true }
       });
       const frozen = parseDepositRuleDecision(snapshot?.securityDepositRuleJson);
-      if (frozen && frozen.basis === 'UNKNOWN'
-          && String(snapshot?.source || '').toUpperCase() !== 'UI_MANUAL') {
+      // UI_MANUAL normally freezes the decision (the agent decided). But
+      // EVERY Save Override stamps UI_MANUAL — including a mileage-only
+      // exception — which would freeze an UNKNOWN deposit at the
+      // conservative $2,000 forever (QA MAJOR A-2). Heuristic: if the
+      // snapshot's deposit still EQUALS what the rule froze, the agent
+      // never touched the deposit — only then may the re-evaluation refresh
+      // the deposit tier (manual mileage is preserved below either way).
+      const sourceIsManual = String(snapshot?.source || '').toUpperCase() === 'UI_MANUAL';
+      const depositUntouched = frozen
+        && Number(snapshot?.securityDepositAmount) === Number(frozen.securityDepositAmount);
+      if (frozen && frozen.basis === 'UNKNOWN' && (!sourceIsManual || depositUntouched)) {
         const cfg = parseLocationConfig(reservation.pickupLocation?.locationConfig);
         const rules = parseDepositRules(cfg, { locationId: reservation.pickupLocationId || null });
         const fresh = rules ? evaluateDepositRule({
@@ -1421,10 +1430,20 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
           }
         }) : null;
         if (fresh && fresh.basis !== 'UNKNOWN') {
+          // An agent's per-reservation mileage exception (mileageSource
+          // UI_MANUAL, set via Edit pricing) survives the re-evaluation —
+          // only the locality/deposit half refreshes.
+          const manualMileage = frozen.mileageSource === 'UI_MANUAL'
+            ? {
+                milesPerDay: frozen.milesPerDay ?? null,
+                unlimitedMileage: !!frozen.unlimitedMileage,
+                mileageSource: 'UI_MANUAL'
+              }
+            : {};
           await prisma.reservationPricingSnapshot.update({
             where: { reservationId: reservation.id },
             data: {
-              securityDepositRuleJson: JSON.stringify({ ...fresh, evaluatedAt: new Date().toISOString() }),
+              securityDepositRuleJson: JSON.stringify({ ...fresh, ...manualMileage, evaluatedAt: new Date().toISOString() }),
               securityDepositRequired: Number(fresh.securityDepositAmount) > 0,
               securityDepositAmount: Number(fresh.securityDepositAmount) || 0
             }

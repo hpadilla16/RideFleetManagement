@@ -1819,12 +1819,34 @@ function ReservationDetailInner({ token, me, logout }) {
     securityDeposit: ''
   });
 
+  // Mileage exception (2026-07-25): agents can override the local/non-local
+  // policy per reservation (Hector). Prefilled from the frozen decision on
+  // the snapshot; only SENT when the agent actually changes it, so an
+  // untouched save never stamps a manual mileage.
+  const [mileageOverride, setMileageOverride] = useState({ milesPerDay: '', unlimited: false });
+  const [mileageInitial, setMileageInitial] = useState({ milesPerDay: '', unlimited: false });
+
   useEffect(() => {
+    // While the edit panel is OPEN, a background refresh (payment recorded,
+    // note added — refresh() runs after every action) must not clobber the
+    // agent's in-flight deposit/mileage edits back to the snapshot values.
+    if (chargeEdit) return;
     setDepositOverrides({
       depositDue: pricing?.snapshot?.depositAmountDue != null ? String(pricing.snapshot.depositAmountDue) : '',
       securityDeposit: pricing?.snapshot?.securityDepositAmount != null ? String(pricing.snapshot.securityDepositAmount) : ''
     });
-  }, [pricing?.snapshot]);
+    let decision = null;
+    try {
+      const parsed = pricing?.snapshot?.securityDepositRuleJson ? JSON.parse(pricing.snapshot.securityDepositRuleJson) : null;
+      decision = parsed && typeof parsed === 'object' ? parsed : null;
+    } catch { decision = null; }
+    const initial = {
+      milesPerDay: decision?.milesPerDay != null && Number(decision.milesPerDay) > 0 ? String(decision.milesPerDay) : '',
+      unlimited: decision?.unlimitedMileage === true
+    };
+    setMileageOverride(initial);
+    setMileageInitial(initial);
+  }, [pricing?.snapshot, chargeEdit]);
 
   const [chargeOverrides, setChargeOverrides] = useState({});
 
@@ -2161,6 +2183,18 @@ depositBasis: [],
 depositAmountDue: Number(depositOverrides.depositDue || 0),
 securityDepositRequired: Number(depositOverrides.securityDeposit || 0) > 0,
 securityDepositAmount: Number(depositOverrides.securityDeposit || 0),
+// Mileage exception: undefined = untouched; null = cleared;
+// {unlimited} / {milesPerDay} = the agent's per-reservation override.
+...(mileageOverride.unlimited !== mileageInitial.unlimited
+  || Number(mileageOverride.milesPerDay || 0) !== Number(mileageInitial.milesPerDay || 0)
+  ? {
+      mileageOverride: mileageOverride.unlimited
+        ? { unlimited: true }
+        : Number(mileageOverride.milesPerDay || 0) > 0
+          ? { milesPerDay: Number(mileageOverride.milesPerDay) }
+          : null
+    }
+  : {}),
 source: 'UI_MANUAL',
 charges: [...normalizedRows, ...depositRows]
 })
@@ -3223,6 +3257,37 @@ token
                               ...prev,
                               securityDeposit: e.target.value
                             }))} />
+                        </div>
+                      </div><div className="grid2">
+                        <div className="stack">
+                          <label className="label">Included miles/day</label>
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            placeholder="Policy default"
+                            disabled={mileageOverride.unlimited}
+                            value={mileageOverride.unlimited ? '' : mileageOverride.milesPerDay}
+                            onChange={(e) => setMileageOverride((prev) => ({
+                              ...prev,
+                              milesPerDay: e.target.value
+                            }))} />
+                        </div>
+                        <div className="stack">
+                          <label className="label">Unlimited mileage</label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 38 }}>
+                            <input
+                              type="checkbox"
+                              checked={mileageOverride.unlimited}
+                              onChange={(e) => setMileageOverride((prev) => ({
+                                ...prev,
+                                unlimited: e.target.checked,
+                                milesPerDay: e.target.checked ? '' : prev.milesPerDay
+                              }))} />
+                            <span className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                              No cap for this reservation
+                            </span>
+                          </label>
                         </div>
                       </div></>
               ) : null}

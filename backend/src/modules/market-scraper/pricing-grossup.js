@@ -18,8 +18,18 @@
  *   base_to_upload = target_all_in / grossupFactor(config)
  *
  * `taxes` is the sum of the location's tax components (e.g. PR tax 11.5% + airport
- * fee 10.5% = 22%). No flat per-rental fees (Hector, 2026-06-19) → every term is a
- * percentage, so this works per-day without needing the length of rental.
+ * fee 10.5% = 22%). Percentage terms work per-day without needing the length of
+ * rental.
+ *
+ * 2026-07-25 — FLAT PER-DAY fees. The "no flat fees" rule (Hector, 2026-06-19)
+ * held until LAX's Vehicle License Fee: a flat $2.00 PER DAY (Hector,
+ * 2026-07-25). A tax component may now carry `amountPerDay` instead of `pct`:
+ *
+ *   all_in_per_day = base × grossupFactor + flatPerDay
+ *   base_to_upload = (target_all_in − flatPerDay) / grossupFactor
+ *
+ * Still per-day (a per-RENTAL flat fee would need the rental length and is
+ * deliberately NOT supported — reject it at config time, don't guess).
  *
  * All pure (no prisma / no IO) so the money math is unit-testable in isolation.
  */
@@ -31,6 +41,17 @@ export function taxesFraction(config = {}) {
   const list = Array.isArray(config.taxes) ? config.taxes : [];
   const pct = list.reduce((acc, t) => acc + (Number(t?.pct) || 0), 0);
   return pct / 100;
+}
+
+/** Sum the location's FLAT per-day fee components in USD (LAX VLF = $2/day).
+ * Negatives are clamped to 0 per entry — a negative flat fee would push the
+ * inverse ABOVE the market target, the silent-overprice failure mode.
+ * upsertMarketPricingConfig rejects them loudly at write time; this clamp
+ * covers hand-edited rows. An entry carrying BOTH pct and amountPerDay
+ * applies both (pct into the factor, amount into the flat) — intentional. */
+export function flatPerDay(config = {}) {
+  const list = Array.isArray(config.taxes) ? config.taxes : [];
+  return list.reduce((acc, t) => acc + Math.max(0, Number(t?.amountPerDay) || 0), 0);
 }
 
 function brokerageFraction(config = {}) {
@@ -57,16 +78,22 @@ export function customerAllInFromBase(base, config = {}) {
   if (base == null || base === '') return null; // Number(null) is 0 — guard it.
   const v = Number(base);
   if (!Number.isFinite(v)) return null;
-  return round2(v * grossupFactor(config));
+  return round2(v * grossupFactor(config) + flatPerDay(config));
 }
 
-/** Inverse: the base rate to upload so the customer all-in equals targetAllIn. */
+/** Inverse: the base rate to upload so the customer all-in equals targetAllIn.
+ * Affine now: subtract the flat per-day fees BEFORE dividing by the factor.
+ * A target at or below the flat fees means no positive base can reach it —
+ * return null (fail-closed: the caller treats it as "no suggestion"), never
+ * a zero/negative money value. */
 export function baseFromCustomerAllIn(targetAllIn, config = {}) {
   if (targetAllIn == null || targetAllIn === '') return null;
   const v = Number(targetAllIn);
   const f = grossupFactor(config);
   if (!Number.isFinite(v) || !(f > 0)) return null;
-  return round2(v / f);
+  const net = v - flatPerDay(config);
+  if (!(net > 0)) return null;
+  return round2(net / f);
 }
 
 function round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }

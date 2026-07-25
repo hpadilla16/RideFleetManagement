@@ -96,6 +96,54 @@ function buildSnapshotUpsertData(payload = {}) {
   };
 }
 
+// 2026-07-25 — per-reservation mileage exception (Hector: agents can make
+// exceptions to the local/non-local policy). Normalizes payload.mileageOverride:
+//   undefined        → field untouched (frontend only sends it when CHANGED)
+//   null             → clear any manual mileage (back to rule/vehicle-type/200)
+//   { unlimited: true }   → no cap for this reservation
+//   { milesPerDay: 200 }  → that cap
+// Anything unparseable → undefined (never guess money-adjacent intent).
+export function normalizeMileageOverride(raw) {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  if (typeof raw !== 'object') return undefined;
+  if (raw.unlimited === true || raw.unlimitedMileage === true) return { unlimited: true };
+  const miles = Number(raw.milesPerDay);
+  if (Number.isFinite(miles) && miles > 0) return { milesPerDay: Math.round(miles) };
+  return undefined;
+}
+
+// Merge a mileage override into the frozen deposit-rule decision JSON (the
+// single source resolveIncludedMilesPerDay reads, so hold + billing can never
+// disagree). mileageSource UI_MANUAL marks it so the pre-check-in
+// re-evaluation preserves the agent's exception when it refreshes an
+// UNKNOWN-basis decision.
+export function mergeMileageOverride(existingJson, override) {
+  let decision = null;
+  try {
+    const parsed = existingJson ? JSON.parse(existingJson) : null;
+    decision = parsed && typeof parsed === 'object' ? parsed : null;
+  } catch { decision = null; }
+
+  if (override === null) {
+    if (!decision) return null;
+    // Clearing only removes a MANUAL exception. The rule's own frozen
+    // mileage lives in the same keys — stripping it here would delete the
+    // contractual cap (LAX local 150 → suddenly vehicle-type/200, or a
+    // promised unlimited → billed overage) with no way back, since the
+    // re-evaluation never fires on UI_MANUAL snapshots (QA MAJOR A-1).
+    if (decision.mileageSource !== 'UI_MANUAL') return existingJson;
+    const { milesPerDay, unlimitedMileage, mileageSource, ...rest } = decision;
+    return Object.keys(rest).length ? JSON.stringify(rest) : null;
+  }
+
+  const base = decision || { locality: null, basis: 'MANUAL' };
+  const next = override.unlimited === true
+    ? { ...base, unlimitedMileage: true, milesPerDay: null, mileageSource: 'UI_MANUAL' }
+    : { ...base, unlimitedMileage: false, milesPerDay: override.milesPerDay, mileageSource: 'UI_MANUAL' };
+  return JSON.stringify(next);
+}
+
 function buildChargeRows(reservationId, charges = []) {
   return (Array.isArray(charges) ? charges : []).map((row, idx) => ({
     reservationId,
@@ -1023,11 +1071,26 @@ export const reservationPricingService = {
     const chargeRows = buildChargeRows(reservationId, payload.charges || [])
       .filter((row) => String(row?.code || '').toUpperCase() !== 'EXTENSION_RATE');
 
+    const mileageOverride = normalizeMileageOverride(payload.mileageOverride);
+
     await prisma.$transaction(async (tx) => {
+      // Mileage exception rides inside securityDepositRuleJson (merged, never
+      // replaced — the locality/deposit half of an existing decision survives).
+      let rulePatch = {};
+      if (mileageOverride !== undefined) {
+        const existingSnap = await tx.reservationPricingSnapshot.findUnique({
+          where: { reservationId },
+          select: { securityDepositRuleJson: true }
+        });
+        rulePatch = {
+          securityDepositRuleJson: mergeMileageOverride(existingSnap?.securityDepositRuleJson, mileageOverride)
+        };
+      }
+
       await tx.reservationPricingSnapshot.upsert({
         where: { reservationId },
-        create: { reservationId, ...snapshotData },
-        update: snapshotData
+        create: { reservationId, ...snapshotData, ...rulePatch },
+        update: { ...snapshotData, ...rulePatch }
       });
 
       // Enumerate ids of non-extension rows. Doing this explicitly

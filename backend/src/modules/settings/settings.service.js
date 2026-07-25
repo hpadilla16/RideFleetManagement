@@ -1215,9 +1215,31 @@ export const settingsService = {
     if (!['TITANIUM', 'AMADEUS'].includes(connectionType)) {
       const e = new Error('connectionType must be TITANIUM or AMADEUS'); e.httpStatus = 400; throw e;
     }
+    // 2026-07-25 — a tax component may be a FLAT per-day fee (LAX Vehicle
+    // License Fee $2/day) via `amountPerDay`, alongside or instead of `pct`.
+    // This map used to whitelist {name, pct} only, which silently turned a
+    // hand-seeded flat fee into a 0% no-op on the next Settings save — every
+    // LAX suggestion would then land $2/day ABOVE the intended undercut (QA
+    // BLOCKER B-1). Validation is loud: negatives and per-RENTAL flat fees
+    // (an `amount` key — unsupported by per-day math) are rejected, never
+    // guessed.
     const taxes = (Array.isArray(payload?.taxes) ? payload.taxes : [])
-      .map((t) => ({ name: String(t?.name || '').trim() || 'Tax', pct: Number(t?.pct) || 0 }))
-      .filter((t) => t.pct !== 0 || t.name !== 'Tax');
+      .map((t) => {
+        if (t?.amount !== undefined) {
+          const e = new Error('Per-rental flat fees are not supported — use amountPerDay (USD per day)'); e.httpStatus = 400; throw e;
+        }
+        const pct = Number(t?.pct) || 0;
+        const amountPerDay = (t?.amountPerDay === '' || t?.amountPerDay == null) ? 0 : Number(t.amountPerDay);
+        if (!Number.isFinite(amountPerDay) || amountPerDay < 0) {
+          const e = new Error('amountPerDay must be a number >= 0'); e.httpStatus = 400; throw e;
+        }
+        return {
+          name: String(t?.name || '').trim() || 'Tax',
+          pct,
+          ...(amountPerDay > 0 ? { amountPerDay } : {})
+        };
+      })
+      .filter((t) => t.pct !== 0 || (t.amountPerDay || 0) > 0 || t.name !== 'Tax');
     const brokeragePct = Number(payload?.brokeragePct) || 0;
     const floorBase = (payload?.floorBase === '' || payload?.floorBase == null) ? null : Number(payload.floorBase);
     // Auto-apply guardrails (nullable). ceilingBase = max BASE auto-apply may write;
