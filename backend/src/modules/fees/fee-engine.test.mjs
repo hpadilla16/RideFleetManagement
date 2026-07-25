@@ -56,6 +56,14 @@ describe('computeExcessMileage', () => {
     assert.equal(result.total, 25);
   });
 
+  it('Infinity included miles (unlimited mileage) never charges, however far driven', () => {
+    // The local/non-local rule and VehicleType.unlimitedMileage both resolve
+    // to Infinity — the arithmetic must yield "no fee", not NaN garbage.
+    assert.equal(computeExcessMileage({
+      odometerOut: 10000, odometerIn: 99999, includedMiles: Infinity, rate
+    }), null);
+  });
+
   it('description contains driven mile count', () => {
     const result = computeExcessMileage({
       odometerOut: 10000, odometerIn: 10500, includedMiles: 200, rate

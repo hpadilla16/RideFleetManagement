@@ -23,6 +23,7 @@ import {
   serializePublicPickupSpot
 } from './car-sharing-discovery.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { parseDepositRules, evaluateDepositRule } from '../../lib/deposit-rules.js';
 import { filterMandatoryFeesForChannel } from './fee-channel-filter.js';
 import { stopSalesService } from '../stop-sales/stop-sales.service.js';
 export { filterMandatoryFeesForChannel };
@@ -710,18 +711,40 @@ async function listPublicInsurancePlans({ tenantId, locationId, vehicleTypeId, b
     .map((plan) => computeInsuranceLine(plan, baseAmount, days));
 }
 
-function depositSnapshot({ location, quote, addOnsTotal = 0, bookingChannel = 'STAFF' }) {
-  // Deposits only apply to external bookings (website / car sharing)
-  if (bookingChannel === 'STAFF' || bookingChannel === 'MIGRATION') {
-    return { required: false, mode: null, value: null, amountDue: 0, securityDepositRequired: false, securityDepositAmount: 0 };
-  }
+function depositSnapshot({ location, quote, addOnsTotal = 0, bookingChannel = 'STAFF', renter = null }) {
   const cfg = parseLocationConfig(location?.locationConfig);
+  // 2026-07-25 — local vs non-local renter rule (MONEY). When the location
+  // configures depositRules, the rule decides the SECURITY deposit for every
+  // channel — including STAFF (Hector, 2026-07-25) — while the "deposit due
+  // now" payment stays external-only. With no renter data (availability
+  // listing runs before the customer exists) the rule classifies UNKNOWN →
+  // LOCAL: the quote shows the higher deposit and checkout can only lower it.
+  const depositRules = parseDepositRules(cfg, { locationId: location?.id || null });
+  const securityDepositRule = depositRules ? evaluateDepositRule({ rules: depositRules, renter: renter || {} }) : null;
+
+  // Deposits-due-now only apply to external bookings (website / car sharing)
+  if (bookingChannel === 'STAFF' || bookingChannel === 'MIGRATION') {
+    if (securityDepositRule && bookingChannel === 'STAFF') {
+      const ruleAmount = Number(securityDepositRule.securityDepositAmount) || 0;
+      return {
+        required: false, mode: null, value: null, amountDue: 0,
+        securityDepositRequired: ruleAmount > 0,
+        securityDepositAmount: ruleAmount > 0 ? money(ruleAmount) : 0,
+        securityDepositRule
+      };
+    }
+    return { required: false, mode: null, value: null, amountDue: 0, securityDepositRequired: false, securityDepositAmount: 0, securityDepositRule: null };
+  }
   const requireDeposit = !!cfg?.requireDeposit;
   const depositMode = String(cfg?.depositMode || 'FIXED').toUpperCase();
   const depositValue = Number(cfg?.depositAmount || 0);
   const basis = Array.isArray(cfg?.depositPercentBasis) && cfg.depositPercentBasis.length ? cfg.depositPercentBasis : ['rate'];
-  const requireSecurityDeposit = !!cfg?.requireSecurityDeposit;
-  const securityDepositAmount = requireSecurityDeposit ? Number(cfg?.securityDepositAmount || 0) : 0;
+  const requireSecurityDeposit = securityDepositRule
+    ? Number(securityDepositRule.securityDepositAmount) > 0
+    : !!cfg?.requireSecurityDeposit;
+  const securityDepositAmount = securityDepositRule
+    ? (Number(securityDepositRule.securityDepositAmount) || 0)
+    : (requireSecurityDeposit ? Number(cfg?.securityDepositAmount || 0) : 0);
 
   let depositAmountDue = 0;
   if (requireDeposit && Number.isFinite(depositValue) && depositValue > 0) {
@@ -740,7 +763,8 @@ function depositSnapshot({ location, quote, addOnsTotal = 0, bookingChannel = 'S
     value: requireDeposit ? depositValue : null,
     amountDue: depositAmountDue,
     securityDepositRequired: requireSecurityDeposit || securityDepositAmount > 0,
-    securityDepositAmount: securityDepositAmount > 0 ? money(securityDepositAmount) : 0
+    securityDepositAmount: securityDepositAmount > 0 ? money(securityDepositAmount) : 0,
+    securityDepositRule: securityDepositRule || null
   };
 }
 
@@ -1664,7 +1688,10 @@ export const bookingEngineService = {
         location: search.location,
         quote: { ...selected.quote, baseTotal: Number(selected.quote?.baseTotal || selected.quote?.subtotal || 0) },
         addOnsTotal: money(addOnsTotal + linkedServiceFeesTotal + insuranceTotal + mandatoryFeesTotal + websiteFeesTotal),
-        bookingChannel: 'WEBSITE'
+        bookingChannel: 'WEBSITE',
+        // Checkout knows the renter (the availability listing doesn't), so the
+        // local/non-local deposit rule classifies on real licence/address data.
+        renter: { licenseState: customer?.licenseState, addressState: customer?.state }
       });
 
       const reservation = await reservationsService.create({
@@ -1685,6 +1712,9 @@ export const bookingEngineService = {
         notes: '[PUBLIC BOOKING] Created from booking web'
       }, { tenantId: tenant.id });
 
+      const securityDepositRuleJson = checkoutDeposit?.securityDepositRule
+        ? JSON.stringify({ ...checkoutDeposit.securityDepositRule, evaluatedAt: new Date().toISOString() })
+        : null;
       await prisma.reservationPricingSnapshot.upsert({
         where: { reservationId: reservation.id },
         create: {
@@ -1699,6 +1729,7 @@ export const bookingEngineService = {
           depositAmountDue: checkoutDeposit?.amountDue ?? 0,
           securityDepositRequired: !!checkoutDeposit?.securityDepositRequired,
           securityDepositAmount: checkoutDeposit?.securityDepositAmount ?? 0,
+          securityDepositRuleJson,
           source: 'PUBLIC_BOOKING'
         },
         update: {
@@ -1712,6 +1743,7 @@ export const bookingEngineService = {
           depositAmountDue: checkoutDeposit?.amountDue ?? 0,
           securityDepositRequired: !!checkoutDeposit?.securityDepositRequired,
           securityDepositAmount: checkoutDeposit?.securityDepositAmount ?? 0,
+          securityDepositRuleJson,
           source: 'PUBLIC_BOOKING'
         }
       });

@@ -34,6 +34,7 @@ import { settingsService } from '../settings/settings.service.js';
 import { sendInvoiceAfterCheckin, sendReceiptPaidInFull } from './checkin-emails.service.js';
 import { enqueueJob } from '../../lib/queue/index.js';
 import { AUTOCHARGE_PRIORITY } from '../../lib/queue/priorities.js';
+import { parseDepositRuleDecision, decideIncludedMilesPerDay, UNLIMITED_MILES } from '../../lib/deposit-rules.js';
 
 const AUTOCHARGE_DELAY_MS = 24 * 60 * 60 * 1000;  // 24 hours
 
@@ -463,9 +464,46 @@ export async function resolveTankCapacity(agreement) {
 }
 
 export async function resolveIncludedMilesPerDay(agreement) {
-  // Could come from the rate plan or pricing snapshot. For now, fall back to
-  // 200 miles/day (industry standard for U.S. rentals). Future: read from
-  // ReservationPricingSnapshot or rate plan config.
+  // 2026-07-25 — no longer a hardcoded 200 stub. Resolution order:
+  //  1. The frozen local/non-local rule decision on the reservation's
+  //     pricing snapshot (LAX: 150 mi/day for a local renter, unlimited for
+  //     non-local). This is the SAME decision the deposit was based on, so
+  //     the miles the contract promised are the miles billing honors.
+  //  2. The vehicle type's own mileage profile (unlimitedMileage /
+  //     freeMilesPerDay) — before this change those fields were shown on
+  //     the public site but IGNORED at check-in billing, so an
+  //     unlimited-mileage class still billed overage past 200 mi/day.
+  //  3. The legacy 200 mi/day fallback, unchanged.
+  // Unlimited is returned as Infinity: computeExcessMileage's arithmetic
+  // (driven − Infinity < 0 → excess 0) makes it a safe no-fee sentinel.
+  // Any lookup failure falls back to 200 — a broken read must degrade to
+  // the historical behavior, not throw inside check-in close.
+  try {
+    if (agreement?.reservationId) {
+      const snapshot = await prisma.reservationPricingSnapshot.findUnique({
+        where: { reservationId: agreement.reservationId },
+        select: { securityDepositRuleJson: true }
+      }).catch(() => null);
+      const decision = parseDepositRuleDecision(snapshot?.securityDepositRuleJson);
+      const fromRule = decideIncludedMilesPerDay({ decision });
+      if (fromRule != null) return fromRule;
+    }
+    if (agreement?.vehicleId) {
+      const vehicle = await prisma.vehicle.findUnique({
+        where: { id: agreement.vehicleId },
+        select: { vehicleType: { select: { unlimitedMileage: true, freeMilesPerDay: true } } }
+      }).catch(() => null);
+      const vehicleType = vehicle?.vehicleType;
+      if (vehicleType?.unlimitedMileage) return UNLIMITED_MILES;
+      const freeMiles = Number(vehicleType?.freeMilesPerDay || 0);
+      if (Number.isFinite(freeMiles) && freeMiles > 0) return freeMiles;
+    }
+  } catch (err) {
+    logger.warn('[checkin-close] resolveIncludedMilesPerDay lookup failed — using 200 mi/day fallback', {
+      rentalAgreementId: agreement?.id || null,
+      err: String(err?.message || err)
+    });
+  }
   return 200;
 }
 

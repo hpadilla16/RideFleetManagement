@@ -11,6 +11,8 @@ import { settingsService } from '../settings/settings.service.js';
 import { enrichPrecheckinCatalog } from '../../lib/precheckin-catalog.js';
 import { buildSelfServiceSnapshot } from './customer-portal-self-service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { parseDepositRules, evaluateDepositRule, parseDepositRuleDecision } from '../../lib/deposit-rules.js';
+import logger from '../../lib/logger.js';
 import { normalizeDob } from '../../lib/dob.js';
 import { getEffectiveTermsHtml } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
@@ -1391,6 +1393,56 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
         idPhotoUrl: _idPhotoStored
       }
     });
+
+    // 2026-07-25 — local vs non-local deposit rule (MONEY). Website bookings
+    // freeze the decision as UNKNOWN → LOCAL because the licence isn't known
+    // at booking time. Pre-check-in is the moment the real licence arrives,
+    // so re-evaluate — but ONLY when the frozen basis is UNKNOWN (a decision
+    // made on real licence/address data stays frozen) and only while the
+    // agent hasn't taken over the pricing (UI_MANUAL always wins). Deposit
+    // and mileage update TOGETHER so the hold and the check-in billing can
+    // never disagree about which tier the renter is. Fail-soft: pre-check-in
+    // must never break because of the rule.
+    try {
+      const snapshot = await prisma.reservationPricingSnapshot.findUnique({
+        where: { reservationId: reservation.id },
+        select: { securityDepositRuleJson: true, source: true }
+      });
+      const frozen = parseDepositRuleDecision(snapshot?.securityDepositRuleJson);
+      if (frozen && frozen.basis === 'UNKNOWN'
+          && String(snapshot?.source || '').toUpperCase() !== 'UI_MANUAL') {
+        const cfg = parseLocationConfig(reservation.pickupLocation?.locationConfig);
+        const rules = parseDepositRules(cfg, { locationId: reservation.pickupLocationId || null });
+        const fresh = rules ? evaluateDepositRule({
+          rules,
+          renter: {
+            licenseState: body.licenseState ? String(body.licenseState).trim() : null,
+            addressState: body.state ? String(body.state).trim() : null
+          }
+        }) : null;
+        if (fresh && fresh.basis !== 'UNKNOWN') {
+          await prisma.reservationPricingSnapshot.update({
+            where: { reservationId: reservation.id },
+            data: {
+              securityDepositRuleJson: JSON.stringify({ ...fresh, evaluatedAt: new Date().toISOString() }),
+              securityDepositRequired: Number(fresh.securityDepositAmount) > 0,
+              securityDepositAmount: Number(fresh.securityDepositAmount) || 0
+            }
+          });
+          logger.info('[customer-portal] deposit rule re-evaluated at pre-check-in (was UNKNOWN)', {
+            reservationId: reservation.id,
+            locality: fresh.locality,
+            basis: fresh.basis,
+            securityDepositAmount: fresh.securityDepositAmount
+          });
+        }
+      }
+    } catch (err) {
+      logger.warn('[customer-portal] deposit rule re-evaluation failed — frozen decision kept', {
+        reservationId: reservation.id,
+        err: String(err?.message || err)
+      });
+    }
 
     // Load pre-checkin discount for this tenant
     const discount = reservation.tenantId

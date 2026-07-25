@@ -295,7 +295,8 @@ export function computeLateReturnFee({ dueBackAt, returnedAt, graceMinutes = LAT
  *   fuelOut/In               — 0..1 (fraction of tank)
  *   cleanlinessOut/In        — 1..5
  *   smokingDetected          — boolean
- *   includedMilesPerDay      — number; multiplied by rental days
+ *   includedMilesPerDay      — number; multiplied by rental days.
+ *                              Infinity = unlimited mileage → no excess fee.
  *   rentalDays               — number; required if includedMilesPerDay > 0
  *   tankCapacityGallons      — number; required if fuel delta > 0
  *   persist                  — boolean (default false)
@@ -355,7 +356,12 @@ export async function computeCheckinFees(params) {
     CLEANING_HEAVY:  cleaningHeavy
   };
 
-  const includedMiles = Math.max(0, Number(includedMilesPerDay) * Number(rentalDays));
+  // Infinity = unlimited mileage (local/non-local rule or vehicle type).
+  // Handled explicitly because Infinity × a zero/NaN rentalDays is NaN,
+  // which would flow into the mileage math as garbage.
+  const includedMiles = includedMilesPerDay === Infinity
+    ? Infinity
+    : Math.max(0, Number(includedMilesPerDay) * Number(rentalDays));
 
   // Run pure computations. Each rate is null when the tenant has explicitly
   // disabled that fee type (isActive=false on the FeeRate row) — skip the

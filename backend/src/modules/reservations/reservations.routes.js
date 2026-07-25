@@ -22,6 +22,7 @@ import { franchiseService } from '../settings/franchise.service.js';
 import { crossTenantScopeFor as scopeFor, scopeVisibilityCacheSegment } from '../../lib/tenant-scope.js';
 import { vehicleProgramWhereForScope } from '../../lib/program-category.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { parseDepositRules, evaluateDepositRule } from '../../lib/deposit-rules.js';
 import { cache } from '../../lib/cache.js';
 import { globalKey } from '../../lib/cache/tenantKey.js';
 import { compactStartRentalResponse } from './start-rental-compact.js';
@@ -680,7 +681,12 @@ reservationsRouter.put('/:id/pricing', async (req, res, next) => {
     if (!canManagePricingOverrides(req)) {
       return res.status(403).json({ error: 'User role not allowed to edit pricing overrides' });
     }
-    const out = await reservationPricingService.replacePricing(req.params.id, req.body || {}, scopeFor(req));
+    // Provenance is forced server-side: this route IS the manual pricing
+    // edit, and 'UI_MANUAL' is what shields an agent's deliberate deposit
+    // from being re-raised by the local/non-local rule's hold-time safety
+    // net. A client that omitted (or typo'd) the source used to leave the
+    // snapshot unprotected. QA 2026-07-25 (m2).
+    const out = await reservationPricingService.replacePricing(req.params.id, { ...(req.body || {}), source: 'UI_MANUAL' }, scopeFor(req));
     res.json(out);
   } catch (e) {
     if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
@@ -1090,8 +1096,42 @@ reservationsRouter.post('/', async (req, res, next) => {
     const depositMode = String(cfg?.depositMode || 'FIXED').toUpperCase();
     const depositValue = Number(cfg?.depositAmount || 0);
     const basis = Array.isArray(cfg?.depositPercentBasis) && cfg.depositPercentBasis.length ? cfg.depositPercentBasis : ['rate'];
-    const requireSecurityDeposit = isExternalBooking && !!cfg?.requireSecurityDeposit;
-    const securityDepositAmount = requireSecurityDeposit ? Number(cfg?.securityDepositAmount || 0) : 0;
+    // 2026-07-25 — local vs non-local renter rule (MONEY). When the pickup
+    // location configures depositRules, the rule decides the security deposit
+    // for EVERY channel — including STAFF, so the counter agent sees the
+    // contract amount pre-filled instead of typing it from memory (Hector,
+    // 2026-07-25). No rules configured → exact legacy behavior (external
+    // bookings only, flat configured amount).
+    // MIGRATION imports stay untouched (same exemption depositSnapshot keeps):
+    // a migrated reservation's deposit is historical fact, not the rule's call.
+    const depositRules = bookingChannel === 'MIGRATION'
+      ? null
+      : parseDepositRules(cfg, { locationId: String(req.body.pickupLocationId) });
+    let depositRuleDecision = null;
+    if (depositRules) {
+      const renterCustomer = req.body?.customerId
+        ? await withTenantSchema(req.user.tenantId, (db) => db.customer.findFirst({
+            where: {
+              id: String(req.body.customerId),
+              ...(scopeFor(req).tenantId ? { tenantId: scopeFor(req).tenantId } : {})
+            },
+            select: { licenseState: true, state: true }
+          }))
+        : null;
+      depositRuleDecision = evaluateDepositRule({
+        rules: depositRules,
+        renter: { licenseState: renterCustomer?.licenseState, addressState: renterCustomer?.state }
+      });
+    }
+    const requireSecurityDeposit = depositRuleDecision
+      ? Number(depositRuleDecision.securityDepositAmount) > 0
+      : (isExternalBooking && !!cfg?.requireSecurityDeposit);
+    const securityDepositAmount = depositRuleDecision
+      ? Number(depositRuleDecision.securityDepositAmount)
+      : (requireSecurityDeposit ? Number(cfg?.securityDepositAmount || 0) : 0);
+    const securityDepositRuleJson = depositRuleDecision
+      ? JSON.stringify({ ...depositRuleDecision, evaluatedAt: new Date().toISOString() })
+      : null;
     let depositAmountDue = 0;
     if (requireDeposit && Number.isFinite(depositValue) && depositValue > 0) {
       if (depositMode === 'PERCENTAGE') {
@@ -1132,6 +1172,7 @@ reservationsRouter.post('/', async (req, res, next) => {
         depositAmountDue,
         securityDepositRequired: requireSecurityDeposit || securityDepositAmount > 0,
         securityDepositAmount: securityDepositAmount > 0 ? securityDepositAmount : 0,
+        securityDepositRuleJson,
         source: 'RESERVATION_CREATE'
       },
       update: {
@@ -1144,6 +1185,7 @@ reservationsRouter.post('/', async (req, res, next) => {
         depositAmountDue,
         securityDepositRequired: requireSecurityDeposit || securityDepositAmount > 0,
         securityDepositAmount: securityDepositAmount > 0 ? securityDepositAmount : 0,
+        securityDepositRuleJson,
         source: 'RESERVATION_CREATE'
       }
     }));

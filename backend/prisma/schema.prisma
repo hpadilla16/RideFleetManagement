@@ -2602,6 +2602,17 @@ model ReservationPricingSnapshot {
   securityDepositRequired Boolean @default(false)
   securityDepositAmount   Decimal @default(0) @db.Decimal(10, 2)
 
+  // 2026-07-25 — local vs non-local renter deposit rule (MONEY). When the
+  // pickup location configures locationConfig.depositRules, the decision is
+  // frozen here as JSON {locality, basis, localStates,
+  // securityDepositAmount, milesPerDay, unlimitedMileage, evaluatedAt} so a
+  // later licence edit never re-prices a decided reservation, and check-in
+  // mileage billing reads the SAME decision the deposit was based on.
+  // Absent = no rule ran (legacy reservations / location has no rules).
+  // Written by reservation create paths; read by resolveIncludedMilesPerDay
+  // and the runDepositHold safety net (which skips when this is present).
+  securityDepositRuleJson String?
+
   source    String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

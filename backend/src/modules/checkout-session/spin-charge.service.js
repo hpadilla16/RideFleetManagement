@@ -32,6 +32,7 @@
 
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
+import { parseDepositRules, evaluateDepositRule } from '../../lib/deposit-rules.js';
 import { spinClient } from '../payment-gateway/spin-client.js';
 import { iposTransactClient } from '../payment-gateway/ipos-transact-client.js';
 import { appendEvent } from './state-machine.js';
@@ -176,6 +177,73 @@ async function applyDebitDepositUplift({ baseAmount, cardOnFileType, reservation
     }
   } catch (err) {
     logger.warn('[spin-charge] debit deposit uplift check failed — using standard amount', {
+      sessionId, reservationId, err: String(err?.message || err),
+    });
+  }
+  return baseAmount;
+}
+
+/**
+ * 2026-07-25 — local vs non-local renter rule, hold-time SAFETY NET (MONEY).
+ *
+ * The rule normally decides the deposit at reservation-create and freezes
+ * its decision on ReservationPricingSnapshot.securityDepositRuleJson, which
+ * then flows through the agreement column that resolveDepositAmount reads.
+ * This function only exists for reservations that never went through the
+ * rule (created before the feature, or through a path that skipped it).
+ *
+ * It deliberately does NOT run when:
+ *  - the snapshot carries a rule decision (already applied upstream), or
+ *  - the snapshot source is UI_MANUAL (the counter agent decided — the
+ *    contract's "up to" amounts are the human's call, and a rule that
+ *    re-raised an agent's override would defeat the override).
+ *
+ * Like the debit uplift it only ever RAISES the resolved amount, and a
+ * failure reading config falls back to the standard amount. Composition
+ * order (decided 2026-07-25): rule first, debit uplift after — max wins,
+ * since both only raise.
+ */
+async function applyLocalRenterDepositRule({ baseAmount, reservationId, sessionId }) {
+  if (!reservationId) return baseAmount;
+  try {
+    const reservation = await prisma.reservation.findUnique({
+      where: { id: reservationId },
+      select: {
+        bookingChannel: true,
+        pickupLocation: { select: { id: true, locationConfig: true } },
+        customer: { select: { licenseState: true, state: true } },
+        pricingSnapshot: { select: { securityDepositRuleJson: true, source: true } },
+      },
+    });
+    const snapshot = reservation?.pricingSnapshot;
+    if (snapshot?.securityDepositRuleJson) return baseAmount;
+    if (String(snapshot?.source || '').toUpperCase() === 'UI_MANUAL') return baseAmount;
+    // Car-sharing deposits belong to the HOST's listing (snapshot source
+    // CAR_SHARING_TRIP carries listing.securityDeposit) — the branch rule
+    // must never override them. QA 2026-07-25 (M1).
+    if (String(reservation?.bookingChannel || '').toUpperCase() === 'CAR_SHARING') return baseAmount;
+    if (String(snapshot?.source || '').toUpperCase() === 'CAR_SHARING_TRIP') return baseAmount;
+    const raw = reservation?.pickupLocation?.locationConfig;
+    const cfg = raw ? JSON.parse(raw) : {};
+    const rules = parseDepositRules(cfg, { locationId: reservation?.pickupLocation?.id || null });
+    if (!rules) return baseAmount;
+    const decision = evaluateDepositRule({
+      rules,
+      renter: {
+        licenseState: reservation?.customer?.licenseState,
+        addressState: reservation?.customer?.state,
+      },
+    });
+    const ruleAmount = Number(decision?.securityDepositAmount || 0);
+    if (Number.isFinite(ruleAmount) && ruleAmount > baseAmount) {
+      logger.info('[spin-charge] local/non-local deposit rule raised the hold (no upstream decision on file)', {
+        sessionId, reservationId, baseAmount, ruleAmount,
+        locality: decision?.locality, basis: decision?.basis,
+      });
+      return ruleAmount;
+    }
+  } catch (err) {
+    logger.warn('[spin-charge] local/non-local deposit rule check failed — using standard amount', {
       sessionId, reservationId, err: String(err?.message || err),
     });
   }
@@ -789,8 +857,13 @@ async function runDepositHold({ sessionId, depositAmount: depositAmountHint, act
   // amount — but only when configured AND higher. The uplift never
   // lowers a configured deposit, and unknown card types pass through.
   const standardDepositAmount = resolveDepositAmount(agreement, depositAmountHint);
-  const depositAmount = await applyDebitDepositUplift({
+  const ruleAdjustedAmount = await applyLocalRenterDepositRule({
     baseAmount: standardDepositAmount,
+    reservationId: session.reservation.id,
+    sessionId,
+  });
+  const depositAmount = await applyDebitDepositUplift({
+    baseAmount: ruleAdjustedAmount,
     cardOnFileType: agreement.cardOnFileType,
     reservationId: session.reservation.id,
     sessionId,
