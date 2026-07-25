@@ -555,13 +555,18 @@ function Inner({ token, me, logout }) {
                     });
                     if (!editingPersonId) setUserModuleAccess(buildDefaultUserModuleAccess(nextPersonType, nextRole));
                   }}
-                  disabled={!!editingPersonId}
+                  disabled={!!editingPersonId && form.personType === 'HOST'}
                 >
                   <option value="ADMIN">ADMIN</option>
                   <option value="EMPLOYEE">EMPLOYEE</option>
                   <option value="VIRTUAL_AGENT">VIRTUAL AGENT</option>
-                  <option value="HOST">HOST</option>
+                  {(!editingPersonId || form.personType === 'HOST') ? <option value="HOST">HOST</option> : null}
                 </select>
+                {editingPersonId && form.personType !== 'HOST' ? (
+                  <span className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                    Changing the type converts this person (e.g. Employee ↔ Virtual Agent). Their pending commissions recalculate under the new type on the next sync.
+                  </span>
+                ) : null}
               </div>
 
               <div className="stack">

@@ -135,6 +135,23 @@ function allowedRoleForPayload(personType, requestedRole) {
   return 'AGENT';
 }
 
+// Pure decision for updatePerson's type/role patch (unit-tested). Returns
+// { personKind?: 'STANDARD'|'VIRTUAL_AGENT', role }; personKind undefined =
+// unchanged. See the call site comment for the full conversion semantics.
+function resolveEmployeeTypePatch({ storedKind, requestedType, requestedRole }) {
+  const requested = String(requestedType || '').trim().toUpperCase();
+  const stored = String(storedKind || '').toUpperCase() === 'VIRTUAL_AGENT' ? 'VIRTUAL_AGENT' : 'STANDARD';
+  if (['ADMIN', 'EMPLOYEE', 'VIRTUAL_AGENT'].includes(requested)) {
+    const nextKind = requested === 'VIRTUAL_AGENT' ? 'VIRTUAL_AGENT' : 'STANDARD';
+    return {
+      ...(nextKind !== stored ? { personKind: nextKind } : {}),
+      role: allowedRoleForPayload(requested, requestedRole)
+    };
+  }
+  const effectiveType = stored === 'VIRTUAL_AGENT' ? 'VIRTUAL_AGENT' : 'EMPLOYEE';
+  return { role: allowedRoleForPayload(effectiveType, requestedRole) };
+}
+
 function mapUserPerson(user) {
   const hasHostProfile = !!user.hostProfile;
   return {
@@ -442,14 +459,22 @@ export const peopleService = {
       };
 
       if (!user.hostProfile) {
-        // QA M2: the "virtual agents are ALWAYS AGENT" invariant derives from
-        // the STORED personKind, never the client-sent personType — a PATCH
-        // claiming personType EMPLOYEE + role ADMIN on a VIRTUAL_AGENT row
-        // must not mint an admin that still earns under VA commission math.
-        const storedKind = String(user.personKind || '').toUpperCase() === 'VIRTUAL_AGENT'
-          ? 'VIRTUAL_AGENT'
-          : (payload.personType || 'EMPLOYEE');
-        userPatch.role = allowedRoleForPayload(storedKind, payload.role || user.role);
+        // Conversion within the employee family (2026-07-25, Hector: "no
+        // puedo cambiar los de agents a virtual agent"): an explicit
+        // personType in the payload flips ADMIN / EMPLOYEE / VIRTUAL_AGENT
+        // and the stored personKind FOLLOWS the type — kind and role can
+        // never diverge into the hybrid QA M2 flagged (a VA row with role
+        // ADMIN still earning VA math). No/invalid personType in the
+        // payload → kind unchanged and the invariant derives from the
+        // STORED kind, never the payload. HOST conversions stay impossible
+        // (a HostProfile is not creatable from here).
+        const typePatch = resolveEmployeeTypePatch({
+          storedKind: user.personKind,
+          requestedType: payload.personType,
+          requestedRole: payload.role || user.role
+        });
+        if (typePatch.personKind !== undefined) userPatch.personKind = typePatch.personKind;
+        userPatch.role = typePatch.role;
       } else if (payload.role) {
         userPatch.role = allowedRoleForPayload('HOST', payload.role);
       }
@@ -584,4 +609,4 @@ export const peopleService = {
   }
 };
 
-export const _internal = { allowedRoleForPayload };
+export const _internal = { allowedRoleForPayload, resolveEmployeeTypePatch };
