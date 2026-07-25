@@ -13,43 +13,18 @@ import { LoanerVehicleSwapModal } from '../../../components/reservations/LoanerV
 import { api, API_BASE } from '../../../lib/client';
 import { utcToTenantLocalInput } from '../../../lib/tenant-time';
 import { FuelLevelInput, OdometerInput } from '../../../components/wizard/MetricInputs';
-
-function stripChargePrefix(name = '', prefix) {
-  return String(name || '').replace(prefix, '').trim();
-}
-
-function pricingEditorState(pricing, reservation) {
-  const snapshot = pricing?.snapshot || null;
-  const charges = Array.isArray(pricing?.charges) ? pricing.charges : [];
-  if (snapshot || charges.length) {
-    const serviceNames = charges
-      .filter((c) => ['SERVICE', 'ADDITIONAL_SERVICE'].includes(String(c?.source || '').toUpperCase()))
-      .map((c) => stripChargePrefix(c?.name, /^Service:\s*/i))
-      .filter(Boolean)
-      .join(', ');
-    const feeNames = charges
-      .filter((c) => String(c?.source || '').toUpperCase() === 'FEE')
-      .map((c) => stripChargePrefix(c?.name, /^Fee:\s*/i))
-      .filter(Boolean)
-      .join(', ');
-    return {
-      dailyRate: String(snapshot?.dailyRate ?? reservation?.dailyRate ?? '0'),
-      serviceFee: '0',
-      taxRate: String(snapshot?.taxRate ?? '11.5'),
-      serviceNames,
-      feeNames,
-      insuranceCodes: snapshot?.selectedInsuranceCodes || snapshot?.selectedInsuranceCode || ''
-    };
-  }
-  return {
-    dailyRate: String(reservation?.dailyRate ?? '0'),
-    serviceFee: '0',
-    taxRate: '11.5',
-    serviceNames: '',
-    feeNames: '',
-    insuranceCodes: ''
-  };
-}
+import {
+  makeDiscountFn as makePrecheckinDiscountFn,
+  hasPrecheckinDiscount,
+  precheckinServiceKeys,
+  isPrecheckinService,
+  precheckinNotes,
+  PRECHECKIN_NAME_MARKER
+} from '../../../lib/precheckin-discount';
+// pricingEditorState lives in lib/ so the money round-trip — portal writes
+// charges → editor derives → Save Override rebuilds — is covered by vitest
+// without mounting this page. Its derivation rules are documented there.
+import { pricingEditorState, stripChargePrefix } from '../../../lib/pricing-editor';
 
 function structuredDisplayChargeRows(pricingRows = []) {
   return (Array.isArray(pricingRows) ? pricingRows : []).map((r, idx) => {
@@ -722,6 +697,23 @@ function ReservationDetailInner({ token, me, logout }) {
   const [serviceOptions, setServiceOptions] = useState([]);
   const [feeOptions, setFeeOptions] = useState([]);
   const [insurancePlans, setInsurancePlans] = useState([]);
+  // Tenant's pre-check-in discount config (from pricing-options). Needed so a
+  // Save Override can RE-APPLY the discount the customer earned at pre-check-in
+  // instead of rebuilding rows at catalog price — including onto a NEW plan the
+  // agent swaps in (Hector, 2026-07-25).
+  const [precheckinDiscount, setPrecheckinDiscount] = useState(null);
+  // ONE discount context feeding BOTH the on-screen preview and the Save
+  // payload. QA caught them disagreeing: the preview showed catalog prices
+  // while Save wrote discounted ones, so the agent quoted the customer a
+  // number that was never persisted. Single source kills that class of drift.
+  const precheckinCtx = useMemo(() => {
+    const active = !!(precheckinDiscount?.enabled && hasPrecheckinDiscount(pricing?.charges));
+    return {
+      active,
+      apply: makePrecheckinDiscountFn(active ? precheckinDiscount : null),
+      serviceKeys: precheckinServiceKeys(pricing?.charges),
+    };
+  }, [pricing?.charges, precheckinDiscount]);
   const [tollSummary, setTollSummary] = useState(null);
   const [docViewer, setDocViewer] = useState(null);
   // Report Damage flow (Feature 3): wizard open state + the incident DRAFT the
@@ -940,6 +932,7 @@ function ReservationDetailInner({ token, me, logout }) {
       setServiceOptions(Array.isArray(pricingOptionsOut?.services) ? pricingOptionsOut.services : []);
       setFeeOptions(Array.isArray(pricingOptionsOut?.fees) ? pricingOptionsOut.fees : []);
       setInsurancePlans(Array.isArray(pricingOptionsOut?.insurancePlans) ? pricingOptionsOut.insurancePlans : []);
+      setPrecheckinDiscount(pricingOptionsOut?.precheckinDiscount || null);
       setFranchises(Array.isArray(pricingOptionsOut?.franchises) ? pricingOptionsOut.franchises : []);
       setTollSummary(tollsOut);
       setForm({
@@ -1920,6 +1913,20 @@ const selectedInsurancePlansList = selectedInsuranceCodes
   .map((code) => (insurancePlans || []).find((p) => String(p.code || '').trim().toUpperCase() === code.toUpperCase()))
   .filter(Boolean);
 
+// Pre-check-in discount (2026-07-25). The rows below are rebuilt from CATALOG
+// prices, which used to silently revert the discounted price the customer had
+// already accepted at pre-check-in ($38 back to $40). The rules, from Hector's
+// decision plus QA's narrowing:
+//  - INSURANCE: when the reservation carries the pre-check-in marker, the
+//    discount re-applies to the plan slot — INCLUDING a new plan the agent
+//    swaps in ("the reservation earned pre-check-in pricing; the plan is
+//    secondary").
+//  - SERVICES: only the services the customer actually bought at pre-check-in
+//    keep the discount (and their PRECHECKIN source). A service the agent adds
+//    fresh at the counter is counter-priced — no marker-wide bleed.
+// An explicit per-row rate typed by the agent still wins: applyOv runs after.
+const { active: precheckinActive, apply: applyPrecheckin, serviceKeys: precheckinKeys } = precheckinCtx;
+
 const serviceRows = serviceNames.map((name, idx) => {
 const opt = serviceOptions.find((s) => (s.name || s.code || '').trim().toLowerCase() === name.toLowerCase());
 // Pick the best rate: dailyRate for per-day services, weeklyRate/monthlyRate for longer trips, flat rate as fallback
@@ -1947,16 +1954,29 @@ if (dailyRate > 0) {
   const perDay = ['PER_DAY', 'DAILY', 'DAY', 'BY_DAY'].includes(svcMode);
   unit = perDay ? breakdown.days : 1;
 }
+// Re-apply the pre-check-in discount to the per-unit rate (same math as the
+// portal: discount the unit price, then multiply), and keep the PRECHECKIN
+// source on services the customer bought there so the portal's
+// "already on reservation" logic and the next override still recognize them.
+// Matched by sourceRefId FIRST (AdditionalService.id, identical on the portal
+// and editor sides), name only as fallback. QA blocker: keying by name alone
+// broke on the SECOND override — the editor writes "Service: X (Pre-checkin
+// rate)", the name stopped matching, the row lost its PRECHECKIN source, and
+// the portal's delete-by-source missed it and double-charged the customer.
+const wasPrecheckin = isPrecheckinService(precheckinKeys, { id: opt?.id, name });
+const finalRate = (precheckinActive && wasPrecheckin) ? applyPrecheckin(rate) : rate;
+const svcDiscounted = finalRate < rate;
 return {
 id: `svc-${idx}`,
-name: `Service: ${name}`,
+name: svcDiscounted ? `Service: ${name} ${PRECHECKIN_NAME_MARKER}` : `Service: ${name}`,
 chargeType: 'UNIT',
 quantity: unit,
-rate,
-total: toMoneyNum(rate * unit),
+rate: finalRate,
+total: toMoneyNum(finalRate * unit),
  taxable: opt?.taxable !== false,
- source: 'SERVICE',
- sourceRefId: opt?.id || null
+ source: wasPrecheckin ? 'ADDITIONAL_SERVICE_PRECHECKIN' : 'SERVICE',
+ sourceRefId: opt?.id || null,
+ notes: svcDiscounted ? precheckinNotes(`Counter price: $${rate.toFixed(2)} per unit × ${unit}`) : null
 };
 });
 
@@ -2013,28 +2033,42 @@ const linkedFeeRows = serviceRows
 const insuranceRows = selectedInsurancePlansList.map((plan) => {
   const planLabel = plan.label || plan.name || plan.code;
   const mode = String(plan.chargeBy || plan.mode || 'FIXED').toUpperCase();
-  const amount = toMoneyNum(plan.amount || 0);
+  const counterAmount = toMoneyNum(plan.amount || 0);
+  // Re-apply the pre-check-in discount to the plan amount BEFORE the mode math,
+  // the same order the portal used (applyDiscount(amount), then the mode math).
+  // For FIXED and PER_DAY plans this reproduces the exact figure the customer
+  // accepted. PERCENTAGE plans do NOT fully match the portal: the discount step
+  // is identical, but this editor's percentage BASE has always been
+  // dailyRate × days while the portal's is the sum of all non-insurance
+  // charges — a pre-existing divergence this fix does not touch. Applies to a
+  // swapped-in plan too (Hector, 2026-07-25).
+  const amount = precheckinActive ? applyPrecheckin(counterAmount) : counterAmount;
+  const insDiscounted = amount < counterAmount;
   let quantity = 1;
   let rate = amount;
   let total = amount;
+  let counterNote = `Counter price: $${counterAmount.toFixed(2)}`;
   if (mode === 'PER_DAY') {
     quantity = Math.max(1, breakdown.days || 1);
     total = toMoneyNum(amount * quantity);
+    counterNote = `Counter price: $${counterAmount.toFixed(2)}/day × ${quantity} day(s)`;
   } else if (mode === 'PERCENTAGE') {
     quantity = 1;
     total = toMoneyNum(toMoneyNum((chargeModel.dailyRate || row?.dailyRate || 0) * breakdown.days) * (amount / 100));
     rate = total;
+    counterNote = `Counter price: ${counterAmount.toFixed(2)}% of base`;
   }
   return {
     id: `ins-${plan.code}`,
-    name: `Insurance: ${planLabel}`,
+    name: insDiscounted ? `Insurance: ${planLabel} ${PRECHECKIN_NAME_MARKER}` : `Insurance: ${planLabel}`,
     chargeType: 'UNIT',
     quantity,
     rate,
     total,
     taxable: !!plan.taxable,
     source: 'INSURANCE',
-    sourceRefId: plan.code
+    sourceRefId: plan.code,
+    notes: insDiscounted ? precheckinNotes(counterNote) : null
   };
 });
 
@@ -2235,8 +2269,13 @@ token
         unit = perDay ? toMoneyNum(breakdown.days) : 1;
       }
       const taxable = opt?.taxable === undefined ? true : !!opt?.taxable;
-      const total = toMoneyNum(rate * unit);
-      return { id: r.id, name: r.name, unit, rate, total, taxable };
+      // Same discount rule as the Save payload (see serviceRows in the save
+      // handler) — the preview MUST show the price that will be persisted, or
+      // the agent quotes the customer a number that never reaches the DB.
+      const wasPrecheckin = isPrecheckinService(precheckinCtx.serviceKeys, { id: opt?.id, name: raw });
+      const shownRate = (precheckinCtx.active && wasPrecheckin) ? precheckinCtx.apply(rate) : rate;
+      const total = toMoneyNum(shownRate * unit);
+      return { id: r.id, name: r.name, unit, rate: shownRate, total, taxable };
     });
 
     const feeRows = selectedFeeRows.map((r) => {
@@ -2292,7 +2331,9 @@ token
 
     const insuranceDisplayRows = selectedInsurancePlansDisplay.map((plan) => {
       const mode = String(plan.chargeBy || plan.mode || 'FIXED').toUpperCase();
-      const amount = toMoneyNum(plan.amount || 0);
+      // Discount BEFORE the mode math — identical to the Save payload's
+      // insuranceRows, so preview and persisted price cannot disagree.
+      const amount = precheckinCtx.active ? precheckinCtx.apply(toMoneyNum(plan.amount || 0)) : toMoneyNum(plan.amount || 0);
       let quantity = 1;
       let rate = amount;
       let total = amount;
@@ -2331,7 +2372,7 @@ token
     }
 
     return rows;
-  }, [chargeEdit, pricing?.charges, breakdown, selectedServiceRows, selectedFeeRows, selectedInsurancePlansDisplay, serviceOptions, feeOptions, chargeModel?.taxRate, depositOverrides.depositDue, depositOverrides.securityDeposit, chargeOverrides]);
+  }, [chargeEdit, pricing?.charges, breakdown, selectedServiceRows, selectedFeeRows, selectedInsurancePlansDisplay, serviceOptions, feeOptions, chargeModel?.taxRate, depositOverrides.depositDue, depositOverrides.securityDeposit, chargeOverrides, precheckinCtx]);
 
   const securityDepositDisplayTotal = useMemo(
     () => toMoneyNum(displayChargeRows.filter((r) => isSecurityDepositDisplayRow(r)).reduce((s, r) => s + toMoneyNum(r?.total), 0)),

@@ -634,9 +634,16 @@ reservationsRouter.get('/:id/pricing-options', async (req, res, next) => {
       }),
       feesService.list(tenantScope),
       settingsService.getInsurancePlans(tenantScope),
-      franchiseService.list(tenantScope)
+      franchiseService.list(tenantScope),
+      // Pre-check-in discount config (2026-07-25). The Edit-pricing UI rebuilds
+      // insurance/service rows from CATALOG prices, which silently reverted a
+      // discount the customer had already accepted during pre-check-in (the
+      // $38-back-to-$40 bug). To re-apply the discount — including to a NEW
+      // plan the agent swaps in, Hector's call — the UI needs the tenant's
+      // discount config, which only the customer portal received before this.
+      settingsService.getPrecheckinDiscount(tenantScope)
     ]);
-    const [locationsResult, servicesResult, feesResult, insurancePlansResult, franchisesResult] = settled;
+    const [locationsResult, servicesResult, feesResult, insurancePlansResult, franchisesResult, precheckinDiscountResult] = settled;
 
     const allFulfilled = settled.every((r) => r.status === 'fulfilled');
 
@@ -645,12 +652,16 @@ reservationsRouter.get('/:id/pricing-options', async (req, res, next) => {
     const fees = feesResult.status === 'fulfilled' ? feesResult.value : [];
     const insurancePlans = insurancePlansResult.status === 'fulfilled' ? insurancePlansResult.value : [];
     const franchisesOut = franchisesResult.status === 'fulfilled' ? franchisesResult.value : [];
+    const precheckinDiscount = precheckinDiscountResult.status === 'fulfilled'
+      ? precheckinDiscountResult.value
+      : { enabled: false, type: 'PERCENTAGE', value: 0 };
     const payload = {
       locations: Array.isArray(locations) ? locations : [],
       services: Array.isArray(services) ? services : [],
       fees: Array.isArray(fees) ? fees : [],
       insurancePlans: Array.isArray(insurancePlans) ? insurancePlans : [],
-      franchises: Array.isArray(franchisesOut) ? franchisesOut : []
+      franchises: Array.isArray(franchisesOut) ? franchisesOut : [],
+      precheckinDiscount
     };
 
     // Only cache when nothing failed. Degraded payloads are returned to the
