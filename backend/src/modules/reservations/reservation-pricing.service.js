@@ -502,7 +502,10 @@ export const reservationPricingService = {
   async getPricing(reservationId, scope = {}, opts = {}) {
     await Promise.all([
       syncMandatoryLocationFees(reservationId, scope),
-      tollsService.syncReservationCharges(reservationId, scope),
+      // skipAgreementMirror: syncAgreementCharges runs right below in this
+      // same Promise.all — the toll sync's own post-close mirror (2026-07-26)
+      // would race a second concurrent agreement rebuild here.
+      tollsService.syncReservationCharges(reservationId, scope, { skipAgreementMirror: true }),
       syncAgreementCharges(reservationId, scope, opts)
     ]);
     const row = await getReservationOrThrow(reservationId, scope);
