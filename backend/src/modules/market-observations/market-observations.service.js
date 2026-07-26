@@ -595,18 +595,31 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
     }
     let suggestedAllIn = null;
     let uploaded = target; // legacy: upload the target as-is
+    // Titanium/Amadeus DUAL bases (LAX meeting, 2026-07-26): the same target
+    // all-in back-solved under BOTH gross-up formulas, side by side, so the
+    // numbers can be relayed to franchises on either connection (TL runs
+    // Titanium; the others run Amadeus). DISPLAY-ONLY — auto-apply and the
+    // "Uploaded Rate" column still use the location's configured
+    // connectionType, which is the only value that actually gets written.
+    let baseTitanium = null;
+    let baseAmadeus = null;
     if (taxAware && target != null) {
       suggestedAllIn = target;
       let base = baseFromCustomerAllIn(target, pricingConfig);
       if (base != null && floorBase != null && base < floorBase) base = floorBase;
       uploaded = base;
+      baseTitanium = baseFromCustomerAllIn(target, { ...pricingConfig, connectionType: 'TITANIUM' });
+      if (baseTitanium != null && floorBase != null && baseTitanium < floorBase) baseTitanium = floorBase;
+      baseAmadeus = baseFromCustomerAllIn(target, { ...pricingConfig, connectionType: 'AMADEUS' });
+      if (baseAmadeus != null && floorBase != null && baseAmadeus < floorBase) baseAmadeus = floorBase;
     }
     const current = ownDailyBySipp.has(c.sipp) ? ownDailyBySipp.get(c.sipp) : null;
     const diff = (uploaded != null && current != null) ? Number((uploaded - current).toFixed(2)) : null;
     return {
       date: c.date, location: A, sipp: c.sipp, rateCode: 'Daily', rule: ruleLabelFor(profile, '-'),
       marketVendor: c.vendor || '', marketCheapest: Number(c.cheapest.toFixed(2)),
-      suggested: (taxAware ? suggestedAllIn : uploaded), uploadedBase: uploaded, utilization,
+      suggested: (taxAware ? suggestedAllIn : uploaded), uploadedBase: uploaded,
+      baseTitanium, baseAmadeus, utilization,
       currentPrice: current, deltaAbs: diff, marketSampled: c.sampled,
     };
   });
@@ -621,6 +634,8 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
     { header: taxAware ? 'Comp. Rate (all-in)' : 'Comp. Rate', key: 'marketCheapest', type: 'currency', width: 14 },
     { header: taxAware ? 'Suggested (all-in)' : 'Suggested', key: 'suggested', type: 'currency', width: 14 },
     ...(taxAware ? [{ header: 'Uploaded Rate (base)', key: 'uploadedBase', type: 'currency', width: 16 }] : []),
+    ...(taxAware ? [{ header: 'Base (Titanium)', key: 'baseTitanium', type: 'currency', width: 14 }] : []),
+    ...(taxAware ? [{ header: 'Base (Amadeus)', key: 'baseAmadeus', type: 'currency', width: 14 }] : []),
     ...(taxAware ? [{ header: 'Util %', key: 'utilization', type: 'percent', width: 9 }] : []),
     { header: 'Current Rate', key: 'currentPrice', type: 'currency', width: 12 },
     { header: 'Difference', key: 'deltaAbs', type: 'currency', width: 11 },
