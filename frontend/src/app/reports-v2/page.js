@@ -46,19 +46,23 @@ function ReportsLanding({ token, me, logout }) {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // Report Builder (2026-07-26): the user's own saved reports + tenant-shared.
+  const [customReports, setCustomReports] = useState([]);
 
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
     (async () => {
       try {
-        const [listR, snapR] = await Promise.allSettled([
+        const [listR, snapR, customR] = await Promise.allSettled([
           api('/api/reports/list', {}, token),
           api(`/api/reports/snapshot?from=${range.from}&to=${range.to}`, { bypassCache: true }, token),
+          api('/api/reports/custom', { bypassCache: true }, token),
         ]);
         if (cancelled) return;
         if (listR.status === 'fulfilled') setReports(listR.value?.reports || []);
         if (snapR.status === 'fulfilled') setSnapshot(snapR.value || null);
+        if (customR.status === 'fulfilled') setCustomReports(customR.value?.reports || []);
       } catch (err) {
         if (!cancelled) setError(err?.message || 'Failed to load reports');
       } finally {
@@ -131,6 +135,39 @@ function ReportsLanding({ token, me, logout }) {
               hint={snapshot ? `${snapshot.utilizationPct}% utilization` : null}
             />
           </div>
+        </div>
+
+        {/* Report Builder — My Reports / Team Reports (2026-07-26) */}
+        <div style={{ marginBottom: 22 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: '#6f668f', fontWeight: 500, textTransform: 'uppercase' }}>My Reports</div>
+            <button
+              onClick={() => router.push('/reports-v2/builder')}
+              style={{ background: '#534AB7', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+            >+ Create report</button>
+          </div>
+          {customReports.length ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
+              {customReports.map((cr) => (
+                <div key={cr.id} onClick={() => router.push(`/reports-v2/custom/${cr.id}`)} role="button" tabIndex={0}
+                  style={{ background: 'white', border: '0.5px solid #d3d1c7', borderRadius: 8, padding: '12px 14px', cursor: 'pointer' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#534AB7'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#d3d1c7'; }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                    <div style={{ fontWeight: 500, fontSize: 14 }}>{cr.name}</div>
+                    <span style={{ fontSize: 10, padding: '2px 7px', borderRadius: 999, background: '#eceafd', color: '#3f3796', whiteSpace: 'nowrap' }}>
+                      {cr.dataset}{!cr.mine ? ' · shared' : ''}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: '#6f668f', marginTop: 4 }}>{cr.description || 'Custom report'}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ border: '1.5px dashed #d3d1c7', borderRadius: 8, padding: 18, fontSize: 13, color: '#6f668f' }}>
+              No custom reports yet. Build your own from Reservations, Payments, Fleet, Tolls and more.
+            </div>
+          )}
         </div>
 
         {/* Category grids */}

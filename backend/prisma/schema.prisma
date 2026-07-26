@@ -66,9 +66,9 @@ enum RepairOrderStatus {
 
 enum RepairOrderSource {
   SCHEDULED // from a service interval coming due
-  DAMAGE    // rolled up from VehicleDamageReport(s)
-  INCIDENT  // from a ReservationIncident
-  MANUAL    // ad-hoc
+  DAMAGE // rolled up from VehicleDamageReport(s)
+  INCIDENT // from a ReservationIncident
+  MANUAL // ad-hoc
 }
 
 enum RepairOrderLineType {
@@ -618,21 +618,22 @@ model Tenant {
   advantageLocationConfigs AdvantageLocationConfig[]
   loanerAgreements         LoanerAgreement[]
   longTermPlans            LongTermPlan[]
+  customReports            CustomReport[]
 }
 
 model Location {
-  id             String   @id @default(cuid())
-  tenantId       String?
-  tenant         Tenant?  @relation(fields: [tenantId], references: [id])
-  code           String
-  name           String
-  address        String?
-  city           String?
-  state          String?
-  country        String?
-  taxRate        Decimal  @default(0) @db.Decimal(5, 2)
-  isActive       Boolean  @default(true)
-  locationConfig String?
+  id                String   @id @default(cuid())
+  tenantId          String?
+  tenant            Tenant?  @relation(fields: [tenantId], references: [id])
+  code              String
+  name              String
+  address           String?
+  city              String?
+  state             String?
+  country           String?
+  taxRate           Decimal  @default(0) @db.Decimal(5, 2)
+  isActive          Boolean  @default(true)
+  locationConfig    String?
   // Per-branch Terms & Conditions override (2026-07-24). Mirrors
   // Tenant.termsHtml one level down; the resolver in lib/terms/index.js reads
   // location → tenant → canonical, so NULL here (the default, and every
@@ -649,7 +650,7 @@ model Location {
   // different local policies. This field REPLACES the whole agreement, so a
   // copy of the canonical text pasted here goes stale — silently — the next
   // time TC_VERSION is bumped.
-  termsHtml      String?
+  termsHtml         String?
   // Per-branch RIDER, appended to whatever the resolver produced (2026-07-24).
   // This is the right field for the ordinary case: the branch keeps inheriting
   // the canonical 24-section agreement — authorized use, the card-on-file
@@ -663,7 +664,7 @@ model Location {
   // none of the sections above — so loading it into `termsHtml` as a
   // replacement would have stripped the company's ability to bill anything
   // after the rental closed.
-  termsRiderHtml String?
+  termsRiderHtml    String?
   // Per-branch overrides for the acknowledgement sections the customer initials
   // (checkout-session/terms-content.js TC_SECTIONS). JSON map keyed by the
   // CANONICAL sectionKey: { "deposit_post_charges": { "body": "...", "label": "..." } }.
@@ -676,8 +677,8 @@ model Location {
   // deposit and 150 mi/day while the initialled page bound into the SAME PDF
   // said $500, on the renter's own initials.
   termsSectionsJson String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   vehiclesHome                   Vehicle[]               @relation("VehicleHomeLocation")
   reservationsPickup             Reservation[]           @relation("ReservationPickupLocation")
@@ -703,30 +704,30 @@ model Location {
 }
 
 model VehicleType {
-  id          String   @id @default(cuid())
-  tenantId    String?
-  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
-  code        String
-  name        String
-  description String?
-  imageUrl    String?
+  id                String        @id @default(cuid())
+  tenantId          String?
+  tenant            Tenant?       @relation(fields: [tenantId], references: [id])
+  code              String
+  name              String
+  description       String?
+  imageUrl          String?
   // Public Vehicle Profile (2026-06-25) — read-only specs exposed on the public booking API
   // (bootstrap + vehicle-classes). All optional/additive; generic for every tenant.
-  passengers        Int?          // # seats / passengers
-  bags              Int?          // # luggage
+  passengers        Int? // # seats / passengers
+  bags              Int? // # luggage
   doors             Int?
   transmission      Transmission? // AUTOMATIC | MANUAL
   features          String[]      @default([]) // controlled catalog codes (see vehicle-feature-catalog.js)
   // "What's included" policy (configurable per type — NOT hardcoded):
   unlimitedMileage  Boolean       @default(false)
-  freeMilesPerDay   Int?          // used only when unlimitedMileage = false
+  freeMilesPerDay   Int? // used only when unlimitedMileage = false
   insuranceIncluded Boolean       @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
   vehicles               Vehicle[]
-  reservations           Reservation[]          @relation("ReservationVehicleType")
-  serviceReservations    Reservation[]          @relation("ReservationServiceVehicleType")
+  reservations           Reservation[]           @relation("ReservationVehicleType")
+  serviceReservations    Reservation[]           @relation("ReservationServiceVehicleType")
   rateItems              RateItem[]
   rateDailyPrices        RateDailyPrice[]
   hostVehicleSubmissions HostVehicleSubmission[]
@@ -1508,9 +1509,9 @@ model MaintenanceJob {
 // Replaces MaintenanceJob (rows migrated later). Numbered PER UNIT (roNumber per vehicle).
 // Money rule: costs are an INTERNAL record only; no auto-charge to agreements/claims.
 model RepairOrder {
-  id        String @id @default(cuid())
+  id        String  @id @default(cuid())
   tenantId  String
-  tenant    Tenant @relation(fields: [tenantId], references: [id])
+  tenant    Tenant  @relation(fields: [tenantId], references: [id])
   vehicleId String
   vehicle   Vehicle @relation(fields: [vehicleId], references: [id])
   // Per-unit sequence (RO-0001 for that vehicle), assigned at create time.
@@ -1535,7 +1536,7 @@ model RepairOrder {
   incidentId String?
   incident   ReservationIncident? @relation(fields: [incidentId], references: [id], onDelete: SetNull)
 
-  lines        RepairOrderLine[]
+  lines         RepairOrderLine[]
   damageReports VehicleDamageReport[] // damages grouped into this RO; FIXED on complete
 
   createdAt DateTime @default(now())
@@ -1564,9 +1565,9 @@ model RepairOrderLine {
 // Per-unit service interval (LOF, tire rotation, …) with make/model defaults overridable
 // per vehicle. nextDue* are derived from the live odometer (VehicleMileageEntry) + lastService.
 model ServiceSchedule {
-  id        String @id @default(cuid())
+  id        String  @id @default(cuid())
   tenantId  String
-  tenant    Tenant @relation(fields: [tenantId], references: [id])
+  tenant    Tenant  @relation(fields: [tenantId], references: [id])
   vehicleId String
   vehicle   Vehicle @relation(fields: [vehicleId], references: [id])
 
@@ -1577,7 +1578,7 @@ model ServiceSchedule {
   lastServiceAt    DateTime?
   nextDueMiles     Int?
   nextDueAt        DateTime?
-  active           Boolean   @default(true)
+  active           Boolean     @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1732,52 +1733,52 @@ model ListingAvailabilityWindow {
 }
 
 model User {
-  id               String          @id @default(cuid())
-  tenantId         String?
-  tenant           Tenant?         @relation(fields: [tenantId], references: [id])
-  createdByUserId  String?
-  createdByUser    User?           @relation("UserCreatedBy", fields: [createdByUserId], references: [id])
-  email            String          @unique
-  passwordHash     String
+  id                 String               @id @default(cuid())
+  tenantId           String?
+  tenant             Tenant?              @relation(fields: [tenantId], references: [id])
+  createdByUserId    String?
+  createdByUser      User?                @relation("UserCreatedBy", fields: [createdByUserId], references: [id])
+  email              String               @unique
+  passwordHash       String
   // First-login onboarding (2026-07-25): mustChangePassword is true whenever
   // someone OTHER than the user knows the password (temp password at create,
   // any admin reset). While true, requireAuth 403s everything except the
   // change-password allowlist (code PASSWORD_CHANGE_REQUIRED) and AuthGate
   // renders the forced-change screen. passwordChangedAt records the last
   // SELF-chosen password (null = never chose one).
-  mustChangePassword Boolean  @default(false)
+  mustChangePassword Boolean              @default(false)
   passwordChangedAt  DateTime?
-  lockPinHash      String?
-  lockPinUpdatedAt DateTime?
-  screenLockExempt Boolean         @default(false)
-  fullName         String
-  role             UserRole        @default(AGENT)
-  isActive         Boolean         @default(true)
+  lockPinHash        String?
+  lockPinUpdatedAt   DateTime?
+  screenLockExempt   Boolean              @default(false)
+  fullName           String
+  role               UserRole             @default(AGENT)
+  isActive           Boolean              @default(true)
   // Location scoping (2026-06-23): JSON array of Location ids this user may see.
   // null/absent or empty = ALL locations (no restriction). ADMIN/SUPER_ADMIN
   // always bypass (see locationScopeFor). Enforced in Fase 2.
-  locationIds      String?
+  locationIds        String?
   // Program scoping (2026-07-02): which program's data this employee sees.
   // BOTH = no restriction (default, zero behavior change). ADMIN/SUPER_ADMIN
   // always bypass (see userProgramScope). Composes with locationIds.
-  programScope     EmployeeProgramScope @default(BOTH)
+  programScope       EmployeeProgramScope @default(BOTH)
   // Person kind (2026-07-25, LAX meeting #4): VIRTUAL_AGENT sells remotely
   // (auth role stays AGENT — UserRole is load-bearing for permissions) and
   // earns a PERCENT-of-sold-items commission (services + insurance) on the
   // agreements they originate, computed alongside — never instead of — the
   // checkout employee's commission. STANDARD = zero behavior change.
-  personKind       EmployeePersonKind @default(STANDARD)
+  personKind         EmployeePersonKind   @default(STANDARD)
   // VozIA service integration (2026-07-03): machine identity + token
   // versioning. isServiceAccount gates the default-deny endpoint allowlist
   // (lib/service-account-allowlist.js) and the tv-claim check in requireAuth;
   // bumping tokenVersion revokes every outstanding service token at once.
   // Human JWTs never carry the tv/svc claims — zero behavior change for staff.
-  isServiceAccount Boolean         @default(false)
-  tokenVersion     Int             @default(0)
-  commissionPlanId String?
-  commissionPlan   CommissionPlan? @relation("UserCommissionPlan", fields: [commissionPlanId], references: [id])
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  isServiceAccount   Boolean              @default(false)
+  tokenVersion       Int                  @default(0)
+  commissionPlanId   String?
+  commissionPlan     CommissionPlan?      @relation("UserCommissionPlan", fields: [commissionPlanId], references: [id])
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
 
   auditLogs                        AuditLog[]
   salesOwnedAgreements             RentalAgreement[]       @relation("AgreementSalesOwner")
@@ -2342,62 +2343,62 @@ model RentalAgreementPayment {
 // toward. photoJson uses the repo's standard photo envelope
 // ({storage,bucket,refs} | {storage:false,photos}).
 model ReviewProof {
-  id               String    @id @default(cuid())
-  tenantId         String?
-  employeeUserId   String
-  monthKey         String
-  reservationId    String?
+  id                String    @id @default(cuid())
+  tenantId          String?
+  employeeUserId    String
+  monthKey          String
+  reservationId     String?
   rentalAgreementId String?
-  photoJson        Json
+  photoJson         Json
   // PENDING_AI | VALIDATED | REJECTED. AI is advisory but automatic; an
   // ADMIN can flip status manually (soft gate, audited via AuditLog-less
   // reviewedByUserId + notes — this table IS the audit record).
-  status           String    @default("PENDING_AI")
-  aiConfidence     Int?
-  aiPlatform       String?
-  aiBusinessName   String?
-  aiRating         Int?
-  aiReviewerName   String?
-  aiNotes          String?   @db.Text
+  status            String    @default("PENDING_AI")
+  aiConfidence      Int?
+  aiPlatform        String?
+  aiBusinessName    String?
+  aiRating          Int?
+  aiReviewerName    String?
+  aiNotes           String?   @db.Text
   // SHA-256 of the decoded photo bytes (QA M2): an exact re-upload of the
   // same photo — the cheapest way to farm one review into a tier — is
   // auto-REJECTED tenant-wide.
-  photoSha256      String?
-  validatedAt      DateTime?
-  reviewedByUserId String?
-  uploadedByUserId String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  photoSha256       String?
+  validatedAt       DateTime?
+  reviewedByUserId  String?
+  uploadedByUserId  String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@index([tenantId, employeeUserId, monthKey, status])
   @@index([rentalAgreementId])
 }
 
 model CommissionPlan {
-  id                  String               @id @default(cuid())
-  tenantId            String?
-  tenant              Tenant?              @relation(fields: [tenantId], references: [id])
-  name                String
-  isActive            Boolean              @default(true)
+  id                    String               @id @default(cuid())
+  tenantId              String?
+  tenant                Tenant?              @relation(fields: [tenantId], references: [id])
+  name                  String
+  isActive              Boolean              @default(true)
   // 2026-07-25 (LAX #4): which person kind this plan targets. NULL = standard
   // employees (legacy behavior: catalog + rules). 'VIRTUAL_AGENT' = resolved
   // by the sync for virtual agents: defaultPercentValue applied to SOLD-ITEM
   // charges only (services + insurance, never taxes/fees/deposits); the
   // flat-rate SERVICE_CATALOG is never consulted for these plans.
-  personKind          String?
-  defaultValueType    CommissionValueType?
-  defaultPercentValue Decimal?             @db.Decimal(5, 2)
-  defaultFixedAmount  Decimal?             @db.Decimal(10, 2)
+  personKind            String?
+  defaultValueType      CommissionValueType?
+  defaultPercentValue   Decimal?             @db.Decimal(5, 2)
+  defaultFixedAmount    Decimal?             @db.Decimal(10, 2)
   // LAX #5 (2026-07-25) — review-tier commission for counter staff. When set
   // (non-empty array [{minReviews, pct}] sorted ascending), the counter
   // employee's row is computed as tierPct(validated reviews this month) ×
   // sold items on QUALIFYING contracts (reviewTierSourcesJson, e.g.
   // ["EXPEDIA","PRICELINE"]) INSTEAD of the flat-rate catalog. Null = legacy
   // catalog behavior, zero change for tenants without tiers.
-  reviewTiersJson        Json?
-  reviewTierSourcesJson  Json?
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
+  reviewTiersJson       Json?
+  reviewTierSourcesJson Json?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 
   rules                CommissionRule[]
   agreementCommissions AgreementCommission[]
@@ -2797,33 +2798,33 @@ model Rate {
   locationIds         String?
   purpose             RatePurpose @default(RENTAL)
   rateType            RateType    @default(MULTIPLE_CLASSES)
-  calculationBy       String    @default("24_HOUR_TIME")
-  averageBy           String?   @default("DATE_RANGE")
-  daily               Decimal   @default(0) @db.Decimal(10, 2)
-  fuelChargePerGallon Decimal?  @db.Decimal(10, 2)
+  calculationBy       String      @default("24_HOUR_TIME")
+  averageBy           String?     @default("DATE_RANGE")
+  daily               Decimal     @default(0) @db.Decimal(10, 2)
+  fuelChargePerGallon Decimal?    @db.Decimal(10, 2)
   minChargeDays       Int?
   minChargeHours      Int?
-  grossFlatNumber     Decimal?  @db.Decimal(10, 2)
-  extraMileCharge     Decimal?  @db.Decimal(10, 2)
+  grossFlatNumber     Decimal?    @db.Decimal(10, 2)
+  extraMileCharge     Decimal?    @db.Decimal(10, 2)
   graceMinutes        Int?
-  useHourlyRates      Boolean   @default(false)
-  active              Boolean   @default(true)
-  displayOnline       Boolean   @default(false)
-  variesPricing       Boolean   @default(false)
-  sameSpecialRates    Boolean   @default(false)
-  rencarscom          Boolean   @default(false)
-  monday              Boolean   @default(true)
-  tuesday             Boolean   @default(true)
-  wednesday           Boolean   @default(true)
-  thursday            Boolean   @default(true)
-  friday              Boolean   @default(true)
-  saturday            Boolean   @default(true)
-  sunday              Boolean   @default(true)
+  useHourlyRates      Boolean     @default(false)
+  active              Boolean     @default(true)
+  displayOnline       Boolean     @default(false)
+  variesPricing       Boolean     @default(false)
+  sameSpecialRates    Boolean     @default(false)
+  rencarscom          Boolean     @default(false)
+  monday              Boolean     @default(true)
+  tuesday             Boolean     @default(true)
+  wednesday           Boolean     @default(true)
+  thursday            Boolean     @default(true)
+  friday              Boolean     @default(true)
+  saturday            Boolean     @default(true)
+  sunday              Boolean     @default(true)
   effectiveDate       DateTime?
   endDate             DateTime?
-  isActive            Boolean   @default(true)
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  isActive            Boolean     @default(true)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
 
   rateItems            RateItem[]
   dailyPrices          RateDailyPrice[]
@@ -3049,6 +3050,34 @@ model PlannerRecommendationAudit {
   createdAt          DateTime                  @default(now())
 
   @@index([tenantId, recommendationType, createdAt])
+}
+
+// Report Builder (2026-07-26): a saved custom report is DATA, not code - a
+// definition JSON executed by custom-report.engine.js. The definition can
+// never express a tenant or location (the engine injects those from the
+// runner), and every field key resolves through the role-gated registry.
+enum CustomReportVisibility {
+  PRIVATE
+  TENANT
+}
+
+model CustomReport {
+  id            String                 @id @default(cuid())
+  tenantId      String
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ownerUserId   String
+  name          String
+  description   String?
+  dataset       String
+  definition    Json
+  schemaVersion Int                    @default(1)
+  visibility    CustomReportVisibility @default(PRIVATE)
+  lastRunAt     DateTime?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  @@unique([tenantId, ownerUserId, name])
+  @@index([tenantId, visibility])
 }
 
 model TollProviderAccount {
@@ -3657,25 +3686,25 @@ model MarketScrapeProfile {
 //   AMADEUS : all_in = base × (1 + brokerage) + base × taxes
 // Opt-in: a location WITHOUT a config keeps the legacy behavior (no gross-up).
 model MarketPricingConfig {
-  id             String   @id @default(cuid())
-  tenantId       String
-  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  locationCode   String                              // "SJU", "MCO", ...
-  connectionType String   @default("TITANIUM")       // TITANIUM | AMADEUS
-  taxes          Json     @default("[]")             // [{ name: "PR tax", pct: 11.5 }, ...]
-  brokeragePct   Decimal  @default(0) @db.Decimal(6, 3)
-  floorBase      Decimal? @db.Decimal(10, 2)         // per-location floor (BASE rate); null = none
-  ceilingBase    Decimal? @db.Decimal(10, 2)         // per-location ceiling (BASE rate); null = none
+  id               String   @id @default(cuid())
+  tenantId         String
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  locationCode     String // "SJU", "MCO", ...
+  connectionType   String   @default("TITANIUM") // TITANIUM | AMADEUS
+  taxes            Json     @default("[]") // [{ name: "PR tax", pct: 11.5 }, ...]
+  brokeragePct     Decimal  @default(0) @db.Decimal(6, 3)
+  floorBase        Decimal? @db.Decimal(10, 2) // per-location floor (BASE rate); null = none
+  ceilingBase      Decimal? @db.Decimal(10, 2) // per-location ceiling (BASE rate); null = none
   // Max allowed |delta %| vs the CURRENT live resolved price for an AUTO write. A move beyond
   // this band is HELD (never applied, never clamped) so a broken scrape can't push a live price
   // out of band. null = NOT configured → AUTO writes fail-closed HOLD for this location.
-  maxDeltaPct    Decimal? @db.Decimal(6, 3)
+  maxDeltaPct      Decimal? @db.Decimal(6, 3)
   // Utilization-based dynamic tiers (Fase 2): [{ maxPct, adjustAmount?, adjustPct? }] applied
   // ON TOP of the base margin, using projected utilization from the Availability Forecast.
-  utilizationRules Json   @default("[]")
-  currency       String   @default("USD")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  utilizationRules Json     @default("[]")
+  currency         String   @default("USD")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   @@unique([tenantId, locationCode])
   @@index([tenantId])
@@ -3692,16 +3721,16 @@ model PriceChangeLog {
   locationCode    String?
   rateId          String
   vehicleTypeId   String?
-  date            DateTime                            // the pickup date the daily price applies to
-  oldDaily        Decimal? @db.Decimal(10, 2)         // current live resolved BASE for that class/date
-  newDaily        Decimal? @db.Decimal(10, 2)         // the value written (or the rejected suggestion when held)
+  date            DateTime // the pickup date the daily price applies to
+  oldDaily        Decimal? @db.Decimal(10, 2) // current live resolved BASE for that class/date
+  newDaily        Decimal? @db.Decimal(10, 2) // the value written (or the rejected suggestion when held)
   deltaPct        Decimal? @db.Decimal(10, 3)
-  runId           String?                             // MarketScrapeRun that drove it (null for legacy/manual-adhoc)
-  competitorBasis String?                             // vendor + price that drove the suggestion, e.g. "Hertz @ $78.67 all-in"
-  engine          String                              // MARKET_A | manual
-  outcome         String                              // applied | held | clamped
-  reason          String?                             // held/clamped reason
-  oldFromFallback Boolean  @default(false)            // oldDaily came from the header fallback (pre-existing cross-price data gap)
+  runId           String? // MarketScrapeRun that drove it (null for legacy/manual-adhoc)
+  competitorBasis String? // vendor + price that drove the suggestion, e.g. "Hertz @ $78.67 all-in"
+  engine          String // MARKET_A | manual
+  outcome         String // applied | held | clamped
+  reason          String? // held/clamped reason
+  oldFromFallback Boolean  @default(false) // oldDaily came from the header fallback (pre-existing cross-price data gap)
   createdAt       DateTime @default(now())
 
   @@index([tenantId, createdAt])
@@ -4313,12 +4342,12 @@ model FranchisePayoutPeriod {
 // See doc/economy-integration-plan-2026-07-05.md
 // ============================================================================
 model EconomyLocationConfig {
-  id           String   @id @default(cuid())
-  tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id])
-  locationId   String // Ride location (Miami / FLL / MCO / LAX)
-  externalArea String // 'MIA' | 'LAX' — first 3 chars of rgLocPickup
-  enabled      Boolean  @default(true)
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  locationId    String // Ride location (Miami / FLL / MCO / LAX)
+  externalArea  String // 'MIA' | 'LAX' — first 3 chars of rgLocPickup
+  enabled       Boolean  @default(true)
   // Per-area import window override (2026-07-09, Fase 5). NULL → fall back to the
   // env defaults ECONOMY_DATE_WINDOW_LOOKBACK_DAYS / ECONOMY_DATE_WINDOW_LOOKAHEAD_DAYS.
   // The worker fetches the UNION window (max lookback + max lookahead across the
@@ -4326,7 +4355,7 @@ model EconomyLocationConfig {
   // [lookback, lookahead] as a precision filter per row.
   lookbackDays  Int?
   lookaheadDays Int?
-  createdAt    DateTime @default(now())
+  createdAt     DateTime @default(now())
 
   @@unique([tenantId, externalArea])
   @@index([tenantId, enabled])
@@ -4353,19 +4382,19 @@ model EconomyLocationConfig {
 // See doc/nu-integration-plan-2026-07-09.md
 // ============================================================================
 model NuLocationConfig {
-  id           String   @id @default(cuid())
-  tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id])
-  locationId   String // Ride location (FLL)
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id])
+  locationId     String // Ride location (FLL)
   // NU portal center code (e.g. "100" = FT. LAUDERDALE). Nullable — NU accounts
   // CAN be multi-center later; for the 1:1 FLL case it is optional metadata.
   externalCenter String?
-  enabled      Boolean  @default(true)
+  enabled        Boolean  @default(true)
   // Per-config import window override (mirrors Economy). NULL → fall back to the
   // env defaults NU_DATE_WINDOW_LOOKBACK_DAYS / NU_DATE_WINDOW_LOOKAHEAD_DAYS.
-  lookbackDays  Int?
-  lookaheadDays Int?
-  createdAt    DateTime @default(now())
+  lookbackDays   Int?
+  lookaheadDays  Int?
+  createdAt      DateTime @default(now())
 
   // 1:1 FLL: one enabled config row per tenant is expected. The unique is on
   // (tenantId, locationId) — the sane key for the 1:1 shape (one Ride location
@@ -4394,19 +4423,19 @@ model NuLocationConfig {
 // See doc/flexways-integration-plan-2026-07-13.md
 // ============================================================================
 model FlexwaysLocationConfig {
-  id           String   @id @default(cuid())
-  tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
   // Portal branch id (e.g. "383"), from the MobilityPS URLs (idSede=...). The
   // identity of a Flexways config row within a tenant.
-  idSede       String
-  locationId   String // Ride location this sede maps to
-  enabled      Boolean  @default(true)
+  idSede        String
+  locationId    String // Ride location this sede maps to
+  enabled       Boolean  @default(true)
   // Per-sede import window override (mirrors Economy/NU). NULL → fall back to the
   // env defaults FLEXWAYS_DATE_WINDOW_LOOKBACK_DAYS / FLEXWAYS_DATE_WINDOW_LOOKAHEAD_DAYS.
   lookbackDays  Int?
   lookaheadDays Int?
-  createdAt    DateTime @default(now())
+  createdAt     DateTime @default(now())
 
   // One config row per (tenant, portal sede).
   @@unique([tenantId, idSede])
@@ -4437,9 +4466,9 @@ model FlexwaysLocationConfig {
 // See doc/advantage-integration-plan-2026-07-13.md
 // ============================================================================
 model AdvantageLocationConfig {
-  id       String @id @default(cuid())
-  tenantId String
-  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
   // TSD account number as it appears in `lstTSDNumber` and in the grid's `Loc`
   // cell prefix (e.g. "61302"). Stored as text — it is an identifier, not a
   // number to do math on, and the portal renders it zero-padded.
@@ -4447,7 +4476,7 @@ model AdvantageLocationConfig {
   // Branch code as it appears in `lstBranch` / the grid's `Loc` suffix ("MCO").
   branch        String
   locationId    String // Ride location this (tsdNumber, branch) maps to
-  enabled       Boolean @default(true)
+  enabled       Boolean  @default(true)
   // Per-config import window override (mirrors Economy/NU/Flexways). NULL → fall
   // back to ADVANTAGE_DATE_WINDOW_LOOKBACK_DAYS / _LOOKAHEAD_DAYS.
   lookbackDays  Int?
@@ -4750,9 +4779,9 @@ model VehicleDamageReport {
   // damages and customer-inspection reports leave every column NULL.
   reservationChargeId String? // the RentalAgreementCharge (source DAMAGE_CHARGE) put on the contract
   incidentId          String? // the ReservationIncident DRAFT auto-created for this damage
-  estimatePhotoJson   Json?   // uploaded repair estimate (same {storage,refs}|{photos} shape as photoJson)
-  damageCostCents     Int?    // full repair cost (CUSTOMER / CUSTOMER_INSURANCE)
-  ourDeductibleCents  Int?    // our deductible (OUR_INSURANCE) — the amount billed to the renter
+  estimatePhotoJson   Json? // uploaded repair estimate (same {storage,refs}|{photos} shape as photoJson)
+  damageCostCents     Int? // full repair cost (CUSTOMER / CUSTOMER_INSURANCE)
+  ourDeductibleCents  Int? // our deductible (OUR_INSURANCE) — the amount billed to the renter
   responsibleParty    String? // CUSTOMER | CUSTOMER_INSURANCE | OUR_INSURANCE
 
   phase InspectionPhase
@@ -4946,12 +4975,12 @@ model LoanerAgreement {
   // Customer self-service portal. Unlike signatureToken (single-use), this
   // token is long-lived (valid while the loaner is out) so the borrower can
   // re-open their status page, request an extension, or schedule a return.
-  portalToken          String?   @unique
-  portalTokenExpiresAt DateTime?
+  portalToken            String?   @unique
+  portalTokenExpiresAt   DateTime?
   // Customer-initiated requests captured via the portal (staff acts on them).
-  requestedReturnAt    DateTime?
-  returnScheduledAt    DateTime?
-  portalRequestNote    String?
+  requestedReturnAt      DateTime?
+  returnScheduledAt      DateTime?
+  portalRequestNote      String?
   portalRequestAt        DateTime?
   portalRequestKind      String?
   portalRequestHandledAt DateTime?
@@ -5179,7 +5208,7 @@ model KioskSession {
   // THIS column — eventsJson is client-fed telemetry and must never be
   // consulted for authorization. Cleared when a different reservation is
   // attached to the session.
-  idVerifiedAt DateTime?
+  idVerifiedAt   DateTime?
   // How the ID was verified: 'SCAN' (guest AAMVA scan) | 'STAFF_OVERRIDE'
   // (B3c staff assist — manual entry after PIN unlock).
   idVerifyMethod String?

@@ -72,6 +72,7 @@ import { reportDamageRouter } from './modules/report-damage/report-damage.routes
 import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-center/issue-center.routes.js';
 import { tollsRouter, tollsInternalRouter } from './modules/tolls/tolls.routes.js';
 import { fleetInternalRouter } from './modules/vehicles/fleet-internal.routes.js';
+import { customReportsRouter } from './modules/reports/custom/custom-reports.routes.js';
 import { plannerRouter } from './modules/planner/planner.routes.js';
 import { quotesRouter } from './modules/quotes/quotes.routes.js';
 import { paymentGatewayRouter } from './modules/payment-gateway/payment-gateway.routes.js';
@@ -342,6 +343,9 @@ app.use('/api/customer-inspections', requireAuth, tenantRateLimit, customerInspe
 // 2026-05-25 — mount Reports v2 router FIRST so the new /list and per-slug
 // data/pdf/excel endpoints win. The legacy reportsRouter stays mounted as
 // a fallthrough for any path the v2 router doesn't define.
+// Report Builder (2026-07-26): saved custom reports. Mounted BEFORE the v2
+// router so /custom/* never falls through to a report slug.
+app.use('/api/reports/custom', requireAuth, tenantRateLimit, requireModuleAccess('reports'), customReportsRouter);
 app.use('/api/reports', requireAuth, tenantRateLimit, requireModuleAccess('reports'), reportsV2Router);
 app.use('/api/reports', requireAuth, tenantRateLimit, requireModuleAccess('reports'), reportsRouter);
 app.use('/api/commissions', requireAuth, tenantRateLimit, requireModuleAccess('reports'), commissionsRouter);
