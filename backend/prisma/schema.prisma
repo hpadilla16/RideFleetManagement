@@ -616,6 +616,7 @@ model Tenant {
   nuLocationConfigs        NuLocationConfig[]
   flexwaysLocationConfigs  FlexwaysLocationConfig[]
   advantageLocationConfigs AdvantageLocationConfig[]
+  mexLocationConfigs       MexLocationConfig[]
   loanerAgreements         LoanerAgreement[]
   longTermPlans            LongTermPlan[]
   customReports            CustomReport[]
@@ -4484,6 +4485,25 @@ model AdvantageLocationConfig {
   createdAt     DateTime @default(now())
 
   // One config row per (tenant, TSD account, branch).
+  @@unique([tenantId, tsdNumber, branch])
+  @@index([tenantId, enabled])
+}
+
+// MEX Rent a Car (2026-07-26): sibling of AdvantageLocationConfig — MEX's
+// portal is the SAME TSD RezCentral software, so the config shape is
+// identical. Own model so a tenant can run Advantage AND MEX side by side.
+model MexLocationConfig {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  tsdNumber     String
+  branch        String
+  locationId    String
+  enabled       Boolean  @default(true)
+  lookbackDays  Int?
+  lookaheadDays Int?
+  createdAt     DateTime @default(now())
+
   @@unique([tenantId, tsdNumber, branch])
   @@index([tenantId, enabled])
 }

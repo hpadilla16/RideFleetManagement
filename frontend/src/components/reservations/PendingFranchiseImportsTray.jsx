@@ -30,6 +30,7 @@ function sourceLabelFor(source) {
     case 'nu': return 'NU Car Rentals';
     case 'flexways': return 'Flexways';
     case 'advantage': return 'Advantage';
+    case 'mex': return 'MEX Rent a Car';
     case 'tl-international':
     default: return 'TL International';
   }

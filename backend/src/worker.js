@@ -121,6 +121,20 @@ async function registerAllHandlers() {
     }
   }
 
+  // MEX Rent a Car franchise sync (2026-07-26) — sibling of Advantage (same
+  // TSD RezCentral portal). Own flag, own queue, same fail-isolated posture.
+  if (String(process.env.MEX_INTEGRATION_ENABLED || 'false').toLowerCase() === 'true') {
+    try {
+      const mexMod = await import('./modules/integrations/mex/mex.worker.js');
+      mexMod.registerMexSyncWorker();
+      logger.info('[worker] registered handler: mex.sync');
+    } catch (err) {
+      logger.warn('[worker] mex sync worker not registered', {
+        message: err.message, stack: err.stack
+      });
+    }
+  }
+
   // Future handlers go here. Each in its own try/catch so a broken one
   // doesn't poison the others.
 }
@@ -286,6 +300,17 @@ async function main() {
     });
   }
 
+  // MEX autonomous sync scheduler (2026-07-26) — gated by MEX_INTEGRATION_ENABLED.
+  try {
+    const mexSchedMod = await import('./modules/integrations/mex/mex.scheduler.js');
+    mexSchedMod.startMexSyncScheduler();
+    logger.info('[worker] started: mex sync scheduler (if enabled)');
+  } catch (err) {
+    logger.warn('[worker] mex sync scheduler not started', {
+      message: err.message,
+    });
+  }
+
   const shutdown = async (signal) => {
     logger.info('[worker] shutting down', { signal });
     stopAutochargePoll();
@@ -322,6 +347,10 @@ async function main() {
     try {
       const advSchedMod = await import('./modules/integrations/advantage/advantage.scheduler.js');
       advSchedMod.stopAdvantageSyncScheduler();
+    } catch {}
+    try {
+      const mexSchedMod = await import('./modules/integrations/mex/mex.scheduler.js');
+      mexSchedMod.stopMexSyncScheduler();
     } catch {}
     // Close the Chromium singleton if a toll sweep ever launched it here.
     // Lazy import keeps puppeteer out of the boot graph.

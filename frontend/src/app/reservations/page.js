@@ -790,6 +790,14 @@ function ReservationsInner({ token, me, logout }) {
         scopedPath={scopedPath}
         source="advantage"
       />
+      <PendingFranchiseImportsTray
+        token={token}
+        me={me}
+        isSuper={isSuper}
+        activeTenantId={activeTenantId}
+        scopedPath={scopedPath}
+        source="mex"
+      />
       <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
         <div className="app-banner">
           <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>

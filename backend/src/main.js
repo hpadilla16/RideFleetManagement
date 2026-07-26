@@ -90,6 +90,7 @@ import { economyRouter } from './modules/integrations/economy/economy.routes.js'
 import { nuRouter } from './modules/integrations/nu/nu.routes.js';
 import { flexwaysRouter } from './modules/integrations/flexways/flexways.routes.js';
 import { advantageRouter } from './modules/integrations/advantage/advantage.routes.js';
+import { mexRouter } from './modules/integrations/mex/mex.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
 import { closeBrowser } from './lib/puppeteer-browser.js';
@@ -269,6 +270,10 @@ app.use('/api/admin/integrations/flexways', tenantRateLimit, flexwaysRouter);
 // is MULTI-CONFIG keyed by a PAIR: AdvantageLocationConfig rows are unique on
 // (tenantId, tsdNumber, branch) — the portal's `Loc` column, "61302.MCO".
 app.use('/api/admin/integrations/advantage', tenantRateLimit, advantageRouter);
+// MEX Rent a Car (2026-07-26): same TSD RezCentral portal as Advantage, own
+// module/flag/queue. Routes always available; MEX_INTEGRATION_ENABLED gates
+// only the autonomous scheduler.
+app.use('/api/admin/integrations/mex', tenantRateLimit, mexRouter);
 // Round 26 (2026-06-01) — reservation status override + smart rewind.
 // 2026-07-10: widened from SUPER_ADMIN-only to ADMIN + SUPER_ADMIN (Hector). ADMIN
 // gets the same power (all target statuses + the smart rewind); SUPER_ADMIN still
