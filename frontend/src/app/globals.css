@@ -149,8 +149,13 @@ a { color: inherit; text-decoration: none; }
    border (glare mandate: never a tint alone), dark text. */
 .button-subtle { background: var(--n-0); color: var(--text-1); border-color: var(--border-strong); box-shadow: var(--sh-1); }
 .button-subtle:hover { background: var(--surface-2); border-color: #c3b6e8; box-shadow: var(--sh-1); }
-.mobile-menu-btn { display: none; min-width: 52px; padding: 8px 12px; border-radius: 12px; }
+.mobile-menu-btn { display: none; min-width: 52px; padding: 8px 12px; border-radius: var(--r-sm); }
 .drawer-backdrop { display: none; }
+.nav-link-disabled { opacity: .55; cursor: not-allowed; }
+/* Customer-display opener — semantic ok tint (was an inline green style). */
+.topbar-display-btn { background: var(--ok-bg); border-color: var(--ok-bd); color: var(--ok-tx); }
+.topbar-display-btn:hover { background: var(--ok-bg); border-color: var(--ok); }
+.topbar-lang-btn { font-weight: 700; letter-spacing: .03em; }
 
 /* .glass — the name stays (454 JSX usages), the glass is gone (review Q4:
    the repo's own bug history voted for flat; blur cost sub-30fps scroll on

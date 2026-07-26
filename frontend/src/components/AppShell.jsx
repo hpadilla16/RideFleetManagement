@@ -266,7 +266,7 @@ export function AppShell({ me, logout, children }) {
             .filter((item) => isModuleEnabled(me, item.moduleKey))
             .map((item) => (
               item.disabled ? (
-                <span key={item.href} className="nav-link" style={{ opacity: 0.55, cursor: 'not-allowed' }}>
+                <span key={item.href} className="nav-link nav-link-disabled">
                   <span className="nav-label">{t(item.labelKey)}</span>
                 </span>
               ) : (
@@ -294,7 +294,9 @@ export function AppShell({ me, logout, children }) {
               title={t('appShell.openMenu')}
               onClick={() => setMobileOpen((v) => !v)}
             >
-              ☰
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true" style={{ display: 'block', margin: '0 auto' }}>
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
             </button>
             <div className="topbar-identity">
               <div className="topbar-name">{me?.fullName || me?.name || me?.email || t('appShell.userFallback')}</div>
@@ -304,8 +306,8 @@ export function AppShell({ me, logout, children }) {
 
           <div className="topbar-actions">
             {canReturnSuper ? <button className="button-subtle topbar-action-btn topbar-action-wide" title={t('topbar.returnToSuperAdmin')} onClick={returnToSuperAdmin}>{t('appShell.return')}</button> : null}
-            <button className="button-subtle topbar-action-btn" title={t('appShell.openCustomerDisplay')} style={{ background: 'rgba(22,163,74,.1)', borderColor: 'rgba(22,163,74,.2)', color: '#166534' }} onClick={() => window.open('/customer-display', 'customer-display', 'width=600,height=900,scrollbars=yes,resizable=yes')}>{t('appShell.display')}</button>
-            <button className="button-subtle topbar-action-btn" onClick={() => setLanguage(i18n.language === 'es' ? 'en' : 'es')} style={{ fontWeight: 700, letterSpacing: '.03em' }}>{i18n.language === 'es' ? 'EN' : 'ES'}</button>
+            <button className="button-subtle topbar-action-btn topbar-display-btn" title={t('appShell.openCustomerDisplay')} onClick={() => window.open('/customer-display', 'customer-display', 'width=600,height=900,scrollbars=yes,resizable=yes')}>{t('appShell.display')}</button>
+            <button className="button-subtle topbar-action-btn topbar-lang-btn" onClick={() => setLanguage(i18n.language === 'es' ? 'en' : 'es')}>{i18n.language === 'es' ? 'EN' : 'ES'}</button>
             <button className="button-subtle topbar-action-btn" title={t('appShell.toggleDarkMode')} onClick={() => setDarkMode((v) => !v)}>{darkMode ? t('topbar.light') : t('topbar.dark')}</button>
             <button className="button-subtle topbar-action-btn" title={t('topbar.lock')} onClick={lockNow}>{t('topbar.lock')}</button>
             <button className="topbar-action-btn" onClick={logout}>{t('topbar.logout')}</button>
