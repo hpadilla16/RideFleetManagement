@@ -175,9 +175,10 @@ export function WizardShell({
           left: 0;
           right: 0;
           padding: 14px 16px;
-          background: rgba(255,255,255,.95);
-          backdrop-filter: blur(20px);
-          border-top: 1px solid rgba(135,82,254,.12);
+          /* Opaque (Ola2 2.6 class of bug): a translucent sticky bar smears the
+             content scrolling beneath it, and blur is banned on staff surfaces. */
+          background: var(--surface-card, #fff);
+          border-top: 1px solid var(--border, #e9e4f4);
           display: flex;
           gap: 10px;
           justify-content: flex-end;
