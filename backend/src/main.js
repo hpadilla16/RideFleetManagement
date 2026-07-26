@@ -71,6 +71,7 @@ import { incidentReportRouter } from './modules/incident-report/incident-report.
 import { reportDamageRouter } from './modules/report-damage/report-damage.routes.js';
 import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-center/issue-center.routes.js';
 import { tollsRouter, tollsInternalRouter } from './modules/tolls/tolls.routes.js';
+import { fleetInternalRouter } from './modules/vehicles/fleet-internal.routes.js';
 import { plannerRouter } from './modules/planner/planner.routes.js';
 import { quotesRouter } from './modules/quotes/quotes.routes.js';
 import { paymentGatewayRouter } from './modules/payment-gateway/payment-gateway.routes.js';
@@ -316,6 +317,10 @@ app.use('/api/internal/citations', citationsInternalRouter);
 // Internal endpoint for the tolls scraper droplet (SunPass/E-PASS, etc.) — keeps
 // heavy headless scraping OFF the worker so connectors don't block each other.
 app.use('/api/internal/tolls', tollsInternalRouter);
+// Internal fleet feed for TollBridge (their point 6, Hector's decision: RFM is
+// the fleet source of truth). DEDICATED token (TOLLBRIDGE_FLEET_TOKEN), not
+// BACKEND_INTERNAL_TOKEN, so revoking TollBridge never breaks the scrapers.
+app.use('/api/internal/fleet', fleetInternalRouter);
 app.use('/api/rental-agreements', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), rentalAgreementsRouter);
 // Dejavoo Spin checkout redesign (Phase 1.2). The auth'd router is for
 // the agent's wizard; the public router below is for the QR token
