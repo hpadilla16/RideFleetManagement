@@ -99,6 +99,33 @@ tollsRouter.get('/dashboard', async (req, res, next) => {
   }
 });
 
+// Bandeja "peajes por cobrar" (TollBridge point 9): unacknowledged tolls on
+// contracts, closed ones first. Same open posture as /dashboard — front-desk
+// staff (AGENT) are exactly who must see and work these.
+tollsRouter.get('/alerts', async (req, res, next) => {
+  try {
+    res.json(await tollsService.listStaffTollAlerts(scopeFor(req), {
+      reservationId: req.query?.reservationId ? String(req.query.reservationId) : null
+    }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Ack = workflow mark ("seen/collected"), not a money mutation, so no
+// ADMIN/OPS gate — the location scope inside getTransactionOrThrow is the
+// boundary that matters.
+tollsRouter.post('/transactions/:id/acknowledge', async (req, res, next) => {
+  try {
+    res.json(await tollsService.acknowledgeTollAlert(req.params.id, scopeFor(req), req.user?.id || req.user?.sub || null));
+  } catch (error) {
+    if (/not found|required|enabled/i.test(String(error?.message || ''))) {
+      return res.status(400).json({ error: error.message });
+    }
+    next(error);
+  }
+});
+
 tollsRouter.get('/provider-account', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
   try {
     res.json(await tollsService.getProviderAccount(scopeFor(req)));
@@ -155,12 +182,14 @@ tollsRouter.post('/provider-account/live-sync', requireRole('ADMIN', 'OPS'), rej
 });
 
 // Gated for the same reason as live-sync/mock-sync, which reach the IDENTICAL
-// service method (createManualTransactions). Matching is deliberately tenant-wide
-// — `listTenantVehiclesForMatch` / `listReservationCandidates` intentionally
-// ignore location so an import produces the same result whoever runs it — so an
-// import by a branch user creates TOLL_MODULE charges on reservations at every
-// branch, which they then cannot see. Gating live-sync but not this door would
-// read as covered while leaving the money-touching half open.
+// service method (createManualTransactions). Matching is deliberately
+// actor-independent — `listTenantVehiclesForMatch` / `listReservationCandidates`
+// ignore the CALLER's location scope so an import produces the same result
+// whoever runs it (the 2026-07-26 sede filter keys off the TOLL's own
+// locationId stamp, data not actor, so this still holds) — so an import by a
+// branch user creates TOLL_MODULE charges on reservations at every branch,
+// which they then cannot see. Gating live-sync but not this door would read as
+// covered while leaving the money-touching half open.
 tollsRouter.post('/transactions/manual-import', requireRole('ADMIN', 'OPS'), rejectLocationScopedUsers, async (req, res, next) => {
   try {
     const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];

@@ -3056,6 +3056,10 @@ model TollProviderAccount {
   tenantId          String
   tenant            Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   provider          TollProvider
+  // Sede this account's tolls belong to (TollBridge finding (a), 2026-07-26: a
+  // CA toll must never evaluate against a FL car). Stamped onto every imported
+  // transaction; null keeps the pre-existing tenant-wide behavior.
+  locationId        String?
   isActive          Boolean      @default(true)
   username          String?
   passwordEncrypted String?
@@ -3129,6 +3133,23 @@ model TollTransaction {
   billingStatus      TollBillingStatus     @default(PENDING)
   sourcePayloadJson  String?
   reviewNotes        String?
+  // Sede stamp inherited from the provider account at import. Scopes match
+  // candidates and selects the per-location re-match window (TollBridge
+  // findings (a)+(b), 2026-07-26). Null = tenant-wide, pre-existing behavior.
+  locationId         String?
+  // Staff-alert workflow (Hector's request, TollBridge point 9). notifiedAt is
+  // the one-email-per-toll idempotency claim; ackAt is the in-app
+  // "seen/collected" mark. Existing rows are backfilled non-null by the
+  // migration so the feature only fires for tolls arriving after it ships.
+  staffNotifiedAt    DateTime?
+  staffAckAt         DateTime?
+  staffAckByUserId   String?
+  // Set by RESET_MATCH (a human explicitly parked this toll for manual
+  // review). The scheduled re-match sweep NEVER touches held rows — without
+  // this, the sweep would re-derive the same suggestion the human just
+  // rejected and silently re-bill it (QA blocker, 2026-07-26). A human
+  // running bulk-auto-match clears the hold.
+  manualHoldAt       DateTime?
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
 
@@ -3140,6 +3161,7 @@ model TollTransaction {
   @@index([tenantId, plateNormalized, transactionAt])
   @@index([tenantId, tagNormalized, transactionAt])
   @@index([tenantId, selloNormalized, transactionAt])
+  @@index([tenantId, staffAckAt])
 }
 
 model TollAssignment {

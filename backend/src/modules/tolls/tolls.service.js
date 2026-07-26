@@ -11,10 +11,45 @@ import {
 } from './tolls-responsibility.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { scopeAllowedLocationIds, reservationLocationWhere, systemScope } from '../../lib/tenant-scope.js';
+import { sendEmail } from '../../lib/mailer.js';
+// beta.357 latent fix: the agreement-mirror catch already called logger.error
+// but the import was missing - a mirror failure would have thrown
+// ReferenceError out of the sync instead of logging. Only the failure path
+// was affected, which is why tests (mirror succeeds) never tripped it.
+import logger from '../../lib/logger.js';
 
 const DEFAULT_PRE_PICKUP_GRACE_MINUTES = 120;
 const DEFAULT_POST_RETURN_GRACE_MINUTES = 180;
 const DEFAULT_AUTO_SYNC_INTERVAL_MINUTES = 15;
+const DAY_MS = 24 * 60 * 60 * 1000;
+// Per-location re-match window (TollBridge finding (b)): CA statements post up
+// to a month late, so LAX needs ~45 days — but raising the window GLOBALLY
+// would reopen months-closed contracts at other sedes. The default stays
+// conservative; each sede opts into a wider window via
+// locationConfig.tolls.rematchWindowDays.
+const DEFAULT_REMATCH_WINDOW_DAYS = 14;
+const MAX_REMATCH_WINDOW_DAYS = 120;
+
+/** Pure: per-sede toll settings from a parsed locationConfig. */
+export function resolveTollLocationSettings(locationConfig = {}) {
+  const cfg = locationConfig && typeof locationConfig === 'object' ? locationConfig : {};
+  const raw = cfg.tolls || {};
+  const windowDays = Number(raw.rematchWindowDays);
+  const pickEmail = (value) => {
+    const email = String(value || '').trim();
+    return email && email.includes('@') ? email : null;
+  };
+  return {
+    rematchWindowDays: Number.isFinite(windowDays) && windowDays > 0
+      ? Math.min(Math.floor(windowDays), MAX_REMATCH_WINDOW_DAYS)
+      : DEFAULT_REMATCH_WINDOW_DAYS,
+    // Recipient: tolls.alertEmail is a specific override; the normal case
+    // (Hector, 2026-07-26) is the sede's own email — locationConfig
+    // .locationEmail, already editable in Settings -> Locations. No separate
+    // config needed for LAX: set the location's email and alerts flow there.
+    alertEmail: pickEmail(raw.alertEmail) || pickEmail(cfg.locationEmail)
+  };
+}
 const AUTOEXPRESO_LOGIN_URL = 'https://www.autoexpreso.com/login?v=0.0.1';
 const AUTOEXPRESO_BALANCE_URL = 'https://www.autoexpreso.com/dashboard/balance';
 const SUNPASS_LOGIN_URL = 'https://www.sunpass.com/vector/account/home/accountLogin.do';
@@ -405,6 +440,7 @@ function serializeProviderAccount(row) {
     id: row.id,
     provider: row.provider,
     isActive: !!row.isActive,
+    locationId: row.locationId || null,
     username: row.username || '',
     settings: safeJsonParse(row.settingsJson, {}),
     lastSyncAt: row.lastSyncAt,
@@ -688,6 +724,9 @@ function serializeTransaction(row) {
     billingMode: coveredByTollPackage ? 'USAGE_ONLY' : 'CHARGEABLE',
     matchConfidence: row.matchConfidence == null ? null : Number(row.matchConfidence),
     reviewNotes: row.reviewNotes || '',
+    locationId: row.locationId || null,
+    staffNotifiedAt: row.staffNotifiedAt || null,
+    staffAckAt: row.staffAckAt || null,
     vehicle: row.vehicle ? {
       id: row.vehicle.id,
       internalNumber: row.vehicle.internalNumber,
@@ -813,6 +852,7 @@ async function listTenantVehiclesForMatch(scope = {}, transaction = null) {
       plate: true,
       tollTagNumber: true,
       tollStickerNumber: true,
+      homeLocationId: true,
       make: true,
       model: true,
       year: true
@@ -1039,7 +1079,21 @@ export function scoreCandidate({ transaction, vehicle, reservation, siblingCandi
 }
 
 async function buildMatchSuggestion(transaction, scope = {}) {
-  const vehicles = await listTenantVehiclesForMatch(scope, transaction);
+  let vehicles = await listTenantVehiclesForMatch(scope, transaction);
+
+  // TollBridge finding (a), 2026-07-26: when the toll carries a sede stamp,
+  // never offer a vehicle homed at a DIFFERENT sede — in a tenant mixing LAX
+  // and FL fleets, a CA toll must not evaluate against a FL car. Vehicles with
+  // no homeLocationId stay eligible (fail-open for fleets that don't assign
+  // homes); a toll with no stamp keeps the pre-existing tenant-wide behavior.
+  const tollLocationId = transaction?.locationId ? String(transaction.locationId) : null;
+  let locationExcludedCount = 0;
+  if (tollLocationId && vehicles.length) {
+    const inSede = vehicles.filter((row) => !row.homeLocationId || String(row.homeLocationId) === tollLocationId);
+    locationExcludedCount = vehicles.length - inSede.length;
+    vehicles = inSede;
+  }
+
   if (!vehicles.length) {
     return {
       vehicle: null,
@@ -1047,7 +1101,10 @@ async function buildMatchSuggestion(transaction, scope = {}) {
       score: 0,
       matchStatus: null,
       needsReview: true,
-      matchReason: 'vehicle-not-found'
+      // Distinct reason when identifier-matching vehicles exist but all live at
+      // another sede: staff sees WHY the toll was held instead of a generic
+      // not-found, and can reassign the account/vehicle sede if it's wrong.
+      matchReason: locationExcludedCount > 0 ? 'vehicle-outside-location' : 'vehicle-not-found'
     };
   }
 
@@ -1143,6 +1200,58 @@ async function replaceSuggestedAssignments(tx, transaction, suggestion, matchedB
   if (suggestion?.reservation?.id) {
     await createAssignmentRecord(tx, transaction, suggestion, matchedByUserId);
   }
+}
+
+// Shared per-row re-match core: recompute the suggestion and persist it.
+// Used by the manual bulk-auto-match route AND the scheduled re-match sweep so
+// the two paths can never drift. Returns the suggestion (with `unchanged: true`
+// when nothing was written).
+async function rematchTransactionRow(transaction, scope, actorUserId = null) {
+  const suggestion = await buildMatchSuggestion(transaction, scope);
+
+  // No-op guard (QA 2026-07-26): the sweep re-processes the same window every
+  // few hours, and for a stable backlog the suggestion is identical each time.
+  // Writing it anyway would REJECT + recreate an identical TollAssignment per
+  // pass (thousands of junk audit rows/day) and clobber reviewNotes for
+  // nothing. If the persisted row already says exactly what we'd write, leave
+  // it alone entirely. Human-triggered runs still clear a manual hold.
+  const targetVehicleId = suggestion.vehicle?.id || null;
+  const targetReservationId = suggestion.reservation?.id || null;
+  const targetStatus = suggestion.matchStatus === 'AUTO_CONFIRMED' ? 'MATCHED' : 'NEEDS_REVIEW';
+  const targetNeedsReview = suggestion.needsReview !== false;
+  const targetConfidence = suggestion.score || null;
+  const targetNotes = suggestion.matchReason || null;
+  const unchanged =
+    (transaction.vehicleId || null) === targetVehicleId &&
+    (transaction.reservationId || null) === targetReservationId &&
+    String(transaction.status || '') === targetStatus &&
+    !!transaction.needsReview === targetNeedsReview &&
+    (transaction.matchConfidence == null ? null : Number(transaction.matchConfidence)) === targetConfidence &&
+    (transaction.reviewNotes || null) === targetNotes &&
+    !(actorUserId && transaction.manualHoldAt);
+  if (unchanged) {
+    return { ...suggestion, unchanged: true };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await replaceSuggestedAssignments(tx, transaction, suggestion, actorUserId);
+
+    await tx.tollTransaction.update({
+      where: { id: transaction.id },
+      data: {
+        vehicleId: targetVehicleId,
+        reservationId: targetReservationId,
+        status: targetStatus,
+        needsReview: targetNeedsReview,
+        matchConfidence: targetConfidence,
+        reviewNotes: targetNotes,
+        // Any write through here is either a real state change (new data
+        // arrived) or a human bulk-auto-match — both supersede a manual hold.
+        manualHoldAt: null
+      }
+    });
+  });
+  return suggestion;
 }
 
 // Single gateway for every by-id toll mutation (confirmMatch, postToReservation,
@@ -1273,9 +1382,100 @@ async function getReservationForTollChargeSync(reservationId, scope = {}) {
       tenant: { select: { id: true, tollsEnabled: true } },
       pickupLocation: { select: { id: true, name: true, locationConfig: true } },
       returnLocation: { select: { id: true, name: true, locationConfig: true } },
+      // For the staff alert email: who rented and which contract to open.
+      customer: { select: { firstName: true, lastName: true } },
+      rentalAgreement: { select: { id: true, agreementNumber: true, status: true } },
       charges: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] }
     }
   });
+}
+
+function staffAppBaseUrl() {
+  return (process.env.APP_BASE_URL || process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
+}
+
+/**
+ * Staff alert per newly-synced toll (Hector's request, TollBridge point 9).
+ * CA/FL tolls arrive after the renter left; if nobody is told, nobody
+ * collects. One email per toll, idempotent via a claim on staffNotifiedAt
+ * (updateMany WHERE null — only the caller that flips it sends). Recipient is
+ * per sede: locationConfig.tolls.alertEmail of the toll's sede, falling back
+ * to the reservation's pickup sede. No configured recipient => no email, but
+ * the in-app alert (staffAckAt null) still shows on the contract.
+ * Never throws — an alert failure must not break the money sync.
+ */
+async function notifyStaffOfNewTolls(reservation, transactions = []) {
+  const pending = (Array.isArray(transactions) ? transactions : []).filter((row) => row && !row.staffNotifiedAt);
+  if (!pending.length) return { notified: 0 };
+
+  const pickupLocationId = reservation?.pickupLocation?.id ? String(reservation.pickupLocation.id) : null;
+  const emailByLocation = new Map();
+  if (pickupLocationId) {
+    emailByLocation.set(
+      pickupLocationId,
+      resolveTollLocationSettings(parseLocationConfig(reservation.pickupLocation.locationConfig)).alertEmail
+    );
+  }
+  async function alertEmailFor(locationId) {
+    const key = locationId ? String(locationId) : pickupLocationId;
+    if (!key) return null;
+    if (!emailByLocation.has(key)) {
+      const location = await prisma.location.findUnique({ where: { id: key }, select: { locationConfig: true } });
+      emailByLocation.set(key, location ? resolveTollLocationSettings(parseLocationConfig(location.locationConfig)).alertEmail : null);
+    }
+    // Toll's own sede first; a sede without a configured inbox falls back to
+    // the renting sede so the alert lands somewhere staffed.
+    return emailByLocation.get(key) || (key !== pickupLocationId ? emailByLocation.get(pickupLocationId) : null) || null;
+  }
+
+  const agreement = reservation?.rentalAgreement || null;
+  const agreementClosed = String(agreement?.status || '').toUpperCase() === 'CLOSED';
+  const contractLabel = agreement?.agreementNumber || reservation?.reservationNumber || reservation?.id;
+  const customerName = [reservation?.customer?.firstName, reservation?.customer?.lastName].filter(Boolean).join(' ') || 'Customer';
+  const reservationUrl = `${staffAppBaseUrl()}/reservations/${reservation.id}`;
+
+  let notified = 0;
+  for (const toll of pending) {
+    const claimed = await prisma.tollTransaction.updateMany({
+      where: { id: toll.id, staffNotifiedAt: null },
+      data: { staffNotifiedAt: new Date() }
+    });
+    if (claimed.count !== 1) continue;
+    notified += 1;
+
+    const to = await alertEmailFor(toll.locationId);
+    if (!to) continue;
+
+    const amount = toMoney(toll.amount).toFixed(2);
+    const when = new Date(toll.transactionAt).toISOString().slice(0, 16).replace('T', ' ');
+    const subject = `${agreementClosed ? '[CONTRATO CERRADO] ' : ''}Peaje nuevo $${amount} - Contrato ${contractLabel}`;
+    const lines = [
+      `Un peaje nuevo se adjunto al contrato ${contractLabel}${agreementClosed ? ' (YA CERRADO - requiere cobro manual)' : ''}.`,
+      '',
+      `Cliente: ${customerName}`,
+      `Placa: ${toll.plateRaw || toll.plateNormalized || '-'}`,
+      `Monto: $${amount}`,
+      `Fecha del peaje: ${when} UTC`,
+      `Plaza: ${toll.location || '-'}`,
+      '',
+      `Abrir el contrato: ${reservationUrl}`
+    ];
+    // Fire-and-forget (same pattern as booking confirmation emails): the sync
+    // must not block or fail on SMTP. On failure, release the claim so the
+    // next sync retries the email.
+    sendEmail({ to, subject, text: lines.join('\n') }).catch(async (err) => {
+      logger.error('[tolls] staff alert email FAILED - releasing claim for retry on next sync', {
+        tollTransactionId: toll.id,
+        err: String(err?.message || err)
+      });
+      await prisma.tollTransaction.updateMany({
+        where: { id: toll.id },
+        data: { staffNotifiedAt: null }
+      }).catch(() => {});
+    });
+  }
+
+  return { notified };
 }
 
 // Charge sources that can carry a prepaid toll package (an AdditionalService
@@ -1538,6 +1738,20 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
     }
   }
 
+  // Staff alert per new BILLABLE toll (TollBridge point 9). Package-covered
+  // tolls are usage-only — nothing to collect, nothing to alert. Failure here
+  // must never break the money sync above.
+  if (billingDecision.shouldCreateChargeRows) {
+    try {
+      await notifyStaffOfNewTolls(reservation, transactions);
+    } catch (err) {
+      logger.error('[tolls] staff toll alert pass FAILED after sync', {
+        reservationId,
+        err: String(err?.message || err)
+      });
+    }
+  }
+
   return {
     reservationId,
     tollsEnabled: true,
@@ -1779,6 +1993,24 @@ export const tollsService = {
       notes: String(payload.notes || '').trim()
     };
 
+    // Sede binding (TollBridge finding (a)). Only accept a location that
+    // belongs to THIS tenant — a cross-tenant id would silently mis-scope
+    // every future import. undefined = leave as-is, '' / null = clear.
+    let locationIdPatch;
+    if (payload.locationId !== undefined) {
+      const requested = String(payload.locationId || '').trim();
+      if (!requested) {
+        locationIdPatch = null;
+      } else {
+        const location = await prisma.location.findFirst({
+          where: { id: requested, tenantId: scope.tenantId },
+          select: { id: true }
+        });
+        if (!location) throw new Error('locationId does not belong to this tenant');
+        locationIdPatch = location.id;
+      }
+    }
+
     const existing = await prisma.tollProviderAccount.findFirst({
       where: {
         tenantId: scope.tenantId,
@@ -1807,6 +2039,7 @@ export const tollsService = {
             passwordEncrypted: password ? encodeSecret(password) : existing.passwordEncrypted,
             isActive,
             settingsJson: JSON.stringify(settings),
+            ...(locationIdPatch !== undefined ? { locationId: locationIdPatch } : {}),
             lastSyncStatus: existing.lastSyncStatus || 'READY'
           }
         })
@@ -1818,6 +2051,7 @@ export const tollsService = {
             passwordEncrypted: password ? encodeSecret(password) : null,
             isActive,
             settingsJson: JSON.stringify(settings),
+            ...(locationIdPatch !== undefined ? { locationId: locationIdPatch } : {}),
             lastSyncStatus: 'READY'
           }
         });
@@ -2310,22 +2544,7 @@ export const tollsService = {
     const reservationIdsToSync = new Set();
 
     for (const transaction of rows) {
-      const suggestion = await buildMatchSuggestion(transaction, scope);
-      await prisma.$transaction(async (tx) => {
-        await replaceSuggestedAssignments(tx, transaction, suggestion, actorUserId);
-
-        await tx.tollTransaction.update({
-          where: { id: transaction.id },
-          data: {
-            vehicleId: suggestion.vehicle?.id || null,
-            reservationId: suggestion.reservation?.id || null,
-            status: suggestion.matchStatus === 'AUTO_CONFIRMED' ? 'MATCHED' : 'NEEDS_REVIEW',
-            needsReview: suggestion.needsReview !== false,
-            matchConfidence: suggestion.score || null,
-            reviewNotes: suggestion.matchReason || null
-          }
-        });
-      });
+      const suggestion = await rematchTransactionRow(transaction, scope, actorUserId);
 
       reviewed += 1;
       if (suggestion.matchStatus === 'AUTO_CONFIRMED') {
@@ -2354,6 +2573,168 @@ export const tollsService = {
       suggested,
       pendingReviewCount
     };
+  },
+
+  // Scheduled re-match sweep (TollBridge finding (b), 2026-07-26). CA tolls
+  // post up to a month after the crossing, when the reservation data they
+  // should match (agreement, swaps, plates) may not have been complete at
+  // import time. Before this sweep, a toll that failed to match at import was
+  // retried ONLY when someone pressed bulk-auto-match by hand — late tolls
+  // could sit unmatched forever, silent loss. The window is PER SEDE
+  // (locationConfig.tolls.rematchWindowDays, default 14): LAX sets 45 without
+  // reopening months-closed contracts at other sedes. Runs on its own worker
+  // timer, independent of the scraper sweeps.
+  async runRematchSweep() {
+    const tenants = await prisma.tenant.findMany({
+      where: { tollsEnabled: true },
+      select: { id: true }
+    });
+
+    const results = [];
+    for (const tenant of tenants) {
+      try {
+        results.push(await this.rematchTenantWithinWindow(tenant.id));
+      } catch (error) {
+        logger.error('[tolls] re-match sweep failed for tenant', {
+          tenantId: tenant.id,
+          err: String(error?.message || error)
+        });
+        results.push({ tenantId: tenant.id, ok: false, error: String(error?.message || 'Re-match failed') });
+      }
+    }
+
+    return { processedTenants: results.length, results };
+  },
+
+  async rematchTenantWithinWindow(tenantId) {
+    if (!tenantId) throw new Error('tenantId is required for toll re-match');
+    const scope = systemScope({ tenantId });
+
+    const locations = await prisma.location.findMany({
+      where: { tenantId },
+      select: { id: true, locationConfig: true }
+    });
+    const windowByLocation = new Map(locations.map((row) => [
+      String(row.id),
+      resolveTollLocationSettings(parseLocationConfig(row.locationConfig)).rematchWindowDays
+    ]));
+    const widestWindowDays = Math.max(DEFAULT_REMATCH_WINDOW_DAYS, ...windowByLocation.values());
+
+    const now = Date.now();
+    const rows = await prisma.tollTransaction.findMany({
+      where: {
+        tenantId,
+        needsReview: true,
+        billingStatus: 'PENDING',
+        // A human parked these via RESET_MATCH — the machine keeps its hands
+        // off until a human acts again (bulk-auto-match clears the hold).
+        manualHoldAt: null,
+        transactionAt: { gte: new Date(now - widestWindowDays * DAY_MS) }
+      },
+      orderBy: [{ transactionAt: 'desc' }],
+      take: 500
+    });
+
+    // The DB fence above uses the WIDEST window in the tenant; the per-row
+    // fence below applies each toll's own sede window. A toll without a sede
+    // stamp gets the conservative default, never the widest.
+    const eligible = rows.filter((row) => {
+      const windowDays = row.locationId
+        ? (windowByLocation.get(String(row.locationId)) ?? DEFAULT_REMATCH_WINDOW_DAYS)
+        : DEFAULT_REMATCH_WINDOW_DAYS;
+      return new Date(row.transactionAt).getTime() >= now - windowDays * DAY_MS;
+    });
+
+    let autoConfirmed = 0;
+    const reservationIdsToSync = new Set();
+    for (const transaction of eligible) {
+      const suggestion = await rematchTransactionRow(transaction, scope, null);
+      if (suggestion.matchStatus === 'AUTO_CONFIRMED' && suggestion.reservation?.id) {
+        autoConfirmed += 1;
+        reservationIdsToSync.add(String(suggestion.reservation.id));
+      }
+    }
+
+    // Charge sync mirrors to the agreement (allowClosed) and fires the staff
+    // alert — the full "late toll lands on a closed contract" pipeline.
+    for (const reservationId of reservationIdsToSync) {
+      await syncReservationTollCharges(reservationId, scope);
+    }
+
+    return {
+      tenantId,
+      ok: true,
+      scanned: rows.length,
+      eligible: eligible.length,
+      autoConfirmed
+    };
+  },
+
+  // Bandeja "peajes por cobrar": unacknowledged matched/billed tolls, closed
+  // contracts first (that's the risk case — the customer already left).
+  // Location-scoped like every other toll read; any authenticated staff can
+  // see it (same posture as the tolls dashboard).
+  async listStaffTollAlerts(scope = {}, filters = {}) {
+    const state = await getTenantTollsState(scope);
+    if (!state.tollsEnabled) return { tollsEnabled: false, alerts: [] };
+
+    const rows = await prisma.tollTransaction.findMany({
+      where: {
+        ...tenantWhereForScope(scope),
+        ...tollLocationWhere(scope),
+        ...(filters.reservationId ? { reservationId: String(filters.reservationId) } : {}),
+        staffAckAt: null,
+        reservationId: { not: null },
+        status: { in: ['MATCHED', 'BILLED'] },
+        billingStatus: { in: ['PENDING', 'POSTED_TO_RESERVATION', 'POSTED_TO_AGREEMENT'] }
+      },
+      include: {
+        reservation: {
+          select: {
+            id: true,
+            reservationNumber: true,
+            status: true,
+            customer: { select: { firstName: true, lastName: true } },
+            rentalAgreement: { select: { id: true, agreementNumber: true, status: true } }
+          }
+        }
+      },
+      orderBy: [{ transactionAt: 'desc' }],
+      take: 100
+    });
+
+    const alerts = rows.map((row) => {
+      const agreement = row.reservation?.rentalAgreement || null;
+      return {
+        id: row.id,
+        amount: toMoney(row.amount),
+        transactionAt: row.transactionAt,
+        location: row.location || '',
+        plate: row.plateRaw || row.plateNormalized || '',
+        staffNotifiedAt: row.staffNotifiedAt,
+        reservationId: row.reservation?.id || null,
+        reservationNumber: row.reservation?.reservationNumber || '',
+        customerName: [row.reservation?.customer?.firstName, row.reservation?.customer?.lastName].filter(Boolean).join(' '),
+        agreementNumber: agreement?.agreementNumber || '',
+        agreementClosed: String(agreement?.status || '').toUpperCase() === 'CLOSED'
+      };
+    });
+    alerts.sort((a, b) => Number(b.agreementClosed) - Number(a.agreementClosed)
+      || new Date(b.transactionAt).getTime() - new Date(a.transactionAt).getTime());
+
+    return { tollsEnabled: true, alerts };
+  },
+
+  // Mark a toll alert as seen/collected. Goes through getTransactionOrThrow so
+  // a branch user cannot ack another branch's toll by holding an id.
+  async acknowledgeTollAlert(id, scope = {}, actorUserId = null) {
+    const row = await getTransactionOrThrow(id, scope);
+    if (row.staffAckAt) return { ok: true, alreadyAcknowledged: true };
+    await prisma.tollTransaction.update({
+      where: { id: row.id },
+      data: { staffAckAt: new Date(), staffAckByUserId: actorUserId || null }
+    });
+    return { ok: true, alreadyAcknowledged: false };
   },
 
   // AutoExpreso (PR) sweep — kept as a thin wrapper for backward-compat. The worker
@@ -2515,6 +2896,57 @@ export const tollsService = {
       }
     });
 
+    // Sede stamp (TollBridge finding (a)): every transaction inherits the
+    // sede of the account it came through, so matching and the re-match
+    // window can scope per location. Explicit options.locationId wins (used
+    // by feed clients that know the sede per row); otherwise the account's —
+    // but ONLY when the source account is unambiguous. Null keeps the
+    // pre-existing tenant-wide behavior.
+    let stampLocationId = null;
+    if (options.locationId) {
+      // Tenant-validate like saveProviderAccount does — a cross-tenant id
+      // would silently mis-scope every row of the import (QA 2026-07-26).
+      const requested = await prisma.location.findFirst({
+        where: { id: String(options.locationId), tenantId: scope.tenantId },
+        select: { id: true }
+      });
+      if (!requested) throw new Error('locationId does not belong to this tenant');
+      stampLocationId = requested.id;
+    } else if (options.providerAccountId) {
+      // Explicit source account (live/mock sync, future feed clients): its
+      // binding is authoritative whether or not it happens to be the one
+      // resolveActiveProvider picked.
+      if (options.providerAccountId === effectiveProviderAccount.id) {
+        stampLocationId = effectiveProviderAccount.locationId || null;
+      } else {
+        const stampAccount = await prisma.tollProviderAccount.findFirst({
+          where: { id: options.providerAccountId, tenantId: scope.tenantId },
+          select: { locationId: true }
+        });
+        stampLocationId = stampAccount?.locationId || null;
+      }
+    } else if (effectiveProviderAccount.locationId) {
+      // QA 2026-07-26: callers that DON'T say which account they're importing
+      // for (internal droplet ingest, staff manual import) fall back to
+      // resolveActiveProvider = "most recently updated account". In a
+      // multi-account tenant (the exact LAX+FL case) that guess can be WRONG,
+      // and a wrong stamp bulk-holds the whole batch as
+      // vehicle-outside-location. Only inherit the stamp when the resolved
+      // account is the tenant's ONLY provider account; otherwise import
+      // unstamped (tenant-wide matching, the pre-feature behavior).
+      const accountCount = await prisma.tollProviderAccount.count({
+        where: { tenantId: scope.tenantId }
+      });
+      if (accountCount === 1) {
+        stampLocationId = effectiveProviderAccount.locationId;
+      } else {
+        logger.warn('[tolls] import without explicit providerAccountId in a multi-account tenant - NOT stamping a sede', {
+          tenantId: scope.tenantId,
+          resolvedAccountId: effectiveProviderAccount.id
+        });
+      }
+    }
+
     const importRun = await prisma.tollImportRun.create({
       data: {
         tenantId: scope.tenantId,
@@ -2550,6 +2982,9 @@ export const tollsService = {
         selloRaw: selloRaw || null,
         selloNormalized: normalizeNullableToken(selloRaw),
         externalId: String(raw.externalId || '').trim() || null,
+        // On the draft too (not just the row) so buildMatchSuggestion applies
+        // the sede filter to the pre-create suggestion, not only on re-match.
+        locationId: stampLocationId,
         sourcePayloadJson: JSON.stringify(raw || {})
       };
 
@@ -2588,6 +3023,7 @@ export const tollsService = {
             tagNormalized: draft.tagNormalized,
             selloRaw: draft.selloRaw,
             selloNormalized: draft.selloNormalized,
+            locationId: stampLocationId,
             vehicleId: suggestion.vehicle?.id || null,
             reservationId: suggestion.reservation?.id || null,
             status: suggestion.matchStatus === 'AUTO_CONFIRMED' ? 'MATCHED' : 'NEEDS_REVIEW',
@@ -2773,6 +3209,11 @@ export const tollsService = {
             needsReview: true,
             matchConfidence: null,
             billingStatus: transaction.billingStatus === 'DISPUTED' ? 'DISPUTED' : 'PENDING',
+            // A human parked this toll. The scheduled re-match sweep excludes
+            // held rows — otherwise it would re-derive the exact suggestion
+            // the human just rejected and silently re-bill it within hours
+            // (QA blocker, 2026-07-26). Bulk-auto-match (human) clears it.
+            manualHoldAt: new Date(),
             reviewNotes: mergeChargeNotes(transaction.reviewNotes, note || 'Match reset for manual review')
           }
         });

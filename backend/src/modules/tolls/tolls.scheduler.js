@@ -12,6 +12,14 @@ let sunpassSyncTimer = null;
 let sunpassStartupTimer = null;
 let sunpassSweepInProgress = false;
 
+// Re-match sweep (TollBridge finding (b), 2026-07-26): retries unmatched tolls
+// inside each sede's own window so month-late CA statements still land on the
+// right (usually closed) contract. Own timer/flag per Hector's rule — one
+// connector can never depend on another.
+let rematchTimer = null;
+let rematchStartupTimer = null;
+let rematchInProgress = false;
+
 function autoSyncEnabled() {
   return String(process.env.TOLLS_AUTO_SYNC_ENABLED || 'true').toLowerCase() !== 'false';
 }
@@ -40,6 +48,39 @@ function sunpassSyncIntervalMs() {
 function sunpassStartupDelayMs() {
   const seconds = Number(process.env.TOLLS_SUNPASS_STARTUP_DELAY_SECONDS || 90);
   return (Number.isFinite(seconds) && seconds >= 0 ? seconds : 90) * 1000;
+}
+
+function rematchEnabled() {
+  return String(process.env.TOLLS_REMATCH_ENABLED || 'true').toLowerCase() !== 'false';
+}
+
+function rematchIntervalMs() {
+  const minutes = Number(process.env.TOLLS_REMATCH_INTERVAL_MINUTES || 360);
+  return (Number.isFinite(minutes) && minutes > 0 ? minutes : 360) * 60 * 1000;
+}
+
+// Staggered well behind both scraper startups; the re-match reads the DB only
+// (no browser), so the stagger is about boot noise, not the page semaphore.
+function rematchStartupDelayMs() {
+  const seconds = Number(process.env.TOLLS_REMATCH_STARTUP_DELAY_SECONDS || 180);
+  return (Number.isFinite(seconds) && seconds >= 0 ? seconds : 180) * 1000;
+}
+
+async function runRematchSweep() {
+  if (rematchInProgress) {
+    console.log('[tolls] re-match sweep skipped because one is already running');
+    return;
+  }
+
+  rematchInProgress = true;
+  try {
+    const result = await tollsService.runRematchSweep();
+    console.log(`[tolls] re-match sweep processed ${result.processedTenants} tenant(s)`);
+  } catch (error) {
+    console.error('[tolls] re-match sweep failed', error);
+  } finally {
+    rematchInProgress = false;
+  }
 }
 
 async function runTollAutoSyncSweep() {
@@ -106,6 +147,21 @@ export function startTollAutoSyncScheduler() {
 
     console.log(`[tolls] SunPass sync scheduler started every ${Math.round(sunpassSyncIntervalMs() / 60000)} minute(s)`);
   }
+
+  // Re-match timer — INDEPENDENT cadence + guard, DB-only work.
+  if (!rematchEnabled()) {
+    console.log('[tolls] re-match scheduler disabled');
+  } else if (!rematchTimer && !rematchStartupTimer) {
+    rematchStartupTimer = setTimeout(() => {
+      runRematchSweep().catch(() => null);
+    }, rematchStartupDelayMs());
+
+    rematchTimer = setInterval(() => {
+      runRematchSweep().catch(() => null);
+    }, rematchIntervalMs());
+
+    console.log(`[tolls] re-match scheduler started every ${Math.round(rematchIntervalMs() / 60000)} minute(s)`);
+  }
 }
 
 export function stopTollAutoSyncScheduler() {
@@ -124,5 +180,13 @@ export function stopTollAutoSyncScheduler() {
   if (sunpassSyncTimer) {
     clearInterval(sunpassSyncTimer);
     sunpassSyncTimer = null;
+  }
+  if (rematchStartupTimer) {
+    clearTimeout(rematchStartupTimer);
+    rematchStartupTimer = null;
+  }
+  if (rematchTimer) {
+    clearInterval(rematchTimer);
+    rematchTimer = null;
   }
 }

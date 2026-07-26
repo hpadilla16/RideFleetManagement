@@ -127,6 +127,9 @@ function TollsInner({ token, me, logout }) {
   }));
   const [reservationDrafts, setReservationDrafts] = useState({});
   const [busyId, setBusyId] = useState('');
+  // Bandeja "peajes por cobrar" (TollBridge point 9): unacked tolls attached
+  // to contracts, closed contracts first.
+  const [alerts, setAlerts] = useState([]);
 
   const scopedTollsPath = (path) => {
     if (!isSuper || !activeTenantId) return path;
@@ -158,6 +161,10 @@ function TollsInner({ token, me, logout }) {
       if (reviewOnly) params.set('needsReview', 'true');
       const out = await api(scopedTollsPath(`/api/tolls/dashboard${params.toString() ? `?${params.toString()}` : ''}`), {}, token);
       setDashboard(out);
+      try {
+        const alertsOut = await api(scopedTollsPath('/api/tolls/alerts'), { bypassCache: true }, token);
+        setAlerts(Array.isArray(alertsOut?.alerts) ? alertsOut.alerts : []);
+      } catch { setAlerts([]); }
       const provider = out?.providerAccount || null;
       setProviderForm((current) => ({
         provider: provider?.provider || 'AUTOEXPRESO',
@@ -196,6 +203,18 @@ function TollsInner({ token, me, logout }) {
     }
     return transactions;
   }, [queueView, transactions]);
+
+  const acknowledgeAlert = async (id) => {
+    try {
+      await api(scopedTollsPath(`/api/tolls/transactions/${id}/acknowledge`), {
+        method: 'POST',
+        body: JSON.stringify({})
+      }, token);
+      setAlerts((prev) => prev.filter((row) => row.id !== id));
+    } catch (error) {
+      setMsg(error.message);
+    }
+  };
 
   const saveManualImport = async (event) => {
     event.preventDefault();
@@ -489,6 +508,41 @@ function TollsInner({ token, me, logout }) {
                   ? `${tenantRows.find((tenant) => tenant.id === activeTenantId)?.name || 'Tenant selected'} active`
                   : 'Choose a tenant before importing or reviewing tolls'}
               </span>
+            </div>
+          ) : null}
+
+          {alerts.length ? (
+            <div
+              className="glass card"
+              style={{
+                marginTop: 12,
+                padding: 10,
+                border: alerts.some((a) => a.agreementClosed) ? '2px solid #d9534f' : '2px solid #f0ad4e'
+              }}
+            >
+              <div className="row-between" style={{ marginBottom: 8 }}>
+                <div style={{ fontWeight: 700 }}>Peajes por cobrar</div>
+                <span className={`status-chip ${alerts.some((a) => a.agreementClosed) ? 'warn' : 'neutral'}`}>
+                  {alerts.length} pending
+                </span>
+              </div>
+              <div className="stack" style={{ gap: 6 }}>
+                {alerts.map((alert) => (
+                  <div key={alert.id} className="row-between" style={{ gap: 8, flexWrap: 'wrap' }}>
+                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                      {alert.agreementClosed ? <strong style={{ color: '#d9534f' }}>[CLOSED] </strong> : null}
+                      ${Number(alert.amount || 0).toFixed(2)} · {new Date(alert.transactionAt).toLocaleDateString()} · {alert.location || 'toll'} ·{' '}
+                      {alert.customerName || 'Customer'} · {alert.agreementNumber || alert.reservationNumber || '-'}
+                    </div>
+                    <div className="inline-actions">
+                      {alert.reservationId ? (
+                        <a className="button-subtle" href={`/reservations/${alert.reservationId}`}>Open contract</a>
+                      ) : null}
+                      <button type="button" className="button-subtle" onClick={() => acknowledgeAlert(alert.id)}>Mark as seen</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
 

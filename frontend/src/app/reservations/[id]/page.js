@@ -715,6 +715,9 @@ function ReservationDetailInner({ token, me, logout }) {
     };
   }, [pricing?.charges, precheckinDiscount]);
   const [tollSummary, setTollSummary] = useState(null);
+  // Unacknowledged tolls on this contract (TollBridge point 9) — the "new
+  // toll on a closed contract" banner reads from here.
+  const [tollAlerts, setTollAlerts] = useState([]);
   const [docViewer, setDocViewer] = useState(null);
   // Report Damage flow (Feature 3): wizard open state + the incident DRAFT the
   // "Complete now" nudge points the IncidentReportsPanel at after a submit.
@@ -905,7 +908,8 @@ function ReservationDetailInner({ token, me, logout }) {
         api(`/api/reservations/${id}/pricing`, { bypassCache: true }, token).catch(() => null),
         api(`/api/reservations/${id}/payments`, { bypassCache: true }, token).catch(() => []),
         api(`/api/reservations/${id}/audit-logs`, {}, token).catch(() => []),
-        canLoadSupportingCatalogs ? api(`/api/tolls/reservations/${id}`, {}, token).catch(() => null) : Promise.resolve(null)
+        canLoadSupportingCatalogs ? api(`/api/tolls/reservations/${id}`, {}, token).catch(() => null) : Promise.resolve(null),
+        api(`/api/tolls/alerts?reservationId=${id}`, { bypassCache: true }, token).catch(() => null)
       ]);
 
       const valueOr = (index, fallback) => allCalls[index]?.status === 'fulfilled' ? allCalls[index].value : fallback;
@@ -921,6 +925,7 @@ function ReservationDetailInner({ token, me, logout }) {
       const paymentsOut = valueOr(3, []);
       const logsOut = valueOr(4, []);
       const tollsOut = valueOr(5, null);
+      const tollAlertsOut = valueOr(6, null);
       const locationsOut = Array.isArray(pricingOptionsOut?.locations) ? pricingOptionsOut.locations : [];
 
       setPricing(pricingOut);
@@ -935,6 +940,7 @@ function ReservationDetailInner({ token, me, logout }) {
       setPrecheckinDiscount(pricingOptionsOut?.precheckinDiscount || null);
       setFranchises(Array.isArray(pricingOptionsOut?.franchises) ? pricingOptionsOut.franchises : []);
       setTollSummary(tollsOut);
+      setTollAlerts(Array.isArray(tollAlertsOut?.alerts) ? tollAlertsOut.alerts : []);
       setForm({
         customerId: reservationResult.customerId || '',
         vehicleId: reservationResult.vehicleId || '',
@@ -1067,6 +1073,19 @@ function ReservationDetailInner({ token, me, logout }) {
       await refresh();
       setMsg(`Reservation set to ${status}`);
     } catch (e) { setMsg(e.message); }
+  };
+
+  const acknowledgeTollAlert = async (transactionId) => {
+    try {
+      await api(`/api/tolls/transactions/${transactionId}/acknowledge`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      }, token);
+      setTollAlerts((prev) => prev.filter((a) => a.id !== transactionId));
+      setMsg('Toll marked as seen');
+    } catch (e) {
+      setMsg(e.message);
+    }
   };
 
   const postReservationToll = async (transactionId) => {
@@ -3106,7 +3125,41 @@ token
             </div>
           </div>
 
-          <div className="glass card" style={{ marginTop: 12, padding: 10 }}>
+          <div
+            className="glass card"
+            style={{
+              marginTop: 12,
+              padding: 10,
+              ...(tollAlerts.length ? { border: tollAlerts.some((a) => a.agreementClosed) ? '2px solid #d9534f' : '2px solid #f0ad4e' } : {})
+            }}
+          >
+            {tollAlerts.length ? (
+              <div
+                className="surface-note"
+                style={{
+                  marginBottom: 10,
+                  background: tollAlerts.some((a) => a.agreementClosed) ? 'rgba(217,83,79,0.12)' : 'rgba(240,173,78,0.12)',
+                  display: 'grid',
+                  gap: 8
+                }}
+              >
+                <div style={{ fontWeight: 700 }}>
+                  {tollAlerts.some((a) => a.agreementClosed)
+                    ? `⚠ ${tollAlerts.length} new toll${tollAlerts.length > 1 ? 's' : ''} on a CLOSED contract — collect manually`
+                    : `${tollAlerts.length} new toll${tollAlerts.length > 1 ? 's' : ''} pending review/collection`}
+                </div>
+                {tollAlerts.map((alert) => (
+                  <div key={alert.id} className="row-between" style={{ gap: 8, flexWrap: 'wrap' }}>
+                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                      {money(alert.amount)} · {new Date(alert.transactionAt).toLocaleDateString()} · {alert.location || 'toll'} · Plate {alert.plate || '-'}
+                    </div>
+                    <button type="button" className="button-subtle" onClick={() => acknowledgeTollAlert(alert.id)}>
+                      Mark as seen
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <div className="row-between" style={{ marginBottom: 8 }}>
               <div style={{ fontWeight: 700 }}>Toll Review</div>
               <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
