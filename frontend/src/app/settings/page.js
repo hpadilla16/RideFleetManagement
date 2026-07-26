@@ -137,28 +137,6 @@ function SettingsInner({ token, me, logout }) {
   const [ocrCfg, setOcrCfg] = useState({ provider: 'anthropic', model: '', hasKey: false });
   const [ocrKeyInput, setOcrKeyInput] = useState('');
   const [ocrSaving, setOcrSaving] = useState(false);
-  useEffect(() => {
-    api(scopedSettingsPath('/api/settings/fleet-rotation'), {}, token)
-      .then((out) => setFleetRotationRule(out?.rule === 'MILEAGE' ? 'MILEAGE' : 'TIME'))
-      .catch(() => {});
-    api(scopedSettingsPath('/api/settings/customer-inspection'), {}, token)
-      .then((out) => {
-        setCustomerInspectionEnabled(!!out?.enabled);
-        setCustomerInspectionCheckinModel(String(out?.checkinModel || 'AGENT').toUpperCase() === 'CUSTOMER' ? 'CUSTOMER' : 'AGENT');
-      })
-      .catch(() => {});
-    api(scopedSettingsPath('/api/settings/citation-ocr'), {}, token)
-      .then((out) => out && setOcrCfg(out))
-      .catch(() => {});
-    // activeSettingsTenantId in deps (2026-07-26 fix): for a SUPER_ADMIN these
-    // three loads are tenant-scoped via scopedSettingsPath, but the effect only
-    // ran once on mount — BEFORE a tenant was picked — so the toggles showed
-    // the unscoped/stale value forever. Hector flipped customer-led inspection
-    // ON for a tenant, the PUT landed in the right key, and the UI kept
-    // showing OFF ("no me deja prenderlo").
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, activeSettingsTenantId]);
-
   const saveOcrConfig = async (patch) => {
     setOcrSaving(true);
     try {
@@ -247,6 +225,33 @@ function SettingsInner({ token, me, logout }) {
     const sep = path.includes('?') ? '&' : '?';
     return `${path}${sep}tenantId=${encodeURIComponent(tenantId)}`;
   };
+
+  useEffect(() => {
+    api(scopedSettingsPath('/api/settings/fleet-rotation'), {}, token)
+      .then((out) => setFleetRotationRule(out?.rule === 'MILEAGE' ? 'MILEAGE' : 'TIME'))
+      .catch(() => {});
+    api(scopedSettingsPath('/api/settings/customer-inspection'), {}, token)
+      .then((out) => {
+        setCustomerInspectionEnabled(!!out?.enabled);
+        setCustomerInspectionCheckinModel(String(out?.checkinModel || 'AGENT').toUpperCase() === 'CUSTOMER' ? 'CUSTOMER' : 'AGENT');
+      })
+      .catch(() => {});
+    api(scopedSettingsPath('/api/settings/citation-ocr'), {}, token)
+      .then((out) => out && setOcrCfg(out))
+      .catch(() => {});
+    // activeSettingsTenantId in deps (2026-07-26 fix): for a SUPER_ADMIN these
+    // three loads are tenant-scoped via scopedSettingsPath, but the effect only
+    // ran once on mount — BEFORE a tenant was picked — so the toggles showed
+    // the unscoped/stale value forever. Hector flipped customer-led inspection
+    // ON for a tenant, the PUT landed in the right key, and the UI kept
+    // showing OFF ("no me deja prenderlo").
+    // HOTFIX 2026-07-26: this effect must live BELOW the activeSettingsTenantId
+    // declaration — referencing the useState const in the deps array from above
+    // its declaration is a TDZ ReferenceError that crashed the whole Settings
+    // page ("something went wrong") in beta.363.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, activeSettingsTenantId]);
+
 
   const applySettingsSection = (key, value) => {
     if (key === 'agreement') setCfg(value || DEFAULTS);
