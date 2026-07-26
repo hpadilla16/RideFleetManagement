@@ -259,6 +259,34 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
 
   const agg = aggregate(rowsWithCheckout, tenantTz);
 
+  // LAX #5 (2026-07-25): monthly VALIDATED review counts per employee — the
+  // number that drives the review-tier percent. Summed across the months the
+  // window touches; fail-soft (a ReviewProof hiccup must not kill payouts).
+  const monthKeys = [];
+  {
+    const cursor = new Date(fromDate);
+    cursor.setDate(1);
+    while (cursor < windowEnd) {
+      monthKeys.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`);
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+  }
+  // Optional-chained: the unit tests inject a minimal prisma mock without
+  // the ReviewProof delegate, and a missing delegate must read as "0
+  // reviews", not a crash.
+  const reviewCounts = monthKeys.length && prisma.reviewProof?.groupBy
+    ? await prisma.reviewProof.groupBy({
+        by: ['employeeUserId'],
+        where: { tenantId, monthKey: { in: monthKeys }, status: 'VALIDATED' },
+        _count: { _all: true }
+      }).catch(() => [])
+    : [];
+  const reviewsByEmployee = new Map(reviewCounts.map((r) => [r.employeeUserId, r._count._all]));
+  const byEmployeeWithReviews = agg.byEmployee.map((e) => ({
+    ...e,
+    reviewsValidated: reviewsByEmployee.get(e.employeeUserId) || 0
+  }));
+
   // Build a day skeleton so the chart shows zeros for empty days
   const days = [];
   for (let i = 0; i < safeNumDays; i++) {
@@ -284,7 +312,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
     rangeDays: safeNumDays,
     truncated,
     totals: agg.totals,
-    byEmployee: agg.byEmployee,
+    byEmployee: byEmployeeWithReviews,
     byDay: days,
     peakDay: peakDay && peakDay.amount > 0 ? peakDay : null,
     tenantTimeZone: tenantTz,

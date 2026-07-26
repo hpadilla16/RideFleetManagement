@@ -98,10 +98,10 @@ test('listReports refuses without tenantId', async () => {
 
 test('listReports returns directory with the current registry length', async () => {
   const out = await listReports({ tenantId: 't1' });
-  // 16 AVAILABLE + 3 coming-soon slugs (upcoming-vehicle-sales, damage,
-  // chargeback). Stale-check note: this test rotted at 18 while unwired from
-  // package.json (fleet-value shipped in beta.158) — wired + fixed 2026-07-13.
-  assert.equal(out.reports.length, 19);
+  // 17 AVAILABLE + 3 coming-soon slugs (upcoming-vehicle-sales, damage,
+  // chargeback). 2026-07-25: +1 — 'commission' (Commission Payouts)
+  // resurrected for the LAX #5 approve workflow + review tiers.
+  assert.equal(out.reports.length, 20);
   assert.deepEqual(out.categories, ['MANAGEMENT', 'FLEET', 'OPERATIONS', 'REVENUE']);
 });
 
@@ -114,6 +114,7 @@ test('listReports marks the AVAILABLE reports correctly (rest COMING_SOON)', asy
       'agent-track-record',
       'availability',
       'availability-forecast',
+      'commission',
       'commission-sales-performance',
       'fleet-status',
       'fleet-value',
