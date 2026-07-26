@@ -336,6 +336,18 @@ export default function IssueCenterPage() {
 }
 
 function IssueCenterInner({ token, me, logout }) {
+  // Payment Actions capability. The Recovery Quick Action
+  // "Charge Card On File" posts to /api/issue-center/incidents/:id/
+  // charge-card-on-file, which delegates to the same
+  // rentalAgreementsService.chargeCardOnFile as the reservation screen and is
+  // gated by requireCapability('paymentActions'). Without this the agent sees a
+  // live button and gets a raw 403 back.
+  // Mirrors requireCapability EXACTLY: SUPER_ADMIN bypasses, everyone else
+  // needs an explicit true. Deliberately not isModuleEnabled(), which is
+  // `!== false` and would light the button up for a user the backend refuses.
+  const canPaymentActions =
+    String(me?.role || '').toUpperCase() === 'SUPER_ADMIN' || me?.moduleAccess?.paymentActions === true;
+
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
@@ -1493,12 +1505,34 @@ function IssueCenterInner({ token, me, logout }) {
                     <span className="status-chip neutral">{edit.recoveryActions.length} action{edit.recoveryActions.length === 1 ? '' : 's'}</span>
                   </div>
                   <div className="inline-actions" style={{ marginTop: 12 }}>
-                    {edit.recoveryActions.map((action) => (
-                      <button key={action.key} type="button" className="button-subtle" onClick={() => runRecoveryAction(action)}>
-                        {action.label}
-                      </button>
-                    ))}
+                    {edit.recoveryActions.map((action) => {
+                      // Only the gateway charge is capability-gated. Preparing
+                      // the draft amount is not (pre-existing, tracked separately).
+                      const needsPaymentActions =
+                        action.kind === 'service' && action.service === 'CHARGE_CARD_ON_FILE';
+                      const locked = needsPaymentActions && !canPaymentActions;
+                      return (
+                        <span key={action.key} className={locked ? 'capability-locked' : undefined}>
+                          <button
+                            type="button"
+                            className="button-subtle"
+                            onClick={() => runRecoveryAction(action)}
+                            disabled={locked}
+                            title={locked ? 'Requires Payment Actions' : undefined}
+                          >
+                            {action.label}
+                          </button>
+                        </span>
+                      );
+                    })}
                   </div>
+                  {edit.recoveryActions.some(
+                    (a) => a.kind === 'service' && a.service === 'CHARGE_CARD_ON_FILE'
+                  ) && !canPaymentActions ? (
+                    <div className="capability-lock-hint" style={{ marginTop: 10 }}>
+                      🔒 Charging a card on file requires Payment Actions — ask an admin.
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
               {edit.inspectionCompare ? (

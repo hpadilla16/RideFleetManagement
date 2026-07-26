@@ -440,6 +440,26 @@ function Inner({ token, me, logout }) {
   // of the collected/balance math. This does NOT move money — no refund to the card.
   // For a real card refund use the "Refund" action instead.
   const isAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(String(me?.role || '').toUpperCase());
+
+  // Payment Actions capability (2026-07-25).
+  //
+  // MIRRORS requireCapability('paymentActions') in backend/src/middleware/auth.js
+  // EXACTLY: SUPER_ADMIN bypasses, everyone else needs an explicit `true`.
+  // Deliberately NOT isModuleEnabled() from lib/moduleAccess — that helper is
+  // `!== false` (fail-open) and would light buttons up for a user the backend
+  // then 403s.
+  //
+  // me.moduleAccess already carries the anti-self-lockout carve-out, because the
+  // session is built from getEffectiveModuleAccessForUser -> the same editable
+  // config the People screen renders. So an admin never sees their own buttons
+  // greyed out while the backend would have allowed them.
+  //
+  // THIS IS UX COURTESY, NOT THE DEFENSE. The gate is the backend. A stale
+  // session (30s TTL), a race, or a deep link can still produce a 403 — which is
+  // why the server message was made human-readable too.
+  const canPaymentActions =
+    String(me?.role || '').toUpperCase() === 'SUPER_ADMIN' || me?.moduleAccess?.paymentActions === true;
+  const gatedProps = canPaymentActions ? {} : { disabled: true, title: 'Requires Payment Actions' };
   const voidPaymentNoRefund = async (payment) => {
     if (!isAdmin) return setMsg('Admin role required to void a payment');
     const amt = Number(payment?.amount || 0);
@@ -554,10 +574,19 @@ function Inner({ token, me, logout }) {
 
         <div className="row-between">
           <h2>Reservation Payments</h2>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button onClick={reconcileAuthNetPayment} disabled={!!actionBusy}>
-              {actionBusy === 'reconcile-authnet' ? 'Reconciling...' : 'Reconcile Latest AuthNet Payment'}
-            </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* Reconcile lives in the page header, outside every locked group,
+                so it needs its own lock hint. `title` alone is not enough: the
+                counter runs on iPad, where there is no hover and a tooltip
+                never appears. */}
+            {!canPaymentActions ? (
+              <span className="capability-lock-hint">🔒 Requires Payment Actions</span>
+            ) : null}
+            <span className={canPaymentActions ? undefined : 'capability-locked'}>
+              <button onClick={reconcileAuthNetPayment} {...gatedProps} disabled={!canPaymentActions || !!actionBusy}>
+                {actionBusy === 'reconcile-authnet' ? 'Reconciling...' : 'Reconcile Latest AuthNet Payment'}
+              </button>
+            </span>
             <button onClick={() => router.push(`/reservations/${id}`)}>Back</button>
           </div>
         </div>
@@ -631,15 +660,33 @@ function Inner({ token, me, logout }) {
         )}
         <button onClick={addPayment} disabled={saving || (method === 'CARD' && String(cardLast4).replace(/\D/g, '').length !== 4)}>{saving ? 'Saving...' : 'Record OTC Payment'}</button>
 
-        <div className="grid3" style={{ marginTop: 16, marginBottom: 10 }}>
+        {/* Payment Actions notice — ONE per screen, above the affected panel, so
+            it is read before anything is clicked. Recording a terminal payment
+            (the button directly above) stays available and is deliberately the
+            most prominent control on the page: it is what backs the promise the
+            text makes. */}
+        {!canPaymentActions ? (
+          <div className="surface-note" style={{ marginTop: 16 }}>
+            <strong>Payment Actions is turned off for your account.</strong> You can still record a
+            payment taken on the card terminal. To charge or refund a card, ask an admin.
+          </div>
+        ) : null}
+
+        {!canPaymentActions ? (
+          <div className="row" style={{ marginTop: 16, marginBottom: -6 }}>
+            <span className="capability-lock-hint">🔒 Requires Payment Actions</span>
+          </div>
+        ) : null}
+
+        <div className={`grid3${canPaymentActions ? '' : ' capability-locked'}`} style={{ marginTop: 16, marginBottom: 10 }}>
           <div className="stack">
             <label className="label">Charge Saved Card</label>
-            <input type="number" min="0" step="0.01" value={cardChargeAmount} onChange={(e) => setCardChargeAmount(e.target.value)} />
+            <input type="number" min="0" step="0.01" value={cardChargeAmount} onChange={(e) => setCardChargeAmount(e.target.value)} disabled={!canPaymentActions} />
             <span className="ui-muted">{cardOnFileReady ? 'Customer already has an Authorize.Net card profile on file.' : 'Save a card from an Authorize.Net payment before charging on file.'}</span>
           </div>
           <div className="stack">
             <label className="label">Security Deposit Hold</label>
-            <input type="number" min="0" step="0.01" value={holdAmount} onChange={(e) => setHoldAmount(e.target.value)} />
+            <input type="number" min="0" step="0.01" value={holdAmount} onChange={(e) => setHoldAmount(e.target.value)} disabled={!canPaymentActions} />
             <span className="ui-muted">
               {securityDepositHold.captured
                 ? `Authorized${securityDepositHold.reference ? ` | Ref ${securityDepositHold.reference}` : ''}`
@@ -647,16 +694,16 @@ function Inner({ token, me, logout }) {
             </span>
           </div>
           <div className="stack" style={{ alignSelf: 'end' }}>
-            <button onClick={chargeSavedCard} disabled={!cardOnFileReady || !!actionBusy}>
+            <button onClick={chargeSavedCard} {...gatedProps} disabled={!canPaymentActions || !cardOnFileReady || !!actionBusy}>
               {actionBusy === 'charge-card' ? 'Charging...' : 'Charge Card On File'}
             </button>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
               {!securityDepositHold.captured ? (
-                <button onClick={captureHold} disabled={!cardOnFileReady || !!actionBusy}>
+                <button onClick={captureHold} {...gatedProps} disabled={!canPaymentActions || !cardOnFileReady || !!actionBusy}>
                   {actionBusy === 'capture-hold' ? 'Authorizing...' : 'Authorize Hold'}
                 </button>
               ) : (
-                <button onClick={releaseHold} disabled={!!actionBusy}>
+                <button onClick={releaseHold} {...gatedProps} disabled={!canPaymentActions || !!actionBusy}>
                   {actionBusy === 'release-hold' ? 'Releasing...' : 'Release Hold'}
                 </button>
               )}
@@ -666,13 +713,17 @@ function Inner({ token, me, logout }) {
 
         {(spinState.hasCardOnFile || spinState.depositHoldActive) ? (
           <section
-            className="surface-note"
+            className={`surface-note${canPaymentActions ? '' : ' capability-locked'}`}
             style={{ marginTop: 18, padding: 16, borderRadius: 12, background: 'rgba(13, 148, 136, 0.06)', border: '1px solid rgba(13, 148, 136, 0.25)' }}
           >
             <div className="row-between" style={{ marginBottom: 12 }}>
               <div className="stack" style={{ gap: 4 }}>
                 <span className="eyebrow">Dejavoo Spin · Card on File</span>
                 <h3 style={{ margin: 0 }}>Operational Tools</h3>
+                {/* Group-level lock indicator — once per group, not per button. */}
+                {!canPaymentActions ? (
+                  <span className="capability-lock-hint">🔒 Requires Payment Actions</span>
+                ) : null}
                 <p className="ui-muted" style={{ margin: 0 }}>
                   Card-not-present operations against the iPOS token captured at checkout. No second tap required.
                 </p>
@@ -694,6 +745,7 @@ function Inner({ token, me, logout }) {
                     step="0.01"
                     value={spinChargeAmount}
                     onChange={(e) => setSpinChargeAmount(e.target.value)}
+                    disabled={!canPaymentActions}
                     placeholder={unpaid > 0 ? unpaid.toFixed(2) : '0.00'}
                   />
                   <span className="ui-muted">Charges {spinState.brand || 'saved card'} ****{spinState.last4 || '----'} via Dejavoo CNP.</span>
@@ -703,11 +755,12 @@ function Inner({ token, me, logout }) {
                   <input
                     value={spinChargeNotes}
                     onChange={(e) => setSpinChargeNotes(e.target.value)}
+                    disabled={!canPaymentActions}
                     placeholder="e.g. toll reimbursement, late fee"
                   />
                 </div>
                 <div className="stack" style={{ alignSelf: 'end' }}>
-                  <button onClick={spinChargeOnFile} disabled={!!actionBusy}>
+                  <button onClick={spinChargeOnFile} {...gatedProps} disabled={!canPaymentActions || !!actionBusy}>
                     {actionBusy === 'spin-charge' ? 'Charging...' : 'Charge Spin Card on File'}
                   </button>
                 </div>
@@ -726,6 +779,7 @@ function Inner({ token, me, logout }) {
                     <input
                       value={spinReleaseReason}
                       onChange={(e) => setSpinReleaseReason(e.target.value)}
+                      disabled={!canPaymentActions}
                       placeholder="e.g. clean return, no damages"
                     />
                     <span className="ui-muted">
@@ -742,15 +796,16 @@ function Inner({ token, me, logout }) {
                       step="0.01"
                       value={spinReauthAmount}
                       onChange={(e) => setSpinReauthAmount(e.target.value)}
+                      disabled={!canPaymentActions}
                     />
                     <span className="ui-muted">Voids old hold, places new hold on saved card.</span>
                   </div>
                   <div className="stack" style={{ alignSelf: 'end' }}>
-                    <button onClick={spinReleaseDeposit} disabled={!!actionBusy || !spinReleaseReason.trim()}>
+                    <button onClick={spinReleaseDeposit} {...gatedProps} disabled={!canPaymentActions || !!actionBusy || !spinReleaseReason.trim()}>
                       {actionBusy === 'spin-release' ? 'Releasing...' : 'Release Deposit Hold'}
                     </button>
                     <div style={{ marginTop: 8 }}>
-                      <button onClick={spinReauthDeposit} disabled={!!actionBusy || !spinState.hasCardOnFile}>
+                      <button onClick={spinReauthDeposit} {...gatedProps} disabled={!canPaymentActions || !!actionBusy || !spinState.hasCardOnFile}>
                         {actionBusy === 'spin-reauth' ? 'Re-authorizing...' : 'Re-Authorize Deposit'}
                       </button>
                     </div>
@@ -767,11 +822,12 @@ function Inner({ token, me, logout }) {
                     step="0.01"
                     value={spinReauthAmount}
                     onChange={(e) => setSpinReauthAmount(e.target.value)}
+                    disabled={!canPaymentActions}
                   />
                   <span className="ui-muted">No active hold on file. Places one against the saved card.</span>
                 </div>
                 <div className="stack" style={{ alignSelf: 'end' }}>
-                  <button onClick={spinReauthDeposit} disabled={!!actionBusy}>
+                  <button onClick={spinReauthDeposit} {...gatedProps} disabled={!canPaymentActions || !!actionBusy}>
                     {actionBusy === 'spin-reauth' ? 'Authorizing...' : 'Authorize Deposit Hold'}
                   </button>
                 </div>
@@ -787,7 +843,24 @@ function Inner({ token, me, logout }) {
         ) : null}
 
         <table style={{ marginTop: 12 }}>
-          <thead><tr><th>Date</th><th>Method</th><th>Amount</th><th>Reference</th><th>Actions</th></tr></thead>
+          <thead>
+            <tr>
+              <th>Date</th><th>Method</th><th>Amount</th><th>Reference</th>
+              <th>
+                {/* Same argument as Reconcile: these row actions sit outside
+                    every locked group, and `title` alone is invisible on the
+                    counter's iPad (no hover, no tooltip). One hint for the
+                    column rather than one per row — a lock badge repeated on
+                    every payment would drown the table. */}
+                Actions
+                {!canPaymentActions ? (
+                  <div style={{ marginTop: 4 }}>
+                    <span className="capability-lock-hint">🔒 Requires Payment Actions</span>
+                  </div>
+                ) : null}
+              </th>
+            </tr>
+          </thead>
           <tbody>
             {payments.length ? payments.map((p) => (
               <tr key={p.id}>
@@ -806,9 +879,15 @@ function Inner({ token, me, logout }) {
                 <td>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     {Number(p.amount || 0) > 0 && p.status !== 'VOID' ? (
-                      <button onClick={() => refundPayment(p)} disabled={!!actionBusy}>
-                        {actionBusy === `refund-${p.id}` ? 'Refunding...' : 'Refund'}
-                      </button>
+                      // Wrapped rather than classed directly: the sibling
+                      // "Void · no refund" button is ADMIN-gated, not
+                      // paymentActions-gated, so dimming the whole cell would
+                      // mark a live control as locked.
+                      <span className={canPaymentActions ? undefined : 'capability-locked'}>
+                        <button onClick={() => refundPayment(p)} {...gatedProps} disabled={!canPaymentActions || !!actionBusy}>
+                          {actionBusy === `refund-${p.id}` ? 'Refunding...' : 'Refund'}
+                        </button>
+                      </span>
                     ) : null}
                     {isAdmin && p.method !== 'AUTH_HOLD' && p.status !== 'VOID' ? (
                       <button
@@ -821,9 +900,11 @@ function Inner({ token, me, logout }) {
                       </button>
                     ) : null}
                     {String(p.reference || '').toUpperCase().startsWith('AUTHNET:') && p.status !== 'VOID' ? (
-                      <button onClick={() => saveCardOnFile(p.id)} disabled={cardOnFileReady || !!actionBusy}>
-                        {cardOnFileReady ? 'Card Saved' : actionBusy === `save-card-${p.id}` ? 'Saving Card...' : 'Save Card To File'}
-                      </button>
+                      <span className={canPaymentActions ? undefined : 'capability-locked'}>
+                        <button onClick={() => saveCardOnFile(p.id)} {...gatedProps} disabled={!canPaymentActions || cardOnFileReady || !!actionBusy}>
+                          {cardOnFileReady ? 'Card Saved' : actionBusy === `save-card-${p.id}` ? 'Saving Card...' : 'Save Card To File'}
+                        </button>
+                      </span>
                     ) : null}
                   </div>
                 </td>

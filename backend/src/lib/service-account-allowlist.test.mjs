@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isAllowedForServiceAccount } from './service-account-allowlist.js';
+import { requireCapability } from '../middleware/auth.js';
 
 const allowed = (m, p) => assert.equal(isAllowedForServiceAccount(m, p), true, `${m} ${p} should be ALLOWED`);
 const denied = (m, p) => assert.equal(isAllowedForServiceAccount(m, p), false, `${m} ${p} should be DENIED`);
@@ -19,16 +20,151 @@ test('every allowlist entry matches with realistic params', () => {
   allowed('GET', '/api/locations/loc123/hours');
   allowed('POST', '/api/reservations/RES-00123/notes');
   allowed('PATCH', '/api/reservations/RES-00123'); // W1 field-whitelisted (2026-07-19)
-  // Fase 6 RE-SCOPE (2026-07-04): the three link/adjust-only routes are allowed.
+  // Fase 6 RE-SCOPE (2026-07-04): the link/adjust-only routes plus refund.
   allowed('POST', '/api/reservations/RES-00123/send-request-email');
-  allowed('POST', '/api/rental-agreements/cmck11111111111111111111/payments/pay1/refund');
   allowed('POST', '/api/reservations/RES-00123/charges');
+  allowed('POST', '/api/rental-agreements/cmck11111111111111111111/payments/pay1/refund');
 });
 
-test('Fase 6 re-scope: link/refund/charge routes open — DIRECT-charge routes now DENIED again', () => {
-  // The three benign capabilities VozIA now gets.
-  allowed('POST', '/api/reservations/abc123/send-request-email');
+test('REFUND stays allowlisted for service accounts (Hector, 2026-07-25)', () => {
+  // KEPT, and this test is the pin. It was briefly removed earlier the same day
+  // on the premise that it was a dormant path with no usage; the premise was
+  // wrong. doc/session-handoff-2026-07-04-EOD.md records refund as a capability
+  // Hector deliberately scoped IN three weeks earlier, with a ceiling
+  // (voziaMaxRefundAmount 2000), non-recyclable idempotency, an ops runbook for
+  // releasing stuck keys, and an accepted known-risk note. Never-exercised is
+  // not the same as dormant. Do not "clean this up" without re-reading that doc.
   allowed('POST', '/api/rental-agreements/abc123/payments/pay1/refund');
+  allowed('POST', '/api/rental-agreements/cmck11111111111111111111/payments/pay1/refund');
+
+  // The reservations-side refund TWIN is a different route and was never
+  // allowlisted. Keeping it denied is deliberate: one refund path, one set of
+  // guards, one thing to audit.
+  denied('POST', '/api/reservations/abc123/payments/pay1/refund');
+  // Nested sneak past the :paymentId param.
+  denied('POST', '/api/rental-agreements/abc123/payments/pay1/refund/extra');
+});
+
+// ── THE DOUBLE GATE (2026-07-25) ────────────────────────────────────────────
+//
+// Restoring the allowlist entry above does NOT by itself let VozIA refund. The
+// route carries requireCapability('paymentActions') as well, and the service
+// account's role is AGENT, whose role default for that module is FALSE. Two
+// independent layers, both of which must pass:
+//
+//   Layer 1  requireAuth  → isAllowedForServiceAccount(method, path)
+//                           "WHICH PATHS may a service account touch"
+//   Layer 2  the route    → requireCapability('paymentActions')
+//                           "WHICH PRINCIPALS may make the system move money"
+//
+// Going live therefore takes a DEPLOY STEP, not just this diff:
+//   node scripts/grant-payment-actions.mjs --apply <svc-account-email>
+// (writes a per-user AppSetting override + a ModuleAccessAuditLog row; takes
+// effect within the ~30s session-cache TTL, no restart).
+//
+// These tests exist so that nobody "fixes" the resulting 403 by punching a
+// service-account exemption into requireCapability. That was considered and
+// REJECTED: requireCapability's entire reason for existing is that an absent
+// key must DENY, and an isServiceAccount bypass would reintroduce exactly the
+// fail-open shape it was written to remove — for every service account that
+// exists now or is created later, not just this one. The grant is data: scoped
+// to one user id, reversible with --revoke, and audited.
+
+/** Minimal express double — mirrors the one in module-access-payment-actions. */
+function runGate(middleware, req) {
+  const out = { status: null, nextCalled: false };
+  const res = {
+    status(code) {
+      out.status = code;
+      return res;
+    },
+    json() {
+      return res;
+    }
+  };
+  middleware(req, res, () => {
+    out.nextCalled = true;
+  });
+  return out;
+}
+
+const REFUND_PATH = '/api/rental-agreements/cmck11111111111111111111/payments/pay1/refund';
+const gate = requireCapability('paymentActions');
+const svcAccount = (moduleAccess) => ({
+  role: 'AGENT',
+  isServiceAccount: true,
+  ...(moduleAccess === undefined ? {} : { moduleAccess })
+});
+
+test('DOUBLE GATE — layer 1 admits the refund path for a service account', () => {
+  allowed('POST', REFUND_PATH);
+});
+
+test('DOUBLE GATE — layer 2 STILL denies an ungranted service account', () => {
+  // This is the state the account is in the instant this diff deploys, before
+  // the grant script runs. The allowlist says yes, the capability says no, and
+  // the request 403s. That is CORRECT, not a bug: it is what makes the grant a
+  // deliberate, separately-audited act.
+  assert.equal(gate.length, 3, 'requireCapability must return an express middleware');
+  assert.equal(runGate(gate, { user: svcAccount({ reservations: true }) }).status, 403);
+  assert.equal(runGate(gate, { user: svcAccount() }).status, 403, 'no moduleAccess at all → denied');
+  assert.equal(runGate(gate, { user: svcAccount({ paymentActions: false }) }).status, 403);
+});
+
+test('DOUBLE GATE — layer 2 passes once the module is granted', () => {
+  // What scripts/grant-payment-actions.mjs --apply produces: an explicit true in
+  // the per-user override, which getEffectiveModuleAccessForUser surfaces as
+  // moduleAccess.paymentActions on the hydrated session (buildSessionUser runs
+  // for service accounts exactly as it does for humans).
+  const out = runGate(gate, { user: svcAccount({ paymentActions: true }) });
+  assert.equal(out.nextCalled, true, 'granted service account reaches the handler');
+  assert.equal(out.status, null);
+});
+
+test('DOUBLE GATE — requireCapability has NO service-account exemption', () => {
+  // The rejected design (option c). If someone adds
+  //   if (req.user?.isServiceAccount) return next();
+  // to requireCapability, this test goes red. Two identical sessions that differ
+  // ONLY by isServiceAccount must be treated identically: being a robot is not
+  // a permission.
+  const human = { role: 'AGENT', moduleAccess: { reservations: true } };
+  const robot = { role: 'AGENT', isServiceAccount: true, moduleAccess: { reservations: true } };
+  assert.equal(runGate(gate, { user: human }).status, 403);
+  assert.equal(
+    runGate(gate, { user: robot }).status,
+    403,
+    'isServiceAccount must NOT bypass the capability gate — the allowlist is a ' +
+      'path filter, not a money authorization. Grant the module instead: ' +
+      'scripts/grant-payment-actions.mjs --apply <email>'
+  );
+});
+
+test('DOUBLE GATE — a grant does not widen the PATH surface', () => {
+  // The other half of the containment argument. Holding paymentActions lets the
+  // account through layer 2 on every gated route, but layer 1 still admits only
+  // the ONE refund path. Every other paymentActions route stays 403 at
+  // requireAuth, before any handler runs.
+  denied('POST', '/api/rental-agreements/abc123/payments/charge-card-on-file');
+  denied('POST', '/api/rental-agreements/abc123/charge-card-on-file');
+  denied('POST', '/api/rental-agreements/abc123/security-deposit/capture');
+  denied('POST', '/api/rental-agreements/abc123/security-deposit/release');
+  denied('POST', '/api/rental-agreements/abc123/customer/card-on-file');
+  denied('POST', '/api/reservations/abc123/payments/pay1/refund');
+  denied('POST', '/api/reservations/abc123/payments/pay1/delete');
+  denied('POST', '/api/reservations/abc123/payments/pay1/save-card-on-file');
+  denied('POST', '/api/reservations/abc123/payments/reconcile-authorizenet');
+  denied('POST', '/api/reservations/abc123/agreement/security-deposit/capture');
+  denied('POST', '/api/reservations/abc123/agreement/security-deposit/release');
+  denied('POST', '/api/reservations/abc123/agreement/spin/charge-card-on-file');
+  denied('POST', '/api/reservations/abc123/agreement/spin/release-deposit');
+  denied('POST', '/api/reservations/abc123/agreement/spin/reauth-deposit');
+  denied('POST', '/api/reservations/abc123/agreement/customer/card-on-file');
+  denied('POST', '/api/issue-center/incidents/abc123/charge-card-on-file');
+});
+
+test('Fase 6 re-scope: link/charge routes open — DIRECT-charge routes now DENIED again', () => {
+  // The benign capabilities VozIA still gets.
+  allowed('POST', '/api/reservations/abc123/send-request-email');
   allowed('POST', '/api/reservations/abc123/charges');
   // The two DIRECT card-charge routes were REMOVED — DENIED again after re-scope.
   denied('POST', '/api/rental-agreements/abc123/payments/manual');

@@ -3319,6 +3319,13 @@ function SettingsInner({ token, me, logout }) {
             <div className="surface-note">
               Control which workspace modules are enabled for this tenant. User-level permissions can only narrow access further. Car Sharing and Loaner still depend on their tenant feature flags too.
             </div>
+            {MODULE_DEFINITIONS.filter((item) => item.description && item.key !== 'tenants').map((item) => (
+              <div className="surface-note" key={`${item.key}-desc`}>
+                <strong>{item.label}</strong> — {item.description}
+                {item.keepsNote ? <> {item.keepsNote}</> : null}
+                {item.tenantNote ? <> {item.tenantNote}</> : null}
+              </div>
+            ))}
             <div className="service-checks-grid">
               {MODULE_DEFINITIONS.filter((item) => item.key !== 'tenants').map((item) => (
                 <label key={item.key} className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>

@@ -17,7 +17,7 @@ import { ratesService } from '../rates/rates.service.js';
 import { locationsService } from '../locations/locations.service.js';
 import { vehicleTypesService } from '../vehicle-types/vehicle-types.service.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
-import { isSuperAdmin } from '../../middleware/auth.js';
+import { isSuperAdmin, requireCapability } from '../../middleware/auth.js';
 import { franchiseService } from '../settings/franchise.service.js';
 import { crossTenantScopeFor as scopeFor, scopeVisibilityCacheSegment } from '../../lib/tenant-scope.js';
 import { vehicleProgramWhereForScope } from '../../lib/program-category.js';
@@ -2168,7 +2168,7 @@ reservationsRouter.post('/:id/agreement/payments/manual', async (req, res, next)
   }
 });
 
-reservationsRouter.post('/:id/agreement/payments/charge-card-on-file', async (req, res, next) => {
+reservationsRouter.post('/:id/agreement/payments/charge-card-on-file', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
@@ -2183,7 +2183,7 @@ reservationsRouter.post('/:id/agreement/payments/charge-card-on-file', async (re
   }
 });
 
-reservationsRouter.post('/:id/agreement/security-deposit/capture', async (req, res, next) => {
+reservationsRouter.post('/:id/agreement/security-deposit/capture', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
@@ -2198,7 +2198,7 @@ reservationsRouter.post('/:id/agreement/security-deposit/capture', async (req, r
   }
 });
 
-reservationsRouter.post('/:id/agreement/security-deposit/release', async (req, res, next) => {
+reservationsRouter.post('/:id/agreement/security-deposit/release', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
@@ -2218,7 +2218,7 @@ reservationsRouter.post('/:id/agreement/security-deposit/release', async (req, r
 // against the saved iPOS token captured during checkout-wizard-v2's
 // Spin sale step. They surface as ReservationPayment rows in the
 // payments list so the agent can see them immediately.
-reservationsRouter.post('/:id/agreement/spin/charge-card-on-file', async (req, res, next) => {
+reservationsRouter.post('/:id/agreement/spin/charge-card-on-file', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
@@ -2234,7 +2234,7 @@ reservationsRouter.post('/:id/agreement/spin/charge-card-on-file', async (req, r
   }
 });
 
-reservationsRouter.post('/:id/agreement/spin/release-deposit', async (req, res, next) => {
+reservationsRouter.post('/:id/agreement/spin/release-deposit', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
@@ -2250,7 +2250,7 @@ reservationsRouter.post('/:id/agreement/spin/release-deposit', async (req, res, 
   }
 });
 
-reservationsRouter.post('/:id/agreement/spin/reauth-deposit', async (req, res, next) => {
+reservationsRouter.post('/:id/agreement/spin/reauth-deposit', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
@@ -2266,7 +2266,7 @@ reservationsRouter.post('/:id/agreement/spin/reauth-deposit', async (req, res, n
   }
 });
 
-reservationsRouter.post('/:id/agreement/customer/card-on-file', async (req, res, next) => {
+reservationsRouter.post('/:id/agreement/customer/card-on-file', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(400).json({ error: 'No rental agreement exists for this reservation yet' });
@@ -2342,7 +2342,7 @@ reservationsRouter.delete('/:id', async (req, res) => {
 
 
 // Reservation-native payment delete endpoint
-reservationsRouter.post('/:id/payments/:paymentId/delete', async (req, res, next) => {
+reservationsRouter.post('/:id/payments/:paymentId/delete', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(404).json({ error: 'Agreement not found for reservation' });
@@ -2385,7 +2385,13 @@ reservationsRouter.post('/:id/payments/:paymentId/delete', async (req, res, next
   }
 });
 
-reservationsRouter.post('/:id/payments/:paymentId/refund', async (req, res, next) => {
+// REFUND — moves money OUT to the customer's card via Authorize.Net.
+// This route was NEVER gated. It sits directly above the ADMIN-only
+// `void-no-refund` block, and its "ADMIN-only" comment made it LOOK protected
+// on a casual read (and to a grep) — the handler checked nothing. Measured in
+// prod before this change: 43 refunds totalling $9,618.79, 18 of them by
+// AGENTs. This is closing an open hole, not tightening an existing permission.
+reservationsRouter.post('/:id/payments/:paymentId/refund', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(404).json({ error: 'Agreement not found for reservation' });
@@ -2424,7 +2430,7 @@ reservationsRouter.post('/:id/payments/:paymentId/void-no-refund', async (req, r
   }
 });
 
-reservationsRouter.post('/:id/payments/:paymentId/save-card-on-file', async (req, res, next) => {
+reservationsRouter.post('/:id/payments/:paymentId/save-card-on-file', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(404).json({ error: 'Agreement not found for reservation' });
@@ -2437,7 +2443,7 @@ reservationsRouter.post('/:id/payments/:paymentId/save-card-on-file', async (req
   }
 });
 
-reservationsRouter.post('/:id/payments/reconcile-authorizenet', async (req, res, next) => {
+reservationsRouter.post('/:id/payments/reconcile-authorizenet', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     const row = await rentalAgreementsService.reconcileLatestAuthNetReservationPayment(
       req.params.id,
@@ -2455,7 +2461,7 @@ reservationsRouter.post('/:id/payments/reconcile-authorizenet', async (req, res,
   }
 });
 
-reservationsRouter.post('/:id/payments/charge-card-on-file', async (req, res, next) => {
+reservationsRouter.post('/:id/payments/charge-card-on-file', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     const agreementId = await ensureAgreementByReservationId(req.params.id, scopeFor(req));
     if (!agreementId) return res.status(404).json({ error: 'Agreement not found for reservation' });

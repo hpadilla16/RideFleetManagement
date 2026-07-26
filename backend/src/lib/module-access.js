@@ -1,10 +1,30 @@
 import { prisma } from './prisma.js';
 import { cache } from './cache.js';
 import { globalKey } from './cache/tenantKey.js';
+import logger from './logger.js';
 
 export const MODULE_KEYS = [
   'dashboard',
   'reservations',
+  // Payment Actions (2026-07-25) — a CAPABILITY module, not a nav page.
+  //
+  // The rule (Hector): an AGENT may RECORD what already happened outside the
+  // system; only ADMIN/OPS may make the system MOVE money at the gateway,
+  // DESTROY a payment record, or STORE a reusable card. Counter staff collect
+  // on an external POS terminal and key the result in afterwards, so the
+  // record-only routes (postPayment, addManualPayment, request-payment) are
+  // deliberately NOT gated — gating them would jam the counter.
+  //
+  // Gated: charge-card-on-file (AuthNet + Spin), security-deposit
+  // capture/release, spin release/reauth, refund, payment delete/void, and
+  // save-card-on-file. Those shipped behind requireModuleAccess('reservations')
+  // only, so any employee with the Reservations module could charge a saved
+  // card, refund, or delete a payment record.
+  //
+  // Default ON for ADMIN/OPS, OFF for AGENT/staff and hosts — Hector opens it
+  // per person in People. Because it has no page of its own it is deliberately
+  // absent from pathnameToModule/preferredAppRoute.
+  'paymentActions',
   'vehicles',
   'maintenance',
   'customers',
@@ -26,9 +46,21 @@ export const MODULE_KEYS = [
   'tenants'
 ];
 
+/**
+ * Optional second sentence shown when a module gate denies a request. The first
+ * sentence is always "<Label> is turned off for your account." — this adds the
+ * next step so the user is not left guessing. Keep them short and actionable.
+ */
+export const MODULE_DENIED_HINTS = {
+  paymentActions:
+    'You can still record a payment taken on the card terminal — ask an admin if ' +
+    'you need to charge or refund a card.'
+};
+
 export const MODULE_LABELS = {
   dashboard: 'Dashboard',
   reservations: 'Reservations',
+  paymentActions: 'Payment Actions',
   vehicles: 'Vehicles',
   maintenance: 'Maintenance',
   customers: 'Customers',
@@ -52,8 +84,16 @@ export const MODULE_LABELS = {
 
 function hostRoleModuleMap() {
   return {
+    // Spread every MODULE_KEY as false FIRST. getEditableModuleAccessForUser
+    // reads this map as `roleAllowed[key] !== false`, so a key missing from a
+    // literal resolves to TRUE — a host would silently inherit any module added
+    // after this map was written. The other role maps already spread `base`;
+    // this one did not, which is why paymentActions had to be listed by hand.
+    // With the spread, a new module is OFF for hosts by default.
+    ...Object.fromEntries(MODULE_KEYS.map((key) => [key, false])),
     dashboard: true,
     reservations: false,
+    paymentActions: false,
     vehicles: false,
     maintenance: false,
     customers: false,
@@ -110,6 +150,7 @@ export function roleAllowedModuleMap(roleOrUser) {
       ...base,
       dashboard: true,
       reservations: true,
+      paymentActions: true,
       vehicles: true,
       maintenance: true,
       customers: true,
@@ -137,6 +178,7 @@ export function roleAllowedModuleMap(roleOrUser) {
       ...base,
       dashboard: true,
       reservations: true,
+      paymentActions: true,
       vehicles: true,
       maintenance: true,
       customers: true,
@@ -163,6 +205,10 @@ export function roleAllowedModuleMap(roleOrUser) {
     ...base,
     dashboard: true,
     reservations: true,
+    // AGENT / staff default: OFF. Explicit rather than relying on `base`,
+    // so the intent survives anyone reordering this map. Hector opens it
+    // per person in People when a counter agent genuinely needs it.
+    paymentActions: false,
     vehicles: true,
     maintenance: true,
     customers: true,
@@ -189,6 +235,9 @@ export function defaultTenantModuleConfig(tenant = null) {
   return {
     dashboard: true,
     reservations: true,
+    // Tenant-level default ON (Hector, 2026-07-25): the tenant owns the
+    // capability, the per-user/role layer decides who actually gets it.
+    paymentActions: true,
     vehicles: true,
     maintenance: true,
     customers: true,
@@ -327,6 +376,113 @@ export async function updateStoredUserModuleConfig(userId, payload = {}) {
   return next;
 }
 
+/**
+ * ANTI-SELF-LOCKOUT (2026-07-25) — paymentActions only.
+ *
+ * Every other module is a FEATURE a tenant either has or does not (Tolls, Car
+ * Sharing, Kiosk), so it is correct that the tenant switch turns it off for
+ * everyone. paymentActions is not a feature — it is a PERMISSION LEVEL inside
+ * Reservations, which the tenant already has. If the tenant switch could strip
+ * ADMIN too, turning it off would leave the whole company unable to charge a
+ * saved card or RELEASE A CUSTOMER'S DEPOSIT HOLD. So for this key the tenant
+ * switch governs everyone BELOW admin: it decides whether the capability can be
+ * handed to OPS/agents at all. Admins keep it unconditionally.
+ *
+ * This MUST live in getEditableModuleAccessForUser, not only in the effective
+ * path. settings.service.js returns `config` from HERE to the People screen. If
+ * the two disagreed, People would render an admin's checkbox UNCHECKED while
+ * the admin actually had access — and because savePerson PUTs the whole map
+ * back, any routine edit (a phone number) would persist `paymentActions:false`
+ * as an EXPLICIT override. That override sets hasUserOverride, the carve-out
+ * stops applying, and the admin is locked out for real, recoverable only by a
+ * SUPER_ADMIN. The security property is only real if both paths agree.
+ *
+ * An explicit per-user override still wins, which is the intended way to remove
+ * the capability from one specific admin.
+ */
+function applyPaymentActionsLockoutCarveOut(user, tenantConfig, storedConfig, config) {
+  if (tenantConfig?.paymentActions !== false) return;
+  const role = String(user?.role || '').toUpperCase();
+  if (role !== 'ADMIN' && role !== 'SUPER_ADMIN') return;
+  const hasUserOverride = Object.prototype.hasOwnProperty.call(storedConfig || {}, 'paymentActions');
+  config.paymentActions = hasUserOverride ? !!storedConfig.paymentActions : true;
+}
+
+/**
+ * Diff two module maps and record what actually changed.
+ *
+ * BOTH maps must come from the SAME layer. Comparing an EFFECTIVE map
+ * (role ∧ tenant ∧ stored) against a STORED map invents phantom changes
+ * wherever role or tenant denies a module the stored blob says true, and
+ * misses real ones — so callers pass stored-before vs stored-after for the
+ * per-user scope, and tenant-before vs tenant-after for the tenant scope.
+ *
+ * TRI-STATE, not boolean. A stored map has three states per key: explicit true,
+ * explicit false, and ABSENT (no override — follow the role/tenant default).
+ * A value-only diff (`!!before[k] !== !!after[k]`) collapses absent into false,
+ * so REMOVING an explicit `{paymentActions:false}` reads as false -> false and
+ * writes NO ROW — even though the effective access jumps to the role default,
+ * which is `true` for ADMIN/OPS. That is a real grant of the capability to
+ * charge and refund cards, recorded nowhere. It is also the same "a missing key
+ * is not the same as false" assumption that produced the fail-open role maps
+ * this whole change exists to fix, so it is closed here rather than left as a
+ * latent twin.
+ *
+ * `from`/`to` are therefore `true | false | null`, where NULL means "no
+ * explicit override". Keys absent on BOTH sides are still not a change.
+ *
+ * IDs only, never emails or names: actor and target are resolvable by join, so
+ * there is no reason to copy PII into an audit row.
+ *
+ * Best-effort by design — an audit failure must never block the permission
+ * change — but it is now capable of succeeding, which the AuditLog version was
+ * not (that table's reservationId is required, so every insert threw into the
+ * catch and wrote nothing).
+ *
+ * Returns the changed list so callers/tests can assert on it.
+ */
+export async function recordModuleAccessAudit({
+  scope,
+  tenantId = null,
+  targetUserId = null,
+  actor = null,
+  before = {},
+  after = {}
+}) {
+  const has = (map, key) => Object.prototype.hasOwnProperty.call(map || {}, key);
+  const state = (map, key) => (has(map, key) ? !!map[key] : null);
+
+  const changed = MODULE_KEYS.filter((key) => {
+    if (!has(before, key) && !has(after, key)) return false; // absent both sides
+    return has(before, key) !== has(after, key) || !!before?.[key] !== !!after?.[key];
+  }).map((key) => ({
+    module: key,
+    from: state(before, key),
+    to: state(after, key)
+  }));
+  if (!changed.length) return [];
+
+  try {
+    await prisma.moduleAccessAuditLog.create({
+      data: {
+        tenantId: tenantId || null,
+        scope,
+        targetUserId: targetUserId || null,
+        actorUserId: actor?.sub || actor?.id || null,
+        actorRole: actor?.role ? String(actor.role).toUpperCase() : null,
+        changed
+      }
+    });
+  } catch (err) {
+    logger.warn('module-access: audit write failed', {
+      scope,
+      targetUserId,
+      error: String(err?.message || err)
+    });
+  }
+  return changed;
+}
+
 export async function getEditableModuleAccessForUser(user) {
   const roleAllowed = roleAllowedModuleMap(user);
   const tenantConfig = await getTenantModuleConfig(user?.tenantId || null);
@@ -341,6 +497,8 @@ export async function getEditableModuleAccessForUser(user) {
     const moduleEnabled = hasUserOverride ? !!storedConfig[key] : roleEnabled;
     config[key] = !!tenantEnabled && !!moduleEnabled;
   }
+
+  applyPaymentActionsLockoutCarveOut(user, tenantConfig, storedConfig, config);
 
   return { tenantConfig, storedConfig, config };
 }
@@ -369,6 +527,10 @@ export async function getEffectiveModuleAccessForUser(user) {
   if (role !== 'ADMIN' && String(user?.programScope || '').toUpperCase() === 'RENTAL_ONLY') {
     config.loaner = false;
   }
+
+  // The paymentActions anti-self-lockout carve-out is applied inside
+  // getEditableModuleAccessForUser (above), so this path and the People screen
+  // can never disagree. See applyPaymentActionsLockoutCarveOut.
 
   return {
     tenantConfig,

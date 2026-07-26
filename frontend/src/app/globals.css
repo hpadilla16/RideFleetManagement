@@ -1333,6 +1333,85 @@ label input[type="radio"],
   background: rgba(23, 27, 36, 0.92);
   color: #e5e7eb;
 }
+/* Capability-gated action group (Payment Actions, 2026-07-25).
+   Rendered DISABLED AND VISIBLE, never hidden: an agent has to see that the
+   action exists and know who to ask, otherwise they conclude the system is
+   broken and call support.
+
+   Opacity is .6, not the mockup's .42. Measured against the dark surface with
+   the #d1d5db label colour: .42 lands at 3.10:1 and .55 at 4.38:1, while .6
+   gives 4.95:1 and clears AA outright. WCAG exempts inactive controls from the
+   contrast minimum, so .42 was not wrong — but GD asked that "off" must not
+   read as "invisible", and .6 is still unmistakably off next to the live
+   primary button, especially with the grayscale and the group lock hint.
+
+   TWO THINGS THIS DELIBERATELY DOES NOT DO:
+
+   1. It does NOT dim the container. An earlier version put opacity on
+      `.capability-locked` itself, which greyed the informational text too —
+      "Authorized | Ref XXXX", the card-on-file status line, the panel heading.
+      That text is valid and still true, and the agent who cannot release the
+      hold is precisely the one who needs to read the reference number off to
+      an admin. WCAG exempts the inactive CONTROL, never the surrounding copy.
+
+   2. It does NOT compound with the global `button:disabled { opacity: .55 }`
+      (line ~519). Container opacity multiplies with the child's, so .6 x .55
+      landed at ~.33 effective — BELOW the .42 that was rejected. Dimming the
+      controls themselves means the value is literal. The `:disabled` selector
+      below is more specific than the global rule on purpose, so this wins on
+      specificity rather than on source order.
+
+   THE STYLE IS NOT THE GATE. Dimming an input does not stop anyone typing in
+   it. Every input/select inside a locked group carries its own
+   `disabled={!canPaymentActions}` in the JSX — the amount fields in the grid3
+   panel read as inert and ARE inert. Style and state must agree: a field that
+   looks dead but accepts a number invites an agent to fill in $250, press a
+   button that never fires, and conclude the app is broken. `pointer-events:
+   none` is deliberately NOT used as a substitute: it would also kill text
+   selection (the reference numbers here exist to be read out to an admin) and
+   leaves the field keyboard-reachable via Tab. If you add a control to a
+   `.capability-locked` group, disable it in the JSX too. */
+.capability-locked button,
+.capability-locked input,
+.capability-locked select {
+  opacity: 0.6;
+  filter: grayscale(0.55);
+  cursor: not-allowed;
+}
+.capability-locked button:disabled {
+  opacity: 0.6;
+}
+.capability-lock-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #6b7280;
+}
+:root[data-theme='dark'] .capability-lock-hint {
+  color: #cbd5e1;
+}
+
+/* .label has no dark override and sits at 3.26:1 on the dark surface — below
+   AA. It is used for the inline status/error banner on the payments screen,
+   which is where the "Payment Actions is turned off for your account…" denial
+   lands, so the most actionable message on the page was rendering at the worst
+   contrast on the page. #a5a0bd is 6.86:1. */
+:root[data-theme='dark'] .label {
+  color: #a5a0bd;
+}
+
+/* Module-access checkbox labels (Settings → Tenant Module Access, People →
+   Module access). The light-mode rule pins color:#4b5563, which has no dark
+   override and lands at roughly 2.4:1 on the dark surface — below the 4.5:1 AA
+   minimum, on the grid that now carries a money permission. #d1d5db is ~11.9:1.
+   Fixed here in the shared stylesheet rather than with an inline style: that
+   inline-style shortcut is exactly the NOTE_STYLE bug beta.321 had to undo. */
+:root[data-theme='dark'] .service-checks-grid label {
+  color: #d1d5db;
+}
 :root[data-theme='dark'] th,
 :root[data-theme='dark'] td {
   border-bottom-color: #2a3140;

@@ -49,7 +49,7 @@ jobs:
         run: node -e "import('./src/main.js').then(() => process.exit(0)).catch((err) => { console.error('Transitive import failed:', err?.message || err); process.exit(1); })"
 
       - name: Money-path guard suites (B5 Phase 1)
-        # These three are DB-free and run in seconds. They exist to catch
+        # These are DB-free and run in seconds. They exist to catch
         # SILENT failures that no other CI step would notice:
         #   test:payment-refs  — the partial unique index that IS the payment
         #     idempotency floor is invisible to Prisma; this asserts the
@@ -58,10 +58,24 @@ jobs:
         #   test:kiosk         — kiosk + payment guard/intent behavior.
         #   test:stale-preauth — the sweep must never stamp a deposit hold as
         #     voided without a real gateway void.
+        #   test:money-route-gate — the structural guard: every gateway-calling
+        #     or payment-destroying route must carry the paymentActions gate,
+        #     and the money/record-only classification is re-derived from the
+        #     service call graph on every run. A guard that does not run is
+        #     documentation, so it belongs HERE, not only in `npm test`.
+        #   test:payment-actions — paymentActions defaults per role + the
+        #     anti-self-lockout carve-out on BOTH access paths.
+        #   test:module-defaults-drift — the People create form pre-fills module
+        #     checkboxes from a role map hand-copied out of module-access.js,
+        #     and savePerson PUTs that map back as explicit per-user overrides.
+        #     When the copy rots, creating a person silently GRANTS whatever the
+        #     copy is missing. This loads both halves in one process and fails
+        #     if they disagree. It needs the frontend/ tree, which the repo
+        #     checkout above already provides.
         # NOTE: they are also wired into `npm test`, but that chain currently
         # hangs at an early suite lacking --test-force-exit, so it cannot be
         # relied on as the automatic gate. Run them explicitly here.
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:
@@ -98,6 +112,14 @@ jobs:
         run: docker exec fleet-backend sh -lc "cd /app && node scripts/tenant-seed-beta.mjs && node scripts/tenant-seed-superadmin.mjs"
       - name: Run tenant isolation suite
         run: docker exec fleet-backend sh -lc "cd /app && node scripts/tenant-tests/run-suite.mjs"
+      - name: Module-access audit trail (DB-backed)
+        # Runs HERE, not in the DB-free money-guard step, because its whole
+        # point is hitting real Postgres. The bug it guards against — writing a
+        # permission audit into the reservation-scoped AuditLog, where the
+        # required reservationId makes every insert throw into a best-effort
+        # catch — is invisible to a mocked prisma. A green mock is exactly how
+        # it shipped the first time.
+        run: docker exec fleet-backend sh -lc "cd /app && npm run test:module-access-audit"
       - name: Dump logs on failure
         if: failure()
         run: docker compose -f docker-compose.yml logs --tail=200

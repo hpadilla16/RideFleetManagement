@@ -5,6 +5,11 @@ import { requireRole, isSuperAdmin } from '../../middleware/auth.js';
 import { scopeFor } from '../../lib/tenant-scope.js';
 
 import { prisma } from '../../lib/prisma.js';
+import {
+  recordModuleAccessAudit,
+  getStoredUserModuleConfig,
+  getTenantModuleConfig
+} from '../../lib/module-access.js';
 
 export const settingsRouter = Router();
 
@@ -35,7 +40,23 @@ settingsRouter.get('/tenant-modules', requireRole('ADMIN'), async (req, res, nex
 
 settingsRouter.put('/tenant-modules', requireRole('ADMIN'), async (req, res, next) => {
   try {
-    res.json(await settingsService.updateTenantModuleAccess(req.body || {}, scopeFor(req)));
+    // AUDITED for the same reason as the per-user route below — and this one
+    // matters MORE: one save here can strip paymentActions from every OPS user
+    // and agent in the tenant at once. Tenant-config-before vs
+    // tenant-config-after, so both sides come from the same layer.
+    const scope = scopeFor(req);
+    const before = await getTenantModuleConfig(scope?.tenantId || null).catch(() => ({}));
+    const out = await settingsService.updateTenantModuleAccess(req.body || {}, scope);
+
+    await recordModuleAccessAudit({
+      scope: 'TENANT',
+      tenantId: scope?.tenantId || null,
+      actor: req.user,
+      before,
+      after: out?.config || {}
+    });
+
+    res.json(out);
   } catch (e) {
     next(e);
   }
@@ -110,7 +131,29 @@ settingsRouter.get('/users/:userId/module-access', requireRole('ADMIN'), enforce
 
 settingsRouter.put('/users/:userId/module-access', requireRole('ADMIN'), enforceUserModuleScope, async (req, res, next) => {
   try {
-    res.json(await settingsService.updateUserModuleAccess(req.targetUser.id, req.body || {}));
+    // AUDIT (2026-07-25). paymentActions authorizes charging and refunding a
+    // customer's card, so "who gave this agent the ability to refund, and when"
+    // has to be answerable. These writes previously touched only an AppSetting
+    // row and left no trace.
+    //
+    // STORED-vs-STORED. getUserModuleAccess() returns the EFFECTIVE map
+    // (role ∧ tenant ∧ stored) while the update returns the STORED map;
+    // diffing one against the other invents phantom changes wherever role or
+    // tenant denies a module the stored blob says true, and misses real ones.
+    const before = await getStoredUserModuleConfig(req.targetUser.id).catch(() => ({}));
+    const out = await settingsService.updateUserModuleAccess(req.targetUser.id, req.body || {});
+    const after = out?.config || {};
+
+    await recordModuleAccessAudit({
+      scope: 'USER',
+      tenantId: req.targetUser.tenantId || req.user?.tenantId || null,
+      targetUserId: req.targetUser.id,
+      actor: req.user,
+      before,
+      after
+    });
+
+    res.json(out);
   } catch (e) {
     next(e);
   }

@@ -55,15 +55,39 @@ const ALLOWED = [
   // It adjusts the balance and sends the customer a link to pay themselves. So
   // the two direct-charge routes (payments/manual + payments/charge-card-on-file)
   // are REMOVED from this allowlist — a service account can no longer reach them
-  // (requireAuth 403s anything not listed here). Instead VozIA gets four benign,
-  // link/adjust-only capabilities, each gated by service-payment-guards.js
-  // (author+ticketId required + a per-transaction ceiling) and, where money-state
-  // changes, the idempotency middleware:
+  // (requireAuth 403s anything not listed here). What VozIA keeps is THREE
+  // capabilities, each gated by service-payment-guards.js (author+ticketId
+  // required + a per-transaction ceiling) and, where money-state changes, the
+  // idempotency middleware:
   //   1. send-request-email  → emails the customer a self-pay link (no money moves)
-  //   2. refund              → refunds an existing payment (native refund<=original cap)
-  //   3. charges             → add service/fee (positive) OR credit (negative); no gateway
-  ['POST', '/api/reservations/:id/send-request-email'],
+  //   2. charges             → add service/fee (positive) OR credit (negative); no gateway
+  //   3. refund              → the ONE that genuinely moves money OUT at the
+  //                            gateway. Ceiling voziaMaxRefundAmount (default
+  //                            2000), non-recyclable idempotency (kind:'payment'
+  //                            — a retry no-ops, a stuck in-flight key 409s), and
+  //                            the native refund<=original / cumulative<=original
+  //                            caps in refundPayment underneath.
+  //
+  // REFUND: KEPT (Hector, 2026-07-25, deciding with the full record in front of
+  // him). It was briefly removed earlier the same day on the premise that it was
+  // a dormant, never-exercised path. That premise was wrong: this is a capability
+  // Hector deliberately scoped IN three weeks ago
+  // (doc/session-handoff-2026-07-04-EOD.md — ceiling, idempotency, the ops runbook
+  // for releasing stuck keys, and a documented known-risk note). Unexercised is
+  // not the same as dormant. Re-confirmed with that context, it stays.
+  //
+  // ⚠️ THIS ENTRY ALONE IS NOT ENOUGH — the gate is DOUBLE.
+  // The route also carries requireCapability('paymentActions')
+  // (rental-agreements.routes.js). The service account's role is AGENT, whose
+  // role default for paymentActions is FALSE, so the allowlist admits the path
+  // and the capability gate then 403s it. The account must ALSO hold the module:
+  //   node scripts/grant-payment-actions.mjs --apply <svc-account-email>
+  // Both layers are required, on purpose: the allowlist says WHICH PATHS a
+  // service account may touch, the capability says WHICH PRINCIPALS may move
+  // money. Neither is redundant. See the double-gate tests in
+  // service-account-allowlist.test.mjs.
   ['POST', '/api/rental-agreements/:id/payments/:paymentId/refund'],
+  ['POST', '/api/reservations/:id/send-request-email'],
   ['POST', '/api/reservations/:id/charges'],
   // S27 W-D (Hector, 2026-07-19) — the human-agent workspace operates through
   // this same service account. Each write below has its own payload gate:

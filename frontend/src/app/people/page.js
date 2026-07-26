@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
-import { MODULE_DEFINITIONS } from '../../lib/moduleAccess';
+import { MODULE_DEFINITIONS, buildDefaultUserModuleAccess } from '../../lib/moduleAccess';
 
 const EMPTY_PERSON = {
   personType: 'EMPLOYEE',
@@ -35,87 +35,18 @@ const PROGRAM_SCOPE_OPTIONS = [
   { value: 'BOTH', label: 'Both', hint: '(default)' }
 ];
 
-function buildDefaultUserModuleAccess(personType = 'EMPLOYEE', role = 'AGENT') {
-  const type = String(personType || 'EMPLOYEE').toUpperCase();
-  const currentRole = String(role || 'AGENT').toUpperCase();
-
-  if (type === 'HOST') {
-    return {
-      dashboard: true,
-      reservations: false,
-      vehicles: false,
-      customers: false,
-      people: false,
-      planner: false,
-      reports: false,
-      carSharing: false,
-      hostApp: true,
-      employeeApp: false,
-      issueCenter: false,
-      loaner: false,
-      settings: false,
-      security: false,
-      tenants: false
-    };
-  }
-
-  if (currentRole === 'ADMIN') {
-    return {
-      dashboard: true,
-      reservations: true,
-      vehicles: true,
-      customers: true,
-      people: true,
-      planner: true,
-      reports: true,
-      carSharing: true,
-      hostApp: true,
-      employeeApp: true,
-      issueCenter: true,
-      loaner: true,
-      settings: true,
-      security: true,
-      tenants: false
-    };
-  }
-
-  if (currentRole === 'OPS') {
-    return {
-      dashboard: true,
-      reservations: true,
-      vehicles: true,
-      customers: true,
-      people: false,
-      planner: true,
-      reports: true,
-      carSharing: true,
-      hostApp: true,
-      employeeApp: true,
-      issueCenter: true,
-      loaner: true,
-      settings: false,
-      security: false,
-      tenants: false
-    };
-  }
-
-  return {
-    dashboard: true,
-    reservations: true,
-    vehicles: true,
-    customers: true,
-    people: false,
-    planner: true,
-    reports: false,
-    carSharing: false,
-    hostApp: false,
-    employeeApp: true,
-    issueCenter: true,
-    loaner: true,
-    settings: false,
-    security: false,
-    tenants: false
-  };
+/**
+ * Whether a module checkbox renders checked. `=== true`, deliberately NOT
+ * `!== false`: this map is PUT back verbatim by savePerson, so a key missing
+ * from it must render UNCHECKED and persist as a denial — never as a silent
+ * grant. That inversion is the whole bug this screen used to have.
+ *
+ * Both suppliers of the state now return every registry key
+ * (buildDefaultUserModuleAccess on create, the API's effective config on edit),
+ * so in practice this only decides what happens when one of them is incomplete.
+ */
+function isModuleChecked(map, key) {
+  return map?.[key] === true;
 }
 
 function metricSummary(people) {
@@ -806,12 +737,18 @@ function Inner({ token, me, logout }) {
                 <div className="surface-note">
                   Module access controls what this user can see. Tenant module settings still apply on top of these selections.
                 </div>
+                {MODULE_DEFINITIONS.filter((item) => item.description && item.key !== 'tenants').map((item) => (
+                  <div className="surface-note" key={`${item.key}-desc`}>
+                    <strong>{item.label}</strong> — {item.description}
+                    {item.keepsNote ? <> {item.keepsNote}</> : null}
+                  </div>
+                ))}
                 <div className="service-checks-grid">
                   {MODULE_DEFINITIONS.filter((item) => item.key !== 'tenants').map((item) => (
                     <label key={item.key} className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
                       <input
                         type="checkbox"
-                        checked={userModuleAccess[item.key] !== false}
+                        checked={isModuleChecked(userModuleAccess, item.key)}
                         onChange={(e) => setUserModuleAccess((current) => ({ ...current, [item.key]: e.target.checked }))}
                       /> {item.label}
                     </label>

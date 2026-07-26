@@ -3,6 +3,13 @@ import { issueCenterService } from './issue-center.service.js';
 import { hostAppService } from '../host-app/host-app.service.js';
 import { requireString, assertPlainObject } from '../../lib/request-validation.js';
 import { attachPublicRequestMeta, createOptionalIdempotencyGuard, createPublicRateLimitGuard } from '../../middleware/public-endpoint-guards.js';
+// Payment Actions gate (2026-07-25). This router is mounted with only
+// requireModuleAccess('issueCenter') (main.js:237), which AGENTS have ON by
+// default. issueCenterService.chargeCardOnFile reaches the very same
+// rentalAgreementsService.chargeCardOnFile — a real Authorize.Net charge
+// against the saved profile — so without this an agent denied the charge on
+// the reservation screen could simply do it from Issue Center instead.
+import { requireCapability } from '../../middleware/auth.js';
 
 export const issueCenterRouter = Router();
 export const publicIssueCenterRouter = Router();
@@ -74,7 +81,7 @@ issueCenterRouter.post('/incidents/:id/charge-draft', async (req, res, next) => 
   }
 });
 
-issueCenterRouter.post('/incidents/:id/charge-card-on-file', async (req, res, next) => {
+issueCenterRouter.post('/incidents/:id/charge-card-on-file', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     res.json(await issueCenterService.chargeCardOnFile(req.user, req.params.id, req.body || {}));
   } catch (error) {

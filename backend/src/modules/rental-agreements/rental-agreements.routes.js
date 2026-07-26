@@ -7,6 +7,12 @@ import logger from '../../lib/logger.js';
 // VozIA Fase 6 RE-SCOPE (2026-07-04) — service-account REFUND guard + idempotency.
 import { prisma } from '../../lib/prisma.js';
 import { idempotency } from '../../middleware/idempotency.js';
+// Payment Actions gate (2026-07-25). This router is mounted with only
+// requireModuleAccess('reservations') (main.js:319), so every money route below
+// was reachable by any employee holding the Reservations module — and these are
+// byte-for-byte the same service calls as the /api/reservations twins. Gating
+// one file and not this one would have been theater.
+import { requireCapability } from '../../middleware/auth.js';
 import {
   assertServiceAccountRefundAllowed,
   resolveVoziaCeiling
@@ -284,7 +290,7 @@ rentalAgreementsRouter.post('/:id/payments/manual', async (req, res, next) => {
   }
 });
 
-rentalAgreementsRouter.post('/:id/customer/card-on-file', async (req, res, next) => {
+rentalAgreementsRouter.post('/:id/customer/card-on-file', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
     const row = await rentalAgreementsService.captureCustomerCardOnFile(req.params.id, req.body || {}, req.user?.sub || null);
@@ -299,7 +305,7 @@ rentalAgreementsRouter.post('/:id/customer/card-on-file', async (req, res, next)
 // RE-SCOPE (Hector, 2026-07-04): reverted to HUMAN-ONLY. Direct card capture by
 // VozIA is removed — this route is off the allowlist, so a service account is
 // 403'd upstream. Byte-identical to its pre-Fase-6 form.
-rentalAgreementsRouter.post('/:id/payments/charge-card-on-file', async (req, res, next) => {
+rentalAgreementsRouter.post('/:id/payments/charge-card-on-file', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
     const row = await rentalAgreementsService.chargeCardOnFile(req.params.id, req.body || {}, req.user?.sub || null);
@@ -311,7 +317,7 @@ rentalAgreementsRouter.post('/:id/payments/charge-card-on-file', async (req, res
   }
 });
 
-rentalAgreementsRouter.post('/:id/security-deposit/capture', async (req, res, next) => {
+rentalAgreementsRouter.post('/:id/security-deposit/capture', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
     const row = await rentalAgreementsService.captureSecurityDeposit(req.params.id, req.body || {}, req.user?.sub || null);
@@ -323,7 +329,7 @@ rentalAgreementsRouter.post('/:id/security-deposit/capture', async (req, res, ne
   }
 });
 
-rentalAgreementsRouter.post('/:id/security-deposit/release', async (req, res, next) => {
+rentalAgreementsRouter.post('/:id/security-deposit/release', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
     const row = await rentalAgreementsService.releaseSecurityDeposit(req.params.id, req.body || {}, req.user?.sub || null);
@@ -447,16 +453,19 @@ rentalAgreementsRouter.delete('/:id', async (req, res, next) => {
 
 
 
-rentalAgreementsRouter.post('/:id/payments/:paymentId/void', async (req, res, next) => {
-  try {
-    await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.deletePaymentHard(req.params.id, req.params.paymentId, req.body || {}, req.user?.sub || null);
-    res.json(row);
-  } catch (e) {
-    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
-    if (/cannot|invalid|already/i.test(e.message)) return res.status(400).json({ error: e.message });
-    next(e);
-  }
+// REMOVED 2026-07-25. This route called `rentalAgreementsService.deletePaymentHard`,
+// which HAS NEVER EXISTED anywhere in the codebase — every call threw TypeError
+// and returned 500. Same bug class as the removed `adjustCustomerCredit`
+// (RES-849093 FIX 3c), and retired the same way rather than left as a dead
+// route that 500s. No frontend calls it.
+// To void a payment for bookkeeping (no refund), use the ADMIN-only
+//   POST /api/reservations/:id/payments/:paymentId/void-no-refund
+// which soft-voids with a mandatory reason and a full AuditLog entry.
+// For a real card refund use POST /:id/payments/:paymentId/refund.
+rentalAgreementsRouter.post('/:id/payments/:paymentId/void', async (req, res) => {
+  res.status(410).json({
+    error: 'Endpoint removed. Use POST /api/reservations/:id/payments/:paymentId/void-no-refund (admin, soft void with reason + audit), or /refund for a real card refund.'
+  });
 });
 
 // CAP 2 (VozIA Fase 6 re-scope, 2026-07-04) — REFUND an existing payment.
@@ -465,7 +474,7 @@ rentalAgreementsRouter.post('/:id/payments/:paymentId/void', async (req, res, ne
 // — the double-refund defense. Humans are byte-identical (no key → passthrough).
 // The native refund<=original & cumulative<=original caps stay in refundPayment;
 // the VozIA guard adds author+ticketId + an absolute ceiling on top.
-rentalAgreementsRouter.post('/:id/payments/:paymentId/refund', paymentIdempotency, async (req, res, next) => {
+rentalAgreementsRouter.post('/:id/payments/:paymentId/refund', requireCapability('paymentActions'), paymentIdempotency, async (req, res, next) => {
   try {
     const agreement = await ensureEditable(req.params.id, req.user);
 
@@ -500,7 +509,7 @@ rentalAgreementsRouter.post('/:id/payments/:paymentId/refund', paymentIdempotenc
   }
 });
 
-rentalAgreementsRouter.post('/:id/charge-card-on-file', async (req, res, next) => {
+rentalAgreementsRouter.post('/:id/charge-card-on-file', requireCapability('paymentActions'), async (req, res, next) => {
   try {
     await ensureEditable(req.params.id, req.user);
     const row = await rentalAgreementsService.chargeCardOnFile(req.params.id, req.body || {}, req.user?.sub || null);
@@ -527,16 +536,13 @@ rentalAgreementsRouter.post('/:id/finalize', async (req, res, next) => {
 
 
 // PAYMENT_ACTION_COMPAT_ROUTES
-rentalAgreementsRouter.post('/:id/payments/:paymentId/delete', async (req, res, next) => {
-  try {
-    await ensureEditable(req.params.id, req.user);
-    const row = await rentalAgreementsService.deletePaymentHard(req.params.id, req.params.paymentId, req.body || {}, req.user?.sub || null);
-    res.json(row);
-  } catch (e) {
-    if (/not found/i.test(e.message)) return res.status(404).json({ error: e.message });
-    if (/cannot|invalid|already/i.test(e.message)) return res.status(400).json({ error: e.message });
-    next(e);
-  }
+// REMOVED 2026-07-25 — same story as /void above: `deletePaymentHard` does not
+// exist, so this always 500'd. Retired as a 410 rather than left dead.
+// The working equivalent is POST /api/reservations/:id/payments/:paymentId/delete.
+rentalAgreementsRouter.post('/:id/payments/:paymentId/delete', async (req, res) => {
+  res.status(410).json({
+    error: 'Endpoint removed. Use POST /api/reservations/:id/payments/:paymentId/delete, or prefer the audited soft void at /void-no-refund.'
+  });
 });
 
 

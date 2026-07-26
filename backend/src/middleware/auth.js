@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import { getJwtSecret } from '../modules/auth/auth.config.js';
 import { authService } from '../modules/auth/auth.service.js';
 import { isAllowedForServiceAccount } from '../lib/service-account-allowlist.js';
+import { MODULE_LABELS, MODULE_DENIED_HINTS } from '../lib/module-access.js';
 
 // First-login onboarding (2026-07-25): while User.mustChangePassword is
 // true (temp password at create, admin reset), a human session may reach
@@ -80,12 +81,50 @@ export function requireRole(...roles) {
   };
 }
 
+/**
+ * Human-readable denial. The old text interpolated the RAW key, so a user was
+ * told "Access to paymentActions is disabled for this user" — the message falls
+ * straight through to the banner on the payments screen. Uses the same labels
+ * the Settings/People toggles show, so what the admin switched off and what the
+ * user is told match. Benefits all modules, not just this one.
+ */
+function moduleDeniedMessage(moduleKey) {
+  const label = MODULE_LABELS[moduleKey] || moduleKey;
+  const hint = MODULE_DENIED_HINTS[moduleKey];
+  return `${label} is turned off for your account.${hint ? ` ${hint}` : ''}`;
+}
+
 export function requireModuleAccess(moduleKey) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
     if (isSuperAdmin(req.user)) return next();
     if (req.user?.moduleAccess?.[moduleKey] === false) {
-      return res.status(403).json({ error: `Access to ${moduleKey} is disabled for this user` });
+      return res.status(403).json({ error: moduleDeniedMessage(moduleKey) });
+    }
+    next();
+  };
+}
+
+/**
+ * FAIL-CLOSED variant of requireModuleAccess — requires an explicit `true`.
+ *
+ * requireModuleAccess denies only on `=== false`, so a MISSING key PERMITS the
+ * request. That is safe today because buildSessionUser emits every MODULE_KEY
+ * as a boolean, but it makes the money gate depend on an invariant enforced
+ * nowhere. This review found two separate fail-open traps in a single pass
+ * (hostRoleModuleMap, and the People create-form default map), and a parallel
+ * workstream is minting sessions for the employee mobile app. For a gate that
+ * authorizes charging and refunding a card, absence must mean NO.
+ *
+ * Zero behavior change today: for every real session the key is present.
+ * Use this for capabilities; requireModuleAccess stays the nav-module gate.
+ */
+export function requireCapability(moduleKey) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+    if (isSuperAdmin(req.user)) return next();
+    if (req.user?.moduleAccess?.[moduleKey] !== true) {
+      return res.status(403).json({ error: moduleDeniedMessage(moduleKey) });
     }
     next();
   };

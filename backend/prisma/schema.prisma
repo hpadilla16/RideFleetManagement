@@ -4055,6 +4055,39 @@ model FeeRateAuditLog {
   @@index([changedAt])
 }
 
+/// Module-access grant/revoke trail (2026-07-25).
+///
+/// paymentActions authorizes charging and refunding a customer's card, so
+/// "who gave this agent the ability to refund, and when" has to be answerable.
+/// Those changes previously wrote only an AppSetting row and left no trace.
+///
+/// This is a STANDALONE table, modelled on FeeRateAuditLog, because AuditLog is
+/// reservation-scoped: its `reservationId` is a REQUIRED String with a required
+/// relation, and a permission change has no reservation to attach to. Writing
+/// module-access rows into AuditLog is impossible, not merely awkward — the
+/// first attempt did exactly that and every insert threw
+/// PrismaClientValidationError into a best-effort catch, producing zero rows.
+///
+/// Holds IDs only, never emails or names: the actor and target are resolvable
+/// by join, so there is no reason to copy PII into an audit row.
+model ModuleAccessAuditLog {
+  id           String   @id @default(cuid())
+  tenantId     String?
+  /// 'USER' (per-person override) | 'TENANT' (the tenant-wide switch)
+  scope        String
+  /// null when scope = 'TENANT'
+  targetUserId String?
+  actorUserId  String?
+  actorRole    String?
+  /// [{ module, from, to }] — only the keys that actually changed
+  changed      Json
+  changedAt    DateTime @default(now())
+
+  @@index([tenantId, changedAt])
+  @@index([targetUserId, changedAt])
+  @@index([changedAt])
+}
+
 // PR-5 — Endpoint-level performance telemetry (PERF pillar).
 // Distinct from `LoadObservation` (business volume): this table captures raw
 // per-request samples (HTTP method, normalized route, status, duration, db

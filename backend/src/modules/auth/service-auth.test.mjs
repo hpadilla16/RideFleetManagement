@@ -8,7 +8,7 @@ process.env.JWT_SECRET = 'test-secret-for-service-auth-tests-0123456789';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import jwt from 'jsonwebtoken';
-import { requireAuth } from '../../middleware/auth.js';
+import { requireAuth, requireCapability } from '../../middleware/auth.js';
 import {
   authService,
   clampServiceTokenExpiresIn,
@@ -222,4 +222,120 @@ test('clamp: invalid values throw', () => {
   assert.throws(() => clampServiceTokenExpiresIn('-5d'), /Invalid expiresIn/);
   assert.throws(() => clampServiceTokenExpiresIn('0d'), /Invalid expiresIn/);
   assert.throws(() => clampServiceTokenExpiresIn('1w'), /Invalid expiresIn/);
+});
+
+// ── FULL-CHAIN E2E: VozIA refund (Hector, 2026-07-25) ───────────────────────
+//
+// Everything above tests requireAuth in isolation. The refund route is guarded
+// by TWO middlewares in series, and the interesting failures live in the seam:
+//
+//   requireAuth  → service-account allowlist   (WHICH PATHS)
+//   requireCapability('paymentActions')        (WHICH PRINCIPALS)
+//
+// These drive a REAL JWT through the REAL requireAuth and then the REAL
+// capability gate, in the exact order main.js/the router mount them, so the
+// assertions describe what a live request actually does.
+//
+// The state that matters operationally: the instant this diff deploys, the
+// service account passes layer 1 and fails layer 2. It starts working only
+// after the deploy step
+//   node scripts/grant-payment-actions.mjs --apply <svc-account-email>
+// which flips moduleAccess.paymentActions to true on the hydrated session.
+
+const REFUND_URL = '/api/rental-agreements/cmck11111111111111111111/payments/pay1/refund';
+
+/** requireAuth, then requireCapability — returns where the chain stopped. */
+async function runChain({ sessionUser, claims = {}, method = 'POST', url = REFUND_URL }) {
+  const { req, res, nextCalled } = await runRequireAuth({ sessionUser, claims, method, url });
+  if (!nextCalled) return { stoppedAt: 'requireAuth', status: res.statusCode, body: res.body };
+
+  const capRes = makeRes();
+  let reached = false;
+  requireCapability('paymentActions')(req, capRes, () => { reached = true; });
+  if (!reached) return { stoppedAt: 'requireCapability', status: capRes.statusCode, body: capRes.body };
+  return { stoppedAt: null, status: null, reachedHandler: true };
+}
+
+/** The VozIA account as it exists TODAY: AGENT role, no paymentActions. */
+const SVC_UNGRANTED = {
+  ...SERVICE_USER,
+  moduleAccess: { reservations: true, customers: true, paymentActions: false }
+};
+/** The same account AFTER grant-payment-actions.mjs --apply. */
+const SVC_GRANTED = {
+  ...SERVICE_USER,
+  moduleAccess: { reservations: true, customers: true, paymentActions: true }
+};
+/** A DIFFERENT service account that was never granted anything. */
+const SVC_OTHER = {
+  id: 'svc2',
+  role: 'AGENT',
+  tenantId: 't1',
+  isServiceAccount: true,
+  tokenVersion: 1,
+  moduleAccess: { reservations: true, paymentActions: false }
+};
+
+test('E2E: refund path clears the ALLOWLIST (layer 1) for a service account', async () => {
+  // Proves the restored entry is live: the chain gets past requireAuth and only
+  // then hits the capability gate. Before the entry was restored this stopped at
+  // requireAuth with "Endpoint not available for service accounts".
+  const out = await runChain({ sessionUser: SVC_UNGRANTED, claims: { svc: true, tv: 1 } });
+  assert.notEqual(out.stoppedAt, 'requireAuth', 'the allowlist must admit the refund path');
+});
+
+test('E2E: ungranted service account is stopped by the CAPABILITY gate (layer 2)', async () => {
+  const out = await runChain({ sessionUser: SVC_UNGRANTED, claims: { svc: true, tv: 1 } });
+  assert.equal(out.stoppedAt, 'requireCapability');
+  assert.equal(out.status, 403);
+  assert.match(out.body.error, /Payment Actions is turned off/);
+});
+
+test('E2E: GRANTED service account reaches the refund handler', async () => {
+  // The end state Hector chose. Both layers pass; the route's own VozIA guards
+  // (author+ticketId, voziaMaxRefundAmount ceiling) and paymentIdempotency then
+  // apply inside the handler.
+  const out = await runChain({ sessionUser: SVC_GRANTED, claims: { svc: true, tv: 1 } });
+  assert.equal(out.stoppedAt, null, `chain stopped at ${out.stoppedAt} (${out.status})`);
+  assert.equal(out.reachedHandler, true);
+});
+
+test('E2E: the grant does NOT widen the path surface — other money routes still 403 at layer 1', async () => {
+  // Containment. Holding paymentActions clears layer 2 everywhere, so layer 1 is
+  // what keeps a granted service account off the other 19 gated routes. Each of
+  // these must stop at requireAuth, never reaching the capability gate.
+  for (const url of [
+    '/api/rental-agreements/abc123/payments/charge-card-on-file',
+    '/api/rental-agreements/abc123/security-deposit/capture',
+    '/api/rental-agreements/abc123/security-deposit/release',
+    '/api/rental-agreements/abc123/customer/card-on-file',
+    '/api/reservations/abc123/payments/pay1/refund',
+    '/api/reservations/abc123/payments/pay1/delete',
+    '/api/reservations/abc123/agreement/spin/charge-card-on-file',
+    '/api/issue-center/incidents/abc123/charge-card-on-file'
+  ]) {
+    const out = await runChain({ sessionUser: SVC_GRANTED, claims: { svc: true, tv: 1 }, url });
+    assert.equal(out.stoppedAt, 'requireAuth', `${url} must be refused by the allowlist`);
+    assert.equal(out.status, 403);
+    assert.deepEqual(out.body, { error: 'Endpoint not available for service accounts' });
+  }
+});
+
+test('E2E: a DIFFERENT service account gains nothing from the grant', async () => {
+  // Per-ACCOUNT containment — the reason the grant is data (one AppSetting row
+  // keyed to one user id) rather than an isServiceAccount exemption in
+  // requireCapability. svc2 shares the same allowlist, so it clears layer 1 on
+  // the refund path, and is stopped dead at layer 2.
+  const out = await runChain({ sessionUser: SVC_OTHER, claims: { svc: true, tv: 1 } });
+  assert.equal(out.stoppedAt, 'requireCapability');
+  assert.equal(out.status, 403);
+});
+
+test('E2E: a granted service account still cannot use a REVOKED token', async () => {
+  // The grant is orthogonal to revocation — bumping tokenVersion still kills it
+  // at layer 0, before either gate.
+  const out = await runChain({ sessionUser: SVC_GRANTED, claims: { svc: true, tv: 0 } });
+  assert.equal(out.stoppedAt, 'requireAuth');
+  assert.equal(out.status, 401);
+  assert.deepEqual(out.body, { error: 'Token revoked' });
 });
