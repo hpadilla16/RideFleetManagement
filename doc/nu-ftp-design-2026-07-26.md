@@ -1,5 +1,41 @@
 # NU via FTP — design + open questions (2026-07-26)
 
+## UPDATE (same day): NU sent the spec + a sample. Most questions ANSWERED.
+
+Files from NU (Hector hand-off): "NU FTP Reservation File Format V2026.xlsx"
+(full tag dictionary) + FTPsample.txt (one real record).
+
+**Format**: tagged text — fields are `/TAG value` terminated by `\`, records
+concatenated (`\/` is the field boundary; values MAY contain `/`, e.g. dates
+`25Jul26/1000`, so split on `\/`, never on `/`).
+
+**Answered:**
+- **/ACT action codes: CR create, MR modify, XL CANCEL**, CU customer record,
+  AD additional-driver record → it is a TRANSACTIONAL (delta/event) feed and
+  cancellations arrive explicitly — BETTER than the scrape (which only sees a
+  live window). The importer must handle MR updates and XL → cancel the
+  promoted reservation (needs a cancel path the current worker lacks).
+- **/1EM email EXISTS** (multiple, ';' separated) — kills the biggest
+  manual-review driver (the portal grid has no email).
+- **/DLS driver license state + /DLC/DLN/DLE + /DOB + full address** — feeds
+  the local/non-local deposit rule classifier directly.
+- **Mileage: /FMD free miles/day, 99999 = UNLIMITED; /MIL overage rate.**
+- **Charges: repeating /1CL..1CF table** (description, method P/R/D, included
+  flag, amount, total, taxable, NU fee classification: 10000 CDW, 20000
+  INSURANCE, 70000 TAXES, 80000 FEES) — full breakdown, far richer than the
+  grid's single total. /1BR base, /1MC mandatory, /1TP total price.
+- **Prepaid: PP/OP does NOT exist in this format.** Payment is /MOP (method
+  of payment; sample shows `BC`), /PVA "voucher amount — treat as bill to
+  NU", /1VC pre-pay voucher. The sample (MOPBC + PVA17.88) reads as
+  billed-to-NU = prepaid. isPrepaidFromCode gets REPLACED by MOP/PVA logic —
+  pending NU's confirmation of the MOP value list.
+- SIPP in /VTP; locations /PUL (3 or 6 char GDS, e.g. LAX / LAXCO3) + /CTI
+  NU location number; /CNF = 3-digit location + 7-digit rez + chain code.
+
+**Still open (the ONLY things to ask NU):** see the revised email — protocol/
+credentials/path, file naming + cadence + retention, record separator /
+encoding confirmation, and the /MOP value semantics for prepaid.
+
 Prepared while Hector sleeps, from a full read of the current integration.
 Nothing built yet — the decisive unknowns below need NU's answers first.
 
