@@ -1509,6 +1509,35 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
 
   await refreshReservationEstimatedTotal(reservationId);
 
+  // 2026-07-26 (found by the TollBridge team reading this module; verified
+  // by us): this function used to stop at the reservation — it NEVER
+  // mirrored the toll charges into the RentalAgreement, and the counter
+  // reads RentalAgreement.balance. Since CA/FL tolls almost always post
+  // AFTER the rental closed (SunPass 2+ weeks late, CA statements up to a
+  // month), the charge existed on the reservation but the counter never saw
+  // it and nobody collected it — SILENT LOSS with today's providers, not
+  // just future ones. allowClosed:true is the established post-close mirror
+  // pattern (manual charges, corrections, extensions all use it). Dynamic
+  // import: reservation-pricing imports this module statically — a static
+  // import back would be a cycle. Failure is LOUD but does not abort the
+  // toll sync: the ReservationCharge is already written and the next sync
+  // retries the mirror.
+  // skipAgreementMirror: getPricing already runs syncAgreementCharges in the
+  // SAME Promise.all as this sync — mirroring from here too would race two
+  // concurrent agreement rebuilds on one reservation. That caller opts out;
+  // every ingest/match path mirrors.
+  if (!options.skipAgreementMirror) {
+    try {
+      const { reservationPricingService } = await import('../reservations/reservation-pricing.service.js');
+      await reservationPricingService.syncAgreementCharges(reservationId, scope, { allowClosed: true });
+    } catch (err) {
+      logger.error('[tolls] agreement mirror after toll sync FAILED — counter balance is stale until the next sync', {
+        reservationId,
+        err: String(err?.message || err)
+      });
+    }
+  }
+
   return {
     reservationId,
     tollsEnabled: true,
