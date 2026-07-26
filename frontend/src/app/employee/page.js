@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { MobileAppShell } from '../../components/MobileAppShell';
@@ -268,9 +268,55 @@ function EmployeeAppInner({ token, me, logout }) {
     recent: []
   };
 
+  // LAX #5 — review proofs: the agent photographs the customer's posted
+  // review; the AI validates it; VALIDATED count this month drives the tier.
+  const [reviewProofs, setReviewProofs] = useState([]);
+  const [reviewUploading, setReviewUploading] = useState(false);
+  const [reviewProofMsg, setReviewProofMsg] = useState('');
+  const reviewProofInputRef = useRef(null);
+
+  async function loadReviewProofs() {
+    try {
+      const now = new Date();
+      const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const rows = await api(`/api/commissions/review-proofs?monthKey=${month}`, {}, token);
+      setReviewProofs(Array.isArray(rows) ? rows : []);
+    } catch {
+      setReviewProofs([]);
+    }
+  }
+
+  function uploadReviewProof(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onerror = () => setReviewProofMsg('Could not read the file — try again.');
+    reader.onload = async () => {
+      try {
+        setReviewUploading(true);
+        setReviewProofMsg('');
+        const out = await api('/api/commissions/review-proofs', {
+          method: 'POST',
+          body: JSON.stringify({ photoDataUrl: reader.result })
+        }, token);
+        setReviewProofMsg(out?.status === 'VALIDATED'
+          ? '✓ Review validated — it counts toward your tier.'
+          : out?.status === 'REJECTED'
+            ? `✕ Not validated${out?.aiNotes ? `: ${out.aiNotes}` : ''} — retake the photo of the posted review.`
+            : 'Uploaded — pending manual validation.');
+        await loadReviewProofs();
+      } catch (e) {
+        setReviewProofMsg(e?.message || 'Upload failed');
+      } finally {
+        setReviewUploading(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
   async function load(query = '') {
     try {
       setLoading(true);
+      loadReviewProofs();
       const [dash, customersOut, locationsOut, typesOut] = await Promise.allSettled([
         api(`/api/employee-app/dashboard${query ? `?q=${encodeURIComponent(query)}` : ''}`, {}, token),
         api('/api/customers', {}, token),
@@ -542,6 +588,25 @@ function EmployeeAppInner({ token, me, logout }) {
               <div className="doc-meta">
                 {(selfCommissions?.approved || 0)} approved | {(selfCommissions?.paid || 0)} paid
               </div>
+            </div>
+            <div className="doc-card">
+              <span className="label">Reviews This Month</span>
+              <strong>{reviewProofs.filter((p) => p.status === 'VALIDATED').length} validated</strong>
+              <div className="doc-meta">
+                {reviewProofs.filter((p) => p.status === 'REJECTED').length} rejected · {reviewProofs.filter((p) => p.status === 'PENDING_AI').length} pending
+              </div>
+              <div className="inline-actions" style={{ marginTop: 10 }}>
+                <button type="button" className="button-subtle" disabled={reviewUploading} onClick={() => reviewProofInputRef.current?.click()}>
+                  {reviewUploading ? 'Validating…' : '＋ Upload review photo'}
+                </button>
+                <input
+                  ref={reviewProofInputRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => { uploadReviewProof(e.target.files?.[0]); e.target.value = ''; }} />
+              </div>
+              {reviewProofMsg ? <div className="doc-meta" style={{ marginTop: 6 }}>{reviewProofMsg}</div> : null}
             </div>
           </div>
           <div className="stack" style={{ marginTop: 16 }}>

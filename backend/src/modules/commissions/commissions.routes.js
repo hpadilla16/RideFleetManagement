@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { isSuperAdmin } from '../../middleware/auth.js';
+import express from 'express';
+import { isSuperAdmin, requireRole } from '../../middleware/auth.js';
 import { commissionsService } from './commissions.service.js';
 import { calculateCarSharingCommission, HOST_TIERS, TRIP_PROTECTION_TIERS, GUEST_SERVICE_FEE_PCT, PROTECTION_EXCLUSIONS, OPTIONAL_ADDONS as COMMISSION_ADDONS } from './car-sharing-commission.js';
 import { getAllPolicies } from './car-sharing-policies.js';
@@ -138,6 +139,89 @@ commissionsRouter.patch('/employees/:id/plan', async (req, res) => {
   }
 });
 
+// ── LAX #5: review proofs + payout workflow ──
+
+// Review photos arrive as base64 data URLs — bump this route's body limit
+// (same convention as report-damage / customer-inspection routers).
+const reviewProofBody = express.json({ limit: '25mb' });
+
+function statusFromError(e) {
+  return Number.isInteger(e?.httpStatus) ? e.httpStatus : 400;
+}
+
+// The submitting employee is ALWAYS req.user — an agent can only earn
+// reviews for themselves; there is no employeeUserId in the body on purpose.
+commissionsRouter.post('/review-proofs', reviewProofBody, async (req, res) => {
+  try {
+    const out = await commissionsService.submitReviewProof({
+      employeeUserId: req.user?.sub || req.user?.id || null,
+      tenantId: req.user?.tenantId || null,
+      reservationId: req.body?.reservationId || null,
+      photoDataUrl: req.body?.photoDataUrl
+    });
+    res.status(201).json(out);
+  } catch (e) {
+    res.status(statusFromError(e)).json({ error: e.message });
+  }
+});
+
+// Agents see their own; ADMIN/OPS/SUPER_ADMIN see everyone (ledger-scope rule).
+commissionsRouter.get('/review-proofs', async (req, res, next) => {
+  try {
+    const scope = employeeLedgerScope(req);
+    res.json(await commissionsService.listReviewProofs({
+      employeeUserId: scope.employeeUserId || req.query?.employeeUserId || null,
+      monthKey: req.query?.monthKey || null,
+      status: req.query?.status || null
+    }, scope));
+  } catch (e) {
+    next(e);
+  }
+});
+
+// Manual override of the AI verdict — ADMIN only, recorded on the row.
+commissionsRouter.patch('/review-proofs/:id/status', requireRole('ADMIN'), async (req, res) => {
+  try {
+    res.json(await commissionsService.setReviewProofStatus(
+      req.params.id, req.body?.status, req.user?.sub || req.user?.id || null, scopeFor(req)
+    ));
+  } catch (e) {
+    res.status(statusFromError(e)).json({ error: e.message });
+  }
+});
+
+// Payout workflow — ADMIN only, soft gate (Hector 2026-07-25): nothing
+// blocks approval; the screen shows the review context, the action audits.
+commissionsRouter.post('/ledger/:id/approve', requireRole('ADMIN'), async (req, res) => {
+  try {
+    res.json(await commissionsService.setCommissionStatus(req.params.id, 'APPROVED', {
+      actorUserId: req.user?.sub || req.user?.id || null, note: req.body?.note || null
+    }, scopeFor(req)));
+  } catch (e) {
+    res.status(statusFromError(e)).json({ error: e.message });
+  }
+});
+
+commissionsRouter.post('/ledger/:id/mark-paid', requireRole('ADMIN'), async (req, res) => {
+  try {
+    res.json(await commissionsService.setCommissionStatus(req.params.id, 'PAID', {
+      actorUserId: req.user?.sub || req.user?.id || null, note: req.body?.note || null
+    }, scopeFor(req)));
+  } catch (e) {
+    res.status(statusFromError(e)).json({ error: e.message });
+  }
+});
+
+commissionsRouter.post('/ledger/:id/void', requireRole('ADMIN'), async (req, res) => {
+  try {
+    res.json(await commissionsService.setCommissionStatus(req.params.id, 'VOID', {
+      actorUserId: req.user?.sub || req.user?.id || null, note: req.body?.note || null
+    }, scopeFor(req)));
+  } catch (e) {
+    res.status(statusFromError(e)).json({ error: e.message });
+  }
+});
+
 // ── Car Sharing Commission Endpoints ──
 
 // Get host tier options
@@ -150,7 +234,9 @@ commissionsRouter.get('/car-sharing/protection', (req, res) => {
   res.json({
     tiers: Object.values(TRIP_PROTECTION_TIERS),
     exclusions: PROTECTION_EXCLUSIONS,
-    addons: Object.values(OPTIONAL_ADDONS),
+    // Pre-existing 500 spotted in QA: the import aliases OPTIONAL_ADDONS to
+    // COMMISSION_ADDONS, so the un-aliased name was a ReferenceError.
+    addons: Object.values(COMMISSION_ADDONS),
     guestServiceFeePct: GUEST_SERVICE_FEE_PCT,
     disclaimer: 'Trip Protection is NOT insurance. It is a limited program where Ride reimburses the host\'s insurance deductible only. Tire damage, glass damage, and wear and tear are NOT covered. These can be purchased separately as add-ons if the host offers them.',
   });

@@ -366,10 +366,22 @@ export const EMPTY_COMMISSION_PLAN = {
   // '' = standard employees; 'VIRTUAL_AGENT' = plan for virtual agents
   // (percent of sold items — services + insurance — catalog never consulted).
   personKind: '',
+  // LAX #5 — review-tier commissions for counter staff: [{minReviews, pct}]
+  // + qualifying booking sources. Empty = legacy catalog behavior.
+  reviewTiers: [],
+  reviewTierSources: [],
   defaultValueType: '',
   defaultPercentValue: '',
   defaultFixedAmount: ''
 };
+
+export const DEFAULT_REVIEW_TIERS_UI = [
+  { minReviews: 10, pct: 2 },
+  { minReviews: 20, pct: 3 },
+  { minReviews: 30, pct: 4 },
+  { minReviews: 40, pct: 5 },
+  { minReviews: 61, pct: 6 }
+];
 export const EMPTY_COMMISSION_RULE = {
   id: '',
   name: '',

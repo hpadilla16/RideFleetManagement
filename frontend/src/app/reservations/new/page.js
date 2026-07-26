@@ -49,7 +49,7 @@ function Wizard({ token, me, logout }) {
   // Form state
   const [form, setForm] = useState({
     pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '',
-    vehicleTypeId: '', customerId: '', reservationNumber: '', notes: ''
+    vehicleTypeId: '', customerId: '', reservationNumber: '', notes: '', bookingChannel: 'STAFF'
   });
   const [quote, setQuote] = useState(null);
   const [rateError, setRateError] = useState('');
@@ -161,6 +161,9 @@ function Wizard({ token, me, logout }) {
           addOnsTotal: 0,
           status: 'CONFIRMED',
           sendConfirmationEmail: false,
+          // Booking source (LAX #5): OTA-sourced contracts qualify for the
+          // review-tier commission; walk-ins stay STAFF.
+          bookingChannel: form.bookingChannel || 'STAFF',
           notes: form.notes || null
         })
       }, token);
@@ -331,6 +334,17 @@ function Wizard({ token, me, logout }) {
               <div className="stack" style={{ gap: 4 }}>
                 <label className="label">Reservation # (optional — auto if blank)</label>
                 <input placeholder="Leave blank for auto-number" value={form.reservationNumber} onChange={(e) => set({ reservationNumber: e.target.value })} />
+              </div>
+              <div className="stack" style={{ gap: 4 }}>
+                <label className="label">Booking source</label>
+                <select value={form.bookingChannel} onChange={(e) => set({ bookingChannel: e.target.value })}>
+                  <option value="STAFF">Walk-in / counter</option>
+                  <option value="EXPEDIA">Expedia</option>
+                  <option value="PRICELINE">Priceline</option>
+                </select>
+                <span className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                  OTA reservations (Expedia/Priceline) qualify for the review-tier commission.
+                </span>
               </div>
               <div className="stack" style={{ gap: 4 }}>
                 <label className="label">Notes</label>

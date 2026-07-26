@@ -2335,6 +2335,44 @@ model RentalAgreementPayment {
   @@index([rentalAgreementId, paidAt])
 }
 
+// LAX #5 (2026-07-25) — one row per review a counter employee got a customer
+// to leave, proven by a PHOTO the AI validates. VALIDATED rows in a month
+// drive the employee's tier percent (CommissionPlan.reviewTiersJson) over
+// sold items on qualifying contracts. monthKey = the month the review counts
+// toward. photoJson uses the repo's standard photo envelope
+// ({storage,bucket,refs} | {storage:false,photos}).
+model ReviewProof {
+  id               String    @id @default(cuid())
+  tenantId         String?
+  employeeUserId   String
+  monthKey         String
+  reservationId    String?
+  rentalAgreementId String?
+  photoJson        Json
+  // PENDING_AI | VALIDATED | REJECTED. AI is advisory but automatic; an
+  // ADMIN can flip status manually (soft gate, audited via AuditLog-less
+  // reviewedByUserId + notes — this table IS the audit record).
+  status           String    @default("PENDING_AI")
+  aiConfidence     Int?
+  aiPlatform       String?
+  aiBusinessName   String?
+  aiRating         Int?
+  aiReviewerName   String?
+  aiNotes          String?   @db.Text
+  // SHA-256 of the decoded photo bytes (QA M2): an exact re-upload of the
+  // same photo — the cheapest way to farm one review into a tier — is
+  // auto-REJECTED tenant-wide.
+  photoSha256      String?
+  validatedAt      DateTime?
+  reviewedByUserId String?
+  uploadedByUserId String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([tenantId, employeeUserId, monthKey, status])
+  @@index([rentalAgreementId])
+}
+
 model CommissionPlan {
   id                  String               @id @default(cuid())
   tenantId            String?
@@ -2350,6 +2388,14 @@ model CommissionPlan {
   defaultValueType    CommissionValueType?
   defaultPercentValue Decimal?             @db.Decimal(5, 2)
   defaultFixedAmount  Decimal?             @db.Decimal(10, 2)
+  // LAX #5 (2026-07-25) — review-tier commission for counter staff. When set
+  // (non-empty array [{minReviews, pct}] sorted ascending), the counter
+  // employee's row is computed as tierPct(validated reviews this month) ×
+  // sold items on QUALIFYING contracts (reviewTierSourcesJson, e.g.
+  // ["EXPEDIA","PRICELINE"]) INSTEAD of the flat-rate catalog. Null = legacy
+  // catalog behavior, zero change for tenants without tiers.
+  reviewTiersJson        Json?
+  reviewTierSourcesJson  Json?
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 

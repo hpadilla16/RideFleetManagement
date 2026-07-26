@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
@@ -1814,6 +1814,38 @@ function ReservationDetailInner({ token, me, logout }) {
     }
   };
 
+  // LAX #5 — review proof upload, ON the reservation (Hector: "tiene que
+  // ser en la misma reservation" — the employee app isn't in use yet). The
+  // proof links to this reservation for audit; the AI validates on upload.
+  const [reviewUploading, setReviewUploading] = useState(false);
+  const [reviewProofMsg, setReviewProofMsg] = useState('');
+  const reviewProofInputRef = useRef(null);
+  const uploadReviewProof = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onerror = () => setReviewProofMsg('Could not read the file — try again.');
+    reader.onload = async () => {
+      try {
+        setReviewUploading(true);
+        setReviewProofMsg('');
+        const out = await api('/api/commissions/review-proofs', {
+          method: 'POST',
+          body: JSON.stringify({ reservationId: id, photoDataUrl: reader.result })
+        }, token);
+        setReviewProofMsg(out?.status === 'VALIDATED'
+          ? '✓ Review validated — it counts toward your tier this month.'
+          : out?.status === 'REJECTED'
+            ? `✕ Not validated${out?.aiNotes ? `: ${out.aiNotes}` : ''} — retake the photo of the POSTED review.`
+            : 'Uploaded — pending manual validation.');
+      } catch (e2) {
+        setReviewProofMsg(e2?.message || 'Upload failed');
+      } finally {
+        setReviewUploading(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const [depositOverrides, setDepositOverrides] = useState({
     depositDue: '',
     securityDeposit: ''
@@ -3470,6 +3502,27 @@ token
                   </div>
                 );
               })()}
+              <div className="card" style={{ marginTop: 14 }}>
+                <div className="row-between" style={{ marginBottom: 8 }}>
+                  <h3 style={{ margin: 0 }}>Customer Review</h3>
+                  <span className="label">Counts toward your monthly commission tier</span>
+                </div>
+                <div className="label" style={{ textTransform: 'none', letterSpacing: 0, lineHeight: 1.5, marginBottom: 10 }}>
+                  Got this customer to leave a review? Photograph the POSTED review (Google, etc.) and upload it — the AI validates it and it counts toward your review tier this month.
+                </div>
+                <div className="inline-actions">
+                  <button type="button" className="button-subtle" disabled={reviewUploading} onClick={() => reviewProofInputRef.current?.click()}>
+                    {reviewUploading ? 'Validating…' : '＋ Upload review photo'}
+                  </button>
+                  <input
+                    ref={reviewProofInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => { uploadReviewProof(e.target.files?.[0]); e.target.value = ''; }} />
+                </div>
+                {reviewProofMsg ? <div className="label" style={{ marginTop: 8, textTransform: 'none', letterSpacing: 0 }}>{reviewProofMsg}</div> : null}
+              </div>
               {canManageCommissionOwner && row?.rentalAgreement?.id ? (
                 <div className="card" style={{ marginTop: 14 }}>
                   <div className="row-between" style={{ marginBottom: 8 }}>

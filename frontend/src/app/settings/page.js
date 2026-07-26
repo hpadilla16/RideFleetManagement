@@ -45,7 +45,7 @@ import {
   DEFAULT_SELF_SERVICE_CONFIG, DEFAULT_CAR_SHARING_PRESET,
   EMPTY_LOCATION, LOCATION_CONFIG_DEFAULT, EMPTY_FEE, EMPTY_STOP_SALE, DEFAULT_REVIEW_EMAIL_CONFIG,
   EMPTY_VEHICLE_TYPE, EMPTY_RATE, EMPTY_SERVICE,
-  EMPTY_COMMISSION_PLAN, EMPTY_COMMISSION_RULE,
+  EMPTY_COMMISSION_PLAN, EMPTY_COMMISSION_RULE, DEFAULT_REVIEW_TIERS_UI,
   TENANT_TIMEZONE_OPTIONS, normalizeInsurancePlan, parseDelimitedRows
 } from './settings-constants';
 
@@ -2121,6 +2121,8 @@ function SettingsInner({ token, me, logout }) {
       name: plan.name || '',
       isActive: plan.isActive !== false,
       personKind: plan.personKind || '',
+      reviewTiers: Array.isArray(plan.reviewTiersJson) ? plan.reviewTiersJson : [],
+      reviewTierSources: Array.isArray(plan.reviewTierSourcesJson) ? plan.reviewTierSourcesJson : [],
       defaultValueType: plan.defaultValueType || '',
       defaultPercentValue: plan.defaultPercentValue ?? '',
       defaultFixedAmount: plan.defaultFixedAmount ?? ''
@@ -2145,6 +2147,13 @@ function SettingsInner({ token, me, logout }) {
       name: commissionPlanForm.name.trim(),
       isActive: !!commissionPlanForm.isActive,
       personKind: commissionPlanForm.personKind || null,
+      reviewTiers: (commissionPlanForm.reviewTiers || [])
+        // An untouched "+ Add tier" row is blank strings — drop it, don't
+        // let Number('') turn it into a phantom 0-reviews/0% tier.
+        .filter((t) => String(t.minReviews).trim() !== '' && String(t.pct).trim() !== '')
+        .map((t) => ({ minReviews: Number(t.minReviews), pct: Number(t.pct) }))
+        .filter((t) => Number.isFinite(t.minReviews) && Number.isFinite(t.pct)),
+      reviewTierSources: commissionPlanForm.reviewTierSources || [],
       defaultValueType: commissionPlanForm.defaultValueType || null,
       defaultPercentValue: commissionPlanForm.defaultPercentValue,
       defaultFixedAmount: commissionPlanForm.defaultFixedAmount
@@ -5896,6 +5905,71 @@ function SettingsInner({ token, me, logout }) {
                     <span className="label">Uses Default Percent on every service and insurance line the agent sells. Taxes, fees and deposits are always excluded. Set Default Rule Type to Percent.</span>
                   ) : null}
                 </div>
+
+                {commissionPlanForm.personKind !== 'VIRTUAL_AGENT' ? (
+                  <div className="stack">
+                    <label className="label">
+                      <input
+                        type="checkbox"
+                        checked={(commissionPlanForm.reviewTiers || []).length > 0}
+                        onChange={(e) => setCommissionPlanForm((prev) => ({
+                          ...prev,
+                          reviewTiers: e.target.checked ? DEFAULT_REVIEW_TIERS_UI.map((t) => ({ ...t })) : [],
+                          reviewTierSources: e.target.checked ? ['EXPEDIA', 'PRICELINE'] : []
+                        }))}
+                      /> Review-tier commissions (replaces the flat-rate catalog for this plan)
+                    </label>
+                    {(commissionPlanForm.reviewTiers || []).length ? (
+                      <div className="stack" style={{ gap: 6 }}>
+                        <span className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                          Percent of sold items (services + insurance) by validated reviews this month. Below the first row = no commission. Applies only to the sources checked below.
+                        </span>
+                        {(commissionPlanForm.reviewTiers || []).map((tier, idx) => (
+                          <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                            <input type="number" min="0" step="1" value={tier.minReviews}
+                              style={{ width: 110 }}
+                              onChange={(e) => setCommissionPlanForm((prev) => {
+                                const tiers = [...prev.reviewTiers];
+                                tiers[idx] = { ...tiers[idx], minReviews: e.target.value };
+                                return { ...prev, reviewTiers: tiers };
+                              })} />
+                            <span className="label">reviews →</span>
+                            <input type="number" min="0" max="100" step="0.5" value={tier.pct}
+                              style={{ width: 90 }}
+                              onChange={(e) => setCommissionPlanForm((prev) => {
+                                const tiers = [...prev.reviewTiers];
+                                tiers[idx] = { ...tiers[idx], pct: e.target.value };
+                                return { ...prev, reviewTiers: tiers };
+                              })} />
+                            <span className="label">%</span>
+                            <button type="button" className="button-subtle" onClick={() => setCommissionPlanForm((prev) => ({
+                              ...prev, reviewTiers: prev.reviewTiers.filter((_, j) => j !== idx)
+                            }))}>✕</button>
+                          </div>
+                        ))}
+                        <div>
+                          <button type="button" className="button-subtle" onClick={() => setCommissionPlanForm((prev) => ({
+                            ...prev, reviewTiers: [...prev.reviewTiers, { minReviews: '', pct: '' }]
+                          }))}>＋ Add tier</button>
+                        </div>
+                        <div style={{ display: 'flex', gap: 14 }}>
+                          {['EXPEDIA', 'PRICELINE'].map((src) => (
+                            <label key={src} className="label">
+                              <input type="checkbox"
+                                checked={(commissionPlanForm.reviewTierSources || []).includes(src)}
+                                onChange={(e) => setCommissionPlanForm((prev) => ({
+                                  ...prev,
+                                  reviewTierSources: e.target.checked
+                                    ? [...(prev.reviewTierSources || []), src]
+                                    : (prev.reviewTierSources || []).filter((s) => s !== src)
+                                }))} /> {src}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="grid2">
                   <div className="stack">

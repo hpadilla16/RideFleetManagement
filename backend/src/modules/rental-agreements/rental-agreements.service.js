@@ -32,6 +32,7 @@ import { userProgramScope } from '../../lib/tenant-scope.js';
 import { reservationProgramWhereForScope } from '../../lib/program-category.js';
 import { resolveCatalogEntry } from '../../lib/commission-catalog.js';
 import { isSoldItemCharge, SERVICE_CHARGE_SOURCES } from '../../lib/sold-items.js';
+import { normalizeReviewTiers, tierPercentFor } from '../../lib/review-tiers.js';
 import { spinClient } from '../payment-gateway/spin-client.js';
 import { iposTransactClient } from '../payment-gateway/ipos-transact-client.js';
 import { paymentOpsQueue } from '../payment-gateway/payment-ops-queue.service.js';
@@ -1579,10 +1580,9 @@ function calculateCommissionLine({ charge, rule, plan, appliedFixedAgreementRule
 // flat-rate SERVICE_CATALOG is deliberately NOT consulted: it would
 // short-circuit the percent (its entries win by design for standard
 // employees), and virtual-agent economics are percent-based.
-export function virtualAgentCommissionLines(charges = [], plan = null) {
-  if (String(plan?.defaultValueType || '').toUpperCase() !== 'PERCENT') return [];
-  const percent = Number(plan?.defaultPercentValue);
-  if (!Number.isFinite(percent) || !(percent > 0)) return [];
+export function percentSoldItemLines(charges = [], percent) {
+  const pct = Number(percent);
+  if (!Number.isFinite(pct) || !(pct > 0)) return [];
   return (Array.isArray(charges) ? charges : [])
     .filter(isSoldItemCharge)
     .map((charge) => ({
@@ -1598,6 +1598,28 @@ export function virtualAgentCommissionLines(charges = [], plan = null) {
       fixedAmount: null,
       commissionAmount: roundMoney(Number(charge?.total || 0) * (percent / 100))
     }));
+}
+
+// Virtual-agent lines: the plan's default percent over sold items.
+export function virtualAgentCommissionLines(charges = [], plan = null) {
+  if (String(plan?.defaultValueType || '').toUpperCase() !== 'PERCENT') return [];
+  return percentSoldItemLines(charges, Number(plan?.defaultPercentValue));
+}
+
+// LAX #5 — does this agreement's reservation qualify for the plan's
+// review-tier sources (e.g. EXPEDIA / PRICELINE)? Case-insensitive PREFIX
+// match on the reservation's bookingChannel AND (for franchise-promoted
+// rows) the linked ExternalReservation.channel — TL rows carry 'EXPEDIA02'
+// there and nothing propagates it to Reservation today.
+export function channelMatchesReviewSources(channelValues = [], sources = []) {
+  const wanted = (Array.isArray(sources) ? sources : [])
+    .map((s) => String(s || '').trim().toUpperCase())
+    .filter(Boolean);
+  if (!wanted.length) return false;
+  return (Array.isArray(channelValues) ? channelValues : []).some((raw) => {
+    const value = String(raw || '').trim().toUpperCase();
+    return value && wanted.some((w) => value === w || value.startsWith(w));
+  });
 }
 
 // Resolve the plan a VIRTUAL_AGENT earns under: their individually assigned
@@ -1725,7 +1747,9 @@ export async function syncAgreementCommissionSnapshot(rentalAgreementId) {
           source: true,
           sourceRefId: true
         }
-      }
+      },
+      // LAX #5: the review-tier qualifier reads the booking channel.
+      reservation: { select: { id: true, bookingChannel: true } }
     }
   });
   if (!agreement) throw new Error('Rental agreement not found');
@@ -1847,20 +1871,53 @@ export async function syncAgreementCommissionSnapshot(rentalAgreementId) {
         });
     plan = employeePlan || tenantPlan;
 
-    const appliedFixedAgreementRules = new Set();
-    lines = eligibleCharges
-      .map((charge) => {
-        const rule = resolveCommissionRule(charge, plan?.rules || [], servicesById, insurancePlansByCode);
-        const calc = calculateCommissionLine({ charge, rule, plan, appliedFixedAgreementRules });
-        return {
-          rentalAgreementChargeId: charge.id,
-          serviceId: String(charge?.source || '').toUpperCase() === 'ADDITIONAL_SERVICE' && charge?.sourceRefId
-            ? String(charge.sourceRefId)
-            : null,
-          ...calc
-        };
-      })
-      .filter((line) => line.valueType);
+    const reviewTiers = normalizeReviewTiers(plan?.reviewTiersJson);
+    if (plan && reviewTiers) {
+      // LAX #5 — review-tier commissions REPLACE the flat-rate catalog for
+      // counter staff on tenants that configure tiers: tierPct(validated
+      // reviews this month) × sold items, and ONLY on qualifying booking
+      // sources (Expedia/Priceline per the plan). Non-qualifying contracts
+      // earn nothing under tiers — "ONLY EXPEDIA/PRICELINE" is Hector's
+      // table verbatim. Tenants without tiers keep the catalog untouched.
+      const sources = Array.isArray(plan?.reviewTierSourcesJson) ? plan.reviewTierSourcesJson : [];
+      const channels = [agreement.reservation?.bookingChannel];
+      if (String(agreement.reservation?.bookingChannel || '').toUpperCase().startsWith('FRANCHISE')) {
+        const ext = await prisma.externalReservation.findFirst({
+          where: { promotedToReservationId: agreement.reservation.id },
+          select: { channel: true }
+        }).catch(() => null);
+        if (ext?.channel) channels.push(ext.channel);
+      }
+      if (channelMatchesReviewSources(channels, sources)) {
+        const month = monthKey(checkoutCapturedAt || agreement.closedAt || new Date());
+        const validatedReviews = await prisma.reviewProof.count({
+          where: {
+            tenantId: agreement.tenantId || null,
+            employeeUserId: commissionEmployeeUserId,
+            monthKey: month,
+            status: 'VALIDATED'
+          }
+        });
+        lines = percentSoldItemLines(agreement.charges, tierPercentFor(validatedReviews, reviewTiers));
+      } else {
+        lines = [];
+      }
+    } else {
+      const appliedFixedAgreementRules = new Set();
+      lines = eligibleCharges
+        .map((charge) => {
+          const rule = resolveCommissionRule(charge, plan?.rules || [], servicesById, insurancePlansByCode);
+          const calc = calculateCommissionLine({ charge, rule, plan, appliedFixedAgreementRules });
+          return {
+            rentalAgreementChargeId: charge.id,
+            serviceId: String(charge?.source || '').toUpperCase() === 'ADDITIONAL_SERVICE' && charge?.sourceRefId
+              ? String(charge.sourceRefId)
+              : null,
+            ...calc
+          };
+        })
+        .filter((line) => line.valueType);
+    }
   }
 
   // Virtual-agent SECOND row (sales owner ≠ checkout employee): computed
@@ -1901,7 +1958,33 @@ export async function syncAgreementCommissionSnapshot(rentalAgreementId) {
     }
   });
 
-  const snapshot = await prisma.agreementCommission.upsert({
+  // QA M1 (LAX #5): a PAID row's dollars are FROZEN — what was paid is a
+  // historical fact. Pre-tiers this was a latent hazard (config edits
+  // re-priced paid history); with tiers it becomes routine (the percent
+  // moves as the month's validated-review count grows, and the nightly
+  // resync sweep touches every agreement). PENDING/APPROVED rows keep
+  // refreshing — the retroactive whole-month tier bump is the intended
+  // semantics of Hector's table.
+  const paidStatuses = await prisma.agreementCommission.findMany({
+    where: { rentalAgreementId: agreement.id, employeeUserId: { in: keepEmployeeIds }, status: 'PAID' },
+    select: { employeeUserId: true }
+  });
+  const paidEmployeeIds = new Set(paidStatuses.map((r) => r.employeeUserId));
+
+  let snapshot;
+  if (paidEmployeeIds.has(commissionEmployeeUserId)) {
+    // Frozen: the paid counter row (and its lines) stay untouched. The VA
+    // block below still runs — each row freezes independently.
+    snapshot = await prisma.agreementCommission.findUnique({
+      where: {
+        rentalAgreementId_employeeUserId: {
+          rentalAgreementId: agreement.id,
+          employeeUserId: commissionEmployeeUserId
+        }
+      }
+    });
+  } else {
+  snapshot = await prisma.agreementCommission.upsert({
     where: {
       rentalAgreementId_employeeUserId: {
         rentalAgreementId: agreement.id,
@@ -1956,11 +2039,12 @@ export async function syncAgreementCommissionSnapshot(rentalAgreementId) {
       }))
     });
   }
+  }
 
   // 2026-07-25 (LAX #4) — the virtual-agent sales owner's SECOND row.
   // Status semantics identical to the main row: sync refreshes amounts,
-  // approve/mark-paid own the workflow status.
-  if (writeVaRow) {
+  // approve/mark-paid own the workflow status. PAID rows are frozen (QA M1).
+  if (writeVaRow && !paidEmployeeIds.has(virtualAgentUser.id)) {
     const vaEligibleRevenue = roundMoney(vaLines.reduce((sum, line) => sum + Number(line.lineRevenue || 0), 0));
     const vaCommissionAmount = roundMoney(vaLines.reduce((sum, line) => sum + Number(line.commissionAmount || 0), 0));
     const vaSnapshot = await prisma.agreementCommission.upsert({
