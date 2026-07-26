@@ -150,8 +150,14 @@ function SettingsInner({ token, me, logout }) {
     api(scopedSettingsPath('/api/settings/citation-ocr'), {}, token)
       .then((out) => out && setOcrCfg(out))
       .catch(() => {});
+    // activeSettingsTenantId in deps (2026-07-26 fix): for a SUPER_ADMIN these
+    // three loads are tenant-scoped via scopedSettingsPath, but the effect only
+    // ran once on mount — BEFORE a tenant was picked — so the toggles showed
+    // the unscoped/stale value forever. Hector flipped customer-led inspection
+    // ON for a tenant, the PUT landed in the right key, and the UI kept
+    // showing OFF ("no me deja prenderlo").
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, activeSettingsTenantId]);
 
   const saveOcrConfig = async (patch) => {
     setOcrSaving(true);

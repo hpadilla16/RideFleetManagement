@@ -10,7 +10,7 @@
  */
 import { Router } from 'express';
 import { prisma } from '../../../lib/prisma.js';
-import { userAllowedLocationIds } from '../../../lib/tenant-scope.js';
+import { userAllowedLocationIds, scopeFor as tenantScopeFor } from '../../../lib/tenant-scope.js';
 import { datasetsForRole } from './custom-report-datasets.js';
 import { runCustomReport, resolveDefinition, CustomReportError } from './custom-report.engine.js';
 import { renderReportExcel } from '../reports-export.js';
@@ -18,8 +18,14 @@ import { renderReportExcel } from '../reports-export.js';
 export const customReportsRouter = Router();
 
 function scopeFor(req) {
+  // Canonical tenant resolution (Sentry 54aacfd1, 2026-07-26): a SUPER_ADMIN
+  // has no tenantId of their own — req.user.tenantId is null and Prisma
+  // rejects a null filter with a 500 on every reports-v2 landing view. The
+  // lib helper resolves ?tenantId= for supers and the JWT tenant otherwise;
+  // callers below treat a still-missing tenant as empty/400, never a query.
+  const base = tenantScopeFor(req);
   return {
-    tenantId: req.user?.tenantId || null,
+    tenantId: base?.tenantId || null,
     role: String(req.user?.role || ''),
     allowedLocationIds: userAllowedLocationIds(req.user) || null
   };
@@ -34,6 +40,7 @@ function sendError(res, error) {
 
 async function getReportOrThrow(req) {
   const scope = scopeFor(req);
+  if (!scope.tenantId) throw new CustomReportError('Select a tenant first', 400);
   const row = await prisma.customReport.findFirst({
     where: { id: String(req.params.id), tenantId: scope.tenantId }
   });
@@ -64,6 +71,8 @@ customReportsRouter.post('/run', async (req, res, next) => {
 customReportsRouter.get('/', async (req, res, next) => {
   try {
     const scope = scopeFor(req);
+    // Super admin browsing without a tenant selected: nothing to list.
+    if (!scope.tenantId) return res.json({ reports: [] });
     const userId = req.user?.id || req.user?.sub || null;
     const rows = await prisma.customReport.findMany({
       where: {
@@ -91,6 +100,7 @@ customReportsRouter.get('/', async (req, res, next) => {
 customReportsRouter.post('/', async (req, res, next) => {
   try {
     const scope = scopeFor(req);
+    if (!scope.tenantId) throw new CustomReportError('Select a tenant first', 400);
     const { name, description, dataset, definition, visibility } = req.body || {};
     const cleanName = String(name || '').trim();
     if (!cleanName) throw new CustomReportError('Report name is required');
