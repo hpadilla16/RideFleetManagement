@@ -53,7 +53,7 @@
     "test:inspection-photos": "node --test src/modules/rental-agreements/inspection-photos-normalize.test.mjs",
     "test:commissions": "node --test src/modules/commissions/car-sharing-commission.test.mjs src/modules/rental-agreements/virtual-agent-commission.test.mjs src/lib/review-tiers.test.mjs",
     "test:economy": "node --test --test-force-exit src/modules/integrations/economy/economy.test.mjs src/modules/integrations/economy/economy.routes.test.mjs",
-    "test:nu": "node --test --test-force-exit src/modules/integrations/nu/nu.test.mjs src/modules/integrations/nu/nu.routes.test.mjs",
+    "test:nu": "node --test --test-force-exit src/modules/integrations/nu/nu.test.mjs src/modules/integrations/nu/nu.routes.test.mjs src/modules/integrations/nu/nu-ftp-parser.test.mjs",
     "test:flexways": "node --test --test-force-exit src/modules/integrations/flexways/flexways.test.mjs src/modules/integrations/flexways/flexways.routes.test.mjs src/modules/integrations/flexways/flexways-worker.test.mjs",
     "test:advantage": "node --test --test-force-exit src/modules/integrations/advantage/advantage.test.mjs src/modules/integrations/advantage/advantage.routes.test.mjs src/modules/integrations/advantage/advantage-worker.test.mjs",
     "verify": "npm run test",
