@@ -1062,6 +1062,28 @@ label input[type="radio"],
   color: #4b5563;
 }
 
+/* ── reports-v2 shared chrome (ReportPageLayout — 22 pages inherit) ──────── */
+.report-shell { max-width: 1200px; margin: 0 auto; padding: 20px 24px; }
+.report-breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-3); margin-bottom: 4px; }
+.report-breadcrumb-link { display: inline-flex; align-items: center; gap: 4px; color: var(--text-3); text-decoration: underline; cursor: pointer; }
+.report-breadcrumb-link:hover { color: var(--p-700); }
+.report-title { margin: 0 0 6px; font-size: 24px; font-weight: 700; letter-spacing: -.02em; }
+.report-desc { font-size: 13px; color: var(--text-3); margin-bottom: 16px; }
+.report-filterbar {
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--r-lg);
+  padding: 12px 14px; margin-bottom: 18px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.report-filterbar-extra { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.report-export-group { margin-left: auto; display: flex; gap: 8px; }
+.report-export-btn {
+  font-size: 13px; font-weight: 600; padding: 7px 12px; min-height: 40px;
+  background: var(--n-0); color: var(--text-1); border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm); cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  box-shadow: var(--sh-1);
+}
+.report-export-btn:hover { background: var(--surface-2); border-color: #c3b6e8; box-shadow: var(--sh-1); }
+.report-export-btn svg { color: var(--icon-quiet); }
+
 /* Screen lock */
 .screenlock-overlay {
   position: fixed;

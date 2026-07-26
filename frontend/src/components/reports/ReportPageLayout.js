@@ -82,59 +82,39 @@ export function ReportPageLayout({
   };
 
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 24px' }}>
+    <div className="report-shell">
 
       {/* Breadcrumb */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 6,
-        fontSize: 13, color: '#6f668f', marginBottom: 4,
-      }}>
-        <Link href="/reports-v2" style={{ color: '#6f668f', textDecoration: 'underline', cursor: 'pointer' }}>
-          ← Reports
+      <div className="report-breadcrumb">
+        <Link href="/reports-v2" className="report-breadcrumb-link">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+          Reports
         </Link>
         {category ? <><span>·</span><span>{category}</span></> : null}
       </div>
 
       {/* Title + description */}
-      <h1 style={{ margin: '0 0 6px', fontSize: 24, fontWeight: 500 }}>{title}</h1>
+      <h1 className="report-title">{title}</h1>
       {description ? (
-        <div style={{ fontSize: 13, color: '#6f668f', marginBottom: 16 }}>{description}</div>
+        <div className="report-desc">{description}</div>
       ) : null}
 
       {/* Filter bar */}
-      <div style={{
-        background: '#f1efe8', borderRadius: 12, padding: '12px 14px',
-        marginBottom: 18, display: 'flex', alignItems: 'center',
-        gap: 12, flexWrap: 'wrap',
-      }}>
+      <div className="report-filterbar">
         {hideDateRange
           ? (leftSlot || null)
           : <DateRangePicker value={range} onChange={onRangeChange} presets={presets} />}
         {extraFilters ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>{extraFilters}</div>
+          <div className="report-filterbar-extra">{extraFilters}</div>
         ) : null}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button
-            onClick={() => handleDownload('pdf')}
-            style={{
-              fontSize: 13, padding: '6px 12px',
-              background: 'white', border: '0.5px solid #d3d1c7',
-              borderRadius: 8, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}
-          >
-            📄 PDF
+        <div className="report-export-group">
+          <button className="report-export-btn" onClick={() => handleDownload('pdf')}>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+            PDF
           </button>
-          <button
-            onClick={() => handleDownload('excel')}
-            style={{
-              fontSize: 13, padding: '6px 12px',
-              background: 'white', border: '0.5px solid #d3d1c7',
-              borderRadius: 8, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}
-          >
-            📊 Excel
+          <button className="report-export-btn" onClick={() => handleDownload('excel')}>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M3 15h18M9 3v18M15 3v18" /></svg>
+            Excel
           </button>
         </div>
       </div>
