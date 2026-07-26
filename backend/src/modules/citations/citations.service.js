@@ -180,19 +180,57 @@ async function visibleCitationIds(scope = {}) {
 }
 
 // Build a normalized-plate → vehicleId map for the tenant once per batch.
+// 2026-07-26 (Orlando→LAX bug): the map now carries AMBIGUITY and the
+// vehicle's home state instead of silently picking a winner. The old
+// "first write wins; ambiguous plates are rare and caught in review" was
+// wrong on both counts once a tenant spans states: matching posts CHARGES,
+// so a two-branch plate collision would bill the wrong customer with no
+// review at all.
 async function buildVehiclePlateMap(tenantId) {
   const vehicles = await prisma.vehicle.findMany({
     where: { tenantId, plate: { not: null } },
-    select: { id: true, plate: true },
+    select: { id: true, plate: true, homeLocation: { select: { state: true } } },
   });
   const map = new Map();
   for (const v of vehicles) {
     const norm = normalizePlate(v.plate);
     if (!norm) continue;
-    // First write wins; ambiguous plates are rare and caught in review.
-    if (!map.has(norm)) map.set(norm, v.id);
+    const existing = map.get(norm);
+    if (existing) {
+      existing.ambiguous = true;
+      existing.count += 1;
+      continue;
+    }
+    map.set(norm, {
+      vehicleId: v.id,
+      homeState: v.homeLocation?.state ? String(v.homeLocation.state).trim().toUpperCase() : null,
+      ambiguous: false,
+      count: 1,
+    });
   }
   return map;
+}
+
+// Conservative geography check: which US state does the CITATION claim?
+// plateState (what the officer wrote) wins; else a keyword scan of the
+// agency/location text. Only EXPLICIT signals count — unknown → null →
+// no hold (never guess a mismatch into existence).
+const STATE_KEYWORDS = {
+  FL: ['ORLANDO', 'MIAMI', 'TAMPA', 'KISSIMMEE', 'FLORIDA', 'FT LAUDERDALE', 'FORT LAUDERDALE'],
+  CA: ['LOS ANGELES', 'SAN FRANCISCO', 'SAN DIEGO', 'CALIFORNIA', 'INGLEWOOD', 'HAWTHORNE'],
+  NV: ['LAS VEGAS', 'NEVADA', 'RENO'],
+  AZ: ['PHOENIX', 'ARIZONA', 'TUCSON'],
+  PR: ['PUERTO RICO', 'SAN JUAN', 'AUTOEXPRESO'],
+};
+function citationClaimedState({ plateState, agency, location }) {
+  const ps = String(plateState || '').trim().toUpperCase();
+  if (/^[A-Z]{2}$/.test(ps)) return ps;
+  const text = `${agency || ''} ${location || ''}`.toUpperCase();
+  if (!text.trim()) return null;
+  for (const [state, words] of Object.entries(STATE_KEYWORDS)) {
+    if (words.some((w) => text.includes(w))) return state;
+  }
+  return null;
 }
 
 // Find the rental whose window contains the citation timestamp for this vehicle.
@@ -249,7 +287,32 @@ export const citationsService = {
           continue;
         }
         const plateNormalized = normalizePlate(row.plateNormalized || row.plate);
-        const vehicleId = plateNormalized ? vehicleMap.get(plateNormalized) || null : null;
+        const plateEntry = plateNormalized ? vehicleMap.get(plateNormalized) || null : null;
+
+        // 2026-07-26 guards (Orlando→LAX bug). Both HOLD the citation for a
+        // human instead of auto-matching — matching posts charges, so a
+        // wrong match bills the wrong customer:
+        //  - AMBIGUOUS_PLATE: >1 vehicle shares the normalized plate. No
+        //    vehicle bind at all (picking one is the old silent bug).
+        //  - AGENCY_STATE_MISMATCH: the citation's claimed state (officer's
+        //    plate state, else agency/location keywords) contradicts the
+        //    matched vehicle's home state. The bind is KEPT for display —
+        //    the plate really is this vehicle's — but nothing auto-bills.
+        let holdReason = null;
+        let vehicleId = null;
+        if (plateEntry?.ambiguous) {
+          holdReason = 'AMBIGUOUS_PLATE';
+        } else if (plateEntry) {
+          vehicleId = plateEntry.vehicleId;
+          const claimedState = citationClaimedState({
+            plateState: row.plateState,
+            agency: row.agency,
+            location: row.location,
+          });
+          if (claimedState && plateEntry.homeState && claimedState !== plateEntry.homeState) {
+            holdReason = 'AGENCY_STATE_MISMATCH';
+          }
+        }
 
         const base = {
           tenantId,
@@ -270,6 +333,7 @@ export const citationsService = {
           externalUrl: row.externalUrl || null,
           documentPath: row.documentPath || row.documentUrl || null,
           vehicleId,
+          holdReason,
           sourcePayloadJson: row.raw ? JSON.stringify(row.raw).slice(0, 20000) : null,
         };
 
@@ -294,8 +358,10 @@ export const citationsService = {
           citation = await prisma.citation.update({ where: { id: existing.id }, data: base });
         }
 
-        // Two-level amarre: vehicleId already set above (level 1). Now reservation.
-        const reservation = await findMatchingReservation(tenantId, vehicleId, issuedAt);
+        // Two-level amarre: vehicleId already set above (level 1). Now
+        // reservation — SKIPPED entirely when a guard held the row: a held
+        // citation must never AUTO_CONFIRM or bill.
+        const reservation = holdReason ? null : await findMatchingReservation(tenantId, vehicleId, issuedAt);
         if (reservation) {
           await prisma.citation.update({
             where: { id: citation.id },

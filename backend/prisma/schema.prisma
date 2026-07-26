@@ -3247,6 +3247,13 @@ model Citation {
   billingStatus     CitationBillingStatus  @default(PENDING)
   matchConfidence   Decimal?               @db.Decimal(5, 2)
   needsReview       Boolean                @default(false)
+  // 2026-07-26 (Orlando→LAX bug): WHY the ingest held this citation out of
+  // auto-matching — 'AMBIGUOUS_PLATE' (>1 vehicle shares the normalized
+  // plate; first-write-wins used to pick one silently) or
+  // 'AGENCY_STATE_MISMATCH' (the agency/plate-state geography contradicts
+  // the matched vehicle's home state — the Orlando-on-LAX class). Null =
+  // held for an ordinary reason (no date / no plate match).
+  holdReason        String?
   sourcePayloadJson String?
   reviewNotes       String?
   createdAt         DateTime               @default(now())

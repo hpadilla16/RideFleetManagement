@@ -80,7 +80,7 @@
     "test:toll-void-credit": "node --test src/modules/reservations/toll-void-credit.test.mjs",
     "test:route-handlers": "node --test src/modules/reservations/route-handlers-defined.test.mjs",
     "test:customers-scope": "node --test --test-force-exit src/modules/customers/customers-tenant-scope.test.mjs",
-    "test:citations-scope": "node --test --test-force-exit src/modules/citations/citations-location-scope.test.mjs",
+    "test:citations-scope": "node --test --test-force-exit src/modules/citations/citations-location-scope.test.mjs src/modules/citations/citation-ingest-guards.test.mjs",
     "test:tolls-scope": "node --test --test-force-exit src/modules/tolls/tolls-location-scope.test.mjs",
     "test:tolls-scope-guard": "node --test --test-force-exit src/modules/tolls/tolls-scope-guard.test.mjs",
     "test:maintenance-scope": "node --test --test-force-exit src/modules/maintenance/maintenance-location-scope.test.mjs",
