@@ -21,3 +21,20 @@ export function providerForIngest({ provider, sourceType } = {}) {
   const st = String(sourceType || '').toUpperCase();
   return INGEST_SOURCE_PROVIDER[st] || null;
 }
+
+/**
+ * Kill-switch for the internal /ingest: a CSV env value (TOLLS_INGEST_DISABLED_
+ * PROVIDERS) of providers whose pushes should be REJECTED at the endpoint —
+ * used to cut off a misbehaving external scraper (the SunPass camoufox droplet)
+ * without rotating the shared internal token. Case/whitespace-insensitive.
+ * Empty -> nothing blocked (default). Returns a Set of upper-cased provider
+ * names; use `.has(provider)` at the route.
+ */
+export function parseDisabledIngestProviders(csv) {
+  return new Set(
+    String(csv || '')
+      .split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean)
+  );
+}

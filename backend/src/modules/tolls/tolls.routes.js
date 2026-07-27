@@ -3,7 +3,7 @@ import { prisma } from '../../lib/prisma.js';
 import { requireRole, isSuperAdmin } from '../../middleware/auth.js';
 import { scopeFor, userAllowedLocationIds } from '../../lib/tenant-scope.js';
 import { tollsService } from './tolls.service.js';
-import { providerForIngest } from './tolls-ingest-provider.js';
+import { providerForIngest, parseDisabledIngestProviders } from './tolls-ingest-provider.js';
 
 export const tollsRouter = Router();
 export const tollsInternalRouter = Router();
@@ -32,21 +32,29 @@ tollsInternalRouter.post('/ingest', requireInternalToken, async (req, res, next)
     const { tenantId, rows, sourceType, importMeta, provider, providerAccountId } = req.body || {};
     if (!tenantId) return res.status(400).json({ error: 'tenantId required' });
     const st = sourceType || 'SUNPASS_SYNC';
+    const wantProvider = providerForIngest({ provider, sourceType: st });
+
+    // Kill-switch: drop pushes for providers explicitly disabled at /ingest
+    // (cuts off a misbehaving external scraper without rotating the shared
+    // token). 202 + skipped so the pusher sees "accepted, not stored" and does
+    // not treat it as an error to retry.
+    const disabledProviders = parseDisabledIngestProviders(process.env.TOLLS_INGEST_DISABLED_PROVIDERS);
+    if (wantProvider && disabledProviders.has(wantProvider)) {
+      console.log(`[tolls] /ingest skipped ${wantProvider} batch of ${Array.isArray(rows) ? rows.length : 0} row(s) — provider disabled (kill-switch)`);
+      return res.status(202).json({ skipped: true, provider: wantProvider, reason: `${wantProvider} ingest disabled`, importedCount: 0 });
+    }
 
     // Pin the provider account so the batch lands on ITS OWN provider, not
     // whatever resolveActiveProvider happens to pick. No matching account ->
     // leave unpinned (legacy resolution) rather than drop the push.
     let pinnedAccountId = providerAccountId || null;
-    if (!pinnedAccountId) {
-      const wantProvider = providerForIngest({ provider, sourceType: st });
-      if (wantProvider) {
-        const acct = await prisma.tollProviderAccount.findFirst({
-          where: { tenantId, provider: wantProvider },
-          orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
-          select: { id: true }
-        });
-        pinnedAccountId = acct?.id || null;
-      }
+    if (!pinnedAccountId && wantProvider) {
+      const acct = await prisma.tollProviderAccount.findFirst({
+        where: { tenantId, provider: wantProvider },
+        orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
+        select: { id: true }
+      });
+      pinnedAccountId = acct?.id || null;
     }
 
     const out = await tollsService.createManualTransactions(
