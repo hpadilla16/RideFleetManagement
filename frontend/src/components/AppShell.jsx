@@ -7,6 +7,7 @@ import { API_BASE, TOKEN_KEY, USER_KEY, readStoredToken } from '../lib/client';
 import { isModuleEnabled, pathnameToModule } from '../lib/moduleAccess';
 import { useTranslation } from 'react-i18next';
 import { setLanguage } from '../lib/i18n';
+import { CommandPalette } from './CommandPalette';
 
 const NAV_ITEMS = [
   { href: '/dashboard', labelKey: 'nav.dashboard', moduleKey: 'dashboard' },
@@ -302,6 +303,17 @@ export function AppShell({ me, logout, children }) {
               <div className="topbar-name">{me?.fullName || me?.name || me?.email || t('appShell.userFallback')}</div>
               <div className="topbar-role">{me?.role || 'ADMIN'}</div>
             </div>
+            <button
+              type="button"
+              className="topbar-search-btn"
+              title={t('search.open', 'Search (Ctrl+K)')}
+              onClick={() => { try { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true })); } catch { /* no-op */ } }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, border: '1px solid var(--border-2, #d9d2ea)', background: 'var(--surface-2, #f7f5fd)', color: 'var(--text-3, #736a8b)', borderRadius: 8, padding: '7px 12px', fontSize: 12.5, cursor: 'pointer', minWidth: 0 }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+              <span className="topbar-search-label">{t('search.placeholder', 'Search plate, booking, customer…')}</span>
+              <kbd style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono, ui-monospace, monospace)', fontSize: 10, border: '1px solid var(--border-2, #d9d2ea)', borderRadius: 5, padding: '1px 6px' }}>⌘K</kbd>
+            </button>
           </div>
 
           <div className="topbar-actions">
@@ -313,6 +325,8 @@ export function AppShell({ me, logout, children }) {
             <button className="topbar-action-btn" onClick={logout}>{t('topbar.logout')}</button>
           </div>
         </div>
+
+        <CommandPalette />
 
         {blockedModule ? (
           <section className="glass card-lg stack">

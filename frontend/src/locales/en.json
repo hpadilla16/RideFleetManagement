@@ -83,6 +83,14 @@
     "tileMaintenanceOos": "Maintenance / OOS",
     "tileMaintenanceOosDesc": "Units blocked for maintenance or out-of-service work.",
     "tileMaintenanceOosTitle": "Open maintenance / out-of-service units",
+    "search": {
+      "open": "Search (Ctrl+K)",
+      "placeholder": "Search plate, booking, customer…",
+      "hint": "Type at least 2 characters — plate, booking #, agreement #, name, phone or email.",
+      "loading": "Searching…",
+      "empty": "No matches.",
+      "type": { "reservation": "Reservation", "agreement": "Agreement", "vehicle": "Vehicle", "customer": "Customer" }
+    },
     "tileCollectedToday": "Collected Today",
     "tileCollectedTodayTitle": "Money collected today (paid, deposit holds excluded). Click for Payments by Day.",
     "tileCollectedTodayDesc": "Paid today, tenant timezone. Click for the daily breakdown.",

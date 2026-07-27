@@ -83,6 +83,14 @@
     "tileMaintenanceOos": "Mantenimiento / Fuera de Servicio",
     "tileMaintenanceOosDesc": "Unidades bloqueadas por mantenimiento o fuera de servicio.",
     "tileMaintenanceOosTitle": "Abrir unidades en mantenimiento / fuera de servicio",
+    "search": {
+      "open": "Buscar (Ctrl+K)",
+      "placeholder": "Buscar placa, reserva, cliente…",
+      "hint": "Escribe al menos 2 caracteres — placa, # de reserva, # de contrato, nombre, telefono o correo.",
+      "loading": "Buscando…",
+      "empty": "Sin resultados.",
+      "type": { "reservation": "Reserva", "agreement": "Contrato", "vehicle": "Vehiculo", "customer": "Cliente" }
+    },
     "tileCollectedToday": "Cobrado Hoy",
     "tileCollectedTodayTitle": "Dinero cobrado hoy (pagado, sin holds de deposito). Clic para Pagos por Dia.",
     "tileCollectedTodayDesc": "Pagado hoy, zona horaria del tenant. Clic para el desglose diario.",

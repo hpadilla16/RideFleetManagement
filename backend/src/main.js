@@ -73,6 +73,7 @@ import { issueCenterRouter, publicIssueCenterRouter } from './modules/issue-cent
 import { tollsRouter, tollsInternalRouter } from './modules/tolls/tolls.routes.js';
 import { fleetInternalRouter } from './modules/vehicles/fleet-internal.routes.js';
 import { customReportsRouter } from './modules/reports/custom/custom-reports.routes.js';
+import { globalSearchRouter } from './modules/search/global-search.routes.js';
 import { plannerRouter } from './modules/planner/planner.routes.js';
 import { quotesRouter } from './modules/quotes/quotes.routes.js';
 import { paymentGatewayRouter } from './modules/payment-gateway/payment-gateway.routes.js';
@@ -351,6 +352,9 @@ app.use('/api/customer-inspections', requireAuth, tenantRateLimit, customerInspe
 // Report Builder (2026-07-26): saved custom reports. Mounted BEFORE the v2
 // router so /custom/* never falls through to a report slug.
 app.use('/api/reports/custom', requireAuth, tenantRateLimit, requireModuleAccess('reports'), customReportsRouter);
+// Global search for the Cmd/Ctrl+K palette (2026-07-27): any authenticated
+// staff; results only link to pages that keep their own guards.
+app.use('/api/search', requireAuth, tenantRateLimit, globalSearchRouter);
 app.use('/api/reports', requireAuth, tenantRateLimit, requireModuleAccess('reports'), reportsV2Router);
 app.use('/api/reports', requireAuth, tenantRateLimit, requireModuleAccess('reports'), reportsRouter);
 app.use('/api/commissions', requireAuth, tenantRateLimit, requireModuleAccess('reports'), commissionsRouter);
