@@ -234,6 +234,16 @@ async function main() {
     });
   }
 
+  // TollBridge partner poller (2026-07-27) — own flag/timer; dormant unless
+  // TOLLBRIDGE_IMPORT_ENABLED=true. Fail-isolated like the scrapers.
+  try {
+    const tbMod = await import('./modules/tolls/tollbridge/tollbridge.scheduler.js');
+    tbMod.startTollBridgeImportScheduler();
+    logger.info('[worker] started: tollbridge import scheduler (if enabled)');
+  } catch (err) {
+    logger.warn('[worker] tollbridge import scheduler not started', { message: err.message });
+  }
+
   // Citations OCR mail intake (2026-06-15, Fase B) — processes uploaded/emailed
   // citation-notice scans (CitationDocument PENDING) via vision-LLM → ingestBatch.
   // No-ops unless CITATION_OCR_ENABLED + provider key are set. Dynamic import so a
@@ -327,6 +337,10 @@ async function main() {
     try {
       const tollsMod = await import('./modules/tolls/tolls.scheduler.js');
       tollsMod.stopTollAutoSyncScheduler();
+    } catch {}
+    try {
+      const tbMod = await import('./modules/tolls/tollbridge/tollbridge.scheduler.js');
+      tbMod.stopTollBridgeImportScheduler();
     } catch {}
     try {
       const ocrMod = await import('./modules/citations/citation-ocr.scheduler.js');

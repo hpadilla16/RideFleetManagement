@@ -405,6 +405,11 @@ enum LoanerBillingStatus {
 enum TollProvider {
   AUTOEXPRESO
   SUNPASS
+  // TollBridge partner feed (2026-07-27): RFM polls their
+  // GET /api/partner/tolls and ingests via the same pipeline as the scrapers
+  // (sede stamp + matcher + agreement mirror + staff alerts all reused). Not a
+  // browser scraper.
+  TOLLBRIDGE
 }
 
 enum TollTransactionStatus {
