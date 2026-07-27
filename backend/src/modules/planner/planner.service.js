@@ -18,6 +18,59 @@ function tenantWhere(scope = {}) {
   return scope?.allowCrossTenant ? undefined : { tenantId: '__never__' };
 }
 
+// Blocked-reason signals for the planner chips (Innovation #4, 2026-07-27).
+// Data-only, no migration: three cheap groupBy counts over the VISIBLE
+// vehicle ids. Deliberately NOT joined into buildVehicleOperationalSignalsMap
+// (that query already fights the 15s statement_timeout — see its comments).
+async function buildVehicleBlockSignalsMap(vehicleIds = [], scope = {}) {
+  const ids = [...new Set((Array.isArray(vehicleIds) ? vehicleIds : []).filter(Boolean))];
+  const map = new Map();
+  if (!ids.length) return map;
+  const tenantId = scope?.tenantId || null;
+  if (!tenantId) return map; // planner is always tenant-scoped in practice
+
+  const [repairRows, tollRows, citationRows] = await Promise.all([
+    prisma.repairOrder.groupBy({
+      by: ['vehicleId'],
+      where: { tenantId, vehicleId: { in: ids }, status: { in: ['OPEN', 'IN_PROGRESS'] } },
+      _count: { _all: true }
+    }).catch(() => []),
+    prisma.tollTransaction.groupBy({
+      by: ['vehicleId'],
+      where: {
+        tenantId,
+        vehicleId: { in: ids },
+        staffAckAt: null,
+        status: { in: ['MATCHED', 'BILLED'] },
+        billingStatus: { in: ['PENDING', 'POSTED_TO_RESERVATION', 'POSTED_TO_AGREEMENT'] }
+      },
+      _count: { _all: true }
+    }).catch(() => []),
+    prisma.citation.groupBy({
+      by: ['vehicleId'],
+      where: {
+        tenantId,
+        vehicleId: { in: ids },
+        billingStatus: { in: ['PENDING', 'POSTED_TO_AGREEMENT'] }
+      },
+      _count: { _all: true }
+    }).catch(() => [])
+  ]);
+
+  const bump = (rows, key) => {
+    for (const row of rows) {
+      if (!row.vehicleId) continue;
+      const cur = map.get(row.vehicleId) || { maintenance: 0, tollsPending: 0, citations: 0 };
+      cur[key] = Number(row._count?._all || 0);
+      map.set(row.vehicleId, cur);
+    }
+  };
+  bump(repairRows, 'maintenance');
+  bump(tollRows, 'tollsPending');
+  bump(citationRows, 'citations');
+  return map;
+}
+
 function normalizeDate(value, label) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) throw new Error(`${label} must be a valid date`);
@@ -139,7 +192,8 @@ function vehicleTrackLabel(vehicle = {}) {
       name: vehicle.vehicleType.name,
       code: vehicle.vehicleType.code
     } : null,
-    operationalSignals: vehicle.operationalSignals || null
+    operationalSignals: vehicle.operationalSignals || null,
+    blockSignals: vehicle.blockSignals || null
   };
 }
 
@@ -536,9 +590,17 @@ export const plannerService = {
       activeBlocksByVehicleId,
       telematicsFeatureEnabled: telematicsConfig?.ready !== false
     });
+    // Blocked-reason chips (Innovation #4, 2026-07-27, Hector: only what's
+    // already in the data). Cheap groupBy counts over the VISIBLE vehicle ids
+    // — no join into the heavy signals query, no migration.
+    const blockSignalsMap = await buildVehicleBlockSignalsMap(
+      vehicles.map((vehicle) => vehicle.id),
+      scope
+    );
     const vehiclesWithSignals = vehicles.map((vehicle) => ({
       ...vehicle,
-      operationalSignals: signalsMap.get(vehicle.id) || null
+      operationalSignals: signalsMap.get(vehicle.id) || null,
+      blockSignals: blockSignalsMap.get(vehicle.id) || null
     }));
 
     const occupancy = buildOccupancyMap({ vehicles: vehiclesWithSignals, reservations });

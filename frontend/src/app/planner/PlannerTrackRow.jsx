@@ -65,6 +65,24 @@ export function PlannerTrackRow({
             ) : null}
             {hasInspectionAttention(vehicle) ? <span className="status-chip warn">Inspection Attention</span> : null}
             {hasTelematicsAttention(vehicle) ? <span className="status-chip neutral">Telematics {vehicle.operationalSignals?.telematics?.status || 'Attention'}</span> : null}
+            {/* Blocked-reason chips (Innovation #4): open WO / unbilled tolls /
+                pending citations on this vehicle — data-only, from planner
+                snapshot blockSignals. */}
+            {Number(vehicle?.blockSignals?.maintenance || 0) > 0 ? (
+              <span className="status-chip warn" title="Open repair order(s)">
+                WO {vehicle.blockSignals.maintenance}
+              </span>
+            ) : null}
+            {Number(vehicle?.blockSignals?.tollsPending || 0) > 0 ? (
+              <span className="status-chip neutral" title="Unbilled tolls attached to this vehicle">
+                Tolls {vehicle.blockSignals.tollsPending}
+              </span>
+            ) : null}
+            {Number(vehicle?.blockSignals?.citations || 0) > 0 ? (
+              <span className="status-chip neutral" title="Citations pending on this vehicle">
+                Citations {vehicle.blockSignals.citations}
+              </span>
+            ) : null}
           </div>
         ) : null}
         {vehicle.id === '__unassigned__' && plannerOverbookedCount ? (
