@@ -48,7 +48,9 @@ import {
   TIME_ZONE,
   HEADER_ANCHORS,
   isPrepaidFromCode,
+  NU_TRANSPORT,
 } from './nu.constants.js';
+import { listRezFiles } from './nu-sftp-client.js';
 
 export { SOURCE_SYSTEM, BASE_URL };
 
@@ -943,6 +945,15 @@ export function filterByPickupWindow(rows, dateFrom, dateTo) {
 // ---------------------------------------------------------------------------
 export async function testAuth(tenantId) {
   try {
+    if (NU_TRANSPORT === 'sftp') {
+      // SFTP transport: connect + LIST the drop folder only (never download or
+      // delete — a Test must not consume .REZ files). Proves the credentials
+      // authenticate and the drop directory is reachable.
+      const creds = await getCredentials(tenantId);
+      const files = await listRezFiles(creds);
+      await recordTestStatus(tenantId, 'OK');
+      return { ok: true, status: 'OK', message: `SFTP OK — ${files.length} .REZ file(s) in drop` };
+    }
     await login(tenantId);
     // A no-window fetch confirms the session can render the reservations grid.
     await fetchReservationList(tenantId, {});
