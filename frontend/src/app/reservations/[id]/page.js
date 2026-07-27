@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
+import { LifecycleRail } from '../../../components/reservations/LifecycleRail';
 import { AgreementAddendumsCard } from '../../../components/AgreementAddendumsCard';
 import { ReservationExtendDialog } from '../../../components/ReservationExtendDialog';
 import { ReservationOverridePanel } from '../../../components/admin/ReservationOverridePanel';
@@ -2539,6 +2540,12 @@ token
   return (
     <AppShell me={me} logout={logout}>
       {msg ? <p className="label">{msg}</p> : null}
+      {/* Lifecycle rail (Innovation #1): stage strip + Balance/Deposit always
+          visible. agreementFull is the bypassCache agreement fetch this page
+          already does — the server-side source of truth for balance. */}
+      <div style={{ marginBottom: 12 }}>
+        <LifecycleRail reservation={row} agreement={agreementFull || row?.rentalAgreement || null} />
+      </div>
       <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
         <div className="app-banner">
           <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
