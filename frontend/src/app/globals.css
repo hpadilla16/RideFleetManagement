@@ -39,6 +39,7 @@
   --danger:#c02626;--danger-bg:#fdecea; --danger-bd:#f6cdc9;--danger-tx:#9c1d1d;
   --info:#0b63d6;  --info-bg:#eaf2fe;   --info-bd:#c5dcfb; --info-tx:#0b63d6;
   --teal-tx:#086a5e; /* returns accent — 6.49:1 AA on white */
+  --brand-tx:var(--p-700); /* brand-colored TEXT — inverts in dark */
 
   /* ── Surfaces / borders / text ── */
   --surface-0:var(--n-50);       /* page canvas (staff app)             */
@@ -69,8 +70,9 @@
   --brand-purple:var(--brand);
   --brand-violet:var(--p-700);
   --brand-mint:#1fc7aa;
-  --brand-ink:var(--n-900);
-  --brand-charcoal:var(--n-800);
+  /* text aliases (NOT raw ramp steps) so dark mode inverts them for free */
+  --brand-ink:var(--text-1);
+  --brand-charcoal:var(--text-1);
   --brand-white:#FFFFFF;
   --bg-soft:var(--n-50);
   --bg-soft-2:var(--n-25);
@@ -1448,6 +1450,15 @@ label input[type="radio"],
   --ios-muted: var(--text-3);
   --ios-ring: var(--focus-halo);
 
+  /* Low neutral steps re-point to dark plates (the target's .band--ink
+     pattern) so components that hard-code a "white plate" invert for free. */
+  --n-0: #1a1e2a;
+  --n-25: #161922;
+  --n-50: #131722;
+  --n-100: #1d2230;
+  --n-200: #2a2f3a;
+  --n-300: #3a4150;
+
   --surface-0: #0f1117;
   --surface-1: #141824;
   --surface-card: #161922;
@@ -1470,6 +1481,7 @@ label input[type="radio"],
   --danger-bg: rgba(224,69,59,.16);--danger-bd: rgba(224,69,59,.34);--danger-tx: #ff9d95;
   --info-bg: rgba(11,99,214,.18); --info-bd: rgba(124,192,255,.30);--info-tx: #7cc0ff;
   --teal-tx: #4fd6c0;
+  --brand-tx: #c0a8ff; /* 9.83:1 on the dark canvas */
 
   --sh-1: 0 1px 2px rgba(0,0,0,.55);
   --sh-2: 0 2px 6px rgba(0,0,0,.5), 0 14px 32px -14px rgba(0,0,0,.9);
@@ -1496,16 +1508,20 @@ label input[type="radio"],
 :root[data-theme='dark'] h4 {
   color: #f3f4f6;
 }
-:root[data-theme='dark'] input,
-:root[data-theme='dark'] select,
-:root[data-theme='dark'] textarea {
+/* :where() keeps these at element-level specificity, so any CLASSED control
+   (.info-tile buttons, .button-subtle, .pl-* chrome, .report-export-btn…)
+   still wins with its own — dark-aware — surface. Without it, this rule
+   out-specified every classed button and painted them all purple. */
+:where(:root[data-theme='dark']) input,
+:where(:root[data-theme='dark']) select,
+:where(:root[data-theme='dark']) textarea {
   background: #171b24;
   border-color: var(--border-strong);
   color: var(--text-1);
 }
 /* Primary buttons keep the flat brand fill in dark — white on --p-600 is
    6.57:1 regardless of theme (deterministic contrast, review Q4). */
-:root[data-theme='dark'] button {
+:where(:root[data-theme='dark']) button {
   background: var(--p-600);
   border-color: var(--p-600);
   color: #fff;

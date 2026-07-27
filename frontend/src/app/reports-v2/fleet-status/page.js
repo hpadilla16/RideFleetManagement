@@ -336,7 +336,7 @@ function Row({ v }) {
 const CARD_ACCENTS = {
   ok:    'var(--ok-tx)',
   warn:  'var(--warn-tx)',
-  brand: 'var(--p-700)',
+  brand: 'var(--brand-tx)',
 };
 function Card({ label, value, hint, accent }) {
   return (
@@ -362,7 +362,7 @@ function Th({ children, align = 'left', sortKey, sort, onClick }) {
       }}
     >
       {children}
-      <span style={{ color: 'var(--p-700)', fontWeight: 600 }}>{arrow}</span>
+      <span style={{ color: 'var(--brand-tx)', fontWeight: 600 }}>{arrow}</span>
     </th>
   );
 }
