@@ -189,13 +189,30 @@ function TollsInner({ token, me, logout }) {
   }, [token, statusFilter, reviewOnly, activeTenantId, isSuper]);
 
   const transactions = useMemo(() => Array.isArray(dashboard?.transactions) ? dashboard.transactions : [], [dashboard]);
+  // Match-triage buckets (Innovation #3, 2026-07-27): a confidence axis over
+  // the existing billing-workflow tabs, timely for the TollBridge LAX feed
+  // where non-matches will grow. Grounded in serializeTransaction fields:
+  //  - AUTO_MATCHED: confidently attributed to a contract, no human needed.
+  //  - NEEDS_REVIEW: a suggestion exists but a human must confirm/reject.
+  //  - UNMATCHED: nothing to attribute to (no vehicle / wrong sede / no
+  //    reservation window) — the "vehicle-not-found"/"vehicle-outside-location"
+  //    holds from the matcher.
+  const isAutoMatched = (row) => !!row.reservation?.id && !row.needsReview && ['MATCHED', 'BILLED'].includes(String(row.status || '').toUpperCase());
+  const isNeedsReview = (row) => !!row.needsReview && (!!row.reservation?.id || !!row.vehicle?.id || Number(row.matchConfidence || 0) > 0);
+  const isUnmatched = (row) => !isAutoMatched(row) && !isNeedsReview(row) && !row.reservation?.id;
   const queueCounts = useMemo(() => ({
     ALL: transactions.length,
+    AUTO_MATCHED: transactions.filter(isAutoMatched).length,
+    NEEDS_REVIEW: transactions.filter(isNeedsReview).length,
+    UNMATCHED: transactions.filter(isUnmatched).length,
     DISPATCH_REVIEW: transactions.filter((row) => row.dispatchConfirmationRequired).length,
     USAGE_ONLY: transactions.filter((row) => row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY').length,
     READY_TO_POST: transactions.filter((row) => row.reservation?.id && row.billingStatus === 'PENDING' && !row.needsReview && !(row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY')).length
   }), [transactions]);
   const visibleTransactions = useMemo(() => {
+    if (queueView === 'AUTO_MATCHED') return transactions.filter(isAutoMatched);
+    if (queueView === 'NEEDS_REVIEW') return transactions.filter(isNeedsReview);
+    if (queueView === 'UNMATCHED') return transactions.filter(isUnmatched);
     if (queueView === 'DISPATCH_REVIEW') return transactions.filter((row) => row.dispatchConfirmationRequired);
     if (queueView === 'USAGE_ONLY') return transactions.filter((row) => row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY');
     if (queueView === 'READY_TO_POST') {
@@ -753,6 +770,15 @@ function TollsInner({ token, me, logout }) {
             <button type="button" className={queueView === 'ALL' ? '' : 'button-subtle'} onClick={() => setQueueView('ALL')}>
               All ({queueCounts.ALL})
             </button>
+            <button type="button" className={queueView === 'AUTO_MATCHED' ? '' : 'button-subtle'} onClick={() => setQueueView('AUTO_MATCHED')}>
+              Auto-matched ({queueCounts.AUTO_MATCHED})
+            </button>
+            <button type="button" className={queueView === 'NEEDS_REVIEW' ? '' : 'button-subtle'} onClick={() => setQueueView('NEEDS_REVIEW')}>
+              Needs review ({queueCounts.NEEDS_REVIEW})
+            </button>
+            <button type="button" className={queueView === 'UNMATCHED' ? '' : 'button-subtle'} onClick={() => setQueueView('UNMATCHED')}>
+              Unmatched ({queueCounts.UNMATCHED})
+            </button>
             <button type="button" className={queueView === 'DISPATCH_REVIEW' ? '' : 'button-subtle'} onClick={() => setQueueView('DISPATCH_REVIEW')}>
               Dispatch Review ({queueCounts.DISPATCH_REVIEW})
             </button>
@@ -763,6 +789,21 @@ function TollsInner({ token, me, logout }) {
               Ready To Post ({queueCounts.READY_TO_POST})
             </button>
           </div>
+          {queueView === 'AUTO_MATCHED' ? (
+            <div className="surface-note" style={{ marginBottom: 10 }}>
+              Confidently attributed to a contract — no action needed. Spot-check as you like.
+            </div>
+          ) : null}
+          {queueView === 'NEEDS_REVIEW' ? (
+            <div className="surface-note" style={{ marginBottom: 10 }}>
+              A match was suggested but needs a human decision. Confirm or reject each toll below.
+            </div>
+          ) : null}
+          {queueView === 'UNMATCHED' ? (
+            <div className="surface-note" style={{ marginBottom: 10 }}>
+              No contract could be attributed (vehicle not found, wrong sede, or no rental window). These bill no one until matched — assign a reservation or leave for the next re-match sweep.
+            </div>
+          ) : null}
           {queueView === 'DISPATCH_REVIEW' ? (
             <div className="surface-note" style={{ marginBottom: 10 }}>
               These tolls need an operations decision because the vehicle is generating toll activity before formal checkout was completed.
