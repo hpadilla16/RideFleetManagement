@@ -44,6 +44,8 @@
  */
 
 import { Router } from 'express';
+import { filterExternalRowsByLocationScope } from '../booking-source/pending-import-scope.js';
+import { userAllowedLocationIds } from '../../../lib/tenant-scope.js';
 import { requireAuth, requireRole, isSuperAdmin } from '../../../middleware/auth.js';
 import { prisma } from '../../../lib/prisma.js';
 import logger from '../../../lib/logger.js';
@@ -531,9 +533,18 @@ nuRouter.get('/pending-imports', asyncHandler(async (req, res) => {
       isPrepaid: true,
       lastSyncedAt: true,
       firstSeenAt: true,
+      rawJson: true,
     },
   });
-  res.json({ rows, count: rows.length });
+  // Location scoping (2026-07-27): a location-scoped admin only sees pending
+  // imports for their own sede(s); unscoped admins see everything.
+  const scopedRows = await filterExternalRowsByLocationScope(rows, {
+    tenantId,
+    allowedLocationIds: userAllowedLocationIds(req.user),
+    sourceSystem: SOURCE_SYSTEM,
+  });
+  const outRows = scopedRows.map(({ rawJson, ...rest }) => rest);
+  res.json({ rows: outRows, count: outRows.length });
 }));
 
 // ---------------------------------------------------------------------------
