@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma.js';
 import { requireRole, isSuperAdmin } from '../../middleware/auth.js';
 import { scopeFor, userAllowedLocationIds } from '../../lib/tenant-scope.js';
 import { tollsService } from './tolls.service.js';
+import { providerForIngest } from './tolls-ingest-provider.js';
 
 export const tollsRouter = Router();
 export const tollsInternalRouter = Router();
@@ -21,17 +22,42 @@ function requireInternalToken(req, res, next) {
 }
 
 // Body: { tenantId, rows:[{transactionAt, plate?, tag?, sello?, amount, location?,
-//   lane?, direction?, externalId, transactionTimeRaw?}], sourceType?, importMeta? }
+//   lane?, direction?, externalId, transactionTimeRaw?}], sourceType?, importMeta?,
+//   provider?, providerAccountId? }
+// provider/providerAccountId pin the batch to its own account (see above); when
+// omitted, provider is inferred from sourceType.
 // tenant must have tollsEnabled (enforced inside createManualTransactions).
 tollsInternalRouter.post('/ingest', requireInternalToken, async (req, res, next) => {
   try {
-    const { tenantId, rows, sourceType, importMeta } = req.body || {};
+    const { tenantId, rows, sourceType, importMeta, provider, providerAccountId } = req.body || {};
     if (!tenantId) return res.status(400).json({ error: 'tenantId required' });
+    const st = sourceType || 'SUNPASS_SYNC';
+
+    // Pin the provider account so the batch lands on ITS OWN provider, not
+    // whatever resolveActiveProvider happens to pick. No matching account ->
+    // leave unpinned (legacy resolution) rather than drop the push.
+    let pinnedAccountId = providerAccountId || null;
+    if (!pinnedAccountId) {
+      const wantProvider = providerForIngest({ provider, sourceType: st });
+      if (wantProvider) {
+        const acct = await prisma.tollProviderAccount.findFirst({
+          where: { tenantId, provider: wantProvider },
+          orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
+          select: { id: true }
+        });
+        pinnedAccountId = acct?.id || null;
+      }
+    }
+
     const out = await tollsService.createManualTransactions(
       Array.isArray(rows) ? rows : [],
       { tenantId },
       null,
-      { sourceType: sourceType || 'SUNPASS_SYNC', importMeta: importMeta || null }
+      {
+        sourceType: st,
+        importMeta: importMeta || null,
+        ...(pinnedAccountId ? { providerAccountId: pinnedAccountId } : {})
+      }
     );
     res.status(201).json(out);
   } catch (error) {
