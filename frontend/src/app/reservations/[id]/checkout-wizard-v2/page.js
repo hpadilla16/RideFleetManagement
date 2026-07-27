@@ -89,6 +89,24 @@ function CheckoutWizardV2({ token, me, logout }) {
   const [toast, setToast] = useState(null);
   const [swapOpen, setSwapOpen] = useState(false);
   const pollTimer = useRef(null);
+
+  // Innovation #5 (2026-07-27): drive the live customer display. The second
+  // screen (/customer-display) already listens on the 'customer-display'
+  // BroadcastChannel and fast-polls charges once it knows the reservation —
+  // it just was never TOLD which reservation. Broadcast load-reservation when
+  // the wizard mounts (and re-broadcast if the display announces itself
+  // ready), so opening the wizard makes the customer's screen follow along.
+  useEffect(() => {
+    if (!reservationId || typeof BroadcastChannel === 'undefined') return;
+    let ch;
+    try {
+      ch = new BroadcastChannel('customer-display');
+      const announce = () => ch.postMessage({ type: 'load-reservation', id: String(reservationId) });
+      announce();
+      ch.onmessage = (e) => { if (e?.data?.type === 'display-ready') announce(); };
+    } catch { /* channel unsupported — polling on the display still works via ?id= */ }
+    return () => { try { ch && ch.close(); } catch { /* no-op */ } };
+  }, [reservationId]);
   // In-flight guard for the transition POST. Multiple triggers can race
   // (double-clicked Continue button, the auto-advance effect re-running on
   // a stale poll snapshot, StepBridge's 500ms timer remounting) — without
