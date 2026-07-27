@@ -27,12 +27,13 @@ import { AppShell } from '../../../components/AppShell';
 import { api } from '../../../lib/client';
 import { ReportPageLayout } from '../../../components/reports/ReportPageLayout';
 
+// Status -> additive chip classes from the token layer (design/UI-MIGRATION.md).
 const STATUS_PILL = {
-  AVAILABLE:      { bg: '#EAF3DE', fg: '#173404', label: 'Available' },
-  RESERVED:       { bg: '#EEEDFE', fg: '#26215C', label: 'Reserved' },
-  ON_RENT:        { bg: '#FAEEDA', fg: '#412402', label: 'On rent' },
-  IN_MAINTENANCE: { bg: '#F1EFE8', fg: '#444441', label: 'Maintenance' },
-  OUT_OF_SERVICE: { bg: '#FCEBEB', fg: '#501313', label: 'Out of service' },
+  AVAILABLE:      { cls: 'chip chip--ok',      label: 'Available' },
+  RESERVED:       { cls: 'chip chip--brand',   label: 'Reserved' },
+  ON_RENT:        { cls: 'chip chip--warn',    label: 'On rent' },
+  IN_MAINTENANCE: { cls: 'chip chip--neutral', label: 'Maintenance' },
+  OUT_OF_SERVICE: { cls: 'chip chip--danger',  label: 'Out of service' },
 };
 
 // Sort order used when sorting by `status` column — urgency-first.
@@ -153,22 +154,22 @@ function FleetStatusReport({ token, me, logout }) {
 
   const locationFilter = (
     <>
-      <span style={{ fontSize: 13, color: '#6f668f' }}>Location</span>
+      <span style={{ fontSize: 13, color: 'var(--text-3)' }}>Location</span>
       <select
         value={locationId}
         onChange={(e) => setLocationId(e.target.value || '')}
-        style={{ fontSize: 13, padding: '6px 8px', minWidth: 140, borderRadius: 8, border: '0.5px solid #d3d1c7', background: 'white' }}
+        style={{ fontSize: 13, padding: '6px 8px', minWidth: 140, width: 'auto', minHeight: 40 }}
       >
         <option value="">All</option>
         {locations.map((loc) => (
           <option key={loc.id} value={loc.id}>{loc.name || loc.code || loc.id}</option>
         ))}
       </select>
-      <span style={{ fontSize: 13, color: '#6f668f' }}>Status</span>
+      <span style={{ fontSize: 13, color: 'var(--text-3)' }}>Status</span>
       <select
         value={statusFilter}
         onChange={(e) => setStatusFilter(e.target.value || '')}
-        style={{ fontSize: 13, padding: '6px 8px', minWidth: 130, borderRadius: 8, border: '0.5px solid #d3d1c7', background: 'white' }}
+        style={{ fontSize: 13, padding: '6px 8px', minWidth: 130, width: 'auto', minHeight: 40 }}
       >
         <option value="">Any</option>
         {Object.entries(STATUS_PILL).map(([key, p]) => (
@@ -180,28 +181,19 @@ function FleetStatusReport({ token, me, logout }) {
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="plate / model / customer"
-        style={{
-          fontSize: 13, padding: '6px 10px', minWidth: 200,
-          borderRadius: 8, border: '0.5px solid #d3d1c7', background: 'white',
-        }}
+        style={{ fontSize: 13, padding: '6px 10px', minWidth: 200, width: 'auto', minHeight: 40 }}
       />
-      <button
-        type="button"
-        onClick={refresh}
-        style={{
-          fontSize: 13, padding: '6px 12px',
-          background: 'white', border: '0.5px solid #d3d1c7',
-          borderRadius: 8, cursor: 'pointer',
-          display: 'flex', alignItems: 'center', gap: 6, color: '#211a38',
-        }}
-      >↻ Refresh</button>
+      <button type="button" className="report-export-btn" onClick={refresh}>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" /></svg>
+        Refresh
+      </button>
     </>
   );
 
   const leftSlot = data ? (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <span style={{ fontSize: 13, color: '#6f668f' }}>As of</span>
-      <span style={{ fontSize: 13, color: '#211a38', fontWeight: 500 }}>{data.asOfLabel}</span>
+      <span style={{ fontSize: 13, color: 'var(--text-3)' }}>As of</span>
+      <span className="tnum" style={{ fontSize: 13, color: 'var(--text-1)', fontWeight: 600 }}>{data.asOfLabel}</span>
     </div>
   ) : null;
 
@@ -222,7 +214,7 @@ function FleetStatusReport({ token, me, logout }) {
         {loading && !data ? (
           <Skeleton />
         ) : error ? (
-          <div role="alert" style={{ background: '#FCEBEB', color: '#791F1F', padding: 12, borderRadius: 8 }}>{error}</div>
+          <div role="alert" style={{ background: 'var(--danger-bg)', color: 'var(--danger-tx)', border: '1px solid var(--danger-bd)', padding: 12, borderRadius: 'var(--r-md)' }}>{error}</div>
         ) : data ? (
           <ReportBody
             data={data}
@@ -254,33 +246,31 @@ function ReportBody({ data, visibleVehicles, sort, onSort, searchActive, statusF
           label="Available"
           value={String(totals.AVAILABLE)}
           hint={`${fmtPct(totals.availablePct)} of fleet`}
-          bg={totals.AVAILABLE > 0 ? '#EAF3DE' : undefined}
-          fg={totals.AVAILABLE > 0 ? '#173404' : undefined}
+          accent={totals.AVAILABLE > 0 ? 'ok' : undefined}
         />
         <Card
           label="On rent"
           value={String(totals.ON_RENT)}
           hint={`${fmtPct(totals.onRentPct)} of fleet`}
-          bg="#EEEDFE" fg="#26215C"
+          accent="brand"
         />
         <Card
           label="Out of service"
           value={String(totals.outOfServiceTotal)}
           hint={`${totals.IN_MAINTENANCE} maint. · ${totals.OUT_OF_SERVICE} OOS`}
-          bg={totals.outOfServiceTotal > 0 ? '#FAEEDA' : undefined}
-          fg={totals.outOfServiceTotal > 0 ? '#412402' : undefined}
+          accent={totals.outOfServiceTotal > 0 ? 'warn' : undefined}
         />
       </div>
 
-      <div style={{ fontSize: 11, color: '#6f668f', textTransform: 'uppercase', fontWeight: 500, marginBottom: 6 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-3)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '.05em', marginBottom: 6 }}>
         {visibleVehicles.length} of {data.totalCount} vehicle{data.totalCount === 1 ? '' : 's'} shown
         {isFiltered ? ' · filters active' : ''}
         {' · click a column header to sort'}
       </div>
-      <div style={{ background: 'white', border: '0.5px solid #d3d1c7', borderRadius: 8, overflowX: 'auto' }}>
-        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', minWidth: 800 }}>
+      <div className="table-shell">
+        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', minWidth: 800 }}>
           <thead>
-            <tr style={{ background: '#f1efe8' }}>
+            <tr>
               {COLUMNS.map((c) => (
                 <Th key={c.key} align={c.align} sortKey={c.key} sort={sort} onClick={onSort}>{c.label}</Th>
               ))}
@@ -300,43 +290,37 @@ function ReportBody({ data, visibleVehicles, sort, onSort, searchActive, statusF
 }
 
 function Row({ v }) {
-  const pill = STATUS_PILL[v.status] || { bg: '#f1efe8', fg: '#5F5E5A', label: v.status };
+  const pill = STATUS_PILL[v.status] || { cls: 'chip chip--neutral', label: v.status };
   return (
-    <tr style={{ borderTop: '0.5px solid #d3d1c7' }}>
-      <td style={{ padding: '8px 12px', fontWeight: 500 }}>
-        <Link
-          href={`/vehicles/${v.id}`}
-          style={{ color: '#211a38', textDecoration: 'none' }}
-        >
-          {v.plate || '—'}
+    <tr>
+      <td style={{ fontWeight: 500 }}>
+        <Link href={`/vehicles/${v.id}`} style={{ textDecoration: 'none' }}>
+          <span className="plate">{v.plate || '—'}</span>
         </Link>
-        <div style={{ fontSize: 10, color: '#6f668f', marginTop: 1 }}>#{v.internalNumber}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 2 }}>#{v.internalNumber}</div>
       </td>
-      <td style={{ padding: '8px 12px', color: '#211a38' }}>
+      <td style={{ color: 'var(--text-1)' }}>
         {v.label || '—'}
-        {v.color ? <span style={{ color: '#6f668f' }}> · {v.color}</span> : null}
+        {v.color ? <span style={{ color: 'var(--text-3)' }}> · {v.color}</span> : null}
       </td>
-      <td style={{ padding: '8px 12px', color: '#6f668f' }}>{v.vehicleType?.name || '—'}</td>
-      <td style={{ padding: '8px 12px', textAlign: 'right', color: '#211a38', fontVariantNumeric: 'tabular-nums' }}>
+      <td style={{ color: 'var(--text-3)' }}>{v.vehicleType?.name || '—'}</td>
+      <td className="tnum" style={{ textAlign: 'right', color: 'var(--text-1)' }}>
         {v.mileage > 0 ? v.mileage.toLocaleString() : '—'}
       </td>
-      <td style={{ padding: '8px 12px', color: '#6f668f' }}>{v.homeLocation?.name || '—'}</td>
-      <td style={{ padding: '8px 12px' }}>
-        <span style={{
-          background: pill.bg, color: pill.fg, fontSize: 10,
-          padding: '2px 8px', borderRadius: 999, whiteSpace: 'nowrap',
-        }}>{pill.label}</span>
+      <td style={{ color: 'var(--text-3)' }}>{v.homeLocation?.name || '—'}</td>
+      <td>
+        <span className={pill.cls}>{pill.label}</span>
       </td>
-      <td style={{ padding: '8px 12px' }}>
+      <td>
         {v.currentReservation ? (
           <>
-            <div style={{ color: '#211a38' }}>{v.currentReservation.customerName || '(no customer)'}</div>
-            <div style={{ fontSize: 11, color: '#6f668f', marginTop: 1 }}>
+            <div style={{ color: 'var(--text-1)' }}>{v.currentReservation.customerName || '(no customer)'}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 1 }}>
               due {v.currentReservation.returnLabel || 'unknown'}
             </div>
           </>
         ) : (
-          <span style={{ color: '#6f668f' }}>—</span>
+          <span style={{ color: 'var(--text-3)' }}>—</span>
         )}
       </td>
     </tr>
@@ -347,12 +331,19 @@ function Row({ v }) {
 // Primitives
 // ---------------------------------------------------------------------------
 
-function Card({ label, value, hint, bg, fg }) {
+// Flat KPI card on the token layer; `accent` tints the VALUE only — labels
+// and hints never drop below the 5.04:1 state-text floor.
+const CARD_ACCENTS = {
+  ok:    'var(--ok-tx)',
+  warn:  'var(--warn-tx)',
+  brand: 'var(--p-700)',
+};
+function Card({ label, value, hint, accent }) {
   return (
-    <div style={{ background: bg || '#f1efe8', padding: '12px 14px', borderRadius: 8, color: fg }}>
-      <div style={{ fontSize: 12, color: fg || '#6f668f' }}>{label}</div>
-      <div style={{ fontSize: 24, fontWeight: 500, marginTop: 2, color: fg || '#211a38' }}>{value}</div>
-      {hint ? <div style={{ fontSize: 11, color: fg || '#6f668f', marginTop: 2 }}>{hint}</div> : null}
+    <div className="kpi">
+      <div className="klab">{label}</div>
+      <div className="kval" style={accent ? { color: CARD_ACCENTS[accent] } : undefined}>{value}</div>
+      {hint ? <div className="kfoot">{hint}</div> : null}
     </div>
   );
 }
@@ -365,19 +356,13 @@ function Th({ children, align = 'left', sortKey, sort, onClick }) {
       onClick={() => onClick?.(sortKey)}
       style={{
         textAlign: align,
-        padding: '8px 12px',
-        fontWeight: 500,
-        fontSize: 12,
-        background: '#f1efe8',
-        color: '#211a38',
-        borderBottom: '0.5px solid #d3d1c7',
         whiteSpace: 'nowrap',
         cursor: 'pointer',
         userSelect: 'none',
       }}
     >
       {children}
-      <span style={{ color: '#534AB7', fontWeight: 500 }}>{arrow}</span>
+      <span style={{ color: 'var(--p-700)', fontWeight: 600 }}>{arrow}</span>
     </th>
   );
 }
@@ -386,10 +371,8 @@ function Td({ children, align = 'left', muted, center, colSpan }) {
   return (
     <td colSpan={colSpan} style={{
       textAlign: center ? 'center' : align,
-      padding: muted || center ? '24px 12px' : '6px 12px',
-      borderTop: '0.5px solid #d3d1c7',
-      color: muted ? '#6f668f' : undefined,
-      fontSize: 12,
+      padding: muted || center ? '24px 12px' : undefined,
+      color: muted ? 'var(--text-3)' : undefined,
     }}>{children}</td>
   );
 }
@@ -400,7 +383,7 @@ function Td({ children, align = 'left', muted, center, colSpan }) {
 
 function Skeleton() {
   const shimmer = {
-    background: 'linear-gradient(90deg, #f1efe8 0%, #e8e6df 50%, #f1efe8 100%)',
+    background: 'linear-gradient(90deg, var(--n-100) 0%, var(--n-50) 50%, var(--n-100) 100%)',
     backgroundSize: '200% 100%',
     animation: 'rfm-fs-shimmer 1.4s ease-in-out infinite',
     borderRadius: 6,

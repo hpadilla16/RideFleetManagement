@@ -836,7 +836,7 @@ function VehicleProfileInner({ token, me, logout }) {
             <div className="rent-modal glass" onClick={(e) => e.stopPropagation()}>
               <h3>Record an existing damage</h3>
               <p className="ui-muted" style={{ fontSize: 13, marginTop: 0 }}>Pick the view, tap the diagram where the damage is, and attach a photo.</p>
-              <div style={{ display: 'flex', border: '1px solid #E5E7EB', borderRadius: 999, overflow: 'hidden', marginBottom: 10 }}>
+              <div style={{ display: 'flex', border: '1px solid var(--border-strong)', borderRadius: 10, overflow: 'hidden', marginBottom: 10 }}>
                 {DAMAGE_VIEWS.map((v) => (
                   <button key={v} type="button" onClick={() => setAddDmg((c) => ({ ...c, view: v, xPct: null, yPct: null }))} style={{
                     flex: 1, fontSize: 12, padding: '7px 2px', border: 'none', borderRadius: 0,
@@ -991,7 +991,7 @@ function VehicleProfileInner({ token, me, logout }) {
                   const nextAt = hasDays ? new Date(new Date(schedModal.form.lastServiceAt + 'T12:00:00').getTime() + idn * 86400000) : null;
                   const odo = schedules.vehicleMileage ?? row?.mileage ?? null;
                   return (
-                    <div className="surface-note" style={{ background: 'rgba(135,82,254,0.07)', borderColor: 'rgba(135,82,254,0.25)' }}>
+                    <div className="surface-note" style={{ background: 'var(--brand-a08)', borderColor: 'var(--border-brand)' }}>
                       <strong>Next due:</strong>
                       {hasMiles ? ` ${(lm + im).toLocaleString()} mi${odo != null ? ` (odometer now ${Number(odo).toLocaleString()} mi → ${lm + im - odo >= 0 ? `${(lm + im - odo).toLocaleString()} mi to go` : `${Math.abs(lm + im - odo).toLocaleString()} mi OVERDUE`})` : ''}` : ''}
                       {hasMiles && hasDays ? ' · ' : ' '}
@@ -1234,7 +1234,7 @@ function VehicleProfileInner({ token, me, logout }) {
                   <div className="surface-note">No hard-approved damages on this vehicle.</div>
                 ) : (
                   <>
-                    <div style={{ display: 'flex', border: '1px solid #E5E7EB', borderRadius: 999, overflow: 'hidden', marginBottom: 10, maxWidth: 480 }}>
+                    <div style={{ display: 'flex', border: '1px solid var(--border-strong)', borderRadius: 10, overflow: 'hidden', marginBottom: 10, maxWidth: 480 }}>
                       {DAMAGE_VIEWS.map((v) => {
                         const n = damage.active.filter((r) => r.view === v).length;
                         return (
@@ -1276,7 +1276,7 @@ function VehicleProfileInner({ token, me, logout }) {
                                 </button>
                                 {canAdminDamage ? (
                                   <div style={{ display: 'flex', gap: 8, padding: '6px 10px', borderTop: '1px solid #F1EFE8', background: 'rgba(0,0,0,0.02)' }}>
-                                    <button type="button" onClick={() => editDamageRecord(r)} style={{ background: 'rgba(135,82,254,.08)', color: '#4c1d95', border: '1px solid rgba(135,82,254,.16)', borderRadius: 8, padding: '4px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Edit</button>
+                                    <button type="button" onClick={() => editDamageRecord(r)} style={{ background: 'var(--n-0)', color: 'var(--text-1)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '4px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Edit</button>
                                     <button type="button" onClick={() => deleteDamageRecord(r)} style={{ background: '#fff5f5', color: '#b91c1c', border: '1px solid #b91c1c', borderRadius: 8, padding: '4px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Delete · void charge</button>
                                   </div>
                                 ) : null}
@@ -1300,7 +1300,7 @@ function VehicleProfileInner({ token, me, logout }) {
                                     record that was marked fixed can still be corrected / voided. */}
                                 {canAdminDamage ? (
                                   <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                                    <button type="button" onClick={() => editDamageRecord(r)} style={{ background: 'rgba(135,82,254,.08)', color: '#4c1d95', border: '1px solid rgba(135,82,254,.16)', borderRadius: 8, padding: '3px 9px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Edit</button>
+                                    <button type="button" onClick={() => editDamageRecord(r)} style={{ background: 'var(--n-0)', color: 'var(--text-1)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '3px 9px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Edit</button>
                                     <button type="button" onClick={() => deleteDamageRecord(r)} style={{ background: '#fff5f5', color: '#b91c1c', border: '1px solid #b91c1c', borderRadius: 8, padding: '3px 9px', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Delete · void charge</button>
                                   </div>
                                 ) : null}

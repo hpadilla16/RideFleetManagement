@@ -175,8 +175,8 @@ function LongTermPill({ kind, children }) {
   return (
     <span style={{
       ...style,
-      display: 'inline-block', padding: '2px 9px', borderRadius: 999,
-      fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase'
+      display: 'inline-block', padding: '2px 9px', borderRadius: 6,
+      fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase'
     }}>
       {children}
     </span>
@@ -457,9 +457,9 @@ function CorrectReadingsPanel({ reservationId, token, me, agreement, onChanged }
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <h3 style={{ margin: 0 }}>Correct readings</h3>
           <span style={{
-            fontSize: 10, fontWeight: 800, letterSpacing: '.04em', textTransform: 'uppercase',
-            color: '#a32d2d', background: 'rgba(163,45,45,.10)', border: '1px solid rgba(163,45,45,.28)',
-            borderRadius: 999, padding: '2px 8px'
+            fontSize: 11, fontWeight: 800, letterSpacing: '.04em', textTransform: 'uppercase',
+            color: 'var(--danger-tx)', background: 'var(--danger-bg)', border: '1px solid var(--danger-bd)',
+            borderRadius: 6, padding: '2px 8px'
           }}>Admin override</span>
         </div>
         <button type="button" className="button-subtle" onClick={() => setOpen((v) => !v)}>{open ? 'Hide' : 'Show'}</button>
@@ -2652,7 +2652,7 @@ token
                   <span style={{ color: '#1a1230', fontWeight: 600 }}>
                     {new Date(row.returnAt).toLocaleString()}
                   </span>
-                  <span style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 6, background: '#ede5ff', color: '#6e49ff', fontSize: 10, fontWeight: 700, letterSpacing: '.05em' }}>
+                  <span style={{ marginLeft: 6, padding: '1px 7px', borderRadius: 6, background: 'var(--p-50)', color: 'var(--p-700)', fontSize: 11, fontWeight: 700, letterSpacing: '.05em' }}>
                     EXTENDED
                   </span>
                 </div>
@@ -3400,7 +3400,7 @@ token
                               <span>{r.name}</span>
                               {isExtensionRow ? (
                                 <span
-                                  style={{ padding: '1px 7px', borderRadius: 6, background: '#ede5ff', color: '#6e49ff', fontSize: 10, fontWeight: 700, letterSpacing: '.05em' }}
+                                  style={{ padding: '1px 7px', borderRadius: 6, background: 'var(--p-50)', color: 'var(--p-700)', fontSize: 11, fontWeight: 700, letterSpacing: '.05em' }}
                                   title="Extension charge — created by Extend Reservation"
                                 >
                                   EXTENSION
@@ -3523,7 +3523,7 @@ token
                             <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: '#211a38', wordBreak: 'break-word', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                               <span>{c.name}</span>
                               {tag ? (
-                                <span style={{ padding: '1px 7px', borderRadius: 6, background: tag.bg, color: tag.color, fontSize: 10, fontWeight: 700, letterSpacing: '.05em' }}>{tag.text}</span>
+                                <span style={{ padding: '1px 7px', borderRadius: 6, background: tag.bg, color: tag.color, fontSize: 11, fontWeight: 700, letterSpacing: '.05em' }}>{tag.text}</span>
                               ) : null}
                             </div>
                             <div style={{ whiteSpace: 'nowrap', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: '#211a38' }}>{money(Number(c.total || 0))}</div>

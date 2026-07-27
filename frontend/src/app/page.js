@@ -672,13 +672,13 @@ function DashboardInner({ token, me, logout }) {
                 style={{
                   textAlign: 'left',
                   cursor: 'pointer',
-                  background: Number(maintSummary.overdue || 0) > 0 ? 'rgba(239, 68, 68, 0.08)' : undefined,
-                  borderColor: Number(maintSummary.overdue || 0) > 0 ? 'rgba(239, 68, 68, 0.35)' : undefined,
+                  background: Number(maintSummary.overdue || 0) > 0 ? 'var(--danger-bg)' : undefined,
+                  borderColor: Number(maintSummary.overdue || 0) > 0 ? 'var(--danger-bd)' : undefined,
                 }}
                 title={t('dashboard.tileMaintenanceDueTitle')}
               >
                 <span className="label">{t('dashboard.tileMaintenanceDue')}</span>
-                <strong style={{ color: Number(maintSummary.overdue || 0) > 0 ? '#dc2626' : (Number(maintSummary.dueSoon || 0) === 0 ? '#15803d' : undefined) }}>
+                <strong style={{ color: Number(maintSummary.overdue || 0) > 0 ? 'var(--danger-tx)' : (Number(maintSummary.dueSoon || 0) === 0 ? 'var(--ok-tx)' : undefined) }}>
                   {Number(maintSummary.overdue || 0)}
                 </strong>
                 <span className="ui-muted">
@@ -700,13 +700,13 @@ function DashboardInner({ token, me, logout }) {
               style={{
                 textAlign: 'left',
                 cursor: 'pointer',
-                background: mismatchCount > 0 ? 'rgba(239, 68, 68, 0.08)' : undefined,
-                borderColor: mismatchCount > 0 ? 'rgba(239, 68, 68, 0.35)' : undefined,
+                background: mismatchCount > 0 ? 'var(--danger-bg)' : undefined,
+                borderColor: mismatchCount > 0 ? 'var(--danger-bd)' : undefined,
               }}
               title={t('dashboard.tileStatusMismatchesTitle')}
             >
               <span className="label">{t('dashboard.tileStatusMismatches')}</span>
-              <strong style={{ color: mismatchCount > 0 ? '#dc2626' : undefined }}>{mismatchCount}</strong>
+              <strong style={{ color: mismatchCount > 0 ? 'var(--danger-tx)' : undefined }}>{mismatchCount}</strong>
               <span className="ui-muted">{t('dashboard.tileStatusMismatchesDesc')}</span>
             </button>
             <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/reservations?filter=active')} title={t('dashboard.tileActiveReservationsTitle')}>
@@ -721,13 +721,13 @@ function DashboardInner({ token, me, logout }) {
               style={{
                 textAlign: 'left',
                 cursor: 'pointer',
-                background: workspaceOpsHub.overdueReservations > 0 ? 'rgba(239, 68, 68, 0.08)' : undefined,
-                borderColor: workspaceOpsHub.overdueReservations > 0 ? 'rgba(239, 68, 68, 0.35)' : undefined,
+                background: workspaceOpsHub.overdueReservations > 0 ? 'var(--danger-bg)' : undefined,
+                borderColor: workspaceOpsHub.overdueReservations > 0 ? 'var(--danger-bd)' : undefined,
               }}
               title={t('dashboard.tileOverdueReturnsTitle')}
             >
               <span className="label">{t('dashboard.tileOverdueReturns')}</span>
-              <strong style={{ color: workspaceOpsHub.overdueReservations > 0 ? '#dc2626' : undefined }}>
+              <strong style={{ color: workspaceOpsHub.overdueReservations > 0 ? 'var(--danger-tx)' : undefined }}>
                 {workspaceOpsHub.overdueReservations}
               </strong>
               <span className="ui-muted">{t('dashboard.tileOverdueReturnsDesc')}</span>
@@ -773,7 +773,7 @@ function DashboardInner({ token, me, logout }) {
           <h3 style={{ margin: 0 }}>{t('dashboard.opsBoard')}</h3>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button onClick={() => { const d = new Date(boardDate + 'T00:00:00'); d.setDate(d.getDate() - 1); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 8px', minWidth: 0 }}>&larr;</button>
-            <input type="date" value={boardDate} onChange={(e) => setBoardDate(e.target.value)} style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid var(--border-soft)', background: 'var(--bg-soft)', color: 'var(--charcoal)', fontSize: 13, fontWeight: 600 }} />
+            <input type="date" value={boardDate} onChange={(e) => setBoardDate(e.target.value)} style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid var(--border-soft)', background: 'var(--bg-soft)', color: 'var(--text-1)', fontSize: 13, fontWeight: 600 }} />
             <button onClick={() => { const d = new Date(boardDate + 'T00:00:00'); d.setDate(d.getDate() + 1); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 8px', minWidth: 0 }}>&rarr;</button>
             {!isToday && <button onClick={() => { const d = new Date(); setBoardDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`); }} style={{ padding: '4px 10px', fontSize: 12 }}>{t('dashboard.today')}</button>}
           </div>
@@ -809,10 +809,10 @@ function DashboardInner({ token, me, logout }) {
                     onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-soft)'; }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                   >
-                    <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--charcoal)' }}>{fmtWallClockTime(r.pickupAt)}</span>
+                    <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--text-1)' }}>{fmtWallClockTime(r.pickupAt)}</span>
                     <span style={{ flex: 1 }}>
                       #{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}{r.vehicle ? ` · ${r.vehicle.year || ''} ${r.vehicle.make || ''} ${r.vehicle.model || ''}`.trim() : ''}
-                      {balance > 0 ? <span className="status-chip warn" style={{ fontSize: 10, marginLeft: 6 }}>{t('dashboard.unpaid', { amount: moneyShort(balance) })}</span> : null}
+                      {balance > 0 ? <span className="status-chip warn" style={{ marginLeft: 6 }}>{t('dashboard.unpaid', { amount: moneyShort(balance) })}</span> : null}
                     </span>
                     <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
                       <button onClick={(e) => { e.stopPropagation(); startCheckout(r.id); }}>{t('dashboard.startCheckout')}</button>
@@ -827,7 +827,7 @@ function DashboardInner({ token, me, logout }) {
         </div>
 
         <div className="glass card-lg">
-          <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: '#30D5C8', marginBottom: 8 }}>{t('dashboard.returnsCount', { count: returns.length })}</div>
+          <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--teal-tx)', marginBottom: 8 }}>{t('dashboard.returnsCount', { count: returns.length })}</div>
           {returns.length === 0 ? (
             <p className="ui-muted" style={{ textAlign: 'center', padding: 20, margin: 0 }}>{t('dashboard.noReturns')}</p>
           ) : (
@@ -852,20 +852,14 @@ function DashboardInner({ token, me, logout }) {
                     onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-soft)'; }}
                     onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                   >
-                    <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--charcoal)' }}>{fmtWallClockTime(r.returnAt)}</span>
+                    <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--text-1)' }}>{fmtWallClockTime(r.returnAt)}</span>
                     <span style={{ flex: 1 }}>
                       #{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}{r.vehicle ? ` · ${r.vehicle.year || ''} ${r.vehicle.make || ''} ${r.vehicle.model || ''}`.trim() : ''}
-                      {balance > 0 ? <span className="status-chip warn" style={{ fontSize: 10, marginLeft: 6 }}>{t('dashboard.unpaid', { amount: moneyShort(balance) })}</span> : null}
+                      {balance > 0 ? <span className="status-chip warn" style={{ marginLeft: 6 }}>{t('dashboard.unpaid', { amount: moneyShort(balance) })}</span> : null}
                     </span>
                     <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>
                       {alreadyCheckedIn ? (
-                        <span
-                          className="status-chip"
-                          style={{
-                            fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999,
-                            background: '#dcfce7', color: '#166534'
-                          }}
-                        >
+                        <span className="status-chip good">
                           {t('dashboard.checkedIn')}
                         </span>
                       ) : (

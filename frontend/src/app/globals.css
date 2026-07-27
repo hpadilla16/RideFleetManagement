@@ -38,6 +38,7 @@
   --warn:#b8760a;  --warn-bg:#fdf3e2;   --warn-bd:#f3dcb5; --warn-tx:#8a5606;
   --danger:#c02626;--danger-bg:#fdecea; --danger-bd:#f6cdc9;--danger-tx:#9c1d1d;
   --info:#0b63d6;  --info-bg:#eaf2fe;   --info-bd:#c5dcfb; --info-tx:#0b63d6;
+  --teal-tx:#086a5e; /* returns accent — 6.49:1 AA on white */
 
   /* ── Surfaces / borders / text ── */
   --surface-0:var(--n-50);       /* page canvas (staff app)             */
@@ -1468,6 +1469,7 @@ label input[type="radio"],
   --warn-bg: rgba(232,161,60,.14);--warn-bd: rgba(232,161,60,.30);--warn-tx: #e8a13c;
   --danger-bg: rgba(224,69,59,.16);--danger-bd: rgba(224,69,59,.34);--danger-tx: #ff9d95;
   --info-bg: rgba(11,99,214,.18); --info-bd: rgba(124,192,255,.30);--info-tx: #7cc0ff;
+  --teal-tx: #4fd6c0;
 
   --sh-1: 0 1px 2px rgba(0,0,0,.55);
   --sh-2: 0 2px 6px rgba(0,0,0,.5), 0 14px 32px -14px rgba(0,0,0,.9);
