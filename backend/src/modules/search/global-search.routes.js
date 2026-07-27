@@ -126,7 +126,7 @@ globalSearchRouter.get('/', async (req, res, next) => {
         id: c.id,
         title: [c.firstName, c.lastName].filter(Boolean).join(' '),
         subtitle: [c.email, c.phone].filter(Boolean).join(' · '),
-        href: `/customers?focus=${c.id}`
+        href: `/customers/${c.id}`
       }))
     ];
 
