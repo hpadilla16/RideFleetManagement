@@ -18,6 +18,8 @@
 import { Router } from 'express';
 import { requireRole } from '../../middleware/auth.js';
 import { userProgramScope, userAllowedLocationIds } from '../../lib/tenant-scope.js';
+import { scopeFor as tenantScopeFor } from '../../lib/tenant-scope.js';
+import { computeTodayKpis } from './today-kpis.js';
 import {
   listReports,
   getSnapshot,
@@ -101,6 +103,28 @@ reportsV2Router.get(
         to: req.query?.to,
       });
       res.json(out);
+    } catch (err) {
+      sendError(res, err);
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// GET /api/reports/today-kpis — dashboard "Collected today" + "Pending tolls"
+// (2026-07-26, approved UI mockups). Same guard posture as /snapshot: money
+// display, ADMIN/OPS only, scoped users fail closed. SUPER_ADMIN without a
+// tenant gets nulls (the reports-custom Sentry lesson: never pass a null
+// tenantId to Prisma).
+// ---------------------------------------------------------------------------
+reportsV2Router.get(
+  '/today-kpis',
+  requireRole('ADMIN', 'OPS', 'SUPER_ADMIN'),
+  rejectScopedUsers,
+  async (req, res) => {
+    try {
+      const tenantId = tenantScopeFor(req)?.tenantId || null;
+      if (!tenantId) return res.json({ collectedToday: null, pendingTolls: null });
+      res.json(await computeTodayKpis(tenantId));
     } catch (err) {
       sendError(res, err);
     }

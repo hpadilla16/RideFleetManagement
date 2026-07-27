@@ -285,6 +285,9 @@ function DashboardInner({ token, me, logout }) {
   const [mismatchCount, setMismatchCount] = useState(0);
   const [citSummary, setCitSummary] = useState(null);
   const [maintSummary, setMaintSummary] = useState(null);
+  // Today-KPIs (2026-07-26, approved mockups): Collected today + Pending tolls.
+  // 403 for agents/scoped users -> catch keeps it null and the tiles hide.
+  const [todayKpis, setTodayKpis] = useState(null);
   const [msg, setMsg] = useState('');
   const canSeeOverview = me?.moduleAccess?.reports !== false;
   const canSeeVehicles = me?.moduleAccess?.vehicles !== false;
@@ -313,6 +316,7 @@ function DashboardInner({ token, me, logout }) {
     // miles-driven, counts only (no money). Same module-gated soft-fail pattern.
     if (me?.moduleAccess?.maintenance !== false) {
       api('/api/maintenance/summary', { bypassCache: true }, token).then((s) => setMaintSummary(s || null)).catch(() => setMaintSummary(null));
+      api('/api/reports/today-kpis', { bypassCache: true }, token).then((k) => setTodayKpis(k && k.collectedToday != null ? k : null)).catch(() => setTodayKpis(null));
     }
 
     if (reservationsResult.status === 'fulfilled') {
@@ -660,6 +664,35 @@ function DashboardInner({ token, me, logout }) {
               <strong>{workspaceOpsHub.serviceHeld}</strong>
               <span className="ui-muted">{t('dashboard.tileMaintenanceOosDesc')}</span>
             </button>
+            {todayKpis ? (
+              <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/reports-v2/payments-by-day')} title={t('dashboard.tileCollectedTodayTitle')}>
+                <span className="label">{t('dashboard.tileCollectedToday')}</span>
+                <strong className="tnum" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {`$${Number(todayKpis.collectedToday || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                </strong>
+                <span className="ui-muted">{t('dashboard.tileCollectedTodayDesc')}</span>
+              </button>
+            ) : null}
+            {todayKpis ? (
+              <button
+                type="button"
+                className="info-tile"
+                onClick={() => router.push('/tolls')}
+                style={{
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  background: Number(todayKpis.pendingTolls || 0) > 0 ? 'var(--danger-bg)' : undefined,
+                  borderColor: Number(todayKpis.pendingTolls || 0) > 0 ? 'var(--danger-bd)' : undefined,
+                }}
+                title={t('dashboard.tilePendingTollsTitle')}
+              >
+                <span className="label">{t('dashboard.tilePendingTolls')}</span>
+                <strong style={{ fontVariantNumeric: 'tabular-nums', color: Number(todayKpis.pendingTolls || 0) > 0 ? 'var(--danger-tx)' : 'var(--ok-tx)' }}>
+                  {Number(todayKpis.pendingTolls || 0)}
+                </strong>
+                <span className="ui-muted">{t('dashboard.tilePendingTollsDesc')}</span>
+              </button>
+            ) : null}
             {/* Maintenance Due (2026-07-13): service intervals from ServiceSchedule,
                 miles-driven. Big number = OVERDUE (the alarm), due-soon in the desc.
                 Red tint mirrors the overdue-returns tile. Renders only when the
