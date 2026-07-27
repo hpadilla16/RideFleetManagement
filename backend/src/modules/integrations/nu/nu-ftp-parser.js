@@ -64,10 +64,23 @@ function parseName(raw) {
   return { lastName: parts[0] || '', firstName: parts[1] || '' };
 }
 
-// Provisional prepaid derivation — see MONEY NOTE in the header.
+// Prepaid derivation — DEFINITIVE per NU (2026-07-27 answer to Q4):
+//   "/PVA tells you how much NU has collected."  -> PVA > 0 = NU collected =
+//     prepaid (billed to NU), the counter does NOT collect from the customer.
+//   "For a broker where NU is billing them, /MOP will be BC or CC." -> broker
+//     billed via NU -> prepaid; the counter does NOT collect from the customer.
+//   "If we receive a credit card number we identify the card company" -> MC /
+//     VS / AX are the CUSTOMER's card -> pay-at-destination; counter collects.
+//   Anything else stays null — never guess a money posture.
+// This CORRECTS the earlier provisional guess (which mapped CC -> false; NU
+// clarified CC is a broker-billed/prepaid case, not pay-at-destination).
+const PREPAID_MOPS = new Set(['BC', 'CC']);
+const COUNTER_MOPS = new Set(['MC', 'VS', 'AX']);
 export function isPrepaidFromPayment({ voucherAmount, mop }) {
   if (voucherAmount != null && voucherAmount > 0) return true;
-  if (String(mop || '').trim().toUpperCase() === 'CC') return false;
+  const m = String(mop || '').trim().toUpperCase();
+  if (PREPAID_MOPS.has(m)) return true;
+  if (COUNTER_MOPS.has(m)) return false;
   return null;
 }
 

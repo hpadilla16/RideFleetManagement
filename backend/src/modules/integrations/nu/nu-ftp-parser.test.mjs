@@ -81,9 +81,17 @@ test('emails split on ";", license state and DOB land where the deposit rule rea
   assert.equal(r.state, 'TX');
 });
 
-test('prepaid derivation is fail-safe: CC → false, no signals → null', () => {
+test('prepaid derivation — NU definitive MOP/PVA rules (2026-07-27)', () => {
+  // PVA > 0 = NU collected = prepaid, whatever the MOP.
   assert.equal(isPrepaidFromPayment({ voucherAmount: 17.88, mop: 'BC' }), true);
-  assert.equal(isPrepaidFromPayment({ voucherAmount: null, mop: 'CC' }), false);
+  // Broker billed via NU (BC/CC) = prepaid, counter does NOT collect.
+  assert.equal(isPrepaidFromPayment({ voucherAmount: null, mop: 'CC' }), true);
+  assert.equal(isPrepaidFromPayment({ voucherAmount: 0, mop: 'BC' }), true);
+  // Customer's own card (MC/VS/AX) = pay at destination, counter collects.
+  assert.equal(isPrepaidFromPayment({ voucherAmount: null, mop: 'MC' }), false);
+  assert.equal(isPrepaidFromPayment({ voucherAmount: null, mop: 'VS' }), false);
+  assert.equal(isPrepaidFromPayment({ voucherAmount: null, mop: 'AX' }), false);
+  // Unknown → never guess.
   assert.equal(isPrepaidFromPayment({ voucherAmount: 0, mop: 'ZZ' }), null);
   assert.equal(isPrepaidFromPayment({}), null);
 });

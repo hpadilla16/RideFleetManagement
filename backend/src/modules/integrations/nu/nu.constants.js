@@ -48,6 +48,16 @@ export const RESERVATIONS_PATH = (process.env.NU_RESERVATIONS_PATH || '/affiliat
 // Telerik / WebForms field names (confirmed recon 2026-07-09).
 // ---------------------------------------------------------------------------
 // Login form fields.
+// SFTP transport (2026-07-27, NU confirmed SFTP). Defaults are code-side so
+// env-diff-check stays green (no new REQUIRED .env.example keys); the droplet
+// only needs these when flipping NU_TRANSPORT=sftp.
+export const NU_TRANSPORT = (process.env.NU_TRANSPORT || 'http').toLowerCase();
+export const SFTP_HOST = process.env.NU_SFTP_HOST || 'sftp.nucarrentals.com';
+export const SFTP_PORT = Number(process.env.NU_SFTP_PORT || 22) || 22;
+export const SFTP_DIR = process.env.NU_SFTP_DIR || '.';
+// One file per reservation: <resNum>NU<DDMMYYYYHHMMSS>.REZ
+export const SFTP_FILE_GLOB = /\.REZ$/i;
+
 export const LOGIN_USER_FIELD = 'txtLoginID';
 export const LOGIN_PASS_FIELD = 'txtPSWD';
 export const LOGIN_SUBMIT_FIELD = 'Button1';

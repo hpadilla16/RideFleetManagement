@@ -27,6 +27,9 @@ import logger from '../../../lib/logger.js';
 import { captureBackendException } from '../../../lib/sentry.js';
 import { registerWorker, enqueueJob } from '../../../lib/queue/index.js';
 import { SCRAPER_PRIORITY } from '../../../lib/queue/priorities.js';
+import { NU_TRANSPORT } from './nu.constants.js';
+import { fetchReservationListViaSftp } from './nu-ftp-transport.js';
+import { getCredentials } from './nu.service.js';
 import {
   fetchReservationList,
   pickUserAgent,
@@ -204,9 +207,20 @@ export async function nuSyncHandler(job) {
     const now = Date.now();
     const { dateFrom, dateTo } = windowBoundsForConfig(primaryConfig || {}, now);
 
-    const rows = (configs.length === 0 || !targetLocationId)
-      ? []
-      : await fetchReservationList(tenantId, { dateFrom, dateTo, userAgent });
+    // Transport seam (2026-07-27): NU_TRANSPORT=sftp pulls the .REZ drop files
+    // over SFTP (delete-after-download); default 'http' keeps the RadGrid
+    // scraper. Both return the SAME normalized row shape, so everything below
+    // is unchanged. The SFTP path ignores the date window (NU decides which
+    // files to drop); the scraper still windows.
+    let rows;
+    if (configs.length === 0 || !targetLocationId) {
+      rows = [];
+    } else if (NU_TRANSPORT === 'sftp') {
+      const creds = await getCredentials(tenantId);
+      rows = await fetchReservationListViaSftp(tenantId, { creds });
+    } else {
+      rows = await fetchReservationList(tenantId, { dateFrom, dateTo, userAgent });
+    }
     parseDiagnostics = rows?.diagnostics || null;
 
     pickupsFound = rows.length;
