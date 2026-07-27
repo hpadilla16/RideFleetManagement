@@ -117,6 +117,27 @@ test('AGENCY_STATE_MISMATCH: Orlando agency on a CA car holds — bind kept, no 
   assert.equal(assignments, 0);
 });
 
+test('AGENCY_LOCATION_MISMATCH: Orlando agency with an EXPLICIT CA plate state on a CA car still holds', async () => {
+  // Hector's real data (2026-07-27): the CPC feed carried plateState="CA"
+  // (matching the LAX car's CA plate) but agency "City of Orlando". The
+  // plate-first check resolved claimedState=CA == homeState=CA -> no
+  // AGENCY_STATE_MISMATCH, so these garbage FL citations slipped in
+  // unheld. The agency-only check must still hold them.
+  const vehCA = await prisma.vehicle.findUnique({ where: { id: ids.vehCA }, select: { plate: true } });
+  const out = await citationsService.ingestBatch({
+    tenantId: ids.tenant,
+    source: 'MANUAL',
+    sourceType: 'MANUAL_IMPORT',
+    rows: [{ citationNo: `GEO2-${TAG}`, plate: vehCA.plate, plateState: 'CA', agency: 'City of Orlando', issuedAt: '2026-07-10T12:00:00Z', amount: 75 }]
+  });
+  assert.equal(out.matched, 0);
+  const row = await prisma.citation.findFirst({ where: { tenantId: ids.tenant, citationNo: `GEO2-${TAG}` } });
+  assert.equal(row.vehicleId, ids.vehCA, 'bind kept (plate really is this car)');
+  assert.equal(row.holdReason, 'AGENCY_LOCATION_MISMATCH');
+  assert.equal(row.status, 'NEEDS_REVIEW');
+  assert.equal(row.reservationId, null, 'never auto-bills');
+});
+
 test('regression: clean citation still auto-matches the rental window', async () => {
   const vehCA = await prisma.vehicle.findUnique({ where: { id: ids.vehCA }, select: { plate: true } });
   const out = await citationsService.ingestBatch({

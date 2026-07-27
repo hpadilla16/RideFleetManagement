@@ -225,6 +225,19 @@ const STATE_KEYWORDS = {
 function citationClaimedState({ plateState, agency, location }) {
   const ps = String(plateState || '').trim().toUpperCase();
   if (/^[A-Z]{2}$/.test(ps)) return ps;
+  return citationAgencyState({ agency, location });
+}
+
+// Agency/location keyword state ONLY — ignores plateState. 2026-07-27:
+// citationClaimedState lets plateState WIN, so a citation with a CA plate
+// (matching a CA/LAX car's plate) but a "City of Orlando" (FL) agency was
+// never flagged — plate said CA, car was CA, no mismatch. But a LAX rental
+// car getting an Orlando FL citation is geographically implausible: it's
+// either a coincidental cross-state plate collision or garbage in the
+// scraper feed. This resolves the AGENCY's state independently so the
+// ingest can hold on agency-vs-vehicle-state contradictions the plate-first
+// check misses.
+function citationAgencyState({ agency, location }) {
   const text = `${agency || ''} ${location || ''}`.toUpperCase();
   if (!text.trim()) return null;
   for (const [state, words] of Object.entries(STATE_KEYWORDS)) {
@@ -311,6 +324,14 @@ export const citationsService = {
           });
           if (claimedState && plateEntry.homeState && claimedState !== plateEntry.homeState) {
             holdReason = 'AGENCY_STATE_MISMATCH';
+          } else if (plateEntry.homeState) {
+            // 2026-07-27: agency-vs-vehicle-state contradiction the plate-first
+            // check misses (CA plate on a CA car, but a "City of Orlando" FL
+            // agency). Hold — a LAX rental car does not get Orlando citations.
+            const agencyState = citationAgencyState({ agency: row.agency, location: row.location });
+            if (agencyState && agencyState !== plateEntry.homeState) {
+              holdReason = 'AGENCY_LOCATION_MISMATCH';
+            }
           }
         }
 
