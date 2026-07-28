@@ -184,7 +184,11 @@
     "kioskEscalationsDetail_one": "{{count}} kiosk guest waiting",
     "kioskEscalationsDetail_other": "{{count}} kiosk guests waiting",
     "kioskEscalationsNote": "Guests got stuck at a self-service kiosk and asked for a staff member.",
-    "openKiosks": "Open Kiosks"
+    "openKiosks": "Open Kiosks",
+    "tileDocsExpiring": "Documents expiring",
+    "tileDocsExpiringTitle": "Business documents needing renewal",
+    "tileDocsExpiringDesc": "within {{days}} days",
+    "tileDocsExpiredDesc": "{{expired}} already expired"
   },
   "login": {
     "title": "Sign In",
@@ -800,5 +804,50 @@
     "emailNote": "Note (optional)",
     "send": "Send",
     "emailSent": "Report emailed to"
+  },
+  "locationDocs": {
+    "title": "Business documents",
+    "needRenewal": "{{count}} need renewal",
+    "intro": "Permits, registrations, insurance and licences for this branch. Add the date each one stops being valid and the dashboard will warn you {{days}} days ahead.",
+    "namePlaceholder": "Document name (e.g. City business permit)",
+    "issued": "Issued (optional)",
+    "validUntil": "Valid until (leave blank if it never expires)",
+    "notesPlaceholder": "Notes (optional)",
+    "addDocument": "Add document",
+    "saving": "Saving…",
+    "loading": "Loading…",
+    "empty": "No documents on file for this branch yet.",
+    "colType": "Type",
+    "colDocument": "Document",
+    "colValidUntil": "Valid until",
+    "colStatus": "Status",
+    "colActions": "Actions",
+    "view": "View",
+    "archive": "Archive",
+    "filed": "Filed “{{label}}”.",
+    "archived": "Archived “{{label}}”. It stays on file for audits.",
+    "errPickFile": "Choose a file first.",
+    "errName": "Give the document a name.",
+    "errTooBig": "That file is {{size}}MB — the limit is 15MB.",
+    "errRead": "That file could not be read.",
+    "errLoad": "Could not load documents",
+    "errOpen": "Could not open that document",
+    "errArchive": "Could not archive that document",
+    "errUpload": "Upload failed",
+    "stValid": "Valid",
+    "stNoExpiry": "No expiry",
+    "stExpiresToday": "Expires today",
+    "stDaysLeft": "{{days}}d left",
+    "stExpiredToday": "Expired today",
+    "stExpiredAgo": "Expired {{days}}d ago",
+    "type": {
+      "PERMIT": "Permit",
+      "REGISTRATION": "Registration",
+      "INSURANCE": "Insurance",
+      "LICENSE": "Licence",
+      "TAX": "Tax",
+      "LEASE": "Lease",
+      "OTHER": "Other"
+    }
   }
 }
