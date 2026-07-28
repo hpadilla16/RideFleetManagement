@@ -10,7 +10,7 @@ import { runPrecheckinInviteSweep, buildInviteEmail } from './precheckin-invite.
 
 const prisma = new PrismaClient();
 const TAG = `PCI-${Date.now()}`;
-const ids = { reservations: [], customers: [], tenant: null, location: null };
+const ids = { reservations: [], customers: [], tenant: null, location: null, locationOff: null };
 const NOW = new Date('2026-07-01T12:00:00Z');
 const hoursOut = (h) => new Date(NOW.getTime() + h * 3600e3);
 
@@ -27,6 +27,7 @@ test.after(async () => {
   await prisma.reservation.deleteMany({ where: { id: { in: ids.reservations } } }).catch(() => {});
   await prisma.customer.deleteMany({ where: { id: { in: ids.customers } } }).catch(() => {});
   if (ids.location) await prisma.location.delete({ where: { id: ids.location } }).catch(() => {});
+  if (ids.locationOff) await prisma.location.delete({ where: { id: ids.locationOff } }).catch(() => {});
   if (ids.tenant) await prisma.tenant.delete({ where: { id: ids.tenant } }).catch(() => {});
   await prisma.$disconnect();
 });
@@ -121,6 +122,23 @@ test('DEDUPE: a second sweep does not re-invite the same reservation', async () 
   const dupSent = m2.sent.filter((e) => e.to === `dup-${TAG}@x.com`);
   assert.equal(dupSent.length, 0, 'no resend on second sweep');
   assert.ok(firstStamp, 'still stamped');
+});
+
+test('LOCATION kill switch (LAX #7): precheckinAutoEmailEnabled=false on the pickup location skips the send', async () => {
+  const locOff = await prisma.location.create({ data: {
+    code: `LO-${TAG}`.slice(0, 12), name: 'Loc Off', tenantId: ids.tenant,
+    locationConfig: JSON.stringify({ precheckinAutoEmailEnabled: false }),
+  } });
+  ids.locationOff = locOff.id;
+  const s = { loc: { id: locOff.id } };
+  const r = await mkRes(s, `R-${TAG}-LOFF`, `loff-${TAG}@x.com`, { hoursToPickup: 30 });
+  const mailer = mailerSpy();
+  const out = await runPrecheckinInviteSweep({ prisma, mailer, now: () => NOW, getConfig: getConfigEnabled, resolveBrand: noBrand });
+  assert.ok(out.skippedLocationDisabled >= 1, 'counted as location-disabled');
+  const sent = mailer.sent.filter((e) => e.to === `loff-${TAG}@x.com`);
+  assert.equal(sent.length, 0, 'no email to the disabled location');
+  const after = await prisma.reservation.findUnique({ where: { id: r.id } });
+  assert.equal(after.precheckinAutoInviteSentAt, null, 'not stamped');
 });
 
 test('buildInviteEmail localizes EN/ES and includes the link', () => {

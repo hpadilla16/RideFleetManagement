@@ -35,8 +35,30 @@ import { sendInvoiceAfterCheckin, sendReceiptPaidInFull } from './checkin-emails
 import { enqueueJob } from '../../lib/queue/index.js';
 import { AUTOCHARGE_PRIORITY } from '../../lib/queue/priorities.js';
 import { parseDepositRuleDecision, decideIncludedMilesPerDay, UNLIMITED_MILES } from '../../lib/deposit-rules.js';
+import { parseLocationConfig } from '../../lib/location-config.js';
 
 const AUTOCHARGE_DELAY_MS = 24 * 60 * 60 * 1000;  // 24 hours
+
+/**
+ * 2026-07-28 (LAX #8) — per-location delay for the post-check-in email
+ * (receipt or invoice). locationConfig.checkinEmailDelayHours > 0 defers the
+ * send: checkin-close stamps Reservation.checkinEmailDueAt and the
+ * checkin-email scheduler delivers later, deciding receipt-vs-invoice from
+ * the balance AT SEND TIME (a 24h-autocharge may have settled it meanwhile).
+ * 0/absent = today's inline behavior, unchanged.
+ */
+async function resolveCheckinEmailDelayMs(reservationId) {
+  try {
+    const row = await prisma.reservation.findUnique({
+      where: { id: reservationId },
+      select: { pickupLocation: { select: { locationConfig: true } } },
+    });
+    const h = Number(parseLocationConfig(row?.pickupLocation?.locationConfig).checkinEmailDelayHours);
+    return Number.isFinite(h) && h > 0 ? Math.round(h * 60 * 60 * 1000) : 0;
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * Close an agreement via the checkin wizard. Runs the fee engine, routes
@@ -260,6 +282,8 @@ export async function closeAgreementWithCheckinFees(
   let newReservationStatus;
   let autochargeJobId = null;
   let autochargeAt = null;
+  const checkinEmailDelayMs = await resolveCheckinEmailDelayMs(agreement.reservationId);
+  const checkinEmailDueAt = checkinEmailDelayMs > 0 ? new Date(Date.now() + checkinEmailDelayMs) : null;
 
   if (newBalance <= BALANCE_ZERO_EPSILON) {
     // Paid in full — close cleanly
@@ -278,7 +302,7 @@ export async function closeAgreementWithCheckinFees(
 
     await prisma.reservation.update({
       where: { id: agreement.reservationId },
-      data: { status: 'CHECKED_IN' }
+      data: { status: 'CHECKED_IN', ...(checkinEmailDueAt ? { checkinEmailDueAt, checkinEmailSentAt: null } : {}) }
     });
 
     // Loaner companion: close the borrower's LoanerAgreement on return so the portal shows
@@ -296,16 +320,22 @@ export async function closeAgreementWithCheckinFees(
       toStatus: 'CHECKED_IN'
     });
 
-    // 0-balance receipt
-    try {
-      await sendReceiptPaidInFull({
-        reservationId: agreement.reservationId,
-        agreementId: agreement.id
+    // 0-balance receipt — inline unless the location defers it (LAX #8).
+    if (checkinEmailDueAt) {
+      logger.info('[checkin-close] receipt email deferred by location config', {
+        agreementId, dueAt: checkinEmailDueAt.toISOString()
       });
-    } catch (err) {
-      logger.warn('[checkin-close] receipt email failed', {
-        agreementId, message: err.message
-      });
+    } else {
+      try {
+        await sendReceiptPaidInFull({
+          reservationId: agreement.reservationId,
+          agreementId: agreement.id
+        });
+      } catch (err) {
+        logger.warn('[checkin-close] receipt email failed', {
+          agreementId, message: err.message
+        });
+      }
     }
   } else {
     // Outstanding balance — checkin-unpaid. Whether (and when) we auto-charge
@@ -335,7 +365,8 @@ export async function closeAgreementWithCheckinFees(
       where: { id: agreement.reservationId },
       data: {
         status: 'CHECKED_IN_UNPAID',
-        autochargeAt
+        autochargeAt,
+        ...(checkinEmailDueAt ? { checkinEmailDueAt, checkinEmailSentAt: null } : {})
       }
     });
 
@@ -372,16 +403,22 @@ export async function closeAgreementWithCheckinFees(
       });
     }
 
-    // Invoice email with card-on-file notice
-    try {
-      await sendInvoiceAfterCheckin({
-        reservationId: agreement.reservationId,
-        agreementId: agreement.id
+    // Invoice email with card-on-file notice — inline unless deferred (LAX #8).
+    if (checkinEmailDueAt) {
+      logger.info('[checkin-close] invoice email deferred by location config', {
+        agreementId, dueAt: checkinEmailDueAt.toISOString()
       });
-    } catch (err) {
-      logger.warn('[checkin-close] invoice email failed', {
-        agreementId, message: err.message
-      });
+    } else {
+      try {
+        await sendInvoiceAfterCheckin({
+          reservationId: agreement.reservationId,
+          agreementId: agreement.id
+        });
+      } catch (err) {
+        logger.warn('[checkin-close] invoice email failed', {
+          agreementId, message: err.message
+        });
+      }
     }
   }
 

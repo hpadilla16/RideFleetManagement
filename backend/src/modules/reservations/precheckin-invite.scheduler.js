@@ -15,6 +15,7 @@
 import crypto from 'crypto';
 import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { settingsService } from '../settings/settings.service.js';
+import { parseLocationConfig } from '../../lib/location-config.js';
 
 const DEFAULT_INTERVAL_HOURS = 1;
 const DEFAULT_STARTUP_DELAY_SECONDS = 90;
@@ -116,11 +117,12 @@ export async function runPrecheckinInviteSweep(deps = {}) {
       id: true, tenantId: true, reservationNumber: true, pickupAt: true,
       customerInfoToken: true, precheckinAutoInviteSentAt: true, precheckinAutoReminderSentAt: true,
       customer: { select: { firstName: true, lastName: true, email: true, locale: true } },
+      pickupLocation: { select: { locationConfig: true } },
     },
     take: 500,
   });
 
-  const counts = { candidates: rows.length, invited: 0, reminded: 0, skippedNoEmail: 0, skippedDisabled: 0, deduped: 0, failed: 0 };
+  const counts = { candidates: rows.length, invited: 0, reminded: 0, skippedNoEmail: 0, skippedDisabled: 0, skippedLocationDisabled: 0, deduped: 0, failed: 0 };
   const cfgCache = new Map();
   const brandCache = new Map();
   const cfgFor = async (tenantId) => {
@@ -139,6 +141,13 @@ export async function runPrecheckinInviteSweep(deps = {}) {
     if (!email || !row.tenantId) { counts.skippedNoEmail += 1; continue; }
     const cfg = await cfgFor(row.tenantId);
     if (!cfg?.enabled) { counts.skippedDisabled += 1; continue; }
+    // 2026-07-28 (LAX #7): per-location kill switch. Absent key = enabled, so
+    // only a location explicitly set to false (LAX) opts out — every other
+    // location keeps the tenant-level behavior unchanged.
+    if (parseLocationConfig(row.pickupLocation?.locationConfig).precheckinAutoEmailEnabled === false) {
+      counts.skippedLocationDisabled += 1;
+      continue;
+    }
 
     const hoursToPickup = (new Date(row.pickupAt).getTime() - now.getTime()) / (60 * 60 * 1000);
     const customerName = `${row.customer?.firstName || ''} ${row.customer?.lastName || ''}`.trim() || 'Customer';

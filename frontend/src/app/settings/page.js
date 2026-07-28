@@ -6408,6 +6408,12 @@ function SettingsInner({ token, me, logout }) {
                     <div className="stack"><label className="label">Underage Fee Max Age</label><input type="number" min="16" placeholder="Underage Fee Max Age" value={locationEditor.config?.underageFeeMaxAge ?? ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), underageFeeMaxAge: Number(e.target.value || 0) } })} /></div>
                   </div>
                   <span className="label">Tip: Min age must be at least 16 and max age must be ≥ min age. Underage alert adds a reservation warning note when customer age is below alert age. Enforce Age Rules blocks check-out under Minimum Age (and requires a date of birth on file); drivers between Minimum Age and Underage Fee Max Age get the mandatory underage fee (Fees flagged "Underage Fee" assigned to this location).</span>
+                  <div className="label" style={{ marginTop: 12 }}>Automatic emails</div>
+                  <div className="grid2">
+                    <label className="label"><input type="checkbox" checked={locationEditor.config?.precheckinAutoEmailEnabled !== false} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), precheckinAutoEmailEnabled: e.target.checked } })} /> Pre-Check-In Auto Email</label>
+                    <div className="stack"><label className="label">Check-In Email Delay (hours)</label><input type="number" min="0" placeholder="0 = immediately" value={locationEditor.config?.checkinEmailDelayHours ?? ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), checkinEmailDelayHours: Number(e.target.value || 0) } })} /></div>
+                  </div>
+                  <span className="label">Pre-Check-In Auto Email: unchecking stops the tenant-wide automatic pre-check-in invite/reminder for THIS location only. Check-In Email Delay: hours to wait after a completed check-in before emailing the receipt/invoice (0 = send immediately); the email sent reflects the balance at send time.</span>
                 </>
               )}
 
