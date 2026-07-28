@@ -49,28 +49,46 @@ async function refreshPricingSafe(reservationId, tenantId) {
 }
 
 /**
- * 2026-07-28 — AGE-RULES gate (LAX meeting). With `ageRulesEnforced` on for the
- * pickup location: no DOB / under chargeAgeMin / over chargeAgeMax refuse
- * check-out with a 422 the wizard renders as a step-1 blocker (the agent can
- * capture the DOB inline and retry). The 21–24 band does NOT block here — it
- * surfaces as a notice and a mandatory underage fee via the pricing engine.
+ * 2026-07-28 — per-location checkout gates (LAX meeting), evaluated in order:
+ *
+ * 1. PRE-CHECKIN gate (#3): with `requirePrecheckinBeforeCheckout` on, the
+ *    session refuses to start until Reservation.customerInfoCompletedAt is
+ *    stamped — either by the customer (portal pre-checkin) or by staff
+ *    ("Completed by staff on behalf of customer" flow). 422 PRECHECKIN_REQUIRED.
+ * 2. AGE-RULES gate (#4): with `ageRulesEnforced` on, no DOB / under
+ *    chargeAgeMin / over chargeAgeMax refuse check-out with a 422 the wizard
+ *    renders as a step-1 blocker (inline DOB capture + retry). The 21–24 band
+ *    does NOT block — it surfaces as a notice + mandatory underage fee via
+ *    the pricing engine.
+ *
  * Runs at session START and again at CLOSE (a DOB corrected mid-wizard, or a
- * resumed legacy session, must not slip past the rule).
+ * resumed legacy session, must not slip past the rules).
  */
-async function ensureAgeRulesPass(reservationId) {
+async function ensureCheckoutGates(reservationId) {
   const resv = await prisma.reservation.findUnique({
     where: { id: reservationId },
     select: {
       pickupAt: true,
+      customerInfoCompletedAt: true,
       customer: { select: { dateOfBirth: true } },
       pickupLocation: { select: { locationConfig: true } },
     },
   });
   if (!resv) return null;
+  const cfg = parseLocationConfig(resv.pickupLocation?.locationConfig);
+
+  if (cfg.requirePrecheckinBeforeCheckout === true && !resv.customerInfoCompletedAt) {
+    throw new CheckoutSessionError(
+      'Pre-check-in must be completed before check-out can start at this location.',
+      422,
+      'PRECHECKIN_REQUIRED',
+    );
+  }
+
   const evaluation = evaluateAgeRules({
     dateOfBirth: resv.customer?.dateOfBirth ?? null,
     pickupAt: resv.pickupAt,
-    locationConfig: parseLocationConfig(resv.pickupLocation?.locationConfig),
+    locationConfig: cfg,
   });
   if (evaluation.blocking) {
     throw new CheckoutSessionError(
@@ -128,9 +146,9 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
     }
   }
 
-  // AGE-RULES gate — runs before the existing-session lookup on purpose:
-  // resuming a session must not bypass the rule either.
-  await ensureAgeRulesPass(reservationId);
+  // Checkout gates (pre-checkin + age rules) — run before the existing-session
+  // lookup on purpose: resuming a session must not bypass the rules either.
+  await ensureCheckoutGates(reservationId);
 
   const existing = await prisma.checkoutSession.findUnique({ where: { reservationId } });
   if (existing) {
@@ -449,10 +467,10 @@ async function transition({ id, toStep, actorUserId, metadata }) {
             'NO_VEHICLE_ASSIGNED',
           );
         }
-        // AGE-RULES re-check (defense-in-depth, mirrors the vehicle gates):
-        // a DOB edited/cleared mid-wizard must fail the finalize loudly, and a
+        // Gates re-check (defense-in-depth, mirrors the vehicle gates): a DOB
+        // edited/cleared mid-wizard must fail the finalize loudly, and a
         // CheckoutSessionError rethrows past the best-effort catch below.
-        await ensureAgeRulesPass(resv.id);
+        await ensureCheckoutGates(resv.id);
         // 2026-06-04 — defense-in-depth: re-run the vehicle-conflict gate at
         // finalize too. The session-start gate covers the normal flow, but a
         // long-lived/resumed session could finalize after another rental took

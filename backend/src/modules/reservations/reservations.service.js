@@ -110,6 +110,19 @@ function deriveAgeRulesForReservation(reservation) {
   }
 }
 
+// 2026-07-28 (LAX #3): pre-checkin-before-checkout gate, derived the same way.
+// `blocking` mirrors the checkout-session PRECHECKIN_REQUIRED gate exactly.
+function derivePrecheckinGateForReservation(reservation) {
+  try {
+    const cfg = parseLocationConfig(reservation?.pickupLocation?.locationConfig);
+    const required = cfg?.requirePrecheckinBeforeCheckout === true;
+    const complete = !!reservation?.customerInfoCompletedAt;
+    return { precheckinGate: { required, complete, blocking: required && !complete } };
+  } catch {
+    return { precheckinGate: null };
+  }
+}
+
 function isOutsideHours(date, openTime, closeTime) {
   if (!openTime || !closeTime) return false;
   const [oh, om] = String(openTime).split(':').map(Number);
@@ -1639,7 +1652,7 @@ export const reservationsService = {
         row.customer.hasLicenseBack = !!f?.hasLicenseBack;
       } catch { /* fail-open: leave flags undefined, checklist falls back to blob check */ }
     }
-    return { ...row, ...deriveUnderageAlertForReservation(row), ...deriveAgeRulesForReservation(row) };
+    return { ...row, ...deriveUnderageAlertForReservation(row), ...deriveAgeRulesForReservation(row), ...derivePrecheckinGateForReservation(row) };
   },
 
   async create(data, scope = {}) {
