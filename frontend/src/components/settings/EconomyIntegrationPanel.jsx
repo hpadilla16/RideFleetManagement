@@ -27,6 +27,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/client';
+import { RatePushApprovalsPanel } from './RatePushApprovalsPanel';
 
 function relativeTime(iso) {
   if (!iso) return 'never';
@@ -638,6 +639,13 @@ export function EconomyIntegrationPanel({ token, me, isSuper, isAdmin, activeSet
           </table>
         </div>
       </section>
+
+      {/* ============ 5. RATE PUSH APPROVALS (F4) ============ */}
+      <RatePushApprovalsPanel
+        token={token}
+        scopedSettingsPath={scopedSettingsPath}
+        onPageMsg={onPageMsg}
+      />
 
       {/* ============ 5. PENDING IMPORTS POINTER ============ */}
       <section className="glass card section-card" style={{ borderLeft: '4px solid #f59e0b' }}>
