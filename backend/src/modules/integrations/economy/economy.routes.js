@@ -553,4 +553,40 @@ economyRouter.post('/pending-imports/:id/reject', asyncHandler(async (req, res) 
   res.json({ ok: true });
 }));
 
+// ---------------------------------------------------------------------------
+// POST /rate-push/run — run the OUTBOUND rate push now. MONEY-ADJACENT.
+//
+// The scheduler covers the steady state; this exists for the rollout, where an
+// operator wants a DRY_RUN plan on demand before trusting the timer. `mode`
+// may only DOWNGRADE the ambient mode (a LIVE deployment can be exercised as
+// DRY_RUN, never the reverse) — going live stays an env/deploy decision, never
+// a request body. The per-area ratePushEnabled + rateCloseoutMin guards still
+// apply inside pushArea.
+// ---------------------------------------------------------------------------
+economyRouter.post('/rate-push/run', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenantId(req);
+  const { pushAllAreas, pushMode, MODES } = await import('./economy-rate-push.service.js');
+  const ambient = pushMode();
+  if (ambient === MODES.OFF) {
+    return res.status(409).json({ error: 'Rate push is OFF (set ECONOMY_RATE_PUSH_MODE to DRY_RUN or LIVE)' });
+  }
+  const requested = String((req.body || {}).mode || '').toUpperCase();
+  const mode = requested === MODES.DRY_RUN ? MODES.DRY_RUN : ambient;
+
+  const result = await pushAllAreas({ mode, trigger: 'MANUAL', actorUserId: req.user?.id || null, tenantId });
+  res.json({ ok: true, ...result });
+}));
+
+// ---------------------------------------------------------------------------
+// GET /rate-push/log — recent push decisions (including skips) for review.
+// ---------------------------------------------------------------------------
+economyRouter.get('/rate-push/log', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenantId(req);
+  const take = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+  const where = { tenantId, provider: 'ECONOMY' };
+  if (req.query.status) where.status = String(req.query.status).toUpperCase();
+  const items = await prisma.ratePushLog.findMany({ where, orderBy: { createdAt: 'desc' }, take });
+  res.json({ items, count: items.length });
+}));
+
 export default economyRouter;

@@ -244,6 +244,16 @@ async function main() {
     logger.warn('[worker] tollbridge import scheduler not started', { message: err.message });
   }
 
+  // OUTBOUND rate push to the Economy franchise portal (2026-07-28) — own
+  // flag/timer; dormant unless ECONOMY_RATE_PUSH_MODE is DRY_RUN or LIVE.
+  try {
+    const rpMod = await import('./modules/integrations/economy/economy-rate-push.scheduler.js');
+    rpMod.startEconomyRatePushScheduler();
+    logger.info('[worker] started: economy rate-push scheduler (if enabled)');
+  } catch (err) {
+    logger.warn('[worker] economy rate-push scheduler not started', { message: err.message });
+  }
+
   // Citations OCR mail intake (2026-06-15, Fase B) — processes uploaded/emailed
   // citation-notice scans (CitationDocument PENDING) via vision-LLM → ingestBatch.
   // No-ops unless CITATION_OCR_ENABLED + provider key are set. Dynamic import so a
@@ -341,6 +351,10 @@ async function main() {
     try {
       const tbMod = await import('./modules/tolls/tollbridge/tollbridge.scheduler.js');
       tbMod.stopTollBridgeImportScheduler();
+    } catch {}
+    try {
+      const rpMod = await import('./modules/integrations/economy/economy-rate-push.scheduler.js');
+      rpMod.stopEconomyRatePushScheduler();
     } catch {}
     try {
       const ocrMod = await import('./modules/citations/citation-ocr.scheduler.js');

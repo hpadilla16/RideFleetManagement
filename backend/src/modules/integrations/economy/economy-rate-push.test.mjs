@@ -189,3 +189,80 @@ test('LIVE: a throwing write is audited as FAILED and does not abort the run', a
   const failed = logs.find((l) => l.status === 'FAILED');
   assert.match(failed.error, /portal 500/);
 });
+
+// ---------------------------------------------------------------------------
+// F3 — scheduler gating + pushAllAreas fan-out
+// ---------------------------------------------------------------------------
+const sched = await import('./economy-rate-push.scheduler.js');
+const svc = await import('./economy-rate-push.service.js');
+
+test('scheduler: dormant while ECONOMY_RATE_PUSH_MODE is OFF (the default)', () => {
+  const prev = process.env.ECONOMY_RATE_PUSH_MODE;
+  delete process.env.ECONOMY_RATE_PUSH_MODE;
+  try {
+    assert.equal(svc.pushMode(), MODES.OFF);
+    sched.startEconomyRatePushScheduler(); // no-op; must not throw or arm a timer
+    sched.stopEconomyRatePushScheduler();
+  } finally { if (prev === undefined) delete process.env.ECONOMY_RATE_PUSH_MODE; else process.env.ECONOMY_RATE_PUSH_MODE = prev; }
+});
+
+test('scheduler: interval + startup delay fall back to sane defaults', () => {
+  const prevI = process.env.ECONOMY_RATE_PUSH_INTERVAL_MINUTES;
+  const prevS = process.env.ECONOMY_RATE_PUSH_STARTUP_DELAY_SECONDS;
+  try {
+    delete process.env.ECONOMY_RATE_PUSH_INTERVAL_MINUTES;
+    delete process.env.ECONOMY_RATE_PUSH_STARTUP_DELAY_SECONDS;
+    assert.equal(sched.intervalMinutes(), 30);
+    assert.equal(sched.startupDelaySeconds(), 240);
+    process.env.ECONOMY_RATE_PUSH_INTERVAL_MINUTES = '0';
+    assert.equal(sched.intervalMinutes(), 30, 'zero is rejected, not honoured');
+    process.env.ECONOMY_RATE_PUSH_INTERVAL_MINUTES = 'abc';
+    assert.equal(sched.intervalMinutes(), 30);
+  } finally {
+    if (prevI === undefined) delete process.env.ECONOMY_RATE_PUSH_INTERVAL_MINUTES; else process.env.ECONOMY_RATE_PUSH_INTERVAL_MINUTES = prevI;
+    if (prevS === undefined) delete process.env.ECONOMY_RATE_PUSH_STARTUP_DELAY_SECONDS; else process.env.ECONOMY_RATE_PUSH_STARTUP_DELAY_SECONDS = prevS;
+  }
+});
+
+test('pushAllAreas: OFF short-circuits before touching the DB', async () => {
+  let queried = false;
+  const out = await svc.pushAllAreas({
+    mode: MODES.OFF,
+    prisma: { economyLocationConfig: { findMany: async () => { queried = true; return []; } } },
+  });
+  assert.equal(out.skipped, 'mode_off');
+  assert.equal(queried, false);
+});
+
+test('pushAllAreas: only areas with ratePushEnabled are queried, failures isolated', async () => {
+  let capturedWhere = null;
+  const out = await svc.pushAllAreas({
+    mode: MODES.DRY_RUN,
+    prisma: {
+      economyLocationConfig: {
+        findMany: async ({ where }) => {
+          capturedWhere = where;
+          return [
+            { tenantId: 't1', externalArea: 'LAX', ratePushEnabled: true, rateCloseoutMin: 250, locationId: 'l1', externalLocationCode: 'LAXO01' },
+            { tenantId: 't1', externalArea: 'BOOM', ratePushEnabled: true, rateCloseoutMin: 250, locationId: 'l2', externalLocationCode: 'MIAO01' },
+          ];
+        },
+      },
+      ratePushLog: { create: async ({ data }) => ({ id: 'x', ...data }), update: async () => ({}) },
+    },
+    now: () => new Date('2027-03-15T12:00:00Z'),
+    horizonDays: 1,
+    loadRfmRates: async (_t, locationId) => {
+      if (locationId === 'l2') throw new Error('rates blew up');
+      return [{ classCode: 'CCAR', daily: 20 }];
+    },
+    client: {
+      readRateGrid: async () => parseRateGrid(gridHtml([{ cls: 'CCAR', values: ['', '', ''] }])),
+      applyRateCell: async () => ({ claimedSuccess: true }),
+    },
+  });
+  assert.deepEqual(capturedWhere, { enabled: true, ratePushEnabled: true });
+  assert.equal(out.processedAreas, 2);
+  assert.ok(out.results.find((r) => r.externalArea === 'LAX')?.planned >= 1, 'the healthy area still ran');
+  assert.match(out.results.find((r) => r.error)?.error || '', /rates blew up/, 'the broken area was isolated');
+});
