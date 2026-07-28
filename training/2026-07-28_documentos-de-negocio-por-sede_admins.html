@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Documentos de negocio por sede — Guía rápida (Admins)</title>
+<style>
+  @page { size: Letter; margin: 12mm 12mm 14mm 12mm; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; }
+  body {
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 10.2px; line-height: 1.45; color:#1f2430; background:#fff;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .wrap { max-width: 195mm; margin: 0 auto; }
+
+  /* ---------- header ---------- */
+  .hero {
+    background: linear-gradient(100deg, #8752FE 0%, #6C39E0 62%, #5A2ECB 100%);
+    color:#fff; border-radius:12px; padding:14px 18px; margin-bottom:12px;
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+  }
+  .hero h1 { margin:0 0 3px; font-size:19px; font-weight:700; letter-spacing:-.2px; }
+  .hero .sub { font-size:10.5px; opacity:.92; }
+  .hero .badge {
+    background: rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.35);
+    border-radius:999px; padding:5px 11px; font-size:9.5px; font-weight:600;
+    white-space:nowrap; text-align:center; line-height:1.35;
+  }
+  .brand { font-size:9px; letter-spacing:2.4px; text-transform:uppercase; opacity:.8; margin-bottom:4px; }
+
+  /* ---------- layout ---------- */
+  .row { display:flex; gap:10px; align-items:stretch; }
+  .col { flex:1; min-width:0; }
+  .card {
+    background:#fff; border:1px solid #E4E1F1; border-radius:10px;
+    padding:11px 13px; margin-bottom:10px;
+  }
+  .card.tint { background:#FAF8FF; border-color:#DCD3F7; }
+  h2 {
+    font-size:12px; margin:0 0 7px; color:#4B2FA8; font-weight:700;
+    display:flex; align-items:center; gap:7px;
+  }
+  h2 .n {
+    background:#8752FE; color:#fff; width:17px; height:17px; border-radius:5px;
+    display:inline-flex; align-items:center; justify-content:center;
+    font-size:9.5px; font-weight:700; flex:none;
+  }
+  h3 { font-size:10.4px; margin:9px 0 5px; color:#2b2140; font-weight:700; }
+  p { margin:0 0 6px; }
+  .muted { color:#6a6580; }
+  code, .ui {
+    font-family:"Segoe UI", Arial, sans-serif; background:#F1ECFF; color:#4B2FA8;
+    border:1px solid #DDD2FA; border-radius:4px; padding:0 4px; font-weight:600;
+    font-size:9.6px; white-space:nowrap;
+  }
+
+  /* ---------- steps ---------- */
+  ol.steps { list-style:none; margin:0; padding:0; counter-reset:s; }
+  ol.steps li {
+    counter-increment:s; position:relative; padding:0 0 0 22px; margin-bottom:5px;
+  }
+  ol.steps li::before {
+    content: counter(s); position:absolute; left:0; top:0.5px;
+    width:15px; height:15px; border-radius:50%; background:#8752FE; color:#fff;
+    font-size:9px; font-weight:700; display:flex; align-items:center; justify-content:center;
+  }
+  ol.steps li.opt::before { background:#B6A3F0; }
+
+  /* ---------- mockup ---------- */
+  .mock {
+    border:1px solid #D8D3EA; border-radius:9px; overflow:hidden; background:#fff;
+    position:relative;
+  }
+  .mock .bar {
+    background:#F4F2FA; border-bottom:1px solid #E4E1F1; padding:5px 9px;
+    font-size:9px; color:#6a6580; font-weight:600; display:flex; justify-content:space-between;
+  }
+  .mock .body { padding:9px 10px; }
+  .sechead { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+  .sechead .t { font-size:11px; font-weight:700; color:#2b2140; padding-left:20px; }
+  .select {
+    border:1.4px solid #8752FE; border-radius:6px; padding:3px 20px 3px 8px;
+    font-size:9px; color:#2b2140; background:#fff; position:relative; font-weight:600;
+  }
+  .select::after {
+    content:"▾"; position:absolute; right:7px; top:2px; color:#8752FE; font-size:9px;
+  }
+  .grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:6px; }
+  .fld { position:relative; }
+  .fld label { display:block; padding-left:18px; font-size:7.6px; color:#6a6580; font-weight:700; text-transform:uppercase; letter-spacing:.4px; margin-bottom:2px; }
+  .fld .inp {
+    border:1px solid #D8D3EA; border-radius:5px; background:#FCFBFF;
+    padding:4px 6px; font-size:8.6px; color:#3a3450; min-height:20px;
+  }
+  .fld .inp.ph { color:#a09bb5; }
+  .btn {
+    background:#8752FE; color:#fff; border-radius:6px; padding:5px 12px;
+    font-size:9px; font-weight:700; display:inline-block;
+  }
+  .btn.ghost { background:#fff; color:#4B2FA8; border:1px solid #C9BCF5; }
+  .btn.tiny { padding:2px 7px; font-size:8px; }
+
+  table.docs { width:100%; border-collapse:collapse; margin-top:8px; }
+  table.docs th {
+    text-align:left; font-size:7.6px; text-transform:uppercase; letter-spacing:.4px;
+    color:#6a6580; border-bottom:1px solid #E4E1F1; padding:3px 4px;
+  }
+  table.docs td { font-size:8.6px; padding:4px; border-bottom:1px solid #F0EEF7; vertical-align:middle; }
+
+  .chip {
+    display:inline-block; border-radius:999px; padding:1.5px 7px;
+    font-size:8px; font-weight:700; white-space:nowrap;
+  }
+  .chip.green { background:#E4F7EC; color:#12704A; border:1px solid #B6E7CC; }
+  .chip.amber { background:#FEF3DA; color:#8A5A05; border:1px solid #F5D79A; }
+  .chip.red   { background:#FDE7E7; color:#9B1C1C; border:1px solid #F5B9B9; }
+  .chip.grey  { background:#EFEFF3; color:#55516a; border:1px solid #DCDBE4; }
+
+  /* callout badges */
+  .cal {
+    position:absolute; width:15px; height:15px; border-radius:50%;
+    background:#FF7A2F; color:#fff; font-size:9px; font-weight:700;
+    display:flex; align-items:center; justify-content:center;
+    border:1.6px solid #fff; box-shadow:0 0 0 1px #FF7A2F;
+    z-index:5;
+  }
+
+  /* ---------- callouts / notes ---------- */
+  .note {
+    border-left:3px solid #8752FE; background:#F7F4FF; border-radius:0 7px 7px 0;
+    padding:7px 10px; margin:7px 0 0;
+  }
+  .note.warn { border-left-color:#E8A33D; background:#FFF9EE; }
+  .note.stop { border-left-color:#D64545; background:#FEF3F3; }
+  .note b { color:#3a2a6b; }
+
+  ul.tight { margin:0; padding-left:15px; }
+  ul.tight li { margin-bottom:3.5px; }
+
+  .legend { display:grid; grid-template-columns: 88px 1fr; gap:4px 8px; align-items:start; font-size:9.4px; }
+
+  .foot {
+    margin-top:8px; border-top:1px solid #E4E1F1; padding-top:7px;
+    font-size:8.4px; color:#8a86a0; display:flex; justify-content:space-between; gap:10px;
+  }
+  .pagebreak { page-break-before: always; }
+  .avoid { page-break-inside: avoid; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============ HEADER ============ -->
+  <div class="hero avoid">
+    <div>
+      <div class="brand">Ride Fleet Management · Guía de entrenamiento</div>
+      <h1>Documentos de negocio por sede</h1>
+      <div class="sub">Guarda permisos, registraciones, seguros y licencias de cada sede — y deja que el sistema te avise antes de que venzan.</div>
+    </div>
+    <div class="badge">28 julio 2026<br>Para ADMINS</div>
+  </div>
+
+  <!-- ============ QUÉ ES ============ -->
+  <div class="card avoid">
+    <h2><span class="n">i</span> ¿Qué es y cuándo lo uso?</h2>
+    <p>Cada <b>sede</b> puede ahora guardar dentro de RFM todo su papeleo de negocio: <b>permisos, registraciones de vehículos, certificados de seguro, licencias, documentos de impuestos y contratos de arrendamiento</b>. A cada documento le pones la fecha en que deja de ser válido.</p>
+    <ul class="tight">
+      <li><b>El sistema te avisa 30 días antes</b> de que algo venza, en el dashboard principal. Ya no hay que acordarse de memoria.</li>
+      <li><b>Cualquier empleado autorizado puede sacar el documento al instante</b> — por ejemplo si llega una inspección y te piden el permiso de operación.</li>
+      <li><b>Nada se borra nunca.</b> Lo que sacas de la lista queda archivado para auditorías.</li>
+    </ul>
+    <div class="note"><b>Dónde está:</b> <span class="ui">Settings</span> → pestaña <span class="ui">Locations</span> → baja hasta la sección <span class="ui">Business documents</span>.</div>
+  </div>
+
+  <!-- ============ PASOS + MOCKUP A ============ -->
+  <div class="card avoid">
+    <h2><span class="n">1</span> Cómo subir un documento — paso a paso</h2>
+    <div class="row">
+      <div class="col" style="flex:0 0 40%;">
+        <ol class="steps">
+          <li>Entra a <span class="ui">Settings</span> → <span class="ui">Locations</span> y baja a <span class="ui">Business documents</span>.</li>
+          <li><b>Elige la sede</b> en el menú desplegable (arriba a la derecha de la sección). Todo lo que hagas después aplica a esa sede.</li>
+          <li>Elige el <b>tipo de documento</b>: Permit / Registration / Insurance / License / Tax / Lease / Other.</li>
+          <li>Escribe un <b>nombre claro</b>, por ejemplo <i>"Permiso de negocio Ciudad de Los Ángeles"</i>. Ese es el nombre que verá el resto del equipo.</li>
+          <li class="opt"><b>Opcional:</b> pon la fecha de emisión en <span class="ui">Issued</span>.</li>
+          <li>Pon la fecha de vencimiento en <span class="ui">Valid until</span>. <b>Déjala en blanco si el documento no vence nunca.</b></li>
+          <li class="opt"><b>Opcional:</b> agrega notas (número de trámite, contacto, etc.).</li>
+          <li>Selecciona el <b>archivo</b>: PDF o foto, <b>máximo 15 MB</b>.</li>
+          <li>Presiona <span class="ui">Add document</span>. Aparece de inmediato en la tabla de abajo.</li>
+        </ol>
+      </div>
+      <div class="col">
+        <!-- ---------- MOCKUP A ---------- -->
+        <div class="mock">
+          <div class="bar"><span>Settings &nbsp;›&nbsp; Locations</span><span>Ride Fleet Management</span></div>
+          <div class="body" style="position:relative;">
+            <div class="cal" style="left:0; top:5px;">1</div>
+            <div class="cal" style="right:2px; top:-4px;">2</div>
+            <div class="sechead">
+              <div class="t">Business documents</div>
+              <div class="select">LAX — Los Angeles</div>
+            </div>
+
+            <div class="grid">
+              <div class="fld"><div class="cal" style="left:0; top:-2px;">3</div><label>Type</label><div class="inp">Permit ▾</div></div>
+              <div class="fld" style="grid-column: span 2;"><div class="cal" style="left:0; top:-2px;">4</div><label>Name</label><div class="inp">Permiso de negocio Ciudad de Los Ángeles</div></div>
+              <div class="fld"><div class="cal" style="left:0; top:-2px;">5</div><label>Issued</label><div class="inp ph">mm/dd/aaaa</div></div>
+            </div>
+            <div class="grid" style="margin-top:6px;">
+              <div class="fld"><div class="cal" style="left:0; top:-2px;">6</div><label>Valid until</label><div class="inp">03/31/2027</div></div>
+              <div class="fld" style="grid-column: span 2;"><div class="cal" style="left:0; top:-2px;">7</div><label>Notes (opcional)</label><div class="inp ph">Trámite #A-1182 · contacto: City Clerk</div></div>
+              <div class="fld"><div class="cal" style="left:0; top:-2px;">8</div><label>File (PDF/imagen)</label><div class="inp">permiso-lax.pdf</div></div>
+            </div>
+            <div style="margin-top:8px; text-align:right; position:relative;">
+              <div class="cal" style="right:-6px; top:-6px;">9</div>
+              <span class="btn">Add document</span>
+            </div>
+
+            <table class="docs">
+              <tr><th>Tipo</th><th>Nombre</th><th>Vence</th><th>Estado</th><th style="text-align:right;">Acciones</th></tr>
+              <tr>
+                <td>Insurance</td><td>Póliza flota 2026</td><td>12/31/2026</td>
+                <td><span class="chip green">Valid</span></td>
+                <td style="text-align:right;"><span class="btn ghost tiny">View</span> <span class="btn ghost tiny">Archive</span></td>
+              </tr>
+              <tr>
+                <td>Permit</td><td>Permiso de negocio</td><td>08/14/2026</td>
+                <td><span class="chip amber">17d left</span></td>
+                <td style="text-align:right;"><span class="btn ghost tiny">View</span> <span class="btn ghost tiny">Archive</span></td>
+              </tr>
+              <tr>
+                <td>Registration</td><td>Registración unidad 4471</td><td>07/02/2026</td>
+                <td><span class="chip red">Expired 26d ago</span></td>
+                <td style="text-align:right;"><span class="btn ghost tiny">View</span> <span class="btn ghost tiny">Archive</span></td>
+              </tr>
+              <tr>
+                <td>License</td><td>Licencia estatal de operación</td><td>—</td>
+                <td><span class="chip grey">No expiry</span></td>
+                <td style="text-align:right;"><span class="btn ghost tiny">View</span> <span class="btn ghost tiny">Archive</span></td>
+              </tr>
+            </table>
+            <div style="font-size:7.6px; color:#a09bb5; margin-top:5px;">Ilustración de la pantalla (datos de ejemplo).</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ COLORES + BOTONES ============ -->
+  <div class="row avoid">
+    <div class="col">
+      <div class="card" style="height:100%;">
+        <h2><span class="n">2</span> Los colores de la tabla</h2>
+        <p class="muted" style="font-size:9.3px;">Cada documento muestra una etiqueta de color. Léela de un vistazo:</p>
+        <div class="legend">
+          <div><span class="chip green">Valid</span></div>
+          <div>Todo bien, no hay nada que hacer.</div>
+          <div><span class="chip amber">17d left</span></div>
+          <div>Vence dentro de 30 días o menos (también verás <i>"Expires today"</i>). <b>Empieza la renovación ya.</b></div>
+          <div><span class="chip red">Expired 26d ago</span></div>
+          <div>Ya venció. <b>Urgente</b> — la sede podría estar operando sin papeles al día.</div>
+          <div><span class="chip grey">No expiry</span></div>
+          <div>No vence nunca. El sistema no te lo va a recordar jamás (así debe ser).</div>
+        </div>
+        <div class="note"><b>Siempre está al día:</b> el estado se vuelve a calcular cada vez que abres la pantalla. No hay que refrescar nada ni "marcar" nada a mano.</div>
+      </div>
+    </div>
+    <div class="col" style="flex:0 0 40%;">
+      <div class="card" style="height:100%;">
+        <h2><span class="n">3</span> Los dos botones de cada fila</h2>
+        <h3><span class="ui">View</span> — abrir el documento</h3>
+        <p>Abre el archivo. Es un <b>enlace seguro que caduca a los 5 minutos</b>, por protección. Si dejaste la pantalla abierta un rato y el enlace ya no funciona, simplemente vuelve a presionar <span class="ui">View</span>.</p>
+        <h3><span class="ui">Archive</span> — sacarlo de la lista activa</h3>
+        <p>Lo quita de la lista activa (por ejemplo cuando ya subiste la versión renovada), pero <b>NO lo borra</b>: el documento queda guardado para auditorías. En RFM nada se elimina de verdad.</p>
+        <div class="note warn"><b>Regla práctica:</b> cuando renueves un permiso, primero <b>sube el nuevo</b> y después <b>archiva el viejo</b>.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ DASHBOARD ============ -->
+  <div class="card avoid">
+    <h2><span class="n">4</span> El aviso en el dashboard</h2>
+    <div class="row">
+      <div class="col">
+        <p>En el dashboard principal aparece un recuadro llamado <span class="ui">Documents expiring</span>:</p>
+        <ul class="tight">
+          <li>Se pone <b style="color:#8A5A05;">ámbar</b> cuando hay algo que vence dentro de los próximos 30 días.</li>
+          <li>Se pone <b style="color:#9B1C1C;">rojo</b> cuando ya hay algo vencido. Eso es lo primero que hay que atender en el día.</li>
+          <li>Al hacerle clic te lleva directo a <span class="ui">Settings</span> para que resuelvas.</li>
+          <li><b>Si no hay nada que atender, el recuadro no aparece.</b> Que no lo veas es buena noticia, no un error.</li>
+        </ul>
+      </div>
+      <div class="col" style="flex:0 0 42%;">
+        <div class="mock">
+          <div class="bar"><span>Dashboard</span><span>Hoy</span></div>
+          <div class="body" style="position:relative;">
+            <div class="cal" style="right:4px; top:2px;">A</div>
+            <div style="border:1.4px solid #F5B9B9; background:#FEF3F3; border-radius:8px; padding:8px 10px;">
+              <div style="font-size:8px; text-transform:uppercase; letter-spacing:.5px; color:#9B1C1C; font-weight:700;">Documents expiring</div>
+              <div style="font-size:22px; font-weight:700; color:#9B1C1C; line-height:1.1; margin:2px 0;">3</div>
+              <div style="font-size:8.6px; color:#7c2b2b;">1 vencido · 2 vencen en 30 días</div>
+              <div style="font-size:8px; color:#9B1C1C; margin-top:4px; font-weight:700;">Ver en Settings →</div>
+            </div>
+            <div style="display:flex; gap:6px; margin-top:7px;">
+              <div style="flex:1; border:1px solid #F5D79A; background:#FEF3DA; border-radius:8px; padding:6px 8px;">
+                <div style="font-size:7.4px; text-transform:uppercase; color:#8A5A05; font-weight:700;">Documents expiring</div>
+                <div style="font-size:15px; font-weight:700; color:#8A5A05;">2</div>
+                <div style="font-size:7.6px; color:#8A5A05;">versión ámbar (nada vencido aún)</div>
+              </div>
+              <div style="flex:1; border:1px dashed #DCDBE4; background:#FAFAFC; border-radius:8px; padding:6px 8px; color:#a09bb5;">
+                <div style="font-size:7.4px; text-transform:uppercase; font-weight:700;">Sin avisos</div>
+                <div style="font-size:8px; margin-top:8px;">el recuadro simplemente no se muestra</div>
+              </div>
+            </div>
+            <div style="font-size:7.6px; color:#a09bb5; margin-top:5px;">Ilustración de la pantalla (datos de ejemplo).</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PERMISOS Y GOTCHAS ============ -->
+  <div class="card tint avoid">
+    <h2><span class="n">!</span> Permisos y detalles importantes</h2>
+    <div class="row">
+      <div class="col">
+        <h3>¿Quién puede usarlo?</h3>
+        <ul class="tight">
+          <li><b>Solo los roles ADMIN y OPS.</b> Vive dentro de <span class="ui">Settings</span>, así que el resto del equipo no lo ve.</li>
+          <li>Si tu usuario está <b>limitado a ciertas sedes</b>, solo verás y administrarás los documentos <b>de tus sedes</b>. Es correcto: no es un error ni te falta nada.</li>
+        </ul>
+        <div class="note stop"><b>Si no ves la sección:</b> revisa que estés en <span class="ui">Settings</span> → <span class="ui">Locations</span> y que hayas bajado hasta el final. Si aun así no aparece, tu usuario no tiene rol ADMIN u OPS — pídeselo a tu administrador.</div>
+      </div>
+      <div class="col">
+        <h3>Errores que hay que evitar</h3>
+        <ul class="tight">
+          <li><b>No inventes fechas de vencimiento.</b> Si el documento no vence, deja <span class="ui">Valid until</span> <b>vacío</b>. Si le pones una fecha falsa, el sistema te va a estar molestando para siempre con un aviso que no es real.</li>
+          <li><b>Máximo 15 MB</b> por archivo, y debe ser <b>PDF o imagen</b> (foto del documento sirve). Si no sube, casi siempre es el tamaño — escanea en menor calidad.</li>
+          <li><b>Archive no es borrar.</b> No lo uses pensando que limpia el expediente: el documento sigue guardado para auditorías, y eso está bien.</li>
+          <li>Ponle <b>nombres claros</b>. "Permiso 2026" no le dice nada a quien lo busque durante una inspección.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div><b>Ride Fleet Management</b> · Documentos de negocio por sede · Publicado en producción el 28 de julio de 2026.</div>
+    <div style="text-align:right;">Las pantallas de esta guía son ilustraciones. Cuando haya capturas reales, se colocan en<br><code>training/assets/screenshots/documentos-de-negocio-por-sede/</code> y reemplazan a los dibujos.</div>
+  </div>
+
+</div>
+</body>
+</html>
