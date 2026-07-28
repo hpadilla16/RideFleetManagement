@@ -288,6 +288,7 @@ function DashboardInner({ token, me, logout }) {
   // Today-KPIs (2026-07-26, approved mockups): Collected today + Pending tolls.
   // 403 for agents/scoped users -> catch keeps it null and the tiles hide.
   const [todayKpis, setTodayKpis] = useState(null);
+  const [docAlert, setDocAlert] = useState(null);
   const [msg, setMsg] = useState('');
   const canSeeOverview = me?.moduleAccess?.reports !== false;
   const canSeeVehicles = me?.moduleAccess?.vehicles !== false;
@@ -317,6 +318,15 @@ function DashboardInner({ token, me, logout }) {
     if (me?.moduleAccess?.maintenance !== false) {
       api('/api/maintenance/summary', { bypassCache: true }, token).then((s) => setMaintSummary(s || null)).catch(() => setMaintSummary(null));
       api('/api/reports/today-kpis', { bypassCache: true }, token).then((k) => setTodayKpis(k && k.collectedToday != null ? k : null)).catch(() => setTodayKpis(null));
+    }
+
+    // Business documents expiring (2026-07-28). Lives behind the settings
+    // module + ADMIN/OPS like the rest of /api/locations, so a 403 for anyone
+    // else must stay silent rather than break the dashboard.
+    if (me?.moduleAccess?.settings !== false) {
+      api('/api/locations/documents/expiring', { bypassCache: true }, token)
+        .then((d) => setDocAlert(d && (d.expiringCount || d.expiredCount) ? d : null))
+        .catch(() => setDocAlert(null));
     }
 
     if (reservationsResult.status === 'fulfilled') {
@@ -697,6 +707,43 @@ function DashboardInner({ token, me, logout }) {
                 miles-driven. Big number = OVERDUE (the alarm), due-soon in the desc.
                 Red tint mirrors the overdue-returns tile. Renders only when the
                 module is on AND /api/maintenance/summary answered (soft-fail). */}
+            {/* Business documents expiring (2026-07-28). A branch that lets a
+                permit or registration lapse cannot legally trade, and the
+                usual way that surfaces is an inspector — so it gets a tile.
+                Red once something has ALREADY lapsed, amber while there is
+                still time to renew. Renders only when there is something to
+                say. */}
+            {docAlert ? (
+              <button
+                type="button"
+                className="info-tile"
+                onClick={() => router.push('/settings')}
+                style={{
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  background: Number(docAlert.expiredCount || 0) > 0 ? 'var(--danger-bg)' : 'var(--warn-bg)',
+                  borderColor: Number(docAlert.expiredCount || 0) > 0 ? 'var(--danger-bd)' : 'var(--warn-bd)',
+                }}
+                title={t('dashboard.tileDocsExpiringTitle', { defaultValue: 'Business documents needing renewal' })}
+              >
+                <span className="label">{t('dashboard.tileDocsExpiring', { defaultValue: 'Documents expiring' })}</span>
+                <strong style={{ color: Number(docAlert.expiredCount || 0) > 0 ? 'var(--danger-tx)' : 'var(--warn-tx)' }}>
+                  {Number(docAlert.expiredCount || 0) + Number(docAlert.expiringCount || 0)}
+                </strong>
+                <span className="ui-muted">
+                  {Number(docAlert.expiredCount || 0) > 0
+                    ? t('dashboard.tileDocsExpiredDesc', {
+                      defaultValue: '{{expired}} already expired',
+                      expired: Number(docAlert.expiredCount || 0),
+                    })
+                    : t('dashboard.tileDocsExpiringDesc', {
+                      defaultValue: 'within {{days}} days',
+                      days: Number(docAlert.warnDays || 30),
+                    })}
+                </span>
+              </button>
+            ) : null}
+
             {maintSummary ? (
               <button
                 type="button"
