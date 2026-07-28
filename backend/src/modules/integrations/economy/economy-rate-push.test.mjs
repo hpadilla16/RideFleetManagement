@@ -64,10 +64,22 @@ function makeDeps({ portalRows, rfmRates, mode, applyImpl, approvals }) {
     ratePushLog: {
       // F4 reads pre-approved cells (findMany) and dedupes the pending queue
       // (findFirst); `approvals` lets a test seed authorised rows.
-      findMany: async () => (approvals || []).map((a, i) => ({
-        id: `appr-${i}`, classCode: a.classCode,
-        rateDate: new Date(`${a.rateDate}T00:00:00Z`), pushedValue: a.pushedValue,
-      })),
+      findMany: async ({ where } = {}) => {
+        // Two callers share findMany: the APPROVED lookup and the "what did we
+        // already record today" dedup scan.
+        if (where?.status === 'APPROVED') {
+          return (approvals || []).map((a, i) => ({
+            id: `appr-${i}`, classCode: a.classCode,
+            rateDate: new Date(`${a.rateDate}T00:00:00Z`), pushedValue: a.pushedValue,
+          }));
+        }
+        return logs.filter((l) => l.rateDate).map((l) => ({
+          classCode: l.classCode,
+          rateDate: l.rateDate instanceof Date ? l.rateDate : new Date(`${l.rateDate}T00:00:00Z`),
+          status: l.status, skipReason: l.skipReason || null,
+          priorValue: l.priorValue ?? null, pushedValue: l.pushedValue ?? null,
+        }));
+      },
       findFirst: async ({ where }) => logs.find((l) => (
         l.status === 'PENDING_APPROVAL'
         && l.classCode === where.classCode
@@ -325,4 +337,41 @@ test('LIVE consumes the approval exactly once', async () => {
   assert.deepEqual(calls.applied.map((a) => a.rateDate), ['2027-03-15']);
   const spent = logs.find((l) => l.id === 'appr-0');
   assert.ok(spent && ['SENT', 'VERIFIED', 'MISMATCH'].includes(spent.status), 'the approval row moved past APPROVED');
+});
+
+// ---------------------------------------------------------------------------
+// Log hygiene: the sweep runs every 30 min. Re-recording unchanged decisions
+// would add ~2k rows/day of noise and bury the rows that matter.
+// ---------------------------------------------------------------------------
+test('a second identical sweep records NOTHING new (no audit churn)', async () => {
+  const setup = makeDeps({
+    portalRows: [{ cls: 'CCAR', values: ['', '250.00', '20.00'] }],
+    rfmRates: [{ classCode: 'CCAR', daily: 20 }],
+    mode: MODES.DRY_RUN,
+  });
+  const first = await pushArea(CONFIG, setup.deps);
+  const afterFirst = setup.logs.length;
+  assert.ok(afterFirst > 0, 'the first sweep does record its decisions');
+  assert.equal(first.deduped, 0);
+
+  const second = await pushArea(CONFIG, setup.deps);
+  assert.equal(setup.logs.length, afterFirst, 'the repeat sweep added no rows');
+  assert.ok(second.deduped > 0, 'and it reports what it suppressed');
+});
+
+test('but a CHANGED portal price is still recorded (real history is never lost)', async () => {
+  const setup = makeDeps({
+    portalRows: [{ cls: 'CCAR', values: ['20.00', '250.00', '20.00'] }],
+    rfmRates: [{ classCode: 'CCAR', daily: 20 }],
+    mode: MODES.DRY_RUN,
+  });
+  await pushArea(CONFIG, setup.deps);
+  const afterFirst = setup.logs.length;
+
+  // The franchise moves the first day's price: that is news, not noise.
+  setup.deps.client.readRateGrid = async () => parseRateGrid(gridHtml([
+    { cls: 'CCAR', values: ['15.00', '250.00', '20.00'] },
+  ]));
+  await pushArea(CONFIG, setup.deps);
+  assert.ok(setup.logs.length > afterFirst, 'the changed cell produced a new row');
 });

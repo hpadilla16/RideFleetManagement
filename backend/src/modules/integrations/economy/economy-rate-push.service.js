@@ -152,6 +152,32 @@ export async function pushArea(config, deps = {}) {
     trigger, mode, createdByUserId: actorUserId,
   };
 
+  // Log hygiene: the sweep runs every 30 minutes and most cells never change,
+  // so re-recording every unchanged decision would add ~2k rows/day of pure
+  // noise and slowly bury the rows that matter. Load TODAY's already-recorded
+  // outcomes for this location once, then skip writing a row that would be
+  // byte-identical. A row IS written whenever anything actually moved (the
+  // portal's price, the target, the reason), because that is real history.
+  const dayStart = new Date(`${(deps.now ? deps.now() : new Date()).toISOString().slice(0, 10)}T00:00:00Z`);
+  const todaysRows = await db.ratePushLog.findMany({
+    where: { tenantId, provider: PROVIDER, locationId, createdAt: { gte: dayStart } },
+    select: { classCode: true, rateDate: true, status: true, skipReason: true, priorValue: true, pushedValue: true },
+  });
+  const seenToday = new Set(todaysRows.map((r) => [
+    r.classCode,
+    r.rateDate ? r.rateDate.toISOString().slice(0, 10) : '',
+    r.status,
+    r.skipReason || '',
+    r.priorValue == null ? '' : Number(r.priorValue),
+    r.pushedValue == null ? '' : Number(r.pushedValue),
+  ].join('|')));
+  const alreadyRecorded = (classCode, rateDate, status, skipReason, priorValue, pushedValue) => seenToday.has([
+    classCode, rateDate || '', status, skipReason || '',
+    priorValue == null ? '' : Number(priorValue),
+    pushedValue == null ? '' : Number(pushedValue),
+  ].join('|'));
+  let deduped = 0;
+
   // Skips are recorded too — the audit must show what we chose NOT to touch
   // (a preserved close-out is as important as a write).
   //
@@ -196,6 +222,10 @@ export async function pushArea(config, deps = {}) {
       continue;
     }
 
+    if (alreadyRecorded(s.classCode, s.rateDate, 'SKIPPED', s.reason, s.priorValue ?? null, s.intendedValue ?? 0)) {
+      deduped += 1;
+      continue;
+    }
     await db.ratePushLog.create({
       data: {
         ...base,
@@ -210,7 +240,7 @@ export async function pushArea(config, deps = {}) {
     }).catch(() => null);
   }
 
-  const results = { planned: pushes.length, sent: 0, verified: 0, mismatched: 0, failed: 0, skipped: skips.length, queued };
+  const results = { planned: pushes.length, sent: 0, verified: 0, mismatched: 0, failed: 0, skipped: skips.length, queued, deduped: 0 };
 
   for (const p of pushes) {
     // F4: an approved cell REUSES its approval row, so one row carries the
@@ -226,6 +256,14 @@ export async function pushArea(config, deps = {}) {
     // decision survives every dry sweep and is still waiting when the mode
     // finally goes LIVE. Consuming it here would silently discard a human's
     // sign-off and re-queue the same question 30 minutes later.
+    // A rehearsal that would publish the same value it already rehearsed today
+    // is not news either — log it once, then stay quiet until something moves.
+    if (!approvalRow && mode === MODES.DRY_RUN
+      && alreadyRecorded(p.classCode, p.rateDate, 'PLANNED', null, p.priorValue ?? null, p.pushedValue)) {
+      deduped += 1;
+      continue;
+    }
+
     const row = approvalRow
       ? await db.ratePushLog.update({
         where: { id: approvalRow.id },
@@ -296,6 +334,7 @@ export async function pushArea(config, deps = {}) {
     }
   }
 
+  results.deduped = deduped;
   logger.info('[economy-rate-push] area complete', { externalArea: config.externalArea, mode, ...results });
   return { externalArea: config.externalArea, mode, ...results };
 }
