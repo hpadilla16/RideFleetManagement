@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { reservationProgramWhereForScope } from '../../lib/program-category.js';
 import { normalizeDob } from '../../lib/dob.js';
+import { normalizeDate } from '../../lib/date-utils.js';
 import {
   materializeDocumentRef,
   maybeUploadCustomerDocument,
@@ -454,6 +455,7 @@ export const customersService = {
         licenseState: data.licenseState ?? null,
         dateOfBirth: data.dateOfBirth ? normalizeDob(data.dateOfBirth) : null,
         insurancePolicyNumber: data.insurancePolicyNumber ?? null,
+        insuranceExpiry: data.insuranceExpiry ? normalizeDate(data.insuranceExpiry) : null,
         insuranceDocumentUrl: data.insuranceDocumentUrl ?? null,
         address1: data.address1 ?? null,
         address2: data.address2 ?? null,

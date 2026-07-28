@@ -63,7 +63,17 @@ const CURRENT = {
   status: 'CONFIRMED',
   notes: null,
   pickupAt: new Date(Date.now() + 86400e3),
-  returnAt: new Date(Date.now() + 2 * 86400e3)
+  returnAt: new Date(Date.now() + 2 * 86400e3),
+  // LAX #5 (2026-07-28): staff-complete now enforces the pre-check-in
+  // completeness bar on the merged customer state BEFORE reaching the service.
+  // These fixtures carry a COMPLETE customer so the 409-mapping tests still
+  // exercise the service-throw path; the incompleteness path has its own test.
+  customer: {
+    firstName: 'Open', lastName: 'Rental', email: 'a@x.com', phone: '7875550100',
+    dateOfBirth: new Date('1990-01-15'), licenseNumber: 'L-123', licenseState: 'PR',
+    address1: '1 Main St', city: 'San Juan', state: 'PR', zip: '00901', country: 'US',
+    hasIdPhoto: true
+  }
 };
 
 test.afterEach(() => mock.restoreAll());
@@ -129,6 +139,22 @@ test('an error code, when present, rides along with the 4xx', async () => {
 
   assert.equal(res.statusCode, 422);
   assert.equal(res.body?.code, 'NO_VEHICLE_ASSIGNED');
+});
+
+test('LAX #5: an incomplete customer profile → 400 PRECHECKIN_FIELDS_MISSING before the service is reached', async () => {
+  const handler = handlerFor('post', '/:id/precheckin/staff-complete');
+  const incomplete = { ...CURRENT, customer: { firstName: 'Only', lastName: 'Name', hasIdPhoto: false } };
+  mock.method(reservationsService, 'getById', async () => incomplete);
+  let serviceHit = false;
+  mock.method(reservationsService, 'update', async () => { serviceHit = true; return incomplete; });
+
+  const res = mockRes();
+  await handler({ params: { id: 'res-1' }, body: {}, query: {}, user: USER }, res, () => {});
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body?.code, 'PRECHECKIN_FIELDS_MISSING');
+  assert.ok(Array.isArray(res.body?.missing) && res.body.missing.includes('email'));
+  assert.equal(serviceHit, false, 'completeness gate must fire before any write');
 });
 
 test('5xx and code-less errors still fall through to next(e) (error middleware keeps its job)', async () => {

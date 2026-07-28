@@ -13,6 +13,8 @@ import { ReportDamageWizard } from '../../../components/reservations/ReportDamag
 import { LoanerVehicleSwapModal } from '../../../components/reservations/LoanerVehicleSwapModal';
 import { api, API_BASE } from '../../../lib/client';
 import { utcToTenantLocalInput } from '../../../lib/tenant-time';
+import { toCompactUploadPayload } from '../../../lib/upload-compress';
+import { missingRequiredCustomerFields, CUSTOMER_FIELD_LABELS } from '../../../lib/precheckin-fields';
 import { FuelLevelInput, OdometerInput } from '../../../components/wizard/MetricInputs';
 import {
   makeDiscountFn as makePrecheckinDiscountFn,
@@ -798,8 +800,9 @@ function ReservationDetailInner({ token, me, logout }) {
   const [staffCheckinForm, setStaffCheckinForm] = useState({
     firstName: '', lastName: '', email: '', phone: '',
     dateOfBirth: '', licenseNumber: '', licenseState: '',
-    address1: '', city: '', state: '', zip: '', country: 'US',
-    idPhotoUrl: '', insuranceDocumentUrl: ''
+    address1: '', address2: '', city: '', state: '', zip: '', country: 'US',
+    idPhotoUrl: '', licenseBackUrl: '',
+    insurancePolicyNumber: '', insuranceExpiry: '', insuranceDocumentUrl: ''
   });
   const [staffCheckinSaving, setStaffCheckinSaving] = useState(false);
   const [extendDialogOpen, setExtendDialogOpen] = useState(false);
@@ -1464,20 +1467,37 @@ function ReservationDetailInner({ token, me, logout }) {
       firstName: c.firstName || '', lastName: c.lastName || '', email: c.email || '', phone: c.phone || '',
       dateOfBirth: c.dateOfBirth ? new Date(c.dateOfBirth).toISOString().slice(0, 10) : '',
       licenseNumber: c.licenseNumber || '', licenseState: c.licenseState || '',
-      address1: c.address1 || '', city: c.city || '', state: c.state || '', zip: c.zip || '', country: c.country || 'US',
-      idPhotoUrl: c.idPhotoUrl || '', insuranceDocumentUrl: c.insuranceDocumentUrl || ''
+      address1: c.address1 || '', address2: c.address2 || '', city: c.city || '', state: c.state || '', zip: c.zip || '', country: c.country || 'US',
+      idPhotoUrl: c.idPhotoUrl || '', licenseBackUrl: c.licenseBackUrl || '',
+      insurancePolicyNumber: c.insurancePolicyNumber || '',
+      insuranceExpiry: c.insuranceExpiry ? new Date(c.insuranceExpiry).toISOString().slice(0, 10) : '',
+      insuranceDocumentUrl: c.insuranceDocumentUrl || ''
     });
     setStaffCheckinOpen(true);
   };
-  const handleStaffFileUpload = (key, file) => {
+  const handleStaffFileUpload = async (key, file) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setStaffCheckinForm((prev) => ({ ...prev, [key]: reader.result }));
-    reader.readAsDataURL(file);
+    // LAX #5 (2026-07-28): compress like the customer portal does — raw
+    // FileReader data-URLs from phone photos routinely blew the body limit (413).
+    try {
+      const payload = await toCompactUploadPayload(file);
+      setStaffCheckinForm((prev) => ({ ...prev, [key]: payload }));
+    } catch (e) {
+      setMsg(e.message);
+    }
   };
   const submitStaffCheckin = async () => {
     const f = staffCheckinForm;
-    if (!f.firstName || !f.lastName || !f.phone) { setMsg('First name, last name, and phone are required'); return; }
+    // LAX #5: same completeness bar as the portal — all mandatory except
+    // insurance, DL photo included. The form is seeded from the customer, so
+    // validating it validates the MERGED state; the photo requirement is also
+    // satisfied by an already-uploaded photo (hasIdPhoto).
+    const probe = { ...f, idPhotoUrl: f.idPhotoUrl || (row?.customer?.hasIdPhoto ? 'on-file' : '') };
+    const missing = missingRequiredCustomerFields(probe);
+    if (missing.length) {
+      setMsg(`Required before completing pre-check-in: ${missing.map((k) => CUSTOMER_FIELD_LABELS[k] || k).join(', ')}`);
+      return;
+    }
     try {
       setStaffCheckinSaving(true);
       await api(`/api/reservations/${id}/precheckin/staff-complete`, {
@@ -2937,19 +2957,23 @@ token
                     <div className="grid2" style={{ gap: 8, marginBottom: 8 }}>
                       <div className="stack"><label className="label">First Name*</label><input value={staffCheckinForm.firstName} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, firstName: e.target.value }))} /></div>
                       <div className="stack"><label className="label">Last Name*</label><input value={staffCheckinForm.lastName} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, lastName: e.target.value }))} /></div>
-                      <div className="stack"><label className="label">Email</label><input type="email" value={staffCheckinForm.email} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, email: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">Email*</label><input type="email" value={staffCheckinForm.email} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, email: e.target.value }))} /></div>
                       <div className="stack"><label className="label">Phone*</label><input value={staffCheckinForm.phone} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, phone: e.target.value }))} /></div>
-                      <div className="stack"><label className="label">Date of Birth</label><input type="date" value={staffCheckinForm.dateOfBirth} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, dateOfBirth: e.target.value }))} /></div>
-                      <div className="stack"><label className="label">License Number</label><input value={staffCheckinForm.licenseNumber} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, licenseNumber: e.target.value }))} /></div>
-                      <div className="stack"><label className="label">License State</label><input value={staffCheckinForm.licenseState} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, licenseState: e.target.value }))} /></div>
-                      <div className="stack"><label className="label">Address</label><input value={staffCheckinForm.address1} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, address1: e.target.value }))} /></div>
-                      <div className="stack"><label className="label">City</label><input value={staffCheckinForm.city} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, city: e.target.value }))} /></div>
-                      <div className="stack"><label className="label">State</label><input value={staffCheckinForm.state} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, state: e.target.value }))} /></div>
-                      <div className="stack"><label className="label">ZIP</label><input value={staffCheckinForm.zip} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, zip: e.target.value }))} /></div>
-                      <div className="stack"><label className="label">Country</label><input value={staffCheckinForm.country} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, country: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">Date of Birth*</label><input type="date" value={staffCheckinForm.dateOfBirth} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, dateOfBirth: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">License Number*</label><input value={staffCheckinForm.licenseNumber} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, licenseNumber: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">License State*</label><input value={staffCheckinForm.licenseState} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, licenseState: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">Address*</label><input value={staffCheckinForm.address1} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, address1: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">Address Line 2</label><input value={staffCheckinForm.address2} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, address2: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">City*</label><input value={staffCheckinForm.city} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, city: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">State*</label><input value={staffCheckinForm.state} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, state: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">ZIP*</label><input value={staffCheckinForm.zip} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, zip: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">Country*</label><input value={staffCheckinForm.country} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, country: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">Insurance Policy #</label><input value={staffCheckinForm.insurancePolicyNumber} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, insurancePolicyNumber: e.target.value }))} /></div>
+                      <div className="stack"><label className="label">Insurance Exp Date</label><input type="date" value={staffCheckinForm.insuranceExpiry} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, insuranceExpiry: e.target.value }))} /></div>
                     </div>
                     <div className="grid2" style={{ gap: 8, marginBottom: 10 }}>
-                      <div className="stack"><label className="label">ID / License Photo</label><input type="file" accept="image/*" onChange={(e) => handleStaffFileUpload('idPhotoUrl', e.target.files?.[0])} />{staffCheckinForm.idPhotoUrl ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>Uploaded</span> : null}</div>
+                      <div className="stack"><label className="label">ID / License Photo*</label><input type="file" accept="image/*,.pdf" onChange={(e) => handleStaffFileUpload('idPhotoUrl', e.target.files?.[0])} />{staffCheckinForm.idPhotoUrl ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>Uploaded</span> : (row?.customer?.hasIdPhoto ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>On file</span> : null)}</div>
+                      <div className="stack"><label className="label">License (Back)</label><input type="file" accept="image/*,.pdf" onChange={(e) => handleStaffFileUpload('licenseBackUrl', e.target.files?.[0])} />{staffCheckinForm.licenseBackUrl ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>Uploaded</span> : (row?.customer?.hasLicenseBack ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>On file</span> : null)}</div>
                       <div className="stack"><label className="label">Insurance Document</label><input type="file" accept="image/*,.pdf" onChange={(e) => handleStaffFileUpload('insuranceDocumentUrl', e.target.files?.[0])} />{staffCheckinForm.insuranceDocumentUrl ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>Uploaded</span> : null}</div>
                     </div>
                     <button type="button" className="ios-action-btn" onClick={submitStaffCheckin} disabled={staffCheckinSaving} style={{ background: '#166534', color: '#fff' }}>

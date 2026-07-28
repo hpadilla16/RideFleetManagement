@@ -22,6 +22,7 @@ import { franchiseService } from '../settings/franchise.service.js';
 import { crossTenantScopeFor as scopeFor, scopeVisibilityCacheSegment } from '../../lib/tenant-scope.js';
 import { vehicleProgramWhereForScope } from '../../lib/program-category.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { missingRequiredCustomerFields } from '../../lib/precheckin-fields.js';
 import { parseDepositRules, evaluateDepositRule } from '../../lib/deposit-rules.js';
 import { cache } from '../../lib/cache.js';
 import { globalKey } from '../../lib/cache/tenantKey.js';
@@ -2082,7 +2083,8 @@ reservationsRouter.post('/:id/precheckin/staff-complete', idempotency({ kind: 'v
       'firstName', 'lastName', 'email', 'phone', 'dateOfBirth',
       'licenseNumber', 'licenseState', 'address1', 'address2',
       'city', 'state', 'zip', 'country',
-      'idPhotoUrl', 'licenseBackUrl', 'insuranceDocumentUrl', 'insurancePolicyNumber'
+      'idPhotoUrl', 'licenseBackUrl', 'insuranceDocumentUrl', 'insurancePolicyNumber',
+      'insuranceExpiry'
     ];
     for (const key of fields) {
       if (body[key] !== undefined) {
@@ -2097,9 +2099,42 @@ reservationsRouter.post('/:id/precheckin/staff-complete', idempotency({ kind: 'v
             return res.status(400).json({ error: 'Invalid date of birth' });
           }
           customerUpdate[key] = dob;
+        } else if (key === 'insuranceExpiry' && body[key]) {
+          // LAX #5 — optional "Exp Date"; invalid input → clean 400 like DOB.
+          const exp = new Date(body[key]);
+          if (Number.isNaN(exp.getTime())) {
+            return res.status(400).json({ error: 'Invalid insurance expiration date' });
+          }
+          customerUpdate[key] = exp;
         } else {
           customerUpdate[key] = body[key] || null;
         }
+      }
+    }
+
+    // LAX #5 (2026-07-28): staff-complete stamps customerInfoCompletedAt, so
+    // it must enforce the same completeness bar as the customer portal — ALL
+    // fields mandatory EXCEPT insurance, DL photo included. Validated on the
+    // MERGED state (getById's included customer + this patch): staff can fill
+    // only the missing pieces, but can't mark a still-incomplete profile as
+    // complete. The DL-photo requirement accepts an already-on-file photo
+    // (getById exposes hasIdPhoto; the blob column itself is not selected).
+    {
+      const existingCustomer = current.customer || {};
+      const merged = {
+        ...existingCustomer,
+        ...customerUpdate,
+        idPhotoUrl: customerUpdate.idPhotoUrl !== undefined
+          ? customerUpdate.idPhotoUrl
+          : (existingCustomer.hasIdPhoto ? 'on-file' : (existingCustomer.idPhotoUrl || ''))
+      };
+      const missing = missingRequiredCustomerFields(merged);
+      if (missing.length) {
+        return res.status(400).json({
+          error: `Complete the required pre-check-in items first: ${missing.join(', ')}`,
+          code: 'PRECHECKIN_FIELDS_MISSING',
+          missing
+        });
       }
     }
 

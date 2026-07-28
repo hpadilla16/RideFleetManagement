@@ -1203,6 +1203,9 @@ model Customer {
   licenseState             String?
   dateOfBirth              DateTime?
   insurancePolicyNumber    String?
+  // 2026-07-28 (LAX #5) — insurance policy expiration ("Exp Date" on the
+  // pre-check-in forms). Named after LoanerAgreement.insuranceExpiry.
+  insuranceExpiry          DateTime?
   insuranceDocumentUrl     String?
   address1                 String?
   address2                 String?
