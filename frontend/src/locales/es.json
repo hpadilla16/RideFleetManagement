@@ -184,7 +184,11 @@
     "kioskEscalationsDetail_one": "{{count}} cliente esperando en kiosk",
     "kioskEscalationsDetail_other": "{{count}} clientes esperando en kiosk",
     "kioskEscalationsNote": "Clientes se quedaron trancados en un kiosk de autoservicio y pidieron ayuda del personal.",
-    "openKiosks": "Abrir Kiosks"
+    "openKiosks": "Abrir Kiosks",
+    "tileDocsExpiring": "Documentos por vencer",
+    "tileDocsExpiringTitle": "Documentos de negocio que hay que renovar",
+    "tileDocsExpiringDesc": "en los próximos {{days}} días",
+    "tileDocsExpiredDesc": "{{expired}} ya vencidos"
   },
   "login": {
     "title": "Iniciar Sesión",
@@ -800,5 +804,50 @@
     "emailNote": "Nota (opcional)",
     "send": "Enviar",
     "emailSent": "Reporte enviado a"
+  },
+  "locationDocs": {
+    "title": "Documentos de negocio",
+    "needRenewal": "{{count}} por renovar",
+    "intro": "Permisos, registraciones, seguros y licencias de esta sede. Pon la fecha en que cada uno deja de estar vigente y el dashboard te avisa {{days}} días antes.",
+    "namePlaceholder": "Nombre del documento (ej. Permiso de negocio de la ciudad)",
+    "issued": "Emitido (opcional)",
+    "validUntil": "Vigente hasta (déjalo en blanco si no vence)",
+    "notesPlaceholder": "Notas (opcional)",
+    "addDocument": "Añadir documento",
+    "saving": "Guardando…",
+    "loading": "Cargando…",
+    "empty": "Todavía no hay documentos archivados para esta sede.",
+    "colType": "Tipo",
+    "colDocument": "Documento",
+    "colValidUntil": "Vigente hasta",
+    "colStatus": "Estado",
+    "colActions": "Acciones",
+    "view": "Ver",
+    "archive": "Archivar",
+    "filed": "“{{label}}” archivado.",
+    "archived": "“{{label}}” archivado. Se conserva para auditorías.",
+    "errPickFile": "Primero escoge un archivo.",
+    "errName": "Ponle un nombre al documento.",
+    "errTooBig": "Ese archivo pesa {{size}}MB — el límite es 15MB.",
+    "errRead": "No se pudo leer ese archivo.",
+    "errLoad": "No se pudieron cargar los documentos",
+    "errOpen": "No se pudo abrir ese documento",
+    "errArchive": "No se pudo archivar ese documento",
+    "errUpload": "Falló la subida",
+    "stValid": "Vigente",
+    "stNoExpiry": "No vence",
+    "stExpiresToday": "Vence hoy",
+    "stDaysLeft": "{{days}}d restantes",
+    "stExpiredToday": "Venció hoy",
+    "stExpiredAgo": "Venció hace {{days}}d",
+    "type": {
+      "PERMIT": "Permiso",
+      "REGISTRATION": "Registración",
+      "INSURANCE": "Seguro",
+      "LICENSE": "Licencia",
+      "TAX": "Impuestos",
+      "LEASE": "Arrendamiento",
+      "OTHER": "Otro"
+    }
   }
 }
