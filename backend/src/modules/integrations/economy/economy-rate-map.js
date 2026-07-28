@@ -26,6 +26,8 @@ export const SKIP = {
   INVALID_VALUE: 'invalid_value',          // 0/negative/NaN — never publish
   OUT_OF_BAND: 'out_of_band',              // delta beyond the safety band
   NO_SENTINEL: 'no_sentinel',              // location never declared a close-out value
+  COLLISION_LOST: 'collision_lost',         // another RFM class owns this portal class
+  COLLISION_UNRESOLVED: 'collision_unresolved', // several aliases, no identity — human call
 };
 
 /**
@@ -127,12 +129,45 @@ export function buildPushPlan({
   const pushes = [];
   const skips = [];
 
+  // ---- Collision resolution ------------------------------------------------
+  // Several RFM classes can alias onto ONE portal class (LAX: RFM has both
+  // IFAR and SFAR, the portal only IFAR). They carry different prices, so
+  // pushing both would write the same cell twice and the last one would win
+  // arbitrarily. Resolve deterministically instead: the class that matches the
+  // portal code by IDENTITY owns it (Hector 2026-07-28 — IFAR's own price wins
+  // over an aliased SFAR). With no identity claimant the choice is a business
+  // one, so we publish NOTHING for that class and flag it for a human.
+  const claimants = new Map(); // portalClass -> [rate, ...]
+  const unmapped = [];
   for (const rate of rfmRates) {
     const portalClass = mapClassCode(rate.classCode, { overrides: classOverrides, portalClasses });
-    if (!portalClass) {
-      skips.push({ classCode: rate.classCode, portalClass: null, rateDate: null, reason: SKIP.NO_CLASS_MAP });
-      continue;
+    if (!portalClass) { unmapped.push(rate); continue; }
+    if (!claimants.has(portalClass)) claimants.set(portalClass, []);
+    claimants.get(portalClass).push(rate);
+  }
+
+  for (const rate of unmapped) {
+    skips.push({ classCode: rate.classCode, portalClass: null, rateDate: null, reason: SKIP.NO_CLASS_MAP });
+  }
+
+  const owners = new Map(); // portalClass -> the single rate that may write it
+  for (const [portalClass, contenders] of claimants) {
+    if (contenders.length === 1) { owners.set(portalClass, contenders[0]); continue; }
+    const identity = contenders.find((r) => String(r.classCode).toUpperCase() === portalClass);
+    if (identity) {
+      owners.set(portalClass, identity);
+      for (const loser of contenders.filter((r) => r !== identity)) {
+        skips.push({ classCode: portalClass, rfmClassCode: loser.classCode, rateDate: null, reason: SKIP.COLLISION_LOST });
+      }
+    } else {
+      // Ambiguous: two aliases, no identity. Never guess a price.
+      for (const c of contenders) {
+        skips.push({ classCode: portalClass, rfmClassCode: c.classCode, rateDate: null, reason: SKIP.COLLISION_UNRESOLVED });
+      }
     }
+  }
+
+  for (const [portalClass, rate] of owners) {
     for (const rateDate of dates) {
       const portalValue = portalGrid?.[portalClass]?.[rateDate];
       const decision = decideCell({ rfmValue: rate.daily, portalValue, closeoutMin, maxDeltaPct });
@@ -150,12 +185,9 @@ export function buildPushPlan({
 
   // Portal classes we hold no rate for — recorded so the gap is visible.
   if (portalClasses) {
-    const covered = new Set(rfmRates
-      .map((r) => mapClassCode(r.classCode, { overrides: classOverrides, portalClasses }))
-      .filter(Boolean));
     for (const pc of portalClasses) {
       const code = String(pc).toUpperCase();
-      if (!covered.has(code)) skips.push({ classCode: code, rateDate: null, reason: SKIP.NO_RFM_RATE });
+      if (!claimants.has(code)) skips.push({ classCode: code, rateDate: null, reason: SKIP.NO_RFM_RATE });
     }
   }
 

@@ -176,3 +176,64 @@ test('verifyPush: read-back is the only proof (ApplyRates fakes success)', () =>
   // Value silently dropped entirely.
   assert.deepEqual(verifyPush({ pushedValue: 20, readBackValue: '' }), { status: 'MISMATCH', verifiedValue: null });
 });
+
+// ---------------------------------------------------------------------------
+// Collisions: several RFM classes aliasing onto ONE portal class.
+// Real case (Hector 2026-07-28): RFM carries IFAR ($32.67) AND SFAR ($57.33),
+// the LAX portal only offers IFAR. Two prices, one cell — without a rule the
+// last write would win arbitrarily.
+// ---------------------------------------------------------------------------
+test('COLLISION: the identity match owns the cell; the alias is skipped, not silently dropped', () => {
+  const { pushes, skips } = buildPushPlan({
+    rfmRates: [
+      { classCode: 'IFAR', daily: 32.67, rateItemId: 'ri-ifar' },
+      { classCode: 'SFAR', daily: 57.33, rateItemId: 'ri-sfar' },
+    ],
+    dates: ['2027-03-15'],
+    portalGrid: {},
+    portalClasses: ['IFAR'],
+    classOverrides: { SFAR: 'IFAR' },
+    closeoutMin: CLOSEOUT,
+  });
+  assert.equal(pushes.length, 1, 'exactly ONE write for the shared cell');
+  assert.equal(pushes[0].classCode, 'IFAR');
+  assert.equal(pushes[0].rfmClassCode, 'IFAR');
+  assert.equal(pushes[0].pushedValue, 32.67, "IFAR's own price wins over the aliased SFAR");
+
+  const lost = skips.find((s) => s.reason === SKIP.COLLISION_LOST);
+  assert.ok(lost, 'the losing alias is recorded');
+  assert.equal(lost.rfmClassCode, 'SFAR');
+});
+
+test('COLLISION: two aliases with no identity claimant publish NOTHING (never guess a price)', () => {
+  const { pushes, skips } = buildPushPlan({
+    rfmRates: [
+      { classCode: 'CFAR', daily: 43.67 },
+      { classCode: 'SFAR', daily: 57.33 },
+    ],
+    dates: ['2027-03-15'],
+    portalGrid: {},
+    portalClasses: ['FCAR'],
+    classOverrides: { CFAR: 'FCAR', SFAR: 'FCAR' },
+    closeoutMin: CLOSEOUT,
+  });
+  assert.equal(pushes.length, 0, 'ambiguity publishes nothing');
+  const unresolved = skips.filter((s) => s.reason === SKIP.COLLISION_UNRESOLVED).map((s) => s.rfmClassCode).sort();
+  assert.deepEqual(unresolved, ['CFAR', 'SFAR'], 'both contenders flagged for a human');
+});
+
+test('COLLISION: resolution does not disturb the ordinary one-to-one classes', () => {
+  const { pushes } = buildPushPlan({
+    rfmRates: [
+      { classCode: 'CCAR', daily: 20 },
+      { classCode: 'IFAR', daily: 32.67 },
+      { classCode: 'SFAR', daily: 57.33 },
+    ],
+    dates: ['2027-03-15'],
+    portalGrid: {},
+    portalClasses: ['CCAR', 'IFAR'],
+    classOverrides: { SFAR: 'IFAR' },
+    closeoutMin: CLOSEOUT,
+  });
+  assert.deepEqual(pushes.map((p) => `${p.classCode}=${p.pushedValue}`).sort(), ['CCAR=20', 'IFAR=32.67']);
+});
