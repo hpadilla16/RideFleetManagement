@@ -4,65 +4,15 @@ import { useEffect, useRef, useState } from 'react';
 import { API_BASE } from '../../../lib/client';
 import { PortalFrame, portalStyles } from '../_components/PortalFrame';
 import { PortalTimelineCard } from '../_components/PortalTimelineCard';
+import { compressImageDataUrl, toCompactUploadPayload } from '../../../lib/upload-compress';
 
 const PRECHECKIN_DRAFT_PREFIX = 'customer.precheckin.';
-const MAX_INLINE_PDF_BYTES = 350 * 1024;
-
-function loadImage(dataUrl) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('Unable to process image'));
-    image.src = dataUrl;
-  });
-}
 
 function toDateInput(value) {
   if (!value) return '';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
   return d.toISOString().slice(0, 10);
-}
-
-async function fileToDataUrl(file) {
-  if (!file) return '';
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('Unable to read file'));
-    reader.readAsDataURL(file);
-  });
-}
-
-async function compressImageDataUrl(dataUrl, { maxWidth = 1400, maxHeight = 1400, quality = 0.72 } = {}) {
-  const image = await loadImage(dataUrl);
-  let width = image.width || maxWidth;
-  let height = image.height || maxHeight;
-  const scale = Math.min(1, maxWidth / width, maxHeight / height);
-  width = Math.max(1, Math.round(width * scale));
-  height = Math.max(1, Math.round(height * scale));
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(image, 0, 0, width, height);
-  return canvas.toDataURL('image/jpeg', quality);
-}
-
-async function toCompactUploadPayload(file) {
-  if (!file) return '';
-  if (String(file.type || '').startsWith('image/')) {
-    const raw = await fileToDataUrl(file);
-    return compressImageDataUrl(raw);
-  }
-  if (String(file.type || '').includes('pdf')) {
-    if (Number(file.size || 0) > MAX_INLINE_PDF_BYTES) {
-      throw new Error(`PDF "${file.name}" is too large. Please keep PDFs under ${Math.round(MAX_INLINE_PDF_BYTES / 1024)} KB.`);
-    }
-    return fileToDataUrl(file);
-  }
-  return fileToDataUrl(file);
 }
 
 async function compactPrecheckinPayload(form) {
@@ -101,6 +51,7 @@ const EMPTY_FORM = {
   licenseNumber: '',
   licenseState: '',
   insurancePolicyNumber: '',
+  insuranceExpiry: '',
   insuranceDocumentUrl: '',
   address1: '',
   address2: '',
@@ -111,22 +62,9 @@ const EMPTY_FORM = {
   idPhotoUrl: ''
 };
 
-const PRECHECKIN_REQUIRED_FIELDS = [
-  ['firstName', 'First Name'],
-  ['lastName', 'Last Name'],
-  ['email', 'Email'],
-  ['phone', 'Phone'],
-  ['dateOfBirth', 'Date of Birth'],
-  ['licenseNumber', 'Driver License Number'],
-  ['licenseState', 'Driver License State'],
-  ['address1', 'Address Line 1'],
-  ['city', 'City'],
-  ['state', 'State'],
-  ['zip', 'ZIP'],
-  ['country', 'Country'],
-  ['idPhotoUrl', 'ID / License Photo'],
-  ['insuranceDocumentUrl', 'Insurance Document']
-];
+// (The required-field list lives inline in the component — see
+// precheckinRequiredFields — mirrored against lib/precheckin-fields.js.
+// A stale module-level duplicate that had drifted was removed 2026-07-28.)
 
 function precheckinDraftKey(token) {
   return `${PRECHECKIN_DRAFT_PREFIX}${token}`;
@@ -243,6 +181,7 @@ export default function PrecheckinPage() {
           licenseNumber: json?.reservation?.customer?.licenseNumber || '',
           licenseState: json?.reservation?.customer?.licenseState || '',
           insurancePolicyNumber: json?.reservation?.customer?.insurancePolicyNumber || '',
+          insuranceExpiry: toDateInput(json?.reservation?.customer?.insuranceExpiry),
           insuranceDocumentUrl: json?.reservation?.customer?.insuranceDocumentUrl || '',
           address1: json?.reservation?.customer?.address1 || '',
           address2: json?.reservation?.customer?.address2 || '',
@@ -609,6 +548,10 @@ export default function PrecheckinPage() {
               <div>
                 <label style={portalStyles.sectionTitle}>Insurance Policy Number</label>
                 <input style={portalStyles.input} value={form.insurancePolicyNumber} onChange={(e) => updateField('insurancePolicyNumber', e.target.value)} />
+              </div>
+              <div>
+                <label style={portalStyles.sectionTitle}>Insurance Exp Date</label>
+                <input style={portalStyles.input} type="date" value={form.insuranceExpiry} onChange={(e) => updateField('insuranceExpiry', e.target.value)} />
               </div>
             </div>
           </div>

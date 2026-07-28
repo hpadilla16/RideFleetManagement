@@ -1513,6 +1513,7 @@ export const reservationsService = {
             licenseState: true,
             dateOfBirth: true,
             insurancePolicyNumber: true,
+            insuranceExpiry: true,
             // insuranceDocumentUrl + idPhotoUrl excluded — base64 blobs,
             // each loaded on demand by /customers/:id/id-photo and
             // /customers/:id/insurance-doc.

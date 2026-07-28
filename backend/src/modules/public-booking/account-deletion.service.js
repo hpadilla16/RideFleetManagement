@@ -216,6 +216,7 @@ export const accountDeletionService = {
           licenseState: null,
           dateOfBirth: null,
           insurancePolicyNumber: null,
+          insuranceExpiry: null,
           insuranceDocumentUrl: null,
           address1: null,
           address2: null,

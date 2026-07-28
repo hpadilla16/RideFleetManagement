@@ -954,6 +954,7 @@ async function serializeCustomerInfoReservation(reservation) {
       licenseNumber: reservation.customer?.licenseNumber || '',
       licenseState: reservation.customer?.licenseState || '',
       insurancePolicyNumber: reservation.customer?.insurancePolicyNumber || '',
+      insuranceExpiry: reservation.customer?.insuranceExpiry || null,
       insuranceDocumentUrl,
       address1: reservation.customer?.address1 || '',
       address2: reservation.customer?.address2 || '',
@@ -1339,6 +1340,9 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
     const phone = String(body.phone || '').trim();
     const insuranceSelection = body.insuranceSelection || null;
     const customerSelectedOurInsurance = insuranceSelection?.selectedPlanCode && !insuranceSelection?.declinedCoverage;
+    // Field policy: keep in lockstep with lib/precheckin-fields.js
+    // (REQUIRED_CUSTOMER_FIELDS) — all mandatory except insurance; the
+    // insurance DOCUMENT stays conditionally required by the decline flow.
     const requiredChecks = [
       ['firstName', firstName, 'First Name'],
       ['lastName', lastName, 'Last Name'],
@@ -1383,6 +1387,13 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
         licenseNumber: body.licenseNumber ? String(body.licenseNumber).trim() : null,
         licenseState: body.licenseState ? String(body.licenseState).trim() : null,
         insurancePolicyNumber: body.insurancePolicyNumber ? String(body.insurancePolicyNumber).trim() : null,
+        // LAX #5 — optional insurance expiration ("Exp Date"). Invalid dates
+        // collapse to null rather than 500ing (mirrors the DOB guard's intent).
+        insuranceExpiry: (() => {
+          if (!body.insuranceExpiry) return null;
+          const d = new Date(body.insuranceExpiry);
+          return Number.isNaN(d.getTime()) ? null : d;
+        })(),
         insuranceDocumentUrl: _insuranceDocStored,
         address1: body.address1 ? String(body.address1).trim() : null,
         address2: body.address2 ? String(body.address2).trim() : null,

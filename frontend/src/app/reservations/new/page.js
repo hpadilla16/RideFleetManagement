@@ -19,6 +19,18 @@ import { useRouter } from 'next/navigation';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
 import { api } from '../../../lib/client';
+import { toCompactUploadPayload } from '../../../lib/upload-compress';
+import { missingRequiredCustomerFields, CUSTOMER_FIELD_LABELS } from '../../../lib/precheckin-fields';
+
+// LAX #6 (2026-07-28): the inline-create form carries the SAME field set as
+// the pre-check-in form (all mandatory except insurance, DL photo included).
+const EMPTY_NEW_CUSTOMER = {
+  firstName: '', lastName: '', email: '', phone: '',
+  dateOfBirth: '', licenseNumber: '', licenseState: '',
+  address1: '', address2: '', city: '', state: '', zip: '', country: 'US',
+  idPhotoUrl: '', licenseBackUrl: '',
+  insurancePolicyNumber: '', insuranceExpiry: ''
+};
 
 const SIPP_LABELS = {
   ECAR: 'Economy', CCAR: 'Compact', ICAR: 'Mid-size', SCAR: 'Standard',
@@ -133,6 +145,19 @@ function Wizard({ token, me, logout }) {
       setMsg(`Customer ${created.firstName || ''} ${created.lastName || ''} created.`);
     } catch (e) { setErr(e?.message || 'Failed to create customer'); } finally { setBusy(false); }
   };
+
+  const handleNewCustUpload = async (key, file) => {
+    if (!file) return;
+    try {
+      const payload = await toCompactUploadPayload(file);
+      setNewCust((prev) => ({ ...prev, [key]: payload }));
+    } catch (e) { setErr(e?.message || 'Upload failed'); }
+  };
+
+  const newCustMissing = useMemo(
+    () => (newCust ? missingRequiredCustomerFields(newCust) : []),
+    [newCust]
+  );
 
   const stepValid = (n) => {
     if (n === 1) return form.pickupAt && form.returnAt && form.pickupLocationId && form.returnLocationId && rentalDays > 0;
@@ -305,16 +330,44 @@ function Wizard({ token, me, logout }) {
                       </button>
                     ))}
                   </div>
-                  <button type="button" className="link" style={{ marginTop: 8 }} onClick={() => setNewCust({ firstName: '', lastName: '', email: '', phone: '' })}>+ Create new customer</button>
+                  <button type="button" className="link" style={{ marginTop: 8 }} onClick={() => setNewCust({ ...EMPTY_NEW_CUSTOMER })}>+ Create new customer</button>
                 </>
               ) : (
                 <div className="app-card-grid compact">
-                  <div className="stack" style={{ gap: 4 }}><label className="label">First name</label><input value={newCust.firstName} onChange={(e) => setNewCust({ ...newCust, firstName: e.target.value })} /></div>
-                  <div className="stack" style={{ gap: 4 }}><label className="label">Last name</label><input value={newCust.lastName} onChange={(e) => setNewCust({ ...newCust, lastName: e.target.value })} /></div>
-                  <div className="stack" style={{ gap: 4 }}><label className="label">Email</label><input type="email" value={newCust.email} onChange={(e) => setNewCust({ ...newCust, email: e.target.value })} /></div>
-                  <div className="stack" style={{ gap: 4 }}><label className="label">Phone</label><input value={newCust.phone} onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })} /></div>
+                  {/* LAX #6 (2026-07-28): same field set + completeness bar as the
+                      pre-check-in form — all mandatory except insurance. */}
+                  <div className="stack" style={{ gap: 4 }}><label className="label">First name*</label><input value={newCust.firstName} onChange={(e) => setNewCust({ ...newCust, firstName: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">Last name*</label><input value={newCust.lastName} onChange={(e) => setNewCust({ ...newCust, lastName: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">Email*</label><input type="email" value={newCust.email} onChange={(e) => setNewCust({ ...newCust, email: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">Phone*</label><input value={newCust.phone} onChange={(e) => setNewCust({ ...newCust, phone: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">Date of birth*</label><input type="date" value={newCust.dateOfBirth} onChange={(e) => setNewCust({ ...newCust, dateOfBirth: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">License number*</label><input value={newCust.licenseNumber} onChange={(e) => setNewCust({ ...newCust, licenseNumber: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">License state*</label><input value={newCust.licenseState} onChange={(e) => setNewCust({ ...newCust, licenseState: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">Address*</label><input value={newCust.address1} onChange={(e) => setNewCust({ ...newCust, address1: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">Address line 2</label><input value={newCust.address2} onChange={(e) => setNewCust({ ...newCust, address2: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">City*</label><input value={newCust.city} onChange={(e) => setNewCust({ ...newCust, city: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">State*</label><input value={newCust.state} onChange={(e) => setNewCust({ ...newCust, state: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">ZIP*</label><input value={newCust.zip} onChange={(e) => setNewCust({ ...newCust, zip: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">Country*</label><input value={newCust.country} onChange={(e) => setNewCust({ ...newCust, country: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">Insurance policy #</label><input value={newCust.insurancePolicyNumber} onChange={(e) => setNewCust({ ...newCust, insurancePolicyNumber: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}><label className="label">Insurance exp date</label><input type="date" value={newCust.insuranceExpiry} onChange={(e) => setNewCust({ ...newCust, insuranceExpiry: e.target.value })} /></div>
+                  <div className="stack" style={{ gap: 4 }}>
+                    <label className="label">ID / License photo*</label>
+                    <input type="file" accept="image/*,.pdf" onChange={(e) => handleNewCustUpload('idPhotoUrl', e.target.files?.[0])} />
+                    {newCust.idPhotoUrl ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>Uploaded</span> : null}
+                  </div>
+                  <div className="stack" style={{ gap: 4 }}>
+                    <label className="label">License (back)</label>
+                    <input type="file" accept="image/*,.pdf" onChange={(e) => handleNewCustUpload('licenseBackUrl', e.target.files?.[0])} />
+                    {newCust.licenseBackUrl ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>Uploaded</span> : null}
+                  </div>
+                  {newCustMissing.length > 0 && (
+                    <p className="label" style={{ gridColumn: '1 / -1', textTransform: 'none', letterSpacing: 0, color: '#b45309' }}>
+                      Missing: {newCustMissing.map((k) => CUSTOMER_FIELD_LABELS[k] || k).join(', ')}
+                    </p>
+                  )}
                   <div className="inline-actions" style={{ gridColumn: '1 / -1' }}>
-                    <button type="button" onClick={createCustomer} disabled={busy || !newCust.firstName || !newCust.lastName}>Create & select</button>
+                    <button type="button" onClick={createCustomer} disabled={busy || newCustMissing.length > 0}>Create & select</button>
                     <button type="button" className="button-subtle" onClick={() => setNewCust(null)}>Cancel</button>
                   </div>
                 </div>
