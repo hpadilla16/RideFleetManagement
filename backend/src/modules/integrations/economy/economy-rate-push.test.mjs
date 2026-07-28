@@ -75,9 +75,15 @@ function makeDeps({ portalRows, rfmRates, mode, applyImpl, approvals }) {
       )) || null,
       create: async ({ data }) => { const row = { id: `log-${logs.length}`, ...data }; logs.push(row); return row; },
       update: async ({ where, data }) => {
-        const row = logs.find((l) => l.id === where.id);
-        if (row) Object.assign(row, data);
-        return row || { id: where.id, ...data };
+        let row = logs.find((l) => l.id === where.id);
+        if (!row) {
+          // Approval rows come from findMany, not create — record them on
+          // first update so a test can assert what the sweep did to them.
+          row = { id: where.id, status: 'APPROVED' };
+          logs.push(row);
+        }
+        Object.assign(row, data);
+        return row;
       },
     },
   };
@@ -281,4 +287,42 @@ test('pushAllAreas: only areas with ratePushEnabled are queried, failures isolat
   assert.equal(out.processedAreas, 2);
   assert.ok(out.results.find((r) => r.externalArea === 'LAX')?.planned >= 1, 'the healthy area still ran');
   assert.match(out.results.find((r) => r.error)?.error || '', /rates blew up/, 'the broken area was isolated');
+});
+
+// ---------------------------------------------------------------------------
+// An approval is spent by a REAL push, never by a rehearsal. Without this, a
+// dry sweep would consume the sign-off, publish nothing, and re-ask the same
+// question 30 minutes later.
+// ---------------------------------------------------------------------------
+test('DRY_RUN does NOT consume an approval — it survives until a LIVE push', async () => {
+  const approvals = [{ classCode: 'CCAR', rateDate: '2027-03-15', pushedValue: 20 }];
+  const { deps, calls, logs } = makeDeps({
+    // Portal at 11.00 => +82%, out of band: only the approval lets it through.
+    portalRows: [{ cls: 'CCAR', values: ['11.00', '11.00', '11.00'] }],
+    rfmRates: [{ classCode: 'CCAR', daily: 20 }],
+    mode: MODES.DRY_RUN,
+    approvals,
+  });
+  const out = await pushArea(CONFIG, deps);
+
+  assert.equal(out.planned, 1, 'the approved date is planned');
+  assert.equal(calls.applied.length, 0, 'a dry run still writes nothing');
+  // The approval row was touched but NOT moved out of APPROVED.
+  const consumed = logs.find((l) => l.id === 'appr-0' && ['PLANNED', 'SENT'].includes(l.status));
+  assert.equal(consumed, undefined, 'the approval was not spent by the rehearsal');
+});
+
+test('LIVE consumes the approval exactly once', async () => {
+  const approvals = [{ classCode: 'CCAR', rateDate: '2027-03-15', pushedValue: 20 }];
+  const { deps, calls, logs } = makeDeps({
+    portalRows: [{ cls: 'CCAR', values: ['11.00', '11.00', '11.00'] }],
+    rfmRates: [{ classCode: 'CCAR', daily: 20 }],
+    mode: MODES.LIVE,
+    approvals,
+  });
+  const out = await pushArea(CONFIG, deps);
+  assert.equal(out.sent, 1, 'the approved cell was published');
+  assert.deepEqual(calls.applied.map((a) => a.rateDate), ['2027-03-15']);
+  const spent = logs.find((l) => l.id === 'appr-0');
+  assert.ok(spent && ['SENT', 'VERIFIED', 'MISMATCH'].includes(spent.status), 'the approval row moved past APPROVED');
 });

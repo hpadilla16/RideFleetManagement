@@ -221,10 +221,17 @@ export async function pushArea(config, deps = {}) {
       ? approvalRows.find((a) => a.classCode === p.classCode && a.rateDate === p.rateDate && a.pushedValue === p.pushedValue)
       : null;
 
+    // An approval is spent by a REAL push, never by a rehearsal. In DRY_RUN the
+    // row stays APPROVED (only its observed priorValue refreshes) so the
+    // decision survives every dry sweep and is still waiting when the mode
+    // finally goes LIVE. Consuming it here would silently discard a human's
+    // sign-off and re-queue the same question 30 minutes later.
     const row = approvalRow
       ? await db.ratePushLog.update({
         where: { id: approvalRow.id },
-        data: { status: mode === MODES.DRY_RUN ? 'PLANNED' : 'SENT', trigger, mode, priorValue: p.priorValue ?? null },
+        data: mode === MODES.DRY_RUN
+          ? { priorValue: p.priorValue ?? null }
+          : { status: 'SENT', trigger, mode, priorValue: p.priorValue ?? null },
       })
       : await db.ratePushLog.create({
         data: {
