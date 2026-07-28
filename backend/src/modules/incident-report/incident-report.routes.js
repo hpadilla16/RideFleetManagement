@@ -28,6 +28,16 @@ incidentReportRouter.post('/clauses/seed', wrap(async (req, res) => res.json(awa
 incidentReportRouter.patch('/clauses/:id', wrap(async (req, res) => res.json(await svc.clause.update(req.user, req.params.id, req.body || {}))));
 incidentReportRouter.delete('/clauses/:id', wrap(async (req, res) => res.json(await svc.clause.remove(req.user, req.params.id))));
 
+// ---- tenant-wide HUB (2026-07-28): all reports in one place, joined with
+// reservation + customer + vehicle + sede. Location-scoped users see only
+// their sedes' incidents (fail-closed inside listForTenant). ----
+incidentReportRouter.get('/', wrap(async (req, res) => {
+  res.json(await svc.listForTenant(req.user, {
+    status: req.query.status, type: req.query.type, severity: req.query.severity,
+    q: req.query.q, page: req.query.page, pageSize: req.query.pageSize,
+  }));
+}));
+
 // ---- reservation-scoped ----
 incidentReportRouter.post('/reservations/:reservationId', wrap(async (req, res) => {
   res.status(201).json(await svc.create(req.user, req.params.reservationId, req.body || {}));
@@ -51,4 +61,12 @@ incidentReportRouter.post('/:id/revise', wrap(async (req, res) => res.status(201
 incidentReportRouter.get('/:id/print', wrap(async (req, res) => {
   const html = await svc.renderHtml(req.user, req.params.id);
   res.set('Content-Type', 'text/html; charset=utf-8').send(html);
+}));
+
+// Email the report (2026-07-28 hub): same print HTML, inline + .html attach.
+// DRAFTs are rejected (409) — only issued/later documents leave the building.
+incidentReportRouter.post('/:id/email', wrap(async (req, res) => {
+  res.json(await svc.emailReport(req.user, req.params.id, {
+    to: (req.body || {}).to, note: (req.body || {}).note,
+  }));
 }));

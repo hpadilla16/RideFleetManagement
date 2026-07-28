@@ -26,7 +26,8 @@
     "security": "Security",
     "actionBoards": "Action Boards",
     "agreementClauses": "Agreement clauses",
-    "quotes": "Quotes"
+    "quotes": "Quotes",
+    "incidents": "Incidents"
   },
   "topbar": {
     "dark": "Dark",
@@ -89,7 +90,12 @@
       "hint": "Type at least 2 characters — plate, booking #, agreement #, name, phone or email.",
       "loading": "Searching…",
       "empty": "No matches.",
-      "type": { "reservation": "Reservation", "agreement": "Agreement", "vehicle": "Vehicle", "customer": "Customer" }
+      "type": {
+        "reservation": "Reservation",
+        "agreement": "Agreement",
+        "vehicle": "Vehicle",
+        "customer": "Customer"
+      }
     },
     "tileCollectedToday": "Collected Today",
     "tileCollectedTodayTitle": "Money collected today (paid, deposit holds excluded). Click for Payments by Day.",
@@ -769,5 +775,30 @@
     "days": "days",
     "confirmCancel": "Cancel quote {{number}}? The locked price is lost — a new quote gets fresh prices.",
     "newQuoteTitle": "New quote"
+  },
+  "incidents": {
+    "title": "Incident Reports",
+    "total": "total",
+    "searchPlaceholder": "Report #, customer, plate…",
+    "allStatuses": "All statuses",
+    "allTypes": "All types",
+    "report": "Report",
+    "date": "Date",
+    "type": "Type",
+    "status": "Status",
+    "reservation": "Reservation",
+    "customer": "Customer",
+    "vehicle": "Vehicle",
+    "location": "Location",
+    "actions": "Actions",
+    "empty": "No incident reports found.",
+    "print": "Print",
+    "email": "Email",
+    "draftNoEmail": "Draft reports cannot be emailed",
+    "emailTitle": "Email report",
+    "emailTo": "Recipient",
+    "emailNote": "Note (optional)",
+    "send": "Send",
+    "emailSent": "Report emailed to"
   }
 }

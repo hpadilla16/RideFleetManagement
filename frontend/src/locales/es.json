@@ -26,7 +26,8 @@
     "security": "Seguridad",
     "actionBoards": "Action Boards",
     "agreementClauses": "Agreement clauses",
-    "quotes": "Cotizaciones"
+    "quotes": "Cotizaciones",
+    "incidents": "Incidentes"
   },
   "topbar": {
     "dark": "Oscuro",
@@ -89,7 +90,12 @@
       "hint": "Escribe al menos 2 caracteres — placa, # de reserva, # de contrato, nombre, telefono o correo.",
       "loading": "Buscando…",
       "empty": "Sin resultados.",
-      "type": { "reservation": "Reserva", "agreement": "Contrato", "vehicle": "Vehiculo", "customer": "Cliente" }
+      "type": {
+        "reservation": "Reserva",
+        "agreement": "Contrato",
+        "vehicle": "Vehiculo",
+        "customer": "Cliente"
+      }
     },
     "tileCollectedToday": "Cobrado Hoy",
     "tileCollectedTodayTitle": "Dinero cobrado hoy (pagado, sin holds de deposito). Clic para Pagos por Dia.",
@@ -769,5 +775,30 @@
     "days": "días",
     "confirmCancel": "¿Cancelar la cotización {{number}}? El precio fijado se pierde — una nueva cotización trae precios frescos.",
     "newQuoteTitle": "Nueva cotización"
+  },
+  "incidents": {
+    "title": "Reportes de Incidentes",
+    "total": "en total",
+    "searchPlaceholder": "Reporte #, cliente, tablilla…",
+    "allStatuses": "Todos los estados",
+    "allTypes": "Todos los tipos",
+    "report": "Reporte",
+    "date": "Fecha",
+    "type": "Tipo",
+    "status": "Estado",
+    "reservation": "Reserva",
+    "customer": "Cliente",
+    "vehicle": "Vehículo",
+    "location": "Sede",
+    "actions": "Acciones",
+    "empty": "No hay reportes de incidentes.",
+    "print": "Imprimir",
+    "email": "Enviar email",
+    "draftNoEmail": "Los borradores no se pueden enviar por email",
+    "emailTitle": "Enviar reporte",
+    "emailTo": "Destinatario",
+    "emailNote": "Nota (opcional)",
+    "send": "Enviar",
+    "emailSent": "Reporte enviado a"
   }
 }

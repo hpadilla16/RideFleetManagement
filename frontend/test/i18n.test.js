@@ -52,8 +52,11 @@ describe('i18n translation files', () => {
     }
   });
 
-  it('EN nav has 17 items', () => {
-    expect(Object.keys(en.nav).length).toBe(17);
+  it('EN and ES nav key sets match exactly', () => {
+    // Was a hardcoded count pin ("17 items") that silently went stale as the
+    // nav grew to 28 (quotes, kiosks, incidents hub 2026-07-28, …). What the
+    // pin actually protected against is EN/ES drifting apart — assert THAT.
+    expect(Object.keys(en.nav).sort()).toEqual(Object.keys(es.nav).sort());
   });
 
   it('ES translations are actually different from EN', () => {

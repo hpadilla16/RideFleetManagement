@@ -37,3 +37,87 @@ test('clause seed + type metadata are present', () => {
   assert.ok(TYPE_META.SMOKING.banner.includes('SMOKING'));
   assert.ok(TYPE_META.DAMAGE.title.includes('DAMAGE'));
 });
+
+// ---------------------------------------------------------------------------
+// Incidents HUB (2026-07-28): tenant-wide list scoping + email guards.
+// prisma methods are monkey-patched (same pattern as the economy scheduler
+// tests) — no DB needed beyond the client constructing.
+// ---------------------------------------------------------------------------
+const { incidentReportService } = await import('./incident-report.service.js');
+const { prisma } = await import('../../lib/prisma.js');
+
+function patchIncidentQueries() {
+  const captured = { where: null, select: null };
+  const origCount = prisma.reservationIncident.count;
+  const origFindMany = prisma.reservationIncident.findMany;
+  prisma.reservationIncident.count = async ({ where }) => { captured.where = where; return 0; };
+  prisma.reservationIncident.findMany = async ({ where, select }) => {
+    captured.where = where; captured.select = select; return [];
+  };
+  return {
+    captured,
+    restore() {
+      prisma.reservationIncident.count = origCount;
+      prisma.reservationIncident.findMany = origFindMany;
+    },
+  };
+}
+
+test('hub list: location-scoped user filters by reservation.pickupLocationId (fail-closed)', async () => {
+  const { captured, restore } = patchIncidentQueries();
+  try {
+    const scoped = { role: 'ADMIN', tenantId: 't1', locationIds: ['loc-lax'] };
+    await incidentReportService.listForTenant(scoped, {});
+    assert.deepEqual(captured.where.reservation, { pickupLocationId: { in: ['loc-lax'] } });
+    assert.equal(captured.where.tenantId, 't1');
+  } finally { restore(); }
+});
+
+test('hub list: unscoped ADMIN sees tenant-wide (no reservation filter)', async () => {
+  const { captured, restore } = patchIncidentQueries();
+  try {
+    await incidentReportService.listForTenant({ role: 'ADMIN', tenantId: 't1' }, {});
+    assert.equal(captured.where.reservation, undefined);
+    assert.equal(captured.where.tenantId, 't1');
+  } finally { restore(); }
+});
+
+test('hub list: valid filters apply, bogus values are ignored, q builds the OR', async () => {
+  const { captured, restore } = patchIncidentQueries();
+  try {
+    await incidentReportService.listForTenant({ role: 'ADMIN', tenantId: 't1' }, {
+      status: 'issued', type: 'SMOKING', severity: 'BOGUS', q: 'KMV',
+    });
+    assert.equal(captured.where.status, 'ISSUED');
+    assert.equal(captured.where.type, 'SMOKING');
+    assert.equal(captured.where.severity, undefined, 'invalid severity ignored');
+    assert.ok(Array.isArray(captured.where.OR) && captured.where.OR.length >= 5, 'free-text OR present');
+  } finally { restore(); }
+});
+
+test('hub list: payload is light — no evidence in the select', async () => {
+  const { captured, restore } = patchIncidentQueries();
+  try {
+    await incidentReportService.listForTenant({ role: 'ADMIN', tenantId: 't1' }, {});
+    assert.equal(captured.select.evidence, undefined);
+    assert.ok(captured.select.reservation, 'reservation join present');
+  } finally { restore(); }
+});
+
+test('email: invalid recipient rejected with 400 before any DB access', async () => {
+  await assert.rejects(
+    () => incidentReportService.emailReport({ role: 'ADMIN', tenantId: 't1' }, 'x', { to: 'not-an-email' }),
+    (e) => e.statusCode === 400
+  );
+});
+
+test('email: DRAFT reports are blocked with 409', async () => {
+  const orig = prisma.reservationIncident.findFirst;
+  prisma.reservationIncident.findFirst = async () => ({ id: 'x', status: 'DRAFT', reportNumber: 'INC-1', evidence: [] });
+  try {
+    await assert.rejects(
+      () => incidentReportService.emailReport({ role: 'ADMIN', tenantId: 't1' }, 'x', { to: 'a@b.co' }),
+      (e) => e.statusCode === 409
+    );
+  } finally { prisma.reservationIncident.findFirst = orig; }
+});

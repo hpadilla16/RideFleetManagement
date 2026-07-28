@@ -25,6 +25,8 @@ const NAV_ITEMS = [
   // Employee App hidden 2026-06-16 — not in use right now (route still works at /employee).
   // { href: '/employee', labelKey: 'nav.employeeApp', moduleKey: 'employeeApp' },
   { href: '/issues', labelKey: 'nav.issueCenter', moduleKey: 'issueCenter' },
+  // Incidents hub (2026-07-28): reservation-bound documents — gated with reservations.
+  { href: '/incidents', labelKey: 'nav.incidents', moduleKey: 'reservations' },
   { href: '/loaner', labelKey: 'nav.loaner', feature: 'dealershipLoaner', moduleKey: 'loaner' },
   { href: '/tolls', labelKey: 'nav.tolls', moduleKey: 'tolls' },
   { href: '/maintenance', labelKey: 'nav.maintenance', moduleKey: 'maintenance' },

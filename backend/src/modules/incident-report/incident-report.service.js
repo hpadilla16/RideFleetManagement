@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { uploadObject, safePath, getSignedUrl } from '../../lib/storage/supabase-storage.js';
+import { userAllowedLocationIds } from '../../lib/tenant-scope.js';
+import { sendEmail } from '../../lib/mailer.js';
 import { decodePhotoValue, getPhotosBucket } from '../rental-agreements/inspection-photos.js';
 import { buildIncidentReportHtml } from './incident-report-pdf.js';
 import { computeChargeSection } from './incident-report-charges.js';
@@ -99,6 +101,12 @@ function reportingWindowHours(tenant) {
 }
 
 function err(message, statusCode) { const e = new Error(message); e.statusCode = statusCode; return e; }
+
+// Minimal HTML-escape for the optional email note (the report HTML itself is
+// already escaped by buildIncidentReportHtml).
+function escapeHtmlForEmail(v) {
+  return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 function serialize(row) {
   if (!row) return null;
@@ -201,6 +209,127 @@ export const incidentReportService = {
       include: includeEvidence, orderBy: { createdAt: 'desc' }
     });
     return rows.map(serialize);
+  },
+
+  /**
+   * Tenant-wide incidents HUB (2026-07-28): every report in one place, joined
+   * with its reservation + customer + vehicle + pickup sede. Filters:
+   * status/type/severity + free-text q (report #, reservation #, customer
+   * name/email, plate). Location-scoped users only see incidents whose
+   * reservation picked up at one of their sedes (fail-closed: a null
+   * pickupLocationId row is hidden from scoped users, same convention as
+   * tolls/citations lists).
+   */
+  async listForTenant(user, { status, type, severity, q, page = 1, pageSize = 50 } = {}) {
+    const where = { ...tenantScope(user) };
+
+    const st = String(status || '').toUpperCase();
+    if (st && Object.prototype.hasOwnProperty.call(STATUS_FLOW, st)) where.status = st;
+    const ty = String(type || '').toUpperCase();
+    if (ty && VALID_TYPES.includes(ty)) where.type = ty;
+    const sev = String(severity || '').toUpperCase();
+    if (sev && VALID_SEVERITIES.includes(sev)) where.severity = sev;
+
+    const allowedIds = userAllowedLocationIds(user);
+    if (allowedIds) {
+      where.reservation = { pickupLocationId: { in: allowedIds } };
+    }
+
+    const text = String(q || '').trim();
+    if (text) {
+      const contains = { contains: text, mode: 'insensitive' };
+      where.OR = [
+        { reportNumber: contains },
+        { title: contains },
+        { reservation: { reservationNumber: contains } },
+        { reservation: { customer: { firstName: contains } } },
+        { reservation: { customer: { lastName: contains } } },
+        { reservation: { customer: { email: contains } } },
+        { reservation: { vehicle: { plate: contains } } },
+      ];
+    }
+
+    const take = Math.min(Math.max(Number(pageSize) || 50, 1), 200);
+    const skip = (Math.max(Number(page) || 1, 1) - 1) * take;
+
+    const [total, rows] = await Promise.all([
+      prisma.reservationIncident.count({ where }),
+      prisma.reservationIncident.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip, take,
+        // Hub payload stays light: NO evidence blobs, just the row + the joins
+        // the table shows. Detail/print still go through get()/renderHtml.
+        select: {
+          id: true, reportNumber: true, type: true, status: true, severity: true,
+          title: true, discoveryAt: true, issuedAt: true, createdAt: true,
+          depositApplied: true,
+          reservation: {
+            select: {
+              id: true, reservationNumber: true,
+              pickupLocation: { select: { id: true, name: true, code: true } },
+              customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+              vehicle: { select: { id: true, plate: true, internalNumber: true, make: true, model: true } },
+            }
+          }
+        }
+      })
+    ]);
+
+    return {
+      total,
+      page: Math.max(Number(page) || 1, 1),
+      pageSize: take,
+      items: rows.map((r) => ({
+        id: r.id, reportNumber: r.reportNumber, type: r.type, status: r.status,
+        severity: r.severity, title: r.title, discoveryAt: r.discoveryAt,
+        issuedAt: r.issuedAt, createdAt: r.createdAt,
+        depositApplied: r.depositApplied == null ? null : Number(r.depositApplied),
+        reservation: r.reservation ? {
+          id: r.reservation.id,
+          reservationNumber: r.reservation.reservationNumber,
+          location: r.reservation.pickupLocation || null,
+          customer: r.reservation.customer || null,
+          vehicle: r.reservation.vehicle || null,
+        } : null,
+      })),
+    };
+  },
+
+  /**
+   * Email a report to a recipient (2026-07-28 hub ask): renders the SAME
+   * print HTML and sends it inline + as an .html attachment. The report
+   * content is never logged. Any non-DRAFT report can be emailed; a DRAFT
+   * is blocked (it is not a final document yet).
+   */
+  async emailReport(user, id, { to, note } = {}) {
+    const recipient = String(to || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)) throw err('A valid recipient email is required', 400);
+    const row = await findScoped(user, id);
+    if (row.status === 'DRAFT') throw err('Draft reports cannot be emailed — certify & issue first', 409);
+
+    const html = await this.renderHtml(user, id);
+    const noteText = String(note || '').trim();
+    const subject = `Incident Report ${row.reportNumber}`;
+    const bodyHtml = [
+      noteText ? `<p style="font-family:Arial,sans-serif">${escapeHtmlForEmail(noteText)}</p><hr/>` : '',
+      html,
+    ].join('\n');
+
+    await sendEmail({
+      to: recipient,
+      subject,
+      html: bodyHtml,
+      text: `${noteText ? `${noteText}\n\n` : ''}Incident report ${row.reportNumber} is attached.`,
+      attachments: [{
+        filename: `${row.reportNumber}.html`,
+        // Raw Buffer — the mailer's toBase64() encodes exactly once.
+        content: Buffer.from(html, 'utf8'),
+        contentType: 'text/html',
+      }],
+    });
+
+    return { ok: true, reportNumber: row.reportNumber, to: recipient };
   },
 
   async update(user, id, payload = {}) {
