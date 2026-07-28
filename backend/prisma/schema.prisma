@@ -618,6 +618,7 @@ model Tenant {
   tlLocationCodeMaps       LocationCodeMap[]
   franchisePayoutPeriods   FranchisePayoutPeriod[]
   economyLocationConfigs   EconomyLocationConfig[]
+  ratePushLogs             RatePushLog[]
   nuLocationConfigs        NuLocationConfig[]
   flexwaysLocationConfigs  FlexwaysLocationConfig[]
   advantageLocationConfigs AdvantageLocationConfig[]
@@ -4361,10 +4362,70 @@ model EconomyLocationConfig {
   // [lookback, lookahead] as a precision filter per row.
   lookbackDays  Int?
   lookaheadDays Int?
+
+  // ---- Rate push (2026-07-28, outbound) ----------------------------------
+  // The franchise portal's own location code for this area (RezAlliance
+  // lstLocations: 'LAXO01' | 'MIAO01'). Required before this area can push.
+  externalLocationCode String?
+  // Per-area push switch. OFF by default: an area never pushes until it is
+  // explicitly turned on, even when the global transport flag is live.
+  ratePushEnabled      Boolean @default(false)
+  // Optional ACRISS alias overrides, {"RFM_CODE":"PORTAL_CODE"}. Codes match
+  // 1:1 for most classes (CCAR/ECAR/FFAR/ICAR/IFAR at LAX), so this only
+  // carries the exceptions; a class with no rate on either side is skipped.
+  rateClassMapJson     String?
+  // CLOSE-OUT SENTINEL (Hector 2026-07-28): the franchise blocks days by
+  // pricing them absurdly high (LAX uses 250.00). Any EXISTING portal value
+  // >= this threshold is a deliberate close-out and is NEVER overwritten —
+  // pushing a real rate over it would silently re-open blocked inventory.
+  // NULL disables the check, which also means the push refuses to run (a
+  // location must declare its sentinel before it may write).
+  rateCloseoutMin      Decimal? @db.Decimal(10, 2)
+
   createdAt     DateTime @default(now())
 
   @@unique([tenantId, externalArea])
   @@index([tenantId, enabled])
+}
+
+// ============================================================================
+// Outbound rate push audit (2026-07-28). Every value RFM writes into a
+// franchise portal, one row per (location, class, DATE) — the portals price
+// per calendar day, not per base rate. Money-adjacent: this table is the
+// forensic record of what we changed on someone else's system, what it was
+// before, what triggered it, and whether a read-back confirmed it landed.
+// ============================================================================
+model RatePushLog {
+  id       String @id @default(cuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  provider   String // 'ECONOMY' (NU/MEX/ADVANTAGE reuse this table)
+  locationId String // Ride location
+  externalLocationCode String // portal code, e.g. LAXO01
+  classCode  String // ACRISS as the PORTAL knows it
+  rateDate   DateTime @db.Date // the grid column this value belongs to
+  plan       String   @default("DY") // DY | WY | MY | HY | ED
+
+  priorValue  Decimal? @db.Decimal(10, 2) // what the portal showed before
+  pushedValue Decimal  @db.Decimal(10, 2) // what RFM wrote
+  sourceRateItemId String? // RateItem the value came from (traceability)
+
+  trigger String // 'MI_AUTOAPPLY' | 'MANUAL' | 'DRIFT_SWEEP'
+  mode    String // 'DRY_RUN' | 'LIVE'
+  status  String // 'PLANNED' | 'SENT' | 'VERIFIED' | 'MISMATCH' | 'FAILED' | 'SKIPPED'
+  skipReason String? // guardrail that suppressed it (held/no-map/out-of-band)
+
+  verifiedValue Decimal?  @db.Decimal(10, 2) // read-back from the portal
+  verifiedAt    DateTime?
+  error         String?
+
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId, provider, createdAt])
+  @@index([tenantId, locationId, classCode, rateDate])
+  @@index([tenantId, status])
 }
 
 // ============================================================================
