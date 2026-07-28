@@ -28,6 +28,7 @@ import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { TLIntegrationPanel } from '../../components/settings/TLIntegrationPanel';
 import { EconomyIntegrationPanel } from '../../components/settings/EconomyIntegrationPanel';
+import { LocationDocumentsPanel } from '../../components/settings/LocationDocumentsPanel';
 import { NuIntegrationPanel } from '../../components/settings/NuIntegrationPanel';
 import { FlexwaysIntegrationPanel } from '../../components/settings/FlexwaysIntegrationPanel';
 import { AdvantageIntegrationPanel } from '../../components/settings/AdvantageIntegrationPanel';
@@ -3404,6 +3405,11 @@ function SettingsInner({ token, me, logout }) {
                 ))}
               </tbody>
             </table>
+
+            {/* Business documents (2026-07-28): the paperwork a branch needs to
+                trade — permits, registrations, insurance. Filed per location
+                with a validity date; the dashboard warns 30 days out. */}
+            <LocationDocumentsPanel token={token} locations={locations} />
           </div>
         )}
 
