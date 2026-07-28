@@ -47,6 +47,7 @@ const {
   login,
   authedFetch,
   EconomyAuthExpiredError,
+  isDeadLookupResponse,
   __test,
   _resetCookieJarsForTests,
 } = await import('./economy.service.js');
@@ -820,4 +821,97 @@ test('S2: enumerateActiveTenants returns [] when NO tenant has the master switch
     prisma.integrationCredential.findMany = origCred;
     prisma.economyLocationConfig.findMany = origCfg;
   }
+});
+
+// ---------------------------------------------------------------------------
+// Session self-heal (QA 2026-07-28): RezLight killed the session server-side
+// but kept answering 200, so every 15-min run silently imported 0 for 6 hours.
+// The fix: a page-0 lookup body with NO recordsTotal = dead session -> clear
+// jar + re-login + retry once; still dead -> throw EconomyAuthExpiredError.
+// ---------------------------------------------------------------------------
+
+test('isDeadLookupResponse: no recordsTotal = dead; numeric (even 0) = alive; bare array = data', () => {
+  assert.equal(isDeadLookupResponse({}), true);
+  assert.equal(isDeadLookupResponse({ error: 'x' }), true);
+  assert.equal(isDeadLookupResponse(null), true);
+  assert.equal(isDeadLookupResponse({ recordsTotal: 0, data: [] }), false);
+  assert.equal(isDeadLookupResponse({ recordsTotal: 94931, data: [{}] }), false);
+  assert.equal(isDeadLookupResponse([]), true);
+  assert.equal(isDeadLookupResponse([{ rgConfirmation: 'R1' }]), false);
+});
+
+// Fetch mock where the lookup POST plays dead ({}) until `loginsNeeded` login
+// POSTs have happened — models a server-side session kill that a fresh login
+// repairs. Counts logins so tests can assert the self-heal actually re-logged.
+function installSelfHealFetch({ loginsNeeded, pageFor }) {
+  const state = { loginPosts: 0, listPosts: 0 };
+  __test.setCredentialsResolver(() => ({ username: 'u', password: 'p' }));
+  __test.setFetch(async (url, opts = {}) => {
+    const method = (opts.method || 'GET').toUpperCase();
+    const u = String(url);
+    if (method === 'GET' && !LIST_URL_RE.test(u) && !AUTHED_PAGE_RE.test(u)) {
+      return fakeRes({ status: 200, body: LOGIN_HTML });
+    }
+    if (method === 'POST' && !LIST_URL_RE.test(u)) {
+      state.loginPosts += 1;
+      return fakeRes({ status: 200, body: 'ok', setCookie: `.AspNet.ApplicationCookie=S${state.loginPosts}; path=/` });
+    }
+    if (method === 'GET' && AUTHED_PAGE_RE.test(u)) {
+      return fakeRes({ status: 200, body: '<input name="__RequestVerificationToken" value="TKN"/>' });
+    }
+    if (method === 'POST' && LIST_URL_RE.test(u)) {
+      state.listPosts += 1;
+      if (state.loginPosts < loginsNeeded) {
+        // Dead session: RezLight answers 200 with an empty shell (no recordsTotal).
+        return fakeRes({ status: 200, body: '{}' });
+      }
+      const params = new URLSearchParams(opts.body);
+      const dt = JSON.parse(params.get('jsonPaginationParameters'));
+      return fakeRes({ status: 200, body: JSON.stringify({ draw: 1, recordsTotal: 92093, data: pageFor(dt.start, dt.length) }) });
+    }
+    return fakeRes({ status: 200, body: '{}' });
+  });
+  return state;
+}
+
+test('self-heal: dead page-0 lookup triggers ONE re-login and the run recovers rows', async () => {
+  _resetCookieJarsForTests();
+  const now = Date.now();
+  const anchor = now + 30 * 24 * 60 * 60 * 1000;
+  const corpus = descRows(LOOKUP_PAGE_SIZE * 2, anchor, 0);
+  // First login (jar was empty) yields the DEAD session; the self-heal's second
+  // login repairs it.
+  const state = installSelfHealFetch({ loginsNeeded: 2, pageFor: (s, l) => corpus.slice(s, s + l) });
+
+  const rows = await fetchReservationList('tenant-x', {
+    dateFrom: new Date(now - 3 * 24 * 60 * 60 * 1000),
+    dateTo: new Date(now + 30 * 24 * 60 * 60 * 1000),
+  });
+
+  assert.equal(state.loginPosts, 2, 'self-heal performed exactly one extra login');
+  assert.ok(rows.length > 0, 'recovered rows after the re-login');
+
+  __test.setFetch(null);
+  __test.setCredentialsResolver(null);
+  _resetCookieJarsForTests();
+});
+
+test('self-heal: still dead after re-login -> throws EconomyAuthExpiredError (loud, no silent zero)', async () => {
+  _resetCookieJarsForTests();
+  const now = Date.now();
+  // loginsNeeded impossibly high -> lookup stays dead through the healing retry.
+  const state = installSelfHealFetch({ loginsNeeded: 99, pageFor: () => [] });
+
+  await assert.rejects(
+    () => fetchReservationList('tenant-x', {
+      dateFrom: new Date(now - 3 * 24 * 60 * 60 * 1000),
+      dateTo: new Date(now + 30 * 24 * 60 * 60 * 1000),
+    }),
+    (err) => err instanceof EconomyAuthExpiredError
+  );
+  assert.equal(state.loginPosts, 2, 'healed once (initial + retry), then gave up loudly');
+
+  __test.setFetch(null);
+  __test.setCredentialsResolver(null);
+  _resetCookieJarsForTests();
 });

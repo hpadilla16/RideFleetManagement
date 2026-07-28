@@ -40,6 +40,7 @@ import {
   DETAIL_DELAY_MAX_MS,
   DETAIL_ENABLED,
   EconomyAuthExpiredError,
+  clearSession,
 } from './economy.service.js';
 import {
   SOURCE_SYSTEM,
@@ -446,6 +447,10 @@ export async function economySyncHandler(job) {
   } catch (err) {
     if (err instanceof EconomyAuthExpiredError) {
       finalStatus = 'AUTH_EXPIRED';
+      // Drop the dead in-memory cookie jar so the NEXT run performs a fresh
+      // login instead of reusing the poisoned session (QA 2026-07-28: without
+      // this, one server-side session kill silently zeroed every run for 6h).
+      clearSession(tenantId);
       logger.warn('[economy-sync] session expired', { tenantId, runId: runRow.id, message: err.message });
       await prisma.integrationCredential.updateMany({
         where: { tenantId, sourceSystem: SOURCE_SYSTEM },

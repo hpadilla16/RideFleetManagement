@@ -225,6 +225,30 @@ export function _resetCookieJarsForTests() {
   cookieJars.clear();
 }
 
+/**
+ * Drop a tenant's in-memory session so the NEXT authedFetch performs a fresh
+ * login. Self-heal seam (QA 2026-07-28): RezLight can serve the LOGIN page
+ * with HTTP 200 at authed paths after a server-side session kill, which
+ * isLoginBounce (401/403/3xx-only) cannot see — the dead cookie then poisons
+ * every subsequent run. Callers clear + re-login instead of trusting the jar.
+ */
+export function clearSession(tenantId) {
+  cookieJars.delete(tenantId);
+}
+
+/**
+ * A healthy GetReservationLookupRecords response ALWAYS carries a numeric
+ * recordsTotal (the account's full ~94k history — an empty account is 0, not
+ * missing). A JSON body WITHOUT it (e.g. `{}` / error shell served to an
+ * unauthenticated POST) means the session is dead even though the HTTP layer
+ * said 200. A bare non-empty array is data (legacy aaData shape) — not dead.
+ * Pure. Exported for tests. (QA 2026-07-28: 6h of silent zero-imports.)
+ */
+export function isDeadLookupResponse(json) {
+  if (Array.isArray(json)) return json.length === 0;
+  return json?.recordsTotal == null;
+}
+
 // ---------------------------------------------------------------------------
 // Token scrape (regex — no cheerio). Modeled on the working PoC.
 // ---------------------------------------------------------------------------
@@ -390,7 +414,7 @@ export async function fetchReservationList(tenantId, { dateFrom = null, dateTo =
   // token across the paginated DataTables POSTs).
   const pageRes = await authedFetch(tenantId, AUTHED_PAGE_PATH, { userAgent });
   const pageHtml = pageRes.status < 400 ? await pageRes.text() : '';
-  const token = scrapeVerificationToken(pageHtml);
+  let token = scrapeVerificationToken(pageHtml);
 
   // 2a) No date window (e.g. the testAuth 1-row probe): single page, unbounded.
   //     Keeps the cheap "can we read data?" health check unchanged.
@@ -422,9 +446,32 @@ export async function fetchReservationList(tenantId, { dateFrom = null, dateTo =
   let crossedBelowFrom = false;
 
   for (; page < MAX_PAGES; page++) {
-    const json = await fetchLookupPage(tenantId, {
+    let json = await fetchLookupPage(tenantId, {
       token, start, length: LOOKUP_PAGE_SIZE, userAgent, orderDesc: true,
     });
+
+    // Self-heal (QA 2026-07-28): a page-0 body with NO recordsTotal means the
+    // session died server-side but RezLight answered 200 (isLoginBounce can't
+    // see it) — without this, every 15-min run "succeeds" importing 0 forever.
+    // Heal ONCE per run: fresh login + fresh anti-CSRF token, retry the page.
+    // Still dead after that -> throw loud (worker marks the run failed).
+    if (page === 0 && isDeadLookupResponse(json)) {
+      logger.warn('[economy] lookup response has no recordsTotal — stale session suspected, re-login once', { tenantId });
+      clearSession(tenantId);
+      const retryRes = await authedFetch(tenantId, AUTHED_PAGE_PATH, { userAgent });
+      const retryHtml = retryRes.status < 400 ? await retryRes.text() : '';
+      token = scrapeVerificationToken(retryHtml);
+      json = await fetchLookupPage(tenantId, {
+        token, start, length: LOOKUP_PAGE_SIZE, userAgent, orderDesc: true,
+      });
+      if (isDeadLookupResponse(json)) {
+        throw new EconomyAuthExpiredError(
+          `Reservation lookup still has no recordsTotal after re-login for tenant ${tenantId}`
+        );
+      }
+      logger.info('[economy] session self-heal succeeded', { tenantId });
+    }
+
     recordsTotal = json.recordsTotal ?? recordsTotal;
     const pageRows = json.data || json.aaData || (Array.isArray(json) ? json : []);
     const rows = Array.isArray(pageRows) ? pageRows : [];
