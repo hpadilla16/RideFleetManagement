@@ -5860,6 +5860,12 @@ export const rentalAgreementsService = {
     const minAge = Number(locationConfig?.chargeAgeMin || 0);
     const maxAge = Number(locationConfig?.chargeAgeMax || 0);
     const age = ageOnDate(dateOfBirth, agreement.pickupAt);
+    // 2026-07-28 AGE RULES (LAX): with enforcement on, "no DOB on file" is a
+    // block, not a skip — a driver whose age can't be proven must not check
+    // out. Locations without ageRulesEnforced keep the legacy skip.
+    if (age === null && locationConfig?.ageRulesEnforced === true) {
+      throw new Error('Customer date of birth is required before check-out can be finalized at this location.');
+    }
     if (age !== null) {
       // Guard against a garbage DOB on file (e.g. an import storing year 0959 →
       // age ~1067). Give an actionable message instead of a confusing

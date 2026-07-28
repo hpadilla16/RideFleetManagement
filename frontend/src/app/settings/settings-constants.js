@@ -240,6 +240,10 @@ export const LOCATION_CONFIG_DEFAULT = {
   chargeAgeMax: 75,
   underageAlertEnabled: false,
   underageAlertAge: 25,
+  // Age rules at check-out (2026-07-28, LAX): enforcement switch + top of the
+  // mandatory-underage-fee band [chargeAgeMin..underageFeeMaxAge].
+  ageRulesEnforced: false,
+  underageFeeMaxAge: 24,
   defaultRatePlan: 'RETAIL_RATE',
   currency: 'USD',
   paymentDueAction: 'AT_BOOKING',

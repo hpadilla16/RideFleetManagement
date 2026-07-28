@@ -88,6 +88,9 @@ function CheckoutWizardV2({ token, me, logout }) {
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
   const [swapOpen, setSwapOpen] = useState(false);
+  // Bumped by the age-gate blocker after the agent captures/corrects the DOB —
+  // re-runs the mount effect (fresh reservation + ageRules, then find-or-create).
+  const [reloadKey, setReloadKey] = useState(0);
   const pollTimer = useRef(null);
 
   // Innovation #5 (2026-07-27): drive the live customer display. The second
@@ -130,9 +133,19 @@ function CheckoutWizardV2({ token, me, logout }) {
       try {
         setLoading(true);
         // 1. Reservation context (customer, vehicle, charges)
-        const r = await api(`/api/reservations/${reservationId}`, {}, token);
+        const r = await api(`/api/reservations/${reservationId}`, { bypassCache: reloadKey > 0 }, token);
         if (cancelled) return;
         setReservation(r);
+
+        // AGE-RULES gate (2026-07-28, LAX): with the pickup location enforcing
+        // age rules, a blocking evaluation (no DOB / under min / over max)
+        // renders the blocker screen INSTEAD of the wizard — for new AND
+        // resumed sessions alike (the backend re-checks at session create and
+        // again at finalize, so this screen is UX, not the enforcement).
+        if (r?.ageRules?.blocking) {
+          setSession(null);
+          return;
+        }
 
         // 2. Find existing session OR create a new one
         let s;
@@ -154,7 +167,7 @@ function CheckoutWizardV2({ token, me, logout }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [reservationId, token]);
+  }, [reservationId, token, reloadKey]);
 
   // Poll the session for state changes (the customer display, the
   // customer's T&C-signing phone, the Spin webhook, and the agent's
@@ -274,6 +287,19 @@ function CheckoutWizardV2({ token, me, logout }) {
     return (
       <AppShell me={me} logout={logout}>
         <div style={{ padding: 24, color: '#B91C1C' }}>{error}</div>
+      </AppShell>
+    );
+  }
+  if (reservation?.ageRules?.blocking) {
+    return (
+      <AppShell me={me} logout={logout}>
+        <div style={{ padding: 24, maxWidth: 720, margin: '0 auto' }}>
+          <AgeGateBlocker
+            reservation={reservation}
+            token={token}
+            onResolved={() => setReloadKey((k) => k + 1)}
+          />
+        </div>
       </AppShell>
     );
   }
@@ -543,6 +569,125 @@ function StepRenderer({ session, reservation, token, onAdvance }) {
 }
 
 // ---------------------------------------------------------------------------
+// AgeGateBlocker — full-screen replacement for the wizard while the pickup
+// location's age rules block check-out (reservation.ageRules.blocking). The
+// agent captures/corrects the DOB right here; onResolved re-runs the wizard
+// mount (fresh ageRules → session find-or-create). Enforcement lives in the
+// backend (session create + finalize) — this screen is the friendly path.
+// ---------------------------------------------------------------------------
+
+const AGE_BLOCK_COPY = {
+  DOB_REQUIRED: {
+    title: 'Falta la fecha de nacimiento',
+    body: 'Esta sede exige verificar la edad del conductor antes del checkout. Captura la fecha de nacimiento del cliente (del ID/licencia) para continuar.',
+  },
+  DOB_IMPLAUSIBLE: {
+    title: 'Fecha de nacimiento inválida',
+    body: 'La fecha de nacimiento registrada es imposible. Corrígela con el ID/licencia del cliente para continuar.',
+  },
+  UNDER_MIN: {
+    title: 'Conductor menor de la edad mínima',
+    body: null, // built dynamically with the ages
+  },
+  ABOVE_MAX: {
+    title: 'Conductor excede la edad máxima',
+    body: null,
+  },
+};
+
+function AgeGateBlocker({ reservation, token, onResolved }) {
+  const [dob, setDob] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const rules = reservation.ageRules || {};
+  const copy = AGE_BLOCK_COPY[rules.status] || AGE_BLOCK_COPY.DOB_REQUIRED;
+  const customerId = reservation.customer?.id;
+  const isHardAgeBlock = rules.status === 'UNDER_MIN' || rules.status === 'ABOVE_MAX';
+
+  const body = copy.body
+    || (rules.status === 'UNDER_MIN'
+      ? `El conductor tiene ${rules.age} años y la edad mínima de esta sede es ${rules.minAge}. No se puede hacer el checkout.`
+      : `El conductor tiene ${rules.age} años y la edad máxima de esta sede es ${rules.maxAge}. No se puede hacer el checkout.`);
+
+  const saveDob = async () => {
+    if (!dob || !customerId) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await api(`/api/customers/${customerId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ dateOfBirth: dob }),
+      }, token);
+      onResolved();
+    } catch (err) {
+      setSaveError(err?.message || 'No se pudo guardar la fecha de nacimiento');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={cardStyle}>
+      <h3 style={h3Style}>Checkout bloqueado · reglas de edad</h3>
+      <div style={{ marginBottom: 12 }}>
+        <KV label="Reservación" value={`#${reservation.reservationNumber || reservation.id}`} />
+        <KV label="Cliente" value={`${reservation.customer?.firstName || ''} ${reservation.customer?.lastName || ''}`.trim() || '—'} />
+        <KV label="Fecha de nacimiento" value={reservation.customer?.dateOfBirth ? new Date(reservation.customer.dateOfBirth).toLocaleDateString() : '—'} />
+        {rules.age != null && <KV label="Edad al pickup" value={String(rules.age)} />}
+      </div>
+      <div style={{
+        padding: 12, marginBottom: 12,
+        background: '#FEF2F2', border: '0.5px solid #EF4444', borderRadius: 6,
+        color: '#991B1B', fontSize: 13,
+      }}>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>{copy.title}</div>
+        {body}
+      </div>
+      {!isHardAgeBlock && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+          <input
+            type="date"
+            value={dob}
+            onChange={(e) => setDob(e.target.value)}
+            style={{ padding: '8px 10px', border: '0.5px solid #E5E7EB', borderRadius: 6, fontSize: 13 }}
+          />
+          <button
+            style={{ ...primaryBtn, opacity: dob && !saving ? 1 : 0.4 }}
+            disabled={!dob || saving}
+            onClick={saveDob}
+          >
+            {saving ? 'Guardando…' : 'Guardar y continuar'}
+          </button>
+        </div>
+      )}
+      {isHardAgeBlock && (
+        <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 12 }}>
+          ¿Fecha de nacimiento incorrecta? Corrígela:
+          {' '}
+          <input
+            type="date"
+            value={dob}
+            onChange={(e) => setDob(e.target.value)}
+            style={{ padding: '6px 8px', border: '0.5px solid #E5E7EB', borderRadius: 6, fontSize: 12, marginRight: 8 }}
+          />
+          <button
+            style={{ ...ghostBtn, fontSize: 12, opacity: dob && !saving ? 1 : 0.4 }}
+            disabled={!dob || saving}
+            onClick={saveDob}
+          >
+            {saving ? 'Guardando…' : 'Corregir'}
+          </button>
+        </div>
+      )}
+      {saveError && (
+        <div style={{ fontSize: 12, color: '#B91C1C', marginBottom: 12 }}>{saveError}</div>
+      )}
+      <a href={`/reservations/${reservation.id}`} style={{ fontSize: 13 }}>← Volver a la reservación</a>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Per-step renderers (Phase 1 stubs — real content in Phases 2-4)
 // ---------------------------------------------------------------------------
 
@@ -583,10 +728,31 @@ function Step1Confirm({ reservation, session, token, onNext }) {
       <div style={{ marginBottom: 12 }}>
         <KV label="Customer" value={`${reservation.customer?.firstName} ${reservation.customer?.lastName}`} />
         <KV label="Phone" value={reservation.customer?.phone || '—'} />
+        {reservation.ageRules?.enforced && (
+          <KV
+            label="Age"
+            value={reservation.ageRules?.age != null
+              ? `${reservation.ageRules.age} (DOB ${reservation.customer?.dateOfBirth ? new Date(reservation.customer.dateOfBirth).toLocaleDateString() : '—'})`
+              : '—'}
+          />
+        )}
         <KV label="Vehicle" value={reservation.vehicle ? `${reservation.vehicle.year} ${reservation.vehicle.make} ${reservation.vehicle.model} · ${reservation.vehicle.plate}` : 'Not assigned'} />
         <KV label="Pickup" value={reservation.pickupAt ? new Date(reservation.pickupAt).toLocaleString() : '—'} />
         <KV label="Return" value={reservation.returnAt ? new Date(reservation.returnAt).toLocaleString() : '—'} />
       </div>
+      {reservation.ageRules?.status === 'UNDERAGE_BAND' && (
+        <div style={{
+          padding: 12, marginBottom: 12,
+          background: '#FEF3C7', border: '0.5px solid #F59E0B', borderRadius: 6,
+          color: '#92400E', fontSize: 13,
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 2 }}>
+            Conductor joven ({reservation.ageRules.age} años)
+          </div>
+          Entre {reservation.ageRules.minAge} y {reservation.ageRules.bandMaxAge} años aplica el
+          cargo obligatorio de conductor joven — se agrega automáticamente al total en el paso de pago.
+        </div>
+      )}
       {!hasVehicle && (
         <div style={{
           padding: 12, marginBottom: 12,

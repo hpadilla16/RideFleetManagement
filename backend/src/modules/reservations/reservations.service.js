@@ -6,6 +6,7 @@ import { fireConfirmationEmailOnCreate } from './reservation-confirmation-email.
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { evaluateAgeRules } from '../../lib/age-rules.js';
 import { parseDateTimeInTz, startOfDayInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
 import { readFreshCounters, refreshCountersAsync } from './reservation-summary-counters.service.js';
 import { reservationProgramWhereForScope } from '../../lib/program-category.js';
@@ -88,6 +89,24 @@ function deriveUnderageAlertForReservation(reservation) {
     return { underageAlert: underage, underageAlertAge: age, underageAlertThreshold: threshold, underageAlertText: note };
   } catch {
     return { underageAlert: false, underageAlertAge: null, underageAlertThreshold: null, underageAlertText: null };
+  }
+}
+
+// 2026-07-28 AGE RULES (LAX): the checkout wizard's step 1 renders the block /
+// underage-band notice straight from this derived object — same read-time
+// pattern as the underage alert above, but backed by the shared evaluator the
+// checkout-session gate enforces with (so UI and gate can never disagree).
+function deriveAgeRulesForReservation(reservation) {
+  try {
+    return {
+      ageRules: evaluateAgeRules({
+        dateOfBirth: reservation?.customer?.dateOfBirth ?? null,
+        pickupAt: reservation?.pickupAt,
+        locationConfig: parseLocationConfig(reservation?.pickupLocation?.locationConfig),
+      }),
+    };
+  } catch {
+    return { ageRules: null };
   }
 }
 
@@ -1620,7 +1639,7 @@ export const reservationsService = {
         row.customer.hasLicenseBack = !!f?.hasLicenseBack;
       } catch { /* fail-open: leave flags undefined, checklist falls back to blob check */ }
     }
-    return { ...row, ...deriveUnderageAlertForReservation(row) };
+    return { ...row, ...deriveUnderageAlertForReservation(row), ...deriveAgeRulesForReservation(row) };
   },
 
   async create(data, scope = {}) {

@@ -1298,6 +1298,8 @@ function SettingsInner({ token, me, logout }) {
     if (Number.isNaN(minAge) || minAge < 16) { setMsg('Minimum age must be at least 16'); return; }
     if (Number.isNaN(maxAge) || maxAge < minAge) { setMsg('Maximum age must be greater than or equal to minimum age'); return; }
     if (locationEditor.config?.underageAlertEnabled && (Number.isNaN(underageAlertAge) || underageAlertAge < 16)) { setMsg('Underage alert age must be at least 16'); return; }
+    const underageFeeMaxAge = Number(locationEditor.config?.underageFeeMaxAge || 0);
+    if (locationEditor.config?.ageRulesEnforced && (Number.isNaN(underageFeeMaxAge) || underageFeeMaxAge < minAge)) { setMsg('Underage fee max age must be greater than or equal to minimum age'); return; }
 
     await patchLocation(locationEditor.id, {
       code: locationEditor.code,
@@ -6402,8 +6404,10 @@ function SettingsInner({ token, me, logout }) {
                     <div className="stack"><label className="label">Maintenance Hold (miles)</label><input type="number" min="0" placeholder="Maintenance Hold (miles)" value={locationEditor.config?.maintenanceHoldMiles ?? ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), maintenanceHoldMiles: Number(e.target.value || 0) } })} /></div>
                     <label className="label"><input type="checkbox" checked={!!locationEditor.config?.underageAlertEnabled} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), underageAlertEnabled: e.target.checked } })} /> Underage Alert Enabled</label>
                     <div className="stack"><label className="label">Underage Alert Age</label><input type="number" min="16" placeholder="Underage Alert Age" value={locationEditor.config?.underageAlertAge ?? ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), underageAlertAge: Number(e.target.value || 0) } })} /></div>
+                    <label className="label"><input type="checkbox" checked={!!locationEditor.config?.ageRulesEnforced} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), ageRulesEnforced: e.target.checked } })} /> Enforce Age Rules at Check-Out</label>
+                    <div className="stack"><label className="label">Underage Fee Max Age</label><input type="number" min="16" placeholder="Underage Fee Max Age" value={locationEditor.config?.underageFeeMaxAge ?? ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), underageFeeMaxAge: Number(e.target.value || 0) } })} /></div>
                   </div>
-                  <span className="label">Tip: Min age must be at least 16 and max age must be ≥ min age. Underage alert adds a reservation warning note when customer age is below alert age.</span>
+                  <span className="label">Tip: Min age must be at least 16 and max age must be ≥ min age. Underage alert adds a reservation warning note when customer age is below alert age. Enforce Age Rules blocks check-out under Minimum Age (and requires a date of birth on file); drivers between Minimum Age and Underage Fee Max Age get the mandatory underage fee (Fees flagged "Underage Fee" assigned to this location).</span>
                 </>
               )}
 
