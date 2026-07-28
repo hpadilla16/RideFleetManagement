@@ -4,6 +4,8 @@ import logger from '../../lib/logger.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import { ensureNoVehicleConflict } from '../reservations/reservations.service.js';
 import { recordMileageEntrySafe } from '../vehicles/mileage-history.service.js';
+import { evaluateAgeRules, ageRuleBlockMessage } from '../../lib/age-rules.js';
+import { parseLocationConfig } from '../../lib/location-config.js';
 import { fuelLevelToFraction } from '../rental-agreements/inspection-photos-normalize.js';
 import {
   CHECKOUT_STEPS,
@@ -26,6 +28,58 @@ const HANDOFF_TOKEN_TTL_MIN = 15;
 
 function tokenBytes() {
   return crypto.randomBytes(24).toString('base64url');
+}
+
+/**
+ * Best-effort pricing recompute (mandatory + underage fees → ReservationCharge
+ * → agreement mirror). Runs whenever a wizard session is created OR resumed so
+ * the payment step always sees current fee lines — before this, the mirror only
+ * refreshed when someone happened to open the reservation detail page. Dynamic
+ * import for the same boot-weight reason as ensureAgreementExists.
+ */
+async function refreshPricingSafe(reservationId, tenantId) {
+  try {
+    const { reservationPricingService } = await import('../reservations/reservation-pricing.service.js');
+    await reservationPricingService.getPricing(reservationId, tenantId ? { tenantId } : {});
+  } catch (err) {
+    logger.warn('[checkout-session] pricing refresh failed (non-fatal)', {
+      reservationId, error: err?.message || String(err),
+    });
+  }
+}
+
+/**
+ * 2026-07-28 — AGE-RULES gate (LAX meeting). With `ageRulesEnforced` on for the
+ * pickup location: no DOB / under chargeAgeMin / over chargeAgeMax refuse
+ * check-out with a 422 the wizard renders as a step-1 blocker (the agent can
+ * capture the DOB inline and retry). The 21–24 band does NOT block here — it
+ * surfaces as a notice and a mandatory underage fee via the pricing engine.
+ * Runs at session START and again at CLOSE (a DOB corrected mid-wizard, or a
+ * resumed legacy session, must not slip past the rule).
+ */
+async function ensureAgeRulesPass(reservationId) {
+  const resv = await prisma.reservation.findUnique({
+    where: { id: reservationId },
+    select: {
+      pickupAt: true,
+      customer: { select: { dateOfBirth: true } },
+      pickupLocation: { select: { locationConfig: true } },
+    },
+  });
+  if (!resv) return null;
+  const evaluation = evaluateAgeRules({
+    dateOfBirth: resv.customer?.dateOfBirth ?? null,
+    pickupAt: resv.pickupAt,
+    locationConfig: parseLocationConfig(resv.pickupLocation?.locationConfig),
+  });
+  if (evaluation.blocking) {
+    throw new CheckoutSessionError(
+      ageRuleBlockMessage(evaluation),
+      422,
+      `AGE_RULES_${evaluation.status}`,
+    );
+  }
+  return evaluation;
 }
 
 /**
@@ -74,6 +128,10 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
     }
   }
 
+  // AGE-RULES gate — runs before the existing-session lookup on purpose:
+  // resuming a session must not bypass the rule either.
+  await ensureAgeRulesPass(reservationId);
+
   const existing = await prisma.checkoutSession.findUnique({ where: { reservationId } });
   if (existing) {
     if (isTerminal(existing.currentStep)) {
@@ -83,6 +141,7 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
         'SESSION_TERMINAL',
       );
     }
+    await refreshPricingSafe(reservationId, resv.tenantId || tenantId);
     // If a session exists but somehow has no agreement bound (legacy
     // sessions from before this auto-create patch, or a session opened
     // on a reservation that didn't have an agreement yet), back-fill
@@ -115,6 +174,7 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
   // so the new agreement gets the customer snapshot, vehicle, pricing rows,
   // and any pre-checkin charges copied over verbatim.
   const agreementId = await ensureAgreementExists({ reservationId, tenantId, actorUserId });
+  await refreshPricingSafe(reservationId, resv.tenantId || tenantId);
 
   const session = await prisma.checkoutSession.create({
     data: {
@@ -389,6 +449,10 @@ async function transition({ id, toStep, actorUserId, metadata }) {
             'NO_VEHICLE_ASSIGNED',
           );
         }
+        // AGE-RULES re-check (defense-in-depth, mirrors the vehicle gates):
+        // a DOB edited/cleared mid-wizard must fail the finalize loudly, and a
+        // CheckoutSessionError rethrows past the best-effort catch below.
+        await ensureAgeRulesPass(resv.id);
         // 2026-06-04 — defense-in-depth: re-run the vehicle-conflict gate at
         // finalize too. The session-start gate covers the normal flow, but a
         // long-lived/resumed session could finalize after another rental took

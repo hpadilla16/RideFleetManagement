@@ -1,6 +1,8 @@
 import { prisma } from '../../lib/prisma.js';
 import { tollsService } from '../tolls/tolls.service.js';
 import { filterMandatoryFeesForChannel } from '../booking-engine/fee-channel-filter.js';
+import { evaluateAgeRules } from '../../lib/age-rules.js';
+import { parseLocationConfig } from '../../lib/location-config.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import logger from '../../lib/logger.js';
 import { computeCheckinFees } from '../fees/fee-engine.service.js';
@@ -399,6 +401,7 @@ async function syncMandatoryLocationFees(reservationId, scope = {}) {
   const reservation = await prisma.reservation.findFirst({
     where: scopedReservationWhere(reservationId, scope),
     include: {
+      customer: { select: { dateOfBirth: true } },
       pickupLocation: {
         include: {
           locationFees: {
@@ -423,10 +426,32 @@ async function syncMandatoryLocationFees(reservationId, scope = {}) {
     reservation.bookingChannel
   );
 
+  // 2026-07-28 AGE RULES (LAX): with ageRulesEnforced on the pickup location
+  // and the driver inside the [chargeAgeMin..underageFeeMaxAge] band, every
+  // active isUnderageFee fee LINKED TO THE LOCATION auto-applies as a
+  // mandatory charge (source UNDERAGE_FEE). Age is recomputed HERE, from the
+  // customer's current DOB — unlike the legacy reservation.underageAlert flag,
+  // which froze at reservation time and never saw a DOB corrected at the
+  // counter. No channel filter: the fee is a counter/legal rule, not a
+  // website-display one. Outside the band (or unenforced) the rows are
+  // removed like any stale mandatory fee.
+  const ageEval = evaluateAgeRules({
+    dateOfBirth: reservation.customer?.dateOfBirth ?? null,
+    pickupAt: reservation.pickupAt,
+    locationConfig: parseLocationConfig(reservation.pickupLocation?.locationConfig),
+  });
+  const underageFees = ageEval.feeApplies
+    ? (reservation.pickupLocation?.locationFees || [])
+      .map((row) => row.fee)
+      .filter((fee) => fee?.isActive && fee?.isUnderageFee)
+    : [];
+
   const existingCharges = Array.isArray(reservation.charges) ? reservation.charges : [];
-  const existingMandatoryCharges = existingCharges.filter((row) => String(row.source || '').toUpperCase() === 'MANDATORY_FEE');
+  const existingMandatoryCharges = existingCharges.filter(
+    (row) => ['MANDATORY_FEE', 'UNDERAGE_FEE'].includes(String(row.source || '').toUpperCase())
+  );
   const chargeByFeeId = new Map(existingMandatoryCharges.map((row) => [String(row.sourceRefId || ''), row]));
-  const activeFeeIds = new Set(mandatoryFees.map((fee) => String(fee.id)));
+  const activeFeeIds = new Set([...mandatoryFees, ...underageFees].map((fee) => String(fee.id)));
   const baseAmount = Number((toNumber(reservation.pricingSnapshot?.dailyRate, toNumber(reservation.dailyRate)) * rentalDays(reservation.pickupAt, reservation.returnAt)).toFixed(2));
   const days = rentalDays(reservation.pickupAt, reservation.returnAt);
   let nextSortOrder = existingCharges.reduce((max, row) => {
@@ -434,43 +459,57 @@ async function syncMandatoryLocationFees(reservationId, scope = {}) {
     return Math.max(max, sortOrder);
   }, -1) + 1;
 
-  await prisma.$transaction(async (tx) => {
-    for (const fee of mandatoryFees) {
-      const existing = chargeByFeeId.get(String(fee.id));
-      const total = computeFeeTotal(fee, { baseAmount, days });
-      const rate = String(fee.mode || 'FIXED').trim().toUpperCase() === 'PERCENTAGE'
-        ? toNumber(fee.amount)
-        : total;
-      const data = {
-        code: fee.code || null,
-        name: fee.name,
-        chargeType: 'UNIT',
-        quantity: 1,
-        rate,
-        total,
-        taxable: !!fee.taxable,
-        selected: true,
-        notes: 'Auto-applied mandatory location fee'
-      };
+  // A fee flagged both mandatory and isUnderageFee is owned by the mandatory
+  // set (it applies at every age) — dedup so it can't create two rows.
+  const mandatoryIds = new Set(mandatoryFees.map((fee) => String(fee.id)));
+  const feeGroups = [
+    { fees: mandatoryFees, source: 'MANDATORY_FEE', notes: 'Auto-applied mandatory location fee' },
+    {
+      fees: underageFees.filter((fee) => !mandatoryIds.has(String(fee.id))),
+      source: 'UNDERAGE_FEE',
+      notes: `Auto-applied underage fee (driver age ${ageEval.age})`
+    },
+  ];
 
-      if (existing?.id) {
-        // 2026-06-25 (Admin Corrections Option B): if an admin explicitly voided this
-        // mandatory fee (selected=false), DON'T re-select it here — otherwise the void
-        // would rebound on the next pricing recompute. Normal flow keeps selected=true.
-        await tx.reservationCharge.update({
-          where: { id: existing.id },
-          data: existing.selected === false ? { ...data, selected: false } : data
-        });
-      } else {
-        await tx.reservationCharge.create({
-          data: {
-            reservationId,
-            ...data,
-            sortOrder: nextSortOrder++,
-            source: 'MANDATORY_FEE',
-            sourceRefId: fee.id
-          }
-        });
+  await prisma.$transaction(async (tx) => {
+    for (const group of feeGroups) {
+      for (const fee of group.fees) {
+        const existing = chargeByFeeId.get(String(fee.id));
+        const total = computeFeeTotal(fee, { baseAmount, days });
+        const rate = String(fee.mode || 'FIXED').trim().toUpperCase() === 'PERCENTAGE'
+          ? toNumber(fee.amount)
+          : total;
+        const data = {
+          code: fee.code || null,
+          name: fee.name,
+          chargeType: 'UNIT',
+          quantity: 1,
+          rate,
+          total,
+          taxable: !!fee.taxable,
+          selected: true,
+          notes: group.notes
+        };
+
+        if (existing?.id) {
+          // 2026-06-25 (Admin Corrections Option B): if an admin explicitly voided this
+          // mandatory fee (selected=false), DON'T re-select it here — otherwise the void
+          // would rebound on the next pricing recompute. Normal flow keeps selected=true.
+          await tx.reservationCharge.update({
+            where: { id: existing.id },
+            data: existing.selected === false ? { ...data, selected: false } : data
+          });
+        } else {
+          await tx.reservationCharge.create({
+            data: {
+              reservationId,
+              ...data,
+              sortOrder: nextSortOrder++,
+              source: group.source,
+              sourceRefId: fee.id
+            }
+          });
+        }
       }
     }
 
