@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  mapClassCode, toAmount, isCloseout, decideCell, buildPushPlan, verifyPush, SKIP,
+  mapClassCode, toAmount, isCloseout, decideCell, buildPushPlan, verifyPush, isApproved, SKIP,
 } from './economy-rate-map.js';
 
 const LAX_PORTAL_CLASSES = ['CCAR', 'ECAR', 'FCAR', 'FFAR', 'ICAR', 'IFAR', 'MVAR', 'SCAR', 'XXAR'];
@@ -236,4 +236,90 @@ test('COLLISION: resolution does not disturb the ordinary one-to-one classes', (
     closeoutMin: CLOSEOUT,
   });
   assert.deepEqual(pushes.map((p) => `${p.classCode}=${p.pushedValue}`).sort(), ['CCAR=20', 'IFAR=32.67']);
+});
+
+// ---------------------------------------------------------------------------
+// F4 — approvals. An approval bypasses the DELTA BAND for one cell, and
+// nothing else. It must never become a skeleton key.
+// ---------------------------------------------------------------------------
+test('isApproved: matches on class + date + VALUE, all three', () => {
+  const approvals = [{ classCode: 'CCAR', rateDate: '2026-08-02', pushedValue: 20 }];
+  assert.equal(isApproved(approvals, 'CCAR', '2026-08-02', 20), true);
+  assert.equal(isApproved(approvals, 'CCAR', '2026-08-02', 21), false, 'a different price is NOT authorised');
+  assert.equal(isApproved(approvals, 'CCAR', '2026-08-03', 20), false, 'a different date is NOT authorised');
+  assert.equal(isApproved(approvals, 'ECAR', '2026-08-02', 20), false, 'a different class is NOT authorised');
+  assert.equal(isApproved([], 'CCAR', '2026-08-02', 20), false);
+});
+
+test('APPROVAL: bypasses the delta band for that cell (the LAX +82% case)', () => {
+  const held = decideCell({ rfmValue: 20, portalValue: '11.00', closeoutMin: CLOSEOUT });
+  assert.equal(held.reason, SKIP.OUT_OF_BAND);
+  const approved = decideCell({ rfmValue: 20, portalValue: '11.00', closeoutMin: CLOSEOUT, approved: true });
+  assert.deepEqual(approved, { push: true, value: 20, reason: null });
+});
+
+test('APPROVAL is NOT a skeleton key: close-out, zero and sentinel guards all survive', () => {
+  // Cannot re-open a deliberately blocked day.
+  assert.equal(
+    decideCell({ rfmValue: 20, portalValue: '250.00', closeoutMin: CLOSEOUT, approved: true }).reason,
+    SKIP.CLOSEOUT_PRESERVED,
+  );
+  // Cannot publish a free rental.
+  assert.equal(
+    decideCell({ rfmValue: 0, portalValue: '11.00', closeoutMin: CLOSEOUT, approved: true }).reason,
+    SKIP.INVALID_VALUE,
+  );
+  // Cannot CREATE a close-out.
+  assert.equal(
+    decideCell({ rfmValue: 250, portalValue: '11.00', closeoutMin: CLOSEOUT, approved: true }).reason,
+    SKIP.OUT_OF_BAND,
+  );
+  // Cannot run without a declared sentinel.
+  assert.equal(
+    decideCell({ rfmValue: 20, portalValue: '11.00', closeoutMin: null, approved: true }).reason,
+    SKIP.NO_SENTINEL,
+  );
+});
+
+test('buildPushPlan: an approved cell pushes while its unapproved twin stays held', () => {
+  const { pushes, skips } = buildPushPlan({
+    rfmRates: [{ classCode: 'CCAR', daily: 20 }],
+    dates: ['2026-08-02', '2026-08-03'],
+    portalGrid: { CCAR: { '2026-08-02': '11.00', '2026-08-03': '11.00' } },
+    portalClasses: ['CCAR'],
+    closeoutMin: CLOSEOUT,
+    approvals: [{ classCode: 'CCAR', rateDate: '2026-08-02', pushedValue: 20 }],
+  });
+  assert.deepEqual(pushes.map((p) => p.rateDate), ['2026-08-02']);
+  assert.equal(pushes[0].approved, true, 'the push is flagged so its approval row can be consumed');
+  const held = skips.filter((s) => s.reason === SKIP.OUT_OF_BAND);
+  assert.deepEqual(held.map((s) => s.rateDate), ['2026-08-03']);
+});
+
+test('a held cell carries intendedValue so the queue reads "$11 -> $20", not "-> $0"', () => {
+  const { skips } = buildPushPlan({
+    rfmRates: [{ classCode: 'CCAR', daily: 20 }],
+    dates: ['2026-08-02'],
+    portalGrid: { CCAR: { '2026-08-02': '11.00' } },
+    portalClasses: ['CCAR'],
+    closeoutMin: CLOSEOUT,
+  });
+  const held = skips.find((s) => s.reason === SKIP.OUT_OF_BAND);
+  assert.equal(held.priorValue, 11);
+  assert.equal(held.intendedValue, 20);
+});
+
+test('a STALE approval cannot carry a NEW price through the band', () => {
+  // Human approved $20; RFM has since moved to $24. The old sign-off must not
+  // authorise the number nobody reviewed.
+  const { pushes, skips } = buildPushPlan({
+    rfmRates: [{ classCode: 'CCAR', daily: 24 }],
+    dates: ['2026-08-02'],
+    portalGrid: { CCAR: { '2026-08-02': '11.00' } },
+    portalClasses: ['CCAR'],
+    closeoutMin: CLOSEOUT,
+    approvals: [{ classCode: 'CCAR', rateDate: '2026-08-02', pushedValue: 20 }],
+  });
+  assert.equal(pushes.length, 0, 'the new price is not authorised');
+  assert.equal(skips.find((s) => s.reason === SKIP.OUT_OF_BAND)?.intendedValue, 24);
 });

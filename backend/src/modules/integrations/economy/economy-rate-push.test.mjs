@@ -58,15 +58,26 @@ test('dateWindow: contiguous iso days from the start', () => {
 // ---------------------------------------------------------------------------
 // Orchestration harness
 // ---------------------------------------------------------------------------
-function makeDeps({ portalRows, rfmRates, mode, applyImpl }) {
+function makeDeps({ portalRows, rfmRates, mode, applyImpl, approvals }) {
   const logs = [];
   const prismaStub = {
     ratePushLog: {
+      // F4 reads pre-approved cells (findMany) and dedupes the pending queue
+      // (findFirst); `approvals` lets a test seed authorised rows.
+      findMany: async () => (approvals || []).map((a, i) => ({
+        id: `appr-${i}`, classCode: a.classCode,
+        rateDate: new Date(`${a.rateDate}T00:00:00Z`), pushedValue: a.pushedValue,
+      })),
+      findFirst: async ({ where }) => logs.find((l) => (
+        l.status === 'PENDING_APPROVAL'
+        && l.classCode === where.classCode
+        && new Date(l.rateDate).toISOString().slice(0, 10) === new Date(where.rateDate).toISOString().slice(0, 10)
+      )) || null,
       create: async ({ data }) => { const row = { id: `log-${logs.length}`, ...data }; logs.push(row); return row; },
       update: async ({ where, data }) => {
         const row = logs.find((l) => l.id === where.id);
         if (row) Object.assign(row, data);
-        return row;
+        return row || { id: where.id, ...data };
       },
     },
   };
@@ -248,7 +259,12 @@ test('pushAllAreas: only areas with ratePushEnabled are queried, failures isolat
           ];
         },
       },
-      ratePushLog: { create: async ({ data }) => ({ id: 'x', ...data }), update: async () => ({}) },
+      ratePushLog: {
+        findMany: async () => [],
+        findFirst: async () => null,
+        create: async ({ data }) => ({ id: 'x', ...data }),
+        update: async () => ({}),
+      },
     },
     now: () => new Date('2027-03-15T12:00:00Z'),
     horizonDays: 1,

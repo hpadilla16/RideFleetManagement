@@ -56,6 +56,29 @@ export function toAmount(v) {
   return Number.isFinite(n) ? Number(n.toFixed(2)) : null;
 }
 
+/**
+ * Is this exact cell+value pre-authorised? (F4)
+ *
+ * The match is deliberately STRICT on all three of class, date AND value: an
+ * approval authorises the price the operator actually saw. If RFM's rate moves
+ * afterwards, the old approval must NOT carry the new number through the band
+ * — that would let an unreviewed price ride in on a stale decision. It goes
+ * back to PENDING_APPROVAL instead.
+ *
+ * @param {Array<{classCode: string, rateDate: string, pushedValue: number|string}>} approvals
+ */
+export function isApproved(approvals, classCode, rateDate, value) {
+  if (!Array.isArray(approvals) || !approvals.length) return false;
+  const cls = String(classCode || '').toUpperCase();
+  const amount = toAmount(value);
+  if (amount === null) return false;
+  return approvals.some((a) => (
+    String(a?.classCode || '').toUpperCase() === cls
+    && String(a?.rateDate || '') === String(rateDate)
+    && toAmount(a?.pushedValue) === amount
+  ));
+}
+
 /** A portal value at/above the sentinel is a deliberate close-out. */
 export function isCloseout(portalValue, closeoutMin) {
   const v = toAmount(portalValue);
@@ -72,9 +95,15 @@ export function isCloseout(portalValue, closeoutMin) {
  * @param {number|string} p.portalValue   what the portal shows today ('' = unset)
  * @param {number|string} p.closeoutMin   the location's close-out sentinel
  * @param {number} [p.maxDeltaPct]        refuse a change larger than this (%)
+ * @param {boolean} [p.approved]          a human authorised THIS exact value,
+ *                                        so the delta band is bypassed for
+ *                                        this cell only (F4). Every other
+ *                                        guardrail still applies — an approval
+ *                                        can never re-open a close-out, publish
+ *                                        a zero, or create a close-out.
  * @returns {{push: boolean, value: number|null, reason: string|null}}
  */
-export function decideCell({ rfmValue, portalValue, closeoutMin, maxDeltaPct = 60 } = {}) {
+export function decideCell({ rfmValue, portalValue, closeoutMin, maxDeltaPct = 60, approved = false } = {}) {
   const target = toAmount(rfmValue);
   // Never publish a missing/zero/negative price — an empty cell is safer than
   // a wrong one, and 0.00 would be a free rental.
@@ -100,9 +129,11 @@ export function decideCell({ rfmValue, portalValue, closeoutMin, maxDeltaPct = 6
   if (target >= sentinel) {
     return { push: false, value: null, reason: SKIP.OUT_OF_BAND };
   }
-  // Big swings against an EXISTING price are held for a human. An unset cell
-  // (current === null) has no baseline to swing from, so it is allowed.
-  if (current !== null && current > 0 && Number.isFinite(maxDeltaPct)) {
+  // Big swings against an EXISTING price are held for a human (F4: held, not
+  // discarded — the caller queues them for approval). An unset cell
+  // (current === null) has no baseline to swing from, so it is allowed, and an
+  // explicit approval of THIS value bypasses the band for this cell only.
+  if (!approved && current !== null && current > 0 && Number.isFinite(maxDeltaPct)) {
     const deltaPct = Math.abs((target - current) / current) * 100;
     if (deltaPct > maxDeltaPct) return { push: false, value: null, reason: SKIP.OUT_OF_BAND };
   }
@@ -124,7 +155,7 @@ export function decideCell({ rfmValue, portalValue, closeoutMin, maxDeltaPct = 6
  */
 export function buildPushPlan({
   rfmRates = [], dates = [], portalGrid = {}, portalClasses = null,
-  classOverrides = {}, closeoutMin, maxDeltaPct = 60,
+  classOverrides = {}, closeoutMin, maxDeltaPct = 60, approvals = [],
 } = {}) {
   const pushes = [];
   const skips = [];
@@ -170,16 +201,22 @@ export function buildPushPlan({
   for (const [portalClass, rate] of owners) {
     for (const rateDate of dates) {
       const portalValue = portalGrid?.[portalClass]?.[rateDate];
-      const decision = decideCell({ rfmValue: rate.daily, portalValue, closeoutMin, maxDeltaPct });
+      // F4: a human may have pre-authorised this exact (class, date, value).
+      const approved = isApproved(approvals, portalClass, rateDate, rate.daily);
+      const decision = decideCell({ rfmValue: rate.daily, portalValue, closeoutMin, maxDeltaPct, approved });
       const row = {
         classCode: portalClass,
         rfmClassCode: rate.classCode,
         rateDate,
         priorValue: toAmount(portalValue),
         sourceRateItemId: rate.rateItemId || null,
+        approved,
       };
       if (decision.push) pushes.push({ ...row, pushedValue: decision.value });
-      else skips.push({ ...row, reason: decision.reason });
+      // `intendedValue` is what we WOULD have published — it makes an
+      // out-of-band row readable as "portal $11 -> RFM $20" in the approval
+      // queue instead of a bare zero placeholder.
+      else skips.push({ ...row, reason: decision.reason, intendedValue: toAmount(rate.daily) });
     }
   }
 

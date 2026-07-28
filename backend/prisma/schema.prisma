@@ -4413,8 +4413,17 @@ model RatePushLog {
 
   trigger String // 'MI_AUTOAPPLY' | 'MANUAL' | 'DRIFT_SWEEP'
   mode    String // 'DRY_RUN' | 'LIVE'
-  status  String // 'PLANNED' | 'SENT' | 'VERIFIED' | 'MISMATCH' | 'FAILED' | 'SKIPPED'
+  status  String // 'PLANNED' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'SENT' | 'VERIFIED' | 'MISMATCH' | 'FAILED' | 'SKIPPED'
   skipReason String? // guardrail that suppressed it (held/no-map/out-of-band)
+
+  // ---- Approval (F4, 2026-07-28) ----------------------------------------
+  // A move beyond the delta band is a real repricing decision, not noise, so
+  // instead of dying in the log it waits here for a human. An APPROVED row
+  // authorises exactly ONE push of that (class, date, value) on the next
+  // sweep — the band is bypassed for that cell only, never globally.
+  decidedByUserId String?
+  decidedAt       DateTime?
+  decisionNote    String?
 
   verifiedValue Decimal?  @db.Decimal(10, 2) // read-back from the portal
   verifiedAt    DateTime?

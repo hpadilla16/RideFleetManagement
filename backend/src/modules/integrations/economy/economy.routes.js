@@ -578,6 +578,65 @@ economyRouter.post('/rate-push/run', asyncHandler(async (req, res) => {
 }));
 
 // ---------------------------------------------------------------------------
+// GET /rate-push/approvals — the queue: moves beyond the delta band waiting
+// for a human. MONEY: each row is a repricing that needs sign-off.
+// ---------------------------------------------------------------------------
+economyRouter.get('/rate-push/approvals', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenantId(req);
+  const items = await prisma.ratePushLog.findMany({
+    where: { tenantId, provider: 'ECONOMY', status: 'PENDING_APPROVAL' },
+    orderBy: [{ rateDate: 'asc' }, { classCode: 'asc' }],
+    take: 500,
+  });
+  res.json({
+    items: items.map((r) => ({
+      id: r.id,
+      classCode: r.classCode,
+      rateDate: r.rateDate,
+      externalLocationCode: r.externalLocationCode,
+      from: r.priorValue == null ? null : Number(r.priorValue),
+      to: Number(r.pushedValue),
+      deltaPct: r.priorValue && Number(r.priorValue) > 0
+        ? Number((((Number(r.pushedValue) - Number(r.priorValue)) / Number(r.priorValue)) * 100).toFixed(1))
+        : null,
+      reason: r.skipReason,
+      createdAt: r.createdAt,
+    })),
+    count: items.length,
+  });
+}));
+
+// ---------------------------------------------------------------------------
+// POST /rate-push/approvals/:id — { decision: 'approve'|'reject', note? }
+//
+// Approving authorises exactly ONE push of that (class, date, value): the next
+// sweep bypasses the delta band for THAT cell only and consumes the row. Every
+// other guardrail still applies — an approval can never re-open a close-out,
+// publish a zero, or create one. Only a PENDING row can be decided, so a
+// decision can never be replayed onto an already-sent push.
+// ---------------------------------------------------------------------------
+economyRouter.post('/rate-push/approvals/:id', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenantId(req);
+  const decision = String((req.body || {}).decision || '').toLowerCase();
+  if (!['approve', 'reject'].includes(decision)) {
+    return res.status(400).json({ error: "decision must be 'approve' or 'reject'" });
+  }
+  const note = (req.body || {}).note ? String((req.body || {}).note).slice(0, 500) : null;
+
+  const updated = await prisma.ratePushLog.updateMany({
+    where: { id: req.params.id, tenantId, provider: 'ECONOMY', status: 'PENDING_APPROVAL' },
+    data: {
+      status: decision === 'approve' ? 'APPROVED' : 'REJECTED',
+      decidedByUserId: req.user?.id || null,
+      decidedAt: new Date(),
+      decisionNote: note,
+    },
+  });
+  if (!updated.count) return res.status(404).json({ error: 'Row not found or no longer pending' });
+  res.json({ ok: true, id: req.params.id, status: decision === 'approve' ? 'APPROVED' : 'REJECTED' });
+}));
+
+// ---------------------------------------------------------------------------
 // GET /rate-push/log — recent push decisions (including skips) for review.
 // ---------------------------------------------------------------------------
 economyRouter.get('/rate-push/log', asyncHandler(async (req, res) => {

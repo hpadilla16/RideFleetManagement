@@ -123,10 +123,28 @@ export async function pushArea(config, deps = {}) {
     }
   }
 
+  // F4: cells a human already authorised. Strictly matched on class+date+value
+  // inside buildPushPlan, so a stale approval cannot carry a NEW price through
+  // the band.
+  const approvals = await db.ratePushLog.findMany({
+    where: {
+      tenantId, provider: PROVIDER, locationId, status: 'APPROVED',
+      rateDate: { gte: new Date(`${dates[0]}T00:00:00Z`), lte: new Date(`${dates[dates.length - 1]}T00:00:00Z`) },
+    },
+    select: { id: true, classCode: true, rateDate: true, pushedValue: true },
+  });
+  const approvalRows = approvals.map((a) => ({
+    id: a.id,
+    classCode: a.classCode,
+    rateDate: a.rateDate.toISOString().slice(0, 10),
+    pushedValue: Number(a.pushedValue),
+  }));
+
   const { pushes, skips } = buildPushPlan({
     rfmRates, dates, portalGrid, portalClasses,
     classOverrides: parseClassMap(config.rateClassMapJson),
     closeoutMin, maxDeltaPct: deps.maxDeltaPct || maxDeltaPct(),
+    approvals: approvalRows,
   });
 
   const base = {
@@ -136,14 +154,55 @@ export async function pushArea(config, deps = {}) {
 
   // Skips are recorded too — the audit must show what we chose NOT to touch
   // (a preserved close-out is as important as a write).
+  //
+  // F4: an out-of-band move is a real repricing decision, so it does not just
+  // die here — it is queued PENDING_APPROVAL with the value it WOULD publish,
+  // unless an identical pending row already waits (the sweep runs every 30 min
+  // and must not spam the queue with duplicates).
+  let queued = 0;
   for (const s of skips) {
+    const isReviewable = s.reason === SKIP.OUT_OF_BAND && s.rateDate;
+    const rateDate = s.rateDate ? new Date(`${s.rateDate}T00:00:00Z`) : new Date(`${dates[0]}T00:00:00Z`);
+
+    if (isReviewable) {
+      const already = await db.ratePushLog.findFirst({
+        where: { tenantId, provider: PROVIDER, locationId, classCode: s.classCode, rateDate, status: 'PENDING_APPROVAL' },
+        select: { id: true, pushedValue: true },
+      });
+      // A pending row for a DIFFERENT value is stale — the target moved, so
+      // supersede it rather than leaving two competing asks in the queue.
+      if (already && Number(already.pushedValue) === Number(s.intendedValue)) continue;
+      if (already) {
+        await db.ratePushLog.update({
+          where: { id: already.id },
+          data: { status: 'SKIPPED', skipReason: 'superseded_by_newer_target' },
+        }).catch(() => null);
+      }
+      await db.ratePushLog.create({
+        data: {
+          ...base,
+          classCode: s.classCode,
+          rateDate,
+          priorValue: s.priorValue ?? null,
+          // The value awaiting sign-off — NOT a zero placeholder, so the queue
+          // reads as "portal $11 -> RFM $20" rather than "-> $0".
+          pushedValue: s.intendedValue ?? 0,
+          sourceRateItemId: s.sourceRateItemId || null,
+          status: 'PENDING_APPROVAL',
+          skipReason: s.reason,
+        },
+      }).catch(() => null);
+      queued += 1;
+      continue;
+    }
+
     await db.ratePushLog.create({
       data: {
         ...base,
         classCode: s.classCode,
-        rateDate: s.rateDate ? new Date(`${s.rateDate}T00:00:00Z`) : new Date(`${dates[0]}T00:00:00Z`),
+        rateDate,
         priorValue: s.priorValue ?? null,
-        pushedValue: 0,
+        pushedValue: s.intendedValue ?? 0,
         sourceRateItemId: s.sourceRateItemId || null,
         status: 'SKIPPED',
         skipReason: s.reason,
@@ -151,20 +210,33 @@ export async function pushArea(config, deps = {}) {
     }).catch(() => null);
   }
 
-  const results = { planned: pushes.length, sent: 0, verified: 0, mismatched: 0, failed: 0, skipped: skips.length };
+  const results = { planned: pushes.length, sent: 0, verified: 0, mismatched: 0, failed: 0, skipped: skips.length, queued };
 
   for (const p of pushes) {
-    const row = await db.ratePushLog.create({
-      data: {
-        ...base,
-        classCode: p.classCode,
-        rateDate: new Date(`${p.rateDate}T00:00:00Z`),
-        priorValue: p.priorValue ?? null,
-        pushedValue: p.pushedValue,
-        sourceRateItemId: p.sourceRateItemId || null,
-        status: mode === MODES.DRY_RUN ? 'PLANNED' : 'SENT',
-      },
-    });
+    // F4: an approved cell REUSES its approval row, so one row carries the
+    // whole lifecycle (PENDING_APPROVAL -> APPROVED -> SENT -> VERIFIED) and
+    // the approval is consumed exactly once — it cannot authorise a second
+    // sweep. Everything else opens a fresh row as before.
+    const approvalRow = p.approved
+      ? approvalRows.find((a) => a.classCode === p.classCode && a.rateDate === p.rateDate && a.pushedValue === p.pushedValue)
+      : null;
+
+    const row = approvalRow
+      ? await db.ratePushLog.update({
+        where: { id: approvalRow.id },
+        data: { status: mode === MODES.DRY_RUN ? 'PLANNED' : 'SENT', trigger, mode, priorValue: p.priorValue ?? null },
+      })
+      : await db.ratePushLog.create({
+        data: {
+          ...base,
+          classCode: p.classCode,
+          rateDate: new Date(`${p.rateDate}T00:00:00Z`),
+          priorValue: p.priorValue ?? null,
+          pushedValue: p.pushedValue,
+          sourceRateItemId: p.sourceRateItemId || null,
+          status: mode === MODES.DRY_RUN ? 'PLANNED' : 'SENT',
+        },
+      });
 
     if (mode === MODES.DRY_RUN) {
       logger.info('[economy-rate-push] DRY RUN would push', {
