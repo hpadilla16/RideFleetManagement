@@ -137,12 +137,12 @@ function CheckoutWizardV2({ token, me, logout }) {
         if (cancelled) return;
         setReservation(r);
 
-        // AGE-RULES gate (2026-07-28, LAX): with the pickup location enforcing
-        // age rules, a blocking evaluation (no DOB / under min / over max)
-        // renders the blocker screen INSTEAD of the wizard — for new AND
-        // resumed sessions alike (the backend re-checks at session create and
-        // again at finalize, so this screen is UX, not the enforcement).
-        if (r?.ageRules?.blocking) {
+        // Checkout gates (2026-07-28, LAX): a blocking pre-checkin gate (#3)
+        // or age-rules evaluation (#4: no DOB / under min / over max) renders
+        // a blocker screen INSTEAD of the wizard — for new AND resumed
+        // sessions alike (the backend re-checks at session create and again
+        // at finalize, so these screens are UX, not the enforcement).
+        if (r?.precheckinGate?.blocking || r?.ageRules?.blocking) {
           setSession(null);
           return;
         }
@@ -287,6 +287,18 @@ function CheckoutWizardV2({ token, me, logout }) {
     return (
       <AppShell me={me} logout={logout}>
         <div style={{ padding: 24, color: '#B91C1C' }}>{error}</div>
+      </AppShell>
+    );
+  }
+  if (reservation?.precheckinGate?.blocking) {
+    return (
+      <AppShell me={me} logout={logout}>
+        <div style={{ padding: 24, maxWidth: 720, margin: '0 auto' }}>
+          <PrecheckinGateBlocker
+            reservation={reservation}
+            onRetry={() => setReloadKey((k) => k + 1)}
+          />
+        </div>
       </AppShell>
     );
   }
@@ -566,6 +578,43 @@ function StepRenderer({ session, reservation, token, onAdvance }) {
     default:
       return <div style={cardStyle}>Unknown step: {session.currentStep}</div>;
   }
+}
+
+// ---------------------------------------------------------------------------
+// PrecheckinGateBlocker (LAX #3) — full-screen replacement while the pickup
+// location requires a completed pre-check-in and this reservation lacks one.
+// The agent completes it from the reservation page ("fill in for customer" —
+// that flow stamps customerInfoCompletedAt) or the customer finishes the
+// portal link; "Verificar de nuevo" refetches. Enforcement is the backend's
+// PRECHECKIN_REQUIRED gate — this screen is the friendly path.
+// ---------------------------------------------------------------------------
+function PrecheckinGateBlocker({ reservation, onRetry }) {
+  return (
+    <div style={cardStyle}>
+      <h3 style={h3Style}>Checkout bloqueado · pre-check-in pendiente</h3>
+      <div style={{ marginBottom: 12 }}>
+        <KV label="Reservación" value={`#${reservation.reservationNumber || reservation.id}`} />
+        <KV label="Cliente" value={`${reservation.customer?.firstName || ''} ${reservation.customer?.lastName || ''}`.trim() || '—'} />
+        <KV label="Pickup" value={reservation.pickupAt ? new Date(reservation.pickupAt).toLocaleString() : '—'} />
+      </div>
+      <div style={{
+        padding: 12, marginBottom: 12,
+        background: '#FEF2F2', border: '0.5px solid #EF4444', borderRadius: 6,
+        color: '#991B1B', fontSize: 13,
+      }}>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>Esta sede exige el pre-check-in completo antes del checkout</div>
+        El cliente aún no completó su pre-check-in. Opciones: reenvíale el enlace desde la
+        reservación, o complétalo tú con sus datos ("llenar por el cliente") en la sección de
+        pre-registro de la reservación.
+      </div>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <a href={`/reservations/${reservation.id}`} style={{ ...primaryBtn, textDecoration: 'none', display: 'inline-block' }}>
+          Ir a la reservación
+        </a>
+        <button style={ghostBtn} onClick={onRetry}>Verificar de nuevo</button>
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------

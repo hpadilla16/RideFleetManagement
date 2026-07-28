@@ -249,6 +249,10 @@ export const LOCATION_CONFIG_DEFAULT = {
   // receipt/invoice email (0 = send immediately, the historical behavior).
   precheckinAutoEmailEnabled: true,
   checkinEmailDelayHours: 0,
+  // 2026-07-28 (LAX #3): block the check-out wizard until the reservation's
+  // pre-check-in is complete (customerInfoCompletedAt — customer portal or
+  // staff "fill in for customer").
+  requirePrecheckinBeforeCheckout: false,
   defaultRatePlan: 'RETAIL_RATE',
   currency: 'USD',
   paymentDueAction: 'AT_BOOKING',

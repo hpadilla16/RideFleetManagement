@@ -150,3 +150,48 @@ test('aging out: DOB → 30 removes the UNDERAGE_FEE row on the next recompute',
   });
   assert.equal(rows.length, 0, 'stale UNDERAGE_FEE row deleted');
 });
+
+// ── Pre-checkin gate (LAX #3) — same location, flag flipped on ──────────────
+
+test('precheckin gate: required + not completed → 422 PRECHECKIN_REQUIRED (even with an existing session)', async () => {
+  await prisma.location.update({
+    where: { id: ids.location },
+    data: {
+      locationConfig: JSON.stringify({
+        ageRulesEnforced: true, chargeAgeMin: 21, underageFeeMaxAge: 24,
+        requirePrecheckinBeforeCheckout: true,
+      }),
+    },
+  });
+  await assert.rejects(
+    () => checkoutSessionService.createForReservation({ reservationId: ids.reservation, tenantId: scope.tenantId }),
+    (err) => err instanceof CheckoutSessionError && err.code === 'PRECHECKIN_REQUIRED' && err.status === 422,
+  );
+});
+
+test('precheckin gate: completed (staff or customer) → session resumes normally', async () => {
+  await prisma.reservation.update({
+    where: { id: ids.reservation },
+    data: { customerInfoCompletedAt: new Date() },
+  });
+  const session = await checkoutSessionService.createForReservation({ reservationId: ids.reservation, tenantId: scope.tenantId });
+  assert.ok(session?.id, 'existing session returned once the gate passes');
+});
+
+test('precheckin gate: flag off → incomplete pre-checkin does not block', async () => {
+  await prisma.reservation.update({
+    where: { id: ids.reservation },
+    data: { customerInfoCompletedAt: null },
+  });
+  await prisma.location.update({
+    where: { id: ids.location },
+    data: {
+      locationConfig: JSON.stringify({
+        ageRulesEnforced: true, chargeAgeMin: 21, underageFeeMaxAge: 24,
+        requirePrecheckinBeforeCheckout: false,
+      }),
+    },
+  });
+  const session = await checkoutSessionService.createForReservation({ reservationId: ids.reservation, tenantId: scope.tenantId });
+  assert.ok(session?.id, 'gate inert when the location flag is off');
+});
