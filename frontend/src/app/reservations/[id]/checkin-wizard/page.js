@@ -294,7 +294,10 @@ function CheckinWizard({ token, me, logout }) {
       case 1: return photosCaptured >= 1 || agentInspectionOptional;  // staff override (≥1 photo) OR customer already self-inspected
       case 2: return Number(odometerIn) > 0 && Number(odometerIn) >= Number(agreement?.odometerOut || 0);
       case 3: return paymentMode === 'autocharge' || (paymentMode === 'manual' && Number(manualPayment.amount) > 0);
-      case 4: return !!signerName && !!signatureDataUrl;
+      // 2026-07-28 (LAX #9): the customer signature at check-IN is OPTIONAL —
+      // it must never block completion (Hector). The pad stays available and
+      // still persists when captured; the backend never required it.
+      case 4: return true;
       default: return true;
     }
   };
@@ -319,10 +322,8 @@ function CheckinWizard({ token, me, logout }) {
         return `El odómetro de regreso no puede ser menor al de salida (${odoOut.toLocaleString()} mi)`;
       case 3:
         return 'En pago manual, ingresa un monto mayor a $0.00 (o elige auto-cobro en 24h)';
-      case 4:
-        if (!signerName) return 'Ingresa el nombre de quien firma';
-        if (!signatureDataUrl) return 'Captura la firma del cliente';
-        return 'Falta firma y nombre del firmante';
+      // case 4 removed (LAX #9): signature is optional, the button never
+      // disables on this step, so there is no hint to show.
       default:
         return null;
     }
@@ -903,11 +904,11 @@ function Step5Signature({ feePreview, signerName, onSignerName, signatureDataUrl
       <div>
         <SignaturePad
           height={200}
-          label="Customer Signature"
+          label="Customer Signature (optional)"
           signerName={signerName}
           onSignerNameChange={onSignerName}
           onSignatureChange={onSignature}
-          helperText="By signing, the customer acknowledges the return condition and authorizes the listed charges."
+          helperText="Optional — capture it when the customer is present. By signing, the customer acknowledges the return condition and authorizes the listed charges. The return can be completed without a signature."
         />
         {error && (
           <div style={{ marginTop: 12, padding: '6px 8px', background: 'rgba(220,38,38,.06)', border: '0.5px solid rgba(220,38,38,.2)', borderRadius: 4, color: '#B91C1C', fontSize: 12 }}>

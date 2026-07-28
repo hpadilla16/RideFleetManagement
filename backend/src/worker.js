@@ -206,6 +206,20 @@ async function main() {
     });
   }
 
+  // Delayed post-check-in email sweep (2026-07-28, LAX #8). Locations with
+  // checkinEmailDelayHours defer the receipt/invoice email at checkin-close;
+  // this sweep delivers due ones (column-deduped, receipt-vs-invoice decided
+  // from the balance at send time).
+  try {
+    const checkinEmailMod = await import('./modules/rental-agreements/checkin-email.scheduler.js');
+    await checkinEmailMod.startCheckinEmailScheduler();
+    logger.info('[worker] started: checkin-email scheduler');
+  } catch (err) {
+    logger.warn('[worker] checkin-email scheduler not started', {
+      message: err.message,
+    });
+  }
+
   // Long-term (monthly) plans — P2 cycle-billing sweep. Hourly: renewal
   // reminders (48h/24h), cycle close + card-on-file auto-charge, retry +
   // overdue dunning, auto-clear on payment (cache-deduped sends).
@@ -343,6 +357,10 @@ async function main() {
     try {
       const ltBillingMod = await import('./modules/long-term/long-term-billing.scheduler.js');
       ltBillingMod.stopLongTermBillingScheduler();
+    } catch {}
+    try {
+      const checkinEmailMod = await import('./modules/rental-agreements/checkin-email.scheduler.js');
+      checkinEmailMod.stopCheckinEmailScheduler();
     } catch {}
     try {
       const tollsMod = await import('./modules/tolls/tolls.scheduler.js');

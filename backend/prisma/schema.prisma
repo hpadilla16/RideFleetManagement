@@ -1359,6 +1359,15 @@ model Reservation {
   autochargeAttempts  Int       @default(0)
   autochargeLastError String?
 
+  // 2026-07-28 (LAX #8) — delayed post-check-in email. When the pickup
+  // location sets checkinEmailDelayHours > 0, checkin-close stamps DueAt
+  // instead of emailing inline; the checkin-email scheduler sweeps due rows
+  // and sends receipt-or-invoice based on the balance AT SEND TIME. SentAt is
+  // the exactly-once marker (the autocharge worker also stamps it when its
+  // own success receipt makes the delayed email redundant).
+  checkinEmailDueAt  DateTime?
+  checkinEmailSentAt DateTime?
+
   pickupLocationId String
   pickupLocation   Location @relation("ReservationPickupLocation", fields: [pickupLocationId], references: [id])
 
@@ -1460,6 +1469,9 @@ model Reservation {
   // Without this, Postgres filters via [tenantId, status, pickupAt] and
   // then has to sort by updatedAt — getting slower as table grows.
   @@index([tenantId, status, updatedAt(sort: Desc)])
+  // 2026-07-28 (LAX #8) — the checkin-email sweep filters
+  // `checkinEmailDueAt <= now AND checkinEmailSentAt IS NULL`.
+  @@index([checkinEmailDueAt])
   // Perf 2026-06-05 — date-window overlap queries (availability-forecast,
   // planner snapshot, booking engine) all filter
   //   `tenantId = ? AND pickupAt < end AND returnAt > start`

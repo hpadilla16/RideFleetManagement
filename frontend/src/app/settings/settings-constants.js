@@ -244,6 +244,11 @@ export const LOCATION_CONFIG_DEFAULT = {
   // mandatory-underage-fee band [chargeAgeMin..underageFeeMaxAge].
   ageRulesEnforced: false,
   underageFeeMaxAge: 24,
+  // Per-location email behavior (2026-07-28, LAX #7/#8): kill switch for the
+  // tenant's pre-check-in auto-invite, and hours to defer the post-check-in
+  // receipt/invoice email (0 = send immediately, the historical behavior).
+  precheckinAutoEmailEnabled: true,
+  checkinEmailDelayHours: 0,
   defaultRatePlan: 'RETAIL_RATE',
   currency: 'USD',
   paymentDueAction: 'AT_BOOKING',

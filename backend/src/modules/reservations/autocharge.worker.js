@@ -176,6 +176,13 @@ export async function autochargeHandler(job) {
   try {
     const { sendReceiptPaidInFull } = await import('../rental-agreements/checkin-emails.service.js');
     await sendReceiptPaidInFull({ reservationId, agreementId: agreement.id });
+    // 2026-07-28 (LAX #8): this success receipt IS the post-check-in email.
+    // Stamp checkinEmailSentAt so a pending delayed send (checkinEmailDueAt)
+    // doesn't deliver a second one.
+    await prisma.reservation.update({
+      where: { id: reservationId },
+      data: { checkinEmailSentAt: new Date() },
+    }).catch(() => {});
   } catch (err) {
     logger.warn('[autocharge] receipt email failed', { reservationId, message: err.message });
   }
