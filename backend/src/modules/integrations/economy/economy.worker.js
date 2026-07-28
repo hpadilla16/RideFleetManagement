@@ -151,16 +151,25 @@ function toDecimalString(v) {
 
 /**
  * Reinterpret a RezLight date value against a tenant/area timezone → UTC Date.
- * Handles ASP.NET "/Date(ms)/" (already an absolute instant), and
- * naive/ISO strings (interpreted in `timeZone` via parseDateTimeInTz).
+ * Handles ASP.NET "/Date(ms)/" (already an absolute instant), US
+ * "MM/DD/YYYY[ HH:mm]" (RezLight's native shape — normalized to naive ISO so
+ * parseDateTimeInTz takes its timezone path; the raw string would fall through
+ * to `new Date()` and be read as server-UTC, which is the "everything imports
+ * at 8pm" bug), and naive/ISO strings (interpreted in `timeZone`).
  */
 function toDate(v, timeZone) {
   if (v == null || v === '') return null;
-  const s = String(v).trim();
+  let s = String(v).trim();
   const aspNet = s.match(/\/Date\((\d+)([-+]\d+)?\)\//);
   if (aspNet) {
     const ms = Number(aspNet[1]);
     return Number.isFinite(ms) ? new Date(ms) : null;
+  }
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (us) {
+    const [, mo, day, yr, hh, mi, se] = us;
+    const pad = (n) => String(n).padStart(2, '0');
+    s = `${yr}-${pad(mo)}-${pad(day)}T${pad(hh ?? '0')}:${mi ?? '00'}${se ? `:${se}` : ''}`;
   }
   // Naive / ISO string → interpret in the area timezone.
   const d = parseDateTimeInTz(s, timeZone);
@@ -172,6 +181,14 @@ function toDate(v, timeZone) {
  * @param {object}       opts     { detail?, timeZone }
  * @returns {object} ExternalReservation create/update shape (no tenantId/sourceSystem)
  */
+// Detail values use '' (or a literal null) for "not captured" — treat both as
+// absent so an empty detail field can never clobber a real list value.
+function detVal(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s === '' ? null : s;
+}
+
 export function mapRowToExternalReservation(row, opts = {}) {
   const { detail = null, timeZone = 'America/New_York' } = opts;
   const d = detail && typeof detail === 'object' ? detail : {};
@@ -189,23 +206,29 @@ export function mapRowToExternalReservation(row, opts = {}) {
 
   return {
     externalRef,
-    channel: d.resProvider ?? iata ?? null,
-    supplierRef: d.resIata ?? iata ?? null,
+    channel: detVal(d.resProvider) ?? iata ?? null,
+    supplierRef: detVal(d.resIata) ?? iata ?? null,
     status: 'CONFIRMED', // Economy list rows are confirmed reservations
-    customerFirstName: d.resCustomerFirstName ?? (firstName != null ? String(firstName).trim() : null),
-    customerLastName: d.resCustomerLastName ?? (lastName != null ? String(lastName).trim() : null),
-    customerEmail: d.resEmail ?? (email != null ? String(email).trim() : null),
-    customerPhone: d.resPhone ?? null,
-    customerCountry: d.resCountry ?? null,
-    flightNumber: d.resReqFlight ?? null,
-    vehicleAcriss: d.resVehClass ?? (acriss != null ? String(acriss).trim().toUpperCase() : null),
-    vehicleDescription: d.resVehDescription ?? d.resDescription ?? null,
-    pickupAt: toDate(d.resPickupDate ?? pickCol(row, 'rgDatePickup'), timeZone),
-    pickupLocation: d.resPickupLocation ?? (locPickup != null ? String(locPickup).trim() : null),
-    dropoffAt: toDate(d.resDropOffDate ?? pickCol(row, 'rgDateDropOff'), timeZone),
-    dropoffLocation: d.resDropOffLocation ?? (locDropOff != null ? String(locDropOff).trim() : null),
-    totalAmount: toDecimalString(d.resRateTotal ?? d.RateTotal ?? rate),
-    currency: (d.Currency ?? d.resCurrency ?? 'USD') || 'USD',
+    customerFirstName: detVal(d.resCustomerName) ?? (firstName != null ? String(firstName).trim() : null),
+    customerLastName: detVal(d.resCustomerLastName) ?? (lastName != null ? String(lastName).trim() : null),
+    customerEmail: detVal(d.resCustomerEmail) ?? (email != null ? String(email).trim() : null),
+    customerPhone: detVal(d.resCustomerPhone),
+    customerCountry: detVal(d.resCustomerCountry),
+    // resReqFlight is a Y/N "flight required" flag — the actual flight lives in
+    // resCustomerFlightInfo.
+    flightNumber: detVal(d.resCustomerFlightInfo),
+    vehicleAcriss: detVal(d.resVehClass) ?? (acriss != null ? String(acriss).trim().toUpperCase() : null),
+    vehicleDescription: detVal(d.resVehDescription) ?? detVal(d.resDescription),
+    // resPickupFullDate carries "MM/DD/YYYY HH:mm" — THE fix for the 8pm bug.
+    // resPickupDate (detail) and rgDatePickup (list) are date-only fallbacks.
+    pickupAt: toDate(detVal(d.resPickupFullDate) ?? detVal(d.resPickupDate) ?? pickCol(row, 'rgDatePickup'), timeZone),
+    pickupLocation: detVal(d.resPickupLocation) ?? (locPickup != null ? String(locPickup).trim() : null),
+    dropoffAt: toDate(detVal(d.resDropOffFullDate) ?? detVal(d.resDropOffDate) ?? pickCol(row, 'rgDateDropOff'), timeZone),
+    dropoffLocation: detVal(d.resDropOffLocation) ?? (locDropOff != null ? String(locDropOff).trim() : null),
+    totalAmount: toDecimalString(detVal(d.resRateTotal) ?? detVal(d.RateTotal) ?? rate),
+    currency: detVal(d.Currency) ?? detVal(d.resCurrency) ?? 'USD',
+    // Economy's detail carries a real prepaid boolean (e.g. PRICELINE prepays).
+    isPrepaid: typeof d.isPrepaid === 'boolean' ? d.isPrepaid : null,
     rawJson: detail ? { list: row, detail } : { list: row },
   };
 }
@@ -358,7 +381,8 @@ export async function economySyncHandler(job) {
         const wasKnown = knownSet.has(externalRef);
         const timeZone = timeZoneForArea(area);
 
-        // Detail enrichment is a documented seam (returns null until captured).
+        // Detail enrichment: pickup/dropoff TIME, phone, email, flight (null
+        // on a per-row failure — the list row alone still stages the import).
         const detail = await fetchReservationDetail(tenantId, externalRef, { userAgent });
         const mapped = mapRowToExternalReservation(row, { detail, timeZone });
 
@@ -425,10 +449,9 @@ export async function economySyncHandler(job) {
           });
         }
 
-        // Politeness sleep between rows guards the per-row DETAIL fetch. While
-        // DETAIL_ENABLED is false, fetchReservationDetail is a no-op seam, so the
-        // sleep would only throttle a large first sync for no reason. Gate it on
-        // DETAIL_ENABLED — the delay returns automatically when detail goes live.
+        // Politeness sleep between rows guards the per-row DETAIL fetch. With
+        // the ECONOMY_DETAIL_ENABLED kill switch off there is no per-row call,
+        // so the sleep would only throttle a large first sync for no reason.
         if (DETAIL_ENABLED) {
           await sleep(randomDelay(DETAIL_DELAY_MIN_MS, DETAIL_DELAY_MAX_MS));
         }

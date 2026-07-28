@@ -11,7 +11,7 @@
  *   - login(tenantId)                                        → seeds the cookie jar
  *   - authedFetch(tenantId, path, opts)                      → re-login-once on expiry
  *   - fetchReservationList(tenantId, {dateFrom, dateTo})     → [row, ...] (DataTables)
- *   - fetchReservationDetail(tenantId, rgConfirmation)       → detail seam (see below)
+ *   - fetchReservationDetail(tenantId, rgConfirmation)       → res* detail object | null
  *   - testAuth(tenantId)                                     → { ok, status }
  *
  * Authentication (confirmed 2026-07-05, PoC + live recon):
@@ -39,6 +39,7 @@ import {
   LIST_PATH,
   AUTHED_PAGE_PATH,
   DETAIL_PATH,
+  DETAIL_DOC_TYPE,
   LOOKUP_COLUMNS,
   LOOKUP_PFILTER,
   LOOKUP_PAGE_SIZE,
@@ -49,21 +50,27 @@ import {
 export { SOURCE_SYSTEM, BASE_URL };
 
 // ---------------------------------------------------------------------------
-// Detail endpoint command seam (documented constant).
+// Detail endpoint (contract closed 2026-07-28, captured live).
 //
-// The list row alone (confirmation, class, locations, dates, name, email)
-// carries everything needed to create the ExternalReservation. The DETAIL
-// endpoint (POST /RezAlliance/Reservations, command-based) enriches with
-// flight number and amounts, but the EXACT command param + payload were not
-// captured in the 2026-07-05 recon. Rather than block the build, we expose the
-// command as a single documented constant that a follow-up capture can adjust
-// in one place. Until it's confirmed, fetchReservationDetail returns null (a
-// clean seam — the worker treats a null detail as "list-row only").
-// TODO(economy-detail): capture the real command/payload and flip
-// DETAIL_ENABLED on (or set ECONOMY_DETAIL_COMMAND).
+// POST /RezAlliance/Reservations?Length=12 — the Reservations page's own ajax
+// form. Minimal payload is FOUR url-encoded fields (everything else the
+// browser sends is ignorable defaults):
+//   __RequestVerificationToken — anti-CSRF token scraped from the authed page
+//                                (omit → 500)
+//   command          = 'load'
+//   resConfirmation  = the confirmation (the list's rgConfirmation)
+//   resDocType       = 'R'  (omit → 500; this sank the earlier blind probes)
+// Response envelope: {"command":"load","response":{...123 res* fields...}}.
+// A bad confirmation answers HTTP 400 with response:null — NOT an auth
+// failure, so it must not trigger a re-login.
+//
+// The detail is what carries pickup/dropoff TIME (resPickupFullDate),
+// customer phone/email/birth date and flight info — the list row is date-only
+// and phoneless, which is the "everything imports at 8pm with no phone" bug.
 // ---------------------------------------------------------------------------
-export const DETAIL_COMMAND = process.env.ECONOMY_DETAIL_COMMAND || null;
-export const DETAIL_ENABLED = !!DETAIL_COMMAND;
+export const DETAIL_COMMAND = process.env.ECONOMY_DETAIL_COMMAND || 'load';
+// Kill switch only — detail is ON by default now that the contract is proven.
+export const DETAIL_ENABLED = process.env.ECONOMY_DETAIL_ENABLED !== 'false';
 
 // ---------------------------------------------------------------------------
 // Stealth / UA helpers (mirrors TL). Rotate UA per sync run, randomize sleeps.
@@ -220,9 +227,10 @@ function hasAuthCookie(tenantId) {
   return !!jar && jar.has('.AspNet.ApplicationCookie');
 }
 
-// Test seam: clear all jars between tests.
+// Test seam: clear all jars (+ cached detail tokens) between tests.
 export function _resetCookieJarsForTests() {
   cookieJars.clear();
+  detailTokens.clear();
 }
 
 /**
@@ -234,7 +242,13 @@ export function _resetCookieJarsForTests() {
  */
 export function clearSession(tenantId) {
   cookieJars.delete(tenantId);
+  detailTokens.delete(tenantId);
 }
+
+// Per-tenant anti-CSRF token for the DETAIL post. Paired with the session in
+// the cookie jar — cleared together (a token outlives its session and answers
+// 500, never a login bounce).
+const detailTokens = new Map();
 
 /**
  * A healthy GetReservationLookupRecords response ALWAYS carries a numeric
@@ -616,32 +630,67 @@ export function parseRezDate(v) {
 }
 
 // ---------------------------------------------------------------------------
-// Detail fetch — documented seam (see DETAIL_COMMAND above).
+// Detail fetch (see the DETAIL_COMMAND contract block above).
 // ---------------------------------------------------------------------------
-export async function fetchReservationDetail(tenantId, rgConfirmation, opts = {}) {
-  if (!DETAIL_ENABLED) {
-    // Seam: the list row alone is enough to stage the ExternalReservation.
-    // Enrichment (flight, amounts) is a TODO pending a captured command.
-    return null;
-  }
+
+/** Scrape a fresh anti-CSRF token from the authed Reservations page and cache it. */
+async function freshDetailToken(tenantId, userAgent) {
+  const pageRes = await authedFetch(tenantId, AUTHED_PAGE_PATH, { userAgent });
+  const html = pageRes.status < 400 ? await pageRes.text() : '';
+  const token = scrapeVerificationToken(html);
+  if (token) detailTokens.set(tenantId, token);
+  return token;
+}
+
+/** One raw detail POST. Returns { status, detail } — detail is the unwrapped
+ * `response` object, or null when the envelope has none. */
+async function postDetailLoad(tenantId, confirmation, token, userAgent) {
   const body = new URLSearchParams();
+  if (token) body.set('__RequestVerificationToken', token);
   body.set('command', DETAIL_COMMAND);
-  body.set('rgConfirmation', String(rgConfirmation));
+  body.set('resConfirmation', confirmation);
+  body.set('resDocType', DETAIL_DOC_TYPE);
+  const res = await authedFetch(tenantId, DETAIL_PATH, {
+    method: 'POST',
+    userAgent,
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  });
+  const text = await res.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch { /* not JSON */ }
+  return { status: res.status, detail: json?.response ?? null };
+}
+
+/**
+ * Fetch the full res* detail object for one confirmation, or null.
+ *
+ * Token lifecycle: one scraped token is cached per tenant and reused across
+ * every row of a sync run (RezLight accepts it repeatedly, same as the list).
+ * A 500 means the token/session died server-side — heal ONCE (fresh login +
+ * fresh token) and retry. A 400 is RezLight's answer for an unknown
+ * confirmation: give up on the row WITHOUT healing, so one stray row can't
+ * force a re-login per row.
+ */
+export async function fetchReservationDetail(tenantId, rgConfirmation, opts = {}) {
+  if (!DETAIL_ENABLED) return null;
+  const confirmation = String(rgConfirmation ?? '').trim();
+  if (!confirmation) return null;
   try {
-    const res = await authedFetch(tenantId, DETAIL_PATH, {
-      method: 'POST',
-      userAgent: opts.userAgent,
-      headers: {
-        'content-type': 'application/x-www-form-urlencoded',
-        'X-Requested-With': 'XMLHttpRequest',
-      },
-      body: body.toString(),
-    });
-    const text = await res.text();
-    try { return JSON.parse(text); } catch { return null; }
+    const token = detailTokens.get(tenantId) || await freshDetailToken(tenantId, opts.userAgent);
+    let { status, detail } = await postDetailLoad(tenantId, confirmation, token, opts.userAgent);
+    if (detail == null && status !== 400) {
+      clearSession(tenantId);
+      const retryToken = await freshDetailToken(tenantId, opts.userAgent);
+      ({ status, detail } = await postDetailLoad(tenantId, confirmation, retryToken, opts.userAgent));
+    }
+    if (detail == null) {
+      logger.warn('[economy] detail load returned no data', { tenantId, rgConfirmation: confirmation, status });
+    }
+    return detail;
   } catch (err) {
     if (err instanceof EconomyAuthExpiredError) throw err;
-    logger.warn('[economy] detail fetch failed', { tenantId, rgConfirmation, message: err.message });
+    logger.warn('[economy] detail fetch failed', { tenantId, rgConfirmation: confirmation, message: err.message });
     return null;
   }
 }

@@ -44,6 +44,7 @@ const {
   filterByPickupWindow,
   parseRezDate,
   fetchReservationList,
+  fetchReservationDetail,
   login,
   authedFetch,
   EconomyAuthExpiredError,
@@ -152,17 +153,65 @@ test('mapRowToExternalReservation: maps a list-row object onto the ExternalReser
   assert.equal(mapped.rawJson.list, row);
 });
 
-test('mapRowToExternalReservation: detail object enriches flight + amounts', () => {
+test('mapRowToExternalReservation: detail enriches time + phone + email + flight (real res* names)', () => {
   const row = {
-    rgConfirmation: 'ABC12345', rgClass: 'ccar', rgLocPickup: 'MIAO01',
-    rgLocDropOff: 'MIAO01', rgDatePickup: '2026-07-10T14:00:00',
-    rgLastName: 'Doe', rgName: 'John', rgEmail: 'john@example.com', rgRate: '100.00',
+    rgConfirmation: 'EPRLA1482F6E', rgClass: 'ifar', rgLocPickup: 'MIAO01',
+    rgLocDropOff: 'MIAO01', rgDatePickup: '09/19/2026', rgDateDropOff: '09/24/2026',
+    rgLastName: 'BREWER', rgName: 'JAMES', rgEmail: null, rgRate: '100.00',
   };
-  const detail = { resReqFlight: 'DL1961', resRateTotal: '175.00', Currency: 'USD' };
+  // Field names as captured live 2026-07-28 (command=load response).
+  const detail = {
+    resPickupFullDate: '09/19/2026 14:30', resPickupDate: '09/19/2026',
+    resDropOffFullDate: '09/24/2026 11:00',
+    resCustomerPhone: '0016236700101', resCustomerEmail: 'james@example.com',
+    resCustomerName: 'JAMES', resCustomerLastName: 'BREWER',
+    resCustomerFlightInfo: 'DL1961', resReqFlight: 'N', // N = flag, NOT a flight number
+    resRateTotal: '175.00', resCurrency: 'USD', resVehClass: 'IFAR',
+    resProvider: '61201', isPrepaid: true,
+  };
   const mapped = mapRowToExternalReservation(row, { detail, timeZone: 'America/New_York' });
-  assert.equal(mapped.flightNumber, 'DL1961');
+  // THE bug fix: 14:30 ET (EDT, UTC-4) → 18:30Z — not 00:00 UTC / "8pm yesterday".
+  assert.equal(mapped.pickupAt.toISOString(), '2026-09-19T18:30:00.000Z');
+  assert.equal(mapped.dropoffAt.toISOString(), '2026-09-24T15:00:00.000Z');
+  assert.equal(mapped.customerPhone, '0016236700101');
+  assert.equal(mapped.customerEmail, 'james@example.com');
+  assert.equal(mapped.flightNumber, 'DL1961');         // resCustomerFlightInfo, not resReqFlight
   assert.equal(mapped.totalAmount, '175.00');          // detail overrides list rate
+  assert.equal(mapped.isPrepaid, true);
+  assert.equal(mapped.channel, '61201');
   assert.equal(mapped.rawJson.detail, detail);
+});
+
+test('mapRowToExternalReservation: US date in LAX timezone + list-only fallback is local midnight', () => {
+  const row = {
+    rgConfirmation: 'X1', rgClass: 'ccar', rgLocPickup: 'LAXO01',
+    rgDatePickup: '09/19/2026', rgLastName: 'Doe', rgName: 'John',
+  };
+  const withDetail = mapRowToExternalReservation(row, {
+    detail: { resPickupFullDate: '09/19/2026 14:30' }, timeZone: 'America/Los_Angeles',
+  });
+  // 14:30 PT (PDT, UTC-7) → 21:30Z.
+  assert.equal(withDetail.pickupAt.toISOString(), '2026-09-19T21:30:00.000Z');
+  // No detail: the date-only list value must mean midnight LOCAL (07:00Z),
+  // never midnight UTC (which rendered as 8pm/5pm the previous day).
+  const listOnly = mapRowToExternalReservation(row, { timeZone: 'America/Los_Angeles' });
+  assert.equal(listOnly.pickupAt.toISOString(), '2026-09-19T07:00:00.000Z');
+});
+
+test('mapRowToExternalReservation: empty-string detail fields never clobber list values', () => {
+  const row = {
+    rgConfirmation: 'X2', rgClass: 'ccar', rgLocPickup: 'MIAO01',
+    rgDatePickup: '09/19/2026', rgLastName: 'Doe', rgName: 'John',
+    rgEmail: 'john@example.com',
+  };
+  // RezLight uses '' (and null) for "not captured" — e.g. PRICELINE rows carry
+  // resCustomerEmail: null, resCustomerBirthDate: ''.
+  const detail = { resCustomerEmail: '', resCustomerName: '', resCustomerPhone: null };
+  const mapped = mapRowToExternalReservation(row, { detail, timeZone: 'America/New_York' });
+  assert.equal(mapped.customerEmail, 'john@example.com');
+  assert.equal(mapped.customerFirstName, 'John');
+  assert.equal(mapped.customerPhone, null);
+  assert.equal(mapped.isPrepaid, null); // absent boolean stays null, not false
 });
 
 test('mapRowToExternalReservation: accepts a positional array row', () => {
@@ -338,6 +387,101 @@ test('authedFetch: a SECOND bounce after re-login throws EconomyAuthExpiredError
   __test.setFetch(null);
   __test.setCredentialsResolver(null);
   _resetCookieJarsForTests();
+});
+
+// ---------------------------------------------------------------------------
+// Detail fetch — command=load contract (captured 2026-07-28)
+// ---------------------------------------------------------------------------
+// URL/method-aware mock: login GET/POST seed the cookie, the authed page GET
+// serves a token, and each detail POST (?Length=12) is answered by `onDetail`,
+// which receives the parsed url-encoded body. Records detail bodies + how many
+// token-page GETs happened.
+function installDetailFetch({ onDetail }) {
+  const detailBodies = [];
+  let tokenPageGets = 0;
+  __test.setCredentialsResolver(() => ({ username: 'u', password: 'p' }));
+  __test.setFetch(async (url, opts = {}) => {
+    const method = (opts.method || 'GET').toUpperCase();
+    const u = String(url);
+    if (method === 'GET' && /RezAlliance\/Reservations$/.test(u)) {
+      tokenPageGets++;
+      return fakeRes({ status: 200, body: '<input name="__RequestVerificationToken" value="DTKN"/>' });
+    }
+    if (method === 'GET') {
+      return fakeRes({ status: 200, body: LOGIN_HTML });
+    }
+    if (method === 'POST' && /Length=12/.test(u)) {
+      const params = new URLSearchParams(opts.body);
+      const body = Object.fromEntries(params.entries());
+      detailBodies.push(body);
+      return onDetail(body, detailBodies.length);
+    }
+    // Any other POST = the login credential post.
+    return fakeRes({ status: 200, body: 'ok', setCookie: '.AspNet.ApplicationCookie=S1; path=/' });
+  });
+  return { detailBodies, tokenPageGets: () => tokenPageGets };
+}
+
+function detailTeardown() {
+  __test.setFetch(null);
+  __test.setCredentialsResolver(null);
+  _resetCookieJarsForTests();
+}
+
+test('fetchReservationDetail: posts the 4-field payload, unwraps the envelope, caches the token', async () => {
+  _resetCookieJarsForTests();
+  const RESP = { resConfirmation: 'EPRLA1482F6E', resPickupTime: '14:30', resCustomerPhone: '0016236700101' };
+  const mock = installDetailFetch({
+    onDetail: () => fakeRes({ status: 200, body: JSON.stringify({ command: 'load', response: RESP }) }),
+  });
+
+  const detail = await fetchReservationDetail('tenant-d', 'EPRLA1482F6E');
+  assert.deepEqual(detail, RESP);
+  // The exact captured contract: token + command=load + resConfirmation + resDocType=R.
+  assert.deepEqual(mock.detailBodies[0], {
+    __RequestVerificationToken: 'DTKN',
+    command: 'load',
+    resConfirmation: 'EPRLA1482F6E',
+    resDocType: 'R',
+  });
+
+  // Second row in the same run: the cached token is reused — no extra page GET.
+  await fetchReservationDetail('tenant-d', 'OTHERCONF001');
+  assert.equal(mock.tokenPageGets(), 1);
+  assert.equal(mock.detailBodies[1].resConfirmation, 'OTHERCONF001');
+
+  detailTeardown();
+});
+
+test('fetchReservationDetail: 400 (unknown confirmation) → null WITHOUT healing the session', async () => {
+  _resetCookieJarsForTests();
+  const mock = installDetailFetch({
+    onDetail: () => fakeRes({ status: 400, body: JSON.stringify({ command: 'load', response: null }) }),
+  });
+
+  const detail = await fetchReservationDetail('tenant-d', 'BOGUS');
+  assert.equal(detail, null);
+  assert.equal(mock.detailBodies.length, 1);  // no retry
+  assert.equal(mock.tokenPageGets(), 1);      // no fresh-token heal
+
+  detailTeardown();
+});
+
+test('fetchReservationDetail: 500 (dead token/session) → heals ONCE with fresh login + token', async () => {
+  _resetCookieJarsForTests();
+  const RESP = { resConfirmation: 'EPRLA1482F6E' };
+  const mock = installDetailFetch({
+    onDetail: (body, n) => (n === 1
+      ? fakeRes({ status: 500, body: '' })
+      : fakeRes({ status: 200, body: JSON.stringify({ command: 'load', response: RESP }) })),
+  });
+
+  const detail = await fetchReservationDetail('tenant-d', 'EPRLA1482F6E');
+  assert.deepEqual(detail, RESP);
+  assert.equal(mock.detailBodies.length, 2);  // original + one retry
+  assert.equal(mock.tokenPageGets(), 2);      // fresh token scraped for the retry
+
+  detailTeardown();
 });
 
 // ---------------------------------------------------------------------------

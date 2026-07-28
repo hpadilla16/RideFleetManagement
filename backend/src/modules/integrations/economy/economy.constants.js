@@ -70,11 +70,13 @@ export const LIST_PATH = '/RezAlliance/Reservations/GetReservationLookupRecords'
 // The authed page we GET to scrape a fresh __RequestVerificationToken before a
 // list POST (and to confirm the session didn't bounce to login).
 export const AUTHED_PAGE_PATH = '/RezAlliance/Reservations';
-// Detail endpoint (command-based). See ECONOMY_DETAIL_COMMAND seam in the
-// service — the exact command/payload is a documented constant pending a
-// follow-up capture; the list row alone carries enough to create the
-// ExternalReservation.
-export const DETAIL_PATH = '/RezAlliance/Reservations';
+// Detail endpoint (contract closed 2026-07-28). The `?Length=12` query is the
+// Reservations page's own form action verbatim — kept as captured. See the
+// DETAIL_COMMAND block in the service for the 4-field payload.
+export const DETAIL_PATH = '/RezAlliance/Reservations?Length=12';
+// resDocType for the detail load: R = Reservation (Q = Quotation). Required —
+// omitting it answers 500.
+export const DETAIL_DOC_TYPE = 'R';
 
 // ---------------------------------------------------------------------------
 // Near-term date window (the account sees the FULL ~92k-row history — NEVER
