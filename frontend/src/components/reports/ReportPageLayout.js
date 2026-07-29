@@ -45,6 +45,10 @@ export function ReportPageLayout({
   slug, title, description, category,
   token, range, onRangeChange, presets,
   extraFilters,
+  // 2026-07-29 (LAWA report): extra query params the PDF/Excel export must
+  // carry (e.g. { locationId }) — previously only from/to were forwarded, so
+  // a location-filtered view exported UNFILTERED data.
+  extraExportParams,
   hideDateRange,
   leftSlot,
   children,
@@ -53,6 +57,9 @@ export function ReportPageLayout({
     const params = new URLSearchParams();
     if (range?.from) params.set('from', range.from);
     if (range?.to)   params.set('to',   range.to);
+    for (const [key, value] of Object.entries(extraExportParams || {})) {
+      if (value !== undefined && value !== null && String(value) !== '') params.set(key, String(value));
+    }
     return `/api/reports/${slug}/${kind}?${params.toString()}`;
   };
 
