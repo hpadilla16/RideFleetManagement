@@ -86,6 +86,65 @@ export async function listMarketAirports({ scope }) {
 }
 
 /**
+ * Providers we do NOT offer as filter chips (Hector, 2026-07-29).
+ *   hertz       — a rental AGENCY quoting direct, not a booking site; it already
+ *                 appears on the agency ladder, so filtering "by Hertz" mixes
+ *                 the two axes.
+ *   booking.com — real OTA but negligible volume here (~7 quotes/day at SJU vs
+ *                 Priceline's 258), so the chip mostly yields an empty screen.
+ * Hiding a chip never hides the DATA: these rows still count toward the market
+ * and toward suggested prices, and ?providers=Hertz still works if called
+ * directly. This is only which shortcuts we put in front of staff.
+ */
+const HIDDEN_FILTER_PROVIDERS = new Set(['hertz', 'booking.com']);
+
+/**
+ * GET /api/market/providers?airport=SJU
+ *
+ * Distinct OTAs quoting at this airport over the last 7 days, cheapest-count
+ * first. Feeds the dashboard's provider filter chips. Derived from data rather
+ * than a constant so a new booking site Kayak starts surfacing shows up on its
+ * own — and one that stops quoting disappears instead of offering an empty
+ * filter.
+ */
+export async function listMarketProviders({ airport, scope }) {
+  if (!airport) {
+    const err = new Error('airport query param is required');
+    err.httpStatus = 400;
+    throw err;
+  }
+  const profiles = await prisma.marketScrapeProfile.findMany({
+    where: {
+      locationCode: String(airport).toUpperCase(),
+      active: true,
+      ...(scope?.tenantId === '__no_tenant__'
+        ? { tenantId: '__no_tenant__' }
+        : scope?.tenantId
+          ? { tenantId: scope.tenantId }
+          : {}),
+    },
+    select: { id: true },
+  });
+  if (!profiles.length) return { airport: String(airport).toUpperCase(), providers: [] };
+
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const grouped = await prisma.rateOffer.groupBy({
+    by: ['provider'],
+    where: {
+      profileId: { in: profiles.map((p) => p.id) },
+      status: 'FOUND',
+      observedAt: { gte: since },
+    },
+    _count: { _all: true },
+  });
+  const providers = grouped
+    .map((g) => ({ name: g.provider, count: g._count._all }))
+    .filter((g) => g.name && !HIDDEN_FILTER_PROVIDERS.has(g.name.trim().toLowerCase()))
+    .sort((a, b) => b.count - a.count);
+  return { airport: String(airport).toUpperCase(), providers };
+}
+
+/**
  * GET /api/market/summary?airport=SJU
  *
  * For every SIPP class observed at the airport in the last 24h, return:
@@ -98,7 +157,7 @@ export async function listMarketAirports({ scope }) {
  * Used by the Market Intelligence Dashboard (1 card per SIPP class) and the
  * Pricing Intelligence panel ("current market position" card).
  */
-export async function getMarketSummary({ airport, scope }) {
+export async function getMarketSummary({ airport, scope, providers = null }) {
   if (!airport) {
     const err = new Error('airport query param is required');
     err.httpStatus = 400;
@@ -149,7 +208,7 @@ export async function getMarketSummary({ airport, scope }) {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const { rows: obs } = await loadCompetitorRows(
     prisma,
-    { profileIds, observedSince: since },
+    { profileIds, observedSince: since, providers },
     { purpose: 'display' }
   );
 
@@ -295,7 +354,7 @@ export async function getMarketSummary({ airport, scope }) {
  * Used by the SIPP Detail drill-down chart (stock-market style) and the
  * sparkline mini-charts on the dashboard.
  */
-export async function getMarketHistory({ airport, sipp, days = 14, mode = 'history', scope }) {
+export async function getMarketHistory({ airport, sipp, days = 14, mode = 'history', scope, providers = null }) {
   if (!airport || !sipp) {
     const err = new Error('airport and sipp query params are required');
     err.httpStatus = 400;
@@ -341,7 +400,7 @@ export async function getMarketHistory({ airport, sipp, days = 14, mode = 'histo
     // Dual-read via the adapter (RateOffer + legacy observations) — display purpose.
     const { rows: obs } = await loadCompetitorRows(
       prisma,
-      { profileIds, sipp, pickupFrom: start, pickupTo: end },
+      { profileIds, sipp, pickupFrom: start, pickupTo: end, providers },
       { purpose: 'display' }
     );
     // Keep only the most recent observation per (pickupDate, vendor).
@@ -364,7 +423,7 @@ export async function getMarketHistory({ airport, sipp, days = 14, mode = 'histo
     // RateOffer — one series, no gap.
     const { rows: obs } = await loadCompetitorRows(
       prisma,
-      { profileIds, sipp, observedSince: since },
+      { profileIds, sipp, observedSince: since, providers },
       { purpose: 'display' }
     );
     for (const o of obs) {
@@ -443,7 +502,7 @@ function percentile(sortedAsc, p) {
  * tenant's current rate for that class. One row per (pickup day × class), exactly like the
  * RateHighway export. Returns { buffer, filename }.
  */
-export async function buildAirportExportWorkbook({ airport, days, scope = {} }) {
+export async function buildAirportExportWorkbook({ airport, days, scope = {}, providers = null }) {
   if (!airport) {
     const err = new Error('airport query param is required'); err.httpStatus = 400; throw err;
   }
@@ -670,6 +729,7 @@ export async function buildAirportExportWorkbook({ airport, days, scope = {} }) 
 
 export const marketObservationsService = {
   listMarketAirports,
+  listMarketProviders,
   getMarketSummary,
   getMarketHistory,
   buildAirportExportWorkbook,

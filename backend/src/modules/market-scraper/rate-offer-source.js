@@ -160,6 +160,24 @@ export async function loadCompetitorRows(prismaClient, filters = {}, opts = {}) 
 
   let rows = [...obsRows, ...offerRows];
 
+  // PROVIDER FILTER (2026-07-29, Hector) — narrow the view to specific OTAs
+  // (Expedia, Priceline, EconomyBookings, Booking.com...). Applied in memory
+  // because provider values are free-form mixed case ('Booking.com',
+  // 'EconomyBookings') and the legacy observations get their provider assigned
+  // above rather than in SQL, so one case-insensitive pass covers both models.
+  //
+  // DELIBERATELY independent of `purpose`: only a caller that PASSES providers
+  // is filtered. Every pricing caller omits it, so the suggestion math still
+  // sees the full multi-OTA pool and keeps collapsing it into the per-AGENCY
+  // ladder — this narrows what you LOOK at, never what we price against.
+  const providerFilter = Array.isArray(filters.providers)
+    ? filters.providers.map((s) => String(s).trim().toLowerCase()).filter(Boolean)
+    : null;
+  if (providerFilter && providerFilter.length) {
+    const wanted = new Set(providerFilter);
+    rows = rows.filter((r) => wanted.has(String(r.provider || '').trim().toLowerCase()));
+  }
+
   // Expedia-channel precedence: a Kayak-relayed Expedia quote is a second-hand
   // copy of the direct row — drop it when the direct row is in this result set.
   const directKeys = new Set();
