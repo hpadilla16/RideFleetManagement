@@ -715,6 +715,16 @@ export default function PrecheckinPage() {
                     By declining coverage, you must acknowledge the following three statements by entering your initials.
                   </p>
 
+                  {/* 2026-07-29 (Hector): same disclosure the ride-carsharing.com
+                      checkout shows on step 2 — declining online is not the end of
+                      it, the office still has to approve their policy. Stated
+                      BEFORE the initials so it informs the decision. */}
+                  <div style={{ padding: '12px 14px', borderRadius: 12, background: 'rgba(245,158,11,.12)', border: '1px solid rgba(245,158,11,.4)', color: '#92400e', fontSize: '0.88rem', lineHeight: 1.6 }}>
+                    <strong>Your own insurance is still subject to approval at the rental office.</strong>{' '}
+                    Bring proof of coverage to your pickup — if it cannot be verified or does not meet
+                    our minimum requirements, you will need to purchase coverage at the counter.
+                  </div>
+
                   <div style={{ display: 'grid', gap: 6, padding: '14px 16px', borderRadius: 12, background: 'rgba(255,255,255,.9)', border: '1px solid rgba(220,38,38,.12)' }}>
                     <div style={{ fontSize: '0.9rem', color: '#1e2847', lineHeight: 1.6, fontWeight: 600 }}>
                       1. I hereby decline the vehicle protection coverage offered by the rental company. I understand that I am forgoing the company&apos;s damage waiver and liability coverage options.
