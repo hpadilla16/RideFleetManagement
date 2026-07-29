@@ -163,6 +163,14 @@ const REPORT_REGISTRY = [
     description: 'TL franchise pre-paid bookings — monthly recap by location',
     status: 'AVAILABLE',
   },
+  {
+    slug: 'airport-lawa',
+    title: 'Airport Report (LAWA)',
+    category: 'OPERATIONS',
+    icon: 'plane',
+    description: 'Airport concession compliance — RAReporting format per rental',
+    status: 'AVAILABLE',
+  },
 
   // Revenue
   {

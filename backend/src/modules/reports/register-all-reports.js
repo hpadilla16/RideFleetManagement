@@ -31,3 +31,6 @@ import './toll-per-location.report.js';
 import './commission.report.js';
 import './taxes.report.js';
 import './pre-paid-reservations.report.js';
+// 2026-07-29 — LAWA airport-concession compliance export (Hector's ask,
+// matches the RAReporting sample column-for-column).
+import './airport-lawa.report.js';
