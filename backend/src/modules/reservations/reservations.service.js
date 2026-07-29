@@ -206,6 +206,7 @@ const reservationListSelect = {
   dailyRate: true,
   estimatedTotal: true,
   notes: true,
+  notesUpdatedAt: true,
   customer: {
     select: {
       id: true,
@@ -1784,7 +1785,9 @@ export const reservationsService = {
         estimatedTotal: data.estimatedTotal ?? null,
         paymentStatus: data.paymentStatus ?? 'PENDING',
         sendConfirmationEmail: data.sendConfirmationEmail ?? true,
-        notes: mergeUnderageAlert(data.notes ?? null, underageAlert)
+        notes: mergeUnderageAlert(data.notes ?? null, underageAlert),
+        // LAX #12: a creation-time note counts as a note for the banner.
+        ...(String(data.notes || '').trim() ? { notesUpdatedAt: new Date() } : {})
       }
       });
     });
@@ -1910,10 +1913,18 @@ export const reservationsService = {
     }
 
     const nextNotesInput = patch.notes !== undefined ? patch.notes : current.notes;
+    const mergedNotes = mergeUnderageAlert(nextNotesInput, underageAlert);
+    // 2026-07-28 (LAX #12): stamp notesUpdatedAt ONLY when the notes text
+    // really changed. Compare with the [UNDERAGE ALERT] line stripped from
+    // BOTH sides — this update rewrites/re-appends that line on every PATCH,
+    // and an alert re-splice is not "an agent left a note".
+    const stripAlert = (s) => String(s || '').replace(/\n?\[UNDERAGE ALERT\][^\n]*/g, '').trim();
+    const notesChanged = stripAlert(mergedNotes) !== stripAlert(current.notes);
 
     const data = {
       ...patch,
-      notes: mergeUnderageAlert(nextNotesInput, underageAlert),
+      notes: mergedNotes,
+      ...(notesChanged ? { notesUpdatedAt: new Date() } : {}),
       serviceStartAt: patch.serviceStartAt
         ? new Date(patch.serviceStartAt)
         : (patch.serviceStartAt === null ? null : undefined),

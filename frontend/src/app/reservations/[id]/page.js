@@ -15,6 +15,7 @@ import { api, API_BASE } from '../../../lib/client';
 import { utcToTenantLocalInput } from '../../../lib/tenant-time';
 import { toCompactUploadPayload } from '../../../lib/upload-compress';
 import { missingRequiredCustomerFields, CUSTOMER_FIELD_LABELS } from '../../../lib/precheckin-fields';
+import { displayNoteLines, hasDisplayNotes, isRecentNote, relativeNoteAge } from '../../../lib/reservation-notes';
 import { FuelLevelInput, OdometerInput } from '../../../components/wizard/MetricInputs';
 import {
   makeDiscountFn as makePrecheckinDiscountFn,
@@ -749,6 +750,20 @@ function ReservationDetailInner({ token, me, logout }) {
   const [preArrivalBusy, setPreArrivalBusy] = useState(false);
   const [activePanel, setActivePanel] = useState('overview');
   const [auditLogs, setAuditLogs] = useState([]);
+  // LAX #12: who last touched the notes — from the audit trail (human PATCHes
+  // record metadata.patch.notes; VozIA note appends carry their own reason).
+  const lastNoteAuthor = useMemo(() => {
+    for (const log of auditLogs || []) {
+      if (/^VozIA note appended/i.test(String(log?.reason || ''))) return 'VozIA';
+      try {
+        const meta = JSON.parse(log?.metadata || '{}');
+        if (meta?.patch?.notes !== undefined) {
+          return log?.actorUser?.fullName || log?.actorUser?.email || null;
+        }
+      } catch { /* unparseable metadata — keep scanning */ }
+    }
+    return null;
+  }, [auditLogs]);
   const [chargeEdit, setChargeEdit] = useState(false);
   const [chargeModel, setChargeModel] = useState({ dailyRate: '0', serviceFee: '0', taxRate: '11.5', serviceNames: '', feeNames: '', insuranceCodes: '' });
   const [form, setForm] = useState({ customerId: '', vehicleId: '', pickupAt: '', returnAt: '', pickupLocationId: '', returnLocationId: '', notes: '', franchiseId: '' });
@@ -2623,6 +2638,20 @@ token
           </div>
         </div>
       </section>
+      {/* LAX #12 (2026-07-28): "new note" banner — shows while the last real
+          notes change is recent, with the editor pulled from the audit log. */}
+      {isRecentNote(row?.notesUpdatedAt) && hasDisplayNotes(row?.notes) && (
+        <section className="glass card-lg section-card" style={{ marginBottom: 16, background: 'rgba(110,73,255,.06)', border: '1px solid rgba(110,73,255,.35)' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+            <strong style={{ color: '#5b21b6' }}>📝 Nota nueva · {relativeNoteAge(row.notesUpdatedAt)}</strong>
+            {lastNoteAuthor ? <span className="ui-muted">por {lastNoteAuthor}</span> : null}
+            <button type="button" className="button-subtle" style={{ marginLeft: 'auto', fontSize: '0.82rem' }} onClick={() => setActivePanel('notes')}>Ver notas</button>
+          </div>
+          <div style={{ marginTop: 6, fontSize: '0.9rem', color: '#3b2d66' }}>
+            {displayNoteLines(row.notes).slice(-2).map((line, i) => <div key={i}>{line}</div>)}
+          </div>
+        </section>
+      )}
       <section className="grid2">
         <div className="glass card-lg">
           <div className="row-between"><h2>Reservation # {row.reservationNumber}</h2><button onClick={save}>Save</button></div>

@@ -39,6 +39,7 @@ import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { PendingFranchiseImportsTray } from '../../components/reservations/PendingFranchiseImportsTray';
 import { api } from '../../lib/client';
+import { isRecentNote, relativeNoteAge } from '../../lib/reservation-notes';
 
 const RESERVATION_PAGE_SIZE = 100;
 // CUSTOMER_PICKER_LIMIT — the new-reservation flow loads this many customers
@@ -1078,6 +1079,24 @@ function ReservationsInner({ token, me, logout }) {
                     </span>
                   ) : null}
                   {hasFeeAdvisory(r.notes) ? <span title="Additional fee advisory" style={{ marginLeft: 6 }}>⚠️</span> : null}
+                  {isRecentNote(r.notesUpdatedAt) ? (
+                    <span
+                      title={`Nota actualizada ${relativeNoteAge(r.notesUpdatedAt)}`}
+                      style={{
+                        marginLeft: 6,
+                        background: 'rgba(110,73,255,.12)',
+                        color: '#5b21b6',
+                        padding: '2px 6px',
+                        borderRadius: 999,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      📝 Nota
+                    </span>
+                  ) : null}
                 </td>
                 <td>{r.customer?.firstName} {r.customer?.lastName}</td>
                 <td>

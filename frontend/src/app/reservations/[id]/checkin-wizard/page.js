@@ -28,6 +28,7 @@ import { AuthGate } from '../../../../components/AuthGate';
 import { AppShell } from '../../../../components/AppShell';
 import { api } from '../../../../lib/client';
 import { formatTenantWallClock } from '../../../../lib/tenant-time';
+import { displayNoteLines, hasDisplayNotes, isRecentNote, relativeNoteAge } from '../../../../lib/reservation-notes';
 import { useFeePreview } from '../../../../components/wizard/useFeePreview';
 import { FeePreviewPanel } from '../../../../components/wizard/FeePreviewPanel';
 import {
@@ -539,6 +540,31 @@ function Step1Summary({ reservation, agreement }) {
   const totalPaid = Number(agreement?.paidAmount || 0);
   const settledPaid = Math.max(0, Number((totalPaid - authHoldsTotal).toFixed(2)));
   return (
+    <>
+      {/* LAX #13 (2026-07-28): reservation notes reviewed as part of the flow. */}
+      {hasDisplayNotes(reservation?.notes) && (
+        <div style={{
+          ...sectionBox, marginBottom: 16,
+          background: 'rgba(110,73,255,.06)', border: '0.5px solid rgba(110,73,255,.35)',
+        }}>
+          <div style={{ ...sectionLabel, color: '#5b21b6' }}>
+            📝 Notas de la reservación
+            {isRecentNote(reservation?.notesUpdatedAt) && (
+              <span style={{
+                marginLeft: 8, padding: '1px 8px', borderRadius: 999, fontSize: 10,
+                fontWeight: 700, textTransform: 'uppercase', background: '#6d28d9', color: '#fff',
+              }}>
+                Nueva · {relativeNoteAge(reservation?.notesUpdatedAt)}
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 13, color: '#3b2d66', marginTop: 6 }}>
+            {displayNoteLines(reservation?.notes).map((line, i) => (
+              <div key={i} style={{ marginTop: i === 0 ? 0 : 2 }}>{line}</div>
+            ))}
+          </div>
+        </div>
+      )}
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={sectionBox}>
@@ -582,6 +608,7 @@ function Step1Summary({ reservation, agreement }) {
         } />
       </div>
     </div>
+    </>
   );
 }
 

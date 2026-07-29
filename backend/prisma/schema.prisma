@@ -1397,6 +1397,11 @@ model Reservation {
   flightNumber                 String?
   pickupInstructions           String?
   notes                        String?
+  // 2026-07-28 (LAX #12) — stamped by the service ONLY when the notes text
+  // actually changes (the automatic [UNDERAGE ALERT] re-splice on every PATCH
+  // is ignored). Drives the "new note" banner on the detail page, the list
+  // pill, and the wizards' step-1 note boxes. WHO edited comes from AuditLog.
+  notesUpdatedAt               DateTime?
   customerInfoToken            String?
   customerInfoTokenExpiresAt   DateTime?
   customerInfoCompletedAt      DateTime?
