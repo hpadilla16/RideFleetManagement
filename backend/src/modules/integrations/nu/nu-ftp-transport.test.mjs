@@ -50,3 +50,24 @@ test('ftpRecordToListRow tolerates a bare/empty record', () => {
   assert.equal(row.pickupAt, null);
   assert.equal(row.isPrepaid, null);
 });
+
+// ── remotePath (2026-07-29, first live NU file) ─────────────────────────────
+// NU's SFTP server resolves './x.REZ' to the DIRECTORY (mode 40777) instead of
+// the file, so `get` returned "Permission denied" and every sweep silently
+// downloaded nothing while the file sat on the server. A dot/empty dir means
+// "the login directory" → emit the bare name.
+test('remotePath: a dot/empty drop dir yields the BARE name (never ./name)', async () => {
+  const { remotePath } = await import('./nu-sftp-client.js');
+  assert.equal(remotePath('.', 'A.REZ'), 'A.REZ');
+  assert.equal(remotePath('./', 'A.REZ'), 'A.REZ');
+  assert.equal(remotePath('', 'A.REZ'), 'A.REZ');
+  assert.equal(remotePath(undefined, 'A.REZ'), 'A.REZ');
+  assert.equal(remotePath('  .  ', 'A.REZ'), 'A.REZ');
+});
+
+test('remotePath: a real dir still joins, with or without a trailing slash', async () => {
+  const { remotePath } = await import('./nu-sftp-client.js');
+  assert.equal(remotePath('cor616usa', 'A.REZ'), 'cor616usa/A.REZ');
+  assert.equal(remotePath('cor616usa/', 'A.REZ'), 'cor616usa/A.REZ');
+  assert.equal(remotePath('/drop/616', 'A.REZ'), '/drop/616/A.REZ');
+});
