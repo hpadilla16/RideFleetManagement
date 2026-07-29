@@ -92,7 +92,7 @@ async function processDoc(doc, cfg) {
     });
     if (lowConfidence && created.length) {
       await prisma.citation.updateMany({
-        where: { id: { in: created.map((c) => c.id) }, status: { notIn: ['BILLED', 'DISPUTED', 'VOID'] } },
+        where: { id: { in: created.map((c) => c.id) }, status: { notIn: ['BILLED', 'DISPUTED', 'VOID', 'CLOSED'] } },
         data: { status: 'NEEDS_REVIEW', needsReview: true },
       });
     }
