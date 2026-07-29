@@ -48,7 +48,7 @@ describe('marketScrapeProfileService.create — validation', () => {
     windowStartDay: 1,
     windowEndDay: 14,
     lorDays: 3,
-    sources: ['EXPEDIA'],
+    sources: ['KAYAK'],
     strategy: 'CHEAPEST_MINUS_AMOUNT',
     strategyAmount: 1
   };
@@ -120,7 +120,7 @@ describe('marketScrapeProfileService.create — validation', () => {
   it('rejects unknown source', async () => {
     await assert.rejects(
       marketScrapeProfileService.create(
-        { ...validBase, sources: ['EXPEDIA', 'BOGUS'] },
+        { ...validBase, sources: ['KAYAK', 'BOGUS'] },
         { tenantId: 'tenant-1' }
       ),
       (err) => err.message.includes('unknown source')
@@ -236,7 +236,7 @@ describe('marketScrapeProfileService.update — merged-state revalidation (Codex
     scheduleHour: 4,
     scheduleMinute: 1,
     runTimezone: 'America/Puerto_Rico',
-    sources: ['EXPEDIA'],
+    sources: ['KAYAK'],
     active: true,
     strategy: 'CHEAPEST_MINUS_AMOUNT',
     strategyAmount: 1,

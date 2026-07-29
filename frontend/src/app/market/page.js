@@ -60,10 +60,17 @@ const SIPP_LABELS = {
   FFAR: 'Full-size SUV'
 };
 
+// Forward booking window (pickup dates today..today+N). 60 added 2026-07-29
+// so staff can pull the 60-day Excel; the export endpoint already clamps at
+// exactly 60 (market-observations.service.js) and /market/[sipp] has shipped a
+// 60d pill since launch, so this only closes the gap on the dashboard.
+// NOTE: rows only exist as far forward as the airport's scrape profiles reach
+// — an airport whose profiles stop at day 29 shows an empty 30-60 tail.
 const RANGE_PILLS = [
   { value: 7, label: '7d' },
   { value: 14, label: '14d' },
-  { value: 30, label: '30d' }
+  { value: 30, label: '30d' },
+  { value: 60, label: '60d' }
 ];
 
 function fmtMoney(value) {
