@@ -1478,11 +1478,14 @@ async function notifyStaffOfNewTolls(reservation, transactions = []) {
   return { notified };
 }
 
-// Charge sources that can carry a prepaid toll package (an AdditionalService
+// Charge sources that can carry a toll-relevant service (an AdditionalService
 // referenced via sourceRefId). 'KIOSK_UPSELL' added 2026-07-05 (kiosk B2
 // review): kiosk-sold coversTolls services were invisible here, so the
 // customer paid per-toll ON TOP of the package they bought at the kiosk.
-const TOLL_PACKAGE_CHARGE_SOURCES = ['ADDITIONAL_SERVICE', 'SERVICE', 'KIOSK_UPSELL'];
+// 'ADDITIONAL_SERVICE_PRECHECKIN' added 2026-07-28 (LAX #10 review): the SAME
+// blind spot existed for packages bought in the customer portal pre-check-in
+// upsell — matching lib/sold-items.js SERVICE_CHARGE_SOURCES.
+const TOLL_PACKAGE_CHARGE_SOURCES = ['ADDITIONAL_SERVICE', 'SERVICE', 'ADDITIONAL_SERVICE_PRECHECKIN', 'KIOSK_UPSELL'];
 
 /** Pure: the AdditionalService ids referenced by selected package-capable charges. */
 export function tollPackageCandidateServiceIds(charges = []) {
@@ -1520,16 +1523,15 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
   const effectiveScope = systemScope({ tenantId });
   const policy = resolveReservationTollPolicy(reservation);
   const selectedServiceIds = tollPackageCandidateServiceIds(reservation.charges);
-  const prepaidTollServiceCount = selectedServiceIds.length
-    ? await prisma.additionalService.count({
-        where: {
-          tenantId,
-          id: { in: selectedServiceIds },
-          coversTolls: true,
-          isActive: true
-        }
+  // One read resolves BOTH toll-relevant flags (LAX #10 added tollPassthrough).
+  const tollServices = selectedServiceIds.length
+    ? await prisma.additionalService.findMany({
+        where: { tenantId, id: { in: selectedServiceIds }, isActive: true },
+        select: { coversTolls: true, tollPassthrough: true }
       })
-    : 0;
+    : [];
+  const prepaidTollServiceCount = tollServices.filter((s) => s.coversTolls).length;
+  const tollPassthroughServiceCount = tollServices.filter((s) => s.tollPassthrough).length;
   const transactions = await prisma.tollTransaction.findMany({
     where: {
       reservationId,
@@ -1559,6 +1561,7 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
   const note = String(options?.note || '').trim();
   const billingDecision = evaluateTollBillingPolicy({
     prepaidTollServiceCount,
+    tollPassthroughServiceCount,
     transactions
   });
 
@@ -1571,7 +1574,9 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
     // suffix → single group). Sentry "Repeating Spans" / N+1 fix.
     const noteSuffix = billingDecision.coveredByTollPackage
       ? 'Covered by prepaid toll package; usage recorded without billing'
-      : (note ? `Posted to reservation: ${note}` : 'Posted to reservation automatically');
+      : billingDecision.tollPassthrough
+        ? (note ? `Posted at cost (Toll Activation, no policy fee): ${note}` : 'Posted at cost — Toll Activation service, no policy fee')
+        : (note ? `Posted to reservation: ${note}` : 'Posted to reservation automatically');
 
     const tollUpdateGroups = new Map();
     for (const transaction of transactions) {
@@ -1760,6 +1765,7 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
     chargeableCount: billingDecision.chargeableCount,
     policyFeeApplied: billingDecision.shouldApplyPolicyFee && !!buildTollPolicyChargeShape(policy, transactions),
     coveredByTollPackage: billingDecision.coveredByTollPackage,
+    tollPassthrough: billingDecision.tollPassthrough,
     billingMode: billingDecision.billingMode,
     policy
   };

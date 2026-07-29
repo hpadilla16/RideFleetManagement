@@ -2977,6 +2977,10 @@ model AdditionalService {
   defaultRencars         Boolean              @default(false)
   mandatory              Boolean              @default(false)
   coversTolls            Boolean              @default(false)
+  // 2026-07-28 (LAX #10) — "Toll Activation": bill the ACTUAL tolls used at
+  // cost, but suppress the location's toll policy/admin fee. Opposite corner
+  // from coversTolls (prepaid → nothing billed); coversTolls wins if both.
+  tollPassthrough        Boolean              @default(false)
   displayDescription     String?
   displayPriority        Int                  @default(0)
   isActive               Boolean              @default(true)

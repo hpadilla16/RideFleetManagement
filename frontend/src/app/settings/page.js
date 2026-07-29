@@ -2111,6 +2111,7 @@ function SettingsInner({ token, me, logout }) {
       defaultRencars: !!svc.defaultRencars,
       mandatory: !!svc.mandatory,
       coversTolls: !!svc.coversTolls,
+      tollPassthrough: !!svc.tollPassthrough,
       isActive: svc.isActive !== false,
       locationId: svc.locationId || '',
       linkedFeeId: svc.linkedFeeId || ''
@@ -5795,7 +5796,8 @@ function SettingsInner({ token, me, logout }) {
                 <label className="label"><input type="checkbox" checked={serviceForm.mandatory} onChange={(e) => setServiceForm({ ...serviceForm, mandatory: e.target.checked })} /> Mandatory</label>
                 <label className="label"><input type="checkbox" checked={serviceForm.displayOnline} onChange={(e) => setServiceForm({ ...serviceForm, displayOnline: e.target.checked })} /> Display Online</label>
                 <label className="label"><input type="checkbox" checked={serviceForm.taxable} onChange={(e) => setServiceForm({ ...serviceForm, taxable: e.target.checked })} /> Taxable</label>
-                <label className="label"><input type="checkbox" checked={serviceForm.coversTolls} onChange={(e) => setServiceForm({ ...serviceForm, coversTolls: e.target.checked })} /> Toll Package / Prepaid Tolls</label>
+                <label className="label"><input type="checkbox" checked={serviceForm.coversTolls} onChange={(e) => setServiceForm({ ...serviceForm, coversTolls: e.target.checked, ...(e.target.checked ? { tollPassthrough: false } : {}) })} /> Toll Package / Prepaid Tolls</label>
+                <label className="label" title="Bill the actual tolls used at cost — the location's toll policy/admin fee is NOT applied. If Toll Package is also checked, the package wins."><input type="checkbox" checked={serviceForm.tollPassthrough} onChange={(e) => setServiceForm({ ...serviceForm, tollPassthrough: e.target.checked, ...(e.target.checked ? { coversTolls: false } : {}) })} /> Toll Activation (bill tolls at cost, no admin fee)</label>
                 <label className="label"><input type="checkbox" checked={serviceForm.isActive} onChange={(e) => setServiceForm({ ...serviceForm, isActive: e.target.checked })} /> Active</label>
               </div>
 
@@ -5854,7 +5856,7 @@ function SettingsInner({ token, me, logout }) {
                     </td>
                     <td>{Number(s.defaultQty || 1).toFixed(2)}</td>
                     <td>{s.location?.name || 'All'}</td>
-                    <td>{s.coversTolls ? 'Yes' : 'No'}</td>
+                    <td>{s.coversTolls ? 'Prepaid' : (s.tollPassthrough ? 'At cost' : 'No')}</td>
                     <td>{s.displayOnline ? 'Yes' : 'No'}</td>
                     <td>{s.isActive ? 'Yes' : 'No'}</td>
                     <td style={{ display: 'flex', gap: 6 }}>

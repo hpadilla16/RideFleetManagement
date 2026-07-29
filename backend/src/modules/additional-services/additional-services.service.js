@@ -119,6 +119,7 @@ export const additionalServicesService = {
       defaultRencars: data.defaultRencars ?? false,
       mandatory: data.mandatory ?? false,
       coversTolls: data.coversTolls ?? false,
+      tollPassthrough: data.tollPassthrough ?? false,
       displayDescription: data.displayDescription ?? null,
       displayPriority: data.displayPriority ?? 0,
       isActive: data.isActive ?? true,
