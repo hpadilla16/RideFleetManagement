@@ -276,3 +276,33 @@ describe('loadCompetitorRows — pricing gate (KAYAK_EFFECTIVE_IS_ALL_IN)', () =
     assert.ok(!typo.some((r) => r.source === 'KAYAK'), 'unknown purpose must not receive Kayak teaser rows');
   });
 });
+
+// ── Provider filter (2026-07-29) ───────────────────────────────────────────
+// Narrows the DISPLAY pool to specific OTAs. Must never fire unless the caller
+// passes providers, so the pricing path keeps seeing every OTA and the
+// per-agency ladder is unchanged.
+describe('providers filter', () => {
+  const offers = [
+    { id: '1', supplier: 'Hertz', provider: 'Priceline', source: 'KAYAK', status: 'FOUND', dailyPrice: 40, effectiveDailyPrice: 40, pickupDate: new Date('2026-08-01'), sipp: 'CCAR' },
+    { id: '2', supplier: 'Hertz', provider: 'Booking.com', source: 'KAYAK', status: 'FOUND', dailyPrice: 38, effectiveDailyPrice: 38, pickupDate: new Date('2026-08-01'), sipp: 'CCAR' },
+    { id: '3', supplier: 'Sixt', provider: 'EconomyBookings', source: 'KAYAK', status: 'FOUND', dailyPrice: 55, effectiveDailyPrice: 55, pickupDate: new Date('2026-08-01'), sipp: 'CCAR' }
+  ];
+
+  it('keeps only the named OTAs, case-insensitively', async () => {
+    const client = fakeClient({ offers });
+    const { rows } = await loadCompetitorRows(client, { providers: ['booking.COM', 'EconomyBookings'] }, { purpose: 'display' });
+    assert.deepEqual(rows.map((r) => r.provider).sort(), ['Booking.com', 'EconomyBookings']);
+  });
+
+  it('no providers key = every OTA (pricing path is never narrowed)', async () => {
+    const client = fakeClient({ offers });
+    const { rows } = await loadCompetitorRows(client, {}, { purpose: 'display' });
+    assert.equal(rows.length, 3);
+  });
+
+  it('an empty list means "no filter", not "nothing"', async () => {
+    const client = fakeClient({ offers });
+    const { rows } = await loadCompetitorRows(client, { providers: [] }, { purpose: 'display' });
+    assert.equal(rows.length, 3);
+  });
+});

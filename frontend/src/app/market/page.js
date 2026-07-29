@@ -112,6 +112,11 @@ function Dashboard({ token, me, logout }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [sortBy, setSortBy] = useState('biggest_move');
+  // Provider (OTA) filter — DISPLAY ONLY. Narrows what the dashboard and the
+  // Excel show; the suggested-price math still weighs every OTA and collapses
+  // them into the per-agency ladder. Empty = all providers.
+  const [providers, setProviders] = useState([]);
+  const [providerOptions, setProviderOptions] = useState([]);
   // Lightweight count of PENDING pricing suggestions for the topbar badge. We
   // poll every 60s — the inbox itself polls at the same cadence, so the badge
   // stays roughly in sync without an additional websocket.
@@ -173,6 +178,34 @@ function Dashboard({ token, me, logout }) {
     } catch { /* private mode — selection just won't persist */ }
   }, [me?.tenantId]);
 
+  // `&providers=a,b` when narrowed, '' when showing every OTA.
+  const providerQS = useMemo(
+    () => (providers.length ? `&providers=${encodeURIComponent(providers.join(','))}` : ''),
+    [providers]
+  );
+
+  // Which OTAs actually quote at this airport (last 7 days, busiest first).
+  useEffect(() => {
+    if (!token || !airport) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const out = await api(`/api/market/providers?airport=${encodeURIComponent(airport)}`, { bypassCache: true }, token);
+        if (!cancelled) setProviderOptions(Array.isArray(out?.providers) ? out.providers : []);
+      } catch {
+        if (!cancelled) setProviderOptions([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, airport]);
+
+  // Switching airports clears a filter that may not exist over there.
+  useEffect(() => { setProviders([]); }, [airport]);
+
+  const toggleProvider = useCallback((name) => {
+    setProviders((prev) => (prev.includes(name) ? prev.filter((p) => p !== name) : [...prev, name]));
+  }, []);
+
   useEffect(() => {
     if (!token || !airport) return;
     let cancelled = false;
@@ -180,7 +213,7 @@ function Dashboard({ token, me, logout }) {
     setError('');
     (async () => {
       try {
-        const sum = await api(`/api/market/summary?airport=${encodeURIComponent(airport)}`, { bypassCache: true }, token);
+        const sum = await api(`/api/market/summary?airport=${encodeURIComponent(airport)}${providerQS}`, { bypassCache: true }, token);
         if (cancelled) return;
         setSummary(sum);
 
@@ -191,7 +224,7 @@ function Dashboard({ token, me, logout }) {
         } else {
           const results = await Promise.all(
             sipps.map((sipp) =>
-              api(`/api/market/history?airport=${encodeURIComponent(airport)}&sipp=${encodeURIComponent(sipp)}&days=${rangeDays}&mode=forward`, { bypassCache: true }, token)
+              api(`/api/market/history?airport=${encodeURIComponent(airport)}&sipp=${encodeURIComponent(sipp)}&days=${rangeDays}&mode=forward${providerQS}`, { bypassCache: true }, token)
                 .then((data) => [sipp, data])
                 .catch(() => [sipp, null])
             )
@@ -208,7 +241,7 @@ function Dashboard({ token, me, logout }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [token, airport, rangeDays]);
+  }, [token, airport, rangeDays, providerQS]);
 
   // Build the display list: union of standard order + any unknowns from API,
   // each entry either has summary data or is an empty-state placeholder.
@@ -235,7 +268,7 @@ function Dashboard({ token, me, logout }) {
 
   async function downloadExcel() {
     try {
-      const res = await fetch(`${API_BASE}/api/market/export.xlsx?airport=${encodeURIComponent(airport)}&days=${rangeDays}`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${API_BASE}/api/market/export.xlsx?airport=${encodeURIComponent(airport)}&days=${rangeDays}${providerQS}`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) {
         let m = `Export failed (${res.status})`;
         try { const j = await res.json(); if (j?.error) m = j.error; } catch { /* ignore */ }
@@ -264,6 +297,44 @@ function Dashboard({ token, me, logout }) {
           pendingCount={pendingCount}
           onExport={downloadExcel}
         />
+        {providerOptions.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>Providers</span>
+            <button
+              type="button"
+              onClick={() => setProviders([])}
+              style={{
+                fontSize: 12, padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
+                border: '1px solid rgba(148,163,184,0.35)',
+                background: providers.length === 0 ? 'rgba(99,102,241,0.35)' : 'transparent',
+                color: providers.length === 0 ? '#e0e7ff' : '#94a3b8'
+              }}
+            >All</button>
+            {providerOptions.map((p) => {
+              const on = providers.includes(p.name);
+              return (
+                <button
+                  key={p.name}
+                  type="button"
+                  onClick={() => toggleProvider(p.name)}
+                  title={`${p.count} quotes in the last 7 days`}
+                  style={{
+                    fontSize: 12, padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
+                    border: '1px solid rgba(148,163,184,0.35)',
+                    background: on ? 'rgba(99,102,241,0.35)' : 'transparent',
+                    color: on ? '#e0e7ff' : '#94a3b8'
+                  }}
+                >{p.name}</button>
+              );
+            })}
+            {providers.length > 0 && (
+              <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                filters the view and the Excel — suggested prices still weigh every provider
+              </span>
+            )}
+          </div>
+        )}
+
         <Legend sortBy={sortBy} onSortChange={setSortBy} />
 
         {error && (
