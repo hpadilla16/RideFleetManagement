@@ -123,7 +123,9 @@ export function RatePushApprovalsPanel({ token, scopedSettingsPath, onPageMsg })
                     <td style={{ whiteSpace: 'nowrap' }}>{String(r.rateDate).slice(0, 10)}</td>
                     <td>
                       <strong>{r.classCode}</strong>
-                      <div style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>{r.externalLocationCode}</div>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>
+                        {r.externalLocationCode}{r.rateCode ? ` · ${r.rateCode}` : ''}
+                      </div>
                     </td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{money(r.from)}</td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>{money(r.to)}</td>

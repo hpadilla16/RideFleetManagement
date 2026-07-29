@@ -42,6 +42,19 @@ export function maxDeltaPct() {
   return Number.isFinite(n) && n > 0 ? n : 60;
 }
 
+/**
+ * 2026-07-28 (LAX #2): the portal prices PER RATE PLAN (length-of-rent tier)
+ * and Hector's rule is that ALL of them carry RFM's price — the original
+ * client hardcoded STND and silently left the other seven tiers stale. Every
+ * tier gets its own grid read, its own plan (each tier has its own current
+ * values and close-outs) and its own verified write.
+ */
+export function pushRateCodes() {
+  const raw = String(process.env.ECONOMY_RATE_PUSH_RATE_CODES || '1TO2,3DYS,4DYS,5DYS,6DYS,7DYS,8DYS,STND');
+  const codes = raw.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+  return codes.length ? codes : ['STND'];
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** yyyy-mm-dd list starting at `from` (UTC), `days` long. Pure, exported. */
@@ -107,45 +120,26 @@ export async function pushArea(config, deps = {}) {
   const rfmRates = await (deps.loadRfmRates || loadRfmRates)(tenantId, locationId, deps);
   if (!rfmRates.length) return { skipped: 'no_rfm_rates', externalArea: config.externalArea };
 
-  // The portal serves 7 days per read, so cover the window in chunks.
   const client = deps.client || { readRateGrid, applyRateCell };
-  const portalGrid = {};
-  let portalClasses = null;
-  for (let i = 0; i < dates.length; i += 7) {
-    const chunk = await client.readRateGrid(tenantId, {
-      provider: config.provider || process.env.ECONOMY_RATE_PUSH_PROVIDER || '61201',
-      location: externalLocationCode,
-      startDate: dates[i],
-    }, deps);
-    portalClasses = portalClasses || chunk.classes;
-    for (const [cls, perDate] of Object.entries(chunk.grid || {})) {
-      portalGrid[cls] = { ...(portalGrid[cls] || {}), ...perDate };
-    }
-  }
+  const rateCodes = deps.rateCodes || pushRateCodes();
 
-  // F4: cells a human already authorised. Strictly matched on class+date+value
-  // inside buildPushPlan, so a stale approval cannot carry a NEW price through
-  // the band.
+  // F4: cells a human already authorised. Strictly matched on
+  // rateCode+class+date+value, so a stale approval cannot carry a NEW price
+  // through the band, nor an approval for one LOR tier authorise another.
   const approvals = await db.ratePushLog.findMany({
     where: {
       tenantId, provider: PROVIDER, locationId, status: 'APPROVED',
       rateDate: { gte: new Date(`${dates[0]}T00:00:00Z`), lte: new Date(`${dates[dates.length - 1]}T00:00:00Z`) },
     },
-    select: { id: true, classCode: true, rateDate: true, pushedValue: true },
+    select: { id: true, classCode: true, rateDate: true, pushedValue: true, rateCode: true },
   });
-  const approvalRows = approvals.map((a) => ({
+  const allApprovalRows = approvals.map((a) => ({
     id: a.id,
     classCode: a.classCode,
     rateDate: a.rateDate.toISOString().slice(0, 10),
     pushedValue: Number(a.pushedValue),
+    rateCode: a.rateCode || 'STND',
   }));
-
-  const { pushes, skips } = buildPushPlan({
-    rfmRates, dates, portalGrid, portalClasses,
-    classOverrides: parseClassMap(config.rateClassMapJson),
-    closeoutMin, maxDeltaPct: deps.maxDeltaPct || maxDeltaPct(),
-    approvals: approvalRows,
-  });
 
   const base = {
     tenantId, provider: PROVIDER, locationId, externalLocationCode,
@@ -161,9 +155,10 @@ export async function pushArea(config, deps = {}) {
   const dayStart = new Date(`${(deps.now ? deps.now() : new Date()).toISOString().slice(0, 10)}T00:00:00Z`);
   const todaysRows = await db.ratePushLog.findMany({
     where: { tenantId, provider: PROVIDER, locationId, createdAt: { gte: dayStart } },
-    select: { classCode: true, rateDate: true, status: true, skipReason: true, priorValue: true, pushedValue: true },
+    select: { classCode: true, rateDate: true, status: true, skipReason: true, priorValue: true, pushedValue: true, rateCode: true },
   });
   const seenToday = new Set(todaysRows.map((r) => [
+    r.rateCode || 'STND',
     r.classCode,
     r.rateDate ? r.rateDate.toISOString().slice(0, 10) : '',
     r.status,
@@ -171,12 +166,43 @@ export async function pushArea(config, deps = {}) {
     r.priorValue == null ? '' : Number(r.priorValue),
     r.pushedValue == null ? '' : Number(r.pushedValue),
   ].join('|')));
-  const alreadyRecorded = (classCode, rateDate, status, skipReason, priorValue, pushedValue) => seenToday.has([
-    classCode, rateDate || '', status, skipReason || '',
+  const alreadyRecorded = (rateCode, classCode, rateDate, status, skipReason, priorValue, pushedValue) => seenToday.has([
+    rateCode, classCode, rateDate || '', status, skipReason || '',
     priorValue == null ? '' : Number(priorValue),
     pushedValue == null ? '' : Number(pushedValue),
   ].join('|'));
   let deduped = 0;
+  let queued = 0;
+  const results = { planned: 0, sent: 0, verified: 0, mismatched: 0, failed: 0, skipped: 0, queued: 0, deduped: 0, rateCodes: rateCodes.length };
+
+  for (const rateCode of rateCodes) {
+  // The portal serves 7 days per read, so cover the window in chunks — once
+  // per rate code, because each LOR tier carries its own current values.
+  const portalGrid = {};
+  let portalClasses = null;
+  for (let i = 0; i < dates.length; i += 7) {
+    const chunk = await client.readRateGrid(tenantId, {
+      provider: config.provider || process.env.ECONOMY_RATE_PUSH_PROVIDER || '61201',
+      location: externalLocationCode,
+      rate: rateCode,
+      startDate: dates[i],
+    }, deps);
+    portalClasses = portalClasses || chunk.classes;
+    for (const [cls, perDate] of Object.entries(chunk.grid || {})) {
+      portalGrid[cls] = { ...(portalGrid[cls] || {}), ...perDate };
+    }
+  }
+
+  const approvalRows = allApprovalRows.filter((a) => a.rateCode === rateCode);
+
+  const { pushes, skips } = buildPushPlan({
+    rfmRates, dates, portalGrid, portalClasses,
+    classOverrides: parseClassMap(config.rateClassMapJson),
+    closeoutMin, maxDeltaPct: deps.maxDeltaPct || maxDeltaPct(),
+    approvals: approvalRows,
+  });
+  results.planned += pushes.length;
+  results.skipped += skips.length;
 
   // Skips are recorded too — the audit must show what we chose NOT to touch
   // (a preserved close-out is as important as a write).
@@ -185,14 +211,13 @@ export async function pushArea(config, deps = {}) {
   // die here — it is queued PENDING_APPROVAL with the value it WOULD publish,
   // unless an identical pending row already waits (the sweep runs every 30 min
   // and must not spam the queue with duplicates).
-  let queued = 0;
   for (const s of skips) {
     const isReviewable = s.reason === SKIP.OUT_OF_BAND && s.rateDate;
     const rateDate = s.rateDate ? new Date(`${s.rateDate}T00:00:00Z`) : new Date(`${dates[0]}T00:00:00Z`);
 
     if (isReviewable) {
       const already = await db.ratePushLog.findFirst({
-        where: { tenantId, provider: PROVIDER, locationId, classCode: s.classCode, rateDate, status: 'PENDING_APPROVAL' },
+        where: { tenantId, provider: PROVIDER, locationId, classCode: s.classCode, rateDate, rateCode, status: 'PENDING_APPROVAL' },
         select: { id: true, pushedValue: true },
       });
       // A pending row for a DIFFERENT value is stale — the target moved, so
@@ -209,6 +234,7 @@ export async function pushArea(config, deps = {}) {
           ...base,
           classCode: s.classCode,
           rateDate,
+          rateCode,
           priorValue: s.priorValue ?? null,
           // The value awaiting sign-off — NOT a zero placeholder, so the queue
           // reads as "portal $11 -> RFM $20" rather than "-> $0".
@@ -222,7 +248,7 @@ export async function pushArea(config, deps = {}) {
       continue;
     }
 
-    if (alreadyRecorded(s.classCode, s.rateDate, 'SKIPPED', s.reason, s.priorValue ?? null, s.intendedValue ?? 0)) {
+    if (alreadyRecorded(rateCode, s.classCode, s.rateDate, 'SKIPPED', s.reason, s.priorValue ?? null, s.intendedValue ?? 0)) {
       deduped += 1;
       continue;
     }
@@ -231,6 +257,7 @@ export async function pushArea(config, deps = {}) {
         ...base,
         classCode: s.classCode,
         rateDate,
+        rateCode,
         priorValue: s.priorValue ?? null,
         pushedValue: s.intendedValue ?? 0,
         sourceRateItemId: s.sourceRateItemId || null,
@@ -239,8 +266,6 @@ export async function pushArea(config, deps = {}) {
       },
     }).catch(() => null);
   }
-
-  const results = { planned: pushes.length, sent: 0, verified: 0, mismatched: 0, failed: 0, skipped: skips.length, queued, deduped: 0 };
 
   for (const p of pushes) {
     // F4: an approved cell REUSES its approval row, so one row carries the
@@ -259,7 +284,7 @@ export async function pushArea(config, deps = {}) {
     // A rehearsal that would publish the same value it already rehearsed today
     // is not news either — log it once, then stay quiet until something moves.
     if (!approvalRow && mode === MODES.DRY_RUN
-      && alreadyRecorded(p.classCode, p.rateDate, 'PLANNED', null, p.priorValue ?? null, p.pushedValue)) {
+      && alreadyRecorded(rateCode, p.classCode, p.rateDate, 'PLANNED', null, p.priorValue ?? null, p.pushedValue)) {
       deduped += 1;
       continue;
     }
@@ -276,6 +301,7 @@ export async function pushArea(config, deps = {}) {
           ...base,
           classCode: p.classCode,
           rateDate: new Date(`${p.rateDate}T00:00:00Z`),
+          rateCode,
           priorValue: p.priorValue ?? null,
           pushedValue: p.pushedValue,
           sourceRateItemId: p.sourceRateItemId || null,
@@ -285,7 +311,7 @@ export async function pushArea(config, deps = {}) {
 
     if (mode === MODES.DRY_RUN) {
       logger.info('[economy-rate-push] DRY RUN would push', {
-        location: externalLocationCode, classCode: p.classCode, rateDate: p.rateDate,
+        location: externalLocationCode, rateCode, classCode: p.classCode, rateDate: p.rateDate,
         from: p.priorValue, to: p.pushedValue,
       });
       continue;
@@ -295,6 +321,7 @@ export async function pushArea(config, deps = {}) {
       await client.applyRateCell(tenantId, {
         provider: config.provider || process.env.ECONOMY_RATE_PUSH_PROVIDER || '61201',
         location: externalLocationCode,
+        rate: rateCode,
         classCode: p.classCode,
         rateDate: p.rateDate,
         dailyValue: p.pushedValue,
@@ -306,6 +333,7 @@ export async function pushArea(config, deps = {}) {
       const back = await client.readRateGrid(tenantId, {
         provider: config.provider || process.env.ECONOMY_RATE_PUSH_PROVIDER || '61201',
         location: externalLocationCode,
+        rate: rateCode,
         startDate: p.rateDate,
       }, deps);
       const readBackValue = back?.grid?.[p.classCode]?.[p.rateDate];
@@ -317,7 +345,7 @@ export async function pushArea(config, deps = {}) {
       });
       if (v.status !== 'VERIFIED') {
         logger.warn('[economy-rate-push] portal claimed success but the value did not land', {
-          location: externalLocationCode, classCode: p.classCode, rateDate: p.rateDate,
+          location: externalLocationCode, rateCode, classCode: p.classCode, rateDate: p.rateDate,
           sent: p.pushedValue, readBack: v.verifiedValue,
         });
       }
@@ -328,12 +356,14 @@ export async function pushArea(config, deps = {}) {
         data: { status: 'FAILED', error: String(err?.message || err) },
       }).catch(() => null);
       logger.error('[economy-rate-push] push failed', {
-        location: externalLocationCode, classCode: p.classCode, rateDate: p.rateDate,
+        location: externalLocationCode, rateCode, classCode: p.classCode, rateDate: p.rateDate,
         message: String(err?.message || err),
       });
     }
   }
+  } // end per-rateCode loop
 
+  results.queued = queued;
   results.deduped = deduped;
   logger.info('[economy-rate-push] area complete', { externalArea: config.externalArea, mode, ...results });
   return { externalArea: config.externalArea, mode, ...results };

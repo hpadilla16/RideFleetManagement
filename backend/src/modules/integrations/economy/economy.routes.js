@@ -593,6 +593,7 @@ economyRouter.get('/rate-push/approvals', asyncHandler(async (req, res) => {
       id: r.id,
       classCode: r.classCode,
       rateDate: r.rateDate,
+      rateCode: r.rateCode || 'STND',
       externalLocationCode: r.externalLocationCode,
       from: r.priorValue == null ? null : Number(r.priorValue),
       to: Number(r.pushedValue),
