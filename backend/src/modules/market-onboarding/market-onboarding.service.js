@@ -116,7 +116,10 @@ export const marketOnboardingService = {
           windowEndDay: w.windowEndDay,
           lorDays: w.lorDays,
           frequency: w.frequency,
-          sources: ['EXPEDIA'],
+          // 2026-07-29: was ['EXPEDIA'] — not a RateSource enum value and not
+          // what the scraper reads. Every live profile runs KAYAK; onboarding
+          // now seeds the same so a newly onboarded airport actually scrapes.
+          sources: ['KAYAK'],
           active: true,
           strategy: 'CHEAPEST_MINUS_AMOUNT',
           strategyAmount: 0,
