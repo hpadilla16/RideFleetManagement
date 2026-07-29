@@ -366,7 +366,7 @@ export const TENANT_TIMEZONE_OPTIONS = [
 export const EMPTY_SERVICE = {
   code: '', name: '', description: '', chargeType: 'UNIT', unitLabel: 'Unit', calculationBy: '24_HOUR_TIME',
   rate: '', dailyRate: '', weeklyRate: '', monthlyRate: '', commissionValueType: '', commissionPercentValue: '', commissionFixedAmount: '', taxable: false, defaultQty: '1', sortOrder: '0',
-  allVehicleTypes: true, vehicleTypeIds: [], displayOnline: false, defaultRencars: false, mandatory: false, coversTolls: false,
+  allVehicleTypes: true, vehicleTypeIds: [], displayOnline: false, defaultRencars: false, mandatory: false, coversTolls: false, tollPassthrough: false,
   displayDescription: '', displayPriority: '0',
   isActive: true, locationId: '', linkedFeeId: ''
 };
