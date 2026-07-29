@@ -35,6 +35,28 @@ function isRezFile(name) {
 }
 
 /**
+ * Join the drop directory and a file name into the remote path we ask the
+ * server for.
+ *
+ * 2026-07-29 (first live NU file): NU's SFTP server resolves a './' prefix to
+ * the DIRECTORY, not the file — `stat('./x.REZ')` came back mode 40777/size 8
+ * while `stat('x.REZ')` and `stat('/x.REZ')` came back mode 100777/size 733,
+ * and `get('./x.REZ')` failed "Permission denied". Since the login already
+ * lands inside the drop folder (NU_SFTP_DIR='.'), the naive `${dir}/${name}`
+ * produced exactly that poisoned path and every sweep silently downloaded
+ * nothing — the file stayed on the server and the run logged fetched: 0.
+ *
+ * A dot/empty dir therefore means "the login directory": emit the BARE name.
+ * Pure + exported for tests.
+ */
+export function remotePath(dir, name) {
+  const d = String(dir ?? '').trim();
+  const base = String(name ?? '');
+  if (!d || d === '.' || d === './') return base;
+  return d.endsWith('/') ? `${d}${base}` : `${d}/${base}`;
+}
+
+/**
  * Connect, run fn(client), always disconnect. `creds` = { username, password }.
  */
 export async function withSftp(creds, fn, opts = {}) {
@@ -84,7 +106,7 @@ export async function drainRezFiles(creds, onFile, opts = {}) {
     let deleted = 0;
     const failures = [];
     for (const entry of entries) {
-      const remote = dir.endsWith('/') ? `${dir}${entry.name}` : `${dir}/${entry.name}`;
+      const remote = remotePath(dir, entry.name);
       try {
         const buf = await client.get(remote);
         const content = Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf);
