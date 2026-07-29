@@ -25,6 +25,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { AuthGate } from '../../../../components/AuthGate';
 import { AppShell } from '../../../../components/AppShell';
 import { api } from '../../../../lib/client';
+import { displayNoteLines, hasDisplayNotes, isRecentNote, relativeNoteAge } from '../../../../lib/reservation-notes';
 import {
   createSession, getSessionByReservation, transition,
   mintTermsToken, mintHandoffToken, abandon,
@@ -789,6 +790,28 @@ function Step1Confirm({ reservation, session, token, onNext }) {
         <KV label="Pickup" value={reservation.pickupAt ? new Date(reservation.pickupAt).toLocaleString() : '—'} />
         <KV label="Return" value={reservation.returnAt ? new Date(reservation.returnAt).toLocaleString() : '—'} />
       </div>
+      {hasDisplayNotes(reservation.notes) && (
+        <div style={{
+          padding: 12, marginBottom: 12,
+          background: 'rgba(110,73,255,.06)', border: '0.5px solid rgba(110,73,255,.35)', borderRadius: 6,
+          color: '#3b2d66', fontSize: 13,
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            📝 Notas de la reservación
+            {isRecentNote(reservation.notesUpdatedAt) && (
+              <span style={{
+                marginLeft: 8, padding: '1px 8px', borderRadius: 999, fontSize: 10,
+                fontWeight: 700, textTransform: 'uppercase', background: '#6d28d9', color: '#fff',
+              }}>
+                Nueva · {relativeNoteAge(reservation.notesUpdatedAt)}
+              </span>
+            )}
+          </div>
+          {displayNoteLines(reservation.notes).map((line, i) => (
+            <div key={i} style={{ marginTop: i === 0 ? 0 : 2 }}>{line}</div>
+          ))}
+        </div>
+      )}
       {reservation.ageRules?.status === 'UNDERAGE_BAND' && (
         <div style={{
           padding: 12, marginBottom: 12,
