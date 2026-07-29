@@ -12,8 +12,33 @@ import { Router } from 'express';
 import { prisma } from '../../../lib/prisma.js';
 import { userAllowedLocationIds, scopeFor as tenantScopeFor } from '../../../lib/tenant-scope.js';
 import { datasetsForRole } from './custom-report-datasets.js';
-import { runCustomReport, resolveDefinition, CustomReportError } from './custom-report.engine.js';
+import {
+  runCustomReport, resolveDefinition, CustomReportError,
+  runCustomReportMulti, validateMultiDefinition, isMultiDefinition, JOINED_ANCHOR_DATASET
+} from './custom-report.engine.js';
 import { renderReportExcel } from '../reports-export.js';
+
+// LAX #14: a multi-mode definition carries its own datasets — run it through
+// the multi engine; classic single-dataset definitions are untouched.
+async function runAny(datasetKey, definition, scope, opts = {}) {
+  return isMultiDefinition(definition)
+    ? runCustomReportMulti(definition, scope, opts)
+    : runCustomReport(String(datasetKey || ''), definition || {}, scope, opts);
+}
+
+function validateAny(datasetKey, definition, role) {
+  if (isMultiDefinition(definition)) return validateMultiDefinition(definition, role);
+  return resolveDefinition(String(datasetKey || ''), definition || {}, role);
+}
+
+/** The `dataset` column value for a multi definition (NOT NULL in the model):
+ * the anchor for JOINED, the first section's dataset for SECTIONS. */
+function datasetColumnFor(definition, fallback) {
+  if (!isMultiDefinition(definition)) return fallback;
+  const mode = String(definition.mode).toUpperCase();
+  if (mode === 'JOINED') return JOINED_ANCHOR_DATASET;
+  return String(definition.sections?.[0]?.dataset || fallback || JOINED_ANCHOR_DATASET);
+}
 
 export const customReportsRouter = Router();
 
@@ -62,7 +87,7 @@ customReportsRouter.get('/datasets', (req, res) => {
 customReportsRouter.post('/run', async (req, res, next) => {
   try {
     const { dataset, definition } = req.body || {};
-    res.json(await runCustomReport(String(dataset || ''), definition || {}, scopeFor(req)));
+    res.json(await runAny(dataset, definition || {}, scopeFor(req)));
   } catch (error) {
     try { sendError(res, error); } catch (e) { next(e); }
   }
@@ -105,15 +130,16 @@ customReportsRouter.post('/', async (req, res, next) => {
     const cleanName = String(name || '').trim();
     if (!cleanName) throw new CustomReportError('Report name is required');
     // Validate against the registry + role BEFORE saving — never store junk.
-    resolveDefinition(String(dataset || ''), definition || {}, scope.role);
+    validateAny(dataset, definition || {}, scope.role);
     const row = await prisma.customReport.create({
       data: {
         tenantId: scope.tenantId,
         ownerUserId: req.user?.id || req.user?.sub || null,
         name: cleanName,
         description: String(description || '').trim() || null,
-        dataset: String(dataset),
+        dataset: datasetColumnFor(definition, String(dataset || '')),
         definition: definition || {},
+        schemaVersion: isMultiDefinition(definition) ? 2 : 1,
         visibility: visibility === 'TENANT' ? 'TENANT' : 'PRIVATE'
       }
     });
@@ -140,7 +166,7 @@ customReportsRouter.post('/:id/run', async (req, res, next) => {
   try {
     const { row, scope } = await getReportOrThrow(req);
     const definition = { ...row.definition, ...(req.body?.range ? { range: req.body.range } : {}) };
-    const out = await runCustomReport(row.dataset, definition, scope);
+    const out = await runAny(row.dataset, definition, scope);
     prisma.customReport.update({ where: { id: row.id }, data: { lastRunAt: new Date() } }).catch(() => {});
     res.json(out);
   } catch (error) { try { sendError(res, error); } catch (e) { next(e); } }
@@ -150,16 +176,22 @@ customReportsRouter.get('/:id/excel', async (req, res, next) => {
   try {
     const { row, scope } = await getReportOrThrow(req);
     const definition = { ...row.definition, ...(req.query?.preset ? { range: { preset: String(req.query.preset) } } : {}) };
-    const out = await runCustomReport(row.dataset, definition, scope, { forExport: true });
+    const out = await runAny(row.dataset, definition, scope, { forExport: true });
     // renderReportExcel returns { buffer, filename } (QA blocker: res.send on
     // the raw object JSON-serialized it into a corrupt .xlsx).
+    const toSheet = (name, result) => ({
+      name: String(name).slice(0, 31) || 'Report', // Excel sheet-name cap
+      columns: result.columns.map((c) => ({ header: c.label, key: c.key })),
+      rows: result.rows.map((r) => Object.fromEntries(result.columns.map((c, i) => [c.key, r[i]])))
+    });
+    // LAX #14: SECTIONS exports one sheet per section (the renderer already
+    // loops spec.sheets); JOINED and classic reports stay single-sheet.
+    const sheets = out.mode === 'sections'
+      ? out.sections.map((section, i) => toSheet(section.label || `Section ${i + 1}`, section))
+      : [toSheet('Report', out)];
     const { buffer } = await renderReportExcel({
       title: row.name,
-      sheets: [{
-        name: 'Report',
-        columns: out.columns.map((c) => ({ header: c.label, key: c.key })),
-        rows: out.rows.map((r) => Object.fromEntries(out.columns.map((c, i) => [c.key, r[i]])))
-      }]
+      sheets
     });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${row.name.replace(/[^a-z0-9-_ ]/gi, '')}.xlsx"`);
@@ -172,15 +204,18 @@ customReportsRouter.put('/:id', async (req, res, next) => {
     const { row, isOwner, isAdmin, scope } = await getReportOrThrow(req);
     if (!isOwner && !isAdmin) throw new CustomReportError('Only the owner or an admin can edit this report', 403);
     const { name, description, definition, visibility, dataset } = req.body || {};
-    const nextDataset = dataset ? String(dataset) : row.dataset;
-    if (definition || dataset) resolveDefinition(nextDataset, definition || row.definition, scope.role);
+    const effectiveDefinition = definition || row.definition;
+    const nextDataset = isMultiDefinition(effectiveDefinition)
+      ? datasetColumnFor(effectiveDefinition, row.dataset)
+      : (dataset ? String(dataset) : row.dataset);
+    if (definition || dataset) validateAny(nextDataset, effectiveDefinition, scope.role);
     const updated = await prisma.customReport.update({
       where: { id: row.id },
       data: {
         ...(name !== undefined ? { name: String(name).trim() } : {}),
         ...(description !== undefined ? { description: String(description).trim() || null } : {}),
-        ...(definition !== undefined ? { definition } : {}),
-        ...(dataset !== undefined ? { dataset: nextDataset } : {}),
+        ...(definition !== undefined ? { definition, schemaVersion: isMultiDefinition(definition) ? 2 : 1 } : {}),
+        ...(definition !== undefined || dataset !== undefined ? { dataset: nextDataset } : {}),
         ...(visibility !== undefined ? { visibility: visibility === 'TENANT' ? 'TENANT' : 'PRIVATE' } : {})
       }
     });

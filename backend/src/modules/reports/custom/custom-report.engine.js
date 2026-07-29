@@ -289,6 +289,10 @@ export async function runCustomReport(datasetKey, definition = {}, scope = {}, o
       hiddenColumns: resolved.hiddenColumns,
       unavailableColumns: resolved.unavailableColumns,
       rows: page.map((row) => columns.map((field) => valueOf(row, field))),
+      // LAX #14 (JOINED mode): the caller needs each row's primary key to
+      // merge per-reservation aggregates. Internal — never serialized to the
+      // client (the routes pass opts without captureIds).
+      ...(opts.captureIds ? { ids: page.map((row) => String(row.id)) } : {}),
       rowCount: page.length,
       truncated
     };
@@ -350,4 +354,164 @@ export async function runCustomReport(datasetKey, definition = {}, scope = {}, o
     scannedRows: page.length,
     truncated
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Multi-dataset reports (2026-07-28, LAX #14). Two tenant-selectable modes:
+//
+//   SECTIONS — N independent sections (each its own dataset/columns/grouping)
+//              sharing ONE date range. Output = one result per section;
+//              Excel = one sheet per section. Zero new query semantics: each
+//              section runs through runCustomReport unchanged, so every
+//              fail-closed property (tenant/location injection, role gates,
+//              caps) holds per section by construction.
+//
+//   JOINED   — ONE table anchored on the `reservations` dataset, with
+//              per-reservation AGGREGATES (count / sums) appended from
+//              datasets that declare `reservationJoin` in the registry
+//              (tolls, citations, incidents). Aggregating to the anchor grain
+//              avoids row multiplication; a reservation with no rows in a
+//              joined dataset shows 0.
+//
+// Single-dataset (schemaVersion 1) definitions are untouched — the routes
+// branch on definition.mode.
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const MAX_SECTIONS = 5;
+export const JOINED_ANCHOR_DATASET = 'reservations';
+
+export const MULTI_MODES = Object.freeze(['SECTIONS', 'JOINED']);
+
+export function isMultiDefinition(definition) {
+  return MULTI_MODES.includes(String(definition?.mode || '').toUpperCase());
+}
+
+/** Validate the joins array against the registry + runner role. Pure. */
+function resolveJoins(definition, role) {
+  const rawJoins = Array.isArray(definition.joins) ? definition.joins : [];
+  if (!rawJoins.length) throw new CustomReportError('Pick at least one dataset to join');
+  const joins = [];
+  for (const raw of rawJoins) {
+    const key = String(raw?.dataset || '');
+    const ds = CUSTOM_REPORT_DATASETS[key];
+    if (!ds || !ds.reservationJoin) throw new CustomReportError(`Dataset "${key}" cannot be joined by reservation`);
+    const dsRoles = ds.rolesDataset || STAFF_ROLES;
+    if (!dsRoles.includes(role)) throw new CustomReportError(`Dataset "${ds.label}" is not available for your role`, 403);
+    const requested = Array.isArray(raw.metrics) && raw.metrics.length ? raw.metrics.map(String) : ['count'];
+    const metrics = [];
+    for (const metricKey of requested) {
+      const metric = ds.reservationJoin.metrics.find((m) => m.key === metricKey);
+      if (!metric) throw new CustomReportError(`Unknown metric "${metricKey}" for "${key}"`);
+      if ((metric.roles || MONEY_ROLES).includes(role)) metrics.push(metric);
+      // Role-hidden metrics are silently dropped (mirrors hiddenColumns).
+    }
+    if (!metrics.length) throw new CustomReportError(`No metrics from "${ds.label}" are available for your role`, 403);
+    joins.push({ key, ds, metrics });
+  }
+  return joins;
+}
+
+/**
+ * Validation-only pass for create/update routes (no queries). Throws
+ * CustomReportError on a bad multi definition; returns the normalized mode.
+ */
+export function validateMultiDefinition(definition = {}, role) {
+  const mode = String(definition?.mode || '').toUpperCase();
+  if (mode === 'SECTIONS') {
+    const sections = Array.isArray(definition.sections) ? definition.sections : [];
+    if (!sections.length) throw new CustomReportError('Add at least one section');
+    if (sections.length > MAX_SECTIONS) throw new CustomReportError(`Reports are limited to ${MAX_SECTIONS} sections`);
+    for (const section of sections) {
+      resolveDefinition(String(section?.dataset || ''), { ...section, range: definition.range }, role);
+    }
+    return mode;
+  }
+  if (mode === 'JOINED') {
+    if (definition.groupBy?.field) throw new CustomReportError('Joined reports are flat — remove the grouping');
+    resolveDefinition(JOINED_ANCHOR_DATASET, { ...definition.anchor, range: definition.range }, role);
+    resolveJoins(definition, role);
+    return mode;
+  }
+  throw new CustomReportError(`Unknown report mode "${definition?.mode}"`);
+}
+
+export async function runCustomReportMulti(definition = {}, scope = {}, opts = {}) {
+  const mode = String(definition?.mode || '').toUpperCase();
+  const role = scope.role;
+
+  if (mode === 'SECTIONS') {
+    const sections = Array.isArray(definition.sections) ? definition.sections : [];
+    if (!sections.length) throw new CustomReportError('Add at least one section');
+    if (sections.length > MAX_SECTIONS) throw new CustomReportError(`Reports are limited to ${MAX_SECTIONS} sections`);
+    const results = [];
+    for (const section of sections) {
+      const datasetKey = String(section?.dataset || '');
+      const ds = CUSTOM_REPORT_DATASETS[datasetKey];
+      const result = await runCustomReport(datasetKey, { ...section, range: definition.range }, scope, opts);
+      results.push({ dataset: datasetKey, label: ds?.label || datasetKey, ...result });
+    }
+    return { mode: 'sections', tz: results[0]?.tz || null, range: results[0]?.range || null, sections: results };
+  }
+
+  if (mode === 'JOINED') {
+    if (definition.groupBy?.field) throw new CustomReportError('Joined reports are flat — remove the grouping');
+    const joins = resolveJoins(definition, role);
+
+    const anchor = await runCustomReport(
+      JOINED_ANCHOR_DATASET,
+      { ...definition.anchor, range: definition.range },
+      scope,
+      { ...opts, captureIds: true }
+    );
+    const ids = anchor.ids || [];
+
+    const joinColumns = [];
+    const perJoinValues = []; // aligned with joinColumns: Map<reservationId, number>
+    for (const { key, ds, metrics } of joins) {
+      const sumColumns = metrics.filter((m) => m.fn === 'sum').map((m) => m.column);
+      const grouped = ids.length
+        ? await prisma[ds.model].groupBy({
+            by: [ds.reservationJoin.field],
+            where: {
+              AND: [
+                ds.tenantPath ? nestedWhere(ds.tenantPath, scope.tenantId) : { tenantId: scope.tenantId },
+                ...(Object.keys(ds.baseWhere || {}).length ? [ds.baseWhere] : []),
+                ...(ds.reservationJoin.baseWhere ? [ds.reservationJoin.baseWhere] : []),
+                { [ds.reservationJoin.field]: { in: ids } },
+              ],
+            },
+            _count: { _all: true },
+            ...(sumColumns.length ? { _sum: Object.fromEntries(sumColumns.map((c) => [c, true])) } : {}),
+          })
+        : [];
+      const byReservation = new Map(grouped.map((g) => [String(g[ds.reservationJoin.field]), g]));
+      for (const metric of metrics) {
+        joinColumns.push({
+          key: `${key}_${metric.key}`,
+          label: metric.label,
+          type: metric.fn === 'count' ? 'number' : (metric.type || 'money'),
+        });
+        perJoinValues.push({
+          valueFor: (reservationId) => {
+            const g = byReservation.get(String(reservationId));
+            if (!g) return 0;
+            if (metric.fn === 'count') return g._count?._all || 0;
+            const n = Number(g._sum?.[metric.column] ?? 0);
+            return Number.isFinite(n) ? Number(n.toFixed(2)) : 0;
+          },
+        });
+      }
+    }
+
+    const { ids: _ids, ...anchorPublic } = anchor;
+    return {
+      ...anchorPublic,
+      mode: 'flat',
+      joined: joins.map(({ key, ds }) => ({ dataset: key, label: ds.label })),
+      columns: [...anchor.columns, ...joinColumns],
+      rows: anchor.rows.map((row, i) => [...row, ...perJoinValues.map((j) => j.valueFor(ids[i]))]),
+    };
+  }
+
+  throw new CustomReportError(`Unknown report mode "${definition?.mode}"`);
 }

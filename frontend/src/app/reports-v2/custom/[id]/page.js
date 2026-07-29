@@ -25,6 +25,25 @@ function cell(value, type) {
   return String(value);
 }
 
+/** One result table (flat or grouped) — shared by the classic view and the
+ * stacked sections (LAX #14). */
+function ResultTable({ result }) {
+  if (!result?.rows?.length) return <div className="surface-note" style={{ margin: '8px 0' }}>No data in range.</div>;
+  return (
+    <table>
+      <thead><tr>{result.columns.map((c) => <th key={c.key} style={['money', 'number'].includes(c.type) ? { textAlign: 'right' } : {}}>{c.label}</th>)}</tr></thead>
+      <tbody>
+        {result.rows.map((row, i) => (
+          <tr key={i}>{row.map((v, j) => <td key={j} style={['money', 'number'].includes(result.columns[j].type) ? { textAlign: 'right', fontVariantNumeric: 'tabular-nums' } : {}}>{cell(v, result.columns[j].type)}</td>)}</tr>
+        ))}
+        {result.mode === 'grouped' && result.totals ? (
+          <tr style={{ fontWeight: 700 }}>{result.totals.map((v, j) => <td key={j} style={j > 0 ? { textAlign: 'right' } : {}}>{j === 0 ? v : cell(v, result.columns[j]?.type)}</td>)}</tr>
+        ) : null}
+      </tbody>
+    </table>
+  );
+}
+
 function SavedReport({ me, token, logout }) {
   const { id } = useParams();
   const router = useRouter();
@@ -58,6 +77,16 @@ function SavedReport({ me, token, logout }) {
   const summary = useMemo(() => {
     if (!report) return '';
     const def = report.definition || {};
+    const mode = String(def.mode || '').toUpperCase();
+    // LAX #14 — multi-mode summaries.
+    if (mode === 'SECTIONS') {
+      const names = (def.sections || []).map((s) => s.dataset).join(' + ');
+      return [`Sections: ${names}`, def.range?.preset ? def.range.preset.replace('_', ' ').toLowerCase() : null].filter(Boolean).join(' · ');
+    }
+    if (mode === 'JOINED') {
+      const names = (def.joins || []).map((j) => j.dataset).join(' + ');
+      return [`Reservations combined with ${names}`, def.range?.preset ? def.range.preset.replace('_', ' ').toLowerCase() : null].filter(Boolean).join(' · ');
+    }
     const parts = [report.dataset.charAt(0).toUpperCase() + report.dataset.slice(1)];
     if (def.range?.preset) parts.push(def.range.preset.replace('_', ' ').toLowerCase());
     if (def.groupBy?.field) parts.push(`grouped by ${def.groupBy.bucket || def.groupBy.field}`);
@@ -145,20 +174,23 @@ function SavedReport({ me, token, logout }) {
         <div className="glass card" style={{ padding: 0 }}>
           <div style={{ padding: '0 16px 14px', overflowX: 'auto' }}>
             {loading ? <div className="surface-note" style={{ margin: 16 }}>Loading…</div>
-              : result && result.rows.length ? (
-                <table>
-                  <thead><tr>{result.columns.map((c) => <th key={c.key} style={['money', 'number'].includes(c.type) ? { textAlign: 'right' } : {}}>{c.label}</th>)}</tr></thead>
-                  <tbody>
-                    {result.rows.map((row, i) => (
-                      <tr key={i}>{row.map((v, j) => <td key={j} style={['money', 'number'].includes(result.columns[j].type) ? { textAlign: 'right', fontVariantNumeric: 'tabular-nums' } : {}}>{cell(v, result.columns[j].type)}</td>)}</tr>
-                    ))}
-                    {result.mode === 'grouped' && result.totals ? (
-                      <tr style={{ fontWeight: 700 }}>{result.totals.map((v, j) => <td key={j} style={j > 0 ? { textAlign: 'right' } : {}}>{j === 0 ? v : cell(v, result.columns[j]?.type)}</td>)}</tr>
-                    ) : null}
-                  </tbody>
-                </table>
+              : result?.mode === 'sections' ? (
+                // LAX #14 — stacked sections, one table each.
+                result.sections.map((section, si) => (
+                  <div key={si} style={{ marginTop: 14 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                      {section.label}
+                      <span className="label" style={{ textTransform: 'none', marginLeft: 8 }}>
+                        {section.rowCount} row{section.rowCount === 1 ? '' : 's'}{section.truncated ? ' (truncated — export for all)' : ''}
+                      </span>
+                    </div>
+                    <ResultTable result={section} />
+                  </div>
+                ))
+              ) : result && result.rows.length ? (
+                <ResultTable result={result} />
               ) : <div className="surface-note" style={{ margin: 16 }}>No data matches — try another range.</div>}
-            {result?.truncated ? (
+            {result?.mode !== 'sections' && result?.truncated ? (
               <div className="label" style={{ textTransform: 'none', padding: '8px 2px', ...(result.mode === 'grouped' ? { color: '#92600a', fontWeight: 600 } : {}) }}>
                 {result.mode === 'grouped'
                   ? '⚠ Totals are incomplete — over 5,000 rows matched. Narrow the range for accurate numbers.'
