@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 process.env.INTEGRATION_ENC_KEY = crypto.randomBytes(32).toString('base64');
 
 const { parseRateGrid, headerToIsoDate, toPortalDate } = await import('./economy-rate-client.js');
-const { dateWindow, pushArea, MODES } = await import('./economy-rate-push.service.js');
+const { dateWindow, pushArea, MODES, pushRateCodes } = await import('./economy-rate-push.service.js');
 
 // A faithful slice of the real display-grid HTML (recon 2026-07-28).
 function gridHtml(rows) {
@@ -58,7 +58,7 @@ test('dateWindow: contiguous iso days from the start', () => {
 // ---------------------------------------------------------------------------
 // Orchestration harness
 // ---------------------------------------------------------------------------
-function makeDeps({ portalRows, rfmRates, mode, applyImpl, approvals }) {
+function makeDeps({ portalRows, rfmRates, mode, applyImpl, approvals, rateCodes }) {
   const logs = [];
   const prismaStub = {
     ratePushLog: {
@@ -71,6 +71,7 @@ function makeDeps({ portalRows, rfmRates, mode, applyImpl, approvals }) {
           return (approvals || []).map((a, i) => ({
             id: `appr-${i}`, classCode: a.classCode,
             rateDate: new Date(`${a.rateDate}T00:00:00Z`), pushedValue: a.pushedValue,
+            rateCode: a.rateCode || 'STND',
           }));
         }
         return logs.filter((l) => l.rateDate).map((l) => ({
@@ -78,11 +79,13 @@ function makeDeps({ portalRows, rfmRates, mode, applyImpl, approvals }) {
           rateDate: l.rateDate instanceof Date ? l.rateDate : new Date(`${l.rateDate}T00:00:00Z`),
           status: l.status, skipReason: l.skipReason || null,
           priorValue: l.priorValue ?? null, pushedValue: l.pushedValue ?? null,
+          rateCode: l.rateCode || 'STND',
         }));
       },
       findFirst: async ({ where }) => logs.find((l) => (
         l.status === 'PENDING_APPROVAL'
         && l.classCode === where.classCode
+        && (!where.rateCode || (l.rateCode || 'STND') === where.rateCode)
         && new Date(l.rateDate).toISOString().slice(0, 10) === new Date(where.rateDate).toISOString().slice(0, 10)
       )) || null,
       create: async ({ data }) => { const row = { id: `log-${logs.length}`, ...data }; logs.push(row); return row; },
@@ -111,6 +114,9 @@ function makeDeps({ portalRows, rfmRates, mode, applyImpl, approvals }) {
       now: () => new Date('2027-03-15T12:00:00Z'),
       horizonDays: 3,
       loadRfmRates: async () => rfmRates,
+      // Single-rate by default so the pre-existing single-tier expectations
+      // hold; the multi-tier behavior has its own tests below.
+      rateCodes: rateCodes || ['STND'],
     },
   };
 }
@@ -374,4 +380,60 @@ test('but a CHANGED portal price is still recorded (real history is never lost)'
   ]));
   await pushArea(CONFIG, setup.deps);
   assert.ok(setup.logs.length > afterFirst, 'the changed cell produced a new row');
+});
+
+// ---------------------------------------------------------------------------
+// LAX #2 — every LOR rate plan updates, not just STND
+// ---------------------------------------------------------------------------
+test('pushRateCodes: defaults to all 8 LOR tiers, env-overridable', () => {
+  const prev = process.env.ECONOMY_RATE_PUSH_RATE_CODES;
+  delete process.env.ECONOMY_RATE_PUSH_RATE_CODES;
+  assert.deepEqual(pushRateCodes(), ['1TO2', '3DYS', '4DYS', '5DYS', '6DYS', '7DYS', '8DYS', 'STND']);
+  process.env.ECONOMY_RATE_PUSH_RATE_CODES = 'STND, 3dys';
+  assert.deepEqual(pushRateCodes(), ['STND', '3DYS']);
+  if (prev === undefined) delete process.env.ECONOMY_RATE_PUSH_RATE_CODES;
+  else process.env.ECONOMY_RATE_PUSH_RATE_CODES = prev;
+});
+
+test('LIVE multi-tier: each rate code gets its own read, write and verified log row', async () => {
+  const { deps, calls, logs } = makeDeps({
+    portalRows: [{ cls: 'CCAR', values: ['15.00', '15.00', '15.00'] }],
+    rfmRates: [{ classCode: 'CCAR', daily: 20 }],
+    mode: MODES.LIVE,
+    rateCodes: ['STND', '3DYS'],
+  });
+  // A faithful portal double: reads reflect what was WRITTEN to that tier, so
+  // the verify read-back can actually verify (each tier has its own cells).
+  const written = new Set();
+  deps.client.applyRateCell = async (_t, args) => {
+    calls.applied.push(args);
+    written.add(`${args.rate}|${args.rateDate}`);
+    return { claimedSuccess: true };
+  };
+  deps.client.readRateGrid = async (_t, args) => parseRateGrid(gridHtml([{
+    cls: 'CCAR',
+    values: ['2027-03-15', '2027-03-16', '2027-03-17'].map((d) => (written.has(`${args.rate}|${d}`) ? '20.00' : '15.00')),
+  }]));
+  const out = await pushArea(CONFIG, deps);
+  // 3-day horizon = 1 read chunk per rate code + 1 verify read per write.
+  const writtenRates = calls.applied.map((a) => a.rate).sort();
+  assert.deepEqual([...new Set(writtenRates)], ['3DYS', 'STND'], 'both tiers written');
+  assert.equal(calls.applied.length, 6, '3 dates x 2 tiers');
+  assert.equal(out.verified, 6, 'every write verified per tier');
+  const rateCodesInLog = new Set(logs.filter((l) => l.status === 'VERIFIED').map((l) => l.rateCode));
+  assert.deepEqual([...rateCodesInLog].sort(), ['3DYS', 'STND'], 'log rows carry the tier');
+});
+
+test('multi-tier dedup: identical decisions for DIFFERENT tiers are both recorded (no cross-tier collision)', async () => {
+  const { deps, logs } = makeDeps({
+    portalRows: [{ cls: 'CCAR', values: ['15.00', '15.00', '15.00'] }],
+    rfmRates: [{ classCode: 'CCAR', daily: 20 }],
+    mode: MODES.DRY_RUN,
+    rateCodes: ['STND', '3DYS'],
+  });
+  await pushArea(CONFIG, deps);
+  const planned = logs.filter((l) => l.status === 'PLANNED');
+  const byRate = new Set(planned.map((l) => l.rateCode));
+  assert.deepEqual([...byRate].sort(), ['3DYS', 'STND'], 'both tiers planned despite identical values');
+  assert.equal(planned.length, 6, '3 dates x 2 tiers planned');
 });

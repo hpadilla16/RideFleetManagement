@@ -4466,6 +4466,11 @@ model RatePushLog {
   classCode  String // ACRISS as the PORTAL knows it
   rateDate   DateTime @db.Date // the grid column this value belongs to
   plan       String   @default("DY") // DY | WY | MY | HY | ED
+  // 2026-07-28 (LAX #2): the portal prices PER RATE PLAN (LOR tier — 1TO2,
+  // 3DYS … STND) and ALL must update, so the audit key carries the rate code.
+  // Default STND is historically correct: every pre-fix write targeted STND
+  // only (that was the bug).
+  rateCode   String   @default("STND")
 
   priorValue  Decimal? @db.Decimal(10, 2) // what the portal showed before
   pushedValue Decimal  @db.Decimal(10, 2) // what RFM wrote
