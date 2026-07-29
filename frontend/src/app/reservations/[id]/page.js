@@ -1507,8 +1507,7 @@ function ReservationDetailInner({ token, me, logout }) {
     // insurance, DL photo included. The form is seeded from the customer, so
     // validating it validates the MERGED state; the photo requirement is also
     // satisfied by an already-uploaded photo (hasIdPhoto).
-    const probe = { ...f, idPhotoUrl: f.idPhotoUrl || (row?.customer?.hasIdPhoto ? 'on-file' : '') };
-    const missing = missingRequiredCustomerFields(probe);
+    const missing = missingRequiredCustomerFields(f);
     if (missing.length) {
       setMsg(`Required before completing pre-check-in: ${missing.map((k) => CUSTOMER_FIELD_LABELS[k] || k).join(', ')}`);
       return;
@@ -3001,7 +3000,7 @@ token
                       <div className="stack"><label className="label">Insurance Exp Date</label><input type="date" value={staffCheckinForm.insuranceExpiry} onChange={(e) => setStaffCheckinForm((p) => ({ ...p, insuranceExpiry: e.target.value }))} /></div>
                     </div>
                     <div className="grid2" style={{ gap: 8, marginBottom: 10 }}>
-                      <div className="stack"><label className="label">ID / License Photo*</label><input type="file" accept="image/*,.pdf" onChange={(e) => handleStaffFileUpload('idPhotoUrl', e.target.files?.[0])} />{staffCheckinForm.idPhotoUrl ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>Uploaded</span> : (row?.customer?.hasIdPhoto ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>On file</span> : null)}</div>
+                      <div className="stack"><label className="label">ID / License Photo</label><input type="file" accept="image/*,.pdf" onChange={(e) => handleStaffFileUpload('idPhotoUrl', e.target.files?.[0])} />{staffCheckinForm.idPhotoUrl ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>Uploaded</span> : (row?.customer?.hasIdPhoto ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>On file</span> : null)}</div>
                       <div className="stack"><label className="label">License (Back)</label><input type="file" accept="image/*,.pdf" onChange={(e) => handleStaffFileUpload('licenseBackUrl', e.target.files?.[0])} />{staffCheckinForm.licenseBackUrl ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>Uploaded</span> : (row?.customer?.hasLicenseBack ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>On file</span> : null)}</div>
                       <div className="stack"><label className="label">Insurance Document</label><input type="file" accept="image/*,.pdf" onChange={(e) => handleStaffFileUpload('insuranceDocumentUrl', e.target.files?.[0])} />{staffCheckinForm.insuranceDocumentUrl ? <span style={{ fontSize: '0.8rem', color: '#166534' }}>Uploaded</span> : null}</div>
                     </div>
