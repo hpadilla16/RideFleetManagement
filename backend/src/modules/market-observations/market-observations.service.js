@@ -86,6 +86,19 @@ export async function listMarketAirports({ scope }) {
 }
 
 /**
+ * Providers we do NOT offer as filter chips (Hector, 2026-07-29).
+ *   hertz       — a rental AGENCY quoting direct, not a booking site; it already
+ *                 appears on the agency ladder, so filtering "by Hertz" mixes
+ *                 the two axes.
+ *   booking.com — real OTA but negligible volume here (~7 quotes/day at SJU vs
+ *                 Priceline's 258), so the chip mostly yields an empty screen.
+ * Hiding a chip never hides the DATA: these rows still count toward the market
+ * and toward suggested prices, and ?providers=Hertz still works if called
+ * directly. This is only which shortcuts we put in front of staff.
+ */
+const HIDDEN_FILTER_PROVIDERS = new Set(['hertz', 'booking.com']);
+
+/**
  * GET /api/market/providers?airport=SJU
  *
  * Distinct OTAs quoting at this airport over the last 7 days, cheapest-count
@@ -126,7 +139,7 @@ export async function listMarketProviders({ airport, scope }) {
   });
   const providers = grouped
     .map((g) => ({ name: g.provider, count: g._count._all }))
-    .filter((g) => g.name)
+    .filter((g) => g.name && !HIDDEN_FILTER_PROVIDERS.has(g.name.trim().toLowerCase()))
     .sort((a, b) => b.count - a.count);
   return { airport: String(airport).toUpperCase(), providers };
 }
