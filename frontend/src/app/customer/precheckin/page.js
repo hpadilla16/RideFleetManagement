@@ -306,7 +306,6 @@ export default function PrecheckinPage() {
     ['state', 'State'],
     ['zip', 'ZIP'],
     ['country', 'Country'],
-    ['idPhotoUrl', 'ID / License Photo'],
     ...(customerSelectedOurInsurance ? [] : [['insuranceDocumentUrl', 'Insurance Document']])
   ];
   const missingRequiredFields = precheckinRequiredFields

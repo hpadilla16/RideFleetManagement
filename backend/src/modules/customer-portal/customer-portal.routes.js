@@ -1356,7 +1356,6 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
       ['state', String(body.state || '').trim(), 'State'],
       ['zip', String(body.zip || '').trim(), 'ZIP'],
       ['country', String(body.country || '').trim(), 'Country'],
-      ['idPhotoUrl', String(body.idPhotoUrl || '').trim(), 'ID / License Photo'],
       ...(customerSelectedOurInsurance ? [] : [['insuranceDocumentUrl', String(body.insuranceDocumentUrl || '').trim(), 'Insurance Document']])
     ];
     const missing = requiredChecks.filter(([, value]) => !value).map(([, , label]) => label);

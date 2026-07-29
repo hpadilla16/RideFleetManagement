@@ -23,7 +23,8 @@ export const REQUIRED_CUSTOMER_FIELDS = Object.freeze([
   'state',
   'zip',
   'country',
-  'idPhotoUrl',
+  // idPhotoUrl was required 2026-07-28, OPTIONAL again 2026-07-29 (Hector).
+  // Keep the label below — the field is still captured and displayed.
 ]);
 
 export const CUSTOMER_FIELD_LABELS = Object.freeze({

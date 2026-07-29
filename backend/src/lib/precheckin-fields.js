@@ -28,11 +28,14 @@ export const REQUIRED_CUSTOMER_FIELDS = Object.freeze([
   'state',
   'zip',
   'country',
-  'idPhotoUrl', // the DL photo — mandatory per Hector
+  // idPhotoUrl (the ID/DL photo) was required 2026-07-28 and made OPTIONAL
+  // again 2026-07-29 at Hector's request. Still captured, still shown in the
+  // staff checklist and documents panel — just no longer blocking.
 ]);
 
 export const OPTIONAL_CUSTOMER_FIELDS = Object.freeze([
   'address2',
+  'idPhotoUrl',
   'insurancePolicyNumber',
   'insuranceExpiry',
   'insuranceDocumentUrl',
