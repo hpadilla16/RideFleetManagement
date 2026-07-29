@@ -219,7 +219,15 @@ export const CUSTOM_REPORT_DATASETS = {
       fa('createdAt', 'Imported date', 'Dates', 'date')
     ],
     filterableKeys: ['status', 'billingStatus', 'needsReview'],
-    groupByKeys: ['status', 'billingStatus', 'location']
+    groupByKeys: ['status', 'billingStatus', 'location'],
+    // LAX #14 — JOINED mode: per-reservation aggregates. Sums are money-gated.
+    reservationJoin: {
+      field: 'reservationId',
+      metrics: [
+        { key: 'count', label: 'Tolls (count)', fn: 'count', roles: STAFF_ROLES },
+        { key: 'amount', label: 'Tolls total $', fn: 'sum', column: 'amount', type: 'money', roles: MONEY_ROLES }
+      ]
+    }
   },
 
   citations: {
@@ -247,7 +255,15 @@ export const CUSTOM_REPORT_DATASETS = {
       fa('reservationNumber', 'Reservation #', 'Rental', 'string', { path: 'reservation.reservationNumber', select: { reservation: { select: { reservationNumber: true } } } })
     ],
     filterableKeys: ['status', 'billingStatus', 'agency'],
-    groupByKeys: ['agency', 'status', 'billingStatus', 'violationType']
+    groupByKeys: ['agency', 'status', 'billingStatus', 'violationType'],
+    reservationJoin: {
+      field: 'reservationId',
+      metrics: [
+        { key: 'count', label: 'Citations (count)', fn: 'count', roles: STAFF_ROLES },
+        { key: 'amount', label: 'Citations total $', fn: 'sum', column: 'amount', type: 'money', roles: MONEY_ROLES },
+        { key: 'fee', label: 'Citation fees $', fn: 'sum', column: 'fee', type: 'money', roles: MONEY_ROLES }
+      ]
+    }
   },
 
   commissions: {
@@ -327,7 +343,18 @@ export const CUSTOM_REPORT_DATASETS = {
       fa('reservationNumber', 'Reservation #', 'Rental', 'string', { path: 'reservation.reservationNumber', select: { reservation: { select: { reservationNumber: true } } } })
     ],
     filterableKeys: ['type', 'status', 'severity'],
-    groupByKeys: ['type', 'status', 'severity']
+    groupByKeys: ['type', 'status', 'severity'],
+    reservationJoin: {
+      field: 'reservationId',
+      // TripIncident has no own tenantId — the groupBy where uses tenantPath,
+      // same as the main query. reservationId is nullable on this model, so
+      // exclude orphans from the aggregate.
+      baseWhere: { reservationId: { not: null } },
+      metrics: [
+        { key: 'count', label: 'Incidents (count)', fn: 'count', roles: STAFF_ROLES },
+        { key: 'amountClaimed', label: 'Incident claims $', fn: 'sum', column: 'amountClaimed', type: 'money', roles: MONEY_ROLES }
+      ]
+    }
   }
 };
 
@@ -347,7 +374,15 @@ export function datasetsForRole(role) {
       requiredDateFilter: ds.requiredDateFilter,
       fields: fields.map(({ key, label, group, type }) => ({ key, label, group, type })),
       filterableKeys: ds.filterableKeys.filter((k) => fields.some((fl) => fl.key === k)),
-      groupByKeys: ds.groupByKeys.filter((k) => fields.some((fl) => fl.key === k))
+      groupByKeys: ds.groupByKeys.filter((k) => fields.some((fl) => fl.key === k)),
+      // LAX #14 — joinable-by-reservation metadata (metrics filtered to role).
+      ...(ds.reservationJoin ? {
+        reservationJoin: {
+          metrics: ds.reservationJoin.metrics
+            .filter((m) => (m.roles || MONEY_ROLES).includes(role))
+            .map(({ key, label, fn }) => ({ key, label, fn }))
+        }
+      } : {})
     });
   }
   return out;
