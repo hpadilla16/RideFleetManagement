@@ -308,6 +308,7 @@ function Inner({ token, me, logout }) {
                   <button type="button" className="cd-act b-conf" disabled={busy === 'CONFIRM'} onClick={() => review('CONFIRM')}>Confirm</button>
                   <button type="button" className="cd-act b-disp" disabled={busy === 'DISPUTE'} onClick={() => review('DISPUTE')}>Dispute</button>
                   <button type="button" className="cd-act b-void" disabled={busy === 'VOID'} onClick={() => review('VOID')}>Void</button>
+                  <button type="button" className="cd-act" disabled={busy === 'CLOSE'} onClick={() => review('CLOSE')} title="Close — resolved, moves to Archive (posted charges stay)">Close</button>
                   {status !== 'NEEDS_REVIEW' ? (
                     <button type="button" className="cd-act" disabled={busy === 'REJECT'} onClick={() => review('REJECT')} title="Undo — back to Needs Review">Undo</button>
                   ) : null}

@@ -78,6 +78,8 @@ function CitationsInner({ token, me, logout }) {
   const [sourceFilter, setSourceFilter] = useState('');
   const [plateFilter, setPlateFilter] = useState('');
   const [reviewOnly, setReviewOnly] = useState(false);
+  // LAX #11: 'working' (default, VOID/CLOSED excluded server-side) | 'archive'.
+  const [view, setView] = useState('working');
   const [importForm, setImportForm] = useState(EMPTY_IMPORT);
   const [showImport, setShowImport] = useState(false);
   const [busyId, setBusyId] = useState('');
@@ -110,6 +112,7 @@ function CitationsInner({ token, me, logout }) {
       }
       const params = new URLSearchParams();
       params.set('pageSize', '200');
+      params.set('view', view);
       if (statusFilter) params.set('status', statusFilter);
       else if (reviewOnly) params.set('status', 'NEEDS_REVIEW');
       if (sourceFilter) params.set('source', sourceFilter);
@@ -124,11 +127,11 @@ function CitationsInner({ token, me, logout }) {
 
   useEffect(() => { loadTenants(); }, [token, isSuper]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { load(); }, [token, statusFilter, sourceFilter, reviewOnly, activeTenantId, isSuper]);
+  useEffect(() => { load(); }, [token, statusFilter, sourceFilter, reviewOnly, activeTenantId, isSuper, view]);
 
   const rows = useMemo(() => (Array.isArray(data?.rows) ? data.rows : []), [data]);
   const kpis = useMemo(() => {
-    const open = rows.filter((r) => !['VOID', 'PAID', 'CLOSED'].includes(String(r.status).toUpperCase()));
+    const open = rows.filter((r) => !['VOID', 'CLOSED'].includes(String(r.status).toUpperCase()));
     return {
       total: Number(data?.total || rows.length),
       review: rows.filter((r) => String(r.status).toUpperCase() === 'NEEDS_REVIEW').length,
@@ -138,7 +141,7 @@ function CitationsInner({ token, me, logout }) {
   }, [rows, data]);
 
   const review = async (row, decision) => {
-    const note = decision === 'DISPUTE' || decision === 'VOID'
+    const note = decision === 'DISPUTE' || decision === 'VOID' || decision === 'CLOSE'
       ? (window.prompt(`Optional note for ${decision}`, '') || '')
       : '';
     try {
@@ -278,16 +281,35 @@ function CitationsInner({ token, me, logout }) {
 
         <div className="glass card section-card">
           <div className="row-between" style={{ flexWrap: 'wrap', gap: 8 }}>
-            <div className="section-title">Citations</div>
+            <div className="section-title" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              Citations
+              {/* LAX #11: working vs archive (VOID + CLOSED) */}
+              <button
+                type="button"
+                className={view === 'working' ? '' : 'button-subtle'}
+                style={{ fontSize: '0.8rem', padding: '4px 12px' }}
+                onClick={() => { setView('working'); setStatusFilter(''); }}
+              >
+                Working
+              </button>
+              <button
+                type="button"
+                className={view === 'archive' ? '' : 'button-subtle'}
+                style={{ fontSize: '0.8rem', padding: '4px 12px' }}
+                onClick={() => { setView('archive'); setStatusFilter(''); setReviewOnly(false); }}
+              >
+                Archive
+              </button>
+            </div>
             <div className="inline-actions" style={{ flexWrap: 'wrap', gap: 6 }}>
               <input placeholder="Plate (exact)" style={{ minWidth: 130 }} value={plateFilter} onChange={(e) => setPlateFilter(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') load(); }} />
               <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-                <option value="">All statuses</option>
+                <option value="">{view === 'archive' ? 'All archived' : 'All working'}</option>
                 <option value="NEEDS_REVIEW">Needs Review</option>
                 <option value="MATCHED">Matched</option>
                 <option value="DISPUTED">Disputed</option>
                 <option value="BILLED">Billed</option>
-                <option value="PAID">Paid</option>
+                <option value="CLOSED">Closed</option>
                 <option value="VOID">Void</option>
               </select>
               <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)}>
@@ -425,15 +447,23 @@ function CitationsInner({ token, me, logout }) {
                     <td onClick={stop}>
                       <span className={`status-chip ${STATUS_TONE[status] || 'neutral'}`}>{status.replace('_', ' ')}</span>
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 }}>
-                        {status !== 'MATCHED' ? (
-                          <button type="button" style={{ fontSize: '0.74rem', padding: '3px 8px' }} onClick={() => review(r, 'CONFIRM')} disabled={busyId === `CONFIRM-${r.id}`}>Confirm</button>
-                        ) : null}
-                        {status !== 'DISPUTED' ? (
-                          <button type="button" className="button-subtle" style={{ fontSize: '0.74rem', padding: '3px 8px' }} onClick={() => review(r, 'DISPUTE')} disabled={busyId === `DISPUTE-${r.id}`}>Dispute</button>
-                        ) : null}
-                        {status !== 'NEEDS_REVIEW' ? (
-                          <button type="button" className="button-subtle" style={{ fontSize: '0.74rem', padding: '3px 8px' }} onClick={() => review(r, 'REJECT')} disabled={busyId === `REJECT-${r.id}`} title="Undo — back to Needs Review">Undo</button>
-                        ) : null}
+                        {view === 'archive' ? (
+                          // Archived rows: only the way back (REJECT → Needs Review).
+                          <button type="button" className="button-subtle" style={{ fontSize: '0.74rem', padding: '3px 8px' }} onClick={() => review(r, 'REJECT')} disabled={busyId === `REJECT-${r.id}`} title="Unarchive — back to Needs Review">Unarchive</button>
+                        ) : (
+                          <>
+                            {status !== 'MATCHED' ? (
+                              <button type="button" style={{ fontSize: '0.74rem', padding: '3px 8px' }} onClick={() => review(r, 'CONFIRM')} disabled={busyId === `CONFIRM-${r.id}`}>Confirm</button>
+                            ) : null}
+                            {status !== 'DISPUTED' ? (
+                              <button type="button" className="button-subtle" style={{ fontSize: '0.74rem', padding: '3px 8px' }} onClick={() => review(r, 'DISPUTE')} disabled={busyId === `DISPUTE-${r.id}`}>Dispute</button>
+                            ) : null}
+                            <button type="button" className="button-subtle" style={{ fontSize: '0.74rem', padding: '3px 8px' }} onClick={() => review(r, 'CLOSE')} disabled={busyId === `CLOSE-${r.id}`} title="Close — resolved, moves to Archive">Close</button>
+                            {status !== 'NEEDS_REVIEW' ? (
+                              <button type="button" className="button-subtle" style={{ fontSize: '0.74rem', padding: '3px 8px' }} onClick={() => review(r, 'REJECT')} disabled={busyId === `REJECT-${r.id}`} title="Undo — back to Needs Review">Undo</button>
+                            ) : null}
+                          </>
+                        )}
                         <a href={`/citations/${r.id}`} style={{ fontSize: '0.72rem', color: '#6e49ff', alignSelf: 'center' }}>View</a>
                       </div>
                     </td>

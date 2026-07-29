@@ -454,6 +454,10 @@ enum CitationStatus {
   BILLED
   DISPUTED
   VOID
+  // 2026-07-28 (LAX #11) — terminal "resolved/paid" state. Together with VOID
+  // it forms the ARCHIVE set: out of the working list, visible in the Archive
+  // tab. The frontend status-tone map had CLOSED for months; now it's real.
+  CLOSED
 }
 
 enum CitationBillingStatus {

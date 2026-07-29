@@ -262,7 +262,17 @@ async function findMatchingReservation(tenantId, vehicleId, issuedAt) {
 }
 
 // Statuses we will NOT overwrite on re-ingest (human/billing decisions are sticky).
-const STICKY = new Set(['BILLED', 'DISPUTED', 'VOID']);
+const STICKY = new Set(['BILLED', 'DISPUTED', 'VOID', 'CLOSED']);
+
+// 2026-07-28 (LAX #11) — the ARCHIVE set: terminal citations kept OUT of the
+// working list and shown in the Archive tab instead. Single source of truth —
+// the list default, the dashboard "outstanding" calc and the frontend KPI all
+// key off this pair (they had drifted into three different inline arrays).
+export const ARCHIVED_CITATION_STATUSES = Object.freeze(['VOID', 'CLOSED']);
+
+const VALID_CITATION_STATUSES = new Set([
+  'IMPORTED', 'MATCHED', 'NEEDS_REVIEW', 'BILLED', 'DISPUTED', 'VOID', 'CLOSED',
+]);
 
 export const citationsService = {
   normalizePlate,
@@ -449,7 +459,20 @@ export const citationsService = {
     if (filters.plate) where.plateNormalized = normalizePlate(filters.plate);
     if (filters.plateState) where.plateState = String(filters.plateState).toUpperCase();
     if (filters.source && VALID_SOURCES.has(filters.source)) where.source = filters.source;
-    if (filters.status) where.status = filters.status;
+    // LAX #11 — view split. Default = the WORKING list (archive statuses
+    // excluded); view=archive = only VOID/CLOSED. An explicit VALID status
+    // filter always wins over the view default (picking "Void" in the
+    // dropdown still works from either tab). Invalid status values are
+    // ignored instead of reaching Prisma (the old UI offered "PAID", which
+    // the enum rejects with a 500).
+    const status = filters.status && VALID_CITATION_STATUSES.has(String(filters.status)) ? String(filters.status) : null;
+    if (status) {
+      where.status = status;
+    } else if (String(filters.view || '') === 'archive') {
+      where.status = { in: [...ARCHIVED_CITATION_STATUSES] };
+    } else {
+      where.status = { notIn: [...ARCHIVED_CITATION_STATUSES] };
+    }
     if (filters.citationNo) where.citationNo = { contains: String(filters.citationNo), mode: 'insensitive' };
     if (filters.agency) where.agency = { contains: String(filters.agency), mode: 'insensitive' };
     if (filters.from || filters.to) {
@@ -541,7 +564,8 @@ export const citationsService = {
     const [needsReview, open] = await Promise.all([
       prisma.citation.count({ where: { ...where, status: 'NEEDS_REVIEW' } }),
       prisma.citation.findMany({
-        where: { ...where, status: { notIn: ['VOID', 'DISPUTED'] } },
+        // LAX #11: CLOSED joins VOID as "not outstanding" (resolved money).
+        where: { ...where, status: { notIn: [...ARCHIVED_CITATION_STATUSES, 'DISPUTED'] } },
         select: { amount: true, fee: true },
       }),
     ]);
@@ -638,7 +662,11 @@ export const citationsService = {
       err.status = 404;
       throw err;
     }
-    const map = { CONFIRM: 'MATCHED', REJECT: 'NEEDS_REVIEW', DISPUTE: 'DISPUTED', VOID: 'VOID' };
+    // LAX #11: CLOSE archives a resolved citation (with VOID it forms the
+    // archive set). Unlike VOID, closing does NOT prune a posted charge —
+    // syncCitationCharges keeps CLOSED billable, so money already on the
+    // reservation stays. REJECT doubles as "unarchive" (back to review).
+    const map = { CONFIRM: 'MATCHED', REJECT: 'NEEDS_REVIEW', DISPUTE: 'DISPUTED', VOID: 'VOID', CLOSE: 'CLOSED' };
     const next = map[decision];
     if (!next) throw new Error('invalid decision');
     const updated = await prisma.citation.update({
