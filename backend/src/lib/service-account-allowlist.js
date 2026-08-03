@@ -111,6 +111,11 @@ const ALLOWED = [
   ['PUT', '/api/reservations/:id/additional-drivers'],
   ['GET', '/api/reservations/:id/available-services'],
   ['POST', '/api/reservations/:id/send-detail-email'],
+  // 2026-08-03 (Hector) — the console emails the customer a copy of their
+  // rental agreement (PDF, async 202). Non-money; the route's service-account
+  // branch requires author+ticketId and strips payload.to (on-file recipient
+  // only, same policy as send-request-email/send-detail-email).
+  ['POST', '/api/rental-agreements/:id/email-agreement'],
   ['PATCH', '/api/customers/:id'],
   // S28 mini W-D bis (Hector, 2026-07-19) — video assist del kiosk: el agente
   // completa el pre-check-in POR el cliente desde el workspace. El route exige

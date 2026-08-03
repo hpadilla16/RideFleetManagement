@@ -284,6 +284,21 @@ test('W-D: reprice-preview, reschedule, extend, drivers, services, detail-email 
   allowed('PATCH', '/api/customers/cus123');
 });
 
+// ── 2026-08-03 (Hector) — agreement copy by email ───────────────────────────
+
+test('email-agreement is allowed; its dangerous neighbors stay denied', () => {
+  allowed('POST', '/api/rental-agreements/AGR-1/email-agreement');
+  // The rest of the agreement surface stays humans-only: signing, status
+  // transitions, closing, charge-line rewrites — none of these ride in on the
+  // new entry (exact-path matching, no prefix bleed).
+  denied('POST', '/api/rental-agreements/AGR-1/signature');
+  denied('POST', '/api/rental-agreements/AGR-1/status');
+  denied('POST', '/api/rental-agreements/AGR-1/close');
+  denied('POST', '/api/rental-agreements/AGR-1/charges');
+  denied('GET', '/api/rental-agreements/AGR-1/print');
+  denied('POST', '/api/rental-agreements/AGR-1/email-agreement/extra');
+});
+
 test('W-D: adjacent surfaces stay denied', () => {
   denied('DELETE', '/api/reservations/abc123/extension/ch1'); // extension revert = humans
   denied('DELETE', '/api/reservations/abc123/additional-drivers');
