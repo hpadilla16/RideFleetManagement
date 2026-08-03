@@ -206,6 +206,17 @@ async function main() {
     });
   }
 
+  // Disk-space watchdog (2026-08-03). The droplet once hit 0 bytes free and
+  // the only symptom users saw was "Failed to fetch" — with EMPTY logs, since
+  // the server could not write them. Warn to Sentry while there is still room.
+  try {
+    const diskMod = await import('./modules/ops/disk-space.scheduler.js');
+    diskMod.startDiskCheckScheduler();
+    logger.info('[worker] started: disk-space watchdog');
+  } catch (err) {
+    logger.warn('[worker] disk-space watchdog not started', { message: err.message });
+  }
+
   // Delayed post-check-in email sweep (2026-07-28, LAX #8). Locations with
   // checkinEmailDelayHours defer the receipt/invoice email at checkin-close;
   // this sweep delivers due ones (column-deduped, receipt-vs-invoice decided
@@ -357,6 +368,10 @@ async function main() {
     try {
       const ltBillingMod = await import('./modules/long-term/long-term-billing.scheduler.js');
       ltBillingMod.stopLongTermBillingScheduler();
+    } catch {}
+    try {
+      const diskMod = await import('./modules/ops/disk-space.scheduler.js');
+      diskMod.stopDiskCheckScheduler();
     } catch {}
     try {
       const checkinEmailMod = await import('./modules/rental-agreements/checkin-email.scheduler.js');
