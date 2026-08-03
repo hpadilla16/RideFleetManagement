@@ -170,6 +170,13 @@ tollsRouter.post('/transactions/:id/acknowledge', async (req, res, next) => {
  * Defaults to a DRY RUN: it reports what it would confirm and writes nothing.
  * Pass `apply: true` to commit. Manual holds are still respected, so a toll a
  * human parked stays parked.
+ *
+ * BOUNDED PER CALL. Measured in production at ~70ms per toll, so the full
+ * 3,532-row backlog is ~4 minutes — far past any sane proxy timeout. One call
+ * therefore processes `maxRows` (default 250, ~18s) and returns
+ * `truncated: true` when rows remain. Call again until it comes back false.
+ * A bounded run must never be mistaken for a finished one, which is exactly
+ * what the old silent `take: 500` got wrong.
  */
 tollsRouter.post('/rematch-backfill', requireRole('ADMIN', 'SUPER_ADMIN'), rejectLocationScopedUsers, async (req, res, next) => {
   try {
@@ -179,7 +186,7 @@ tollsRouter.post('/rematch-backfill', requireRole('ADMIN', 'SUPER_ADMIN'), rejec
     const result = await tollsService.rematchTenant(scope.tenantId, {
       ignoreWindow: true,
       since: body.since || null,
-      maxRows: Number.isFinite(Number(body.maxRows)) ? Math.min(20000, Math.max(1, Number(body.maxRows))) : 5000,
+      maxRows: Number.isFinite(Number(body.maxRows)) ? Math.min(2000, Math.max(1, Number(body.maxRows))) : 250,
       dryRun: body.apply !== true,
     });
     res.json(result);
