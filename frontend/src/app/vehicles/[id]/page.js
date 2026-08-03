@@ -38,6 +38,90 @@ function formatDateTime(value) {
   return date.toLocaleString();
 }
 
+/**
+ * Turn-Ready breakdown — "why this unit scores N".
+ *
+ * Renders the backend's `breakdown` verbatim: one row per rule that fired,
+ * each with its own signed delta and, when the backend had one, the evidence
+ * behind it. The list is deliberately NOT filtered or capped — the whole point
+ * is that the column adds up to the score, and a hidden row breaks that.
+ * The reconciliation notice below only ever appears if the API and the
+ * arithmetic disagree, which would be a backend bug worth seeing.
+ */
+function evidenceLine(evidence) {
+  if (!evidence) return null;
+  switch (evidence.type) {
+    case 'inspection': {
+      const when = evidence.at ? formatDateTime(evidence.at) : null;
+      const photos = evidence.photosRequired
+        ? `${evidence.photosCaptured}/${evidence.photosRequired} photos`
+        : null;
+      return [evidence.phase, when, photos].filter(Boolean).join(' · ') || null;
+    }
+    case 'telematics':
+      return evidence.at ? `last signal ${formatDateTime(evidence.at)}` : null;
+    case 'availabilityBlock':
+      return [blockTypeLabel(evidence.blockType), evidence.endAt ? `until ${formatDateTime(evidence.endAt)}` : null]
+        .filter(Boolean).join(' · ') || null;
+    case 'document':
+      return evidence.expiresAt ? `registration expires ${formatDateTime(evidence.expiresAt)}` : null;
+    case 'serviceSchedule':
+      return [evidence.serviceType, evidence.nextDueMiles != null ? `due at ${evidence.nextDueMiles} mi` : null,
+        evidence.nextDueAt ? `due ${formatDateTime(evidence.nextDueAt)}` : null].filter(Boolean).join(' · ') || null;
+    default:
+      return null;
+  }
+}
+
+function TurnReadyBreakdown({ turnReady }) {
+  const rows = Array.isArray(turnReady?.breakdown) ? turnReady.breakdown : [];
+  if (!rows.length) {
+    return (
+      <p className="ui-muted" style={{ marginTop: 12 }}>
+        This vehicle has not been scored yet, so there is nothing to explain.
+      </p>
+    );
+  }
+  const sum = rows.reduce((total, row) => total + Number(row.delta || 0), 0);
+  const reconciles = sum === Number(turnReady.score);
+  const toneFor = (row) => {
+    if (row.kind === 'base') return 'tr-pts--base';
+    if (row.kind === 'clamp') return 'tr-pts--clamp';
+    return Number(row.delta) === 0 ? 'tr-pts--ok' : 'tr-pts--down';
+  };
+  return (
+    <div className="tr-rows">
+      {rows.map((row, index) => {
+        const evidence = evidenceLine(row.evidence);
+        return (
+          <div className="tr-row" key={`${row.key}-${index}`}>
+            <span className="tr-ic" aria-hidden="true">
+              {row.kind === 'base' ? '=' : Number(row.delta) === 0 ? '✓' : row.kind === 'clamp' ? '↑' : '−'}
+            </span>
+            <span>
+              <b>{row.label}</b>
+              <small>{row.detail}</small>
+              {evidence ? <span className="tr-ev">{evidence}</span> : null}
+            </span>
+            <span className={`tr-pts ${toneFor(row)}`}>
+              {row.kind === 'base' ? row.delta : Number(row.delta) === 0 ? '0' : row.delta > 0 ? `+${row.delta}` : row.delta}
+            </span>
+          </div>
+        );
+      })}
+      <div className="tr-total">
+        <span className="tr-total-label">Turn-Ready</span>
+        <span className="tr-total-value">{turnReady.score}</span>
+      </div>
+      <p className="tr-foot">
+        {reconciles
+          ? 'Every point above traces to a recorded event. Weights are configured per tenant.'
+          : `These lines total ${sum}, but the API reported ${turnReady.score}. Report this — the breakdown is supposed to reconcile.`}
+      </p>
+    </div>
+  );
+}
+
 function reservationCustomerName(reservation) {
   return [reservation?.customer?.firstName, reservation?.customer?.lastName].filter(Boolean).join(' ') || reservation?.customer?.email || '-';
 }
@@ -1583,13 +1667,6 @@ function VehicleProfileInner({ token, me, logout }) {
                     ))}
                   </div>
                 ) : null}
-                {operationalSignals?.turnReady?.reasons?.length ? (
-                  <div className="timeline-list" style={{ marginTop: 12 }}>
-                    {operationalSignals.turnReady.reasons.map((reason) => (
-                      <div key={reason} className="surface-note">{reason}</div>
-                    ))}
-                  </div>
-                ) : null}
                 {operationalSignals?.turnReady?.blockers?.length ? (
                   <div className="timeline-list" style={{ marginTop: 12 }}>
                     {operationalSignals.turnReady.blockers.map((reason) => (
@@ -1597,6 +1674,12 @@ function VehicleProfileInner({ token, me, logout }) {
                     ))}
                   </div>
                 ) : null}
+                {/* 2026-08-03: the prose `reasons` list used to live here. It is
+                    deduped and capped at 4, so it could not be reconciled with
+                    the score; the breakdown below carries every line WITH its
+                    points. Blockers stay above — they are a call to action, not
+                    an explanation. */}
+                <TurnReadyBreakdown turnReady={operationalSignals?.turnReady} />
                 {operationalSignals?.telematics?.alerts?.length ? (
                   <div className="timeline-list" style={{ marginTop: 12 }}>
                     {operationalSignals.telematics.alerts.map((reason) => (
