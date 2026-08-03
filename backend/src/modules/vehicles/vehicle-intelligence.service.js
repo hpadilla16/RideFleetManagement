@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { DEFAULT_TURN_READY_RULES, parseStoredTurnReadyRules } from '../../lib/turn-ready-rules.js';
 import { prisma } from '../../lib/prisma.js';
 import { canonicalPhotoKey } from '../rental-agreements/inspection-photos-normalize.js';
 
@@ -343,106 +344,249 @@ export function buildTelematicsSummary({ device = null, event = null, featureEna
   };
 }
 
-export function buildTurnReadyScore({ inspection = null, telematics = null, activeBlock = null }) {
-  let score = 100;
+/**
+ * Turn-Ready score.
+ *
+ * Every rule contributes exactly ONE labelled line to `breakdown`, carrying its
+ * own signed point value and whatever evidence was in scope when it fired. The
+ * lines sum to the score — `sum(delta) === rawScore` — and when the 0..100
+ * clamp bites it becomes its own visible line rather than a silent difference.
+ * That is what makes the score explainable instead of merely numeric.
+ *
+ * `reasons` and `blockers` keep their historical shape (deduped prose, capped
+ * at 4 and 3) because the vehicle profile, issues centre and planner all render
+ * them today. They are a SUMMARY view — the complete, untruncated list is
+ * `breakdown`, and anything that needs to add up must read that.
+ *
+ * `rules` comes from the tenant's TurnReadyRuleSet; omitted, it is the frozen
+ * default set that reproduces the pre-2026-08-03 formula exactly.
+ */
+export function buildTurnReadyScore({
+  inspection = null,
+  telematics = null,
+  activeBlock = null,
+  documents = null,
+  maintenance = null,
+} = {}, rules = DEFAULT_TURN_READY_RULES) {
+  const r = rules && typeof rules === 'object' ? rules : DEFAULT_TURN_READY_RULES;
+  const weight = (key) => {
+    const v = Number(r[key]);
+    return Number.isFinite(v) ? v : Number(DEFAULT_TURN_READY_RULES[key]) || 0;
+  };
+
+  const breakdown = [{
+    key: 'baseline',
+    label: 'Unit baseline',
+    detail: 'Every unit starts at 100 and drops on evidence.',
+    delta: 100,
+    kind: 'base',
+  }];
   const reasons = [];
   const blockers = [];
+
+  // One rule firing = one line. `points` is a magnitude; the sign is applied
+  // here so a mis-signed config cannot hand a vehicle free points.
+  // `silent` = the rule deducted points but never contributed prose. Only
+  // inspectionAttention is silent, and it must stay that way: adding a reason
+  // would shift the slice(0, 4) window and change what every existing screen
+  // displays today.
+  const deduct = (key, label, detail, points, { evidence = null, blocking = false, silent = false } = {}) => {
+    const magnitude = Math.max(0, Math.round(Number(points) || 0));
+    breakdown.push({
+      key,
+      label,
+      detail,
+      // `-magnitude` on a zeroed-out weight yields -0, which is not strictly
+      // equal to 0 and would quietly break any comparison downstream.
+      delta: magnitude === 0 ? 0 : -magnitude,
+      kind: magnitude === 0 ? 'ok' : 'down',
+      ...(evidence ? { evidence } : {}),
+    });
+    if (silent) return;
+    if (blocking) blockers.push(detail);
+    else reasons.push(detail);
+  };
+
   const blockType = String(activeBlock?.blockType || '').toUpperCase();
+  const blockEvidence = activeBlock
+    ? { type: 'availabilityBlock', blockType, startAt: activeBlock.startAt ?? null, endAt: activeBlock.endAt ?? null }
+    : null;
 
   if (blockType === 'WASH_HOLD') {
-    score -= 35;
-    reasons.push('Vehicle is currently inside a planned wash and turnaround buffer.');
+    deduct('blockWashHold', 'Wash hold', 'Vehicle is currently inside a planned wash and turnaround buffer.', weight('blockWashHold'), { evidence: blockEvidence });
   } else if (blockType === 'MAINTENANCE_HOLD') {
-    score -= 75;
-    blockers.push('Vehicle is blocked for scheduled maintenance right now.');
+    deduct('blockMaintenanceHold', 'Maintenance hold', 'Vehicle is blocked for scheduled maintenance right now.', weight('blockMaintenanceHold'), { evidence: blockEvidence, blocking: true });
   } else if (blockType === 'OUT_OF_SERVICE_HOLD') {
-    score -= 85;
-    blockers.push('Vehicle is marked out of service and should not be dispatched.');
+    deduct('blockOutOfService', 'Out of service', 'Vehicle is marked out of service and should not be dispatched.', weight('blockOutOfService'), { evidence: blockEvidence, blocking: true });
   } else if (blockType === 'MIGRATION_HOLD') {
-    score -= 70;
-    blockers.push('Vehicle is still protected by a migration hold and is not dispatchable yet.');
+    deduct('blockMigrationHold', 'Migration hold', 'Vehicle is still protected by a migration hold and is not dispatchable yet.', weight('blockMigrationHold'), { evidence: blockEvidence, blocking: true });
   }
 
+  const inspectionEvidence = inspection
+    ? {
+        type: 'inspection',
+        phase: inspection.latestPhase ?? null,
+        at: inspection.latestAt ?? null,
+        photosCaptured: Number(inspection?.photoCoverage?.captured || 0),
+        photosRequired: Number(inspection?.photoCoverage?.required || 0),
+      }
+    : null;
+
   if (inspection?.status === 'NO_DATA') {
-    score -= 25;
-    reasons.push('No recent inspection is on file for this vehicle.');
+    deduct('inspectionMissing', 'Inspection', 'No recent inspection is on file for this vehicle.', weight('inspectionMissing'), { evidence: inspectionEvidence });
   } else if (inspection?.status === 'ATTENTION') {
-    score -= 28;
+    deduct('inspectionAttention', 'Inspection', 'Latest inspection needs review before the next turn.', weight('inspectionAttention'), { evidence: inspectionEvidence, silent: true });
+
     const missingPhotos = Math.max(0, Number(inspection?.photoCoverage?.required || 0) - Number(inspection?.photoCoverage?.captured || 0));
     if (missingPhotos > 0) {
-      score -= Math.min(18, missingPhotos * 3);
-      reasons.push(`Latest inspection is missing ${missingPhotos} required photo(s).`);
+      const points = Math.min(weight('inspectionMissingPhotoCap'), missingPhotos * weight('inspectionMissingPhotoEach'));
+      deduct('inspectionMissingPhotos', 'Photo coverage', `Latest inspection is missing ${missingPhotos} required photo(s).`, points, { evidence: inspectionEvidence });
     }
-    if (Number(inspection?.conditionAttentionCount || 0) > 0) {
-      score -= Math.min(18, Number(inspection.conditionAttentionCount) * 6);
-      reasons.push(`Latest inspection has ${inspection.conditionAttentionCount} condition flag(s) to review.`);
+
+    const conditionFlags = Number(inspection?.conditionAttentionCount || 0);
+    if (conditionFlags > 0) {
+      const points = Math.min(weight('inspectionConditionFlagCap'), conditionFlags * weight('inspectionConditionFlagEach'));
+      deduct('inspectionConditionFlags', 'Condition flags', `Latest inspection has ${conditionFlags} condition flag(s) to review.`, points, { evidence: inspectionEvidence });
     }
+
     if (inspection?.damageReported) {
-      score -= 16;
-      blockers.push('Latest inspection reported damage that still needs review before dispatch.');
+      deduct('inspectionDamageReported', 'Open damage', 'Latest inspection reported damage that still needs review before dispatch.', weight('inspectionDamageReported'), { evidence: inspectionEvidence, blocking: true });
     }
-    if (String(inspection?.damageTriage?.severity || '').toUpperCase() === 'HIGH') {
-      score -= 25;
-      blockers.push('Damage triage marked this vehicle as high-risk based on the latest inspection.');
-    } else if (String(inspection?.damageTriage?.severity || '').toUpperCase() === 'MEDIUM') {
-      score -= 10;
-      reasons.push('Damage triage suggests moderate review before the next turn.');
+
+    const severity = String(inspection?.damageTriage?.severity || '').toUpperCase();
+    if (severity === 'HIGH') {
+      deduct('damageTriageHigh', 'Damage triage', 'Damage triage marked this vehicle as high-risk based on the latest inspection.', weight('damageTriageHigh'), { evidence: inspectionEvidence, blocking: true });
+    } else if (severity === 'MEDIUM') {
+      deduct('damageTriageMedium', 'Damage triage', 'Damage triage suggests moderate review before the next turn.', weight('damageTriageMedium'), { evidence: inspectionEvidence });
     }
   }
+
+  const telematicsEvidence = telematics ? { type: 'telematics', at: telematics.lastEventAt ?? null } : null;
 
   switch (String(telematics?.status || '').toUpperCase()) {
     case 'NO_DEVICE':
-      score -= 8;
-      reasons.push('No telematics device is linked to this vehicle.');
+      deduct('telematicsNoDevice', 'Telematics', 'No telematics device is linked to this vehicle.', weight('telematicsNoDevice'), { evidence: telematicsEvidence });
       break;
     case 'NO_SIGNAL':
-      score -= 14;
-      reasons.push('Telematics device is linked but has not reported a signal yet.');
+      deduct('telematicsNoSignal', 'Telematics', 'Telematics device is linked but has not reported a signal yet.', weight('telematicsNoSignal'), { evidence: telematicsEvidence });
       break;
     case 'STALE':
-      score -= 10;
-      reasons.push('Telematics feed has gone stale and should be checked.');
+      deduct('telematicsStale', 'Telematics', 'Telematics feed has gone stale and should be checked.', weight('telematicsStale'), { evidence: telematicsEvidence });
       break;
     case 'OFFLINE':
-      score -= 18;
-      reasons.push('Telematics feed appears offline.');
+      deduct('telematicsOffline', 'Telematics', 'Telematics feed appears offline.', weight('telematicsOffline'), { evidence: telematicsEvidence });
       break;
     default:
       break;
   }
 
+  const fuelLabel = telematics?.fuelPct == null ? 'Fuel' : `Fuel ${Math.round(Number(telematics.fuelPct))}%`;
   switch (String(telematics?.fuelStatus || '').toUpperCase()) {
     case 'CRITICAL':
-      score -= 20;
-      reasons.push('Fuel level is critically low for the next assignment.');
+      deduct('fuelCritical', fuelLabel, 'Fuel level is critically low for the next assignment.', weight('fuelCritical'), { evidence: telematicsEvidence });
       break;
     case 'LOW':
-      score -= 10;
-      reasons.push('Fuel level is low and may need attention before dispatch.');
+      deduct('fuelLow', fuelLabel, 'Fuel level is low and may need attention before dispatch.', weight('fuelLow'), { evidence: telematicsEvidence });
       break;
     default:
       break;
   }
 
-  if (String(telematics?.gpsStatus || '').toUpperCase() === 'MISSING' && ['ONLINE', 'STALE'].includes(String(telematics?.status || '').toUpperCase())) {
-    score -= 8;
-    reasons.push('Latest telematics update is missing GPS coordinates.');
+  const feedLive = ['ONLINE', 'STALE'].includes(String(telematics?.status || '').toUpperCase());
+  if (String(telematics?.gpsStatus || '').toUpperCase() === 'MISSING' && feedLive) {
+    deduct('gpsMissing', 'GPS', 'Latest telematics update is missing GPS coordinates.', weight('gpsMissing'), { evidence: telematicsEvidence });
   }
-  if (String(telematics?.odometerStatus || '').toUpperCase() === 'MISSING' && ['ONLINE', 'STALE'].includes(String(telematics?.status || '').toUpperCase())) {
-    score -= 6;
-    reasons.push('Latest telematics update is missing odometer data.');
+  if (String(telematics?.odometerStatus || '').toUpperCase() === 'MISSING' && feedLive) {
+    deduct('odometerMissing', 'Odometer', 'Latest telematics update is missing odometer data.', weight('odometerMissing'), { evidence: telematicsEvidence });
   }
   if (String(telematics?.batteryStatus || '').toUpperCase() === 'LOW') {
-    score -= 6;
-    reasons.push('Telematics battery is low.');
+    deduct('batteryLow', 'Battery', 'Telematics battery is low.', weight('batteryLow'), { evidence: telematicsEvidence });
   }
 
-  const finalScore = clampScore(score);
+  // ── Factors added 2026-08-03. Both OFF by default: enabling them lowers the
+  // score of every unit that already has an expiring registration or an
+  // approaching service, so it is the tenant's call, not ours.
+  if (r.documentsEnabled) {
+    const expiresAt = documents?.registrationExpiresAt ? new Date(documents.registrationExpiresAt) : null;
+    const now = documents?.now ? new Date(documents.now) : new Date();
+    if (expiresAt && !Number.isNaN(expiresAt.getTime())) {
+      const days = Math.floor((expiresAt.getTime() - now.getTime()) / 86400000);
+      const evidence = { type: 'document', document: 'registration', expiresAt: expiresAt.toISOString(), daysRemaining: days };
+      if (days < 0) {
+        deduct('documentsExpired', 'Documents', `Registration expired ${Math.abs(days)} day(s) ago.`, weight('documentsExpired'), { evidence });
+      } else if (days <= weight('documentsExpiringWithinDays')) {
+        deduct('documentsExpiringSoon', 'Documents', `Registration expires in ${days} day(s).`, weight('documentsExpiringSoon'), { evidence });
+      } else {
+        breakdown.push({
+          key: 'documentsOk',
+          label: 'Documents',
+          detail: `Registration current · expires in ${days} day(s).`,
+          delta: 0,
+          kind: 'ok',
+          evidence,
+        });
+      }
+    }
+  }
+
+  if (r.maintenanceDueEnabled && maintenance) {
+    const milesRemaining = maintenance.milesRemaining == null ? null : Number(maintenance.milesRemaining);
+    const daysRemaining = maintenance.daysRemaining == null ? null : Number(maintenance.daysRemaining);
+    const has = (v) => v != null && Number.isFinite(v);
+    if (has(milesRemaining) || has(daysRemaining)) {
+      const evidence = {
+        type: 'serviceSchedule',
+        serviceType: maintenance.serviceType ?? null,
+        nextDueMiles: maintenance.nextDueMiles ?? null,
+        nextDueAt: maintenance.nextDueAt ?? null,
+        milesRemaining: has(milesRemaining) ? milesRemaining : null,
+        daysRemaining: has(daysRemaining) ? daysRemaining : null,
+      };
+      const overdue = (has(milesRemaining) && milesRemaining < 0) || (has(daysRemaining) && daysRemaining < 0);
+      const soon = (has(milesRemaining) && milesRemaining <= weight('maintenanceDueSoonWithinMiles'))
+        || (has(daysRemaining) && daysRemaining <= weight('maintenanceDueSoonWithinDays'));
+      // Prefer the mileage phrasing when we have it — that is how shops talk.
+      const detailSuffix = has(milesRemaining)
+        ? `${Math.abs(milesRemaining)} mi`
+        : `${Math.abs(daysRemaining)} day(s)`;
+      if (overdue) {
+        deduct('maintenanceOverdue', 'Maintenance', `Service overdue by ${detailSuffix}.`, weight('maintenanceOverdue'), { evidence });
+      } else if (soon) {
+        deduct('maintenanceDueSoon', 'Maintenance', `Next service in ${detailSuffix}.`, weight('maintenanceDueSoon'), { evidence });
+      } else {
+        breakdown.push({
+          key: 'maintenanceOk',
+          label: 'Maintenance',
+          detail: `Current · next service in ${detailSuffix}.`,
+          delta: 0,
+          kind: 'ok',
+          evidence,
+        });
+      }
+    }
+  }
+
+  const rawScore = breakdown.reduce((sum, row) => sum + row.delta, 0);
+  const finalScore = clampScore(rawScore);
+  // The clamp is a real adjustment, so it gets a real line. Without this the
+  // column would not add up for any vehicle deep enough in the hole.
+  if (finalScore !== rawScore) {
+    breakdown.push({
+      key: 'clamp',
+      label: 'Floor',
+      detail: `Score cannot go below 0 — ${rawScore} raised to ${finalScore}.`,
+      delta: finalScore - rawScore,
+      kind: 'clamp',
+    });
+  }
+
+  const readyAt = Number(r.readyThreshold ?? DEFAULT_TURN_READY_RULES.readyThreshold);
+  const watchAt = Number(r.watchThreshold ?? DEFAULT_TURN_READY_RULES.watchThreshold);
   const status = blockers.length
     ? 'BLOCKED'
-    : finalScore >= 85
+    : finalScore >= readyAt
       ? 'READY'
-      : finalScore >= 65
+      : finalScore >= watchAt
         ? 'WATCH'
         : 'ATTENTION';
 
@@ -457,21 +601,24 @@ export function buildTurnReadyScore({ inspection = null, telematics = null, acti
   return {
     score: finalScore,
     status,
+    // Legacy summary views — deduped and capped, as they have always been.
+    // `breakdown` is the complete list; anything that must add up reads that.
     reasons: [...new Set(reasons)].slice(0, 4),
     blockers: [...new Set(blockers)].slice(0, 3),
+    breakdown,
     activeBlockType: blockType || null,
     activeBlockLabel: activeBlock ? activeBlockLabel(blockType) : null,
     summary
   };
 }
 
-export function buildVehicleOperationalSignals({ latestAgreement = null, latestEvent = null, activeDevice = null, activeBlock = null, telematicsFeatureEnabled = true }) {
+export function buildVehicleOperationalSignals({ latestAgreement = null, latestEvent = null, activeDevice = null, activeBlock = null, telematicsFeatureEnabled = true, rules = DEFAULT_TURN_READY_RULES, documents = null, maintenance = null }) {
   const inspection = buildInspectionIntelligence({
     checkout: latestAgreement?.checkoutInspection || null,
     checkin: latestAgreement?.checkinInspection || null
   });
   const telematics = buildTelematicsSummary({ device: activeDevice, event: latestEvent, featureEnabled: telematicsFeatureEnabled });
-  const turnReady = buildTurnReadyScore({ inspection, telematics, activeBlock });
+  const turnReady = buildTurnReadyScore({ inspection, telematics, activeBlock, documents, maintenance }, rules);
 
   const attentionReasons = [];
   if (turnReady.status !== 'READY') attentionReasons.push(turnReady.summary);
@@ -486,6 +633,31 @@ export function buildVehicleOperationalSignals({ latestAgreement = null, latestE
     telematics,
     turnReady
   };
+}
+
+/**
+ * Tenant Turn-Ready rules, resolved defensively.
+ *
+ * Scoring must never be able to take the planner down. A missing row, a
+ * corrupt payload, or a Prisma client that predates the TurnReadyRuleSet model
+ * (which is exactly what a rolling deploy looks like for the few seconds
+ * before the new client lands) all degrade to the frozen defaults instead of
+ * throwing — and the defaults reproduce the formula that shipped before this
+ * table existed, so degrading changes nothing a user would notice.
+ */
+async function resolveTurnReadyRules(scope = {}) {
+  if (!scope?.tenantId || !prisma?.turnReadyRuleSet?.findUnique) {
+    return { ...DEFAULT_TURN_READY_RULES };
+  }
+  try {
+    const row = await prisma.turnReadyRuleSet.findUnique({
+      where: { tenantId: scope.tenantId },
+      select: { rulesJson: true }
+    });
+    return parseStoredTurnReadyRules(row?.rulesJson);
+  } catch {
+    return { ...DEFAULT_TURN_READY_RULES };
+  }
 }
 
 export async function buildVehicleOperationalSignalsMap(vehicleIds = [], scope = {}, options = {}) {
@@ -647,6 +819,64 @@ export async function buildVehicleOperationalSignalsMap(vehicleIds = [], scope =
     latestEventByVehicleId.set(event.vehicleId, event);
   }
 
+  // Tenant scoring rules (2026-08-03). Callers may pass them in to avoid a
+  // per-call lookup; otherwise resolve once for the whole batch.
+  const rules = options?.rules || await resolveTurnReadyRules(scope);
+
+  // The document and maintenance factors are opt-in, so their queries are too.
+  // This function has a history of timing out on over-fetching (see the
+  // DISTINCT ON note above) — a tenant that has not enabled these pays nothing.
+  const documentsByVehicleId = new Map();
+  const maintenanceByVehicleId = new Map();
+  const now = options?.now ? new Date(options.now) : new Date();
+
+  if (rules.documentsEnabled || rules.maintenanceDueEnabled) {
+    const vehicleRows = await prisma.vehicle.findMany({
+      where: { id: { in: ids }, ...tenantFilter },
+      select: { id: true, mileage: true, registrationExpiresAt: true }
+    });
+    const mileageByVehicleId = new Map(vehicleRows.map((v) => [v.id, Number(v.mileage || 0)]));
+
+    if (rules.documentsEnabled) {
+      for (const v of vehicleRows) {
+        documentsByVehicleId.set(v.id, { registrationExpiresAt: v.registrationExpiresAt || null, now });
+      }
+    }
+
+    if (rules.maintenanceDueEnabled) {
+      const schedules = await prisma.serviceSchedule.findMany({
+        where: { vehicleId: { in: ids }, active: true, ...tenantFilter },
+        select: { vehicleId: true, serviceType: true, nextDueMiles: true, nextDueAt: true }
+      });
+      for (const sched of schedules) {
+        const mileage = mileageByVehicleId.get(sched.vehicleId) ?? null;
+        const milesRemaining = sched.nextDueMiles != null && mileage != null
+          ? Number(sched.nextDueMiles) - mileage
+          : null;
+        const daysRemaining = sched.nextDueAt
+          ? Math.floor((new Date(sched.nextDueAt).getTime() - now.getTime()) / 86400000)
+          : null;
+        const candidate = {
+          serviceType: sched.serviceType,
+          nextDueMiles: sched.nextDueMiles ?? null,
+          nextDueAt: sched.nextDueAt ? new Date(sched.nextDueAt).toISOString() : null,
+          milesRemaining,
+          daysRemaining
+        };
+        // A vehicle can have several schedules; the score should reflect the
+        // one that comes due first, not whichever row the DB returned last.
+        const urgency = (c) => Math.min(
+          c.milesRemaining == null ? Number.POSITIVE_INFINITY : c.milesRemaining,
+          c.daysRemaining == null ? Number.POSITIVE_INFINITY : c.daysRemaining
+        );
+        const existing = maintenanceByVehicleId.get(sched.vehicleId);
+        if (!existing || urgency(candidate) < urgency(existing)) {
+          maintenanceByVehicleId.set(sched.vehicleId, candidate);
+        }
+      }
+    }
+  }
+
   return new Map(ids.map((vehicleId) => ([
     vehicleId,
     buildVehicleOperationalSignals({
@@ -654,7 +884,10 @@ export async function buildVehicleOperationalSignalsMap(vehicleIds = [], scope =
       latestEvent: latestEventByVehicleId.get(vehicleId) || null,
       activeDevice: activeDeviceByVehicleId.get(vehicleId) || null,
       activeBlock: activeBlocksByVehicleId.get(vehicleId) || null,
-      telematicsFeatureEnabled: options?.telematicsFeatureEnabled !== false
+      telematicsFeatureEnabled: options?.telematicsFeatureEnabled !== false,
+      rules,
+      documents: documentsByVehicleId.get(vehicleId) || null,
+      maintenance: maintenanceByVehicleId.get(vehicleId) || null
     })
   ])));
 }

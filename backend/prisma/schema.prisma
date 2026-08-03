@@ -594,6 +594,7 @@ model Tenant {
   telematicsDevices           VehicleTelematicsDevice[]
   telematicsEvents            VehicleTelematicsEvent[]
   plannerRuleSet              PlannerRuleSet?
+  turnReadyRuleSet            TurnReadyRuleSet?
   plannerScenarios            PlannerScenario[]
   plannerRecommendationAudits PlannerRecommendationAudit[]
   conversations               Conversation[]
@@ -3032,6 +3033,20 @@ model PlannerRuleSet {
   updatedAt                       DateTime        @updatedAt
 }
 
+// Per-tenant Turn-Ready scoring rules (2026-08-03, dashboard v2). Hector:
+// the tenant configures how their own score is calculated. Stored as JSON so
+// adding a factor is a code change, not a migration. NO ROW = the frozen
+// defaults in src/lib/turn-ready-rules.js, which reproduce the formula that
+// shipped before this model existed.
+model TurnReadyRuleSet {
+  id        String   @id @default(cuid())
+  tenantId  String   @unique
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rulesJson String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model PlannerScenario {
   id                String   @id @default(cuid())
   tenantId          String
@@ -4379,12 +4394,12 @@ model FranchisePayoutPeriod {
 // See doc/economy-integration-plan-2026-07-05.md
 // ============================================================================
 model EconomyLocationConfig {
-  id            String   @id @default(cuid())
+  id            String  @id @default(cuid())
   tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [id])
+  tenant        Tenant  @relation(fields: [tenantId], references: [id])
   locationId    String // Ride location (Miami / FLL / MCO / LAX)
   externalArea  String // 'MIA' | 'LAX' — first 3 chars of rgLocPickup
-  enabled       Boolean  @default(true)
+  enabled       Boolean @default(true)
   // Per-area import window override (2026-07-09, Fase 5). NULL → fall back to the
   // env defaults ECONOMY_DATE_WINDOW_LOOKBACK_DAYS / ECONOMY_DATE_WINDOW_LOOKAHEAD_DAYS.
   // The worker fetches the UNION window (max lookback + max lookahead across the
@@ -4399,7 +4414,7 @@ model EconomyLocationConfig {
   externalLocationCode String?
   // Per-area push switch. OFF by default: an area never pushes until it is
   // explicitly turned on, even when the global transport flag is live.
-  ratePushEnabled      Boolean @default(false)
+  ratePushEnabled      Boolean  @default(false)
   // Optional ACRISS alias overrides, {"RFM_CODE":"PORTAL_CODE"}. Codes match
   // 1:1 for most classes (CCAR/ECAR/FFAR/ICAR/IFAR at LAX), so this only
   // carries the exceptions; a class with no rate on either side is skipped.
@@ -4412,7 +4427,7 @@ model EconomyLocationConfig {
   // location must declare its sentinel before it may write).
   rateCloseoutMin      Decimal? @db.Decimal(10, 2)
 
-  createdAt     DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@unique([tenantId, externalArea])
   @@index([tenantId, enabled])
@@ -4473,25 +4488,25 @@ model RatePushLog {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id])
 
-  provider   String // 'ECONOMY' (NU/MEX/ADVANTAGE reuse this table)
-  locationId String // Ride location
+  provider             String // 'ECONOMY' (NU/MEX/ADVANTAGE reuse this table)
+  locationId           String // Ride location
   externalLocationCode String // portal code, e.g. LAXO01
-  classCode  String // ACRISS as the PORTAL knows it
-  rateDate   DateTime @db.Date // the grid column this value belongs to
-  plan       String   @default("DY") // DY | WY | MY | HY | ED
+  classCode            String // ACRISS as the PORTAL knows it
+  rateDate             DateTime @db.Date // the grid column this value belongs to
+  plan                 String   @default("DY") // DY | WY | MY | HY | ED
   // 2026-07-28 (LAX #2): the portal prices PER RATE PLAN (LOR tier — 1TO2,
   // 3DYS … STND) and ALL must update, so the audit key carries the rate code.
   // Default STND is historically correct: every pre-fix write targeted STND
   // only (that was the bug).
-  rateCode   String   @default("STND")
+  rateCode             String   @default("STND")
 
-  priorValue  Decimal? @db.Decimal(10, 2) // what the portal showed before
-  pushedValue Decimal  @db.Decimal(10, 2) // what RFM wrote
+  priorValue       Decimal? @db.Decimal(10, 2) // what the portal showed before
+  pushedValue      Decimal  @db.Decimal(10, 2) // what RFM wrote
   sourceRateItemId String? // RateItem the value came from (traceability)
 
-  trigger String // 'MI_AUTOAPPLY' | 'MANUAL' | 'DRIFT_SWEEP'
-  mode    String // 'DRY_RUN' | 'LIVE'
-  status  String // 'PLANNED' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'SENT' | 'VERIFIED' | 'MISMATCH' | 'FAILED' | 'SKIPPED'
+  trigger    String // 'MI_AUTOAPPLY' | 'MANUAL' | 'DRIFT_SWEEP'
+  mode       String // 'DRY_RUN' | 'LIVE'
+  status     String // 'PLANNED' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED' | 'SENT' | 'VERIFIED' | 'MISMATCH' | 'FAILED' | 'SKIPPED'
   skipReason String? // guardrail that suppressed it (held/no-map/out-of-band)
 
   // ---- Approval (F4, 2026-07-28) ----------------------------------------
