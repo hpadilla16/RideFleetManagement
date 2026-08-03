@@ -842,7 +842,17 @@ async function getTenantTollsState(scope = {}) {
   };
 }
 
-async function listTenantVehiclesForMatch(scope = {}, transaction = null) {
+/**
+ * The tenant's fleet, normalized for identifier matching.
+ *
+ * PERFORMANCE (2026-08-03): this used to run inside the per-toll matcher, so a
+ * sweep loaded and normalized the ENTIRE fleet once per toll — measured at
+ * ~2.7s per row against International Rental Corp, which put a 3,532-row
+ * recovery run near three hours. The rows are identical for every toll in a
+ * run, so callers processing more than one toll load this once and pass it in.
+ * Matching semantics are untouched: the same rows, the same filter.
+ */
+async function loadTenantVehicleMatchCache(scope = {}) {
   const rows = await prisma.vehicle.findMany({
     where: tenantWhereForScope(scope),
     select: {
@@ -859,12 +869,18 @@ async function listTenantVehiclesForMatch(scope = {}, transaction = null) {
     }
   });
 
-  const normalizedRows = rows.map((row) => ({
+  return rows.map((row) => ({
     ...row,
     plateNormalized: normalizeNullableToken(row.plate),
     tollTagNumberNormalized: normalizeNullableToken(row.tollTagNumber),
     tollStickerNumberNormalized: normalizeNullableToken(row.tollStickerNumber)
   }));
+}
+
+async function listTenantVehiclesForMatch(scope = {}, transaction = null, vehicleCache = null) {
+  const normalizedRows = Array.isArray(vehicleCache)
+    ? vehicleCache
+    : await loadTenantVehicleMatchCache(scope);
 
   if (!transaction) return normalizedRows;
 
@@ -1078,8 +1094,8 @@ export function scoreCandidate({ transaction, vehicle, reservation, siblingCandi
   };
 }
 
-async function buildMatchSuggestion(transaction, scope = {}) {
-  let vehicles = await listTenantVehiclesForMatch(scope, transaction);
+async function buildMatchSuggestion(transaction, scope = {}, vehicleCache = null) {
+  let vehicles = await listTenantVehiclesForMatch(scope, transaction, vehicleCache);
 
   // TollBridge finding (a), 2026-07-26: when the toll carries a sede stamp,
   // never offer a vehicle homed at a DIFFERENT sede — in a tenant mixing LAX
@@ -1206,8 +1222,8 @@ async function replaceSuggestedAssignments(tx, transaction, suggestion, matchedB
 // Used by the manual bulk-auto-match route AND the scheduled re-match sweep so
 // the two paths can never drift. Returns the suggestion (with `unchanged: true`
 // when nothing was written).
-async function rematchTransactionRow(transaction, scope, actorUserId = null) {
-  const suggestion = await buildMatchSuggestion(transaction, scope);
+async function rematchTransactionRow(transaction, scope, actorUserId = null, vehicleCache = null) {
+  const suggestion = await buildMatchSuggestion(transaction, scope, vehicleCache);
 
   // No-op guard (QA 2026-07-26): the sweep re-processes the same window every
   // few hours, and for a stable backlog the suggestion is identical each time.
@@ -2544,13 +2560,16 @@ export const tollsService = {
       take: limit
     });
 
+    // Same fleet for every row in this batch — load it once, not per toll.
+    const bulkVehicleCache = await loadTenantVehicleMatchCache(scope);
+
     let autoConfirmed = 0;
     let suggested = 0;
     let reviewed = 0;
     const reservationIdsToSync = new Set();
 
     for (const transaction of rows) {
-      const suggestion = await rematchTransactionRow(transaction, scope, actorUserId);
+      const suggestion = await rematchTransactionRow(transaction, scope, actorUserId, bulkVehicleCache);
 
       reviewed += 1;
       if (suggestion.matchStatus === 'AUTO_CONFIRMED') {
@@ -2666,6 +2685,9 @@ export const tollsService = {
       ? (sinceDate && !Number.isNaN(sinceDate.getTime()) ? sinceDate : null)
       : new Date(now - widestWindowDays * DAY_MS);
 
+    // Load the fleet ONCE for the whole run — see loadTenantVehicleMatchCache.
+    const vehicleCache = await loadTenantVehicleMatchCache(scope);
+
     let scanned = 0;
     let eligibleCount = 0;
     let autoConfirmed = 0;
@@ -2709,11 +2731,11 @@ export const tollsService = {
 
       for (const transaction of eligible) {
         if (dryRun) {
-          const suggestion = await buildMatchSuggestion(transaction, scope);
+          const suggestion = await buildMatchSuggestion(transaction, scope, vehicleCache);
           if (suggestion.matchStatus === 'AUTO_CONFIRMED' && suggestion.reservation?.id) autoConfirmed += 1;
           continue;
         }
-        const suggestion = await rematchTransactionRow(transaction, scope, null);
+        const suggestion = await rematchTransactionRow(transaction, scope, null, vehicleCache);
         if (!suggestion.unchanged) changed += 1;
         if (suggestion.matchStatus === 'AUTO_CONFIRMED' && suggestion.reservation?.id) {
           autoConfirmed += 1;
