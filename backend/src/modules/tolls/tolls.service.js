@@ -2612,7 +2612,41 @@ export const tollsService = {
     return { processedTenants: results.length, results };
   },
 
+  /**
+   * The recurring sweep: re-match this tenant's held tolls inside each sede's
+   * own re-match window (default 14 days).
+   */
   async rematchTenantWithinWindow(tenantId) {
+    return this.rematchTenant(tenantId, {});
+  },
+
+  /**
+   * Re-match a tenant's needs-review tolls.
+   *
+   * Default behaviour is the recurring sweep: each toll is fenced by its own
+   * sede's rematchWindowDays. Pass `ignoreWindow` to reach further back — that
+   * is the recovery path for a toll whose reservation was created AFTER the
+   * toll was imported, which the window can never catch up with once the toll
+   * ages past it.
+   *
+   * WHY THIS EXISTS (International Rental Corp, 2026-08-03): 3,478 of their
+   * 3,532 unmatched tolls sat outside the 14-day window, so the sweep could
+   * not see them at all. 204 of those DO fall inside a reservation — typically
+   * the toll was imported in March and the reservation row was created in May
+   * covering a window that had already started. Nothing short of clicking each
+   * one could recover them.
+   *
+   * Paginates by cursor instead of the old single `take: 500`. That cap was
+   * silent: with thousands of held rows everything past the 500 most recent
+   * was skipped on every pass, and the summary still read like a clean run.
+   */
+  async rematchTenant(tenantId, {
+    ignoreWindow = false,
+    since = null,
+    batchSize = 250,
+    maxRows = 5000,
+    dryRun = false,
+  } = {}) {
     if (!tenantId) throw new Error('tenantId is required for toll re-match');
     const scope = systemScope({ tenantId });
 
@@ -2627,52 +2661,93 @@ export const tollsService = {
     const widestWindowDays = Math.max(DEFAULT_REMATCH_WINDOW_DAYS, ...windowByLocation.values());
 
     const now = Date.now();
-    const rows = await prisma.tollTransaction.findMany({
-      where: {
-        tenantId,
-        needsReview: true,
-        billingStatus: 'PENDING',
-        // A human parked these via RESET_MATCH — the machine keeps its hands
-        // off until a human acts again (bulk-auto-match clears the hold).
-        manualHoldAt: null,
-        transactionAt: { gte: new Date(now - widestWindowDays * DAY_MS) }
-      },
-      orderBy: [{ transactionAt: 'desc' }],
-      take: 500
-    });
+    const sinceDate = since ? new Date(since) : null;
+    const lowerBound = ignoreWindow
+      ? (sinceDate && !Number.isNaN(sinceDate.getTime()) ? sinceDate : null)
+      : new Date(now - widestWindowDays * DAY_MS);
 
-    // The DB fence above uses the WIDEST window in the tenant; the per-row
-    // fence below applies each toll's own sede window. A toll without a sede
-    // stamp gets the conservative default, never the widest.
-    const eligible = rows.filter((row) => {
-      const windowDays = row.locationId
-        ? (windowByLocation.get(String(row.locationId)) ?? DEFAULT_REMATCH_WINDOW_DAYS)
-        : DEFAULT_REMATCH_WINDOW_DAYS;
-      return new Date(row.transactionAt).getTime() >= now - windowDays * DAY_MS;
-    });
-
+    let scanned = 0;
+    let eligibleCount = 0;
     let autoConfirmed = 0;
+    let changed = 0;
+    let truncated = false;
+    let cursor = null;
     const reservationIdsToSync = new Set();
-    for (const transaction of eligible) {
-      const suggestion = await rematchTransactionRow(transaction, scope, null);
-      if (suggestion.matchStatus === 'AUTO_CONFIRMED' && suggestion.reservation?.id) {
-        autoConfirmed += 1;
-        reservationIdsToSync.add(String(suggestion.reservation.id));
+
+    for (;;) {
+      const remaining = maxRows - scanned;
+      if (remaining <= 0) { truncated = true; break; }
+      const rows = await prisma.tollTransaction.findMany({
+        where: {
+          tenantId,
+          needsReview: true,
+          billingStatus: 'PENDING',
+          // A human parked these via RESET_MATCH — the machine keeps its hands
+          // off until a human acts again (bulk-auto-match clears the hold).
+          manualHoldAt: null,
+          ...(lowerBound ? { transactionAt: { gte: lowerBound } } : {})
+        },
+        orderBy: [{ transactionAt: 'desc' }, { id: 'desc' }],
+        take: Math.min(batchSize, remaining),
+        ...(cursor ? { skip: 1, cursor: { id: cursor } } : {})
+      });
+      if (!rows.length) break;
+      scanned += rows.length;
+      cursor = rows[rows.length - 1].id;
+
+      // On the recurring sweep the DB fence above uses the WIDEST window in the
+      // tenant; this per-row fence applies each toll's own sede window. A toll
+      // without a sede stamp gets the conservative default, never the widest.
+      // A windowless recovery run skips the fence entirely.
+      const eligible = ignoreWindow ? rows : rows.filter((row) => {
+        const windowDays = row.locationId
+          ? (windowByLocation.get(String(row.locationId)) ?? DEFAULT_REMATCH_WINDOW_DAYS)
+          : DEFAULT_REMATCH_WINDOW_DAYS;
+        return new Date(row.transactionAt).getTime() >= now - windowDays * DAY_MS;
+      });
+      eligibleCount += eligible.length;
+
+      for (const transaction of eligible) {
+        if (dryRun) {
+          const suggestion = await buildMatchSuggestion(transaction, scope);
+          if (suggestion.matchStatus === 'AUTO_CONFIRMED' && suggestion.reservation?.id) autoConfirmed += 1;
+          continue;
+        }
+        const suggestion = await rematchTransactionRow(transaction, scope, null);
+        if (!suggestion.unchanged) changed += 1;
+        if (suggestion.matchStatus === 'AUTO_CONFIRMED' && suggestion.reservation?.id) {
+          autoConfirmed += 1;
+          reservationIdsToSync.add(String(suggestion.reservation.id));
+        }
       }
     }
 
     // Charge sync mirrors to the agreement (allowClosed) and fires the staff
     // alert — the full "late toll lands on a closed contract" pipeline.
-    for (const reservationId of reservationIdsToSync) {
-      await syncReservationTollCharges(reservationId, scope);
+    if (!dryRun) {
+      for (const reservationId of reservationIdsToSync) {
+        await syncReservationTollCharges(reservationId, scope);
+      }
+    }
+
+    // Never let a bounded run read as a complete one.
+    if (truncated) {
+      logger.warn('[tolls] re-match stopped at maxRows — more rows remain unprocessed', {
+        tenantId, scanned, maxRows
+      });
     }
 
     return {
       tenantId,
       ok: true,
-      scanned: rows.length,
-      eligible: eligible.length,
-      autoConfirmed
+      scanned,
+      eligible: eligibleCount,
+      autoConfirmed,
+      changed,
+      reservationsSynced: reservationIdsToSync.size,
+      truncated,
+      dryRun,
+      ignoreWindow
     };
   },
 
