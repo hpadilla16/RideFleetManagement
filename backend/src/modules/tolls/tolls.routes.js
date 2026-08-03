@@ -160,6 +160,34 @@ tollsRouter.post('/transactions/:id/acknowledge', async (req, res, next) => {
   }
 });
 
+/**
+ * Recovery re-match. The scheduled sweep only reaches back each sede's
+ * rematchWindowDays (default 14), which by design can never catch a toll whose
+ * reservation was created after the toll had already aged out — for
+ * International Rental Corp that was 3,478 of 3,532 unmatched tolls. This runs
+ * the same matcher with the window lifted.
+ *
+ * Defaults to a DRY RUN: it reports what it would confirm and writes nothing.
+ * Pass `apply: true` to commit. Manual holds are still respected, so a toll a
+ * human parked stays parked.
+ */
+tollsRouter.post('/rematch-backfill', requireRole('ADMIN', 'SUPER_ADMIN'), rejectLocationScopedUsers, async (req, res, next) => {
+  try {
+    const scope = scopeFor(req);
+    if (!scope?.tenantId) return res.status(400).json({ error: 'tenantId is required for toll re-match' });
+    const body = req.body || {};
+    const result = await tollsService.rematchTenant(scope.tenantId, {
+      ignoreWindow: true,
+      since: body.since || null,
+      maxRows: Number.isFinite(Number(body.maxRows)) ? Math.min(20000, Math.max(1, Number(body.maxRows))) : 5000,
+      dryRun: body.apply !== true,
+    });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
 tollsRouter.get('/provider-account', requireRole('ADMIN', 'OPS'), async (req, res, next) => {
   try {
     res.json(await tollsService.getProviderAccount(scopeFor(req)));
