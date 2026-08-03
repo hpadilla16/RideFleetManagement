@@ -1,7 +1,8 @@
 ﻿import { timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import { vehiclesService } from './vehicles.service.js';
-import { isSuperAdmin } from '../../middleware/auth.js';
+import { turnReadyRulesService } from './turn-ready-rules.service.js';
+import { isSuperAdmin, requireRole } from '../../middleware/auth.js';
 import { crossTenantScopeFor as scopeFor } from '../../lib/tenant-scope.js';
 import { settingsService } from '../settings/settings.service.js';
 import { requireString, assertPlainObject } from '../../lib/request-validation.js';
@@ -173,6 +174,42 @@ vehiclesRouter.post('/telematics/voltswitch/sync', enforceTelematicsFeature, asy
       return res.status(400).json({ error: String(e.message) });
     }
     next(e);
+  }
+});
+
+// ─── Turn-Ready scoring rules (2026-08-03, dashboard v2) ────────────────────
+// Reading is open to anyone who can see vehicles — the score is rendered on
+// the planner and the vehicle profile, and the UI needs the weights to explain
+// each line. Writing is ADMIN: these numbers drive dispatch.
+
+vehiclesRouter.get('/turn-ready/rules', async (req, res, next) => {
+  try {
+    res.json(await turnReadyRulesService.getRules(scopeFor(req)));
+  } catch (error) {
+    if (error?.status === 400) return res.status(400).json({ error: error.message });
+    next(error);
+  }
+});
+
+vehiclesRouter.put('/turn-ready/rules', requireRole('ADMIN', 'SUPER_ADMIN'), async (req, res, next) => {
+  try {
+    assertPlainObject(req.body, 'body');
+    res.json(await turnReadyRulesService.upsertRules(req.body || {}, scopeFor(req)));
+  } catch (error) {
+    if (error?.details?.length) {
+      return res.status(400).json({ error: 'Validation failed', details: error.details });
+    }
+    if (error?.status === 400) return res.status(400).json({ error: error.message });
+    next(error);
+  }
+});
+
+vehiclesRouter.delete('/turn-ready/rules', requireRole('ADMIN', 'SUPER_ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await turnReadyRulesService.resetRules(scopeFor(req)));
+  } catch (error) {
+    if (error?.status === 400) return res.status(400).json({ error: error.message });
+    next(error);
   }
 });
 
