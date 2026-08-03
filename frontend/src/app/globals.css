@@ -2071,3 +2071,39 @@ label input[type="radio"],
   font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
 }
 .tr-foot { font-size: 11px; color: var(--n-600); margin-top: 8px; line-height: 1.5; }
+
+/* ---------------------------------------------------------------------------
+ * Dashboard v2 hero row (2026-08-03, phases 4-5 of design/DASHBOARD-V2.md).
+ * Ported from the marketing product shot (design/marketing-shot.css). `.kpi`,
+ * `.klab`, `.kval`, `.kfoot` already exist above (beta.365, flat variant) and
+ * are reused as-is — only the grid, the ring and the spark bars are new.
+ * The ring is STATIC by design: INNOVATION-REVIEW.md rejected the animated
+ * sweep, so `.prog` carries no transition.
+ * ------------------------------------------------------------------------- */
+.kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.kpi--ring { display: flex; align-items: center; gap: 16px; }
+.kpi-note { font-size: 11px; color: var(--text-3); margin-top: 6px; line-height: 1.4; }
+.ring { position: relative; flex: 0 0 auto; }
+.ring, .ring svg { width: 88px; height: 88px; }
+.ring svg { transform: rotate(-90deg); }
+.ring .track { stroke: var(--n-200); stroke-width: 8; fill: none; }
+.ring .prog {
+  stroke: var(--brand); stroke-width: 8; fill: none; stroke-linecap: round;
+  stroke-dasharray: 238.76;
+  stroke-dashoffset: calc(238.76 - (238.76 * var(--pct, 0) / 100));
+}
+.ring .rcenter { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; }
+.ring .rnum { font-size: 24px; font-weight: 700; letter-spacing: -.04em; line-height: 1; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.ring .rsuf { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); margin-top: 3px; font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace); }
+.spark-bars { display: flex; align-items: flex-end; gap: 4px; height: 34px; margin-top: 12px; }
+.spark-bars i { flex: 1 1 0%; border-radius: 3px 3px 2px 2px; background: var(--brand); opacity: .35; }
+.spark-bars i.is-hi { opacity: .9; }
+@media (max-width: 1180px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpis > .kpi:first-child { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) {
+  .kpis { grid-template-columns: minmax(0, 1fr); }
+  .kpis > .kpi:first-child { grid-column: auto; }
+  .kpi--ring { flex-direction: column; align-items: flex-start; gap: 12px; }
+}

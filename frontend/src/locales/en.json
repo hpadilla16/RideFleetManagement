@@ -849,5 +849,28 @@
       "LEASE": "Lease",
       "OTHER": "Other"
     }
+  },
+  "dashboardV2": {
+    "eyebrow": "Operations",
+    "title": "Today's turns",
+    "subtitle": "{{count}} units in fleet",
+    "subtitleLoading": "Loading fleet…",
+    "previewChip": "v2 preview",
+    "forbidden": "These KPIs are limited to admin and ops accounts without a location restriction.",
+    "error": "The KPI service did not respond. Reload to retry.",
+    "turnReady": "Turn-ready",
+    "turnReadyTitle": "Open the planner",
+    "readyCount": "{{count}} ready",
+    "blockedCount": "{{count}} blocked",
+    "watchCount": "{{count}} to review",
+    "turnReadyNote": "Wash, damage, telematics and holds — fleet average, explained per unit on its profile.",
+    "utilization": "Utilization · 7d",
+    "noPriorWeek": "No prior-week data",
+    "vsLastWeek": "vs. last week",
+    "tolls": "Tolls reconciled · 30d",
+    "tollsTitle": "Open tolls",
+    "crossings": "{{count}} crossings",
+    "inReview": "{{count}} in review",
+    "wip": "Preview build. The fleet table and the full block set from the current dashboard land here next; the main dashboard is unchanged."
   }
 }

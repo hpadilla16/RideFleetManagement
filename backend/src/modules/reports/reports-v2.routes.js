@@ -20,6 +20,7 @@ import { requireRole } from '../../middleware/auth.js';
 import { userProgramScope, userAllowedLocationIds } from '../../lib/tenant-scope.js';
 import { scopeFor as tenantScopeFor } from '../../lib/tenant-scope.js';
 import { computeTodayKpis } from './today-kpis.js';
+import { computeDashboardV2Kpis } from './dashboard-v2-kpis.js';
 import {
   listReports,
   getSnapshot,
@@ -125,6 +126,28 @@ reportsV2Router.get(
       const tenantId = tenantScopeFor(req)?.tenantId || null;
       if (!tenantId) return res.json({ collectedToday: null, pendingTolls: null });
       res.json(await computeTodayKpis(tenantId));
+    } catch (err) {
+      sendError(res, err);
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// GET /api/reports/dashboard-v2-kpis — the v2 hero row (2026-08-03, phase 4-5
+// of design/DASHBOARD-V2.md): fleet-wide Turn-Ready counts + average, 7-day
+// utilization with week-over-week delta, tolls reconciled over 30 days. Same
+// guard posture as /today-kpis — money display, scoped users fail closed,
+// SUPER_ADMIN without a tenant gets nulls.
+// ---------------------------------------------------------------------------
+reportsV2Router.get(
+  '/dashboard-v2-kpis',
+  requireRole('ADMIN', 'OPS', 'SUPER_ADMIN'),
+  rejectScopedUsers,
+  async (req, res) => {
+    try {
+      const tenantId = tenantScopeFor(req)?.tenantId || null;
+      if (!tenantId) return res.json({ turnReady: null, utilization: null, tolls30d: null });
+      res.json(await computeDashboardV2Kpis(tenantId));
     } catch (err) {
       sendError(res, err);
     }
