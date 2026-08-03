@@ -69,7 +69,9 @@ export async function computeDashboardV2Kpis(tenantId, { allowedLocationIds = nu
     : {};
 
   const vehicles = await db.vehicle.findMany({
-    where: { tenantId, status: { not: 'RETIRED' }, ...locationFilter },
+    // SOLD is the only terminal status in the enum (there is no RETIRED) —
+    // sold units are excluded from totalFleet everywhere else too.
+    where: { tenantId, status: { not: 'SOLD' }, ...locationFilter },
     select: {
       id: true,
       availabilityBlocks: {
