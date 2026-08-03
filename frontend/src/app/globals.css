@@ -2019,3 +2019,55 @@ label input[type="radio"],
   .pl-search { min-width: 140px; }
   .pl-panel { left: 10px; right: 10px; width: auto; top: auto; bottom: 10px; max-height: 68vh; }
 }
+
+/* ---------------------------------------------------------------------------
+ * Turn-Ready breakdown (2026-08-03, dashboard v2 phase 3).
+ *
+ * The "why this unit scores N" panel. Ported from the product shot's .srow on
+ * ridefleet-web (see design/marketing-shot.css) — same three-column grid, same
+ * type scale — but namespaced `tr-` so it cannot collide with anything in the
+ * staff app. Deltas render in a mono, tabular face so the column reads as
+ * arithmetic the eye can add, which is the entire point of the panel.
+ * ------------------------------------------------------------------------- */
+.tr-rows { margin-top: 12px; }
+.tr-row {
+  display: grid; grid-template-columns: 26px minmax(0, 1fr) auto;
+  gap: 12px; align-items: center; padding: 11px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13.5px; color: var(--n-700);
+}
+.tr-row:last-child { border-bottom: 0; }
+.tr-row .tr-ic {
+  width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+  flex: 0 0 auto; background: var(--surface-3); color: var(--n-700);
+  border: 1px solid var(--border-subtle);
+  font-size: 12px; font-weight: 700; line-height: 1;
+}
+.tr-row b { display: block; color: var(--n-900); font-weight: 600; font-size: 13.5px; line-height: 1.3; }
+.tr-row small { display: block; color: var(--n-600); font-size: 11.5px; line-height: 1.4; margin-top: 2px; }
+.tr-row .tr-ev {
+  display: block; color: var(--n-600); font-size: 11px; line-height: 1.4; margin-top: 3px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+.tr-pts {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 13px; font-weight: 600; white-space: nowrap;
+  font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+}
+.tr-pts--base { color: var(--n-600); }
+.tr-pts--ok { color: var(--ok-tx); }
+.tr-pts--down { color: var(--danger-tx); }
+.tr-pts--clamp { color: var(--warn-tx); }
+.tr-total {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-top: 10px; padding-top: 11px; border-top: 2px solid var(--n-900);
+}
+.tr-total .tr-total-label {
+  font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--n-600);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+.tr-total .tr-total-value {
+  font-size: 26px; font-weight: 700; letter-spacing: -.035em; color: var(--n-900);
+  font-feature-settings: "tnum"; font-variant-numeric: tabular-nums;
+}
+.tr-foot { font-size: 11px; color: var(--n-600); margin-top: 8px; line-height: 1.5; }
