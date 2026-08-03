@@ -849,5 +849,28 @@
       "LEASE": "Arrendamiento",
       "OTHER": "Otro"
     }
+  },
+  "dashboardV2": {
+    "eyebrow": "Operaciones",
+    "title": "Los turnos de hoy",
+    "subtitle": "{{count}} unidades en flota",
+    "subtitleLoading": "Cargando flota…",
+    "previewChip": "vista previa v2",
+    "forbidden": "Estos KPIs son solo para cuentas admin y ops sin restricción de sede.",
+    "error": "El servicio de KPIs no respondió. Recarga para reintentar.",
+    "turnReady": "Turn-ready",
+    "turnReadyTitle": "Abrir el planner",
+    "readyCount": "{{count}} listas",
+    "blockedCount": "{{count}} bloqueadas",
+    "watchCount": "{{count}} por revisar",
+    "turnReadyNote": "Lavado, daños, telemática y bloqueos — promedio de flota, explicado por unidad en su perfil.",
+    "utilization": "Utilización · 7d",
+    "noPriorWeek": "Sin datos de la semana previa",
+    "vsLastWeek": "vs. semana pasada",
+    "tolls": "Peajes conciliados · 30d",
+    "tollsTitle": "Abrir peajes",
+    "crossings": "{{count}} cruces",
+    "inReview": "{{count}} en revisión",
+    "wip": "Vista previa. La tabla de flota y todos los bloques del dashboard actual llegan aquí después; el dashboard principal no cambia."
   }
 }
