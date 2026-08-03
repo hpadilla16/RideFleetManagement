@@ -1530,7 +1530,12 @@ reservationsRouter.post('/:id/send-request-email', async (req, res, next) => {
       if (!/^[A-Za-z0-9._-]{1,64}$/.test(ticketId)) {
         return res.status(400).json({ error: 'ticketId is required (^[A-Za-z0-9._-]{1,64}$)' });
       }
-      await writeVoziaReservationAudit(current, req, { requestKind: kind }, 'payment_link');
+      // Label derives from the KIND — this wrote 'payment_link' unconditionally,
+      // so a VozIA pre-check-in or signature email was recorded in the audit
+      // trail as a payment link (found in recon 2026-08-03). requestKind in the
+      // metadata always carried the truth; now the action label does too.
+      const auditKind = kind === 'payment' ? 'payment_link' : kind === 'signature' ? 'signature_link' : 'precheckin_link';
+      await writeVoziaReservationAudit(current, req, { requestKind: kind }, auditKind);
     }
     if (!checkTokenIssuanceCooldown(current.id, `email:${kind}`)) {
       return res.status(429).json({ error: `A ${kind} email was just sent for this reservation. Please wait a moment before resending.` });

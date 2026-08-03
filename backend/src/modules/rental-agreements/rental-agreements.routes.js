@@ -15,7 +15,9 @@ import { idempotency } from '../../middleware/idempotency.js';
 import { requireCapability } from '../../middleware/auth.js';
 import {
   assertServiceAccountRefundAllowed,
-  resolveVoziaCeiling
+  resolveVoziaCeiling,
+  checkServiceAccountAgreementEmail,
+  makeSendCooldown
 } from './service-payment-guards.js';
 
 export const rentalAgreementsRouter = Router();
@@ -208,9 +210,55 @@ rentalAgreementsRouter.get('/:id/print', async (req, res, next) => {
   }
 });
 
+// One agreement email per agreement per minute (QA m1) — factory lives in
+// service-payment-guards.js with its truth table.
+const checkAgreementEmailCooldown = makeSendCooldown(60_000);
+
 rentalAgreementsRouter.post('/:id/email-agreement', async (req, res, next) => {
   try {
     await ensureAccessible(req.params.id, req.user);
+    // VozIA (Hector 2026-08-03) — the agent console emails the customer a copy
+    // of their agreement. Service accounts follow the send-request-email
+    // contract: author+ticketId required (attribution to the human agent and
+    // the case). The recipient is ALWAYS the on-file email and the CONTENT is
+    // always the tenant template: the body is replaced with a whitelist — a
+    // stripped `to` alone still left subject/html/text injectable, i.e.
+    // arbitrary branded phishing with the real contract attached (QA M2).
+    // Human path is UNCHANGED.
+    if (req.user?.isServiceAccount) {
+      const author = String(req.body?.author || '').trim();
+      const ticketId = String(req.body?.ticketId || '').trim();
+      const bad = checkServiceAccountAgreementEmail({ author, ticketId });
+      if (bad.ok !== true) {
+        return res.status(bad.statusCode).json({ error: bad.error });
+      }
+      req.body = { author, ticketId }; // whitelist: nothing else reaches the mailer
+      // One send per agreement per minute — each send is a Puppeteer render on
+      // the shared semaphore, and a retry loop would both spam the customer
+      // and starve other PDF consumers (QA m1).
+      if (!checkAgreementEmailCooldown(req.params.id)) {
+        return res.status(429).json({ error: 'An agreement email was just sent. Please wait a moment before resending.' });
+      }
+      // Best-effort attribution row (same shape as writeVoziaReservationAudit,
+      // which lives in reservations.routes and isn't imported here).
+      try {
+        const ag = await prisma.rentalAgreement.findUnique({
+          where: { id: req.params.id },
+          select: { reservationId: true, tenantId: true }
+        });
+        if (ag) {
+          await prisma.auditLog.create({
+            data: {
+              tenantId: ag.tenantId || req.user?.tenantId || null,
+              reservationId: ag.reservationId || null,
+              actorUserId: req.user?.sub || null,
+              action: 'UPDATE',
+              metadata: JSON.stringify({ source: 'vozia', kind: 'agreement_email', ticketId, author })
+            }
+          });
+        }
+      } catch { /* audit is best-effort — never block the send */ }
+    }
     // Fire-and-forget: Puppeteer PDF render + SMTP send used to block the
     // response for 4-5s on checkout. The service schedules the heavy work via
     // setImmediate (interim; SCALING_ROADMAP.md plans a Redis/BullMQ queue).

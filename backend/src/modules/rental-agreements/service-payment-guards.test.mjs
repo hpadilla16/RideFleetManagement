@@ -179,3 +179,33 @@ test('resolveVoziaCeiling: default, bare number, JSON, bad value, read failure, 
   await resolveVoziaCeiling(null, 'voziaMaxRefundAmount', 2000, { prisma: spy });
   assert.equal(seenKey, 'voziaMaxRefundAmount');
 });
+
+// ---------------------------------------------------------------------------
+// 2026-08-03 — agreement email (NON-MONEY, same provenance bar)
+// ---------------------------------------------------------------------------
+import { checkServiceAccountAgreementEmail, makeSendCooldown } from './service-payment-guards.js';
+
+test('agreement-email: happy path passes', () => {
+  assert.deepEqual(checkServiceAccountAgreementEmail({ author: 'Hector via VozIA', ticketId: 'TKT-1035' }), { ok: true });
+});
+
+test('agreement-email: author required + <=120', () => {
+  assert.equal(checkServiceAccountAgreementEmail({ author: '', ticketId: 'T-1' }).statusCode, 400);
+  assert.equal(checkServiceAccountAgreementEmail({ author: 'x'.repeat(121), ticketId: 'T-1' }).statusCode, 400);
+  assert.equal(checkServiceAccountAgreementEmail({ author: 'x'.repeat(120), ticketId: 'T-1' }).ok, true);
+});
+
+test('agreement-email: ticketId required + shape', () => {
+  assert.equal(checkServiceAccountAgreementEmail({ author: 'A', ticketId: '' }).statusCode, 400);
+  assert.equal(checkServiceAccountAgreementEmail({ author: 'A', ticketId: 'has space' }).statusCode, 400);
+  assert.equal(checkServiceAccountAgreementEmail({ author: 'A', ticketId: 'a'.repeat(65) }).statusCode, 400);
+});
+
+test('sendCooldown: blocks within the window, forgives after, per-key', () => {
+  const check = makeSendCooldown(60_000);
+  assert.equal(check('AGR-1', 1_000_000), true);
+  assert.equal(check('AGR-1', 1_030_000), false);  // 30s later — blocked
+  assert.equal(check('AGR-2', 1_030_000), true);   // different key — fine
+  assert.equal(check('AGR-1', 1_060_001), true);   // window passed — allowed
+  assert.equal(check('AGR-1', 1_060_002), false);  // and re-armed
+});

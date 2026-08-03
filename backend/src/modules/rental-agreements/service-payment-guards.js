@@ -52,6 +52,34 @@ function checkProvenance({ author, ticketId }) {
 }
 
 /**
+ * VozIA agreement-email (2026-08-03) — NON-MONEY, but same provenance bar as
+ * every service-account write: author + ticketId or 400. Pure so the truth
+ * table lives in service-payment-guards.test.mjs like its siblings.
+ */
+export function checkServiceAccountAgreementEmail({ author, ticketId }) {
+  const bad = checkProvenance({ author, ticketId });
+  if (bad) return bad;
+  return { ok: true };
+}
+
+/**
+ * Bounded in-memory send cooldown (one send per key per window). In-memory on
+ * purpose — a restart forgives, which is fine for an anti-spam guard; no
+ * cross-process state needed at current scale. Pure factory for testability
+ * (callers inject the clock in tests).
+ */
+export function makeSendCooldown(windowMs) {
+  const last = new Map();
+  return function check(key, now = Date.now()) {
+    const prev = last.get(key) || 0;
+    if (now - prev < windowMs) return false;
+    if (last.size > 5000) last.clear(); // bounded
+    last.set(key, now);
+    return true;
+  };
+}
+
+/**
  * CAP 2 — REFUND. Pure decision function.
  *
  * @param {object}  a
