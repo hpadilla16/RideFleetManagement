@@ -128,6 +128,11 @@ const ALLOWED = [
   // en la ruta). Ya matcheaba vía GET /:id, la entrada explícita documenta la
   // intención. Lib compartido con el kiosk: reservation-smart-match.js.
   ['GET', '/api/reservations/smart-lookup'],
+  // Shuttle arc (Valet, 2026-08-05) — Chloe creates a pickup request after
+  // validating reservation+sede+name. Route re-validates server-side, requires
+  // author+ticketId, and is idempotent per reservation (repeat call = ONE bus,
+  // callCount+1, back to READY so the floor banner re-fires).
+  ['POST', '/api/shuttle-requests'],
 ];
 
 // -----------------------------------------------------------------------------

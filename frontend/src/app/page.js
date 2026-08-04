@@ -279,6 +279,7 @@ function DashboardInner({ token, me, logout }) {
   // client-side filter over a capped /api/reservations?limit=500 dropped today's
   // pickups when a tenant had >500 reservations → showed 0).
   const [pickupsTodayRows, setPickupsTodayRows] = useState([]);
+  const [shuttleOpen, setShuttleOpen] = useState(0);
   const [returnsTodayRows, setReturnsTodayRows] = useState([]);
   const [overview, setOverview] = useState(null);
   const [resSummary, setResSummary] = useState(null);
@@ -307,6 +308,11 @@ function DashboardInner({ token, me, logout }) {
     ]);
 
     setMismatchCount(reconResult.status === 'fulfilled' && reconResult.value ? Number(reconResult.value.count || 0) : 0);
+
+    // Shuttle arc (2026-08-05): open pickup requests for the action board.
+    api('/api/shuttle-requests?status=open', { bypassCache: true }, token)
+      .then((o) => setShuttleOpen(Array.isArray(o?.rows) ? o.rows.length : 0))
+      .catch(() => setShuttleOpen(0));
 
     // Citations tile (module-gated; soft-fail so a 403/off-module never breaks the dashboard).
     if (me?.moduleAccess?.citations !== false) {
@@ -529,6 +535,18 @@ function DashboardInner({ token, me, logout }) {
   }).slice(0, 10);
   const workspaceOpsHub = useMemo(() => {
     const nextItems = [
+      // Shuttle arc (2026-08-05): a customer standing at an airport curb
+      // outranks everything else on the rail.
+      shuttleOpen > 0
+        ? {
+            id: 'shuttle-requests',
+            title: t('shuttle.railTitle', { defaultValue: 'Shuttle requests' }),
+            detail: t('shuttle.railDetail', { defaultValue: '{{count}} customer(s) waiting for airport pickup', count: shuttleOpen }),
+            note: t('shuttle.railNote', { defaultValue: 'Chloe validated the reservation; the floor dispatches the bus.' }),
+            action: () => router.push('/shuttle'),
+            actionLabel: t('shuttle.railOpen', { defaultValue: 'Open queue' })
+          }
+        : null,
       pickups[0]
         ? {
             id: `pickup-${pickups[0].id}`,
@@ -637,7 +655,7 @@ function DashboardInner({ token, me, logout }) {
       feeAdvisoryCount,
       nextItems
     };
-  }, [pickups, returns, feeAdvisoryCount, registrationsExpiring30d, readyToRotate, rotationRuleLabel, inspectionsToReview, loanerRequestsPending, kioskEscalations, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner, me?.moduleAccess?.kiosk, t]);
+  }, [shuttleOpen, pickups, returns, feeAdvisoryCount, registrationsExpiring30d, readyToRotate, rotationRuleLabel, inspectionsToReview, loanerRequestsPending, kioskEscalations, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner, me?.moduleAccess?.kiosk, t]);
 
   return (
     <AppShell me={me} logout={logout}>

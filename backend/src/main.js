@@ -75,6 +75,7 @@ import { fleetInternalRouter } from './modules/vehicles/fleet-internal.routes.js
 import { customReportsRouter } from './modules/reports/custom/custom-reports.routes.js';
 import { globalSearchRouter } from './modules/search/global-search.routes.js';
 import { plannerRouter } from './modules/planner/planner.routes.js';
+import { shuttleRequestsRouter } from './modules/shuttle/shuttle-requests.routes.js';
 import { quotesRouter } from './modules/quotes/quotes.routes.js';
 import { paymentGatewayRouter } from './modules/payment-gateway/payment-gateway.routes.js';
 // Phase 0 (2026-06-09): the toll auto-sync scheduler MOVED to the worker
@@ -242,6 +243,9 @@ app.use('/api/issue-center', requireAuth, tenantRateLimit, requireModuleAccess('
 app.use('/api/tolls', requireAuth, tenantRateLimit, requireModuleAccess('tolls'), tollsRouter);
 app.use('/api/citations', requireAuth, tenantRateLimit, requireModuleAccess('citations'), citationsRouter);
 app.use('/api/planner', requireAuth, tenantRateLimit, requireModuleAccess('planner'), plannerRouter);
+// Shuttle Requests (Valet arc 2026-08-05) — Chloe writes via service account
+// (allowlisted POST), floor staff read/close. Rides on the reservations module.
+app.use('/api/shuttle-requests', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), shuttleRequestsRouter);
 // Quotes module (2026-07-17) — doc/quotes-module-plan-2026-07-17.md
 app.use('/api/quotes', requireAuth, tenantRateLimit, requireModuleAccess('quotes'), quotesRouter);
 app.use('/api/payment-gateway', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), paymentGatewayRouter);

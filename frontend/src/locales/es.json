@@ -895,5 +895,23 @@
       "SOLD": "Vendido"
     },
     "actionOverdue": "Vencido desde {{time}}"
+  },
+  "shuttle": {
+    "bannerTitle": "{{count}} cliente(s) listos para recoger en el aeropuerto — favor enviar shuttle",
+    "bannerParty": "{{count}} pers.",
+    "calledTimes": "llamó ×{{count}}",
+    "waitingFor": "esperando {{minutes}} min",
+    "waitingShort": "{{minutes}} min",
+    "view": "Ver",
+    "queueTitle": "Solicitudes de shuttle",
+    "queueSubtitle": "Clientes esperando recogido en el aeropuerto. El check-out las cierra solas.",
+    "loading": "Cargando…",
+    "empty": "Nadie está esperando ahora mismo.",
+    "cancel": "Cliente canceló",
+    "noShow": "No llegó",
+    "railTitle": "Solicitudes de shuttle",
+    "railDetail": "{{count}} cliente(s) esperando recogido en el aeropuerto",
+    "railNote": "Chloe validó la reserva; el piso despacha la guagua.",
+    "railOpen": "Abrir cola"
   }
 }

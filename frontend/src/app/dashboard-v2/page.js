@@ -73,6 +73,7 @@ function DashboardV2Inner({ token, me, logout }) {
   const [maintSummary, setMaintSummary] = useState(null);
   const [docAlert, setDocAlert] = useState(null);
   const [reservations, setReservations] = useState(null);
+  const [shuttleOpen, setShuttleOpen] = useState(0);
   const [resSummary, setResSummary] = useState(null);
   const [state, setState] = useState('loading'); // loading | ready | forbidden | error
 
@@ -111,6 +112,7 @@ function DashboardV2Inner({ token, me, logout }) {
       soft(api('/api/reservations?limit=500', {}, token), setReservations, (val) =>
         (Array.isArray(val) ? val : (Array.isArray(val?.items) ? val.items : [])));
       soft(api('/api/reservations/summary', {}, token), setResSummary);
+      soft(api('/api/shuttle-requests?status=open', { bypassCache: true }, token), setShuttleOpen, (o) => (Array.isArray(o?.rows) ? o.rows.length : 0));
     })();
     return () => { cancelled = true; };
   }, [token, me]);
@@ -292,6 +294,7 @@ function DashboardV2Inner({ token, me, logout }) {
           overviewKpis={overviewKpis}
           pickups={pickups}
           returns={returns}
+          shuttleOpen={shuttleOpen}
         />
       ) : null}
 
@@ -598,7 +601,7 @@ function UtilizationSpark({ days }) {
  * overview KPIs, same module gates, same `dashboard.*` locale keys — cards
  * self-clear when their queue empties, exactly as on v1.
  */
-function AttentionRail({ router, t, me, overviewKpis, pickups, returns }) {
+function AttentionRail({ router, t, me, overviewKpis, pickups, returns, shuttleOpen = 0 }) {
   const k = overviewKpis || {};
   const kioskEscalations = Number(k.kioskEscalations || 0);
   const inspectionsToReview = Number(k.inspectionsToReview || 0);
@@ -609,6 +612,14 @@ function AttentionRail({ router, t, me, overviewKpis, pickups, returns }) {
   const clock = (v) => new Date(v).toLocaleString('en-US', { timeZone: DEFAULT_TENANT_TIMEZONE });
 
   const items = [
+    shuttleOpen > 0 ? {
+      id: 'shuttle-requests',
+      title: t('shuttle.railTitle', { defaultValue: 'Shuttle requests' }),
+      detail: t('shuttle.railDetail', { defaultValue: '{{count}} customer(s) waiting for airport pickup', count: shuttleOpen }),
+      note: t('shuttle.railNote', { defaultValue: 'Chloe validated the reservation; the floor dispatches the bus.' }),
+      action: () => router.push('/shuttle'),
+      actionLabel: t('shuttle.railOpen', { defaultValue: 'Open queue' }),
+    } : null,
     pickups[0] ? {
       id: `pickup-${pickups[0].id}`,
       title: t('dashboard.nextPickup'),

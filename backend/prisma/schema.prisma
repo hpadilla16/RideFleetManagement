@@ -595,6 +595,7 @@ model Tenant {
   telematicsEvents            VehicleTelematicsEvent[]
   plannerRuleSet              PlannerRuleSet?
   turnReadyRuleSet            TurnReadyRuleSet?
+  shuttleRequests             ShuttleRequest[]
   plannerScenarios            PlannerScenario[]
   plannerRecommendationAudits PlannerRecommendationAudit[]
   conversations               Conversation[]
@@ -635,17 +636,18 @@ model Tenant {
 }
 
 model Location {
-  id                String   @id @default(cuid())
+  shuttleRequests   ShuttleRequest[]
+  id                String           @id @default(cuid())
   tenantId          String?
-  tenant            Tenant?  @relation(fields: [tenantId], references: [id])
+  tenant            Tenant?          @relation(fields: [tenantId], references: [id])
   code              String
   name              String
   address           String?
   city              String?
   state             String?
   country           String?
-  taxRate           Decimal  @default(0) @db.Decimal(5, 2)
-  isActive          Boolean  @default(true)
+  taxRate           Decimal          @default(0) @db.Decimal(5, 2)
+  isActive          Boolean          @default(true)
   locationConfig    String?
   // Per-branch Terms & Conditions override (2026-07-24). Mirrors
   // Tenant.termsHtml one level down; the resolver in lib/terms/index.js reads
@@ -690,8 +692,8 @@ model Location {
   // deposit and 150 mi/day while the initialled page bound into the SAME PDF
   // said $500, on the renter's own initials.
   termsSectionsJson String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   vehiclesHome                   Vehicle[]               @relation("VehicleHomeLocation")
   reservationsPickup             Reservation[]           @relation("ReservationPickupLocation")
@@ -1257,6 +1259,7 @@ model Customer {
 }
 
 model Reservation {
+  shuttleRequests                 ShuttleRequest[]
   id                              String                  @id @default(cuid())
   tenantId                        String?
   tenant                          Tenant?                 @relation(fields: [tenantId], references: [id])
@@ -3045,6 +3048,46 @@ model TurnReadyRuleSet {
   rulesJson String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ─── Shuttle Requests (Valet arc, 2026-08-05) ────────────────────────────────
+// Chloe (the VozIA voice agent) validates the reservation and creates one of
+// these when an arrived customer calls for airport pickup. RFM floor agents
+// dispatch. Idempotent per reservation: a repeat call bumps callCount and
+// re-READYs the existing row instead of creating a second bus.
+enum ShuttleRequestStatus {
+  READY
+  VIEWED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model ShuttleRequest {
+  id             String               @id @default(cuid())
+  tenantId       String
+  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  locationId     String
+  location       Location             @relation(fields: [locationId], references: [id])
+  reservationId  String
+  reservation    Reservation          @relation(fields: [reservationId], references: [id])
+  customerName   String
+  customerPhone  String?
+  partySize      Int                  @default(1)
+  pickupNote     String?
+  status         ShuttleRequestStatus @default(READY)
+  callCount      Int                  @default(1)
+  viewedAt       DateTime?
+  viewedByUserId String?
+  closedAt       DateTime?
+  closedByUserId String?
+  closeReason    String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  // The global banner polls this every few seconds.
+  @@index([tenantId, locationId, status])
+  @@index([reservationId, status])
 }
 
 model PlannerScenario {
