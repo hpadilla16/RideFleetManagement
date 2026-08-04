@@ -113,6 +113,62 @@ function DashboardV2Inner({ token, me, logout }) {
     return () => { cancelled = true; };
   }, [token, me]);
 
+  // Ops board (phase 7b) — same date-scoped queries as v1 (the old capped
+  // client-side filter showed 0 pickups for non-today dates; dateOn /
+  // returnDateOn are server-side and volume-proof).
+  const [boardDate, setBoardDate] = useState(() => wallClockDate(new Date()));
+  const [boardPickups, setBoardPickups] = useState([]);
+  const [boardReturns, setBoardReturns] = useState([]);
+  const [boardMsg, setBoardMsg] = useState('');
+  const [boardRefresh, setBoardRefresh] = useState(0);
+  const todayStr = wallClockDate(new Date());
+  const isToday = boardDate === todayStr;
+
+  useEffect(() => {
+    if (!token) return undefined;
+    let cancelled = false;
+    const rowsOf = (res) => {
+      if (res.status !== 'fulfilled') return [];
+      const v = res.value;
+      return Array.isArray(v?.rows) ? v.rows : (Array.isArray(v?.items) ? v.items : (Array.isArray(v) ? v : []));
+    };
+    (async () => {
+      const [pk, rt] = await Promise.allSettled([
+        api(`/api/reservations/page?dateOn=${boardDate}&limit=500`, {}, token),
+        api(`/api/reservations/page?returnDateOn=${boardDate}&limit=500`, {}, token),
+      ]);
+      if (cancelled) return;
+      setBoardPickups(rowsOf(pk));
+      setBoardReturns(rowsOf(rt));
+    })();
+    return () => { cancelled = true; };
+  }, [token, boardDate, boardRefresh]);
+
+  // Same filters as v1: pickups still pending; returns drop cancelled /
+  // no-show / already-received (bug 2026-05-27: closed rentals kept prompting
+  // the agent for check-in).
+  const pickups = boardPickups.filter((r) => ['NEW', 'CONFIRMED'].includes(r.status))
+    .sort((a, b) => String(a.pickupAt).localeCompare(String(b.pickupAt)));
+  const returns = boardReturns.filter((r) => !['CANCELLED', 'NO_SHOW', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(r.status))
+    .sort((a, b) => String(a.returnAt).localeCompare(String(b.returnAt)));
+
+  const markNoShow = async (id) => {
+    if (!window.confirm(t('dashboard.confirmNoShow'))) return;
+    try {
+      await api(`/api/reservations/${id}`, { method: 'PATCH', body: JSON.stringify({ status: 'NO_SHOW' }) }, token);
+      setBoardMsg(t('dashboard.reservationNoShow'));
+      setBoardRefresh((n) => n + 1);
+    } catch (e) { setBoardMsg(e.message); }
+  };
+  const requestCustomerInfo = async (id) => {
+    try {
+      const out = await api(`/api/reservations/${id}/request-customer-info`, { method: 'POST', body: JSON.stringify({}) }, token);
+      const link = out?.link || '';
+      if (link && navigator?.clipboard) { try { await navigator.clipboard.writeText(link); } catch {} }
+      setBoardMsg(link ? t('dashboard.customerInfoCopied', { link }) : t('dashboard.customerInfoIssued'));
+    } catch (e) { setBoardMsg(e.message); }
+  };
+
   const tr = kpis?.turnReady || null;
   const util = kpis?.utilization || null;
   const tolls = kpis?.tolls30d || null;
@@ -172,6 +228,7 @@ function DashboardV2Inner({ token, me, logout }) {
             <div className="kpi">
               <div className="klab">{t('dashboardV2.utilization', 'Utilization · 7d')}</div>
               <div className="kval">{util?.pct == null ? '–' : `${util.pct}%`}</div>
+              <UtilizationSpark days={util?.days} />
               <div className="kfoot">
                 {util?.deltaPts == null ? (
                   <span className="ui-muted">{t('dashboardV2.noPriorWeek', 'No prior-week data')}</span>
@@ -207,6 +264,32 @@ function DashboardV2Inner({ token, me, logout }) {
       </section>
 
       {state === 'ready' ? <FleetTable fleet={fleet} router={router} t={t} /> : null}
+
+      {state === 'ready' ? (
+        <AttentionRail
+          router={router}
+          t={t}
+          me={me}
+          overviewKpis={overviewKpis}
+          pickups={pickups}
+          returns={returns}
+        />
+      ) : null}
+
+      {state === 'ready' ? (
+        <OpsBoard
+          router={router}
+          t={t}
+          boardDate={boardDate}
+          setBoardDate={setBoardDate}
+          isToday={isToday}
+          pickups={pickups}
+          returns={returns}
+          boardMsg={boardMsg}
+          markNoShow={markNoShow}
+          requestCustomerInfo={requestCustomerInfo}
+        />
+      ) : null}
 
       {state === 'ready' ? (
         <OpsTiles
@@ -430,5 +513,252 @@ function OpsTiles({ router, t, overviewKpis, todayKpis, mismatchCount, citSummar
         {citSummary ? tile('citations', () => router.push('/citations'), t('dashboard.tileCitations'), Number(citSummary.needsReview || 0), t('dashboard.tileCitationsDesc', { outstanding: Number(citSummary.outstanding || 0).toFixed(2) })) : null}
       </div>
     </section>
+  );
+}
+
+function wallClockDate(value) {
+  const d = new Date(value);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DEFAULT_TENANT_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(d);
+  return parts; // en-CA gives YYYY-MM-DD
+}
+
+function shiftDate(dateStr, delta) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() + delta);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * 7-day utilization line (Hector, 2026-08-04). Pure SVG — the points are the
+ * backend's per-day buckets, computed with the same formula as the headline
+ * percentage, so the line cannot tell a different story than the number.
+ * Y-scale is 0..100 fixed: a flat-low week must LOOK flat-low, not zoomed
+ * into fake drama.
+ */
+function UtilizationSpark({ days }) {
+  const points = Array.isArray(days) ? days.filter((d) => d && d.pct != null) : [];
+  if (points.length < 2) return null;
+  const W = 100;
+  const H = 34;
+  const step = W / (points.length - 1);
+  const y = (pct) => H - 2 - (Math.max(0, Math.min(100, pct)) / 100) * (H - 4);
+  const path = points.map((d, i) => `${i === 0 ? 'M' : 'L'}${(i * step).toFixed(1)},${y(d.pct).toFixed(1)}`).join(' ');
+  const last = points[points.length - 1];
+  return (
+    <svg
+      className="spark"
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label={points.map((d) => `${d.pct}%`).join(', ')}
+    >
+      <path d={path} fill="none" stroke="var(--brand)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+      <circle cx={(points.length - 1) * step} cy={y(last.pct)} r="2.5" fill="var(--brand)" />
+    </svg>
+  );
+}
+
+/**
+ * The v1 attention rail, ported whole (phase 7b): next pickup, next return,
+ * kiosk escalations, inspections to review, registrations expiring, ready to
+ * rotate, loaner requests, loaner lane. Same derivations from the same
+ * overview KPIs, same module gates, same `dashboard.*` locale keys — cards
+ * self-clear when their queue empties, exactly as on v1.
+ */
+function AttentionRail({ router, t, me, overviewKpis, pickups, returns }) {
+  const k = overviewKpis || {};
+  const kioskEscalations = Number(k.kioskEscalations || 0);
+  const inspectionsToReview = Number(k.inspectionsToReview || 0);
+  const registrationsExpiring30d = Number(k.registrationsExpiring30d || 0);
+  const readyToRotate = Number(k.readyToRotate || 0);
+  const loanerRequestsPending = Number(k.loanerRequestsPending || 0);
+  const rotationRuleLabel = k.fleetRotationRule === 'MILEAGE' ? t('dashboard.rotationRuleMileage') : t('dashboard.rotationRuleTime');
+  const clock = (v) => new Date(v).toLocaleString('en-US', { timeZone: DEFAULT_TENANT_TIMEZONE });
+
+  const items = [
+    pickups[0] ? {
+      id: `pickup-${pickups[0].id}`,
+      title: t('dashboard.nextPickup'),
+      detail: `#${pickups[0].reservationNumber} - ${pickups[0].customer?.firstName || ''} ${pickups[0].customer?.lastName || ''}`.trim(),
+      note: t('dashboard.pickupAt', { time: clock(pickups[0].pickupAt) }),
+      action: () => router.push(`/reservations/${pickups[0].id}/checkout-wizard-v2`),
+      actionLabel: t('dashboard.startCheckout'),
+    } : null,
+    returns[0] ? {
+      id: `return-${returns[0].id}`,
+      title: t('dashboard.nextReturn'),
+      detail: `#${returns[0].reservationNumber} - ${returns[0].customer?.firstName || ''} ${returns[0].customer?.lastName || ''}`.trim(),
+      note: t('dashboard.returnAt', { time: clock(returns[0].returnAt) }),
+      action: () => router.push(`/reservations/${returns[0].id}/checkin-wizard`),
+      actionLabel: t('dashboard.openCheckin'),
+    } : null,
+    (kioskEscalations > 0 && me?.moduleAccess?.kiosk !== false) ? {
+      id: 'kiosk-escalations',
+      title: t('dashboard.kioskEscalations'),
+      detail: t('dashboard.kioskEscalationsDetail', { count: kioskEscalations }),
+      note: t('dashboard.kioskEscalationsNote'),
+      action: () => router.push('/kiosks?outcome=ESCALATED'),
+      actionLabel: t('dashboard.openKiosks'),
+    } : null,
+    inspectionsToReview > 0 ? {
+      id: 'inspections-to-review',
+      title: t('dashboard.inspectionsToReview'),
+      detail: t('dashboard.inspectionsToReviewDetail', { count: inspectionsToReview }),
+      note: t('dashboard.inspectionsToReviewNote'),
+      action: () => router.push('/inspections/review'),
+      actionLabel: t('dashboard.reviewNow'),
+    } : null,
+    registrationsExpiring30d > 0 ? {
+      id: 'registrations-expiring',
+      title: t('dashboard.registrationsExpiring'),
+      detail: t('dashboard.vehicleCount', { count: registrationsExpiring30d }),
+      note: t('dashboard.registrationsExpiringNote'),
+      action: () => router.push('/vehicles?registration=expiring'),
+      actionLabel: t('dashboard.reviewVehicles'),
+    } : null,
+    readyToRotate > 0 ? {
+      id: 'ready-to-rotate',
+      title: t('dashboard.readyToRotate'),
+      detail: t('dashboard.vehicleCount', { count: readyToRotate }),
+      note: t('dashboard.readyToRotateNote', { rule: rotationRuleLabel }),
+      action: () => router.push('/vehicles?rotation=ready'),
+      actionLabel: t('dashboard.viewBatch'),
+    } : null,
+    (me?.moduleAccess?.loaner === true && loanerRequestsPending > 0) ? {
+      id: 'loaner-requests-pending',
+      title: t('dashboard.loanerRequests'),
+      detail: t('dashboard.loanerRequestsDetail', { count: loanerRequestsPending }),
+      note: t('dashboard.loanerRequestsNote'),
+      action: () => router.push('/loaner#loaner-queues'),
+      actionLabel: t('dashboard.reviewRequests'),
+    } : null,
+    (me?.moduleAccess?.loaner === true) ? {
+      id: 'loaner',
+      title: t('dashboard.loanerLane'),
+      detail: t('dashboard.loanerLaneDetail'),
+      note: t('dashboard.loanerLaneNote'),
+      action: () => router.push('/loaner'),
+      actionLabel: t('dashboard.openLoaner'),
+    } : null,
+  ].filter(Boolean);
+
+  if (!items.length) return null;
+  return (
+    <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
+      <div className="app-card-grid compact">
+        {items.map((item) => (
+          <section key={item.id} className="glass card section-card">
+            <div className="section-title" style={{ fontSize: 15 }}>{item.title}</div>
+            <div className="ui-muted">{item.detail}</div>
+            <div className="surface-note">{item.note}</div>
+            <div className="inline-actions">
+              <button type="button" onClick={item.action}>{item.actionLabel}</button>
+            </div>
+          </section>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * The v1 ops board, ported whole (phase 7b): date-navigable pickups and
+ * returns for the selected day, with the same actions (check-out, request
+ * info, no-show; check-in or the received chip) and the same unpaid-balance
+ * warning chips. Header counts mirror the filtered lists on purpose — the
+ * backend summary counts disagreed with the cards (v1 bug note).
+ */
+function OpsBoard({ router, t, boardDate, setBoardDate, isToday, pickups, returns, boardMsg, markNoShow, requestCustomerInfo }) {
+  const boardLabel = isToday
+    ? t('dashboard.today')
+    : new Date(`${boardDate}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+  const timeOf = (v) => {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('en-US', { timeZone: DEFAULT_TENANT_TIMEZONE, hour: 'numeric', minute: '2-digit', hour12: true });
+  };
+  const moneyShort = (n) => `$${Number(n || 0).toFixed(2)}`;
+  const unpaidBalance = (r) => {
+    const balance = Number(r?.rentalAgreement?.balance);
+    return Number.isFinite(balance) && balance > 0 ? balance : 0;
+  };
+  const open = (id) => router.push(`/reservations/${id}`);
+
+  const row = (r, when, actions) => {
+    const balance = unpaidBalance(r);
+    return (
+      <div
+        key={`${when}-${r.id}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => open(r.id)}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(r.id); } }}
+        className="row"
+        style={{ alignItems: 'center', gap: 8, cursor: 'pointer', padding: '6px 4px', borderRadius: 8 }}
+      >
+        <span style={{ minWidth: 70, fontWeight: 600, fontSize: 13, color: 'var(--text-1)' }}>{timeOf(when === 'pickup' ? r.pickupAt : r.returnAt)}</span>
+        <span style={{ flex: 1 }}>
+          #{r.reservationNumber} · {r.customer?.firstName} {r.customer?.lastName}
+          {r.vehicle ? ` · ${r.vehicle.year || ''} ${r.vehicle.make || ''} ${r.vehicle.model || ''}`.trim() : ''}
+          {balance > 0 ? <span className="status-chip warn" style={{ marginLeft: 6 }}>{t('dashboard.unpaid', { amount: moneyShort(balance) })}</span> : null}
+        </span>
+        <div style={{ display: 'flex', gap: 6 }} onClick={(e) => e.stopPropagation()}>{actions(r)}</div>
+      </div>
+    );
+  };
+
+  return (
+    <>
+      <section className="glass card-lg" style={{ marginBottom: 12 }}>
+        <div className="row-between" style={{ alignItems: 'center' }}>
+          <h3 style={{ margin: 0 }}>{t('dashboard.opsBoard')}</h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button type="button" onClick={() => setBoardDate(shiftDate(boardDate, -1))} style={{ padding: '4px 8px', minWidth: 0 }}>&larr;</button>
+            <input type="date" value={boardDate} onChange={(e) => setBoardDate(e.target.value)} style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid var(--border-soft)', background: 'var(--bg-soft)', color: 'var(--text-1)', fontSize: 13, fontWeight: 600 }} />
+            <button type="button" onClick={() => setBoardDate(shiftDate(boardDate, 1))} style={{ padding: '4px 8px', minWidth: 0 }}>&rarr;</button>
+            {!isToday && <button type="button" onClick={() => setBoardDate(wallClockDate(new Date()))} style={{ padding: '4px 10px', fontSize: 12 }}>{t('dashboard.today')}</button>}
+          </div>
+        </div>
+        <p className="label" style={{ marginTop: 6, marginBottom: 0 }}>
+          {boardLabel} — {t('dashboard.pickupsLabel')}: <strong>{pickups.length}</strong> · {t('dashboard.returnsLabel')}: <strong>{returns.length}</strong>
+        </p>
+        {boardMsg ? <p className="ui-muted" style={{ marginTop: 6, marginBottom: 0 }}>{boardMsg}</p> : null}
+      </section>
+
+      <section className="grid2" style={{ marginBottom: 16 }}>
+        <div className="glass card-lg">
+          <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--brand)', marginBottom: 8 }}>{t('dashboard.pickupsCount', { count: pickups.length })}</div>
+          {pickups.length === 0 ? (
+            <p className="ui-muted" style={{ textAlign: 'center', padding: 20, margin: 0 }}>{t('dashboard.noPickups')}</p>
+          ) : (
+            <div className="stack">
+              {pickups.map((r) => row(r, 'pickup', (res) => (
+                <>
+                  <button type="button" onClick={(e) => { e.stopPropagation(); router.push(`/reservations/${res.id}/checkout-wizard-v2`); }}>{t('dashboard.startCheckout')}</button>
+                  <button type="button" onClick={(e) => { e.stopPropagation(); requestCustomerInfo(res.id); }}>{t('dashboard.requestInfo')}</button>
+                  <button type="button" onClick={(e) => { e.stopPropagation(); markNoShow(res.id); }}>{t('dashboard.noShow')}</button>
+                </>
+              )))}
+            </div>
+          )}
+        </div>
+
+        <div className="glass card-lg">
+          <div className="label" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--teal-tx)', marginBottom: 8 }}>{t('dashboard.returnsCount', { count: returns.length })}</div>
+          {returns.length === 0 ? (
+            <p className="ui-muted" style={{ textAlign: 'center', padding: 20, margin: 0 }}>{t('dashboard.noReturns')}</p>
+          ) : (
+            <div className="stack">
+              {returns.map((r) => row(r, 'return', (res) => (
+                ['CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(res.status)
+                  ? <span className="status-chip good">{t('dashboard.checkedIn')}</span>
+                  : <button type="button" onClick={(e) => { e.stopPropagation(); router.push(`/reservations/${res.id}/checkin-wizard`); }}>{t('dashboard.startCheckin')}</button>
+              )))}
+            </div>
+          )}
+        </div>
+      </section>
+    </>
   );
 }

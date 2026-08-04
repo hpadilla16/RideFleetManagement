@@ -129,6 +129,17 @@ export async function computeDashboardV2Kpis(tenantId, { allowedLocationIds = nu
   const thisWeek = utilizationPct(weekReservations, vehicles.length, weekFrom, today);
   const prevWeek = utilizationPct(weekReservations, vehicles.length, prevWeekFrom, weekFrom);
 
+  // Per-day series for the hero sparkline (Hector, 2026-08-04): the same
+  // clipped-overlap math, bucketed into the 7 tenant-tz days the headline
+  // number summarizes — so the line and the percentage can never disagree.
+  const days = [];
+  for (let i = 0; i < 7; i += 1) {
+    const dayFrom = addDaysInTz(weekFrom, i);
+    const dayTo = addDaysInTz(weekFrom, i + 1);
+    const pct = utilizationPct(weekReservations, vehicles.length, dayFrom, dayTo);
+    days.push({ date: dayFrom.toISOString(), pct: pct == null ? null : +pct.toFixed(1) });
+  }
+
   return {
     tz,
     asOf: now.toISOString(),
@@ -144,7 +155,8 @@ export async function computeDashboardV2Kpis(tenantId, { allowedLocationIds = nu
     utilization: {
       pct: thisWeek == null ? null : +thisWeek.toFixed(1),
       prevPct: prevWeek == null ? null : +prevWeek.toFixed(1),
-      deltaPts: thisWeek == null || prevWeek == null ? null : +(thisWeek - prevWeek).toFixed(1)
+      deltaPts: thisWeek == null || prevWeek == null ? null : +(thisWeek - prevWeek).toFixed(1),
+      days
     },
     tolls30d: {
       reconciledAmount: Number(tollsAgg._sum.amount || 0),
