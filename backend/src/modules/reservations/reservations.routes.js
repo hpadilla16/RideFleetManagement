@@ -1,6 +1,7 @@
 ﻿import crypto from 'node:crypto';
 import { Router } from 'express';
 import { reservationsService } from './reservations.service.js';
+import { looksLikeXlsx, parseReservationImportWorkbook } from './reservation-import-parse.js';
 import { validateReservationCreate, validateReservationPatch } from './reservations.rules.js';
 import { prisma } from '../../lib/prisma.js';
 import { withTenantSchema } from '../../lib/tenant-routing.js';
@@ -366,6 +367,24 @@ reservationsRouter.get('/resolve-rate', async (req, res, next) => {
       return res.status(400).json({ error: 'No rate tables found for selected vehicle type, location and dates' });
     }
     res.json(out);
+  } catch (e) {
+    next(e);
+  }
+});
+
+reservationsRouter.post('/bulk/parse-file', async (req, res, next) => {
+  try {
+    const b64 = String(req.body?.fileBase64 || '');
+    if (!b64) return res.status(400).json({ error: 'fileBase64 is required' });
+    // 15MB decoded — a migration sheet is tens of KB; anything bigger is a
+    // mistake, not a fleet.
+    if (b64.length > 20 * 1024 * 1024) return res.status(413).json({ error: 'File too large' });
+    const buffer = Buffer.from(b64, 'base64');
+    if (!looksLikeXlsx(buffer)) {
+      return res.status(422).json({ error: 'Not an Excel file. CSV files are parsed in the browser.' });
+    }
+    const parsed = await parseReservationImportWorkbook(buffer);
+    res.json(parsed);
   } catch (e) {
     next(e);
   }

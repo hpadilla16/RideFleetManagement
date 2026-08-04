@@ -414,11 +414,31 @@ function hasFeeAdvisoryFlag(notes) {
   return /\[FEE_ADVISORY_OPEN\s+/i.test(String(notes || ''));
 }
 
-function parseDateInput(value) {
+export function parseDateInput(value) {
   if (!value) return null;
-  const parsed = new Date(value);
+  // Excel strips leading zeros on save, and V8 refuses a single-digit hour:
+  // new Date('2026-03-08T9:00') is Invalid Date. Every VPH migration row had
+  // this (2026-08-04). Padding the hour is unambiguous, so do it here.
+  const raw = norm(value).replace(/T(\d):/, 'T0$1:');
+  const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
+}
+
+/**
+ * Why a date failed, in words the person who typed it can act on. The VPH
+ * migration sheet had rows like 2026-21-07 — YYYY-DD-MM. When the "month" is
+ * over 12 the swap is provable, and "pickupAt invalid" alone sends the user
+ * hunting in the wrong place. We deliberately do NOT auto-swap: a sheet with
+ * one provable swap almost certainly has AMBIGUOUS ones too (2026-03-08...),
+ * and silently guessing those would import six-month rentals nobody booked.
+ */
+export function dateInputHint(value) {
+  const m = String(value || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m && Number(m[2]) > 12 && Number(m[3]) <= 12) {
+    return `day and month look swapped (got ${m[1]}-${m[2]}-${m[3]}; the format is YYYY-MM-DD)`;
+  }
+  return null;
 }
 
 function isLegacyPlaceholderDate(value) {
@@ -685,8 +705,14 @@ async function buildReservationImportRow(row, index, scope = {}, cache = {}) {
 
   if (!tenantId) errors.push('tenantId/tenantSlug required');
   if (!normalized.reservationNumber) errors.push('reservationNumber required');
-  if (!normalized.pickupAt) errors.push('pickupAt invalid');
-  if (!normalized.returnAt) errors.push('returnAt invalid');
+  if (!normalized.pickupAt) {
+    const hint = dateInputHint(row?.pickupAt);
+    errors.push(hint ? `pickupAt invalid — ${hint}` : 'pickupAt invalid');
+  }
+  if (!normalized.returnAt) {
+    const hint = dateInputHint(row?.returnAt);
+    errors.push(hint ? `returnAt invalid — ${hint}` : 'returnAt invalid');
+  }
   if (normalized.pickupAt && normalized.returnAt && normalized.pickupAt >= normalized.returnAt) errors.push('returnAt must be after pickupAt');
   if (normalized.returnAtUsedPlaceholder) warnings.push('returnAt placeholder detected in legacy file; import defaulted it to pickupAt + 1 day');
   if (!pickupLocation) errors.push('pickup location not found');

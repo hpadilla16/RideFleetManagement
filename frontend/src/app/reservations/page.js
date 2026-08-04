@@ -1,13 +1,34 @@
 'use client';
 
+// RFC-4180-ish CSV: quoted fields may contain commas, doubled quotes and
+// newlines. The old split-on-comma parser shifted every column after a note
+// like "Imported, needs review".
 function parseCsv(text) {
-  const lines = String(text || '').split(/\r?\n/).filter(Boolean);
-  if (!lines.length) return [];
-  const headers = lines[0].split(',').map((h) => h.trim());
-  return lines.slice(1).map((line) => {
-    const cols = line.split(',').map((c) => c.trim());
+  const src = String(text || '');
+  const records = [];
+  let field = '';
+  let record = [];
+  let inQuotes = false;
+  const endField = () => { record.push(field); field = ''; };
+  const endRecord = () => { endField(); records.push(record); record = []; };
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') { field += '"'; i += 1; } else { inQuotes = false; }
+      } else field += ch;
+    } else if (ch === '"') inQuotes = true;
+    else if (ch === ',') endField();
+    else if (ch === '\n') endRecord();
+    else if (ch !== '\r') field += ch;
+  }
+  if (field !== '' || record.length) endRecord();
+  const nonEmpty = records.filter((r) => r.some((c) => String(c).trim() !== ''));
+  if (!nonEmpty.length) return [];
+  const headers = nonEmpty[0].map((h) => String(h).trim());
+  return nonEmpty.slice(1).map((cols) => {
     const row = {};
-    headers.forEach((h, i) => { row[h] = cols[i] ?? ''; });
+    headers.forEach((h, i) => { row[h] = String(cols[i] ?? '').trim(); });
     return row;
   });
 }
@@ -696,7 +717,33 @@ function ReservationsInner({ token, me, logout }) {
 
   const onSelectImportFile = async (file) => {
     if (!file) return;
-    const text = await file.text();
+    setImportReport(null);
+    const buffer = await file.arrayBuffer();
+    const magic = new Uint8Array(buffer.slice(0, 2));
+    // 'PK' = zip = an Excel workbook, whatever the file is NAMED — Excel
+    // silently converts an opened CSV template to xlsx on save, and VPH's
+    // upload was an xlsx called `...csv.xlsx`. Reading that zip as text used
+    // to produce 44 garbage rows and a validation report that blamed the
+    // user's data. Excel files now parse server-side (exceljs).
+    if (magic[0] === 0x50 && magic[1] === 0x4b) {
+      try {
+        let binary = '';
+        const bytes = new Uint8Array(buffer);
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        }
+        const parsed = await api(scopedPath('/api/reservations/bulk/parse-file'), {
+          method: 'POST',
+          body: JSON.stringify({ fileBase64: btoa(binary) })
+        }, token);
+        setImportRows(Array.isArray(parsed?.rows) ? parsed.rows : []);
+      } catch (e) {
+        setImportRows([]);
+        setMsg(e.message);
+      }
+      return;
+    }
+    const text = new TextDecoder('utf-8').decode(buffer);
     setImportRows(parseCsv(text));
   };
 
@@ -1374,7 +1421,7 @@ function ReservationsInner({ token, me, logout }) {
             {importStep === 2 && (
               <div className="stack">
                 <p className="label">Step 2: Upload file and validate</p>
-                <input type="file" accept=".csv,text/csv" onChange={(e) => onSelectImportFile(e.target.files?.[0])} />
+                <input type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(e) => onSelectImportFile(e.target.files?.[0])} />
                 <p className="label">Rows loaded: {importRows.length}</p>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button type="button" onClick={resetImportWizard}>Try again</button>
