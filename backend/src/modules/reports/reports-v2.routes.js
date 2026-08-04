@@ -21,6 +21,7 @@ import { userProgramScope, userAllowedLocationIds } from '../../lib/tenant-scope
 import { scopeFor as tenantScopeFor } from '../../lib/tenant-scope.js';
 import { computeTodayKpis } from './today-kpis.js';
 import { computeDashboardV2Kpis } from './dashboard-v2-kpis.js';
+import { computeDashboardV2Fleet } from './dashboard-v2-fleet.js';
 import {
   listReports,
   getSnapshot,
@@ -148,6 +149,26 @@ reportsV2Router.get(
       const tenantId = tenantScopeFor(req)?.tenantId || null;
       if (!tenantId) return res.json({ turnReady: null, utilization: null, tolls30d: null });
       res.json(await computeDashboardV2Kpis(tenantId));
+    } catch (err) {
+      sendError(res, err);
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
+// GET /api/reports/dashboard-v2-fleet — the v2 fleet table (2026-08-04,
+// phase 6): worst-Turn-Ready-first rows with a derived next action. Same
+// guard posture as the KPIs above.
+// ---------------------------------------------------------------------------
+reportsV2Router.get(
+  '/dashboard-v2-fleet',
+  requireRole('ADMIN', 'OPS', 'SUPER_ADMIN'),
+  rejectScopedUsers,
+  async (req, res) => {
+    try {
+      const tenantId = tenantScopeFor(req)?.tenantId || null;
+      if (!tenantId) return res.json({ totalCount: 0, rows: [] });
+      res.json(await computeDashboardV2Fleet(tenantId, { limit: req.query?.limit }));
     } catch (err) {
       sendError(res, err);
     }

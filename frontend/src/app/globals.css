@@ -2107,3 +2107,9 @@ label input[type="radio"],
   .kpis > .kpi:first-child { grid-column: auto; }
   .kpi--ring { flex-direction: column; align-items: flex-start; gap: 12px; }
 }
+
+/* Dashboard v2 fleet table (phase 6): the vehicle cell from the product shot.
+ * .plate and .table-shell already exist above (beta.365) and are reused. */
+.cell-veh { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.cell-veh b { display: block; font-weight: 620; font-size: 13px; color: var(--text-1); line-height: 1.3; }
+.cell-veh small { display: block; font-size: 11.5px; color: var(--text-3); }
