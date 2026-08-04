@@ -173,3 +173,16 @@ async function runRematch({ find, onRow, opts = {}, widestWindowDays = 14 }) {
   }
   return { scanned, truncated, dryRun, ignoreWindow };
 }
+
+describe('covered auto-confirm gate', () => {
+  const cand = (resId) => ({ reservation: { id: resId } });
+
+  it('fires only when exactly one distinct reservation is in play', async () => {
+    const { shouldCheckCoveredAutoConfirm } = await import('./tolls.service.js');
+    assert.equal(shouldCheckCoveredAutoConfirm([cand('r1')]), true);
+    assert.equal(shouldCheckCoveredAutoConfirm([cand('r1'), cand('r1')]), true, 'same reservation via two windows still counts as one');
+    assert.equal(shouldCheckCoveredAutoConfirm([cand('r1'), cand('r2')]), false, 'competing reservations must keep human review');
+    assert.equal(shouldCheckCoveredAutoConfirm([]), false);
+    assert.equal(shouldCheckCoveredAutoConfirm([{ reservation: null }]), false);
+  });
+});
