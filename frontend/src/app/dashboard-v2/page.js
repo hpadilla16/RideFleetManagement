@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
+import { DEFAULT_TENANT_TIMEZONE } from '../../lib/tenant-time';
 
 function ringTone(avgScore) {
   if (avgScore == null) return 'neutral';
@@ -60,14 +61,18 @@ function DashboardV2Inner({ token, me, logout }) {
   const { t } = useTranslation();
   const router = useRouter();
   const [kpis, setKpis] = useState(null);
+  const [fleet, setFleet] = useState(null);
   const [state, setState] = useState('loading'); // loading | ready | forbidden | error
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const out = await api('/api/reports/dashboard-v2-kpis', {}, token);
-        if (!cancelled) { setKpis(out); setState('ready'); }
+        const [out, fleetOut] = await Promise.all([
+          api('/api/reports/dashboard-v2-kpis', {}, token),
+          api('/api/reports/dashboard-v2-fleet?limit=8', {}, token),
+        ]);
+        if (!cancelled) { setKpis(out); setFleet(fleetOut); setState('ready'); }
       } catch (err) {
         if (cancelled) return;
         setState(/403|forbidden|restricted/i.test(String(err?.message || '')) ? 'forbidden' : 'error');
@@ -169,15 +174,124 @@ function DashboardV2Inner({ token, me, logout }) {
         )}
       </section>
 
-      {/* Phases 6-7 land below: the fleet table with the TURN-READY column,
-          then every block the current dashboard has (Hector's binding
-          constraint: nothing gets deleted). Until then this page is a preview
-          reached by URL only — it is deliberately NOT in the nav. */}
+      {state === 'ready' ? <FleetTable fleet={fleet} router={router} t={t} /> : null}
+
+      {/* Phase 7 lands below: every block the current dashboard has (Hector's
+          binding constraint: nothing gets deleted). Until then this page is a
+          preview reached by URL only — it is deliberately NOT in the nav. */}
       <section className="glass card-lg">
         <p className="ui-muted" style={{ margin: 0 }}>
-          {t('dashboardV2.wip', 'Preview build. The fleet table and the full block set from the current dashboard land here next; the main dashboard is unchanged.')}
+          {t('dashboardV2.wip', 'Preview build. The full block set from the current dashboard lands here next; the main dashboard is unchanged.')}
         </p>
       </section>
     </AppShell>
+  );
+}
+
+const VEHICLE_STATUS_TONE = {
+  AVAILABLE: 'ok',
+  RESERVED: 'neutral',
+  ON_RENT: 'neutral',
+  IN_MAINTENANCE: 'warn',
+  OUT_OF_SERVICE: 'danger',
+  SOLD: 'neutral',
+};
+
+function turnReadyTone(status) {
+  const value = String(status || '').toUpperCase();
+  if (value === 'READY') return 'ok';
+  if (value === 'BLOCKED') return 'danger';
+  if (value === 'WATCH' || value === 'ATTENTION') return 'warn';
+  return 'neutral';
+}
+
+function wallClock(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const sameDay = new Date().toDateString() === date.toDateString();
+  return date.toLocaleString('en-US', {
+    timeZone: DEFAULT_TENANT_TIMEZONE,
+    ...(sameDay ? {} : { month: 'short', day: 'numeric' }),
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function nextActionLabel(action, t) {
+  switch (action?.kind) {
+    case 'return': return t('dashboardV2.actionReturn', 'Returns {{time}}', { time: wallClock(action.at) });
+    case 'pickup': return t('dashboardV2.actionPickup', 'Pickup {{time}}', { time: wallClock(action.at) });
+    case 'block': return t('dashboardV2.actionBlocked', 'Held until {{time}}', { time: wallClock(action.until) });
+    case 'assign': return t('dashboardV2.actionAssign', 'Assign');
+    default: return t('dashboardV2.actionReview', 'Review');
+  }
+}
+
+/**
+ * Worst-Turn-Ready-first slice of the fleet — "what needs a human", not an
+ * inventory (that is /vehicles, one click away on any row).
+ */
+function FleetTable({ fleet, router, t }) {
+  const rows = Array.isArray(fleet?.rows) ? fleet.rows : [];
+  return (
+    <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
+      <div className="row-between" style={{ marginBottom: 10 }}>
+        <h3 style={{ margin: 0 }}>{t('dashboardV2.fleetTitle', 'Units needing attention')}</h3>
+        <span className="ui-muted">
+          {t('dashboardV2.fleetCount', '{{shown}} of {{total}} units', { shown: rows.length, total: fleet?.totalCount ?? rows.length })}
+        </span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="ui-muted" style={{ margin: 0 }}>{t('dashboardV2.fleetEmpty', 'No units to show yet.')}</p>
+      ) : (
+        <div className="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th>{t('dashboardV2.colPlate', 'Plate')}</th>
+                <th>{t('dashboardV2.colVehicle', 'Vehicle')}</th>
+                <th>{t('dashboardV2.colStatus', 'Status')}</th>
+                <th>{t('dashboardV2.colLocation', 'Location')}</th>
+                <th>{t('dashboardV2.colTurnReady', 'Turn-ready')}</th>
+                <th>{t('dashboardV2.colNextAction', 'Next action')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr
+                  key={row.id}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => router.push(`/vehicles/${row.id}`)}
+                  title={row.turnReady?.summary || ''}
+                >
+                  <td><span className="plate">{row.plate || row.internalNumber || '—'}</span></td>
+                  <td>
+                    <span className="cell-veh">
+                      <span>
+                        <b>{[row.make, row.model].filter(Boolean).join(' ') || row.internalNumber || '—'}</b>
+                        <small>{[row.year, row.internalNumber].filter(Boolean).join(' · ')}</small>
+                      </span>
+                    </span>
+                  </td>
+                  <td>
+                    <span className={`status-chip ${VEHICLE_STATUS_TONE[row.status] || 'neutral'}`}>
+                      {t(`dashboardV2.status.${row.status}`, row.status)}
+                    </span>
+                  </td>
+                  <td>{row.location?.name || '—'}</td>
+                  <td>
+                    <span className={`status-chip ${turnReadyTone(row.turnReady?.status)}`}>
+                      {row.turnReady?.score ?? '—'}
+                    </span>
+                  </td>
+                  <td>{nextActionLabel(row.nextAction, t)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }

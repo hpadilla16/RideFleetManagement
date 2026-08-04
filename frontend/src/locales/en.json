@@ -871,6 +871,28 @@
     "tollsTitle": "Open tolls",
     "crossings": "{{count}} crossings",
     "inReview": "{{count}} in review",
-    "wip": "Preview build. The fleet table and the full block set from the current dashboard land here next; the main dashboard is unchanged."
+    "wip": "Preview build. The full block set from the current dashboard lands here next; the main dashboard is unchanged.",
+    "fleetTitle": "Units needing attention",
+    "fleetCount": "{{shown}} of {{total}} units",
+    "fleetEmpty": "No units to show yet.",
+    "colPlate": "Plate",
+    "colVehicle": "Vehicle",
+    "colStatus": "Status",
+    "colLocation": "Location",
+    "colTurnReady": "Turn-ready",
+    "colNextAction": "Next action",
+    "actionReturn": "Returns {{time}}",
+    "actionPickup": "Pickup {{time}}",
+    "actionBlocked": "Held until {{time}}",
+    "actionAssign": "Assign",
+    "actionReview": "Review",
+    "status": {
+      "AVAILABLE": "Available",
+      "RESERVED": "Reserved",
+      "ON_RENT": "On rent",
+      "IN_MAINTENANCE": "In shop",
+      "OUT_OF_SERVICE": "Out of service",
+      "SOLD": "Sold"
+    }
   }
 }

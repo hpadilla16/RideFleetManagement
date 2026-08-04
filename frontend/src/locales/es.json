@@ -871,6 +871,28 @@
     "tollsTitle": "Abrir peajes",
     "crossings": "{{count}} cruces",
     "inReview": "{{count}} en revisión",
-    "wip": "Vista previa. La tabla de flota y todos los bloques del dashboard actual llegan aquí después; el dashboard principal no cambia."
+    "wip": "Vista previa. Todos los bloques del dashboard actual llegan aquí después; el dashboard principal no cambia.",
+    "fleetTitle": "Unidades que necesitan atención",
+    "fleetCount": "{{shown}} de {{total}} unidades",
+    "fleetEmpty": "Aún no hay unidades que mostrar.",
+    "colPlate": "Tablilla",
+    "colVehicle": "Vehículo",
+    "colStatus": "Estado",
+    "colLocation": "Sede",
+    "colTurnReady": "Turn-ready",
+    "colNextAction": "Próxima acción",
+    "actionReturn": "Regresa {{time}}",
+    "actionPickup": "Pickup {{time}}",
+    "actionBlocked": "Retenido hasta {{time}}",
+    "actionAssign": "Asignar",
+    "actionReview": "Revisar",
+    "status": {
+      "AVAILABLE": "Disponible",
+      "RESERVED": "Reservado",
+      "ON_RENT": "Rentado",
+      "IN_MAINTENANCE": "En taller",
+      "OUT_OF_SERVICE": "Fuera de servicio",
+      "SOLD": "Vendido"
+    }
   }
 }
