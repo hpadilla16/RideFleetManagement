@@ -8,6 +8,7 @@ import { isModuleEnabled, pathnameToModule } from '../lib/moduleAccess';
 import { useTranslation } from 'react-i18next';
 import { setLanguage } from '../lib/i18n';
 import { CommandPalette } from './CommandPalette';
+import { ShuttleBanner } from './ShuttleBanner';
 
 const NAV_ITEMS = [
   { href: '/dashboard', labelKey: 'nav.dashboard', moduleKey: 'dashboard' },
@@ -289,6 +290,9 @@ export function AppShell({ me, logout, children }) {
       {mobileOpen ? <div className="drawer-backdrop" onClick={() => setMobileOpen(false)} /> : null}
 
       <main className="content">
+        {/* Shuttle arc (2026-08-05): a customer at the curb outranks whatever
+            screen the agent is on — banner lives in the shell, not a page. */}
+        <ShuttleBanner />
         <div className="topbar glass">
           <div className="topbar-primary">
             <button

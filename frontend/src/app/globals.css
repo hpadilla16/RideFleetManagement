@@ -2116,3 +2116,20 @@ label input[type="radio"],
 
 /* Dashboard v2 utilization sparkline (phase 7b) — fixed 0..100 y-scale. */
 .spark { display: block; width: 100%; height: 34px; margin-top: 12px; overflow: visible; }
+
+/* Shuttle Request banner (Valet arc 2026-08-05) — visible on every staff
+ * screen until "View". Warn palette: urgent, but not an error. */
+.shuttle-banner {
+  display: flex; align-items: center; gap: 12px;
+  margin: 0 0 12px; padding: 10px 14px;
+  background: var(--warn-bg); border: 1px solid var(--warn-bd);
+  border-radius: var(--r-lg); color: var(--warn-tx);
+}
+.shuttle-banner-icon { font-size: 20px; flex: 0 0 auto; }
+.shuttle-banner-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.shuttle-banner-text strong { font-size: 13.5px; }
+.shuttle-banner-detail { font-size: 12px; opacity: .9; }
+.shuttle-banner-action {
+  flex: 0 0 auto; font-weight: 700; padding: 6px 16px; cursor: pointer;
+  background: var(--warn-tx); color: #fff; border: 0; border-radius: var(--r-sm);
+}

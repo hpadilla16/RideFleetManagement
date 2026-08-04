@@ -37,6 +37,7 @@ import { spinClient } from '../payment-gateway/spin-client.js';
 import { iposTransactClient } from '../payment-gateway/ipos-transact-client.js';
 import { paymentOpsQueue } from '../payment-gateway/payment-ops-queue.service.js';
 import logger from '../../lib/logger.js';
+import { autoCompleteShuttleRequestsOnCheckout } from '../shuttle/shuttle-requests.service.js';
 
 // Tenant Spin config loader — mirrors the helper in spin-charge.service.js.
 // Tenant.spin* columns don't exist on the Tenant model today; the Spin
@@ -2318,6 +2319,10 @@ export async function applyFinalizeWritesTx(tx, ctx) {
     where: { id: updated.reservationId },
     data: { status: 'CHECKED_OUT' }
   });
+
+  // Shuttle arc (2026-08-05): the customer is holding the keys, so any open
+  // shuttle request closes itself — same tx, nobody has to remember anything.
+  await autoCompleteShuttleRequestsOnCheckout(tx, updated.reservationId);
 
   // Bug #44 — keep Vehicle.status in step: checkout flips the car to ON_RENT
   // (respects IN_MAINTENANCE/OUT_OF_SERVICE/SOLD). In the same tx for atomicity.

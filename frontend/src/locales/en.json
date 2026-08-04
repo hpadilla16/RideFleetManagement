@@ -895,5 +895,23 @@
       "SOLD": "Sold"
     },
     "actionOverdue": "Overdue since {{time}}"
+  },
+  "shuttle": {
+    "bannerTitle": "{{count}} customer(s) ready for airport pickup — please send the shuttle",
+    "bannerParty": "{{count}} pers.",
+    "calledTimes": "called ×{{count}}",
+    "waitingFor": "waiting {{minutes}} min",
+    "waitingShort": "{{minutes}} min",
+    "view": "View",
+    "queueTitle": "Shuttle requests",
+    "queueSubtitle": "Customers waiting for airport pickup. Check-out closes these automatically.",
+    "loading": "Loading…",
+    "empty": "No one is waiting right now.",
+    "cancel": "Customer cancelled",
+    "noShow": "No-show",
+    "railTitle": "Shuttle requests",
+    "railDetail": "{{count}} customer(s) waiting for airport pickup",
+    "railNote": "Chloe validated the reservation; the floor dispatches the bus.",
+    "railOpen": "Open queue"
   }
 }
