@@ -332,7 +332,14 @@ export const reportsService = {
       // stale data so the count starts fresh.
       overdueIgnored: false,
       OR: [
-        { status: 'CHECKED_OUT', returnAt: { lt: startOfTenantToday } },
+        // A rental is overdue the moment its planned return passes — not at
+        // midnight. The old `lt: startOfTenantToday` opened a crack: a car due
+        // back at 9 AM, still out at 5 PM, counted as NEITHER active (needs
+        // returnAt > now) NOR overdue (needed returnAt before today), so
+        // active + overdue undercounted the fleet that is actually out
+        // (VPH, 2026-08-05: 32+10 shown vs 46 really out). Missed PICKUPS
+        // keep the midnight grace — arriving late the same day is normal.
+        { status: 'CHECKED_OUT', returnAt: { lt: now } },
         { status: { in: ['NEW', 'CONFIRMED'] }, pickupAt: { lt: startOfTenantToday } },
       ],
     };
