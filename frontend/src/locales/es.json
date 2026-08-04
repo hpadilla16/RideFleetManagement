@@ -893,6 +893,7 @@
       "IN_MAINTENANCE": "En taller",
       "OUT_OF_SERVICE": "Fuera de servicio",
       "SOLD": "Vendido"
-    }
+    },
+    "actionOverdue": "Vencido desde {{time}}"
   }
 }

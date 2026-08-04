@@ -62,6 +62,16 @@ function DashboardV2Inner({ token, me, logout }) {
   const router = useRouter();
   const [kpis, setKpis] = useState(null);
   const [fleet, setFleet] = useState(null);
+  // Ops-hub tile data (phase 7a) — mirrors the v1 dashboard's sources tile
+  // for tile so the two screens can never disagree on a number. Every fetch
+  // is soft-fail: a 403 or an off module hides that tile, never the page.
+  const [overviewKpis, setOverviewKpis] = useState(null);
+  const [todayKpis, setTodayKpis] = useState(null);
+  const [mismatchCount, setMismatchCount] = useState(null);
+  const [citSummary, setCitSummary] = useState(null);
+  const [maintSummary, setMaintSummary] = useState(null);
+  const [docAlert, setDocAlert] = useState(null);
+  const [feeAdvisoryCount, setFeeAdvisoryCount] = useState(null);
   const [state, setState] = useState('loading'); // loading | ready | forbidden | error
 
   useEffect(() => {
@@ -77,9 +87,31 @@ function DashboardV2Inner({ token, me, logout }) {
         if (cancelled) return;
         setState(/403|forbidden|restricted/i.test(String(err?.message || '')) ? 'forbidden' : 'error');
       }
+
+      // Tile data, each independent and soft-fail — same endpoints, same
+      // gating conditions as the v1 dashboard.
+      const soft = (promise, set, map = (x) => x) =>
+        promise.then((v) => { if (!cancelled) set(map(v)); }).catch(() => { if (!cancelled) set(null); });
+      soft(api('/api/reports/overview', {}, token), setOverviewKpis, (o) => o?.kpis || null);
+      soft(api('/api/inventory/reconciliation/open', { bypassCache: true }, token), setMismatchCount, (v) => Number(v?.count || 0));
+      if (me?.moduleAccess?.citations !== false) {
+        soft(api('/api/citations/summary', {}, token), setCitSummary);
+      }
+      if (me?.moduleAccess?.maintenance !== false) {
+        soft(api('/api/maintenance/summary', { bypassCache: true }, token), setMaintSummary);
+        soft(api('/api/reports/today-kpis', { bypassCache: true }, token), setTodayKpis, (k) => (k && k.collectedToday != null ? k : null));
+      }
+      if (me?.moduleAccess?.settings !== false) {
+        soft(api('/api/locations/documents/expiring', { bypassCache: true }, token), setDocAlert, (d) => (d && (d.expiringCount || d.expiredCount) ? d : null));
+      }
+      // Fee advisories live only in reservation notes — same scan as v1.
+      soft(api('/api/reservations?limit=500', {}, token), setFeeAdvisoryCount, (val) => {
+        const list = Array.isArray(val) ? val : (Array.isArray(val?.items) ? val.items : []);
+        return list.filter((r) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(r.notes || ''))).length;
+      });
     })();
     return () => { cancelled = true; };
-  }, [token]);
+  }, [token, me]);
 
   const tr = kpis?.turnReady || null;
   const util = kpis?.utilization || null;
@@ -176,6 +208,20 @@ function DashboardV2Inner({ token, me, logout }) {
 
       {state === 'ready' ? <FleetTable fleet={fleet} router={router} t={t} /> : null}
 
+      {state === 'ready' ? (
+        <OpsTiles
+          router={router}
+          t={t}
+          overviewKpis={overviewKpis}
+          todayKpis={todayKpis}
+          mismatchCount={mismatchCount}
+          citSummary={citSummary}
+          maintSummary={maintSummary}
+          docAlert={docAlert}
+          feeAdvisoryCount={feeAdvisoryCount}
+        />
+      ) : null}
+
       {/* Phase 7 lands below: every block the current dashboard has (Hector's
           binding constraint: nothing gets deleted). Until then this page is a
           preview reached by URL only — it is deliberately NOT in the nav. */}
@@ -218,9 +264,19 @@ function wallClock(value) {
   });
 }
 
+function isOverdue(action) {
+  return action?.kind === 'return' && action.at && new Date(action.at).getTime() < Date.now();
+}
+
 function nextActionLabel(action, t) {
   switch (action?.kind) {
-    case 'return': return t('dashboardV2.actionReturn', 'Returns {{time}}', { time: wallClock(action.at) });
+    case 'return':
+      // A planned return in the past is not a schedule item, it is an alarm —
+      // an open contract nobody closed. Say so (the cell renders it red).
+      if (action.at && new Date(action.at).getTime() < Date.now()) {
+        return t('dashboardV2.actionOverdue', 'Overdue since {{time}}', { time: wallClock(action.at) });
+      }
+      return t('dashboardV2.actionReturn', 'Returns {{time}}', { time: wallClock(action.at) });
     case 'pickup': return t('dashboardV2.actionPickup', 'Pickup {{time}}', { time: wallClock(action.at) });
     case 'block': return t('dashboardV2.actionBlocked', 'Held until {{time}}', { time: wallClock(action.until) });
     case 'assign': return t('dashboardV2.actionAssign', 'Assign');
@@ -285,13 +341,94 @@ function FleetTable({ fleet, router, t }) {
                       {row.turnReady?.score ?? '—'}
                     </span>
                   </td>
-                  <td>{nextActionLabel(row.nextAction, t)}</td>
+                  <td style={isOverdue(row.nextAction) ? { color: 'var(--danger-tx)', fontWeight: 600 } : undefined}>
+                    {nextActionLabel(row.nextAction, t)}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+    </section>
+  );
+}
+
+/**
+ * The v1 dashboard's ops-hub tile wall, ported whole (phase 7a — Hector's
+ * binding constraint: every tile survives). Numbers come from the SAME
+ * endpoints as v1 and labels reuse the SAME `dashboard.*` locale keys, so the
+ * two screens cannot drift apart while they coexist. Conditional tiles keep
+ * their v1 conditions: citations/maintenance/docs render only when their
+ * module answers, red tints fire on the same thresholds.
+ */
+function OpsTiles({ router, t, overviewKpis, todayKpis, mismatchCount, citSummary, maintSummary, docAlert, feeAdvisoryCount }) {
+  const k = overviewKpis || {};
+  const totalVehicles = Number(k.fleetTotal || 0);
+  const available = Number(k.availableFleet || 0);
+  const migrationHeld = Number(k.migrationHeld || 0);
+  const serviceHeld = Number(k.vehiclesInMaintenance || 0) + Number(k.vehiclesOutOfService || 0);
+  const activeReservations = Number(k.activeReservations || 0);
+  const overdueReservations = Number(k.overdueReservations || 0);
+  const money = (n) => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const tile = (key, onClick, label, value, desc, tone = null) => (
+    <button
+      type="button"
+      key={key}
+      className="info-tile"
+      onClick={onClick}
+      style={{
+        textAlign: 'left',
+        cursor: 'pointer',
+        ...(tone === 'danger' ? { background: 'var(--danger-bg)', borderColor: 'var(--danger-bd)' } : {}),
+        ...(tone === 'warn' ? { background: 'var(--warn-bg)', borderColor: 'var(--warn-bd)' } : {}),
+      }}
+    >
+      <span className="label">{label}</span>
+      <strong style={{ fontVariantNumeric: 'tabular-nums', ...(tone === 'danger' ? { color: 'var(--danger-tx)' } : tone === 'warn' ? { color: 'var(--warn-tx)' } : tone === 'ok' ? { color: 'var(--ok-tx)' } : {}) }}>
+        {value}
+      </strong>
+      <span className="ui-muted">{desc}</span>
+    </button>
+  );
+
+  return (
+    <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
+      <h3 style={{ marginTop: 0 }}>{t('dashboard.opsHubTitle')}</h3>
+      <div className="app-card-grid compact">
+        {overviewKpis ? tile('vehicles', () => router.push('/vehicles'), t('dashboard.tileVehicles'), totalVehicles, t('dashboard.tileVehiclesDesc')) : null}
+        {overviewKpis ? tile('available', () => router.push('/vehicles?status=available'), t('dashboard.tileAvailable'), available, t('dashboard.tileAvailableDesc')) : null}
+        {overviewKpis ? tile('migration', () => router.push('/vehicles?status=migration'), t('dashboard.tileMigrationHolds'), migrationHeld, t('dashboard.tileMigrationHoldsDesc')) : null}
+        {overviewKpis ? tile('maintOos', () => router.push('/vehicles?status=maintenance'), t('dashboard.tileMaintenanceOos'), serviceHeld, t('dashboard.tileMaintenanceOosDesc')) : null}
+        {todayKpis ? tile('collected', () => router.push('/reports-v2/payments-by-day'), t('dashboard.tileCollectedToday'), money(todayKpis.collectedToday), t('dashboard.tileCollectedTodayDesc')) : null}
+        {todayKpis ? tile('pendingTolls', () => router.push('/tolls'), t('dashboard.tilePendingTolls'), Number(todayKpis.pendingTolls || 0), t('dashboard.tilePendingTollsDesc'), Number(todayKpis.pendingTolls || 0) > 0 ? 'danger' : 'ok') : null}
+        {docAlert ? tile('docs', () => router.push('/settings'),
+          t('dashboard.tileDocsExpiring', { defaultValue: 'Documents expiring' }),
+          Number(docAlert.expiredCount || 0) + Number(docAlert.expiringCount || 0),
+          Number(docAlert.expiredCount || 0) > 0
+            ? t('dashboard.tileDocsExpiredDesc', { defaultValue: '{{expired}} already expired', expired: Number(docAlert.expiredCount || 0) })
+            : t('dashboard.tileDocsExpiringDesc', { defaultValue: 'within {{days}} days', days: Number(docAlert.warnDays || 30) }),
+          Number(docAlert.expiredCount || 0) > 0 ? 'danger' : 'warn') : null}
+        {maintSummary ? tile('maintDue', () => router.push('/maintenance'), t('dashboard.tileMaintenanceDue'), Number(maintSummary.overdue || 0), (() => {
+          const overdueN = Number(maintSummary.overdue || 0);
+          const soonN = Number(maintSummary.dueSoonOnly ?? Math.max(0, Number(maintSummary.dueSoon || 0) - overdueN));
+          if (overdueN > 0) return t('dashboard.tileMaintenanceDueDesc', { soon: soonN });
+          if (soonN > 0) return t('dashboard.tileMaintenanceDueSoonDesc', { soon: soonN });
+          return t('dashboard.tileMaintenanceDueOk');
+        })(), Number(maintSummary.overdue || 0) > 0 ? 'danger' : null) : null}
+        {mismatchCount != null ? tile('mismatch', () => router.push('/vehicles/reconciliation'), t('dashboard.tileStatusMismatches'), mismatchCount, t('dashboard.tileStatusMismatchesDesc'), mismatchCount > 0 ? 'danger' : null) : null}
+        {overviewKpis ? tile('active', () => router.push('/reservations?filter=active'), t('dashboard.tileActiveReservations'), activeReservations, t('dashboard.tileActiveReservationsDesc')) : null}
+        {overviewKpis ? tile('overdue', () => router.push('/reservations?filter=overdue'), t('dashboard.tileOverdueReturns'), overdueReservations, t('dashboard.tileOverdueReturnsDesc'), overdueReservations > 0 ? 'danger' : null) : null}
+        {feeAdvisoryCount != null ? (
+          <div className="info-tile" key="feeAdv">
+            <span className="label">{t('dashboard.tileFeeAdvisories')}</span>
+            <strong>{feeAdvisoryCount}</strong>
+            <span className="ui-muted">{t('dashboard.tileFeeAdvisoriesDesc')}</span>
+          </div>
+        ) : null}
+        {citSummary ? tile('citations', () => router.push('/citations'), t('dashboard.tileCitations'), Number(citSummary.needsReview || 0), t('dashboard.tileCitationsDesc', { outstanding: Number(citSummary.outstanding || 0).toFixed(2) })) : null}
+      </div>
     </section>
   );
 }

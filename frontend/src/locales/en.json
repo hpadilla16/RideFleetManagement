@@ -893,6 +893,7 @@
       "IN_MAINTENANCE": "In shop",
       "OUT_OF_SERVICE": "Out of service",
       "SOLD": "Sold"
-    }
+    },
+    "actionOverdue": "Overdue since {{time}}"
   }
 }
