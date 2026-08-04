@@ -21,6 +21,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
+import MarketIntelligenceCard from '../../components/MarketIntelligenceCard';
 import { api } from '../../lib/client';
 import { DEFAULT_TENANT_TIMEZONE } from '../../lib/tenant-time';
 
@@ -71,7 +72,8 @@ function DashboardV2Inner({ token, me, logout }) {
   const [citSummary, setCitSummary] = useState(null);
   const [maintSummary, setMaintSummary] = useState(null);
   const [docAlert, setDocAlert] = useState(null);
-  const [feeAdvisoryCount, setFeeAdvisoryCount] = useState(null);
+  const [reservations, setReservations] = useState(null);
+  const [resSummary, setResSummary] = useState(null);
   const [state, setState] = useState('loading'); // loading | ready | forbidden | error
 
   useEffect(() => {
@@ -104,11 +106,11 @@ function DashboardV2Inner({ token, me, logout }) {
       if (me?.moduleAccess?.settings !== false) {
         soft(api('/api/locations/documents/expiring', { bypassCache: true }, token), setDocAlert, (d) => (d && (d.expiringCount || d.expiredCount) ? d : null));
       }
-      // Fee advisories live only in reservation notes — same scan as v1.
-      soft(api('/api/reservations?limit=500', {}, token), setFeeAdvisoryCount, (val) => {
-        const list = Array.isArray(val) ? val : (Array.isArray(val?.items) ? val.items : []);
-        return list.filter((r) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(r.notes || ''))).length;
-      });
+      // The recent-reservations list feeds three v1 blocks at once: the
+      // fee-advisory note scan, the grid4 row and the operations timeline.
+      soft(api('/api/reservations?limit=500', {}, token), setReservations, (val) =>
+        (Array.isArray(val) ? val : (Array.isArray(val?.items) ? val.items : [])));
+      soft(api('/api/reservations/summary', {}, token), setResSummary);
     })();
     return () => { cancelled = true; };
   }, [token, me]);
@@ -168,6 +170,10 @@ function DashboardV2Inner({ token, me, logout }) {
       setBoardMsg(link ? t('dashboard.customerInfoCopied', { link }) : t('dashboard.customerInfoIssued'));
     } catch (e) { setBoardMsg(e.message); }
   };
+
+  const feeAdvisoryCount = reservations == null
+    ? null
+    : reservations.filter((r) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(r.notes || ''))).length;
 
   const tr = kpis?.turnReady || null;
   const util = kpis?.utilization || null;
@@ -263,7 +269,20 @@ function DashboardV2Inner({ token, me, logout }) {
         )}
       </section>
 
-      {state === 'ready' ? <FleetTable fleet={fleet} router={router} t={t} /> : null}
+
+      {state === 'ready' ? (
+        <OpsTiles
+          router={router}
+          t={t}
+          overviewKpis={overviewKpis}
+          todayKpis={todayKpis}
+          mismatchCount={mismatchCount}
+          citSummary={citSummary}
+          maintSummary={maintSummary}
+          docAlert={docAlert}
+          feeAdvisoryCount={feeAdvisoryCount}
+        />
+      ) : null}
 
       {state === 'ready' ? (
         <AttentionRail
@@ -291,28 +310,40 @@ function DashboardV2Inner({ token, me, logout }) {
         />
       ) : null}
 
-      {state === 'ready' ? (
-        <OpsTiles
-          router={router}
-          t={t}
-          overviewKpis={overviewKpis}
-          todayKpis={todayKpis}
-          mismatchCount={mismatchCount}
-          citSummary={citSummary}
-          maintSummary={maintSummary}
-          docAlert={docAlert}
-          feeAdvisoryCount={feeAdvisoryCount}
-        />
+
+      {state === 'ready' ? <FleetTable fleet={fleet} router={router} t={t} /> : null}
+
+      {state === 'ready' && overviewKpis ? (
+        <section className="grid4" style={{ marginBottom: 12 }}>
+          <div className="glass card"><div className="label">{t('dashboard.totalVehicles')}</div><div className="value">{Number(overviewKpis.fleetTotal || 0)}</div></div>
+          <div className="glass card"><div className="label">{t('dashboard.availableVehicles')}</div><div className="value">{Number(overviewKpis.availableFleet || 0)}</div></div>
+          <div className="glass card"><div className="label">{t('dashboard.reservations')}</div><div className="value">{Number.isFinite(Number(resSummary?.totalReservations)) ? Number(resSummary.totalReservations).toLocaleString() : (reservations?.length ?? 0)}</div></div>
+          <div className="glass card"><div className="label">{t('dashboard.active')}</div><div className="value">{Number(overviewKpis.activeReservations || 0)}</div></div>
+          <div className="glass card"><div className="label">{t('dashboard.tileFeeAdvisories')}</div><div className="value">{feeAdvisoryCount ?? 0}</div></div>
+        </section>
       ) : null}
 
-      {/* Phase 7 lands below: every block the current dashboard has (Hector's
-          binding constraint: nothing gets deleted). Until then this page is a
-          preview reached by URL only — it is deliberately NOT in the nav. */}
-      <section className="glass card-lg">
-        <p className="ui-muted" style={{ margin: 0 }}>
-          {t('dashboardV2.wip', 'Preview build. The full block set from the current dashboard lands here next; the main dashboard is unchanged.')}
-        </p>
-      </section>
+      {/* Per-tenant gated — the component itself returns null when the role
+          lacks marketIntelligence access or the tenant flag is off. */}
+      <MarketIntelligenceCard me={me} token={token} />
+
+      {state === 'ready' && reservations?.length ? (
+        <section className="glass card-lg">
+          <h3>{t('dashboard.operationsTimeline')}</h3>
+          <div className="stack">
+            {reservations
+              .slice()
+              .sort((a, b) => (new Date(b.updatedAt || b.createdAt || b.pickupAt || 0).getTime() || 0) - (new Date(a.updatedAt || a.createdAt || a.pickupAt || 0).getTime() || 0))
+              .slice(0, 10)
+              .map((r) => (
+                <div key={r.id} className="row">
+                  <span>{(() => { const v = r.updatedAt || r.createdAt || r.pickupAt; const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? d.toLocaleString() : '—'; })()}</span>
+                  <span>{t('dashboard.reservationLine', { number: r.reservationNumber, status: r.status })}</span>
+                </div>
+              ))}
+          </div>
+        </section>
+      ) : null}
     </AppShell>
   );
 }
