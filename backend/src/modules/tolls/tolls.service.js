@@ -1094,6 +1094,31 @@ export function scoreCandidate({ transaction, vehicle, reservation, siblingCandi
   };
 }
 
+/** Pure: covered auto-confirm applies only when ONE distinct reservation is in play. */
+export function shouldCheckCoveredAutoConfirm(candidates = []) {
+  const ids = new Set(
+    (Array.isArray(candidates) ? candidates : [])
+      .map((c) => c?.reservation?.id)
+      .filter(Boolean)
+  );
+  return ids.size === 1;
+}
+
+/** Does the reservation carry a selected, active coversTolls package? */
+async function reservationHasTollCoverage(reservationId, scope = {}) {
+  const reservation = await prisma.reservation.findFirst({
+    where: { id: reservationId, ...tenantWhereForScope(scope) },
+    select: { tenantId: true, charges: { select: { source: true, sourceRefId: true, selected: true } } }
+  });
+  if (!reservation) return false;
+  const serviceIds = tollPackageCandidateServiceIds(reservation.charges);
+  if (!serviceIds.length) return false;
+  const covered = await prisma.additionalService.count({
+    where: { tenantId: reservation.tenantId, id: { in: serviceIds }, isActive: true, coversTolls: true }
+  });
+  return covered > 0;
+}
+
 async function buildMatchSuggestion(transaction, scope = {}, vehicleCache = null) {
   let vehicles = await listTenantVehiclesForMatch(scope, transaction, vehicleCache);
 
@@ -1166,16 +1191,31 @@ async function buildMatchSuggestion(transaction, scope = {}, vehicleCache = null
   }
 
   const top = candidates[0];
-  const matchStatus = top.dispatchConfirmationRequired
+  let matchStatus = top.dispatchConfirmationRequired
     ? 'SUGGESTED'
     : top.score >= 85 ? 'AUTO_CONFIRMED' : top.score >= 60 ? 'SUGGESTED' : null;
+  let coveredAutoConfirm = false;
+  // 2026-08-05 (Hector): when the ONLY candidate reservation carries a
+  // coversTolls package, confirm instead of queueing review. Nothing gets
+  // billed either way (USAGE_ONLY), so the worst case of a wrong confirm is a
+  // $0 usage record — while every review row costs staff attention. Gated to
+  // a single distinct candidate: with competing reservations, attributing to
+  // the covered one would let the OTHER customer's real charge escape.
+  if (matchStatus === 'SUGGESTED' && shouldCheckCoveredAutoConfirm(candidates) && top.reservation?.id) {
+    if (await reservationHasTollCoverage(top.reservation.id, scope)) {
+      matchStatus = 'AUTO_CONFIRMED';
+      coveredAutoConfirm = true;
+    }
+  }
   return {
     vehicle: top.vehicle || null,
     reservation: top.reservation || null,
     score: top.score,
     matchStatus,
-    needsReview: top.dispatchConfirmationRequired || matchStatus !== 'AUTO_CONFIRMED',
-    matchReason: top.matchReason || 'manual-review',
+    needsReview: matchStatus !== 'AUTO_CONFIRMED',
+    matchReason: coveredAutoConfirm
+      ? 'auto-confirmed-covered-by-toll-package'
+      : (top.matchReason || 'manual-review'),
     candidates: candidates.slice(0, 5).map((candidate) => ({
       reservationId: candidate.reservation.id,
       reservationNumber: candidate.reservation.reservationNumber,
@@ -1557,7 +1597,9 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
       // status=VOID, billingStatus=WAIVED) is permanently excluded from the
       // rebuild — the voided charge stays voided and never regenerates.
       status: { in: ['MATCHED', 'BILLED'] },
-      billingStatus: { in: ['PENDING', 'POSTED_TO_RESERVATION', 'POSTED_TO_AGREEMENT'] }
+      // COVERED_BY_PACKAGE stays in the rebuild set on purpose: if the package
+      // is later removed from the reservation, the next sync re-bills these.
+      billingStatus: { in: ['PENDING', 'POSTED_TO_RESERVATION', 'POSTED_TO_AGREEMENT', 'COVERED_BY_PACKAGE'] }
     },
     orderBy: [{ transactionAt: 'asc' }, { createdAt: 'asc' }]
   });
@@ -1596,9 +1638,15 @@ async function syncReservationTollCharges(reservationId, scope = {}, options = {
 
     const tollUpdateGroups = new Map();
     for (const transaction of transactions) {
-      const targetBillingStatus = String(transaction.billingStatus || '').toUpperCase() === 'POSTED_TO_AGREEMENT'
-        ? 'POSTED_TO_AGREEMENT'
-        : 'POSTED_TO_RESERVATION';
+      // 2026-08-05 (Hector): prepaid-covered crossings are not money anyone
+      // still has to collect — give them their own state instead of letting
+      // them masquerade as POSTED_TO_RESERVATION (the pending-tolls KPI and
+      // staff alerts counted 900+ prepaid crossings as uncollected for IRC).
+      const targetBillingStatus = billingDecision.coveredByTollPackage
+        ? 'COVERED_BY_PACKAGE'
+        : String(transaction.billingStatus || '').toUpperCase() === 'POSTED_TO_AGREEMENT'
+          ? 'POSTED_TO_AGREEMENT'
+          : 'POSTED_TO_RESERVATION';
       const targetReviewNotes = mergeChargeNotes(transaction.reviewNotes, noteSuffix);
 
       // Skip if the row is already in the target state — common when the

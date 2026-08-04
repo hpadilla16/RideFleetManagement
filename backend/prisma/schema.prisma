@@ -434,6 +434,10 @@ enum TollBillingStatus {
   POSTED_TO_AGREEMENT
   WAIVED
   DISPUTED
+  // 2026-08-05: a coversTolls package prepaid these — usage recorded, nothing
+  // to collect. Distinct from WAIVED (a human decision) and from POSTED_*
+  // (money on a contract): the pending-tolls KPI and staff alerts skip these.
+  COVERED_BY_PACKAGE
 }
 
 // ─── Citations / traffic-ticket ingestion (Manuel Shop P1, plan
