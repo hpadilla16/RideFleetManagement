@@ -85,6 +85,44 @@ describe('dashboard-v2 KPIs', () => {
     assert.ok(out.utilization.deltaPts > 40);
   });
 
+  it('the daily series buckets with the same math as the headline number', async () => {
+    // 2 vehicles, one reservation covering the whole window: every one of the
+    // 7 day buckets must read ~50%, and the series must sum-consistently with
+    // the headline (same clipped-overlap formula, same tz boundaries).
+    const out = await computeDashboardV2Kpis('t1', {
+      now: NOW,
+      deps: {
+        prisma: fakeDb({
+          vehicles: [veh('a'), veh('b')],
+          reservations: [{ pickupAt: new Date(NOW - 20 * DAY), returnAt: new Date(NOW.getTime() + 5 * DAY) }],
+        }),
+        buildVehicleOperationalSignalsMap: fakeSignals({}),
+      },
+    });
+    assert.equal(out.utilization.days.length, 7);
+    for (const d of out.utilization.days) {
+      assert.ok(Math.abs(d.pct - 50) < 1.5, `day ${d.date} pct=${d.pct}`);
+    }
+    const avg = out.utilization.days.reduce((s2, d) => s2 + d.pct, 0) / 7;
+    assert.ok(Math.abs(avg - out.utilization.pct) < 1.5, `series avg ${avg} vs headline ${out.utilization.pct}`);
+  });
+
+  it('a day with no coverage reads 0 in the series, null only when there is no fleet', async () => {
+    const out = await computeDashboardV2Kpis('t1', {
+      now: NOW,
+      deps: {
+        prisma: fakeDb({ vehicles: [veh('a')], reservations: [] }),
+        buildVehicleOperationalSignalsMap: fakeSignals({}),
+      },
+    });
+    assert.ok(out.utilization.days.every((d) => d.pct === 0));
+    const empty = await computeDashboardV2Kpis('t1', {
+      now: NOW,
+      deps: { prisma: fakeDb({ vehicles: [] }), buildVehicleOperationalSignalsMap: fakeSignals({}) },
+    });
+    assert.ok(empty.utilization.days.every((d) => d.pct === null));
+  });
+
   it('reports null utilization for an empty fleet — not a fake 0%', async () => {
     const out = await computeDashboardV2Kpis('t1', {
       now: NOW,
