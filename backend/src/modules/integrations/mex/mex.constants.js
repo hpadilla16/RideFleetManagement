@@ -126,6 +126,10 @@ export const MENU_TEXT_RATE_UPDATE_1 =
 export const MENU_PATH_EMAIL =
   process.env.MEX_MENU_PATH_EMAIL || 'Reports POS\\Email Address Report';
 
+/** Visible label for the Email Address Report — how navigateMenu finds it. */
+export const MENU_TEXT_EMAIL =
+  process.env.MEX_MENU_TEXT_EMAIL || 'Email Address Report';
+
 // ---------------------------------------------------------------------------
 // Report screen controls. MEASURED 2026-07-17 off the live rcEstimatedTM.aspx DOM
 // (document.forms[0].elements enumerated in full). The portal renders these with
@@ -211,11 +215,17 @@ export const REPORT = Object.freeze({
     key: 'TM_SUMMARY',
     label: 'Estimated T&M Summary',
     menuPath: MENU_PATH_TM_SUMMARY,
+    // The VISIBLE menu label, PER REPORT. navigateMenu falls back to it when
+    // the portal's stored value no longer equals menuPath. Never share one
+    // default across reports: doing so sent the Email report to the T&M screen,
+    // which then failed a column guard for "drift" that was mis-navigation.
+    menuText: MENU_TEXT_TM_SUMMARY,
   }),
   EMAIL: Object.freeze({
     key: 'EMAIL',
     label: 'Email Address Report',
     menuPath: MENU_PATH_EMAIL,
+    menuText: MENU_TEXT_EMAIL,
   }),
 });
 

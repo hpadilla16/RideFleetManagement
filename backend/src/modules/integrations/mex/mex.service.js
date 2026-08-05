@@ -213,6 +213,68 @@ export function parseMenuItems(html) {
   return out;
 }
 
+/**
+ * Pure: the argument to post for a menu destination.
+ *
+ * Preference order, all read off the LIVE page:
+ *   1. the exact path the caller asked for, if the menu advertises it
+ *   2. an item whose visible TEXT matches `menuText` (portal renamed the value)
+ *   3. an item whose LEAF path matches case-insensitively
+ *   4. the caller's path unchanged — let the portal decide
+ */
+export function resolveMenuArgument(html, { menuPath, menuText = null } = {}) {
+  const items = parseMenuItems(html);
+  const path = String(menuPath || '');
+  if (items.some((i) => i.argument === path)) return path;
+  if (menuText) {
+    const byText = items.find((i) => i.text.toLowerCase() === String(menuText).trim().toLowerCase());
+    if (byText) return byText.argument;
+  }
+  const leaf = path.split('\\').pop().trim().toLowerCase();
+  if (leaf) {
+    const byLeaf = items.find((i) => i.argument.split('\\').pop().trim().toLowerCase() === leaf);
+    if (byLeaf) return byLeaf.argument;
+  }
+  return path;
+}
+
+/**
+ * Pure: does the live menu actually offer this destination?
+ *
+ * Not every TSD account exposes every report. MEX's SJU account advertises 13
+ * Reports POS items and NONE of them is the Email Address Report the Advantage
+ * clone assumed — navigating there just re-renders the Main Menu, whose columns
+ * then fail the email grid's header guard as "drift". Asking first turns an
+ * alarming false drift into a plain, true statement: this portal has no such
+ * report.
+ */
+export function menuOffers(html, { menuPath, menuText = null } = {}) {
+  const items = parseMenuItems(html);
+  const path = String(menuPath || '');
+  if (items.some((i) => i.argument === path)) return true;
+  if (menuText && items.some((i) => i.text.toLowerCase() === String(menuText).trim().toLowerCase())) return true;
+  const leaf = path.split('\\').pop().trim().toLowerCase();
+  return !!leaf && items.some((i) => i.argument.split('\\').pop().trim().toLowerCase() === leaf);
+}
+
+/**
+ * Pure: does the page render this menu path's SECTION at all?
+ * `Reports POS\\Email Address Report` → true when the page advertises any
+ * other `Reports POS\\…` item. Without that, we have no standing to say the
+ * destination is missing.
+ */
+export function menuSectionRendered(html, menuPath) {
+  const section = String(menuPath || '').split('\\')[0].trim().toLowerCase();
+  if (!section) return false;
+  return parseMenuItems(html)
+    .some((i) => i.argument.split('\\')[0].trim().toLowerCase() === section);
+}
+
+/** Raised when the portal simply does not carry a report we asked for. */
+export class MexReportUnavailableError extends Error {
+  constructor(message) { super(message); this.name = 'MexReportUnavailableError'; }
+}
+
 /** Pure: the postback argument for a menu item, matched on its visible text. */
 export function findMenuArgumentByText(html, linkText) {
   const wanted = String(linkText || '').trim().toLowerCase();
@@ -797,7 +859,7 @@ async function fetchCurrentPage(tenantId, userAgent) {
  * Navigate to a menu destination and return the rendered screen's HTML.
  * Re-logs-in ONCE on a bounce. Exported so the worker/routes can warm a screen.
  */
-export async function navigateMenu(tenantId, menuPath = MENU_PATH_TM_SUMMARY, { userAgent, menuText = MENU_TEXT_TM_SUMMARY } = {}) {
+export async function navigateMenu(tenantId, menuPath = MENU_PATH_TM_SUMMARY, { userAgent, menuText = null, requireOffered = false } = {}) {
   const ua = userAgent || pickUserAgent();
   await ensureSession(tenantId, { userAgent: ua });
 
@@ -807,11 +869,25 @@ export async function navigateMenu(tenantId, menuPath = MENU_PATH_TM_SUMMARY, { 
     if (isLoginBounce(pageRes, pageHtml)) return { bounced: true, html: '' };
 
     const { action, fields } = parseWebFormsForm(pageHtml);
-    // Resolve the postback ARGUMENT off the live menu when we know the item's
-    // visible label; the constant is only a fallback (see parseMenuItems).
-    const resolvedArgument = (menuText && findMenuArgumentByText(pageHtml, menuText)) || menuPath;
+    // Resolve the postback ARGUMENT off the live menu. Matching on the
+    // caller's own menuPath keeps each report on ITS OWN item — resolving by a
+    // shared default label once sent the Email report to the T&M screen, which
+    // then failed a column guard for a "drift" that was really mis-navigation.
+    // Declaring a report "unavailable" needs real evidence: the page must
+    // advertise OTHER items from the SAME menu section and still not ours.
+    // A page with no menu, or one whose menu never mentions that section, is
+    // silence — and concluding absence from silence is how a working portal
+    // gets reported as broken.
+    if (requireOffered
+      && menuSectionRendered(pageHtml, menuPath)
+      && !menuOffers(pageHtml, { menuPath, menuText })) {
+      throw new MexReportUnavailableError(
+        `This TSD account's menu does not offer "${menuText || menuPath}"`
+      );
+    }
+    const resolvedArgument = resolveMenuArgument(pageHtml, { menuPath, menuText });
     if (resolvedArgument !== menuPath) {
-      logger.info('[mex] menu argument resolved from page', { tenantId, menuText, resolvedArgument });
+      logger.info('[mex] menu argument resolved from page', { tenantId, menuPath, menuText, resolvedArgument });
     }
     const body = buildPostBody(fields, {}, {
       __EVENTTARGET: MENU_EVENT_TARGET,
@@ -1076,7 +1152,13 @@ async function submitReport(tenantId, { report, tsdNumber, branch, from, to, use
   const ua = userAgent || pickUserAgent();
 
   const run = async () => {
-    const screenHtml = await navigateMenu(tenantId, report.menuPath, { userAgent: ua });
+    const screenHtml = await navigateMenu(tenantId, report.menuPath, {
+      userAgent: ua,
+      menuText: report.menuText || null,
+      // Surfaces as MexReportUnavailableError when the portal simply does not
+      // carry this report — a true statement, not a layout alarm.
+      requireOffered: true,
+    });
     try {
       return await applyRangeAndSubmit(tenantId, screenHtml, { from, to, tsdNumber, branch, mode, ua });
     } catch (err) {
@@ -1681,7 +1763,7 @@ export async function testAuth(tenantId) {
     // Reaching the report screen proves the session survives a menu postback —
     // the piece that actually matters (single-window). No report is submitted:
     // the probe must stay cheap and side-effect-free.
-    await navigateMenu(tenantId, REPORT.TM_SUMMARY.menuPath);
+    await navigateMenu(tenantId, REPORT.TM_SUMMARY.menuPath, { menuText: REPORT.TM_SUMMARY.menuText || null });
     await recordTestStatus(tenantId, 'OK');
     return { ok: true, status: 'OK' };
   } catch (err) {

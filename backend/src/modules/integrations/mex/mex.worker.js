@@ -302,6 +302,20 @@ export async function mexSyncHandler(job) {
         emailRows = await fetchEmailReport(tenantId, fetchOpts);
       } catch (err) {
         if (err instanceof MexAuthExpiredError) throw err;
+        // An account that never HAD this report is not a drifting layout.
+        // Treating it as one failed the whole sync for International Rental
+        // Corp while 9 importable reservations sat in the T&M feed
+        // (2026-08-05): MEX's SJU account offers 13 Reports POS items and none
+        // is the Email Address Report the Advantage clone assumed.
+        // Name check, not instanceof: the class may be absent from a stubbed
+        // service module, and an instanceof against undefined THROWS inside the
+        // catch — turning a graceful skip into a failed run.
+        if (err?.name === 'MexReportUnavailableError') {
+          logger.info('[mex-sync] portal has no Email Address Report — importing without email enrichment', {
+            tenantId, tsdNumber: config.tsdNumber, branch: config.branch,
+          });
+          emailRows = [];
+        } else {
         // Header drift on the email grid is a REAL drift signal, same as the T&M
         // grid's — the report changed shape and the join key may be gone. Let it
         // propagate to the ATTENTION handler rather than quietly importing every
@@ -316,6 +330,7 @@ export async function mexSyncHandler(job) {
           integration: { source: SOURCE_SYSTEM, tenantId, tsdNumber: config.tsdNumber, branch: config.branch },
           level: 'warning',
         });
+        }
       }
       rows = joinEmailsByConfirm(rows, emailRows);
 
