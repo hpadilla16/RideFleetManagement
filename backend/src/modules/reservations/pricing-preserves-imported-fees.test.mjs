@@ -102,3 +102,56 @@ describe('buildImportedFeeRows', () => {
     assert.deepEqual(buildImportedFeeRows({ optionalServices: [] }), []);
   });
 });
+
+describe('the imported quote reconciles to what MEX told the customer', () => {
+  it('rental + tax + fees add up to the portal Estimated Total', async () => {
+    const { buildImportedQuoteRows, quoteReconciliation, effectiveDailyRate } =
+      await import('../integrations/mex/mex-reservation-detail.js');
+    // WMX000FAD4, verbatim from the portal: 1180 + 147.92 + 106.30 = 1434.22
+    const detail = {
+      confirmation: 'WMX000FAD4',
+      confirmedRate: '826.00/Week , 118.00/XDay  UNL',
+      charges: { rateTotal: 1180, taxTotal: 147.92, extraTotal: 106.30, estimatedTotal: 1434.22 },
+      optionalServices: [
+        { amount: 5.93, description: 'CUSTOMER FACILITY CHARGE' },
+        { amount: 2.5, description: 'VEHICLE LICENSE FEE SJU' },
+        { amount: 2.2, description: 'SURCHARGE' },
+      ],
+    };
+    const rows = buildImportedQuoteRows(detail, { days: 10 });
+    const rec = quoteReconciliation(rows, detail);
+    assert.equal(rec.ok, true, `rows ${rec.actual} vs portal ${rec.expected}`);
+    // The rental row carries the daily rate the counter quotes from.
+    const base = rows.find((r) => r.code === 'BASE_RATE');
+    assert.equal(base.rate, 118);
+    assert.equal(base.quantity, 10);
+    assert.equal(base.total, 1180);
+    assert.match(base.name, /10 day\(s\) @ \$118\.00\/day/);
+    // Every row is MEX-owned, so Save Override keeps the whole quote.
+    assert.equal(rows.every((r) => isPreservedOnPricingRebuild(r)), true);
+  });
+
+  it('the daily rate is derived from money ÷ days, not from the rate STRUCTURE', async () => {
+    const { effectiveDailyRate } = await import('../integrations/mex/mex-reservation-detail.js');
+    // "196.00/Month , 70.00/XDay" on 30 days bills 336.00 — neither 196 nor 70
+    // is the daily rate; 336/30 = 11.20 is.
+    assert.equal(effectiveDailyRate({ charges: { rateTotal: 336 } }, { days: 30 }), 11.2);
+    assert.equal(effectiveDailyRate({ charges: { rateTotal: 1012 } }, { days: 4 }), 253);
+    assert.equal(effectiveDailyRate({ charges: { rateTotal: 924 } }, { days: 11 }), 84);
+    // No day count, no invented rate.
+    assert.equal(effectiveDailyRate({ charges: { rateTotal: 924 } }, { days: null }), null);
+    assert.equal(effectiveDailyRate({ charges: {} }, { days: 5 }), null);
+  });
+
+  it('a quote that does not add up says so instead of being shown as fact', async () => {
+    const { quoteReconciliation } = await import('../integrations/mex/mex-reservation-detail.js');
+    const bad = quoteReconciliation(
+      [{ total: 100 }],
+      { charges: { estimatedTotal: 1434.22 } },
+    );
+    assert.equal(bad.ok, false);
+    assert.equal(bad.expected, 1434.22);
+    assert.equal(bad.actual, 100);
+    assert.match(bad.reason, /do not reconcile/);
+  });
+});
