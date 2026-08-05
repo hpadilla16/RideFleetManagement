@@ -231,8 +231,10 @@ export const MEX_CHARGE_SOURCE = 'MEX_IMPORT';
  * `sourceRefId` is stable per (confirmation, service) so a re-sync updates a
  * row instead of stacking a second copy of the same fee.
  *
- * taxable:false on purpose — the portal reports Est Tax Total separately, so
- * taxing these again would invent money MEX never charged.
+ * taxable:TRUE (changed 2026-08-05). These fees ARE in MEX's taxable base: on
+ * all nine live bookings `Est Tax Total` is exactly 11.5% of (Est Rate Total +
+ * Est Extra Total), and 11.5% is SJU's own taxRate in RFM. Marking them
+ * non-taxable while our engine computes the tax would under-collect.
  */
 export function buildImportedFeeRows(detail, { days = null } = {}) {
   const services = Array.isArray(detail?.optionalServices) ? detail.optionalServices : [];
@@ -267,7 +269,7 @@ export function buildImportedFeeRows(detail, { days = null } = {}) {
       quantity,
       rate,
       total: round2(rate * quantity),
-      taxable: false,
+      taxable: true,
       selected: true,
       sortOrder: 900 + idx,
       source: MEX_CHARGE_SOURCE,
@@ -321,21 +323,33 @@ export function effectiveDailyRate(detail, { days = null } = {}) {
 }
 
 /**
- * The booking's money as charge rows: the rental itself, MEX's tax, and the
- * per-booking fees.
+ * The booking's money as charge rows: the rental, the per-day fees, and the tax
+ * OUR engine computes.
  *
- * WHY THE RENTAL AND TAX ARE ROWS TOO (2026-08-05): a reservation imported with
- * an estimatedTotal but NO charges to support it is one recompute away from
- * collapsing. MEX-WMX000F971 proved it in production — it dropped to $10.63,
- * the sum of its three fees, because those were the only rows that existed.
- * With the rental and tax present the rows add up to the portal's own
- * `Estimated Total`, so a rebuild reproduces the quote instead of shrinking it.
+ * WE DO NOT IMPORT MEX'S TAX (Hector, 2026-08-05: "dont pass taxes just let the
+ * system calculate the taxes"). Two reasons it is safe, and one reason it is
+ * better:
+ *   - Safe: MEX's `Est Tax Total` is exactly 11.5% of (Est Rate Total + Est
+ *     Extra Total) on every one of the nine live bookings, and 11.5% is SJU's
+ *     own taxRate in RFM. The engine reproduces MEX's figure to the cent.
+ *   - Better: an imported tax is a frozen number. Extend the rental, add a
+ *     service, void a fee — MEX's tax no longer describes the booking, while a
+ *     computed one follows it. Tax stops being data and becomes a consequence.
+ * If a tenant's taxRate ever disagrees with the source's, quoteReconciliation
+ * reports the gap instead of silently splitting the difference.
  *
- * All rows carry source MEX_IMPORT, so Save Override leaves the whole imported
- * quote intact (see reservation-pricing.service).
+ * THE RENTAL ROW USES THE ENGINE'S OWN IDENTITY (code DAILY / source BASE_RATE),
+ * not MEX_IMPORT. A preserved rental row would survive Save Override while the
+ * UI ALSO rebuilds a Daily row from reservation.dailyRate — two rental lines,
+ * double the rent. Engine-owned, it is replaced in place; the reservation's
+ * dailyRate carries the number so any rebuild reproduces it. Only the fees are
+ * MEX-owned, because only the fees are something our engine cannot re-derive.
+ *
+ * @param {object} detail  parsed portal detail
+ * @param {{days?: number|null, taxRate?: number|null}} opts
+ *        taxRate is a percentage (11.5 → 11.5%), normally the pickup location's.
  */
-export function buildImportedQuoteRows(detail, { days = null } = {}) {
-  const confirmation = String(detail?.confirmation || '').trim();
+export function buildImportedQuoteRows(detail, { days = null, taxRate = null } = {}) {
   const c = detail?.charges || {};
   const rows = [];
 
@@ -344,47 +358,61 @@ export function buildImportedQuoteRows(detail, { days = null } = {}) {
   if (Number.isFinite(rateTotal) && rateTotal > 0) {
     const qty = daily ? Math.round(rateTotal / daily) : 1;
     rows.push({
-      code: 'BASE_RATE',
-      name: daily ? `Rental — ${qty} day(s) @ $${daily.toFixed(2)}/day (MEX)` : 'Rental (MEX)',
+      code: 'DAILY',
+      name: 'Daily',
       chargeType: 'UNIT',
       quantity: qty,
       rate: daily || rateTotal,
       total: round2(rateTotal),
-      taxable: false,
+      taxable: true,
       selected: true,
-      sortOrder: 800,
-      source: MEX_CHARGE_SOURCE,
-      sourceRefId: `${confirmation}:RATE`,
+      sortOrder: 0,
+      source: 'BASE_RATE',
       notes: detail?.confirmedRate ? `MEX confirmed rate: ${detail.confirmedRate}` : null,
     });
   }
 
-  const taxTotal = Number(c.taxTotal);
-  if (Number.isFinite(taxTotal) && taxTotal > 0) {
-    rows.push({
-      code: 'IMPORTED_TAX',
-      name: 'Taxes (quoted by MEX)',
-      chargeType: 'UNIT',
-      quantity: 1,
-      rate: round2(taxTotal),
-      total: round2(taxTotal),
-      // taxable:false — this IS the tax. Marking it taxable would tax the tax.
-      taxable: false,
-      selected: true,
-      sortOrder: 850,
-      source: MEX_CHARGE_SOURCE,
-      sourceRefId: `${confirmation}:TAX`,
-      notes: 'Tax as quoted by MEX with the booking.',
-    });
-  }
+  rows.push(...buildImportedFeeRows(detail, { days }));
 
-  return [...rows, ...buildImportedFeeRows(detail, { days })];
+  const taxRow = buildTaxRow(rows, taxRate);
+  return taxRow ? [...rows, taxRow] : rows;
 }
 
 /**
- * Pure: do the imported rows add up to the portal's own Estimated Total?
- * `ok:false` means we would show the customer a number MEX never quoted —
- * worth saying out loud rather than trusting our arithmetic over theirs.
+ * The engine's tax row over the taxable rows — same shape and identity the
+ * booking engine writes (code TAX / source TAX), so a later recompute replaces
+ * it rather than stacking a second one.
+ */
+export function buildTaxRow(rows, taxRate) {
+  const pct = Number(taxRate);
+  if (!Number.isFinite(pct) || pct <= 0) return null;
+  const base = (rows || [])
+    .filter((r) => r?.taxable && String(r?.chargeType || '').toUpperCase() !== 'TAX')
+    .reduce((sum, r) => sum + Number(r.total || 0), 0);
+  if (base <= 0) return null;
+  const total = round2(base * (pct / 100));
+  if (total <= 0) return null;
+  return {
+    code: 'TAX',
+    name: `Sales Tax (${pct.toFixed(2)}%)`,
+    chargeType: 'TAX',
+    quantity: 1,
+    rate: total,
+    total,
+    taxable: false,
+    selected: true,
+    sortOrder: 999,
+    source: 'TAX',
+  };
+}
+
+/**
+ * Pure: do the rows add up to the portal's own Estimated Total?
+ *
+ * Still checked even though the tax is now ours: if our tax rate and the
+ * source's ever diverge, this is where it becomes visible. `ok:false` means we
+ * would show the customer a number MEX never quoted — worth saying out loud
+ * rather than trusting our arithmetic over theirs.
  */
 export function quoteReconciliation(rows, detail) {
   const expected = Number(detail?.charges?.estimatedTotal);
@@ -397,6 +425,6 @@ export function quoteReconciliation(rows, detail) {
     ok,
     expected: round2(expected),
     actual,
-    reason: ok ? null 	: 'imported rows do not reconcile to the portal Estimated Total',
+    reason: ok ? null : 'imported rows do not reconcile to the portal Estimated Total',
   };
 }
