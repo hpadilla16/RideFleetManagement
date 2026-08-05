@@ -1596,3 +1596,43 @@ test('parseWebFormsForm + buildPostBody: every selected option of a multi-select
   assert.deepEqual(body.getAll('lstBranch'), ['SJU']);
   assert.deepEqual(body.getAll('lstClass'), ['*ALL', 'ECAR'], 'both selections must reach the server');
 });
+
+// ---------------------------------------------------------------------------
+// Menu availability (IRC activation, 2026-08-05)
+//
+// MEX's SJU account advertises 13 Reports POS items and NONE is the Email
+// Address Report the Advantage clone assumed. Navigating there re-rendered the
+// Main Menu, whose columns then failed the email grid's header guard — a
+// "layout drift" alarm for a portal that was working fine. The module now says
+// the true thing and imports without email enrichment.
+// ---------------------------------------------------------------------------
+
+test('menuOffers: true for an advertised item, false when the section lacks it', async () => {
+  const { menuOffers } = await import('./mex.service.js');
+  const html = `<a href="javascript:__doPostBack('_ctl0$Menu1','Reports POS\\\\Estimated TM Report')">Estimated T&M Summary</a>
+    <a href="javascript:__doPostBack('_ctl0$Menu1','Reports POS\\\\LOR Report')">Length of Rental Summary</a>`;
+  assert.equal(menuOffers(html, { menuPath: 'Reports POS\\Estimated TM Report' }), true);
+  assert.equal(menuOffers(html, { menuPath: 'Reports POS\\Email Address Report', menuText: 'Email Address Report' }), false);
+  // Renamed value, same visible label → still found.
+  assert.equal(menuOffers(html, { menuPath: 'Reports POS\\Renamed', menuText: 'Estimated T&M Summary' }), true);
+});
+
+test('menuSectionRendered: absence is only meaningful when the SECTION is on screen', async () => {
+  const { menuSectionRendered } = await import('./mex.service.js');
+  const reports = `<a href="javascript:__doPostBack('_ctl0$Menu1','Reports POS\\\\LOR Report')">Length of Rental Summary</a>`;
+  const ratesOnly = `<a href="javascript:__doPostBack('_ctl0$Menu1','Rates\\\\Rate Input1')">Rate Update 1</a>`;
+  assert.equal(menuSectionRendered(reports, 'Reports POS\\Email Address Report'), true);
+  // A page showing only the Rates section says NOTHING about Reports POS —
+  // concluding "unavailable" from that would invent absence from silence.
+  assert.equal(menuSectionRendered(ratesOnly, 'Reports POS\\Email Address Report'), false);
+  assert.equal(menuSectionRendered('', 'Reports POS\\Anything'), false);
+});
+
+test('resolveMenuArgument: exact path wins, then label, then leaf', async () => {
+  const { resolveMenuArgument } = await import('./mex.service.js');
+  const html = `<a href="javascript:__doPostBack('_ctl0$Menu1','Reports POS\\\\Estimated TM Report')">Estimated T&M Summary</a>`;
+  assert.equal(resolveMenuArgument(html, { menuPath: 'Reports POS\\Estimated TM Report' }), 'Reports POS\\Estimated TM Report');
+  assert.equal(resolveMenuArgument(html, { menuPath: 'Reports POS\\Estimated T&M Summary', menuText: 'Estimated T&M Summary' }), 'Reports POS\\Estimated TM Report');
+  // Nothing matches → hand back what the caller asked for; let the portal judge.
+  assert.equal(resolveMenuArgument(html, { menuPath: 'Rates\\Rate Input1' }), 'Rates\\Rate Input1');
+});
