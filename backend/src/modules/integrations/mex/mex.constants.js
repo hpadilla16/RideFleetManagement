@@ -527,3 +527,89 @@ export function mtdCoverageBounds(now = Date.now(), timeZone = TIME_ZONE) {
   );
   return { from, to };
 }
+
+// ─── Rate-code classification (Hector's list from MEX, 2026-08-05) ──────────
+//
+// MEX is NOT 100% Pay on Arrival after all — OTA products arrive prepaid, and
+// the rate code on the T&M row says which. The 2026-07-14 "always false"
+// posture stays only as the UNKNOWN-code fallback: never assume a booking is
+// paid — telling the counter to collect twice embarrasses staff, telling them
+// not to collect loses money silently.
+//
+//   PREPAID             — customer already paid the OTA; counter collects $0
+//                         of the rate (deposits/extras still apply).
+//   PAY_AT_DESTINATION  — counter collects, the historical default.
+//   product INCLUSIVO   — all-in prepaid bundle. EXCLUDED from rate writeback
+//                         (Hector: "vamos a escribir a todos menos los que
+//                         sean inclusivo").
+//
+// The prepaid products also identify by company id in the transmission
+// (Expedia 00346, Priceline 00543) — the `CD` column corroborates when the
+// rate code alone is unknown.
+export const MEX_RATE_CODE_MAP = Object.freeze({
+  PPEXR:  Object.freeze({ source: 'EXPEDIA',   pointOfSale: 'Expedia.com',            product: 'BASICO',    payment: 'PREPAID' }),
+  BPPPKM: Object.freeze({ source: 'EXPEDIA',   pointOfSale: 'Expedia USA/CAN package', product: 'BASICO',    payment: 'PREPAID' }),
+  BPPETM: Object.freeze({ source: 'EXPEDIA',   pointOfSale: 'Expedia EMEA',           product: 'BASICO',    payment: 'PREPAID' }),
+  IDAEXD: Object.freeze({ source: 'EXPEDIA',   pointOfSale: 'Expedia MOD',            product: 'BASICO',    payment: 'PREPAID' }),
+  IPMEXS: Object.freeze({ source: 'EXPEDIA',   pointOfSale: 'Expedia ARG/MX MOD',     product: 'INCLUSIVO', payment: 'PREPAID' }),
+  PPEXI:  Object.freeze({ source: 'EXPEDIA',   pointOfSale: 'Expedia APAC',           product: 'INCLUSIVO', payment: 'PREPAID' }),
+  BPAPR:  Object.freeze({ source: 'PRICELINE', pointOfSale: 'Priceline',              product: 'BASICO',    payment: 'PAY_AT_DESTINATION' }),
+  BPPPA:  Object.freeze({ source: 'PRICELINE', pointOfSale: 'Priceline mobile',       product: 'BASICO',    payment: 'PREPAID' }),
+  PPPRB:  Object.freeze({ source: 'PRICELINE', pointOfSale: 'Priceline mobile',       product: 'BASICO',    payment: 'PREPAID' }),
+});
+
+export const MEX_PREPAID_COMPANY_IDS = Object.freeze({
+  '00346': 'EXPEDIA',
+  '00543': 'PRICELINE',
+});
+
+/**
+ * Pure. Classify a staged row by rate code, with the transmission's company
+ * id (`CD` column) as the prepaid corroborator for codes not on the list.
+ */
+export function classifyMexRateCode(rateCode, companyId = null) {
+  const code = String(rateCode || '').trim().toUpperCase();
+  const entry = code ? MEX_RATE_CODE_MAP[code] : null;
+  if (entry) {
+    return {
+      known: true,
+      rateCode: code,
+      source: entry.source,
+      product: entry.product,
+      payment: entry.payment,
+      isPrepaid: entry.payment === 'PREPAID',
+      // Hector 2026-08-05: write rates to every code EXCEPT inclusivo.
+      ratePushEligible: entry.product !== 'INCLUSIVO',
+    };
+  }
+  const cd = String(companyId || '').trim();
+  const prepaidSource = MEX_PREPAID_COMPANY_IDS[cd] || null;
+  if (prepaidSource) {
+    return {
+      known: false,
+      rateCode: code || null,
+      source: prepaidSource,
+      product: null,
+      payment: 'PREPAID',
+      isPrepaid: true,
+      ratePushEligible: false,
+    };
+  }
+  // Unknown code, unknown company: the historical Pay-on-Arrival posture.
+  return {
+    known: false,
+    rateCode: code || null,
+    source: null,
+    product: null,
+    payment: 'PAY_AT_DESTINATION',
+    isPrepaid: false,
+    ratePushEligible: false,
+  };
+}
+
+/** The writeback target list: every classified code that is not inclusivo. */
+export function mexRatePushEligibleCodes() {
+  return Object.entries(MEX_RATE_CODE_MAP)
+    .filter(([, v]) => v.product !== 'INCLUSIVO')
+    .map(([code]) => code);
+}

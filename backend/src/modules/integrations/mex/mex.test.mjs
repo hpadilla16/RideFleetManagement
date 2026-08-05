@@ -64,6 +64,9 @@ const {
   mtdCoverageBounds,
   effectiveWindowDays,
   windowBoundsForConfig,
+  classifyMexRateCode,
+  mexRatePushEligibleCodes,
+  MEX_RATE_CODE_MAP,
 } = await import('./mex.constants.js');
 
 const {
@@ -1054,7 +1057,8 @@ test('mapRowToExternalReservation: the real row maps Total Bill → totalAmount,
   // MONEY: Total Bill only → estimatedTotal downstream. Never a charge.
   assert.equal(mapped.totalAmount, 135.85);
   assert.equal(mapped.currency, 'USD');
-  // Mex is 100% Pay on Arrival (confirmed 2026-07-14).
+  // D6 is not on Hector's 2026-08-05 rate-code list and CD AD0016 is not a
+  // prepaid company id — unknown keeps the Pay-on-Arrival posture.
   assert.equal(mapped.isPrepaid, false);
   // Rate code / PNR / CD preserved for audit + a future prepaid-by-rate-code config.
   assert.equal(mapped.rawJson.rateCode, 'D6');
@@ -1403,4 +1407,69 @@ test('sourceSpec: the shared promoter writes MEX-<ref> + FRANCHISE_MEX + estimat
   // MONEY posture: estimatedTotal is the ONLY money field the promoter writes.
   assert.equal('charges' in r, false);
   assert.equal('paidAmount' in r, false);
+});
+
+// ---------------------------------------------------------------------------
+// Rate-code classification (Hector's list from MEX, 2026-08-05)
+// ---------------------------------------------------------------------------
+
+test('classifyMexRateCode: the nine listed codes classify exactly as the sheet says', () => {
+  const expect = {
+    PPEXR:  { isPrepaid: true,  product: 'BASICO',    push: true },
+    BPPPKM: { isPrepaid: true,  product: 'BASICO',    push: true },
+    BPPETM: { isPrepaid: true,  product: 'BASICO',    push: true },
+    IDAEXD: { isPrepaid: true,  product: 'BASICO',    push: true },
+    IPMEXS: { isPrepaid: true,  product: 'INCLUSIVO', push: false },
+    PPEXI:  { isPrepaid: true,  product: 'INCLUSIVO', push: false },
+    BPAPR:  { isPrepaid: false, product: 'BASICO',    push: true },
+    BPPPA:  { isPrepaid: true,  product: 'BASICO',    push: true },
+    PPPRB:  { isPrepaid: true,  product: 'BASICO',    push: true },
+  };
+  for (const [code, want] of Object.entries(expect)) {
+    const got = classifyMexRateCode(code);
+    assert.equal(got.known, true, code);
+    assert.equal(got.isPrepaid, want.isPrepaid, `${code} isPrepaid`);
+    assert.equal(got.product, want.product, `${code} product`);
+    assert.equal(got.ratePushEligible, want.push, `${code} push eligibility`);
+  }
+  // case/whitespace tolerant — portals are not tidy
+  assert.equal(classifyMexRateCode(' ppexr ').isPrepaid, true);
+});
+
+test('classifyMexRateCode: prepaid company ids corroborate unknown codes', () => {
+  // "El producto prepagado de Expedia se identifica con el company id 00346 y
+  // en el caso de Priceline 00543 en la transmisión."
+  const viaExpedia = classifyMexRateCode('SOMETHING_NEW', '00346');
+  assert.equal(viaExpedia.isPrepaid, true);
+  assert.equal(viaExpedia.source, 'EXPEDIA');
+  assert.equal(viaExpedia.ratePushEligible, false, 'unknown codes never enter the writeback list');
+  assert.equal(classifyMexRateCode('X', '00543').source, 'PRICELINE');
+  // unknown code + unknown company = the historical POA posture
+  const unknown = classifyMexRateCode('D6', 'AD0016');
+  assert.equal(unknown.isPrepaid, false);
+  assert.equal(unknown.payment, 'PAY_AT_DESTINATION');
+});
+
+test('mexRatePushEligibleCodes: everything except inclusivo', () => {
+  const codes = mexRatePushEligibleCodes();
+  assert.deepEqual([...codes].sort(), ['BPAPR', 'BPPETM', 'BPPPA', 'BPPPKM', 'IDAEXD', 'PPEXR', 'PPPRB'].sort());
+  assert.ok(!codes.includes('IPMEXS'));
+  assert.ok(!codes.includes('PPEXI'));
+  assert.equal(Object.keys(MEX_RATE_CODE_MAP).length, 9);
+});
+
+test('mapRowToExternalReservation: prepaid Expedia code flips isPrepaid and records why', () => {
+  const mapped = mapRowToExternalReservation({
+    externalRef: 'A1TL099999', rateCode: 'PPEXR', cd: '00346', source: 'BOOKINGGRO',
+    customerFirstName: 'ANA', customerLastName: 'PEREZ', totalBill: 210.5,
+  });
+  assert.equal(mapped.isPrepaid, true);
+  assert.equal(mapped.rawJson.rateClassification.product, 'BASICO');
+  assert.equal(mapped.rawJson.rateClassification.source, 'EXPEDIA');
+  const inclusivo = mapRowToExternalReservation({ externalRef: 'A1TL099998', rateCode: 'IPMEXS' });
+  assert.equal(inclusivo.isPrepaid, true);
+  assert.equal(inclusivo.rawJson.rateClassification.product, 'INCLUSIVO');
+  assert.equal(inclusivo.rawJson.rateClassification.ratePushEligible, false);
+  const poa = mapRowToExternalReservation({ externalRef: 'A1TL099997', rateCode: 'BPAPR' });
+  assert.equal(poa.isPrepaid, false);
 });

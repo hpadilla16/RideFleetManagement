@@ -66,7 +66,9 @@ import {
   SOURCE_SYSTEM,
 } from './mex.service.js';
 import { enqueueOneOffSync, promoteWithMappings } from './mex.worker.js';
-import { effectiveWindowDays, TIME_ZONE } from './mex.constants.js';
+import {
+  MEX_RATE_CODE_MAP,
+  mexRatePushEligibleCodes, effectiveWindowDays, TIME_ZONE } from './mex.constants.js';
 import { integrationEnabled } from './mex.scheduler.js';
 
 export const mexRouter = Router();
@@ -326,6 +328,12 @@ mexRouter.get('/status', asyncHandler(async (req, res) => {
     locations: configs,
     lastRun: lastRun || null,
     nextRunAt: estimateNextRunAt(lastRun),
+    // Rate-code classification (2026-08-05): read-only so the panel can show
+    // which codes import as prepaid / pay-at-destination and which are
+    // excluded from rate writeback (inclusivo). The map lives in
+    // mex.constants.js — changing it is a code change, on purpose.
+    rateCodes: MEX_RATE_CODE_MAP,
+    ratePushEligibleCodes: mexRatePushEligibleCodes(),
   });
 }));
 
