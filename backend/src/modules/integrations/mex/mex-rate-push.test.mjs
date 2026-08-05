@@ -22,6 +22,24 @@ const { mexRatePushEligibleCodes } = await import('./mex.constants.js');
 // Tier formula
 // ---------------------------------------------------------------------------
 
+describe('pushWindowDays', () => {
+  it('defaults to 28 days — each push covers the next four weeks, not a year', async () => {
+    const { pushWindowDays } = await import('./mex-rate-push.service.js');
+    const prev = process.env.MEX_RATE_PUSH_WINDOW_DAYS;
+    delete process.env.MEX_RATE_PUSH_WINDOW_DAYS;
+    try {
+      assert.equal(pushWindowDays(), 28);
+      process.env.MEX_RATE_PUSH_WINDOW_DAYS = '90';
+      assert.equal(pushWindowDays(), 90);
+      process.env.MEX_RATE_PUSH_WINDOW_DAYS = 'garbage';
+      assert.equal(pushWindowDays(), 28, 'a bad value falls back, never to zero or a year');
+    } finally {
+      if (prev === undefined) delete process.env.MEX_RATE_PUSH_WINDOW_DAYS;
+      else process.env.MEX_RATE_PUSH_WINDOW_DAYS = prev;
+    }
+  });
+});
+
 describe('mexTierValues', () => {
   it('is d / d×7 / d×28 / d — the portal-confirmed formula, ×28 not ×30', () => {
     // Live BPABR rows: ECAR 64/448/1792/64, FFAR 118/826/3304/118.

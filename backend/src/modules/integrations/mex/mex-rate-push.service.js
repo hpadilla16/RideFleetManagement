@@ -47,10 +47,15 @@ export function maxDeltaPct() {
   return Number.isFinite(n) && n > 0 ? n : 60;
 }
 
-/** How far forward each write applies, in days (bounded by the portal's month list). */
+/**
+ * How far forward each write applies, in days. 28 by Hector's instruction
+ * (2026-08-06): each push covers the next four weeks and the next day's push
+ * slides the window forward — today's MI price must not be locked onto dates
+ * a year out, where it would flatten seasonal pricing MEX may carry.
+ */
 export function pushWindowDays() {
-  const n = Number(process.env.MEX_RATE_PUSH_WINDOW_DAYS || 350);
-  return Number.isFinite(n) && n > 0 ? Math.min(n, 360) : 350;
+  const n = Number(process.env.MEX_RATE_PUSH_WINDOW_DAYS || 28);
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 360) : 28;
 }
 
 export function round2(n) {
