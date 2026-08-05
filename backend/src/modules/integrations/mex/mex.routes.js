@@ -70,6 +70,7 @@ import {
   MEX_RATE_CODE_MAP,
   mexRatePushEligibleCodes, effectiveWindowDays, TIME_ZONE } from './mex.constants.js';
 import { integrationEnabled } from './mex.scheduler.js';
+import { runMexRatePush, pushMode } from './mex-rate-push.service.js';
 
 export const mexRouter = Router();
 
@@ -721,6 +722,61 @@ mexRouter.post('/pending-imports/:id/reject', asyncHandler(async (req, res) => {
   });
   if (!updated.count) return res.status(404).json({ error: 'Row not found or already promoted' });
   res.json({ ok: true });
+}));
+
+// ---------------------------------------------------------------------------
+// Rate writeback (2026-08-06) — doc/mex-rate-writeback-recon-2026-08-05.md.
+// MONEY: writes prices into MEX's live system. Two gates stack:
+//   - env MEX_RATE_PUSH_MODE (OFF default; DRY_RUN plans only; LIVE allows writes)
+//   - the route: /plan never writes; /run writes only with body.live === true
+//     AND the env gate at LIVE.
+// Only mexRatePushEligibleCodes() are ever written; asking for anything else
+// is a 400, not a warning.
+// ---------------------------------------------------------------------------
+
+mexRouter.post('/rate-push/plan', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenantId(req);
+  const { rateCodes, fromDate, toDate } = req.body || {};
+  try {
+    const out = await runMexRatePush(tenantId, {
+      rateCodes, fromDate, toDate,
+      live: false, trigger: 'MANUAL', actorUserId: req.user?.id || null,
+    });
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    if (/not on the write list/.test(err.message)) return send400(res, err.message);
+    throw err;
+  }
+}));
+
+mexRouter.post('/rate-push/run', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenantId(req);
+  const { rateCodes, fromDate, toDate, force } = req.body || {};
+  if (pushMode() !== 'LIVE') {
+    return res.status(409).json({ error: `MEX_RATE_PUSH_MODE is ${pushMode()} — set it to LIVE to write` });
+  }
+  try {
+    const out = await runMexRatePush(tenantId, {
+      rateCodes, fromDate, toDate, force: force === true,
+      live: true, trigger: 'MANUAL', actorUserId: req.user?.id || null,
+    });
+    logger.info('[mex-routes] rate push executed', { tenantId, userId: req.user?.id, mode: out.mode });
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    if (/not on the write list/.test(err.message)) return send400(res, err.message);
+    throw err;
+  }
+}));
+
+mexRouter.get('/rate-push/log', asyncHandler(async (req, res) => {
+  const tenantId = resolveTenantId(req);
+  const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+  const rows = await prisma.ratePushLog.findMany({
+    where: { tenantId, provider: 'MEX' },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  });
+  res.json({ ok: true, rows });
 }));
 
 export default mexRouter;
