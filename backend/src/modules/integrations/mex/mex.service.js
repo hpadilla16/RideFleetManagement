@@ -69,7 +69,12 @@ import {
   randomDelay,
   sleep,
 } from '../booking-source/http-common.js';
+import { parseReservationDetail } from './mex-reservation-detail.js';
 import {
+  MENU_PATH_REZ_CANCEL,
+  MENU_TEXT_REZ_CANCEL,
+  DETAIL_FIELD,
+  DETAIL_VIEW_VALUE,
   MENU_TEXT_TM_SUMMARY,
   SOURCE_SYSTEM,
   BASE_URL,
@@ -1018,6 +1023,66 @@ async function postBack(tenantId, action, body, ua) {
   }
 
   return { bounced: isLoginBounce(res, html), html };
+}
+
+
+// ---------------------------------------------------------------------------
+// Reservation detail (2026-08-05)
+//
+// The T&M summary carries no contact and no charge breakdown, so every row
+// imported email-less and sat in MANUAL_REVIEW. This screen fills both gaps.
+//
+// SAFETY: the screen also hosts btnGoCancel ("Cancel") and cmdUnCancel. We post
+// ONLY btnCancel — whose VALUE is the innocuous "View/Add" — and buildPostBody
+// drops submit-typed fields, so no other button can ride along on the body.
+// ---------------------------------------------------------------------------
+
+/** Fetch + parse ONE reservation's confirmation detail. Null when not found. */
+export async function fetchReservationDetail(tenantId, confirmation, { userAgent } = {}) {
+  const ref = String(confirmation || '').trim();
+  if (!ref) return null;
+  const ua = userAgent || pickUserAgent();
+
+  const run = async () => {
+    const screenHtml = await navigateMenu(tenantId, MENU_PATH_REZ_CANCEL, {
+      userAgent: ua,
+      menuText: MENU_TEXT_REZ_CANCEL,
+      requireOffered: true,
+    });
+    const { action, fields } = parseWebFormsForm(screenHtml);
+    const confirmField = findFieldName(fields, DETAIL_FIELD.CONFIRMATION);
+    const viewField = findFieldName(fields, DETAIL_FIELD.VIEW_BUTTON);
+    if (!confirmField) {
+      throw new MexLayoutError(
+        `Mex detail screen has no ${DETAIL_FIELD.CONFIRMATION} input — screen changed`
+      );
+    }
+    const body = buildPostBody(fields, {}, {
+      [confirmField]: ref,
+      ...(viewField ? { [viewField]: DETAIL_VIEW_VALUE } : {}),
+    });
+    return postBack(tenantId, action, body, ua);
+  };
+
+  let out = await run();
+  if (out.bounced) {
+    await login(tenantId, { userAgent: ua });
+    out = await run();
+    if (out.bounced) throw new MexAuthExpiredError(`Detail fetch for ${ref} bounced twice`);
+  }
+
+  const raw = (out.html.match(/<textarea[^>]*txtDetails[^>]*>([\s\S]*?)<\/textarea>/i) || [])[1];
+  if (!raw) return null;
+  const detail = parseReservationDetail(decodeEntities(raw));
+  // A portal that hands back SOMEONE ELSE's booking is worse than one that
+  // hands back nothing — never enrich a row with another renter's contact.
+  if (detail && detail.confirmation && detail.confirmation.toUpperCase() !== ref.toUpperCase()) {
+    logger.warn('[mex] detail confirmation mismatch — discarding', {
+      tenantId, requested: ref, returned: detail.confirmation,
+    });
+    return null;
+  }
+  return detail;
 }
 
 /** Raised by a range step so the caller can abort instead of running a wrong window. */

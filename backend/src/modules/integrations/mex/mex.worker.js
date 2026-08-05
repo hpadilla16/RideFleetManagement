@@ -47,11 +47,13 @@ import { SCRAPER_PRIORITY } from '../../../lib/queue/priorities.js';
 import {
   fetchTMSummary,
   fetchEmailReport,
+  fetchReservationDetail,
   joinEmailsByConfirm,
   pickUserAgent,
   MexAuthExpiredError,
   MexLayoutError,
 } from './mex.service.js';
+import { formatDetailBreakdown } from './mex-reservation-detail.js';
 import {
   classifyMexRateCode,
   SOURCE_SYSTEM,
@@ -93,12 +95,36 @@ const mexSourceSpec = Object.freeze({
   defaultTimeZone: TIME_ZONE,
   buildReservationExtras: (fresh) => {
     const cls = fresh?.rawJson?.rateClassification || null;
+    const detail = fresh?.rawJson?.detail || null;
     const suffix = fresh.isPrepaid === true
       ? ` (prepaid${cls?.product === 'INCLUSIVO' ? ' inclusivo' : ''}${cls?.source ? ` — ${cls.source}` : ''}${cls?.rateCode ? ` ${cls.rateCode}` : ''})`
       : fresh.isPrepaid === false ? ' (pay-at-destination)' : '';
+    const lines = [`Imported from Mex — ${fresh.externalRef}` + suffix];
+    // The breakdown goes ON the reservation because a pay-at-destination
+    // booking is collected at the counter, and the agent needs to see what MEX
+    // quoted the customer without opening the portal.
+    const breakdown = formatDetailBreakdown(detail);
+    if (breakdown) lines.push(breakdown);
+    // An agency mailbox is recorded but NOT used as the customer's identity —
+    // say so, so nobody thinks the contact is missing.
+    if (detail?.email && detail.emailLooksPersonal === false) {
+      lines.push(`Booking contact (agency, not the renter): ${detail.email}`);
+    }
+    // The portal states the payment terms in words. When that disagrees with
+    // the rate-code map, SAY SO rather than silently trusting one.
+    if (detail?.paymentSignal && cls) {
+      const signalPrepaid = detail.paymentSignal === 'PREPAID';
+      if (typeof cls.isPrepaid === 'boolean' && cls.isPrepaid !== signalPrepaid) {
+        lines.push(
+          `⚠ Payment mismatch: rate code ${cls.rateCode || '?'} says `
+          + `${cls.isPrepaid ? 'prepaid' : 'pay-at-destination'}, MEX's own note says `
+          + `${detail.paymentSignal.replace('_', ' ').toLowerCase()} — verify before collecting.`
+        );
+      }
+    }
     return {
       isPrepaid: typeof fresh.isPrepaid === 'boolean' ? fresh.isPrepaid : null,
-      notes: `Imported from Mex — ${fresh.externalRef}` + suffix,
+      notes: lines.join('\n'),
     };
   },
 });
@@ -159,6 +185,11 @@ export function rejectReasonForStatus(status) {
  * This is done HERE, in Mex's mapping. The shared helper is NOT changed, so
  * economy/nu/flexways behavior is untouched.
  */
+// One HTTP round-trip per reservation. A normal sync window is tens of rows;
+// this ceiling exists so a pathological window cannot turn one sync into
+// thousands of portal hits.
+const DETAIL_FETCH_LIMIT = Number(process.env.MEX_DETAIL_FETCH_LIMIT || 200);
+
 export function mapRowToExternalReservation(row) {
   const r = row && typeof row === 'object' ? row : {};
   const email = (r.customerEmail || '').trim() || null;
@@ -172,9 +203,10 @@ export function mapRowToExternalReservation(row) {
     customerFirstName: r.customerFirstName || null,
     customerLastName: r.customerLastName || null,
     customerEmail: email,
-    // ALWAYS null: the T&M / Email reports carry no phone at all, and a
-    // placeholder here would poison the shared matcher (see the note above).
-    customerPhone: null,
+    // From the DETAIL screen since 2026-08-05 (the T&M report itself carries
+    // no phone). Still null unless the contact looked like a traveller's —
+    // never a shared agency desk line.
+    customerPhone: (r.customerPhone || '').trim() || null,
     customerCountry: null,
     flightNumber: null,
     vehicleAcriss: r.acriss || null,          // ACRISS inline from the Class column
@@ -195,6 +227,11 @@ export function mapRowToExternalReservation(row) {
     rawJson: {
       list: r,
       rateClassification: classifyMexRateCode(r.rateCode, r.cd),
+      // The portal's own confirmation detail: contact, the estimate broken into
+      // rate/tax/extras, the confirmed per-period rate, and each optional
+      // service as a line item. Every number here came FROM MEX — nothing is
+      // derived, so nothing can drift from what they will actually bill.
+      detail: r.detail || null,
       rateCode: r.rateCode ?? null,
       pnr: r.pnr ?? null,
       cd: r.cd ?? null,
@@ -333,6 +370,47 @@ export async function mexSyncHandler(job) {
         }
       }
       rows = joinEmailsByConfirm(rows, emailRows);
+
+      // Per-reservation detail (2026-08-05). The T&M summary carries no contact
+      // and no charge breakdown, so every row imported email-less and sat in
+      // MANUAL_REVIEW. One extra fetch per row buys the renter's email/phone
+      // AND the full estimate the counter needs for a pay-on-arrival booking.
+      // Bounded and fail-soft: a detail we cannot read must never cost us the
+      // reservation itself, which imports fine without it.
+      let detailsFetched = 0;
+      for (const row of rows.slice(0, DETAIL_FETCH_LIMIT)) {
+        const ref = String(row?.externalRef || '').trim();
+        if (!ref) continue;
+        try {
+          const detail = await fetchReservationDetail(tenantId, ref);
+          if (!detail) continue;
+          detailsFetched += 1;
+          row.detail = detail;
+          // Contact is used for MATCHING only when it identifies a traveller.
+          // An OTA desk (reservations@bookinggroup.com) is one address behind
+          // every booking that channel ever sends — importing it as identity
+          // would collapse the channel into a single customer record.
+          if (detail.emailLooksPersonal) {
+            row.customerEmail = detail.email || row.customerEmail || null;
+            row.customerPhone = detail.homePhone || row.customerPhone || null;
+          }
+        } catch (err) {
+          if (err instanceof MexAuthExpiredError) throw err;
+          logger.warn('[mex-sync] reservation detail fetch failed — importing without it', {
+            tenantId, externalRef: ref, message: err.message,
+          });
+        }
+      }
+      if (rows.length > DETAIL_FETCH_LIMIT) {
+        // Never let a cap read as full coverage.
+        logger.warn('[mex-sync] detail fetch capped — some rows imported without contact/breakdown', {
+          tenantId, rows: rows.length, limit: DETAIL_FETCH_LIMIT,
+        });
+      }
+      logger.info('[mex-sync] reservation details fetched', {
+        tenantId, tsdNumber: config.tsdNumber, branch: config.branch,
+        details: detailsFetched, rows: rows.length,
+      });
 
       pickupsFound += rows.length;
 

@@ -641,3 +641,21 @@ export function mexRatePushEligibleCodes() {
     .filter(([, v]) => v.product !== 'INCLUSIVO')
     .map(([code]) => code);
 }
+
+// ─── Reservation detail screen (recon 2026-08-05) ───────────────────────────
+// Reports POS → Reservation View/Cancel. Type the Confirm # into
+// txtConfirmation and press the control whose VALUE is "View/Add"; the portal
+// renders a plain-text confirmation into txtDetails (contact + full charge
+// breakdown). btnGoCancel / cmdUnCancel on that screen are DESTRUCTIVE — the
+// detail fetch must never post them.
+export const MENU_PATH_REZ_CANCEL =
+  process.env.MEX_MENU_PATH_REZ_CANCEL || 'Reports POS\Rez Cancel';
+export const MENU_TEXT_REZ_CANCEL =
+  process.env.MEX_MENU_TEXT_REZ_CANCEL || 'Reservation View/Cancel';
+
+export const DETAIL_FIELD = Object.freeze({
+  CONFIRMATION: 'txtConfirmation',
+  DETAILS: 'txtDetails',
+  VIEW_BUTTON: 'btnCancel',   // NAME is btnCancel; its VALUE is "View/Add"
+});
+export const DETAIL_VIEW_VALUE = 'View/Add';
