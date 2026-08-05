@@ -2,6 +2,8 @@ import { prisma } from '../../lib/prisma.js';
 import { cache } from '../../lib/cache.js';
 import { loadCompetitorRows } from '../market-scraper/rate-offer-source.js';
 import { getEngineAManagedRateIds } from '../market-scraper/market-scrape-correction.service.js';
+import { pickUtilizationTier, resolveTierTarget } from '../market-scraper/pricing-tiers.js';
+import { buildUtilizationLookup } from '../market-scraper/pricing-utilization.js';
 
 /**
  * Pricing Suggestion Engine
@@ -20,6 +22,74 @@ import { getEngineAManagedRateIds } from '../market-scraper/market-scrape-correc
  */
 
 const SUGGESTION_TTL_MS = 48 * 60 * 60 * 1000; // 48h
+
+// ---------------------------------------------------------------------------
+// Utilization lift (Hector, 2026-08-06: "asegurate que los precios de MI esten
+// mirando utilization rate y que estan subiendo basado de los settings").
+//
+// The tenant's MarketPricingConfig.utilizationRules — the same tier ladder the
+// market-comparison screen resolves (pricing-tiers.js) — now applies to THIS
+// engine, the one that actually writes Rate.daily. As projected utilization
+// rises, the tier moves the target up the competitive ladder (3rd cheapest →
+// 5th → market median → median+15% → …).
+//
+// ONE deliberate divergence from the comparison screen: there the tier REPLACES
+// the base target; here it can only RAISE it. A fleet that is filling up must
+// never price BELOW what the competitive strategy already chose — a tier table
+// with a low rung would otherwise cut prices exactly when scarcity says not to.
+// ---------------------------------------------------------------------------
+
+/**
+ * Pure. Lift a padded strategy price by the utilization tier, never lowering it.
+ * Returns { price, utilization, tier, lifted }.
+ */
+export function applyUtilizationLift({ paddedPrice, pricesAsc, utilization, rules }) {
+  const base = Number(paddedPrice);
+  const none = { price: base, utilization: utilization ?? null, tier: null, lifted: false };
+  if (!Number.isFinite(base) || utilization == null || !Array.isArray(rules) || rules.length === 0) return none;
+  const tier = pickUtilizationTier(utilization, rules);
+  if (!tier) return none;
+  const tierTarget = resolveTierTarget(tier, pricesAsc);
+  if (tierTarget == null || tierTarget <= base) {
+    return { price: base, utilization, tier, lifted: false };
+  }
+  return { price: tierTarget, utilization, tier, lifted: true };
+}
+
+/**
+ * Per-run cache of (tenant, location) → { rules, lookup }. Building the
+ * utilization lookup runs the availability-forecast math, so it is done once
+ * per location per engine run, not once per rule.
+ */
+function createUtilizationContext() {
+  const entries = new Map();
+  const todayISO = new Date().toISOString().slice(0, 10);
+  return {
+    async utilizationFor(tenantId, locationCode, sipp) {
+      if (!tenantId || !locationCode) return { utilization: null, rules: [] };
+      const key = `${tenantId}|${locationCode}`;
+      if (!entries.has(key)) {
+        entries.set(key, (async () => {
+          const config = await prisma.marketPricingConfig.findUnique({
+            where: { tenantId_locationCode: { tenantId, locationCode } },
+            select: { utilizationRules: true },
+          }).catch(() => null);
+          const rules = Array.isArray(config?.utilizationRules) ? config.utilizationRules : [];
+          if (!rules.length) return { rules, lookup: null };
+          const lookup = await buildUtilizationLookup({
+            tenantId, locationCode, fromISO: todayISO, toISO: todayISO,
+          });
+          return { rules, lookup };
+        })());
+      }
+      const { rules, lookup } = await entries.get(key);
+      return {
+        rules,
+        utilization: lookup && sipp ? lookup.utilOf(sipp, todayISO) : null,
+      };
+    },
+  };
+}
 
 /**
  * Top-level orchestrator. Iterates all active rules across all tenants,
@@ -72,6 +142,9 @@ export async function runPricingEngine({ rateIds = null, tenantId = null } = {})
     data: { status: 'EXPIRED' },
   });
 
+  // Shared per-run utilization context (config + forecast math once per location).
+  const utilizationContext = createUtilizationContext();
+
   for (const rule of rules) {
     out.rulesEvaluated += 1;
     if (engineAManaged.has(rule.rateId)) {
@@ -80,7 +153,7 @@ export async function runPricingEngine({ rateIds = null, tenantId = null } = {})
       continue;
     }
     try {
-      const result = await evaluateRule(rule);
+      const result = await evaluateRule(rule, { utilizationContext });
       if (result.skipped) {
         out.suggestionsSkipped += 1;
         continue;
@@ -103,7 +176,7 @@ export async function runPricingEngine({ rateIds = null, tenantId = null } = {})
  * Pure logic + a single PricingSuggestion write (+ optional Rate.daily
  * update for AUTO mode). Safe to retry.
  */
-export async function evaluateRule(rule) {
+export async function evaluateRule(rule, { utilizationContext = null } = {}) {
   if (rule.strategy === 'MANUAL') {
     return { skipped: true, reason: 'manual_rule_no_op' };
   }
@@ -218,6 +291,20 @@ export async function evaluateRule(rule) {
   const padPct = Number(rule.paddingPct ?? 0);
   let priced = targetPrice * (1 + padPct / 100);
 
+  // Utilization lift: as the fleet fills, the tenant's tier ladder
+  // (MarketPricingConfig.utilizationRules) moves the target UP the competitive
+  // ladder — never down. Today's projected utilization for this SIPP, computed
+  // with the same math as the Availability Forecast report.
+  let utilizationInfo = { utilization: null, tier: null, lifted: false };
+  if (utilizationContext) {
+    const { utilization, rules: utilRules } = await utilizationContext
+      .utilizationFor(rule.tenantId, rule.rate.location.code, sipp);
+    utilizationInfo = applyUtilizationLift({
+      paddedPrice: priced, pricesAsc: prices, utilization, rules: utilRules,
+    });
+    priced = utilizationInfo.price;
+  }
+
   // Clamp to floor/ceiling.
   const floor = Number(rule.floorPrice);
   const ceiling = Number(rule.ceilingPrice);
@@ -248,6 +335,12 @@ export async function evaluateRule(rule) {
     marketVendorCount: ordered.length,
     yourRankAfter: yourRank,
     guardrailsHit,
+    // The money trail for the utilization lift: what the fleet looked like and
+    // which tier (if any) moved the price. utilization is 0..1; null = no
+    // config / no capacity data — behavior identical to before the lift.
+    utilization: utilizationInfo.utilization ?? null,
+    utilizationTier: utilizationInfo.tier || null,
+    utilizationLifted: utilizationInfo.lifted === true,
     observationIds: Array.from(perVendor.values()).map((r) => r.observationId),
   };
 

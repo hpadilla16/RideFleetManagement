@@ -83,6 +83,17 @@ export const DECISION = Object.freeze({
 });
 
 /**
+ * The close-out price (Hector, 2026-08-06: "si nosotros ponemos un stop sales
+ * en el sistema de Ride que automaticamente para la proxima corrida subir todo
+ * los precios a 999.99, y calculalo por semana mensual"). MEX has no
+ * availability API, so a class closed in Ride is closed on the portal by
+ * pricing it out: daily 999.99, weekly ×7, monthly ×28, x-day = daily — the
+ * same formula as every other write, so the portal's own arithmetic stays
+ * consistent.
+ */
+export const STOP_SALE_DAILY = 999.99;
+
+/**
  * RFM's per-class pricing for one Ride location ACROSS A DATE WINDOW — the
  * truth the booking engine itself quotes from (Hector, 2026-08-06: "tiene que
  * mirar los 28 dias de precio ya que sube y baja los precios").
@@ -153,6 +164,37 @@ export async function loadDesiredMexRates(tenantId, locationId, deps = {}) {
     }
   }
 
+  // STOP SALES beat everything (Hector, 2026-08-06). A class closed in Ride is
+  // closed on the portal by price: every closed date overlays STOP_SALE_DAILY,
+  // ON TOP of base and MI overrides. Deliberately able to CREATE a class entry
+  // — a class with no RFM rate still deserves its closure; leaving it open at
+  // the portal's own price because we could not price it would sell cars Ride
+  // has declared unsellable.
+  if (from && to) {
+    const stopSales = await db.vehicleClassStopSale.findMany({
+      where: {
+        tenantId, isActive: true,
+        startDate: { lt: to },
+        endDate: { gte: from },
+      },
+      select: { startDate: true, endDate: true, vehicleType: { select: { code: true } } },
+    }).catch(() => []);
+    for (const ss of stopSales) {
+      const code = String(ss.vehicleType?.code || '').trim().toUpperCase();
+      if (!code) continue;
+      if (!byClass.has(code)) byClass.set(code, { daily: null, sourceRateItemId: null, byDate: new Map() });
+      const entry = byClass.get(code);
+      // Inclusive on both ends: a stop sale Aug 10–12 closes the 10th, 11th
+      // and 12th. Walk the window day by day.
+      const startIso = new Date(ss.startDate).toISOString().slice(0, 10);
+      const endIso = new Date(ss.endDate).toISOString().slice(0, 10);
+      for (let d = new Date(from); d < to; d = new Date(d.getTime() + 24 * 60 * 60 * 1000)) {
+        const iso = d.toISOString().slice(0, 10);
+        if (iso >= startIso && iso <= endIso) entry.byDate.set(iso, STOP_SALE_DAILY);
+      }
+    }
+  }
+
   // The portal sells classes RFM does not stock under those codes (ECAR is a
   // NISSAN VERSA; IRC's economy class is CCAR). The tenant's AcrissCategoryMap
   // already encodes that redirect for imports — reuse it in reverse rather
@@ -192,7 +234,9 @@ export function effectiveDailyOn(entry, isoDate) {
   if (!entry) return null;
   const byDate = entry.byDate;
   if (byDate && byDate.has(isoDate)) return byDate.get(isoDate);
-  return round2(entry.daily);
+  // A stop-sale-only entry has no base — its open days simply have no price.
+  const base = Number(entry.daily);
+  return Number.isFinite(base) && base > 0 ? round2(base) : null;
 }
 
 /** ISO date list [from, from+days). Pure. */
@@ -254,14 +298,18 @@ export function buildRatePlan(rows, desired, { maxDeltaPct: maxPct = 60, force =
     if (same) {
       return { ...row, decision: DECISION.SKIP_SAME, desired: want, source };
     }
+    // A stop-sale close-out bypasses the delta guard: 999.99 against any real
+    // price is always out of band, and holding it for review would leave a
+    // class Ride has CLOSED still selling on the portal overnight.
+    const isStopSale = want.daily === STOP_SALE_DAILY;
     const curDaily = Number(cur.daily);
-    if (!force && Number.isFinite(curDaily) && curDaily > 0) {
+    if (!force && !isStopSale && Number.isFinite(curDaily) && curDaily > 0) {
       const deltaPct = Math.abs(want.daily - curDaily) / curDaily * 100;
       if (deltaPct > maxPct) {
         return { ...row, decision: DECISION.HELD_DELTA, desired: want, source, deltaPct: round2(deltaPct) };
       }
     }
-    return { ...row, decision: DECISION.WRITE, desired: want, source };
+    return { ...row, decision: DECISION.WRITE, desired: want, source, ...(isStopSale ? { stopSale: true } : {}) };
   });
 }
 
