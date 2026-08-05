@@ -76,6 +76,8 @@ import {
   DETAIL_FIELD,
   DETAIL_VIEW_VALUE,
   MENU_TEXT_TM_SUMMARY,
+  MENU_PATH_RATE_UPDATE_1,
+  MENU_TEXT_RATE_UPDATE_1,
   SOURCE_SYSTEM,
   BASE_URL,
   ROOT_PATH,
@@ -1839,4 +1841,279 @@ export async function testAuth(tenantId) {
     await recordTestStatus(tenantId, 'ERROR');
     return { ok: false, status: 'ERROR', message: err.message };
   }
+}
+
+// ---------------------------------------------------------------------------
+// Rate writeback client (2026-08-06).
+//
+// Contract: doc/mex-rate-writeback-recon-2026-08-05.md — captured from a REAL
+// successful write (Hector's CFAR monthly fix on BPABR). The screen is
+// rcUpdateRates1a.aspx: select rate code(s)/branch/system/TSD, drive the
+// From/To calendars (same ASP.NET Calendar semantics as the T&M screen), fill
+// the dgRates grid, Button1=Submit. Success REDIRECTS to WebRateReport1.aspx
+// which renders one row per (class × tier) written with Result "Completed" —
+// that report is the verification surface, not our own optimism.
+//
+// This section is the TRANSPORT only. What to write, to which codes, with what
+// guardrails, lives in mex-rate-push.service.js.
+// ---------------------------------------------------------------------------
+
+/** Grid field suffixes we write. Everything else in the row is echoed as-is. */
+export const RATE_GRID_FIELD = Object.freeze({
+  DAILY: 'txtDGDailyRate',
+  WEEKLY: 'txtDGWeeklyRate',
+  MONTHLY: 'txtDGMonthlyRate',
+  XDAY: 'txtDGXDayRate',
+});
+
+const RATE_SCREEN_PATH = process.env.MEX_RATE_SCREEN_PATH || '/WebRezClient/rcUpdateRates1a.aspx';
+const RATE_PRELOAD_SUFFIX = process.env.MEX_RATE_PRELOAD_FIELD || 'Button2';
+const RATE_SUBMIT_SUFFIX = process.env.MEX_RATE_SUBMIT_FIELD || 'Button1';
+
+/** Does this HTML look like the rate-update screen? (grid + code selector) */
+export function isRateUpdateScreen(html) {
+  const s = String(html || '');
+  return /dgRates/i.test(s) && new RegExp(FIELD.RATE_CODE, 'i').test(s);
+}
+
+/**
+ * Row → class mapping, scraped per session. The recon doc is explicit:
+ * `_ctl2..11` map to classes ALPHABETICALLY and the indices SHIFT if MEX adds
+ * a class — so the writer must read the labels off the live grid, never
+ * hardcode. Each row's class is the first standalone 4-letter code in its
+ * text (the cell reads "CFAR HYUNDAI KONA SE OR SIMILAR").
+ *
+ * Pure. Returns [{ rowPrefix, classCode }] — rowPrefix is the full naming
+ * container ('_ctl0:cphMaster1:dgRates:_ctl2').
+ */
+export function parseRateGridRows(html) {
+  const rows = [];
+  const seen = new Set();
+  // Find every daily-rate input; its name pins the row's naming container.
+  const re = new RegExp(`name="([^"]*dgRates[^"]*):${RATE_GRID_FIELD.DAILY}"`, 'gi');
+  const raw = String(html || '');
+  for (const m of raw.matchAll(re)) {
+    const rowPrefix = m[1];
+    if (seen.has(rowPrefix)) continue;
+    seen.add(rowPrefix);
+    // The row's <tr> is the nearest preceding one; label sits before the inputs.
+    const inputAt = m.index;
+    const trStart = raw.lastIndexOf('<tr', inputAt);
+    const rowHtml = trStart >= 0 ? raw.slice(trStart, inputAt) : '';
+    const text = rowHtml.replace(/<[^>]*>/g, ' ');
+    const label = (text.match(/\b([A-Z]{4})\b/) || [])[1] || null;
+    rows.push({ rowPrefix, classCode: label });
+  }
+  return rows;
+}
+
+/**
+ * Current grid values for one row, read from the parsed form fields (the
+ * Preload response carries them as input values).
+ */
+export function rateRowValues(fields, rowPrefix) {
+  const val = (suffix) => {
+    const meta = fields[`${rowPrefix}:${suffix}`];
+    if (!meta) return null;
+    const n = Number(String(meta.value ?? '').replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(n) ? n : null;
+  };
+  return {
+    daily: val(RATE_GRID_FIELD.DAILY),
+    weekly: val(RATE_GRID_FIELD.WEEKLY),
+    monthly: val(RATE_GRID_FIELD.MONTHLY),
+    xday: val(RATE_GRID_FIELD.XDAY),
+  };
+}
+
+/**
+ * WebRateReport1.aspx rows. One per (class × tier) the portal wrote:
+ *
+ *   Requested · System · TSD# · Branch · Code · Cat · Class · Rate · Result · Allow Undo
+ *   2026/08/04 20:45:52 · WebLink · 61306 · SJU-SJU · BPABR · S · CFAR ·
+ *     1960.00/MY UNL [...] · Completed 2026/08/04 20:45:52 · Yes
+ *
+ * Pure. `completed` is the portal's own word — anything else is a failed write.
+ */
+export function parseRateReport(html) {
+  const out = [];
+  const raw = String(html || '');
+  for (const tr of raw.match(/<tr[\s\S]*?<\/tr>/gi) || []) {
+    const cells = (tr.match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi) || [])
+      .map((c) => cellText(c.replace(/^<t[dh][^>]*>/i, '').replace(/<\/t[dh]>$/i, '')));
+    if (cells.length < 9) continue;
+    // Data rows start with the Requested timestamp.
+    if (!/^\d{4}\/\d{2}\/\d{2}/.test(cells[0])) continue;
+    const rateText = cells[7] || '';
+    out.push({
+      requestedAt: cells[0],
+      rateCode: cells[4] || null,
+      classCode: cells[6] || null,
+      rateText,
+      tier: (rateText.match(/\/([A-Z]{2})\b/) || [])[1] || null,
+      result: cells[8] || '',
+      completed: /^completed/i.test(cells[8] || ''),
+    });
+  }
+  return out;
+}
+
+/**
+ * Reach the rate-update screen. Menu-first (single-window portal — the menu
+ * postback is the measured-safe route), direct GET as fallback, one re-login
+ * between attempts. Throws MexLayoutError when what comes back is not the
+ * rates screen — never returns a page the caller would then write blind.
+ */
+export async function fetchRateUpdateScreen(tenantId, { userAgent } = {}) {
+  const ua = userAgent || pickUserAgent();
+
+  const attempt = async () => {
+    try {
+      const html = await navigateMenu(tenantId, MENU_PATH_RATE_UPDATE_1, {
+        userAgent: ua, menuText: MENU_TEXT_RATE_UPDATE_1,
+      });
+      if (isRateUpdateScreen(html)) return html;
+    } catch (err) {
+      if (err instanceof MexAuthExpiredError) throw err;
+      // Menu miss — fall through to the direct GET.
+    }
+    const res = await rawFetch(tenantId, absUrl(withSessionToken(tenantId, RATE_SCREEN_PATH)), { userAgent: ua });
+    const html = res.status < 400 ? await res.text().catch(() => '') : '';
+    if (isLoginBounce(res, html)) throw new MexAuthExpiredError('rate screen bounced to login');
+    return html;
+  };
+
+  let html;
+  try {
+    html = await attempt();
+  } catch (err) {
+    if (!(err instanceof MexAuthExpiredError)) throw err;
+    await login(tenantId, { userAgent: ua });
+    html = await attempt();
+  }
+  if (!isRateUpdateScreen(html)) {
+    throw new MexLayoutError('Mex rate-update screen did not render (no dgRates grid / rate-code selector)');
+  }
+  return html;
+}
+
+/**
+ * Select a rate code + branch/system/TSD and Preload the grid (Button2).
+ * Returns { html, fields, rows } — the read-back the plan diffs against.
+ */
+export async function preloadRateGrid(tenantId, { rateCode, tsdNumber, branch, userAgent } = {}) {
+  const ua = userAgent || pickUserAgent();
+  const screenHtml = await fetchRateUpdateScreen(tenantId, { userAgent: ua });
+  const { action, fields } = parseWebFormsForm(screenHtml);
+
+  const preloadName = findFieldName(fields, RATE_PRELOAD_SUFFIX);
+  if (!preloadName) throw new MexLayoutError(`rate screen has no ${RATE_PRELOAD_SUFFIX} (Preload) button`);
+  const overrides = rateSelectionOverrides({ rateCode, tsdNumber, branch });
+  const body = buildPostBody(fields, overrides, {
+    [preloadName]: fields[preloadName]?.value || 'Preload',
+  });
+  const out = await postBack(tenantId, action, body, ua);
+  if (out.bounced) throw new MexAuthExpiredError('rate preload bounced to login');
+
+  const rows = parseRateGridRows(out.html);
+  if (!rows.length) throw new MexLayoutError('rate preload rendered no dgRates rows');
+  const parsed = parseWebFormsForm(out.html);
+  return {
+    html: out.html,
+    action: parsed.action,
+    fields: parsed.fields,
+    rows: rows.map((r) => ({ ...r, current: rateRowValues(parsed.fields, r.rowPrefix) })),
+  };
+}
+
+/** The selector overrides threaded through EVERY postback on this screen. */
+export function rateSelectionOverrides({ rateCode, tsdNumber, branch }) {
+  return {
+    [FIELD.RATE_CODE]: rateCode,
+    [FIELD.BRANCH]: branch,
+    [FIELD.SYSTEM]: 'WebLink',
+    [FIELD.TSD_NUMBER]: tsdNumber,
+  };
+}
+
+/**
+ * Drive one of the screen's calendars to a date: month select first when the
+ * displayed month differs (its own autopostback), then the day-serial click.
+ * Same semantics the T&M screen proved live; serial = days since 2000-01-01.
+ * Returns the new screen HTML.
+ */
+async function driveRateCalendar(tenantId, html, { calSuffix, monthSuffixes, date, overrides, ua }) {
+  const serial = toCalendarDaySerial(date);
+  if (!serial) throw new MexLayoutError(`unusable calendar date: ${date}`);
+  const wantMonth = toMonthOptionLabel(date);
+
+  // The rates screen names its To-month list `lstTOMonth` (capital TO) where
+  // the T&M screen has `lstToMonth` — accept either spelling.
+  const { fields: f0 } = parseWebFormsForm(html);
+  const monthSuffix = monthSuffixes.find((s) => findFieldName(f0, s)) || null;
+
+  if (monthSuffix) {
+    const options = parseSelectOptions(html, monthSuffix);
+    const current = selectedOptionOf(options);
+    if (!current || cellText(current.label).toLowerCase() !== wantMonth.toLowerCase()) {
+      const value = findOptionValueByLabel(options, wantMonth);
+      const target = eventTargetFor(f0, monthSuffix);
+      if (value != null && target) {
+        const body = buildPostBody(f0, { ...overrides, [monthSuffix]: value }, {
+          __EVENTTARGET: target,
+          __EVENTARGUMENT: '',
+        });
+        const { action } = parseWebFormsForm(html);
+        const out = await postBack(tenantId, action, body, ua);
+        if (out.bounced) throw new MexAuthExpiredError('rate calendar month bounced');
+        html = out.html;
+      }
+    }
+  }
+
+  const { action, fields } = parseWebFormsForm(html);
+  const body = buildCalendarPostBody(fields, overrides, calSuffix, serial);
+  const out = await postBack(tenantId, action, body, ua);
+  if (out.bounced) throw new MexAuthExpiredError('rate calendar day bounced');
+  return out.html;
+}
+
+/**
+ * Write one rate code's grid: drive the window, fill the touched rows, Submit.
+ * Returns { reportRows, reportHtml } from WebRateReport1.aspx (postBack follows
+ * the success redirect). The CALLER decides whether the report proves the
+ * write — this function only refuses transport-level failure.
+ *
+ * `gridOverrides` maps FULL field names ('…dgRates:_ctl2:txtDGDailyRate') to
+ * string values; buildPostBody echoes every untouched field verbatim, so the
+ * rest of the grid (weekend/hourly/free-miles) rides through unchanged.
+ */
+export async function submitRateGrid(tenantId, {
+  preload, rateCode, tsdNumber, branch, fromDate, toDate, gridOverrides, userAgent,
+} = {}) {
+  const ua = userAgent || pickUserAgent();
+  const overrides = rateSelectionOverrides({ rateCode, tsdNumber, branch });
+  let html = preload.html;
+
+  html = await driveRateCalendar(tenantId, html, {
+    calSuffix: CAL_TARGET.FROM, monthSuffixes: [FIELD.FROM_MONTH, 'lstFromMonth'],
+    date: fromDate, overrides, ua,
+  });
+  html = await driveRateCalendar(tenantId, html, {
+    calSuffix: CAL_TARGET.TO, monthSuffixes: ['lstTOMonth', FIELD.TO_MONTH],
+    date: toDate, overrides, ua,
+  });
+
+  const { action, fields } = parseWebFormsForm(html);
+  const submitName = findFieldName(fields, RATE_SUBMIT_SUFFIX);
+  if (!submitName) throw new MexLayoutError(`rate screen has no ${RATE_SUBMIT_SUFFIX} (Submit) button`);
+
+  const body = buildPostBody(fields, overrides, {
+    ...gridOverrides,
+    [submitName]: fields[submitName]?.value || 'Submit',
+  });
+  const out = await postBack(tenantId, action, body, ua);
+  if (out.bounced) throw new MexAuthExpiredError('rate submit bounced to login');
+
+  return { reportRows: parseRateReport(out.html), reportHtml: out.html };
 }
