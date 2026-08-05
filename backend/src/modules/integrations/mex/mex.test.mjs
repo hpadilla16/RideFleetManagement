@@ -1473,3 +1473,41 @@ test('mapRowToExternalReservation: prepaid Expedia code flips isPrepaid and reco
   const poa = mapRowToExternalReservation({ externalRef: 'A1TL099997', rateCode: 'BPAPR' });
   assert.equal(poa.isPrepaid, false);
 });
+
+// ---------------------------------------------------------------------------
+// Session URL token (IRC activation fix, 2026-08-05)
+//
+// RezCentral hands out a FRESH `?id=` at login: the entry token routes you to
+// the right account's login form, a DIFFERENT per-session one authorizes every
+// page after. Navigating the bare root bounced IRC's first activation attempt
+// straight back to WebLogin ("[mex] login ok" then "menu postback bounced").
+// ---------------------------------------------------------------------------
+
+test('extractSessionToken: pulls the id out of URLs and form actions', async () => {
+  const { extractSessionToken } = await import('./mex.service.js');
+  assert.equal(extractSessionToken('rcRezCentral.aspx?id=sbrcynfuqssacs45e1m0'), 'sbrcynfuqssacs45e1m0');
+  assert.equal(extractSessionToken('https://rezcentral.tsdasp.net/WebRezClient/rcUpdateRates1a.aspx?id=abc123'), 'abc123');
+  assert.equal(extractSessionToken('/WebRezClient/x.aspx?foo=1&id=tok9'), 'tok9');
+  assert.equal(extractSessionToken('rcRezCentral.aspx'), null);
+  assert.equal(extractSessionToken(''), null);
+  assert.equal(extractSessionToken(null), null);
+});
+
+test('findSessionToken: redirect Location wins, then the form action', async () => {
+  const { findSessionToken } = await import('./mex.service.js');
+  // The live shape: login POST 302s to the landing page carrying the token.
+  assert.equal(
+    findSessionToken({ location: 'rcRezCentral.aspx?id=sess1', html: '<form action="x.aspx?id=other">' }),
+    'sess1',
+  );
+  // 200-rendered landing: the form action is the evidence.
+  assert.equal(
+    findSessionToken({ html: '<form name="aspnetForm" method="post" action="rcRezCentral.aspx?id=sess2" id="aspnetForm">' }),
+    'sess2',
+  );
+  assert.equal(findSessionToken({ html: '<form action="rcRezCentral.aspx">' }), null);
+  assert.equal(findSessionToken({}), null);
+  // The entry token must never be mistaken for a session token by this helper's
+  // callers — it only ever reads what the LANDED page reported.
+  assert.equal(findSessionToken({ location: 'WebLogin.aspx?id=vufnda45gf12r2ifchif' }), 'vufnda45gf12r2ifchif');
+});
