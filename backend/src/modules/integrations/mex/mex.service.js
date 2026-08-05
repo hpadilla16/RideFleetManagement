@@ -147,9 +147,56 @@ const cookieJars = new Map();
 // bounce/rotation/logout path.
 const authenticatedJars = new Set();
 
+// Per-session URL token (2026-08-05 activation fix). RezCentral hands out a
+// FRESH `?id=` on login — the entry token routes you to the right account's
+// login form, but every authenticated page carries a different, per-session
+// one (observed live: entry vufnda45gf12r2ifchif -> session sbrcynfuqssacs45e1m0).
+// Navigating to the bare app root without it bounces straight back to
+// WebLogin, which is exactly what "[mex] login ok" followed by "menu postback
+// bounced to login" looked like on IRC's first activation attempt.
+const sessionTokens = new Map();
+
 function dropJar(tenantId) {
   cookieJars.delete(tenantId);
   authenticatedJars.delete(tenantId);
+  sessionTokens.delete(tenantId);
+}
+
+/** Pure: pull the `id` query value out of a URL or a form action. */
+export function extractSessionToken(urlOrAction) {
+  const m = String(urlOrAction || '').match(/[?&]id=([^&"'\s]+)/i);
+  return m ? m[1] : null;
+}
+
+/**
+ * Pure: the first `?id=` a landed page reveals — the redirect Location wins
+ * (most explicit), then the form action, then any app-page link.
+ */
+export function findSessionToken({ location = '', html = '' } = {}) {
+  const fromLocation = extractSessionToken(location);
+  if (fromLocation) return fromLocation;
+  const action = String(html || '').match(/<form[^>]+action="([^"]+)"/i);
+  const fromAction = action ? extractSessionToken(action[1]) : null;
+  if (fromAction) return fromAction;
+  return extractSessionToken(String(html || '').match(/(?:href|action)="[^"]*\.aspx\?id=[^"]+"/i)?.[0] || '');
+}
+
+/** The app root for THIS tenant's session, carrying the token when we have one. */
+function rootPathFor(tenantId) {
+  const token = sessionTokens.get(tenantId);
+  if (!token) return ROOT_PATH;
+  return ROOT_PATH.includes('?') ? `${ROOT_PATH}&id=${token}` : `${ROOT_PATH}?id=${token}`;
+}
+
+/**
+ * Re-attach the session token to a resolved action that lost it. WebForms
+ * actions are frequently query-less ("rcUpdateRates1a.aspx"), and posting
+ * there without the token bounces.
+ */
+function withSessionToken(tenantId, resolved) {
+  const token = sessionTokens.get(tenantId);
+  if (!token || !resolved || /[?&]id=/i.test(resolved)) return resolved;
+  return resolved.includes('?') ? `${resolved}&id=${token}` : `${resolved}?id=${token}`;
 }
 
 function jarFor(tenantId) {
@@ -580,11 +627,18 @@ export async function login(tenantId, opts = {}) {
   // either a 302 to the landing page or a 200 rendering it directly.
   const bounced = isLoginBounce(postRes, postBody);
   let landedHtml = postBody;
+  // Capture the per-session token the moment it appears — everything after
+  // login must carry it (see sessionTokens above).
+  const postLocation = postRes.headers?.get?.('location') || '';
+  const tokenFromPost = findSessionToken({ location: postLocation, html: postBody });
+  if (tokenFromPost) sessionTokens.set(tenantId, tokenFromPost);
   if (!bounced && postRes.status >= 300 && postRes.status < 400) {
-    const loc = postRes.headers.get?.('location') || '';
+    const loc = postLocation;
     if (loc) {
       const follow = await rawFetch(tenantId, absUrl(resolveAction(loc, ROOT_PATH)), { userAgent });
       landedHtml = follow.status < 400 ? await follow.text().catch(() => '') : '';
+      const tokenFromLanding = findSessionToken({ location: loc, html: landedHtml });
+      if (tokenFromLanding) sessionTokens.set(tenantId, tokenFromLanding);
       if (isLoginBounce(follow, landedHtml)) {
         dropJar(tenantId);
         throw new MexAuthExpiredError(
@@ -645,8 +699,11 @@ async function ensureSession(tenantId, opts = {}) {
 // as __EVENTARGUMENT, re-sending the page's viewstate.
 // ---------------------------------------------------------------------------
 async function fetchCurrentPage(tenantId, userAgent) {
-  const res = await rawFetch(tenantId, absUrl(ROOT_PATH), { userAgent });
+  const res = await rawFetch(tenantId, absUrl(rootPathFor(tenantId)), { userAgent });
   const html = res.status < 400 ? await res.text().catch(() => '') : '';
+  // The token can rotate mid-session; keep ours current from what we just saw.
+  const refreshed = findSessionToken({ location: res.url || '', html });
+  if (refreshed) sessionTokens.set(tenantId, refreshed);
   return { res, html };
 }
 
@@ -668,14 +725,17 @@ export async function navigateMenu(tenantId, menuPath = MENU_PATH_TM_SUMMARY, { 
       __EVENTTARGET: MENU_EVENT_TARGET,
       __EVENTARGUMENT: menuPath,
     });
-    const actionUrl = action ? absUrl(resolveAction(action, ROOT_PATH)) : absUrl(ROOT_PATH);
+    const actionUrl = absUrl(withSessionToken(
+      tenantId,
+      action ? resolveAction(action, ROOT_PATH) : ROOT_PATH
+    ));
     const res = await rawFetch(tenantId, actionUrl, {
       method: 'POST',
       userAgent: ua,
       headers: {
         'content-type': 'application/x-www-form-urlencoded',
         origin: BASE_URL,
-        referer: absUrl(ROOT_PATH),
+        referer: absUrl(rootPathFor(tenantId)),
       },
       body: body.toString(),
     });
@@ -750,14 +810,17 @@ export function buildCalendarPostBody(fields, overrides, calSuffix, serial) {
 
 /** POST one WebForms body to the screen's action URL. Returns { bounced, html }. */
 async function postBack(tenantId, action, body, ua) {
-  const actionUrl = action ? absUrl(resolveAction(action, ROOT_PATH)) : absUrl(ROOT_PATH);
+  const actionUrl = absUrl(withSessionToken(
+    tenantId,
+    action ? resolveAction(action, ROOT_PATH) : ROOT_PATH
+  ));
   const res = await rawFetch(tenantId, actionUrl, {
     method: 'POST',
     userAgent: ua,
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
       origin: BASE_URL,
-      referer: absUrl(ROOT_PATH),
+      referer: absUrl(rootPathFor(tenantId)),
     },
     body: body.toString(),
   });
