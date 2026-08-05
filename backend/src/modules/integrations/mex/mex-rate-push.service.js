@@ -389,9 +389,14 @@ export async function runMexRatePush(tenantId, opts = {}) {
       const codeOut = { rateCode, bands: [], error: null };
       cfgOut.codes.push(codeOut);
       try {
-        // One preload up front: the portal's current values (the diff base and
-        // the delta guard) and the classes the grid actually renders.
-        let preload = await preloadRateGrid(tenantId, { rateCode, tsdNumber, branch, userAgent: ua });
+        // One preload up front — the window's dates are part of the preload
+        // (rates live per date window; a Preload without dates loads nothing).
+        // Gives the classes the grid renders and the current values for the
+        // full window.
+        let preload = await preloadRateGrid(tenantId, {
+          rateCode, tsdNumber, branch,
+          fromDate: dates[0], toDate: dates[dates.length - 1], userAgent: ua,
+        });
         const portalClasses = preload.rows.map((r) => r.classCode).filter(Boolean);
 
         // Days where every class prices the same collapse into ONE portal
@@ -402,8 +407,14 @@ export async function runMexRatePush(tenantId, opts = {}) {
         for (let i = 0; i < bands.length; i += 1) {
           const band = bands[i];
           // Each submit consumes the screen (the portal redirects to the
-          // report), so every band after the first re-preloads.
-          if (i > 0) preload = await preloadRateGrid(tenantId, { rateCode, tsdNumber, branch, userAgent: ua });
+          // report), and each band has its OWN date window — so every band
+          // beyond a lone full-window one re-preloads with its dates.
+          if (i > 0 || bands.length > 1) {
+            preload = await preloadRateGrid(tenantId, {
+              rateCode, tsdNumber, branch,
+              fromDate: band.fromDate, toDate: band.toDate, userAgent: ua,
+            });
+          }
 
           const plan = buildRatePlan(preload.rows, bandToDesired(desired, band), { maxDeltaPct: maxDeltaPct(), force });
           const bandOut = {
@@ -449,7 +460,6 @@ export async function runMexRatePush(tenantId, opts = {}) {
 
           const { reportRows } = await submitRateGrid(tenantId, {
             preload, rateCode, tsdNumber, branch,
-            fromDate: band.fromDate, toDate: band.toDate,
             gridOverrides: buildGridOverrides(plan), userAgent: ua,
           });
           const verdicts = verifyReport(reportRows, {
