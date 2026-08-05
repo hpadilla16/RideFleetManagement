@@ -146,6 +146,37 @@ export function mergeMileageOverride(existingJson, override) {
   return JSON.stringify(next);
 }
 
+/**
+ * Charge rows the pricing engine does NOT own (2026-08-05).
+ *
+ * A fee that arrived FROM an upstream system is a fact about what the customer
+ * was already quoted — MEX's Customer Facility Charge, Vehicle License Fee and
+ * Surcharge come down with the booking and MEX will bill them whatever RFM
+ * decides. "Edit pricing → Save Override" rebuilds the charge list from the
+ * UI's synthesized payload, which knows nothing about those rows, so a naïve
+ * rebuild silently drops a fee the customer already owes. Same failure shape
+ * as the EXTENSION_RATE bug below, generalised: preserve by OWNERSHIP, not by
+ * one hardcoded code.
+ *
+ * These rows are still editable/voidable through Admin Corrections — this only
+ * stops an unrelated pricing edit from deleting them as collateral.
+ */
+export const EXTERNALLY_OWNED_CHARGE_SOURCES = Object.freeze(new Set([
+  'MEX_IMPORT',
+]));
+
+/** True when the pricing engine must leave this row alone. */
+export function isExternallyOwnedCharge(row) {
+  const source = String(row?.source || '').trim().toUpperCase();
+  return EXTERNALLY_OWNED_CHARGE_SOURCES.has(source);
+}
+
+/** True when a rebuild must NOT delete this row (extensions + imported fees). */
+export function isPreservedOnPricingRebuild(row) {
+  if (String(row?.code || '').toUpperCase() === 'EXTENSION_RATE') return true;
+  return isExternallyOwnedCharge(row);
+}
+
 function buildChargeRows(reservationId, charges = []) {
   return (Array.isArray(charges) ? charges : []).map((row, idx) => ({
     reservationId,
@@ -1111,7 +1142,7 @@ export const reservationPricingService = {
     // place. Only wipe the non-extension rows, leave extensions in
     // place with their original ids untouched.
     const chargeRows = buildChargeRows(reservationId, payload.charges || [])
-      .filter((row) => String(row?.code || '').toUpperCase() !== 'EXTENSION_RATE');
+      .filter((row) => !isPreservedOnPricingRebuild(row));
 
     const mileageOverride = normalizeMileageOverride(payload.mileageOverride);
 
@@ -1142,14 +1173,14 @@ export const reservationPricingService = {
       // delete we know exactly which rows go.
       const existing = await tx.reservationCharge.findMany({
         where: { reservationId },
-        select: { id: true, code: true }
+        select: { id: true, code: true, source: true }
       });
-      const nonExtensionIds = existing
-        .filter((c) => String(c?.code || '').toUpperCase() !== 'EXTENSION_RATE')
+      const rebuildableIds = existing
+        .filter((c) => !isPreservedOnPricingRebuild(c))
         .map((c) => c.id);
-      if (nonExtensionIds.length) {
+      if (rebuildableIds.length) {
         await tx.reservationCharge.deleteMany({
-          where: { id: { in: nonExtensionIds } }
+          where: { id: { in: rebuildableIds } }
         });
       }
 
@@ -1160,12 +1191,15 @@ export const reservationPricingService = {
       // Re-read EXTENSION_RATE rows so estimatedTotal includes their
       // contribution. Using the live rows (not a snapshot) keeps us
       // honest if anything else in this tx touched them.
-      const liveExtensions = await tx.reservationCharge.findMany({
-        where: { reservationId, code: 'EXTENSION_RATE' }
-      });
+      // Every row that survived the rebuild still contributes to the total —
+      // a preserved fee the customer owes must not vanish from estimatedTotal
+      // just because the pricing engine did not author it.
+      const livePreserved = (await tx.reservationCharge.findMany({
+        where: { reservationId }
+      })).filter((c) => isPreservedOnPricingRebuild(c));
 
       const nextDailyRate = snapshotData.dailyRate;
-      const estimatedTotal = summarizeChargeTotals([...chargeRows, ...liveExtensions]).total;
+      const estimatedTotal = summarizeChargeTotals([...chargeRows, ...livePreserved]).total;
       await tx.reservation.update({
         where: { id: reservationId },
         data: {

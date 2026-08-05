@@ -216,3 +216,46 @@ export function formatDetailBreakdown(detail) {
   if (services) bits.push(`Optional services: ${services}`);
   return bits.join(' | ');
 }
+
+/** The charge `source` that marks a row as owned by MEX, not by our engine. */
+export const MEX_CHARGE_SOURCE = 'MEX_IMPORT';
+
+/**
+ * The portal's OPTIONAL SERVICES as ReservationCharge rows.
+ *
+ * These are fees MEX already quoted the customer and WILL bill — a
+ * pay-at-destination booking is collected at our counter, so they have to be
+ * on the reservation, and they have to survive an unrelated pricing edit
+ * (source MEX_IMPORT is preserved by reservation-pricing.service).
+ *
+ * `sourceRefId` is stable per (confirmation, service) so a re-sync updates a
+ * row instead of stacking a second copy of the same fee.
+ *
+ * taxable:false on purpose — the portal reports Est Tax Total separately, so
+ * taxing these again would invent money MEX never charged.
+ */
+export function buildImportedFeeRows(detail) {
+  const services = Array.isArray(detail?.optionalServices) ? detail.optionalServices : [];
+  const confirmation = String(detail?.confirmation || '').trim();
+  return services
+    // Number(null) is 0, and 0 is finite — so an amount-less line would sail
+    // through as a phantom $0.00 fee. Reject the absence explicitly.
+    .filter((s2) => s2
+      && String(s2.description || '').trim()
+      && s2.amount !== null && s2.amount !== undefined && s2.amount !== ''
+      && Number.isFinite(Number(s2.amount)))
+    .map((s2, idx) => ({
+      code: 'IMPORTED_FEE',
+      name: String(s2.description).trim(),
+      chargeType: 'UNIT',
+      quantity: 1,
+      rate: Number(s2.amount),
+      total: Number(s2.amount),
+      taxable: false,
+      selected: true,
+      sortOrder: 900 + idx,
+      source: MEX_CHARGE_SOURCE,
+      sourceRefId: `${confirmation}:${String(s2.description).trim().toUpperCase()}`,
+      notes: 'Quoted by MEX with the booking — collected at the counter.',
+    }));
+}
