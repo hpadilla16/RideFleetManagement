@@ -363,9 +363,15 @@ export function mapRowToExternalReservation(row) {
 
 /**
  * The job handler. Exported for direct invocation from tests + a bootstrap CLI.
- * Job payload: { tenantId, triggeredBy }.
+ * Job payload: { tenantId, triggeredBy } — or { kind: 'rate-push', ... } for
+ * the outbound rate writeback, which shares THIS queue on purpose: the sync
+ * and the push drive the same single-window TSD account, and two concurrent
+ * sessions kick each other's login (measured 2026-08-06 — the first push
+ * dry-run collided with the 15-min sync and every screen bounced). One queue,
+ * concurrency 1 → they can never overlap.
  */
 export async function mexSyncHandler(job) {
+  if (job?.data?.kind === 'rate-push') return mexRatePushHandler(job);
   const { tenantId, triggeredBy = 'schedule' } = job?.data || {};
   if (!tenantId) throw new Error('mex.sync: job.data.tenantId is required');
 
@@ -861,6 +867,66 @@ export async function enqueueOneOffSync(tenantId, triggeredBy = 'manual') {
     jobId: `mex-sync:${tenantId}:${Date.now()}`,
     priority: 5,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Outbound rate push as a queue job (2026-08-06, Hector: "que se haga despues
+// del motor de pricing"). Same queue as the sync — see mexSyncHandler.
+// ---------------------------------------------------------------------------
+
+/** The rate-push job body. Never force from a schedule: out-of-band deltas
+ * stay HELD in RatePushLog for a human, exactly like MI's own cap. */
+async function mexRatePushHandler(job) {
+  const { tenantId, triggeredBy = 'schedule' } = job?.data || {};
+  if (!tenantId) throw new Error('mex.sync rate-push: job.data.tenantId is required');
+  const { runMexRatePush } = await import('./mex-rate-push.service.js');
+  logger.info('[mex-rate-push] queued run starting', { tenantId, triggeredBy });
+  const out = await runMexRatePush(tenantId, { live: true, trigger: 'MI_AUTOAPPLY' });
+  logger.info('[mex-rate-push] queued run finished', {
+    tenantId,
+    mode: out.mode || null,
+    skipped: out.skipped || null,
+    codes: (out.configs || []).flatMap((c) => c.codes || []).map((c) => ({
+      rateCode: c.rateCode,
+      error: c.error || null,
+      bands: (c.bands || []).length,
+    })),
+  });
+  return out;
+}
+
+/** Enqueue one tenant's rate push behind whatever sync is running. */
+export async function enqueueRatePush(tenantId, triggeredBy = 'post-pricing-engine') {
+  return enqueueJob(QUEUE_NAME, { kind: 'rate-push', tenantId, triggeredBy }, {
+    jobId: `mex-rate-push:${tenantId}:${Date.now()}`,
+    // Below the manual-sync priority: reservations first, prices after.
+    priority: 6,
+  });
+}
+
+/**
+ * Enqueue the push for every tenant that can actually run one: an enabled
+ * MexLocationConfig AND the env gate at LIVE. Called by the pricing-engine
+ * internal route after a run, best-effort — pricing must never fail because
+ * the push could not queue.
+ */
+export async function enqueueRatePushForEnabledTenants({ tenantId = null } = {}) {
+  const { pushMode } = await import('./mex-rate-push.service.js');
+  if (pushMode() !== 'LIVE') return { skipped: 'mode_' + pushMode().toLowerCase(), queued: 0 };
+  const configs = await prisma.mexLocationConfig.findMany({
+    where: { enabled: true, ...(tenantId ? { tenantId } : {}) },
+    select: { tenantId: true },
+    distinct: ['tenantId'],
+  });
+  let queued = 0;
+  for (const cfg of configs) {
+    const jobId = await enqueueRatePush(cfg.tenantId).catch((e) => {
+      logger.warn('[mex-rate-push] could not enqueue', { tenantId: cfg.tenantId, message: e.message });
+      return null;
+    });
+    if (jobId) queued += 1;
+  }
+  return { queued, tenants: configs.length };
 }
 
 /** Register the worker with BullMQ. Idempotent — call once at worker boot. */

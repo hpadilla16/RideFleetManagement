@@ -283,6 +283,18 @@ pricingEngineInternalRouter.post('/run', requireInternalToken, async (req, res, 
     } catch (e) {
       marketAutoApply = { error: e.message };
     }
-    res.json({ ...out, marketAutoApply });
+    // Outbound MEX rate push, QUEUED behind the reservation sync (2026-08-06,
+    // Hector: "que se haga despues del motor de pricing"). Enqueue-only here:
+    // the push drives the same single-window TSD account as the sync, so it
+    // runs on the mex.sync queue (concurrency 1) where they can never collide.
+    // Best-effort — pricing must never fail because the push could not queue.
+    let mexRatePush = null;
+    try {
+      const { enqueueRatePushForEnabledTenants } = await import('../integrations/mex/mex.worker.js');
+      mexRatePush = await enqueueRatePushForEnabledTenants({ tenantId: opts.tenantId || null });
+    } catch (e) {
+      mexRatePush = { error: e.message };
+    }
+    res.json({ ...out, marketAutoApply, mexRatePush });
   } catch (e) { handle(e, res, next); }
 });
