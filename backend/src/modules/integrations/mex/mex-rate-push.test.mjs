@@ -15,7 +15,7 @@ const {
   resolveDesiredForClass, DECISION,
   effectiveDailyOn, isoDates, buildPushBands, bandToDesired,
 } = await import('./mex-rate-push.service.js');
-const { parseRateGridRows, parseRateReport, rateRowValues, isRateUpdateScreen } =
+const { parseRateGridRows, parseRateReport, rateRowValues, isRateUpdateScreen, dayCheckboxOverrides } =
   await import('./mex.service.js');
 const { mexRatePushEligibleCodes } = await import('./mex.constants.js');
 
@@ -215,6 +215,20 @@ describe('parseRateReport / verifyReport', () => {
     assert.match(verdicts.get('ECAR').reason, /Rejected/);
     assert.equal(verdicts.get('SFAR').verified, false, 'a class missing from the report is NOT a success');
     assert.match(verdicts.get('SFAR').reason, /missing/);
+  });
+});
+
+describe('dayCheckboxOverrides', () => {
+  it('forces all eight day checkboxes ON, keyed by full field name', () => {
+    // First live push wrote ZERO rows: the checkboxes render unchecked, an
+    // unchecked checkbox is never posted, and "no days selected" made the
+    // portal update nothing while answering 302 → report as if all was well.
+    const out = dayCheckboxOverrides('_ctl0:cphMaster1:Button1');
+    assert.equal(Object.keys(out).length, 8);
+    assert.equal(out['_ctl0:cphMaster1:chkAllDays'], 'on');
+    assert.equal(out['_ctl0:cphMaster1:chkSunday'], 'on');
+    assert.equal(out['_ctl0:cphMaster1:chkSaturday'], 'on');
+    assert.equal(Object.keys(out).every((k) => k.startsWith('_ctl0:cphMaster1:chk')), true);
   });
 });
 

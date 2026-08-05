@@ -1998,18 +1998,92 @@ export async function fetchRateUpdateScreen(tenantId, { userAgent } = {}) {
 }
 
 /**
- * Select a rate code + branch/system/TSD and Preload the grid (Button2).
- * Returns { html, fields, rows } — the read-back the plan diffs against.
+ * A calendar date for the serial computation. A date-only string parses as UTC
+ * midnight, which in America/New_York is STILL YESTERDAY — the first live push
+ * clicked Aug 4 while meaning Aug 5 and the portal silently clamped the past
+ * day to today. Anchoring date-only values at noon UTC keeps them on their own
+ * literal day in any sane timezone.
  */
-export async function preloadRateGrid(tenantId, { rateCode, tsdNumber, branch, userAgent } = {}) {
+export function calendarDateArg(date) {
+  const s = String(date || '');
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s}T12:00:00Z` : date;
+}
+
+/**
+ * Select a rate code + set the date window + tick the day boxes, then Preload
+ * the grid (Button2). Returns { html, fields, rows } — the read-back the plan
+ * diffs against.
+ *
+ * THE ORDER IS THE BUG HISTORY OF THIS SCREEN (all found live, 2026-08-06):
+ *   1. The selection first, as ITS OWN postback — lstRateCode is AUTOPOSTBACK
+ *      (__ControlsRequirePostBackKey__); folding it into the Preload POST left
+ *      the handler reading the pre-change selection.
+ *   2. The CALENDARS before Preload — rates live per date window, so a Preload
+ *      without dates has nothing to load: BPABR, a code with live rates,
+ *      preloaded all zeros until the window was set first. This is exactly the
+ *      sequence Hector's manual flow followed ("selecionar los rate codes, las
+ *      fechas y actualizar precio").
+ *   3. The day checkboxes with the rest of the state — all eight render
+ *      unchecked, and "no days selected" made a mechanically perfect submit
+ *      write zero rows.
+ */
+export async function preloadRateGrid(tenantId, {
+  rateCode, tsdNumber, branch, fromDate, toDate, userAgent,
+} = {}) {
   const ua = userAgent || pickUserAgent();
   const screenHtml = await fetchRateUpdateScreen(tenantId, { userAgent: ua });
-  const { action, fields } = parseWebFormsForm(screenHtml);
+  const overrides = rateSelectionOverrides({ rateCode, tsdNumber, branch });
 
+  let html = screenHtml;
+  const ownPostback = async (name, extraFn) => {
+    const { action, fields } = parseWebFormsForm(html);
+    const body = buildPostBody(fields, overrides, {
+      // The rate code rides on EVERY postback: absent from the form until the
+      // selection sticks (see absentFieldExtra), a plain field afterwards.
+      ...absentFieldExtra(fields, FIELD.RATE_CODE, rateCode),
+      ...extraFn(fields),
+    });
+    const out = await postBack(tenantId, action, body, ua);
+    if (out.bounced) throw new MexAuthExpiredError(`rate screen ${name} bounced to login`);
+    html = out.html;
+  };
+
+  await ownPostback('selection', (fields) => {
+    const name = findFieldName(fields, FIELD.RATE_CODE)
+      || Object.keys(absentFieldExtra(fields, FIELD.RATE_CODE, rateCode))[0] || '';
+    return {
+      __EVENTTARGET: name.replace(/:/g, '$'),
+      __EVENTARGUMENT: '',
+    };
+  });
+
+  const codeExtra = (fields) => absentFieldExtra(fields, FIELD.RATE_CODE, rateCode);
+
+  if (fromDate) {
+    html = await driveRateCalendar(tenantId, html, {
+      calSuffix: CAL_TARGET.FROM, monthSuffixes: [FIELD.FROM_MONTH, 'lstFromMonth'],
+      date: fromDate, overrides, extra: codeExtra(parseWebFormsForm(html).fields), ua,
+    });
+  }
+  if (toDate) {
+    html = await driveRateCalendar(tenantId, html, {
+      calSuffix: CAL_TARGET.TO, monthSuffixes: ['lstTOMonth', FIELD.TO_MONTH],
+      date: toDate, overrides, extra: codeExtra(parseWebFormsForm(html).fields), ua,
+    });
+  }
+
+  await ownPostback('day checkboxes', (fields) => ({
+    ...dayCheckboxOverrides(findFieldName(fields, RATE_PRELOAD_SUFFIX) || 'Button2'),
+    __EVENTTARGET: eventTargetFor(fields, 'chkAllDays') || '',
+    __EVENTARGUMENT: '',
+  }));
+
+  const { action, fields } = parseWebFormsForm(html);
   const preloadName = findFieldName(fields, RATE_PRELOAD_SUFFIX);
   if (!preloadName) throw new MexLayoutError(`rate screen has no ${RATE_PRELOAD_SUFFIX} (Preload) button`);
-  const overrides = rateSelectionOverrides({ rateCode, tsdNumber, branch });
   const body = buildPostBody(fields, overrides, {
+    ...absentFieldExtra(fields, FIELD.RATE_CODE, rateCode),
+    ...dayCheckboxOverrides(preloadName),
     [preloadName]: fields[preloadName]?.value || 'Preload',
   });
   const out = await postBack(tenantId, action, body, ua);
@@ -2037,15 +2111,40 @@ export function rateSelectionOverrides({ rateCode, tsdNumber, branch }) {
 }
 
 /**
+ * THE ROOT CAUSE OF "Updated: 0" (found live, 2026-08-06): lstRateCode renders
+ * with NOTHING selected, a browser does not submit an empty multi-select, so
+ * parseWebFormsForm omits it — and buildPostBody applies overrides only to
+ * fields the form carries. Every POST on this screen therefore went out
+ * WITHOUT a rate code at all: Preload loaded nothing (all-zero grids even for
+ * BPABR, which has live rates) and Submit wrote to zero codes while reporting
+ * success. lstBranch/lstSystem never hit this because they render with a
+ * default selected.
+ *
+ * This helper emits the field BY FULL NAME (buildPostBody's `extra` path) when
+ * the form omits it, deriving the naming container from a sibling. Once the
+ * selection postback sticks, the re-render carries the select and the normal
+ * suffix override takes over; the extra then emits nothing.
+ */
+export function absentFieldExtra(fields, suffix, value) {
+  if (findFieldName(fields, suffix)) return {};
+  const sibling = findFieldName(fields, FIELD.BRANCH)
+    || findFieldName(fields, RATE_PRELOAD_SUFFIX)
+    || findFieldName(fields, RATE_SUBMIT_SUFFIX);
+  if (!sibling) return {};
+  return { [`${sibling.replace(/[^:$]+$/, '')}${suffix}`]: String(value) };
+}
+
+/**
  * Drive one of the screen's calendars to a date: month select first when the
  * displayed month differs (its own autopostback), then the day-serial click.
  * Same semantics the T&M screen proved live; serial = days since 2000-01-01.
  * Returns the new screen HTML.
  */
-async function driveRateCalendar(tenantId, html, { calSuffix, monthSuffixes, date, overrides, ua }) {
-  const serial = toCalendarDaySerial(date);
+async function driveRateCalendar(tenantId, html, { calSuffix, monthSuffixes, date, overrides, extra = {}, ua }) {
+  const arg = calendarDateArg(date);
+  const serial = toCalendarDaySerial(arg);
   if (!serial) throw new MexLayoutError(`unusable calendar date: ${date}`);
-  const wantMonth = toMonthOptionLabel(date);
+  const wantMonth = toMonthOptionLabel(arg);
 
   // The rates screen names its To-month list `lstTOMonth` (capital TO) where
   // the T&M screen has `lstToMonth` — accept either spelling.
@@ -2060,6 +2159,7 @@ async function driveRateCalendar(tenantId, html, { calSuffix, monthSuffixes, dat
       const target = eventTargetFor(f0, monthSuffix);
       if (value != null && target) {
         const body = buildPostBody(f0, { ...overrides, [monthSuffix]: value }, {
+          ...extra,
           __EVENTTARGET: target,
           __EVENTARGUMENT: '',
         });
@@ -2072,10 +2172,34 @@ async function driveRateCalendar(tenantId, html, { calSuffix, monthSuffixes, dat
   }
 
   const { action, fields } = parseWebFormsForm(html);
-  const body = buildCalendarPostBody(fields, overrides, calSuffix, serial);
+  const container = namingContainerOf(fields);
+  const body = buildPostBody(fields, overrides, {
+    ...extra,
+    __EVENTTARGET: `${container}${calSuffix}`,
+    __EVENTARGUMENT: String(serial),
+  });
   const out = await postBack(tenantId, action, body, ua);
   if (out.bounced) throw new MexAuthExpiredError('rate calendar day bounced');
   return out.html;
+}
+
+/**
+ * The days-of-week checkboxes, forced ON for every submit.
+ *
+ * FOUND LIVE (first push, 2026-08-06): all eight render UNCHECKED, an
+ * unchecked checkbox is never posted (parseWebFormsForm mirrors the browser),
+ * and the portal answered "Rates Updated … Updated: 0" — transport perfect,
+ * zero rows written, because we asked it to update rates on no days of the
+ * week. Hector's captured manual write carried chkAllDays=on; he had clicked
+ * it. Keyed by FULL field name (derived from a sibling field's prefix) because
+ * suffix overrides only reach fields the form already posts.
+ */
+export function dayCheckboxOverrides(siblingFieldName) {
+  const prefix = String(siblingFieldName || '').replace(/[^:$]+$/, '');
+  return Object.fromEntries([
+    'chkAllDays', 'chkSunday', 'chkMonday', 'chkTuesday',
+    'chkWednesday', 'chkThursday', 'chkFriday', 'chkSaturday',
+  ].map((s) => [`${prefix}${s}`, 'on']));
 }
 
 /**
@@ -2089,26 +2213,22 @@ async function driveRateCalendar(tenantId, html, { calSuffix, monthSuffixes, dat
  * rest of the grid (weekend/hourly/free-miles) rides through unchanged.
  */
 export async function submitRateGrid(tenantId, {
-  preload, rateCode, tsdNumber, branch, fromDate, toDate, gridOverrides, userAgent,
+  preload, rateCode, tsdNumber, branch, gridOverrides, userAgent,
 } = {}) {
   const ua = userAgent || pickUserAgent();
   const overrides = rateSelectionOverrides({ rateCode, tsdNumber, branch });
-  let html = preload.html;
-
-  html = await driveRateCalendar(tenantId, html, {
-    calSuffix: CAL_TARGET.FROM, monthSuffixes: [FIELD.FROM_MONTH, 'lstFromMonth'],
-    date: fromDate, overrides, ua,
-  });
-  html = await driveRateCalendar(tenantId, html, {
-    calSuffix: CAL_TARGET.TO, monthSuffixes: ['lstTOMonth', FIELD.TO_MONTH],
-    date: toDate, overrides, ua,
-  });
+  // The window, the selection and the day boxes were all set BEFORE the
+  // Preload (see preloadRateGrid — the order is the screen's bug history), so
+  // the submit only fills the grid and clicks Submit.
+  const html = preload.html;
 
   const { action, fields } = parseWebFormsForm(html);
   const submitName = findFieldName(fields, RATE_SUBMIT_SUFFIX);
   if (!submitName) throw new MexLayoutError(`rate screen has no ${RATE_SUBMIT_SUFFIX} (Submit) button`);
 
   const body = buildPostBody(fields, overrides, {
+    ...absentFieldExtra(fields, FIELD.RATE_CODE, rateCode),
+    ...dayCheckboxOverrides(submitName),
     ...gridOverrides,
     [submitName]: fields[submitName]?.value || 'Submit',
   });
