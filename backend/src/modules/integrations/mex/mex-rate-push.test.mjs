@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 const {
   mexTierValues, buildRatePlan, buildGridOverrides, verifyReport,
   resolveDesiredForClass, DECISION,
+  effectiveDailyOn, isoDates, buildPushBands, bandToDesired,
 } = await import('./mex-rate-push.service.js');
 const { parseRateGridRows, parseRateReport, rateRowValues, isRateUpdateScreen } =
   await import('./mex.service.js');
@@ -214,6 +215,75 @@ describe('parseRateReport / verifyReport', () => {
     assert.match(verdicts.get('ECAR').reason, /Rejected/);
     assert.equal(verdicts.get('SFAR').verified, false, 'a class missing from the report is NOT a success');
     assert.match(verdicts.get('SFAR').reason, /missing/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-date pricing → date bands (Hector, 2026-08-06: "tiene que mirar los 28
+// dias de precio ya que sube y baja los precios")
+// ---------------------------------------------------------------------------
+
+describe('per-date pricing bands', () => {
+  function desiredWithOverrides() {
+    const d = desiredFixture();
+    d.byClass.get('CFAR').byDate = new Map([
+      // Weekend surge Aug 8–9, back to base after.
+      ['2026-08-08', 29.99],
+      ['2026-08-09', 29.99],
+    ]);
+    d.byClass.get('CCAR').byDate = new Map();
+    return d;
+  }
+
+  it('effectiveDailyOn: the override wins, the base backs it — resolveForRental semantics', () => {
+    const entry = desiredWithOverrides().byClass.get('CFAR');
+    assert.equal(effectiveDailyOn(entry, '2026-08-07'), 19.6, 'no override → base');
+    assert.equal(effectiveDailyOn(entry, '2026-08-08'), 29.99, 'override wins');
+    assert.equal(effectiveDailyOn(null, '2026-08-08'), null);
+  });
+
+  it('collapses the window into contiguous bands, one portal write each', () => {
+    const dates = isoDates('2026-08-06', 7); // Aug 6..12
+    const bands = buildPushBands(desiredWithOverrides(), ['CFAR', 'ECAR'], dates);
+    assert.deepEqual(
+      bands.map((b) => [b.fromDate, b.toDate, b.prices.get('CFAR'), b.prices.get('ECAR')]),
+      [
+        ['2026-08-06', '2026-08-07', 19.6, 14.38],   // base until the surge
+        ['2026-08-08', '2026-08-09', 29.99, 14.38],  // the surge, its own write
+        ['2026-08-10', '2026-08-12', 19.6, 14.38],   // base again after
+      ],
+      'a price change on any class starts a new band; equal days merge',
+    );
+  });
+
+  it('a flat window is exactly one band — the pre-per-date behavior', () => {
+    const dates = isoDates('2026-08-06', 28);
+    const bands = buildPushBands(desiredFixture(), ['CFAR', 'ECAR'], dates);
+    assert.equal(bands.length, 1);
+    assert.equal(bands[0].fromDate, '2026-08-06');
+    assert.equal(bands[0].toDate, '2026-09-02');
+    assert.equal(bands[0].prices.get('ECAR'), 14.38, 'redirect applies inside bands too');
+  });
+
+  it('bandToDesired feeds buildRatePlan the band price, keeping the source id', () => {
+    const desired = desiredWithOverrides();
+    const dates = isoDates('2026-08-08', 2);
+    const [band] = buildPushBands(desired, ['CFAR'], dates);
+    const plan = buildRatePlan(
+      [{ rowPrefix: 'p:_ctl2', classCode: 'CFAR', current: { daily: 19.6, weekly: 137.2, monthly: 548.8, xday: 19.6 } }],
+      bandToDesired(desired, band),
+      { maxDeltaPct: 90 },
+    );
+    assert.equal(plan[0].decision, DECISION.WRITE, 'surge differs from the portal → write');
+    assert.deepEqual(plan[0].desired, mexTierValues(29.99));
+    assert.equal(plan[0].source.sourceRateItemId, 'ri-cfar', 'audit trail survives the band adapter');
+  });
+
+  it('isoDates spans exactly the window, UTC-stable', () => {
+    const dates = isoDates('2026-08-06', 28);
+    assert.equal(dates.length, 28);
+    assert.equal(dates[0], '2026-08-06');
+    assert.equal(dates[27], '2026-09-02');
   });
 });
 
