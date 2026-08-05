@@ -53,7 +53,7 @@ import {
   MexAuthExpiredError,
   MexLayoutError,
 } from './mex.service.js';
-import { formatDetailBreakdown } from './mex-reservation-detail.js';
+import { formatDetailBreakdown, buildImportedFeeRows, MEX_CHARGE_SOURCE } from './mex-reservation-detail.js';
 import {
   classifyMexRateCode,
   SOURCE_SYSTEM,
@@ -185,6 +185,41 @@ export function rejectReasonForStatus(status) {
  * This is done HERE, in Mex's mapping. The shared helper is NOT changed, so
  * economy/nu/flexways behavior is untouched.
  */
+/**
+ * Put MEX's own fees on the reservation, idempotently.
+ *
+ * Runs after promotion (the row must have a reservation to hang them on).
+ * Matched by sourceRefId so a re-sync UPDATES the fee instead of stacking a
+ * duplicate — the same identity discipline the toll charge sync uses.
+ */
+export async function syncImportedFeeCharges(db, reservationId, detail) {
+  if (!reservationId || !detail) return { created: 0, updated: 0 };
+  const wanted = buildImportedFeeRows(detail);
+  if (!wanted.length) return { created: 0, updated: 0 };
+
+  const existing = await db.reservationCharge.findMany({
+    where: { reservationId, source: MEX_CHARGE_SOURCE },
+    select: { id: true, sourceRefId: true, total: true },
+  });
+  const byRef = new Map(existing.map((c) => [String(c.sourceRefId || ''), c]));
+
+  let created = 0;
+  let updated = 0;
+  for (const row of wanted) {
+    const hit = byRef.get(row.sourceRefId);
+    if (!hit) {
+      await db.reservationCharge.create({ data: { reservationId, ...row } });
+      created += 1;
+      continue;
+    }
+    if (Number(hit.total) !== Number(row.total)) {
+      await db.reservationCharge.update({ where: { id: hit.id }, data: { rate: row.rate, total: row.total, name: row.name } });
+      updated += 1;
+    }
+  }
+  return { created, updated };
+}
+
 // One HTTP round-trip per reservation. A normal sync window is tens of rows;
 // this ceiling exists so a pathological window cannot turn one sync into
 // thousands of portal hits.
@@ -613,6 +648,27 @@ export async function mexSyncHandler(job) {
                 locationId: targetLocationId, timeZone: TIME_ZONE,
               });
               autoPromoted++;
+              // MEX's own fees follow the booking onto the reservation. Done
+              // AFTER promotion (there is no reservation before it) and
+              // fail-soft: a fee we could not write is a number to chase, a
+              // failed promotion is a reservation nobody can rent against.
+              try {
+                const promoted = await prisma.externalReservation.findUnique({
+                  where: { id: upserted.id }, select: { promotedToReservationId: true },
+                });
+                if (promoted?.promotedToReservationId) {
+                  const feeOut = await syncImportedFeeCharges(prisma, promoted.promotedToReservationId, row.detail);
+                  if (feeOut.created || feeOut.updated) {
+                    logger.info('[mex-sync] imported fees written to reservation', {
+                      tenantId, externalRef, ...feeOut,
+                    });
+                  }
+                }
+              } catch (feeErr) {
+                logger.warn('[mex-sync] could not write imported fees', {
+                  tenantId, externalRef, message: feeErr.message,
+                });
+              }
             } catch (promoErr) {
               errorsCount++;
               errorSamples.push(`${externalRef}: promote failed: ${promoErr.message}`);
