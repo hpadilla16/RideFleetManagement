@@ -53,7 +53,13 @@ import {
   MexAuthExpiredError,
   MexLayoutError,
 } from './mex.service.js';
-import { formatDetailBreakdown, buildImportedFeeRows, MEX_CHARGE_SOURCE } from './mex-reservation-detail.js';
+import {
+  formatDetailBreakdown,
+  buildImportedQuoteRows,
+  effectiveDailyRate,
+  quoteReconciliation,
+  MEX_CHARGE_SOURCE,
+} from './mex-reservation-detail.js';
 import {
   classifyMexRateCode,
   SOURCE_SYSTEM,
@@ -122,8 +128,12 @@ const mexSourceSpec = Object.freeze({
         );
       }
     }
+    // The daily rate the counter quotes from. Without it the reservation shows
+    // a total with nothing behind it (Hector, 2026-08-05).
+    const dailyRate = effectiveDailyRate(detail, { days: fresh?.rawJson?.days ?? fresh?.rawJson?.list?.days ?? null });
     return {
       isPrepaid: typeof fresh.isPrepaid === 'boolean' ? fresh.isPrepaid : null,
+      ...(dailyRate ? { dailyRate } : {}),
       notes: lines.join('\n'),
     };
   },
@@ -192,9 +202,9 @@ export function rejectReasonForStatus(status) {
  * Matched by sourceRefId so a re-sync UPDATES the fee instead of stacking a
  * duplicate — the same identity discipline the toll charge sync uses.
  */
-export async function syncImportedFeeCharges(db, reservationId, detail) {
+export async function syncImportedFeeCharges(db, reservationId, detail, { days = null } = {}) {
   if (!reservationId || !detail) return { created: 0, updated: 0 };
-  const wanted = buildImportedFeeRows(detail);
+  const wanted = buildImportedQuoteRows(detail, { days });
   if (!wanted.length) return { created: 0, updated: 0 };
 
   const existing = await db.reservationCharge.findMany({
@@ -657,7 +667,7 @@ export async function mexSyncHandler(job) {
                   where: { id: upserted.id }, select: { promotedToReservationId: true },
                 });
                 if (promoted?.promotedToReservationId) {
-                  const feeOut = await syncImportedFeeCharges(prisma, promoted.promotedToReservationId, row.detail);
+                  const feeOut = await syncImportedFeeCharges(prisma, promoted.promotedToReservationId, row.detail, { days: row.days });
                   if (feeOut.created || feeOut.updated) {
                     logger.info('[mex-sync] imported fees written to reservation', {
                       tenantId, externalRef, ...feeOut,

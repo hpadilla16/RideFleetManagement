@@ -234,28 +234,169 @@ export const MEX_CHARGE_SOURCE = 'MEX_IMPORT';
  * taxable:false on purpose — the portal reports Est Tax Total separately, so
  * taxing these again would invent money MEX never charged.
  */
-export function buildImportedFeeRows(detail) {
+export function buildImportedFeeRows(detail, { days = null } = {}) {
   const services = Array.isArray(detail?.optionalServices) ? detail.optionalServices : [];
   const confirmation = String(detail?.confirmation || '').trim();
-  return services
+  const usable = services
     // Number(null) is 0, and 0 is finite — so an amount-less line would sail
     // through as a phantom $0.00 fee. Reject the absence explicitly.
     .filter((s2) => s2
       && String(s2.description || '').trim()
       && s2.amount !== null && s2.amount !== undefined && s2.amount !== ''
-      && Number.isFinite(Number(s2.amount)))
-    .map((s2, idx) => ({
+      && Number.isFinite(Number(s2.amount)));
+  if (!usable.length) return [];
+
+  // THESE FEES ARE PER DAY. The portal's own `Est Extra Total` proves it:
+  // 10.63/day × 10 days = 106.30, × 30 = 318.90, × 4 = 42.52, × 11 = 116.93 —
+  // exact on every booking we captured. Importing them flat under-billed those
+  // four alone by $542.13.
+  //
+  // The day count is taken from the portal's money (Est Extra Total ÷ the daily
+  // sum) before the caller's, because dividing their total by their rates
+  // cannot disagree with what they bill. Dates are NOT used: two bookings in
+  // the same 08/06→08/16 window came back as 10 and 11 days.
+  const dailySum = round2(usable.reduce((sum, s2) => sum + Number(s2.amount), 0));
+  const quantity = resolveFeeDays({ dailySum, extraTotal: detail?.charges?.extraTotal, days });
+
+  return usable.map((s2, idx) => {
+    const rate = Number(s2.amount);
+    return {
       code: 'IMPORTED_FEE',
       name: String(s2.description).trim(),
       chargeType: 'UNIT',
-      quantity: 1,
-      rate: Number(s2.amount),
-      total: Number(s2.amount),
+      quantity,
+      rate,
+      total: round2(rate * quantity),
       taxable: false,
       selected: true,
       sortOrder: 900 + idx,
       source: MEX_CHARGE_SOURCE,
       sourceRefId: `${confirmation}:${String(s2.description).trim().toUpperCase()}`,
-      notes: 'Quoted by MEX with the booking — collected at the counter.',
-    }));
+      notes: quantity > 1
+        ? `Quoted by MEX — $${rate.toFixed(2)}/day × ${quantity} days, collected at the counter.`
+        : 'Quoted by MEX with the booking — collected at the counter.',
+    };
+  });
+}
+
+function round2(n) {
+  return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Pure: how many days these per-day fees are billed on.
+ * Portal money ÷ portal rates first; the caller's day count second; 1 last —
+ * better a visible single day than an invented number.
+ */
+export function resolveFeeDays({ dailySum, extraTotal, days = null }) {
+  const daily = Number(dailySum);
+  const total = Number(extraTotal);
+  if (Number.isFinite(daily) && daily > 0 && Number.isFinite(total) && total > 0) {
+    const implied = total / daily;
+    const rounded = Math.round(implied);
+    if (rounded >= 1 && Math.abs(implied - rounded) < 0.01) return rounded;
+  }
+  const fromCaller = Number(days);
+  if (Number.isFinite(fromCaller) && fromCaller >= 1) return Math.round(fromCaller);
+  return 1;
+}
+
+/**
+ * The EFFECTIVE daily rate MEX is charging: Est Rate Total ÷ rental days.
+ *
+ * Not read off `Confirmed Rate` on purpose. That field states the rate
+ * STRUCTURE, and the structure is not always per-day: "196.00/Month , 70.00/XDay"
+ * on a 30-day rental bills 336.00 total (a 28-day month plus two extra days),
+ * so quoting 196 or 70 as "the daily rate" would both be wrong. Dividing the
+ * portal's own money by the portal's own day count cannot disagree with what
+ * MEX bills. Verified against three live bookings: 1012/4 = 253.00, 1180/10 =
+ * 118.00, 924/11 = 84.00 — each matching that booking's own per-day figure.
+ */
+export function effectiveDailyRate(detail, { days = null } = {}) {
+  const rateTotal = Number(detail?.charges?.rateTotal);
+  const n = Number(days);
+  if (!Number.isFinite(rateTotal) || rateTotal <= 0) return null;
+  if (!Number.isFinite(n) || n < 1) return null;
+  return round2(rateTotal / n);
+}
+
+/**
+ * The booking's money as charge rows: the rental itself, MEX's tax, and the
+ * per-booking fees.
+ *
+ * WHY THE RENTAL AND TAX ARE ROWS TOO (2026-08-05): a reservation imported with
+ * an estimatedTotal but NO charges to support it is one recompute away from
+ * collapsing. MEX-WMX000F971 proved it in production — it dropped to $10.63,
+ * the sum of its three fees, because those were the only rows that existed.
+ * With the rental and tax present the rows add up to the portal's own
+ * `Estimated Total`, so a rebuild reproduces the quote instead of shrinking it.
+ *
+ * All rows carry source MEX_IMPORT, so Save Override leaves the whole imported
+ * quote intact (see reservation-pricing.service).
+ */
+export function buildImportedQuoteRows(detail, { days = null } = {}) {
+  const confirmation = String(detail?.confirmation || '').trim();
+  const c = detail?.charges || {};
+  const rows = [];
+
+  const rateTotal = Number(c.rateTotal);
+  const daily = effectiveDailyRate(detail, { days });
+  if (Number.isFinite(rateTotal) && rateTotal > 0) {
+    const qty = daily ? Math.round(rateTotal / daily) : 1;
+    rows.push({
+      code: 'BASE_RATE',
+      name: daily ? `Rental — ${qty} day(s) @ $${daily.toFixed(2)}/day (MEX)` : 'Rental (MEX)',
+      chargeType: 'UNIT',
+      quantity: qty,
+      rate: daily || rateTotal,
+      total: round2(rateTotal),
+      taxable: false,
+      selected: true,
+      sortOrder: 800,
+      source: MEX_CHARGE_SOURCE,
+      sourceRefId: `${confirmation}:RATE`,
+      notes: detail?.confirmedRate ? `MEX confirmed rate: ${detail.confirmedRate}` : null,
+    });
+  }
+
+  const taxTotal = Number(c.taxTotal);
+  if (Number.isFinite(taxTotal) && taxTotal > 0) {
+    rows.push({
+      code: 'IMPORTED_TAX',
+      name: 'Taxes (quoted by MEX)',
+      chargeType: 'UNIT',
+      quantity: 1,
+      rate: round2(taxTotal),
+      total: round2(taxTotal),
+      // taxable:false — this IS the tax. Marking it taxable would tax the tax.
+      taxable: false,
+      selected: true,
+      sortOrder: 850,
+      source: MEX_CHARGE_SOURCE,
+      sourceRefId: `${confirmation}:TAX`,
+      notes: 'Tax as quoted by MEX with the booking.',
+    });
+  }
+
+  return [...rows, ...buildImportedFeeRows(detail, { days })];
+}
+
+/**
+ * Pure: do the imported rows add up to the portal's own Estimated Total?
+ * `ok:false` means we would show the customer a number MEX never quoted —
+ * worth saying out loud rather than trusting our arithmetic over theirs.
+ */
+export function quoteReconciliation(rows, detail) {
+  const expected = Number(detail?.charges?.estimatedTotal);
+  if (!Number.isFinite(expected)) {
+    return { ok: true, expected: null, actual: null, reason: 'no Estimated Total to check against' };
+  }
+  const actual = round2((rows || []).reduce((sum, r) => sum + Number(r.total || 0), 0));
+  const ok = Math.abs(actual - expected) < 0.02;
+  return {
+    ok,
+    expected: round2(expected),
+    actual,
+    reason: ok ? null 	: 'imported rows do not reconcile to the portal Estimated Total',
+  };
 }
