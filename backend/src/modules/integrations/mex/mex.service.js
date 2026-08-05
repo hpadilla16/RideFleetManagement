@@ -419,7 +419,21 @@ export function parseWebFormsForm(html) {
     const attrs = parseTagAttributes(`<select${m[1]}>`);
     const name = attrs.name;
     if (!name || name in fields) continue;
-    fields[name] = { value: selectedOptionValue(m[2]), type: 'select' };
+    const multiple = 'multiple' in attrs;
+    const chosen = selectedOptionValues(m[2]);
+    // A MULTI-select with nothing selected submits NOTHING in a browser.
+    // Echoing back the first option instead silently applies a filter the user
+    // never chose — on the T&M screen that meant posting lstSystem=Amadeus,
+    // narrowing the report to one booking system and returning "No records
+    // found" for a branch that had reservations from several (IRC, 2026-08-05).
+    if (multiple && chosen.length === 0) continue;
+    fields[name] = {
+      // First selected keeps the historical single-value shape for callers.
+      value: chosen.length ? chosen[0] : selectedOptionValue(m[2]),
+      values: chosen,
+      multiple,
+      type: 'select',
+    };
   }
 
   return { action, fields };
@@ -462,6 +476,24 @@ function parseTagAttributes(tag) {
  * is what a browser submits when nothing is marked selected). An option with no
  * value attribute submits its TEXT. '' when the select is empty.
  */
+/**
+ * Pure: every explicitly-selected option value, in document order. Empty when
+ * the select has no selection at all — which for a MULTI-select is meaningful
+ * (submit nothing) and for a single select just means "browser picks the first".
+ */
+function selectedOptionValues(optionsHtml) {
+  const body = String(optionsHtml || '');
+  const optRe = /<option\b([^>]*)>([^<]*)/gi;
+  const out = [];
+  let m;
+  while ((m = optRe.exec(body))) {
+    if (!/(^|\s)selected(\s|=|\/|>|$)/i.test(m[1])) continue;
+    const attrs = parseTagAttributes(`<option${m[1]}>`);
+    out.push('value' in attrs ? attrs.value : cellText(m[2]));
+  }
+  return out;
+}
+
 function selectedOptionValue(optionsHtml) {
   const body = String(optionsHtml || '');
   // Options may be UNCLOSED in old WebForms markup → match the label as text up
@@ -513,7 +545,16 @@ export function buildPostBody(fields, overrides = {}, extra = {}) {
     // renders it pre-checked — in which case echoing it back would silently change
     // the report's shape. Cheap belt to the layout guard's braces.
     if (suffix === FIELD.SUMMARY) continue;
-    body.set(name, Object.hasOwn(overrides, suffix) ? String(overrides[suffix]) : (meta.value || ''));
+    if (Object.hasOwn(overrides, suffix)) {
+      body.set(name, String(overrides[suffix]));
+      continue;
+    }
+    // A multi-select posts one pair PER selected option, not just the first.
+    if (meta.multiple && Array.isArray(meta.values) && meta.values.length > 1) {
+      for (const v of meta.values) body.append(name, String(v));
+      continue;
+    }
+    body.set(name, meta.value || '');
   }
   for (const [name, value] of Object.entries(extra || {})) body.set(name, String(value));
   return body;
@@ -859,13 +900,23 @@ export function buildCalendarPostBody(fields, overrides, calSuffix, serial) {
   });
 }
 
-/** POST one WebForms body to the screen's action URL. Returns { bounced, html }. */
+/**
+ * POST one WebForms body to the screen's action URL. Returns { bounced, html }.
+ *
+ * FOLLOWS REDIRECTS (2026-08-05). RezCentral answers a report run that HAS
+ * results with a 302 to its own render page (…/rcReport.aspx?id=<session>),
+ * and only an EMPTY report re-renders the input screen inline with "No records
+ * found". Reading the 302's body gives you a 176-byte "Object moved" stub — no
+ * grid — which the parser reported as "T&M report rendered no dgRates grid",
+ * i.e. a layout break that never happened. IRC's activation looked like a
+ * broken scraper for exactly this reason while the portal was working fine.
+ */
 async function postBack(tenantId, action, body, ua) {
   const actionUrl = absUrl(withSessionToken(
     tenantId,
     action ? resolveAction(action, ROOT_PATH) : ROOT_PATH
   ));
-  const res = await rawFetch(tenantId, actionUrl, {
+  let res = await rawFetch(tenantId, actionUrl, {
     method: 'POST',
     userAgent: ua,
     headers: {
@@ -875,7 +926,21 @@ async function postBack(tenantId, action, body, ua) {
     },
     body: body.toString(),
   });
-  const html = res.status < 400 ? await res.text().catch(() => '') : '';
+  let html = res.status < 400 ? await res.text().catch(() => '') : '';
+
+  // Bounded: a redirect loop must fail loudly, not spin.
+  for (let hop = 0; hop < 3 && res.status >= 300 && res.status < 400; hop += 1) {
+    const location = res.headers?.get?.('location') || '';
+    if (!location) break;
+    // A redirect AT the login page is a bounce, not a report — let
+    // isLoginBounce below see it rather than chasing it.
+    if (/WebLogin\.aspx/i.test(location)) break;
+    res = await rawFetch(tenantId, absUrl(resolveAction(location, ROOT_PATH)), { userAgent: ua });
+    html = res.status < 400 ? await res.text().catch(() => '') : '';
+    const refreshed = findSessionToken({ location, html });
+    if (refreshed) sessionTokens.set(tenantId, refreshed);
+  }
+
   return { bounced: isLoginBounce(res, html), html };
 }
 

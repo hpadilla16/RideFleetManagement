@@ -1560,3 +1560,39 @@ test('the shipped constants match what the live portal advertises', async () => 
   // And the value is NOT the text — the bug this pins down.
   assert.notEqual(MENU_PATH_TM_SUMMARY, 'Reports POS\\Estimated T&M Summary');
 });
+
+// ---------------------------------------------------------------------------
+// Report retrieval (IRC activation, 2026-08-05)
+//
+// Two defects found by probing the live portal, either of which returned an
+// empty feed while the portal itself had 9 reservations:
+//   * a MULTI-select with nothing selected was echoed back as its FIRST option
+//     (lstSystem=Amadeus), silently filtering the report to one booking system
+//   * a report WITH results answers 302 -> rcReport.aspx; only an EMPTY one
+//     re-renders inline. Reading the redirect stub looked like a layout break.
+// ---------------------------------------------------------------------------
+
+test('parseWebFormsForm: an unselected MULTI-select submits nothing', () => {
+  const html = `<form action="x.aspx">
+    <select name="lstSystem" multiple="multiple"><option value="Amadeus">Amadeus</option><option value="SABRE">SABRE</option></select>
+    <select name="lstRunBy"><option value="Date Booked">Date Booked</option><option value="Date Out" selected>Date Out</option></select>
+  </form>`;
+  const { fields } = parseWebFormsForm(html);
+  assert.equal('lstSystem' in fields, false, 'a browser posts NOTHING for an unselected multi-select');
+  // A single select with no explicit selection still falls back to the first
+  // option — that IS what a browser submits.
+  assert.equal(fields.lstRunBy.value, 'Date Out');
+});
+
+test('parseWebFormsForm + buildPostBody: every selected option of a multi-select is posted', () => {
+  const html = `<form action="x.aspx">
+    <select name="lstBranch" multiple><option value="ALL">ALL</option><option value="SJU" selected>SJU</option></select>
+    <select name="lstClass" multiple><option value="*ALL" selected>*ALL</option><option value="ECAR" selected>ECAR</option></select>
+  </form>`;
+  const { fields } = parseWebFormsForm(html);
+  assert.deepEqual(fields.lstBranch.values, ['SJU']);
+  assert.deepEqual(fields.lstClass.values, ['*ALL', 'ECAR']);
+  const body = buildPostBody(fields, {}, {});
+  assert.deepEqual(body.getAll('lstBranch'), ['SJU']);
+  assert.deepEqual(body.getAll('lstClass'), ['*ALL', 'ECAR'], 'both selections must reach the server');
+});
