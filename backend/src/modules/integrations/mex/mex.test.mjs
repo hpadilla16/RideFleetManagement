@@ -67,6 +67,8 @@ const {
   classifyMexRateCode,
   mexRatePushEligibleCodes,
   MEX_RATE_CODE_MAP,
+  MENU_TEXT_TM_SUMMARY,
+  MENU_PATH_RATE_UPDATE_1,
 } = await import('./mex.constants.js');
 
 const {
@@ -195,7 +197,9 @@ test('constants: source identity is MEX / FRANCHISE_MEX / MEX-', () => {
 test('constants: the report IS the menu path — there is no cmbReport', () => {
   assert.equal(MENU_EVENT_TARGET, '_ctl0$Menu1');
   // Backslash path — the single-window menu argument.
-  assert.equal(MENU_PATH_TM_SUMMARY, 'Reports POS\\Estimated T&M Summary');
+  // The postback argument is the menu item's VALUE, not its visible TEXT
+  // (fixed 2026-08-05 — the text was why navigation silently no-op'd).
+  assert.equal(MENU_PATH_TM_SUMMARY, 'Reports POS\\Estimated TM Report');
   assert.equal(REPORT.TM_SUMMARY.menuPath, MENU_PATH_TM_SUMMARY);
   // VALIDATED-FALSE 2026-07-17: the live form has NO cmbReport control. Nothing
   // may reintroduce it as a driven field.
@@ -1017,7 +1021,7 @@ test('SEQUENCE: the report is reached by ITS OWN menu path, and cmbReport is nev
 
   const menu = posts.find((p) => (p.params.get('__EVENTTARGET') || '').endsWith('$Menu1'));
   assert.ok(menu, 'navigation happens by menu postback (single-window rule)');
-  assert.equal(menu.params.get('__EVENTARGUMENT'), 'Reports POS\\Estimated T&M Summary');
+  assert.equal(menu.params.get('__EVENTARGUMENT'), 'Reports POS\\Estimated TM Report');
   // ⚠️ The report selector is the MENU PATH. cmbReport does not exist.
   for (const p of posts) {
     for (const k of p.params.keys()) {
@@ -1510,4 +1514,49 @@ test('findSessionToken: redirect Location wins, then the form action', async () 
   // The entry token must never be mistaken for a session token by this helper's
   // callers — it only ever reads what the LANDED page reported.
   assert.equal(findSessionToken({ location: 'WebLogin.aspx?id=vufnda45gf12r2ifchif' }), 'vufnda45gf12r2ifchif');
+});
+
+// ---------------------------------------------------------------------------
+// Menu navigation (IRC activation fix, 2026-08-05)
+//
+// RezCentral's ASP.NET Menu builds the postback ARGUMENT from item VALUES, not
+// the TEXT the user reads. We shipped the text, so every menu postback quietly
+// re-rendered the Main Menu and the panel said "Login Failed" — after a login
+// that had actually succeeded.
+// ---------------------------------------------------------------------------
+
+test('parseMenuItems: reads target/argument/text off the portal anchor shape', async () => {
+  const { parseMenuItems } = await import('./mex.service.js');
+  // Verbatim shape captured from the live portal.
+  const html = `<td><a class="_ctl0_Menu1_1" href="javascript:__doPostBack('_ctl0$Menu1','Reports POS\\\\Estimated TM Report')">Estimated T&M Summary</a></td>
+    <td><a href="javascript:__doPostBack('_ctl0$Menu1','Rates\\\\Rate Input1')">Rate Update 1</a></td>`;
+  const items = parseMenuItems(html);
+  assert.equal(items.length, 2);
+  assert.equal(items[0].target, '_ctl0$Menu1');
+  // ONE backslash: the href is a JS literal inside HTML, so '\\' is one.
+  assert.equal(items[0].argument, 'Reports POS\\Estimated TM Report');
+  assert.equal(items[0].text, 'Estimated T&M Summary');
+  assert.equal(items[1].argument, 'Rates\\Rate Input1');
+});
+
+test('findMenuArgumentByText: value for the visible label, null when absent', async () => {
+  const { findMenuArgumentByText } = await import('./mex.service.js');
+  const html = `<a href="javascript:__doPostBack('_ctl0$Menu1','Reports POS\\\\Estimated TM Report')">Estimated T&M Summary</a>`;
+  assert.equal(findMenuArgumentByText(html, 'Estimated T&M Summary'), 'Reports POS\\Estimated TM Report');
+  assert.equal(findMenuArgumentByText(html, 'estimated t&m summary'), 'Reports POS\\Estimated TM Report');
+  assert.equal(findMenuArgumentByText(html, 'Rate Update 1'), null);
+  assert.equal(findMenuArgumentByText(html, ''), null);
+  assert.equal(findMenuArgumentByText('', 'anything'), null);
+});
+
+test('the shipped constants match what the live portal advertises', async () => {
+  const { findMenuArgumentByText } = await import('./mex.service.js');
+  const html = `<a href="javascript:__doPostBack('_ctl0$Menu1','Reports POS\\\\Estimated TM Report')">Estimated T&M Summary</a>
+    <a href="javascript:__doPostBack('_ctl0$Menu1','Rates\\\\Rate Input1')">Rate Update 1</a>`;
+  // The fallback constant must equal what resolution finds — if a future edit
+  // breaks one, this catches it without a portal round-trip.
+  assert.equal(findMenuArgumentByText(html, MENU_TEXT_TM_SUMMARY), MENU_PATH_TM_SUMMARY);
+  assert.equal(findMenuArgumentByText(html, 'Rate Update 1'), MENU_PATH_RATE_UPDATE_1);
+  // And the value is NOT the text — the bug this pins down.
+  assert.notEqual(MENU_PATH_TM_SUMMARY, 'Reports POS\\Estimated T&M Summary');
 });

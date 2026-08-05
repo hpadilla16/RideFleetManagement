@@ -70,6 +70,7 @@ import {
   sleep,
 } from '../booking-source/http-common.js';
 import {
+  MENU_TEXT_TM_SUMMARY,
   SOURCE_SYSTEM,
   BASE_URL,
   ROOT_PATH,
@@ -156,10 +157,18 @@ const authenticatedJars = new Set();
 // bounced to login" looked like on IRC's first activation attempt.
 const sessionTokens = new Map();
 
+// Where the app actually lives once authenticated. CRITICAL (2026-08-05): the
+// app ROOT (`/WebRezClient/`) serves WebLogin.aspx — with or without a token —
+// so re-GETting it for a fresh viewstate lands you on the login form and every
+// subsequent postback "bounces". The authenticated page is the landing the
+// login redirect names (rcRezCentral.aspx?id=<session>).
+const sessionLandings = new Map();
+
 function dropJar(tenantId) {
   cookieJars.delete(tenantId);
   authenticatedJars.delete(tenantId);
   sessionTokens.delete(tenantId);
+  sessionLandings.delete(tenantId);
 }
 
 /** Pure: pull the `id` query value out of a URL or a form action. */
@@ -181,8 +190,41 @@ export function findSessionToken({ location = '', html = '' } = {}) {
   return extractSessionToken(String(html || '').match(/(?:href|action)="[^"]*\.aspx\?id=[^"]+"/i)?.[0] || '');
 }
 
+/**
+ * Pure: every menu item the page advertises, as {target, argument, text}.
+ *
+ * RezCentral renders menu items as
+ *   <a href="javascript:__doPostBack('_ctl0$Menu1','Reports POS\\Estimated TM Report')">
+ *     Estimated T&M Summary</a>
+ * — the postback ARGUMENT is the item's VALUE, which differs from the visible
+ * TEXT. Reading it off the page is the same discipline the report parser uses
+ * for columns: resolve by label, never by a hardcoded guess.
+ */
+export function parseMenuItems(html) {
+  const out = [];
+  const re = /<a[^>]+href="javascript:__doPostBack\('([^']+)','([^']*)'\)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = re.exec(String(html || '')))) {
+    // The href is a JS string literal inside HTML: '\\' is one backslash.
+    const argument = m[2].replace(/\\\\/g, '\\').replace(/\\'/g, "'");
+    const text = decodeEntities(m[3].replace(/<[^>]+>/g, '')).trim();
+    out.push({ target: m[1], argument, text });
+  }
+  return out;
+}
+
+/** Pure: the postback argument for a menu item, matched on its visible text. */
+export function findMenuArgumentByText(html, linkText) {
+  const wanted = String(linkText || '').trim().toLowerCase();
+  if (!wanted) return null;
+  const item = parseMenuItems(html).find((x) => x.text.toLowerCase() === wanted);
+  return item ? item.argument : null;
+}
+
 /** The app root for THIS tenant's session, carrying the token when we have one. */
 function rootPathFor(tenantId) {
+  const landing = sessionLandings.get(tenantId);
+  if (landing) return landing;
   const token = sessionTokens.get(tenantId);
   if (!token) return ROOT_PATH;
   return ROOT_PATH.includes('?') ? `${ROOT_PATH}&id=${token}` : `${ROOT_PATH}?id=${token}`;
@@ -632,6 +674,9 @@ export async function login(tenantId, opts = {}) {
   const postLocation = postRes.headers?.get?.('location') || '';
   const tokenFromPost = findSessionToken({ location: postLocation, html: postBody });
   if (tokenFromPost) sessionTokens.set(tenantId, tokenFromPost);
+  // The redirect names the authenticated page — remember it; the app root is
+  // the LOGIN form, not the app (see sessionLandings).
+  if (postLocation) sessionLandings.set(tenantId, resolveAction(postLocation, ROOT_PATH));
   if (!bounced && postRes.status >= 300 && postRes.status < 400) {
     const loc = postLocation;
     if (loc) {
@@ -711,7 +756,7 @@ async function fetchCurrentPage(tenantId, userAgent) {
  * Navigate to a menu destination and return the rendered screen's HTML.
  * Re-logs-in ONCE on a bounce. Exported so the worker/routes can warm a screen.
  */
-export async function navigateMenu(tenantId, menuPath = MENU_PATH_TM_SUMMARY, { userAgent } = {}) {
+export async function navigateMenu(tenantId, menuPath = MENU_PATH_TM_SUMMARY, { userAgent, menuText = MENU_TEXT_TM_SUMMARY } = {}) {
   const ua = userAgent || pickUserAgent();
   await ensureSession(tenantId, { userAgent: ua });
 
@@ -721,9 +766,15 @@ export async function navigateMenu(tenantId, menuPath = MENU_PATH_TM_SUMMARY, { 
     if (isLoginBounce(pageRes, pageHtml)) return { bounced: true, html: '' };
 
     const { action, fields } = parseWebFormsForm(pageHtml);
+    // Resolve the postback ARGUMENT off the live menu when we know the item's
+    // visible label; the constant is only a fallback (see parseMenuItems).
+    const resolvedArgument = (menuText && findMenuArgumentByText(pageHtml, menuText)) || menuPath;
+    if (resolvedArgument !== menuPath) {
+      logger.info('[mex] menu argument resolved from page', { tenantId, menuText, resolvedArgument });
+    }
     const body = buildPostBody(fields, {}, {
       __EVENTTARGET: MENU_EVENT_TARGET,
-      __EVENTARGUMENT: menuPath,
+      __EVENTARGUMENT: resolvedArgument,
     });
     const actionUrl = absUrl(withSessionToken(
       tenantId,
