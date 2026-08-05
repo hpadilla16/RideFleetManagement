@@ -11,12 +11,18 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import {
+
+// Pure test — no DB. The prisma singleton is imported transitively and only
+// needs a syntactically valid URL to construct.
+process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://u:p@127.0.0.1:5432/none';
+
+// Dynamic: static imports hoist above the env assignment above.
+const {
   isExternallyOwnedCharge,
   isPreservedOnPricingRebuild,
   EXTERNALLY_OWNED_CHARGE_SOURCES,
-} from './reservation-pricing.service.js';
-import { buildImportedFeeRows, MEX_CHARGE_SOURCE } from '../integrations/mex/mex-reservation-detail.js';
+} = await import('./reservation-pricing.service.js');
+const { buildImportedFeeRows, MEX_CHARGE_SOURCE } = await import('../integrations/mex/mex-reservation-detail.js');
 
 const DETAIL = {
   confirmation: 'WMX000FAD4',
@@ -79,8 +85,8 @@ describe('buildImportedFeeRows', () => {
     // Stable per (confirmation, service) so a re-sync updates instead of
     // stacking a second copy of the same fee.
     assert.equal(rows[0].sourceRefId, 'WMX000FAD4:CUSTOMER FACILITY CHARGE');
-    assert.equal(rows.every((r) => r.taxable === false), true,
-      'the portal reports Est Tax Total separately — taxing these again invents money');
+    assert.equal(rows.every((r) => r.taxable === true), true,
+      'MEX taxes rate+fees at 11.5% — a non-taxable fee would under-collect once the engine computes the tax');
   });
 
   it('ignores junk rather than importing a zero-value fee', () => {
@@ -104,31 +110,62 @@ describe('buildImportedFeeRows', () => {
 });
 
 describe('the imported quote reconciles to what MEX told the customer', () => {
-  it('rental + tax + fees add up to the portal Estimated Total', async () => {
-    const { buildImportedQuoteRows, quoteReconciliation, effectiveDailyRate } =
+  // WMX000FAD4, verbatim from the portal: 1180 + 147.92 + 106.30 = 1434.22
+  const FAD4 = {
+    confirmation: 'WMX000FAD4',
+    confirmedRate: '826.00/Week , 118.00/XDay  UNL',
+    charges: { rateTotal: 1180, taxTotal: 147.92, extraTotal: 106.30, estimatedTotal: 1434.22 },
+    optionalServices: [
+      { amount: 5.93, description: 'CUSTOMER FACILITY CHARGE' },
+      { amount: 2.5, description: 'VEHICLE LICENSE FEE SJU' },
+      { amount: 2.2, description: 'SURCHARGE' },
+    ],
+  };
+
+  it('OUR tax over rental+fees reproduces the portal Estimated Total exactly', async () => {
+    // Hector, 2026-08-05: "dont pass taxes just let the system calculate the
+    // taxes". Safe because MEX's Est Tax Total is 11.5% of (rate + fees) on all
+    // nine live bookings, and 11.5% is SJU's own taxRate — so the engine lands
+    // on MEX's number without importing it.
+    const { buildImportedQuoteRows, quoteReconciliation } =
       await import('../integrations/mex/mex-reservation-detail.js');
-    // WMX000FAD4, verbatim from the portal: 1180 + 147.92 + 106.30 = 1434.22
-    const detail = {
-      confirmation: 'WMX000FAD4',
-      confirmedRate: '826.00/Week , 118.00/XDay  UNL',
-      charges: { rateTotal: 1180, taxTotal: 147.92, extraTotal: 106.30, estimatedTotal: 1434.22 },
-      optionalServices: [
-        { amount: 5.93, description: 'CUSTOMER FACILITY CHARGE' },
-        { amount: 2.5, description: 'VEHICLE LICENSE FEE SJU' },
-        { amount: 2.2, description: 'SURCHARGE' },
-      ],
-    };
-    const rows = buildImportedQuoteRows(detail, { days: 10 });
-    const rec = quoteReconciliation(rows, detail);
+    const rows = buildImportedQuoteRows(FAD4, { days: 10, taxRate: 11.5 });
+
+    const tax = rows.find((r) => r.chargeType === 'TAX');
+    assert.equal(tax.total, 147.92, 'computed tax must equal the tax MEX quoted');
+    assert.equal(tax.source, 'TAX', 'engine identity, so a recompute replaces it');
+    assert.equal(rows.filter((r) => r.code === 'IMPORTED_TAX').length, 0, "MEX's tax is not imported");
+
+    const rec = quoteReconciliation(rows, FAD4);
     assert.equal(rec.ok, true, `rows ${rec.actual} vs portal ${rec.expected}`);
-    // The rental row carries the daily rate the counter quotes from.
-    const base = rows.find((r) => r.code === 'BASE_RATE');
+  });
+
+  it('the rental line is engine-owned so Save Override cannot double it', async () => {
+    // A preserved rental row would survive the rebuild while the UI ALSO
+    // recreates a Daily row from reservation.dailyRate — two rental lines.
+    const { buildImportedQuoteRows } = await import('../integrations/mex/mex-reservation-detail.js');
+    const rows = buildImportedQuoteRows(FAD4, { days: 10, taxRate: 11.5 });
+
+    const base = rows.find((r) => r.code === 'DAILY');
     assert.equal(base.rate, 118);
     assert.equal(base.quantity, 10);
     assert.equal(base.total, 1180);
-    assert.match(base.name, /10 day\(s\) @ \$118\.00\/day/);
-    // Every row is MEX-owned, so Save Override keeps the whole quote.
-    assert.equal(rows.every((r) => isPreservedOnPricingRebuild(r)), true);
+    assert.equal(base.source, 'BASE_RATE');
+    assert.equal(base.taxable, true);
+    assert.equal(isPreservedOnPricingRebuild(base), false, 'the rental must be rebuilt, not preserved');
+
+    // Only the fees are MEX-owned — the one thing our engine cannot re-derive.
+    const preserved = rows.filter((r) => isPreservedOnPricingRebuild(r));
+    assert.deepEqual(preserved.map((r) => r.name).sort(),
+      ['CUSTOMER FACILITY CHARGE', 'SURCHARGE', 'VEHICLE LICENSE FEE SJU']);
+  });
+
+  it('no tax rate means no invented tax row', async () => {
+    const { buildImportedQuoteRows } = await import('../integrations/mex/mex-reservation-detail.js');
+    for (const taxRate of [null, 0, undefined, NaN]) {
+      const rows = buildImportedQuoteRows(FAD4, { days: 10, taxRate });
+      assert.equal(rows.some((r) => r.chargeType === 'TAX'), false, `taxRate=${taxRate}`);
+    }
   });
 
   it('the daily rate is derived from money ÷ days, not from the rate STRUCTURE', async () => {

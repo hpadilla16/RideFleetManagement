@@ -196,38 +196,109 @@ export function rejectReasonForStatus(status) {
  * economy/nu/flexways behavior is untouched.
  */
 /**
- * Put MEX's own fees on the reservation, idempotently.
+ * Put the booking's quote on the reservation, idempotently: the rental line,
+ * MEX's per-day fees, and the tax OUR engine computes over them.
  *
  * Runs after promotion (the row must have a reservation to hang them on).
- * Matched by sourceRefId so a re-sync UPDATES the fee instead of stacking a
- * duplicate — the same identity discipline the toll charge sync uses.
+ * Every row is matched by a stable identity so a re-sync UPDATES instead of
+ * stacking a duplicate — the same discipline the toll charge sync uses.
  */
+function quoteRowKey(row) {
+  const source = String(row?.source || '').toUpperCase();
+  const code = String(row?.code || '').toUpperCase();
+  if (String(row?.chargeType || '').toUpperCase() === 'TAX' || source === 'TAX' || code === 'TAX') return 'TAX';
+  // The rental line has been written under several identities over time
+  // (source BASE_RATE, source DAILY, code DAILY). They are all the same line —
+  // matching on only one of them left a stale $0.00 "Daily" beside the real one
+  // on MEX-WMX000F971.
+  if (code === 'DAILY' || source === 'BASE_RATE' || source === 'DAILY') return 'DAILY';
+  const ref = String(row?.sourceRefId || '').trim();
+  return ref ? `FEE:${ref}` : null;
+}
+
 export async function syncImportedFeeCharges(db, reservationId, detail, { days = null } = {}) {
-  if (!reservationId || !detail) return { created: 0, updated: 0 };
-  const wanted = buildImportedQuoteRows(detail, { days });
-  if (!wanted.length) return { created: 0, updated: 0 };
+  if (!reservationId || !detail) return { created: 0, updated: 0, removed: 0 };
+
+  // The tax is ours to compute, so we need the rate that applies at pickup.
+  const reservation = await db.reservation.findUnique({
+    where: { id: reservationId },
+    select: { dailyRate: true, pickupLocation: { select: { taxRate: true } } },
+  });
+  const taxRate = Number(reservation?.pickupLocation?.taxRate) || null;
+
+  const wanted = buildImportedQuoteRows(detail, { days, taxRate });
+  if (!wanted.length) return { created: 0, updated: 0, removed: 0 };
 
   const existing = await db.reservationCharge.findMany({
-    where: { reservationId, source: MEX_CHARGE_SOURCE },
-    select: { id: true, sourceRefId: true, total: true },
+    where: {
+      reservationId,
+      OR: [
+        { source: MEX_CHARGE_SOURCE },
+        { code: 'DAILY' }, { source: 'BASE_RATE' }, { source: 'DAILY' },
+        { chargeType: 'TAX' }, { source: 'TAX' },
+      ],
+    },
+    select: { id: true, code: true, chargeType: true, source: true, sourceRefId: true, total: true, quantity: true, taxable: true },
+    orderBy: { createdAt: 'asc' },
   });
-  const byRef = new Map(existing.map((c) => [String(c.sourceRefId || ''), c]));
+  // At most one row per identity. A second row sharing a key is a duplicate of
+  // the same line and is dropped below.
+  const byKey = new Map();
+  const superseded = [];
+  for (const row of existing) {
+    const key = quoteRowKey(row);
+    if (!key) continue;
+    if (byKey.has(key)) superseded.push(row.id);
+    else byKey.set(key, row);
+  }
 
   let created = 0;
   let updated = 0;
+  const keep = new Set();
   for (const row of wanted) {
-    const hit = byRef.get(row.sourceRefId);
+    const key = quoteRowKey(row);
+    keep.add(key);
+    const hit = byKey.get(key);
     if (!hit) {
       await db.reservationCharge.create({ data: { reservationId, ...row } });
       created += 1;
       continue;
     }
-    if (Number(hit.total) !== Number(row.total)) {
-      await db.reservationCharge.update({ where: { id: hit.id }, data: { rate: row.rate, total: row.total, name: row.name } });
+    const same = Number(hit.total) === Number(row.total)
+      && Number(hit.quantity) === Number(row.quantity)
+      && !!hit.taxable === !!row.taxable;
+    if (!same) {
+      await db.reservationCharge.update({
+        where: { id: hit.id },
+        data: { name: row.name, quantity: row.quantity, rate: row.rate, total: row.total, taxable: row.taxable },
+      });
       updated += 1;
     }
   }
-  return { created, updated };
+
+  // Rows this sync owns that the current quote no longer wants — notably the
+  // imported tax and the MEX-owned rental line it wrote before the engine took
+  // the tax over (2026-08-05). Leaving them behind double-bills.
+  const removeIds = [...new Set([
+    ...superseded,
+    ...existing
+      .filter((row) => String(row.source || '').toUpperCase() === MEX_CHARGE_SOURCE
+        || String(row.code || '').toUpperCase() === 'IMPORTED_TAX')
+      .filter((row) => !keep.has(quoteRowKey(row)))
+      .map((row) => row.id),
+  ])];
+  if (removeIds.length) {
+    await db.reservationCharge.deleteMany({ where: { id: { in: removeIds } } });
+  }
+
+  // The daily rate the counter quotes from, so any later rebuild reproduces the
+  // same rental line instead of a $0.00 one.
+  const daily = wanted.find((r) => String(r.code).toUpperCase() === 'DAILY')?.rate ?? null;
+  if (daily && Number(reservation?.dailyRate) !== Number(daily)) {
+    await db.reservation.update({ where: { id: reservationId }, data: { dailyRate: daily } });
+  }
+
+  return { created, updated, removed: removeIds.length };
 }
 
 // One HTTP round-trip per reservation. A normal sync window is tens of rows;

@@ -27,6 +27,74 @@ import logger from '../../../lib/logger.js';
 import { findDuplicateReservation } from './duplicate-detector.service.js';
 
 /**
+ * The VehicleType the reservation should carry.
+ *
+ * BUG (Hector, 2026-08-05): MEX imports arrived with no vehicle type at all —
+ * no CFAR, no FVAR — even though the ACRISS was present and correctly mapped at
+ * every layer. The category was being lost in the REVIEW path: evaluatePromotion
+ * resolves the ACRISS map at gate 2, but a row that fails a LATER gate (customer
+ * not found, which is exactly why those six were in review) returns
+ * MANUAL_REVIEW and drops the mapping it already had. The routes then only read
+ * `mappedVehicleCategory` when the decision was AUTO, so a hand-approved row
+ * promoted with vehicleCategory=null. Nothing was wrong with the ACRISS — the
+ * customer gate was throwing away the answer to an unrelated question.
+ *
+ * So the resolution lives here instead, where every caller passes through, and
+ * falls back to the ExternalReservation's OWN ACRISS when no caller supplied a
+ * category. The order matters:
+ *   1. explicit vehicleTypeId  — the operator picked it by hand; never override
+ *   2. explicit vehicleCategory — the AUTO decision, or a panel override
+ *   3. the row's ACRISS via AcrissCategoryMap — the map may REDIRECT (this
+ *      tenant maps ECAR→CCAR and ICAR→SCAR because it stocks neither), so the
+ *      map has to be consulted before trying the code directly
+ *   4. the ACRISS as a VehicleType code — no map row, but the tenant happens to
+ *      stock exactly that class (SPAR, FJAR, …)
+ *
+ * Never throws: a reservation with no type is worse than it was, but a
+ * promotion that fails outright is worse still.
+ */
+export async function resolveVehicleTypeId(tx, fresh, opts = {}) {
+  const { vehicleTypeId = null, vehicleCategory = null, logPrefix = '[promote]' } = opts;
+  if (vehicleTypeId) return vehicleTypeId;
+
+  const byCode = async (code) => {
+    if (!code) return null;
+    const vt = await tx.vehicleType?.findFirst?.({
+        where: { tenantId: fresh.tenantId, code: { equals: String(code).trim(), mode: 'insensitive' } },
+      select: { id: true },
+    })?.catch?.(() => null);
+    return vt?.id || null;
+  };
+
+  if (vehicleCategory) {
+    const hit = await byCode(vehicleCategory);
+    if (hit) return hit;
+  }
+
+  const acriss = String(fresh?.vehicleAcriss || '').trim().toUpperCase();
+  if (!acriss) return null;
+
+  // Optional-chained throughout: a caller's tx may predate this model (rolling
+  // deploy) or be a test double, and a missing map must degrade to "no type",
+  // never to a thrown promotion.
+  const mapped = await tx.acrissCategoryMap?.findFirst?.({
+    where: { acrissCode: acriss, OR: [{ tenantId: fresh.tenantId }, { tenantId: null }] },
+    // Tenant row wins over the global fallback.
+    orderBy: { tenantId: 'desc' },
+    select: { vehicleCategory: true },
+  })?.catch?.(() => null);
+
+  const resolved = (await byCode(mapped?.vehicleCategory)) || (await byCode(acriss));
+  if (!resolved) {
+    logger.warn(`${logPrefix} ${fresh?.externalRef}: ACRISS ${acriss} resolved to no VehicleType`, {
+      tenantId: fresh?.tenantId, externalRef: fresh?.externalRef, acriss,
+      mappedCategory: mapped?.vehicleCategory || null,
+    });
+  }
+  return resolved;
+}
+
+/**
  * Build the promote pair for one source.
  *
  * @param {{
@@ -104,14 +172,11 @@ export function createPromoter(sourceSpec) {
         }
       }
 
-      let resolvedVehicleTypeId = vehicleTypeId;
-      if (!resolvedVehicleTypeId && vehicleCategory) {
-        const vt = await tx.vehicleType.findFirst({
-          where: { tenantId: fresh.tenantId, code: { equals: vehicleCategory, mode: 'insensitive' } },
-          select: { id: true },
-        }).catch(() => null);
-        resolvedVehicleTypeId = vt?.id || null;
-      }
+      const resolvedVehicleTypeId = await resolveVehicleTypeId(tx, fresh, {
+        vehicleTypeId,
+        vehicleCategory,
+        logPrefix,
+      });
 
       const pickupAt = fresh.pickupAt || new Date();
       const returnAt = fresh.dropoffAt || new Date(pickupAt.getTime() + 3 * 24 * 60 * 60 * 1000);
