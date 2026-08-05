@@ -97,8 +97,26 @@ export const LOGIN_IMAGE_Y = process.env.MEX_LOGIN_IMAGE_Y || '10';
 // ---------------------------------------------------------------------------
 export const MENU_EVENT_TARGET = process.env.MEX_MENU_EVENT_TARGET || '_ctl0$Menu1';
 // Backslash-separated menu paths, exactly as the portal emits them.
+// The ASP.NET Menu postback argument is built from item VALUES, not the TEXT
+// the user sees. Captured live from the portal's own anchor (2026-08-05):
+//   href="javascript:__doPostBack('_ctl0$Menu1','Reports POS\\Estimated TM Report')"
+//                        text -> "Estimated T&M Summary"   value -> "Estimated TM Report"
+// Using the text was why every menu postback re-rendered the Main Menu and the
+// module reported "Login Failed" despite a successful login. navigateMenu now
+// RESOLVES the argument from the live page by link text and only falls back to
+// this constant, so a portal-side rename cannot silently break navigation again.
 export const MENU_PATH_TM_SUMMARY =
-  process.env.MEX_MENU_PATH_TM_SUMMARY || 'Reports POS\\Estimated T&M Summary';
+  process.env.MEX_MENU_PATH_TM_SUMMARY || 'Reports POS\\Estimated TM Report';
+
+/** Visible menu label for the T&M report — how navigateMenu finds the item. */
+export const MENU_TEXT_TM_SUMMARY =
+  process.env.MEX_MENU_TEXT_TM_SUMMARY || 'Estimated T&M Summary';
+
+// Rate writeback screen (recon 2026-08-05, doc/mex-rate-writeback-recon-2026-08-05.md).
+export const MENU_PATH_RATE_UPDATE_1 =
+  process.env.MEX_MENU_PATH_RATE_UPDATE_1 || 'Rates\\Rate Input1';
+export const MENU_TEXT_RATE_UPDATE_1 =
+  process.env.MEX_MENU_TEXT_RATE_UPDATE_1 || 'Rate Update 1';
 // ⚠️ UNVERIFIED (the 2026-07-17 live pass measured ONLY rcEstimatedTM.aspx): the
 // Email Address Report's own menu path. The Fase 0 recon saw it listed among the
 // Daily Activity screen's report options, so it may live either on its own page
