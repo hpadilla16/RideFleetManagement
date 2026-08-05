@@ -31,6 +31,7 @@ import {
   RATE_GRID_FIELD,
 } from './mex.service.js';
 import { mexRatePushEligibleCodes } from './mex.constants.js';
+import { loadStopSaleClosures, STOP_SALE_DAILY as SHARED_STOP_SALE_DAILY } from '../booking-source/stop-sale-closures.js';
 
 export const MODES = Object.freeze({ OFF: 'OFF', DRY_RUN: 'DRY_RUN', LIVE: 'LIVE' });
 const PROVIDER = 'MEX';
@@ -89,9 +90,11 @@ export const DECISION = Object.freeze({
  * availability API, so a class closed in Ride is closed on the portal by
  * pricing it out: daily 999.99, weekly ×7, monthly ×28, x-day = daily — the
  * same formula as every other write, so the portal's own arithmetic stays
- * consistent.
+ * consistent. The constant and the closure loader live in
+ * booking-source/stop-sale-closures.js so EVERY writeback integration answers
+ * "is this class closed on this date" identically.
  */
-export const STOP_SALE_DAILY = 999.99;
+export const STOP_SALE_DAILY = SHARED_STOP_SALE_DAILY;
 
 /**
  * RFM's per-class pricing for one Ride location ACROSS A DATE WINDOW — the
@@ -169,29 +172,14 @@ export async function loadDesiredMexRates(tenantId, locationId, deps = {}) {
   // ON TOP of base and MI overrides. Deliberately able to CREATE a class entry
   // — a class with no RFM rate still deserves its closure; leaving it open at
   // the portal's own price because we could not price it would sell cars Ride
-  // has declared unsellable.
+  // has declared unsellable. Shared loader: every writeback integration reads
+  // the same closures the same way.
   if (from && to) {
-    const stopSales = await db.vehicleClassStopSale.findMany({
-      where: {
-        tenantId, isActive: true,
-        startDate: { lt: to },
-        endDate: { gte: from },
-      },
-      select: { startDate: true, endDate: true, vehicleType: { select: { code: true } } },
-    }).catch(() => []);
-    for (const ss of stopSales) {
-      const code = String(ss.vehicleType?.code || '').trim().toUpperCase();
-      if (!code) continue;
+    const closures = await loadStopSaleClosures(db, { tenantId, from, to });
+    for (const [code, days] of closures) {
       if (!byClass.has(code)) byClass.set(code, { daily: null, sourceRateItemId: null, byDate: new Map() });
       const entry = byClass.get(code);
-      // Inclusive on both ends: a stop sale Aug 10–12 closes the 10th, 11th
-      // and 12th. Walk the window day by day.
-      const startIso = new Date(ss.startDate).toISOString().slice(0, 10);
-      const endIso = new Date(ss.endDate).toISOString().slice(0, 10);
-      for (let d = new Date(from); d < to; d = new Date(d.getTime() + 24 * 60 * 60 * 1000)) {
-        const iso = d.toISOString().slice(0, 10);
-        if (iso >= startIso && iso <= endIso) entry.byDate.set(iso, STOP_SALE_DAILY);
-      }
+      for (const iso of days) entry.byDate.set(iso, STOP_SALE_DAILY);
     }
   }
 
