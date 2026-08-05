@@ -33,7 +33,8 @@
  *
  * MONEY: writes ONLY estimatedTotal on the Reservation (from `Total Bill`). No
  * charge, no card, no autocharge — same posture as TL/Economy/NU/Flexways.
- * Mex is 100% Pay on Arrival → isPrepaid is always false.
+ * Prepaid is RATE-CODE driven since 2026-08-05 (see mex.constants.js);
+ * unknown codes keep the Pay-on-Arrival posture.
  *
  * See doc/mex-integration-plan-2026-07-13.md
  */
@@ -52,6 +53,7 @@ import {
   MexLayoutError,
 } from './mex.service.js';
 import {
+  classifyMexRateCode,
   SOURCE_SYSTEM,
   BOOKING_CHANNEL,
   QUEUE_NAME,
@@ -77,11 +79,11 @@ export const REJECT_REASONS = Object.freeze({
 });
 
 // ---------------------------------------------------------------------------
-// The sourceSpec for the shared promoter. Mex is 100% Pay on Arrival
-// (confirmed with Mex 2026-07-14), so every promoted row carries the
-// structured isPrepaid=false + NU's "(pay-at-destination)" notes suffix — the
-// counter collects at handoff. This NEVER changes the money posture: the
-// promoter still writes estimatedTotal and nothing else.
+// The sourceSpec for the shared promoter. Prepaid is per-rate-code since
+// 2026-08-05 (Hector's list): OTA rows promote with isPrepaid=true and a
+// "(prepaid — SOURCE CODE)" notes suffix so the counter knows NOT to collect
+// the rate; unknown codes keep "(pay-at-destination)". This NEVER changes the
+// money posture: the promoter still writes estimatedTotal and nothing else.
 // ---------------------------------------------------------------------------
 const mexSourceSpec = Object.freeze({
   reservationPrefix: RESERVATION_PREFIX,
@@ -89,11 +91,16 @@ const mexSourceSpec = Object.freeze({
   sourceLabel: 'Mex',
   logPrefix: '[mex-sync]',
   defaultTimeZone: TIME_ZONE,
-  buildReservationExtras: (fresh) => ({
-    isPrepaid: typeof fresh.isPrepaid === 'boolean' ? fresh.isPrepaid : null,
-    notes: `Imported from Mex — ${fresh.externalRef}`
-      + (fresh.isPrepaid === false ? ' (pay-at-destination)' : ''),
-  }),
+  buildReservationExtras: (fresh) => {
+    const cls = fresh?.rawJson?.rateClassification || null;
+    const suffix = fresh.isPrepaid === true
+      ? ` (prepaid${cls?.product === 'INCLUSIVO' ? ' inclusivo' : ''}${cls?.source ? ` — ${cls.source}` : ''}${cls?.rateCode ? ` ${cls.rateCode}` : ''})`
+      : fresh.isPrepaid === false ? ' (pay-at-destination)' : '';
+    return {
+      isPrepaid: typeof fresh.isPrepaid === 'boolean' ? fresh.isPrepaid : null,
+      notes: `Imported from Mex — ${fresh.externalRef}` + suffix,
+    };
+  },
 });
 
 const { promoteAutomatically, promoteWithMappings } = createPromoter(mexSourceSpec);
@@ -179,11 +186,15 @@ export function mapRowToExternalReservation(row) {
     // MONEY: Total Bill (rate + tax) → estimatedTotal only. Never a charge.
     totalAmount: r.totalBill ?? null,
     currency: 'USD',
-    // Mex is 100% Pay on Arrival (confirmed 2026-07-14). If that ever
-    // changes it becomes per-rate-code CONFIG, not code — rateCode is in rawJson.
-    isPrepaid: false,
+    // Per-rate-code since 2026-08-05 (Hector's list from MEX): OTA products
+    // arrive PREPAID — Expedia PPEXR/BPPPKM/BPPETM/IDAEXD/IPMEXS/PPEXI,
+    // Priceline BPPPA/PPPRB — while BPAPR and everything unknown keeps the
+    // historical Pay-on-Arrival posture. The `CD` company id corroborates
+    // (00346 Expedia / 00543 Priceline are prepaid transmissions).
+    isPrepaid: classifyMexRateCode(r.rateCode, r.cd).isPrepaid,
     rawJson: {
       list: r,
+      rateClassification: classifyMexRateCode(r.rateCode, r.cd),
       rateCode: r.rateCode ?? null,
       pnr: r.pnr ?? null,
       cd: r.cd ?? null,
