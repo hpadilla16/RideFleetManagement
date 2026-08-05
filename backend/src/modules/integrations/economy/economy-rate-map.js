@@ -17,6 +17,10 @@
  *    MUST re-read and compare; `verifyPush` below is that comparison.
  */
 
+import { STOP_SALE_DAILY } from '../booking-source/stop-sale-closures.js';
+
+export { STOP_SALE_DAILY };
+
 /** Skip reasons — stored verbatim in RatePushLog.skipReason. */
 export const SKIP = {
   NO_CLASS_MAP: 'no_class_map',            // RFM class has no portal counterpart
@@ -103,7 +107,23 @@ export function isCloseout(portalValue, closeoutMin) {
  *                                        a zero, or create a close-out.
  * @returns {{push: boolean, value: number|null, reason: string|null}}
  */
-export function decideCell({ rfmValue, portalValue, closeoutMin, maxDeltaPct = 60, approved = false } = {}) {
+export function decideCell({ rfmValue, portalValue, closeoutMin, maxDeltaPct = 60, approved = false, stopSale = false } = {}) {
+  // A Ride stop sale (Hector, 2026-08-06) IS the operator decision the
+  // "never create a close-out" refusal below exists to protect. The cell
+  // closes by price — STOP_SALE_DAILY, at/above any sane sentinel — and the
+  // delta band does not apply: holding a closure for review would leave a
+  // closed class selling overnight. A cell the portal already shows closed
+  // needs no write at all, whatever value closed it.
+  if (stopSale) {
+    const sentinel0 = toAmount(closeoutMin);
+    if (sentinel0 === null) return { push: false, value: null, reason: SKIP.NO_SENTINEL };
+    const current0 = toAmount(portalValue);
+    if (current0 !== null && isCloseout(current0, sentinel0)) {
+      return { push: false, value: null, reason: SKIP.CLOSEOUT_PRESERVED };
+    }
+    return { push: true, value: STOP_SALE_DAILY, reason: null, stopSale: true };
+  }
+
   const target = toAmount(rfmValue);
   // Never publish a missing/zero/negative price — an empty cell is safer than
   // a wrong one, and 0.00 would be a free rental.
@@ -156,9 +176,22 @@ export function decideCell({ rfmValue, portalValue, closeoutMin, maxDeltaPct = 6
 export function buildPushPlan({
   rfmRates = [], dates = [], portalGrid = {}, portalClasses = null,
   classOverrides = {}, closeoutMin, maxDeltaPct = 60, approvals = [],
+  closedDates = null,
 } = {}) {
   const pushes = [];
   const skips = [];
+
+  // Ride stop sales (Map<CLASS, Set<iso>> from stop-sale-closures.js). Checked
+  // under BOTH the RFM class code and the portal's, so a class-code override
+  // cannot open a hole in a closure.
+  const isClosed = (rfmCode, portalCode, rateDate) => {
+    if (!closedDates || typeof closedDates.get !== 'function') return false;
+    const under = (code) => {
+      const days = code ? closedDates.get(String(code).toUpperCase()) : null;
+      return !!days && days.has(rateDate);
+    };
+    return under(rfmCode) || under(portalCode);
+  };
 
   // ---- Collision resolution ------------------------------------------------
   // Several RFM classes can alias onto ONE portal class (LAX: RFM has both
@@ -203,7 +236,8 @@ export function buildPushPlan({
       const portalValue = portalGrid?.[portalClass]?.[rateDate];
       // F4: a human may have pre-authorised this exact (class, date, value).
       const approved = isApproved(approvals, portalClass, rateDate, rate.daily);
-      const decision = decideCell({ rfmValue: rate.daily, portalValue, closeoutMin, maxDeltaPct, approved });
+      const stopSale = isClosed(rate.classCode, portalClass, rateDate);
+      const decision = decideCell({ rfmValue: rate.daily, portalValue, closeoutMin, maxDeltaPct, approved, stopSale });
       const row = {
         classCode: portalClass,
         rfmClassCode: rate.classCode,
@@ -211,6 +245,7 @@ export function buildPushPlan({
         priorValue: toAmount(portalValue),
         sourceRateItemId: rate.rateItemId || null,
         approved,
+        ...(stopSale ? { stopSale: true } : {}),
       };
       if (decision.push) pushes.push({ ...row, pushedValue: decision.value });
       // `intendedValue` is what we WOULD have published — it makes an
@@ -220,11 +255,25 @@ export function buildPushPlan({
     }
   }
 
-  // Portal classes we hold no rate for — recorded so the gap is visible.
+  // Portal classes we hold no rate for — recorded so the gap is visible. A
+  // closed date on such a class STILL pushes its close-out: the closure
+  // matters more than the price, and skipping it would leave a class Ride has
+  // declared unsellable open at the portal's own rate.
   if (portalClasses) {
     for (const pc of portalClasses) {
       const code = String(pc).toUpperCase();
-      if (!claimants.has(code)) skips.push({ classCode: code, rateDate: null, reason: SKIP.NO_RFM_RATE });
+      if (claimants.has(code)) continue;
+      let closedAny = false;
+      for (const rateDate of dates) {
+        if (!isClosed(code, code, rateDate)) continue;
+        closedAny = true;
+        const portalValue = portalGrid?.[code]?.[rateDate];
+        const decision = decideCell({ portalValue, closeoutMin, stopSale: true });
+        const row = { classCode: code, rfmClassCode: code, rateDate, priorValue: toAmount(portalValue), sourceRateItemId: null, stopSale: true };
+        if (decision.push) pushes.push({ ...row, pushedValue: decision.value });
+        else skips.push({ ...row, reason: decision.reason, intendedValue: STOP_SALE_DAILY });
+      }
+      if (!closedAny) skips.push({ classCode: code, rateDate: null, reason: SKIP.NO_RFM_RATE });
     }
   }
 

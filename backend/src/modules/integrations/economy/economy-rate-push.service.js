@@ -20,6 +20,7 @@ import { prisma } from '../../../lib/prisma.js';
 import logger from '../../../lib/logger.js';
 import { buildPushPlan, verifyPush, SKIP } from './economy-rate-map.js';
 import { readRateGrid, applyRateCell } from './economy-rate-client.js';
+import { loadStopSaleClosures } from '../booking-source/stop-sale-closures.js';
 
 export const MODES = Object.freeze({ OFF: 'OFF', DRY_RUN: 'DRY_RUN', LIVE: 'LIVE' });
 const PROVIDER = 'ECONOMY';
@@ -120,6 +121,16 @@ export async function pushArea(config, deps = {}) {
   const rfmRates = await (deps.loadRfmRates || loadRfmRates)(tenantId, locationId, deps);
   if (!rfmRates.length) return { skipped: 'no_rfm_rates', externalArea: config.externalArea };
 
+  // Ride stop sales for the window — the same closures every writeback
+  // integration reads (stop-sale-closures.js). A closed (class, date) writes
+  // the close-out value regardless of price state; see decideCell's stopSale
+  // lane for the exact rules.
+  const closedDates = await loadStopSaleClosures(db, {
+    tenantId,
+    from: `${dates[0]}T00:00:00.000Z`,
+    to: new Date(new Date(`${dates[dates.length - 1]}T00:00:00.000Z`).getTime() + 24 * 60 * 60 * 1000),
+  });
+
   const client = deps.client || { readRateGrid, applyRateCell };
   const rateCodes = deps.rateCodes || pushRateCodes();
 
@@ -200,6 +211,7 @@ export async function pushArea(config, deps = {}) {
     classOverrides: parseClassMap(config.rateClassMapJson),
     closeoutMin, maxDeltaPct: deps.maxDeltaPct || maxDeltaPct(),
     approvals: approvalRows,
+    closedDates,
   });
   results.planned += pushes.length;
   results.skipped += skips.length;
