@@ -74,6 +74,41 @@ quotesRouter.get('/:id', async (req, res, next) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Staff editing (Hector 2026-08-06): add-ons + contact details. ALL humans-only
+// — deliberately absent from the VozIA service-account allowlist, so the phone
+// quoting flow cannot reach them and keeps its exact shape.
+// ---------------------------------------------------------------------------
+
+// The priced add-on catalog for this quote (services + insurance for its
+// location/class/days) plus the current selection.
+quotesRouter.get('/:id/add-on-options', async (req, res, next) => {
+  try {
+    res.json(await quotesService.addOnOptions(req.params.id, scopeFor(req)));
+  } catch (e) {
+    if (!fail(res, e)) next(e);
+  }
+});
+
+// Replace the add-on selection. Body: { addOns: [{kind, code}] }. Codes only —
+// prices resolve server-side; [] clears back to the original spoken price.
+quotesRouter.put('/:id/add-ons', async (req, res, next) => {
+  try {
+    res.json(await quotesService.setAddOns(req.params.id, req.body || {}, scopeFor(req), actorFor(req)));
+  } catch (e) {
+    if (!fail(res, e)) next(e);
+  }
+});
+
+// Contact-detail edit (name/phone/email). Never money.
+quotesRouter.patch('/:id/contact', async (req, res, next) => {
+  try {
+    res.json(await quotesService.updateContact(req.params.id, req.body || {}, scopeFor(req)));
+  } catch (e) {
+    if (!fail(res, e)) next(e);
+  }
+});
+
 // Re-quote (Hector 2026-07-17): duplicate with fresh engine prices. Humans-only
 // (not allowlisted for service accounts).
 quotesRouter.post('/:id/requote', async (req, res, next) => {

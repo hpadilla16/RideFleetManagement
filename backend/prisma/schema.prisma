@@ -5648,6 +5648,14 @@ model Quote {
   expiresAt              DateTime
   convertedReservationId String?
 
+  // Staff-edited add-ons (2026-08-06): additional services + insurance chosen
+  // AFTER the quote was spoken. JSON { baseline: {subtotal,fees,taxes,total},
+  // items: [{kind,code,name,quantity,rate,total,taxable}], updatedAt,
+  // updatedByUserId }. The baseline is the ORIGINAL engine snapshot totals so
+  // re-edits always recompute from the price the caller was told, never from a
+  // previous edit. Null = never edited — byte-identical to the VozIA shape.
+  addOnsJson String? @db.Text
+
   // Provenance
   source          String  @default("STAFF") // STAFF | VOZIA | PORTAL
   createdByUserId String?
