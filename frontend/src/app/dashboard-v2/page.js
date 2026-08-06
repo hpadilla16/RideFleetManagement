@@ -518,7 +518,13 @@ function OpsTiles({ router, t, overviewKpis, todayKpis, mismatchCount, citSummar
         {overviewKpis ? tile('available', () => router.push('/vehicles?status=available'), t('dashboard.tileAvailable'), available, t('dashboard.tileAvailableDesc')) : null}
         {overviewKpis ? tile('migration', () => router.push('/vehicles?status=migration'), t('dashboard.tileMigrationHolds'), migrationHeld, t('dashboard.tileMigrationHoldsDesc')) : null}
         {overviewKpis ? tile('maintOos', () => router.push('/vehicles?status=maintenance'), t('dashboard.tileMaintenanceOos'), serviceHeld, t('dashboard.tileMaintenanceOosDesc')) : null}
-        {todayKpis ? tile('collected', () => router.push('/reports-v2/payments-by-day'), t('dashboard.tileCollectedToday'), money(todayKpis.collectedToday), t('dashboard.tileCollectedTodayDesc')) : null}
+        {todayKpis ? tile('collected', () => router.push('/reports-v2/payments-by-day'), t('dashboard.tileCollectedToday'), money(todayKpis.collectedToday),
+          // Per-location split (2026-08-06). Location codes are data, not
+          // translatable copy; falls back to the generic caption until the
+          // day's first payment gives the split something to say.
+          (Array.isArray(todayKpis.byLocation) && todayKpis.byLocation.length
+            ? todayKpis.byLocation.map((l) => `${l.code || l.name || '—'} ${money(l.amount)}`).join(' · ')
+            : t('dashboard.tileCollectedTodayDesc'))) : null}
         {todayKpis ? tile('pendingTolls', () => router.push('/tolls'), t('dashboard.tilePendingTolls'), Number(todayKpis.pendingTolls || 0), t('dashboard.tilePendingTollsDesc'), Number(todayKpis.pendingTolls || 0) > 0 ? 'danger' : 'ok') : null}
         {docAlert ? tile('docs', () => router.push('/settings'),
           t('dashboard.tileDocsExpiring', { defaultValue: 'Documents expiring' }),

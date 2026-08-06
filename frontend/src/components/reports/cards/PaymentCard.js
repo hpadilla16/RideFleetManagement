@@ -30,6 +30,7 @@ const METHOD_STYLE = {
   CARD:          { bg: '#EEEDFE', fg: '#26215C', label: 'Card' },
   ZELLE:         { bg: '#EEEDFE', fg: '#26215C', label: 'Zelle' },
   ATH_MOVIL:     { bg: '#EEEDFE', fg: '#26215C', label: 'ATH Móvil' },
+  CHECK:         { bg: '#FEF9C3', fg: '#713F12', label: 'Check' },
   BANK_TRANSFER: { bg: '#EEEDFE', fg: '#26215C', label: 'Bank xfer' },
   OTHER:         { bg: '#F1EFE8', fg: '#444441', label: 'Other' },
   AUTH_HOLD:     { bg: '#FAEEDA', fg: '#412402', label: 'Auth hold' },

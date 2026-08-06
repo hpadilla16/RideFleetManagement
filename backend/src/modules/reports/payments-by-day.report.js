@@ -42,7 +42,9 @@ async function resolveTenantTimeZone(tenantId) {
 }
 
 const METHOD_BUCKETS = {
-  CASH:    ['CASH'],
+  // CHECK buckets with CASH (2026-08-06): paper collected at the counter,
+  // reconciled with the drawer — not a card settlement, not a digital rail.
+  CASH:    ['CASH', 'CHECK'],
   CARD:    ['CARD'],
   DIGITAL: ['ZELLE', 'ATH_MOVIL', 'BANK_TRANSFER'],
   OTHER:   ['OTHER'],

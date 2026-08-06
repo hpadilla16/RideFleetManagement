@@ -619,6 +619,7 @@ function Inner({ token, me, logout }) {
           <div className="stack"><label className="label">Method</label>
             <select value={method} onChange={(e) => setMethod(e.target.value)}>
               <option value="CASH">Cash</option>
+              <option value="CHECK">Check</option>
               <option value="CARD">Card</option>
               <option value="ZELLE">Zelle</option>
               <option value="ATH_MOVIL">ATH Movil</option>
