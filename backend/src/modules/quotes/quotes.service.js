@@ -43,6 +43,27 @@ function tenantWhere(scope) {
   return scope?.tenantId ? { tenantId: scope.tenantId } : {};
 }
 
+function round2(n) {
+  return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Parse a quote's addOnsJson. Null when never edited — the VozIA shape.
+ * Bad JSON degrades to null rather than breaking a read: the column is a
+ * staff-editing convenience, never load-bearing for the phone flow.
+ */
+export function parseAddOns(quote) {
+  const raw = quote?.addOnsJson;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 async function defaultBookingEngine() {
   const mod = await import('../booking-engine/booking-engine.service.js');
   return mod.bookingEngineService;
@@ -312,6 +333,128 @@ export function createQuotesService(deps = {}) {
       );
     },
 
+    // -----------------------------------------------------------------------
+    // Staff add-on editing (2026-08-06, Hector: "abrir quotes que los puedan
+    // editar, que puedan poner additional services y insurances"). NEW surface
+    // only — preview/create/getById/convert signatures are untouched, and the
+    // routes for these methods are NOT on the VozIA service-account allowlist,
+    // so the phone flow cannot reach them and stays byte-identical.
+    // -----------------------------------------------------------------------
+
+    /** The priced catalog for THIS quote: its location, class and day count. */
+    async addOnOptions(idOrNumber, scope = {}) {
+      const quote = await service.getById(idOrNumber, scope);
+      if (!quote) throw err('Quote not found', 'NOT_FOUND', 404);
+      if (quote.status !== 'ACTIVE') throw err(`Quote is ${quote.status}`, 'QUOTE_NOT_ACTIVE', 422);
+      const engine = await getEngine();
+      const catalog = await engine.getAddOnCatalog({
+        tenantId: scope.tenantId,
+        locationId: quote.pickupLocationId,
+        vehicleTypeId: quote.vehicleTypeId,
+        baseAmount: Number(quote.subtotal || 0),
+        days: Number(quote.days || 1)
+      });
+      return { quoteId: quote.id, quoteNumber: quote.quoteNumber, ...catalog, addOns: parseAddOns(quote) };
+    },
+
+    /**
+     * Replace the quote's add-on selection. Prices resolve SERVER-SIDE against
+     * the same catalog the booking engine sells from — the client sends codes,
+     * never amounts. Totals recompute from the BASELINE (the original engine
+     * snapshot), so a re-edit never compounds on a previous edit and clearing
+     * the list restores the exact spoken price.
+     */
+    async setAddOns(idOrNumber, { addOns } = {}, scope = {}, actor = {}) {
+      const quote = await service.getById(idOrNumber, scope);
+      if (!quote) throw err('Quote not found', 'NOT_FOUND', 404);
+      if (quote.status !== 'ACTIVE') throw err(`Quote is ${quote.status}`, 'QUOTE_NOT_ACTIVE', 422);
+
+      const requested = Array.isArray(addOns) ? addOns : [];
+      const engine = await getEngine();
+      const catalog = await engine.getAddOnCatalog({
+        tenantId: scope.tenantId,
+        locationId: quote.pickupLocationId,
+        vehicleTypeId: quote.vehicleTypeId,
+        baseAmount: Number(quote.subtotal || 0),
+        days: Number(quote.days || 1)
+      });
+      const byKey = new Map();
+      for (const s of catalog.services || []) byKey.set(`SERVICE:${String(s.code || s.id || '').toUpperCase()}`, { kind: 'SERVICE', row: s });
+      for (const p of catalog.insurancePlans || []) byKey.set(`INSURANCE:${String(p.code || '').toUpperCase()}`, { kind: 'INSURANCE', row: p });
+
+      const items = [];
+      for (const req of requested) {
+        const kind = String(req?.kind || '').toUpperCase();
+        const code = String(req?.code || '').trim().toUpperCase();
+        if (!code || !['SERVICE', 'INSURANCE'].includes(kind)) {
+          throw err('Each add-on needs kind (SERVICE|INSURANCE) and code', 'VALIDATION', 400);
+        }
+        const hit = byKey.get(`${kind}:${code}`);
+        // A code the catalog does not offer for this location/class is refused,
+        // never guessed — the alternative is inventing a price.
+        if (!hit) throw err(`Add-on not available for this quote: ${kind} ${code}`, 'ADDON_NOT_AVAILABLE', 422);
+        const r = hit.row;
+        items.push({
+          kind,
+          code,
+          name: String(r.name || r.label || code),
+          quantity: Number(r.quantity || 1),
+          rate: round2(Number(r.rate ?? r.amount ?? 0)),
+          total: round2(Number(r.total || 0)),
+          taxable: !!r.taxable
+        });
+      }
+
+      // Baseline = the ORIGINAL totals, captured once. The price the caller
+      // was told is the floor everything recomputes from.
+      const prior = parseAddOns(quote);
+      const baseline = prior?.baseline || {
+        subtotal: Number(quote.subtotal || 0),
+        fees: Number(quote.fees || 0),
+        taxes: Number(quote.taxes || 0),
+        total: Number(quote.total || 0)
+      };
+
+      const loc = await db.location.findFirst({
+        where: { id: quote.pickupLocationId, ...tenantWhere(scope) },
+        select: { taxRate: true }
+      }).catch(() => null);
+      const taxRate = Number(loc?.taxRate || 0);
+
+      const addOnsSubtotal = round2(items.reduce((s, i) => s + i.total, 0));
+      const addOnTaxes = round2(items.filter((i) => i.taxable).reduce((s, i) => s + i.total, 0) * (taxRate / 100));
+
+      const payload = {
+        baseline,
+        items,
+        updatedAt: now().toISOString(),
+        updatedByUserId: actor?.userId || null
+      };
+      const updated = await db.quote.update({
+        where: { id: quote.id },
+        data: {
+          addOnsJson: JSON.stringify(payload),
+          taxes: round2(baseline.taxes + addOnTaxes),
+          total: round2(baseline.total + addOnsSubtotal + addOnTaxes)
+        }
+      });
+      return withVehicleTypeNames(updated);
+    },
+
+    /** Contact-detail edit. Never touches money, dates, class or status. */
+    async updateContact(idOrNumber, patch = {}, scope = {}) {
+      const quote = await service.getById(idOrNumber, scope);
+      if (!quote) throw err('Quote not found', 'NOT_FOUND', 404);
+      if (quote.status === 'CONVERTED') throw err('Quote already converted', 'QUOTE_NOT_ACTIVE', 422);
+      const data = {};
+      for (const k of ['contactName', 'contactPhone', 'contactEmail']) {
+        if (patch[k] !== undefined) data[k] = String(patch[k] || '').trim() || null;
+      }
+      if (!Object.keys(data).length) throw err('Nothing to update', 'VALIDATION', 400);
+      const updated = await db.quote.update({ where: { id: quote.id }, data });
+      return withVehicleTypeNames(updated);
+    },
+
     /**
      * Convert an ACTIVE, unexpired quote into a reservation AT THE QUOTED PRICE.
      * Idempotent: converting an already-CONVERTED quote returns the existing
@@ -433,6 +576,40 @@ export function createQuotesService(deps = {}) {
         if (/vehicle conflict/i.test(msg)) throw err(msg, 'QUOTE_UNAVAILABLE', 422);
         if (/closed|window|hours/i.test(msg)) throw err(msg, 'LOCATION_CLOSED', 422);
         throw e;
+      }
+
+      // Staff add-ons ride into the reservation as ITEMIZED charge rows
+      // (2026-08-06), with the same identities the booking engine writes
+      // (source SERVICE / INSURANCE) so the staff pricing UI lists them and a
+      // pricing edit carries them like any other line. estimatedTotal already
+      // includes them (quote.total was recomputed at setAddOns). Best-effort:
+      // a failed itemization must not kill a conversion whose money is
+      // already correct in estimatedTotal — the quote note keeps the trail.
+      const addOnState = parseAddOns(quote);
+      if (addOnState?.items?.length) {
+        try {
+          await db.reservationCharge.createMany({
+            data: addOnState.items.map((i, idx) => ({
+              reservationId: reservation.id,
+              code: i.code,
+              name: i.kind === 'INSURANCE' ? `Insurance: ${i.name}` : i.name,
+              chargeType: 'UNIT',
+              quantity: Number(i.quantity || 1),
+              rate: Number(i.rate || 0),
+              total: Number(i.total || 0),
+              taxable: !!i.taxable,
+              selected: true,
+              sortOrder: 100 + idx,
+              source: i.kind === 'INSURANCE' ? 'INSURANCE' : 'SERVICE',
+              sourceRefId: `QUOTE:${quote.id}:${i.kind}:${i.code}`,
+              notes: `From quote ${quote.quoteNumber}`
+            }))
+          });
+        } catch (chargeErr) {
+          // Itemization is a convenience; the total is the contract.
+          // eslint-disable-next-line no-console
+          console.warn('[quotes] add-on charge itemization failed', quote.id, chargeErr?.message);
+        }
       }
 
       const updated = await db.quote.update({

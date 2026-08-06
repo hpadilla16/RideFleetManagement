@@ -945,6 +945,27 @@ async function rentalAvailabilityCount({ tenantId, vehicleTypeId, pickupAt, retu
 }
 
 export const bookingEngineService = {
+  // Staff add-on catalog for the QUOTE EDITOR (2026-08-06). Unlike the public
+  // wrappers above/below (days=1, location-less, tenant resolved from a slug),
+  // this prices for the quote's REAL location, class and day count so the line
+  // totals are what the customer will actually pay. Auth is the caller's
+  // problem (quotes routes are behind requireAuth); tenantId comes from the
+  // caller's scope, never from a slug.
+  async getAddOnCatalog({ tenantId, locationId, vehicleTypeId, baseAmount, days } = {}) {
+    if (!tenantId) return { services: [], insurancePlans: [] };
+    const [services, insurancePlans] = await Promise.all([
+      listPublicAdditionalServices({
+        tenantId, locationId: locationId || null, vehicleTypeId: vehicleTypeId || null,
+        days: Math.max(1, Number(days || 1))
+      }),
+      listPublicInsurancePlans({
+        tenantId, locationId: locationId || null, vehicleTypeId: vehicleTypeId || null,
+        baseAmount: Number(baseAmount || 0), days: Math.max(1, Number(days || 1))
+      })
+    ]);
+    return { services, insurancePlans };
+  },
+
   // Public add-ons for a vehicle type (website "Add extras"). Tenant-scoped; only
   // isActive + displayOnline. days=1 so per-day lines report the per-day rate (the site
   // multiplies by days). locationId null → global (non-location-specific) add-ons.

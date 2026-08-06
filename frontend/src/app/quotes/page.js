@@ -40,6 +40,7 @@ function QuotesInner({ token, me, logout }) {
   const [selected, setSelected] = useState(null); // detail
   const [creating, setCreating] = useState(false);
   const [converting, setConverting] = useState(null); // quote being converted
+  const [editingAddOns, setEditingAddOns] = useState(null); // quote whose add-ons are being edited
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -160,7 +161,18 @@ function QuotesInner({ token, me, logout }) {
       {selected ? (
         <QuoteDetail quote={selected} locById={locById} busy={busy} t={t}
           onClose={() => setSelected(null)} onConvert={() => setConverting(selected)}
-          onCancel={() => cancelQuote(selected)} onRequote={() => requote(selected)} />
+          onCancel={() => cancelQuote(selected)} onRequote={() => requote(selected)}
+          onEditAddOns={() => setEditingAddOns(selected)} />
+      ) : null}
+      {editingAddOns ? (
+        <AddOnsEditor token={token} quote={editingAddOns} t={t}
+          onClose={() => setEditingAddOns(null)}
+          onSaved={async (updated) => {
+            setEditingAddOns(null);
+            setSelected(updated);
+            setMsg(t('quotes.addOnsSaved', { defaultValue: 'Add-ons updated — new total {{total}}', total: money(updated.total) }));
+            await reload();
+          }} />
       ) : null}
       {creating ? (
         <NewQuotePanel token={token} locations={locations} t={t}
@@ -203,7 +215,15 @@ function Row({ k, v, strong }) {
   );
 }
 
-function QuoteDetail({ quote, locById, busy, t, onClose, onConvert, onCancel, onRequote }) {
+function parseQuoteAddOns(quote) {
+  try {
+    const parsed = JSON.parse(quote?.addOnsJson || 'null');
+    return parsed && Array.isArray(parsed.items) && parsed.items.length ? parsed.items : null;
+  } catch { return null; }
+}
+
+function QuoteDetail({ quote, locById, busy, t, onClose, onConvert, onCancel, onRequote, onEditAddOns }) {
+  const addOns = parseQuoteAddOns(quote);
   const loc = locById[quote.pickupLocationId];
   const left = quote.status === 'ACTIVE' ? daysLeft(quote.expiresAt) : null;
   return (
@@ -224,6 +244,11 @@ function QuoteDetail({ quote, locById, busy, t, onClose, onConvert, onCancel, on
       <Row k={t('quotes.dailyRate')} v={<>{money(quote.dailyRate)}{quote.revenuePricingApplied ? <span style={{ color: '#6d3df2', fontSize: 10.5 }}> · {t('quotes.revenuePricing')}</span> : null}</>} />
       <Row k={t('quotes.subtotal')} v={money(quote.subtotal)} />
       <Row k={t('quotes.fees')} v={money(quote.fees)} />
+      {addOns ? addOns.map((a) => (
+        <Row key={`${a.kind}:${a.code}`}
+          k={`+ ${a.kind === 'INSURANCE' ? t('quotes.addOnInsurance', { defaultValue: 'Insurance' }) + ': ' : ''}${a.name}${Number(a.quantity) > 1 ? ` (${a.quantity} × ${money(a.rate)})` : ''}`}
+          v={money(a.total)} />
+      )) : null}
       <Row k={t('quotes.taxes')} v={money(quote.taxes)} />
       <Row k={t('quotes.totalQuoted')} v={money(quote.total)} strong />
       {quote.status === 'ACTIVE' ? (
@@ -236,10 +261,112 @@ function QuoteDetail({ quote, locById, busy, t, onClose, onConvert, onCancel, on
         <Link href={`/reservations/${quote.convertedReservationId}`}><button>{t('quotes.viewReservation')} →</button></Link>
       ) : (
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          {quote.status === 'ACTIVE' ? <button className="button-subtle" disabled={busy} onClick={onEditAddOns}>{t('quotes.editAddOns', { defaultValue: 'Add-ons' })}</button> : null}
           {quote.status === 'ACTIVE' ? <button className="button-subtle" disabled={busy} onClick={onCancel}>{t('quotes.cancelQuote')}</button> : null}
           {quote.status === 'EXPIRED' || quote.status === 'CANCELLED' ? <button className="button-subtle" disabled={busy} onClick={onRequote}>{t('quotes.requote')}</button> : null}
           {quote.status === 'ACTIVE' ? <button disabled={busy} onClick={onConvert}>{t('quotes.convert')} →</button> : null}
         </div>
+      )}
+    </Overlay>
+  );
+}
+
+/**
+ * Add-ons editor (2026-08-06): services + insurance for an ACTIVE quote.
+ * Codes only go to the server — prices always resolve there, against the same
+ * catalog the booking engine sells from. Clearing every box restores the
+ * original spoken price.
+ */
+function AddOnsEditor({ token, quote, t, onClose, onSaved }) {
+  const [options, setOptions] = useState(null); // null = loading
+  const [chosen, setChosen] = useState({});     // "KIND:CODE" -> true
+  const [busy, setBusy] = useState(false);
+  const [errMsg, setErrMsg] = useState('');
+
+  useEffect(() => {
+    api(`/api/quotes/${quote.id}/add-on-options`, { bypassCache: true }, token)
+      .then((d) => {
+        setOptions(d);
+        const pre = {};
+        for (const it of (d?.addOns?.items || [])) pre[`${it.kind}:${String(it.code).toUpperCase()}`] = true;
+        setChosen(pre);
+      })
+      .catch((e) => { setOptions({ services: [], insurancePlans: [] }); setErrMsg(String(e?.message || e)); });
+  }, [quote.id, token]);
+
+  const toggle = (kind, code) => setChosen((c) => {
+    const k = `${kind}:${String(code).toUpperCase()}`;
+    return { ...c, [k]: !c[k] };
+  });
+
+  const lines = [];
+  for (const svc of options?.services || []) {
+    if (chosen[`SERVICE:${String(svc.code || svc.id || '').toUpperCase()}`]) lines.push(svc);
+  }
+  for (const plan of options?.insurancePlans || []) {
+    if (chosen[`INSURANCE:${String(plan.code || '').toUpperCase()}`]) lines.push(plan);
+  }
+  const addOnsSubtotal = lines.reduce((sum, l) => sum + Number(l.total || 0), 0);
+
+  const save = async () => {
+    setBusy(true); setErrMsg('');
+    try {
+      const addOns = [];
+      for (const svc of options?.services || []) {
+        if (chosen[`SERVICE:${String(svc.code || svc.id || '').toUpperCase()}`]) addOns.push({ kind: 'SERVICE', code: svc.code || svc.id });
+      }
+      for (const plan of options?.insurancePlans || []) {
+        if (chosen[`INSURANCE:${String(plan.code || '').toUpperCase()}`]) addOns.push({ kind: 'INSURANCE', code: plan.code });
+      }
+      const updated = await api(`/api/quotes/${quote.id}/add-ons`, { method: 'PUT', body: { addOns } }, token);
+      onSaved(updated);
+    } catch (e) { setErrMsg(String(e?.message || e)); } finally { setBusy(false); }
+  };
+
+  const optionRow = (kind, key, label, detail, total) => (
+    <label key={`${kind}:${key}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 4px', borderBottom: '1px dashed rgba(135,82,254,.14)', cursor: 'pointer', fontSize: 13 }}>
+      <input type="checkbox" checked={!!chosen[`${kind}:${String(key).toUpperCase()}`]} onChange={() => toggle(kind, key)} disabled={busy} />
+      <span style={{ flex: 1 }}>
+        <span style={{ fontWeight: 600 }}>{label}</span>
+        {detail ? <span style={{ opacity: 0.6, marginLeft: 6, fontSize: 12 }}>{detail}</span> : null}
+      </span>
+      <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{money(total)}</span>
+    </label>
+  );
+
+  return (
+    <Overlay onClose={onClose}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 19, fontWeight: 800, color: '#8752FE' }}>{quote.quoteNumber} · {t('quotes.editAddOns', { defaultValue: 'Add-ons' })}</span>
+        <button className="button-subtle" onClick={onClose}>✕</button>
+      </div>
+      {options === null ? <div style={{ padding: 16, opacity: 0.6 }}>{t('quotes.loading', { defaultValue: 'Loading…' })}</div> : (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', opacity: 0.6, margin: '14px 0 2px' }}>
+            {t('quotes.addOnServices', { defaultValue: 'Additional services' })}
+          </div>
+          {(options.services || []).length === 0 ? <div style={{ fontSize: 12.5, opacity: 0.55, padding: '6px 4px' }}>{t('quotes.noneAvailable', { defaultValue: 'None available for this class/location' })}</div>
+            : options.services.map((svc) => optionRow('SERVICE', svc.code || svc.id, svc.name,
+                Number(svc.quantity) > 1 ? `${svc.quantity} × ${money(svc.rate)}` : null, svc.total))}
+          <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', opacity: 0.6, margin: '14px 0 2px' }}>
+            {t('quotes.addOnInsurancePlans', { defaultValue: 'Insurance / protection' })}
+          </div>
+          {(options.insurancePlans || []).length === 0 ? <div style={{ fontSize: 12.5, opacity: 0.55, padding: '6px 4px' }}>{t('quotes.noneAvailable', { defaultValue: 'None available for this class/location' })}</div>
+            : options.insurancePlans.map((plan) => optionRow('INSURANCE', plan.code, plan.label || plan.name || plan.code,
+                Number(plan.quantity) > 1 ? `${plan.quantity} × ${money(plan.rate || plan.amount)}` : null, plan.total))}
+          <div style={{ marginTop: 14 }}>
+            <Row k={t('quotes.totalQuoted')} v={money(quote.total)} />
+            <Row k={t('quotes.addOnsSubtotal', { defaultValue: 'Add-ons selected' })} v={money(addOnsSubtotal)} />
+            <div style={{ fontSize: 11.5, opacity: 0.6, margin: '6px 0 12px' }}>
+              {t('quotes.addOnsTaxNote', { defaultValue: 'Taxes on taxable add-ons are applied on save; the final total comes from the server.' })}
+            </div>
+          </div>
+          {errMsg ? <div className="surface-note warn" style={{ marginBottom: 10 }}>{errMsg}</div> : null}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="button-subtle" disabled={busy} onClick={onClose}>{t('common.cancel', { defaultValue: 'Cancel' })}</button>
+            <button disabled={busy} onClick={save}>{t('quotes.saveAddOns', { defaultValue: 'Save add-ons' })}</button>
+          </div>
+        </>
       )}
     </Overlay>
   );
