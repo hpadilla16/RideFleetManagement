@@ -16,6 +16,7 @@ import logger from '../../lib/logger.js';
 import { normalizeDob } from '../../lib/dob.js';
 import { getEffectiveTermsHtml } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
+import { analyzeSignatureInk } from '../../lib/signature-ink.js';
 import {
   attachPublicRequestMeta,
   createPublicRateLimitGuard
@@ -1761,6 +1762,15 @@ customerPortalRouter.post('/signature/:token', portalWrite, async (req, res, nex
     const signatureDataUrl = String(req.body?.signatureDataUrl || '').trim();
     if (!signerName) return res.status(400).json({ error: 'signerName is required' });
     if (!signatureDataUrl) return res.status(400).json({ error: 'signatureDataUrl is required' });
+    // An untouched signature pad is still a valid PNG (RA-20260701152550: the
+    // customer submitted a blank canvas and a WHITE BOX printed in the
+    // agreement's Customer Signature block while her real T&C stroke sat on
+    // the appendix page). Reject the blank HERE, where the customer can simply
+    // sign again. Fail-open on formats the analyzer cannot read.
+    const ink = analyzeSignatureInk(signatureDataUrl);
+    if (ink.analyzable && !ink.hasInk) {
+      return res.status(400).json({ error: 'The signature is blank — please sign before submitting' });
+    }
 
     const reservation = await findReservationByToken('signature', token);
     if (!reservation) return res.status(404).json({ error: 'Invalid or expired signature link' });
