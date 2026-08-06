@@ -61,9 +61,26 @@ export function applyUtilizationLift({ paddedPrice, pricesAsc, utilization, rule
  * utilization lookup runs the availability-forecast math, so it is done once
  * per location per engine run, not once per rule.
  */
+/**
+ * Pure. The lookup window for "today's utilization". The forecast window
+ * EXCLUDES its `to` day, so from == to is a ZERO-DAY window and every
+ * utilOf() answers null. Found on the first nightly run (2026-08-06 04:51):
+ * the whole chain worked, but every suggestion carried utilization n/a — the
+ * lift was silently dark. One day past today is the narrowest window that
+ * contains today.
+ */
+export function utilizationLookupWindow(now = new Date()) {
+  const t = now.getTime();
+  return {
+    todayISO: new Date(t).toISOString().slice(0, 10),
+    fromISO: new Date(t).toISOString().slice(0, 10),
+    toISO: new Date(t + 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+  };
+}
+
 function createUtilizationContext() {
   const entries = new Map();
-  const todayISO = new Date().toISOString().slice(0, 10);
+  const { todayISO, toISO: tomorrowISO } = utilizationLookupWindow();
   return {
     async utilizationFor(tenantId, locationCode, sipp) {
       if (!tenantId || !locationCode) return { utilization: null, rules: [] };
@@ -77,7 +94,7 @@ function createUtilizationContext() {
           const rules = Array.isArray(config?.utilizationRules) ? config.utilizationRules : [];
           if (!rules.length) return { rules, lookup: null };
           const lookup = await buildUtilizationLookup({
-            tenantId, locationCode, fromISO: todayISO, toISO: todayISO,
+            tenantId, locationCode, fromISO: todayISO, toISO: tomorrowISO,
           });
           return { rules, lookup };
         })());

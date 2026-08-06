@@ -12,7 +12,7 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://u:p@127.0.0
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { applyUtilizationLift } = await import('./pricing-suggestion-engine.service.js');
+const { applyUtilizationLift, utilizationLookupWindow } = await import('./pricing-suggestion-engine.service.js');
 
 // IRC's REAL SJU ladder, verbatim from MarketPricingConfig.utilizationRules.
 const IRC_RULES = [
@@ -25,6 +25,18 @@ const IRC_RULES = [
 
 // A market of 7 vendors, ascending. Median = 60.
 const PRICES = [40, 45, 52, 60, 75, 90, 120];
+
+describe('utilizationLookupWindow', () => {
+  it('spans one full day — the forecast excludes `to`, so from==to reads nothing', () => {
+    // The first nightly run proved it: from==to → zero-day window → every
+    // suggestion logged utilization n/a while FFAR sat sold out at $43.51.
+    const w = utilizationLookupWindow(new Date('2026-08-06T04:51:00Z'));
+    assert.equal(w.fromISO, '2026-08-06');
+    assert.equal(w.toISO, '2026-08-07');
+    assert.equal(w.todayISO, '2026-08-06');
+    assert.notEqual(w.fromISO, w.toISO, 'a zero-day window makes the lift silently dark');
+  });
+});
 
 describe('applyUtilizationLift', () => {
   it('below the first rung nothing changes — empty fleet keeps chasing the market', () => {
