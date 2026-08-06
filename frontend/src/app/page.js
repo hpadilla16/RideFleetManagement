@@ -698,7 +698,13 @@ function DashboardInner({ token, me, logout }) {
                 <strong className="tnum" style={{ fontVariantNumeric: 'tabular-nums' }}>
                   {`$${Number(todayKpis.collectedToday || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
                 </strong>
-                <span className="ui-muted">{t('dashboard.tileCollectedTodayDesc')}</span>
+                <span className="ui-muted">
+                  {/* Per-location split (2026-08-06); the generic caption until
+                      the day's first payment gives it something to say. */}
+                  {Array.isArray(todayKpis.byLocation) && todayKpis.byLocation.length
+                    ? todayKpis.byLocation.map((l) => `${l.code || l.name || '—'} $${Number(l.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`).join(' · ')
+                    : t('dashboard.tileCollectedTodayDesc')}
+                </span>
               </button>
             ) : null}
             {todayKpis ? (
