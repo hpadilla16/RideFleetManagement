@@ -530,6 +530,9 @@ function buildExcelSpec(data) {
 
 registerReport({
   slug: 'agent-track-record',
+  // Tenant-wide by nature (no locationId dimension in its where): a location-
+  // scoped user cannot be pinned to a slice, so the gate keeps rejecting them.
+  locationScoped: false,
   title: 'Rental Agent Track Record — Month over Month',
   computeData,
   renderHtml,

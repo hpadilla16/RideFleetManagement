@@ -371,6 +371,9 @@ export function buildExcelSpec(data) {
 
 registerReport({
   slug: 'pre-paid-reservations',
+  // Tenant-wide by nature (no locationId dimension in its where): a location-
+  // scoped user cannot be pinned to a slice, so the gate keeps rejecting them.
+  locationScoped: false,
   title: 'Pre-Paid Reservations',
   category: 'OPERATIONS',
   icon: 'card',

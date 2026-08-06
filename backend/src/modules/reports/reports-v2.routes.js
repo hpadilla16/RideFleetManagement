@@ -205,11 +205,69 @@ reportsV2Router.get(
  *   (req, res, ctx) where ctx = { tenantId }. Errors bubble through sendError
  *   for consistent JSON shape.
  */
+/**
+ * Location scoping for report routes (2026-08-06, Hector — a location-
+ * restricted ADMIN was getting the flat 403 on every report page).
+ *
+ * Almost every report already filters by `query.locationId` down in its own
+ * Prisma where (16 of 19 at the time of writing), so a scoped user does not
+ * need to be rejected — they need their location PINNED:
+ *   - a requested locationId outside their allowed set → 403;
+ *   - no locationId and exactly one allowed location → pinned silently;
+ *   - no locationId and several allowed → 400 with allowedLocationIds, so
+ *     the UI's own dropdown (already limited to their locations) must choose
+ *     — never a silent default to the wrong branch.
+ * Reports that have NO location dimension (registered with
+ * locationScoped: false) keep the old rejection: without a filter to pin,
+ * letting the request through would show other locations' data.
+ * Program-restricted accounts stay rejected everywhere — their world is a
+ * program, not a set of locations.
+ *
+ * Returns true to continue; false when it already answered.
+ */
+export function applyReportLocationScope(req, res, { locationScoped = true } = {}) {
+  if (userProgramScope(req.user)) {
+    res.status(403).json({
+      error: 'This report set is not yet available for program-restricted accounts',
+    });
+    return false;
+  }
+  const allowed = userAllowedLocationIds(req.user);
+  if (!allowed) return true; // unscoped user — nothing to pin
+  if (!locationScoped) {
+    res.status(403).json({
+      error: 'This report has no per-location view yet, so location-restricted accounts cannot open it',
+    });
+    return false;
+  }
+  const requested = req.query?.locationId ? String(req.query.locationId) : null;
+  if (requested) {
+    if (!allowed.includes(requested)) {
+      res.status(403).json({ error: 'That location is outside your allowed locations' });
+      return false;
+    }
+    return true;
+  }
+  if (allowed.length === 1) {
+    req.query = { ...(req.query || {}), locationId: allowed[0] };
+    return true;
+  }
+  res.status(400).json({
+    error: 'Choose one of your locations to run this report',
+    allowedLocationIds: allowed,
+  });
+  return false;
+}
+
 export function registerReport(report) {
   const slug = report.slug;
   const roles = report.roles || ['ADMIN', 'OPS', 'SUPER_ADMIN'];
+  const scopeOpts = { locationScoped: report.locationScoped !== false };
+  const scopeGate = (req, res, next) => {
+    if (applyReportLocationScope(req, res, scopeOpts)) next();
+  };
 
-  reportsV2Router.get(`/${slug}`, requireRole(...roles), rejectScopedUsers, async (req, res) => {
+  reportsV2Router.get(`/${slug}`, requireRole(...roles), scopeGate, async (req, res) => {
     try {
       const data = await report.computeData(
         { tenantId: req.user.tenantId, from: req.query?.from, to: req.query?.to, query: req.query || {} },
@@ -226,7 +284,7 @@ export function registerReport(report) {
   // availability-forecast's 12-month sold-out scan) that would otherwise
   // push us over nginx's 60s gateway timeout. Reports that don't care about
   // the flag simply ignore it.
-  reportsV2Router.get(`/${slug}/pdf`, requireRole(...roles), rejectScopedUsers, async (req, res) => {
+  reportsV2Router.get(`/${slug}/pdf`, requireRole(...roles), scopeGate, async (req, res) => {
     try {
       const data = await report.computeData(
         { tenantId: req.user.tenantId, from: req.query?.from, to: req.query?.to, query: { ...(req.query || {}), _isExport: '1' } },
@@ -246,7 +304,7 @@ export function registerReport(report) {
     }
   });
 
-  reportsV2Router.get(`/${slug}/excel`, requireRole(...roles), rejectScopedUsers, async (req, res) => {
+  reportsV2Router.get(`/${slug}/excel`, requireRole(...roles), scopeGate, async (req, res) => {
     try {
       const data = await report.computeData(
         { tenantId: req.user.tenantId, from: req.query?.from, to: req.query?.to, query: { ...(req.query || {}), _isExport: '1' } },
@@ -278,8 +336,9 @@ export function registerReport(report) {
         }
       };
       const subRoles = Array.isArray(sub.roles) ? sub.roles : roles;
-      // Sub-routes get ctx = { tenantId } only — same leak class, same guard.
-      reportsV2Router[method](fullPath, requireRole(...subRoles), rejectScopedUsers, wrapped);
+      // Sub-routes carry the same location semantics as the parent report
+      // (their handlers read query.locationId too), so the same gate pins them.
+      reportsV2Router[method](fullPath, requireRole(...subRoles), scopeGate, wrapped);
     }
   }
 }
