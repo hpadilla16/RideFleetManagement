@@ -446,6 +446,9 @@ function buildExcelSpec(data) {
 
 registerReport({
   slug: 'commission-sales-performance',
+  // Tenant-wide by nature (no locationId dimension in its where): a location-
+  // scoped user cannot be pinned to a slice, so the gate keeps rejecting them.
+  locationScoped: false,
   title: 'Commission & Sales Performance Report',
   computeData,
   renderHtml,
