@@ -51,10 +51,21 @@ export async function computeTodayKpis(tenantId, deps = {}) {
         }
       }
     }),
-    // Mirrors listStaffTollAlerts' where (tolls.service.js): unacknowledged
-    // billable tolls attached to a contract — the "someone still has to
-    // collect this" number, not raw needs-review noise. Scoped users count
-    // only their locations' contracts.
+    // "Someone still has to ACT on this" — and nothing else (Hector,
+    // 2026-08-06: the tile read 186/380 when the real answer was 60/0).
+    // A toll POSTED to a reservation or agreement is already on the
+    // customer's bill and collects itself with the contract — counting it
+    // as pending inflated the tile with money that needed no hands. What
+    // is actionable:
+    //   - billingStatus PENDING: matched + billable but not yet posted;
+    //   - POSTED_* whose agreement is already CLOSED: the contract settled
+    //     without it, so collection is manual (the [CONTRATO CERRADO]
+    //     emails flag the same rows).
+    // staffAckAt still counts as "handled" (years of rows were dismissed
+    // with the old button — dropping it resurrected 1,032 of them), and the
+    // closed-contract branch clears itself by MONEY, not by clicks: once the
+    // manual collection posts and the agreement balance reaches zero, the
+    // toll stops counting. No button needed, nothing grows forever.
     db.tollTransaction.count({
       where: {
         tenantId,
@@ -62,7 +73,16 @@ export async function computeTodayKpis(tenantId, deps = {}) {
         reservationId: { not: null },
         ...(locationIds ? { reservation: { pickupLocationId: { in: locationIds } } } : {}),
         status: { in: ['MATCHED', 'BILLED'] },
-        billingStatus: { in: ['PENDING', 'POSTED_TO_RESERVATION', 'POSTED_TO_AGREEMENT'] }
+        OR: [
+          { billingStatus: 'PENDING' },
+          {
+            billingStatus: { in: ['POSTED_TO_RESERVATION', 'POSTED_TO_AGREEMENT'] },
+            reservation: {
+              ...(locationIds ? { pickupLocationId: { in: locationIds } } : {}),
+              rentalAgreement: { status: 'CLOSED', balance: { gt: 0 } }
+            }
+          }
+        ]
       }
     })
   ]);
