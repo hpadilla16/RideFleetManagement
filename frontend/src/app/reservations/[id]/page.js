@@ -3189,36 +3189,8 @@ token
             style={{
               marginTop: 12,
               padding: 10,
-              ...(tollAlerts.length ? { border: tollAlerts.some((a) => a.agreementClosed) ? '2px solid #d9534f' : '2px solid #f0ad4e' } : {})
             }}
           >
-            {tollAlerts.length ? (
-              <div
-                className="surface-note"
-                style={{
-                  marginBottom: 10,
-                  background: tollAlerts.some((a) => a.agreementClosed) ? 'rgba(217,83,79,0.12)' : 'rgba(240,173,78,0.12)',
-                  display: 'grid',
-                  gap: 8
-                }}
-              >
-                <div style={{ fontWeight: 700 }}>
-                  {tollAlerts.some((a) => a.agreementClosed)
-                    ? `⚠ ${tollAlerts.length} new toll${tollAlerts.length > 1 ? 's' : ''} on a CLOSED contract — collect manually`
-                    : `${tollAlerts.length} new toll${tollAlerts.length > 1 ? 's' : ''} pending review/collection`}
-                </div>
-                {tollAlerts.map((alert) => (
-                  <div key={alert.id} className="row-between" style={{ gap: 8, flexWrap: 'wrap' }}>
-                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-                      {money(alert.amount)} · {new Date(alert.transactionAt).toLocaleDateString()} · {alert.location || 'toll'} · Plate {alert.plate || '-'}
-                    </div>
-                    <button type="button" className="button-subtle" onClick={() => acknowledgeTollAlert(alert.id)}>
-                      Mark as seen
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
             <div className="row-between" style={{ marginBottom: 8 }}>
               <div style={{ fontWeight: 700 }}>Toll Review</div>
               <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>

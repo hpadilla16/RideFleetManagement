@@ -528,41 +528,6 @@ function TollsInner({ token, me, logout }) {
             </div>
           ) : null}
 
-          {alerts.length ? (
-            <div
-              className="glass card"
-              style={{
-                marginTop: 12,
-                padding: 10,
-                border: alerts.some((a) => a.agreementClosed) ? '2px solid #d9534f' : '2px solid #f0ad4e'
-              }}
-            >
-              <div className="row-between" style={{ marginBottom: 8 }}>
-                <div style={{ fontWeight: 700 }}>Peajes por cobrar</div>
-                <span className={`status-chip ${alerts.some((a) => a.agreementClosed) ? 'warn' : 'neutral'}`}>
-                  {alerts.length} pending
-                </span>
-              </div>
-              <div className="stack" style={{ gap: 6 }}>
-                {alerts.map((alert) => (
-                  <div key={alert.id} className="row-between" style={{ gap: 8, flexWrap: 'wrap' }}>
-                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-                      {alert.agreementClosed ? <strong style={{ color: '#d9534f' }}>[CLOSED] </strong> : null}
-                      ${Number(alert.amount || 0).toFixed(2)} · {new Date(alert.transactionAt).toLocaleDateString()} · {alert.location || 'toll'} ·{' '}
-                      {alert.customerName || 'Customer'} · {alert.agreementNumber || alert.reservationNumber || '-'}
-                    </div>
-                    <div className="inline-actions">
-                      {alert.reservationId ? (
-                        <a className="button-subtle" href={`/reservations/${alert.reservationId}`}>Open contract</a>
-                      ) : null}
-                      <button type="button" className="button-subtle" onClick={() => acknowledgeAlert(alert.id)}>Mark as seen</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
           <div className="app-card-grid compact">
             <div className="info-tile">
               <span className="label">Imported Today</span>
