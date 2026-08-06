@@ -31,7 +31,7 @@ function normalizePaymentMethod(method) {
   // AUTH_HOLD = security deposit authorization hold. Included for paidAmount
   // math (Option A) so agreement.balance correctly excludes the held amount.
   // The hold is NOT a settled payment — distinguishable downstream via method.
-  return ['CASH', 'CARD', 'ZELLE', 'ATH_MOVIL', 'BANK_TRANSFER', 'AUTH_HOLD', 'OTHER'].includes(raw) ? raw : 'OTHER';
+  return ['CASH', 'CARD', 'CHECK', 'ZELLE', 'ATH_MOVIL', 'BANK_TRANSFER', 'AUTH_HOLD', 'OTHER'].includes(raw) ? raw : 'OTHER';
 }
 
 function normalizePaymentOrigin(origin) {
