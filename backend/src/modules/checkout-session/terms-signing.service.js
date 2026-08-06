@@ -16,6 +16,7 @@ import logger from '../../lib/logger.js';
 import { CheckoutSessionError } from './checkout-session.service.js';
 import { sectionsForAgreement } from './terms-content.js';
 import { appendEvent } from './state-machine.js';
+import { analyzeSignatureInk } from '../../lib/signature-ink.js';
 
 async function loadToken(token) {
   if (!token) throw new CheckoutSessionError('token required', 400);
@@ -116,6 +117,15 @@ async function saveInitial({ token, sectionKey, initialDataUrl, customerIp }) {
 async function complete({ token, signatureDataUrl, signerName, customerIp }) {
   if (!signatureDataUrl || signatureDataUrl.length < 200) {
     throw new CheckoutSessionError('signature missing or too small', 400);
+  }
+  // A blank canvas passes the length check — it is a valid PNG (see
+  // signature-ink.js and RA-20260701152550, where a blank interactive
+  // signature printed a white box over a real T&C stroke). Reject it here,
+  // where the customer can simply sign again; fail-open on formats the
+  // analyzer cannot read.
+  const ink = analyzeSignatureInk(signatureDataUrl);
+  if (ink.analyzable && !ink.hasInk) {
+    throw new CheckoutSessionError('The signature is blank — please sign before submitting', 400);
   }
   const row = await loadToken(token);
   const ag = row.reservation.rentalAgreement;

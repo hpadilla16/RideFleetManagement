@@ -38,6 +38,7 @@ import { iposTransactClient } from '../payment-gateway/ipos-transact-client.js';
 import { paymentOpsQueue } from '../payment-gateway/payment-ops-queue.service.js';
 import logger from '../../lib/logger.js';
 import { autoCompleteShuttleRequestsOnCheckout } from '../shuttle/shuttle-requests.service.js';
+import { pickInkedSignature } from '../../lib/signature-ink.js';
 
 // Tenant Spin config loader — mirrors the helper in spin-charge.service.js.
 // Tenant.spin* columns don't exist on the Tenant model today; the Spin
@@ -3619,11 +3620,15 @@ export const rentalAgreementsService = {
     // signature image into both the legacy 'Customer Signature' block
     // on page 2 AND the new 'Signed acknowledgement' section we
     // append later, so neither version of the print looks blank.
-    const rawSigUrl = String(
-      agreement.reservation?.signatureDataUrl ||
-      agreement.tcSignatureDataUrl ||
-      ''
-    ).trim();
+    //
+    // pickInkedSignature, not ||: a BLANK interactive signature (an untouched
+    // pad is still a valid PNG) must never mask a real T&C stroke.
+    // RA-20260701152550 printed a white box in this block while the customer's
+    // actual signature sat on the appendix page.
+    const rawSigUrl = pickInkedSignature(
+      agreement.reservation?.signatureDataUrl,
+      agreement.tcSignatureDataUrl
+    );
     const signatureImageBlock = rawSigUrl
       ? `<img src="${rawSigUrl}" alt="Signature" style="max-height:60px;max-width:320px;width:auto;height:auto;display:block;object-fit:contain" />`
       : '<div class="sig-meta">No signature on file</div>';
