@@ -697,6 +697,25 @@ function computeInsuranceLine(plan, baseAmount, days) {
   };
 }
 
+/** The staff-facing service catalog: ACTIVE only — no displayOnline gate. */
+async function listStaffAdditionalServices({ tenantId, locationId, vehicleTypeId, days }) {
+  const services = await prisma.additionalService.findMany({
+    where: {
+      tenantId,
+      isActive: true,
+      OR: [
+        { locationId: null },
+        ...(locationId ? [{ locationId }] : [])
+      ]
+    },
+    include: { linkedFee: true },
+    orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }]
+  });
+  return services
+    .filter((service) => isServiceEligibleForVehicleType(service, vehicleTypeId))
+    .map((service) => computeAdditionalServiceLine(service, days, service.defaultQty));
+}
+
 async function listPublicInsurancePlans({ tenantId, locationId, vehicleTypeId, baseAmount, days }) {
   const plans = await settingsService.getInsurancePlans({ tenantId });
   return (Array.isArray(plans) ? plans : [])
@@ -954,7 +973,13 @@ export const bookingEngineService = {
   async getAddOnCatalog({ tenantId, locationId, vehicleTypeId, baseAmount, days } = {}) {
     if (!tenantId) return { services: [], insurancePlans: [] };
     const [services, insurancePlans] = await Promise.all([
-      listPublicAdditionalServices({
+      // STAFF catalog: every ACTIVE service, displayOnline or not. displayOnline
+      // is a WEBSITE-visibility flag; a staff agent selling by phone offers the
+      // internal services too (IRC: 9 of 12 are displayOnline=false — toll
+      // activations, upgrades — and the first live test showed an empty list).
+      // Vehicle-type eligibility and location scoping still apply: those are
+      // sales rules, not display rules. Insurance never had the gate.
+      listStaffAdditionalServices({
         tenantId, locationId: locationId || null, vehicleTypeId: vehicleTypeId || null,
         days: Math.max(1, Number(days || 1))
       }),
