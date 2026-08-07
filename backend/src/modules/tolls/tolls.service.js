@@ -10,6 +10,7 @@ import {
   resolveReservationResponsibility
 } from './tolls-responsibility.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { countQueues } from './tolls-queue-counts.js';
 import { scopeAllowedLocationIds, reservationLocationWhere, systemScope } from '../../lib/tenant-scope.js';
 import { sendEmail } from '../../lib/mailer.js';
 // beta.357 latent fix: the agreement-mirror catch already called logger.error
@@ -2016,6 +2017,11 @@ export const tollsService = {
       }) : []
     ]);
 
+    // The tab counts come from the DATABASE, not from the 200 rows above.
+    // Counting the page is what made the queue climb from 19 to 21 when staff
+    // confirmed 19 (Hector, 2026-08-07) — see tolls-queue-counts.js.
+    const queueCounts = await countQueues(prisma, where);
+
     const latestAutoSyncRun = (importRuns || []).find((run) => String(run.sourceType || '').toUpperCase() === 'AUTOEXPRESO_SYNC') || null;
     const transactionsWithIssues = await attachIssueIncidents(transactions, scope);
 
@@ -2025,9 +2031,19 @@ export const tollsService = {
         importedToday,
         matched: matchedCount,
         needsReview: reviewCount,
+        // Of everything flagged for review, how much a human can actually act
+        // on. International's 3,579 was 189 with a suggestion and 3,390 with
+        // no match candidate at all — one number for both read as a backlog.
+        needsReviewActionable: queueCounts.NEEDS_REVIEW,
+        needsReviewNoSuggestion: queueCounts.NO_SUGGESTION,
         postedToBilling: billedCount,
         disputed: disputedCount
       },
+      queueCounts,
+      // How much of the queue this payload actually contains, so the page can
+      // say so instead of implying it has everything.
+      returnedCount: transactions.length,
+      totalCount: queueCounts.ALL,
       providerAccount: serializeProviderAccount(providerAccount),
       autoSync: getAutoSyncStatus(providerAccount, latestAutoSyncRun, reviewCount),
       importRuns: (importRuns || []).map(serializeImportRun),
