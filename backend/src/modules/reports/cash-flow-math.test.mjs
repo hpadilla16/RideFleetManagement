@@ -15,6 +15,8 @@ import {
   expectedInflow,
   committedByDayFrom,
   splitExpectedMoney,
+  isPrepaidBooking,
+  PREPAID_BOOKING_CHANNELS,
   summarize,
   addIsoDays,
   weekdayOf,
@@ -251,4 +253,74 @@ test('summarize carries the component breakdown through', () => {
   assert.equal(s.components.rate, 60);
   assert.equal(s.components.prepaid, 400, 'prepaid sits BESIDE committed, never inside it');
   assert.equal(s.forecastCommitted, 100);
+});
+
+// ---------------------------------------------------------------------------
+// The channel rule (Hector, 2026-08-07): "todos los que son de TL
+// International que terminan en BA son Pre Paid"
+// ---------------------------------------------------------------------------
+
+test('MEASURED: the BA suffix is not the signal — the CHANNEL is', () => {
+  // Production count on 2026-08-07: 797 of 798 FRANCHISE_TL reservations end
+  // in "BA". The suffix separates nothing; encoding it would be a rule that
+  // reads like a rule but behaves like "all of TL".
+  assert.equal(isPrepaidBooking({ bookingChannel: 'FRANCHISE_TL' }), true);
+  assert.equal(
+    isPrepaidBooking({ bookingChannel: 'FRANCHISE_TL' }),
+    isPrepaidBooking({ bookingChannel: 'franchise_tl' }),
+    'and the channel test is case-insensitive',
+  );
+});
+
+test('THE GAP: a TL booking that DOES carry a rate is still prepaid', () => {
+  // Ten live BA rows carry a real dailyRate — up to $102.24. The old
+  // "dailyRate === 0" heuristic committed every one of them.
+  const out = splitExpectedMoney({ estimatedTotal: 862.56, dailyRate: 15, bookingChannel: 'FRANCHISE_TL' });
+  assert.equal(out.collectible, 0, 'a rate on a TL booking is the franchise price, not our cash');
+  assert.equal(out.prepaid, 862.56);
+  // Prove the old rule would have failed here:
+  assert.equal(splitExpectedMoney({ estimatedTotal: 862.56, dailyRate: 15 }).collectible, 862.56);
+});
+
+test('MEX is deliberately NOT prepaid — it sells pay-at-destination too', () => {
+  assert.equal(isPrepaidBooking({ bookingChannel: 'FRANCHISE_MEX', dailyRate: 50 }), false);
+  assert.equal(PREPAID_BOOKING_CHANNELS.includes('FRANCHISE_MEX'), false);
+  const out = splitExpectedMoney({ estimatedTotal: 200, dailyRate: 50, bookingChannel: 'FRANCHISE_MEX', taxRatePct: 11.5 });
+  assert.equal(out.collectible, 200, 'the counter really does collect on a POA booking');
+});
+
+test('an explicit isPrepaid flag always wins over the channel', () => {
+  assert.equal(isPrepaidBooking({ isPrepaid: false, bookingChannel: 'FRANCHISE_TL' }), false,
+    'if a source ever starts setting the flag, the flag is the truth');
+  assert.equal(isPrepaidBooking({ isPrepaid: true, bookingChannel: 'STAFF' }), true);
+});
+
+test('the rate-zero fallback still covers channels nobody classified', () => {
+  assert.equal(isPrepaidBooking({ bookingChannel: 'SOME_NEW_OTA', dailyRate: 0 }), true);
+  assert.equal(isPrepaidBooking({ bookingChannel: 'SOME_NEW_OTA', dailyRate: 50 }), false);
+});
+
+test('a prepaid-channel booking WITH charge rows still owes fees and taxes', () => {
+  // If TL ever sends itemised rows, the counter collects the local fee/tax.
+  const out = splitExpectedMoney({
+    estimatedTotal: 236, bookingChannel: 'FRANCHISE_TL',
+    charges: [
+      { code: 'DAILY', chargeType: 'UNIT', total: 200 },
+      { code: 'VLF', chargeType: 'UNIT', total: 12 },
+      { code: 'TAX', chargeType: 'TAX', total: 24 },
+    ],
+  });
+  assert.equal(out.collectible, 36);
+  assert.equal(out.prepaid, 200);
+});
+
+test('a NULL dailyRate is the franchise-import shape, not a missing value', () => {
+  // Measured on prod: every leaked TL row had dailyRate NULL (not 0) and zero
+  // charge rows. A `dailyRate != null` guard in the fallback would commit them
+  // all the moment a franchise arrived on an unclassified channel.
+  assert.equal(isPrepaidBooking({ bookingChannel: 'SOME_NEW_OTA', dailyRate: null }), true);
+  assert.equal(isPrepaidBooking({ bookingChannel: 'SOME_NEW_OTA' }), true);
+  const out = splitExpectedMoney({ estimatedTotal: 210, dailyRate: null, charges: [] });
+  assert.equal(out.collectible, 0);
+  assert.equal(out.prepaid, 210);
 });

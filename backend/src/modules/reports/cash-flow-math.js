@@ -136,6 +136,39 @@ export function buildForecastSeries({ startIso, days = 30, committedByDay = new 
 }
 
 /**
+ * Booking channels whose RATE is collected by whoever sold the booking, not
+ * at our counter.
+ *
+ * Hector, 2026-08-07: "todos los que son de TL International que terminan en
+ * BA son Pre Paid". Measured: 797 of 798 FRANCHISE_TL reservations end in BA,
+ * so the suffix discriminates nothing — the CHANNEL is the rule. And the
+ * channel is the only reliable signal: 10 of those BA rows carry a real
+ * dailyRate (up to $102.24), so the "rate is zero" heuristic alone silently
+ * committed them.
+ *
+ * FRANCHISE_MEX is deliberately NOT here — MEX sells both prepaid and
+ * pay-at-destination, decided per rate code (mex.constants classifyMexRateCode),
+ * and the counter really does collect on POA bookings.
+ */
+export const PREPAID_BOOKING_CHANNELS = Object.freeze(
+  String(process.env.CASHFLOW_PREPAID_CHANNELS || 'FRANCHISE_TL')
+    .split(',').map((c) => c.trim().toUpperCase()).filter(Boolean)
+);
+
+/** Is this booking's rate settled by the seller rather than by us? */
+export function isPrepaidBooking({ isPrepaid = null, bookingChannel = null, dailyRate = null } = {}) {
+  if (isPrepaid === true) return true;
+  if (isPrepaid === false) return false;
+  const channel = String(bookingChannel || '').trim().toUpperCase();
+  if (channel && PREPAID_BOOKING_CHANNELS.includes(channel)) return true;
+  // Fallback for channels we have not classified: a booking worth money with
+  // no rate of its own was priced somewhere else. NULL counts — the franchise
+  // importers leave dailyRate null, not 0, and an `!= null` guard here would
+  // quietly commit every one of them.
+  return Number(dailyRate || 0) <= 0;
+}
+
+/**
  * Split a reservation's expected money into what the COUNTER will actually
  * collect and what was already collected upstream.
  *
@@ -157,12 +190,14 @@ export function buildForecastSeries({ startIso, days = 30, committedByDay = new 
  * @param {boolean|null} r.isPrepaid   explicit flag when the source sets it
  * @param {Array<{code, chargeType, total, taxable}>} r.charges
  * @param {number} r.taxRatePct        pickup location's tax rate, for the estimate
+ * @param {string|null} r.bookingChannel  decides prepaid when isPrepaid is unset
  * @returns {{rate, fees, taxes, collectible, prepaid}}
  */
 export function splitExpectedMoney({
   estimatedTotal = 0, dailyRate = 0, alreadyPaid = 0, isPrepaid = null,
-  charges = null, taxRatePct = 0,
+  bookingChannel = null, charges = null, taxRatePct = 0,
 } = {}) {
+  const prepaidBooking = isPrepaidBooking({ isPrepaid, bookingChannel, dailyRate });
   const total = Number(estimatedTotal || 0);
   const paid = Number(alreadyPaid || 0);
   const zero = { rate: 0, fees: 0, taxes: 0, collectible: 0, prepaid: 0 };
@@ -181,9 +216,9 @@ export function splitExpectedMoney({
       else fees += amount;
     }
     const gross = round2(rate + fees + taxes);
-    // An explicitly prepaid booking has had its RATE settled upstream; the
-    // counter still collects fees and taxes.
-    const prepaidRate = isPrepaid === true ? round2(rate) : 0;
+    // A prepaid booking has had its RATE settled upstream; the counter still
+    // collects fees and taxes.
+    const prepaidRate = prepaidBooking ? round2(rate) : 0;
     const collectible = round2(Math.max(0, gross - prepaidRate - paid));
     return {
       rate: round2(rate), fees: round2(fees), taxes: round2(taxes),
@@ -191,10 +226,9 @@ export function splitExpectedMoney({
     };
   }
 
-  // No charge rows yet. dailyRate === 0 on a booking worth money means the
-  // rate lives with whoever sold it — nothing here is ours to collect.
-  const rateIsElsewhere = isPrepaid === true || Number(dailyRate || 0) <= 0;
-  if (rateIsElsewhere) {
+  // No charge rows yet: with nothing itemised, a prepaid booking has nothing
+  // for us to collect at all.
+  if (prepaidBooking) {
     return { rate: 0, fees: 0, taxes: 0, collectible: 0, prepaid: round2(total) };
   }
 
