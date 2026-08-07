@@ -146,12 +146,20 @@ export function buildForecastSeries({ startIso, days = 30, committedByDay = new 
  * dailyRate (up to $102.24), so the "rate is zero" heuristic alone silently
  * committed them.
  *
+ * ECONOMY and NU are here for the same reason, found the same way: on
+ * 2026-08-07 Corpusa had 647 upcoming FRANCHISE_ECONOMY and 186
+ * FRANCHISE_NU pickups and NOT ONE carried a rate, so every one was landing
+ * in the rate-shape fallback below. Right answer, reached by accident — the
+ * first one that arrives with a rate would have been committed. Naming them
+ * makes it a decision.
+ *
  * FRANCHISE_MEX is deliberately NOT here — MEX sells both prepaid and
  * pay-at-destination, decided per rate code (mex.constants classifyMexRateCode),
- * and the counter really does collect on POA bookings.
+ * and the counter really does collect on POA bookings. Its 3 upcoming IRC
+ * pickups all carry a rate, which is exactly the shape that should commit.
  */
 export const PREPAID_BOOKING_CHANNELS = Object.freeze(
-  String(process.env.CASHFLOW_PREPAID_CHANNELS || 'FRANCHISE_TL')
+  String(process.env.CASHFLOW_PREPAID_CHANNELS || 'FRANCHISE_TL,FRANCHISE_ECONOMY,FRANCHISE_NU')
     .split(',').map((c) => c.trim().toUpperCase()).filter(Boolean)
 );
 

@@ -324,3 +324,13 @@ test('a NULL dailyRate is the franchise-import shape, not a missing value', () =
   assert.equal(out.collectible, 0);
   assert.equal(out.prepaid, 210);
 });
+
+test("Corpusa's franchise channels are prepaid by decision, not by accident", () => {
+  // They were already excluded — via the rate-shape fallback, because not one
+  // of 833 upcoming pickups carried a rate. Naming them means the first one
+  // that DOES carry a rate still behaves.
+  for (const channel of ['FRANCHISE_ECONOMY', 'FRANCHISE_NU']) {
+    assert.equal(isPrepaidBooking({ bookingChannel: channel, dailyRate: 89 }), true, channel);
+    assert.equal(splitExpectedMoney({ estimatedTotal: 400, dailyRate: 89, bookingChannel: channel }).collectible, 0, channel);
+  }
+});
