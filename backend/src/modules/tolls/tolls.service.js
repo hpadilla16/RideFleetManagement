@@ -3762,31 +3762,45 @@ export const tollsService = {
       }
     }
 
-    // ---- Phase 6: single consolidated audit log entry --------------------------
+    // ---- Phase 6: consolidated audit log entry ---------------------------------
+    // AuditLog.reservationId is REQUIRED by the schema, and this write omitted
+    // it — so every bulk confirm since the feature shipped threw
+    // "Argument `reservation` is missing" into the empty catch below. The
+    // money always posted; the trail never did. Found 2026-08-07 while bulk
+    // confirming 186 tolls for International: 186 confirmed, 0 audit rows.
+    //
+    // One row PER touched reservation, which is also the shape the reservation
+    // audit tab reads — a single tenant-level row would have been invisible
+    // there anyway.
     if (touchedReservationIds.size && (confirmedCount + dispatchConfirmedCount) > 0) {
-      try {
-        const tenantId = transactions[0]?.tenantId || scope?.tenantId || null;
-        if (tenantId) {
-          await prisma.auditLog.create({
-            data: {
+      const tenantId = transactions[0]?.tenantId || scope?.tenantId || null;
+      if (tenantId) {
+        const metadata = JSON.stringify({
+          bulkTollConfirm: true,
+          requested: list.length,
+          confirmed: confirmedCount,
+          dispatchConfirmed: dispatchConfirmedCount,
+          skipped: skippedCount,
+          failed: failedCount,
+          touchedReservationIds: Array.from(touchedReservationIds),
+          note: noteHint
+        });
+        try {
+          await prisma.auditLog.createMany({
+            data: Array.from(touchedReservationIds).map((reservationId) => ({
               tenantId,
+              reservationId,
               actorUserId: actorUserId || null,
               action: 'UPDATE',
-              metadata: JSON.stringify({
-                bulkTollConfirm: true,
-                requested: list.length,
-                confirmed: confirmedCount,
-                dispatchConfirmed: dispatchConfirmedCount,
-                skipped: skippedCount,
-                failed: failedCount,
-                touchedReservationIds: Array.from(touchedReservationIds),
-                note: noteHint
-              })
-            }
+              metadata
+            }))
           });
+        } catch (auditErr) {
+          // Still best-effort — a money operation must not fail on its trail —
+          // but it is LOUD now, because a silent audit gap is the thing this
+          // block exists to prevent.
+          console.warn('[tolls] bulk confirm audit log failed', auditErr?.message);
         }
-      } catch {
-        // Audit log is best-effort — never block the response
       }
     }
 
