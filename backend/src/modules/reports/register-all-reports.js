@@ -12,6 +12,7 @@ import './agent-track-record.report.js';
 import './availability-forecast.report.js';
 import './reservations-by-day.report.js';
 import './payments-by-day.report.js';
+import './cash-flow.report.js';
 import './rental-status.report.js';
 import './sales.report.js';
 import './unpaid-balance.report.js';
