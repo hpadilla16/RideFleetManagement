@@ -316,17 +316,37 @@ export const incidentReportService = {
       html,
     ].join('\n');
 
+    // The attachment is a REAL PDF (2026-08-07, Sentry f36960357ba5):
+    // MailerSend content-sniffs every attachment against its filename and
+    // rejected the .html one with MS42202 ("Filename and attached file does
+    // not match"), 422-ing the whole send. A PDF's magic bytes always agree
+    // with .pdf — and a PDF is the better deliverable for the insurance and
+    // third parties these reports go to. The filename is sanitized because
+    // the sniff-vs-name check is also known to trip on odd characters.
+    // Fallback: if the PDF render fails, attach the HTML as before — a
+    // maybe-rejected attachment beats losing the send entirely.
+    const safeName = String(row.reportNumber).replace(/[^A-Za-z0-9._-]+/g, '-');
+    let attachments;
+    try {
+      const { renderReportPdf } = await import('../reports/reports-export.js');
+      const pdf = await renderReportPdf(html);
+      attachments = [{ filename: `${safeName}.pdf`, content: pdf, contentType: 'application/pdf' }];
+    } catch (pdfErr) {
+      console.warn('[incident-report] PDF render failed — attaching HTML fallback', row.reportNumber, pdfErr?.message);
+      attachments = [{
+        filename: `${safeName}.html`,
+        // Raw Buffer — the mailer's toBase64() encodes exactly once.
+        content: Buffer.from(html, 'utf8'),
+        contentType: 'text/html',
+      }];
+    }
+
     await sendEmail({
       to: recipient,
       subject,
       html: bodyHtml,
       text: `${noteText ? `${noteText}\n\n` : ''}Incident report ${row.reportNumber} is attached.`,
-      attachments: [{
-        filename: `${row.reportNumber}.html`,
-        // Raw Buffer — the mailer's toBase64() encodes exactly once.
-        content: Buffer.from(html, 'utf8'),
-        contentType: 'text/html',
-      }],
+      attachments,
     });
 
     return { ok: true, reportNumber: row.reportNumber, to: recipient };
