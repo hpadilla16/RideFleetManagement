@@ -97,3 +97,141 @@ Garantías que S30 se compromete a cumplir (= acceptance tests del lib):
 Seam del kiosk: `backend/src/modules/kiosk/kiosk-smart-match.js` (una línea
 cuando el lib aterrice). Los detalles de PII/masking son del kiosk (el lib
 solo entrega ids). Aviso al kiosk team cuando el lib esté en el árbol.
+
+
+---
+
+# ✅ LIB ATERRIZADO — beta.331 (2026-07-19, commit 589cc82)
+
+`backend/src/lib/reservation-smart-match.js` está en el árbol y el seam del
+kiosk (`kiosk-smart-match.js`, B3g) quedó **CONECTADO** en el mismo tag (lambda
+que inyecta prisma — el single-arg contract del seam intacto). El kiosk gana
+variant-matching en find_reservation al deployar beta.331. test:kiosk 127/127
+con el seam vivo. Nota para el kiosk team: el matcher pasó Innovation+QA con
+2 hardenings de privacidad (el stub del ROUTE de VozIA ya no expone id/fecha
+exacta) — NO afecta su lado: el lib les sigue devolviendo reservation.id en
+cada entry (guarantee #2 del freeze intacta; su re-fetch scoping aplica igual).
+
+---
+
+# 🔁 PATRÓN DE VARIANTE NUEVO — pass 5, tolerancia a cero inicial (2026-08-06)
+
+Registrado aquí porque la regla #6 del freeze lo pide: variante nueva
+descubierta en el field → al lib compartido **y a este doc**.
+
+**El caso real.** Un cliente en el baggage claim de SJU dictó su código a
+Chloe: *"r e s one zero seven one six zero"* (= `RES-107160`). Llegó al lookup
+como **`RES0107160`** — un cero de más al frente — en 3 de 5 intentos. Ninguno
+matcheó y el cliente se quedó sin guagua.
+
+**Qué hace pass 5.** Después de generar las variantes de siempre, para cada
+candidato cuya cola (tras un prefijo conocido) sea **solo dígitos y empiece en
+`0`**, añade la misma variante sin los ceros iniciales.
+
+**Los límites, a propósito:**
+- Solo cola **all-digit** — `TL0ZE409` NO se toca (una cola alfanumérica es un
+  código real, no un artefacto de transcripción).
+- Solo **ceros iniciales** — un dígito de más en cualquier otra posición sigue
+  siendo un miss. Es una pasada estrecha y diseñada, no un fuzzy match.
+- El resultado debe quedar en **≥3 caracteres** — `RES00012` no produce
+  `RES-12`, que matchearía demasiado ancho.
+- Se **añade al final** de la lista, así que nunca supera en ranking a un match
+  genuino, y `exact` se sigue calculando solo contra `variants[0]`. Una fila
+  encontrada por esta tolerancia es siempre `matchType: 'variant'` → **sigue
+  enmascarada** hasta que el que llama pruebe un dato. Pass 5 en sí no cambia
+  el gate; lo que sí lo cambia es la sección de abajo, y hay que leer las dos
+  juntas — el abanico de variantes es justo la población que el comparador de
+  apellidos gobierna.
+- `take` de la query pasó a `Math.max(MAX_CANDIDATES, variants.length)`: el
+  peor caso de variantes subió de 8 a 16 y la query no tiene `orderBy`, así que
+  el cap viejo podía botar un candidato arbitrario.
+
+**Colisiones, medidas (no argumentadas).** Un unmask equivocado necesitaría que
+existieran `P+"0"+D` y `P+D` en el MISMO tenant y con el MISMO apellido.
+Consulta contra prod 2026-08-06: **0 pares colisionando, 0 con apellido igual.**
+Y aun colisionando, ambos volverían enmascarados.
+
+**Impacto para el kiosk:** un typo de teclado numérico con cero inicial que
+antes daba 404 ahora resuelve, enmascarado, por el camino normal. El
+short-circuit de `findFirst` exacto en `kiosk-session.service.js` corre antes,
+así que un código bien tecleado ni llega al matcher. `test:kiosk` 148/148.
+
+**Suite:** el test del matcher (`reservation-smart-match.test.mjs`) llevaba
+desde S30 **sin correr en ningún script de npm** — huérfano. Ahora es
+`npm run test:smart-match` y está en la cadena de `npm test` **y en el step
+DB-free de `beta-ci.yml`** — la cadena de npm sola no bastaba: aborta en el
+suite #8 por falta de Postgres y nunca llega al final, así que el test habría
+quedado huérfano por un segundo mecanismo. 24/24.
+
+---
+
+# 🔒 CAMBIO DE SEMÁNTICA DEL GATE (2026-08-06, decisión de Hector)
+
+Dos mitades opuestas, y hay que leerlas juntas.
+
+**(a) CERRADO PARA EL APELLIDO — la instancia de la FECHA sigue ABIERTA.** Un
+dato que SELECCIONA un candidato no puede PROBARLO. La búsqueda
+por nombre matchea tokens contra `firstName` OR `lastName`; aceptar el apellido
+como verificación dejaba que UNA sola cadena adivinada encontrara la reserva de
+un extraño y la destapara. Medido por QA: unmask completo —número, fecha
+exacta, status y el **cuid interno** que `maskCandidate` esconde a propósito—
+partiendo de un nombre de dos palabras. `candidateMatchesVerification` recibe
+ahora `{ matchType }` y con `matchType === 'name'` **ignora `verifyLastName`**:
+ahí solo vale `verifyPickupDate`, que la búsqueda no usó.
+
+**(b) El apellido se compara por TOKEN, no como cadena completa**
+(`lastNameMatches`). Un huésped cuya reserva dice "Gonzalez Perez" nunca pasaba
+el gate diciendo "Perez" — y en PR medio mundo carga dos apellidos y dice uno.
+
+**QUÉ GOBIERNA EXACTAMENTE ESTE COMPARADOR — importa, y la primera versión de
+esta nota lo tenía al revés.** En la ruta, `exact` hace corto-circuito a
+verificado *antes* de llamarlo, y `name` tiene su apellido ignorado por (a).
+Así que el comparador decide **una sola población: los candidatos `variant`** —
+o sea filas que el matcher ADIVINÓ expandiendo prefijos y ceros. Un "107160"
+dictado abre RES-/TL-/NU-/ECON-/FW-/ADV-107160, y **como máximo una es del que
+llama**; el resto son de extraños. No es "ya probó que tiene el número": es
+precisamente donde NO lo probó. Por eso el comparador tiene que ser estrecho.
+
+Los dos límites que lo hacen sostenible, ambos encontrados rompiéndolo:
+- **Stoplist de partículas.** Sin ella, "De Jesus" destapaba a "De La Cruz": el
+  token compartido era `de`. En PR esa partícula está en todos lados, así que
+  el hueco era más ancho justo donde el cambio pretendía ayudar. Se descartan
+  `de del la las lo los el y da das do dos di du le van von san santa st saint`.
+- **Cap de 2 tokens del lado hablado.** Sin cap, una sola petición valía N
+  intentos: una bolsa de once apellidos comunes matcheaba casi cualquier fila.
+  El lado ALMACENADO no se capea — ese es autoritativo.
+- El mínimo de token queda en 2 chars, no 3: `Ng`, `Li`, `Wu` son apellidos
+  reales y fallarlos solo empuja al huésped honesto a la fecha de pickup.
+
+**Medición en prod con el predicado correcto** (traslape de token sobre el
+abanico COMPLETO de prefijos — el bare core igual dentro del mismo tenant, no
+solo la familia de ceros): **0 pares colisionando, 0 compartiendo token de
+apellido.** Hoy no hay instancia viva; los límites de arriba son estructurales,
+no dependen de ese cero.
+
+Más suelto donde el que llama ya probó algo, más estricto donde el propio
+nombre hizo el hallazgo. Consumidor único: la ruta `/smart-lookup`.
+
+**⚠️ ABIERTO — la MITAD de fecha del mismo oráculo, y es la barata.** Los
+params `from`/`to` de la ruta se convierten en el `dateWindow` del matcher, que
+FILTRA la búsqueda por nombre por `pickupAt`. O sea la fecha **selecciona** la
+población. Y `verifyPickupDate` **prueba** por fecha. Es exactamente la misma
+clase que (a), sin cerrar.
+
+Peor que un simple resto simétrico: si atas `from=to=X` y `verifyPickupDate=X`,
+todo lo que vuelve verifica, así que `isFailedVerifyProbe` da false y **el
+barrido no cuesta NI UNA ranura del throttle** — hasta 10 filas destapadas por
+petición, día por día. Gratis para el que barre, mientras al huésped honesto sí
+se le cobraba (eso último ya está arreglado).
+
+Es **preexistente** — los dos params son de antes de este arco — y no es
+alcanzable por Chloe: el `HttpAdapter` de Valet nunca manda `from`/`to`. Pero
+este cambio **encamina tráfico hacia ahí** (el `nextStep` ahora dice "pídele la
+fecha exacta de pickup … verifyPickupDate"), así que hereda el volumen. Lo
+correcto es lo mismo que se hizo con el apellido: si la fecha acotó la
+población, la fecha no puede ser la prueba.
+
+**PENDIENTE para el kiosk (no lo tocamos):** `kiosk-session.service.js` sigue
+comparando el apellido con `equals` de cadena completa, así que el huésped con
+dos apellidos SIGUE trancado en el kiosk — que es el camino de más volumen. El
+objetivo de negocio de Hector está a medias hasta que eso se atienda.

@@ -75,7 +75,13 @@ jobs:
         # NOTE: they are also wired into `npm test`, but that chain currently
         # hangs at an early suite lacking --test-force-exit, so it cannot be
         # relied on as the automatic gate. Run them explicitly here.
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift
+        #   - test:smart-match: the reservation code matcher (shared with the
+        #     kiosk) AND the guard that every test:* script is reachable from
+        #     `npm test`. Wiring that suite into the npm chain alone was NOT
+        #     enough — the chain aborts long before reaching it, so the suite
+        #     would have stayed effectively orphaned by a second mechanism
+        #     (QA M3, 2026-08-06). DB-free, 0.2s.
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:

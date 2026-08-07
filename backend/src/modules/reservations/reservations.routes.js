@@ -32,7 +32,7 @@ import { maybeUploadCustomerDocument } from '../customers/customer-documents.js'
 import { idempotency } from '../../middleware/idempotency.js';
 import { validateVoziaNotePayload, buildVoziaNoteLine } from './vozia-note.js';
 import { smartMatchReservation, maskCandidate, candidateMatchesVerification } from '../../lib/reservation-smart-match.js';
-import { verifyProbeThrottle } from '../../lib/verify-probe-throttle.js';
+import { verifyProbeThrottle, isFailedVerifyProbe } from '../../lib/verify-probe-throttle.js';
 import {
   validateVoziaCancelPayload,
   validateVoziaReschedulePayload,
@@ -487,7 +487,8 @@ reservationsRouter.get('/smart-lookup', async (req, res, next) => {
 
     const candidates = matches.map((m) => {
       const verified =
-        m.matchType === 'exact' || candidateMatchesVerification(m.reservation, verify);
+        m.matchType === 'exact' ||
+        candidateMatchesVerification(m.reservation, verify, { matchType: m.matchType });
       if (!verified) return { ...maskCandidate(m), verified: false };
       const c = m.reservation.customer || {};
       return {
@@ -501,8 +502,11 @@ reservationsRouter.get('/smart-lookup', async (req, res, next) => {
         status: m.reservation.status
       };
     });
-    if (throttleApplies && candidates.some((c) => c.verified === false)) {
-      // A verify attempt that left >=1 candidate masked = one failed probe.
+    // See isFailedVerifyProbe for the two things this predicate is NOT:
+    // "nothing verified" (gives away the pin-and-guess attack) and "charge
+    // anything that stayed masked" (bills the honest guest for a verification
+    // that could never have succeeded).
+    if (throttleApplies && isFailedVerifyProbe(candidates, verify)) {
       // recordFailure is fail-open internally (never throws, times out fast).
       await verifyProbeThrottle.recordFailure(throttlePrincipal);
     }

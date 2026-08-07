@@ -24,12 +24,63 @@
  * not per-process memory: ~10 probes spread over 4 workers would never trip a
  * local counter.
  *
- * Self-contained on purpose: does NOT import from tenant-rate-limit.js, so
- * the S30 ship script can stage this workstream without dragging that shared
- * middleware's pending (separate-workstream) changes into the commit.
+ * Deliberately does NOT import from tenant-rate-limit.js, so a ship script can
+ * stage this workstream without dragging that shared middleware's pending
+ * (separate-workstream) changes into the commit. It DOES import
+ * isVerifiablePickupDate from reservation-smart-match.js — the two files always
+ * ship together, and the alternative was a second copy of the date rule, which
+ * is exactly how the throttle and the verifier drifted apart in the first
+ * place (2026-08-06).
  */
 
 import logger from './logger.js';
+import { isVerifiablePickupDate } from './reservation-smart-match.js';
+
+/**
+ * Did this verify attempt fail? ONE definition, in one place, because the two
+ * plausible-looking predicates leave opposite holes and the difference is not
+ * visible at the call site.
+ *
+ * Charge whenever ANY candidate stayed masked — including when another one in
+ * the same response verified. That case is not a success, it is the cheapest
+ * attack this gate has: a caller who pins one token to a surname they already
+ * own and spends the other on a guess. Their own row verifies, the stranger's
+ * stays masked, and a "did anything verify?" predicate waves it through for
+ * free (QA B2, 2026-08-06 — measured; the guess space is small because the
+ * masked stub already discloses the first name and last initial).
+ *
+ * NOT charged: zero candidates. Tempting, since a verify-carrying code sweep
+ * looks like probing — but the same sweep WITHOUT verify params skips this
+ * throttle entirely and still returns masked stubs, so charging closes no
+ * channel. It does cost: VozIA is a single service account, so the bucket is
+ * tenant-wide, and a mistranscribed code (Chloe's most common failure by far)
+ * returns zero candidates. Five of those in ten minutes would 429 every honest
+ * guest in the tenant — an outage triggered by the exact defect this whole
+ * change exists to fix (QA M-B).
+ *
+ * NOT charged either: an attempt where the datum supplied COULD NOT have
+ * verified anything. Since a name-selected candidate ignores the surname (the
+ * string that found it cannot prove it), "name search + the caller's real
+ * surname" is deterministically unwinnable — and charging it means the honest
+ * guest answering the question Chloe just asked burns a slot every time, with
+ * the whole voice channel sharing one bucket. Ten of those and the tenant 429s,
+ * including the code happy path this work exists to fix (QA, 2026-08-06).
+ * There is nothing to rate-limit: a structurally impossible verification
+ * returns no information, so the charge buys availability loss and no defense.
+ */
+export function isFailedVerifyProbe(candidates, verify = {}) {
+  if (!Array.isArray(candidates)) return false;
+  const rows = candidates.filter(Boolean);
+  // A pickup date can prove any candidate; a surname only one the name search
+  // did not select.
+  // isVerifiablePickupDate, NOT truthiness: a date the verifier will discard
+  // ("08/06/2026", "ayer", " ") could never have proved anything, and charging
+  // for it also defeats the surname carve-out right below.
+  const couldVerify =
+    isVerifiablePickupDate(verify.pickupDate) ||
+    (Boolean(verify.lastName) && rows.some((c) => c.matchType !== 'name'));
+  return couldVerify && rows.some((c) => c.verified === false);
+}
 
 const REDIS_URL = process.env.REDIS_URL || '';
 

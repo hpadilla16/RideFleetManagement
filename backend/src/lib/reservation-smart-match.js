@@ -61,6 +61,22 @@ export function generateCodeVariants(raw) {
     // 4. The OTA gave them the bare source ref → try every import prefix.
     for (const p of KNOWN_PREFIXES) push(`${p}${clean}`);
   }
+
+  // 5. Leading-zero tolerance. A code read aloud picks up a stray leading zero
+  //    on the way through transcription: measured in a live Chloe call
+  //    (2026-08-06) where the caller said "r e s one zero seven one six zero"
+  //    for RES-107160 and the lookup arrived as RES0107160 — three times.
+  //    Bounded HARD: an ALL-DIGIT tail only, leading zeros only, and appended
+  //    LAST so a genuine match always outranks it. If both codes happen to
+  //    exist, both come back as candidates — already this matcher's contract,
+  //    and each stays masked until the caller proves a datum.
+  for (const v of [...out]) {
+    const p = KNOWN_PREFIXES.find((k) => v.startsWith(k));
+    const tail = p ? v.slice(p.length) : v;
+    if (!/^0\d{2,}$/.test(tail)) continue;
+    const stripped = tail.replace(/^0+/, '');
+    if (stripped.length >= 3) push(`${p ?? ''}${stripped}`);
+  }
   return out;
 }
 
@@ -97,7 +113,11 @@ export async function smartMatchReservation({ code, name, dateWindow, tenantId }
         OR: variants.map((v) => ({ reservationNumber: { equals: v, mode: 'insensitive' } })),
       },
       select,
-      take: MAX_CANDIDATES,
+      // Never fewer rows than variants asked for. Pass 5 doubled the worst
+      // case (8 -> 16) past this cap, and the query has no orderBy — so a
+      // truncation that used to be structurally impossible would silently
+      // drop an arbitrary candidate (Innovation SC2).
+      take: Math.max(MAX_CANDIDATES, variants.length),
     });
     // Rank by which variant matched (variant order is already best-first;
     // variants[0] IS the cleaned input — same normalization, incl. the
@@ -177,22 +197,106 @@ export function maskCandidate({ reservation, matchType, confidence }) {
   };
 }
 
+const foldName = (s) =>
+  String(s ?? '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+/**
+ * Connectives that carry no identity. "De La Cruz" and "De Jesús" are not the
+ * same family, but they share "de" — and with plain token containment that
+ * particle was a full-strength proof of identity. QA demonstrated the unmask:
+ * a caller giving their own truthful "De Jesus" pulled a stranger's "De La
+ * Cruz" out of the same prefix fan-out. In Puerto Rico these particles are
+ * everywhere, so this was worst exactly where the change was meant to help.
+ */
+const SURNAME_PARTICLES = new Set([
+  'de', 'del', 'la', 'las', 'lo', 'los', 'el', 'y', 'da', 'das', 'do', 'dos',
+  'di', 'du', 'le', 'van', 'von', 'san', 'santa', 'st', 'saint',
+]);
+
+/** How many spoken tokens may be offered at once. Uncapped, one request was N
+ *  guesses: a bag of eleven common surnames matched almost any row (QA). Real
+ *  callers say one surname, at most a compound pair. */
+const MAX_SPOKEN_TOKENS = 2;
+
+/** Comparable surname tokens: accent- and case-folded, 2+ chars so a bare
+ *  initial is never a token, particles dropped. Kept at 2 (not 3) because
+ *  short surnames — Ng, Li, Wu — are real, and failing them closed would just
+ *  push honest guests onto the pickup-date path for no security gain. */
+function surnameTokens(v) {
+  return foldName(v)
+    .replace(/[^a-z\s]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length > 1 && !SURNAME_PARTICLES.has(t));
+}
+
+/**
+ * Does a spoken surname belong to this booking?
+ *
+ * TOKEN CONTAINMENT, not whole-string (Hector's decision, 2026-08-06). Whole
+ * string meant a guest whose booking reads "Gonzalez Perez" could never get
+ * past the gate by saying "Perez" — and half of Puerto Rico carries two
+ * surnames, so the honest guest was the one it stopped. Either side may be the
+ * longer form; one shared token is enough.
+ *
+ * KNOW WHAT THIS ACTUALLY GOVERNS. An `exact` candidate short-circuits to
+ * verified in the route and never reaches here; a `name` candidate has its
+ * surname ignored (below). So this comparator decides exactly one population:
+ * `variant` candidates — rows the matcher GUESSED by expanding prefixes and
+ * leading zeros. A spoken "107160" fans out to RES-/TL-/NU-/ECON-/FW-/ADV-
+ * 107160, and at most one of those is the caller's. Everything else in that
+ * list belongs to a stranger, which is why the comparator has to be narrow:
+ * it is the only thing standing between a caller's own truthful surname and
+ * somebody else's booking.
+ */
+export function lastNameMatches(spoken, onFile) {
+  // The spoken side is capped; the stored side is authoritative and is not.
+  const a = surnameTokens(spoken).slice(-MAX_SPOKEN_TOKENS);
+  const b = surnameTokens(onFile);
+  if (!a.length || !b.length) return false;
+  return a.some((t) => b.includes(t));
+}
+
+/**
+ * Is this pickup date usable as proof at all?
+ *
+ * THE ONE definition, exported, because there were briefly two: the verifier
+ * required `YYYY-MM-DD` and silently discarded anything else, while the
+ * throttle only asked "is a date present?". A caller saying "08/06/2026" or
+ * "ayer" therefore bought a charge for a verification that could not run — and
+ * paired with a surname it defeated the carve-out that keeps an honest guest
+ * from paying. Since `verifyPickupDate` is a free-form string an LLM fills in,
+ * that is a formatting slip, not an attack (QA, 2026-08-06).
+ */
+export function isVerifiablePickupDate(v) {
+  return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.trim());
+}
+
 /**
  * Server-side identity gate: does the caller-provided datum actually belong
- * to this candidate? Verified ⇒ the route may unmask. lastName is compared
- * whole (not a prefix) so "P" can never verify "Pérez". pickupDate tolerates
+ * to this candidate? Verified ⇒ the route may unmask. pickupDate tolerates
  * ±1 day (Innovation SC1: UTC-vs-Florida rollover would fail an honest guest
  * with an evening pickup; 3 dates out of a ~36,500 guess space stays closed).
+ *
+ * `matchType` is how the candidate was FOUND, and it is load-bearing — see
+ * the name-search carve-out below.
  */
-export function candidateMatchesVerification(reservation, { lastName, pickupDate } = {}) {
+export function candidateMatchesVerification(reservation, { lastName, pickupDate } = {}, { matchType } = {}) {
   const checks = [];
-  if (typeof lastName === 'string' && lastName.trim()) {
-    // Accent-insensitive (NFD strip): voice transcription says "Perez", the
-    // row says "Pérez" — same person. Still full-string, still fail-closed.
-    const fold = (s) => String(s ?? '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-    checks.push(fold(lastName) === fold(reservation.customer?.lastName));
+  // A datum that SELECTED a candidate can never also PROVE it.
+  //
+  // The name search matches tokens against firstName OR lastName, so honoring
+  // the last name here let ONE guessed string both find a stranger's booking
+  // and unmask it — a self-answering oracle. QA demonstrated the full unmask
+  // on 2026-08-06: number, exact date, status and the internal cuid that
+  // maskCandidate deliberately withholds, out of a two-token name and nothing
+  // else. That directly contradicted the guarantee the route advertises.
+  //
+  // For a name-selected candidate the caller must produce something the search
+  // did NOT use: the exact pickup date (or come back with the code).
+  if (matchType !== 'name' && typeof lastName === 'string' && lastName.trim()) {
+    checks.push(lastNameMatches(lastName, reservation.customer?.lastName));
   }
-  if (typeof pickupDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(pickupDate.trim())) {
+  if (isVerifiablePickupDate(pickupDate)) {
     // Calendar-day distance (both sides at UTC midnight), so a 14:00Z pickup
     // doesn't skew the tolerance window.
     const pickupDay = reservation.pickupAt instanceof Date

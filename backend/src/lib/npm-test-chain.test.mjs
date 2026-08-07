@@ -1,0 +1,177 @@
+// A test suite that nobody runs is worse than no test suite: it reports
+// safety it never checked. Two ways that happens here, and the first version
+// of this guard only caught the second one.
+//
+// WHY: `reservation-smart-match.test.mjs` — 17 tests including a prefix-drift
+// guard — sat in the tree since S30 named by NO script at all. It had never
+// run. The bug it would have caught (a spoken code with a stray leading zero)
+// cost a customer his airport shuttle on 2026-08-06. That is an orphan FILE.
+// This guard originally only checked orphan SCRIPTS, so it would not have
+// caught the incident it was written for — and one of the files it was
+// missing was `verify-probe-throttle.test.mjs`, the suite for the only rate
+// control on the smart-lookup privacy gate (QA, 2026-08-06).
+//
+// So there are two checks. Scripts: every `test:*` must be reachable from
+// `npm test`; the exceptions live in KNOWN_OUT with a reason. Files: the set
+// of test files named by no script is a RATCHET — the 50 that already existed
+// are grandfathered, and a new one cannot join them. Grandfathering is honest
+// about what was verified: nobody audited those 50, and pretending otherwise
+// with individual "reasons" would be a worse lie than the list.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+
+const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+
+const KNOWN_OUT = {
+  // Hangs without --test-force-exit (open prisma handle) — it would wedge the
+  // whole chain. Fix the script, then delete this line.
+  'test:toll-void-credit': 'hangs: no --test-force-exit',
+  'test:route-handlers': 'hangs: no --test-force-exit',
+  // Need a reachable Postgres; the chain must stay runnable on a laptop.
+  'test:module-access-audit': 'DB-backed (.db.test.mjs)',
+  'test:customer-inspection': 'DB-backed',
+  'test:customer-docs-backfill': 'DB-backed (storage backfill script)',
+  // Landed on main in the 194 commits between this branch and prod, already
+  // orphaned when this guard arrived. Grandfathered UNAUDITED — wiring another
+  // session's suite into CI sight-unseen is how the chain gets wedged. Each
+  // one is a real suite nobody runs; audit and wire them, then delete the line.
+  'test:age-rules': 'inherited from main 2026-08-06, unaudited',
+  'test:custom-reports-multi': 'inherited from main 2026-08-06, unaudited',
+  'test:airport-lawa': 'inherited from main 2026-08-06, unaudited',
+  'test:checkin-email': 'inherited from main 2026-08-06, unaudited',
+};
+
+/**
+ * Tokenized, NOT substring. `chain.includes('npm run test:maintenance')` is
+ * satisfied by `npm run test:maintenance-scope`, which silently exempted seven
+ * script names from this very guard (QA m1) — a guard with a blind spot the
+ * shape of the bug it is watching for.
+ */
+function chainScripts() {
+  return new Set(
+    (pkg.scripts.test ?? '')
+      .split('&&')
+      .map((s) => s.trim())
+      .filter((s) => s.startsWith('npm run '))
+      .map((s) => s.slice('npm run '.length).trim()),
+  );
+}
+
+test('every test:* script is reachable from `npm test`', () => {
+  const chain = chainScripts();
+  const orphans = Object.keys(pkg.scripts)
+    .filter((k) => k.startsWith('test:'))
+    .filter((k) => !chain.has(k))
+    .filter((k) => !(k in KNOWN_OUT));
+  assert.deepEqual(
+    orphans,
+    [],
+    `Orphaned suite(s) — add to the "test" chain, or to KNOWN_OUT with a reason: ${orphans.join(', ')}`,
+  );
+});
+
+test('KNOWN_OUT does not outlive the scripts it excuses', () => {
+  // A stale excuse is how the allowlist turns into a place to hide things.
+  const stale = Object.keys(KNOWN_OUT).filter((k) => !(k in pkg.scripts));
+  assert.deepEqual(stale, [], `KNOWN_OUT names script(s) that no longer exist: ${stale.join(', ')}`);
+  const chain = chainScripts();
+  const wired = Object.keys(KNOWN_OUT).filter((k) => chain.has(k));
+  assert.deepEqual(wired, [], `KNOWN_OUT names script(s) that ARE in the chain now: ${wired.join(', ')}`);
+});
+
+/**
+ * Test files named by no script, as of 2026-08-06. NOT an approval — a
+ * high-water mark. Deleting an entry (by wiring the file into a script) is
+ * always welcome; adding one requires a deliberate edit here, which is the
+ * whole point.
+ */
+const UNRUN_FILES_BASELINE = new Set([
+  'src/lib/integration-crypto.test.mjs',
+  'src/lib/prisma.test.mjs',
+  'src/lib/queue/priorities.test.mjs',
+  'src/lib/storage/supabase-storage.test.mjs',
+  'src/lib/tenant-routing.test.mjs',
+  'src/middleware/endpoint-load-sampler.test.mjs',
+  'src/middleware/tenant-rate-limit.test.mjs',
+  'src/modules/booking-engine/car-sharing-discovery.test.mjs',
+  'src/modules/checkout-session/age-rules-gate.test.mjs',
+  'src/modules/checkout-session/checkout-session.scheduler.test.mjs',
+  'src/modules/checkout-session/spin-charge.test.mjs',
+  'src/modules/checkout-session/state-machine.test.mjs',
+  'src/modules/checkout-session/terms-signing.test.mjs',
+  'src/modules/citations/citations-archive.test.mjs',
+  'src/modules/customer-portal/customer-portal-rate-limit.test.mjs',
+  'src/modules/customers/customer-doc-endpoints.embedded.test.mjs',
+  'src/modules/customers/customer-phone-normalize.embedded.test.mjs',
+  'src/modules/fees/fee-rate-audit.service.test.mjs',
+  'src/modules/fees/fee-rates.routes.test.mjs',
+  'src/modules/fees/fee-rates.service.test.mjs',
+  'src/modules/fees/fees-cache.test.mjs',
+  'src/modules/integrations/tl-international/duplicate-detector.test.mjs',
+  'src/modules/integrations/tl-international/mapper.test.mjs',
+  'src/modules/integrations/tl-international/promotion-matcher.service.test.mjs',
+  'src/modules/integrations/tl-international/tl-international.routes.test.mjs',
+  'src/modules/integrations/tl-international/tl-international.service.test.mjs',
+  'src/modules/integrations/tl-international/tl-international.worker.stealth.test.mjs',
+  'src/modules/integrations/tl-international/tl-international.worker.test.mjs',
+  'src/modules/inventory/inventory-logic.test.mjs',
+  'src/modules/market-scraper/market-vendor.test.mjs',
+  'src/modules/market-scraper/pricing-tiers.test.mjs',
+  'src/modules/market-scraper/pricing-utilization.test.mjs',
+  'src/modules/payment-gateway/ipos-auth.test.mjs',
+  'src/modules/payment-gateway/ipos-transact-client.test.mjs',
+  'src/modules/rental-agreements/duplicate-charges.test.mjs',
+  'src/modules/rental-agreements/inspection-photos-hardened.test.mjs',
+  'src/modules/rental-agreements/inspection-photos.test.mjs',
+  'src/modules/rental-agreements/rental-agreements-compact-response.test.mjs',
+  'src/modules/rental-agreements/slim-response-contracts.test.mjs',
+  'src/modules/reports/availability.report.test.mjs',
+  'src/modules/reports/fleet-status.report.test.mjs',
+  'src/modules/reports/rental-status.report.test.mjs',
+  'src/modules/reports/reservations-by-day.report.test.mjs',
+  'src/modules/reports/unpaid-balance.report.test.mjs',
+  'src/modules/reports/upcoming-vehicle-sales.report.test.mjs',
+  'src/modules/reports/utilization.report.test.mjs',
+  'src/modules/reservations/list-page-date-filter.test.mjs',
+  'src/modules/reservations/list-page-shape.test.mjs',
+  'src/modules/reservations/notes-updated-at.test.mjs',
+  'src/modules/reservations/reservation-summary-counters.test.mjs',
+  'src/modules/reservations/start-rental-compact.test.mjs',
+  'src/modules/tolls/tolls-scoring.test.mjs',
+  'src/modules/vehicles/mileage-history.service.test.mjs',
+]);
+
+function testFiles(dir) {
+  return readdirSync(dir).flatMap((name) => {
+    const p = join(dir, name);
+    return statSync(p).isDirectory() ? testFiles(p) : p.endsWith('.test.mjs') ? [p] : [];
+  });
+}
+
+test('no NEW test file is left unrun by every script', () => {
+  const named = new Set();
+  for (const cmd of Object.values(pkg.scripts)) {
+    for (const m of String(cmd).matchAll(/[\w./-]+\.test\.mjs/g)) named.add(m[0]);
+  }
+  const unrun = testFiles('src').filter((f) => !named.has(f));
+  const added = unrun.filter((f) => !UNRUN_FILES_BASELINE.has(f));
+  assert.deepEqual(
+    added,
+    [],
+    `Test file(s) that no script runs — name them in a test:* script: ${added.join(', ')}`,
+  );
+});
+
+test('the baseline shrinks, never silently rots', () => {
+  // An entry that no longer exists, or is now wired, must leave the list —
+  // otherwise the high-water mark drifts upward without anyone deciding.
+  const named = new Set();
+  for (const cmd of Object.values(pkg.scripts)) {
+    for (const m of String(cmd).matchAll(/[\w./-]+\.test\.mjs/g)) named.add(m[0]);
+  }
+  const all = new Set(testFiles('src'));
+  const stale = [...UNRUN_FILES_BASELINE].filter((f) => !all.has(f) || named.has(f));
+  assert.deepEqual(stale, [], `Baseline entries to delete (gone or now wired): ${stale.join(', ')}`);
+});
