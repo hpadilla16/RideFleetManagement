@@ -32,6 +32,7 @@ import {
   expectedInflow,
   committedByDayFrom,
   splitExpectedMoney,
+  isPrepaidBooking,
   summarize,
   round2,
   addIsoDays,
@@ -182,7 +183,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
       },
       select: {
         id: true, reservationNumber: true, pickupAt: true, estimatedTotal: true,
-        dailyRate: true, isPrepaid: true,
+        dailyRate: true, isPrepaid: true, bookingChannel: true,
         payments: { where: { status: 'PAID' }, select: { amount: true } },
         charges: { select: { code: true, chargeType: true, total: true, taxable: true, selected: true } },
         pickupLocation: { select: { taxRate: true } },
@@ -202,6 +203,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
         dailyRate: r.dailyRate,
         alreadyPaid: paid,
         isPrepaid: r.isPrepaid,
+        bookingChannel: r.bookingChannel,
         charges: r.charges,
         taxRatePct: Number(r.pickupLocation?.taxRate || 0),
       });
@@ -233,7 +235,7 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
       },
       select: {
         id: true, agreementNumber: true, balance: true,
-        reservation: { select: { id: true, reservationNumber: true, returnAt: true } },
+        reservation: { select: { id: true, reservationNumber: true, returnAt: true, bookingChannel: true, isPrepaid: true } },
       },
     });
     for (const a of openAgreements) {
@@ -357,8 +359,11 @@ async function dayDrillDownHandler(req, res, ctx) {
       },
       select: {
         id: true, reservationNumber: true, estimatedTotal: true, pickupAt: true,
+        dailyRate: true, isPrepaid: true, bookingChannel: true,
         customer: { select: { firstName: true, lastName: true } },
         payments: { where: { status: 'PAID' }, select: { amount: true } },
+        charges: { select: { code: true, chargeType: true, total: true, taxable: true, selected: true } },
+        pickupLocation: { select: { taxRate: true } },
       },
     }),
     prisma.rentalAgreement.findMany({
@@ -367,29 +372,57 @@ async function dayDrillDownHandler(req, res, ctx) {
         ...(locationId ? { reservation: { pickupLocationId: locationId } } : {}),
         reservation: { returnAt: { gte: start, lt: end }, ...(locationId ? { pickupLocationId: locationId } : {}) },
       },
-      select: { id: true, agreementNumber: true, balance: true, reservation: { select: { reservationNumber: true, returnAt: true } } },
+      select: { id: true, agreementNumber: true, balance: true, reservation: { select: { reservationNumber: true, returnAt: true, bookingChannel: true, isPrepaid: true } } },
     }),
   ]);
 
   const rows = [
+    // The drill-down MUST use the same split as the series (Hector, 2026-08-07:
+    // the chart already excluded the prepaid TL bookings, but clicking the day
+    // still listed their full estimatedTotal — a list that contradicts the
+    // chart above it is worse than either alone).
     ...pickups.map((r) => {
       const paid = (r.payments || []).reduce((s, p) => s + Number(p.amount || 0), 0);
+      const split = splitExpectedMoney({
+        estimatedTotal: r.estimatedTotal,
+        dailyRate: r.dailyRate,
+        alreadyPaid: paid,
+        isPrepaid: r.isPrepaid,
+        bookingChannel: r.bookingChannel,
+        charges: r.charges,
+        taxRatePct: Number(r.pickupLocation?.taxRate || 0),
+      });
       return {
         kind: 'PICKUP', at: r.pickupAt,
-        amount: round2(Number(r.estimatedTotal || 0) - paid),
+        amount: split.collectible,
+        prepaid: split.prepaid,
         reservationNumber: r.reservationNumber,
         customer: [r.customer?.firstName, r.customer?.lastName].filter(Boolean).join(' ') || null,
       };
-    }).filter((r) => r.amount > 0),
-    ...returns.map((a) => ({
-      kind: 'RETURN', at: a.reservation?.returnAt,
-      amount: round2(Number(a.balance || 0)),
-      agreementNumber: a.agreementNumber,
-      reservationNumber: a.reservation?.reservationNumber || null,
-    })),
+    }).filter((r) => r.amount > 0 || r.prepaid > 0),
+    ...returns
+      .filter((a) => !isPrepaidBooking({
+        isPrepaid: a.reservation?.isPrepaid,
+        bookingChannel: a.reservation?.bookingChannel,
+      }))
+      .map((a) => ({
+        kind: 'RETURN', at: a.reservation?.returnAt,
+        amount: round2(Number(a.balance || 0)),
+        agreementNumber: a.agreementNumber,
+        reservationNumber: a.reservation?.reservationNumber || null,
+      })),
   ].sort((x, y) => new Date(x.at) - new Date(y.at));
 
-  res.json({ day, kind: 'FORECAST', total: round2(rows.reduce((s, r) => s + r.amount, 0)), rows });
+  // The drawer's headline is COLLECTIBLE money — it has to match the chart it
+  // was opened from. Prepaid pickups stay in the list (a day that looks empty
+  // with no explanation is its own bug) but carry $0 and their own total.
+  res.json({
+    day,
+    kind: 'FORECAST',
+    total: round2(rows.reduce((s, r) => s + Number(r.amount || 0), 0)),
+    prepaidTotal: round2(rows.reduce((s, r) => s + Number(r.prepaid || 0), 0)),
+    rows,
+  });
 }
 
 // ---------------------------------------------------------------------------

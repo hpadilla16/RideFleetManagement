@@ -60,6 +60,12 @@ function DayDrawer({ day, data, loading, onClose }) {
               <span className="status-chip">{data.kind === 'HISTORY' ? 'Collected' : 'Expected'}</span>{' '}
               <strong style={{ fontSize: 18, fontVariantNumeric: 'tabular-nums' }}>{money(data.total)}</strong>
             </p>
+            {Number(data.prepaidTotal || 0) > 0 ? (
+              <p className="ui-muted" style={{ margin: '-6px 0 12px', fontSize: 12 }}>
+                Plus <strong>{money(data.prepaidTotal)}</strong> prepaid — collected by whoever sold the booking, so it is
+                listed below at $0 and is not part of the total above.
+              </p>
+            ) : null}
             {!data.rows?.length ? (
               <p className="ui-muted">
                 {data.kind === 'HISTORY' ? 'No payments were collected on this day.' : 'Nothing booked for this day yet — anything shown on the chart is projected.'}
@@ -75,7 +81,14 @@ function DayDrawer({ day, data, loading, onClose }) {
                       {r.method ? <span className="ui-muted"> · {r.method}</span> : null}
                       {r.location ? <span className="ui-muted"> · {r.location}</span> : null}
                     </span>
-                    <strong style={{ fontVariantNumeric: 'tabular-nums' }}>{money(r.amount)}</strong>
+                    <strong style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {money(r.amount)}
+                      {Number(r.prepaid || 0) > 0 ? (
+                        <span className="ui-muted" style={{ fontWeight: 400, fontSize: 11, marginLeft: 6 }}>
+                          prepaid {money(r.prepaid)}
+                        </span>
+                      ) : null}
+                    </strong>
                   </div>
                 ))}
               </div>
