@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { reservationPricingService } from './reservation-pricing.service.js';
+import { parseDateTimeInTz } from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
 // =============================================================================
 // Reservation Extension Service
@@ -350,8 +352,19 @@ export const reservationExtendService = {
     if (!newReturnAt) {
       throw new Error('New return date is required');
     }
-    const nextReturnDate = new Date(newReturnAt);
-    if (Number.isNaN(nextReturnDate.getTime())) {
+    // The extend dialog submits the raw <input type="datetime-local"> value —
+    // a naive "2026-08-07T19:00" with no timezone. `new Date()` reads a naive
+    // string as the SERVER's local time, and the container runs in UTC, so
+    // 7:00 PM was stored as 19:00Z and rendered back to San Juan as 3:00 PM.
+    // Staff typed an evening return, saved, and watched it jump backwards
+    // (Hector, 2026-08-07). create() and update() in reservations.service.js
+    // were fixed for exactly this; the extension path was missed.
+    //
+    // parseDateTimeInTz passes strings that already carry a Z or an offset
+    // straight through, so explicit-TZ callers (VozIA) are unaffected.
+    const tenantTz = await resolveTenantTimeZone(tenantScope?.tenantId);
+    const nextReturnDate = parseDateTimeInTz(newReturnAt, tenantTz);
+    if (!nextReturnDate || Number.isNaN(nextReturnDate.getTime())) {
       throw new Error('newReturnAt is invalid');
     }
 

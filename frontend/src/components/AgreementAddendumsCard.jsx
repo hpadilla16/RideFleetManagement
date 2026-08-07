@@ -111,8 +111,12 @@ export function AgreementAddendumsCard({ rentalAgreementId, role, reservation = 
       await api(`/api/rental-agreements/${rentalAgreementId}/addendums`, {
         method: 'POST',
         body: JSON.stringify({
-          newPickupAt: new Date(formPickupAt).toISOString(),
-          newReturnAt: new Date(formReturnAt).toISOString(),
+          // Send the naive wall-clock value and let the backend read it in the
+          // TENANT's timezone. new Date(...).toISOString() converts using the
+          // BROWSER's zone, which is right on a San Juan laptop and wrong for
+          // a remote agent — the same class of bug as the extension jump.
+          newPickupAt: formPickupAt,
+          newReturnAt: formReturnAt,
           reason: formReason.trim(),
           reasonCategory: formCategory
         })
