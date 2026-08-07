@@ -166,8 +166,29 @@ function Wizard({ token, me, logout }) {
     return true;
   };
 
+  /**
+   * Why a save is refused, in the agent's words.
+   *
+   * "Complete all steps first." sent an International agent to Hector on
+   * 2026-08-07 reporting "no me graba la reserva" — and because submit()
+   * returns BEFORE calling the API, the server had no record of the attempt
+   * at all. Nothing to read in the logs, nothing for the agent to act on.
+   * A refusal has to name what is missing.
+   */
+  const blockedReason = () => {
+    if (!form.pickupAt || !form.returnAt) return 'Step 1: pick a pickup and a return date.';
+    if (rentalDays <= 0) return 'Step 1: the return date must be after the pickup date.';
+    if (!form.pickupLocationId || !form.returnLocationId) return 'Step 1: choose a pickup and a return location.';
+    if (!form.vehicleTypeId) return 'Step 2: choose a vehicle class.';
+    if (rateError) return `Step 2: ${rateError}`;
+    if (!quote) return 'Step 2: still pricing this class — wait a moment, or reselect the dates if the price never appears.';
+    if (!form.customerId) return 'Step 3: choose or create the customer.';
+    return '';
+  };
+
   const submit = async () => {
-    if (!stepValid(1) || !stepValid(2) || !stepValid(3)) { setErr('Complete all steps first.'); return; }
+    const blocked = blockedReason();
+    if (blocked) { setErr(blocked); return; }
     setBusy(true); setErr('');
     try {
       const reservationNumber = form.reservationNumber || `RES-${Date.now().toString().slice(-6)}`;
