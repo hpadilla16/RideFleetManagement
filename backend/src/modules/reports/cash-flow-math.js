@@ -136,6 +136,78 @@ export function buildForecastSeries({ startIso, days = 30, committedByDay = new 
 }
 
 /**
+ * Split a reservation's expected money into what the COUNTER will actually
+ * collect and what was already collected upstream.
+ *
+ * THE BUG THIS EXISTS FOR (Hector, 2026-08-07): franchise imports
+ * (FRANCHISE_TL and friends) arrive with dailyRate 0.00, ZERO charge rows and
+ * an estimatedTotal that is the FRANCHISE's number — money the OTA already
+ * took. Treating estimatedTotal as "cash coming to us" put $140-$186 a head
+ * into a forecast that will never see a cent of it. A rate of zero on a
+ * booking worth something is the signature of "somebody else got paid".
+ *
+ * Charge rows are the truth when they exist — they ARE the contract. Without
+ * them we fall back to the reservation's own header fields, and the rate-zero
+ * shape decides where the money goes.
+ *
+ * @param {object} r
+ * @param {number} r.estimatedTotal
+ * @param {number} r.dailyRate
+ * @param {number} r.alreadyPaid       payments RFM itself captured
+ * @param {boolean|null} r.isPrepaid   explicit flag when the source sets it
+ * @param {Array<{code, chargeType, total, taxable}>} r.charges
+ * @param {number} r.taxRatePct        pickup location's tax rate, for the estimate
+ * @returns {{rate, fees, taxes, collectible, prepaid}}
+ */
+export function splitExpectedMoney({
+  estimatedTotal = 0, dailyRate = 0, alreadyPaid = 0, isPrepaid = null,
+  charges = null, taxRatePct = 0,
+} = {}) {
+  const total = Number(estimatedTotal || 0);
+  const paid = Number(alreadyPaid || 0);
+  const zero = { rate: 0, fees: 0, taxes: 0, collectible: 0, prepaid: 0 };
+  if (!Number.isFinite(total) || total <= 0) return zero;
+
+  const rows = Array.isArray(charges) ? charges.filter((c) => c && c.selected !== false) : null;
+
+  if (rows && rows.length) {
+    let rate = 0; let taxes = 0; let fees = 0;
+    for (const c of rows) {
+      const amount = Number(c.total || 0);
+      const type = String(c.chargeType || '').toUpperCase();
+      const code = String(c.code || '').toUpperCase();
+      if (type === 'TAX' || code === 'TAX') taxes += amount;
+      else if (code === 'DAILY' || code === 'BASE_RATE' || type === 'DAILY') rate += amount;
+      else fees += amount;
+    }
+    const gross = round2(rate + fees + taxes);
+    // An explicitly prepaid booking has had its RATE settled upstream; the
+    // counter still collects fees and taxes.
+    const prepaidRate = isPrepaid === true ? round2(rate) : 0;
+    const collectible = round2(Math.max(0, gross - prepaidRate - paid));
+    return {
+      rate: round2(rate), fees: round2(fees), taxes: round2(taxes),
+      collectible, prepaid: round2(prepaidRate + Math.min(paid, gross - prepaidRate)),
+    };
+  }
+
+  // No charge rows yet. dailyRate === 0 on a booking worth money means the
+  // rate lives with whoever sold it — nothing here is ours to collect.
+  const rateIsElsewhere = isPrepaid === true || Number(dailyRate || 0) <= 0;
+  if (rateIsElsewhere) {
+    return { rate: 0, fees: 0, taxes: 0, collectible: 0, prepaid: round2(total) };
+  }
+
+  // A real staff/website booking without rows yet: estimate the shape so the
+  // operator sees rate vs tax vs fees rather than one opaque number.
+  const pct = Number(taxRatePct || 0);
+  const rate = round2(total / (1 + pct / 100));
+  const taxes = round2(total - rate);
+  const collectible = round2(Math.max(0, total - paid));
+  return { rate, fees: 0, taxes, collectible, prepaid: round2(Math.min(paid, total)) };
+}
+
+/**
  * Where a piece of expected money lands, and how much of it is still owed.
  * Pure so the "do not double-count what was already paid" rule is testable.
  *
@@ -165,7 +237,7 @@ export function committedByDayFrom(inflows = []) {
 }
 
 /** Totals for the header tiles. */
-export function summarize({ history = [], forecast = [] } = {}) {
+export function summarize({ history = [], forecast = [], components = null } = {}) {
   const collected = round2(history.reduce((s, d) => s + Number(d.collected || 0), 0));
   const committed = round2(forecast.reduce((s, d) => s + Number(d.committed || 0), 0));
   const projected = round2(forecast.reduce((s, d) => s + Number(d.projected || 0), 0));
@@ -177,5 +249,9 @@ export function summarize({ history = [], forecast = [] } = {}) {
     forecastProjected: projected,
     forecastTotal: round2(committed + projected),
     bestDay: bestDay ? { iso: bestDay.iso, collected: round2(Number(bestDay.collected || 0)) } : null,
+    // What the committed money is MADE OF, and what sits beside it as already
+    // collected upstream (Hector 2026-08-07 — "poner estimated taxes y
+    // estimated fees aparte para que puedan ver whole picture of cash flow").
+    ...(components ? { components } : {}),
   };
 }
