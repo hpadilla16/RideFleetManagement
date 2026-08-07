@@ -3084,6 +3084,10 @@ model ShuttleRequest {
   callCount      Int                  @default(1)
   viewedAt       DateTime?
   viewedByUserId String?
+  // Delay-notice log (2026-08-07): JSON array of {at, byUserId, reason,
+  // etaMinutes, to, status} — the record that stops three agents from
+  // emailing the same waiting customer three times.
+  delayNoticesJson String?
   closedAt       DateTime?
   closedByUserId String?
   closeReason    String?

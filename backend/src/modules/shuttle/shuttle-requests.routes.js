@@ -112,7 +112,11 @@ shuttleRequestsRouter.get('/', async (req, res, next) => {
   try {
     res.json(await shuttleRequestsService.list(staffScope(req), {
       status: req.query?.status,
-      limit: req.query?.limit
+      limit: req.query?.limit,
+      page: req.query?.page,
+      from: req.query?.from,
+      to: req.query?.to,
+      locationId: req.query?.locationId
     }));
   } catch (e) {
     next(e);
@@ -124,6 +128,37 @@ shuttleRequestsRouter.post('/:id/view', async (req, res, next) => {
     res.json(await shuttleRequestsService.markViewed(String(req.params.id), staffScope(req), req.user?.sub || null));
   } catch (e) {
     if (e?.status === 404) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+// COMPLETED by a human (2026-08-07 spec): the driver picked the customer up
+// and the contract has not checked out yet. The service's close() already
+// knew the outcome — only this route was missing. closedByUserId is ALWAYS
+// the authenticated user; nothing from the payload can impersonate.
+shuttleRequestsRouter.post('/:id/complete', async (req, res, next) => {
+  try {
+    res.json(await shuttleRequestsService.close(String(req.params.id), 'COMPLETED', staffScope(req), req.user?.sub || null, req.body?.reason));
+  } catch (e) {
+    if (e?.status === 404) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+// Delay notice: email the waiting customer. 409 NO_EMAIL carries the phone so
+// the UI can offer the call instead of failing silently.
+shuttleRequestsRouter.post('/:id/notify-delay', async (req, res, next) => {
+  try {
+    res.json(await shuttleRequestsService.notifyDelay(
+      String(req.params.id),
+      { reason: req.body?.reason, etaMinutes: req.body?.etaMinutes },
+      staffScope(req),
+      req.user?.sub || null
+    ));
+  } catch (e) {
+    if (e?.status === 404) return res.status(404).json({ error: e.message });
+    if (e?.status === 409) return res.status(409).json({ error: e.message, code: e.code || null, customerPhone: e.customerPhone || null });
+    if (e?.status === 503) return res.status(503).json({ error: e.message });
     next(e);
   }
 });

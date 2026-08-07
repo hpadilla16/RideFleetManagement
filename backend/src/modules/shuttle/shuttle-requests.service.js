@@ -11,18 +11,17 @@
  * so the banner fires again, even if someone had already viewed it.
  */
 import { prisma } from '../../lib/prisma.js';
-
-const OPEN_STATUSES = ['READY', 'VIEWED'];
-
-function scopeWhere(scope = {}) {
-  const where = {};
-  if (scope?.tenantId) where.tenantId = scope.tenantId;
-  const locationIds = Array.isArray(scope?.allowedLocationIds) ? scope.allowedLocationIds.filter(Boolean) : [];
-  // Location-scoped users see their sedes only; an empty list means unscoped
-  // (tenant-wide), matching userAllowedLocationIds semantics elsewhere.
-  if (locationIds.length) where.locationId = { in: locationIds.map(String) };
-  return where;
-}
+import { sendEmail } from '../../lib/mailer.js';
+// The list/notice DECISIONS live in a pure module so CI's DB-free step can
+// guard them — this suite needs embedded postgres and does not run there.
+import {
+  OPEN_STATUSES,
+  scopeWhere,
+  buildListQuery,
+  buildDelayNotice,
+  appendNotice,
+  markNoticeFailed
+} from './shuttle-query.js';
 
 export const shuttleRequestsService = {
   /**
@@ -66,22 +65,58 @@ export const shuttleRequestsService = {
     return { request, deduplicated: false };
   },
 
-  /** The sede queue. `open` (default) = READY + VIEWED, newest first. */
-  async list(scope = {}, { status = 'open', limit = 50 } = {}) {
-    const where = scopeWhere(scope);
-    const wanted = String(status || 'open').toLowerCase();
-    if (wanted === 'open') where.status = { in: OPEN_STATUSES };
-    else if (wanted !== 'all') where.status = String(status).toUpperCase();
-    const rows = await prisma.shuttleRequest.findMany({
-      where,
-      orderBy: [{ createdAt: 'asc' }],
-      take: Math.min(200, Math.max(1, Number(limit) || 50)),
-      include: {
-        reservation: { select: { reservationNumber: true } },
-        location: { select: { id: true, name: true, code: true } }
-      }
-    });
-    return { rows, openCount: rows.filter((r) => OPEN_STATUSES.includes(r.status)).length };
+  /**
+   * The sede queue AND the history view (2026-08-07 spec).
+   *
+   * `open` (default) keeps its original live-queue semantics untouched — no
+   * date window, oldest first, exactly what the banner polls. Any other
+   * status (or `all`) is the HISTORY view: date-windowed (defaults to today),
+   * newest first, real pagination.
+   *
+   * `locationId` narrows within the caller's scope, never widens it: a
+   * scoped user asking for a sede outside their list gets an empty page, not
+   * another sede's queue.
+   */
+  async list(scope = {}, { status = 'open', limit = 50, page = 1, from = null, to = null, locationId = null } = {}) {
+    const q = buildListQuery(scope, { status, limit, page, from, to, locationId });
+    const [rows, total] = await Promise.all([
+      prisma.shuttleRequest.findMany({
+        where: q.where,
+        orderBy: q.orderBy,
+        take: q.take,
+        skip: q.skip,
+        include: {
+          reservation: { select: { reservationNumber: true } },
+          location: { select: { id: true, name: true, code: true } }
+        }
+      }),
+      prisma.shuttleRequest.count({ where: q.where })
+    ]);
+
+    // "Who viewed it, who closed it" — the model has no User relations, so
+    // names come from one keyed lookup. Cosmetic: a failed lookup never
+    // fails the list.
+    const userIds = [...new Set(rows.flatMap((r) => [r.viewedByUserId, r.closedByUserId]).filter(Boolean))];
+    let usersById = {};
+    if (userIds.length) {
+      try {
+        const users = await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullName: true, email: true } });
+        usersById = Object.fromEntries(users.map((u) => [u.id, u.fullName || u.email || u.id]));
+      } catch { usersById = {}; }
+    }
+    const enriched = rows.map((r) => ({
+      ...r,
+      viewedByName: r.viewedByUserId ? usersById[r.viewedByUserId] || null : null,
+      closedByName: r.closedByUserId ? usersById[r.closedByUserId] || null : null
+    }));
+
+    return {
+      rows: enriched,
+      openCount: enriched.filter((r) => OPEN_STATUSES.includes(r.status)).length,
+      total,
+      page: q.page,
+      pageSize: q.pageSize
+    };
   },
 
   /** READY → VIEWED, stamping who. Clearing the banner goes through here. */
@@ -93,6 +128,74 @@ export const shuttleRequestsService = {
       where: { id: row.id },
       data: { status: 'VIEWED', viewedAt: row.viewedAt || new Date(), viewedByUserId: userId || row.viewedByUserId }
     });
+  },
+
+  /**
+   * Delay notice (2026-08-07 spec): email the waiting customer that the bus
+   * is late. The email comes from the reservation's Customer — ShuttleRequest
+   * only carries a phone. No email → a 409 the UI can act on (it offers the
+   * phone instead); never a silent failure.
+   *
+   * THE EXPENSIVE LESSON (beta.335→336) applies: the send is fire-and-forget.
+   * The notice is LOGGED first with status SENT and downgraded to FAILED
+   * asynchronously if the provider rejects — so the screen always shows that
+   * someone tried, and three agents don't email the same customer blind.
+   */
+  async notifyDelay(id, { reason = null, etaMinutes = null } = {}, scope = {}, userId = null, deps = {}) {
+    const row = await prisma.shuttleRequest.findFirst({
+      where: { id, ...scopeWhere(scope) },
+      include: {
+        reservation: { select: { reservationNumber: true, customer: { select: { firstName: true, lastName: true, email: true } } } },
+        location: { select: { name: true, code: true } }
+      }
+    });
+    if (!row) { const e = new Error('Shuttle request not found'); e.status = 404; throw e; }
+    if (!OPEN_STATUSES.includes(row.status)) { const e = new Error(`Request is ${row.status} — no delay notice needed`); e.status = 409; throw e; }
+
+    const email = String(row.reservation?.customer?.email || '').trim();
+    if (!email) {
+      const e = new Error('Customer has no email on file — call them instead');
+      e.status = 409;
+      e.code = 'NO_EMAIL';
+      e.customerPhone = row.customerPhone || null;
+      throw e;
+    }
+
+    const notice = buildDelayNotice({ reason, etaMinutes, to: email, userId });
+    const notices = appendNotice(row.delayNoticesJson, notice);
+
+    const updated = await prisma.shuttleRequest.update({
+      where: { id: row.id },
+      data: { delayNoticesJson: JSON.stringify(notices) }
+    }).catch((err) => {
+      // A Prisma client predating the column (rolling deploy): the log is the
+      // point of this feature, so REFUSE rather than send unrecorded email.
+      const e = new Error(`Could not record the delay notice: ${err.message}`);
+      e.status = 503;
+      throw e;
+    });
+
+    const firstName = row.reservation?.customer?.firstName || row.customerName || 'customer';
+    const sede = row.location?.name || row.location?.code || 'our location';
+    const etaLine = notice.etaMinutes ? ` We estimate about ${notice.etaMinutes} minutes.` : '';
+    const reasonLine = notice.reason ? ` (${notice.reason})` : '';
+    const send = deps.sendEmail || sendEmail;
+    // Fire-and-forget — NEVER awaited inside the request (beta.335→336:
+    // awaiting SMTP added 4-5s, VozIA retried, duplicates shipped).
+    send({
+      to: email,
+      subject: `Shuttle update — ${row.reservation?.reservationNumber || sede}`,
+      text: `Hi ${firstName},\n\nOur shuttle is running a little late${reasonLine}.${etaLine} We apologize for the wait — the bus is on its way to you.\n\n${sede}`,
+      html: `<p style="font-family:Arial,sans-serif">Hi ${firstName},</p><p style="font-family:Arial,sans-serif">Our shuttle is running a little late${reasonLine}.${etaLine} We apologize for the wait &mdash; the bus is on its way to you.</p><p style="font-family:Arial,sans-serif">${sede}</p>`
+    }).catch(async (err) => {
+      try {
+        const fresh = await prisma.shuttleRequest.findUnique({ where: { id: row.id }, select: { delayNoticesJson: true } });
+        const list = markNoticeFailed(fresh?.delayNoticesJson, notice, err);
+        await prisma.shuttleRequest.update({ where: { id: row.id }, data: { delayNoticesJson: JSON.stringify(list) } });
+      } catch { /* the SENT row stands; the provider log has the truth */ }
+    });
+
+    return { ok: true, request: updated, notice };
   },
 
   async close(id, outcome, scope = {}, userId = null, reason = null) {

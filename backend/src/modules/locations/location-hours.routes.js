@@ -44,7 +44,13 @@ export function buildLocationHoursPayload(location) {
     code: location?.code ?? null,
     name: location?.name ?? null,
     weeklyHours,
-    pickupInstructions: String(cfg?.pickupInstructions || '').trim()
+    pickupInstructions: String(cfg?.pickupInstructions || '').trim(),
+    // Where to STAND for the shuttle (2026-08-07): its own field because the
+    // shared pickupInstructions serves the customer portal too, where "call
+    // us when you arrive" is right — and exactly wrong when Chloe reads it to
+    // a customer who JUST called and whose bus is already dispatched. Falls
+    // back to pickupInstructions so nothing regresses until a sede fills it.
+    shuttlePickupInstructions: String(cfg?.shuttlePickupInstructions || cfg?.pickupInstructions || '').trim()
   };
 }
 

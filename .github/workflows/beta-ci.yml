@@ -81,7 +81,12 @@ jobs:
         #     enough — the chain aborts long before reaching it, so the suite
         #     would have stayed effectively orphaned by a second mechanism
         #     (QA M3, 2026-08-06). DB-free, 0.2s.
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match
+        #   - test:shuttle-query: who sees whose shuttle customers. The shuttle
+        #     integration suite needs embedded postgres and never runs here, so
+        #     the scoping rules (a locationId filter INTERSECTS the caller's
+        #     sedes, never widens) live in a pure module guarded on every push
+        #     (2026-08-07).
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:
