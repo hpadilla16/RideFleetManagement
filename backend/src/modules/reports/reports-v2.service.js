@@ -40,6 +40,14 @@ const REPORT_REGISTRY = [
     status: 'AVAILABLE',
   },
   {
+    slug: 'cash-flow',
+    title: 'Cash Flow',
+    category: 'MANAGEMENT',
+    icon: 'cash',
+    description: 'Collected history + forward forecast',
+    status: 'AVAILABLE',
+  },
+  {
     slug: 'rental-status',
     title: 'Rental Status',
     category: 'MANAGEMENT',

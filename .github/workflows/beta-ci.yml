@@ -86,7 +86,11 @@ jobs:
         #     the scoping rules (a locationId filter INTERSECTS the caller's
         #     sedes, never widens) live in a pure module guarded on every push
         #     (2026-08-07).
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query
+        #   - test:cash-flow: the forecast model. Committed money and projected
+        #     money must never blend, and money already collected must never be
+        #     forecast again — both are pure arithmetic, and both are the kind
+        #     of error that reads as a plausible number (2026-08-07).
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:
