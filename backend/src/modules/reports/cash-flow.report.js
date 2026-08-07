@@ -31,6 +31,7 @@ import {
   buildForecastSeries,
   expectedInflow,
   committedByDayFrom,
+  splitExpectedMoney,
   summarize,
   round2,
   addIsoDays,
@@ -163,6 +164,9 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   // Money owed on contracts whose return date already passed — collectible
   // now, but undated, so it is reported separately from the daily series.
   const overdue = { total: 0, count: 0, oldest: null };
+  // What the committed money is made of, plus what was collected upstream and
+  // is therefore NOT cash coming to the counter.
+  const components = { rate: 0, fees: 0, taxes: 0, prepaid: 0, prepaidCount: 0 };
   if (horizonDays > 0) {
     const forecastStartIso = addIsoDays(todayIso, 1);
     const forecastEnd = addDaysInTz(todayStart, horizonDays + 1);
@@ -178,7 +182,10 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
       },
       select: {
         id: true, reservationNumber: true, pickupAt: true, estimatedTotal: true,
+        dailyRate: true, isPrepaid: true,
         payments: { where: { status: 'PAID' }, select: { amount: true } },
+        charges: { select: { code: true, chargeType: true, total: true, taxable: true, selected: true } },
+        pickupLocation: { select: { taxRate: true } },
         rentalAgreement: { select: { id: true } },
       },
     });
@@ -187,13 +194,33 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
       // agreement's balance below — never twice.
       if (r.rentalAgreement?.id) continue;
       const paid = (r.payments || []).reduce((s, p) => s + Number(p.amount || 0), 0);
+      // Only what OUR counter will collect (Hector, 2026-08-07). A franchise
+      // import with dailyRate 0 and no charge rows was sold — and paid for —
+      // upstream; its estimatedTotal is the franchise's number, not our cash.
+      const split = splitExpectedMoney({
+        estimatedTotal: r.estimatedTotal,
+        dailyRate: r.dailyRate,
+        alreadyPaid: paid,
+        isPrepaid: r.isPrepaid,
+        charges: r.charges,
+        taxRatePct: Number(r.pickupLocation?.taxRate || 0),
+      });
+      if (split.prepaid > 0) {
+        components.prepaid = round2(components.prepaid + split.prepaid);
+        components.prepaidCount += 1;
+      }
       const row = expectedInflow({
         kind: 'PICKUP',
         dateIso: isoDayInTz(r.pickupAt, tz),
-        expectedTotal: r.estimatedTotal,
-        alreadyPaid: paid,
+        expectedTotal: split.collectible,
+        alreadyPaid: 0,
       });
-      if (row) inflows.push({ ...row, ref: r.reservationNumber, id: r.id });
+      // The shape rides WITH the inflow so the components can be summed from
+      // exactly the rows that reach the series — a pickup happening later
+      // TODAY passes the query but lands before the series starts, and
+      // counting its shape while dropping its money made the breakdown
+      // overstate committed by $681 (caught 2026-08-07).
+      if (row) inflows.push({ ...row, ref: r.reservationNumber, id: r.id, split });
     }
 
     // (b) Open contracts: the balance settles at return.
@@ -230,7 +257,10 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
       }
       if (iso >= addIsoDays(todayIso, horizonDays + 1)) continue;
       const row = expectedInflow({ kind: 'RETURN', dateIso: iso, expectedTotal: a.balance, alreadyPaid: 0 });
-      if (row) inflows.push({ ...row, ref: a.agreementNumber || a.reservation?.reservationNumber, id: a.id });
+      // An open contract's balance is whatever is left unpaid on a signed
+      // agreement — already net of taxes and fees, so it is its own component
+      // rather than guessed apart.
+      if (row) inflows.push({ ...row, ref: a.agreementNumber || a.reservation?.reservationNumber, id: a.id, isBalance: true });
     }
 
     forecast = buildForecastSeries({
@@ -239,9 +269,26 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
       committedByDay: committedByDayFrom(inflows),
       runRate,
     }).map((d) => ({ ...d, label: dayLabel(d.iso) }));
+
+    // Components are derived from the SAME rows the series counted, so the
+    // breakdown always reconciles to committed. Each pickup's shape is scaled
+    // to what is actually collectible: a partial prepayment reduces the cash
+    // without changing the mix.
+    const seriesDays = new Set(forecast.map((d) => d.iso));
+    for (const row of inflows) {
+      if (!seriesDays.has(row.iso)) continue;
+      if (row.isBalance) { components.balances = round2((components.balances || 0) + row.amount); continue; }
+      const sp = row.split;
+      if (!sp) continue;
+      const gross = round2(sp.rate + sp.fees + sp.taxes);
+      const ratio = gross > 0 ? row.amount / gross : 0;
+      components.rate = round2(components.rate + sp.rate * ratio);
+      components.fees = round2(components.fees + sp.fees * ratio);
+      components.taxes = round2(components.taxes + sp.taxes * ratio);
+    }
   }
 
-  const totals = summarize({ history, forecast });
+  const totals = summarize({ history, forecast, components: { ...components, balances: round2(components.balances || 0) } });
 
   return {
     range: { from: history[0]?.iso || null, to: history[history.length - 1]?.iso || null, tz, today: todayIso },
@@ -363,6 +410,15 @@ function renderHtml(data) {
           <th>Projected ahead</th><td class="num">${money(t.forecastProjected)}</td></tr>
       <tr><th>Past-due balances</th><td class="num">${money(data?.overdue?.total)}</td>
           <th>Contracts past due</th><td class="num">${Number(data?.overdue?.count || 0)}</td></tr>
+    </table>
+    <h3>What the committed money is made of</h3>
+    <table>
+      <tr><th>Estimated rate</th><td class="num">${money(t.components?.rate)}</td>
+          <th>Estimated fees</th><td class="num">${money(t.components?.fees)}</td></tr>
+      <tr><th>Estimated taxes</th><td class="num">${money(t.components?.taxes)}</td>
+          <th>Open contract balances</th><td class="num">${money(t.components?.balances)}</td></tr>
+      <tr><th>Prepaid elsewhere (NOT counter cash)</th><td class="num">${money(t.components?.prepaid)}</td>
+          <th>Prepaid bookings</th><td class="num">${Number(t.components?.prepaidCount || 0)}</td></tr>
     </table>
     ${locRows ? `<h3>Collected by location</h3><table><tr><th>Location</th><th class="num">Collected</th></tr>${locRows}</table>` : ''}
     <h3>History</h3>

@@ -14,6 +14,7 @@ import {
   confidenceFor,
   expectedInflow,
   committedByDayFrom,
+  splitExpectedMoney,
   summarize,
   addIsoDays,
   weekdayOf,
@@ -152,4 +153,102 @@ test('empty inputs summarize to zeros, never NaN', () => {
   assert.equal(s.historyDailyAverage, 0);
   assert.equal(s.forecastTotal, 0);
   assert.equal(s.bestDay, null);
+});
+
+// ---------------------------------------------------------------------------
+// splitExpectedMoney — the prepaid bug (Hector, 2026-08-07)
+// ---------------------------------------------------------------------------
+
+test('THE PREPAID BUG: a franchise import with rate 0 is NOT counter cash', () => {
+  // The exact shape from production: FRANCHISE_TL, dailyRate 0.00, zero charge
+  // rows, estimatedTotal $140 — the OTA already took that money. Forecasting
+  // it put money in the chart that will never reach the counter.
+  const out = splitExpectedMoney({ estimatedTotal: 140, dailyRate: 0, charges: [] });
+  assert.equal(out.collectible, 0, 'nothing for us to collect');
+  assert.equal(out.prepaid, 140, 'and it is visible as collected upstream');
+  assert.equal(out.rate, 0);
+});
+
+test('an explicitly prepaid booking still owes its fees and taxes at the counter', () => {
+  // Rate settled upstream; the counter still collects the license fee and tax.
+  const out = splitExpectedMoney({
+    estimatedTotal: 236,
+    isPrepaid: true,
+    charges: [
+      { code: 'DAILY', chargeType: 'UNIT', total: 200 },
+      { code: 'VLF', chargeType: 'UNIT', total: 12 },
+      { code: 'TAX', chargeType: 'TAX', total: 24 },
+    ],
+  });
+  assert.equal(out.rate, 200);
+  assert.equal(out.fees, 12);
+  assert.equal(out.taxes, 24);
+  assert.equal(out.collectible, 36, 'fees + taxes only — the rate was already paid');
+  assert.equal(out.prepaid, 200);
+});
+
+test('a normal booking commits everything and still shows its shape', () => {
+  const out = splitExpectedMoney({
+    estimatedTotal: 236, dailyRate: 50,
+    charges: [
+      { code: 'DAILY', chargeType: 'UNIT', total: 200 },
+      { code: 'VLF', chargeType: 'UNIT', total: 12 },
+      { code: 'TAX', chargeType: 'TAX', total: 24 },
+    ],
+  });
+  assert.equal(out.collectible, 236);
+  assert.equal(out.prepaid, 0);
+  assert.deepEqual([out.rate, out.fees, out.taxes], [200, 12, 24], 'rate / fees / taxes are separable');
+});
+
+test('a partially paid booking commits only the remainder', () => {
+  const out = splitExpectedMoney({
+    estimatedTotal: 236, dailyRate: 50, alreadyPaid: 100,
+    charges: [
+      { code: 'DAILY', chargeType: 'UNIT', total: 200 },
+      { code: 'TAX', chargeType: 'TAX', total: 36 },
+    ],
+  });
+  assert.equal(out.collectible, 136);
+  assert.equal(out.prepaid, 100);
+});
+
+test('voided charge rows do not count', () => {
+  const out = splitExpectedMoney({
+    estimatedTotal: 100, dailyRate: 50,
+    charges: [
+      { code: 'DAILY', chargeType: 'UNIT', total: 100 },
+      { code: 'EXTRA', chargeType: 'UNIT', total: 999, selected: false },
+    ],
+  });
+  assert.equal(out.rate, 100);
+  assert.equal(out.fees, 0, 'a voided row is not money');
+});
+
+test('no charge rows yet on a REAL booking estimates the tax shape', () => {
+  // A staff booking made before pricing rows exist: the operator still sees
+  // rate vs tax instead of one opaque number.
+  const out = splitExpectedMoney({ estimatedTotal: 223, dailyRate: 100, taxRatePct: 11.5 });
+  assert.equal(out.rate, 200);
+  assert.equal(out.taxes, 23);
+  assert.equal(out.collectible, 223);
+  assert.equal(out.prepaid, 0);
+});
+
+test('a worthless or malformed booking contributes nothing', () => {
+  for (const bad of [{}, { estimatedTotal: 0 }, { estimatedTotal: -5 }, { estimatedTotal: 'abc' }]) {
+    const out = splitExpectedMoney(bad);
+    assert.equal(out.collectible, 0);
+    assert.equal(out.prepaid, 0);
+  }
+});
+
+test('summarize carries the component breakdown through', () => {
+  const s = summarize({
+    history: [], forecast: [{ committed: 100, projected: 0 }],
+    components: { rate: 60, fees: 15, taxes: 25, prepaid: 400, prepaidCount: 3, balances: 0 },
+  });
+  assert.equal(s.components.rate, 60);
+  assert.equal(s.components.prepaid, 400, 'prepaid sits BESIDE committed, never inside it');
+  assert.equal(s.forecastCommitted, 100);
 });

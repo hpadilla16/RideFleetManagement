@@ -174,6 +174,25 @@ function CashFlowInner({ me, token, logout }) {
               <Tile label="Expected total" value={money(t.forecastTotal)} hint="committed + projected" />
             </div>
 
+            {t.components ? (
+              <div className="glass card" style={{ padding: 12, marginBottom: 14 }}>
+                <div style={{ fontWeight: 700, marginBottom: 8 }}>What the committed money is made of</div>
+                <div className="app-card-grid compact">
+                  <Tile label="Estimated rate" value={money(t.components.rate)} hint="base rental at the counter" />
+                  <Tile label="Estimated fees" value={money(t.components.fees)} hint="mandatory + services" />
+                  <Tile label="Estimated taxes" value={money(t.components.taxes)} hint="on the taxable portion" />
+                  <Tile label="Open contract balances" value={money(t.components.balances)} hint="settle at return" />
+                </div>
+                {Number(t.components.prepaid || 0) > 0 ? (
+                  <div className="surface-note" style={{ marginTop: 10, fontSize: 12.5 }}>
+                    <strong>{money(t.components.prepaid)}</strong> across {t.components.prepaidCount} booking{t.components.prepaidCount === 1 ? '' : 's'} was
+                    already collected upstream (prepaid / franchise). It is <strong>not</strong> counter cash and is deliberately excluded from
+                    the forecast — see the Pre-Paid Reservations report for that side.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             {Number(data.overdue?.total || 0) > 0 ? (
               <div className="surface-note warn" style={{ marginBottom: 12 }}>
                 <strong>{money(data.overdue.total)}</strong> owed on {data.overdue.count} contract{data.overdue.count === 1 ? '' : 's'} already past their return date
