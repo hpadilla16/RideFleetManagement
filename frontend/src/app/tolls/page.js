@@ -200,7 +200,12 @@ function TollsInner({ token, me, logout }) {
   const isAutoMatched = (row) => !!row.reservation?.id && !row.needsReview && ['MATCHED', 'BILLED'].includes(String(row.status || '').toUpperCase());
   const isNeedsReview = (row) => !!row.needsReview && (!!row.reservation?.id || !!row.vehicle?.id || Number(row.matchConfidence || 0) > 0);
   const isUnmatched = (row) => !isAutoMatched(row) && !isNeedsReview(row) && !row.reservation?.id;
-  const queueCounts = useMemo(() => ({
+  // The counts come from the DATABASE (dashboard.queueCounts). Counting the
+  // loaded page is what made the queue climb from 19 to 21 after staff
+  // confirmed 19 rows: the list is capped at 200 over a queue thousands deep,
+  // so confirming rows pulled unseen ones into the window. The client-side
+  // numbers survive only as a fallback for an older payload.
+  const queueCounts = useMemo(() => dashboard?.queueCounts || ({
     ALL: transactions.length,
     AUTO_MATCHED: transactions.filter(isAutoMatched).length,
     NEEDS_REVIEW: transactions.filter(isNeedsReview).length,
@@ -208,7 +213,14 @@ function TollsInner({ token, me, logout }) {
     DISPATCH_REVIEW: transactions.filter((row) => row.dispatchConfirmationRequired).length,
     USAGE_ONLY: transactions.filter((row) => row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY').length,
     READY_TO_POST: transactions.filter((row) => row.reservation?.id && row.billingStatus === 'PENDING' && !row.needsReview && !(row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY')).length
-  }), [transactions]);
+  }), [dashboard, transactions]);
+  // What this payload actually holds, versus what matches. Saying so beats
+  // implying the page is the whole queue.
+  const shownOf = useMemo(() => {
+    const total = Number(dashboard?.totalCount ?? transactions.length);
+    const returned = Number(dashboard?.returnedCount ?? transactions.length);
+    return returned < total ? { returned, total } : null;
+  }, [dashboard, transactions]);
   const visibleTransactions = useMemo(() => {
     if (queueView === 'AUTO_MATCHED') return transactions.filter(isAutoMatched);
     if (queueView === 'NEEDS_REVIEW') return transactions.filter(isNeedsReview);
@@ -539,7 +551,12 @@ function TollsInner({ token, me, logout }) {
             </div>
             <div className="info-tile">
               <span className="label">Needs Review</span>
-              <strong>{dashboard?.metrics?.needsReview || 0}</strong>
+              <strong>{dashboard?.metrics?.needsReviewActionable ?? dashboard?.metrics?.needsReview ?? 0}</strong>
+              {Number(dashboard?.metrics?.needsReviewNoSuggestion || 0) > 0 ? (
+                <span className="label" style={{ display: 'block', marginTop: 2 }}>
+                  + {dashboard.metrics.needsReviewNoSuggestion} with no match candidate
+                </span>
+              ) : null}
             </div>
             <div className="info-tile">
               <span className="label">Posted To Billing</span>
@@ -547,7 +564,7 @@ function TollsInner({ token, me, logout }) {
             </div>
             <div className="info-tile">
               <span className="label">Usage Only</span>
-              <strong>{transactions.filter((row) => row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY').length}</strong>
+              <strong>{dashboard?.queueCounts?.USAGE_ONLY ?? transactions.filter((row) => row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY').length}</strong>
             </div>
           </div>
         </div>
@@ -754,6 +771,13 @@ function TollsInner({ token, me, logout }) {
               Ready To Post ({queueCounts.READY_TO_POST})
             </button>
           </div>
+          {shownOf && visibleTransactions.length < Number(queueCounts[queueView] || 0) ? (
+            <div className="surface-note" style={{ marginBottom: 10 }}>
+              Showing <strong>{visibleTransactions.length}</strong> of <strong>{queueCounts[queueView]}</strong> in this view.
+              The tab counts come from the database; the list loads the {shownOf.returned} most recent of {shownOf.total} tolls.
+              Narrow it with the filters above to reach the rest.
+            </div>
+          ) : null}
           {queueView === 'AUTO_MATCHED' ? (
             <div className="surface-note" style={{ marginBottom: 10 }}>
               Confidently attributed to a contract — no action needed. Spot-check as you like.
