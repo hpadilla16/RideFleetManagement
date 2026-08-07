@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { parseDateTimeInTz } from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -5993,6 +5995,15 @@ export const rentalAgreementsService = {
       }
     });
     if (!agreement) throw new Error('Rental agreement not found');
+
+    // Interpret naive "2026-08-07T19:00" values as wall-clock time in the
+    // TENANT's timezone rather than the server's (which is UTC). Strings that
+    // already carry a Z or an offset pass through untouched, so this is inert
+    // for today's callers — it exists so a naive value can never be read as
+    // UTC the way the extension path was (Hector, 2026-08-07).
+    const addendumTz = await resolveTenantTimeZone(agreement.reservation?.tenantId || agreement.tenantId);
+    newPickupAt = parseDateTimeInTz(newPickupAt, addendumTz) || new Date(newPickupAt);
+    newReturnAt = parseDateTimeInTz(newReturnAt, addendumTz) || new Date(newReturnAt);
 
     // Snapshot original charges at time of addendum creation.
     const originalCharges = (agreement.charges || []).map((c) => ({
