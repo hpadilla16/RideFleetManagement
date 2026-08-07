@@ -1292,12 +1292,21 @@ export const reservationsService = {
       ? { returnAt: { gte: returnRange.start, lte: returnRange.end } }
       : {};
 
-    // ?filter=overdue — bookings whose scheduled day already ended without
-    // the expected next step:
-    //   - CHECKED_OUT past planned returnAt EOD = customer didn't return
+    // ?filter=overdue — bookings whose scheduled step already passed:
+    //   - CHECKED_OUT past planned returnAt = customer didn't return
     //   - NEW/CONFIRMED past planned pickupAt EOD = agent missed checkout
-    // EOD = start of TODAY (so anything scheduled for a calendar day < today
-    // in tenant TZ is overdue). Same definition the dashboard KPI uses.
+    //
+    // A RETURN is overdue THE MOMENT it passes, not at midnight. This must
+    // match reports.service.js's Overdue Returns KPI exactly — the two drifted
+    // apart when the KPI was fixed on 2026-08-05 and this filter kept the old
+    // midnight rule, so International's dashboard said 6 and the list it links
+    // to showed 4 (Hector, 2026-08-07). The two missing rows were cars due
+    // back at 10:39 AM and 2:30 PM the same day, still out: counted by the
+    // KPI, invisible in the list. A tile you cannot click through to is worse
+    // than no tile.
+    //
+    // Missed PICKUPS keep the midnight grace — arriving late the same day is
+    // normal and does not make a booking overdue.
     let overdueWhere = null;
     if (String(options.filter || '').toLowerCase() === 'overdue') {
       const now = new Date();
@@ -1312,7 +1321,7 @@ export const reservationsService = {
         // KPI count it backs.
         overdueIgnored: false,
         OR: [
-          { status: 'CHECKED_OUT', returnAt: { lt: startOfTenantToday } },
+          { status: 'CHECKED_OUT', returnAt: { lt: now } },
           { status: { in: ['NEW', 'CONFIRMED'] }, pickupAt: { lt: startOfTenantToday } },
         ],
       };
