@@ -525,7 +525,7 @@ function OpsTiles({ router, t, overviewKpis, todayKpis, mismatchCount, citSummar
           (Array.isArray(todayKpis.byLocation) && todayKpis.byLocation.length
             ? todayKpis.byLocation.map((l) => `${l.code || l.name || '—'} ${money(l.amount)}`).join(' · ')
             : t('dashboard.tileCollectedTodayDesc'))) : null}
-        {todayKpis ? tile('pendingTolls', () => router.push('/tolls'), t('dashboard.tilePendingTolls'), Number(todayKpis.pendingTolls || 0), t('dashboard.tilePendingTollsDesc'), Number(todayKpis.pendingTolls || 0) > 0 ? 'danger' : 'ok') : null}
+        {todayKpis ? tile('pendingTolls', () => router.push('/tolls?view=NEEDS_REVIEW'), t('dashboard.tilePendingTolls'), Number(todayKpis.pendingTolls || 0), t('dashboard.tilePendingTollsDesc'), Number(todayKpis.pendingTolls || 0) > 0 ? 'danger' : 'ok') : null}
         {docAlert ? tile('docs', () => router.push('/settings'),
           t('dashboard.tileDocsExpiring', { defaultValue: 'Documents expiring' }),
           Number(docAlert.expiredCount || 0) + Number(docAlert.expiringCount || 0),
