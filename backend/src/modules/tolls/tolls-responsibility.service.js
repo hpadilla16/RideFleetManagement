@@ -163,12 +163,45 @@ export function resolveReservationResponsibility({
   const withinGraceWindow = !withinTripWindow && when >= prePickupAt && when <= postReturnAt;
   const dispatchConfirmationRequired = !!matchedWindow?.dispatchConfirmationRequired;
 
+  // WHICH vehicle this rental actually had at that instant, ignoring the one we
+  // are testing. When the rental demonstrably held a DIFFERENT car, the toll is
+  // not this customer's — no score can make it so.
+  //
+  // RES-119005 (Hector, 2026-08-08): rented 15 Jun on KKJ-001, swapped to
+  // KDY966 on 11 Jul. It was billed five KKJ-001 tolls from 25 Jul (a car he
+  // had already returned) AND four KDY966 tolls from June (a car he did not yet
+  // have). $13.60 of $14.15 belonged to other customers.
+  //
+  // The windows were always built correctly; they only ADDED points. A toll
+  // whose plate matched still collected +25 for the plate and +25 for landing
+  // inside the long rental window, scored ~50, and was SUGGESTED — then swept
+  // up by "Confirm All".
+  //
+  // Deliberately narrow: this fires only on a POSITIVE contradiction. If the
+  // toll time falls outside every window (grace periods, loaners, rentals with
+  // no agreement), heldVehicleId is null and nothing is disqualified — those
+  // paths keep their existing behaviour.
+  const heldWindow = windows.find((w) => when >= w.startAt && when <= w.endAt) || null;
+  const heldVehicleId = heldWindow?.vehicleId || null;
+  // Only a rental that DEMONSTRABLY changed cars carries a timeline precise
+  // enough to disqualify on. With a single vehicle there is nothing to be
+  // wrong about in time — a mismatch there is a data gap (a car handed over
+  // without a recorded swap), and turning those into "no candidate" would hide
+  // real work instead of surfacing it. Ordinary rentals keep their exact
+  // previous behaviour.
+  const swapped = new Set(windows.map((w) => String(w.vehicleId))).size > 1;
+  const contradictsHeldVehicle = !!(
+    swapped && vehicleId && heldVehicleId && String(heldVehicleId) !== String(vehicleId)
+  );
+
   return {
     windows,
     matchedWindow,
     withinTripWindow,
     withinGraceWindow,
     withinEffectiveWindow: !!matchedWindow,
+    heldVehicleId,
+    contradictsHeldVehicle,
     dispatchConfirmationRequired,
     reviewCategory: dispatchConfirmationRequired ? DISPATCH_CONFIRMATION_REVIEW_CATEGORY : null
   };

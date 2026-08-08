@@ -993,6 +993,23 @@ export function scoreCandidate({ transaction, vehicle, reservation, siblingCandi
     postReturnGraceMinutes: DEFAULT_POST_RETURN_GRACE_MINUTES
   });
 
+  // The rental provably had a DIFFERENT car at that moment — a swap is on
+  // record. Disqualify outright instead of scoring it down: a matching plate
+  // (+25) plus the toll landing inside the long rental window (+25) was enough
+  // to SUGGEST it, and suggestions get swept up by Confirm All. RES-119005 was
+  // billed $13.60 of other customers' tolls that way.
+  if (responsibility.contradictsHeldVehicle) {
+    return {
+      score: 0,
+      matchReason: 'vehicleNotOnRentalAtThatTime',
+      reviewCategory: null,
+      dispatchConfirmationRequired: false,
+      multiSignalOverride: false,
+      strongIdentifierMatches: 0,
+      disqualified: true
+    };
+  }
+
   let score = 0;
   const reasons = [];
   let withinTripWindow = responsibility.withinTripWindow;
