@@ -75,14 +75,14 @@ function scopedReservationWhere(id, scope = {}) {
   return { id, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) };
 }
 
-function rentalDays(pickupAt, returnAt) {
+export function rentalDays(pickupAt, returnAt) {
   const start = new Date(pickupAt || Date.now());
   const end = new Date(returnAt || Date.now());
   const diff = end.getTime() - start.getTime();
   return Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)) || 1);
 }
 
-function isSecurityDepositCharge(row = {}) {
+export function isSecurityDepositCharge(row = {}) {
   const source = String(row?.source || '').trim().toUpperCase();
   const name = String(row?.name || '').trim().toUpperCase();
   return source === 'SECURITY_DEPOSIT' || name === 'SECURITY DEPOSIT';
@@ -90,7 +90,7 @@ function isSecurityDepositCharge(row = {}) {
 
 // 2026-06-06 deposit-balance fix: ALL deposit charges (Deposit Due + Security
 // Deposit, both chargeType DEPOSIT) are excluded from agreement total/balance.
-function isDepositCharge(row = {}) {
+export function isDepositCharge(row = {}) {
   const type = String(row?.chargeType || '').trim().toUpperCase();
   const source = String(row?.source || '').trim().toUpperCase();
   const name = String(row?.name || '').trim().toUpperCase();
@@ -101,11 +101,11 @@ function isDepositCharge(row = {}) {
     || name === 'DEPOSIT (DUE NOW)';
 }
 
-function isExtensionCharge(row = {}) {
+export function isExtensionCharge(row = {}) {
   return String(row?.code || '').trim().toUpperCase() === 'EXTENSION_RATE';
 }
 
-function isTaxCharge(row = {}) {
+export function isTaxCharge(row = {}) {
   return String(row?.chargeType || '').trim().toUpperCase() === 'TAX';
 }
 
@@ -120,7 +120,7 @@ function isTaxCharge(row = {}) {
 // kiosk-offers.service.js acceptOffers) must rescale on extension exactly
 // like counter-sold SERVICE rows, or the extra days ride uncharged (and a
 // coversTolls package would cover days the customer never paid for).
-const PER_DAY_LIKE_SOURCES = new Set([
+export const PER_DAY_LIKE_SOURCES = new Set([
   'SERVICE',
   'ADDITIONAL_SERVICE',
   'FEE',
@@ -283,12 +283,17 @@ function buildExtensionChargeData({
 // Exported (2026-07-05, kiosk B2 review): the kiosk upsell accept path
 // reuses this exact recompute so taxable kiosk add-ons are never sold
 // tax-free. Behavior is unchanged for the extension path.
-export async function recomputeTaxRow({ reservationId, pricingSnapshot, pickupLocationId }) {
-  const remaining = await prisma.reservationCharge.findMany({
+// `client` (2026-08-08): the VozIA reschedule rebuilds the base-rate row and
+// this tax row together, and those two writes MUST be one transaction — a
+// reservation left with a new Daily line and the OLD tax line is a wrong price
+// that every later read will faithfully recompute and keep. Defaults to the
+// module prisma so the extension and kiosk callers are byte-identical.
+export async function recomputeTaxRow({ reservationId, pricingSnapshot, pickupLocationId }, client = prisma) {
+  const remaining = await client.reservationCharge.findMany({
     where: { reservationId, selected: true }
   });
 
-  await prisma.reservationCharge.deleteMany({
+  await client.reservationCharge.deleteMany({
     where: { reservationId, chargeType: 'TAX' }
   });
 
@@ -300,7 +305,7 @@ export async function recomputeTaxRow({ reservationId, pricingSnapshot, pickupLo
 
   let taxRate = toNumber(pricingSnapshot?.taxRate);
   if (!taxRate && pickupLocationId) {
-    const loc = await prisma.location.findUnique({
+    const loc = await client.location.findUnique({
       where: { id: pickupLocationId },
       select: { taxRate: true }
     });
@@ -309,7 +314,7 @@ export async function recomputeTaxRow({ reservationId, pricingSnapshot, pickupLo
   if (taxRate <= 0) return null;
 
   const taxAmount = Number((taxableTotal * taxRate / 100).toFixed(2));
-  return prisma.reservationCharge.create({
+  return client.reservationCharge.create({
     data: {
       reservationId,
       source: 'TAX_RECALC',
@@ -338,7 +343,307 @@ async function getReservationOrThrow(reservationId, scope = {}) {
   return row;
 }
 
+
+/**
+ * Refusals that MUST happen before the dates are committed.
+ *
+ * The reprice runs after reservationsService.update (which owns the real gates
+ * — operating hours, vehicle conflict, agreement-immutable), so by the time it
+ * discovers an unsupported shape the move has already landed. The route calls
+ * this FIRST so a refusal leaves the reservation untouched instead of moved
+ * with a price nobody could compute.
+ */
+
+/**
+ * Is this THE base rental row?
+ *
+ * POSITIVE identification, deliberately. The first version of the reprice
+ * classified by exclusion — anything that was not tax/deposit/extension/a known
+ * per-day add-on was "the base rate". That predicate is safe in
+ * shouldRescaleDailyRow, where a false positive only means "don't rescale". Here
+ * the consequence is deleteMany, so the same logic is fail-DESTRUCTIVE: it would
+ * have deleted ADDITIONAL_SERVICE_PRECHECKIN rows (add-ons a customer already
+ * bought online, which nothing recreates), WEBSITE_FEE, ISSUE_CENTER claims, and
+ * would have un-voided an admin's waived MANDATORY_FEE.
+ *
+ * The shapes are the three prod has, and this mirrors long-term.service.js's
+ * predicate, which has run in production:
+ *   'BASE_RATE' — current booking-engine
+ *   'DAILY'     — older paths / migrated rows
+ *   null / ''   — very old rows, identified by code or name instead
+ */
+export function isBaseRentalRow(row = {}) {
+  if (isTaxCharge(row) || isDepositCharge(row) || isExtensionCharge(row)) return false;
+  const source = String(row?.source || '').trim().toUpperCase();
+  const code = String(row?.code || '').trim().toUpperCase();
+  const name = String(row?.name || '').trim().toUpperCase();
+  if (source === 'BASE_RATE' || source === 'DAILY') return true;
+  if (!source && (code === 'DAILY' || name === 'DAILY')) return true;
+  return false;
+}
+
+export function assertRepriceable(charges = [], oldDays = 0, newDays = 0, bookingChannel = null, workflowMode = null) {
+  const rows = Array.isArray(charges) ? charges : [];
+
+  // WORKFLOW MODE FIRST. A dealership courtesy loaner is created through the
+  // ordinary reservation path — CONFIRMED, no bookingChannel (so it defaults to
+  // STAFF), dailyRate 0, estimatedTotal 0, and NO charge rows — because the
+  // dealer covers it. Every other guard here passes it, and repricing it
+  // creates a retail BASE_RATE row and bills a customer for a car they were
+  // lent for free.
+  //
+  // This is a REGRESSION RISK CREATED BY THIS CHANGE, not a pre-existing bug:
+  // the old code only stamped the reservation columns, and the very defect
+  // being fixed (a pricing read recomputing from the charge rows) dragged a
+  // loaner back toward 0 on the next read. Rebuilding the charge rows makes the
+  // retail price the durable, self-reinforcing truth instead.
+  const mode = String(workflowMode || 'RENTAL').trim().toUpperCase();
+  if (mode !== 'RENTAL') {
+    const err = new Error(
+      'This booking is not a standard rental (it is a courtesy loaner or car-sharing trip) and is not priced at counter rates. A human in RideFleet has to change its dates — for a loaner, the return date moves via the dealership-loaner extend flow, which has no price side-effects.'
+    );
+    err.code = 'UNSUPPORTED_WORKFLOW_MODE';
+    err.status = 409;
+    throw err;
+  }
+
+  // BOOKING CHANNEL FIRST — this is the guard that matters most, and label
+  // predicates cannot replace it.
+  //
+  // Measured on prod 2026-08-08: of 6,375 pre-pickup reservations, 6,353 have
+  // NO charge rows at all — MIGRATION (2,856) and the FRANCHISE_* brokers
+  // (3,497). Those carry a broker NET or prepaid total written straight onto
+  // estimatedTotal (promote.js: "writes ONLY estimatedTotal"). Repricing one
+  // deletes nothing, creates a RETAIL base row, and replaces the broker's
+  // number with counter pricing — on the overwhelming majority of everything
+  // this tool can reach.
+  //
+  // CAR_SHARING is the mirror failure: its base row is source
+  // 'CAR_SHARING_TRIP' (4 live rows right now), which no base-rate label
+  // predicate recognises, so the delete misses it and a second, retail base
+  // row is added ON TOP — billed twice, with every downstream guard reporting
+  // success because the count only ever sees the row we created.
+  //
+  // An ALLOWLIST is the only shape that fails closed on the NEXT integration
+  // channel instead of silently repricing it.
+  const channel = String(bookingChannel || '').trim().toUpperCase();
+  // VOZIA is on the list deliberately: quote-convert stamps it
+  // (quotes.service.js), and those reservations are priced by the SAME engine
+  // through the SAME preview() as STAFF — so repricing them is exactly as
+  // safe, and refusing them would mean Chloe cannot change a booking she made
+  // herself ten minutes earlier.
+  if (channel && !['WEBSITE', 'STAFF', 'VOZIA'].includes(channel)) {
+    const err = new Error(
+      'This reservation came from a partner or import channel and is not priced at counter rates. Changing its dates here would replace the agreed price. A human has to make this change.'
+    );
+    err.code = 'UNSUPPORTED_BOOKING_CHANNEL';
+    err.status = 409;
+    throw err;
+  }
+
+  // A monthly plan's base row is a MONTHLY_CYCLE; stacking a daily line on it
+  // would bill both. An OTA prepaid booking has had its base row deleted on
+  // purpose (customer-portal third-party flow) and left a voucher marker —
+  // recreating a full-price Daily line would re-bill a prepaid rental.
+  const blocked = rows.find((c) => {
+    const source = String(c?.source || '').trim().toUpperCase();
+    return source === 'MONTHLY_CYCLE' || source === 'OTA_PREPAID_VOUCHER';
+  });
+  if (blocked) {
+    const err = new Error(
+      'This reservation is priced on a plan this tool cannot reprice (monthly cycle or prepaid third-party voucher). A human has to make this change.'
+    );
+    err.code = 'UNSUPPORTED_PRICING_PLAN';
+    err.status = 409;
+    throw err;
+  }
+
+  // Per-day add-ons (insurance, prepaid tolls, per-day services) carry their
+  // own day count. If the LENGTH changes they all have to be rescaled, and
+  // getting that subtly wrong underbills the add-on while the customer is
+  // quoted a total that includes it. extendReservation solves it properly with
+  // shouldRescaleDailyRow; until this path reuses that, fail CLOSED on money.
+  // An admin who VOIDED the base rate (selected:false, kept for history by
+  // Admin Corrections) waived the rental. getReservationOrThrow returns voided
+  // rows, so they match isBaseRentalRow, would be deleted by id, and come back
+  // as a fresh billable row — silently un-waiving it, with the like-for-like
+  // guard agreeing because it compares the NEW row to the quote. Refused HERE
+  // rather than mid-reprice so it costs the caller nothing, which is the
+  // invariant the rest of this change is built on.
+  const voidedBase = rows.find((c) => isBaseRentalRow(c) && c?.selected === false);
+  if (voidedBase) {
+    const err = new Error(
+      'The rental charge on this reservation was voided by an administrator. Repricing it would make it billable again. A human has to change its dates.'
+    );
+    err.code = 'VOIDED_BASE_RATE';
+    err.status = 409;
+    throw err;
+  }
+
+  // A length change we cannot anchor is the case we understand LEAST, so it
+  // must not be the case where the guard is disabled. oldDays===0 means no
+  // recognisable base row.
+  if (!oldDays && newDays) {
+    const anyPerDay = rows.find(
+      (c) => c?.selected !== false && PER_DAY_LIKE_SOURCES.has(String(c?.source || '').trim().toUpperCase())
+    );
+    if (anyPerDay) {
+      const err = new Error(
+        'This reservation has per-day add-ons but no base rate this tool can identify. A human has to reprice it.'
+      );
+      err.code = 'PER_DAY_ADDONS_PRESENT';
+      err.status = 409;
+      throw err;
+    }
+  }
+  if (oldDays && newDays && oldDays !== newDays) {
+    const perDayAddOn = rows.find(
+      (c) => c?.selected !== false && PER_DAY_LIKE_SOURCES.has(String(c?.source || '').trim().toUpperCase())
+    );
+    if (perDayAddOn) {
+      const err = new Error(
+        'Changing the length of this rental would also change its per-day add-ons (insurance, prepaid tolls or services). A human has to reprice it.'
+      );
+      err.code = 'PER_DAY_ADDONS_PRESENT';
+      err.status = 409;
+      throw err;
+    }
+  }
+}
+
 export const reservationExtendService = {
+  /**
+   * Reprice a reservation whose DATES just moved (VozIA reschedule).
+   *
+   * Lives in the EXTEND service, not the pricing service: this module already
+   * owns "reprice because the dates changed" (extendReservation), already has
+   * the charge classifiers and recomputeTaxRow, and already imports the pricing
+   * service. Putting it in reservation-pricing.service.js would have created an
+   * import CYCLE — and PER_DAY_LIKE_SOURCES is a module-level const, so in a
+   * cycle it can evaluate to undefined and every predicate below silently
+   * inverts. It belonged in a route handler even less: that version could not
+   * be tested against a real charge set.
+   *
+   * THE BUG THIS EXISTS FOR (measured on RES-107160, twice):
+   * `Reservation.estimatedTotal` has two writers — the reschedule, which
+   * stamped the quote engine's number, and syncMandatoryLocationFees, which
+   * recomputes it from the ReservationCharge rows and runs inside getPricing,
+   * a READ. Moving dates without rebuilding those rows left them on the old
+   * daily rate, so the next pricing read silently reverted the price the
+   * customer had just agreed to. Nothing errored.
+   *
+   * The fix is not "write the number harder" — it is to make the charge rows
+   * correct and then let the CANONICAL read produce the total, so the number
+   * we report is by construction the one the system will keep.
+   */
+  async repriceForNewDates(reservationId, engineRow = {}, scope = {}) {
+    const current = await getReservationOrThrow(reservationId, scope);
+    const charges = Array.isArray(current.charges) ? current.charges : [];
+    // NOT rentalDays(current...): by the time this runs the dates have already
+    // been committed, so that count is the NEW duration and the guard could
+    // never fire. And a plain ceil disagrees with the engine's count on
+    // locations with a grace period or rates with a minimum charge, which would
+    // refuse ordinary pure-shift requests. The quantity the reservation was
+    // actually billed for is the honest baseline.
+    const bad = !Number.isFinite(Number(engineRow.subtotal)) || Number(engineRow.subtotal) <= 0
+      || !Number.isFinite(Number(engineRow.dailyRate)) || !(Number(engineRow.days) > 0);
+    if (bad) {
+      const err = new Error('The quote for the new dates is incomplete, so the price cannot be rebuilt.');
+      err.code = 'INVALID_QUOTE_ROW';
+      err.status = 422;
+      throw err;
+    }
+
+    const billedBaseRow = charges.find(isBaseRentalRow);
+    const billedDays = billedBaseRow ? Number(billedBaseRow.quantity) || 0 : 0;
+    assertRepriceable(charges, billedDays, Number(engineRow.days) || 0, current.bookingChannel, current.workflowMode);
+
+    await prisma.$transaction(async (tx) => {
+      // Selected in JS and deleted BY ID, because a Prisma negated string
+      // filter never matches NULL and prod really does have base rows with a
+      // null source (the beta.297 duplicate-charge incident). Which rows count
+      // as the base rental is isBaseRentalRow's business — see the rationale
+      // there for why it identifies positively instead of by exclusion.
+      const baseIds = charges.filter(isBaseRentalRow).map((c) => c.id);
+      if (baseIds.length) {
+        await tx.reservationCharge.deleteMany({ where: { reservationId: current.id, id: { in: baseIds } } });
+      }
+
+      // Same shape the current public booking path writes, so every
+      // downstream predicate (code-based, source-based, reports) sees it as
+      // the base rate: booking-engine.service.js.
+      await tx.reservationCharge.create({
+        data: {
+          reservationId: current.id,
+          code: 'DAILY',
+          name: 'Daily',
+          chargeType: 'UNIT',
+          // The ENGINE's own numbers. `total` is `subtotal`, NOT days × rate:
+          // rates.service derives dailyRate as baseTotal/days rounded, so with
+          // per-date overrides the product disagrees with the quote by cents.
+          quantity: Number(engineRow.days) || 0,
+          rate: engineRow.dailyRate,
+          total: engineRow.subtotal,
+          taxable: true,
+          selected: true,
+          sortOrder: 0,
+          source: 'BASE_RATE'
+        }
+      });
+
+      const pricingSnapshot = await tx.reservationPricingSnapshot.findUnique({
+        where: { reservationId: current.id }
+      });
+      await recomputeTaxRow(
+        { reservationId: current.id, pricingSnapshot, pickupLocationId: current.pickupLocationId },
+        tx
+      );
+
+      // The SNAPSHOT rate too, not just Reservation.dailyRate. The snapshot
+      // takes precedence for percentage mandatory fees, for a later extension's
+      // price, and for the customer portal display — leaving it stale prices
+      // the next extension at the OLD rate. replacePricing already does this.
+      if (pricingSnapshot) {
+        await tx.reservationPricingSnapshot.update({
+          where: { reservationId: current.id },
+          data: { dailyRate: engineRow.dailyRate }
+        });
+      }
+      await tx.reservation.update({
+        where: { id: current.id },
+        data: { dailyRate: engineRow.dailyRate }
+      });
+    });
+
+    // THE FIXED POINT. getPricing is the canonical read: it re-syncs mandatory
+    // fees (re-pricing PER_DAY and PERCENTAGE ones against the new window),
+    // tolls and the agreement, and writes estimatedTotal through
+    // summarizeChargeTotals — the one formula, which excludes deposits. Ending
+    // here means the number we report IS what the system will hold, instead of
+    // a number a later read gets to overrule.
+    const priced = await reservationPricingService.getPricing(reservationId, scope);
+    // COUNT them, don't just find ours. A base row we failed to recognise would
+    // survive the delete and be billed alongside the new one — and a guard that
+    // only inspects the row it just created cannot see that. This is the
+    // duplication M2 was about; the like-for-like total check does not cover it.
+    const baseRows = (priced.charges || []).filter(isBaseRentalRow);
+    if (baseRows.length > 1) {
+      const err = new Error(
+        `Repricing left ${baseRows.length} base-rate rows on this reservation, which would double-bill the rental. A human has to fix it before it is quoted.`
+      );
+      err.code = 'DUPLICATE_BASE_RATE';
+      throw err;
+    }
+    const baseRow = baseRows[0] || null;
+    return {
+      total: priced.totals.total,
+      subtotal: priced.totals.subtotal,
+      taxes: priced.totals.taxes,
+      dailyRate: Number(engineRow.dailyRate),
+      baseTotal: baseRow ? Number(baseRow.total) : null
+    };
+  },
+
   async extendReservation({
     reservationId,
     newReturnAt,

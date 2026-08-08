@@ -4,6 +4,7 @@ import { reservationsService } from './reservations.service.js';
 import { looksLikeXlsx, parseReservationImportWorkbook } from './reservation-import-parse.js';
 import { validateReservationCreate, validateReservationPatch } from './reservations.rules.js';
 import { prisma } from '../../lib/prisma.js';
+import logger from '../../lib/logger.js';
 import { withTenantSchema } from '../../lib/tenant-routing.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
@@ -30,6 +31,7 @@ import { globalKey } from '../../lib/cache/tenantKey.js';
 import { compactStartRentalResponse } from './start-rental-compact.js';
 import { maybeUploadCustomerDocument } from '../customers/customer-documents.js';
 import { idempotency } from '../../middleware/idempotency.js';
+import { reservationExtendService, assertRepriceable, isBaseRentalRow } from './reservation-extend.service.js';
 import { validateVoziaNotePayload, buildVoziaNoteLine } from './vozia-note.js';
 import { smartMatchReservation, maskCandidate, candidateMatchesVerification } from '../../lib/reservation-smart-match.js';
 import { verifyProbeThrottle, isFailedVerifyProbe } from '../../lib/verify-probe-throttle.js';
@@ -1786,15 +1788,15 @@ reservationsRouter.post('/:id/reschedule', idempotency({ kind: 'vozia-reschedule
 
     // The real gates live in update(): operating hours, vehicle conflict,
     // AGREEMENT_IMMUTABLE/ADDENDUM_PENDING — same errors as the staff PATCH.
-    // dailyRate/estimatedTotal ride the SAME patch (Innovation MC-2): one
-    // atomic write — no window where dates moved but the price didn't. The
-    // plain update() path deliberately never recomputes totals; this endpoint's
-    // whole point is that it stamps the engine's numbers.
+    // DATES ONLY. Stamping the quote here used to be the point of this
+    // endpoint, but it makes update() a second price writer: if the reprice
+    // below then fails, the reservation is left holding an UNVERIFIED total
+    // with stale charge rows — precisely the RES-107160 state, which the next
+    // read reverts. The rebuild is now the sole writer of price, so a failed
+    // reprice leaves a consistent OLD price instead of a phantom new one.
     const patch = {
       pickupAt: value.pickupAt,
-      returnAt: value.returnAt,
-      dailyRate: row.dailyRate,
-      estimatedTotal: row.total
+      returnAt: value.returnAt
     };
     if (pickupLocationId !== current.pickupLocationId) {
       patch.pickupLocationId = pickupLocationId;
@@ -1804,7 +1806,66 @@ reservationsRouter.post('/:id/reschedule', idempotency({ kind: 'vozia-reschedule
         patch.returnLocationId = pickupLocationId;
       }
     }
+    // REFUSE BEFORE COMMITTING. The reprice runs after update(), so an
+    // unsupported shape discovered there would leave the dates already moved.
+    // Check the charge set first: a refusal must cost the caller nothing.
+    try {
+      const existingCharges = await prisma.reservationCharge.findMany({
+        where: { reservationId: current.id }
+      });
+      // The quantity actually billed, not a re-derived day count — the engine
+      // honours grace periods and minimum charges, a plain ceil does not, and
+      // the disagreement would refuse ordinary pure-shift requests.
+      const billed = existingCharges.find(isBaseRentalRow);
+      assertRepriceable(existingCharges, billed ? Number(billed.quantity) || 0 : 0, Number(row.days) || 0, current.bookingChannel, current.workflowMode);
+    } catch (e) {
+      if (e.status === 409) return res.status(409).json({ error: e.message, code: e.code });
+      throw e;
+    }
+
     const row2 = await reservationsService.update(req.params.id, patch, scopeFor(req), req.user?.sub || null);
+
+    // Reprice through the service (see reservation-extend.service.js). Doing
+    // this in the route was wrong twice over: it could not be tested against a
+    // real charge set, and it wrote estimatedTotal with a DIFFERENT formula
+    // than the canonical reader — which is the very bug being fixed.
+    let priced;
+    try {
+      priced = await reservationExtendService.repriceForNewDates(row2.id, row, scopeFor(req));
+    } catch (e) {
+      // The dates are already committed at this point and the caller has been
+      // told they moved; reverting them silently would be worse. Say so
+      // loudly, and leave a marker a human can reconcile against.
+      logger.error('[reschedule] reprice failed AFTER the dates moved', {
+        reservationId: row2.id, code: e.code || null, message: e.message
+      });
+      return res.status(e.status && e.status < 500 ? e.status : 500).json({
+        error: e.status && e.status < 500
+          ? e.message
+          : 'The dates were changed, but the new price could not be confirmed. Tell the caller their dates are changed and that a colleague will confirm the price — do not quote a number. Do NOT retry this.',
+        code: e.code || 'RESCHEDULE_REPRICE_FAILED',
+        datesMoved: true
+      });
+    }
+
+    // LIKE FOR LIKE. The engine's `row.total` is base + tax-on-base + the
+    // WEBSITE-channel mandatory fees it happens to model; the reservation's
+    // real total also carries insurance, per-day services, tolls and this
+    // reservation's own channel's fees. Comparing those two 500s on any
+    // ordinary reservation that has a CDW line. What must agree is the BASE
+    // component we just wrote against the engine's subtotal.
+    if (priced.baseTotal == null || Math.abs(priced.baseTotal - row.subtotal) > 0.01) {
+      logger.error('[reschedule] stored base rate does not match the quote', {
+        reservationId: row2.id, storedBase: priced.baseTotal, quotedBase: row.subtotal
+      });
+      return res.status(500).json({
+        error: 'The dates were changed, but the stored base rate does not match the price that was quoted. Tell the caller their dates are changed and that a colleague will confirm the price — do not quote a number.',
+        code: 'RESCHEDULE_BASE_MISMATCH',
+        datesMoved: true,
+        storedBase: priced.baseTotal,
+        quotedBase: row.subtotal
+      });
+    }
 
     await withTenantSchema(req.user.tenantId, (db) => db.auditLog.create({
       data: {
@@ -1818,9 +1879,13 @@ reservationsRouter.post('/:id/reschedule', idempotency({ kind: 'vozia-reschedule
           ticketId: value.ticketId,
           author: value.author,
           before,
+          // PERSISTED values, not the quote. The audit is the record someone
+          // reconciles a disputed price against; reporting what we INTENDED to
+          // write makes it useless exactly when it matters.
           after: {
             pickupAt: row2.pickupAt, returnAt: row2.returnAt,
-            pickupLocationId, estimatedTotal: row.total, dailyRate: row.dailyRate
+            pickupLocationId,
+            estimatedTotal: priced.total, dailyRate: priced.dailyRate
           }
         })
       }
@@ -1834,11 +1899,13 @@ reservationsRouter.post('/:id/reschedule', idempotency({ kind: 'vozia-reschedule
         pickupAt: row2.pickupAt,
         returnAt: row2.returnAt,
         pickupLocationId,
-        estimatedTotal: row.total,
-        dailyRate: row.dailyRate
+        // What the reservation ACTUALLY holds — this is the number the agent
+        // reads to the customer, so it must be the one they will be billed.
+        estimatedTotal: priced.total,
+        dailyRate: priced.dailyRate
       },
       difference: before.estimatedTotal != null
-        ? Number((row.total - before.estimatedTotal).toFixed(2))
+        ? Number((priced.total - before.estimatedTotal).toFixed(2))
         : null
     });
   } catch (e) {
