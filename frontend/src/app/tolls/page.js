@@ -18,6 +18,8 @@ const EMPTY_IMPORT_FORM = {
 
 const ISSUE_EDIT_ID_KEY = 'issues.editId';
 
+const TOLL_QUEUE_VIEWS = ['ALL', 'AUTO_MATCHED', 'NEEDS_REVIEW', 'UNMATCHED', 'DISPATCH_REVIEW', 'USAGE_ONLY', 'READY_TO_POST'];
+
 export default function TollsPage() {
   return <AuthGate>{({ token, me, logout }) => <TollsInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -118,7 +120,14 @@ function TollsInner({ token, me, logout }) {
   });
   const [statusFilter, setStatusFilter] = useState('');
   const [reviewOnly, setReviewOnly] = useState(true);
-  const [queueView, setQueueView] = useState('ALL');
+  // ?view=NEEDS_REVIEW lets the dashboard tile land on the queue it counts.
+  // A tile that opens the module on "All" makes the reader hunt for the rows
+  // it just promised them (Hector, 2026-08-07: "le dan y no aparece nada").
+  const [queueView, setQueueView] = useState(() => {
+    if (typeof window === 'undefined') return 'ALL';
+    const v = new URLSearchParams(window.location.search).get('view');
+    return v && TOLL_QUEUE_VIEWS.includes(v) ? v : 'ALL';
+  });
   const [query, setQuery] = useState('');
   const [bulkImportText, setBulkImportText] = useState('');
   const [importForm, setImportForm] = useState(() => ({

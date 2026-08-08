@@ -172,3 +172,23 @@ test('reviewNotes wins over the assignment reason, exactly as the serializer doe
   assert.equal(matches('DISPATCH_REVIEW', row), false, 'non-empty notes are the answer');
   assert.equal(evalWhere(queueWhere('DISPATCH_REVIEW'), row), false);
 });
+
+test("the dashboard tile counts the SAME rows as the queue it links to", async () => {
+  // Hector, 2026-08-07: the tile said 22, you clicked it and the module showed
+  // nothing to do. It had been counting "matched but not collected yet",
+  // which on an OPEN contract is not work — the toll rides along and settles
+  // at check-in. today-kpis.js now imports queueWhere('NEEDS_REVIEW') instead
+  // of restating a rule, so the tile and the tab cannot disagree. This test is
+  // the tripwire on that import.
+  const rows = CORPUS.map((r) => ({ ...r, tenantId: 't1', staffAckAt: null }));
+  const counts = await countQueues(fakeDb(rows), { tenantId: 't1' });
+  const tile = rows.filter((r) => evalWhere(queueWhere('NEEDS_REVIEW'), r)).length;
+  assert.equal(tile, counts.NEEDS_REVIEW, 'the tile number IS the tab number');
+
+  // And the old definition is not it: a matched, unbilled toll on an open
+  // contract was counted before and must not be now.
+  const ridesAlong = { tenantId: 't1', staffAckAt: null, reservationId: 'r1', vehicleId: 'v1',
+    needsReview: false, status: 'MATCHED', billingStatus: 'PENDING', matchConfidence: 95, reviewNotes: null };
+  assert.equal(evalWhere(queueWhere('NEEDS_REVIEW'), ridesAlong), false,
+    'nobody has to touch this — it collects itself with the contract');
+});

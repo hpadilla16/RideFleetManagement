@@ -10,6 +10,7 @@ import { prisma } from '../../lib/prisma.js';
 import { COLLECTED_PAYMENT_WHERE } from './collected-payments.js';
 import { startOfDayInTz, addDaysInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
+import { queueWhere } from '../tolls/tolls-queue-counts.js';
 
 /**
  * @param {object} deps
@@ -31,7 +32,7 @@ export async function computeTodayKpis(tenantId, deps = {}) {
     ? { reservation: { pickupLocationId: { in: locationIds } } }
     : {};
 
-  const [payments, pendingTolls] = await Promise.all([
+  const [payments, tollsNeedingReview] = await Promise.all([
     // Row-level (not aggregate) so the sum can split per pickup location. A
     // day's collected payments are tens of rows, not thousands.
     db.rentalAgreementPayment.findMany({
@@ -51,37 +52,35 @@ export async function computeTodayKpis(tenantId, deps = {}) {
         }
       }
     }),
-    // "Someone still has to ACT on this" — and nothing else (Hector,
-    // 2026-08-06: the tile read 186/380 when the real answer was 60/0).
-    // A toll POSTED to a reservation or agreement is already on the
-    // customer's bill and collects itself with the contract — counting it
-    // as pending inflated the tile with money that needed no hands. What
-    // is actionable:
-    //   - billingStatus PENDING: matched + billable but not yet posted;
-    //   - POSTED_* whose agreement is already CLOSED: the contract settled
-    //     without it, so collection is manual (the [CONTRATO CERRADO]
-    //     emails flag the same rows).
-    // staffAckAt still counts as "handled" (years of rows were dismissed
-    // with the old button — dropping it resurrected 1,032 of them), and the
-    // closed-contract branch clears itself by MONEY, not by clicks: once the
-    // manual collection posts and the agreement balance reaches zero, the
-    // toll stops counting. No button needed, nothing grows forever.
+    // Tolls a HUMAN must judge — the toll module's "Needs review" queue,
+    // nothing else.
+    //
+    // This used to count tolls that were matched but not yet collected.
+    // Hector, 2026-08-07: "aun dice 22, cuando le dan no parece nada pq ya
+    // todo estan confirmed... entiendo son tolls en reservas que no se han
+    // cobrado aun (normal si todo esos contratos estan open)". Exactly right:
+    // an open contract's toll rides along and collects itself at check-in. It
+    // needed no hands, so a tile you click into and find nothing to do was
+    // counting work that does not exist.
+    //
+    // The definition is IMPORTED from the tolls module rather than restated,
+    // so the tile and the queue it links to can never drift — the same reason
+    // tolls-queue-counts.js exists at all (the 19-to-21 bug). Rows flagged
+    // with no match candidate stay out: they are the 3,390 off-rental ones a
+    // human cannot action either.
+    //
+    // Scoped by the toll's own location the way the tolls module scopes
+    // (vehicle home location), NOT the reservation pickup location — a review
+    // row often has no reservation yet, which is the whole point of it.
     db.tollTransaction.count({
       where: {
-        tenantId,
-        staffAckAt: null,
-        reservationId: { not: null },
-        ...(locationIds ? { reservation: { pickupLocationId: { in: locationIds } } } : {}),
-        status: { in: ['MATCHED', 'BILLED'] },
-        OR: [
-          { billingStatus: 'PENDING' },
+        AND: [
           {
-            billingStatus: { in: ['POSTED_TO_RESERVATION', 'POSTED_TO_AGREEMENT'] },
-            reservation: {
-              ...(locationIds ? { pickupLocationId: { in: locationIds } } : {}),
-              rentalAgreement: { status: 'CLOSED', balance: { gt: 0 } }
-            }
-          }
+            tenantId,
+            staffAckAt: null,
+            ...(locationIds ? { vehicle: { is: { homeLocationId: { in: locationIds } } } } : {})
+          },
+          queueWhere('NEEDS_REVIEW')
         ]
       }
     })
@@ -115,7 +114,11 @@ export async function computeTodayKpis(tenantId, deps = {}) {
     to,
     collectedToday: round2(collectedToday),
     byLocation,
-    pendingTolls,
+    // Kept as `pendingTolls` for the existing dashboard contract; the value
+    // is now the review queue. `tollsNeedingReview` is the honest name and
+    // both are returned so the tile can be relabelled without a flag day.
+    pendingTolls: tollsNeedingReview,
+    tollsNeedingReview,
     scoped: !!locationIds
   };
 }

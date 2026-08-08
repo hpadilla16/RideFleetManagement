@@ -711,7 +711,7 @@ function DashboardInner({ token, me, logout }) {
               <button
                 type="button"
                 className="info-tile"
-                onClick={() => router.push('/tolls')}
+                onClick={() => router.push('/tolls?view=NEEDS_REVIEW')}
                 style={{
                   textAlign: 'left',
                   cursor: 'pointer',
