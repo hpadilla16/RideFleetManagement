@@ -1325,11 +1325,29 @@ model Reservation {
   // VIRTUAL_AGENT — the attribution the commission sync pays the VA's 1% on.
   createdByUserId String?
 
-  // Structured prepaid signal for franchise imports that carry a prepaid MIX
-  // (NU Car Rentals: PP/OP = prepaid, blank Code = pay-at-destination). Stamped
-  // at promotion from ExternalReservation.isPrepaid. NULL for every other source
-  // (TL/Economy = all-prepaid, staff-created = n/a) → zero behavior change.
-  // MONEY: informational only — Ride still records estimatedTotal, never charges.
+  // Structured prepaid signal for imports whose source knows its commercial
+  // model. Stamped at promotion from ExternalReservation.isPrepaid.
+  //   TL International — true. The aggregator that originated the booking
+  //     (Expedia, CarTrawler, Carnect, BookingGroup, Stressfree) collects
+  //     before pickup.
+  //   NU Car Rentals — MIXED per row: PP/OP = prepaid, blank Code = pay-at-destination.
+  //   Advantage — false. Pay-on-arrival.
+  //   Economy — NULL. Measured 2026-08-09: 0 of 2,366 rows prepaid, and 1,851
+  //     explicitly pay-at-counter. An earlier version of this comment called
+  //     Economy all-prepaid. It is not, and stamping it true on that belief
+  //     would have stopped collection on those 1,851.
+  //   Flexways, staff-created — NULL; the source never declares.
+  //
+  // NULL means "this source never told us". That is not prepaid, and it is not
+  // proof of prepayment either. Read it as unknown, never as permission to charge.
+  //
+  // MONEY — this field is NO LONGER informational, though this comment said so
+  // for as long as nothing read it. The public payment link changed that:
+  // assertPayable() in public-booking/authnet-accept-hosted.js refuses a
+  // reservation with isPrepaid === true. Measured 2026-08-08, while the flag was
+  // NULL on all 854 TL rows: 54 future-pickup TL reservations were chargeable
+  // through the public link for $13,187.01 — every one already paid to the
+  // aggregator.
   isPrepaid Boolean?
 
   customerId String
