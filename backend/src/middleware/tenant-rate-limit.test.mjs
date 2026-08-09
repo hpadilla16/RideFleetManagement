@@ -142,6 +142,31 @@ test('redis incr failure allows the request (graceful degradation)', async () =>
   assert.equal(res.statusCode, 200);
 });
 
+// Regression for the 2026-06-20 incident: a managed-Redis maintenance left the
+// ioredis client reconnecting, so `incr` HUNG (never resolved/rejected) instead
+// of erroring. The middleware must race it against the op timeout and fail OPEN
+// quickly, not stall the request path.
+test('redis incr that HANGS fails open within the timeout (zombie connection)', async () => {
+  const hangingRedis = {
+    async incr() { return new Promise(() => {}); },   // never settles
+    async expire() { return new Promise(() => {}); },
+  };
+  const mw = createTenantRateLimit({
+    getRedis: async () => hangingRedis,
+    now: fixedClock,
+    prisma: { tenant: { findUnique: async () => ({ tier: 'STANDARD' }) } },
+  });
+  const req = makeReq({ tenantId: 'tenant-hang' });
+  const res = makeRes();
+  let nextCalled = false;
+  const t0 = Date.now();
+  await mw(req, res, () => { nextCalled = true; });
+  const elapsed = Date.now() - t0;
+  assert.equal(nextCalled, true);        // request allowed (fail-open)
+  assert.equal(res.statusCode, 200);     // not blocked, not stalled
+  assert.ok(elapsed < 1000, `should fail open quickly, took ${elapsed}ms`);
+});
+
 test('redis unavailable (null client) allows the request', async () => {
   const mw = createTenantRateLimit({
     getRedis: async () => null,
