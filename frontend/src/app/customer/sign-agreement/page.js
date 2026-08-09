@@ -54,6 +54,9 @@ export default function SignAgreementPage() {
   const [signerName, setSignerName] = useState('');
   const [accepted, setAccepted] = useState(false);
   const nextPortalStep = portal?.nextStep;
+  // A booking the customer already paid the partner for. The rental never
+  // reaches the charge rows, so every figure on this page is post-booking.
+  const rentalPrepaid = reservation?.isPrepaid === true;
   const signatureReady = !!signerName.trim() && accepted;
 
   useEffect(() => {
@@ -224,7 +227,15 @@ export default function SignAgreementPage() {
             <h2 style={portalStyles.cardTitle}>What You Are Signing</h2>
             <div style={portalStyles.statGrid}>
               <div style={portalStyles.statTile}>
-                <div style={portalStyles.statLabel}>Trip Estimate</div>
+                {/* On a prepaid booking `breakdown.total` is charge-rows-only —
+                    the rental was paid to the partner and never appears there,
+                    so this is $0.00, or the price of whatever was bought since.
+                    Calling that the trip estimate on the page where somebody
+                    SIGNS is the worst place to get it wrong, and the aside on
+                    this same page already shows a dash for the rental. */}
+                <div style={portalStyles.statLabel}>
+                  {rentalPrepaid ? 'Added Since Booking' : 'Trip Estimate'}
+                </div>
                 <div style={portalStyles.statValue}>${Number(breakdown?.total || 0).toFixed(2)}</div>
               </div>
               <div style={portalStyles.statTile}>
@@ -233,7 +244,9 @@ export default function SignAgreementPage() {
               </div>
             </div>
             <div style={{ marginTop: 12, color: '#55456f', lineHeight: 1.6 }}>
-              This page shows the full reservation estimate and rental terms. If there is still a balance after signing, the secure payment step comes next.
+              {rentalPrepaid
+                ? 'Your rental was paid when you booked it, so the figures here cover only what has been added since. The rental terms below apply in full.'
+                : 'This page shows the full reservation estimate and rental terms. If there is still a balance after signing, the secure payment step comes next.'}
             </div>
           </div>
 

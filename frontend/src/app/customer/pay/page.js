@@ -235,6 +235,9 @@ export default function CustomerPayPage() {
 
   const paymentStatusLabel = model?.portal?.payment?.statusLabel || (Number(model?.amountDue || 0) > 0 ? 'Payment Pending' : 'Paid in Full');
   const balanceDue = Number(model?.portal?.payment?.balanceDue ?? model?.amountDue ?? 0);
+  // A booking the customer already paid the partner for. The rental never
+  // appears in the charge rows, so every figure on this screen is post-booking.
+  const rentalPrepaid = model?.reservation?.isPrepaid === true;
   const fullyPaid = balanceDue <= 0;
   const nextPortalStep = model?.portal?.nextStep;
   const agreementDoc = (model?.portal?.documents || []).find((doc) => doc.key === 'agreement' && doc.available);
@@ -307,12 +310,22 @@ export default function CustomerPayPage() {
                 <div style={portalStyles.statValue}>${balanceDue.toFixed(2)}</div>
               </div>
               <div style={portalStyles.statTile}>
-                <div style={portalStyles.statLabel}>Trip Total</div>
+                {/* On a prepaid booking this figure is NOT the trip — the
+                    rental was paid to the partner and never appears in the
+                    charge rows. What is here is whatever was added since, so
+                    calling it "Trip Total" tells the customer their whole trip
+                    cost $45. The aside already shows a dash for the rental; the
+                    two halves of this screen have to agree. */}
+                <div style={portalStyles.statLabel}>
+                  {rentalPrepaid ? 'Added Since Booking' : 'Trip Total'}
+                </div>
                 <div style={portalStyles.statValue}>${Number(model.breakdown?.total || 0).toFixed(2)}</div>
               </div>
             </div>
             <div style={{ marginTop: 12, color: '#55456f', lineHeight: 1.6 }}>
-              The amount due right now may only be part of the full reservation cost. The full estimate stays visible below so there is no confusion before you pay.
+              {rentalPrepaid
+                ? 'Your rental was paid when you booked it. Anything shown here is what has been added since — the breakdown below lists it in full.'
+                : 'The amount due right now may only be part of the full reservation cost. The full estimate stays visible below so there is no confusion before you pay.'}
             </div>
           </div>
 

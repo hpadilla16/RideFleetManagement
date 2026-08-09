@@ -51,6 +51,13 @@ export function PortalTimelineCard({
   const nextStep = portal.nextStep;
   const showNextLink = nextStep?.link && nextStep?.key && nextStep.key !== currentStepKey;
   const estimatedTotal = deriveEstimatedTotal({ reservation, breakdown, portal });
+  // A booking the customer already paid the partner for (Expedia, CarTrawler,
+  // NU's prepaid codes) shows a dash, not a figure. The stored total is the
+  // PARTNER's number — real, and the record of what the rental is worth — but
+  // to the person reading this screen a dollar amount looks like something
+  // they owe. What they can still owe is whatever was sold at the counter, and
+  // that is what "Due Now" carries.
+  const rentalPrepaid = reservation?.isPrepaid === true;
   const paidAmount = Number(portal.payment?.paidAmount || 0);
   const balanceDue = Number(portal.payment?.balanceDue || 0);
   const dueToday = balanceDue > 0 ? balanceDue : 0;
@@ -151,7 +158,9 @@ export function PortalTimelineCard({
         <div style={portalStyles.statGrid}>
           <div style={portalStyles.statTile}>
             <div style={portalStyles.statLabel}>Estimated Total</div>
-            <div style={portalStyles.statValue}>{formatMoney(estimatedTotal)}</div>
+            <div style={portalStyles.statValue}>
+              {rentalPrepaid ? '—' : formatMoney(estimatedTotal)}
+            </div>
           </div>
           <div style={portalStyles.statTile}>
             <div style={portalStyles.statLabel}>Paid So Far</div>
@@ -167,9 +176,13 @@ export function PortalTimelineCard({
           </div>
         </div>
         <div style={{ marginTop: 12, color: '#55456f', lineHeight: 1.55 }}>
-          {dueToday > 0
-            ? `The amount due right now is ${formatMoney(dueToday)}. Your full reservation estimate is ${formatMoney(estimatedTotal)}.`
-            : `You're caught up right now. Your full reservation estimate is ${formatMoney(estimatedTotal)}.`}
+          {rentalPrepaid
+            ? (dueToday > 0
+              ? `Your rental was paid when you booked it. The amount due right now is ${formatMoney(dueToday)} for what you added at the counter.`
+              : 'Your rental was paid when you booked it, and there is nothing due right now.')
+            : (dueToday > 0
+              ? `The amount due right now is ${formatMoney(dueToday)}. Your full reservation estimate is ${formatMoney(estimatedTotal)}.`
+              : `You're caught up right now. Your full reservation estimate is ${formatMoney(estimatedTotal)}.`)}
         </div>
       </div>
 
