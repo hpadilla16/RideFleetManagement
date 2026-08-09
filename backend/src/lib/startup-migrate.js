@@ -45,6 +45,15 @@ export async function runStartupMigrations(opts = {}) {
   const client = new pg.Client({ connectionString: databaseUrl, connectionTimeoutMillis: 10000 });
   try {
     await client.connect();
+    // Never wait forever for a lock (2026-08-08 incident review, P2).
+    // A migration that runs on BOOT and blocks on a lock held by live traffic
+    // would hang the container's startup indefinitely — and because the boot
+    // never completes, the deploy neither succeeds nor fails visibly. Failing
+    // fast turns a silent hang into a loud, retryable error.
+    // statement_timeout is the companion guard: a lock we DID get, on a table
+    // big enough to rewrite for minutes, is the same outage by another route.
+    await client.query("SET lock_timeout = '10s'");
+    await client.query("SET statement_timeout = '120s'");
     await client.query('CREATE TABLE IF NOT EXISTS "_app_migrations" (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now(), baseline boolean NOT NULL DEFAULT false)');
     const { rows } = await client.query('SELECT name FROM "_app_migrations"');
     const applied = new Set(rows.map((r) => r.name));

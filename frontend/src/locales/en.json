@@ -100,6 +100,8 @@
     "tileCollectedToday": "Collected Today",
     "tileCollectedTodayTitle": "Money collected today (paid, deposit holds excluded). Click for Payments by Day.",
     "tileCollectedTodayDesc": "Paid today, tenant timezone. Click for the daily breakdown.",
+    "loadFailedTitle": "This page could not load its data.",
+    "loadFailedBody": "The numbers below are incomplete or missing — they are NOT real counts. Reload in a moment, and tell an admin if it keeps happening.",
     "tilePendingTolls": "Tolls To Review",
     "tilePendingTollsTitle": "Tolls waiting on a human decision in the toll module. Click to open that queue.",
     "tilePendingTollsDesc": "Matched to something, but a person must confirm or reject it.",

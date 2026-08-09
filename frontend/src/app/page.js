@@ -291,6 +291,13 @@ function DashboardInner({ token, me, logout }) {
   const [todayKpis, setTodayKpis] = useState(null);
   const [docAlert, setDocAlert] = useState(null);
   const [msg, setMsg] = useState('');
+  // Did the CORE data actually load? (2026-08-08 incident review.)
+  // Promise.allSettled degraded every rejection to 0 / [], so a total outage
+  // rendered as "you have no reservations and no cars" — indistinguishable
+  // from a quiet Tuesday. Nobody reported an error because nobody SAW one;
+  // Hector found out when users complained. A number we could not fetch must
+  // never be drawn as a number.
+  const [loadFailed, setLoadFailed] = useState(false);
   const canSeeOverview = me?.moduleAccess?.reports !== false;
   const canSeeVehicles = me?.moduleAccess?.vehicles !== false;
 
@@ -358,6 +365,13 @@ function DashboardInner({ token, me, logout }) {
     }
 
     if (summaryResult.status === 'fulfilled') setResSummary(summaryResult.value || null);
+
+    // The core of the page. If reservations failed, the board, the timeline and
+    // every count derived from them are unknown — not zero.
+    const coreFailed = reservationsResult.status === 'rejected'
+      || (canSeeOverview && overviewResult.status === 'rejected')
+      || (!canSeeOverview && canSeeVehicles && vehiclesResult.status === 'rejected');
+    setLoadFailed(coreFailed);
 
     if (reservationsResult.status === 'rejected' && overviewResult.status === 'rejected' && vehiclesResult.status === 'rejected') {
       setMsg(reservationsResult.reason?.message || overviewResult.reason?.message || vehiclesResult.reason?.message || t('dashboard.msgUnableToLoad'));
@@ -432,6 +446,11 @@ function DashboardInner({ token, me, logout }) {
   const moneyShort = (n) => `$${Number(n || 0).toFixed(2)}`;
 
   const kpis = overview?.kpis || {};
+  // Render an UNKNOWN number as a dash, never as 0. This is the whole lesson of
+  // the 2026-08-08 outage: a 504 and an empty fleet looked identical on screen,
+  // so a site-wide stall read as "no tienes data" and went unreported for half
+  // an hour.
+  const num = (v) => (loadFailed ? '—' : v);
   // Total Vehicles = effective fleet (kpis.fleetTotal excludes SOLD +
   // OUT_OF_SERVICE + IN_MAINTENANCE on the backend as of 2026-05-28).
   // Previously summed fleetTotal + maintenance + OOS to show "every
@@ -873,13 +892,26 @@ function DashboardInner({ token, me, logout }) {
         </div>
       </section>
       <section className="grid4">
-        <div className="glass card"><div className="label">{t('dashboard.totalVehicles')}</div><div className="value">{totalVehicles}</div></div>
-        <div className="glass card"><div className="label">{t('dashboard.availableVehicles')}</div><div className="value">{available}</div></div>
-        <div className="glass card"><div className="label">{t('dashboard.reservations')}</div><div className="value">{Number.isFinite(Number(resSummary?.totalReservations)) ? Number(resSummary.totalReservations).toLocaleString() : reservations.length}</div></div>
-        <div className="glass card"><div className="label">{t('dashboard.active')}</div><div className="value">{activeReservations}</div></div>
-        <div className="glass card"><div className="label">{t('dashboard.tileFeeAdvisories')}</div><div className="value">{feeAdvisoryCount}</div></div>
+        <div className="glass card"><div className="label">{t('dashboard.totalVehicles')}</div><div className="value">{num(totalVehicles)}</div></div>
+        <div className="glass card"><div className="label">{t('dashboard.availableVehicles')}</div><div className="value">{num(available)}</div></div>
+        <div className="glass card"><div className="label">{t('dashboard.reservations')}</div><div className="value">{num(Number.isFinite(Number(resSummary?.totalReservations)) ? Number(resSummary.totalReservations).toLocaleString() : reservations.length)}</div></div>
+        <div className="glass card"><div className="label">{t('dashboard.active')}</div><div className="value">{num(activeReservations)}</div></div>
+        <div className="glass card"><div className="label">{t('dashboard.tileFeeAdvisories')}</div><div className="value">{num(feeAdvisoryCount)}</div></div>
       </section>
-      {msg ? <p className="label" style={{ margin: '4px 0 10px 2px' }}>{msg}</p> : null}
+      {loadFailed ? (
+        <div
+          role="alert"
+          className="glass card"
+          style={{ margin: '4px 0 12px', padding: '12px 14px', borderColor: 'var(--danger-bd)', background: 'var(--danger-bg)', color: 'var(--danger-tx)' }}
+        >
+          <strong>{t('dashboard.loadFailedTitle', 'This page could not load its data.')}</strong>{' '}
+          {t('dashboard.loadFailedBody', 'The numbers below are incomplete or missing — they are NOT real counts. Reload in a moment, and tell an admin if it keeps happening.')}
+          {msg ? <div className="label" style={{ marginTop: 6 }}>{msg}</div> : null}
+          <div style={{ marginTop: 10 }}>
+            <button type="button" onClick={() => load()}>{t('common.retry', 'Retry')}</button>
+          </div>
+        </div>
+      ) : msg ? <p className="label" style={{ margin: '4px 0 10px 2px' }}>{msg}</p> : null}
 
       <section className="glass card-lg" style={{ marginBottom: 12 }}>
         <div className="row-between" style={{ alignItems: 'center' }}>

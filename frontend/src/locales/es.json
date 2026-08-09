@@ -100,6 +100,8 @@
     "tileCollectedToday": "Cobrado Hoy",
     "tileCollectedTodayTitle": "Dinero cobrado hoy (pagado, sin holds de deposito). Clic para Pagos por Dia.",
     "tileCollectedTodayDesc": "Pagado hoy, zona horaria del tenant. Clic para el desglose diario.",
+    "loadFailedTitle": "Esta pagina no pudo cargar sus datos.",
+    "loadFailedBody": "Los numeros de abajo estan incompletos o faltan — NO son conteos reales. Recarga en un momento, y avisale a un admin si sigue pasando.",
     "tilePendingTolls": "Peajes Por Revisar",
     "tilePendingTollsTitle": "Peajes esperando una decision humana en el modulo de peajes. Clic para abrir esa cola.",
     "tilePendingTollsDesc": "Tienen una sugerencia, pero alguien tiene que confirmarla o rechazarla.",
