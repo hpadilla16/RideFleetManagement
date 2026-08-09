@@ -121,6 +121,39 @@ export function assertPayable(reservation) {
     err.code = 'NOT_PAYABLE';
     throw err;
   }
+  // PREPAID BOOKINGS ARE NEVER COLLECTIBLE HERE.
+  //
+  // This endpoint is PUBLIC and unauthenticated, and the lookup falls back to a
+  // bare `reservationNumber` — which a customer of a partner already has on
+  // their voucher. Imports are promoted with the partner's total on
+  // `estimatedTotal` and no `paymentStatus`, so they default to PENDING and
+  // `computeAmountDue` happily offers the FULL amount to somebody who has
+  // already paid the aggregator.
+  //
+  // Measured 2026-08-08: TL International is 100% aggregator-prepaid (Expedia,
+  // CarTrawler, Carnect, BookingGroup, Stressfree) and its `isPrepaid` was NULL
+  // on all 854 rows, leaving 54 future-pickup reservations chargeable here for
+  // $13,187.01. The connectors now record the flag; this refuses to act on the
+  // money regardless of who forgets to set it next.
+  //
+  // SCOPE, so this comment does not promise more than it delivers: this closes
+  // the PUBLIC booking payment path only. The customer-portal routes
+  // (customer-portal.routes.js — Stripe checkout sessions, Square payment
+  // links, Auth.Net charges) compute from `estimatedTotal` through their own
+  // amountDueForReservation and do NOT check isPrepaid. They are token-gated
+  // and a human has to mint the token, which is precisely why nobody would
+  // notice the belief was false. Extending the gate there is a separate
+  // decision, not something this guard already did.
+  //
+  // Deliberately `=== true`: NULL means "this source never told us", which is
+  // not permission to charge — but it is also not proof of prepayment, so it
+  // stays payable rather than silently breaking collection for pay-on-arrival
+  // partners. Sources that know their model say so.
+  if (reservation?.isPrepaid === true) {
+    const err = new Error('Trip was prepaid at booking');
+    err.code = 'ALREADY_PAID';
+    throw err;
+  }
   const due = computeAmountDue(reservation);
   if (due <= 0) {
     const err = new Error('No balance due');

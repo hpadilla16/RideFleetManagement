@@ -502,7 +502,52 @@ async function syncMandatoryLocationFees(reservationId, scope = {}) {
     },
   ];
 
+  // DERIVED FROM feeGroups, never hand-listed.
+  //
+  // The guard below must not count rows THIS function creates. A hand-written
+  // set got that wrong the moment a second group existed: prod's base added
+  // UNDERAGE_FEE with the 2026-07-28 age rules, it was not in the list, and an
+  // imported total of 412.50 became 9.99 on the second pricing read — the same
+  // defect as MANDATORY_FEE, one door over, with a green suite over it.
+  //
+  // Deriving means a third group cannot reintroduce it. Same reasoning as the
+  // shared promoter propagating isPrepaid by default: make forgetting
+  // impossible rather than remembering mandatory.
+  const SYNC_OWNED_CHARGE_SOURCES = new Set([
+    ...feeGroups.map((g) => String(g.source || '').trim().toUpperCase()),
+    // Written by tollsService.syncReservationCharges, which runs in the SAME
+    // getPricing Promise.all — so it is our bookkeeping too.
+    'TOLL_MODULE',
+    'TOLL_POLICY',
+  ]);
+
   await prisma.$transaction(async (tx) => {
+    // FIRST STATEMENT IN THE TRANSACTION, AND IT IGNORES OUR OWN ROWS.
+    //
+    // Two things had to be true and only the first was, twice.
+    //
+    // (1) Read BEFORE the fee loop. Placed after it, this sync's own `create`
+    //     satisfied its own precondition on the very first call.
+    //
+    // (2) Do not count rows the syncs inside getPricing CREATE. Fixing only (1)
+    //     moved the corruption one read later: call #1 creates the mandatory
+    //     fee and the total survives; call #2 sees that fee, decides the
+    //     reservation "has charge rows", and writes the fee amount over the
+    //     imported total. Measured against real Postgres — 412.50 → 4.50 on the
+    //     second read. A MANDATORY_FEE with a sourceRefId is our bookkeeping,
+    //     not evidence anyone priced this reservation.
+    //
+    // Filtered in JS, never as a Prisma `{ source: { not: … } }`: a negated
+    // string filter never matches NULL, and legacy base-rate rows really do
+    // carry source:null. Excluding them would freeze exactly the totals this
+    // guard exists to protect (RES-213665 / beta.297).
+    const priorRows = await tx.reservationCharge.findMany({
+      where: { reservationId },
+      select: { id: true, source: true }
+    });
+    const pricedBefore = priorRows.filter(
+      (r) => !SYNC_OWNED_CHARGE_SOURCES.has(String(r?.source || '').trim().toUpperCase())
+    );
     for (const group of feeGroups) {
       for (const fee of group.fees) {
         const existing = chargeByFeeId.get(String(fee.id));
@@ -559,10 +604,35 @@ async function syncMandatoryLocationFees(reservationId, scope = {}) {
     const refreshedCharges = await tx.reservationCharge.findMany({
       where: { reservationId, selected: true }
     });
-    await tx.reservation.update({
-      where: { id: reservationId },
-      data: { estimatedTotal: summarizeChargeTotals(refreshedCharges).total }
-    });
+    // NEVER OVERWRITE AN IMPORTED TOTAL WITH ZERO.
+    //
+    // This function runs inside getPricing — a READ — so merely opening a
+    // reservation's pricing recomputes estimatedTotal from its charge rows. A
+    // reservation with NO charge rows has no computed total, and writing the
+    // sum of nothing (0) destroys whatever was there.
+    //
+    // That is not hypothetical and it is not rare. Broker and migration
+    // reservations are promoted with the partner's agreed total written
+    // straight onto estimatedTotal and NO charge rows at all
+    // (booking-source/promote.js: "writes ONLY estimatedTotal") — 6,353 of
+    // 6,375 pre-pickup reservations. Measured 2026-08-08: 177 had drifted from
+    // their source ExternalReservation.totalAmount and EVERY ONE of them had
+    // zero charge rows, so none of the drift was a real edit; 12 sat at exactly
+    // 0.00 against a source that says the partner is owed money, spanning May
+    // through August — i.e. still happening.
+    //
+    // "Nothing to compute from" is NOT the same as "the total is zero", and the
+    // difference is whether the reservation has any charge rows AT ALL — not
+    // whether any are currently selected. An admin who voids every charge
+    // (selected:false, kept for history) really has taken the total to zero and
+    // that must still be written; a reservation that never had rows has simply
+    // never been priced here.
+    if (pricedBefore.length > 0) {
+      await tx.reservation.update({
+        where: { id: reservationId },
+        data: { estimatedTotal: summarizeChargeTotals(refreshedCharges).total }
+      });
+    }
   });
 
   return mandatoryFees.length;

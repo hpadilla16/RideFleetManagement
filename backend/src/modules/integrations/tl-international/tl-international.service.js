@@ -658,6 +658,19 @@ export function mapDetailToRow(d, externalRef) {
     dropoffLocation: d.dropoffloc ?? d.dropoffLocation ?? d.dropoff_location ?? d.return_location ?? null,
     totalAmount: toDecimalString(d.amount ?? d.total ?? d.totalAmount ?? d.total_amount),
     currency: d.currency ?? 'USD',
+    // TL International is 100% PREPAID — the aggregator that originated the
+    // booking (Expedia, CarTrawler, Carnect, BookingGroup, Stressfree…) has
+    // already collected from the customer. Same shape as Advantage declaring
+    // itself pay-on-arrival: a connector states its commercial model rather
+    // than leaving it unknown.
+    //
+    // TL's feed does not carry the flag, so this stayed NULL on all 854 rows —
+    // and "unknown" is not harmless. The public payment path computes
+    // amountDue = estimatedTotal − paid and never checks isPrepaid, so a TL
+    // reservation with a non-zero total is chargeable through the public link
+    // to a customer who has already paid the aggregator. Measured 2026-08-08:
+    // 54 TL reservations with a future pickup, all 54 payable, $13,187.01.
+    isPrepaid: true,
     rawJson: d,
   };
 }

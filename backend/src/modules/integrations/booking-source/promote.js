@@ -117,6 +117,19 @@ export function createPromoter(sourceSpec) {
     defaultTimeZone = 'America/New_York',
     buildReservationExtras = (fresh) => ({
       notes: `Imported from ${sourceLabel} — ${fresh.externalRef}`,
+      // Propagate the prepaid signal by DEFAULT rather than making each source
+      // remember to copy it — a source that declares its commercial model (TL
+      // is 100% aggregator-prepaid, Advantage 100% pay-on-arrival) gets it onto
+      // the Reservation, which is where anything deciding whether to COLLECT
+      // money can actually see it.
+      //
+      // SPREAD, not a plain `isPrepaid: null`: the R0 refactor's parity tests
+      // assert that a source which never sets the flag produces a create with
+      // NO isPrepaid key at all ("NU-only field stays NU-only"). Writing an
+      // explicit null is the same value in Postgres but breaks that contract,
+      // and the contract is what proves this shared promoter still reproduces
+      // each source's original writes.
+      ...(typeof fresh.isPrepaid === 'boolean' ? { isPrepaid: fresh.isPrepaid } : {}),
     }),
     prismaClient = prisma,
   } = sourceSpec || {};

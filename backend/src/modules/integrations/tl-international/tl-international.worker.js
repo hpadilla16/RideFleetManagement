@@ -593,6 +593,11 @@ export async function promoteWithMappings(extRes, opts) {
         pickupLocationId: locationId,
         returnLocationId: locationId,
         estimatedTotal: fresh.totalAmount ?? null,
+        // Carry the prepaid signal onto the Reservation, the same idiom NU and
+        // Advantage use. Without it the flag lives only on ExternalReservation
+        // and anything deciding from the Reservation — notably the public
+        // payment path — treats an already-paid TL booking as collectible.
+        isPrepaid: typeof fresh.isPrepaid === 'boolean' ? fresh.isPrepaid : null,
         notes: `Imported from TL International — ${fresh.externalRef}`,
         sendConfirmationEmail: false,
       },
