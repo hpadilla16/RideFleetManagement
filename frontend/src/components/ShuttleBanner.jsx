@@ -65,6 +65,14 @@ export function ShuttleBanner() {
       if (cancelled) return;
       const token = readStoredToken();
       if (!token) return schedule(POLL_MS);
+      // A background tab has nobody looking at the banner. Polling it anyway
+      // spends a request and — on HTTP/1.1, before we enabled h2 — one of the
+      // browser's six connections per origin, on a screen that cannot be read.
+      // Suggested in the 2026-08-09 shuttle report; worth taking on its own
+      // merits even though it was not the outage.
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return schedule(POLL_MS);
+      }
       try {
         const out = await api('/api/shuttle-requests?status=open', { bypassCache: true }, token);
         if (cancelled) return;
@@ -83,7 +91,21 @@ export function ShuttleBanner() {
     };
 
     poll();
-    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+    // Come back immediately when the operator returns to the tab, so hiding it
+    // costs freshness only while it is hidden.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !cancelled) {
+        if (timer) clearTimeout(timer);
+        failures = 0;
+        poll();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   if (!ready.length) return null;
