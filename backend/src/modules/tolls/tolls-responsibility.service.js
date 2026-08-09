@@ -190,8 +190,31 @@ export function resolveReservationResponsibility({
   // real work instead of surfacing it. Ordinary rentals keep their exact
   // previous behaviour.
   const swapped = new Set(windows.map((w) => String(w.vehicleId))).size > 1;
+
+  // A swap timestamp is when STAFF pressed the button, not when the car
+  // changed hands. Measured across every swapped rental on 2026-08-08: of the
+  // tolls this rule flagged, most sat within FOUR HOURS of their own
+  // vehicle's window — RES-084226 picked up at 3:17 PM and its first toll,
+  // carrying the plate of the car recorded 56 minutes later, fired at 3:24 PM.
+  // That customer was driving something. The plate and sello come off the
+  // road; the swap row is bookkeeping. When they disagree by less than a
+  // shift, the physical evidence wins.
+  //
+  // My first cut had no grace and detached 30-odd legitimate tolls before the
+  // distribution showed the mistake: a dense cluster under 4h, a gap, then a
+  // long tail at 24h+ which is the real misattribution.
+  const graceMs = Math.max(0, Number(process.env.TOLL_SWAP_GRACE_HOURS || 12)) * 3600 * 1000;
+  const ownWindows = windows.filter((w) => String(w.vehicleId) === String(vehicleId));
+  const nearOwnWindow = ownWindows.some((w) => (
+    when >= new Date(w.startAt.getTime() - graceMs) && when <= new Date(w.endAt.getTime() + graceMs)
+  ));
+
   const contradictsHeldVehicle = !!(
-    swapped && vehicleId && heldVehicleId && String(heldVehicleId) !== String(vehicleId)
+    swapped
+    && vehicleId
+    && heldVehicleId
+    && String(heldVehicleId) !== String(vehicleId)
+    && !nearOwnWindow
   );
 
   return {

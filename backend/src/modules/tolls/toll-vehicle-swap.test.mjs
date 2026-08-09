@@ -62,13 +62,47 @@ test('KDY966 tolls dated BEFORE the swap are not his', () => {
   }
 });
 
-test('THE SAME-DAY CASE: 11 Jul 11:58 AM is before the 3:30 PM swap', () => {
-  // $4.00, the largest single row. A day-granular rule would have kept it.
+test('A SWAP TIMESTAMP IS CLERICAL: hours before it, the new car is already his', () => {
+  // $4.00 at 11:58 AM against a swap recorded at 3:30 PM. I first called this
+  // toll misattributed. The distribution said otherwise: measured across every
+  // swapped rental, flagged tolls clustered within four hours of their own
+  // vehicle's window, because staff record the swap after the fact. The plate
+  // came off the road; the swap row is bookkeeping.
   const r = at('2026-07-11T15:58:00.000Z', KDY);
-  assert.equal(r.contradictsHeldVehicle, true, 'the swap had not happened yet');
-  assert.equal(r.heldVehicleId, KKJ);
-  // And minutes after the swap, the same car IS his.
+  assert.equal(r.heldVehicleId, KKJ, 'the record still says the old car');
+  assert.equal(r.contradictsHeldVehicle, false, 'but 3.5h of lag is not evidence of anything');
+  // Minutes after the swap it is unambiguously his.
   assert.equal(at('2026-07-11T19:45:00.000Z', KDY).contradictsHeldVehicle, false);
+});
+
+test('THE 56-MINUTE CASE: a swap recorded an hour after pickup is bookkeeping', () => {
+  // RES-084226: picked up 3:17 PM, swapped on paper at 4:13 PM, first toll at
+  // 3:24 PM carrying the NEW car's plate. Seven minutes after pickup.
+  const reservation = {
+    pickupAt: '2026-07-30T19:17:00.000Z',
+    returnAt: '2026-08-29T19:17:00.000Z',
+    vehicleId: 'veh-kgu552',
+    rentalAgreement: {
+      vehicleId: 'veh-jum053',
+      vehicleSwaps: [{
+        previousVehicleId: 'veh-jum053', nextVehicleId: 'veh-kgu552',
+        previousCheckedInAt: '2026-07-30T20:13:00.000Z',
+        nextCheckedOutAt: '2026-07-30T20:13:00.000Z',
+        createdAt: '2026-07-30T20:13:00.000Z',
+      }],
+    },
+  };
+  const r = resolveReservationResponsibility({
+    reservation, transactionAt: '2026-07-30T19:24:00.000Z', vehicleId: 'veh-kgu552' });
+  assert.equal(r.contradictsHeldVehicle, false, 'the customer was driving SOMETHING');
+});
+
+test('beyond the grace, a real misattribution is still caught', () => {
+  // The June KDY966 tolls: 16 and 2 DAYS before the swap, not hours.
+  assert.equal(at('2026-06-25T12:23:00.000Z', KDY).contradictsHeldVehicle, true);
+  assert.equal(at('2026-07-09T10:46:00.000Z', KDY).contradictsHeldVehicle, true);
+  // And the 25 Jul KKJ-001 tolls, two weeks after it went back.
+  assert.equal(at('2026-07-25T14:27:00.000Z', KKJ).contradictsHeldVehicle, true);
 });
 
 test('KKJ-001 tolls dated AFTER the swap are not his either', () => {
