@@ -54,6 +54,7 @@ function extractMandatoryFeeIdsFromLocationConfig(rawCfg) {
 
 
 import Link from 'next/link';
+import { LoadErrorBanner } from '../../components/LoadErrorBanner';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AuthGate } from '../../components/AuthGate';
@@ -229,6 +230,11 @@ function ReservationsInner({ token, me, logout }) {
   const canCreateReservation = ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(role);
   const [reservations, setReservations] = useState([]);
   const [reservationsTotal, setReservationsTotal] = useState(0);
+  // Did the list REJECT, or is it genuinely empty? (2026-08-08 outage.)
+  // The catch below empties the rows and zeroes the total, so a stalled
+  // backend rendered as "this branch has no reservations" — the exact reading
+  // that let a two-hour outage go unreported.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [reservationsHasMore, setReservationsHasMore] = useState(false);
   const [loadingReservations, setLoadingReservations] = useState(false);
   const [reservationSummary, setReservationSummary] = useState({
@@ -333,12 +339,14 @@ function ReservationsInner({ token, me, logout }) {
       setReservationsTotal(Number(payload?.total || nextRows.length || 0));
       setReservationsHasMore(!!payload?.hasMore);
       setMsg('');
+      setLoadFailed(false);
     } catch (error) {
       if (!append) {
         setReservations([]);
         setReservationsTotal(0);
         setReservationsHasMore(false);
       }
+      setLoadFailed(true);
       setMsg(error?.message || 'Unable to load reservations');
     } finally {
       setLoadingReservations(false);
@@ -1039,9 +1047,13 @@ function ReservationsInner({ token, me, logout }) {
             ) : null}
           </div>
         </div>
-        {msg ? <p className="label">{msg}</p> : null}
+        {loadFailed
+          ? <LoadErrorBanner detail={msg} onRetry={() => loadReservations({ offset: 0 })} />
+          : msg ? <p className="label">{msg}</p> : null}
         <p className="label">
-          Showing {rows.length} of {reservationsTotal} reservations{loadingReservations ? ' - loading...' : ''}.
+          {loadFailed
+            ? 'Showing — of — reservations (the list could not load).'
+            : `Showing ${rows.length} of ${reservationsTotal} reservations${loadingReservations ? ' - loading...' : ''}.`}
         </p>
         <table>
           <thead><tr><th>#</th><th>Status</th><th>Customer</th><th>Vehicle</th><th>Pickup</th><th>Return</th><th>Next Cycle</th><th>Balance</th><th>Actions</th></tr></thead>

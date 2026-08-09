@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { LoadErrorBanner } from '../components/LoadErrorBanner';
 import { useRouter } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
 import { AuthGate } from '../components/AuthGate';
@@ -298,7 +299,12 @@ function DashboardInner({ token, me, logout }) {
   // Hector found out when users complained. A number we could not fetch must
   // never be drawn as a number.
   const [loadFailed, setLoadFailed] = useState(false);
-  const canSeeOverview = me?.moduleAccess?.reports !== false;
+  // Fail CLOSED on an unknown module map. `!== false` treats undefined as
+  // allowed, and `me` can be a cached or older object with no moduleAccess at
+  // all — the dashboard then fires /api/reports/overview and eats a guaranteed
+  // 403 (2026-08-08 incident review, second finding). Only call it when we can
+  // actually see permission to.
+  const canSeeOverview = me?.moduleAccess ? me.moduleAccess.reports !== false : false;
   const canSeeVehicles = me?.moduleAccess?.vehicles !== false;
 
   const load = async () => {
@@ -898,20 +904,9 @@ function DashboardInner({ token, me, logout }) {
         <div className="glass card"><div className="label">{t('dashboard.active')}</div><div className="value">{num(activeReservations)}</div></div>
         <div className="glass card"><div className="label">{t('dashboard.tileFeeAdvisories')}</div><div className="value">{num(feeAdvisoryCount)}</div></div>
       </section>
-      {loadFailed ? (
-        <div
-          role="alert"
-          className="glass card"
-          style={{ margin: '4px 0 12px', padding: '12px 14px', borderColor: 'var(--danger-bd)', background: 'var(--danger-bg)', color: 'var(--danger-tx)' }}
-        >
-          <strong>{t('dashboard.loadFailedTitle', 'This page could not load its data.')}</strong>{' '}
-          {t('dashboard.loadFailedBody', 'The numbers below are incomplete or missing — they are NOT real counts. Reload in a moment, and tell an admin if it keeps happening.')}
-          {msg ? <div className="label" style={{ marginTop: 6 }}>{msg}</div> : null}
-          <div style={{ marginTop: 10 }}>
-            <button type="button" onClick={() => load()}>{t('common.retry', 'Retry')}</button>
-          </div>
-        </div>
-      ) : msg ? <p className="label" style={{ margin: '4px 0 10px 2px' }}>{msg}</p> : null}
+      {loadFailed
+        ? <LoadErrorBanner detail={msg} onRetry={() => load()} />
+        : msg ? <p className="label" style={{ margin: '4px 0 10px 2px' }}>{msg}</p> : null}
 
       <section className="glass card-lg" style={{ marginBottom: 12 }}>
         <div className="row-between" style={{ alignItems: 'center' }}>

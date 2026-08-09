@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { LoadErrorBanner } from '../../components/LoadErrorBanner';
 import { useRouter, useSearchParams } from 'next/navigation';
 import JSZip from 'jszip';
 import QRCode from 'qrcode';
@@ -246,6 +247,9 @@ function VehiclesInner({ token, me, logout }) {
     }
   };
 
+  // Did the fleet list REJECT, or is the fleet genuinely empty? (2026-08-08.)
+  const [loadFailed, setLoadFailed] = useState(false);
+
   const load = async () => {
     if (isSuper && !activeTenantId) {
       setVehicles([]);
@@ -282,6 +286,11 @@ function VehiclesInner({ token, me, logout }) {
     else setVehicleTypes([]);
     if (ov.status === 'fulfilled') setOverviewKpis(ov.value?.kpis || null);
     else setOverviewKpis(null);
+
+    // The fleet list is the page. If it rejected, everything below — the
+    // count, the tiles, "no vehicles found" — is a guess dressed as data
+    // (2026-08-08 outage).
+    setLoadFailed(v.status === 'rejected');
 
     if (v.status === 'rejected') setMsg(v.reason?.message || 'Unable to load vehicles');
     else if (canManageVehicleSetup && [l, vt].some((row) => row.status === 'rejected')) setMsg('Vehicles loaded with limited supporting data');
@@ -1000,7 +1009,9 @@ function VehiclesInner({ token, me, logout }) {
             <button className="button-subtle" onClick={exportQrPack} disabled={(isSuper && !activeTenantId) || !vehicles.length || exportingQrPack}>{exportingQrPack ? 'Exporting...' : 'Export QR Pack'}</button>
           </div>
         </div>
-        {msg ? <p className="label">{msg}</p> : null}
+        {loadFailed
+          ? <LoadErrorBanner detail={msg} onRetry={() => load()} />
+          : msg ? <p className="label">{msg}</p> : null}
         {selectedVehicleIds.size > 0 ? (
           <div
             className="row-between"
