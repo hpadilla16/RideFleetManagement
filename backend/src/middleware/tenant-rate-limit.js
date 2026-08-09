@@ -56,6 +56,28 @@ const KEY_TTL_SECONDS = 65; // 60s window + 5s slack
 const TENANT_TIER_CACHE_TTL_MS = 60 * 1000; // 1 min - tier changes are rare
 const REDIS_URL = process.env.REDIS_URL || '';
 
+// Hard timeout for Redis ops on the request path. A managed-Redis maintenance/
+// failover (DigitalOcean fleet-cache-prod, 2026-06-20) left the singleton
+// ioredis client reconnecting in a loop; `incr` then HUNG rather than rejecting
+// — it only rejects on a hard error, not on a slow/flapping connection. Result:
+// every non-SUPER_ADMIN request stalled inside this middleware until the socket
+// finally gave up, i.e. a site-wide stall for regular users (super-admin is
+// bypassed above, which is why the outage looked selective). We now race every
+// Redis op against a short timeout and fail OPEN (allow the request), exactly as
+// we already do on an explicit Redis error. Tunable via env for ops.
+const REDIS_OP_TIMEOUT_MS = Number(process.env.RATE_LIMIT_REDIS_TIMEOUT_MS) || 75;
+
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label || 'redis op'} timed out after ${ms}ms`)),
+      ms,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 let redisClient = null;
 let redisLoading = null;
 let redisDisabled = false;
@@ -193,12 +215,14 @@ export function createTenantRateLimit(deps = {}) {
 
       let count;
       try {
-        count = await client.incr(key);
+        count = await withTimeout(client.incr(key), REDIS_OP_TIMEOUT_MS, 'rate-limit incr');
         if (count === 1) {
-          await client.expire(key, KEY_TTL_SECONDS);
+          await withTimeout(client.expire(key, KEY_TTL_SECONDS), REDIS_OP_TIMEOUT_MS, 'rate-limit expire');
         }
       } catch (err) {
-        logger.warn('[tenant-rate-limit] redis incr failed - allowing request', {
+        // Fail OPEN on either a hard Redis error OR a timeout (slow/zombie
+        // connection). A rate-limit hiccup must never take production down.
+        logger.warn('[tenant-rate-limit] redis incr failed/slow - allowing request', {
           tenantId,
           message: err.message,
         });
