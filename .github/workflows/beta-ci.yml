@@ -86,6 +86,11 @@ jobs:
         #     the scoping rules (a locationId filter INTERSECTS the caller's
         #     sedes, never widens) live in a pure module guarded on every push
         #     (2026-08-07).
+        #   - test:with-timeout / test:rate-limit: no network call on a request
+        #     path may be unbounded. The 2026-08-08 outage was a promise that
+        #     never settled, which a try/catch cannot see; the same fix had
+        #     been written in June and never committed, so the rule lives in a
+        #     test now.
         #   - test:tolls-queue-counts: the queue tabs. Their counts decide what
         #     staff believe is left to do, and counting the loaded PAGE instead
         #     of the database once made the queue climb from 19 to 21 when they
@@ -98,7 +103,7 @@ jobs:
         #     money must never blend, and money already collected must never be
         #     forecast again — both are pure arithmetic, and both are the kind
         #     of error that reads as a plausible number (2026-08-07).
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:

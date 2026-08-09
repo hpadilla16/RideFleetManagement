@@ -54,6 +54,9 @@ import { reportsRouter } from './modules/reports/reports.routes.js';
 // register-all-reports.js is a side-effect import that triggers each
 // individual report file's registerReport() call against reportsV2Router.
 import { reportsV2Router } from './modules/reports/reports-v2.routes.js';
+// The dashboard tile every user is meant to see — mounted before the reports
+// module gate below, which an AGENT never passes. See today-kpis.routes.js.
+import { todayKpisRouter } from './modules/reports/today-kpis.routes.js';
 import './modules/reports/register-all-reports.js';
 import { commissionsRouter } from './modules/commissions/commissions.routes.js';
 import { carSharingRouter } from './modules/car-sharing/car-sharing.routes.js';
@@ -359,6 +362,7 @@ app.use('/api/reports/custom', requireAuth, tenantRateLimit, requireModuleAccess
 // Global search for the Cmd/Ctrl+K palette (2026-07-27): any authenticated
 // staff; results only link to pages that keep their own guards.
 app.use('/api/search', requireAuth, tenantRateLimit, globalSearchRouter);
+app.use('/api/reports', requireAuth, tenantRateLimit, todayKpisRouter);
 app.use('/api/reports', requireAuth, tenantRateLimit, requireModuleAccess('reports'), reportsV2Router);
 app.use('/api/reports', requireAuth, tenantRateLimit, requireModuleAccess('reports'), reportsRouter);
 app.use('/api/commissions', requireAuth, tenantRateLimit, requireModuleAccess('reports'), commissionsRouter);

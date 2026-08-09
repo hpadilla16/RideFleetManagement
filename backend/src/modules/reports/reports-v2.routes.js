@@ -112,37 +112,12 @@ reportsV2Router.get(
 );
 
 // ---------------------------------------------------------------------------
-// GET /api/reports/today-kpis — dashboard "Collected today" (split per
-// location) + "Pending tolls". 2026-08-06 (Hector): EVERY user sees this tile
-// — AGENT included, and a location-scoped user gets their locations' numbers
-// instead of the old 403. This is the one route in this file where scoping
-// FILTERS rather than fails closed: computeTodayKpis carries the allowed
-// location ids all the way into the Prisma where and has no shared
-// whole-tenant cache, so the /snapshot rejection rationale does not apply.
-// Program-restricted accounts stay rejected — their world is a program, not a
-// set of locations, and this breakdown has no meaning for them.
-// SUPER_ADMIN without a tenant gets nulls (the reports-custom Sentry lesson:
-// never pass a null tenantId to Prisma).
+// GET /api/reports/today-kpis lives in today-kpis.routes.js, mounted BEFORE
+// this router's `requireModuleAccess('reports')` gate. An AGENT defaults to
+// reports:false, so keeping it here 403'd the very users Hector asked to see
+// it (2026-08-06, "que todo usuario lo pueda ver"). Moved, not copied — two
+// definitions of one endpoint drift.
 // ---------------------------------------------------------------------------
-reportsV2Router.get(
-  '/today-kpis',
-  requireRole('ADMIN', 'OPS', 'AGENT', 'SUPER_ADMIN'),
-  async (req, res) => {
-    try {
-      if (userProgramScope(req.user)) {
-        return res.status(403).json({
-          error: 'This report set is not yet available for program-restricted accounts',
-        });
-      }
-      const tenantId = tenantScopeFor(req)?.tenantId || null;
-      if (!tenantId) return res.json({ collectedToday: null, byLocation: [], pendingTolls: null });
-      const locationIds = userAllowedLocationIds(req.user);
-      res.json(await computeTodayKpis(tenantId, { locationIds }));
-    } catch (err) {
-      sendError(res, err);
-    }
-  }
-);
 
 // ---------------------------------------------------------------------------
 // GET /api/reports/dashboard-v2-kpis — the v2 hero row (2026-08-03, phase 4-5

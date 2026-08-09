@@ -23,6 +23,9 @@ import { useTranslation } from 'react-i18next';
 import { api, readStoredToken } from '../lib/client';
 
 const POLL_MS = 20000;
+// After this many consecutive failures the banner stops polling until reload.
+const MAX_FAILURES = 5;
+const MAX_BACKOFF_MS = 5 * 60 * 1000;
 
 function minutesSince(value) {
   const t = new Date(value).getTime();
@@ -35,23 +38,52 @@ export function ShuttleBanner() {
   const router = useRouter();
   const [ready, setReady] = useState([]);
 
+  // Backoff + circuit breaker (2026-08-08 incident review).
+  //
+  // This banner is mounted on EVERY screen and polled a bypass-cache request
+  // every 20s with no failure handling: the catch swallowed the error and the
+  // interval kept firing. When the backend stalled, each hung poll held one of
+  // the browser's ~6 connections per origin (the site is HTTP/1.1), so tabs ran
+  // out of sockets and could not load data even from a healthy endpoint. A
+  // banner that shows shuttle requests must never be the reason the rest of
+  // the app cannot talk to the server.
+  //
+  // Now: exponential backoff on consecutive failures, and after
+  // MAX_FAILURES it stops entirely until the page is reloaded. One slow
+  // endpoint degrades one banner instead of the whole tab.
   useEffect(() => {
     let cancelled = false;
+    let timer = null;
+    let failures = 0;
+
+    const schedule = (ms) => {
+      if (cancelled) return;
+      timer = setTimeout(poll, ms);
+    };
+
     const poll = async () => {
+      if (cancelled) return;
       const token = readStoredToken();
-      if (!token) return;
+      if (!token) return schedule(POLL_MS);
       try {
         const out = await api('/api/shuttle-requests?status=open', { bypassCache: true }, token);
         if (cancelled) return;
         const rows = Array.isArray(out?.rows) ? out.rows : [];
         setReady(rows.filter((r) => r.status === 'READY'));
+        failures = 0;
+        schedule(POLL_MS);
       } catch {
-        if (!cancelled) setReady([]);
+        if (cancelled) return;
+        failures += 1;
+        setReady([]);
+        // Give up rather than keep consuming a connection every 20s.
+        if (failures >= MAX_FAILURES) return;
+        schedule(Math.min(POLL_MS * 2 ** failures, MAX_BACKOFF_MS));
       }
     };
+
     poll();
-    const timer = setInterval(poll, POLL_MS);
-    return () => { cancelled = true; clearInterval(timer); };
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, []);
 
   if (!ready.length) return null;

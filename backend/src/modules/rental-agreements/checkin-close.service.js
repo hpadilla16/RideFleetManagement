@@ -34,6 +34,10 @@ import { settingsService } from '../settings/settings.service.js';
 import { sendInvoiceAfterCheckin, sendReceiptPaidInFull } from './checkin-emails.service.js';
 import { enqueueJob } from '../../lib/queue/index.js';
 import { AUTOCHARGE_PRIORITY } from '../../lib/queue/priorities.js';
+import { withTimeout } from '../../lib/with-timeout.js';
+
+// Redis must never hold the check-in close hostage (2026-08-08 incident).
+const ENQUEUE_TIMEOUT_MS = Number(process.env.AUTOCHARGE_ENQUEUE_TIMEOUT_MS) || 2000;
 import { parseDepositRuleDecision, decideIncludedMilesPerDay, UNLIMITED_MILES } from '../../lib/deposit-rules.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 
@@ -382,14 +386,24 @@ export async function closeAgreementWithCheckinFees(
       // Enqueue with idempotent jobId so re-runs don't double-charge
       autochargeJobId = `autocharge-${agreement.reservationId}-${autochargeAt.getTime()}`;
       try {
-        await enqueueJob(
-          'reservation.autocharge-after-checkin',
-          { reservationId: agreement.reservationId },
-          {
-            delay: delayMs,
-            jobId: autochargeJobId,
-            priority: AUTOCHARGE_PRIORITY
-          }
+        // Bounded, because the catch below cannot save us from a HANG. This
+        // enqueue talks to the same managed Redis whose maintenance stalled
+        // every request on 2026-08-08; unbounded, it would hang the CHECK-IN
+        // CLOSE itself and the customer would watch their return fail. The
+        // autocharge only accelerates: on timeout the balance drops into the
+        // manual workflow, which is exactly what the catch already does.
+        await withTimeout(
+          enqueueJob(
+            'reservation.autocharge-after-checkin',
+            { reservationId: agreement.reservationId },
+            {
+              delay: delayMs,
+              jobId: autochargeJobId,
+              priority: AUTOCHARGE_PRIORITY
+            }
+          ),
+          ENQUEUE_TIMEOUT_MS,
+          'autocharge enqueue'
         );
       } catch (err) {
         logger.error('[checkin-close] failed to enqueue autocharge', {

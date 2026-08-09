@@ -38,6 +38,7 @@
  */
 
 import logger from '../lib/logger.js';
+import { withTimeout } from '../lib/with-timeout.js';
 // Prisma is imported lazily inside getPrisma() so this module can be unit-tested
 // without spinning up the Prisma client (which requires platform-matching
 // query-engine binaries).
@@ -67,16 +68,6 @@ const REDIS_URL = process.env.REDIS_URL || '';
 // we already do on an explicit Redis error. Tunable via env for ops.
 const REDIS_OP_TIMEOUT_MS = Number(process.env.RATE_LIMIT_REDIS_TIMEOUT_MS) || 75;
 
-function withTimeout(promise, ms, label) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`${label || 'redis op'} timed out after ${ms}ms`)),
-      ms,
-    );
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
 
 let redisClient = null;
 let redisLoading = null;

@@ -34,6 +34,7 @@
  */
 
 import logger from './logger.js';
+import { withTimeout } from './with-timeout.js';
 import { isVerifiablePickupDate } from './reservation-smart-match.js';
 
 /**
@@ -129,16 +130,6 @@ async function getRedis() {
   return redisLoading;
 }
 
-function withTimeout(promise, ms, label) {
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`${label || 'redis op'} timed out after ${ms}ms`)),
-      ms,
-    );
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-}
 
 /**
  * Build a throttle instance. `deps` lets tests inject a Map-backed Redis shim

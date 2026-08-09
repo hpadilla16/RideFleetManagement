@@ -323,8 +323,17 @@ function DashboardInner({ token, me, logout }) {
     // miles-driven, counts only (no money). Same module-gated soft-fail pattern.
     if (me?.moduleAccess?.maintenance !== false) {
       api('/api/maintenance/summary', { bypassCache: true }, token).then((s) => setMaintSummary(s || null)).catch(() => setMaintSummary(null));
-      api('/api/reports/today-kpis', { bypassCache: true }, token).then((k) => setTodayKpis(k && k.collectedToday != null ? k : null)).catch(() => setTodayKpis(null));
     }
+
+    // Collected today / tolls to review. NOT gated on a module: Hector asked
+    // for every user to see this tile, and the backend now serves it ahead of
+    // the reports module gate (today-kpis.routes.js). It used to sit inside
+    // the `maintenance` block above while the backend guarded it with
+    // `reports` — a mismatch that fired a guaranteed 403 on every dashboard
+    // load for AGENTs, who are exactly the people the tile was meant for.
+    api('/api/reports/today-kpis', { bypassCache: true }, token)
+      .then((k) => setTodayKpis(k && k.collectedToday != null ? k : null))
+      .catch(() => setTodayKpis(null));
 
     // Business documents expiring (2026-07-28). Lives behind the settings
     // module + ADMIN/OPS like the rest of /api/locations, so a 403 for anyone
