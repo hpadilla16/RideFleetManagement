@@ -85,6 +85,8 @@ function Wizard({ token, me, logout }) {
 
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
 
+  const [rentalMin, setRentalMin] = useState({ minimumHours: 24, hourly: false });
+
   const rentalDays = useMemo(() => {
     if (!form.pickupAt || !form.returnAt) return 0;
     const ms = new Date(form.returnAt) - new Date(form.pickupAt);
@@ -112,6 +114,23 @@ function Wizard({ token, me, logout }) {
     })();
     return () => { cancelled = true; };
   }, [form.vehicleTypeId, form.pickupLocationId, form.pickupAt, form.returnAt, rentalDays, token]);
+
+  // How short a rental may be here. 24 hours unless an hourly rate is
+  // configured (Hector, 2026-08-09). Asked of the backend rather than assumed,
+  // because the old rule was a hardcoded pickup+1day `min` that the API never
+  // shared: a desktop agent could type past it while an iPhone's picker
+  // clamped hard, which is how an International agent could not save at all.
+  useEffect(() => {
+    if (!form.pickupLocationId) { setRentalMin({ minimumHours: 24, hourly: false }); return undefined; }
+    let cancelled = false;
+    const q = new URLSearchParams({ pickupLocationId: form.pickupLocationId });
+    if (form.vehicleTypeId) q.set('vehicleTypeId', form.vehicleTypeId);
+    if (form.pickupAt) q.set('pickupAt', form.pickupAt);
+    api(`/api/rates/rental-minimum?${q.toString()}`, {}, token)
+      .then((r) => { if (!cancelled && r) setRentalMin({ minimumHours: Number(r.minimumHours || 24), hourly: !!r.hourly }); })
+      .catch(() => { if (!cancelled) setRentalMin({ minimumHours: 24, hourly: false }); });
+    return () => { cancelled = true; };
+  }, [form.pickupLocationId, form.vehicleTypeId, form.pickupAt, token]);
 
   // Market context for the vehicle-class cards, keyed by the pickup airport code.
   useEffect(() => {
@@ -221,10 +240,10 @@ function Wizard({ token, me, logout }) {
     if (!form.pickupAt) return '';
     const d = new Date(form.pickupAt);
     if (!Number.isFinite(d.getTime())) return '';
-    d.setDate(d.getDate() + 1);
+    d.setHours(d.getHours() + Number(rentalMin.minimumHours || 24));
     const pad = (x) => String(x).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }, [form.pickupAt]);
+  }, [form.pickupAt, rentalMin.minimumHours]);
 
   const Stepper = () => (
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
@@ -303,6 +322,11 @@ function Wizard({ token, me, logout }) {
                 </div>
               </div>
               {form.pickupAt && form.returnAt && rentalDays <= 0 ? <p className="error">Return must be after pickup.</p> : null}
+              <p className="ui-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                {rentalMin.hourly
+                  ? `This location rents by the hour — minimum ${rentalMin.minimumHours} hour${rentalMin.minimumHours === 1 ? '' : 's'}.`
+                  : 'Minimum rental is 24 hours. To rent for less, configure an hourly rate for the vehicle class.'}
+              </p>
               <div className="inline-actions" style={{ marginTop: 14 }}>
                 <button type="button" onClick={() => setStep(2)} disabled={!stepValid(1)}>Continue</button>
               </div>

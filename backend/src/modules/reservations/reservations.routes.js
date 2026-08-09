@@ -1,5 +1,6 @@
 ﻿import crypto from 'node:crypto';
 import { Router } from 'express';
+import { checkRentalSpan, rentalSpanMessage } from '../rates/rental-minimum.js';
 import { reservationsService } from './reservations.service.js';
 import { looksLikeXlsx, parseReservationImportWorkbook } from './reservation-import-parse.js';
 import { validateReservationCreate, validateReservationPatch } from './reservations.rules.js';
@@ -1093,6 +1094,30 @@ reservationsRouter.post('/', async (req, res, next) => {
     const validationErrors = validateReservationCreate(req.body || {});
     if (validationErrors.length) {
       return res.status(400).json({ error: 'Validation failed', details: validationErrors });
+    }
+
+    // 24 hours minimum unless an hourly rate is configured (Hector,
+    // 2026-08-09). Enforced HERE, not only in the form: the old minimum was a
+    // `min` attribute on a date input, which a desktop agent could type past
+    // and an API caller never saw at all. rental-minimum.js is the single
+    // definition; the form asks the same endpoint to shape its picker.
+    const span = checkRentalSpan({
+      pickupAt: String(req.body.pickupAt),
+      returnAt: String(req.body.returnAt),
+      offerings: [],
+    });
+    const minimum = await ratesService.rentalMinimumFor({
+      pickupLocationId: String(req.body.pickupLocationId),
+      vehicleTypeId: String(req.body.vehicleTypeId),
+      at: String(req.body.pickupAt),
+    }, scopeFor(req));
+    const hours = span.hours;
+    if (hours < minimum.minimumHours) {
+      return res.status(400).json({
+        error: rentalSpanMessage(minimum),
+        minimumHours: minimum.minimumHours,
+        hours,
+      });
     }
 
     const quote = await ratesService.resolveForRental({

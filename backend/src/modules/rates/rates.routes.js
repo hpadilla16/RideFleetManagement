@@ -9,6 +9,19 @@ ratesRouter.get('/', async (req, res, next) => {
   catch (e) { next(e); }
 });
 
+// How short a rental may be here (Hector 2026-08-09: 24h unless an hourly
+// rate is configured). The create form asks on location change so its date
+// picker can shape itself; the create endpoint enforces the same answer.
+ratesRouter.get('/rental-minimum', async (req, res, next) => {
+  try {
+    res.json(await ratesService.rentalMinimumFor({
+      pickupLocationId: req.query.pickupLocationId ? String(req.query.pickupLocationId) : null,
+      vehicleTypeId: req.query.vehicleTypeId ? String(req.query.vehicleTypeId) : null,
+      at: req.query.pickupAt ? String(req.query.pickupAt) : null,
+    }, scopeFor(req)));
+  } catch (e) { next(e); }
+});
+
 ratesRouter.get('/resolve', async (req, res, next) => {
   try {
     const { vehicleTypeId, pickupLocationId, pickupAt, returnAt } = req.query || {};

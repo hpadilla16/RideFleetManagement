@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { dropFeesAlreadyImported } from './imported-fee-dedup.js';
 import { tollsService } from '../tolls/tolls.service.js';
 import { filterMandatoryFeesForChannel } from '../booking-engine/fee-channel-filter.js';
 import { evaluateAgeRules } from '../../lib/age-rules.js';
@@ -452,10 +453,24 @@ async function syncMandatoryLocationFees(reservationId, scope = {}) {
   // displayOnline=true fees are website-only and must NOT auto-apply to
   // STAFF or CAR_SHARING reservations. See filterMandatoryFeesForChannel
   // in booking-engine.service.js for the full rule set.
-  const mandatoryFees = filterMandatoryFeesForChannel(
+  const mandatoryFeesForChannel = filterMandatoryFeesForChannel(
     (reservation.pickupLocation?.locationFees || []).map((row) => row.fee),
     reservation.bookingChannel
   );
+
+  // Hector, 2026-08-09: "MEX si ya tiene el fee no se lo duplicas."
+  // A franchise booking arrives with the portal's own fee lines imported; the
+  // location's mandatory fees were then stacked on top, billing the customer
+  // twice for one fee on the franchise's own paperwork. Only the OVERLAP is
+  // dropped — a fee the franchise does not charge is still ours to collect.
+  const { keep: mandatoryFees, skipped: feesAlreadyImported } =
+    dropFeesAlreadyImported(mandatoryFeesForChannel, reservation.charges || []);
+  if (feesAlreadyImported.length) {
+    logger.info('[pricing] mandatory fees skipped — already imported from the franchise', {
+      reservationId: reservation.id,
+      skipped: feesAlreadyImported.map((f) => f.name),
+    });
+  }
 
   // 2026-07-28 AGE RULES (LAX): with ageRulesEnforced on the pickup location
   // and the driver inside the [chargeAgeMin..underageFeeMaxAge] band, every

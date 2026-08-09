@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { rentalMinimum } from './rental-minimum.js';
 import { prisma } from '../../lib/prisma.js';
 import { settingsService } from '../settings/settings.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
@@ -729,6 +730,44 @@ export const ratesService = {
     }
 
     return prisma.rate.findUnique({ where: { id: created.id }, include: RATE_INCLUDE });
+  },
+
+  /**
+   * The shortest rental this location (and optionally this class) will take.
+   *
+   * Hector, 2026-08-09: 24 hours, unless an hourly rate is configured. The
+   * decision lives in rental-minimum.js; this only gathers what it needs from
+   * the price book — every active plan that covers the location, with its row
+   * for the class (or all rows when the class is not chosen yet, because the
+   * create form picks dates BEFORE the vehicle).
+   */
+  async rentalMinimumFor({ pickupLocationId = null, vehicleTypeId = null, at = null } = {}, scope = {}) {
+    const when = at ? new Date(at) : new Date();
+    const plans = await prisma.rate.findMany({
+      where: {
+        ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+        purpose: { not: 'LOANER' },
+        isActive: true,
+        active: true,
+        AND: [
+          { OR: [{ locationId: pickupLocationId || null }, { locationId: null }] },
+          { OR: [{ effectiveDate: null }, { effectiveDate: { lte: when } }] },
+          { OR: [{ endDate: null }, { endDate: { gte: when } }] },
+        ],
+      },
+      select: {
+        useHourlyRates: true,
+        rateItems: {
+          ...(vehicleTypeId ? { where: { vehicleTypeId } } : {}),
+          select: { hourly: true, minHourly: true, vehicleTypeId: true },
+        },
+      },
+    });
+    const offerings = plans.flatMap((plan) => (plan.rateItems || []).map((row) => ({
+      plan: { useHourlyRates: plan.useHourlyRates },
+      row: { hourly: Number(row.hourly || 0), minHourly: Number(row.minHourly || 0) },
+    })));
+    return rentalMinimum(offerings);
   },
 
   async resolveForRental({ vehicleTypeId, pickupLocationId, pickupAt, returnAt }, scope = {}, options = {}) {
