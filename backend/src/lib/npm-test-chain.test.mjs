@@ -94,7 +94,9 @@ const UNRUN_FILES_BASELINE = new Set([
   'src/lib/storage/supabase-storage.test.mjs',
   'src/lib/tenant-routing.test.mjs',
   'src/middleware/endpoint-load-sampler.test.mjs',
-  'src/middleware/tenant-rate-limit.test.mjs',
+  // tenant-rate-limit.test.mjs left this list when `test:rate-limit` was wired
+  // up alongside the Redis-timeout fix. The baseline is a high-water mark, so a
+  // stale entry fails the suite on purpose — that is it working, not breaking.
   'src/modules/booking-engine/car-sharing-discovery.test.mjs',
   'src/modules/checkout-session/age-rules-gate.test.mjs',
   'src/modules/checkout-session/checkout-session.scheduler.test.mjs',

@@ -136,14 +136,13 @@ export function assertPayable(reservation) {
   // $13,187.01. The connectors now record the flag; this refuses to act on the
   // money regardless of who forgets to set it next.
   //
-  // SCOPE, so this comment does not promise more than it delivers: this closes
-  // the PUBLIC booking payment path only. The customer-portal routes
-  // (customer-portal.routes.js — Stripe checkout sessions, Square payment
-  // links, Auth.Net charges) compute from `estimatedTotal` through their own
-  // amountDueForReservation and do NOT check isPrepaid. They are token-gated
-  // and a human has to mint the token, which is precisely why nobody would
-  // notice the belief was false. Extending the gate there is a separate
-  // decision, not something this guard already did.
+  // SCOPE: this closes the PUBLIC booking payment path. The customer-portal
+  // routes have since been handled separately — they never reached the stored
+  // total in the first place (their amount comes from the charge rows), and
+  // their own double-charge, a settled agreement re-presented in full, is
+  // guarded in customer-portal/amount-due.js. One case remains open there and
+  // is tracked with a measurement: a payment taken at the counter that was
+  // never mirrored to the reservation ledger still re-bills.
   //
   // Deliberately `=== true`: NULL means "this source never told us", which is
   // not permission to charge — but it is also not proof of prepayment, so it

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import Stripe from 'stripe';
 import { prisma } from '../../lib/prisma.js';
+import { decideAmountDue } from './amount-due.js';
 import { buildGatewayReference } from '../../lib/payment-references.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
@@ -942,6 +943,9 @@ async function serializeCustomerInfoReservation(reservation) {
     pickupAt: reservation.pickupAt,
     returnAt: reservation.returnAt,
     estimatedTotal: reservation.estimatedTotal,
+    // Lets the portal show a dash instead of a figure for a booking the
+    // customer already paid the partner for.
+    isPrepaid: reservation.isPrepaid ?? null,
     pickupLocation: reservation.pickupLocation?.name || '',
     returnLocation: reservation.returnLocation?.name || '',
     vehicle: [reservation.vehicle?.year, reservation.vehicle?.make, reservation.vehicle?.model].filter(Boolean).join(' ') || '',
@@ -1115,31 +1119,8 @@ async function amountDueForReservation(reservationId, fallbackEstimated = 0) {
   ]);
 
   const breakdown = reservation ? await buildReservationBreakdown(reservation) : null;
-  const est = Number(breakdown?.total ?? reservation?.estimatedTotal ?? fallbackEstimated ?? 0);
   const paid = paidFromStructuredPayments(reservation?.payments);
-  const reservationOutstanding = Math.max(0, Number((est - paid).toFixed(2)));
-
-  let depositDueNow = null;
-  if (reservation?.pricingSnapshot) {
-    const dep = Number(reservation.pricingSnapshot.depositAmountDue || 0);
-    if (reservation.pricingSnapshot.depositRequired && Number.isFinite(dep) && dep > 0) {
-      depositDueNow = Math.max(0, Number((dep - paid).toFixed(2)));
-    }
-  }
-
-  if (latestAgreement) {
-    const balance = Number(latestAgreement.balance ?? 0);
-    const total = Number(latestAgreement.total ?? 0);
-    if (Number.isFinite(balance) && balance > 0) return balance;
-    if (reservationOutstanding > 0) return reservationOutstanding;
-    if (Number.isFinite(total) && total > 0) return total;
-  }
-
-  if (depositDueNow != null && depositDueNow > 0) {
-    return Math.min(reservationOutstanding || depositDueNow, depositDueNow);
-  }
-
-  return reservationOutstanding;
+  return decideAmountDue({ agreement: latestAgreement, reservation, breakdown, paid, fallbackEstimated });
 }
 
 async function postPayment({ reservation, paidAmount, reference, gateway }) {
@@ -1247,6 +1228,9 @@ customerPortalRouter.get('/signature/:token', portalRead, async (req, res, next)
         pickupAt: reservation.pickupAt,
         returnAt: reservation.returnAt,
         estimatedTotal: reservation.estimatedTotal,
+        // Lets the portal show a dash instead of a figure for a booking the
+        // customer already paid the partner for.
+        isPrepaid: reservation.isPrepaid ?? null,
         customerName: `${reservation.customer?.firstName || ''} ${reservation.customer?.lastName || ''}`.trim(),
         customerEmail: reservation.customer?.email || null,
         vehicle: reservation.vehicle ? `${reservation.vehicle.year || ''} ${reservation.vehicle.make || ''} ${reservation.vehicle.model || ''}`.trim() : null,
@@ -1989,6 +1973,14 @@ customerPortalRouter.get('/payment/:token', portalRead, async (req, res, next) =
     const reservation = await findReservationByToken('payment', token);
     if (!reservation) return res.status(404).json({ error: 'Invalid or expired payment link' });
 
+    // NO REFUSAL HERE. This GET renders the payment page; it does not move
+    // money. Returning 409 when nothing is due collapses the page to an error
+    // banner for every settled reservation — losing "your payment step is
+    // complete", the signed-agreement download and the receipt — and breaks the
+    // post-checkout poller, which reads amountDue to detect that the payment
+    // landed. It also hid the prepaid copy from the population it was written
+    // for, since prepaid bookings sit at 0 by construction. The refusal belongs
+    // on the two POSTs that mint a hosted page or charge a card.
     const amountDue = await amountDueForReservation(reservation.id, reservation.estimatedTotal);
     const breakdown = await buildReservationBreakdown(reservation);
     const gatewayConfig = await paymentGatewayConfigForTenant(reservation.tenantId || null);
@@ -2006,6 +1998,9 @@ customerPortalRouter.get('/payment/:token', portalRead, async (req, res, next) =
         pickupAt: reservation.pickupAt,
         returnAt: reservation.returnAt,
         estimatedTotal: reservation.estimatedTotal,
+        // Lets the portal show a dash instead of a figure for a booking the
+        // customer already paid the partner for.
+        isPrepaid: reservation.isPrepaid ?? null,
         customerName: `${reservation.customer?.firstName || ''} ${reservation.customer?.lastName || ''}`.trim(),
         customerEmail: reservation.customer?.email || null,
         vehicle: reservation.vehicle ? `${reservation.vehicle.year || ''} ${reservation.vehicle.make || ''} ${reservation.vehicle.model || ''}`.trim() : null,
@@ -2027,6 +2022,14 @@ customerPortalRouter.post('/payment/:token/create-session', portalWrite, async (
     const reservation = await findReservationByToken('payment', token);
     if (!reservation) return res.status(404).json({ error: 'Invalid or expired payment link' });
     const amountDue = await amountDueForReservation(reservation.id, reservation.estimatedTotal);
+    // NOTHING DUE IS NOT A PAYMENT. The public path refuses this explicitly
+    // (assertPayable → ALREADY_PAID); this one had no equivalent and instead
+    // floored the amount to $0.50, minting a real hosted payment page for a
+    // customer who owes nothing. Prepaid bookings land here by design now, so
+    // the floor is no longer a theoretical edge.
+    if (!(Number(amountDue) > 0)) {
+      return res.status(409).json({ error: 'Nothing is due on this reservation', code: 'ALREADY_PAID' });
+    }
     const gatewayConfig = await paymentGatewayConfigForTenant(reservation.tenantId || null);
     const gateway = currentGateway(gatewayConfig);
 
@@ -2159,6 +2162,10 @@ customerPortalRouter.post('/payment/:token/confirm', portalWrite, async (req, re
       }
 
       const chargeAmount = Number(await amountDueForReservation(reservation.id, reservation.estimatedTotal));
+      // Same refusal as above: never charge a card for a balance that is zero.
+      if (!(chargeAmount > 0)) {
+        return res.status(409).json({ error: 'Nothing is due on this reservation', code: 'ALREADY_PAID' });
+      }
       const billingZip = authNetCleanValue(req.body?.billingZip || reservation.customer?.zip || '', '');
       const customerPayload = authNetCompactObject({
         id: authNetCustomerIdValue(reservation.customer?.id || '', reservation.id || ''),
