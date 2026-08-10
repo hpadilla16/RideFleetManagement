@@ -511,6 +511,33 @@ export function assertRepriceable(charges = [], oldDays = 0, newDays = 0, bookin
   }
 }
 
+/**
+ * "Already there" is not a change (2026-08-10: VozIA fired rescheduleReservation
+ * 3x on one live call). True when the REQUESTED window and pickup location match
+ * what the reservation already holds — the caller's reschedule then no-ops with
+ * `alreadyApplied` instead of rebuilding identical charge rows, and instead of
+ * 409ing REPRICE_DRIFT for a state that is already true (which tells the agent
+ * the change FAILED, whose measured response is retrying the write).
+ *
+ * Compared through the preview's OWN parse of the requested strings (tenant
+ * wall-clock), never string equality — "T14:00" and "T14:00:00" are the same
+ * instant and the voice model emits both spellings for one spoken request.
+ * Missing preview echoes fail OPEN to the normal path: worst case is the
+ * pre-existing behavior, never a skipped legitimate change.
+ */
+export function isSameRentalWindow(previewOut = {}, current = {}, requestedPickupLocationId = null) {
+  if (!previewOut?.pickupAt || !previewOut?.returnAt) return false;
+  if (!current?.pickupAt || !current?.returnAt) return false;
+  const p1 = new Date(previewOut.pickupAt).getTime();
+  const r1 = new Date(previewOut.returnAt).getTime();
+  const p2 = new Date(current.pickupAt).getTime();
+  const r2 = new Date(current.returnAt).getTime();
+  if (!Number.isFinite(p1) || !Number.isFinite(r1) || !Number.isFinite(p2) || !Number.isFinite(r2)) return false;
+  if (p1 !== p2 || r1 !== r2) return false;
+  const loc = requestedPickupLocationId || current.pickupLocationId;
+  return loc === current.pickupLocationId;
+}
+
 export const reservationExtendService = {
   /**
    * Reprice a reservation whose DATES just moved (VozIA reschedule).
