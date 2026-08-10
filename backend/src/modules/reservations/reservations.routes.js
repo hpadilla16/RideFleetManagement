@@ -1,6 +1,7 @@
 ﻿import crypto from 'node:crypto';
 import { Router } from 'express';
 import { checkRentalSpan, rentalSpanMessage } from '../rates/rental-minimum.js';
+import { previewLocationMandatoryFees } from './reservation-pricing.service.js';
 import { reservationsService } from './reservations.service.js';
 import { looksLikeXlsx, parseReservationImportWorkbook } from './reservation-import-parse.js';
 import { validateReservationCreate, validateReservationPatch } from './reservations.rules.js';
@@ -369,6 +370,18 @@ reservationsRouter.get('/resolve-rate', async (req, res, next) => {
     if (!out) {
       return res.status(400).json({ error: 'No rate tables found for selected vehicle type, location and dates' });
     }
+    // The location's mandatory fees, priced for these dates — shown on the
+    // create form so agents stop adding them by hand (VPH double-charge,
+    // 2026-08-10). Fail-open: a fee-preview hiccup must not block quoting.
+    try {
+      const fees = await previewLocationMandatoryFees({
+        pickupLocationId,
+        baseAmount: Number(out.baseTotal || 0),
+        days: Number(out.days || 1),
+      }, scopeFor(req));
+      out.mandatoryFees = fees.rows;
+      out.mandatoryFeesTotal = fees.total;
+    } catch { /* quote stands alone */ }
     res.json(out);
   } catch (e) {
     next(e);
@@ -1131,7 +1144,21 @@ reservationsRouter.post('/', async (req, res, next) => {
     }
 
     const addOnsTotal = Number(req.body?.addOnsTotal || 0);
-    const finalEstimate = Number((Number(quote.baseTotal || 0) + (Number.isFinite(addOnsTotal) && addOnsTotal > 0 ? addOnsTotal : 0)).toFixed(2));
+    // Include the location's mandatory fees in the stored estimate. Without
+    // this the number quoted at creation was silently lower than what the
+    // first pricing read would produce — the gap agents kept "fixing" by hand
+    // (VPH, 2026-08-10). Fail-open: the estimate stands without them.
+    let mandatoryFeesEstimate = 0;
+    try {
+      const feePreview = await previewLocationMandatoryFees({
+        pickupLocationId: String(req.body.pickupLocationId),
+        bookingChannel: String(req.body?.bookingChannel || 'STAFF'),
+        baseAmount: Number(quote.baseTotal || 0),
+        days: Number(quote.days || 1),
+      }, scopeFor(req));
+      mandatoryFeesEstimate = feePreview.total;
+    } catch { /* estimate stands without them */ }
+    const finalEstimate = Number((Number(quote.baseTotal || 0) + (Number.isFinite(addOnsTotal) && addOnsTotal > 0 ? addOnsTotal : 0) + mandatoryFeesEstimate).toFixed(2));
 
     const pickupLoc = await withTenantSchema(req.user.tenantId, (db) => db.location.findFirst({
       where: {

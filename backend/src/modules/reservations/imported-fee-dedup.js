@@ -68,3 +68,38 @@ export function dropFeesAlreadyImported(mandatoryFees = [], charges = [], import
   }
   return { keep, skipped };
 }
+
+/**
+ * Fee ids the HUMAN already put on this reservation.
+ *
+ * THE BUG (VPH, 2026-08-10, RES-913785): the location's Vehicle License Fee
+ * did not show on the new-reservation form, so the agent added it by hand in
+ * the charge editor. Then the mandatory-fee sync ran, looked ONLY at rows with
+ * source MANDATORY_FEE/UNDERAGE_FEE, did not see the manual FEE row — same
+ * sourceRefId, different source — and created a second one. $22.50 charged
+ * twice, on the same fee id, in the same minute.
+ *
+ * A human row and a sync row for the same fee are the same money. The human
+ * row wins (it may carry priceOverridden); the sync must neither duplicate it
+ * nor touch it.
+ *
+ * Matched by sourceRefId first (the editor writes the catalog fee id there),
+ * normalized name as fallback for rows added before refs existed.
+ */
+export function manuallyCoveredFeeIds(charges = [], fees = [], syncOwnedSources = ['MANDATORY_FEE', 'UNDERAGE_FEE', 'TOLL_MODULE', 'TOLL_POLICY']) {
+  const owned = new Set(syncOwnedSources.map((x) => String(x).toUpperCase()));
+  const manualRows = (Array.isArray(charges) ? charges : []).filter((row) => row
+    && row.selected !== false
+    && !owned.has(String(row.source || '').toUpperCase()));
+  const refIds = new Set(manualRows.map((r) => String(r.sourceRefId || '')).filter(Boolean));
+  const names = new Set(manualRows
+    .map((r) => normalizeFeeName(String(r.name || '').replace(/^Fee:\s*/i, '')))
+    .filter(Boolean));
+  const covered = new Set();
+  for (const fee of fees || []) {
+    if (refIds.has(String(fee?.id))) { covered.add(String(fee.id)); continue; }
+    const key = normalizeFeeName(fee?.name);
+    if (key && names.has(key)) covered.add(String(fee.id));
+  }
+  return covered;
+}

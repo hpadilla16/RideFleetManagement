@@ -283,7 +283,19 @@ function Wizard({ token, me, logout }) {
         <Row label="Customer" value={selectedCustomer ? `${selectedCustomer.firstName || ''} ${selectedCustomer.lastName || ''}`.trim() || selectedCustomer.email : '—'} />
         <div style={{ borderTop: '1px solid #e6dfff', margin: '6px 0' }} />
         <Row label="Daily rate" value={quote?.dailyRate != null ? money(quote.dailyRate) : '—'} />
-        <Row label="Base total" value={quote?.baseTotal != null ? money(quote.baseTotal) : '—'} strong />
+        {/* The location's mandatory fees, visible BEFORE the reservation exists.
+            When these were invisible here, agents believed the fee was missing,
+            added it by hand on the detail page, and the auto-sync then doubled
+            it (VPH, 2026-08-10). What the counter will charge has to be what
+            this screen quotes. */}
+        {(quote?.mandatoryFees || []).map((f) => (
+          <Row key={f.id} label={f.name} value={money(f.total)} />
+        ))}
+        <Row
+          label="Base total"
+          value={quote?.baseTotal != null ? money(Number(quote.baseTotal) + Number(quote?.mandatoryFeesTotal || 0)) : '—'}
+          strong
+        />
         {rateError ? <div className="error" style={{ fontSize: 12 }}>{rateError}</div> : null}
       </div>
       <div className="surface-note" style={{ marginTop: 12, fontSize: 12 }}>

@@ -1,5 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
-import { dropFeesAlreadyImported } from './imported-fee-dedup.js';
+import { dropFeesAlreadyImported, manuallyCoveredFeeIds } from './imported-fee-dedup.js';
 import { tollsService } from '../tolls/tolls.service.js';
 import { filterMandatoryFeesForChannel } from '../booking-engine/fee-channel-filter.js';
 import { evaluateAgeRules } from '../../lib/age-rules.js';
@@ -58,6 +58,34 @@ function computeFeeTotal(fee, { baseAmount = 0, days = 1 } = {}) {
   if (mode === 'PER_DAY') return Number((amount * days).toFixed(2));
   if (mode === 'PERCENTAGE') return Number((baseAmount * (amount / 100)).toFixed(2));
   return Number(amount.toFixed(2));
+}
+
+/**
+ * The mandatory fees a NEW booking at this location will carry, priced for its
+ * dates — so the create form can SHOW them before the reservation exists.
+ *
+ * VPH, 2026-08-10: the location's Vehicle License Fee only materialised on the
+ * first pricing read of the detail page. The create form's quote never showed
+ * it, so agents believed it was missing, added it by hand, and the sync then
+ * doubled it. The fee was never absent — it was invisible at the moment the
+ * agent was quoting the customer.
+ */
+export async function previewLocationMandatoryFees({ pickupLocationId, bookingChannel = 'STAFF', baseAmount = 0, days = 1 }, scope = {}) {
+  if (!pickupLocationId) return { rows: [], total: 0 };
+  const location = await prisma.location.findFirst({
+    where: { id: String(pickupLocationId), ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+    select: { locationFees: { include: { fee: true } } },
+  });
+  const fees = filterMandatoryFeesForChannel((location?.locationFees || []).map((r) => r.fee), bookingChannel);
+  const rows = fees.map((fee) => ({
+    id: fee.id,
+    name: fee.name,
+    mode: String(fee.mode || 'FIXED').toUpperCase(),
+    amount: toNumber(fee.amount),
+    taxable: !!fee.taxable,
+    total: computeFeeTotal(fee, { baseAmount, days }),
+  }));
+  return { rows, total: Number(rows.reduce((s2, r) => s2 + r.total, 0).toFixed(2)) };
 }
 
 async function getReservationOrThrow(reservationId, scope = {}) {
@@ -602,9 +630,26 @@ async function syncMandatoryLocationFees(reservationId, scope = {}) {
     const pricedBefore = priorRows.filter(
       (r) => !SYNC_OWNED_CHARGE_SOURCES.has(String(r?.source || '').trim().toUpperCase())
     );
+    // Fees the HUMAN already added (source FEE etc., same fee id or name).
+    // VPH RES-913785: the license fee was invisible on the create form, the
+    // agent added it manually, and this sync created a second row for the same
+    // fee id — $22.50 twice. The human row wins: skip creating ours, and if a
+    // sync row for that fee already exists from an earlier run, remove it so
+    // the double heals itself on the next pricing read.
+    const manualCover = manuallyCoveredFeeIds(existingCharges, [...mandatoryFees, ...underageFees]);
+
     for (const group of feeGroups) {
       for (const fee of group.fees) {
         const existing = chargeByFeeId.get(String(fee.id));
+        if (manualCover.has(String(fee.id))) {
+          if (existing?.id) {
+            await tx.reservationCharge.delete({ where: { id: existing.id } });
+            logger.info('[pricing] removed sync-owned duplicate — the fee is manually present', {
+              reservationId, fee: fee.name, feeId: fee.id,
+            });
+          }
+          continue;
+        }
         const total = computeFeeTotal(fee, { baseAmount, days });
         const rate = String(fee.mode || 'FIXED').trim().toUpperCase() === 'PERCENTAGE'
           ? toNumber(fee.amount)
