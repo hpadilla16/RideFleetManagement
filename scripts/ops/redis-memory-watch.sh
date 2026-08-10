@@ -61,35 +61,57 @@ fi
 PCT=$(( USED * 100 / MAX ))
 log "$USED_H of $MAX_H (${PCT}%), policy=$POLICY"
 
-MSGS=""
-[ "$PCT" -ge "$THRESHOLD_PCT" ] && MSGS="Redis is at ${PCT}% of its memory ($USED_H of $MAX_H).
+# Two different concerns, deliberately alerted apart.
+#
+# Memory filling is an INCIDENT: it escalates within hours, so it renotifies
+# hourly. A wrong eviction policy is CONFIG DRIFT: it is equally real but it
+# does not get worse by the hour, and mailing about it every sixty minutes
+# until someone opens a control panel is how an alert address learns to be
+# ignored. Once a day is enough to keep it from being forgotten.
+if [ "$PCT" -ge "$THRESHOLD_PCT" ]; then
+  BODY="Redis is at ${PCT}% of its memory ($USED_H of $MAX_H), policy=$POLICY.
 
-With policy=$POLICY:
   noeviction   -> writes will start FAILING when it fills. Enqueues error out;
                   autocharge falls back to the manual workflow.
   allkeys-lru  -> keys are being DELETED to make room. Queued jobs can vanish
-                  silently. This is the configuration we moved away from.
+                  silently.
 
 Nearly all of it is BullMQ. Check what grew:
   docker exec $CONTAINER node -e \"const R=require('ioredis');const c=new R(process.env.REDIS_URL);c.dbsize().then(n=>{console.log(n);c.quit()})\"
 "
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "DRY RUN — would alert (memory):"; printf '%s
+' "$BODY"
+  else
+    "$ALERT" redis-memory "RFM: Redis at ${PCT}% of memory" "$BODY"
+  fi
+  FIRED=1
+fi
 
-# The policy itself is worth a shout if it ever drifts back.
 if [ "$POLICY" != "noeviction" ]; then
-  MSGS="${MSGS}
-Eviction policy is '$POLICY', not 'noeviction'. Under memory pressure this
-DELETES queued jobs instead of refusing new ones. Change it in the
-DigitalOcean panel: Databases -> the Redis cluster -> Settings -> Eviction
-policy. The CONFIG command is disabled on managed instances, so it cannot be
-set from a shell.
+  BODY="Redis eviction policy is '$POLICY', not 'noeviction'.
+
+Under memory pressure this DELETES queued jobs instead of refusing new ones.
+Nearly everything in Redis is BullMQ, so that means jobs — autocharge included
+— disappearing with no error and no trace.
+
+Change it in the DigitalOcean panel:
+  Databases -> the Redis cluster -> Settings -> Eviction policy -> noeviction
+
+It cannot be set from a shell: the CONFIG command is disabled on managed
+instances. This check is also how you confirm the change landed — once the
+policy is noeviction, this alert stops on its own.
+
+Currently $USED_H of $MAX_H (${PCT}%), so there is no urgency, only drift.
 "
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "DRY RUN — would alert (policy):"; printf '%s
+' "$BODY"
+  else
+    RENOTIFY_MINUTES=1440 "$ALERT" redis-policy "RFM: Redis eviction policy is '$POLICY'" "$BODY"
+  fi
+  FIRED=1
 fi
 
-[ -z "$MSGS" ] && exit 0
-
-SUBJECT="RFM: Redis needs attention (${PCT}% used, policy $POLICY)"
-if [ "$DRY_RUN" -eq 1 ]; then
-  log "DRY RUN — would alert:"; printf '%s\n%s\n' "$SUBJECT" "$MSGS"; exit 1
-fi
-"$ALERT" redis-memory "$SUBJECT" "$MSGS"
-exit 1
+[ "${FIRED:-0}" -eq 1 ] && exit 1
+exit 0
