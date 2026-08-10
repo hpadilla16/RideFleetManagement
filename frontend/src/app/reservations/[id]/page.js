@@ -2452,7 +2452,16 @@ token
       return structuredDisplayChargeRows(pricing.charges);
     }
 
-    const serviceRows = selectedServiceRows.map((r) => {
+    // THE EDIT TABLE AND THE SAVE PAYLOAD MUST AGREE ON ROW IDS. The inputs
+    // key chargeOverrides by the id RENDERED here; applyOv looks them up by the
+    // id BUILT in the save handler. These rows carried `svc-editor-${i}` while
+    // the save built `service-${ref}` — so every typed service/fee price was
+    // orphaned (RES-789156, 2026-08-10). Insurance matched by accident (both
+    // sides use the plan code), which is why only insurance ever stuck.
+    // Same derivation now: saved row's sourceRefId first, catalog id second.
+    const editSvcPricing = Array.isArray(chargeModel?.servicePricing) ? chargeModel.servicePricing : [];
+    const editFeePricing = Array.isArray(chargeModel?.feePricing) ? chargeModel.feePricing : [];
+    const serviceRows = selectedServiceRows.map((r, i) => {
       const raw = String(r.name || '').replace(/^Service:\s*/i, '').trim().toLowerCase();
       const opt = (serviceOptions || []).find((s) => {
         const n = String(s?.name || s?.code || '').trim().toLowerCase();
@@ -2487,10 +2496,23 @@ token
       const wasPrecheckin = isPrecheckinService(precheckinCtx.serviceKeys, { id: opt?.id, name: raw });
       const shownRate = (precheckinCtx.active && wasPrecheckin) ? precheckinCtx.apply(rate) : rate;
       const total = toMoneyNum(shownRate * unit);
-      return { id: r.id, name: r.name, unit, rate: shownRate, total, taxable };
+      const savedSvc = editSvcPricing.find((sp) => sp.name && sp.name.trim().toLowerCase() === raw);
+      // A price a human already froze must be what the edit table SHOWS —
+      // otherwise the agent stares at the catalog number, assumes the revert
+      // happened again, and re-types it forever.
+      const heldUnit = savedSvc?.priceOverridden ? Number(savedSvc.quantity ?? unit) : unit;
+      const heldRate = savedSvc?.priceOverridden ? Number(savedSvc.rate ?? shownRate) : shownRate;
+      return {
+        id: editableRowId('service', savedSvc?.sourceRefId || opt?.id, i),
+        name: r.name,
+        unit: heldUnit,
+        rate: heldRate,
+        total: toMoneyNum(heldRate * heldUnit),
+        taxable,
+      };
     });
 
-    const feeRows = selectedFeeRows.map((r) => {
+    const feeRows = selectedFeeRows.map((r, i) => {
       const raw = String(r.name || '').replace(/^Fee:\s*/i, '').trim().toLowerCase();
       const opt = (feeOptions || []).find((f) => {
         const n = String(f?.name || f?.code || '').trim().toLowerCase();
@@ -2505,7 +2527,17 @@ token
       const taxable = opt?.taxable === undefined ? true : !!opt?.taxable;
       const unit = perDay ? toMoneyNum(breakdown.days) : 1;
       const total = toMoneyNum(rate * unit);
-      return { id: r.id, name: r.name, unit, rate, total, taxable };
+      const savedFee = editFeePricing.find((fp) => fp.name && fp.name.trim().toLowerCase() === raw);
+      const heldUnit = savedFee?.priceOverridden ? Number(savedFee.quantity ?? unit) : unit;
+      const heldRate = savedFee?.priceOverridden ? Number(savedFee.rate ?? rate) : rate;
+      return {
+        id: editableRowId('fee', savedFee?.sourceRefId || opt?.id, i),
+        name: r.name,
+        unit: heldUnit,
+        rate: heldRate,
+        total: toMoneyNum(heldRate * heldUnit),
+        taxable,
+      };
     });
 
     const feeNamesLower = feeRows.map((r) => String(r.name || '').toLowerCase());
@@ -2531,7 +2563,9 @@ token
             ? toMoneyNum(feeAmount * breakdown.days)
             : feeAmount;
         return {
-          id: `linked-fee-preview-${idx}`,
+          // Same id the save handler builds for this row — a preview-only id
+          // orphans any typed edit exactly like the service/fee mismatch did.
+          id: `linked-fee-${idx}`,
           name: `${linkedFee.name} | ${serviceOpt?.name || serviceRow.name}`,
           unit: 1,
           rate: mode === 'PERCENTAGE' ? feeAmount : total,
@@ -2598,7 +2632,7 @@ token
     }
 
     return rows;
-  }, [chargeEdit, pricing?.charges, breakdown, selectedServiceRows, selectedFeeRows, selectedInsurancePlansDisplay, serviceOptions, feeOptions, chargeModel?.taxRate, depositOverrides.depositDue, depositOverrides.securityDeposit, chargeOverrides, precheckinCtx]);
+  }, [chargeEdit, pricing?.charges, breakdown, selectedServiceRows, selectedFeeRows, selectedInsurancePlansDisplay, serviceOptions, feeOptions, chargeModel?.taxRate, chargeModel?.servicePricing, chargeModel?.feePricing, depositOverrides.depositDue, depositOverrides.securityDeposit, chargeOverrides, precheckinCtx]);
 
   const securityDepositDisplayTotal = useMemo(
     () => toMoneyNum(displayChargeRows.filter((r) => isSecurityDepositDisplayRow(r)).reduce((s, r) => s + toMoneyNum(r?.total), 0)),
