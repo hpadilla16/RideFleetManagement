@@ -429,7 +429,8 @@ rentalAgreementsRouter.post('/:id/checkin-close', async (req, res, next) => {
       req.params.id,
       req.body || {},
       req.user?.sub || null,
-      req.ip || null
+      req.ip || null,
+      req.user?.role || 'AGENT'
     );
     res.json(out);
   } catch (e) {

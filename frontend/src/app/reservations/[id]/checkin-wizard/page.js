@@ -68,6 +68,12 @@ function CheckinWizard({ token, me, logout }) {
   // skips the LATE_RETURN line when this is on; the backend re-validates
   // and audit-logs the flag on the STATUS_CHANGE row.
   const [waiveLateFee, setWaiveLateFee] = useState(false);
+  // Actual return date/time — ADMIN backdate (Hector, 2026-08-10): the
+  // customer returned on the scheduled day but staff ran the check-in later,
+  // and the late fee was computing from "now". Empty = now (unchanged flow).
+  // The backend enforces the same role rule; this only reveals the field.
+  const [actualReturnAt, setActualReturnAt] = useState('');
+  const canBackdate = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(String(me?.role || '').toUpperCase());
   const [photos, setPhotos] = useState({});
   const [currentAngle, setCurrentAngle] = useState(0);
   // Fase D (2026-06-18): when the tenant uses the CUSTOMER inspection model AND the customer
@@ -167,7 +173,7 @@ function CheckinWizard({ token, me, logout }) {
     // computation (same trick as the backend uses). Other fees compute
     // normally.
     dueBackAt: waiveLateFee ? null : dueBackAt,
-    returnedAt: returnedAtNow,
+    returnedAt: (canBackdate && actualReturnAt) ? actualReturnAt : returnedAtNow,
     rentalDays,
     includedMilesPerDay: 200,
     tankCapacityGallons: 15
@@ -255,6 +261,10 @@ function CheckinWizard({ token, me, logout }) {
         // Agent waiver of the LATE_RETURN line item. Backend re-validates
         // and audit-logs the flag on the STATUS_CHANGE entry.
         waiveLateFee,
+        // Naive wall-clock string; the backend parses it in the TENANT's
+        // timezone (the 2026-08-07 extension lesson). Omitted entirely when
+        // untouched so the default "now" path is byte-identical to before.
+        ...(canBackdate && actualReturnAt ? { returnedAt: actualReturnAt } : {}),
         signerName,
         signatureDataUrl,
         manualPayment: paymentMode === 'manual' && Number(manualPayment.amount) > 0
@@ -418,6 +428,8 @@ function CheckinWizard({ token, me, logout }) {
               cleanlinessIn={cleanlinessIn} onCleanlinessIn={setCleanlinessIn}
               smokingDetected={smokingDetected} onSmokingDetected={setSmokingDetected}
               waiveLateFee={waiveLateFee} onWaiveLateFee={setWaiveLateFee}
+              canBackdate={canBackdate}
+              actualReturnAt={actualReturnAt} onActualReturnAt={setActualReturnAt}
               feePreview={feePreview}
             />
           )}
@@ -638,6 +650,7 @@ function Step3Metrics({
   cleanlinessIn, onCleanlinessIn,
   smokingDetected, onSmokingDetected,
   waiveLateFee, onWaiveLateFee,
+  canBackdate, actualReturnAt, onActualReturnAt,
   feePreview
 }) {
   const odoOut = Number(agreement?.odometerOut || 0);
@@ -673,6 +686,28 @@ function Step3Metrics({
           value={smokingDetected}
           onChange={onSmokingDetected}
         />
+        {canBackdate && isPastGrace ? (
+          <div style={{ padding: 12, background: actualReturnAt ? '#EFF6FF' : '#F9FAFB', border: `0.5px solid ${actualReturnAt ? '#3B82F6' : '#E5E7EB'}`, borderRadius: 6 }}>
+            <div style={{ fontWeight: 500, fontSize: 13, color: '#374151' }}>Actual return date & time</div>
+            <div style={{ fontSize: 11, color: '#6B7280', margin: '2px 0 8px' }}>
+              {actualReturnAt
+                ? 'Late fees will be computed from THIS moment, not from now. Backdate is audit-logged with your role.'
+                : 'If the customer returned the car earlier and the check-in is only being recorded now, set when the car actually came back. Leave empty to use the current time.'}
+            </div>
+            <input
+              type="datetime-local"
+              value={actualReturnAt}
+              max={new Date(Date.now() + 5 * 60000).toISOString().slice(0, 16)}
+              onChange={(e) => onActualReturnAt(e.target.value)}
+              style={{ padding: '8px 10px', border: '1px solid #D1D5DB', borderRadius: 6, fontSize: 13, fontFamily: 'inherit' }}
+            />
+            {actualReturnAt ? (
+              <button type="button" onClick={() => onActualReturnAt('')} style={{ marginLeft: 8, fontSize: 12, background: 'none', border: 'none', color: '#3B82F6', cursor: 'pointer' }}>
+                use current time
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {isPastGrace ? (
           <div style={{
             padding: 12,

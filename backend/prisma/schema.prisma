@@ -2147,6 +2147,10 @@ model RentalAgreement {
   notes            String?
   finalizedAt      DateTime?
   closedAt         DateTime?
+  // When the customer ACTUALLY returned the car — distinct from closedAt
+  // (when staff closed the record). Late-fee math runs off this; an admin can
+  // backdate it at check-in when staff recorded the return late (2026-08-10).
+  returnedAt       DateTime?
   salesOwnerUserId String?
   salesOwnerUser   User?     @relation("AgreementSalesOwner", fields: [salesOwnerUserId], references: [id])
   closedByUserId   String?

@@ -25,6 +25,9 @@
  */
 
 import { prisma } from '../../lib/prisma.js';
+import { validateBackdatedReturn, backdatedReturnNote } from './backdated-return.js';
+import { parseDateTimeInTz } from '../../lib/date-utils.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 import logger from '../../lib/logger.js';
 import { recordMileageEntrySafe } from '../vehicles/mileage-history.service.js';
 import { recordFuelReadingSafe } from '../vehicles/fuel-history.service.js';
@@ -83,7 +86,8 @@ export async function closeAgreementWithCheckinFees(
   agreementId,
   payload = {},
   actorUserId = null,
-  actorIp = null
+  actorIp = null,
+  actorRole = 'AGENT'
 ) {
   const agreement = await prisma.rentalAgreement.findUnique({
     where: { id: agreementId },
@@ -191,7 +195,28 @@ export async function closeAgreementWithCheckinFees(
   // default to now (when the wizard fires). `dueBackAt` is the scheduled
   // return time on the agreement. If either is missing the fee engine
   // silently skips the LATE_RETURN computation.
-  const returnedAt = payload.returnedAt ? new Date(payload.returnedAt) : new Date();
+  // Parsed in the TENANT's timezone, not the container's (the extension bug of
+  // 2026-08-07: a naive datetime-local read on a UTC clock shifts every typed
+  // time by the tenant offset — here that shift would move late-fee money).
+  // ISO strings with a Z pass through untouched, so the wizard's default
+  // "now" behaves exactly as before.
+  const returnedTz = await resolveTenantTimeZone(agreement.tenantId);
+  const returnedAt = payload.returnedAt
+    ? parseDateTimeInTz(payload.returnedAt, returnedTz)
+    : new Date();
+  // Who may state "the car actually came back earlier", and how far. The
+  // plumbing for payload.returnedAt always existed — ungated. Exposing it in
+  // the UI without this check would make erasing late fees invisible.
+  const backdateCheck = validateBackdatedReturn({
+    returnedAt,
+    role: actorRole,
+    rentalStartAt: agreement.finalizedAt || agreement.pickupAt || null,
+  });
+  if (!backdateCheck.ok) {
+    const err = new Error(backdateCheck.error);
+    err.status = 403;
+    throw err;
+  }
   const dueBackAt = agreement.returnAt || null;
 
   // waiveLateFee: agent override. When true the LATE_RETURN computation is
@@ -300,6 +325,9 @@ export async function closeAgreementWithCheckinFees(
         status: 'CLOSED',
         locked: true,
         closedAt: new Date(),
+        // The moment the CAR came back — what the contract shows and what the
+        // late fee was computed from. closedAt stays the operational record.
+        returnedAt,
         closedByUserId: actorUserId || agreement.closedByUserId || null
       }
     });
@@ -454,6 +482,15 @@ export async function closeAgreementWithCheckinFees(
         feeEngineItemCount: feeResult.items.length,
         feeEngineTotal: feeResult.total,
         feeBreakdown: feeResult.breakdown.byType,
+        // The backdated close leaves its trail HERE, in the audit that every
+        // close already writes — "why didn't this rental get a late fee?" has
+        // one place to look (Hector, 2026-08-10).
+        ...(backdateCheck.backdated ? {
+          backdatedCheckIn: true,
+          actualReturnAt: returnedAt.toISOString(),
+          recordedBy: String(actorRole || 'UNKNOWN').toUpperCase(),
+          note: backdatedReturnNote({ returnedAt, actorRole }),
+        } : {}),
         newBalance,
         autochargeJobId,
         waiveLateFee,
