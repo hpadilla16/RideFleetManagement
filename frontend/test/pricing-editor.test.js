@@ -92,3 +92,53 @@ describe('pricingEditorState — services carry their price, not just a name', (
     expect(out.servicePricing[0].quantity).toBe(1);
   });
 });
+
+describe('fees and insurance carry their price too', () => {
+  // Verified at Hector's request on 2026-08-10: page.js rebuilt a fee from
+  // feeOptions (opt.amount) and insurance from the plan (plan.amount), exactly
+  // like services, so both discarded a typed price on the next editor open.
+  it('a fee keeps its rate, quantity and override flag', () => {
+    const out = pricingEditorState({
+      charges: [{ source: 'FEE', sourceRefId: 'fee-1', name: 'Fee: Airport Concession', rate: 9.5, quantity: 4, priceOverridden: true }],
+    }, {});
+    expect(out.feePricing).toHaveLength(1);
+    expect(out.feePricing[0]).toMatchObject({ name: 'Airport Concession', rate: 9.5, quantity: 4, priceOverridden: true });
+  });
+
+  it('every fee source the engine writes is picked up', () => {
+    const out = pricingEditorState({
+      charges: [
+        { source: 'MANDATORY_FEE', sourceRefId: 'a', name: 'Fee: Vehicle License', rate: 4, quantity: 1 },
+        { source: 'UNDERAGE_FEE', sourceRefId: 'b', name: 'Fee: Underage Driver', rate: 15, quantity: 1 },
+        { source: 'SERVICE_LINKED_FEE', sourceRefId: 'c', name: 'Fee: Delivery', rate: 30, quantity: 1 },
+      ],
+    }, {});
+    expect(out.feePricing.map((f) => f.name)).toEqual(['Vehicle License', 'Underage Driver', 'Delivery']);
+  });
+
+  it('insurance keeps its amount and flag', () => {
+    const out = pricingEditorState({
+      charges: [{ source: 'INSURANCE', sourceRefId: 'CDW', name: 'Insurance: Collision Damage Waiver', rate: 18.75, quantity: 5, priceOverridden: true }],
+    }, {});
+    expect(out.insurancePricing[0]).toMatchObject({ sourceRefId: 'CDW', rate: 18.75, quantity: 5, priceOverridden: true });
+    // The codes string the editor already used stays intact beside it.
+    expect(out.insuranceCodes).toBe('CDW');
+  });
+
+  it('an untouched fee or plan stays unfrozen', () => {
+    const out = pricingEditorState({
+      charges: [
+        { source: 'FEE', sourceRefId: 'f', name: 'Fee: X', rate: 5, quantity: 1 },
+        { source: 'INSURANCE', sourceRefId: 'Y', name: 'Insurance: Y', rate: 5, quantity: 1 },
+      ],
+    }, {});
+    expect(out.feePricing[0].priceOverridden).toBe(false);
+    expect(out.insurancePricing[0].priceOverridden).toBe(false);
+  });
+
+  it('a reservation with nothing yet gives empty lists, never undefined', () => {
+    const out = pricingEditorState(null, {});
+    expect(out.feePricing).toEqual([]);
+    expect(out.insurancePricing).toEqual([]);
+  });
+});

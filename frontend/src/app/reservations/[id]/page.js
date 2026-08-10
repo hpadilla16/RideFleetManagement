@@ -2117,8 +2117,30 @@ total: toMoneyNum(finalRate * unit),
 };
 });
 
+const feePricing = Array.isArray(chargeModel?.feePricing) ? chargeModel.feePricing : [];
 const feeRows = feeNames.map((name, idx) => {
 const opt = feeOptions.find((f) => (f.name || f.code || '').trim().toLowerCase() === name.toLowerCase());
+// A fee price a human set on THIS reservation wins over the catalog — the
+// same rule as services (Hector, 2026-08-10, verified on request).
+const savedFee = feePricing.find((fp) => opt?.id && fp.sourceRefId && String(fp.sourceRefId) === String(opt.id))
+  || feePricing.find((fp) => fp.name && fp.name.trim().toLowerCase() === name.trim().toLowerCase());
+if (savedFee?.priceOverridden) {
+  const q = Number(savedFee.quantity ?? 1);
+  const r = Number(savedFee.rate ?? 0);
+  return {
+    id: `fee-${idx}`,
+    name: `Fee: ${name}`,
+    chargeType: 'UNIT',
+    quantity: q,
+    unit: q,
+    rate: r,
+    total: toMoneyNum(r * q),
+    taxable: opt?.taxable !== false,
+    source: 'FEE',
+    sourceRefId: opt?.id || savedFee.sourceRefId || null,
+    priceOverridden: true,
+  };
+}
 const rate = toMoneyNum(opt?.amount ?? opt?.price ?? opt?.rate ?? 0);
 const mode = String(opt?.mode || '').toUpperCase();
 const perDay = ['PER_DAY', 'DAILY', 'DAY', 'BY_DAY'].includes(mode);
@@ -2167,8 +2189,29 @@ const linkedFeeRows = serviceRows
   })
   .filter(Boolean);
 
+const insurancePricing = Array.isArray(chargeModel?.insurancePricing) ? chargeModel.insurancePricing : [];
 const insuranceRows = selectedInsurancePlansList.map((plan) => {
   const planLabel = plan.label || plan.name || plan.code;
+  // Same rule for insurance: a typed amount beats the plan's configured one.
+  const savedIns = insurancePricing.find((ip) => ip.sourceRefId && String(ip.sourceRefId) === String(plan.code || plan.id || ''))
+    || insurancePricing.find((ip) => ip.name && ip.name.trim().toLowerCase() === String(planLabel).trim().toLowerCase());
+  if (savedIns?.priceOverridden) {
+    const q = Number(savedIns.quantity ?? 1);
+    const r = Number(savedIns.rate ?? 0);
+    return {
+      id: `insurance-${plan.code || plan.id}`,
+      name: `Insurance: ${planLabel}`,
+      chargeType: 'UNIT',
+      quantity: q,
+      unit: q,
+      rate: r,
+      total: toMoneyNum(r * q),
+      taxable: plan.taxable !== false,
+      source: 'INSURANCE',
+      sourceRefId: plan.code || plan.id || savedIns.sourceRefId || null,
+      priceOverridden: true,
+    };
+  }
   const mode = String(plan.chargeBy || plan.mode || 'FIXED').toUpperCase();
   const counterAmount = toMoneyNum(plan.amount || 0);
   // Re-apply the pre-check-in discount to the plan amount BEFORE the mode math,

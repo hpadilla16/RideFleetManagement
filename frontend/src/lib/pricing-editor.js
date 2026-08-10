@@ -62,6 +62,30 @@ export function pricingEditorState(pricing, reservation) {
       .map((c) => stripChargePrefix(c?.name, /^Fee:\s*/i))
       .filter(Boolean)
       .join(', ');
+    // Fees and insurance travel the SAME name-only path services did, and
+    // rebuild from the same catalogs (feeOptions / insurancePlans). Verified
+    // 2026-08-10 at Hector's request: page.js reads opt.amount for a fee and
+    // plan.amount for insurance, so an agent's typed price was discarded on
+    // the next editor open exactly like a service's.
+    const feePricing = charges
+      .filter((c) => ['FEE', 'MANDATORY_FEE', 'SERVICE_LINKED_FEE', 'UNDERAGE_FEE'].includes(String(c?.source || '').toUpperCase()))
+      .map((c) => ({
+        sourceRefId: c?.sourceRefId ? String(c.sourceRefId) : null,
+        name: stripChargePrefix(c?.name, /^Fee:\s*/i),
+        rate: Number(c?.rate ?? 0),
+        quantity: Number(c?.quantity ?? 1),
+        priceOverridden: !!c?.priceOverridden,
+      }))
+      .filter((r) => r.name);
+    const insurancePricing = charges
+      .filter((c) => String(c?.source || '').toUpperCase() === 'INSURANCE')
+      .map((c) => ({
+        sourceRefId: c?.sourceRefId ? String(c.sourceRefId) : null,
+        name: stripChargePrefix(c?.name, /^Insurance:\s*/i),
+        rate: Number(c?.rate ?? 0),
+        quantity: Number(c?.quantity ?? 1),
+        priceOverridden: !!c?.priceOverridden,
+      }));
     const insuranceCodesFromCharges = charges
       .filter((c) => String(c?.source || '').toUpperCase() === 'INSURANCE')
       .map((c) => String(c?.sourceRefId || '').trim())
@@ -74,6 +98,8 @@ export function pricingEditorState(pricing, reservation) {
       serviceNames,
       servicePricing,
       feeNames,
+      feePricing,
+      insurancePricing,
       insuranceCodes: insuranceCodesFromCharges || snapshot?.selectedInsuranceCodes || snapshot?.selectedInsuranceCode || ''
     };
   }
@@ -84,6 +110,8 @@ export function pricingEditorState(pricing, reservation) {
     serviceNames: '',
     servicePricing: [],
     feeNames: '',
+    feePricing: [],
+    insurancePricing: [],
     insuranceCodes: ''
   };
 }
