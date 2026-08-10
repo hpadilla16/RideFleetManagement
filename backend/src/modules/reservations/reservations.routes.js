@@ -33,7 +33,7 @@ import { globalKey } from '../../lib/cache/tenantKey.js';
 import { compactStartRentalResponse } from './start-rental-compact.js';
 import { maybeUploadCustomerDocument } from '../customers/customer-documents.js';
 import { idempotency } from '../../middleware/idempotency.js';
-import { reservationExtendService, assertRepriceable, isBaseRentalRow } from './reservation-extend.service.js';
+import { reservationExtendService, assertRepriceable, isBaseRentalRow, isSameRentalWindow } from './reservation-extend.service.js';
 import { validateVoziaNotePayload, buildVoziaNoteLine } from './vozia-note.js';
 import { smartMatchReservation, maskCandidate, candidateMatchesVerification } from '../../lib/reservation-smart-match.js';
 import { verifyProbeThrottle, isFailedVerifyProbe } from '../../lib/verify-probe-throttle.js';
@@ -1820,6 +1820,39 @@ reservationsRouter.post('/:id/reschedule', idempotency({ kind: 'vozia-reschedule
         code: 'NO_RATE'
       });
     }
+    // ALREADY THERE IS NOT A CHANGE (2026-08-10: rescheduleReservation fired
+    // 3x on one live call; the writes converged only because the rebuild is
+    // deterministic). If the requested window and location match what the
+    // reservation ALREADY holds, there is nothing to apply: re-running the
+    // rebuild is charge-row churn, and failing — e.g. REPRICE_DRIFT against a
+    // slightly stale expected total for a state that is already true — tells
+    // the agent the change FAILED, whose measured response is retrying the
+    // write. State is the answer; report it, touch nothing. Deliberately
+    // BEFORE the drift check for exactly that reason.
+    //
+    // The predicate is IMPORTED from reservation-extend.service.js so the test
+    // drives the real rule (the house lesson: a copy goes on passing while the
+    // original is replaced).
+    if (isSameRentalWindow(previewOut, current, pickupLocationId)) {
+      return res.json({
+        ok: true,
+        reservationId: current.id,
+        alreadyApplied: true,
+        before: {
+          pickupAt: current.pickupAt, returnAt: current.returnAt,
+          pickupLocationId: current.pickupLocationId,
+          estimatedTotal: current.estimatedTotal != null ? Number(current.estimatedTotal) : null,
+          dailyRate: current.dailyRate != null ? Number(current.dailyRate) : null
+        },
+        after: {
+          pickupAt: current.pickupAt, returnAt: current.returnAt,
+          pickupLocationId: current.pickupLocationId,
+          estimatedTotal: current.estimatedTotal != null ? Number(current.estimatedTotal) : null,
+          dailyRate: current.dailyRate != null ? Number(current.dailyRate) : null
+        }
+      });
+    }
+
     if (Math.abs(row.total - value.expectedNewTotal) > 0.01) {
       // Price moved since the agent's preview — surface the fresh number, never
       // silently charge something the customer wasn't shown.

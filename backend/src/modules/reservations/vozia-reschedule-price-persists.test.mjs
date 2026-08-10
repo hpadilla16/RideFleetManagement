@@ -201,11 +201,23 @@ test('a reprice failure says the dates moved instead of reporting a price', () =
 test('the response and the audit report what was PERSISTED, not the quote', () => {
   const h = rescheduleHandler();
   const afterBlocks = [...h.matchAll(/after:\s*\{[\s\S]*?\n\s*\}/g)].map((m) => m[0]);
-  assert.equal(afterBlocks.length, 2, 'expected the audit and the response after-blocks');
+  // Three since the alreadyApplied no-op (2026-08-10): the audit and response
+  // blocks of a REAL change, plus the no-op's snapshot of unchanged state.
+  assert.equal(afterBlocks.length, 3, 'expected audit + response + no-op after-blocks');
   for (const block of afterBlocks) {
-    assert.match(block, /estimatedTotal:\s*priced\.total/);
+    // The invariant is the same for all three: PERSISTED values only. A real
+    // change reports what the reprice wrote (priced.total); the no-op reports
+    // what the row already holds (current.estimatedTotal — equally persisted,
+    // read from the DB). The QUOTE (row.total) appears in none of them: the
+    // engine's number is what we INTENDED, and an audit of intentions is
+    // useless exactly when a disputed price makes someone read it.
+    assert.match(block, /estimatedTotal:\s*(priced\.total|current\.estimatedTotal)/);
     assert.doesNotMatch(block, /estimatedTotal:\s*row\.total/);
   }
+  // The no-op's snapshot appears exactly TWICE in its block pair (before ===
+  // after, both unchanged) — but as after-blocks, exactly one.
+  const noop = afterBlocks.filter((b) => /current\.estimatedTotal/.test(b));
+  assert.equal(noop.length, 1, 'exactly one after-block reports unchanged state');
 });
 
 test('the pre-pickup gate still precedes every write', () => {
