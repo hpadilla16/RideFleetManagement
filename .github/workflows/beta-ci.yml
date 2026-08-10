@@ -1,9 +1,21 @@
 name: beta-ci
 
+# WHAT TRIGGERS THIS, AND WHY EACH ONE IS HERE
+#
+# `push: branches: [main]` exists because most work lands on main DIRECTLY, not
+# through a pull request, and the tag trigger stopped firing when the project
+# stopped cutting v* tags (v0.9.0-beta.379 is not even an ancestor of main).
+# Between those two facts, a run of commits reached main having passed no check
+# at all — the PR trigger below never saw them, and no tag was ever pushed.
+#
+# So this is not belt-and-braces with the PR trigger. It is the only thing
+# covering the path that is actually used. Keep both: the PR trigger reports
+# BEFORE the merge, this one guarantees main itself is never unverified.
 on:
   pull_request:
     branches: [ main, develop ]
   push:
+    branches: [ main ]
     tags:
       - 'v*'
 
