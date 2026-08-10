@@ -30,6 +30,7 @@ THRESHOLD="${THRESHOLD:-15}"
 # Don't re-send every 5 minutes for the whole outage — one alert, then quiet
 # until it clears or this long passes.
 RENOTIFY_MINUTES="${RENOTIFY_MINUTES:-60}"
+ALERT="${ALERT:-/root/RideFleetManagement/scripts/ops/ops-alert.sh}"
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
@@ -38,7 +39,6 @@ log() { echo "[5xx-watch] $(date -u '+%Y-%m-%dT%H:%M:%SZ') $*"; }
 [ -r "$ACCESS_LOG" ] || { log "cannot read $ACCESS_LOG"; exit 0; }
 mkdir -p "$STATE_DIR"
 POS_FILE="$STATE_DIR/position"
-LAST_ALERT_FILE="$STATE_DIR/last-alert"
 
 # Read only what is NEW since the last run. Tracking the inode as well as the
 # line count means a logrotate mid-window restarts cleanly instead of silently
@@ -75,7 +75,7 @@ COUNT="$(printf '%s\n' "$WINDOW" | awk '$9 ~ /^50[234]$/' | wc -l | tr -d ' ')"
 log "$NEW new requests, $COUNT were 502/503/504 (threshold $THRESHOLD)"
 
 if [ "$COUNT" -lt "$THRESHOLD" ]; then
-  rm -f "$LAST_ALERT_FILE"     # cleared — the next burst alerts immediately
+  rm -f "/var/lib/ridefleet-ops-alerts/http-5xx.last"   # cleared — the next burst alerts immediately
   exit 0
 fi
 
@@ -99,42 +99,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
   log "DRY RUN — would alert:"; printf '%s\n%s\n' "$SUBJECT" "$BODY"; exit 1
 fi
 
-# Quiet period, so a two-hour outage sends one email and not twenty-four.
-if [ -f "$LAST_ALERT_FILE" ]; then
-  AGE_MIN=$(( ( $(date +%s) - $(stat -c %Y "$LAST_ALERT_FILE") ) / 60 ))
-  if [ "$AGE_MIN" -lt "$RENOTIFY_MINUTES" ]; then
-    log "already alerted ${AGE_MIN}m ago — staying quiet"; exit 1
-  fi
-fi
-
-# Credentials come from the backend's own env; no second copy to drift.
-TO="${OPS_ALERT_EMAIL:-$(grep -E '^OPS_ALERT_EMAIL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)}"
-KEY="$(grep -E '^MAILERSEND_API_KEY=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)"
-FROM="$(grep -E '^MAILERSEND_FROM=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)"
-
-if [ -z "$TO" ] || [ -z "$KEY" ] || [ -z "$FROM" ]; then
-  log "ALERT NOT SENT — set OPS_ALERT_EMAIL in $ENV_FILE (MailerSend key/from must also be present)"
-  printf '%s\n%s\n' "$SUBJECT" "$BODY"
-  exit 1
-fi
-
-HTTP="$(curl -s -o /tmp/5xx-watch-resp -w '%{http_code}' -X POST https://api.mailersend.com/v1/email \
-  -H "Authorization: Bearer ${KEY}" -H 'Content-Type: application/json' \
-  --data "$(python3 - "$FROM" "$TO" "$SUBJECT" "$BODY" <<'PY'
-import json, sys
-frm, to, subject, body = sys.argv[1:5]
-print(json.dumps({
-    "from": {"email": frm, "name": "RFM Ops"},
-    "to": [{"email": to}],
-    "subject": subject,
-    "text": body,
-}))
-PY
-)")"
-
-if [ "$HTTP" = "202" ] || [ "$HTTP" = "200" ]; then
-  touch "$LAST_ALERT_FILE"; log "alert sent to $TO"
-else
-  log "alert send FAILED (http $HTTP): $(head -c 300 /tmp/5xx-watch-resp 2>/dev/null)"
-fi
+# Sending lives in ops-alert.sh — one notification path, shared with the Redis
+# watcher. Two copies drift, and the copy nobody tested is the one that stays
+# silent during an incident.
+"$ALERT" http-5xx "$SUBJECT" "$BODY"
 exit 1
