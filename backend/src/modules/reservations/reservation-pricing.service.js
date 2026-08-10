@@ -195,8 +195,47 @@ function buildChargeRows(reservationId, charges = []) {
     sortOrder: Number.isInteger(row?.sortOrder) ? row.sortOrder : idx,
     source: row?.source ? String(row.source).trim() : null,
     sourceRefId: row?.sourceRefId ? String(row.sourceRefId).trim() : null,
-    notes: row?.notes ? String(row.notes) : null
+    notes: row?.notes ? String(row.notes) : null,
+    // Carried from the editor: a human typed this rate/quantity on THIS
+    // reservation, so the settings catalog must not re-derive it later.
+    priceOverridden: !!row?.priceOverridden
   }));
+}
+
+/**
+ * What a Save Override actually changed on the manually-priced rows.
+ *
+ * Hector, 2026-08-10: "que se grabe en los logs el cambio." A price typed at
+ * the counter is a money decision by a named person, and until now it left no
+ * trace — the row simply held a different number afterwards, with nothing to
+ * say who set it or what it replaced.
+ *
+ * Keyed by source + sourceRefId, which is what survives a rebuild; the row id
+ * does not, because replacePricing deletes and recreates.
+ */
+export function diffOverriddenCharges(before = [], after = []) {
+  const key = (r) => `${String(r?.source || '').toUpperCase()}:${String(r?.sourceRefId || r?.name || '')}`;
+  const prior = new Map((before || []).map((r) => [key(r), r]));
+  const changes = [];
+  for (const row of after || []) {
+    if (!row?.priceOverridden) continue;
+    const old = prior.get(key(row));
+    const oldRate = Number(old?.rate ?? NaN);
+    const oldQty = Number(old?.quantity ?? NaN);
+    const newRate = Number(row?.rate ?? 0);
+    const newQty = Number(row?.quantity ?? 0);
+    const rateMoved = !Number.isFinite(oldRate) || Math.abs(oldRate - newRate) > 0.004;
+    const qtyMoved = !Number.isFinite(oldQty) || Math.abs(oldQty - newQty) > 0.004;
+    if (!rateMoved && !qtyMoved) continue;
+    changes.push({
+      name: row.name,
+      source: row.source || null,
+      sourceRefId: row.sourceRefId || null,
+      from: Number.isFinite(oldRate) ? { rate: oldRate, quantity: oldQty } : null,
+      to: { rate: newRate, quantity: newQty },
+    });
+  }
+  return changes;
 }
 
 function isSecurityDepositCharge(row = {}) {
@@ -1229,6 +1268,13 @@ export const reservationPricingService = {
     const chargeRows = buildChargeRows(reservationId, payload.charges || [])
       .filter((row) => !isPreservedOnPricingRebuild(row));
 
+    // Snapshot the rows we are about to replace, so the audit entry below can
+    // say what a manual price REPLACED and not merely what it is now.
+    const chargesBefore = await prisma.reservationCharge.findMany({
+      where: { reservationId },
+      select: { name: true, rate: true, quantity: true, source: true, sourceRefId: true },
+    });
+
     const mileageOverride = normalizeMileageOverride(payload.mileageOverride);
 
     await prisma.$transaction(async (tx) => {
@@ -1293,6 +1339,39 @@ export const reservationPricingService = {
         }
       });
     });
+
+    // A price typed at the counter is a money decision by a named person, and
+    // it used to leave no trace — the row simply held a different number
+    // afterwards (Hector, 2026-08-10: "que se grabe en los logs el cambio").
+    // Written OUTSIDE the transaction and fail-open: an audit row that throws
+    // must never roll back the price the agent just saved.
+    try {
+      const changes = diffOverriddenCharges(chargesBefore, chargeRows);
+      if (changes.length) {
+        const reservation = await prisma.reservation.findUnique({
+          where: { id: reservationId },
+          select: { tenantId: true },
+        });
+        const describe = (c) => (c.from
+          ? `${c.name}: ${c.from.quantity} x $${c.from.rate.toFixed(2)} -> ${c.to.quantity} x $${c.to.rate.toFixed(2)}`
+          : `${c.name}: set to ${c.to.quantity} x $${c.to.rate.toFixed(2)}`);
+        await prisma.auditLog.create({
+          data: {
+            tenantId: reservation?.tenantId || null,
+            reservationId,
+            action: 'ADMIN_OVERRIDE',
+            actorUserId: payload?.actorUserId || null,
+            reason: `Manual price override: ${changes.map(describe).join('; ')}`.slice(0, 500),
+            metadata: JSON.stringify({ kind: 'charge_price_override', changes }),
+          },
+        });
+        logger.info('[pricing] manual price override', { reservationId, changes });
+      }
+    } catch (err) {
+      logger.warn('[pricing] could not record the price-override audit', {
+        reservationId, message: err?.message,
+      });
+    }
 
     await syncMandatoryLocationFees(reservationId, scope);
     await tollsService.syncReservationCharges(reservationId, scope);

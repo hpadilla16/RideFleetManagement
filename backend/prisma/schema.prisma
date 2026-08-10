@@ -2777,6 +2777,13 @@ model ReservationCharge {
   sourceRefId String?
   notes       String?
 
+  // A human set this rate/quantity ON THIS RESERVATION, so the settings
+  // catalog must not re-derive it (2026-08-10). Stored, not inferred: a
+  // catalog price change would otherwise make every untouched row look
+  // overridden and freeze it. See imported-fee-dedup.js for the sibling rule
+  // on fees.
+  priceOverridden Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

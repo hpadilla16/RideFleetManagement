@@ -2035,8 +2035,37 @@ const selectedInsurancePlansList = selectedInsuranceCodes
 // An explicit per-row rate typed by the agent still wins: applyOv runs after.
 const { active: precheckinActive, apply: applyPrecheckin, serviceKeys: precheckinKeys } = precheckinCtx;
 
+const servicePricing = Array.isArray(chargeModel?.servicePricing) ? chargeModel.servicePricing : [];
 const serviceRows = serviceNames.map((name, idx) => {
 const opt = serviceOptions.find((s) => (s.name || s.code || '').trim().toLowerCase() === name.toLowerCase());
+// A price a human set ON THIS RESERVATION wins over the settings catalog
+// (Hector, 2026-08-10). Everything below re-derives rate and unit from
+// AdditionalService — right for a service just added, wrong for one an agent
+// already priced. That re-derivation is what silently reverted their number
+// on the next Save Override.
+// Matched by sourceRefId first, name as fallback: the same precedence the
+// pre-check-in discount uses, for the same reason — the editor rewrites names.
+const savedSvc = servicePricing.find((sp) => opt?.id && sp.sourceRefId && String(sp.sourceRefId) === String(opt.id))
+  || servicePricing.find((sp) => sp.name && sp.name.trim().toLowerCase() === name.trim().toLowerCase());
+if (savedSvc?.priceOverridden) {
+  const q = Number(savedSvc.quantity ?? 1);
+  const r = Number(savedSvc.rate ?? 0);
+  return {
+    id: `service-${opt?.id || savedSvc.sourceRefId || idx}`,
+    code: opt?.code || null,
+    name: `Service: ${name}`,
+    chargeType: 'UNIT',
+    unit: q,
+    quantity: q,
+    rate: r,
+    total: toMoneyNum(r * q),
+    taxable: opt?.taxable !== false,
+    selected: true,
+    source: 'SERVICE',
+    sourceRefId: opt?.id || savedSvc.sourceRefId || null,
+    priceOverridden: true,
+  };
+}
 // Pick the best rate: dailyRate for per-day services, weeklyRate/monthlyRate for longer trips, flat rate as fallback
 const flatRate = toMoneyNum(opt?.price ?? opt?.rate ?? opt?.amount ?? 0);
 const dailyRate = toMoneyNum(opt?.dailyRate || 0);
@@ -2195,12 +2224,27 @@ const coreRowsRaw = [baseRow, ...serviceRows, ...feeRows, ...insuranceRows];
 const linkedFeeRowsRaw = linkedFeeRows;
 
 // Apply inline rate/quantity overrides from agent edits
+// applyOv feeds the SAVE payload (coreRows -> normalizedRows -> PUT /pricing),
+// so this is where a typed price becomes durable. priceOverridden is what
+// stops the row being re-derived from the AdditionalService catalog the next
+// time the editor opens — without it the agent's number is handed back to
+// settings on the following Save Override (Hector, 2026-08-10).
+// It also STICKS: a row already marked stays marked, so reopening the editor
+// and saving without touching anything cannot silently revert it.
 const applyOv = (r) => {
   const ov = chargeOverrides[r.id];
   if (!ov) return r;
   const rate = ov.rate !== undefined ? toMoneyNum(ov.rate) : r.rate;
   const quantity = ov.unit !== undefined ? toMoneyNum(ov.unit) : r.quantity;
-  return { ...r, rate, quantity, total: toMoneyNum(rate * quantity) };
+  const touched = ov.rate !== undefined || ov.unit !== undefined;
+  return {
+    ...r,
+    rate,
+    quantity,
+    unit: quantity,
+    total: toMoneyNum(rate * quantity),
+    priceOverridden: r.priceOverridden || touched,
+  };
 };
 const coreRows = coreRowsRaw.map(applyOv);
 const linkedFeeRowsFinal = linkedFeeRowsRaw.map(applyOv);
@@ -2470,13 +2514,27 @@ token
       ...insuranceDisplayRows
     ];
 
-    // Apply inline overrides from agent edits
+    // Apply inline overrides from agent edits.
+    //
+    // priceOverridden is what makes the edit SURVIVE. Without it the row is
+    // re-derived from the AdditionalService catalog the next time the editor
+    // opens, and the agent's number is written over on the following Save
+    // Override (Hector, 2026-08-10). It also sticks to rows already marked, so
+    // reopening the editor and saving without touching anything cannot quietly
+    // hand the price back to settings.
     const rows = rawRows.map((r) => {
       const ov = chargeOverrides[r.id];
       if (!ov) return r;
       const rate = ov.rate !== undefined ? toMoneyNum(ov.rate) : r.rate;
       const unit = ov.unit !== undefined ? toMoneyNum(ov.unit) : r.unit;
-      return { ...r, rate, unit, total: toMoneyNum(rate * unit) };
+      const touched = ov.rate !== undefined || ov.unit !== undefined;
+      return {
+        ...r,
+        rate,
+        unit,
+        total: toMoneyNum(rate * unit),
+        priceOverridden: r.priceOverridden || touched,
+      };
     });
 
     const taxRatePct = toMoneyNum(chargeModel.taxRate || breakdown.taxRate || 0);

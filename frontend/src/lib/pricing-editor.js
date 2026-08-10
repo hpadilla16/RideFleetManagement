@@ -30,11 +30,33 @@ export function pricingEditorState(pricing, reservation) {
   const snapshot = pricing?.snapshot || null;
   const charges = Array.isArray(pricing?.charges) ? pricing.charges : [];
   if (snapshot || charges.length) {
-    const serviceNames = charges
-      .filter((c) => ['SERVICE', 'ADDITIONAL_SERVICE', 'ADDITIONAL_SERVICE_PRECHECKIN'].includes(String(c?.source || '').toUpperCase()))
+    const serviceCharges = charges
+      .filter((c) => ['SERVICE', 'ADDITIONAL_SERVICE', 'ADDITIONAL_SERVICE_PRECHECKIN'].includes(String(c?.source || '').toUpperCase()));
+    const serviceNames = serviceCharges
       .map((c) => stripPrecheckinSuffix(stripChargePrefix(c?.name, /^Service:\s*/i)))
       .filter(Boolean)
       .join(', ');
+    // What the reservation ACTUALLY charges for each service, carried beside
+    // the names (Hector, 2026-08-10).
+    //
+    // The editor used to keep names alone, so every rebuild re-derived rate
+    // and quantity from the AdditionalService catalog — and a price the agent
+    // had typed on THIS reservation was replaced by the configured one and
+    // written back on the next Save Override. The name is not enough to
+    // describe a price.
+    //
+    // priceOverridden is the whole point: it separates "a human set this" from
+    // "this came from settings". Only the former is frozen, so changing a
+    // service's price in settings still reaches reservations nobody edited.
+    const servicePricing = serviceCharges
+      .map((c) => ({
+        sourceRefId: c?.sourceRefId ? String(c.sourceRefId) : null,
+        name: stripPrecheckinSuffix(stripChargePrefix(c?.name, /^Service:\s*/i)),
+        rate: Number(c?.rate ?? 0),
+        quantity: Number(c?.quantity ?? 1),
+        priceOverridden: !!c?.priceOverridden,
+      }))
+      .filter((r) => r.name);
     const feeNames = charges
       .filter((c) => String(c?.source || '').toUpperCase() === 'FEE')
       .map((c) => stripChargePrefix(c?.name, /^Fee:\s*/i))
@@ -50,6 +72,7 @@ export function pricingEditorState(pricing, reservation) {
       serviceFee: '0',
       taxRate: String(snapshot?.taxRate ?? '11.5'),
       serviceNames,
+      servicePricing,
       feeNames,
       insuranceCodes: insuranceCodesFromCharges || snapshot?.selectedInsuranceCodes || snapshot?.selectedInsuranceCode || ''
     };
@@ -59,6 +82,7 @@ export function pricingEditorState(pricing, reservation) {
     serviceFee: '0',
     taxRate: '11.5',
     serviceNames: '',
+    servicePricing: [],
     feeNames: '',
     insuranceCodes: ''
   };

@@ -713,7 +713,7 @@ reservationsRouter.put('/:id/pricing', async (req, res, next) => {
     // from being re-raised by the local/non-local rule's hold-time safety
     // net. A client that omitted (or typo'd) the source used to leave the
     // snapshot unprotected. QA 2026-07-25 (m2).
-    const out = await reservationPricingService.replacePricing(req.params.id, { ...(req.body || {}), source: 'UI_MANUAL' }, scopeFor(req));
+    const out = await reservationPricingService.replacePricing(req.params.id, { ...(req.body || {}), source: 'UI_MANUAL', actorUserId: req.user?.sub || req.user?.id || null }, scopeFor(req));
     res.json(out);
   } catch (e) {
     if (/not found/i.test(String(e?.message || ''))) return res.status(404).json({ error: e.message });
