@@ -28,17 +28,17 @@ import {
 // pricingEditorState lives in lib/ so the money round-trip — portal writes
 // charges → editor derives → Save Override rebuilds — is covered by vitest
 // without mounting this page. Its derivation rules are documented there.
-import { pricingEditorState, stripChargePrefix } from '../../../lib/pricing-editor';
+import { pricingEditorState, stripChargePrefix, editableRowId } from '../../../lib/pricing-editor';
 
 function structuredDisplayChargeRows(pricingRows = []) {
   return (Array.isArray(pricingRows) ? pricingRows : []).map((r, idx) => {
     const source = String(r?.source || '').toUpperCase();
     let displayId = String(r?.id || idx);
-    if (['SERVICE', 'ADDITIONAL_SERVICE'].includes(source)) displayId = `service-${r?.sourceRefId || idx}`;
-    if (['FEE', 'SERVICE_LINKED_FEE'].includes(source)) displayId = `fee-${r?.sourceRefId || idx}`;
+    if (['SERVICE', 'ADDITIONAL_SERVICE'].includes(source)) displayId = editableRowId('service', r?.sourceRefId, idx);
+    if (['FEE', 'SERVICE_LINKED_FEE'].includes(source)) displayId = editableRowId('fee', r?.sourceRefId, idx);
     if (source === 'DEPOSIT_DUE') displayId = 'deposit-due';
     if (source === 'SECURITY_DEPOSIT') displayId = 'security-deposit';
-    if (source === 'INSURANCE') displayId = `insurance-${r?.sourceRefId || idx}`;
+    if (source === 'INSURANCE') displayId = editableRowId('insurance', r?.sourceRefId, idx);
     return {
       id: displayId,
       // Preserve the actual DB charge id + code so the table can wire
@@ -2051,7 +2051,7 @@ if (savedSvc?.priceOverridden) {
   const q = Number(savedSvc.quantity ?? 1);
   const r = Number(savedSvc.rate ?? 0);
   return {
-    id: `service-${opt?.id || savedSvc.sourceRefId || idx}`,
+    id: editableRowId('service', opt?.id || savedSvc.sourceRefId, idx),
     code: opt?.code || null,
     name: `Service: ${name}`,
     chargeType: 'UNIT',
@@ -2104,7 +2104,7 @@ const wasPrecheckin = isPrecheckinService(precheckinKeys, { id: opt?.id, name })
 const finalRate = (precheckinActive && wasPrecheckin) ? applyPrecheckin(rate) : rate;
 const svcDiscounted = finalRate < rate;
 return {
-id: `svc-${idx}`,
+id: editableRowId('service', opt?.id, idx),
 name: svcDiscounted ? `Service: ${name} ${PRECHECKIN_NAME_MARKER}` : `Service: ${name}`,
 chargeType: 'UNIT',
 quantity: unit,
@@ -2128,7 +2128,7 @@ if (savedFee?.priceOverridden) {
   const q = Number(savedFee.quantity ?? 1);
   const r = Number(savedFee.rate ?? 0);
   return {
-    id: `fee-${idx}`,
+    id: editableRowId('fee', opt?.id, idx),
     name: `Fee: ${name}`,
     chargeType: 'UNIT',
     quantity: q,
@@ -2146,7 +2146,7 @@ const mode = String(opt?.mode || '').toUpperCase();
 const perDay = ['PER_DAY', 'DAILY', 'DAY', 'BY_DAY'].includes(mode);
 const unit = perDay ? breakdown.days : 1;
 return {
-id: `fee-${idx}`,
+id: editableRowId('fee', opt?.id, idx),
 name: `Fee: ${name}`,
 chargeType: 'UNIT',
 quantity: unit,
@@ -2199,7 +2199,7 @@ const insuranceRows = selectedInsurancePlansList.map((plan) => {
     const q = Number(savedIns.quantity ?? 1);
     const r = Number(savedIns.rate ?? 0);
     return {
-      id: `insurance-${plan.code || plan.id}`,
+      id: editableRowId('insurance', plan.code || plan.id, 0),
       name: `Insurance: ${planLabel}`,
       chargeType: 'UNIT',
       quantity: q,

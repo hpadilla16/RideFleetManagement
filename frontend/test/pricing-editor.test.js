@@ -15,7 +15,7 @@
  * settings still reaches reservations nobody has edited.
  */
 import { describe, it, expect } from 'vitest';
-import { pricingEditorState } from '../src/lib/pricing-editor';
+import { pricingEditorState, editableRowId } from '../src/lib/pricing-editor';
 
 const svc = (over = {}) => ({
   source: 'SERVICE',
@@ -140,5 +140,40 @@ describe('fees and insurance carry their price too', () => {
     const out = pricingEditorState(null, {});
     expect(out.feePricing).toEqual([]);
     expect(out.insurancePricing).toEqual([]);
+  });
+});
+
+describe('editableRowId — the id both sides of the editor must agree on', () => {
+  // THE BUG (Hector, 2026-08-10, RES-041577): the row DISPLAYED used
+  // `service-${sourceRefId}` and the row SAVED used `svc-${index}`. Typed edits
+  // are keyed by the displayed id, so applyOv looked them up under an id that
+  // did not exist and every service and fee price was dropped on save.
+  //
+  // Insurance was the accident that exposed it: both sides keyed off the plan
+  // code, so insurance alone survived — exactly what he reported.
+  it('the same row gets the same id from either side', () => {
+    const refId = 'cmnbvc6bg0007s60ielxjcmly';
+    // display side passes the charge's sourceRefId; core side passes opt.id.
+    expect(editableRowId('service', refId, 3)).toBe(editableRowId('service', refId, 99));
+    expect(editableRowId('service', refId, 0)).toBe('service-' + refId);
+  });
+
+  it('never produces the old index-keyed shapes', () => {
+    expect(editableRowId('service', 'abc', 2)).not.toBe('svc-2');
+    expect(editableRowId('fee', 'abc', 2)).not.toBe('fee-2');
+  });
+
+  it('falls back to the index only when there is no reference', () => {
+    expect(editableRowId('fee', null, 4)).toBe('fee-4');
+    expect(editableRowId('fee', undefined, 0)).toBe('fee-0');
+    expect(editableRowId('service', '', 7)).toBe('service-7');
+  });
+
+  it('keeps insurance on the shape that already worked', () => {
+    expect(editableRowId('insurance', 'CDW', 0)).toBe('insurance-CDW');
+  });
+
+  it('a zero reference is a reference, not a missing one', () => {
+    expect(editableRowId('fee', 0, 9)).toBe('fee-0');
   });
 });

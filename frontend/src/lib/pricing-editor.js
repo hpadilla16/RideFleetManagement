@@ -115,3 +115,23 @@ export function pricingEditorState(pricing, reservation) {
     insuranceCodes: ''
   };
 }
+
+/**
+ * The id an editable charge row answers to.
+ *
+ * THE BUG THIS EXISTS FOR (Hector, 2026-08-10): the editor built the row it
+ * DISPLAYS with `service-${sourceRefId}` / `fee-${sourceRefId}`, and the row it
+ * SAVES with `svc-${index}` / `fee-${index}`. Typed edits are stored in a map
+ * keyed by the displayed id, so applyOv looked them up under an id that did not
+ * exist and every service and fee price the agent typed was dropped on save.
+ *
+ * Insurance was the accident that proved it: both sides happened to key off the
+ * plan code, so insurance alone worked — which is exactly what he observed.
+ *
+ * One derivation, used by both builders, so they cannot drift apart again.
+ */
+export function editableRowId(kind, ref, fallbackIndex = 0) {
+  const prefix = { service: 'service', fee: 'fee', insurance: 'insurance' }[String(kind)] || String(kind);
+  const key = ref === 0 || ref ? String(ref) : '';
+  return `${prefix}-${key || fallbackIndex}`;
+}
