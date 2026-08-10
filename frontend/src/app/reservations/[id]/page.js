@@ -2037,21 +2037,25 @@ const { active: precheckinActive, apply: applyPrecheckin, serviceKeys: prechecki
 
 const servicePricing = Array.isArray(chargeModel?.servicePricing) ? chargeModel.servicePricing : [];
 const serviceRows = serviceNames.map((name, idx) => {
-const opt = serviceOptions.find((s) => (s.name || s.code || '').trim().toLowerCase() === name.toLowerCase());
-// A price a human set ON THIS RESERVATION wins over the settings catalog
-// (Hector, 2026-08-10). Everything below re-derives rate and unit from
-// AdditionalService — right for a service just added, wrong for one an agent
-// already priced. That re-derivation is what silently reverted their number
-// on the next Save Override.
-// Matched by sourceRefId first, name as fallback: the same precedence the
-// pre-check-in discount uses, for the same reason — the editor rewrites names.
-const savedSvc = servicePricing.find((sp) => opt?.id && sp.sourceRefId && String(sp.sourceRefId) === String(opt.id))
-  || servicePricing.find((sp) => sp.name && sp.name.trim().toLowerCase() === name.trim().toLowerCase());
+// THE ROW ON THE RESERVATION OWNS ITS IDENTITY. Look it up by NAME here only
+// to find which saved row this is, then let that row's sourceRefId choose the
+// catalog entry — never the other way round.
+//
+// International's catalog has TWO services named 'Pre-Paid Cleaning', one with
+// a trailing space (2026-08-10, RES-041577). Both trim to the same text, so a
+// name search returned the FIRST — the wrong id, the wrong price, and a row id
+// that no longer matched the one the editor's inputs were keyed by, so the
+// agent's typed price was dropped on save. Duplicate names are ordinary in a
+// catalog people maintain by hand; the code has to survive them.
+const savedSvc = servicePricing.find((sp) => sp.name && sp.name.trim().toLowerCase() === name.trim().toLowerCase());
+const opt = (savedSvc?.sourceRefId && serviceOptions.find((s2) => String(s2.id) === String(savedSvc.sourceRefId)))
+  || serviceOptions.find((s2) => (s2.name || s2.code || '').trim().toLowerCase() === name.toLowerCase());
+const svcRef = savedSvc?.sourceRefId || opt?.id || null;
 if (savedSvc?.priceOverridden) {
   const q = Number(savedSvc.quantity ?? 1);
   const r = Number(savedSvc.rate ?? 0);
   return {
-    id: editableRowId('service', opt?.id || savedSvc.sourceRefId, idx),
+    id: editableRowId('service', svcRef, idx),
     code: opt?.code || null,
     name: `Service: ${name}`,
     chargeType: 'UNIT',
@@ -2062,7 +2066,7 @@ if (savedSvc?.priceOverridden) {
     taxable: opt?.taxable !== false,
     selected: true,
     source: 'SERVICE',
-    sourceRefId: opt?.id || savedSvc.sourceRefId || null,
+    sourceRefId: svcRef,
     priceOverridden: true,
   };
 }
@@ -2104,7 +2108,7 @@ const wasPrecheckin = isPrecheckinService(precheckinKeys, { id: opt?.id, name })
 const finalRate = (precheckinActive && wasPrecheckin) ? applyPrecheckin(rate) : rate;
 const svcDiscounted = finalRate < rate;
 return {
-id: editableRowId('service', opt?.id, idx),
+id: editableRowId('service', svcRef, idx),
 name: svcDiscounted ? `Service: ${name} ${PRECHECKIN_NAME_MARKER}` : `Service: ${name}`,
 chargeType: 'UNIT',
 quantity: unit,
@@ -2112,23 +2116,24 @@ rate: finalRate,
 total: toMoneyNum(finalRate * unit),
  taxable: opt?.taxable !== false,
  source: wasPrecheckin ? 'ADDITIONAL_SERVICE_PRECHECKIN' : 'SERVICE',
- sourceRefId: opt?.id || null,
+ sourceRefId: svcRef,
  notes: svcDiscounted ? precheckinNotes(`Counter price: $${rate.toFixed(2)} per unit × ${unit}`) : null
 };
 });
 
 const feePricing = Array.isArray(chargeModel?.feePricing) ? chargeModel.feePricing : [];
 const feeRows = feeNames.map((name, idx) => {
-const opt = feeOptions.find((f) => (f.name || f.code || '').trim().toLowerCase() === name.toLowerCase());
-// A fee price a human set on THIS reservation wins over the catalog — the
-// same rule as services (Hector, 2026-08-10, verified on request).
-const savedFee = feePricing.find((fp) => opt?.id && fp.sourceRefId && String(fp.sourceRefId) === String(opt.id))
-  || feePricing.find((fp) => fp.name && fp.name.trim().toLowerCase() === name.trim().toLowerCase());
+// Same rule as services: the reservation's own row decides which catalog
+// entry this is. A fee catalog maintained by hand has duplicate names too.
+const savedFee = feePricing.find((fp) => fp.name && fp.name.trim().toLowerCase() === name.trim().toLowerCase());
+const opt = (savedFee?.sourceRefId && feeOptions.find((f2) => String(f2.id) === String(savedFee.sourceRefId)))
+  || feeOptions.find((f2) => (f2.name || f2.code || '').trim().toLowerCase() === name.toLowerCase());
+const feeRef = savedFee?.sourceRefId || opt?.id || null;
 if (savedFee?.priceOverridden) {
   const q = Number(savedFee.quantity ?? 1);
   const r = Number(savedFee.rate ?? 0);
   return {
-    id: editableRowId('fee', opt?.id, idx),
+    id: editableRowId('fee', feeRef, idx),
     name: `Fee: ${name}`,
     chargeType: 'UNIT',
     quantity: q,
@@ -2137,7 +2142,7 @@ if (savedFee?.priceOverridden) {
     total: toMoneyNum(r * q),
     taxable: opt?.taxable !== false,
     source: 'FEE',
-    sourceRefId: opt?.id || savedFee.sourceRefId || null,
+    sourceRefId: feeRef,
     priceOverridden: true,
   };
 }
@@ -2146,7 +2151,7 @@ const mode = String(opt?.mode || '').toUpperCase();
 const perDay = ['PER_DAY', 'DAILY', 'DAY', 'BY_DAY'].includes(mode);
 const unit = perDay ? breakdown.days : 1;
 return {
-id: editableRowId('fee', opt?.id, idx),
+id: editableRowId('fee', feeRef, idx),
 name: `Fee: ${name}`,
 chargeType: 'UNIT',
 quantity: unit,
