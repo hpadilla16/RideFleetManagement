@@ -11,6 +11,7 @@ import { customersRouter } from './modules/customers/customers.routes.js';
 import { publicVehicleTelematicsRouter, vehiclesRouter } from './modules/vehicles/vehicles.routes.js';
 import { inventoryRouter } from './modules/inventory/inventory.routes.js';
 import { locationsRouter } from './modules/locations/locations.routes.js';
+import { locationsSelectableRouter } from './modules/locations/locations-selectable.routes.js';
 import { locationHoursRouter } from './modules/locations/location-hours.routes.js';
 import { vehicleTypesRouter } from './modules/vehicle-types/vehicle-types.routes.js';
 import { additionalServicesRouter } from './modules/additional-services/additional-services.routes.js';
@@ -312,6 +313,11 @@ app.use('/api/vehicles', requireAuth, tenantRateLimit, requireModuleAccess('vehi
 // The hours router only defines GET /:id/hours; every other /api/locations
 // path falls through (Express router next()) to the gated router below.
 app.use('/api/locations', requireAuth, tenantRateLimit, locationHoursRouter);
+// The branch list a booking form needs — any authenticated staff, mounted
+// before the ADMIN/OPS configuration gate below. See
+// locations-selectable.routes.js: agents were getting a 403 rendered as an
+// empty dropdown and could not create reservations at all.
+app.use('/api/locations', requireAuth, tenantRateLimit, locationsSelectableRouter);
 app.use('/api/locations', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), locationsRouter);
 app.use('/api/vehicle-types', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), vehicleTypesRouter);
 app.use('/api/additional-services', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), additionalServicesRouter);

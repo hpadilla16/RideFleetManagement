@@ -49,7 +49,10 @@ function MaintenanceInner({ token, me, logout }) {
   }
 
   useEffect(() => {
-    api('/api/locations', {}, token).then((d) => {
+    // /selectable, not the ADMIN-only configuration endpoint: an AGENT gets
+    // 403 from the latter and the catch below turned that into an empty
+    // dropdown (Hector, 2026-08-10). Only id/code/name are used here anyway.
+    api('/api/locations/selectable', {}, token).then((d) => {
       const list = Array.isArray(d) ? d : (d?.locations || []);
       setLocations(list.map((l) => ({ id: l.id, code: l.code, name: l.name })));
     }).catch(() => {});

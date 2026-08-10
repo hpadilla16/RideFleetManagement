@@ -74,12 +74,23 @@ function Wizard({ token, me, logout }) {
 
   useEffect(() => {
     if (!token) return;
-    Promise.all([
-      api('/api/locations', {}, token).catch(() => []),
-      api('/api/vehicle-types', {}, token).catch(() => [])
+    // /api/locations/selectable, not /api/locations. The latter is the branch
+    // CONFIGURATION (fees, tax, documents) and is ADMIN/OPS only, so for an
+    // AGENT it 403s — and the old `.catch(() => [])` turned that into an empty
+    // dropdown. No branch to pick, step 1 impossible, save refused: agents
+    // could not create a reservation at all and it looked like the tenant had
+    // no locations (Hector, 2026-08-10).
+    Promise.allSettled([
+      api('/api/locations/selectable', {}, token),
+      api('/api/vehicle-types', {}, token)
     ]).then(([locs, vts]) => {
-      setLocations(Array.isArray(locs) ? locs : []);
-      setVehicleTypes(Array.isArray(vts) ? vts : []);
+      const gotLocs = locs.status === 'fulfilled' && Array.isArray(locs.value) ? locs.value : [];
+      const gotTypes = vts.status === 'fulfilled' && Array.isArray(vts.value) ? vts.value : [];
+      setLocations(gotLocs);
+      setVehicleTypes(gotTypes);
+      // An empty dropdown must say WHY. Silence here is what hid this for weeks.
+      if (locs.status === 'rejected') setErr(`Could not load locations: ${locs.reason?.message || 'request failed'}`);
+      else if (!gotLocs.length) setErr('No locations are set up for this tenant yet — an admin has to add one before a reservation can be created.');
     });
   }, [token]);
 
