@@ -103,6 +103,24 @@ jobs:
         #     money must never blend, and money already collected must never be
         #     forecast again — both are pure arithmetic, and both are the kind
         #     of error that reads as a plausible number (2026-08-07).
+        # A DUMMY DATABASE_URL IS REQUIRED HERE, AND NOTHING CONNECTS WITH IT.
+        # test:kiosk builds a PrismaClient at import time, and the Prisma
+        # constructor THROWS on an undefined datasource url — before any
+        # try/catch around connect can see it. Nothing in this job provides one,
+        # so all 7 kiosk files failed with
+        # `PrismaClientConstructorValidationError: Invalid value undefined for
+        # datasource "db"` and this whole step exited 1.
+        #
+        # It went unnoticed because it is invisible on a dev box: Prisma
+        # auto-loads backend/.env, which every developer has and CI does not. A
+        # git worktree makes it worse — its node_modules is usually a symlink
+        # into the main checkout, so the suite reads THAT .env and passes even
+        # with no .env of its own. The same shape as beta.344.
+        #
+        # This is the identical dummy value the "Resolve transitive imports" step
+        # above already uses. Same reason: satisfy a constructor, never connect.
+        env:
+          DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_unit_only?schema=public'
         run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup
   tenant-isolation-suite:
     runs-on: ubuntu-latest
