@@ -838,7 +838,11 @@ reservationsRouter.post('/:id/charges', chargeIdempotency, async (req, res, next
 
     const out = await reservationPricingService.addManualCharge(
       req.params.id,
-      { name: req.body?.name, amount: req.body?.amount },
+      // kind + sourceRefId ride through for the PRE-CHECKOUT branch (QA B1,
+      // 2026-08-11: they were validated by the service and then dropped right
+      // here — every VozIA-sold coverage landed as a generic service line, so
+      // the counter could not see the customer was covered).
+      { name: req.body?.name, amount: req.body?.amount, kind: req.body?.kind, sourceRefId: req.body?.sourceRefId },
       { reason, actorUserId: req.user?.sub || null },
       scopeFor(req)
     );
