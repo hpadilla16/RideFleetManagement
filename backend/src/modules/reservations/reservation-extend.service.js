@@ -126,7 +126,13 @@ export const PER_DAY_LIKE_SOURCES = new Set([
   'FEE',
   'SERVICE_LINKED_FEE',
   'INSURANCE',
-  'KIOSK_UPSELL'
+  'KIOSK_UPSELL',
+  // QA Major 1 (2026-08-11): a pre-checkout extra is priced FOR THE TRIP
+  // (per-day × days flattened to one line). Changing the day count makes that
+  // flat price wrong in either direction, silently — so it routes to a human
+  // exactly like every other trip-priced add-on. Also closes the identical
+  // latent gap for portal-sold services.
+  'ADDITIONAL_SERVICE_PRECHECKIN'
 ]);
 
 // Returns true if this row is a per-day charge whose quantity should

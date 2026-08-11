@@ -962,13 +962,196 @@ export const reservationPricingService = {
       : 'ADMIN_CORRECTION';
     if (!name) { const e = new Error('name is required'); e.status = 400; throw e; }
     if (!Number.isFinite(amount) || amount === 0) { const e = new Error('amount must be a non-zero number'); e.status = 400; throw e; }
-    await getReservationOrThrow(reservationId, scope);
+    const reservation = await getReservationOrThrow(reservationId, scope);
     const agreement = await prisma.rentalAgreement.findFirst({
       where: { reservationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
       orderBy: { createdAt: 'desc' },
       select: { id: true, tenantId: true, balance: true }
     });
-    if (!agreement) { const e = new Error('No agreement for reservation'); e.status = 404; throw e; }
+    if (!agreement) {
+      // PRE-CHECKOUT: no agreement exists yet — one is created at check-out.
+      // This used to 404 ('No agreement for reservation'), which killed VozIA's
+      // whole upsell: Chloe books a reservation, offers protection or a toll
+      // pass thirty seconds later, the caller says yes, and the add lands here
+      // 36 seconds after convert — measured 2026-08-11, RES-566343061B18. The
+      // extra belongs on the RESERVATION's books, in the exact shape the
+      // customer portal has proven for pre-check-in add-ons: a ReservationCharge
+      // that survives syncAgreementCharges (its source is not sync-owned) and
+      // that startFromReservation absorbs into the agreement at check-out — the
+      // same path a portal-sold $45 insurance line already travels.
+      //
+      // ONLY for reservations whose price WE own. A broker import or a prepaid
+      // booking carries the PARTNER's total in estimatedTotal with no rows, and
+      // any row written here would make the next pricing read recompute
+      // estimatedTotal from rows — the 3a1b274 corruption class (177 drifted
+      // broker totals). Measured blast radius: 6,353 row-less MIGRATION/
+      // FRANCHISE reservations. Those get a speakable refusal, not a write.
+      if (String(reservation?.status || '').toUpperCase() === 'CANCELLED') {
+        const e = new Error('Cannot adjust charges on a cancelled reservation');
+        e.status = 400;
+        throw e;
+      }
+      const channel = String(reservation?.bookingChannel || '').toUpperCase();
+      const NATIVE_CHANNELS = new Set(['VOZIA', 'WEBSITE', 'STAFF', 'CAR_SHARING']);
+      if (!NATIVE_CHANNELS.has(channel) || reservation?.isPrepaid === true) {
+        const e = new Error(
+          'Add-ons for this booking are arranged at the counter at pickup — a colleague there will be happy to add it.'
+        );
+        e.code = 'EXTRA_AT_COUNTER';
+        e.status = 409;
+        throw e;
+      }
+
+      // SEED THE BOOKED PRICE BEFORE THE FIRST ROW LANDS (QA blocker, measured
+      // $322.88 → $63.00 against real Postgres). A converted quote writes
+      // estimatedTotal and ZERO charge rows; the first row on such a
+      // reservation makes the next pricing read recompute estimatedTotal as
+      // sum(rows) — i.e. just the extra. So when the reservation is row-less,
+      // materialize the BOOKED price (never today's engine price — the quote's
+      // number is the contract) as rows first:
+      //   BASE_RATE Daily × days — the shape isBaseRentalRow recognizes, so
+      //     the d9ad2f6 reschedule rebuild replaces it correctly; and
+      //   a chargeType TAX remainder for taxes/fees — TAX on purpose: the
+      //     rebuild deletes chargeType TAX wholesale before recomputing, so
+      //     this row dies WITH the base instead of surviving as a stale
+      //     double-count. A UNIT remainder would outlive the rebuild.
+      // Invariant: sum(seeded rows) === estimatedTotal, so the recompute after
+      // the extra lands on estimatedTotal + extra. Exactly.
+      // MATERIALIZE THE SYNC'S OWN ROWS FIRST (QA probe case B/C). A pricing
+      // read creates MANDATORY_FEE/UNDERAGE_FEE rows as bookkeeping, and the
+      // quote's total already INCLUDES those fees. Two consequences the first
+      // version missed, both measured against real Postgres:
+      //   C) counting a MANDATORY_FEE row as "already priced" skipped the seed
+      //      → recompute → est $322.88 → $88.00 (fee + extra, rental gone);
+      //   B) NOT subtracting the fee from the remainder double-counted it
+      //      → est $410.88 for a $322.88 booking (+$25, the fee twice).
+      // Running the read here makes the fee rows exist BEFORE the math, so the
+      // remainder can subtract them, and the 3a1b274 guard means this read
+      // cannot itself clobber a row-less reservation.
+      await this.getPricing(reservationId, scope);
+      // "Our bookkeeping, not evidence anyone priced this reservation" — the
+      // same classification syncMandatoryLocationFees derives from feeGroups.
+      // A drift in that derivation is pinned by the suite.
+      const BOOKKEEPING_SOURCES = new Set(['MANDATORY_FEE', 'UNDERAGE_FEE', 'TOLL_MODULE', 'TOLL_POLICY']);
+      const kind = String(body?.kind || '').trim().toLowerCase();
+      const preSource = kind === 'insurance' ? 'INSURANCE' : 'ADDITIONAL_SERVICE_PRECHECKIN';
+      const sourceRefId = String(body?.sourceRefId || '').trim() || null;
+      const roundedAmount = Math.round(amount * 100) / 100;
+
+      // ONE transaction (QA): the seed rows are the reservation's ONLY pricing
+      // evidence — a crash between creates would leave a partial sum that the
+      // next read faithfully recomputes est down to. Same standard the file
+      // already states for recomputeTaxRow's paired writes.
+      const created = await prisma.$transaction(async (tx) => {
+        // FIRST STATEMENT IN THE TRANSACTION — the same discipline
+        // syncMandatoryLocationFees states for the same reason: the decision
+        // and the writes it justifies must see one consistent world. Read
+        // outside, two concurrent first-adds could both see zero priced rows
+        // and double-seed the base (QA residual, round 3).
+        const existingRows = await tx.reservationCharge.findMany({
+          where: { reservationId },
+          select: { id: true, selected: true, source: true, total: true }
+        });
+        const visibleRows = existingRows.filter((r) => r.selected !== false);
+        const pricedRows = visibleRows.filter(
+          (r) => !BOOKKEEPING_SOURCES.has(String(r.source || '').trim().toUpperCase())
+        );
+        const feeRowsTotal = Math.round(visibleRows
+          .filter((r) => BOOKKEEPING_SOURCES.has(String(r.source || '').trim().toUpperCase()))
+          .reduce((s, r) => s + Number(r.total || 0), 0) * 100) / 100;
+        if (pricedRows.length === 0) {
+          const est = Math.round(Number(reservation?.estimatedTotal || 0) * 100) / 100;
+          if (est > 0) {
+            // The quote's total is fee-INCLUSIVE (booking-engine total =
+            // base + taxes + mandatory fees), and the sync maintains the fee
+            // rows itself — so the seeded rows must cover est MINUS the fees.
+            // Invariant: sum(seeded) + feeRowsTotal === est.
+            const estLessFees = Math.max(0, Math.round((est - feeRowsTotal) * 100) / 100);
+            const dailyRate = Number(reservation?.dailyRate || 0);
+            const ms = new Date(reservation?.returnAt || 0) - new Date(reservation?.pickupAt || 0);
+            const days = Math.max(0, Math.ceil(ms / 86400000));
+            const base = Math.round(dailyRate * days * 100) / 100;
+            if (estLessFees > 0) {
+              if (dailyRate > 0 && days > 0 && base > 0 && base <= estLessFees + 0.005) {
+                await tx.reservationCharge.create({ data: {
+                  reservationId,
+                  source: 'BASE_RATE', code: 'DAILY', name: 'Daily',
+                  chargeType: 'UNIT', quantity: days, rate: dailyRate, total: base,
+                  taxable: false, selected: true, sortOrder: 0,
+                  notes: 'Booked price materialized at first pre-checkout add-on'
+                }});
+                const remainder = Math.round((estLessFees - base) * 100) / 100;
+                if (remainder > 0) {
+                  await tx.reservationCharge.create({ data: {
+                    reservationId,
+                    source: 'QUOTE_TAXES_FEES', name: 'Taxes & fees (booked price)',
+                    chargeType: 'TAX', quantity: 1, rate: remainder, total: remainder,
+                    taxable: false, selected: true, sortOrder: 999,
+                    notes: 'Booked price materialized at first pre-checkout add-on'
+                  }});
+                }
+              } else {
+                // No usable daily rate (or it exceeds the fee-less total —
+                // discounts): one row carrying the whole fee-less booked
+                // price. Still isBaseRentalRow, so a reschedule rebuild
+                // replaces it.
+                await tx.reservationCharge.create({ data: {
+                  reservationId,
+                  source: 'BASE_RATE', code: 'DAILY', name: 'Booked rental',
+                  chargeType: 'UNIT', quantity: 1, rate: estLessFees, total: estLessFees,
+                  taxable: false, selected: true, sortOrder: 0,
+                  notes: 'Booked price materialized at first pre-checkout add-on'
+                }});
+              }
+            }
+          }
+        }
+
+        // The amount written is the amount SPOKEN: flat qty-1 line at exactly
+        // the price the caller agreed to. `kind: 'insurance'` labels the row
+        // source INSURANCE (the portal's own source for coverage) so the
+        // counter SEES the customer is covered and does not re-sell it — and
+        // so a day-count reschedule hits PER_DAY_ADDONS_PRESENT and goes to a
+        // human; the generic source is in that per-day set now too (QA Major 1).
+        const extraRow = await tx.reservationCharge.create({ data: {
+          reservationId,
+          source: preSource,
+          sourceRefId,
+          name: name.slice(0, 200),
+          chargeType: 'UNIT',
+          quantity: 1,
+          rate: roundedAmount,
+          total: roundedAmount,
+          taxable: false,
+          selected: true,
+          sortOrder: 10,
+          notes: reason ? String(reason).slice(0, 300) : null
+        }, select: { id: true } });
+        await tx.auditLog.create({ data: {
+          tenantId: reservation?.tenantId || scope?.tenantId || null,
+          reservationId,
+          action: 'ADMIN_OVERRIDE',
+          actorUserId: actorUserId || null,
+          reason: reason ? String(reason).slice(0, 500) : null,
+          metadata: JSON.stringify({
+            kind: 'add_precheckout_extra',
+            chargeId: extraRow.id,
+            source: preSource,
+            sourceRefId,
+            name: name.slice(0, 200),
+            amount: roundedAmount
+          })
+        }});
+        return extraRow;
+      });
+      // The rows are the truth; the next pricing read recomputes estimatedTotal
+      // from them. Return it NOW so the caller can read the fresh number back.
+      const pricing = await this.getPricing(reservationId, scope);
+      if (returnMeta) {
+        return { pricing, chargeId: created.id, source: preSource, appliedTo: 'reservation' };
+      }
+      return pricing;
+    }
     const rounded = Math.round(amount * 100) / 100; // negative = credit
     const balanceBefore = Number(agreement.balance || 0);
     // source ADMIN_CORRECTION (not FEE_ENGINE*, not TAX, not deposit) → lands in
