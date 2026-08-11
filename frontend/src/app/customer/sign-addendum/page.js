@@ -196,7 +196,7 @@ export default function SignAddendumPage() {
 
   return (
     <PortalFrame
-      eyebrow={agreement?.tenantName || 'Ride Fleet Self-Service'}
+      eyebrow={agreement?.tenantName || 'Self-Service'}
       title="Review and Sign Your Addendum"
       subtitle="An update has been made to your rental agreement. Please review the new dates, accept the terms, and sign below."
     >

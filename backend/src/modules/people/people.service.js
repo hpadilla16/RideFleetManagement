@@ -106,7 +106,7 @@ async function sendInviteEmail({ email, fullName, tempPassword, tenantName, role
     cta: { label: 'Sign in', url: loginUrl },
     preheader: 'Your account is ready',
   });
-  await sendEmail({ to: email, subject, text, html });
+  await sendEmail({ to: email, subject, text, html, fromName: tenantName || undefined });
 }
 
 async function resolveTenant(tenantId) {

@@ -206,7 +206,7 @@ export async function sendReservationConfirmationEmail({
             : undefined,
       preheader: subject,
     });
-    await _sendEmail({
+    await _sendEmail({ fromName: confirmBrand?.companyName, fromEmail: confirmBrand?.fromEmail || undefined,
       to: customer.email,
       subject,
       text: confirmText,

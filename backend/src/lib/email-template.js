@@ -53,6 +53,9 @@ export async function resolveEmailBrand(scope = {}, deps = {}) {
     address: s.companyAddress || '',
     phone: s.companyPhone || '',
     supportUrl: s.emailSupportUrl || '',
+    // Set only after the tenant's domain is verified in MailerSend — see the
+    // emailFromAddress comment in settings.service.js.
+    fromEmail: s.emailFromAddress || '',
   };
 }
 

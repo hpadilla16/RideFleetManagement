@@ -130,7 +130,7 @@ export default function SignLoanerPage() {
 
   return (
     <PortalFrame
-      eyebrow={agreement?.reservation?.reservationNumber ? 'Dealership Loaner' : 'Ride Fleet Self-Service'}
+      eyebrow={agreement?.reservation?.reservationNumber ? 'Dealership Loaner' : 'Self-Service'}
       title="Review and Sign Your Loaner Agreement"
       subtitle="Please review the loaner details, accept the terms, and sign below to complete your check-out."
     >

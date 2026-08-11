@@ -173,7 +173,7 @@ async function _notifyAddendumCustomer({ agreement, addendum }) {
       preheader: 'Action required: sign your agreement addendum',
     });
 
-    await sendEmail({ to: agreement.customerEmail, subject, text: brandedText, html });
+    await sendEmail({ to: agreement.customerEmail, subject, text: brandedText, html, fromName: brand?.companyName, fromEmail: brand?.fromEmail || undefined });
 
     logger?.info?.('addendum-notification customer sent', {
       rentalAgreementId: agreement.id,

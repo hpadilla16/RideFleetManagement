@@ -1681,7 +1681,7 @@ reservationsRouter.post('/:id/send-request-email', async (req, res, next) => {
         preheader: render(subjectTpl) || `${actionLabel} - Reservation ${current.reservationNumber}`,
       });
       await sendEmail({
-        to: recipients.join(','),
+        to: recipients.join(','), fromName: companyName,
         subject: render(subjectTpl) || `${actionLabel} - Reservation ${current.reservationNumber}`,
         text: reqText,
         html: reqHtml
@@ -2094,7 +2094,7 @@ reservationsRouter.post('/:id/send-detail-email', async (req, res, next) => {
     });
 
     await sendEmail({
-      to: recipients.join(','),
+      to: recipients.join(','), fromName: current.pickupLocation?.name || undefined,
       subject,
       text,
       html

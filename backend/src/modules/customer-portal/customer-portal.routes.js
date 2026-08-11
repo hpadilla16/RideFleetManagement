@@ -904,10 +904,10 @@ async function buildPortalSummary(reservation, kind, token) {
   };
 }
 
-function paymentReceiptText({ reservation, agreement, payments }) {
+function paymentReceiptText({ reservation, agreement, payments, companyName }) {
   const customerName = `${reservation?.customer?.firstName || ''} ${reservation?.customer?.lastName || ''}`.trim() || 'Customer';
   const lines = [
-    'Ride Fleet Payment Receipt',
+    `${companyName || 'Payment'} Receipt`,
     '',
     `Reservation: ${reservation?.reservationNumber || '-'}`,
     `Agreement: ${agreement?.agreementNumber || '-'}`,
@@ -1163,7 +1163,7 @@ async function postPayment({ reservation, paidAmount, reference, gateway }) {
         ..._rows.map(([k, v]) => `${k}: ${v}`), '', 'This is your payment receipt.',
       ].join('\n');
       const _email = renderBrandedEmail({ brand: _brand, heading: 'Payment received', bodyHtml: _bodyHtml, bodyText: _bodyText });
-      await sendEmail({
+      await sendEmail({ fromName: _brand?.companyName, fromEmail: _brand?.fromEmail || undefined,
         to,
         subject: `Payment Receipt - ${reservation.reservationNumber}`,
         html: _email.html,
@@ -2288,7 +2288,7 @@ customerPortalRouter.post('/payment/:token/confirm', portalWrite, async (req, re
     } catch (postErr) {
       const message = String(postErr?.message || postErr || 'Unable to record payment');
       return res.status(500).json({
-        error: `Payment captured but Ride Fleet could not record it yet: ${message}`,
+        error: `Payment captured but the system could not record it yet: ${message}`,
         captured: true,
         reference,
         paidAmount
@@ -2365,7 +2365,8 @@ customerPortalRouter.get('/document/:kind/:token/:asset', portalRead, async (req
 
     if (asset === 'receipt') {
       if (!payments.length) return res.status(404).json({ error: 'Receipt not available yet' });
-      const text = paymentReceiptText({ reservation, agreement, payments });
+      const _receiptBrand = await resolveEmailBrand(reservation.tenantId ? { tenantId: reservation.tenantId } : {}).catch(() => null);
+      const text = paymentReceiptText({ reservation, agreement, payments, companyName: _receiptBrand?.companyName });
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${reservation.reservationNumber || 'receipt'}-receipt.txt"`);
       return res.send(text);

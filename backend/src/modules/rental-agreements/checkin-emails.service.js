@@ -266,7 +266,7 @@ export async function sendInvoiceAfterCheckin({ reservationId, agreementId }) {
   const pdfBuffer = await renderAgreementPdf(agreementId);
   const attachments = buildAttachments(pdfBuffer, agreementNumber);
 
-  await sendEmail({ to: customerEmail, subject, html, text, attachments });
+  await sendEmail({ to: customerEmail, subject, html, text, attachments, fromName: brand?.companyName, fromEmail: brand?.fromEmail || undefined });
   logger.info('[checkin-emails] invoice sent', {
     reservationId, agreementId, email: customerEmail, withPdf: Boolean(pdfBuffer)
   });
@@ -287,7 +287,7 @@ export async function sendReceiptPaidInFull({ reservationId, agreementId }) {
   const pdfBuffer = await renderAgreementPdf(agreementId);
   const attachments = buildAttachments(pdfBuffer, agreementNumber);
 
-  await sendEmail({ to: customerEmail, subject, html, text, attachments });
+  await sendEmail({ to: customerEmail, subject, html, text, attachments, fromName: brand?.companyName, fromEmail: brand?.fromEmail || undefined });
   logger.info('[checkin-emails] receipt sent', {
     reservationId, agreementId, email: customerEmail, withPdf: Boolean(pdfBuffer)
   });

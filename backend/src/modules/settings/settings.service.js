@@ -40,7 +40,14 @@ const DEFAULTS = {
   // Email branding (2026-06-27): brand color + support link for the unified
   // transactional email template. Empty brand color => RFM default (#8752FE).
   emailBrandColor: '',
-  emailSupportUrl: ''
+  emailSupportUrl: '',
+  // Per-tenant FROM address (2026-08-11, Hector: Rent & Go's emails should
+  // come from noreply@THEIR domain, not @ridefleetmanager.com). ONLY set
+  // after the domain is VERIFIED in MailerSend (SPF + DKIM green): an
+  // unverified from domain is a hard reject, not a spam-folder problem. The
+  // mailer falls back to the platform default when the tenant-from send
+  // fails, so a wrong value degrades the address, never the delivery.
+  emailFromAddress: ''
 };
 
 const ALLOWED_KEYS = Object.keys(DEFAULTS);

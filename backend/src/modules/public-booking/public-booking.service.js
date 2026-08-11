@@ -716,7 +716,7 @@ export const publicBookingService = {
       customers,
       email,
       customerName: firstName || customers[0]?.firstName || 'Guest',
-      subject: 'Welcome to Ride Fleet guest access',
+      subject: 'Welcome — your guest access is ready',
       intro: 'Your guest account is ready. Use this secure link to sign in, view your reservations, and make future bookings from the same guest account.'
     });
   },

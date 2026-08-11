@@ -346,7 +346,7 @@ export default function PrecheckinPage() {
 
   return (
     <PortalFrame
-      eyebrow="Ride Fleet Self-Service"
+      brandName={model?.branding?.companyName}
       title="Complete Your Pre-Check-in"
       subtitle="Share your contact details, driver information, and supporting documents before pickup so the counter team can get you on the road faster."
       aside={(

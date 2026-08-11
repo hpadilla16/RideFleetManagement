@@ -260,7 +260,7 @@ export default function CustomerPayPage() {
 
   return (
     <PortalFrame
-      eyebrow="Ride Fleet Self-Service"
+      eyebrow="Self-Service"
       title="Complete Your Payment"
       subtitle="Review your balance, understand exactly what is due, and finish payment without calling the counter."
       aside={(
@@ -435,7 +435,7 @@ export default function CustomerPayPage() {
                 <div>
                   {returnTransId
                     ? `Return reference detected: ${returnTransId}. Finalizing payment now.`
-                    : 'Waiting for gateway confirmation. This page will refresh automatically as soon as Ride Fleet receives the payment event.'}
+                    : 'Waiting for gateway confirmation. This page will refresh automatically as soon as the payment event arrives.'}
                 </div>
               </div>
             )}

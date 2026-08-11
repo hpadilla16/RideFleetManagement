@@ -161,7 +161,11 @@ export const portalStyles = {
   }
 };
 
-export function PortalFrame({ eyebrow = 'Ride Fleet Portal', title, subtitle, aside, children }) {
+// The eyebrow default is NEUTRAL: a Rent & Go customer must never see "Ride
+// Fleet" (2026-08-11). Pages that know their tenant pass brandName from the
+// API payload (the precheckin endpoint already returns branding.companyName).
+export function PortalFrame({ eyebrow, brandName, title, subtitle, aside, children }) {
+  const shownEyebrow = eyebrow || (brandName ? `${brandName} Portal` : 'Customer Portal');
   const [isCompact, setIsCompact] = useState(false);
 
   useEffect(() => {
@@ -182,7 +186,7 @@ export function PortalFrame({ eyebrow = 'Ride Fleet Portal', title, subtitle, as
           borderRadius: isCompact ? 22 : portalStyles.hero.borderRadius,
           padding: isCompact ? '22px 18px' : portalStyles.hero.padding
         }}>
-          <div style={portalStyles.eyebrow}>{eyebrow}</div>
+          <div style={portalStyles.eyebrow}>{shownEyebrow}</div>
           <h1 style={{
             ...portalStyles.heroTitle,
             fontSize: isCompact ? 28 : portalStyles.heroTitle.fontSize,

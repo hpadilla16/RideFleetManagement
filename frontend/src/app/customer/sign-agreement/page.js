@@ -181,7 +181,7 @@ export default function SignAgreementPage() {
 
   return (
     <PortalFrame
-      eyebrow="Ride Fleet Self-Service"
+      eyebrow="Self-Service"
       title="Review and Sign Your Agreement"
       subtitle="Review your reservation details, verify the full cost breakdown, and sign the agreement digitally in one secure step."
       aside={(

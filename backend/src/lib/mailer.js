@@ -134,10 +134,15 @@ async function sendViaResend({ to, subject, text, html, attachments }) {
   return res.json();
 }
 
-async function sendViaMailersend({ to, subject, text, html, attachments }) {
+async function sendViaMailersend({ to, subject, text, html, attachments, fromName: fromNameOverride, fromEmail: fromEmailOverride }) {
   const apiKey = getEnvOrDotenv('MAILERSEND_API_KEY');
-  const fromEmail = getEnvOrDotenv('MAILERSEND_FROM') || getEnvOrDotenv('SMTP_FROM') || getEnvOrDotenv('SMTP_USER');
-  const fromName = getEnvOrDotenv('MAILERSEND_FROM_NAME') || 'Ride Fleet';
+  const defaultFrom = getEnvOrDotenv('MAILERSEND_FROM') || getEnvOrDotenv('SMTP_FROM') || getEnvOrDotenv('SMTP_USER');
+  // A tenant's own from address — VALID ONLY when that domain is verified in
+  // MailerSend. An unverified domain is a hard 422, not a spam-folder problem,
+  // so a failed tenant-from send RETRIES on the platform default below: the
+  // customer getting the email matters more than the address it came from.
+  const fromEmail = String(fromEmailOverride || '').trim().toLowerCase() || defaultFrom;
+  const fromName = String(fromNameOverride || '').trim() || getEnvOrDotenv('MAILERSEND_FROM_NAME') || 'Ride Fleet';
   if (!apiKey || !fromEmail) {
     throw new Error('MailerSend is not configured (MAILERSEND_API_KEY/MAILERSEND_FROM)');
   }
@@ -179,6 +184,14 @@ async function sendViaMailersend({ to, subject, text, html, attachments }) {
     try {
       detail = await res.text();
     } catch {}
+    // A tenant-branded FROM that MailerSend refuses (unverified domain, DNS
+    // drift, revoked verification) must not cost the customer their email —
+    // retry once on the platform default. The degradation is the address,
+    // never the delivery.
+    if (fromEmailOverride && fromEmail !== defaultFrom) {
+      console.warn(`[mailer] tenant from ${fromEmail} rejected (${res.status}) — retrying with platform default`);
+      return sendViaMailersend({ to, subject, text, html, attachments, fromName: fromNameOverride });
+    }
     throw new Error(`MailerSend request failed (${res.status})${detail ? `: ${detail.slice(0, 300)}` : ''}`);
   }
 
@@ -197,13 +210,21 @@ async function sendViaSmtp({ to, subject, text, html, attachments }) {
   return tx.sendMail({ from, to, subject, text, html, attachments });
 }
 
-export async function sendEmail({ to, subject, text, html, attachments }) {
+/**
+ * `fromName` (optional): the display name the recipient's inbox shows. A VPH
+ * customer's confirmation must arrive from "Rent & Go by VPH Motors", not
+ * "Ride Fleet" (Hector, 2026-08-11) — the body was already tenant-branded via
+ * renderBrandedEmail, but the SENDER name was a global env var, and the sender
+ * is the first branding anyone sees. Callers that resolve a brand pass
+ * brand.companyName; everything else keeps the env default.
+ */
+export async function sendEmail({ to, subject, text, html, attachments, fromName, fromEmail }) {
   const provider = preferredProvider();
   if (provider === 'mailersend') {
-    return sendViaMailersend({ to, subject, text, html, attachments });
+    return sendViaMailersend({ to, subject, text, html, attachments, fromName, fromEmail });
   }
   if (provider === 'resend') {
-    return sendViaResend({ to, subject, text, html, attachments });
+    return sendViaResend({ to, subject, text, html, attachments, fromName });
   }
-  return sendViaSmtp({ to, subject, text, html, attachments });
+  return sendViaSmtp({ to, subject, text, html, attachments, fromName });
 }
