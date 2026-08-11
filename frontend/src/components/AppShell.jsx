@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { API_BASE, TOKEN_KEY, USER_KEY, readStoredToken } from '../lib/client';
+import { API_BASE, TOKEN_KEY, USER_KEY, readStoredToken, api, readViewLocation, writeViewLocation } from '../lib/client';
 import { isModuleEnabled, pathnameToModule } from '../lib/moduleAccess';
 import { useTranslation } from 'react-i18next';
 import { setLanguage } from '../lib/i18n';
@@ -56,6 +56,30 @@ function formatTime(d) {
 }
 
 export function AppShell({ me, logout, children }) {
+  // Location switcher (2026-08-11, Hector): a user with several locations
+  // picks which one they are VIEWING, the way a super admin picks a tenant.
+  // The pick travels as a header on every request (see lib/client.js) and
+  // requireAuth narrows their scope server-side. This list is fetched with
+  // skipViewLocation — otherwise, once narrowed, the dropdown would show only
+  // the selected location and you could never switch back.
+  const [viewLocations, setViewLocations] = useState([]);
+  const [viewLocationId, setViewLocationId] = useState('');
+  useEffect(() => {
+    setViewLocationId(readViewLocation());
+    const token = readStoredToken();
+    if (!token) return;
+    if (String(me?.role || '').toUpperCase() === 'SUPER_ADMIN') return; // supers drive by tenant
+    api('/api/locations/selectable', { skipViewLocation: true }, token)
+      .then((rows) => setViewLocations(Array.isArray(rows) ? rows : []))
+      .catch(() => setViewLocations([]));
+  }, [me?.role]);
+  const switchViewLocation = (id) => {
+    writeViewLocation(id);
+    // Full reload: every page refetches under the new scope. Cheaper and more
+    // correct than teaching each page to react to a scope event.
+    window.location.reload();
+  };
+
   const { t, i18n } = useTranslation();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -309,6 +333,19 @@ export function AppShell({ me, logout, children }) {
               <div className="topbar-name">{me?.fullName || me?.name || me?.email || t('appShell.userFallback')}</div>
               <div className="topbar-role">{me?.role || 'ADMIN'}</div>
             </div>
+            {viewLocations.length > 1 ? (
+              <select
+                value={viewLocationId}
+                onChange={(e) => switchViewLocation(e.target.value)}
+                title={t('appShell.viewLocation', 'Which location you are viewing')}
+                style={{ maxWidth: 190, border: '1px solid var(--border-2, #d9d2ea)', background: 'var(--surface-2, #f7f5fd)', color: 'var(--text-2, #4a4258)', borderRadius: 8, padding: '7px 8px', fontSize: 12.5, cursor: 'pointer' }}
+              >
+                <option value="">{t('appShell.allLocations', 'All my locations')}</option>
+                {viewLocations.map((l) => (
+                  <option key={l.id} value={l.id}>{l.code ? `${l.code} · ${l.name}` : l.name}</option>
+                ))}
+              </select>
+            ) : null}
             <button
               type="button"
               className="topbar-search-btn"

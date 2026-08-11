@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { applyViewLocation, VIEW_LOCATION_HEADER } from '../lib/view-location.js';
 import { getJwtSecret } from '../modules/auth/auth.config.js';
 import { authService } from '../modules/auth/auth.service.js';
 import { isAllowedForServiceAccount } from '../lib/service-account-allowlist.js';
@@ -59,6 +60,22 @@ export async function requireAuth(req, res, next) {
     }
 
     req.user = { ...payload, ...hydrated, sub: hydrated.id, id: hydrated.id };
+
+    // Location switcher (2026-08-11): x-view-location narrows the user's
+    // location scope to ONE location for this request, the way a super admin
+    // views one tenant. Applied HERE, at the single place every request
+    // passes, so every endpoint that respects userAllowedLocationIds filters
+    // without knowing the feature exists. The override only ever SHRINKS what
+    // the user could already see (fail-closed by construction); a restricted
+    // user picking outside their set is a hard 403, not an empty page.
+    const viewResult = applyViewLocation({
+      user: req.user,
+      requested: req.headers[VIEW_LOCATION_HEADER],
+    });
+    if (!viewResult.ok) return res.status(403).json({ error: viewResult.error });
+    if (viewResult.locationIds !== undefined) {
+      req.user = { ...req.user, locationIds: viewResult.locationIds, viewLocationId: viewResult.locationIds[0] };
+    }
     next();
   } catch (e) {
     if (/JWT_SECRET must be configured/i.test(String(e?.message || ''))) {

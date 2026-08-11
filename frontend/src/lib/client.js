@@ -142,11 +142,17 @@ export function readStoredToken() {
 }
 
 export async function api(path, opts = {}, token) {
-  const { cacheTtlMs, bypassCache, ...fetchOpts } = opts || {};
+  const { cacheTtlMs, bypassCache, skipViewLocation, ...fetchOpts } = opts || {};
   const method = String(fetchOpts.method || 'GET').toUpperCase();
   const headers = { 'Content-Type': 'application/json', ...(fetchOpts.headers || {}) };
   const authToken = token || readStoredToken();
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  // Location switcher (2026-08-11): every request carries the location the
+  // user chose to view; requireAuth narrows their scope server-side. Opt-out
+  // (skipViewLocation) exists for exactly one caller — the switcher's own
+  // location list, which must stay complete or you could never switch back.
+  const viewLocation = skipViewLocation ? '' : readViewLocation();
+  if (viewLocation) headers['x-view-location'] = viewLocation;
   const url = `${API_BASE}${path}`;
   const useGetCache = typeof window !== 'undefined' && method === 'GET' && !bypassCache && cacheTtlMs !== 0;
 
@@ -158,7 +164,10 @@ export async function api(path, opts = {}, token) {
 
   const now = Date.now();
   const ttlMs = Math.max(1000, Number(cacheTtlMs || GET_CACHE_TTL_MS));
-  const cacheKey = buildGetCacheKey(url, authToken);
+  // The view location MUST be part of the cache key: without it, switching
+  // locations serves the PREVIOUS location's cached lists until the TTL
+  // expires — stale data wearing the new location's label.
+  const cacheKey = buildGetCacheKey(`${url}||view:${viewLocation}`, authToken);
   const cached = getResponseCache.get(cacheKey);
   if (cached && cached.expiresAt > now) return cloneCachedValue(cached.data);
   if (cached) getResponseCache.delete(cacheKey);
@@ -179,4 +188,18 @@ export async function api(path, opts = {}, token) {
   } finally {
     inflightGetRequests.delete(cacheKey);
   }
+}
+
+/** The location the user is currently viewing AS ('' = all their locations). */
+export function readViewLocation() {
+  try { return localStorage.getItem('ui.viewLocationId') || ''; } catch { return ''; }
+}
+
+/** Set (or clear) the viewed location. Callers reload so every page refetches. */
+export function writeViewLocation(id) {
+  try {
+    if (id) localStorage.setItem('ui.viewLocationId', String(id));
+    else localStorage.removeItem('ui.viewLocationId');
+  } catch {}
+  clearGetCache();
 }
