@@ -16,7 +16,10 @@ const TYPE_LABEL = {
   reservation: 'Reservation',
   agreement: 'Agreement',
   vehicle: 'Vehicle',
-  customer: 'Customer'
+  customer: 'Customer',
+  // Payments by reference (2026-08-11): receipt/auth codes and card last-4 —
+  // the "****1234 · auth A8K2X9" format the payment history already writes.
+  payment: 'Payment'
 };
 
 export function CommandPalette() {

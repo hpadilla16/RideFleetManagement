@@ -19,6 +19,7 @@
 import { Router } from 'express';
 import { prisma } from '../../lib/prisma.js';
 import { scopeFor, userAllowedLocationIds } from '../../lib/tenant-scope.js';
+import { mapPaymentResults, PAYMENT_QUERY_MIN } from './payment-search.js';
 
 export const globalSearchRouter = Router();
 
@@ -68,7 +69,21 @@ globalSearchRouter.get('/', async (req, res, next) => {
       ...(locationIds ? { OR: [{ pickupLocationId: { in: locationIds } }, { returnLocationId: { in: locationIds } }] } : {})
     };
 
-    const [reservations, vehicles, customers, agreements] = await Promise.all([
+    // Payments by REFERENCE (2026-08-11): agents record a receipt/auth code
+    // and the card's last 4 ("****1234 · auth A8K2X9" is the house format the
+    // AUTH_HOLD flow already writes). ReservationPayment.reference has been
+    // indexed since the schema was written; this is the lookup that index was
+    // waiting for. `contains` rather than startsWith because the last 4 sits
+    // mid-string — the tables are payment-sized (thousands, not millions) and
+    // the bucket takes 6, so the scan stays cheap. Gated at 4 characters: the
+    // palette's global minimum of 2 would match half the table.
+    const paymentScope = {
+      tenantId,
+      ...(locationIds ? { OR: [{ pickupLocationId: { in: locationIds } }, { returnLocationId: { in: locationIds } }] } : {})
+    };
+    const wantPayments = q.length >= PAYMENT_QUERY_MIN;
+
+    const [reservations, vehicles, customers, agreements, resPayments, agrPayments] = await Promise.all([
       prisma.reservation.findMany({
         where: reservationWhere,
         select: {
@@ -93,8 +108,29 @@ globalSearchRouter.get('/', async (req, res, next) => {
         where: agreementWhere,
         select: { id: true, agreementNumber: true, status: true, reservationId: true },
         take: TAKE
-      })
+      }),
+      wantPayments ? prisma.reservationPayment.findMany({
+        where: { reference: { contains: q, ...insensitive }, reservation: paymentScope },
+        select: {
+          id: true, amount: true, method: true, reference: true, paidAt: true,
+          rentalAgreementPaymentId: true,
+          reservation: { select: { id: true, reservationNumber: true, customer: { select: { firstName: true, lastName: true } } } }
+        },
+        orderBy: { paidAt: 'desc' },
+        take: TAKE
+      }) : Promise.resolve([]),
+      wantPayments ? prisma.rentalAgreementPayment.findMany({
+        where: { reference: { contains: q, ...insensitive }, rentalAgreement: { is: { reservation: paymentScope } } },
+        select: {
+          id: true, amount: true, method: true, reference: true, paidAt: true,
+          rentalAgreement: { select: { reservation: { select: { id: true, reservationNumber: true, customer: { select: { firstName: true, lastName: true } } } } } }
+        },
+        orderBy: { paidAt: 'desc' },
+        take: TAKE
+      }) : Promise.resolve([])
     ]);
+
+    const paymentResults = mapPaymentResults(resPayments, agrPayments).slice(0, TAKE);
 
     const results = [
       ...reservations.map((r) => ({
@@ -127,7 +163,10 @@ globalSearchRouter.get('/', async (req, res, next) => {
         title: [c.firstName, c.lastName].filter(Boolean).join(' '),
         subtitle: [c.email, c.phone].filter(Boolean).join(' · '),
         href: `/customers/${c.id}`
-      }))
+      })),
+      // Payments LAST: reservation/customer lookups are the palette's muscle
+      // memory; the payment bucket only fires at 4+ chars anyway.
+      ...paymentResults
     ];
 
     res.json({ results: results.slice(0, 20) });
