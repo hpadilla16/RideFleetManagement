@@ -145,6 +145,62 @@ export async function smartMatchReservation({ code, name, dateWindow, tenantId }
     }
   }
 
+  // FUZZY pass, ONLY when every exact variant missed. A code read aloud at an
+  // airport curb loses characters in transcription: measured on the shuttle
+  // line 2026-08-12, the SAME reservation arrived as 443838169A2 (one digit
+  // dropped mid-code from RES-4438388169A2) three times, and a TL voucher
+  // arrived as ZE40842914DA and ZE40842914B for TL-ZE40842914BA. The variant
+  // fan-out tolerates prefixes and leading zeros — not a hole in the middle.
+  //
+  // Trigram similarity against the stored number AND its prefix-stripped form
+  // (the caller reads the voucher, which has no prefix). MEASURED before
+  // shipping: all three real manglings score 0.625-0.786, and at the 0.55
+  // threshold each finds EXACTLY ONE candidate in the whole tenant — zero
+  // false positives across ~9k reservations. The GIN trgm index from beta.150
+  // covers the column; a tenant-scoped scan is <350ms in prod either way.
+  //
+  // SAFETY: candidates ride the SAME masked-until-verified flow as variant
+  // hits (matchType 'variant', confidence 40 — below every ranked tier, so
+  // nothing is disclosed until the caller proves the last name or pickup
+  // date). Guest identity never rests on the fuzz; it rests on the verify.
+  // Fail-open to "not found": any error here must not break the exact path,
+  // and a fake prisma without $queryRaw simply skips the pass.
+  const cleanForFuzzy = variants.length ? variants[0] : '';
+  if (!results.length && cleanForFuzzy.length >= 8 && typeof prisma.$queryRaw === 'function') {
+    try {
+      const rows = await prisma.$queryRaw`
+        SELECT r.id, r."reservationNumber", r.status, r."pickupAt",
+               c."firstName", c."lastName"
+        FROM "Reservation" r
+        LEFT JOIN "Customer" c ON c.id = r."customerId"
+        WHERE r."tenantId" = ${tenantId}
+          AND GREATEST(
+                similarity(upper(r."reservationNumber"), ${cleanForFuzzy}),
+                similarity(regexp_replace(upper(r."reservationNumber"), '^[A-Z]+-', ''), ${cleanForFuzzy})
+              ) > 0.55
+        ORDER BY GREATEST(
+                similarity(upper(r."reservationNumber"), ${cleanForFuzzy}),
+                similarity(regexp_replace(upper(r."reservationNumber"), '^[A-Z]+-', ''), ${cleanForFuzzy})
+              ) DESC
+        LIMIT 5`;
+      for (const r of rows) {
+        results.push({
+          reservation: {
+            id: r.id,
+            reservationNumber: r.reservationNumber,
+            status: r.status,
+            pickupAt: r.pickupAt,
+            customer: { firstName: r.firstName ?? null, lastName: r.lastName ?? null },
+          },
+          matchType: 'variant',
+          confidence: 40,
+        });
+      }
+    } catch {
+      /* fuzzy is an enhancement — the exact path's answer stands */
+    }
+  }
+
   // Name fallback ONLY when the code produced nothing (a code hit is always
   // the better signal; mixing both would just dilute the ranking).
   if (!results.length && typeof name === 'string' && name.trim().length >= 3) {
