@@ -478,3 +478,23 @@ test('the date rule has exactly ONE definition, and both sides import it', () =>
   // …and the verifier must actually call it, not re-test the shape inline.
   assert.match(here, /if \(isVerifiablePickupDate\(pickupDate\)\)/);
 });
+
+test('the exact case Hector dictated: a bare broker ref finds its TL-prefixed row', () => {
+  // "si el cliente dice ZE3745839BA eso es lo mismo en sistema que
+  // TL-ZE3745839BA" (2026-08-12). The voucher shows the BARE ref; RFM stores
+  // it prefixed at promotion. Branch 4 of the fan-out owns this.
+  const v = generateCodeVariants('ZE3745839BA');
+  assert.ok(v.includes('TL-ZE3745839BA'), `variants were: ${v.join(', ')}`);
+});
+
+test('every prefix MEASURED in prod is in the fan-out — WEB/MEX/CS/DL/MIG were missing', () => {
+  // Measured 2026-08-12 against prod reservationNumbers by bookingChannel.
+  // A website customer reading the digits off their own confirmation email
+  // (87 rows shaped WEB-…) missed entirely before this.
+  for (const p of ['WEB-', 'MEX-', 'CS-', 'DL-', 'MIG-']) {
+    assert.ok(KNOWN_PREFIXES.includes(p), `${p} missing from KNOWN_PREFIXES`);
+  }
+  const v = generateCodeVariants('845982558F30');
+  assert.ok(v.includes('WEB-845982558F30'), `variants were: ${v.join(', ')}`);
+});
+

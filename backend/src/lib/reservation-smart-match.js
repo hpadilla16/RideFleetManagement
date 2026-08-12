@@ -19,8 +19,18 @@
  * New variant patterns discovered in the field go HERE + the shared doc.
  */
 
-/** Import prefixes per booking-source (see each source's constants) + native. */
-export const KNOWN_PREFIXES = ['RES-', 'TL-', 'NU-', 'ECON-', 'FW-', 'ADV-'];
+/**
+ * Import prefixes per booking-source (see each source's constants) + native.
+ * MEASURED against prod 2026-08-12 (distinct reservationNumber prefixes by
+ * bookingChannel) — the hand-typed list was missing FIVE that exist in the
+ * data: WEB- (87 website bookings whose customers read the digits off their
+ * own confirmation email), MEX-, CS- (car sharing), DL- (loaners), MIG-.
+ * A caller reads the number their VOUCHER shows; RFM stores it prefixed. The
+ * shuttle go-live rides on this fan-out finding them (Hector, 2026-08-12:
+ * "si el cliente dice ZE3745839BA eso es lo mismo que TL-ZE3745839BA").
+ * RES- stays first: it is the native shape and wins the strip branch.
+ */
+export const KNOWN_PREFIXES = ['RES-', 'TL-', 'NU-', 'ECON-', 'FW-', 'ADV-', 'WEB-', 'MEX-', 'CS-', 'DL-', 'MIG-'];
 
 const CODE_SHAPE = /^[A-Z0-9-]{3,40}$/;
 const MAX_CANDIDATES = 10;
