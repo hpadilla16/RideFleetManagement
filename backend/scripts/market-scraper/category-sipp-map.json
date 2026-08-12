@@ -1,6 +1,6 @@
 {
   "_comment": "Map Expedia user-facing car category names to ACRISS/SIPP codes. Match by exact (case-insensitive) first; fall back to keyword. Keys are the text Expedia renders as the first line of each [data-stid='car-offer-card']'s innerText. SIPP codes are the standard ACRISS 4-letter (Category, Type, Transmission, Fuel/AC). Tenants whose VehicleType.code uses a different convention will have those listings silently skipped via the existing silentSkipUnknownTypes=true import flag.",
-  "_lastUpdated": "2026-05-10",
+  "_lastUpdated": "2026-08-12",
 
   "exact": {
     "Mini": "MCAR",
@@ -64,8 +64,10 @@
     "Fullsize Elite SUV": "PFAR",
     "Full-size Elite SUV": "PFAR",
     "Premium Elite SUV": "PFAR",
-    "Fullsize Open Air All-Terrain": "XFAR",
-    "Full-size Open Air All-Terrain": "XFAR",
+    "Open air all terrain": "FJAR",
+    "Open Air All-Terrain": "FJAR",
+    "Fullsize Open Air All-Terrain": "FJAR",
+    "Full-size Open Air All-Terrain": "FJAR",
     "Fullsize Recreational Vehicle": "RFAR",
     "Full-size Recreational Vehicle": "RFAR",
     "Recreational Vehicle": "RFAR",
@@ -73,7 +75,9 @@
   },
 
   "keyword_fallback": [
-    ["fullsize open air all-terrain", "XFAR"],
+    ["open air all terrain", "FJAR"],
+    ["open air all-terrain", "FJAR"],
+    ["fullsize open air all-terrain", "FJAR"],
     ["fullsize recreational vehicle", "RFAR"],
     ["recreational vehicle", "RFAR"],
     ["fullsize elite suv", "PFAR"],
