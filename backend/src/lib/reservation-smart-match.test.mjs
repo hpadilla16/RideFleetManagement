@@ -478,3 +478,89 @@ test('the date rule has exactly ONE definition, and both sides import it', () =>
   // …and the verifier must actually call it, not re-test the shape inline.
   assert.match(here, /if \(isVerifiablePickupDate\(pickupDate\)\)/);
 });
+
+test('the exact case Hector dictated: a bare broker ref finds its TL-prefixed row', () => {
+  // "si el cliente dice ZE3745839BA eso es lo mismo en sistema que
+  // TL-ZE3745839BA" (2026-08-12). The voucher shows the BARE ref; RFM stores
+  // it prefixed at promotion. Branch 4 of the fan-out owns this.
+  const v = generateCodeVariants('ZE3745839BA');
+  assert.ok(v.includes('TL-ZE3745839BA'), `variants were: ${v.join(', ')}`);
+});
+
+test('every prefix MEASURED in prod is in the fan-out — WEB/MEX/CS/DL/MIG were missing', () => {
+  // Measured 2026-08-12 against prod reservationNumbers by bookingChannel.
+  // A website customer reading the digits off their own confirmation email
+  // (87 rows shaped WEB-…) missed entirely before this.
+  for (const p of ['WEB-', 'MEX-', 'CS-', 'DL-', 'MIG-']) {
+    assert.ok(KNOWN_PREFIXES.includes(p), `${p} missing from KNOWN_PREFIXES`);
+  }
+  const v = generateCodeVariants('845982558F30');
+  assert.ok(v.includes('WEB-845982558F30'), `variants were: ${v.join(', ')}`);
+});
+
+// ── The fuzzy pass (2026-08-12 shuttle line: ASR drops characters mid-code) ──
+
+function fakePrismaWithFuzzy({ variantRows = [], fuzzyRows = [] } = {}) {
+  const calls = { findMany: 0, queryRaw: 0, queryArgs: [] };
+  return {
+    calls,
+    prisma: {
+      reservation: { findMany: async () => { calls.findMany += 1; return variantRows; } },
+      $queryRaw: async (...args) => { calls.queryRaw += 1; calls.queryArgs.push(args); return fuzzyRows; },
+    },
+  };
+}
+
+test('a mid-code ASR mangling reaches the fuzzy pass and comes back MASKED-grade', async () => {
+  // The measured case: caller reads RES-4438388169A2, transcription arrives
+  // as 443838169A2 (one digit gone). Every exact variant misses; the trigram
+  // pass finds it — and at confidence 40 it stays masked until the caller
+  // proves the last name, exactly like any other unverified candidate.
+  const { prisma, calls } = fakePrismaWithFuzzy({
+    fuzzyRows: [{
+      id: 'r1', reservationNumber: 'RES-4438388169A2', status: 'NEW',
+      pickupAt: new Date('2026-08-13T19:00:00Z'), firstName: 'Hector', lastName: 'Padilla',
+    }],
+  });
+  const out = await smartMatchReservation({ code: '443838169A2', tenantId: 't1' }, { prisma });
+  assert.equal(calls.queryRaw, 1, 'the fuzzy query ran');
+  assert.equal(out.length, 1);
+  assert.equal(out[0].reservation.reservationNumber, 'RES-4438388169A2');
+  assert.equal(out[0].matchType, 'variant');
+  assert.equal(out[0].confidence, 40, 'below every ranked tier — stays masked until verified');
+});
+
+test('the fuzzy pass NEVER runs when an exact variant already matched', async () => {
+  const { prisma, calls } = fakePrismaWithFuzzy({
+    variantRows: [{
+      id: 'r1', reservationNumber: 'RES-107160', status: 'NEW',
+      pickupAt: new Date(), customer: { firstName: 'A', lastName: 'B' },
+    }],
+    fuzzyRows: [{ id: 'r2', reservationNumber: 'RES-999999', status: 'NEW', pickupAt: new Date() }],
+  });
+  const out = await smartMatchReservation({ code: 'RES-107160', tenantId: 't1' }, { prisma });
+  assert.equal(calls.queryRaw, 0, 'exact hit → no fuzz');
+  assert.equal(out.length, 1);
+});
+
+test('short codes never fuzz — 7 chars would match half the tenant', async () => {
+  const { prisma, calls } = fakePrismaWithFuzzy({ fuzzyRows: [{ id: 'x', reservationNumber: 'Y', status: 'NEW', pickupAt: new Date() }] });
+  await smartMatchReservation({ code: 'RES-12', tenantId: 't1' }, { prisma });
+  assert.equal(calls.queryRaw, 0);
+});
+
+test('a fake prisma without $queryRaw skips the pass instead of crashing', async () => {
+  const prisma = { reservation: { findMany: async () => [] } };
+  const out = await smartMatchReservation({ code: '443838169A2', tenantId: 't1' }, { prisma });
+  assert.deepEqual(out, []);
+});
+
+test('a fuzzy-pass error is swallowed — the exact path\'s answer stands', async () => {
+  const prisma = {
+    reservation: { findMany: async () => [] },
+    $queryRaw: async () => { throw new Error('similarity() does not exist'); },
+  };
+  const out = await smartMatchReservation({ code: '443838169A2', tenantId: 't1' }, { prisma });
+  assert.deepEqual(out, []);
+});
+
