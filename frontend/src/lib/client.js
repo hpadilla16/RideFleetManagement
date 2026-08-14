@@ -190,6 +190,31 @@ export async function api(path, opts = {}, token) {
   }
 }
 
+/**
+ * File downloads (PDF / XLSX / CSV) — returns the raw Response so the caller
+ * can read a blob and the Content-Disposition filename.
+ *
+ * WHY THIS EXISTS (Hector, 2026-08-14): every export was calling fetch()
+ * directly, which meant none of them sent `x-view-location`. An admin over
+ * several branches who switched their view to one location saw that location
+ * on screen — api() sends the header — and then exported the ENTIRE fleet,
+ * because the export request arrived without it and the backend fell back to
+ * the user's full location set. The screen and the spreadsheet disagreed, and
+ * the spreadsheet is the one people forward.
+ *
+ * One definition, so a new export cannot quietly ship without the header —
+ * the same reasoning as the view-location chokepoint in requireAuth.
+ */
+export async function apiDownload(path, opts = {}, token) {
+  const { headers: extraHeaders, skipViewLocation, ...fetchOpts } = opts || {};
+  const headers = { ...(extraHeaders || {}) };
+  const authToken = token || readStoredToken();
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  const viewLocation = skipViewLocation ? '' : readViewLocation();
+  if (viewLocation) headers['x-view-location'] = viewLocation;
+  return fetch(`${API_BASE}${path}`, { ...fetchOpts, headers });
+}
+
 /** The location the user is currently viewing AS ('' = all their locations). */
 export function readViewLocation() {
   try { return localStorage.getItem('ui.viewLocationId') || ''; } catch { return ''; }

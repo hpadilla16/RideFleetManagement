@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
-import { API_BASE, api } from '../../lib/client';
+import { API_BASE, api, apiDownload } from '../../lib/client';
 
 function fmtMoney(value) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
@@ -259,10 +259,7 @@ function Inner({ token, me, logout }) {
         ...(filters.locationId ? { locationId: filters.locationId } : {}),
         ...(filters.employeeUserId ? { employeeUserId: filters.employeeUserId } : {})
       });
-      const res = await fetch(`${API_BASE}/api/reports/overview.csv?${qs.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store'
-      });
+      const res = await apiDownload(`/api/reports/overview.csv?${qs.toString()}`, { cache: 'no-store' }, token);
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || `CSV export failed (${res.status})`);
@@ -289,10 +286,7 @@ function Inner({ token, me, logout }) {
         end: filters.end,
         ...(filters.tenantId ? { tenantId: filters.tenantId } : {})
       });
-      const res = await fetch(`${API_BASE}/api/reports/contracts.xlsx?${qs.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store'
-      });
+      const res = await apiDownload(`/api/reports/contracts.xlsx?${qs.toString()}`, { cache: 'no-store' }, token);
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || `Excel export failed (${res.status})`);
@@ -324,10 +318,7 @@ function Inner({ token, me, logout }) {
         ...(reservationsWorkflowFilter !== 'ALL' ? { workflowMode: reservationsWorkflowFilter } : {}),
         ...(reservationsStatusFilter !== 'ALL' ? { status: reservationsStatusFilter } : {})
       });
-      const res = await fetch(`${API_BASE}/api/reports/reservations.xlsx?${qs.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store'
-      });
+      const res = await apiDownload(`/api/reports/reservations.xlsx?${qs.toString()}`, { cache: 'no-store' }, token);
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || `Excel export failed (${res.status})`);
@@ -359,10 +350,7 @@ function Inner({ token, me, logout }) {
         ...(filters.tenantId ? { tenantId: filters.tenantId } : {}),
         ...(inventoryProgramFilter !== 'ALL' ? { programCategory: inventoryProgramFilter } : {})
       });
-      const res = await fetch(`${API_BASE}/api/reports/inventory.xlsx?${qs.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store'
-      });
+      const res = await apiDownload(`/api/reports/inventory.xlsx?${qs.toString()}`, { cache: 'no-store' }, token);
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || `Excel export failed (${res.status})`);
@@ -394,10 +382,7 @@ function Inner({ token, me, logout }) {
         ...(filters.tenantId ? { tenantId: filters.tenantId } : {}),
         ...(vehicleRevenueProgramFilter !== 'ALL' ? { programCategory: vehicleRevenueProgramFilter } : {})
       });
-      const res = await fetch(`${API_BASE}/api/reports/vehicle-revenue.xlsx?${qs.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store'
-      });
+      const res = await apiDownload(`/api/reports/vehicle-revenue.xlsx?${qs.toString()}`, { cache: 'no-store' }, token);
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || `Excel export failed (${res.status})`);
