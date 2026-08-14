@@ -1313,7 +1313,21 @@ export const settingsService = {
       webhookAuthMode: normalizeWebhookAuthMode(payload?.webhookAuthMode),
       zubieWebhookSecret: payload?.clearZubieWebhookSecret
         ? ''
-        : String(payload?.zubieWebhookSecret || '').trim() || String(existing?.zubieWebhookSecret || '').trim()
+        : String(payload?.zubieWebhookSecret || '').trim() || String(existing?.zubieWebhookSecret || '').trim(),
+      // Voltswitch GPS. Before 2026-08-13 these keys were silently DROPPED
+      // here, so any save from the UI erased the connector's config — that is
+      // why the connector never went live. The password follows the
+      // zubieWebhookSecret rule: blank in the payload means "keep what is
+      // saved"; only the explicit clear flag erases.
+      allowVoltswitchConnector: !!payload?.allowVoltswitchConnector,
+      voltswitchApiEmail: payload?.clearVoltswitchCredentials
+        ? ''
+        : String(payload?.voltswitchApiEmail ?? existing?.voltswitchApiEmail ?? '').trim(),
+      voltswitchApiPassword: payload?.clearVoltswitchCredentials
+        ? ''
+        : String(payload?.voltswitchApiPassword || '').trim() || String(existing?.voltswitchApiPassword || '').trim(),
+      voltswitchSyncIntervalMinutes: Math.max(1, Math.min(60,
+        Number(payload?.voltswitchSyncIntervalMinutes) || Number(existing?.voltswitchSyncIntervalMinutes) || DEFAULT_TELEMATICS_CONFIG.voltswitchSyncIntervalMinutes))
     };
     const key = scopedKey('telematicsConfig', scope);
     await prisma.appSetting.upsert({
