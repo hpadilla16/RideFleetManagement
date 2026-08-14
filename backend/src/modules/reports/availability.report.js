@@ -28,6 +28,15 @@ import {
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 
 const VEHICLE_STATUSES = ['AVAILABLE', 'RESERVED', 'ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE'];
+
+// Enum values are for the database; a printed roster is read by people.
+const STATUS_LABELS = {
+  AVAILABLE: 'Available',
+  RESERVED: 'Reserved',
+  ON_RENT: 'On rent',
+  IN_MAINTENANCE: 'In maintenance',
+  OUT_OF_SERVICE: 'Out of service',
+};
 const ACTIVE_RESERVATION_STATUSES = ['CHECKED_OUT', 'CHECKED_IN_UNPAID'];
 
 // ---------------------------------------------------------------------------
@@ -118,12 +127,28 @@ async function computeData({ tenantId, query }, deps = {}) {
   const where = { tenantId, status: { notIn: ['SOLD', 'OUT_OF_SERVICE'] } };
   if (locationId) where.homeLocationId = locationId;
 
+  // The exports carry a full per-vehicle roster (2026-08-14, Hector), which
+  // the on-screen report does not need — it has a per-class drill-down. So the
+  // identifying columns are only selected when exporting, and the dashboard's
+  // payload stays as small as it was.
+  const isExport = String(query?._isExport || '') === '1';
+
   const vehicles = await prisma.vehicle.findMany({
     where,
     select: {
       id: true,
       status: true,
       vehicleType: { select: { id: true, code: true, name: true } },
+      ...(isExport ? {
+        plate: true,
+        internalNumber: true,
+        year: true,
+        make: true,
+        model: true,
+        color: true,
+        mileage: true,
+        homeLocation: { select: { name: true } },
+      } : {}),
     },
   });
 
@@ -149,9 +174,25 @@ async function computeData({ tenantId, query }, deps = {}) {
       overdueIgnored: false,
       ...(locationId ? { vehicle: { homeLocationId: locationId } } : {}),
     },
-    select: { vehicleId: true },
+    // On export, the roster says who has each car and when it is due back.
+    // Widened here rather than joined per vehicle: this is already one query
+    // over exactly the reservations we need, so the roster costs nothing extra.
+    select: isExport
+      ? {
+        vehicleId: true,
+        reservationNumber: true,
+        returnAt: true,
+        customer: { select: { firstName: true, lastName: true } },
+      }
+      : { vehicleId: true },
   });
   const onRentVehicleIds = new Set(activeReservations.map((r) => r.vehicleId).filter(Boolean));
+  const reservationByVehicle = new Map();
+  if (isExport) {
+    for (const r of activeReservations) {
+      if (r.vehicleId && !reservationByVehicle.has(r.vehicleId)) reservationByVehicle.set(r.vehicleId, r);
+    }
+  }
 
   const vehiclesWithEffectiveStatus = vehicles.map((v) => {
     let effective = v.status;
@@ -188,6 +229,37 @@ async function computeData({ tenantId, query }, deps = {}) {
     types,
     statusOrder: VEHICLE_STATUSES,
     filters: { locationId },
+    // Export-only roster. Sorted the way someone reading a printout walks a
+    // lot: class, then status, then plate. Uses the EFFECTIVE status computed
+    // above, so the roster can never disagree with the counts above it — the
+    // same list-vs-KPI drift this report has been bitten by before.
+    vehicles: isExport
+      ? vehiclesWithEffectiveStatus
+        .map((v) => {
+          const r = reservationByVehicle.get(v.id) || null;
+          const ret = r?.returnAt ? new Date(r.returnAt) : null;
+          return {
+            id: v.id,
+            unit: v.internalNumber || null,
+            plate: v.plate || null,
+            label: [v.year, v.make, v.model].filter(Boolean).join(' ') || null,
+            color: v.color || null,
+            mileage: num(v.mileage),
+            status: v.status,
+            typeCode: v.vehicleType?.code || null,
+            typeName: v.vehicleType?.name || 'Unassigned',
+            homeLocation: v.homeLocation?.name || null,
+            reservationNumber: r?.reservationNumber || null,
+            customerName: r?.customer
+              ? `${r.customer.firstName || ''} ${r.customer.lastName || ''}`.trim() || null
+              : null,
+            dueBack: ret ? `${dayLabel(ret, tenantTz)} · ${timeLabel(ret, tenantTz)}` : null,
+          };
+        })
+        .sort((a, b) => (a.typeName || '').localeCompare(b.typeName || '')
+          || VEHICLE_STATUSES.indexOf(a.status) - VEHICLE_STATUSES.indexOf(b.status)
+          || String(a.plate || '').localeCompare(String(b.plate || '')))
+      : undefined,
   };
 }
 
@@ -333,6 +405,43 @@ function renderHtml(data) {
     body += `<p style="text-align:center;color:#5F5E5A;font-size:11px;padding:30px">No vehicles configured for this tenant.</p>`;
   }
 
+  // Full roster (export only). Grouped by class so the printout reads in the
+  // same order as the summary above it.
+  const roster = Array.isArray(data.vehicles) ? data.vehicles : [];
+  if (roster.length) {
+    body += `<h3 style="margin-top:18px">Every vehicle (${roster.length})</h3>
+      <table style="font-size:9px"><thead><tr>
+        <th style="text-align:left">Unit</th>
+        <th style="text-align:left">Plate</th>
+        <th style="text-align:left">Vehicle</th>
+        <th style="text-align:left">Class</th>
+        <th style="text-align:left">Status</th>
+        <th style="text-align:left">Location</th>
+        <th class="num">Mileage</th>
+        <th style="text-align:left">On rent to</th>
+        <th style="text-align:left">Due back</th>
+      </tr></thead><tbody>`;
+    let lastType = null;
+    for (const v of roster) {
+      if (v.typeName !== lastType) {
+        lastType = v.typeName;
+        body += `<tr style="background:#f1efe8"><td colspan="9"><strong>${escapeHtml(v.typeName)}</strong>${v.typeCode ? ` <span style="color:#5F5E5A;font-size:8px">${escapeHtml(v.typeCode)}</span>` : ''}</td></tr>`;
+      }
+      body += `<tr>
+        <td>${escapeHtml(v.unit || '—')}</td>
+        <td>${escapeHtml(v.plate || '—')}</td>
+        <td>${escapeHtml(v.label || '—')}</td>
+        <td>${escapeHtml(v.typeCode || '—')}</td>
+        <td>${escapeHtml(STATUS_LABELS[v.status] || v.status)}</td>
+        <td>${escapeHtml(v.homeLocation || '—')}</td>
+        <td class="num">${v.mileage ? v.mileage.toLocaleString('en-US') : '—'}</td>
+        <td>${escapeHtml(v.customerName || '—')}</td>
+        <td>${escapeHtml(v.dueBack || '—')}</td>
+      </tr>`;
+    }
+    body += `</tbody></table>`;
+  }
+
   return body;
 }
 
@@ -356,31 +465,67 @@ function buildExcelSpec(data) {
     { header: 'Out of service',key: 'OUT_OF_SERVICE', width: 14, type: 'integer' },
   ];
 
-  return {
-    title,
-    subtitle,
-    sheets: [{
-      name: 'Availability',
-      bannerRows: [[title], [subtitle]],
-      columns,
-      rows: types.map((t) => ({
-        class: t.name,
-        code: t.code || '',
-        capacity: t.capacity,
-        ...t.counts,
+  const sheets = [{
+    name: 'Availability',
+    bannerRows: [[title], [subtitle]],
+    columns,
+    rows: types.map((t) => ({
+      class: t.name,
+      code: t.code || '',
+      capacity: t.capacity,
+      ...t.counts,
+    })),
+    footerRow: {
+      class: 'FLEET TOTAL',
+      code: '',
+      capacity: totals.capacity,
+      AVAILABLE: totals.AVAILABLE,
+      RESERVED: totals.RESERVED,
+      ON_RENT: totals.ON_RENT,
+      IN_MAINTENANCE: totals.IN_MAINTENANCE,
+      OUT_OF_SERVICE: totals.OUT_OF_SERVICE,
+    },
+  }];
+
+  // Second sheet: one row per vehicle. Its own sheet rather than appended
+  // below the summary, so both stay sortable and filterable in Excel.
+  const roster = Array.isArray(data.vehicles) ? data.vehicles : [];
+  if (roster.length) {
+    sheets.push({
+      name: 'Vehicles',
+      bannerRows: [[`${title} — every vehicle`], [subtitle]],
+      columns: [
+        { header: 'Unit',        key: 'unit',       width: 12 },
+        { header: 'Plate',       key: 'plate',      width: 12 },
+        { header: 'Vehicle',     key: 'label',      width: 26 },
+        { header: 'Class',       key: 'className',  width: 20 },
+        { header: 'Code',        key: 'typeCode',   width: 10 },
+        { header: 'Status',      key: 'statusText', width: 16 },
+        { header: 'Location',    key: 'location',   width: 20 },
+        { header: 'Color',       key: 'color',      width: 12 },
+        { header: 'Mileage',     key: 'mileage',    width: 12, type: 'integer' },
+        { header: 'Reservation', key: 'resNumber',  width: 16 },
+        { header: 'On rent to',  key: 'customer',   width: 24 },
+        { header: 'Due back',    key: 'dueBack',    width: 22 },
+      ],
+      rows: roster.map((v) => ({
+        unit: v.unit || '',
+        plate: v.plate || '',
+        label: v.label || '',
+        className: v.typeName || '',
+        typeCode: v.typeCode || '',
+        statusText: STATUS_LABELS[v.status] || v.status,
+        location: v.homeLocation || '',
+        color: v.color || '',
+        mileage: v.mileage || 0,
+        resNumber: v.reservationNumber || '',
+        customer: v.customerName || '',
+        dueBack: v.dueBack || '',
       })),
-      footerRow: {
-        class: 'FLEET TOTAL',
-        code: '',
-        capacity: totals.capacity,
-        AVAILABLE: totals.AVAILABLE,
-        RESERVED: totals.RESERVED,
-        ON_RENT: totals.ON_RENT,
-        IN_MAINTENANCE: totals.IN_MAINTENANCE,
-        OUT_OF_SERVICE: totals.OUT_OF_SERVICE,
-      },
-    }],
-  };
+    });
+  }
+
+  return { title, subtitle, sheets };
 }
 
 // ---------------------------------------------------------------------------
