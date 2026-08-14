@@ -40,6 +40,7 @@
 
 import Link from 'next/link';
 import { DateRangePicker } from './DateRangePicker';
+import { apiDownload } from '../../lib/client';
 
 export function ReportPageLayout({
   slug, title, description, category,
@@ -66,9 +67,9 @@ export function ReportPageLayout({
   const handleDownload = async (kind) => {
     if (!token) return;
     try {
-      const res = await fetch(exportUrl(kind), {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      // apiDownload, not fetch: it carries the viewed location so the export
+      // matches what is on screen (2026-08-14).
+      const res = await apiDownload(exportUrl(kind), {}, token);
       if (!res.ok) throw new Error(`Export failed: ${res.status}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);

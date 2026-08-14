@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
-import { api, API_BASE } from '../../lib/client';
+import { api, API_BASE, apiDownload } from '../../lib/client';
 import { LoanerRequestsPanel } from './LoanerRequestsPanel';
 import { CustomerRequestsPanel } from './CustomerRequestsPanel';
 
@@ -585,10 +585,7 @@ function LoanerProgramInner({ token, me, logout }) {
       if (exportFilters.billingMode) query.set('billingMode', exportFilters.billingMode);
       if (exportFilters.startDate) query.set('startDate', exportFilters.startDate);
       if (exportFilters.endDate) query.set('endDate', exportFilters.endDate);
-      const res = await fetch(`${API_BASE}/api/dealership-loaner/billing-export${query.toString() ? `?${query.toString()}` : ''}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store'
-      });
+      const res = await apiDownload(`/api/dealership-loaner/billing-export${query.toString() ? `?${query.toString()}` : ''}`, { cache: 'no-store' }, token);
       if (!res.ok) throw new Error(`Billing export failed (${res.status})`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -620,10 +617,7 @@ function LoanerProgramInner({ token, me, logout }) {
     setExportingStatement(true);
     try {
       const query = buildStatementQuery();
-      const res = await fetch(`${API_BASE}/api/dealership-loaner/statement-export${query.toString() ? `?${query.toString()}` : ''}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store'
-      });
+      const res = await apiDownload(`/api/dealership-loaner/statement-export${query.toString() ? `?${query.toString()}` : ''}`, { cache: 'no-store' }, token);
       if (!res.ok) throw new Error(`Statement export failed (${res.status})`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -654,10 +648,7 @@ function LoanerProgramInner({ token, me, logout }) {
     printWindow.document.close();
     try {
       const query = buildStatementQuery();
-      const res = await fetch(`${API_BASE}/api/dealership-loaner/statement-print${query.toString() ? `?${query.toString()}` : ''}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store'
-      });
+      const res = await apiDownload(`/api/dealership-loaner/statement-print${query.toString() ? `?${query.toString()}` : ''}`, { cache: 'no-store' }, token);
       if (!res.ok) throw new Error(`Statement print failed (${res.status})`);
       const html = await res.text();
       printWindow.document.open();
