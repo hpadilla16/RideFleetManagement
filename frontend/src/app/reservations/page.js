@@ -924,7 +924,7 @@ function ReservationsInner({ token, me, logout }) {
       <section className="glass card-lg">
         <div className="row-between">
           <h2>Reservations</h2>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div data-tour="reservations-filters" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <input
               placeholder="Search reservation/customer"
               value={searchDraft}
@@ -1043,7 +1043,7 @@ function ReservationsInner({ token, me, logout }) {
               </button>
             ) : null}
             {canCreateReservation ? (
-              <button onClick={() => { window.location.href = '/reservations/new'; }}>New Reservation (v2)</button>
+              <button data-tour="new-reservation-v2" onClick={() => { window.location.href = '/reservations/new'; }}>New Reservation (v2)</button>
             ) : null}
           </div>
         </div>

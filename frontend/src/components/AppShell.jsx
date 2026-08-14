@@ -11,15 +11,15 @@ import { CommandPalette } from './CommandPalette';
 import { ShuttleBanner } from './ShuttleBanner';
 
 const NAV_ITEMS = [
-  { href: '/dashboard', labelKey: 'nav.dashboard', moduleKey: 'dashboard' },
-  { href: '/reservations', labelKey: 'nav.reservations', moduleKey: 'reservations' },
+  { href: '/dashboard', labelKey: 'nav.dashboard', moduleKey: 'dashboard', tour: 'nav-dashboard' },
+  { href: '/reservations', labelKey: 'nav.reservations', moduleKey: 'reservations', tour: 'nav-reservations' },
   { href: '/quotes', labelKey: 'nav.quotes', moduleKey: 'quotes' },
   { href: '/vehicles', labelKey: 'nav.vehicles', moduleKey: 'vehicles' },
   { href: '/vehicles/inventory-helper', labelKey: 'nav.inventoryHelper', moduleKey: 'vehicles' },
   { href: '/customers', labelKey: 'nav.customers', moduleKey: 'customers' },
-  { href: '/people', labelKey: 'nav.people', adminOnly: true, moduleKey: 'people' },
+  { href: '/people', labelKey: 'nav.people', adminOnly: true, moduleKey: 'people', tour: 'nav-people' },
   { href: '/planner', labelKey: 'nav.planner', moduleKey: 'planner' },
-  { href: '/reports-v2', labelKey: 'nav.reports', moduleKey: 'reports' },
+  { href: '/reports-v2', labelKey: 'nav.reports', moduleKey: 'reports', tour: 'nav-reports' },
   // Inventory Reports now lives INSIDE Reports (tile on the /reports-v2 landing).
   { href: '/car-sharing', labelKey: 'nav.carSharing', feature: 'carSharing', moduleKey: 'carSharing' },
   { href: '/host', labelKey: 'nav.hostApp', feature: 'carSharing', moduleKey: 'hostApp' },
@@ -35,10 +35,10 @@ const NAV_ITEMS = [
   // Self service (kiosk B3b): ops surface with live devices/sessions —
   // top-level like Maintenance, gated by the opt-in 'kiosk' module.
   { href: '/kiosks', labelKey: 'nav.kiosks', moduleKey: 'kiosk' },
-  { href: '/market', labelKey: 'nav.marketIntelligence', adminOnly: true, moduleKey: 'marketIntelligence' },
+  { href: '/market', labelKey: 'nav.marketIntelligence', adminOnly: true, moduleKey: 'marketIntelligence', tour: 'nav-market' },
   { href: '/suggestions', labelKey: 'nav.pricingSuggestions', adminOnly: true, moduleKey: 'marketIntelligence' },
-  { href: '/knowledge-base', labelKey: 'nav.knowledgeBase' },
-  { href: '/settings', labelKey: 'nav.settings', moduleKey: 'settings' },
+  { href: '/knowledge-base', labelKey: 'nav.knowledgeBase', tour: 'nav-university' },
+  { href: '/settings', labelKey: 'nav.settings', moduleKey: 'settings', tour: 'nav-settings' },
   { href: '/tenants', labelKey: 'nav.tenants', superOnly: true, moduleKey: 'tenants' },
   { href: '/settings/security', labelKey: 'nav.security', adminOnly: true, moduleKey: 'security' },
   { href: '/settings/store-boards', labelKey: 'nav.actionBoards', adminOnly: true, moduleKey: 'settings' }
@@ -302,6 +302,7 @@ export function AppShell({ me, logout, children }) {
                   key={item.href}
                   href={item.href}
                   className={`nav-link ${pathname?.startsWith(item.href) ? 'active' : ''}`}
+                  data-tour={item.tour}
                   onClick={() => setMobileOpen(false)}
                 >
                   <span className="nav-label">{t(item.labelKey)}</span>
@@ -335,6 +336,7 @@ export function AppShell({ me, logout, children }) {
             </div>
             {viewLocations.length > 1 ? (
               <select
+                data-tour="view-location-switcher"
                 value={viewLocationId}
                 onChange={(e) => switchViewLocation(e.target.value)}
                 title={t('appShell.viewLocation', 'Which location you are viewing')}
@@ -349,6 +351,7 @@ export function AppShell({ me, logout, children }) {
             <button
               type="button"
               className="topbar-search-btn"
+              data-tour="global-search"
               title={t('search.open', 'Search (Ctrl+K)')}
               onClick={() => { try { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true })); } catch { /* no-op */ } }}
               style={{ display: 'inline-flex', alignItems: 'center', gap: 8, border: '1px solid var(--border-2, #d9d2ea)', background: 'var(--surface-2, #f7f5fd)', color: 'var(--text-3, #736a8b)', borderRadius: 8, padding: '7px 12px', fontSize: 12.5, cursor: 'pointer', minWidth: 0 }}

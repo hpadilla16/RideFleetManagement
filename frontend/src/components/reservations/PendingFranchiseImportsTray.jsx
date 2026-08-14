@@ -202,7 +202,7 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved, basePath =
   };
 
   return (
-    <div style={{
+    <div data-tour="pending-imports" style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
       display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
       zIndex: 1000, padding: '24px 16px', overflowY: 'auto',

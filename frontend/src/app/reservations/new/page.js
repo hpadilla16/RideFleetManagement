@@ -302,7 +302,9 @@ function Wizard({ token, me, logout }) {
       {['Dates & locations', 'Vehicle class', 'Customer', 'Review'].map((label, i) => {
         const n = i + 1; const active = step === n; const done = step > n;
         return (
-          <button key={label} type="button" onClick={() => (done || stepValid(n - 1) || n === 1) && setStep(n)}
+          <button key={label} type="button"
+            data-tour={['wizard-step-dates', 'wizard-step-vehicle', 'wizard-step-customer', 'wizard-step-review'][i]}
+            onClick={() => (done || stepValid(n - 1) || n === 1) && setStep(n)}
             style={{ padding: '6px 12px', borderRadius: 999, fontSize: 13, fontWeight: 600, border: 'none', cursor: 'pointer',
               background: active ? '#6d28d9' : done ? '#ecfdf5' : '#f3f0ff', color: active ? '#fff' : done ? '#166534' : '#6f668f' }}>
             {done ? '✓ ' : `${n}. `}{label}

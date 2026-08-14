@@ -277,7 +277,7 @@ function Wizard({ token, me, logout }) {
 
         {step === 4 && !applyResult && (
           <div className="stack">
-            <h3 style={{ margin: 0 }}>4. Guardrails</h3>
+            <h3 data-tour="market-strategy" style={{ margin: 0 }}>4. Guardrails</h3>
             <div className="ui-muted">Safety limits applied to every rule. Floor/ceiling are computed from each seed price; max change caps how far an AUTO rule could move in one cycle (rules start in SUGGEST, so nothing auto-applies yet).</div>
             <div className="app-card-grid compact" style={{ marginTop: 8 }}>
               <div className="stack" style={{ gap: 4 }}><label className="label">Floor (% below seed)</label><input type="number" min="0" max="90" value={guardrails.floorPct} onChange={(e) => setGuardrails({ ...guardrails, floorPct: Number(e.target.value) })} /></div>

@@ -2852,8 +2852,8 @@ token
             </div>
           </div>
           <div className="app-banner-list">
-            <button type="button" className="button-subtle" onClick={() => router.push(checkoutHref)}>Start Check-out</button>
-            <button type="button" className="button-subtle" onClick={() => router.push(checkinHref)}>Start Check-in</button>
+            <button data-tour="reservation-checkout" type="button" className="button-subtle" onClick={() => router.push(checkoutHref)}>Start Check-out</button>
+            <button data-tour="reservation-checkin" type="button" className="button-subtle" onClick={() => router.push(checkinHref)}>Start Check-in</button>
             {isLoanerWorkflow ? (
               <button type="button" className="button-subtle" disabled={preArrivalBusy} onClick={async () => {
                 if (preArrivalBusy) return;
@@ -2868,7 +2868,7 @@ token
             {row?.vehicleId && row?.rentalAgreement?.id && String(row?.status || '').toUpperCase() === 'CHECKED_OUT' ? (
               <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/swap`)}>Swap Vehicle</button>
             ) : null}
-            <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/payments?total=${Number(effectiveChargeTotal || 0)}`)}>Payments</button>
+            <button data-tour="reservation-payments" type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/payments?total=${Number(effectiveChargeTotal || 0)}`)}>Payments</button>
             <button type="button" className="button-subtle" onClick={() => router.push(`/reservations/${id}/inspection`)}>Inspection</button>
             <button type="button" className="button-subtle" style={{ background: 'rgba(22,163,74,.1)', borderColor: 'rgba(22,163,74,.2)', color: '#166534' }} onClick={() => { try { new BroadcastChannel('customer-display').postMessage({ type: 'load-reservation', id }); } catch {} }}>Customer View</button>
           </div>
