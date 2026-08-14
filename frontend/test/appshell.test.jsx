@@ -38,6 +38,11 @@ vi.mock('../src/lib/client', () => ({
   USER_KEY: 'fleet_user',
   readStoredToken: () => 'mock-token',
   api: vi.fn().mockResolvedValue({}),
+  // The location switcher (2026-08-11) made AppShell call these on mount.
+  // This mock did not export them, so every render threw and all nine tests
+  // in this file went red — a mock gap, not a component bug.
+  readViewLocation: () => '',
+  writeViewLocation: vi.fn(),
 }));
 
 // Mock moduleAccess
