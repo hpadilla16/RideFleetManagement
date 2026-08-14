@@ -1,6 +1,7 @@
 ﻿import { timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import { vehiclesService } from './vehicles.service.js';
+import { prisma } from '../../lib/prisma.js';
 import { turnReadyRulesService } from './turn-ready-rules.service.js';
 import { isSuperAdmin, requireRole } from '../../middleware/auth.js';
 import { crossTenantScopeFor as scopeFor } from '../../lib/tenant-scope.js';
@@ -175,6 +176,72 @@ vehiclesRouter.post('/telematics/voltswitch/sync', enforceTelematicsFeature, asy
     }
     next(e);
   }
+});
+
+// ─── Overdue-vehicle geofence alerts (2026-08-13) ───────────────────────────
+// Written by the worker's voltswitch overdue sweep; read by the dashboard.
+// Reading is open to any authed staff of the tenant (the alert is "go find
+// this car" — agents act on it); dismissing acknowledges, it does not delete.
+
+vehiclesRouter.get('/overdue-alerts', async (req, res, next) => {
+  try {
+    const scope = scopeFor(req);
+    if (!scope?.tenantId) return res.json({ alerts: [] });
+    const alerts = await prisma.overdueVehicleAlert.findMany({
+      where: { tenantId: scope.tenantId, status: 'OPEN' },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    if (!alerts.length) return res.json({ alerts: [] });
+
+    const [reservations, vehicles, locations] = await Promise.all([
+      prisma.reservation.findMany({
+        where: { id: { in: alerts.map((a) => a.reservationId) } },
+        select: { id: true, reservationNumber: true, returnAt: true },
+      }),
+      prisma.vehicle.findMany({
+        where: { id: { in: alerts.map((a) => a.vehicleId).filter(Boolean) } },
+        select: { id: true, plate: true, make: true, model: true },
+      }),
+      prisma.location.findMany({
+        where: { id: { in: alerts.map((a) => a.nearestLocationId).filter(Boolean) } },
+        select: { id: true, name: true, code: true },
+      }),
+    ]);
+    const resById = new Map(reservations.map((r) => [r.id, r]));
+    const vehById = new Map(vehicles.map((v) => [v.id, v]));
+    const locById = new Map(locations.map((l) => [l.id, l]));
+
+    res.json({
+      alerts: alerts.map((a) => ({
+        id: a.id,
+        reservationId: a.reservationId,
+        reservationNumber: resById.get(a.reservationId)?.reservationNumber || null,
+        returnAt: resById.get(a.reservationId)?.returnAt || null,
+        vehicle: vehById.get(a.vehicleId || '') || null,
+        latitude: a.latitude,
+        longitude: a.longitude,
+        address: a.address,
+        distanceKm: a.distanceKm,
+        nearestLocation: locById.get(a.nearestLocationId || '')?.name || null,
+        positionAt: a.positionAt,
+        createdAt: a.createdAt,
+      })),
+    });
+  } catch (e) { next(e); }
+});
+
+vehiclesRouter.post('/overdue-alerts/:id/dismiss', async (req, res, next) => {
+  try {
+    const scope = scopeFor(req);
+    if (!scope?.tenantId) return res.status(400).json({ error: 'tenantId is required' });
+    const updated = await prisma.overdueVehicleAlert.updateMany({
+      where: { id: String(req.params.id), tenantId: scope.tenantId, status: 'OPEN' },
+      data: { status: 'DISMISSED', resolvedAt: new Date() },
+    });
+    if (!updated.count) return res.status(404).json({ error: 'Alert not found' });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
 });
 
 // ─── Turn-Ready scoring rules (2026-08-03, dashboard v2) ────────────────────

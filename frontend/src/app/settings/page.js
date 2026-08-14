@@ -784,7 +784,12 @@ function SettingsInner({ token, me, logout }) {
         allowZubieConnector: !!telematicsConfig.allowZubieConnector,
         webhookAuthMode: String(telematicsConfig.webhookAuthMode || 'HEADER_SECRET').toUpperCase(),
         zubieWebhookSecret: String(telematicsConfig.zubieWebhookSecret || ''),
-        clearZubieWebhookSecret: !!telematicsConfig.clearZubieWebhookSecret
+        clearZubieWebhookSecret: !!telematicsConfig.clearZubieWebhookSecret,
+        allowVoltswitchConnector: !!telematicsConfig.allowVoltswitchConnector,
+        voltswitchApiEmail: String(telematicsConfig.voltswitchApiEmail || ''),
+        voltswitchApiPassword: String(telematicsConfig.voltswitchApiPassword || ''),
+        voltswitchSyncIntervalMinutes: Number(telematicsConfig.voltswitchSyncIntervalMinutes) || 5,
+        clearVoltswitchCredentials: !!telematicsConfig.clearVoltswitchCredentials
       })
     }, token);
     setTelematicsConfig({
@@ -795,9 +800,28 @@ function SettingsInner({ token, me, logout }) {
         ...(out?.planDefaults || {})
       },
       zubieWebhookSecret: '',
-      clearZubieWebhookSecret: false
+      clearZubieWebhookSecret: false,
+      voltswitchApiPassword: '',
+      clearVoltswitchCredentials: false
     });
     setMsg('Telematics settings saved');
+  };
+
+  const [voltswitchSyncBusy, setVoltswitchSyncBusy] = useState(false);
+  const [voltswitchSyncResult, setVoltswitchSyncResult] = useState(null);
+  const runVoltswitchSyncNow = async () => {
+    setVoltswitchSyncBusy(true);
+    setVoltswitchSyncResult(null);
+    try {
+      const out = await api(scopedSettingsPath('/api/vehicles/telematics/voltswitch/sync'), { method: 'POST' }, token);
+      setVoltswitchSyncResult(out || {});
+      setMsg(`Voltswitch sync: ${out?.synced ?? 0} devices synced, ${(out?.devices || []).filter((d) => d.matched).length} matched to fleet vehicles`);
+    } catch (err) {
+      setVoltswitchSyncResult({ error: err?.message || 'Sync failed' });
+      setMsg(`Voltswitch sync failed: ${err?.message || 'unknown error'}`);
+    } finally {
+      setVoltswitchSyncBusy(false);
+    }
   };
 
   // Market Intelligence dashboard SIPP picker (beta.134)
@@ -1266,6 +1290,9 @@ function SettingsInner({ token, me, logout }) {
       country: loc.country || '',
       isActive: !!loc.isActive,
       taxRate: String(loc.taxRate ?? '0'),
+      latitude: loc.latitude == null ? '' : String(loc.latitude),
+      longitude: loc.longitude == null ? '' : String(loc.longitude),
+      geofenceRadiusKm: loc.geofenceRadiusKm == null ? '' : String(loc.geofenceRadiusKm),
       feeIds: (loc.locationFees || []).map((lf) => lf.feeId),
       config: parsedConfig
     });
@@ -1301,6 +1328,14 @@ function SettingsInner({ token, me, logout }) {
     const underageFeeMaxAge = Number(locationEditor.config?.underageFeeMaxAge || 0);
     if (locationEditor.config?.ageRulesEnforced && (Number.isNaN(underageFeeMaxAge) || underageFeeMaxAge < minAge)) { setMsg('Underage fee max age must be greater than or equal to minimum age'); return; }
 
+    const geoLat = String(locationEditor.latitude ?? '').trim();
+    const geoLng = String(locationEditor.longitude ?? '').trim();
+    const geoRadius = String(locationEditor.geofenceRadiusKm ?? '').trim();
+    if ((geoLat === '') !== (geoLng === '')) { setMsg('Geofence needs BOTH latitude and longitude (or leave both empty)'); return; }
+    if (geoLat !== '' && (Number.isNaN(Number(geoLat)) || Math.abs(Number(geoLat)) > 90)) { setMsg('Latitude must be a number between -90 and 90'); return; }
+    if (geoLng !== '' && (Number.isNaN(Number(geoLng)) || Math.abs(Number(geoLng)) > 180)) { setMsg('Longitude must be a number between -180 and 180'); return; }
+    if (geoRadius !== '' && (Number.isNaN(Number(geoRadius)) || Number(geoRadius) <= 0)) { setMsg('Geofence radius must be a positive number of km'); return; }
+
     await patchLocation(locationEditor.id, {
       code: locationEditor.code,
       name: locationEditor.name,
@@ -1310,6 +1345,9 @@ function SettingsInner({ token, me, logout }) {
       country: locationEditor.country,
       isActive: !!locationEditor.isActive,
       taxRate: tax,
+      latitude: geoLat === '' ? null : Number(geoLat),
+      longitude: geoLng === '' ? null : Number(geoLng),
+      geofenceRadiusKm: geoRadius === '' ? null : Number(geoRadius),
       feeIds: locationEditor.feeIds || [],
       locationConfig: locationEditor.config || LOCATION_CONFIG_DEFAULT
     });
@@ -5278,6 +5316,7 @@ function SettingsInner({ token, me, logout }) {
                   <label className="label">Provider</label>
                   <select value={telematicsConfig.provider || 'ZUBIE'} onChange={(e) => setTelematicsConfig((current) => ({ ...current, provider: e.target.value }))}>
                     <option value="ZUBIE">Zubie</option>
+                    <option value="VOLTSWITCH">Voltswitch GPS</option>
                     <option value="GENERIC">Generic</option>
                     <option value="SAMSARA">Samsara</option>
                     <option value="GEOTAB">Geotab</option>
@@ -5354,6 +5393,98 @@ function SettingsInner({ token, me, logout }) {
                   </label>
                 </div>
               </div>
+
+              {String(telematicsConfig.provider || '').toUpperCase() === 'VOLTSWITCH' && (
+                <>
+                  <div className="form-grid-2">
+                    <label className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        checked={!!telematicsConfig.allowVoltswitchConnector}
+                        onChange={(e) => setTelematicsConfig((current) => ({ ...current, allowVoltswitchConnector: e.target.checked }))}
+                      /> Enable the Voltswitch pull connector for this tenant
+                    </label>
+                    <div className="surface-note">
+                      Connector status: <strong>{telematicsConfig.voltswitchConnectorReady ? 'Ready — syncing on schedule' : 'Not ready'}</strong>
+                      <div style={{ marginTop: 8 }}>
+                        Needs provider Voltswitch, the connector enabled, and API credentials saved. The worker then pulls device positions automatically.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="form-grid-2">
+                    <div className="stack">
+                      <label className="label">Voltswitch API Email</label>
+                      <input
+                        type="text"
+                        placeholder="account email for app.voltswitchgps.com"
+                        value={telematicsConfig.voltswitchApiEmail || ''}
+                        onChange={(e) => setTelematicsConfig((current) => ({ ...current, voltswitchApiEmail: e.target.value, clearVoltswitchCredentials: false }))}
+                      />
+                    </div>
+                    <div className="stack">
+                      <label className="label">Voltswitch API Password</label>
+                      <input
+                        type="password"
+                        placeholder={telematicsConfig.hasVoltswitchCredentials ? 'Password already saved' : 'Account password'}
+                        value={telematicsConfig.voltswitchApiPassword || ''}
+                        onChange={(e) => setTelematicsConfig((current) => ({ ...current, voltswitchApiPassword: e.target.value, clearVoltswitchCredentials: false }))}
+                      />
+                      <div className="ui-muted">
+                        {telematicsConfig.hasVoltswitchCredentials
+                          ? `Saved: ${telematicsConfig.voltswitchApiPasswordMasked || 'yes'} — leave blank to keep it`
+                          : 'No credentials saved yet.'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="form-grid-2">
+                    <div className="stack">
+                      <label className="label">Sync interval (minutes)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={60}
+                        value={telematicsConfig.voltswitchSyncIntervalMinutes ?? 5}
+                        onChange={(e) => setTelematicsConfig((current) => ({ ...current, voltswitchSyncIntervalMinutes: e.target.value }))}
+                      />
+                      <div className="ui-muted">How often the worker pulls device locations (1–60 min).</div>
+                    </div>
+                    <div className="stack">
+                      <label className="label" style={{ textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                        <input
+                          type="checkbox"
+                          checked={!!telematicsConfig.clearVoltswitchCredentials}
+                          onChange={(e) => setTelematicsConfig((current) => ({
+                            ...current,
+                            clearVoltswitchCredentials: e.target.checked,
+                            ...(e.target.checked ? { voltswitchApiEmail: '', voltswitchApiPassword: '' } : {})
+                          }))}
+                          disabled={!telematicsConfig.hasVoltswitchCredentials}
+                        /> Clear saved credentials on next save
+                      </label>
+                      <div className="inline-actions" style={{ marginTop: 8 }}>
+                        <button
+                          type="button"
+                          className="button-subtle"
+                          onClick={runVoltswitchSyncNow}
+                          disabled={voltswitchSyncBusy || !telematicsConfig.voltswitchConnectorReady}
+                        >
+                          {voltswitchSyncBusy ? 'Syncing…' : 'Sync devices now'}
+                        </button>
+                      </div>
+                      {voltswitchSyncResult && !voltswitchSyncResult.error && (
+                        <div className="ui-muted">
+                          Synced {voltswitchSyncResult.synced ?? 0} devices ({(voltswitchSyncResult.devices || []).filter((d) => d.matched).length} matched to fleet vehicles by VIN/plate{voltswitchSyncResult.errors?.length ? `, ${voltswitchSyncResult.errors.length} errors` : ''}).
+                        </div>
+                      )}
+                      {voltswitchSyncResult?.error && (
+                        <div className="ui-muted">Sync failed: {voltswitchSyncResult.error}</div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div className="inline-actions">
                 <button type="button" onClick={saveTelematicsConfig}>Save Telematics</button>
@@ -6363,6 +6494,18 @@ function SettingsInner({ token, me, logout }) {
                   <div className="grid2">
                     <div className="stack"><label className="label">Default Rate Plan</label><input placeholder="Default Rate Plan" value={locationEditor.config?.defaultRatePlan || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), defaultRatePlan: e.target.value } })} /></div>
                     <label className="label"><input type="checkbox" checked={!!locationEditor.isActive} onChange={(e) => setLocationEditor({ ...locationEditor, isActive: e.target.checked })} /> Active Location</label>
+                  </div>
+
+                  <div className="label">Geofence (overdue alerts)</div>
+                  <div className="grid2">
+                    <div className="stack"><label className="label">Latitude</label><input placeholder="18.439400" value={locationEditor.latitude ?? ''} onChange={(e) => setLocationEditor({ ...locationEditor, latitude: e.target.value })} /></div>
+                    <div className="stack"><label className="label">Longitude</label><input placeholder="-66.001800" value={locationEditor.longitude ?? ''} onChange={(e) => setLocationEditor({ ...locationEditor, longitude: e.target.value })} /></div>
+                  </div>
+                  <div className="grid2">
+                    <div className="stack"><label className="label">Geofence Radius (km)</label><input placeholder="0.5" value={locationEditor.geofenceRadiusKm ?? ''} onChange={(e) => setLocationEditor({ ...locationEditor, geofenceRadiusKm: e.target.value })} /></div>
+                    <div className="ui-muted" style={{ alignSelf: 'end', fontSize: 12 }}>
+                      Right-click the lot in Google Maps → copy coordinates. Overdue rentals with GPS inside this circle are treated as returned-not-checked-in; outside every geofenced branch raises a dashboard alert. Leave empty to skip this location.
+                    </div>
                   </div>
 
                   <div className="label">Location Contact & Instructions</div>

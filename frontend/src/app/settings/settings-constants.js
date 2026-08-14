@@ -141,7 +141,16 @@ export const DEFAULT_TELEMATICS_CONFIG = {
   },
   ready: false,
   publicWebhookReady: false,
-  clearZubieWebhookSecret: false
+  clearZubieWebhookSecret: false,
+  // Voltswitch GPS (pull-based connector)
+  allowVoltswitchConnector: false,
+  voltswitchApiEmail: '',
+  voltswitchApiPassword: '',
+  voltswitchApiPasswordMasked: '',
+  hasVoltswitchCredentials: false,
+  voltswitchSyncIntervalMinutes: 5,
+  voltswitchConnectorReady: false,
+  clearVoltswitchCredentials: false
 };
 
 export const DEFAULT_REVENUE_PRICING_CONFIG = {

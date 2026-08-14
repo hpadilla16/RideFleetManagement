@@ -697,6 +697,15 @@ model Location {
   // deposit and 150 mi/day while the initialled page bound into the SAME PDF
   // said $500, on the renter's own initials.
   termsSectionsJson String?
+  // Geofence for the overdue-vehicle location check (2026-08-13). An overdue
+  // rental whose GPS position falls inside ANY of the tenant's geofenced
+  // locations is treated as "returned but not checked in" (staff problem, not
+  // customer problem); outside all of them raises an OverdueVehicleAlert on
+  // the dashboard. NULL coordinates = no geofence for this branch, and the
+  // check simply skips it — it never guesses from the street address.
+  latitude          Decimal?         @db.Decimal(9, 6)
+  longitude         Decimal?         @db.Decimal(9, 6)
+  geofenceRadiusKm  Decimal?         @db.Decimal(6, 2)
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 
@@ -1197,6 +1206,37 @@ model VehicleTelematicsEvent {
   // with NO tenant filter when called by super-admin scope, so the
   // (tenantId, vehicleId, eventAt) index can't serve it. This one can.
   @@index([vehicleId, eventAt(sort: Desc)])
+}
+
+// An overdue rental whose GPS position is OUTSIDE every geofenced location of
+// its tenant (2026-08-13, Hector). Inside a geofence = the car is back on a
+// lot and staff forgot the check-in — no alert, that is the backdated-checkin
+// workflow's problem. Written by the voltswitch overdue sweep; one OPEN row
+// per reservation (the sweep updates position in place). Resolved
+// automatically when the car re-enters a geofence or the rental closes;
+// DISMISSED when staff acknowledges from the dashboard.
+//
+// Plain String ids on purpose (no @relation): the alert is an observation,
+// not part of the reservation graph, and loose ids keep the migration purely
+// additive.
+model OverdueVehicleAlert {
+  id                String    @id @default(cuid())
+  tenantId          String
+  reservationId     String
+  vehicleId         String?
+  status            String    @default("OPEN") // OPEN | RESOLVED | DISMISSED
+  latitude          Decimal?  @db.Decimal(9, 6)
+  longitude         Decimal?  @db.Decimal(9, 6)
+  address           String?
+  distanceKm        Decimal?  @db.Decimal(8, 2)
+  nearestLocationId String?
+  positionAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  resolvedAt        DateTime?
+
+  @@index([tenantId, status])
+  @@index([reservationId, status])
 }
 
 model Customer {

@@ -244,6 +244,18 @@ async function main() {
     });
   }
 
+  // Voltswitch GPS periodic pull (2026-08-13). Per-tenant interval from
+  // Settings > Telematics; only tenants with the connector fully configured
+  // (provider VOLTSWITCH + enabled + credentials) are touched. Each tenant
+  // sync is timeout-bounded so one slow tenant cannot stall the loop.
+  try {
+    const voltswitchMod = await import('./modules/vehicles/telematics-voltswitch.scheduler.js');
+    voltswitchMod.startVoltswitchScheduler();
+    logger.info('[worker] started: voltswitch scheduler');
+  } catch (err) {
+    logger.warn('[worker] voltswitch scheduler not started', { message: err.message });
+  }
+
   // Phase 0 (2026-06-09) — toll auto-sync sweep MOVED here from the API
   // container (main.js). Each sweep scrapes SunPass/AutoExpreso with headless
   // Chromium; that RAM/CPU spike now lives in this container, under the

@@ -290,6 +290,15 @@ function DashboardInner({ token, me, logout }) {
   // Today-KPIs (2026-07-26, approved mockups): Collected today + Pending tolls.
   // 403 for agents/scoped users -> catch keeps it null and the tiles hide.
   const [todayKpis, setTodayKpis] = useState(null);
+  const [overdueAlerts, setOverdueAlerts] = useState([]);
+  const dismissOverdueAlert = async (id) => {
+    try {
+      await api(`/api/vehicles/overdue-alerts/${id}/dismiss`, { method: 'POST' }, token);
+      setOverdueAlerts((current) => current.filter((a) => a.id !== id));
+    } catch {
+      // leave the alert visible — a failed dismiss must not hide a real alert
+    }
+  };
   const [docAlert, setDocAlert] = useState(null);
   const [msg, setMsg] = useState('');
   // Did the CORE data actually load? (2026-08-08 incident review.)
@@ -347,6 +356,12 @@ function DashboardInner({ token, me, logout }) {
     api('/api/reports/today-kpis', { bypassCache: true }, token)
       .then((k) => setTodayKpis(k && k.collectedToday != null ? k : null))
       .catch(() => setTodayKpis(null));
+
+    // Overdue vehicles outside their location geofence (2026-08-13). Written
+    // by the worker's Voltswitch sweep; soft-fail like every other tile.
+    api('/api/vehicles/overdue-alerts', { bypassCache: true }, token)
+      .then((out) => setOverdueAlerts(Array.isArray(out?.alerts) ? out.alerts : []))
+      .catch(() => setOverdueAlerts([]));
 
     // Business documents expiring (2026-07-28). Lives behind the settings
     // module + ADMIN/OPS like the rest of /api/locations, so a 403 for anyone
@@ -907,6 +922,45 @@ function DashboardInner({ token, me, logout }) {
       {loadFailed
         ? <LoadErrorBanner detail={msg} onRetry={() => load()} />
         : msg ? <p className="label" style={{ margin: '4px 0 10px 2px' }}>{msg}</p> : null}
+
+      {overdueAlerts.length > 0 && (
+        <section className="glass card-lg" style={{ marginBottom: 12, border: '1px solid var(--danger, #e24b4a)' }}>
+          <h3 style={{ margin: '0 0 8px', color: 'var(--danger, #e24b4a)' }}>
+            {overdueAlerts.length === 1
+              ? '1 overdue vehicle outside its location'
+              : `${overdueAlerts.length} overdue vehicles outside their locations`}
+          </h3>
+          {overdueAlerts.map((a) => (
+            <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 0', borderTop: '1px solid var(--border-soft)' }}>
+              <strong>{a.reservationNumber || a.reservationId}</strong>
+              <span className="label" style={{ margin: 0 }}>
+                {[a.vehicle?.make, a.vehicle?.model].filter(Boolean).join(' ')}{a.vehicle?.plate ? ` · ${a.vehicle.plate}` : ''}
+              </span>
+              {a.distanceKm != null && (
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--danger, #e24b4a)' }}>
+                  {Number(a.distanceKm).toFixed(1)} km {a.nearestLocation ? `from ${a.nearestLocation}` : 'from the nearest branch'}
+                </span>
+              )}
+              {(a.address || a.positionAt) && (
+                <span className="label" style={{ margin: 0, fontSize: 12 }}>
+                  {a.address || ''}{a.positionAt ? ` · ${new Date(a.positionAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}
+                </span>
+              )}
+              <span style={{ flex: 1 }} />
+              {a.latitude != null && a.longitude != null && (
+                <a
+                  href={`https://www.google.com/maps?q=${a.latitude},${a.longitude}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ fontSize: 12 }}
+                >Map</a>
+              )}
+              <button style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => router.push(`/reservations/${a.reservationId}`)}>View</button>
+              <button style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => dismissOverdueAlert(a.id)}>Dismiss</button>
+            </div>
+          ))}
+        </section>
+      )}
 
       <section className="glass card-lg" style={{ marginBottom: 12 }}>
         <div className="row-between" style={{ alignItems: 'center' }}>
