@@ -355,6 +355,9 @@ export const COURSES = [
             // SUPER_ADMIN (they pick a tenant instead), so touring a super
             // admin past it would highlight nothing.
             anchor: 'view-location-switcher',
+            // Renders only for someone with more than one location, so a
+            // single-branch admin correctly has no element (QA, 2026-08-14).
+            optional: true,
             title: 'Viewing as one branch',
             body: 'Anyone with more than one location gets this switcher. It changes what they see everywhere — including what their exports contain.',
           },
@@ -385,6 +388,9 @@ export const COURSES = [
             // pointing at an element that is not on the page.
             anchor: 'pending-imports',
             route: '/reservations',
+            // The tray hides itself when the queue is empty — the normal,
+            // healthy state (QA, 2026-08-14).
+            optional: true,
             title: 'The review tray',
             body: 'Anything that did not match cleanly waits here with what the system found, for a person to decide. It hides itself when there is nothing waiting — an empty screen is good news.',
           },
@@ -410,12 +416,13 @@ export const COURSES = [
             body: 'Competitor offers collected nightly across the major booking sites, mapped to the same vehicle classes your fleet uses.',
           },
           {
-            // Guardrails live on the onboarding screen, not the dashboard —
-            // /market has no strategy UI at all (2026-08-14).
+            // Anchored to the Suggestions button, which is always on /market.
+            // The guardrail form itself sits on step 4 of the onboarding
+            // wizard — invisible on arrival, so pointing at it produced a step
+            // that highlighted nothing (QA, 2026-08-14).
             anchor: 'market-strategy',
-            route: '/market/onboarding',
-            title: 'Set a strategy',
-            body: 'Choose where you want to sit — second cheapest, for instance — and how far a price may move on its own. Anything bigger waits for you.',
+            title: 'Where the strategy pays off',
+            body: 'You choose where to sit — second cheapest, for instance — and how far a price may move on its own. Anything bigger lands in this inbox for you to approve.',
           },
         ],
       },

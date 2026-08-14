@@ -422,6 +422,7 @@ function TopBar({ airport, airports, onAirportChange, updatedAt, rangeDays, onRa
             inbox — so the dashboard is the single entry point for the whole MI surface. */}
         <button
           type="button"
+          data-tour="market-strategy"
           onClick={() => router.push('/suggestions')}
           style={pendingCount > 0 ? topbarBtnActiveStyle : topbarBtnStyle}
           title="Open the Pricing Suggestions inbox"
