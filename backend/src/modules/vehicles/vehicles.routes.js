@@ -171,8 +171,15 @@ vehiclesRouter.post('/telematics/voltswitch/sync', enforceTelematicsFeature, asy
     const results = await vehiclesService.syncVoltswitchDevices(scopeFor(req));
     res.json(results);
   } catch (e) {
-    if (/not configured/i.test(String(e?.message || ''))) {
-      return res.status(400).json({ error: String(e.message) });
+    const msg = String(e?.message || '');
+    if (/not configured/i.test(msg)) {
+      return res.status(400).json({ error: msg });
+    }
+    // Voltswitch rejecting the login is the tenant's configuration problem,
+    // not our server's — a 500 here sent staff hunting a platform outage
+    // when the fix was retyping a password (Corpusa activation, 2026-08-14).
+    if (/Invalid Username\/Password/i.test(msg) || /\/auth\/(token|login)/i.test(msg)) {
+      return res.status(400).json({ error: 'Voltswitch rejected the credentials. Check the API email and password in Settings > Telematics (the same login used at app.voltswitchgps.com).' });
     }
     next(e);
   }
