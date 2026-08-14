@@ -111,22 +111,33 @@ function CheckinWizard({ token, me, logout }) {
             res?.customer?.lastName
           ].filter(Boolean).join(' '));
 
-          // Checkout photos for the side-by-side reference. Soft-fail: an
-          // agreement with no CHECKOUT inspection (or a slow endpoint) must
-          // never stand between an agent and a check-in.
-          try {
-            const rep = await api(`/api/rental-agreements/${agreementId}/inspection-report`, {}, token);
-            const checkout = rep?.report?.checkout || rep?.checkout || null;
-            const shots = checkout?.photos && typeof checkout.photos === 'object' ? checkout.photos : null;
-            if (shots && Object.keys(shots).length) {
+          // Checkout photos for the side-by-side reference.
+          //
+          // DELIBERATELY NOT AWAITED. The payload is the checkout inspection's
+          // base64 photos — 5 MB is typical — so awaiting it here would hold up
+          // the fee-rate load below and delay step 3's preview by seconds on
+          // every check-in. It lands while the agent is still on step 1; the
+          // photo step is step 2. Soft-fail: an agreement with no CHECKOUT
+          // inspection (or a slow endpoint) must never stand between an agent
+          // and a check-in.
+          api(`/api/rental-agreements/${agreementId}/inspection-report`, {}, token)
+            .then((rep) => {
+              // The ROUTE flattens the service's { checkout, checkin } into
+              // checkoutInspection / checkinInspection — reading report.checkout
+              // here silently found nothing and the comparison never rendered
+              // (2026-08-14). Fallbacks cover the service shape in case a caller
+              // ever passes the inner object straight through.
+              const checkout = rep?.checkoutInspection || rep?.report?.checkout || rep?.checkout || null;
+              const shots = checkout?.photos && typeof checkout.photos === 'object' ? checkout.photos : null;
+              if (!shots || !Object.keys(shots).length) return;
               setCheckoutPhotos(shots);
               setCheckoutAt(checkout?.at ? new Date(checkout.at).toLocaleString([], {
                 month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
               }) : '');
-            }
-          } catch (err) {
-            console.warn('[checkin-wizard] no checkout photos to compare against', err);
-          }
+            })
+            .catch((err) => {
+              console.warn('[checkin-wizard] no checkout photos to compare against', err);
+            });
         }
 
         // Fetch tenant-configured fee rates so Step 3 preview matches what
