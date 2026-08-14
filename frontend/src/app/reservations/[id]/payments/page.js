@@ -628,7 +628,7 @@ function Inner({ token, me, logout }) {
               <option value="OTHER">Other</option>
             </select>
           </div>
-          <div className="stack">
+          <div data-tour="payment-reference" className="stack">
             <label className="label">Reference{method === 'AUTH_HOLD' ? <span style={{ color: '#ef4444' }}> *</span> : null}</label>
             <input
               value={reference}

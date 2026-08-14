@@ -868,6 +868,7 @@ function DashboardInner({ token, me, logout }) {
               <span className="ui-muted">{t('dashboard.tileActiveReservationsDesc')}</span>
             </button>
             <button
+              data-tour="kpi-overdue"
               type="button"
               className="info-tile"
               onClick={() => router.push('/reservations?filter=overdue')}
@@ -924,7 +925,7 @@ function DashboardInner({ token, me, logout }) {
         : msg ? <p className="label" style={{ margin: '4px 0 10px 2px' }}>{msg}</p> : null}
 
       {overdueAlerts.length > 0 && (
-        <section className="glass card-lg" style={{ marginBottom: 12, border: '1px solid var(--danger, #e24b4a)' }}>
+        <section data-tour="overdue-alerts" className="glass card-lg" style={{ marginBottom: 12, border: '1px solid var(--danger, #e24b4a)' }}>
           <h3 style={{ margin: '0 0 8px', color: 'var(--danger, #e24b4a)' }}>
             {overdueAlerts.length === 1
               ? '1 overdue vehicle outside its location'

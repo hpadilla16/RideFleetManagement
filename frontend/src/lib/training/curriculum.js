@@ -70,7 +70,7 @@ export const COURSES = [
         steps: [
           {
             anchor: 'nav-dashboard',
-            route: '/dashboard',
+            route: '/',
             title: 'This is your day',
             body: 'Pickups and returns for the date you are looking at, what is overdue, and what needs attention. Every tile clicks through to the list behind it.',
           },
@@ -192,9 +192,13 @@ export const COURSES = [
             body: 'This is the authorization for post-rental charges — fuel, mileage, cleaning, tolls, damage. Without it those charges have no basis.',
           },
           {
-            anchor: 'checkout-photos',
-            title: 'Eight angles, every time',
-            body: 'Front, rear, both sides, both seats, dashboard, trunk. Ninety seconds now settles an argument weeks later.',
+            // The eight-angle grid is NOT in this wizard — the inspection is
+            // handed to a phone, on a token-authed page the tour cannot reach.
+            // Anchored to the handoff step instead, with copy that matches
+            // what the agent is actually looking at (2026-08-14).
+            anchor: 'checkout-inspection-handoff',
+            title: 'Hand the inspection to a phone',
+            body: 'This produces a code for the phone that walks the lot. Eight angles get captured there — front, rear, both sides, both seats, dashboard, trunk — and land back on this rental. Ninety seconds now settles an argument weeks later.',
           },
         ],
       },
@@ -276,14 +280,18 @@ export const COURSES = [
         steps: [
           {
             anchor: 'kpi-overdue',
-            route: '/dashboard',
+            route: '/',
             title: 'Overdue, at a glance',
             body: 'Click through to the list. A rental is overdue the moment its return time passes.',
           },
           {
+            // Renders only when there ARE alerts, which is the normal state.
+            // optional:true tells the engine to skip rather than hunt for an
+            // element that is correctly absent (2026-08-14).
             anchor: 'overdue-alerts',
+            optional: true,
             title: 'Where the car actually is',
-            body: 'With GPS connected, anything overdue and outside every one of your branches raises an alert here, with the distance and a map link.',
+            body: 'With GPS connected, anything overdue and outside every one of your branches raises an alert here, with the distance and a map link. Nothing showing means nothing is missing.',
           },
         ],
       },
@@ -326,8 +334,10 @@ export const COURSES = [
         key: 'users-and-locations',
         title: 'Add a user and scope them',
         summary: 'Roles, and which branches they can see.',
-        roles: ['ADMIN', 'SUPER_ADMIN'],
-        gate: 'settings',
+        // Gated on `people`, not `settings`: the screen this walks IS /people,
+        // which carries its own module key (2026-08-14).
+        roles: ['ADMIN'],
+        gate: 'people',
         kind: 'ON_DEMAND',
         verify: null,
         points: 20,
@@ -341,6 +351,9 @@ export const COURSES = [
             body: 'Everyone with access, and what they can reach.',
           },
           {
+            // ADMIN only, deliberately: the switcher never renders for a
+            // SUPER_ADMIN (they pick a tenant instead), so touring a super
+            // admin past it would highlight nothing.
             anchor: 'view-location-switcher',
             title: 'Viewing as one branch',
             body: 'Anyone with more than one location gets this switcher. It changes what they see everywhere — including what their exports contain.',
@@ -367,9 +380,13 @@ export const COURSES = [
             body: 'Each connected franchise or broker pulls reservations in on a schedule, matched to customers and checked for duplicates before anyone sees them.',
           },
           {
+            // The tray lives on /reservations, not /settings — Settings only
+            // links to it (2026-08-14). The tour navigates rather than
+            // pointing at an element that is not on the page.
             anchor: 'pending-imports',
+            route: '/reservations',
             title: 'The review tray',
-            body: 'Anything that did not match cleanly waits here with what the system found, for a person to decide.',
+            body: 'Anything that did not match cleanly waits here with what the system found, for a person to decide. It hides itself when there is nothing waiting — an empty screen is good news.',
           },
         ],
       },
@@ -393,7 +410,10 @@ export const COURSES = [
             body: 'Competitor offers collected nightly across the major booking sites, mapped to the same vehicle classes your fleet uses.',
           },
           {
+            // Guardrails live on the onboarding screen, not the dashboard —
+            // /market has no strategy UI at all (2026-08-14).
             anchor: 'market-strategy',
+            route: '/market/onboarding',
             title: 'Set a strategy',
             body: 'Choose where you want to sit — second cheapest, for instance — and how far a price may move on its own. Anything bigger waits for you.',
           },

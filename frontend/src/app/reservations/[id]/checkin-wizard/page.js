@@ -545,8 +545,8 @@ function CheckinWizard({ token, me, logout }) {
 function StepTracker({ currentNumber, done }) {
   const steps = [
     { number: 1, label: 'Summary' },
-    { number: 2, label: 'Photos' },
-    { number: 3, label: 'Metrics' },
+    { number: 2, label: 'Photos', tour: 'checkin-photos' },
+    { number: 3, label: 'Metrics', tour: 'checkin-metrics' },
     { number: 4, label: 'Settle' },
     { number: 5, label: 'Sign' },
     { number: 6, label: 'Done' },
@@ -557,7 +557,7 @@ function StepTracker({ currentNumber, done }) {
         const isCurrent = s.number === currentNumber;
         const isDone = s.number < currentNumber || done;
         return (
-          <div key={s.number} style={{
+          <div key={s.number} data-tour={s.tour} style={{
             flex: 1, padding: '8px 12px', borderRadius: 6,
             border: '0.5px solid #E5E7EB',
             background: isCurrent ? '#1F2937' : (isDone ? '#D1FAE5' : '#FFFFFF'),

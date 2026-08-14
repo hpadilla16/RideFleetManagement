@@ -495,9 +495,9 @@ function WizardHeader({ reservation, session, onPause, onSwapClick, swapLocked }
 function StepTracker({ currentStep, currentNumber }) {
   const steps = [
     { number: 1, label: 'Confirm' },
-    { number: 2, label: 'Terms' },
+    { number: 2, label: 'Terms', tour: 'checkout-terms' },
     { number: 3, label: 'Payment' },
-    { number: 4, label: 'Inspection' },
+    { number: 4, label: 'Inspection', tour: 'checkout-inspection-handoff' },
     { number: 5, label: 'Metrics' },
     { number: 6, label: 'Sign' },
   ];
@@ -510,7 +510,7 @@ function StepTracker({ currentStep, currentNumber }) {
         const isCurrent = s.number === currentNumber;
         const isDone = s.number < currentNumber || currentStep === 'CLOSED';
         return (
-          <div key={s.number} style={{
+          <div key={s.number} data-tour={s.tour} style={{
             flex: 1, padding: '8px 12px', borderRadius: 6,
             border: '0.5px solid #E5E7EB',
             background: isCurrent ? '#1F2937' : (isDone ? '#D1FAE5' : '#FFFFFF'),
