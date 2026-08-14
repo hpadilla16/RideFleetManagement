@@ -98,6 +98,21 @@ function Wizard({ token, me, logout }) {
 
   const [rentalMin, setRentalMin] = useState({ minimumHours: 24, hourly: false });
 
+  // Long-Term (Monthly) — parity with the legacy inline form (2026-08-14).
+  // v2 shipped without this because it was built to post "the same payload as
+  // the legacy form", and the monthly plan is NOT part of that payload: it is
+  // a second call after the reservation exists. Copying the body alone left
+  // monthly rentals silently impossible here, so an agent using v2 got a plain
+  // daily rental with no billing cycle, no renewal reminders and no per-cycle
+  // charge. Same opt-in shape as legacy: DAILY unless explicitly switched.
+  const [rateType, setRateType] = useState('DAILY'); // 'DAILY' | 'MONTHLY'
+  const [monthlyForm, setMonthlyForm] = useState({
+    cycleLengthDays: '30', cycleRate: '', includedMilesPerCycle: '3000', autoRenew: true
+  });
+  // Set once the reservation exists, so a failed plan call can never be
+  // "fixed" by pressing Create again and booking the customer twice.
+  const [createdId, setCreatedId] = useState(null);
+
   const rentalDays = useMemo(() => {
     if (!form.pickupAt || !form.returnAt) return 0;
     const ms = new Date(form.returnAt) - new Date(form.pickupAt);
@@ -243,6 +258,32 @@ function Wizard({ token, me, logout }) {
           notes: form.notes || null
         })
       }, token);
+
+      // Monthly is attached AFTER the reservation exists — it is its own
+      // record, not a field on the booking. If this call fails we keep the
+      // reservation (no rollback) and stop, rather than navigating away with
+      // the failure unseen: the agent gets the reason and a link, and the
+      // reservation page can attach the plan after the fact.
+      if (rateType === 'MONTHLY') {
+        setCreatedId(created.id);
+        try {
+          const planBody = {
+            cycleLengthDays: Number(monthlyForm.cycleLengthDays || 30),
+            includedMilesPerCycle: Number(monthlyForm.includedMilesPerCycle || 3000),
+            autoRenew: !!monthlyForm.autoRenew
+          };
+          if (String(monthlyForm.cycleRate || '').trim()) planBody.cycleRate = Number(monthlyForm.cycleRate);
+          await api(`/api/long-term/reservations/${created.id}/plan`, {
+            method: 'POST',
+            body: JSON.stringify(planBody)
+          }, token);
+        } catch (planErr) {
+          setErr(`Reservation ${reservationNumber} was created, but the monthly plan did not attach: ${planErr?.message || 'unknown error'}. Open the reservation and activate the monthly plan there.`);
+          setBusy(false);
+          return;
+        }
+      }
+
       router.push(`/reservations/${created.id}`);
     } catch (e) { setErr(e?.message || 'Failed to create reservation'); setBusy(false); }
   };
@@ -350,6 +391,49 @@ function Wizard({ token, me, logout }) {
                   ? `This location rents by the hour — minimum ${rentalMin.minimumHours} hour${rentalMin.minimumHours === 1 ? '' : 's'}.`
                   : 'Minimum rental is 24 hours. To rent for less, configure an hourly rate for the vehicle class.'}
               </p>
+              <div className="stack" style={{ gap: 6, marginTop: 12 }}>
+                <label className="label">Rate type</label>
+                <div className="inline-actions">
+                  <button
+                    type="button"
+                    onClick={() => setRateType('DAILY')}
+                    className={rateType === 'DAILY' ? '' : 'button-subtle'}
+                  >Daily</button>
+                  <button
+                    type="button"
+                    onClick={() => setRateType('MONTHLY')}
+                    className={rateType === 'MONTHLY' ? '' : 'button-subtle'}
+                  >Monthly</button>
+                </div>
+              </div>
+
+              {rateType === 'MONTHLY' && (
+                <div className="app-card-grid compact" style={{ marginTop: 10 }}>
+                  <div className="stack" style={{ gap: 4 }}>
+                    <label className="label">Cycle length (days)</label>
+                    <input type="number" min="1" value={monthlyForm.cycleLengthDays}
+                      onChange={(e) => setMonthlyForm({ ...monthlyForm, cycleLengthDays: e.target.value })} />
+                  </div>
+                  <div className="stack" style={{ gap: 4 }}>
+                    <label className="label">Cycle rate</label>
+                    <input type="number" min="0" step="0.01" placeholder="auto from monthly rate settings"
+                      value={monthlyForm.cycleRate}
+                      onChange={(e) => setMonthlyForm({ ...monthlyForm, cycleRate: e.target.value })} />
+                  </div>
+                  <div className="stack" style={{ gap: 4 }}>
+                    <label className="label">Included miles per cycle</label>
+                    <input type="number" min="0" value={monthlyForm.includedMilesPerCycle}
+                      onChange={(e) => setMonthlyForm({ ...monthlyForm, includedMilesPerCycle: e.target.value })} />
+                  </div>
+                  <div className="stack" style={{ gap: 4, justifyContent: 'end' }}>
+                    <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+                      <input type="checkbox" checked={monthlyForm.autoRenew}
+                        onChange={(e) => setMonthlyForm({ ...monthlyForm, autoRenew: e.target.checked })} /> Renew every cycle automatically
+                    </label>
+                  </div>
+                </div>
+              )}
+
               <div className="inline-actions" style={{ marginTop: 14 }}>
                 <button type="button" onClick={() => setStep(2)} disabled={!stepValid(1)}>Continue</button>
               </div>
@@ -471,9 +555,23 @@ function Wizard({ token, me, logout }) {
                 <label className="label">Notes</label>
                 <textarea rows={3} value={form.notes} onChange={(e) => set({ notes: e.target.value })} />
               </div>
+              {rateType === 'MONTHLY' && (
+                <div className="surface-note" style={{ marginTop: 4 }}>
+                  <strong>Monthly plan</strong> — {monthlyForm.cycleLengthDays || 30}-day cycles,
+                  {String(monthlyForm.cycleRate || '').trim()
+                    ? ` $${Number(monthlyForm.cycleRate).toFixed(2)} per cycle`
+                    : ' rate taken from the monthly rate settings'},
+                  {' '}{monthlyForm.includedMilesPerCycle || 0} miles included
+                  {monthlyForm.autoRenew ? ', renewing automatically.' : ', no automatic renewal.'}
+                </div>
+              )}
               <div className="inline-actions" style={{ marginTop: 14 }}>
-                <button type="button" className="button-subtle" onClick={() => setStep(3)}>Back</button>
-                <button type="button" onClick={submit} disabled={busy || !!rateError}>{busy ? 'Creating…' : 'Create reservation'}</button>
+                <button type="button" className="button-subtle" onClick={() => setStep(3)} disabled={!!createdId}>Back</button>
+                {createdId ? (
+                  <button type="button" onClick={() => router.push(`/reservations/${createdId}`)}>Open reservation</button>
+                ) : (
+                  <button type="button" onClick={submit} disabled={busy || !!rateError}>{busy ? 'Creating…' : 'Create reservation'}</button>
+                )}
               </div>
             </div>
           )}
