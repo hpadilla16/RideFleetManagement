@@ -499,10 +499,10 @@ export default function KnowledgeBasePage() {
         <AppShell me={me} logout={logout}>
           <div className="stack" style={{ gap: 18 }}>
             <section className="glass card-lg knowledge-hero">
-              <div className="eyebrow">Employee Knowledge Base</div>
-              <h1 className="page-title" style={{ margin: 0 }}>Ride Fleet help center for day-to-day operations.</h1>
+              <div className="eyebrow">Ride University</div>
+              <h1 className="page-title" style={{ margin: 0 }}>Learn the software, one task at a time.</h1>
               <p className="ui-muted" style={{ maxWidth: 860 }}>
-                Use this page as the in-product reference for daily workflows, support questions, and where each team should work inside the platform.
+                Training modules you complete by doing the real work, plus the playbooks your team already relies on.
               </p>
               <div className="knowledge-anchor-grid">
                 {anchors.map((anchor) => (
