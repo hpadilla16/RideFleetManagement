@@ -76,6 +76,13 @@ function CheckinWizard({ token, me, logout }) {
   const canBackdate = ['SUPER_ADMIN', 'ADMIN', 'OPS'].includes(String(me?.role || '').toUpperCase());
   const [photos, setPhotos] = useState({});
   const [currentAngle, setCurrentAngle] = useState(0);
+  // Checkout photos as the inspection reference (Hector, 2026-08-14): the
+  // agent shooting each angle sees how the car left the lot, so a new scratch
+  // is caught while the customer is still at the counter. Never blocks — a
+  // checkout without photos just means no reference to show.
+  const [checkoutPhotos, setCheckoutPhotos] = useState(null);
+  const [checkoutAt, setCheckoutAt] = useState('');
+  const [damageNotes, setDamageNotes] = useState({});
   // Fase D (2026-06-18): when the tenant uses the CUSTOMER inspection model AND the customer
   // already submitted a CHECK-IN inspection, the agent's photo step becomes optional (they can
   // skip and close, or still add their own). Pure gating — no change to the close/money logic.
@@ -103,6 +110,23 @@ function CheckinWizard({ token, me, logout }) {
             res?.customer?.firstName,
             res?.customer?.lastName
           ].filter(Boolean).join(' '));
+
+          // Checkout photos for the side-by-side reference. Soft-fail: an
+          // agreement with no CHECKOUT inspection (or a slow endpoint) must
+          // never stand between an agent and a check-in.
+          try {
+            const rep = await api(`/api/rental-agreements/${agreementId}/inspection-report`, {}, token);
+            const checkout = rep?.report?.checkout || rep?.checkout || null;
+            const shots = checkout?.photos && typeof checkout.photos === 'object' ? checkout.photos : null;
+            if (shots && Object.keys(shots).length) {
+              setCheckoutPhotos(shots);
+              setCheckoutAt(checkout?.at ? new Date(checkout.at).toLocaleString([], {
+                month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+              }) : '');
+            }
+          } catch (err) {
+            console.warn('[checkin-wizard] no checkout photos to compare against', err);
+          }
         }
 
         // Fetch tenant-configured fee rates so Step 3 preview matches what
@@ -232,7 +256,19 @@ function CheckinWizard({ token, me, logout }) {
         console.warn('[checkin-wizard] failed to append RES_CHECKIN notes line', err);
       }
 
-      // 1. Inspection (CHECKIN phase) with photos + metrics
+      // 1. Inspection (CHECKIN phase) with photos + metrics.
+      //    Damage noted against the checkout reference is labelled by angle so
+      //    the inspection report reads "Driver side: 6-inch scratch…" rather
+      //    than an unattributed sentence — that attribution is what makes the
+      //    note usable when a damage charge is questioned later.
+      const damages = STANDARD_ANGLES
+        .map((a) => {
+          const note = String(damageNotes[a.key] || '').trim();
+          return note ? `${a.label}: ${note}` : null;
+        })
+        .filter(Boolean)
+        .join('\n');
+
       await api(`/api/rental-agreements/${agreement.id}/inspection`, {
         method: 'POST',
         body: JSON.stringify({
@@ -240,7 +276,8 @@ function CheckinWizard({ token, me, logout }) {
           odometer: odometerIn ? Number(odometerIn) : null,
           fuelLevel: String(fuelIn),
           cleanliness: String(cleanlinessIn),
-          photos
+          photos,
+          ...(damages ? { damages } : {})
         })
       }, token);
 
@@ -417,6 +454,10 @@ function CheckinWizard({ token, me, logout }) {
                 onCapture={(k, dataUrl) => setPhotos((p) => ({ ...p, [k]: dataUrl }))}
                 currentAngle={currentAngle}
                 onAngleChange={setCurrentAngle}
+                checkoutPhotos={checkoutPhotos}
+                checkoutAt={checkoutAt}
+                damageNotes={damageNotes}
+                onDamageNote={(k, text) => setDamageNotes((d) => ({ ...d, [k]: text }))}
               />
             </>
           )}
@@ -627,7 +668,11 @@ function Step1Summary({ reservation, agreement }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 2 — Photo capture
 // ─────────────────────────────────────────────────────────────────────────────
-function Step2Photos({ photos, onCapture, currentAngle, onAngleChange }) {
+function Step2Photos({
+  photos, onCapture, currentAngle, onAngleChange,
+  checkoutPhotos, checkoutAt, damageNotes, onDamageNote
+}) {
+  const angleKey = STANDARD_ANGLES[currentAngle]?.key;
   return (
     <div style={sectionBox}>
       <PhotoCapture
@@ -635,6 +680,11 @@ function Step2Photos({ photos, onCapture, currentAngle, onAngleChange }) {
         onCapture={onCapture}
         currentAngleIndex={currentAngle}
         onAngleChange={onAngleChange}
+        comparePhoto={checkoutPhotos?.[angleKey] || null}
+        compareCaption={checkoutAt}
+        comparePhotos={checkoutPhotos}
+        damageNotes={damageNotes}
+        onDamageNote={onDamageNote}
       />
     </div>
   );

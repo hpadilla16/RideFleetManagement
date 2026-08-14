@@ -44,7 +44,15 @@ export function PhotoCapture({
   currentAngleIndex,
   onAngleChange,         // (index) => void
   angles = STANDARD_ANGLES,
-  comparePhoto = null    // optional baseline image to show side-by-side
+  comparePhoto = null,   // optional baseline image to show side-by-side
+  // Checkout reference (Hector, 2026-08-14). The agent inspecting a returning
+  // car sees the SAME angle as it left the lot, right beside the live camera —
+  // so a scratch that wasn't there gets noticed while the customer is still
+  // standing there, not days later from the archive.
+  compareCaption = '',   // e.g. "Checkout · Aug 8, 3:15 PM"
+  comparePhotos = null,  // { [angleKey]: dataUrl } — baselines for the thumb grid
+  damageNotes = null,    // { [angleKey]: string } — per-angle new-damage notes
+  onDamageNote = null    // (angleKey, text) => void; omit to hide the control
 }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -161,7 +169,9 @@ export function PhotoCapture({
       <div className={comparePhoto ? 'capture-row compare' : 'capture-row'}>
         {comparePhoto && (
           <div className="compare-cell">
-            <div className="compare-label">PICKUP BASELINE</div>
+            <div className="compare-label">
+              CHECKOUT REFERENCE{compareCaption ? <span className="compare-cap"> · {compareCaption}</span> : null}
+            </div>
             <div className="compare-img" style={{ backgroundImage: `url(${comparePhoto})` }} />
           </div>
         )}
@@ -235,28 +245,64 @@ export function PhotoCapture({
         />
       </div>
 
+      {/* A missing baseline is normal — plenty of older checkouts never shot
+          all 8 angles. Say so plainly instead of leaving a blank half. */}
+      {comparePhotos && !comparePhoto && (
+        <div className="compare-none">No checkout photo for this angle — capture as usual.</div>
+      )}
+
+      {onDamageNote && (
+        <div className="damage-box">
+          <label className="damage-label" htmlFor={`dmg-${currentAngle.key}`}>
+            New damage on {currentAngle.label.toLowerCase()}?
+            {comparePhoto ? ' Compare against the checkout photo above.' : ''}
+          </label>
+          <input
+            id={`dmg-${currentAngle.key}`}
+            type="text"
+            className="damage-input"
+            placeholder="e.g. 6-inch scratch below the door handle — not in the checkout photo"
+            value={damageNotes?.[currentAngle.key] || ''}
+            onChange={(e) => onDamageNote(currentAngle.key, e.target.value)}
+          />
+        </div>
+      )}
+
       {/* Thumbnail grid */}
       <div className="thumb-grid">
         {angles.map((a, idx) => {
           const captured = capturedPhotos?.[a.key];
+          const baseline = comparePhotos?.[a.key];
           const isCurrent = idx === currentAngleIndex;
+          const flagged = !!damageNotes?.[a.key]?.trim();
           return (
-            <button
-              key={a.key}
-              type="button"
-              className={
-                captured ? 'thumb captured' :
-                isCurrent ? 'thumb current' : 'thumb'
-              }
-              onClick={() => onAngleChange?.(idx)}
-              title={a.label}
-            >
-              {captured ? (
-                <div className="thumb-img" style={{ backgroundImage: `url(${captured})` }} />
-              ) : isCurrent ? '📷' : ''}
-              <span className="thumb-label">{a.abbr}</span>
-              {captured && <span className="thumb-check">✓</span>}
-            </button>
+            <div key={a.key} className="thumb-stack">
+              {/* Checkout row sits ABOVE its check-in counterpart so the pair
+                  reads as one column: how it left, how it came back. */}
+              {comparePhotos && (
+                <div
+                  className={baseline ? 'thumb-base' : 'thumb-base empty'}
+                  style={baseline ? { backgroundImage: `url(${baseline})` } : undefined}
+                  title={baseline ? `${a.label} at checkout` : `No checkout photo for ${a.label}`}
+                />
+              )}
+              <button
+                type="button"
+                className={
+                  captured ? 'thumb captured' :
+                  isCurrent ? 'thumb current' : 'thumb'
+                }
+                onClick={() => onAngleChange?.(idx)}
+                title={a.label}
+              >
+                {captured ? (
+                  <div className="thumb-img" style={{ backgroundImage: `url(${captured})` }} />
+                ) : isCurrent ? '📷' : ''}
+                <span className="thumb-label">{a.abbr}</span>
+                {captured && <span className="thumb-check">✓</span>}
+                {flagged && <span className="thumb-flag" title="New damage noted">!</span>}
+              </button>
+            </div>
           );
         })}
       </div>
@@ -295,6 +341,48 @@ export function PhotoCapture({
           letter-spacing: .12em;
         }
         .compare-label.live { color: #1fc7aa; }
+        .compare-cap { font-weight: 700; letter-spacing: 0; text-transform: none; color: #8b83a6; }
+        .compare-none {
+          font-size: 12px;
+          color: #6f668f;
+          background: #f4f2fb;
+          border: 1px solid #e2ddf3;
+          border-radius: 10px;
+          padding: 8px 12px;
+          text-align: center;
+        }
+        .damage-box { display: flex; flex-direction: column; gap: 6px; }
+        .damage-label { font-size: 12px; font-weight: 700; color: #6f668f; }
+        .damage-input {
+          width: 100%;
+          padding: 10px 12px;
+          border: 1px solid #d7cbff;
+          border-radius: 12px;
+          font-size: 13px;
+          color: #2c2a5a;
+        }
+        .damage-input:focus { outline: none; border-color: #6d3df2; }
+        .thumb-stack { display: flex; flex-direction: column; gap: 3px; }
+        .thumb-base {
+          aspect-ratio: 1;
+          border-radius: 8px;
+          background: #ece7fb center / cover no-repeat;
+          border: 1px solid #e2ddf3;
+        }
+        .thumb-base.empty {
+          background: repeating-linear-gradient(45deg, #f4f2fb, #f4f2fb 4px, #ece7fb 4px, #ece7fb 8px);
+        }
+        .thumb-flag {
+          position: absolute;
+          top: -4px; left: -4px;
+          width: 20px; height: 20px;
+          background: #e2574c;
+          color: white;
+          border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 12px;
+          font-weight: 800;
+        }
         .compare-img {
           height: 240px;
           border-radius: 14px;
