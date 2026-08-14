@@ -126,6 +126,9 @@ export const tenantsService = {
     if (patch.tollsEnabled !== undefined) data.tollsEnabled = !!patch.tollsEnabled;
     if (patch.citationsEnabled !== undefined) data.citationsEnabled = !!patch.citationsEnabled;
     if (patch.marketIntelligenceEnabled !== undefined) data.marketIntelligenceEnabled = !!patch.marketIntelligenceEnabled;
+    // Settable after creation too — otherwise an EXISTING tenant could never
+    // be marked as the demo, which is the whole use case (QA, 2026-08-14).
+    if (patch.isDemo !== undefined) data.isDemo = !!patch.isDemo;
     if (patch.platformFeeEnabled !== undefined) data.platformFeeEnabled = !!patch.platformFeeEnabled;
     if (patch.platformFeePct !== undefined) {
       const pct = Number(patch.platformFeePct || 0);

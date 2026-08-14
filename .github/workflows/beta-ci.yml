@@ -31,6 +31,10 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
+      # The training curriculum's anchor-integrity tests are the only thing
+      # stopping a renamed element from silently breaking the tour on a new
+      # employee's first screen. They ran nowhere until now (QA, 2026-08-14).
+      - run: npx vitest run
       - run: npm run build
 
   backend-check:

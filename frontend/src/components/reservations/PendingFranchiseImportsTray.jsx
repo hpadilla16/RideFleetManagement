@@ -202,7 +202,7 @@ function EditPromoteModal({ row, token, scopedPath, onClose, onSaved, basePath =
   };
 
   return (
-    <div data-tour="pending-imports" style={{
+    <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
       display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
       zIndex: 1000, padding: '24px 16px', overflowY: 'auto',
@@ -483,7 +483,7 @@ export function PendingFranchiseImportsTray({ token, me, isSuper, activeTenantId
   };
 
   return (
-    <section className="glass card section-card" style={{ marginBottom: 16, borderLeft: '4px solid #f59e0b', overflow: 'hidden', maxWidth: '100%' }}>
+    <section data-tour="pending-imports" className="glass card section-card" style={{ marginBottom: 16, borderLeft: '4px solid #f59e0b', overflow: 'hidden', maxWidth: '100%' }}>
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}

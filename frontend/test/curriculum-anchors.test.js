@@ -26,30 +26,46 @@ function sourceFiles(dir, out = []) {
   return out;
 }
 
-/** Every data-tour value present in the app source. */
-function placedAnchors() {
-  const found = new Set();
+/**
+ * Every anchor placed in the source, COUNTED — not a set.
+ *
+ * Counting matters: two elements carrying the same name is a real failure the
+ * first version could not see, because a Set collapses them (QA, 2026-08-14).
+ *
+ * Two placement styles exist:
+ *   data-tour="literal"                      — a single element
+ *   data-tour={item.tour} + tour: 'literal'  — a .map() over a table
+ *
+ * A `tour:` key only counts when the file ALSO binds it into a data-tour
+ * attribute. Counting the keys on their own is what let the earlier version
+ * stay green while someone deleted the binding and silently broke eight
+ * anchors at once.
+ */
+function placedAnchorCounts() {
+  const counts = new Map();
+  const bump = (name, by = 1) => counts.set(name, (counts.get(name) || 0) + by);
+
   for (const file of sourceFiles(SRC)) {
     const text = readFileSync(file, 'utf8');
-    // data-tour="literal"
-    for (const m of text.matchAll(/data-tour=["']([a-z0-9-]+)["']/gi)) found.add(m[1]);
-    // data-tour={...'literal'...} — covers the .map() cases where the value
-    // comes from an array or an item field written inline.
-    for (const m of text.matchAll(/data-tour=\{[^}]*\}/gi)) {
-      for (const lit of m[0].matchAll(/['"]([a-z0-9-]+)['"]/gi)) found.add(lit[1]);
+
+    // Literal attributes.
+    for (const m of text.matchAll(/data-tour=["']([a-z0-9-]+)["']/gi)) bump(m[1]);
+
+    // Expression attributes: data-tour={...}
+    const expressions = [...text.matchAll(/data-tour=\{([^}]*)\}/gi)].map((m) => m[1]);
+    for (const expr of expressions) {
+      // Inline array of literals — data-tour={['a','b'][i]}
+      const inline = [...expr.matchAll(/['"]([a-z0-9-]+)['"]/gi)].map((m) => m[1]);
+      for (const name of inline) bump(name);
+    }
+    // A table-driven binding (data-tour={item.tour} / {s.tour}) makes every
+    // `tour:` key in the SAME file live. No binding in this file, no credit.
+    const hasTableBinding = expressions.some((e) => /\.\s*tour\b/.test(e));
+    if (hasTableBinding) {
+      for (const m of text.matchAll(/\btour:\s*['"]([a-z0-9-]+)['"]/gi)) bump(m[1]);
     }
   }
-  return found;
-}
-
-/** Anchor values a NAV_ITEMS-style table supplies via a `tour:` key. */
-function tourKeyValues() {
-  const found = new Set();
-  for (const file of sourceFiles(SRC)) {
-    const text = readFileSync(file, 'utf8');
-    for (const m of text.matchAll(/\btour:\s*['"]([a-z0-9-]+)['"]/gi)) found.add(m[1]);
-  }
-  return found;
+  return counts;
 }
 
 const curriculumAnchors = () => {
@@ -59,16 +75,31 @@ const curriculumAnchors = () => {
 };
 
 describe('curriculum anchors resolve to real elements', () => {
-  const placed = new Set([...placedAnchors(), ...tourKeyValues()]);
+  const counts = placedAnchorCounts();
 
   it('every anchor the curriculum names is placed in the source', () => {
-    const missing = [...curriculumAnchors()].filter((a) => !placed.has(a)).sort();
+    const missing = [...curriculumAnchors()].filter((a) => !counts.has(a)).sort();
     expect(missing, `Curriculum steps point at anchors that do not exist in the app:\n  ${missing.join('\n  ')}`).toEqual([]);
   });
 
   it('every anchor placed in the source is used by the curriculum', () => {
-    const orphans = [...placed].filter((a) => !curriculumAnchors().has(a)).sort();
+    const orphans = [...counts.keys()].filter((a) => !curriculumAnchors().has(a)).sort();
     expect(orphans, `data-tour attributes nothing points at — dead weight or a renamed step:\n  ${orphans.join('\n  ')}`).toEqual([]);
+  });
+
+  it('no anchor name is placed on two different elements', () => {
+    // A duplicate makes the spotlight land on whichever the DOM returns first,
+    // which is not something anyone chose. The reservation page's iOS action
+    // grid mirrors the desktop bar and is the live example of how this happens.
+    const dupes = [...counts.entries()].filter(([, n]) => n > 1).map(([a, n]) => `${a} (${n}×)`).sort();
+    expect(dupes, `Anchors placed more than once — the tour would highlight an arbitrary one:\n  ${dupes.join('\n  ')}`).toEqual([]);
+  });
+
+  it('a table-driven binding is required for tour: keys to count', () => {
+    // Guards the guard: if someone deletes data-tour={item.tour} from AppShell,
+    // the nav anchors must go MISSING rather than stay green off the keys alone.
+    const shell = readFileSync(join(SRC, 'components', 'AppShell.jsx'), 'utf8');
+    expect(/data-tour=\{[^}]*\.\s*tour\b[^}]*\}/.test(shell)).toBe(true);
   });
 });
 
