@@ -40,7 +40,28 @@ export const TOUR_TRACKS = Object.freeze({
   MODULE: 'MODULE',           // one training module, launched from Ride University
 });
 
-/** Verification kinds the backend knows how to check against real records. */
+/**
+ * How completion is PROVED — each names a durable domain record, not an audit
+ * row.
+ *
+ * The audit trail looked like the obvious substrate and is the wrong one
+ * (Innovation, 2026-08-14). Two demonstrated failures, in opposite directions:
+ * settling a balance with a payment writes a STATUS_CHANGE to CHECKED_IN with
+ * the PAYER as actor, so taking a payment would have completed the check-in
+ * module; and a genuine check-in that leaves a balance writes
+ * CHECKED_IN_UNPAID, so it would have been missed. Audit rows also require a
+ * reservationId, a quarter of them omit tenantId, and actorUserId is
+ * unindexed.
+ *
+ * The domain records carry the actor already, are tenant-scoped, and mean
+ * exactly one thing:
+ *
+ *   RESERVATION_CREATED      Reservation.createdByUserId
+ *   RESERVATION_CHECKED_OUT  CheckoutSession.startedByUserId + finishedAt
+ *   RESERVATION_CHECKED_IN   RentalAgreement.closedByUserId
+ *   PAYMENT_RECORDED         needs ReservationPayment.recordedByUserId —
+ *                            the one real gap, one additive column
+ */
 export const VERIFY = Object.freeze({
   RESERVATION_CREATED: 'RESERVATION_CREATED',
   RESERVATION_CHECKED_OUT: 'RESERVATION_CHECKED_OUT',
@@ -48,6 +69,19 @@ export const VERIFY = Object.freeze({
   PAYMENT_RECORDED: 'PAYMENT_RECORDED',
   RESERVATION_EXTENDED: 'RESERVATION_EXTENDED',
 });
+
+/**
+ * ON_DEMAND means "do it now to pass". That is safe for reading a screen and
+ * dangerous for anything that writes: a trainee creating a reservation to earn
+ * points holds real inventory, and one posting a payment moves real money and
+ * moves an agreement's balance.
+ *
+ * So the rule is: anything with a `verify` rule is OPPORTUNISTIC — it completes
+ * the next time the person genuinely does that work. Training follows real
+ * work; it never manufactures it. Rehearsing on demand is what the demo tenant
+ * is for, and that path writes nowhere near your books.
+ */
+export const KINDS = Object.freeze({ ON_DEMAND: 'ON_DEMAND', OPPORTUNISTIC: 'OPPORTUNISTIC' });
 
 export const COURSES = [
   // -------------------------------------------------------------------------
@@ -133,7 +167,7 @@ export const COURSES = [
         summary: 'Book a car from scratch, start to finish.',
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'reservations',
-        kind: 'ON_DEMAND',
+        kind: 'OPPORTUNISTIC',
         verify: { type: VERIFY.RESERVATION_CREATED },
         points: 20,
         showcase: 3,
@@ -239,7 +273,7 @@ export const COURSES = [
         summary: 'Card, cash or check — and make it findable later.',
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'reservations',
-        kind: 'ON_DEMAND',
+        kind: 'OPPORTUNISTIC',
         verify: { type: VERIFY.PAYMENT_RECORDED },
         points: 15,
         showcase: null,
@@ -336,7 +370,7 @@ export const COURSES = [
         summary: 'Roles, and which branches they can see.',
         // Gated on `people`, not `settings`: the screen this walks IS /people,
         // which carries its own module key (2026-08-14).
-        roles: ['ADMIN'],
+        roles: ['ADMIN', 'SUPER_ADMIN'],
         gate: 'people',
         kind: 'ON_DEMAND',
         verify: null,

@@ -38,6 +38,34 @@ describe('curriculum integrity', () => {
     }
   });
 
+  it('nothing that writes to the business can be done on demand', () => {
+    // The rule that keeps training from manufacturing work: a module you can
+    // pass "right now" must not be one that holds inventory or moves money.
+    // Both of the offenders were ON_DEMAND when first written.
+    for (const m of allModules()) {
+      if (m.verify) {
+        expect(m.kind, `${m.key} would have trainees creating real records to earn points`).toBe('OPPORTUNISTIC');
+      }
+    }
+  });
+
+  it('every module gate is a real tenant module', () => {
+    // A typo here silently hides a module from everyone, forever.
+    const known = new Set(['reservations', 'reports', 'settings', 'people', 'marketIntelligence',
+      'dashboard', 'quotes', 'planner', 'vehicles', 'customers', 'tolls', 'citations', 'maintenance']);
+    for (const m of allModules()) {
+      if (m.gate) expect(known, `${m.key} gates on an unknown module: ${m.gate}`).toContain(m.gate);
+    }
+  });
+
+  it('a super admin sees everything an admin sees', () => {
+    // users-and-locations shipped listing ADMIN only — an oversight nothing
+    // caught, because the suite only pinned ADMIN > AGENT.
+    const admin = new Set(modulesFor({ role: 'ADMIN' }).map((m) => m.key));
+    const missing = [...admin].filter((k) => !modulesFor({ role: 'SUPER_ADMIN' }).some((m) => m.key === k));
+    expect(missing, `A super admin cannot see: ${missing.join(', ')}`).toEqual([]);
+  });
+
   it('showcase positions are unique so the demo order is deterministic', () => {
     const pos = allModules().map((m) => m.showcase).filter((n) => Number.isFinite(n));
     expect(new Set(pos).size).toBe(pos.length);
