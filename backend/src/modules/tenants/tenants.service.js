@@ -102,6 +102,8 @@ export const tenantsService = {
           tollsEnabled: !!data.tollsEnabled,
           citationsEnabled: !!data.citationsEnabled,
           marketIntelligenceEnabled: !!data.marketIntelligenceEnabled,
+          // Showcase/practice tenant marker — see schema. Opt-in on create.
+          isDemo: !!data.isDemo,
           platformFeeEnabled: data.platformFeeEnabled !== false,
           platformFeePct: pct,
           platformFeeMin: min,

@@ -527,6 +527,12 @@ model Tenant {
   dealershipLoanerEnabled   Boolean  @default(false)
   tollsEnabled              Boolean  @default(false)
   citationsEnabled          Boolean  @default(false)
+  // A tenant that exists to be SHOWN, not operated (Hector, 2026-08-14).
+  // Ride University's showcase track only runs against one of these, so a
+  // convention demo can never put a real customer's name, licence or card
+  // last-four on a projector. Also what a "practice, nobody is waiting"
+  // training run points at. Never set on a tenant with real bookings.
+  isDemo                    Boolean  @default(false)
   // Per-tenant entitlement for the Market Intelligence module
   // (Expedia scraper + pricing rules + suggestions inbox). Opt-in,
   // gated by super-admin from the /tenants page. When false the module
