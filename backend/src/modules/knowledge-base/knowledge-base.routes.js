@@ -1,9 +1,19 @@
 import { Router } from 'express';
 import { knowledgeBaseService } from './knowledge-base.service.js';
-import { isSuperAdmin } from '../../middleware/auth.js';
+import { isSuperAdmin, requireRole } from '../../middleware/auth.js';
 import { AppError } from '../../lib/errors.js';
 
 export const knowledgeBaseRouter = Router();
+
+// Reading is open to every authenticated member of staff — that is the point
+// of a knowledge base, and Ride University's modules render from it.
+//
+// WRITING was open to them too (found 2026-08-14): the mount in main.js only
+// applies requireAuth, and none of the create/update/delete/seed handlers
+// carried a role check despite the comments claiming admin-only. Any AGENT
+// could rewrite or delete the company's training material. Gated here, at the
+// routes, so the guard sits next to the thing it guards.
+const requireContentAuthor = requireRole('SUPER_ADMIN', 'ADMIN', 'OPS');
 
 function scopeFor(req) {
   if (isSuperAdmin(req.user)) return req.query?.tenantId ? { tenantId: String(req.query.tenantId) } : {};
@@ -37,7 +47,7 @@ knowledgeBaseRouter.get('/article/:slug', async (req, res, next) => {
 });
 
 // Create article (admin only)
-knowledgeBaseRouter.post('/', async (req, res, next) => {
+knowledgeBaseRouter.post('/', requireContentAuthor, async (req, res, next) => {
   try {
     const scope = scopeFor(req);
     res.status(201).json(await knowledgeBaseService.create(req.body || {}, {
@@ -50,14 +60,14 @@ knowledgeBaseRouter.post('/', async (req, res, next) => {
 });
 
 // Update article
-knowledgeBaseRouter.patch('/:id', async (req, res, next) => {
+knowledgeBaseRouter.patch('/:id', requireContentAuthor, async (req, res, next) => {
   try {
     res.json(await knowledgeBaseService.update(req.params.id, req.body || {}, scopeFor(req)));
   } catch (e) { next(e); }
 });
 
 // Delete article
-knowledgeBaseRouter.delete('/:id', async (req, res, next) => {
+knowledgeBaseRouter.delete('/:id', requireContentAuthor, async (req, res, next) => {
   try {
     res.json(await knowledgeBaseService.delete(req.params.id, scopeFor(req)));
   } catch (e) { next(e); }
@@ -71,7 +81,7 @@ knowledgeBaseRouter.post('/:id/helpful', async (req, res, next) => {
 });
 
 // Seed default articles
-knowledgeBaseRouter.post('/seed', async (req, res, next) => {
+knowledgeBaseRouter.post('/seed', requireContentAuthor, async (req, res, next) => {
   try {
     const scope = scopeFor(req);
     res.json(await knowledgeBaseService.seedDefaults({
