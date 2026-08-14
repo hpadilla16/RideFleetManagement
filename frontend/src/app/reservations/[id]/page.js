@@ -187,10 +187,56 @@ function LongTermPill({ kind, children }) {
   );
 }
 
-function LongTermPlanPanel({ reservationId, token }) {
+// A monthly plan only makes sense on a rental long enough to bill in cycles.
+// 25 days rather than 30: a 28-day booking is plainly monthly, and the cycle
+// length is configurable anyway.
+const MONTHLY_MIN_DAYS = 25;
+
+function RENTAL_DAYS(reservation) {
+  const a = new Date(reservation?.pickupAt);
+  const b = new Date(reservation?.returnAt);
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return 0;
+  return Math.round((b - a) / 86400000);
+}
+
+function ELIGIBLE_FOR_MONTHLY(reservation) {
+  if (!reservation) return false;
+  // A finished or abandoned rental has nothing left to bill in cycles.
+  const status = String(reservation.status || '').toUpperCase();
+  if (['CANCELLED', 'NO_SHOW', 'CHECKED_IN'].includes(status)) return false;
+  return RENTAL_DAYS(reservation) >= MONTHLY_MIN_DAYS;
+}
+
+function LongTermPlanPanel({ reservationId, token, reservation }) {
   const [plan, setPlan] = useState(null);
   const [planMsg, setPlanMsg] = useState('');
   const [planBusy, setPlanBusy] = useState(false);
+  const [newPlan, setNewPlan] = useState({
+    cycleLengthDays: '30', cycleRate: '', includedMilesPerCycle: '3000', autoRenew: true
+  });
+
+  // Attach a plan to a reservation that was booked without one.
+  const activatePlan = async () => {
+    try {
+      setPlanBusy(true);
+      setPlanMsg('');
+      const body = {
+        cycleLengthDays: Number(newPlan.cycleLengthDays || 30),
+        includedMilesPerCycle: Number(newPlan.includedMilesPerCycle || 3000),
+        autoRenew: !!newPlan.autoRenew
+      };
+      if (String(newPlan.cycleRate || '').trim()) body.cycleRate = Number(newPlan.cycleRate);
+      await api(`/api/long-term/reservations/${reservationId}/plan`, {
+        method: 'POST', body: JSON.stringify(body)
+      }, token);
+      await loadPlan();
+      setPlanMsg('Monthly plan activated.');
+    } catch (err) {
+      setPlanMsg(err?.message || 'Could not activate the monthly plan.');
+    } finally {
+      setPlanBusy(false);
+    }
+  };
 
   const loadPlan = async () => {
     try {
@@ -204,7 +250,58 @@ function LongTermPlanPanel({ reservationId, token }) {
 
   useEffect(() => { if (reservationId) loadPlan(); }, [reservationId, token]);
 
-  if (!plan) return null;
+  // No plan attached. Historically this rendered nothing, which meant a
+  // monthly rental booked through a form that never offered the option — the
+  // v2 wizard until 2026-08-14 — could not be turned into one afterwards from
+  // anywhere in the UI. The only fix was to delete and re-book.
+  //
+  // Shown only on rentals long enough to plausibly be monthly, so the ordinary
+  // two-day rental keeps a clean page.
+  if (!plan) {
+    if (!ELIGIBLE_FOR_MONTHLY(reservation)) return null;
+    return (
+      <div className="glass card" style={{ marginTop: 12, padding: 12 }}>
+        <div className="row-between" style={{ marginBottom: 6 }}>
+          <strong>Monthly plan</strong>
+          <span className="ui-muted" style={{ fontSize: 12 }}>Not attached</span>
+        </div>
+        <div className="ui-muted" style={{ fontSize: 12, marginBottom: 10 }}>
+          This rental runs {RENTAL_DAYS(reservation)} days but bills as a daily rate. Attaching a
+          monthly plan switches it to billing cycles, with mileage allowance and renewal handling.
+        </div>
+        <div className="app-card-grid compact">
+          <div className="stack" style={{ gap: 4 }}>
+            <label className="label">Cycle length (days)</label>
+            <input type="number" min="1" value={newPlan.cycleLengthDays}
+              onChange={(ev) => setNewPlan({ ...newPlan, cycleLengthDays: ev.target.value })} />
+          </div>
+          <div className="stack" style={{ gap: 4 }}>
+            <label className="label">Cycle rate</label>
+            <input type="number" min="0" step="0.01" placeholder="auto from monthly rate settings"
+              value={newPlan.cycleRate}
+              onChange={(ev) => setNewPlan({ ...newPlan, cycleRate: ev.target.value })} />
+          </div>
+          <div className="stack" style={{ gap: 4 }}>
+            <label className="label">Included miles per cycle</label>
+            <input type="number" min="0" value={newPlan.includedMilesPerCycle}
+              onChange={(ev) => setNewPlan({ ...newPlan, includedMilesPerCycle: ev.target.value })} />
+          </div>
+          <div className="stack" style={{ gap: 4, justifyContent: 'end' }}>
+            <label className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
+              <input type="checkbox" checked={newPlan.autoRenew}
+                onChange={(ev) => setNewPlan({ ...newPlan, autoRenew: ev.target.checked })} /> Renew every cycle automatically
+            </label>
+          </div>
+        </div>
+        <div className="inline-actions" style={{ marginTop: 10 }}>
+          <button type="button" onClick={activatePlan} disabled={planBusy}>
+            {planBusy ? 'Activating…' : 'Activate monthly plan'}
+          </button>
+        </div>
+        {planMsg ? <div className="ui-muted" style={{ fontSize: 12, marginTop: 8 }}>{planMsg}</div> : null}
+      </div>
+    );
+  }
 
   const cycles = Array.isArray(plan.billingCycles) ? plan.billingCycles : [];
 
@@ -3052,7 +3149,7 @@ token
 
           {/* Long-Term Plan — renders nothing unless a LongTermPlan is attached
               (explicit Monthly opt-in at creation). */}
-          <LongTermPlanPanel reservationId={id} token={token} />
+          <LongTermPlanPanel reservationId={id} token={token} reservation={row} />
           <AdminCorrectionsPanel reservationId={id} token={token} me={me} onChanged={load} />
           <CorrectReadingsPanel reservationId={id} token={token} me={me} agreement={agreementFull} onChanged={load} />
 
