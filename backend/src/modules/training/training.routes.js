@@ -9,7 +9,7 @@
  * anyone could arm or complete a module on somebody else's record.
  */
 import { Router } from 'express';
-import { requireRole } from '../../middleware/auth.js';
+import { requireRole, isSuperAdmin } from '../../middleware/auth.js';
 import { trainingService } from './training.service.js';
 
 export const trainingRouter = Router();
@@ -18,6 +18,18 @@ const actorOf = (req) => ({
   tenantId: req.user?.tenantId || null,
   userId: req.user?.id || req.user?.sub || null,
 });
+
+/**
+ * Which tenant's team to report on.
+ *
+ * A SUPER_ADMIN usually carries no tenantId of their own, so without this they
+ * would see an empty team on every tenant — the same trap the command palette
+ * fell into. They pick a tenant; everyone else is pinned to theirs and the
+ * query parameter is ignored.
+ */
+const teamTenantOf = (req) => (isSuperAdmin(req.user)
+  ? (req.query?.tenantId ? String(req.query.tenantId) : req.user?.tenantId || null)
+  : req.user?.tenantId || null);
 
 /** My progress, after settling anything the records now prove. */
 trainingRouter.get('/progress', async (req, res, next) => {
@@ -80,7 +92,7 @@ trainingRouter.post('/progress/:moduleKey/walkthrough-complete', async (req, res
  */
 trainingRouter.get('/team', requireRole('SUPER_ADMIN', 'ADMIN', 'OPS'), async (req, res, next) => {
   try {
-    const { tenantId } = actorOf(req);
+    const tenantId = teamTenantOf(req);
     if (!tenantId) return res.json({ team: [] });
     let available = {};
     try {
