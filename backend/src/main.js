@@ -91,6 +91,7 @@ import { startCheckoutSessionCleanupScheduler, stopCheckoutSessionCleanupSchedul
 import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 import { smsRouter } from './modules/sms/sms.routes.js';
 import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
+import { trainingRouter } from './modules/training/training.routes.js';
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
 import { economyRouter } from './modules/integrations/economy/economy.routes.js';
 import { nuRouter } from './modules/integrations/nu/nu.routes.js';
@@ -255,6 +256,9 @@ app.use('/api/quotes', requireAuth, tenantRateLimit, requireModuleAccess('quotes
 app.use('/api/payment-gateway', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), paymentGatewayRouter);
 app.use('/api/sms', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), smsRouter);
 app.use('/api/knowledge-base', requireAuth, tenantRateLimit, knowledgeBaseRouter);
+// Ride University progress. No module gate: training is not a paid feature,
+// and a person must always be able to see where they stand.
+app.use('/api/training', requireAuth, tenantRateLimit, trainingRouter);
 app.use('/api/admin/integrations/tl-international', tenantRateLimit, tlInternationalRouter);
 // Economy (RezLight) booking-source integration (Fase 5, 2026-07-09) — mounted
 // identically to TL. Routes/config always available; ECONOMY_INTEGRATION_ENABLED

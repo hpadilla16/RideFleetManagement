@@ -1245,6 +1245,48 @@ model OverdueVehicleAlert {
   @@index([reservationId, status])
 }
 
+// Ride University — one row per person per module (2026-08-14).
+//
+// The MODULES themselves are not here. They live in
+// frontend/src/lib/training/curriculum.js, which the tour, the articles and
+// the video scripts all render from; putting them in the database too would
+// give the curriculum two homes and one of them would go stale. Only the
+// PROGRESS is state, so only the progress is stored.
+//
+// pointsAwarded is snapshotted at completion on purpose. Re-weighting a module
+// later must not silently rewrite what someone already earned — the
+// denominator is computed live from the curriculum instead, which also keeps
+// the manager view honest when a role's total changes.
+//
+// Shaped after IdempotencyKey: the same per-user keyed row this codebase
+// already uses.
+model TrainingProgress {
+  id        String @id @default(cuid())
+  tenantId  String
+  userId    String
+  moduleKey String
+
+  // NOT_STARTED is simply the absence of a row.
+  //   ARMED     — an opportunistic module waiting for the person to do the
+  //               real work; completion is proved from domain records.
+  //   COMPLETED — proved, and points awarded.
+  status String @default("ARMED")
+
+  armedAt       DateTime  @default(now())
+  completedAt   DateTime?
+  pointsAwarded Int       @default(0)
+  // What proved it — e.g. the reservation they created. Kept so a disputed
+  // completion can be traced back to the record, not just a timestamp.
+  provenBy      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, moduleKey])
+  @@index([tenantId, status])
+  @@index([tenantId, userId])
+}
+
 model Customer {
   id                       String    @id @default(cuid())
   tenantId                 String?
@@ -2869,12 +2911,21 @@ model ReservationPayment {
 
   rentalAgreementPaymentId String?
 
+  // Who took this payment (2026-08-14). The row recorded the money and the
+  // method but never the person, so "who ran this charge?" could only be
+  // inferred from an audit row that attributes a balance-settling payment to a
+  // STATUS CHANGE rather than to the payment. Ride University's
+  // PAYMENT_RECORDED check needs the plain fact — and so does anyone
+  // reconciling a drawer. Nullable: historic rows genuinely do not know.
+  recordedByUserId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([reservationId, paidAt])
   @@index([reference])
   @@index([status, paidAt])
+  @@index([recordedByUserId, paidAt])
 }
 
 model ReservationAdditionalDriver {

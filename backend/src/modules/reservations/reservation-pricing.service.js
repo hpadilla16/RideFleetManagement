@@ -1655,7 +1655,11 @@ export const reservationPricingService = {
       paidAt,
       origin: normalizePaymentOrigin(payload.origin),
       gateway: payload.gateway ? String(payload.gateway).trim() : null,
-      notes: payload.notes ? String(payload.notes) : null
+      notes: payload.notes ? String(payload.notes) : null,
+      // Who took it (2026-08-14). The actor was already threaded in here for
+      // the audit row; it just never landed on the payment itself, so the row
+      // that holds the money could not say who handled it.
+      recordedByUserId: actorUserId || null
     };
 
     // B5 Phase 1 idempotency floor (2026-07-24). A partial unique index covers
