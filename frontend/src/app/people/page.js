@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { TeamTraining } from '../../components/training/TeamTraining';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
@@ -360,6 +361,10 @@ function Inner({ token, me, logout }) {
       </section>
 
       {msg ? <div className="surface-note" style={{ marginBottom: 16 }}>{msg}</div> : null}
+
+      {/* Ride University standing, per person. Renders nothing for a role
+          without permission, or before anyone has staff who can sign in. */}
+      <TeamTraining token={token} people={people} scopedQuery={scopedQuery} />
 
       <section className="glass card-lg section-card" style={{ marginBottom: 18 }}>
         <div className="app-banner">
