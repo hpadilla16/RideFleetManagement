@@ -1,3 +1,8 @@
+> **OBSOLETO (2026-08-15).** Este documento describe un scraper Node contra
+> Bright Data que YA NO EXISTE. El scraper real es un repo Python/Scrapfly en
+> su propio droplet (138.197.27.209, /root/ridefleet-kayak-scraper). No sigas
+> estas instrucciones; se conservan solo como historia.
+
 # Market Scraper Droplet Setup
 
 One-time provisioning + setup guide for the market intelligence scraper. The

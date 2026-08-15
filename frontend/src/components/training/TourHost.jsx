@@ -26,8 +26,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createPortal } from 'react-dom';
 import { useRouter, usePathname } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
-import { TOUR_TRACKS, stepsForTrack, stepsForModule } from '../../lib/training/curriculum.js';
-import { stepKey, trainingText } from '../../lib/training/i18n-keys.js';
+import { TOUR_TRACKS, stepsForTrack, stepsForModule, findModule } from '../../lib/training/curriculum.js';
+import { stepKey, moduleKey as mKeyOf, trainingText } from '../../lib/training/i18n-keys.js';
 import {
   TOUR_STORAGE_KEY, TOUR_END,
   startTour, settleStart, currentStep, advance, retreat, dismiss,
@@ -234,6 +234,15 @@ export function TourHost({ viewer }) {
   const isShowcase = state.track === TOUR_TRACKS.SHOWCASE;
   const title = trainingText(t, stepKey(step.moduleKey, step, 'title'), step.title);
   const body = trainingText(t, stepKey(step.moduleKey, step, 'body'), step.body);
+  // The gotcha surfaces on a module's LAST step — the mistake people actually
+  // make, shown at the moment the walkthrough wraps that task. Boundary =
+  // the next step belongs to a different module, or there is no next step.
+  const nextStep = steps[state.index + 1];
+  const atModuleEnd = !nextStep || nextStep.moduleKey !== step.moduleKey;
+  const gotchaModule = atModuleEnd ? findModule(step.moduleKey) : null;
+  const gotcha = gotchaModule?.gotcha
+    ? trainingText(t, mKeyOf(gotchaModule, 'gotcha'), gotchaModule.gotcha)
+    : null;
 
   // Card goes below the element, or above when there is no room beneath.
   const vh = window.innerHeight;
@@ -301,6 +310,14 @@ export function TourHost({ viewer }) {
 
         <h3 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 700 }}>{title}</h3>
         <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: 'var(--text-2, #4a4258)' }}>{body}</p>
+        {gotcha && (
+          <p style={{ margin: '10px 0 0', background: '#f8efe0', borderRadius: 8, padding: '8px 10px', fontSize: 12, lineHeight: 1.5, color: 'var(--text-2, #4a4258)' }}>
+            <span style={{ display: 'block', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#9a5b12', fontWeight: 700, marginBottom: 2 }}>
+              {t('training.gotchaLabel', 'Where people trip')}
+            </span>
+            {gotcha}
+          </p>
+        )}
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12 }}>
           <button type="button" onClick={back} disabled={position <= 1} style={btn(false)}>
