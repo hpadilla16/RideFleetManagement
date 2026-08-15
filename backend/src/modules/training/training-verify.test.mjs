@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { findProof, pointsFor, standing, PROOF_SHAPE, VERIFY_TYPES } from './training-verify.js';
+import { findProof, pointsFor, standing, parseArmStamp, canCompleteByWalkthrough, PROOF_SHAPE, VERIFY_TYPES } from './training-verify.js';
 
 const ARMED = '2026-08-14T12:00:00.000Z';
 const AFTER = '2026-08-14T15:00:00.000Z';
@@ -104,6 +104,36 @@ test('missing inputs are answered, not thrown', () => {
   assert.equal(findProof({ verifyType: 'RESERVATION_CREATED', records: [null], userId: ME, armedAt: ARMED }).proved, false);
   assert.equal(findProof({ verifyType: 'RESERVATION_CREATED', records: [{ id: 'x', createdByUserId: ME }], userId: ME, armedAt: ARMED }).proved, false);
   assert.equal(findProof({ verifyType: 'RESERVATION_CREATED', records: [], userId: ME, armedAt: null }).proved, false);
+});
+
+test('the arm stamp round-trips, and an empty verify type is preserved', () => {
+  assert.deepEqual(parseArmStamp('pending:RESERVATION_CREATED:20'), { armed: true, verifyType: 'RESERVATION_CREATED', points: 20 });
+  assert.deepEqual(parseArmStamp('pending::5'), { armed: true, verifyType: null, points: 5 });
+  assert.equal(parseArmStamp(null).armed, false);
+  assert.equal(parseArmStamp('walkthrough').armed, false);
+  assert.equal(parseArmStamp('some-record-id').armed, false);
+});
+
+test('walking a guide completes a module with nothing to prove', () => {
+  assert.equal(canCompleteByWalkthrough({ status: 'ARMED', provenBy: 'pending::5' }), true);
+});
+
+test('walking a guide can NEVER complete a module that needs real work', () => {
+  // The security boundary: otherwise anyone earns the 20 points for
+  // 'create a reservation' by clicking Next five times.
+  for (const type of VERIFY_TYPES) {
+    assert.equal(
+      canCompleteByWalkthrough({ status: 'ARMED', provenBy: `pending:${type}:20` }),
+      false,
+      `${type} was completable by walking`
+    );
+  }
+});
+
+test('an already-completed or unstamped module is not completable again', () => {
+  assert.equal(canCompleteByWalkthrough({ status: 'COMPLETED', provenBy: 'pending::5' }), false);
+  assert.equal(canCompleteByWalkthrough({ status: 'ARMED', provenBy: null }), false);
+  assert.equal(canCompleteByWalkthrough(null), false);
 });
 
 test('points are whole and never negative', () => {

@@ -51,6 +51,27 @@ trainingRouter.post('/progress/:moduleKey/arm', async (req, res, next) => {
 });
 
 /**
+ * Reached the end of a module's steps.
+ *
+ * Completes it ONLY if the module has nothing to prove — the service checks
+ * that against what was stamped at arming, so walking a guide can never
+ * complete a module whose point is doing the real work.
+ */
+trainingRouter.post('/progress/:moduleKey/walkthrough-complete', async (req, res, next) => {
+  try {
+    const who = actorOf(req);
+    if (!who.tenantId || !who.userId) return res.status(400).json({ error: 'A tenant and a user are required' });
+    const row = await trainingService.completeWalkthrough({ ...who, moduleKey: String(req.params.moduleKey) });
+    res.json(row);
+  } catch (e) {
+    if (/required|not started/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
+/**
  * Who on the team is trained.
  *
  * pointsAvailableByUser is supplied by the caller because it depends on each

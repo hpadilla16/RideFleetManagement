@@ -80,6 +80,38 @@ export function findProof({ verifyType, records = [], userId, armedAt }) {
 }
 
 /**
+ * Read the stamp written when a module was armed: `pending:<verifyType>:<points>`.
+ *
+ * The middle field being EMPTY is the whole security boundary. It says the
+ * module had nothing to prove when it was armed, which is the only condition
+ * under which reaching the end of a guide may complete it. Because the stamp
+ * is written server-side at arming, a client cannot later claim a module is
+ * verify-less in order to walk its way to the points.
+ */
+export function parseArmStamp(provenBy) {
+  const parts = String(provenBy || '').split(':');
+  if (parts[0] !== 'pending') return { armed: false, verifyType: null, points: 0 };
+  return {
+    armed: true,
+    verifyType: parts[1] || null,
+    points: Number(parts[2]) || 0,
+  };
+}
+
+/**
+ * May finishing the walkthrough complete this module?
+ *
+ * Only when nothing was ever going to prove it. A module with real work behind
+ * it stays armed however many times someone walks the guide — walking is not
+ * doing the job.
+ */
+export function canCompleteByWalkthrough(row) {
+  if (!row || row.status !== 'ARMED') return false;
+  const { armed, verifyType } = parseArmStamp(row.provenBy);
+  return armed && !verifyType;
+}
+
+/**
  * Points for a completion. Snapshotted by the caller at the moment it is
  * proved, so re-weighting the curriculum later never rewrites history.
  */
