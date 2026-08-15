@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { AppError } from '../../lib/errors.js';
 import { publicBookingService } from './public-booking.service.js';
 import { createGuestPaymentSession, renderReturnPage } from './payment-session.service.js';
 import {
@@ -220,6 +221,11 @@ publicBookingRouter.post('/guest-signin/request', bookingWriteGuard, async (req,
     assertPlainObject(req.body || {}, 'guest sign-in request payload');
     res.json(await publicBookingService.requestGuestSignIn(req.body || {}));
   } catch (error) {
+    // Typed errors carry their own status. The message-grep below stays for
+    // the older throws in this service, but it is the fallback now, not the
+    // mechanism — 'No guest account found' never matched /not found/ and so
+    // reached the 500 handler (2026-08-14).
+    if (error instanceof AppError) return res.status(error.status).json({ error: error.message });
     if (/required|not found/i.test(String(error?.message || ''))) {
       return res.status(400).json({ error: error.message });
     }

@@ -915,5 +915,220 @@
     "railDetail": "{{count}} cliente(s) esperando recogido en el aeropuerto",
     "railNote": "Chloe validó la reserva; el piso despacha la guagua.",
     "railOpen": "Abrir cola"
+  },
+  "training": {
+    "courses": {
+      "orientation": {
+        "title": "Cómo moverte",
+        "summary": "Dónde vive cada cosa, y cómo encontrar cualquier cosa rápido."
+      },
+      "counter": {
+        "title": "Trabajando el counter",
+        "summary": "Todo lo que pasa con un cliente parado frente a ti."
+      },
+      "fleet": {
+        "title": "Cuidando la flota",
+        "summary": "Para quien está pendiente de los carros y no del mostrador."
+      },
+      "running-it": {
+        "title": "Administrando la operación",
+        "summary": "Se configura pocas veces, y sale caro hacerlo mal."
+      }
+    },
+    "modules": {
+      "the-workspace": {
+        "title": "El área de trabajo",
+        "summary": "El dashboard, el menú, y cómo buscar desde cualquier pantalla.",
+        "gotcha": "Un número que no se pudo cargar sale como raya, no como cero. La raya significa que no se pudo leer el dato — no que no pasó nada.",
+        "steps": {
+          "nav-dashboard": {
+            "title": "Este es tu día",
+            "body": "Recogidas y devoluciones de la fecha que estés viendo, lo que está vencido, y lo que necesita atención. Cada tarjeta te lleva a la lista que hay detrás."
+          },
+          "global-search": {
+            "title": "Busca cualquier cosa desde aquí",
+            "body": "Por nombre del cliente, número de reserva, tablilla — o por la referencia de un pago, si el agente la anotó. Nunca tienes que acordarte de en qué pantalla vive algo."
+          },
+          "nav-reservations": {
+            "title": "En Reservations pasa el trabajo",
+            "body": "Crear, entregar, recibir, cobrar y extender — todo arranca aquí."
+          },
+          "nav-university": {
+            "title": "Ride University",
+            "body": "Todos los módulos que puedes tomar, tu progreso, y las guías. Desde aquí puedes volver a correr este tour cuando quieras."
+          }
+        }
+      },
+      "find-reservation": {
+        "title": "Buscar una reserva",
+        "summary": "Por nombre, número, tablilla o referencia de pago.",
+        "gotcha": "Que un número de reserva incompleto no devuelva nada no significa que la reserva no exista. La búsqueda también encuentra por el cliente, la tablilla, y los últimos cuatro de la tarjeta cuando se anotaron en la referencia del pago.",
+        "steps": {
+          "nav-reservations": {
+            "title": "Abre reservations",
+            "body": "La lista completa, la más nueva primero."
+          },
+          "reservations-filters": {
+            "title": "Filtra a lo que necesitas",
+            "body": "Recogidas de hoy, devoluciones de hoy, o todo lo vencido. Una renta cuenta como vencida en el momento en que pasa su hora de devolución — no a medianoche."
+          }
+        }
+      },
+      "create-reservation": {
+        "title": "Crear una reserva",
+        "summary": "Reservar un carro desde cero, de principio a fin.",
+        "gotcha": "El mínimo son 24 horas, salvo que la clase de vehículo tenga tarifa por hora configurada. Y mensual se escoge en el primer paso — si lo decides después, hay que adjuntar el plan desde la página de la reserva.",
+        "steps": {
+          "new-reservation-v2": {
+            "title": "Empieza una reserva nueva",
+            "body": "Esto abre el asistente de cuatro pasos, con la cotización actualizándose al lado durante todo el proceso."
+          },
+          "wizard-step-dates": {
+            "title": "Primero fechas y ubicaciones",
+            "body": "Recogida y devolución, y de dónde sale el carro y a dónde regresa. Aquí también escoges el tipo de tarifa — diaria, o mensual para una renta larga."
+          },
+          "wizard-step-vehicle": {
+            "title": "Escoge la clase",
+            "body": "La cotización se actualiza mientras escoges, así que le puedes decir el precio al cliente antes de comprometerte a nada."
+          },
+          "wizard-step-customer": {
+            "title": "Busca o crea el cliente",
+            "body": "Busca primero — la mayoría ya está. Crear un duplicado parte su historial de rentas en dos."
+          },
+          "wizard-step-review": {
+            "title": "Revisa, y confirma",
+            "body": "Ahora hazlo de verdad: completa esta reserva y el módulo se marca terminado solo."
+          }
+        }
+      },
+      "check-out": {
+        "title": "Entregar un vehículo",
+        "summary": "Contrato, términos, pago, fotos, firma.",
+        "gotcha": "El paso de las fotos se siente saltable cuando el lote está lleno. Es la única evidencia de cómo estaba el carro al entregarlo — y en el check-in el agente ve esas mismas fotos al lado de la cámara.",
+        "steps": {
+          "reservation-checkout": {
+            "title": "Empieza la entrega",
+            "body": "El asistente recorre toda la entrega en orden y no te deja saltar lo que importa."
+          },
+          "checkout-terms": {
+            "title": "Términos, firmados por el cliente",
+            "body": "Esta es la autorización para los cargos después de la renta — gasolina, millaje, limpieza, peajes, daños. Sin ella esos cargos no tienen base."
+          },
+          "checkout-inspection-handoff": {
+            "title": "Pásale la inspección a un teléfono",
+            "body": "Esto genera un código para el teléfono que va al lote. Allá se capturan los ocho ángulos — frente, atrás, ambos lados, ambos asientos, tablero, baúl — y regresan a esta renta. Noventa segundos ahora resuelven una discusión semanas después."
+          }
+        }
+      },
+      "check-in": {
+        "title": "Recibir un vehículo",
+        "summary": "Fotos contra las de la entrega, lecturas, cargos, balance.",
+        "gotcha": "Cuando el cliente devolvió a tiempo pero el check-in se registra tarde, el cargo por tardanza se calcula desde el momento del check-in — salvo que un admin ponga la fecha real de devolución, un campo que solo le aparece a los admin pasado el período de gracia.",
+        "steps": {
+          "reservation-checkin": {
+            "title": "Empieza la devolución",
+            "body": "Igual que la entrega, al revés."
+          },
+          "checkin-photos": {
+            "title": "La foto de la entrega está justo ahí",
+            "body": "Cada ángulo te muestra cómo salió el carro del lote, al lado de tu cámara en vivo. Cualquier cosa nueva se anota aquí, mientras el cliente todavía está frente a ti."
+          },
+          "checkin-metrics": {
+            "title": "Millaje, gasolina, limpieza",
+            "body": "Los cargos se calculan de estos datos mientras escribes, así que le puedes decir el total al cliente antes de cobrárselo."
+          }
+        }
+      },
+      "take-payment": {
+        "title": "Cobrar un pago",
+        "summary": "Tarjeta, efectivo o cheque — y que se pueda encontrar después.",
+        "gotcha": "El campo de referencia es lo que hace que un pago se pueda encontrar meses después. Ponle el número de recibo o de autorización, más los últimos cuatro de la tarjeta — sin eso, contestar \"¿quién pagó con la tarjeta que termina en 1234?\" significa abrir reservas una por una.",
+        "steps": {
+          "reservation-payments": {
+            "title": "Abre los pagos",
+            "body": "Todo lo cobrado y lo recibido en esta renta, en un solo lugar."
+          },
+          "payment-reference": {
+            "title": "Siempre llena la referencia",
+            "body": "Número de recibo o autorización, más los últimos cuatro de la tarjeta. Este es el único hábito que hace que el dinero se pueda buscar."
+          }
+        }
+      },
+      "overdue-returns": {
+        "title": "Perseguir una devolución vencida",
+        "summary": "Encontrarlas, y encontrar el carro.",
+        "gotcha": "Un carro parado en uno de tus propios lotes no levanta alerta. Eso es un check-in que se olvidó, no un carro perdido — dos problemas distintos con soluciones distintas.",
+        "steps": {
+          "kpi-overdue": {
+            "title": "Lo vencido, de un vistazo",
+            "body": "Haz clic para ver la lista. Una renta está vencida en el momento en que pasa su hora de devolución."
+          },
+          "overdue-alerts": {
+            "title": "Dónde está el carro de verdad",
+            "body": "Con GPS conectado, cualquier vencido que esté fuera de todas tus sucursales levanta una alerta aquí, con la distancia y un enlace al mapa. Que no aparezca nada significa que no falta nada."
+          }
+        }
+      },
+      "availability": {
+        "title": "Ver disponibilidad",
+        "summary": "Qué está libre, qué está afuera, qué está fuera de servicio.",
+        "gotcha": "Si cambiaste tu vista a una ubicación, los exports siguen esa vista. Vuelve a todas las ubicaciones antes de exportar un inventario de toda la flota.",
+        "steps": {
+          "nav-reports": {
+            "title": "Disponibilidad por clase",
+            "body": "Disponible, reservado, rentado, en mantenimiento — por clase de vehículo, ahora mismo."
+          },
+          "report-export": {
+            "title": "Exporta el listado",
+            "body": "PDF o Excel, y ahora ambos traen cada vehículo con su estado, no solo los totales."
+          }
+        }
+      },
+      "users-and-locations": {
+        "title": "Añadir un usuario y darle alcance",
+        "summary": "Roles, y cuáles sucursales puede ver.",
+        "gotcha": "Un agente limitado a ciertas ubicaciones ve solo sus sucursales en todas partes — incluyendo desde cuáles puede reservar. Si un agente no puede crear una reserva, revisa primero su alcance de ubicaciones.",
+        "steps": {
+          "nav-people": {
+            "title": "Personas",
+            "body": "Todos los que tienen acceso, y hasta dónde llegan."
+          },
+          "view-location-switcher": {
+            "title": "Viendo como una sucursal",
+            "body": "Cualquiera con más de una ubicación tiene este selector. Cambia lo que ve en todas partes — incluyendo lo que traen sus exports."
+          }
+        }
+      },
+      "incoming-bookings": {
+        "title": "Reservas que entran solas",
+        "summary": "Feeds de franquicias y brokers, y la bandeja de revisión.",
+        "gotcha": "Una reserva en la bandeja de revisión no es un error. Es el sistema negándose a adivinar — casi siempre un cliente que no pudo emparejar con confianza.",
+        "steps": {
+          "nav-settings": {
+            "title": "Integraciones",
+            "body": "Cada franquicia o broker conectado trae sus reservas en horario, emparejadas con el cliente y revisadas por duplicados antes de que alguien las vea."
+          },
+          "pending-imports": {
+            "title": "La bandeja de revisión",
+            "body": "Lo que no emparejó limpio espera aquí con lo que el sistema encontró, para que una persona decida. Se esconde sola cuando no hay nada esperando — una pantalla vacía es buena noticia."
+          }
+        }
+      },
+      "market-pricing": {
+        "title": "Poner precio contra el mercado",
+        "summary": "Lo que cobra la competencia, al lado de lo que cobras tú.",
+        "gotcha": "Los precios se actualizan todas las noches, no en tiempo real. Y los filtros de días son qué tan adelantada está la recogida — la ventana de reserva — no cuánto dura la renta.",
+        "steps": {
+          "nav-market": {
+            "title": "El mercado, por clase",
+            "body": "Ofertas de la competencia recogidas cada noche de los principales sitios de reserva, mapeadas a las mismas clases de vehículo que usa tu flota."
+          },
+          "market-strategy": {
+            "title": "Dónde rinde la estrategia",
+            "body": "Tú escoges dónde quieres estar — el segundo más barato, por ejemplo — y cuánto puede moverse un precio por su cuenta. Lo que se pase de ahí cae en esta bandeja para que lo apruebes."
+          }
+        }
+      }
+    }
   }
 }

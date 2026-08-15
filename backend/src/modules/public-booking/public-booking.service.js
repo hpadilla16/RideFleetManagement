@@ -1,4 +1,5 @@
 import { bookingEngineService } from '../booking-engine/booking-engine.service.js';
+import { ValidationError } from '../../lib/errors.js';
 import { issueCenterService } from '../issue-center/issue-center.service.js';
 import { hostReviewsService } from '../host-reviews/host-reviews.service.js';
 import { authService } from '../auth/auth.service.js';
@@ -659,7 +660,11 @@ export const publicBookingService = {
       }
     });
 
-    if (!matchingCustomers.length) throw new Error('No guest account found for that email');
+    // Typed, not a bare Error: the route classified failures by grepping the
+    // MESSAGE for /required|not found/, and this wording ('No guest account
+    // found') never matched, so a customer typing an unknown email got a 500
+    // and tripped the ops pager (2026-08-14).
+    if (!matchingCustomers.length) throw new ValidationError('No guest account found for that email');
 
     return issueGuestAccess({
       customers: matchingCustomers,
