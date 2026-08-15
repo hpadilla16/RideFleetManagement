@@ -92,6 +92,7 @@ import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 import { smsRouter } from './modules/sms/sms.routes.js';
 import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
 import { trainingRouter } from './modules/training/training.routes.js';
+import { shuttleTrackerPublicRouter } from './modules/shuttle/shuttle-tracker.routes.js';
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
 import { economyRouter } from './modules/integrations/economy/economy.routes.js';
 import { nuRouter } from './modules/integrations/nu/nu.routes.js';
@@ -228,6 +229,9 @@ app.use('/api/public/addendum-signature', addendumSignaturePublicRouter);
 app.use('/api/public/store-board', storeBoardPublicRouter);
 app.use('/api/public/issues', publicIssueCenterRouter);
 app.use('/api/public/telematics', publicVehicleTelematicsRouter);
+// Shuttle tracker: token-only public read, one whitelisted payload. The
+// token resolves everything; unusable tokens are a uniform 404.
+app.use('/api/public/shuttle', shuttleTrackerPublicRouter);
 app.use('/api/host-app', requireAuth, tenantRateLimit, requireModuleAccess('hostApp'), hostAppRouter);
 app.use('/api/employee-app', requireAuth, tenantRateLimit, requireModuleAccess('employeeApp'), employeeAppRouter);
 app.use('/api/dealership-loaner', requireAuth, tenantRateLimit, requireModuleAccess('loaner'), dealershipLoanerRouter);

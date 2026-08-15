@@ -244,6 +244,17 @@ async function main() {
     });
   }
 
+  // Shuttle fast poll (2026-08-15) — demand-driven: fast only while a
+  // customer tracker page is open or a shuttle request is pending. The only
+  // consumer of the VoltSwitch client above the tenant sync.
+  try {
+    const shuttlePollMod = await import('./modules/shuttle/shuttle-fast-poll.scheduler.js');
+    shuttlePollMod.startShuttleFastPollScheduler();
+    logger.info('[worker] started: shuttle fast-poll scheduler');
+  } catch (err) {
+    logger.warn('[worker] shuttle fast-poll scheduler not started', { message: err.message });
+  }
+
   // Voltswitch GPS periodic pull (2026-08-13). Per-tenant interval from
   // Settings > Telematics; only tenants with the connector fully configured
   // (provider VOLTSWITCH + enabled + credentials) are touched. Each tenant
