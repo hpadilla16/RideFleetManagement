@@ -14,7 +14,7 @@
  */
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
-import { findProof, standing, VERIFY_TYPES, PROOF_SHAPE } from './training-verify.js';
+import { findProof, standing, parseArmStamp, canCompleteByWalkthrough, VERIFY_TYPES, PROOF_SHAPE } from './training-verify.js';
 
 /** Nobody earns more than this from one module, whatever the client claims. */
 const MAX_POINTS = 50;
@@ -86,21 +86,55 @@ export const trainingService = {
     if (!tenantId || !userId || !moduleKey) throw new Error('tenantId, userId and moduleKey are required');
     if (verifyType && !VERIFY_TYPES.includes(verifyType)) throw new Error(`Unknown verification type: ${verifyType}`);
 
+    // ALWAYS stamped, even with no verification — the empty middle field is
+    // what later tells the server "this module has nothing to prove, so
+    // finishing the walkthrough is a legitimate completion". Writing null here
+    // is what left every read-only module armed forever (2026-08-15).
+    const stamp = `pending:${verifyType || ''}:${clampPoints(points)}`;
+
     const existing = await prisma.trainingProgress.findUnique({
       where: { userId_moduleKey: { userId, moduleKey } },
     });
-    if (existing) return existing;
+    if (existing) {
+      // Heal a row armed before the stamp existed, without touching armedAt —
+      // re-arming must never reset the clock.
+      if (!existing.provenBy && existing.status === 'ARMED') {
+        return prisma.trainingProgress.update({ where: { id: existing.id }, data: { provenBy: stamp } });
+      }
+      return existing;
+    }
 
     return prisma.trainingProgress.create({
+      data: { tenantId, userId, moduleKey, status: 'ARMED', pointsAwarded: 0, provenBy: stamp },
+    });
+  },
+
+  /**
+   * Finish a module that has nothing to prove.
+   *
+   * Reading a screen leaves no record, so a walkthrough module completes when
+   * the person reaches the end of its steps. THE SERVER decides whether that
+   * is allowed: only a module armed WITHOUT a verify type qualifies, and the
+   * points come from what was stamped at arming — so a client cannot claim it
+   * finished 'create-reservation' by walking the guide, nor invent a score.
+   */
+  async completeWalkthrough({ tenantId, userId, moduleKey }) {
+    if (!tenantId || !userId || !moduleKey) throw new Error('tenantId, userId and moduleKey are required');
+    const row = await prisma.trainingProgress.findUnique({
+      where: { userId_moduleKey: { userId, moduleKey } },
+    });
+    if (!row || row.tenantId !== tenantId) throw new Error('Module not started');
+    // One definition of the rule, in the tested pure module — a module with
+    // real work behind it is never completable by walking the guide.
+    if (!canCompleteByWalkthrough(row)) return row;
+
+    return prisma.trainingProgress.update({
+      where: { id: row.id },
       data: {
-        tenantId,
-        userId,
-        moduleKey,
-        status: 'ARMED',
-        pointsAwarded: 0,
-        // Stash what proves it and what it is worth, so completion never has
-        // to trust whatever the client says at claim time.
-        provenBy: verifyType ? `pending:${verifyType}:${clampPoints(points)}` : null,
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        pointsAwarded: clampPoints(parseArmStamp(row.provenBy).points),
+        provenBy: 'walkthrough',
       },
     });
   },
@@ -121,8 +155,10 @@ export const trainingService = {
 
     const completed = [];
     for (const row of armed) {
-      const [, verifyType, pointsRaw] = String(row.provenBy || '').split(':');
-      if (!verifyType || !PROOF_SHAPE[verifyType]) continue; // read-only module
+      const { verifyType, points } = parseArmStamp(row.provenBy);
+      // No verify type means nothing to prove — those complete when the person
+      // finishes walking the guide, not here.
+      if (!verifyType || !PROOF_SHAPE[verifyType]) continue;
 
       let records = [];
       try {
@@ -141,7 +177,7 @@ export const trainingService = {
         data: {
           status: 'COMPLETED',
           completedAt: new Date(),
-          pointsAwarded: clampPoints(pointsRaw),
+          pointsAwarded: clampPoints(points),
           provenBy: proof.provenBy,
         },
       });

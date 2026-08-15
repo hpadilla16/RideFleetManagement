@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../../lib/client';
 import { COURSES, modulesFor, pointsAvailable } from '../../lib/training/curriculum.js';
 import { moduleKey as mKey, trainingText } from '../../lib/training/i18n-keys.js';
-import { TOUR_START_EVENT } from './TourHost';
+import { TOUR_START_EVENT, TOUR_MODULE_DONE_EVENT } from './TourHost';
 
 export function ModuleList({ token, me }) {
   const { t } = useTranslation();
@@ -46,6 +46,23 @@ export function ModuleList({ token, me }) {
   }, [token]);
 
   useEffect(() => { if (token) load(); }, [token, load]);
+
+  // Walking a module's steps to the end completes it — but only when there is
+  // nothing to prove. The server decides that from what was stamped at arming,
+  // so a module whose point is doing the real work stays armed no matter how
+  // many times someone walks the guide (2026-08-15).
+  useEffect(() => {
+    const onWalked = async (event) => {
+      const moduleKey = event?.detail?.moduleKey;
+      if (!moduleKey || !token) return;
+      try {
+        await api(`/api/training/progress/${encodeURIComponent(moduleKey)}/walkthrough-complete`, { method: 'POST' }, token);
+        await load();
+      } catch { /* the walk still happened; the page just won't tick over yet */ }
+    };
+    window.addEventListener(TOUR_MODULE_DONE_EVENT, onWalked);
+    return () => window.removeEventListener(TOUR_MODULE_DONE_EVENT, onWalked);
+  }, [token, load]);
 
   const byKey = useMemo(() => {
     const map = new Map();

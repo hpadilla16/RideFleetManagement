@@ -35,9 +35,19 @@ import {
 } from '../../lib/training/tour-state.js';
 
 export const TOUR_START_EVENT = 'ride-university:start';
+/** Fired when a MODULE-track tour reaches the end — Ride University listens. */
+export const TOUR_MODULE_DONE_EVENT = 'ride-university:module-walked';
 
 /** How long to wait for a route's elements before judging an anchor missing. */
 const SETTLE_MS = 700;
+/**
+ * Showcase advances on its own (Hector, 2026-08-15): at a convention the
+ * laptop is usually across the table, so the deck should run unattended and
+ * only stop when someone decides to talk about a step. Any interaction —
+ * arrows, Next, Back, the pause button — halts it, because that means a person
+ * took over.
+ */
+const SHOWCASE_STEP_MS = 9000;
 const CARD_WIDTH = 340;
 const GAP = 12;
 
@@ -80,8 +90,10 @@ export function TourHost({ viewer }) {
   const [state, setState] = useState(null);
   const [steps, setSteps] = useState([]);
   const [rect, setRect] = useState(null);
+  const [autoPlay, setAutoPlay] = useState(false);
   const cardRef = useRef(null);
   const lastFocused = useRef(null);
+  const walkedModules = useRef(new Set());
 
   const isPresent = useCallback((name) => !!anchorEl(name), []);
 
@@ -102,6 +114,9 @@ export function TourHost({ viewer }) {
       if (!fresh) return;
       setSteps(list);
       lastFocused.current = document.activeElement;
+      walkedModules.current = new Set();
+      // The showcase runs itself until a person takes over.
+      setAutoPlay(track === TOUR_TRACKS.SHOWCASE);
       persist(settleStart(fresh, list, isPresent));
     };
     window.addEventListener(TOUR_START_EVENT, onStart);
@@ -170,8 +185,31 @@ export function TourHost({ viewer }) {
     try { lastFocused.current?.focus?.(); } catch { /* element went away */ }
   }, [state, persist]);
 
-  const next = useCallback(() => persist(advance(state, steps, isPresent)), [state, steps, isPresent, persist]);
-  const back = useCallback(() => persist(retreat(state, steps, isPresent)), [state, steps, isPresent, persist]);
+  const goNext = useCallback(() => {
+    const after = advance(state, steps, isPresent);
+    // A module-track tour that ran off the end has been WALKED. Announce it
+    // once so Ride University can complete it — modules with real work behind
+    // them ignore this and wait for the record (the server decides which).
+    if (state?.moduleKey && after?.endedAs === TOUR_END.COMPLETED && !walkedModules.current.has(state.moduleKey)) {
+      walkedModules.current.add(state.moduleKey);
+      window.dispatchEvent(new CustomEvent(TOUR_MODULE_DONE_EVENT, { detail: { moduleKey: state.moduleKey } }));
+    }
+    persist(after);
+  }, [state, steps, isPresent, persist]);
+
+  // Any manual move stops the showcase advancing on its own — a person is
+  // driving now.
+  const next = useCallback(() => { setAutoPlay(false); goNext(); }, [goNext]);
+  const back = useCallback(() => { setAutoPlay(false); persist(retreat(state, steps, isPresent)); }, [state, steps, isPresent, persist]);
+
+  // ── showcase autoplay ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!autoPlay || !step) return undefined;
+    if (typeof window !== 'undefined'
+      && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return undefined;
+    const timer = setTimeout(goNext, SHOWCASE_STEP_MS);
+    return () => clearTimeout(timer);
+  }, [autoPlay, step?.anchor, goNext]);
 
   // ── keyboard: Escape closes, arrows drive the showcase ────────────────────
   useEffect(() => {
@@ -272,7 +310,19 @@ export function TourHost({ viewer }) {
             {position >= total ? t('common.done', 'Done') : t('common.next', 'Next')}
           </button>
           <span style={{ flex: 1 }} />
-          {!isShowcase && (
+          {isShowcase ? (
+            <button
+              type="button"
+              onClick={() => setAutoPlay((on) => !on)}
+              aria-pressed={autoPlay}
+              title={autoPlay
+                ? t('training.pauseHint', 'Stop advancing on its own')
+                : t('training.playHint', 'Advance on its own again')}
+              style={btn(false)}
+            >
+              {autoPlay ? t('training.pause', 'Pause') : t('training.play', 'Play')}
+            </button>
+          ) : (
             <button type="button" onClick={close} style={{ ...btn(false), border: 'none', color: 'var(--text-3, #736a8b)' }}>
               {t('training.skip', 'Skip')}
             </button>
