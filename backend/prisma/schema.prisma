@@ -3217,12 +3217,68 @@ model ShuttleRequest {
   closedAt       DateTime?
   closedByUserId String?
   closeReason    String?
+  // Where the request came from (2026-08-15): VOICE (VozIA), VALET, or
+  // PUBLIC_LINK (the customer's tracker page). Null = created before this
+  // column existed. Reporting and abuse triage both want the distinction.
+  source         String?
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
   // The global banner polls this every few seconds.
   @@index([tenantId, locationId, status])
   @@index([reservationId, status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shuttle tracker (Hector, 2026-08-15): a customer-facing live map of the
+// shuttle, reached only through per-reservation expiring links.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Per-location tracker configuration. The explicit vehicle list IS the
+// "this is a shuttle" marker — deliberately NOT a flag on Vehicle, because
+// fleetMode/programCategory are inventory-partition enums with filter rules
+// baked into rental search and loaner intake; adding SHUTTLE there would
+// ripple through every consumer. A list here also can't leave an orphaned
+// flag behind when a unit rotates out of shuttle duty.
+model ShuttleTrackerConfig {
+  id         String @id @default(cuid())
+  tenantId   String
+  locationId String @unique
+
+  // OFF | ON_DEMAND (customer can request) | NON_STOP (fixed loop, watch only)
+  mode String @default("OFF")
+
+  // JSON array of vehicle ids whose position the public page may show.
+  // The ONLY vehicles the public endpoint will ever resolve.
+  vehicleIdsJson Json?
+
+  // NON_STOP: "runs every ~N minutes" — tenant-stated, shown verbatim.
+  headwayMinutes Int @default(10)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+// One expiring link per reservation (Hector's security call, 2026-08-15:
+// NO standing links, NO shareable QR — every link is customer-only and dies
+// with the rental). Sent by email + SMS with the confirmation. The token
+// alone resolves the page; identity for "request shuttle" is inherent, so
+// the customer never types anything at the curb.
+model ShuttleTrackerLink {
+  id            String @id @default(cuid())
+  tenantId      String
+  reservationId String
+
+  token     String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([reservationId])
+  @@index([tenantId, expiresAt])
 }
 
 model PlannerScenario {
