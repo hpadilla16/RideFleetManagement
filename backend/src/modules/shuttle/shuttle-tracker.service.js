@@ -121,6 +121,42 @@ export const shuttleTrackerService = {
 
     return publicPositionPayload({ position, config, location, pickupInstructions });
   },
+
+  /**
+   * Resolution for the public "request the shuttle" POST. Same chain as
+   * publicState with one extra gate: the mode must be ON_DEMAND — a NON_STOP
+   * loop has no request button, and a token for one must not grow that power
+   * just because someone crafts the POST by hand.
+   *
+   * IDENTITY COMES FROM THE TOKEN, never from the request body: the name and
+   * phone on the resulting ShuttleRequest are the reservation's own. A caller
+   * holding a leaked token can summon a bus to the location it already serves
+   * — annoying — but cannot impersonate a different customer or inject text
+   * into the agents' queue.
+   */
+  async publicRequestContext(token) {
+    const clean = String(token || '').trim();
+    if (!clean || clean.length < 16) return null;
+
+    const link = await prisma.shuttleTrackerLink.findUnique({ where: { token: clean } });
+    if (linkState(link) !== 'ACTIVE') return null;
+
+    const reservation = await prisma.reservation.findUnique({
+      where: { id: link.reservationId },
+      select: {
+        id: true, tenantId: true, pickupLocationId: true, reservationNumber: true,
+        customer: { select: { firstName: true, lastName: true, phone: true } },
+      },
+    });
+    if (!reservation || reservation.tenantId !== link.tenantId) return null;
+
+    const config = await prisma.shuttleTrackerConfig.findUnique({
+      where: { locationId: reservation.pickupLocationId || '' },
+    });
+    if (!config || config.tenantId !== link.tenantId || config.mode !== 'ON_DEMAND') return null;
+
+    return { link, reservation, config };
+  },
 };
 
 /** Worker/simulator write path: publish a fix to Redis beside the DB row. */

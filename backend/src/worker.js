@@ -255,6 +255,17 @@ async function main() {
     logger.warn('[worker] shuttle fast-poll scheduler not started', { message: err.message });
   }
 
+  // Shuttle tracker link invites (2026-08-15) — mints the per-reservation
+  // expiring link and delivers it by email + SMS inside the pickup window.
+  // Naturally inert until a location's tracker is switched on.
+  try {
+    const shuttleInviteMod = await import('./modules/shuttle/shuttle-link-invite.scheduler.js');
+    shuttleInviteMod.startShuttleLinkInviteScheduler();
+    logger.info('[worker] started: shuttle link-invite scheduler');
+  } catch (err) {
+    logger.warn('[worker] shuttle link-invite scheduler not started', { message: err.message });
+  }
+
   // Voltswitch GPS periodic pull (2026-08-13). Per-tenant interval from
   // Settings > Telematics; only tenants with the connector fully configured
   // (provider VOLTSWITCH + enabled + credentials) are touched. Each tenant
