@@ -81,7 +81,7 @@ async function tick() {
       longitude: fix.longitude,
       speedMph: fix.speedMph,
       heading: fix.heading,
-      payload: JSON.stringify({ source: 'SHUTTLE_SIMULATOR' }),
+      payloadJson: JSON.stringify({ source: 'SHUTTLE_SIMULATOR' }),
     },
   });
   if (redis) {

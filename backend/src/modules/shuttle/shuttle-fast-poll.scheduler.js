@@ -84,7 +84,7 @@ async function pollTenant(config) {
           longitude: fix.longitude,
           speedMph: fix.speedMph,
           heading: fix.heading,
-          payload: JSON.stringify({ source: 'SHUTTLE_FAST_POLL' }),
+          payloadJson: JSON.stringify({ source: 'SHUTTLE_FAST_POLL' }),
         },
       }).catch(() => {}); // Redis still gets the fix; the row is best-effort
       await publishPosition(device.vehicleId, {
