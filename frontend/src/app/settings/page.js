@@ -34,6 +34,7 @@ import { FlexwaysIntegrationPanel } from '../../components/settings/FlexwaysInte
 import { AdvantageIntegrationPanel } from '../../components/settings/AdvantageIntegrationPanel';
 import { MexIntegrationPanel } from '../../components/settings/MexIntegrationPanel';
 import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettings';
+import { ShuttleTrackerSettings } from '../../components/settings/ShuttleTrackerSettings';
 import { LoanerRatesTab } from './LoanerRatesTab';
 import { API_BASE, api } from '../../lib/client';
 import { MODULE_DEFINITIONS } from '../../lib/moduleAccess';
@@ -6515,6 +6516,7 @@ function SettingsInner({ token, me, logout }) {
                   </div>
                   <div className="stack"><label className="label">Pickup Instructions</label><textarea rows={3} value={locationEditor.config?.pickupInstructions || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), pickupInstructions: e.target.value } })} /></div>
                   <div className="stack"><label className="label">Shuttle Pickup Spot (what the voice agent tells a caller who is already waiting — just WHERE to stand; leave empty to reuse Pickup Instructions)</label><textarea rows={2} value={locationEditor.config?.shuttlePickupInstructions || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), shuttlePickupInstructions: e.target.value } })} placeholder="e.g. Wait between columns 4 and 5, outside of baggage claim." /></div>
+                  {locationEditor.id && <ShuttleTrackerSettings locationId={locationEditor.id} />}
                   <div className="stack"><label className="label">Drop-off Instructions</label><textarea rows={3} value={locationEditor.config?.dropoffInstructions || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), dropoffInstructions: e.target.value } })} /></div>
 
                   <div className="label">Self-Service Handoff Overrides</div>

@@ -113,7 +113,18 @@ export const shuttleTrackerService = {
       pickupInstructions = parsed?.shuttlePickupInstructions || parsed?.pickupInstructions || '';
     } catch { pickupInstructions = ''; }
 
-    const vehicleIds = configVehicleIds(config);
+    // Ownership is re-verified on EVERY read, not just when the config was
+    // saved (QA, 2026-08-15): a super can transfer a vehicle across tenants,
+    // and a config holding the stale id would otherwise stream the NEW
+    // tenant's GPS to the old tenant's public links.
+    const configuredIds = configVehicleIds(config);
+    const owned = configuredIds.length
+      ? await prisma.vehicle.findMany({
+        where: { id: { in: configuredIds }, tenantId: link.tenantId },
+        select: { id: true },
+      })
+      : [];
+    const vehicleIds = owned.map((v) => v.id);
     const position = await latestPosition(vehicleIds);
 
     // The read IS the demand signal for the fast poll.
