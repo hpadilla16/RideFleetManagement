@@ -504,6 +504,21 @@ export default function KnowledgeBasePage() {
               <p className="ui-muted" style={{ maxWidth: 860 }}>
                 Training modules you complete by doing the real work, plus the playbooks your team already relies on.
               </p>
+              {/* The tour's home when it is not running. This is the page
+                  people already open when they are stuck, so it is where
+                  replaying it belongs — not a buried settings toggle. */}
+              <div className="inline-actions" style={{ marginTop: 4, marginBottom: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => window.dispatchEvent(new CustomEvent('ride-university:start', { detail: { track: 'ONBOARDING' } }))}
+                >Take the tour</button>
+                <button
+                  type="button"
+                  className="button-subtle"
+                  title="Presenter mode for demos — shows the whole product, advance with the arrow keys"
+                  onClick={() => window.dispatchEvent(new CustomEvent('ride-university:start', { detail: { track: 'SHOWCASE' } }))}
+                >Showcase mode</button>
+              </div>
               <div className="knowledge-anchor-grid">
                 {anchors.map((anchor) => (
                   <a key={anchor.id} className="knowledge-anchor" href={`#${anchor.id}`}>

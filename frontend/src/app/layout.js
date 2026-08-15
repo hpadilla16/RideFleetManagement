@@ -1,6 +1,7 @@
 import './globals.css';
 import { SentryBoot } from '../components/SentryBoot';
 import { I18nBoot } from '../components/I18nBoot';
+import { TourMount } from '../components/training/TourMount';
 
 export const metadata = {
   title: 'Ride Fleet',
@@ -119,6 +120,10 @@ export default function RootLayout({ children }) {
         <div dangerouslySetInnerHTML={{ __html: aiHoneypotHtml }} style={{ display: 'none' }} aria-hidden="true" />
         <SentryBoot />
         <I18nBoot />
+        {/* Ride University's tour lives HERE and not in AppShell: AppShell is
+            imported per page, so it remounts on every navigation and would
+            drop the tour's state mid-walk. The layout persists. */}
+        <TourMount />
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
         {children}
       </body>
