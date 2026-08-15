@@ -28,7 +28,7 @@ export const shuttleRequestsService = {
    * Create — or absorb into the existing open request for the reservation.
    * Caller (the route) has already resolved+validated tenant/reservation.
    */
-  async create({ tenantId, locationId, reservationId, customerName, customerPhone, partySize, pickupNote }) {
+  async create({ tenantId, locationId, reservationId, customerName, customerPhone, partySize, pickupNote, source = null }) {
     if (!tenantId || !locationId || !reservationId) throw new Error('tenantId, locationId and reservationId are required');
 
     const existing = await prisma.shuttleRequest.findFirst({
@@ -59,7 +59,10 @@ export const shuttleRequestsService = {
         customerName: String(customerName || '').trim(),
         customerPhone: String(customerPhone || '').trim() || null,
         partySize: Number.isFinite(Number(partySize)) && Number(partySize) > 0 ? Math.min(50, Number(partySize)) : 1,
-        pickupNote: String(pickupNote || '').trim() || null
+        pickupNote: String(pickupNote || '').trim() || null,
+        // VOICE (VozIA) | VALET | PUBLIC_LINK — where the request came from.
+        // On absorb (above) the ORIGINAL source stands: the first call named it.
+        source: source ? String(source).trim() : null
       }
     });
     return { request, deduplicated: false };

@@ -11,8 +11,10 @@ import { Router } from 'express';
 import {
   attachPublicRequestMeta,
   createPublicRateLimitGuard,
+  createOptionalIdempotencyGuard,
 } from '../../middleware/public-endpoint-guards.js';
 import { shuttleTrackerService } from './shuttle-tracker.service.js';
+import { shuttleRequestsService } from './shuttle-requests.service.js';
 
 export const shuttleTrackerPublicRouter = Router();
 
@@ -30,5 +32,46 @@ shuttleTrackerPublicRouter.get('/:token', guards, async (req, res, next) => {
     // Positions go stale in seconds — never let a proxy cache one.
     res.setHeader('Cache-Control', 'no-store');
     res.json(state);
+  } catch (e) { next(e); }
+});
+
+const requestGuards = [
+  attachPublicRequestMeta('public-shuttle-request'),
+  // One real customer presses the button once, maybe twice. 5/min per IP is
+  // generous for humans and useless for a flooder — and the service itself is
+  // idempotent per reservation (an open request absorbs repeats), so even the
+  // 5 collapse into ONE bus.
+  createPublicRateLimitGuard({ name: 'public-shuttle-request', maxRequests: 5, windowMs: 60 * 1000 }),
+  createOptionalIdempotencyGuard({ name: 'public-shuttle-request' }),
+];
+
+/**
+ * "I'm at the curb — send the shuttle." ON_DEMAND locations only.
+ *
+ * Everything identifying comes from the TOKEN (reservation → name, phone);
+ * the body may only size the party and describe where they stand. Failures
+ * are the same bare 404 as the GET — an unusable token never explains itself.
+ */
+shuttleTrackerPublicRouter.post('/:token/request', requestGuards, async (req, res, next) => {
+  try {
+    const ctx = await shuttleTrackerService.publicRequestContext(req.params.token);
+    if (!ctx) return res.status(404).json({ error: 'Not found' });
+
+    const customerName = `${ctx.reservation.customer?.firstName || ''} ${ctx.reservation.customer?.lastName || ''}`.trim() || 'Customer';
+    const { request, deduplicated } = await shuttleRequestsService.create({
+      tenantId: ctx.reservation.tenantId,
+      locationId: ctx.reservation.pickupLocationId,
+      reservationId: ctx.reservation.id,
+      customerName,
+      customerPhone: ctx.reservation.customer?.phone || '',
+      partySize: req.body?.partySize,
+      pickupNote: String(req.body?.pickupNote || '').slice(0, 280),
+      source: 'PUBLIC_LINK',
+    });
+
+    res.setHeader('Cache-Control', 'no-store');
+    // Whitelisted like every public payload: enough for the page to say "on
+    // its way" and absorb double-taps, nothing about the queue behind it.
+    res.json({ ok: true, deduplicated, status: request.status });
   } catch (e) { next(e); }
 });
