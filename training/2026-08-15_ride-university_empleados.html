@@ -1,0 +1,266 @@
+<title>Guía y pruebas de Ride University</title>
+<style>
+  :root {
+    --ground: #F5F3F9; --surface: #FFFFFF; --sunk: #EDE9F5;
+    --ink: #1E1A2B; --ink-soft: #4A4258; --ink-faint: #7C7391; --rule: #DDD6EA;
+    --brand: #8752FE; --brand-deep: #6D3DE0; --brand-soft: #F0E9FF;
+    --good: #1F8A5F; --good-soft: #E3F3EB;
+    --warn: #9A5B12; --warn-soft: #F8EFE0;
+    --stop: #B4342B; --stop-soft: #FBEAE8;
+    --mono: ui-monospace, "SF Mono", Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #131019; --surface: #1C1826; --sunk: #171320;
+      --ink: #EAE5F2; --ink-soft: #ADA4BE; --ink-faint: #7C7391; --rule: #2F2841;
+      --brand: #A47CFF; --brand-deep: #8752FE; --brand-soft: #251B3B;
+      --good: #6FC49B; --good-soft: #14291F;
+      --warn: #D69B54; --warn-soft: #2C2214;
+      --stop: #E1786E; --stop-soft: #2E1815;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #131019; --surface: #1C1826; --sunk: #171320;
+    --ink: #EAE5F2; --ink-soft: #ADA4BE; --ink-faint: #7C7391; --rule: #2F2841;
+    --brand: #A47CFF; --brand-deep: #8752FE; --brand-soft: #251B3B;
+    --good: #6FC49B; --good-soft: #14291F;
+    --warn: #D69B54; --warn-soft: #2C2214;
+    --stop: #E1786E; --stop-soft: #2E1815;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground); color: var(--ink); font-family: var(--sans);
+    line-height: 1.65; margin: 0; padding: 2.5rem 1.25rem 4rem; font-size: 16px;
+  }
+  .wrap { max-width: 54rem; margin: 0 auto; display: flex; flex-direction: column; gap: 2.75rem; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--brand-deep); margin: 0 0 0.6rem;
+  }
+  h1 { font-size: clamp(1.9rem, 4.5vw, 2.6rem); line-height: 1.1; letter-spacing: -0.02em; font-weight: 700; margin: 0 0 0.8rem; text-wrap: balance; }
+  .lede { font-size: 1.05rem; color: var(--ink-soft); max-width: 42rem; margin: 0; }
+  h2 { font-size: 1.3rem; font-weight: 650; margin: 0 0 0.3rem; letter-spacing: -0.01em; text-wrap: balance; }
+  .note { color: var(--ink-faint); font-size: 0.9rem; margin: 0 0 1.3rem; max-width: 42rem; }
+  section { display: flex; flex-direction: column; }
+  p { margin: 0 0 0.75rem; }
+  section > p:last-child { margin-bottom: 0; }
+
+  .card { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 1.1rem 1.3rem; }
+  .cards { display: flex; flex-direction: column; gap: 0.7rem; }
+  .card h3 { margin: 0 0 0.35rem; font-size: 1.02rem; font-weight: 650; }
+  .card p { margin: 0 0 0.5rem; color: var(--ink-soft); font-size: 0.94rem; }
+  .card p:last-child { margin-bottom: 0; }
+
+  .key { background: var(--brand-soft); border: 1px solid var(--rule); border-radius: 12px; padding: 1.1rem 1.3rem; }
+  .key p { color: var(--ink-soft); }
+  .key strong { color: var(--ink); }
+
+  .steps { counter-reset: task; display: flex; flex-direction: column; gap: 0.7rem; }
+  .task {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 12px;
+    padding: 1rem 1.2rem; display: grid; grid-template-columns: 1.9rem minmax(0, 1fr); gap: 0.9rem;
+  }
+  .task::before {
+    counter-increment: task; content: counter(task);
+    font-family: var(--mono); font-size: 0.8rem; color: var(--brand-deep);
+    padding-top: 0.15rem; font-variant-numeric: tabular-nums;
+  }
+  .task h3 { margin: 0 0 0.3rem; font-size: 1rem; font-weight: 650; }
+  .task p { margin: 0 0 0.45rem; font-size: 0.93rem; color: var(--ink-soft); }
+  .task p:last-child { margin-bottom: 0; }
+  .expect {
+    background: var(--good-soft); border-radius: 8px; padding: 0.55rem 0.8rem;
+    font-size: 0.89rem; color: var(--ink-soft); margin-top: 0.5rem;
+  }
+  .expect b { color: var(--good); font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em; text-transform: uppercase; display: block; margin-bottom: 0.15rem; }
+  .careful {
+    background: var(--warn-soft); border-radius: 8px; padding: 0.55rem 0.8rem;
+    font-size: 0.89rem; color: var(--ink-soft); margin-top: 0.5rem;
+  }
+  .careful b { color: var(--warn); font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em; text-transform: uppercase; display: block; margin-bottom: 0.15rem; }
+
+  .stop { background: var(--stop-soft); border: 1px solid var(--rule); border-radius: 12px; padding: 1.1rem 1.3rem; }
+  .stop h3 { margin: 0 0 0.4rem; font-size: 1.02rem; font-weight: 650; color: var(--stop); }
+  .stop p { margin: 0 0 0.5rem; color: var(--ink-soft); font-size: 0.94rem; }
+  .stop p:last-child { margin-bottom: 0; }
+
+  ul { margin: 0.4rem 0 0; padding-left: 1.15rem; color: var(--ink-soft); font-size: 0.93rem; }
+  li { margin-bottom: 0.3rem; }
+  .ask { background: var(--sunk); border-radius: 12px; padding: 1.1rem 1.3rem; }
+  .ask ul { font-size: 0.95rem; }
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--sunk); padding: 0.08em 0.4em; border-radius: 4px; }
+  .foot { border-top: 1px solid var(--rule); padding-top: 1.1rem; color: var(--ink-faint); font-size: 0.85rem; }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Ride Fleet · para el equipo</p>
+    <h1>Ride University: cómo funciona y qué necesito que pruebes</h1>
+    <p class="lede">Primera parte: qué es y cómo se usa. Segunda parte: una lista de cosas concretas para probar, con lo que debería pasar en cada una. No hace falta saber nada técnico.</p>
+  </header>
+
+  <section>
+    <h2>Qué es</h2>
+    <p class="note">Antes se llamaba Knowledge Base. Ahora es un lugar donde se aprende haciendo.</p>
+    <div class="key">
+      <p><strong>Ride University te enseña una tarea a la vez, sobre las pantallas de verdad.</strong> No son videos ni manuales aparte: el sistema te va señalando dónde queda cada cosa mientras trabajas.</p>
+      <p>Y lo más importante: <strong>un módulo no se marca completado porque le diste "Siguiente" varias veces.</strong> Los que enseñan una tarea real se completan solos cuando el sistema ve que la hiciste — cuando creaste una reserva de verdad, cuando entregaste un carro de verdad.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Las tres formas de usarlo</h2>
+    <div class="cards">
+      <div class="card">
+        <h3>El tour</h3>
+        <p>Un recorrido por la aplicación que te muestra dónde vive cada cosa. Oscurece la pantalla y va iluminando el botón o el menú del que te está hablando.</p>
+        <p>Se abre desde Ride University con <strong>"Take the tour"</strong>. Puedes salir cuando quieras con Escape o con "Skip", y retomarlo después desde el mismo sitio.</p>
+      </div>
+      <div class="card">
+        <h3>Los módulos</h3>
+        <p>Cada uno enseña una tarea: buscar una reserva, crear una, entregar un carro, cobrar un pago. Le das <strong>Start</strong> y te guía paso por paso.</p>
+        <p>Están agrupados por curso, y <strong>solo ves los que le tocan a tu puesto</strong>. Un agente no ve módulos de configuración.</p>
+      </div>
+      <div class="card">
+        <h3>Showcase</h3>
+        <p>Para enseñar el producto en una convención o a un cliente. Muestra la aplicación completa, avanza solo cada nueve segundos, y se detiene apenas alguien toca algo.</p>
+        <p>Esto es para presentar, no para entrenar. No te va a dar puntos.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Cómo se completa un módulo</h2>
+    <p class="note">Aquí está la parte que más se malinterpreta, y la que más necesito que pruebes.</p>
+    <div class="cards">
+      <div class="card">
+        <h3>Los que se completan caminando</h3>
+        <p>Los que solo te enseñan dónde están las cosas — "El área de trabajo", "Buscar una reserva". Llegas al último paso y quedan completados. No hay nada que probar porque no hay nada que hacer.</p>
+      </div>
+      <div class="card">
+        <h3>Los que esperan a que lo hagas de verdad</h3>
+        <p>"Crear una reserva", "Entregar un vehículo", "Recibir un vehículo", "Cobrar un pago". Le das Start, te guía — pero <strong>queda en espera</strong>. Dice "Waiting on the real thing".</p>
+        <p>Se completa la próxima vez que hagas esa tarea en tu trabajo normal. El sistema lo detecta y la próxima vez que abras Ride University, aparece completado.</p>
+        <p><strong>Esto es a propósito.</strong> No queremos que nadie cree reservas falsas ni cobre pagos falsos para ganar puntos.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Los puntos</h2>
+    <p>Cada módulo vale puntos según <strong>lo caro que sale hacerlo mal</strong>, no según lo que tarda. Cobrar un pago vale más que buscar una reserva.</p>
+    <p>Tu progreso se muestra en porcentaje de <strong>lo que le toca a tu puesto</strong>. Un agente y un administrador tienen currículos distintos, así que los porcentajes se comparan entre sí de forma justa. Tu supervisor ve la misma vista para todo el equipo, desde People.</p>
+  </section>
+
+  <section>
+    <h2>Qué necesito que pruebes</h2>
+    <p class="note">Hazlas en orden. Después de cada una, anota qué pasó — sobre todo si NO pasó lo que dice el recuadro verde.</p>
+
+    <div class="steps">
+
+      <div class="task">
+        <div>
+          <h3>Abre Ride University</h3>
+          <p>Entra al menú y busca <strong>Ride University</strong> (donde antes decía Knowledge Base). Si acabas de entrar, haz un refresh fuerte primero: <code>Ctrl+F5</code>, o <code>Cmd+Shift+R</code> en Mac.</p>
+          <div class="expect"><b>Debería pasar</b>Ves una sección "Your training" con tus módulos agrupados por curso, tu porcentaje arriba, y los botones "Take the tour" y "Showcase mode".</div>
+        </div>
+      </div>
+
+      <div class="task">
+        <div>
+          <h3>Haz el tour completo</h3>
+          <p>Dale a <strong>"Take the tour"</strong> y recórrelo entero con Siguiente, sin saltarlo.</p>
+          <div class="expect"><b>Debería pasar</b>La pantalla se oscurece y se ilumina el elemento del que habla. Cuando un paso está en otra pantalla, te lleva solo y el recuadro sigue ahí. El texto está en español.</div>
+          <div class="careful"><b>Fíjate en</b>Si algún paso ilumina el sitio equivocado, o no ilumina nada, o el recuadro te tapa lo que estás mirando. Anota en cuál paso pasó.</div>
+        </div>
+      </div>
+
+      <div class="task">
+        <div>
+          <h3>Completa un módulo de recorrido</h3>
+          <p>En "Your training", dale <strong>Start</strong> a <strong>"El área de trabajo"</strong> y camínalo hasta el último paso.</p>
+          <div class="expect"><b>Debería pasar</b>Al terminar, el módulo aparece con un ✓ y tu porcentaje sube.</div>
+        </div>
+      </div>
+
+      <div class="task">
+        <div>
+          <h3>Arma un módulo que exige trabajo real</h3>
+          <p>Dale <strong>Start</strong> a <strong>"Crear una reserva"</strong> y camina el guía hasta el final — pero <strong>sin crear la reserva</strong>.</p>
+          <div class="expect"><b>Debería pasar</b>NO se completa. Queda diciendo "Waiting on the real thing". Tu porcentaje no sube.</div>
+          <p>Esta prueba es importante: si se completa sin haber creado nada, eso es un bug y necesito saberlo enseguida.</p>
+        </div>
+      </div>
+
+      <div class="task">
+        <div>
+          <h3>Ahora hazlo de verdad</h3>
+          <p>Crea una reserva real, con el flujo normal. Después vuelve a Ride University.</p>
+          <div class="expect"><b>Debería pasar</b>"Crear una reserva" aparece completado, y arriba sale un aviso de lo que se completó desde la última vez.</div>
+          <div class="careful"><b>Ojo</b>Esa reserva es real y va a apartar un carro. Úsala para una reserva que ibas a hacer de todos modos, o cancélala cuando termines la prueba. No la dejes ahí.</div>
+        </div>
+      </div>
+
+      <div class="task">
+        <div>
+          <h3>Prueba el Showcase</h3>
+          <p>Dale a <strong>"Showcase mode"</strong> y déjalo correr sin tocar nada por un minuto. Después toca una flecha o el botón Pause.</p>
+          <div class="expect"><b>Debería pasar</b>Avanza solo cada nueve segundos. Apenas tocas algo, se detiene y no vuelve a avanzar solo hasta que le des Play.</div>
+        </div>
+      </div>
+
+      <div class="task">
+        <div>
+          <h3>Sal y vuelve a entrar</h3>
+          <p>Empieza el tour, avanza dos o tres pasos, y ciérralo con Escape. Después recarga la página y vuelve a Ride University.</p>
+          <div class="expect"><b>Debería pasar</b>No te vuelve a salir solo. Puedes volver a abrirlo tú cuando quieras.</div>
+        </div>
+      </div>
+
+      <div class="task">
+        <div>
+          <h3>Pruébalo en el celular o la tablet</h3>
+          <p>Abre Ride University desde el aparato que usas en el counter y haz el tour otra vez.</p>
+          <div class="careful"><b>Fíjate en</b>Si el recuadro se sale de la pantalla, tapa el botón del que habla, o el texto queda cortado. Esto es lo que menos he podido probar.</div>
+        </div>
+      </div>
+
+      <div class="task">
+        <div>
+          <h3>Lee el contenido como si fueras nuevo</h3>
+          <p>Cada módulo tiene una línea de advertencia — el error que la gente comete de verdad. Léelas con calma.</p>
+          <div class="expect"><b>Lo que necesito</b>¿Son ciertas? ¿Falta el error que TÚ ves que cometen los agentes nuevos? ¿Hay alguna que esté al revés o que no aplique aquí?</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="stop">
+      <h3>Si algo se ve raro, para y avisa</h3>
+      <p>Sobre todo si un módulo se completa sin que hayas hecho la tarea, si ves módulos que no son de tu puesto, o si el tour te bloquea la pantalla y no puedes salir con Escape.</p>
+      <p>Nada de esto debería afectar tu trabajo normal — el tour se cierra con un clic y no toca reservas ni pagos. Pero si te estorba, ciérralo y sigue trabajando; avisa después.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Qué contestar cuando termines</h2>
+    <div class="ask">
+      <ul>
+        <li>¿Cuál prueba NO dio el resultado del recuadro verde? Di el número y qué pasó.</li>
+        <li>¿En qué paso del tour se iluminó algo equivocado, si pasó?</li>
+        <li>¿Cómo se vio en el celular?</li>
+        <li>De las líneas de advertencia: ¿cuáles cambiarías, y qué error falta?</li>
+        <li>Si mañana entra alguien nuevo, ¿esto lo dejaría trabajando solo? ¿Qué le faltaría?</li>
+      </ul>
+    </div>
+  </section>
+
+  <div class="foot">
+    <p>Ride University está vivo en producción desde el 15 de agosto de 2026. El contenido de los módulos se corrige fácil — no hay que tocar nada del sistema para arreglar un texto o añadir una advertencia.</p>
+  </div>
+
+</div>

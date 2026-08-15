@@ -19,12 +19,45 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { allModules } from '../../lib/training/curriculum.js';
+import { moduleKey as mKey, stepKey, trainingText } from '../../lib/training/i18n-keys.js';
+import '../../lib/i18n';
 import { SCREENS } from './screens.js';
 
 const STEP_MS = 7000;
 
 export default function ShowcasePage() {
+  const { t, i18n } = useTranslation();
+
+  // ?lang=es — the marketing site passes it on the iframe (2026-08-15).
+  // Spanish is the site's first language; a demo narrating in English inside
+  // a Spanish page undercuts the whole positioning. The copy comes from the
+  // same training locale the tour uses, so the two can never disagree.
+  useEffect(() => {
+    const lang = new URLSearchParams(window.location.search).get('lang');
+    if (lang && lang !== i18n.language) i18n.changeLanguage(lang);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // The marketing site sizes the iframe from this (2026-08-15): publish our
+  // real height to the parent on load and on resize. A fixed 600px guess on
+  // their side turns into an inner scrollbar the moment a chapter grows.
+  useEffect(() => {
+    const publish = () => {
+      try {
+        window.parent?.postMessage(
+          { type: 'ride-showcase:height', height: document.documentElement.scrollHeight },
+          '*'
+        );
+      } catch { /* not framed — nothing to tell */ }
+    };
+    publish();
+    window.addEventListener('resize', publish);
+    const timer = setInterval(publish, 2000);
+    return () => { window.removeEventListener('resize', publish); clearInterval(timer); };
+  }, []);
+
   const chapters = useMemo(
     () => allModules()
       .filter((m) => Number.isFinite(m.showcase))
@@ -62,14 +95,25 @@ export default function ShowcasePage() {
 
   if (!chapter) return null;
   const step = chapter.steps?.[0] || {};
+  const title = trainingText(t, mKey(chapter, 'title'), chapter.title);
+  const body = trainingText(t, stepKey(chapter, step, 'body'), step.body || chapter.summary);
+  // The gotcha is the best copy the product has — the mistake people actually
+  // make. Surfaced here per the marketing team's ask (2026-08-15).
+  const gotcha = chapter.gotcha ? trainingText(t, mKey(chapter, 'gotcha'), chapter.gotcha) : null;
 
   return (
     <main style={S.page}>
       <div style={S.frame}>
         <section style={S.copy}>
           <p style={S.eyebrow}>Ride Fleet</p>
-          <h1 style={S.title}>{chapter.title}</h1>
-          <p style={S.body}>{step.body || chapter.summary}</p>
+          <h1 style={S.title}>{title}</h1>
+          <p style={S.body}>{body}</p>
+          {gotcha && (
+            <p style={S.gotcha}>
+              <span style={S.gotchaTag}>{t('training.gotchaLabel', 'Where people trip')}</span>
+              {gotcha}
+            </p>
+          )}
 
           <div style={S.controls}>
             <button type="button" onClick={() => { setPlaying(false); go(i - 1); }} style={S.btn} aria-label="Anterior">←</button>
@@ -298,5 +342,7 @@ const S = {
   marketRow: { display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1.2fr', gap: 8, alignItems: 'center', padding: '8px 4px', borderBottom: '1px solid #ede9f5', fontSize: 13, fontVariantNumeric: 'tabular-nums' },
   marketHead: { fontSize: 11, color: '#7c7391', textTransform: 'uppercase', letterSpacing: '0.08em', borderBottom: '1px solid #ddd6ea' },
 
+  gotcha: { marginTop: 14, background: '#f8efe0', borderRadius: 10, padding: '10px 13px', fontSize: 13, lineHeight: 1.55, color: '#4a4258' },
+  gotchaTag: { display: 'block', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#9a5b12', fontWeight: 700, marginBottom: 3 },
   disclaimer: { textAlign: 'center', fontSize: 11.5, color: '#7c7391', margin: 0 },
 };

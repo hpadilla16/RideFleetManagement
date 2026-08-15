@@ -35,7 +35,7 @@
  */
 
 export const TOUR_TRACKS = Object.freeze({
-  ONBOARDING: 'ONBOARDING',   // first login, role-filtered, on their own tenant
+  ONBOARDING: 'ONBOARDING',   // role-filtered full walkthrough. Launched from Ride University; the automatic first-login trigger is deliberately deferred (deploy D2.5 in the plan) because a new employee's first screen is the worst place to discover a bug.
   SHOWCASE: 'SHOWCASE',       // conventions and demos, presenter-driven
   MODULE: 'MODULE',           // one training module, launched from Ride University
 });
@@ -67,7 +67,6 @@ export const VERIFY = Object.freeze({
   RESERVATION_CHECKED_OUT: 'RESERVATION_CHECKED_OUT',
   RESERVATION_CHECKED_IN: 'RESERVATION_CHECKED_IN',
   PAYMENT_RECORDED: 'PAYMENT_RECORDED',
-  RESERVATION_EXTENDED: 'RESERVATION_EXTENDED',
 });
 
 /**
