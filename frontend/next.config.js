@@ -12,6 +12,18 @@
 const NOAI = { key: 'X-Robots-Tag', value: 'noai, noimageai' };
 
 module.exports = {
+  /**
+   * DEV ONLY: `NEXT_DEV_API_PROXY=https://host npx next dev` makes the dev
+   * server proxy /api/* server-side, so a local frontend can talk to a remote
+   * backend without CORS (the public endpoints send no CORS headers — in
+   * production the page and API share an origin, so none are needed). The env
+   * var is never set in the production image; this returns [] there.
+   */
+  async rewrites() {
+    const proxy = process.env.NEXT_DEV_API_PROXY;
+    if (!proxy) return [];
+    return [{ source: '/api/:path*', destination: `${proxy.replace(/\/$/, '')}/api/:path*` }];
+  },
   async headers() {
     return [
       {
@@ -29,6 +41,13 @@ module.exports = {
           },
           NOAI,
         ],
+      },
+      {
+        // The public tracker's token lives in the URL path. The page's meta
+        // referrer covers main-thread requests; this header extends the
+        // guarantee to worker-issued tile fetches on older engines too.
+        source: '/shuttle/:path*',
+        headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
       },
       {
         // Everything else: an ops app has no business being framed anywhere.

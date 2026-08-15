@@ -92,7 +92,7 @@ import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 import { smsRouter } from './modules/sms/sms.routes.js';
 import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
 import { trainingRouter } from './modules/training/training.routes.js';
-import { shuttleTrackerPublicRouter } from './modules/shuttle/shuttle-tracker.routes.js';
+import { shuttleTrackerPublicRouter, shuttleTrackerAdminRouter } from './modules/shuttle/shuttle-tracker.routes.js';
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
 import { economyRouter } from './modules/integrations/economy/economy.routes.js';
 import { nuRouter } from './modules/integrations/nu/nu.routes.js';
@@ -255,6 +255,9 @@ app.use('/api/planner', requireAuth, tenantRateLimit, requireModuleAccess('plann
 // Shuttle Requests (Valet arc 2026-08-05) — Chloe writes via service account
 // (allowlisted POST), floor staff read/close. Rides on the reservations module.
 app.use('/api/shuttle-requests', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), shuttleRequestsRouter);
+// Shuttle tracker settings (2026-08-15) — per-location config for the public
+// tracker page; same module gate as the shuttle queue it feeds.
+app.use('/api/shuttle-tracker', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), shuttleTrackerAdminRouter);
 // Quotes module (2026-07-17) — doc/quotes-module-plan-2026-07-17.md
 app.use('/api/quotes', requireAuth, tenantRateLimit, requireModuleAccess('quotes'), quotesRouter);
 app.use('/api/payment-gateway', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), paymentGatewayRouter);
