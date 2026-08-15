@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { ModuleList } from '../../components/training/ModuleList';
 import Link from 'next/link';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
@@ -528,6 +529,7 @@ export default function KnowledgeBasePage() {
               </div>
             </section>
 
+            <ModuleList token={token} me={me} />
             <DynamicArticles token={token} />
 
             <section id="start-here" className="glass card-lg section-card">
