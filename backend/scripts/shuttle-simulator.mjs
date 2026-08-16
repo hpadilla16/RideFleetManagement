@@ -42,9 +42,13 @@ try {
   }
 } catch { redis = null; }
 
-// A loop around the SJU area: airport curb → rental lot → hotel strip → back.
+// Loop center defaults to SJU; --center "lat,lng" moves the whole route
+// (e.g. LAX 33.9425,-118.4081 or MIA 25.7959,-80.2870) for demos elsewhere.
 // ~40 waypoints so a 15s tick laps in ~10 minutes, like a real shuttle.
-const CENTER = { lat: 18.4394, lng: -66.0018 };
+const centerArg = String(args.center || '').split(',').map(Number);
+const CENTER = (centerArg.length === 2 && centerArg.every(Number.isFinite))
+  ? { lat: centerArg[0], lng: centerArg[1] }
+  : { lat: 18.4394, lng: -66.0018 };
 const WAYPOINTS = [];
 for (let i = 0; i < 40; i++) {
   const t = (i / 40) * 2 * Math.PI;
