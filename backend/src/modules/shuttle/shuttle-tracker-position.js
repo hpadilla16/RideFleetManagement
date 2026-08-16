@@ -42,16 +42,25 @@ const num = (v) => {
  * @param {object} args
  * @param {{latitude,longitude,heading,speedMph,eventAt}|null} args.position latest fix
  * @param {{mode,headwayMinutes}} args.config
- * @param {{name}|null} args.location
+ * @param {{name,latitude,longitude}|null} args.location
  * @param {string} [args.pickupInstructions]
  * @param {number} [args.now]
  */
 export function publicPositionPayload({ position, config, location, pickupInstructions = '', now = Date.now() }) {
+  // The pickup POINT (where to stand) is the location's own coordinates —
+  // already public knowledge (it's the rental counter's address), and it lets
+  // the page draw "you are here → wait there". Absent coordinates simply omit
+  // the key; the page degrades to text instructions.
+  const pickupLat = num(location?.latitude);
+  const pickupLng = num(location?.longitude);
   const base = {
     mode: config?.mode === 'NON_STOP' ? 'NON_STOP' : 'ON_DEMAND',
     headwayMinutes: num(config?.headwayMinutes) || null,
     locationName: location?.name || null,
     pickupInstructions: String(pickupInstructions || ''),
+    ...(pickupLat !== null && pickupLng !== null
+      ? { pickup: { latitude: pickupLat, longitude: pickupLng } }
+      : {}),
   };
 
   const at = position?.eventAt instanceof Date

@@ -87,3 +87,15 @@ test('redis key naming is centralized', () => {
   assert.equal(watchKey('t1'), 'shuttle:watch:t1');
   assert.equal(posKey('v9'), 'shuttle:pos:v9');
 });
+
+test('location coordinates surface as the pickup point; absent coords omit the key', () => {
+  const withCoords = publicPositionPayload({
+    position: { latitude: 18.44, longitude: -66.0, heading: 0, speedMph: 10, eventAt: secondsAgo(5) },
+    config: CONFIG, location: { name: 'SJU', latitude: 18.438, longitude: -66.002 }, now: NOW,
+  });
+  assert.deepEqual(withCoords.pickup, { latitude: 18.438, longitude: -66.002 });
+  const without = publicPositionPayload({
+    position: null, config: CONFIG, location: LOCATION, now: NOW,
+  });
+  assert.equal('pickup' in without, false);
+});

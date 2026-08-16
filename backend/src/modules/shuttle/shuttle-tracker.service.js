@@ -104,7 +104,7 @@ export const shuttleTrackerService = {
 
     const location = await prisma.location.findUnique({
       where: { id: config.locationId },
-      select: { name: true, locationConfig: true },
+      select: { name: true, locationConfig: true, latitude: true, longitude: true },
     });
 
     let pickupInstructions = '';
