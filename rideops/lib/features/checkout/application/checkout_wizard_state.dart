@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../core/api/api_error.dart';
 import '../../../core/api/dto/checkout_session.dart';
+import '../../../core/api/dto/reservation_display.dart';
 import '../../../core/api/enums.dart';
 import '../domain/checkout_event_log.dart';
 import '../domain/checkout_step_catalog.dart';
@@ -30,6 +31,15 @@ class ForeignAdvanceNotice {
 
   /// Cuándo lo registró el log — alimenta el "hace 40 s" del banner.
   final DateTime? at;
+}
+
+/// Escrituras del paso que no mueven `currentStep` (M2-H2).
+enum CheckoutMutation {
+  /// `POST /:id/declined-insurance` — el switch de 9C.
+  declinedInsurance,
+
+  /// `POST /:id/vehicle` — el swap de 9E.
+  vehicleSwap,
 }
 
 /// Resultado de la matriz 409 (ADR-4). Nunca es un reintento a ciegas: cada
@@ -81,6 +91,12 @@ class CheckoutReservationContext {
     this.tenantName,
     this.pickupAt,
     this.precheckinDone = false,
+    this.customer,
+    this.agreement,
+    this.vehicleId,
+    this.vehicleStatus,
+    this.vehicleTypeId,
+    this.branding,
   });
 
   final String? reservationNumber;
@@ -100,6 +116,28 @@ class CheckoutReservationContext {
   /// de STAFF — aquí sí se puede nombrar al tenant; el filtro
   /// `clientSafeCompanyName` protege las superficies volteadas al cliente.
   final String? tenantName;
+
+  /// Filas de verificación del paso CONFIRMING (9A/9B). Se guardan crudas —
+  /// no aplanadas — porque la tarjeta necesita distinguir "no vino el dato"
+  /// de "el servidor dice que está vacío", y esa distinción es justamente la
+  /// que decide si el CTA se bloquea.
+  final DisplayCustomer? customer;
+  final DisplayAgreement? agreement;
+
+  /// Unidad asignada AHORA (para marcar la fila actual del sheet de swap).
+  final String? vehicleId;
+
+  /// `Vehicle.status` crudo de la unidad asignada.
+  final String? vehicleStatus;
+
+  /// Clase reservada: el sheet dice "mismo grupo" comparando con esto.
+  final String? vehicleTypeId;
+
+  /// Branding del tenant tal como lo devuelve display-data. Las superficies
+  /// volteadas al cliente (10B) SIEMPRE lo consumen por
+  /// `clientSafeCompanyName`, que neutraliza el centinela de plataforma
+  /// 'Ride Fleet'; [tenantName] es la variante de staff y no vale ahí.
+  final TenantBranding? branding;
 }
 
 /// Estado del wizard. El cache es EN MEMORIA y con edad visible: al perder la
@@ -117,6 +155,7 @@ class CheckoutWizardState {
     this.networkAvailable = true,
     this.transitionInFlight = false,
     this.pausing = false,
+    this.mutating,
     this.advance,
     this.conflict,
     this.context,
@@ -154,6 +193,19 @@ class CheckoutWizardState {
   /// Hay un POST /abandon en vuelo.
   final bool pausing;
 
+  /// Escritura del PASO en vuelo que NO es una transición (M2-H2:
+  /// `declined-insurance`, `vehicle`). Se distingue de [transitionInFlight]
+  /// porque no mueve `currentStep` — pero vale lo mismo para el poll: la
+  /// respuesta del POST es más nueva por definición y una lectura lanzada en
+  /// paralelo solo puede aterrizar tarde y vieja (INN MC-2).
+  ///
+  /// Guarda CUÁL escritura, no un bool: la fila que se está escribiendo es la
+  /// única que puede mostrar spinner, y así dos controles distintos no se
+  /// apagan juntos por una escritura ajena.
+  final CheckoutMutation? mutating;
+
+  bool get isMutating => mutating != null;
+
   final ForeignAdvanceNotice? advance;
   final CheckoutConflict? conflict;
   final CheckoutReservationContext? context;
@@ -172,16 +224,38 @@ class CheckoutWizardState {
   /// Paso tipado (null = paso que esta versión no conoce → nodo genérico).
   CheckoutStep? get step => session?.step;
 
+  /// Mensaje del servidor cuando el conflicto VIVO es de vehículo (9D/9E).
+  /// Null si no hay conflicto o si es de otro tipo — la unidad inerte del
+  /// sheet cae entonces a su motivo genérico en vez de heredar un error ajeno.
+  String? get vehicleConflictMessage =>
+      conflict?.kind == CheckoutConflictKind.vehicleConflict
+          ? conflict?.message
+          : null;
+
+  /// Lo último mostrable tras una escritura fallida: el 409 ya reconciliado
+  /// si lo hay, y si no el error de red/servidor. Vacío ⇒ null, para que la
+  /// pantalla ponga su copy traducido en vez de un hueco (DoD #5).
+  String? get conflictOrErrorMessage {
+    final message = conflict?.message ?? error?.message ?? '';
+    return message.isEmpty ? null : message;
+  }
+
   /// Posición en la cadena lineal, o null si el paso no está en el catálogo
   /// (desconocido o CANCELLED, que es salida alterna).
   int? get position => infoFor(step)?.position;
 
   bool get isTerminal => session?.isTerminal ?? false;
 
-  /// Toda transición está bloqueada mientras haya una en vuelo, sin red, o si
-  /// la sesión ya es terminal.
+  /// Toda transición está bloqueada mientras haya una en vuelo, sin red, si la
+  /// sesión ya es terminal, o mientras otra escritura del paso está viva
+  /// (avanzar con un swap a medio aplicar dejaría al agente firmando sobre
+  /// datos que aún no sabe si cambiaron).
   bool get canTransition =>
-      session != null && !isTerminal && !offline && !transitionInFlight;
+      session != null &&
+      !isTerminal &&
+      !offline &&
+      !transitionInFlight &&
+      !isMutating;
 
   CheckoutWizardState copyWith({
     CheckoutSessionDto? session,
@@ -194,6 +268,8 @@ class CheckoutWizardState {
     bool? networkAvailable,
     bool? transitionInFlight,
     bool? pausing,
+    CheckoutMutation? mutating,
+    bool clearMutating = false,
     ForeignAdvanceNotice? advance,
     bool clearAdvance = false,
     CheckoutConflict? conflict,
@@ -211,6 +287,7 @@ class CheckoutWizardState {
       networkAvailable: networkAvailable ?? this.networkAvailable,
       transitionInFlight: transitionInFlight ?? this.transitionInFlight,
       pausing: pausing ?? this.pausing,
+      mutating: clearMutating ? null : (mutating ?? this.mutating),
       advance: clearAdvance ? null : (advance ?? this.advance),
       conflict: clearConflict ? null : (conflict ?? this.conflict),
       context: context ?? this.context,
@@ -242,6 +319,45 @@ enum CheckoutTransitionOutcome {
 
   /// Bloqueado antes de salir: sin red, sesión terminal, o ya había un POST
   /// en vuelo (doble tap).
+  blocked,
+
+  /// Falló por red/servidor; el mensaje está en [CheckoutWizardState.error].
+  failed,
+}
+
+/// Resultado de un intento de swap, CON el mensaje del servidor.
+///
+/// El mensaje viaja aquí y no en `state.error` a propósito: una negativa sobre
+/// la unidad ELEGIDA no puede quedar guardada como "el error del paso" —
+/// acabaría atribuyéndose a la unidad ACTUAL en el sheet, que es justo el dato
+/// que el agente está tratando de entender.
+@immutable
+class CheckoutSwapAttempt {
+  const CheckoutSwapAttempt(this.outcome, {this.message});
+
+  final CheckoutSwapOutcome outcome;
+
+  /// Mensaje del backend tal cual (DoD #5); null si no hubo negativa.
+  final String? message;
+}
+
+/// Qué pasó con un intento de swap (9E). Se separa de
+/// [CheckoutTransitionOutcome] porque el swap NO mueve el paso y sus negativas
+/// se resuelven en lugares distintos de la pantalla.
+enum CheckoutSwapOutcome {
+  /// El servidor cambió la unidad; sesión y contexto ya re-leídos.
+  ok,
+
+  /// 409 sobre la unidad ELEGIDA (`VEHICLE_DOUBLE_BOOKED` /
+  /// `VEHICLE_TERMINAL`): el sheet se queda abierto, muestra el mensaje del
+  /// servidor y recarga su lista.
+  vehicleRejected,
+
+  /// 409 `SWAP_LOCKED`: la sesión pasó de inspección y el swap ya no existe.
+  /// El sheet se cierra y la negativa queda en el banner del paso.
+  lockedStep,
+
+  /// Bloqueado antes de salir: sin red, terminal, o ya había una escritura.
   blocked,
 
   /// Falló por red/servidor; el mensaje está en [CheckoutWizardState.error].

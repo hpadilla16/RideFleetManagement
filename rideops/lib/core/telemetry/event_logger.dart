@@ -97,6 +97,32 @@ abstract final class CheckoutEvents {
   /// vio). El tag `via` es dato NUEVO de H1 — documentado en la tabla de
   /// 03-observability.md en el mismo cambio.
   static const reconciled = 'checkout.reconciled';
+
+  // ── M2-H2 (CONFIRMING + T&C) ──────────────────────────────────────────────
+
+  /// `POST /:id/declined-insurance` aceptado. Tag `declined` (bool).
+  static const declinedInsuranceSet = 'checkout.declined_insurance_set';
+
+  /// `POST /:id/vehicle` aceptado. Sin tags: el id de la unidad es dato de
+  /// operación, no de telemetría, y el volumen ya dice lo que interesa
+  /// (cuántas entregas empiezan con la unidad equivocada).
+  static const vehicleSwapped = 'checkout.vehicle_swapped';
+
+  /// `POST /:id/terms-token` aceptado. Tag `reused` (bool) — mide cuántas
+  /// re-emisiones caen dentro de la ventana de re-uso del backend, que es lo
+  /// que decide si la copy dice "sigue siendo el mismo código".
+  static const termsTokenMinted = 'checkout.terms_token_minted';
+
+  /// El countdown llegó a cero con el paso abierto. Es la medida directa del
+  /// riesgo §5 del plan (TTL de 15 min corto para un cliente que lee).
+  static const termsTokenExpired = 'checkout.terms_token_expired';
+
+  /// El poll vio caer `tcCompletedAt` (el cliente firmó en su teléfono, o
+  /// firmó otra superficie). Una vez por sesión de pantalla.
+  static const termsSignedSeen = 'checkout.terms_signed_seen';
+
+  /// Se abrió el modo presentación (10B), la pantalla volteada al cliente.
+  static const presentModeShown = 'checkout.present_mode_shown';
 }
 
 /// Eventos de la bandeja de salida (03-observability.md §Inspección y

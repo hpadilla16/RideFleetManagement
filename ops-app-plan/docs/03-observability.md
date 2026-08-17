@@ -43,6 +43,26 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 | `checkout.reconciled` | UI reconciliada con el servidor (tags `steps_jumped`, `via`) |
 | `checkout.money_attempt` / `checkout.money_ok` / `checkout.money_fail` | rutas de dinero (tag `kind`: charge_sale/hold_deposit/manual_*; NUNCA montos ni PAN) |
 | `checkout.preview_divergence` | cálculo local ≠ preview del servidor (compuerta ADR-6) |
+| `checkout.declined_insurance_set` | `POST /:id/declined-insurance` aceptado (tag `declined`) |
+| `checkout.vehicle_swapped` | `POST /:id/vehicle` aceptado — sin tags: el id de la unidad es dato de operación, no de telemetría |
+| `checkout.terms_token_minted` | `POST /:id/terms-token` aceptado (tag `reused`) |
+| `checkout.terms_token_expired` | el countdown llegó a 0 con el paso abierto |
+| `checkout.terms_signed_seen` | el poll vio caer `tcCompletedAt` |
+| `checkout.present_mode_shown` | se abrió la pantalla volteada al cliente (10B) |
+
+Notas de los eventos de M2-H2:
+
+- **`terms_token_minted.reused`** mide cuántas re-emisiones caen dentro de la ventana de
+  re-uso del backend (>2 min restantes ⇒ devuelve el MISMO token). Es la métrica que
+  respalda la copy honesta de la re-emisión: si `reused` domina, el agente está tocando el
+  botón sin necesidad y el copy tiene que enseñarlo mejor.
+- **`terms_token_expired`** es la medida directa del riesgo §5 del plan (TTL de 15 min
+  corto para un cliente que de verdad lee los términos). Se emite **una vez por token**,
+  no una por tick del countdown.
+- **`terms_signed_seen`** se emite solo cuando el sello CAE mientras la app mira (null →
+  fechado). Encontrarlo ya puesto al entrar no es un evento: es el estado de la sesión.
+- Ninguno de estos lleva nombre de cliente, número de reserva ni el token: el token es
+  credencial (regla de PII de este mismo documento).
 
 Detalle de `checkout.reconciled` (M2-H1). Tres valores de `via`, deliberadamente
 separados porque miden cosas distintas:

@@ -37,6 +37,9 @@ class TransitionButton extends ConsumerWidget {
     required this.toStep,
     required this.label,
     this.onOutcome,
+    this.why,
+    this.blockedWhy,
+    this.secondary,
   });
 
   final String reservationId;
@@ -47,12 +50,34 @@ class TransitionButton extends ConsumerWidget {
   /// matriz 409, que ya resolvió el controller.
   final void Function(CheckoutTransitionOutcome outcome)? onOutcome;
 
+  /// Subtexto del dock cuando el CTA está HABILITADO. Cada paso puede
+  /// explicar por qué su botón existe: en 10C, "este botón solo existe porque
+  /// el servidor ya tiene la firma registrada" es ADR-4 dicho en voz alta.
+  /// Sin él se usa el texto genérico del wizard.
+  final String? why;
+
+  /// Bloqueo LOCAL con su causa ya redactada (9B: "Faltan licencia y teléfono
+  /// del cliente…"). No sustituye al servidor —el cliente valida para ahorrar
+  /// viajes, nunca para reemplazar la máquina (ADR-4)— y por eso el paso que
+  /// lo usa tiene que ofrecer además la salida: aquí abajo, en [secondary].
+  ///
+  /// Regla que este parámetro protege: el CTA **no se esconde**, se bloquea
+  /// diciendo QUÉ falta. Un botón ausente no se puede preguntar.
+  final String? blockedWhy;
+
+  /// Acción secundaria del dock (9B "Volver a consultar", 9D "Elegir otro
+  /// vehículo"). Va DEBAJO del primario y encima del `.why`.
+  final Widget? secondary;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     final state = ref.watch(checkoutWizardProvider(reservationId));
-    final enabled = state.canTransition;
-    final why = state.offline ? l10n.coBlockedOfflineWhy : l10n.coTransitionWhy;
+    final enabled = state.canTransition && blockedWhy == null;
+    final whyText = blockedWhy ??
+        (state.offline
+            ? l10n.coBlockedOfflineWhy
+            : (why ?? l10n.coTransitionWhy));
 
     return Container(
       width: double.infinity,
@@ -71,7 +96,8 @@ class TransitionButton extends ConsumerWidget {
             // Deshabilitado CON CAUSA también para quien no ve el gris.
             hint: enabled
                 ? null
-                : (state.offline ? l10n.coBlockedOfflineShort : null),
+                : (blockedWhy ??
+                    (state.offline ? l10n.coBlockedOfflineShort : null)),
             child: ExcludeSemantics(
               child: RidePrimaryButton(
                 label: label,
@@ -87,9 +113,13 @@ class TransitionButton extends ConsumerWidget {
               ),
             ),
           ),
+          if (secondary != null) ...[
+            const SizedBox(height: 9),
+            secondary!,
+          ],
           const SizedBox(height: 9),
           Text(
-            why,
+            whyText,
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 12.5,

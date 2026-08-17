@@ -61,6 +61,15 @@ dependencies:
   # Observabilidad (decisión M0-4: Sentry — el backend ya reporta ahí).
   sentry_flutter: ^9.0.0
 
+  # QR del paso T&C (M2-H2). Se elige el codificador PURO (`qr`, sin widget)
+  # en vez de `qr_flutter`: el paquete Flutter no se publica desde 2023 y lo
+  # único que aporta es un CustomPainter que aquí tiene que ser NUESTRO —
+  # quiet zone de 4 módulos, negro puro 21:1 y el estado "vencido" del 10D son
+  # reglas del sistema de diseño, no de un paquete. Codificar QR a mano
+  # (Reed–Solomon + máscaras) sí sería temerario en una ruta de firma legal:
+  # un QR mal codificado deja al cliente sin poder firmar.
+  qr: ^4.0.0
+
   intl: any
 
 dev_dependencies:

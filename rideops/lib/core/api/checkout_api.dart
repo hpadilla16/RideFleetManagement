@@ -133,6 +133,76 @@ class CheckoutApi {
     }
   }
 
+  /// `POST /api/checkout-sessions/:id/declined-insurance` (routes:362) —
+  /// `{declined}`. Escribe `RentalAgreement.declinedInsurance` y añade un
+  /// evento `DECLINED_INSURANCE` al log (service:825-848); devuelve la SESIÓN,
+  /// no el contrato — por eso el estado del switch se lee del `events[]`.
+  ///
+  /// 409 SIN code = "no hay contrato ligado a esta sesión" (service:829-831):
+  /// no es un conflicto de la máquina de estados, y el banner genérico con el
+  /// mensaje del servidor es la respuesta correcta.
+  Future<CheckoutSessionDto> setDeclinedInsurance({
+    required String id,
+    required bool declined,
+  }) async {
+    try {
+      final res = await authedDio.post<Map<String, dynamic>>(
+        '/api/checkout-sessions/$id/declined-insurance',
+        data: {'declined': declined},
+      );
+      return CheckoutSessionDto.fromJson(res.data!);
+    } on DioException catch (e) {
+      throw ApiError.fromDio(e);
+    }
+  }
+
+  /// `POST /api/checkout-sessions/:id/vehicle` (routes:201) —
+  /// `{newVehicleId}`. Swap atómico reserva+contrato.
+  ///
+  /// Negativas que devuelve el servicio y que la pantalla muestra con SU
+  /// mensaje (vehicle-swap.service.js): 409 `SWAP_LOCKED` (la inspección ya
+  /// empezó), 409 `VEHICLE_TERMINAL` (vendida / fuera de servicio), 409
+  /// `VEHICLE_DOUBLE_BOOKED` (otra reserva la tomó en la ventana), 403 de otro
+  /// tenant, 404 y un 400 sin code si es la MISMA unidad.
+  Future<VehicleSwapResult> swapVehicle({
+    required String id,
+    required String newVehicleId,
+  }) async {
+    try {
+      final res = await authedDio.post<Map<String, dynamic>>(
+        '/api/checkout-sessions/$id/vehicle',
+        data: {'newVehicleId': newVehicleId},
+      );
+      return VehicleSwapResult.fromJson(res.data!);
+    } on DioException catch (e) {
+      throw ApiError.fromDio(e);
+    }
+  }
+
+  /// `POST /api/checkout-sessions/:id/terms-token` (routes:144) — mint del
+  /// token `TERMS_SIGNING` que el cliente escanea (TTL 15 min).
+  ///
+  /// **Idempotente con un piso de 2 minutos** (service:708-734): si ya hay un
+  /// token vivo de este tipo para la reserva con MÁS de 2 min por delante, el
+  /// backend devuelve el mismo con `reused: true` y el QR no cambia. Debajo de
+  /// ese piso mintea uno nuevo — para que el cliente no reciba un código que
+  /// vence mientras lo escanea. Esa frontera es la que la UI pinta en ámbar.
+  ///
+  /// A diferencia del mint del DRENADO (`mintHandoffToken`, que va sin
+  /// `x-view-location` porque manda evidencia sellada de otra sede), este SÍ
+  /// lleva el header: aquí hay un agente vivo frente al mostrador y si perdió
+  /// la sede, la negativa tiene que verse (DoD #5), no esquivarse.
+  Future<HandoffToken> mintTermsToken(String checkoutSessionId) async {
+    try {
+      final res = await authedDio.post<Map<String, dynamic>>(
+        '/api/checkout-sessions/$checkoutSessionId/terms-token',
+      );
+      return HandoffToken.fromJson(res.data!);
+    } on DioException catch (e) {
+      throw ApiError.fromDio(e);
+    }
+  }
+
   /// `POST /api/checkout-sessions/:id/handoff-token` (routes:161) — mint del
   /// token MOBILE_INSPECTION con el staff JWT, SIN `x-view-location`
   /// (decisión del drenado; el mint solo exige que la sesión exista —

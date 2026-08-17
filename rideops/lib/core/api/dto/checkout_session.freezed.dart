@@ -398,6 +398,296 @@ as List<CheckoutPresenceDto>?,
 
 
 /// @nodoc
+mixin _$VehicleSwapResult {
+
+ String get sessionId; String? get fromVehicleId; String? get toVehicleId; CheckoutSessionDto get session;
+/// Create a copy of VehicleSwapResult
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$VehicleSwapResultCopyWith<VehicleSwapResult> get copyWith => _$VehicleSwapResultCopyWithImpl<VehicleSwapResult>(this as VehicleSwapResult, _$identity);
+
+  /// Serializes this VehicleSwapResult to a JSON map.
+  Map<String, dynamic> toJson();
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is VehicleSwapResult&&(identical(other.sessionId, sessionId) || other.sessionId == sessionId)&&(identical(other.fromVehicleId, fromVehicleId) || other.fromVehicleId == fromVehicleId)&&(identical(other.toVehicleId, toVehicleId) || other.toVehicleId == toVehicleId)&&(identical(other.session, session) || other.session == session));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,sessionId,fromVehicleId,toVehicleId,session);
+
+@override
+String toString() {
+  return 'VehicleSwapResult(sessionId: $sessionId, fromVehicleId: $fromVehicleId, toVehicleId: $toVehicleId, session: $session)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $VehicleSwapResultCopyWith<$Res>  {
+  factory $VehicleSwapResultCopyWith(VehicleSwapResult value, $Res Function(VehicleSwapResult) _then) = _$VehicleSwapResultCopyWithImpl;
+@useResult
+$Res call({
+ String sessionId, String? fromVehicleId, String? toVehicleId, CheckoutSessionDto session
+});
+
+
+$CheckoutSessionDtoCopyWith<$Res> get session;
+
+}
+/// @nodoc
+class _$VehicleSwapResultCopyWithImpl<$Res>
+    implements $VehicleSwapResultCopyWith<$Res> {
+  _$VehicleSwapResultCopyWithImpl(this._self, this._then);
+
+  final VehicleSwapResult _self;
+  final $Res Function(VehicleSwapResult) _then;
+
+/// Create a copy of VehicleSwapResult
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? sessionId = null,Object? fromVehicleId = freezed,Object? toVehicleId = freezed,Object? session = null,}) {
+  return _then(_self.copyWith(
+sessionId: null == sessionId ? _self.sessionId : sessionId // ignore: cast_nullable_to_non_nullable
+as String,fromVehicleId: freezed == fromVehicleId ? _self.fromVehicleId : fromVehicleId // ignore: cast_nullable_to_non_nullable
+as String?,toVehicleId: freezed == toVehicleId ? _self.toVehicleId : toVehicleId // ignore: cast_nullable_to_non_nullable
+as String?,session: null == session ? _self.session : session // ignore: cast_nullable_to_non_nullable
+as CheckoutSessionDto,
+  ));
+}
+/// Create a copy of VehicleSwapResult
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$CheckoutSessionDtoCopyWith<$Res> get session {
+  
+  return $CheckoutSessionDtoCopyWith<$Res>(_self.session, (value) {
+    return _then(_self.copyWith(session: value));
+  });
+}
+}
+
+
+/// Adds pattern-matching-related methods to [VehicleSwapResult].
+extension VehicleSwapResultPatterns on VehicleSwapResult {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _VehicleSwapResult value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _VehicleSwapResult() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _VehicleSwapResult value)  $default,){
+final _that = this;
+switch (_that) {
+case _VehicleSwapResult():
+return $default(_that);case _:
+  throw StateError('Unexpected subclass');
+
+}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _VehicleSwapResult value)?  $default,){
+final _that = this;
+switch (_that) {
+case _VehicleSwapResult() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String sessionId,  String? fromVehicleId,  String? toVehicleId,  CheckoutSessionDto session)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _VehicleSwapResult() when $default != null:
+return $default(_that.sessionId,_that.fromVehicleId,_that.toVehicleId,_that.session);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String sessionId,  String? fromVehicleId,  String? toVehicleId,  CheckoutSessionDto session)  $default,) {final _that = this;
+switch (_that) {
+case _VehicleSwapResult():
+return $default(_that.sessionId,_that.fromVehicleId,_that.toVehicleId,_that.session);case _:
+  throw StateError('Unexpected subclass');
+
+}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String sessionId,  String? fromVehicleId,  String? toVehicleId,  CheckoutSessionDto session)?  $default,) {final _that = this;
+switch (_that) {
+case _VehicleSwapResult() when $default != null:
+return $default(_that.sessionId,_that.fromVehicleId,_that.toVehicleId,_that.session);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _VehicleSwapResult implements VehicleSwapResult {
+  const _VehicleSwapResult({required this.sessionId, this.fromVehicleId, this.toVehicleId, required this.session});
+  factory _VehicleSwapResult.fromJson(Map<String, dynamic> json) => _$VehicleSwapResultFromJson(json);
+
+@override final  String sessionId;
+@override final  String? fromVehicleId;
+@override final  String? toVehicleId;
+@override final  CheckoutSessionDto session;
+
+/// Create a copy of VehicleSwapResult
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$VehicleSwapResultCopyWith<_VehicleSwapResult> get copyWith => __$VehicleSwapResultCopyWithImpl<_VehicleSwapResult>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$VehicleSwapResultToJson(this, );
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _VehicleSwapResult&&(identical(other.sessionId, sessionId) || other.sessionId == sessionId)&&(identical(other.fromVehicleId, fromVehicleId) || other.fromVehicleId == fromVehicleId)&&(identical(other.toVehicleId, toVehicleId) || other.toVehicleId == toVehicleId)&&(identical(other.session, session) || other.session == session));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,sessionId,fromVehicleId,toVehicleId,session);
+
+@override
+String toString() {
+  return 'VehicleSwapResult(sessionId: $sessionId, fromVehicleId: $fromVehicleId, toVehicleId: $toVehicleId, session: $session)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$VehicleSwapResultCopyWith<$Res> implements $VehicleSwapResultCopyWith<$Res> {
+  factory _$VehicleSwapResultCopyWith(_VehicleSwapResult value, $Res Function(_VehicleSwapResult) _then) = __$VehicleSwapResultCopyWithImpl;
+@override @useResult
+$Res call({
+ String sessionId, String? fromVehicleId, String? toVehicleId, CheckoutSessionDto session
+});
+
+
+@override $CheckoutSessionDtoCopyWith<$Res> get session;
+
+}
+/// @nodoc
+class __$VehicleSwapResultCopyWithImpl<$Res>
+    implements _$VehicleSwapResultCopyWith<$Res> {
+  __$VehicleSwapResultCopyWithImpl(this._self, this._then);
+
+  final _VehicleSwapResult _self;
+  final $Res Function(_VehicleSwapResult) _then;
+
+/// Create a copy of VehicleSwapResult
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? sessionId = null,Object? fromVehicleId = freezed,Object? toVehicleId = freezed,Object? session = null,}) {
+  return _then(_VehicleSwapResult(
+sessionId: null == sessionId ? _self.sessionId : sessionId // ignore: cast_nullable_to_non_nullable
+as String,fromVehicleId: freezed == fromVehicleId ? _self.fromVehicleId : fromVehicleId // ignore: cast_nullable_to_non_nullable
+as String?,toVehicleId: freezed == toVehicleId ? _self.toVehicleId : toVehicleId // ignore: cast_nullable_to_non_nullable
+as String?,session: null == session ? _self.session : session // ignore: cast_nullable_to_non_nullable
+as CheckoutSessionDto,
+  ));
+}
+
+/// Create a copy of VehicleSwapResult
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$CheckoutSessionDtoCopyWith<$Res> get session {
+  
+  return $CheckoutSessionDtoCopyWith<$Res>(_self.session, (value) {
+    return _then(_self.copyWith(session: value));
+  });
+}
+}
+
+
+/// @nodoc
 mixin _$CheckoutPresenceDto {
 
 /// RIDEOPS | COUNTER | KIOSK | CUSTOMER (nunca null en el serializer;

@@ -1331,4 +1331,266 @@ class AppLocalizationsEn extends AppLocalizations {
   String coSessionAgeLabel(String age) {
     return 'State from $age ago';
   }
+
+  @override
+  String get coConfirmCustomer => 'Customer';
+
+  @override
+  String get coConfirmVehicle => 'Vehicle';
+
+  @override
+  String get coConfirmVerified => 'Verified';
+
+  @override
+  String get coConfirmMissingPill => 'Missing data';
+
+  @override
+  String get coConfirmConflictPill => 'In conflict';
+
+  @override
+  String get coConfirmName => 'Name';
+
+  @override
+  String get coConfirmLicense => 'License';
+
+  @override
+  String coConfirmLicenseWithExpiry(String number, String date) {
+    return '$number · expires $date';
+  }
+
+  @override
+  String get coConfirmPhone => 'Phone';
+
+  @override
+  String get coConfirmPrecheckin => 'Pre-check-in';
+
+  @override
+  String get coConfirmMissingValue => 'Not captured';
+
+  @override
+  String get coConfirmUnit => 'Unit';
+
+  @override
+  String get coConfirmOdometerLabel => 'Odometer';
+
+  @override
+  String coOdometerValue(String km) {
+    return '$km km';
+  }
+
+  @override
+  String get coConfirmVehicleAvailable => 'Available';
+
+  @override
+  String get coConfirmChangeVehicle => 'Change vehicle';
+
+  @override
+  String get coConfirmCta => 'Continue to T&C';
+
+  @override
+  String get coConfirmFieldName => 'the name';
+
+  @override
+  String get coConfirmFieldLicense => 'the license';
+
+  @override
+  String get coConfirmFieldPhone => 'the phone';
+
+  @override
+  String get coConfirmFieldJoin => 'and';
+
+  @override
+  String coConfirmBlockedWhy(String fields) {
+    return 'The customer\'s $fields are missing. They are captured at the counter or through the customer\'s pre-check-in; this screen updates itself.';
+  }
+
+  @override
+  String get coConfirmRecheck => 'Check again';
+
+  @override
+  String get coDeclineTitle => 'Customer declines insurance';
+
+  @override
+  String get coDeclineOff => 'Off · standard coverage is charged';
+
+  @override
+  String get coDeclineOn => 'On · the addendum is added';
+
+  @override
+  String get coDeclineLocked =>
+      'Terms are already signed: the insurance addendum can no longer change here';
+
+  @override
+  String get coDeclineNeedsNetwork =>
+      'No connection: this flag is recorded by the server';
+
+  @override
+  String get coDeclineConsequence =>
+      'The coverage-decline addendum will be added to the terms the customer signs and to the contract PDF. You can turn it off while the terms are unsigned.';
+
+  @override
+  String get coDeclineSignedNote =>
+      'The customer already signed the terms with this addendum. To change it, the contract is adjusted at the counter.';
+
+  @override
+  String get coConflictSwapCta => 'Pick another vehicle';
+
+  @override
+  String get coConflictSwapWhy =>
+      'Nothing was lost: after changing the unit you are still on step 1 with the customer already verified.';
+
+  @override
+  String get coSwapTitle => 'Change vehicle';
+
+  @override
+  String coSwapSub(String age) {
+    return 'Available per the server · $age ago';
+  }
+
+  @override
+  String get coSwapSubLoading => 'Asking the server which units are free…';
+
+  @override
+  String get coSwapSameGroup => 'Same class';
+
+  @override
+  String get coSwapOtherGroup => 'Different class · the rate may change';
+
+  @override
+  String get coSwapCurrentReason =>
+      'Current unit · a unit cannot be swapped for itself';
+
+  @override
+  String coSwapConfirm(String unit) {
+    return 'Switch to $unit';
+  }
+
+  @override
+  String get coSwapConfirmNone => 'Pick a unit';
+
+  @override
+  String get coSwapCancel => 'Cancel';
+
+  @override
+  String get coSwapEmpty =>
+      'The server reports no other free units for this window.';
+
+  @override
+  String get coSwapNeedsNetwork =>
+      'Changing the unit needs a connection: the server makes the change on the reservation and the contract.';
+
+  @override
+  String get coTermsInstruction =>
+      'Have the customer scan it with their phone camera to sign.';
+
+  @override
+  String get coTermsExpiresIn => 'Expires in';
+
+  @override
+  String get coTermsExpired => 'Expired';
+
+  @override
+  String get coTermsPresent => 'Show to customer (full screen)';
+
+  @override
+  String get coTermsWaiting =>
+      'Waiting for the customer\'s signature. This screen updates itself.';
+
+  @override
+  String get coTermsReissue => 'Generate a new code';
+
+  @override
+  String get coTermsReissueWhy =>
+      'If the live code has more than 2 minutes left, the server returns the same one: the customer can keep using the QR they already have.';
+
+  @override
+  String get coTermsReused =>
+      'It is still the same code: the live one has more than 2 minutes left and the server reuses it. If the customer already scanned it, they do not have to scan again.';
+
+  @override
+  String get coTermsReissued =>
+      'New code ready. The previous one stopped working.';
+
+  @override
+  String coTermsExpiredBanner(String time) {
+    return 'The code expired at $time. Nothing was lost — generate a new one and the customer signs just the same.';
+  }
+
+  @override
+  String get coTermsExpiredOverlay => 'Code expired';
+
+  @override
+  String get coTermsExpiredWhy =>
+      'The new code lasts another 15 minutes. If the customer had already opened the previous one, they will have to open the new one.';
+
+  @override
+  String get coTermsMinting => 'Asking the server for the code…';
+
+  @override
+  String get coTermsMintFailed => 'The code could not be issued.';
+
+  @override
+  String get coTermsOfflineWhy =>
+      'The server issues the code: with no connection there is no QR to show.';
+
+  @override
+  String get coTermsSignedTitle => 'Terms signed';
+
+  @override
+  String coTermsSignedBody(String name, String time) {
+    return '$name signed at $time. You can move on to payment.';
+  }
+
+  @override
+  String coTermsSignedBodyNoName(String time) {
+    return 'The terms were signed at $time. You can move on to payment.';
+  }
+
+  @override
+  String get coTermsRecord => 'Record';
+
+  @override
+  String get coTermsRecordConfirmed => 'Confirmed by the server';
+
+  @override
+  String get coTermsRecordSigned => 'Signed';
+
+  @override
+  String get coTermsRecordAddenda => 'Addenda';
+
+  @override
+  String get coTermsAddendaNone => 'None (insurance accepted)';
+
+  @override
+  String get coTermsAddendaDecline => 'Coverage-decline addendum';
+
+  @override
+  String get coTermsCta => 'Continue to payment';
+
+  @override
+  String get coTermsCtaWhy =>
+      'This button only exists because the server already has the signature on record.';
+
+  @override
+  String get coPresentInstruction =>
+      'Scan this code with your phone camera to read and sign the terms.';
+
+  @override
+  String get coPresentHelp => 'Trouble scanning? The agent can help you.';
+
+  @override
+  String get coPresentExit => 'Exit presentation';
+
+  @override
+  String coPresentSubtitle(String number) {
+    return 'Rental terms · Reservation $number';
+  }
+
+  @override
+  String get coPresentSubtitleNoNumber => 'Rental terms';
+
+  @override
+  String coPresentClosingSoon(String mmss) {
+    return '$mmss left — if it expires, the agent issues another one right away.';
+  }
 }

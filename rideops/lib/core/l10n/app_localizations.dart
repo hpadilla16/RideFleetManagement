@@ -2185,6 +2185,456 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Estado de hace {age}'**
   String coSessionAgeLabel(String age);
+
+  /// No description provided for @coConfirmCustomer.
+  ///
+  /// In es, this message translates to:
+  /// **'Cliente'**
+  String get coConfirmCustomer;
+
+  /// No description provided for @coConfirmVehicle.
+  ///
+  /// In es, this message translates to:
+  /// **'Vehículo'**
+  String get coConfirmVehicle;
+
+  /// No description provided for @coConfirmVerified.
+  ///
+  /// In es, this message translates to:
+  /// **'Verificado'**
+  String get coConfirmVerified;
+
+  /// No description provided for @coConfirmMissingPill.
+  ///
+  /// In es, this message translates to:
+  /// **'Faltan datos'**
+  String get coConfirmMissingPill;
+
+  /// No description provided for @coConfirmConflictPill.
+  ///
+  /// In es, this message translates to:
+  /// **'En conflicto'**
+  String get coConfirmConflictPill;
+
+  /// No description provided for @coConfirmName.
+  ///
+  /// In es, this message translates to:
+  /// **'Nombre'**
+  String get coConfirmName;
+
+  /// No description provided for @coConfirmLicense.
+  ///
+  /// In es, this message translates to:
+  /// **'Licencia'**
+  String get coConfirmLicense;
+
+  /// El vencimiento sale del snapshot del contrato: el modelo Customer no tiene esa columna.
+  ///
+  /// In es, this message translates to:
+  /// **'{number} · vence {date}'**
+  String coConfirmLicenseWithExpiry(String number, String date);
+
+  /// No description provided for @coConfirmPhone.
+  ///
+  /// In es, this message translates to:
+  /// **'Teléfono'**
+  String get coConfirmPhone;
+
+  /// No description provided for @coConfirmPrecheckin.
+  ///
+  /// In es, this message translates to:
+  /// **'Pre-checkin'**
+  String get coConfirmPrecheckin;
+
+  /// No description provided for @coConfirmMissingValue.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin capturar'**
+  String get coConfirmMissingValue;
+
+  /// No description provided for @coConfirmUnit.
+  ///
+  /// In es, this message translates to:
+  /// **'Unidad'**
+  String get coConfirmUnit;
+
+  /// No description provided for @coConfirmOdometerLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Odómetro'**
+  String get coConfirmOdometerLabel;
+
+  /// No description provided for @coOdometerValue.
+  ///
+  /// In es, this message translates to:
+  /// **'{km} km'**
+  String coOdometerValue(String km);
+
+  /// No description provided for @coConfirmVehicleAvailable.
+  ///
+  /// In es, this message translates to:
+  /// **'Disponible'**
+  String get coConfirmVehicleAvailable;
+
+  /// No description provided for @coConfirmChangeVehicle.
+  ///
+  /// In es, this message translates to:
+  /// **'Cambiar vehículo'**
+  String get coConfirmChangeVehicle;
+
+  /// No description provided for @coConfirmCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Continuar a T&C'**
+  String get coConfirmCta;
+
+  /// No description provided for @coConfirmFieldName.
+  ///
+  /// In es, this message translates to:
+  /// **'el nombre'**
+  String get coConfirmFieldName;
+
+  /// No description provided for @coConfirmFieldLicense.
+  ///
+  /// In es, this message translates to:
+  /// **'la licencia'**
+  String get coConfirmFieldLicense;
+
+  /// No description provided for @coConfirmFieldPhone.
+  ///
+  /// In es, this message translates to:
+  /// **'el teléfono'**
+  String get coConfirmFieldPhone;
+
+  /// No description provided for @coConfirmFieldJoin.
+  ///
+  /// In es, this message translates to:
+  /// **'y'**
+  String get coConfirmFieldJoin;
+
+  /// Bloqueo LOCAL con causa nombrada (9B). El CTA no se esconde: se bloquea diciendo qué falta y dónde se resuelve. RideOps no captura datos del cliente (ADR-1: eso vive en el mostrador web).
+  ///
+  /// In es, this message translates to:
+  /// **'Faltan {fields} del cliente. Se capturan en el mostrador o con el pre-checkin del cliente; esta pantalla se actualiza sola.'**
+  String coConfirmBlockedWhy(String fields);
+
+  /// No description provided for @coConfirmRecheck.
+  ///
+  /// In es, this message translates to:
+  /// **'Volver a consultar'**
+  String get coConfirmRecheck;
+
+  /// No description provided for @coDeclineTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente declina el seguro'**
+  String get coDeclineTitle;
+
+  /// No description provided for @coDeclineOff.
+  ///
+  /// In es, this message translates to:
+  /// **'Apagado · se cobra la cobertura estándar'**
+  String get coDeclineOff;
+
+  /// No description provided for @coDeclineOn.
+  ///
+  /// In es, this message translates to:
+  /// **'Encendido · se agrega el anexo'**
+  String get coDeclineOn;
+
+  /// No description provided for @coDeclineLocked.
+  ///
+  /// In es, this message translates to:
+  /// **'Los términos ya se firmaron: el anexo del seguro ya no cambia aquí'**
+  String get coDeclineLocked;
+
+  /// No description provided for @coDeclineNeedsNetwork.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin conexión: esta bandera la registra el servidor'**
+  String get coDeclineNeedsNetwork;
+
+  /// No description provided for @coDeclineConsequence.
+  ///
+  /// In es, this message translates to:
+  /// **'Se agregará el anexo de rechazo de cobertura a los términos que firma el cliente y al contrato PDF. Puedes apagarlo mientras no se firmen los términos.'**
+  String get coDeclineConsequence;
+
+  /// No description provided for @coDeclineSignedNote.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente ya firmó los términos con este anexo. Para cambiarlo, el contrato se ajusta desde el mostrador.'**
+  String get coDeclineSignedNote;
+
+  /// No description provided for @coConflictSwapCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Elegir otro vehículo'**
+  String get coConflictSwapCta;
+
+  /// No description provided for @coConflictSwapWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Nada se perdió: al cambiar la unidad sigues en el paso 1 con el cliente ya verificado.'**
+  String get coConflictSwapWhy;
+
+  /// No description provided for @coSwapTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Cambiar vehículo'**
+  String get coSwapTitle;
+
+  /// El endpoint filtra por tenant y ventana de la reserva, NO por la sede activa: la copy no promete una sede que el servidor no filtró; cada opción muestra la suya.
+  ///
+  /// In es, this message translates to:
+  /// **'Disponibles según el servidor · hace {age}'**
+  String coSwapSub(String age);
+
+  /// No description provided for @coSwapSubLoading.
+  ///
+  /// In es, this message translates to:
+  /// **'Preguntando al servidor qué unidades están libres…'**
+  String get coSwapSubLoading;
+
+  /// No description provided for @coSwapSameGroup.
+  ///
+  /// In es, this message translates to:
+  /// **'Mismo grupo'**
+  String get coSwapSameGroup;
+
+  /// No description provided for @coSwapOtherGroup.
+  ///
+  /// In es, this message translates to:
+  /// **'Otro grupo · puede cambiar la tarifa'**
+  String get coSwapOtherGroup;
+
+  /// No description provided for @coSwapCurrentReason.
+  ///
+  /// In es, this message translates to:
+  /// **'Unidad actual · una unidad no se cambia por sí misma'**
+  String get coSwapCurrentReason;
+
+  /// No description provided for @coSwapConfirm.
+  ///
+  /// In es, this message translates to:
+  /// **'Cambiar a {unit}'**
+  String coSwapConfirm(String unit);
+
+  /// No description provided for @coSwapConfirmNone.
+  ///
+  /// In es, this message translates to:
+  /// **'Elige una unidad'**
+  String get coSwapConfirmNone;
+
+  /// No description provided for @coSwapCancel.
+  ///
+  /// In es, this message translates to:
+  /// **'Cancelar'**
+  String get coSwapCancel;
+
+  /// No description provided for @coSwapEmpty.
+  ///
+  /// In es, this message translates to:
+  /// **'El servidor no reporta otras unidades libres para esta ventana.'**
+  String get coSwapEmpty;
+
+  /// No description provided for @coSwapNeedsNetwork.
+  ///
+  /// In es, this message translates to:
+  /// **'Cambiar de unidad necesita conexión: el cambio lo hace el servidor sobre la reserva y el contrato.'**
+  String get coSwapNeedsNetwork;
+
+  /// No description provided for @coTermsInstruction.
+  ///
+  /// In es, this message translates to:
+  /// **'Que el cliente lo escanee con la cámara de su teléfono para firmar.'**
+  String get coTermsInstruction;
+
+  /// No description provided for @coTermsExpiresIn.
+  ///
+  /// In es, this message translates to:
+  /// **'Vence en'**
+  String get coTermsExpiresIn;
+
+  /// No description provided for @coTermsExpired.
+  ///
+  /// In es, this message translates to:
+  /// **'Vencido'**
+  String get coTermsExpired;
+
+  /// No description provided for @coTermsPresent.
+  ///
+  /// In es, this message translates to:
+  /// **'Mostrar al cliente (pantalla completa)'**
+  String get coTermsPresent;
+
+  /// No description provided for @coTermsWaiting.
+  ///
+  /// In es, this message translates to:
+  /// **'Esperando la firma del cliente. Esta pantalla se actualiza sola.'**
+  String get coTermsWaiting;
+
+  /// No description provided for @coTermsReissue.
+  ///
+  /// In es, this message translates to:
+  /// **'Generar código nuevo'**
+  String get coTermsReissue;
+
+  /// No description provided for @coTermsReissueWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Si al código vigente le quedan más de 2 minutos, el servidor devuelve el mismo: el cliente puede seguir con el QR que ya tiene.'**
+  String get coTermsReissueWhy;
+
+  /// Nota 9 del mockup: la re-emisión admite cuándo el backend reusó el token en vez de fingir que emitió otro.
+  ///
+  /// In es, this message translates to:
+  /// **'Sigue siendo el mismo código: al vigente le quedan más de 2 minutos y el servidor lo reusa. Si el cliente ya lo escaneó, no tiene que volver a hacerlo.'**
+  String get coTermsReused;
+
+  /// No description provided for @coTermsReissued.
+  ///
+  /// In es, this message translates to:
+  /// **'Código nuevo listo. El anterior dejó de servir.'**
+  String get coTermsReissued;
+
+  /// No description provided for @coTermsExpiredBanner.
+  ///
+  /// In es, this message translates to:
+  /// **'El código venció a las {time}. Nada se perdió: genera uno nuevo y el cliente firma igual.'**
+  String coTermsExpiredBanner(String time);
+
+  /// No description provided for @coTermsExpiredOverlay.
+  ///
+  /// In es, this message translates to:
+  /// **'Código vencido'**
+  String get coTermsExpiredOverlay;
+
+  /// No description provided for @coTermsExpiredWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'El código nuevo dura otros 15 minutos. Si el cliente ya había abierto el anterior, tendrá que abrir el nuevo.'**
+  String get coTermsExpiredWhy;
+
+  /// No description provided for @coTermsMinting.
+  ///
+  /// In es, this message translates to:
+  /// **'Pidiendo el código al servidor…'**
+  String get coTermsMinting;
+
+  /// No description provided for @coTermsMintFailed.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudo emitir el código.'**
+  String get coTermsMintFailed;
+
+  /// No description provided for @coTermsOfflineWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'El código lo emite el servidor: sin conexión no hay QR que mostrar.'**
+  String get coTermsOfflineWhy;
+
+  /// No description provided for @coTermsSignedTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Términos firmados'**
+  String get coTermsSignedTitle;
+
+  /// No se afirma DÓNDE firmó: el sello puede venir del teléfono del cliente o del kiosco, y la sesión no lo distingue.
+  ///
+  /// In es, this message translates to:
+  /// **'{name} firmó a las {time}. Ya puedes seguir con el cobro.'**
+  String coTermsSignedBody(String name, String time);
+
+  /// No description provided for @coTermsSignedBodyNoName.
+  ///
+  /// In es, this message translates to:
+  /// **'Los términos se firmaron a las {time}. Ya puedes seguir con el cobro.'**
+  String coTermsSignedBodyNoName(String time);
+
+  /// No description provided for @coTermsRecord.
+  ///
+  /// In es, this message translates to:
+  /// **'Registro'**
+  String get coTermsRecord;
+
+  /// No description provided for @coTermsRecordConfirmed.
+  ///
+  /// In es, this message translates to:
+  /// **'Confirmado por el servidor'**
+  String get coTermsRecordConfirmed;
+
+  /// No description provided for @coTermsRecordSigned.
+  ///
+  /// In es, this message translates to:
+  /// **'Firmado'**
+  String get coTermsRecordSigned;
+
+  /// No description provided for @coTermsRecordAddenda.
+  ///
+  /// In es, this message translates to:
+  /// **'Anexos'**
+  String get coTermsRecordAddenda;
+
+  /// No description provided for @coTermsAddendaNone.
+  ///
+  /// In es, this message translates to:
+  /// **'Ninguno (seguro aceptado)'**
+  String get coTermsAddendaNone;
+
+  /// No description provided for @coTermsAddendaDecline.
+  ///
+  /// In es, this message translates to:
+  /// **'Anexo de rechazo de cobertura'**
+  String get coTermsAddendaDecline;
+
+  /// No description provided for @coTermsCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Continuar al cobro'**
+  String get coTermsCta;
+
+  /// No description provided for @coTermsCtaWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Este botón solo existe porque el servidor ya tiene la firma registrada.'**
+  String get coTermsCtaWhy;
+
+  /// No description provided for @coPresentInstruction.
+  ///
+  /// In es, this message translates to:
+  /// **'Escanee este código con la cámara de su teléfono para leer y firmar los términos.'**
+  String get coPresentInstruction;
+
+  /// No description provided for @coPresentHelp.
+  ///
+  /// In es, this message translates to:
+  /// **'¿Problemas para escanear? El agente puede ayudarle.'**
+  String get coPresentHelp;
+
+  /// No description provided for @coPresentExit.
+  ///
+  /// In es, this message translates to:
+  /// **'Salir de presentación'**
+  String get coPresentExit;
+
+  /// No description provided for @coPresentSubtitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Términos de renta · Reserva {number}'**
+  String coPresentSubtitle(String number);
+
+  /// No description provided for @coPresentSubtitleNoNumber.
+  ///
+  /// In es, this message translates to:
+  /// **'Términos de renta'**
+  String get coPresentSubtitleNoNumber;
+
+  /// Nota 12: al cliente NO se le pone un reloj en la cara; el countdown solo aparece bajo 2 min y con copy tranquilizadora.
+  ///
+  /// In es, this message translates to:
+  /// **'Quedan {mmss} — si se vence, el agente le genera otro al instante.'**
+  String coPresentClosingSoon(String mmss);
 }
 
 class _AppLocalizationsDelegate

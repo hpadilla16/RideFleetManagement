@@ -88,6 +88,28 @@ abstract class CheckoutSessionDto with _$CheckoutSessionDto {
       );
 }
 
+/// Respuesta de `POST /api/checkout-sessions/:id/vehicle`
+/// (`vehicle-swap.service.js:139-144`): el swap es ATÓMICO sobre
+/// `Reservation.vehicleId` **y** `RentalAgreement.vehicleId` (se separaron una
+/// vez y produjeron contratos con otro coche), y devuelve la sesión ya
+/// actualizada dentro de [session].
+///
+/// La sesión que viene aquí es la fila cruda de la transacción: NO pasa por
+/// `withPresence()`, así que llega sin `presence` — el controller la aplica
+/// con la misma regla que las demás escrituras (la presencia previa sobrevive).
+@freezed
+abstract class VehicleSwapResult with _$VehicleSwapResult {
+  const factory VehicleSwapResult({
+    required String sessionId,
+    String? fromVehicleId,
+    String? toVehicleId,
+    required CheckoutSessionDto session,
+  }) = _VehicleSwapResult;
+
+  factory VehicleSwapResult.fromJson(Map<String, dynamic> json) =>
+      _$VehicleSwapResultFromJson(json);
+}
+
 /// Fila de presencia del serializer de P1 (`activePresence()`:
 /// `{ surface, displayName, lastSeenAt }`, ya filtrada por el TTL lógico de
 /// 45 s en el servidor).

@@ -75,6 +75,24 @@ Map<String, dynamic> _$CheckoutSessionDtoToJson(
   'presence': instance.presence,
 };
 
+_VehicleSwapResult _$VehicleSwapResultFromJson(Map<String, dynamic> json) =>
+    _VehicleSwapResult(
+      sessionId: json['sessionId'] as String,
+      fromVehicleId: json['fromVehicleId'] as String?,
+      toVehicleId: json['toVehicleId'] as String?,
+      session: CheckoutSessionDto.fromJson(
+        json['session'] as Map<String, dynamic>,
+      ),
+    );
+
+Map<String, dynamic> _$VehicleSwapResultToJson(_VehicleSwapResult instance) =>
+    <String, dynamic>{
+      'sessionId': instance.sessionId,
+      'fromVehicleId': instance.fromVehicleId,
+      'toVehicleId': instance.toVehicleId,
+      'session': instance.session,
+    };
+
 _CheckoutPresenceDto _$CheckoutPresenceDtoFromJson(Map<String, dynamic> json) =>
     _CheckoutPresenceDto(
       surface: json['surface'] as String? ?? '',
