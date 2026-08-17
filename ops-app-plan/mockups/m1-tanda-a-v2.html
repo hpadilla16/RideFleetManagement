@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RideOps · Mockups M1 — Tanda A · v2 PREMIUM (Login · Contraseña forzada · PIN/Biometría · Shell + Ubicación)</title>
+<style>
+/* ============================================================
+   TOKENS v2 — misma base que frontend/src/app/globals.css
+   (rampas neutra/púrpura, semánticos, foco AZUL) + capa premium:
+   gradiente aurora, sombras con tinte de marca, radios XL,
+   superficies tonales M3 Expressive.
+   ============================================================ */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-200:#d9c9ff; --p-300:#c0a8ff;
+  --p-400:#9f79ff; --p-500:#7f4ff0; --p-600:#6a35e0; --p-700:#5a26c9;
+  --p-800:#45189e; --p-900:#2e1071;
+  --brand:#8752FE;
+  --brand-a08:rgba(135,82,254,.08); --brand-a12:rgba(135,82,254,.12);
+  --brand-a16:rgba(135,82,254,.16); --brand-a20:rgba(135,82,254,.20);
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --focus:#0b63d6; --focus-halo:rgba(11,99,214,.22);
+
+  /* premium layer */
+  --aurora:
+    radial-gradient(120% 90% at 88% -12%, rgba(255,138,92,.32), transparent 55%),
+    radial-gradient(130% 110% at -14% 4%, rgba(159,121,255,.50), transparent 62%),
+    linear-gradient(158deg,#1c0f4a 0%,#2e1071 42%,#45189e 80%,#5a26c9 112%);
+  --tonal:#f6f2ff;                    /* superficie tonal derivada de la marca */
+  --sh-b1:0 1px 0 rgba(255,255,255,.85) inset,0 2px 6px -2px rgba(69,24,158,.14),0 10px 24px -10px rgba(135,82,254,.22);
+  --sh-b2:0 1px 0 rgba(255,255,255,.85) inset,0 4px 12px -4px rgba(69,24,158,.20),0 22px 44px -16px rgba(135,82,254,.30);
+  --sh-float:0 6px 16px -6px rgba(23,18,43,.18),0 24px 48px -18px rgba(69,24,158,.30);
+  --r-xl:24px; --r-2xl:28px;
+  --bd-lite:1px solid rgba(135,82,254,.14);       /* borde translúcido de marca */
+  --sh-3:0 1px 3px rgba(24,16,54,.06),0 14px 30px -10px rgba(38,20,90,.14),0 44px 80px -28px rgba(38,20,90,.22);
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+  background:var(--n-100);color:var(--n-900);font-size:14px;line-height:1.5}
+h1,h2,h3{margin:0;letter-spacing:.005em}
+a{text-decoration:none;color:inherit}
+.tnum{font-variant-numeric:tabular-nums}
+
+/* ---------- chrome del documento ---------- */
+.doc-head{max-width:1720px;margin:0 auto;padding:26px 24px 10px}
+.doc-head h1{font-size:24px;font-weight:850}
+.doc-head h1 .v2{display:inline-flex;align-items:center;margin-left:10px;padding:3px 12px;border-radius:999px;
+  background:linear-gradient(135deg,var(--p-600),var(--p-800));color:#fff;font-size:13px;font-weight:800;vertical-align:middle}
+.doc-head p{margin:8px 0 0;color:var(--n-700);max-width:1020px}
+.meta-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.mchip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 11px;
+  border-radius:8px;background:var(--p-50);border:1px solid var(--brand-a20);
+  color:var(--p-800);font-size:12.5px;font-weight:700}
+.mchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.mchip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.jump{position:sticky;top:0;z-index:60;display:flex;gap:8px;flex-wrap:wrap;
+  padding:10px 24px;background:rgba(255,255,255,.88);backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--n-200);box-shadow:var(--sh-1)}
+.jump a{display:inline-flex;align-items:center;min-height:40px;padding:6px 14px;border-radius:12px;
+  border:1px solid var(--n-300);background:var(--n-0);font-weight:700;font-size:13px;color:var(--n-800)}
+.jump a:hover{background:var(--p-50);border-color:var(--brand-a20);color:var(--p-800)}
+.jump a:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+section.blk{max-width:1720px;margin:0 auto;padding:30px 24px 8px;scroll-margin-top:76px}
+.blk-head{margin-bottom:16px}
+.blk-head .eyebrow{color:var(--p-700);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.blk-head h2{font-size:20px;font-weight:800;margin-top:2px}
+.blk-head p{color:var(--n-700);margin:6px 0 0;max-width:920px}
+.state-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.schip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:6px;
+  font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--n-50);border:1px solid var(--n-200);color:var(--n-700)}
+.schip i{width:6px;height:6px;border-radius:50%;background:currentColor;font-style:normal}
+.frames{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;padding-bottom:26px}
+figure{margin:0}
+figcaption{font-size:13px;font-weight:800;color:var(--n-800);margin:0 0 8px 6px}
+figcaption small{display:block;font-weight:600;color:var(--n-600);font-size:12px}
+
+/* ---------- notas / anotaciones ---------- */
+.notes{flex:1 1 330px;max-width:410px;background:var(--n-0);border:var(--bd-lite);
+  border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1)}
+.notes h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+.note{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--n-100);font-size:13px;color:var(--n-700)}
+.note:last-child{border-bottom:0}
+.note b{color:var(--n-900)}
+.m{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;
+  border-radius:50%;background:var(--p-600);color:#fff;font-size:12px;font-weight:800;line-height:1}
+.m.inframe{position:absolute;z-index:9;box-shadow:0 0 0 2px #fff}
+.motion{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--info-bg);
+  border:1px solid var(--info-bd);font-size:12.5px;color:var(--n-800)}
+.motion b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--info);margin-bottom:6px}
+.motion ul{margin:0;padding-left:16px}
+.motion li{margin:3px 0}
+.contrast{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--n-50);
+  border:1px solid var(--n-200);font-size:12.5px;color:var(--n-700)}
+.contrast b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:6px}
+.contrast li{margin:3px 0}
+.contrast ul{margin:0;padding-left:16px}
+.decision{margin-top:14px;padding:14px 16px;border-radius:16px;background:var(--warn-bg);
+  border:1.5px dashed var(--warn-bd);color:var(--warn-tx);font-size:13px}
+.decision b{display:block;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.decision ul{margin:6px 0 0;padding-left:18px}
+.decision li{margin:3px 0}
+.mini-demo{margin-top:12px;padding:12px;border-radius:14px;background:var(--n-50);border:1px solid var(--n-200)}
+.mini-demo .cap{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:8px}
+
+/* ---------- frame de teléfono ---------- */
+.phone{position:relative;width:390px;border:9px solid var(--n-900);border-radius:40px;
+  overflow:hidden;background:var(--n-50);box-shadow:var(--sh-3)}
+.statusbar{position:relative;z-index:4;display:flex;justify-content:space-between;align-items:center;height:32px;
+  padding:0 20px;font-size:11.5px;font-weight:700;color:var(--n-700);background:var(--n-50)}
+.statusbar.on-white{background:var(--n-0)}
+.statusbar.on-aurora{background:transparent;color:rgba(255,255,255,.92)}
+.statusbar.on-tonal{background:var(--tonal)}
+.statusbar .off{color:var(--danger-tx)}
+.statusbar.on-aurora .off{color:#ffc9c2}
+.scr{position:relative;display:flex;flex-direction:column;min-height:724px;padding:0}
+.pad{padding:18px 18px 22px;display:flex;flex-direction:column;flex:1;position:relative;z-index:2}
+
+/* ---------- AURORA hero (login) ---------- */
+.aur{background:var(--aurora)}
+.aur .blob{position:absolute;border-radius:46% 54% 58% 42%/52% 44% 56% 48%;filter:blur(2px);opacity:.5;z-index:1}
+.aur .b1{width:160px;height:150px;top:36px;right:-52px;background:radial-gradient(circle at 30% 30%,rgba(255,255,255,.28),rgba(255,255,255,0) 70%)}
+.aur .b2{width:120px;height:112px;top:120px;left:-46px;background:radial-gradient(circle at 60% 40%,rgba(255,138,92,.30),rgba(255,138,92,0) 72%)}
+.hero-top{position:relative;z-index:2;padding:26px 22px 22px;color:#fff}
+.hero-top .mark{width:52px;height:52px;border-radius:16px;background:rgba(255,255,255,.14);
+  border:1px solid rgba(255,255,255,.35);box-shadow:0 1px 0 rgba(255,255,255,.35) inset,0 10px 24px -10px rgba(0,0,0,.4);
+  display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:850;color:#fff;backdrop-filter:blur(8px)}
+.hero-top .wname{font-size:30px;font-weight:850;letter-spacing:-.01em;margin-top:14px;line-height:1.05}
+.hero-top .wsub{font-size:14px;font-weight:650;color:rgba(255,255,255,.90);margin-top:4px}
+.sheetcard{position:relative;z-index:3;flex:1;display:flex;flex-direction:column;background:var(--n-0);
+  border-radius:var(--r-2xl) var(--r-2xl) 0 0;padding:22px 20px 20px;
+  box-shadow:0 1px 0 rgba(255,255,255,.9) inset,0 -18px 44px -20px rgba(23,18,43,.45)}
+.sheetcard .grab{width:44px;height:5px;border-radius:3px;background:var(--n-200);margin:0 auto 14px}
+
+/* ---------- formularios ---------- */
+.flavor{position:absolute;top:42px;right:16px;z-index:5;display:inline-flex;min-height:24px;align-items:center;
+  padding:2px 9px;border-radius:8px;font-size:11px;font-weight:800;letter-spacing:.06em;
+  background:var(--warn-bg);border:1px dashed var(--warn-bd);color:var(--warn-tx)}
+.f-label{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--n-600);margin:14px 0 6px}
+.inp{position:relative;display:flex;align-items:center;min-height:54px;border:1.5px solid var(--n-300);
+  border-radius:16px;background:var(--n-0);padding:0 14px;font-size:15.5px;color:var(--n-900);font-weight:600;
+  box-shadow:0 1px 0 rgba(255,255,255,.8) inset,0 1px 2px rgba(24,16,54,.04)}
+.inp .ph{color:var(--n-600);font-weight:500}
+.inp.focus{border-color:var(--focus);box-shadow:0 0 0 4px var(--focus-halo)}
+.inp.err{border-color:var(--danger);background:#fffbfb}
+.inp .trail{margin-left:auto;display:flex;align-items:center;justify-content:center;
+  width:44px;height:44px;margin-right:-8px;border-radius:12px;color:var(--n-600)}
+.f-err{display:flex;gap:6px;align-items:flex-start;font-size:13px;font-weight:700;color:var(--danger-tx);margin-top:6px}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:56px;border-radius:18px;
+  font-size:16px;font-weight:800;letter-spacing:.01em}
+.btn-primary{background:linear-gradient(180deg,#7442e8,var(--p-600));color:#fff;
+  box-shadow:0 1px 0 rgba(255,255,255,.28) inset,0 4px 10px -4px rgba(69,24,158,.35),0 14px 28px -12px rgba(135,82,254,.45)}
+.btn-ghost{background:var(--n-0);border:1.5px solid var(--n-300);color:var(--n-800);box-shadow:var(--sh-1)}
+.btn.is-disabled{opacity:.55}
+.btn-sm{min-height:48px;font-size:14.5px;border-radius:14px}
+.spin{width:18px;height:18px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;
+  border-radius:50%;animation:rot 1s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;
+  font-size:13.5px;font-weight:600;line-height:1.45;border:1px solid}
+.banner svg{flex:0 0 auto;margin-top:1px}
+.b-danger{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.b-warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.b-ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.linkline{display:flex;align-items:center;justify-content:center;min-height:48px;
+  font-size:13.5px;font-weight:700;color:var(--p-700);text-align:center}
+.ver{margin-top:auto;text-align:center;font-size:11.5px;font-weight:600;color:var(--n-600);padding-top:14px}
+
+/* checklist de política + medidor */
+.policy{display:grid;gap:8px;margin-top:10px;padding:14px;border-radius:18px;
+  background:var(--tonal);border:var(--bd-lite);box-shadow:var(--sh-b1)}
+.strength{display:flex;gap:6px;margin-bottom:4px}
+.strength i{flex:1;height:6px;border-radius:3px;background:var(--n-200);font-style:normal}
+.strength i.on{background:linear-gradient(90deg,var(--p-500),var(--p-600))}
+.strength i.on-ok{background:var(--ok)}
+.rule{display:flex;gap:9px;align-items:center;font-size:13.5px;font-weight:600;color:var(--n-700)} /* SHOULD: pendientes a --n-700, margen al sol */
+.rule .ic{flex:0 0 auto;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  border:1.5px solid var(--n-400);color:transparent;font-size:12px}
+.rule.met{color:var(--ok-tx)}
+.rule.met .ic{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.rule.fail{color:var(--danger-tx)}
+.rule.fail .ic{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+
+/* éxito centrado con anillo animado */
+.center-state{margin:auto 0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;padding:0 8px}
+.ringwrap{position:relative;width:96px;height:96px;display:flex;align-items:center;justify-content:center}
+.ringwrap svg.ring{position:absolute;inset:0}
+.ringwrap .ring .track{stroke:var(--ok-bd)}
+.ringwrap .ring .arc{stroke:var(--ok);stroke-dasharray:264;stroke-dashoffset:264;animation:draw 1s .2s cubic-bezier(.22,.61,.36,1) forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.big-ic{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.big-ic.ok{background:var(--ok-bg);color:var(--ok-tx)}
+.big-ic.deny{background:var(--danger-bg);border:1.5px solid var(--danger-bd);color:var(--danger-tx);width:76px;height:76px}
+.center-state h4{margin:0;font-size:22px;font-weight:850;color:var(--n-900)}
+.center-state p{margin:0;font-size:14px;color:var(--n-700);max-width:290px}
+
+/* ---------- PIN premium (superficie tonal + teclas neumórficas) ---------- */
+.tonal-scr{background:linear-gradient(180deg,var(--tonal) 0%,var(--n-50) 60%)}
+.pinwrap{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:14px}
+.avatar{width:60px;height:60px;border-radius:50%;background:linear-gradient(150deg,var(--p-100),var(--p-200));
+  color:var(--p-800);display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:850;
+  box-shadow:0 1px 0 rgba(255,255,255,.8) inset,0 6px 14px -6px rgba(69,24,158,.30)}
+.pin-title{font-size:24px;font-weight:850;color:var(--n-900);text-align:center;letter-spacing:-.01em}
+.pin-sub{font-size:13.5px;color:var(--n-700);text-align:center;max-width:280px}
+.pdots{display:flex;gap:18px;justify-content:center;margin:18px 0 6px}
+.pd{width:17px;height:17px;border-radius:50%;border:2px solid var(--n-400);background:var(--n-0);
+  box-shadow:0 1px 2px rgba(24,16,54,.08) inset}
+.pd.f{background:var(--p-600);border-color:var(--p-600);box-shadow:0 2px 6px -2px rgba(106,53,224,.6)}
+.pd.e{background:var(--danger);border-color:var(--danger);animation:pulse-err 1.1s ease-in-out infinite}
+@keyframes pulse-err{0%,100%{box-shadow:0 0 0 0 rgba(192,38,38,.35)}50%{box-shadow:0 0 0 6px rgba(192,38,38,0)}}
+.pin-err{font-size:13.5px;font-weight:700;color:var(--danger-tx);text-align:center}
+.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:auto;padding-top:16px}
+.key{display:flex;align-items:center;justify-content:center;height:64px;border-radius:20px;
+  background:linear-gradient(180deg,#ffffff,#f7f3ff);border:1px solid var(--n-300); /* MC-2: elevation = border + shadow, nunca shadow sola */
+  box-shadow:0 1px 0 rgba(255,255,255,.95) inset,0 -1px 0 rgba(69,24,158,.06) inset,
+    0 3px 6px -2px rgba(69,24,158,.14),0 10px 18px -10px rgba(135,82,254,.22);
+  font-size:24px;font-weight:750;color:var(--n-900)}
+.key.util{background:linear-gradient(180deg,var(--n-50),var(--n-100));border:1px solid var(--n-300);color:var(--n-700);font-size:15px;box-shadow:var(--sh-1)}
+.key.bio{color:var(--p-700);background:linear-gradient(180deg,#f8f4ff,var(--p-100));border-color:var(--p-300)}
+
+/* ---------- shell v2 ---------- */
+.appbar{position:relative;z-index:4;display:flex;align-items:center;gap:10px;padding:10px 14px;
+  background:rgba(255,255,255,.96);border-bottom:1px solid var(--n-200)} /* MC-6: plate opaco, SIN blur */
+.appbar .abrand{font-size:15px;font-weight:850;color:var(--n-900)}
+.locchip{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 13px;border-radius:14px;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800);font-size:13px;font-weight:800;
+  box-shadow:0 1px 0 rgba(255,255,255,.7) inset}
+.appbar .sp{flex:1}
+.avatar.sm{width:40px;height:40px;font-size:15px}
+.content{flex:1;padding:14px 14px 96px;display:flex;flex-direction:column;gap:12px;overflow:hidden;position:relative}
+.hello{font-size:13px;font-weight:650;color:var(--n-600)}
+.hello b{display:block;font-size:22px;font-weight:850;color:var(--n-900);letter-spacing:-.01em;margin-top:1px}
+
+/* bento */
+.bento{display:grid;grid-template-columns:1.25fr 1fr;grid-auto-rows:minmax(64px,auto);gap:10px}
+.tile{position:relative;border-radius:var(--r-xl);padding:14px 16px;background:linear-gradient(180deg,#fff,#fdfcff);
+  border:var(--bd-lite);box-shadow:var(--sh-b1);min-width:0}
+.tile .tl{font-size:11px;font-weight:750;letter-spacing:.07em;text-transform:uppercase;color:var(--n-600)}
+.tile .tv{font-size:36px;font-weight:850;color:var(--n-900);letter-spacing:-.03em;line-height:1.02;margin-top:4px;
+  font-variant-numeric:tabular-nums}
+.tile .tf{font-size:12px;font-weight:650;color:var(--n-600);margin-top:4px}
+.tile-hero{grid-row:span 2;background:linear-gradient(155deg,#6a35e0 0%,#5a26c9 55%,#45189e 100%);
+  border:1px solid rgba(255,255,255,.22);color:#fff;
+  box-shadow:0 1px 0 rgba(255,255,255,.35) inset,0 8px 18px -8px rgba(69,24,158,.5),0 22px 44px -16px rgba(135,82,254,.5)}
+.tile-hero .tl{color:rgba(255,255,255,.85)}
+.tile-hero .tv{color:#fff;font-size:44px}
+.tile-hero .tf{color:rgba(255,255,255,.85)}
+.tile-hero .hblob{position:absolute;right:-24px;bottom:-30px;width:110px;height:104px;
+  border-radius:48% 52% 60% 40%/54% 46% 54% 46%;background:radial-gradient(circle at 35% 30%,rgba(255,255,255,.22),transparent 70%)}
+.ringk{position:absolute;top:14px;right:14px}
+.ringk .track{stroke:rgba(255,255,255,.28)}
+.ringk .arc{stroke:#fff;stroke-linecap:round}
+.tile .warn-v{color:var(--warn-tx)}
+
+/* queue cards v2 */
+.qhead{display:flex;align-items:baseline;justify-content:space-between;margin-top:2px}
+.qhead .ql{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600)}
+.qhead a{font-size:13px;font-weight:800;color:var(--p-700);min-height:48px;display:inline-flex;align-items:center} /* MC-5: target 48 */
+.qcard{display:flex;align-items:center;gap:12px;background:linear-gradient(180deg,#fff,#fdfcff);
+  border:var(--bd-lite);border-radius:20px;padding:12px 14px;box-shadow:var(--sh-b1)}
+.qico{flex:0 0 auto;width:42px;height:42px;border-radius:14px;background:var(--brand-a08);
+  display:flex;align-items:center;justify-content:center;color:var(--p-700)}
+.qbody{flex:1;min-width:0;display:grid;gap:3px}
+.qtop{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.qname{font-size:15px;font-weight:800;color:var(--n-900)}
+.qmeta{font-size:12.5px;color:var(--n-600);font-weight:600}
+.tchip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:8px;
+  font-size:12.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800)}
+.tchip .dot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:led 2s ease-in-out infinite}
+@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
+.tchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.tchip.danger{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.empty{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;
+  padding:18px 14px;border:1.5px dashed var(--n-300);border-radius:20px;background:var(--n-25);
+  color:var(--n-600);font-size:13px;font-weight:600}
+
+/* tab bar flotante tipo pill */
+.tabfloat{position:absolute;left:14px;right:14px;bottom:12px;z-index:8;display:flex;padding:6px;
+  background:rgba(255,255,255,.85);backdrop-filter:blur(18px);
+  border:1px solid rgba(255,255,255,.9);outline:1px solid rgba(23,18,43,.07);
+  border-radius:30px;box-shadow:var(--sh-float)}
+.tabf{position:relative;flex:1;min-height:56px;display:flex;flex-direction:column;gap:2px;
+  align-items:center;justify-content:center;font-size:11px;font-weight:750;color:var(--n-700);border-radius:24px}
+.tabf .tico{display:flex;align-items:center;justify-content:center;width:46px;height:26px;border-radius:13px}
+.tabf.on{color:var(--p-800);background:var(--p-100);box-shadow:0 1px 0 rgba(255,255,255,.8) inset}
+.tbadge{position:absolute;top:5px;right:50%;margin-right:-25px;min-width:17px;height:17px;padding:0 4px;
+  border-radius:9px;background:var(--danger);color:#fff;font-size:10.5px;font-weight:800;
+  display:flex;align-items:center;justify-content:center}
+.tbadge::after{content:"";position:absolute;inset:-4px;border-radius:14px;border:2px solid var(--danger);
+  opacity:0;animation:ping 2.2s ease-out infinite}
+@keyframes ping{0%{transform:scale(.65);opacity:.55}70%,100%{transform:scale(1.25);opacity:0}}
+
+/* sheet ubicación (glass con scrim) */
+.dim{opacity:.9;pointer-events:none}
+.scrim{position:absolute;inset:0;z-index:5;background:rgba(23,18,43,.42)}
+.sheet{position:absolute;left:8px;right:8px;bottom:8px;z-index:6;
+  background:rgba(255,255,255,.92);backdrop-filter:blur(20px);
+  border-radius:var(--r-2xl);border:1px solid rgba(255,255,255,.95);outline:1px solid rgba(23,18,43,.06);
+  box-shadow:var(--sh-float);padding:10px 16px 16px}
+.grab{width:44px;height:5px;border-radius:3px;background:var(--n-300);margin:4px auto 12px}
+.sheet h5{margin:0;font-size:18px;font-weight:850;color:var(--n-900)}
+.sheet .ssub{font-size:12.5px;color:var(--n-600);font-weight:600;margin:2px 0 12px}
+.opt{display:flex;align-items:center;gap:12px;min-height:56px;padding:0 14px;border-radius:16px;
+  border:1.5px solid var(--n-200);background:var(--n-0);margin-bottom:8px;font-size:15px;font-weight:700;color:var(--n-800)}
+.opt .radio{width:22px;height:22px;border-radius:50%;border:2px solid var(--n-400);flex:0 0 auto}
+.opt.sel{border-color:var(--p-600);background:var(--p-50);color:var(--p-800);box-shadow:0 1px 0 rgba(255,255,255,.8) inset,0 6px 14px -8px rgba(106,53,224,.4)}
+.opt.sel .radio{border-color:var(--p-600);background:radial-gradient(circle,var(--p-600) 0 45%,transparent 50%)}
+.opt .osub{display:block;font-size:12px;font-weight:600;color:var(--n-600)}
+
+/* skeleton shimmer */
+.sk{background:linear-gradient(90deg,var(--n-100),var(--n-200),var(--n-100));
+  background-size:200% 100%;animation:shim 1.4s infinite;border-radius:14px}
+.sk.r20{border-radius:20px}
+@keyframes shim{to{background-position:-200% 0}}
+
+/* firma / kiosco (tenant) */
+.kioskbar{display:flex;align-items:center;gap:8px;background:linear-gradient(90deg,var(--p-900),var(--p-800));color:#fff;
+  padding:10px 14px;font-size:12.5px;font-weight:800;letter-spacing:.03em}
+.kioskbar .exit{margin-left:auto;font-weight:700;font-size:12px;opacity:.92}
+.tenantbar{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--n-0);border-bottom:1px solid var(--n-200)}
+.tlogo{width:38px;height:38px;border-radius:12px;background:var(--n-800);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:850}
+.tname{font-size:16px;font-weight:850;color:var(--n-900)}
+.tsub{font-size:12px;color:var(--n-600);font-weight:600}
+.sigzone{flex:1;margin:6px 0;border:2px dashed var(--n-300);border-radius:22px;background:var(--n-0);
+  display:flex;align-items:center;justify-content:center;position:relative;min-height:250px;box-shadow:var(--sh-1)}
+.sigline{position:absolute;left:26px;right:26px;bottom:44px;border-bottom:1.5px solid var(--n-300)}
+.sighint{position:absolute;bottom:18px;left:0;right:0;text-align:center;font-size:12.5px;color:var(--n-600);font-weight:600}
+.risk-ghost{position:absolute;inset:auto 14px 40%;padding:10px 12px;border:2px dashed var(--danger);
+  border-radius:14px;background:rgba(192,38,38,.06);color:var(--danger-tx);font-size:12.5px;font-weight:750;text-align:center}
+.sigrow{display:flex;gap:10px}
+.sigrow .btn{flex:1}
+
+/* ---------- DARK preview (M2) ---------- */
+.dk{--dbg:#131024;--dbg2:#1a1533;--dcard:#211b3e;--dtx:#f2eff9;--dmut:#b3aac9;--dbd:rgba(159,121,255,.18)}
+.dk .scr{background:linear-gradient(180deg,#181231 0%,var(--dbg) 45%)}
+.dk .statusbar{background:transparent;color:var(--dmut)}
+.dk .appbar{background:rgba(26,21,51,.96);border-bottom:1px solid rgba(159,121,255,.14)}
+.dk .abrand{color:var(--dtx)}
+.dk .locchip{background:rgba(159,121,255,.14);border-color:rgba(159,121,255,.3);color:#d9c9ff;box-shadow:none}
+.dk .avatar.sm{background:linear-gradient(150deg,#3a2a6e,#2e1f5c);color:#d9c9ff;box-shadow:none}
+.dk .hello{color:var(--dmut)}
+.dk .hello b{color:var(--dtx)}
+.dk .tile{background:linear-gradient(180deg,#241d45,var(--dcard));border:1px solid var(--dbd);
+  box-shadow:0 1px 0 rgba(255,255,255,.06) inset,0 10px 24px -12px rgba(0,0,0,.6)}
+.dk .tile .tl{color:var(--dmut)}
+.dk .tile .tv{color:var(--dtx)}
+.dk .tile .tf{color:var(--dmut)}
+.dk .tile-hero{background:linear-gradient(155deg,#6a35e0 0%,#5a26c9 55%,#45189e 100%);border:1px solid rgba(255,255,255,.16)}
+.dk .tile-hero .tl,.dk .tile-hero .tf{color:rgba(255,255,255,.85)}
+.dk .tile-hero .tv{color:#fff}
+.dk .tile .warn-v{color:#f5c66a}
+.dk .qhead .ql{color:var(--dmut)}
+.dk .qhead a{color:#c0a8ff}
+.dk .qcard{background:linear-gradient(180deg,#241d45,var(--dcard));border:1px solid var(--dbd);box-shadow:0 1px 0 rgba(255,255,255,.06) inset,0 10px 24px -12px rgba(0,0,0,.6)}
+.dk .qname{color:var(--dtx)}
+.dk .qmeta{color:var(--dmut)}
+.dk .qico{background:rgba(159,121,255,.14);color:#c0a8ff}
+.dk .tchip{background:rgba(159,121,255,.16);border-color:rgba(159,121,255,.32);color:#d9c9ff}
+.dk .tabfloat{background:rgba(30,24,58,.82);border:1px solid rgba(159,121,255,.22);outline:1px solid rgba(0,0,0,.4)}
+.dk .tabf{color:var(--dmut)}
+.dk .tabf.on{color:#e6dbff;background:rgba(159,121,255,.20);box-shadow:none}
+.dk .empty{background:rgba(255,255,255,.03);border-color:rgba(159,121,255,.24);color:var(--dmut)}
+
+footer.dod{max-width:1720px;margin:0 auto;padding:10px 24px 50px;color:var(--n-700);font-size:13px}
+footer.dod .card{background:var(--n-0);border:var(--bd-lite);border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1);margin-bottom:14px}
+footer.dod b{color:var(--n-900)}
+.changelog li{margin:5px 0}
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <h1>RideOps · Mockups M1 — Tanda A <span class="v2">v2 · PREMIUM</span></h1>
+  <p>Iteración sobre feedback de Hector: «se ve muy simple — usemos las últimas prácticas de la industria».
+  Dirección de arte v2 «premium field-ops»: Material 3 Expressive (display grande, esquinas XL, superficies
+  tonales de #8752FE), gradiente aurora de marca, glass con juicio (solo overlays y siempre con scrim),
+  tab bar flotante tipo pill, bento grid de KPIs, iconografía duotone y estados con vida. Los límites duros
+  del patio (sol directo, guantes, una mano, gama media) NO se negocian y están verificados por frame.</p>
+  <div class="meta-chips">
+    <span class="mchip">Targets ≥ 48 pt (botones 56, teclas PIN 64)</span>
+    <span class="mchip">Texto ≥ 4.5:1 contra su fondo REAL — pares medidos en cada bloque de notas</span>
+    <span class="mchip">Todo string en l10n — app_es.arb / app_en.arb (ADR-8), aquí se muestra ES</span>
+    <span class="mchip">Loading / empty / error por pantalla (DoD-10)</span>
+    <span class="mchip">Foco AZUL #0b63d6 — regla del design system, nunca morado sobre morado</span>
+    <span class="mchip ok">Gradiente/glass jamás detrás de datos críticos sin scrim u superficie opaca</span>
+    <span class="mchip ok">Política de blur (gama media): default = plates opacos ≥ .95 SIN blur; blur solo como progressive enhancement; máx. 1 BackdropFilter por pantalla (candidatos: tab bar flotante O sheet)</span>
+    <span class="mchip">Divergencia móvil CONSCIENTE vs web: botón primario con gradiente+glow y radios 20–28 px (el web capa a --r-lg 14 px) — decisión de dirección de arte M1 móvil, no inconsistencia accidental</span>
+    <span class="mchip warn">Superficies volteadas al cliente: branding del tenant, nunca "RideOps"</span>
+  </div>
+</div>
+
+<nav class="jump">
+  <a href="#s1">1 · Login (aurora)</a>
+  <a href="#s2">2 · Cambio forzado de contraseña</a>
+  <a href="#s3">3 · PIN / biometría (+ decisión §9-6)</a>
+  <a href="#s4">4 · Shell bento + ubicación</a>
+  <a href="#s4f">4F · Dark preview (M2)</a>
+</nav>
+
+<!-- ============================================================ 1 · LOGIN -->
+<section class="blk" id="s1">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 1 · v2</span>
+    <h2>Login — hero aurora + hoja blanca</h2>
+    <p>POST /api/auth/login. Superficie de personal (no volteada al cliente) — la marca RideOps sí aparece.
+    Sin auto-refresh en 401: JWT vencido = re-login (ADR-3a). El gradiente aurora vive SOLO en el tercio
+    superior decorativo; el formulario completo va sobre hoja blanca opaca — cero texto de datos sobre gradiente.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Loading (botón)</span><span class="schip"><i></i>Error credenciales</span>
+      <span class="schip"><i></i>Sin red</span><span class="schip"><i></i>Empty: n/a (form)</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>1A — Reposo / foco <small>aurora de marca + sheet; foco AZUL en el campo activo</small></figcaption>
+      <div class="phone">
+        <div class="scr aur">
+          <span class="blob b1"></span><span class="blob b2"></span>
+          <div class="statusbar on-aurora"><span>9:41</span><span>LTE · 87 %</span></div>
+          <span class="flavor">DEV</span><span class="m inframe" style="top:40px;left:16px">1</span>
+          <div class="hero-top">
+            <div class="mark">R</div>
+            <div class="wname">RideOps</div>
+            <div class="wsub">Operaciones de patio<span class="m" style="margin-left:8px">2</span></div>
+          </div>
+          <div class="sheetcard">
+            <div class="grab"></div>
+            <div class="f-label" style="margin-top:0">Correo</div>
+            <div class="inp focus">marco@autosdelvalle.com<span class="m" style="margin-left:auto">3</span></div>
+            <div class="f-label">Contraseña</div>
+            <div class="inp"><span class="ph">••••••••</span>
+              <span class="trail"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg></span></div>
+            <div style="height:20px"></div>
+            <div class="btn btn-primary">Entrar</div>
+            <div class="linkline">¿Problemas para entrar? Pide a tu admin restablecer tu contraseña <span class="m" style="margin-left:6px">4</span></div>
+            <div class="ver">v0.1.0 (dev) · es · Patio Centro no seleccionado aún</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>1B — Error de credenciales <small>401 de /login (no confundir con 401 de sesión)</small></figcaption>
+      <div class="phone">
+        <div class="scr aur">
+          <span class="blob b1"></span>
+          <div class="statusbar on-aurora"><span>9:41</span><span>LTE · 87 %</span></div>
+          <span class="flavor">DEV</span>
+          <div class="hero-top" style="padding-bottom:14px">
+            <div class="mark">R</div>
+            <div class="wname">RideOps</div>
+            <div class="wsub">Operaciones de patio</div>
+          </div>
+          <div class="sheetcard">
+            <div class="grab"></div>
+            <div class="banner b-danger">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.5"/></svg>
+              Correo o contraseña incorrectos. Revisa e intenta de nuevo.<span class="m">5</span></div>
+            <div class="f-label">Correo</div>
+            <div class="inp err">marco@autosdelvalle.com</div>
+            <div class="f-label">Contraseña</div>
+            <div class="inp err"><span class="ph">••••••••</span></div>
+            <div style="height:20px"></div>
+            <div class="btn btn-primary">Entrar</div>
+            <div class="linkline">¿Problemas para entrar? Pide a tu admin restablecer tu contraseña</div>
+            <div class="ver">v0.1.0 (dev) · es</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>1C — Sin red <small>el login exige conexión; nada de spinner eterno</small></figcaption>
+      <div class="phone">
+        <div class="scr aur">
+          <span class="blob b1"></span>
+          <div class="statusbar on-aurora"><span>9:41</span><span class="off">Sin red · 87 %</span></div>
+          <span class="flavor">DEV</span>
+          <div class="hero-top" style="padding-bottom:14px">
+            <div class="mark">R</div>
+            <div class="wname">RideOps</div>
+            <div class="wsub">Operaciones de patio</div>
+          </div>
+          <div class="sheetcard">
+            <div class="grab"></div>
+            <div class="banner b-warn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg>
+              No hay conexión a internet. Iniciar sesión necesita red — se reintentará al volver la señal.<span class="m">6</span></div>
+            <div class="f-label">Correo</div>
+            <div class="inp">marco@autosdelvalle.com</div>
+            <div class="f-label">Contraseña</div>
+            <div class="inp"><span class="ph">••••••••</span></div>
+            <div style="height:20px"></div>
+            <div class="btn btn-primary is-disabled">Entrar</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:10px">Reintentar ahora</div>
+            <div class="ver">v0.1.0 (dev) · es</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Login v2</h3>
+      <div class="note"><span class="m">1</span><span><b>Chip de flavor</b> (DEV/STG) solo en builds no-prod — patrón .badge-building del web. Invisible en prod.</span></div>
+      <div class="note"><span class="m">2</span><span><b>Hero aurora = solo branding.</b> Mesh de marca (#1c0f4a → #45189e + acento cálido rgba(255,138,92,.32)) con blobs expresivos M3. El único texto encima es el wordmark blanco, en la zona más oscura. Ningún dato ni control vive sobre el gradiente.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Hoja blanca opaca</b> (radio 28 superior, highlight interior 1px) sube sobre la aurora: todos los inputs y errores van sobre #fff — contraste determinista a pleno sol. Foco AZUL --focus, inputs 54 px; toggle de ojo 44 px visual + hit-slop a 48.</span></div>
+      <div class="note"><span class="m">4</span><span><b>Sin "olvidé mi contraseña" self-service:</b> flujo staff = reset por admin + contraseña temporal (alimenta la pantalla 2). Confirmar contra auth.service.js antes de build.</span></div>
+      <div class="note"><span class="m">5</span><span><b>Error genérico deliberado</b> (no revela si el correo existe). Banner danger sobre la hoja blanca, nunca sobre la aurora.</span></div>
+      <div class="note"><span class="m">6</span><span><b>Sin red honesto:</b> banner warn + botón deshabilitado + reintento manual; se rehabilita solo al volver la señal (connectivity + DioException).</span></div>
+      <div class="contrast"><b>Contraste verificado (1A–1C)</b>
+        <ul>
+          <li>Blanco sobre aurora bajo el wordmark (peor caso, blob cálido): ≈ 5.9–6.8:1. El wordmark es texto GRANDE (30 px / 850) → umbral WCAG 3:1; pasa con margen amplio. Solo branding, sin datos.</li>
+          <li>Blanco sobre botón primario (gradiente #7442e8→#6a35e0): peor parada 5.7:1, base 6.57:1 AA.</li>
+          <li>Texto de campo --n-900 sobre #fff: 18.14:1 · meta --n-600: 5.04:1.</li>
+          <li>Statusbar sobre aurora: peor caso el lado derecho, donde el radial cálido aclara — ≈ 8.3:1.</li>
+        </ul></div>
+      <div class="motion"><b>Motion (build, no en HTML)</b>
+        <ul>
+          <li>Entrada: la hoja sube con spring suave (M3 expressive, ~450 ms, damping 0.85); la aurora hace cross-fade.</li>
+          <li>Submit: botón colapsa a pill + spinner; haptic light al éxito, haptic error + shake 2× del banner en 401.</li>
+          <li>prefers-reduced-motion ⇒ fades simples, sin springs.</li>
+        </ul></div>
+      <div class="mini-demo"><div class="cap">Estado loading del botón (al enviar)</div>
+        <div class="btn btn-primary is-disabled" style="max-width:220px"><span class="spin"></span>Entrando…</div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 2 · CAMBIO FORZADO -->
+<section class="blk" id="s2">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 2 · v2</span>
+    <h2>Cambio forzado de contraseña (gate PASSWORD_CHANGE_REQUIRED)</h2>
+    <p>Pantalla BLOQUEANTE (sin back, sin tabs): el backend deja pasar solo 3 endpoints en allowlist.
+    Al éxito, el backend devuelve {token, user} fresco — se intercambia el JWT sin re-login (blueprint §3).
+    v2: checklist sobre superficie tonal + medidor de fuerza segmentado, título display 24 px.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Validación en vivo</span><span class="schip"><i></i>Error contraseña actual</span>
+      <span class="schip"><i></i>Éxito (anillo animado)</span><span class="schip"><i></i>Loading (botón)</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>2A — Formulario con política en vivo <small>empleado nuevo con contraseña temporal</small></figcaption>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr"><div class="pad">
+          <div style="margin-top:14px"><span class="tchip"><span class="dot"></span>Paso obligatorio</span><span class="m" style="margin-left:8px">1</span></div>
+          <h3 style="font-size:24px;font-weight:850;letter-spacing:-.01em;margin:10px 0 4px">Crea tu contraseña</h3>
+          <p style="font-size:13.5px;color:var(--n-700);margin:0 0 6px">Entraste con una contraseña temporal.
+          Por seguridad, crea la tuya antes de continuar.</p>
+          <div class="f-label">Contraseña temporal (actual)</div>
+          <div class="inp">••••••••••</div>
+          <div class="f-label">Nueva contraseña</div>
+          <div class="inp focus">Patio26<span class="trail"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg></span></div>
+          <div class="policy"><span class="m" style="position:absolute;margin:-24px 0 0 296px">2</span>
+            <div class="strength"><i class="on"></i><i class="on"></i><i></i><i></i></div>
+            <div class="rule"><span class="ic">–</span>Mínimo 8 caracteres</div>
+            <div class="rule met"><span class="ic">✓</span>Al menos una mayúscula</div>
+            <div class="rule met"><span class="ic">✓</span>Al menos un número</div>
+            <div class="rule"><span class="ic">–</span>Distinta de la contraseña temporal</div>
+          </div>
+          <div style="height:16px"></div>
+          <div class="btn btn-primary is-disabled">Guardar y continuar<span class="m">3</span></div>
+          <div class="ver">La sesión temporal sigue viva durante este paso (allowlist del backend)</div>
+        </div></div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>2B — Error: contraseña actual incorrecta <small>error de servidor tras submit</small></figcaption>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr"><div class="pad">
+          <div style="margin-top:14px"><span class="tchip"><span class="dot"></span>Paso obligatorio</span></div>
+          <h3 style="font-size:24px;font-weight:850;letter-spacing:-.01em;margin:10px 0 4px">Crea tu contraseña</h3>
+          <div class="banner b-danger" style="margin:6px 0 4px">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.5"/></svg>
+            La contraseña temporal no es correcta. Revísala o pide a tu admin una nueva.<span class="m">4</span></div>
+          <div class="f-label">Contraseña temporal (actual)</div>
+          <div class="inp err">••••••••••</div>
+          <div class="f-label">Nueva contraseña</div>
+          <div class="inp">••••••••••</div>
+          <div class="policy">
+            <div class="strength"><i class="on-ok on"></i><i class="on-ok on"></i><i class="on-ok on"></i><i class="on-ok on"></i></div>
+            <div class="rule met"><span class="ic">✓</span>Mínimo 8 caracteres</div>
+            <div class="rule met"><span class="ic">✓</span>Al menos una mayúscula</div>
+            <div class="rule met"><span class="ic">✓</span>Al menos un número</div>
+            <div class="rule met"><span class="ic">✓</span>Distinta de la contraseña temporal</div>
+          </div>
+          <div style="height:16px"></div>
+          <div class="btn btn-primary">Guardar y continuar</div>
+          <div class="ver">&nbsp;</div>
+        </div></div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>2C — Éxito <small>anillo dibujándose + check; token intercambiado</small></figcaption>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr tonal-scr"><div class="pad">
+          <div class="center-state">
+            <div class="ringwrap">
+              <svg class="ring" width="96" height="96" viewBox="0 0 96 96" fill="none">
+                <circle class="track" cx="48" cy="48" r="42" stroke-width="6"/>
+                <circle class="arc" cx="48" cy="48" r="42" stroke-width="6" stroke-linecap="round" transform="rotate(-90 48 48)"/>
+              </svg>
+              <div class="big-ic ok"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></div>
+            </div>
+            <h4>Contraseña actualizada</h4>
+            <p>Tu sesión sigue activa — no necesitas volver a entrar.<span class="m">5</span></p>
+            <p style="font-size:13px;color:var(--n-600)">Siguiente: crea tu PIN para desbloquear rápido en el patio.</p>
+          </div>
+          <div class="btn btn-primary">Continuar</div>
+          <div class="ver">&nbsp;</div>
+        </div></div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Cambio forzado v2</h3>
+      <div class="note"><span class="m">1</span><span><b>Bloqueante de verdad:</b> sin AppBar con back, sin tabbar; el redirect de go_router manda aquí ante mustChangePassword o 403 PASSWORD_CHANGE_REQUIRED. El chip "Paso obligatorio" lleva dot con pulso lento (animación CSS ≤ 1 Hz, apagable con reduced-motion).</span></div>
+      <div class="note"><span class="m">2</span><span><b>Checklist sobre superficie tonal</b> (--tonal #f6f2ff derivada de la marca, borde translúcido + highlight): el bloque de política es EL protagonista. Nuevo medidor de fuerza segmentado (4 segmentos, morado→verde al cumplir todo). REGLAS A CONFIRMAR contra POST /api/auth/change-password — no inventar política.</span></div>
+      <div class="note"><span class="m">3</span><span><b>CTA deshabilitado</b> hasta cumplir la política local (la del servidor manda igual). En submit: spinner + "Guardando…" + haptic light.</span></div>
+      <div class="note"><span class="m">4</span><span><b>Sin campo "confirmar contraseña":</b> lo sustituye el toggle de ver contraseña (44 px visual + hit-slop a 48; menos fricción con guantes). Si Hector prefiere confirmación clásica, cambio menor.</span></div>
+      <div class="note"><span class="m">5</span><span><b>Éxito sin re-login:</b> {token, user} fresco, JWT intercambiado en silencio. Anillo SVG se dibuja (stroke-dashoffset, 1 s) y remata con haptic success; "Continuar" encadena al setup de PIN (3A).</span></div>
+      <div class="contrast"><b>Contraste verificado (2A–2C)</b>
+        <ul>
+          <li>Reglas cumplidas --ok-tx #08674e sobre tonal #f6f2ff: ≥ 7.2:1 · pendientes subidas a --n-700: ≈ 8.4:1 sobre tonal (con --n-600 medía 4.58:1 — pasaba AA pero sin margen al sol).</li>
+          <li>--p-800 sobre --p-50 (chip): 9.9:1 · título --n-900 sobre --n-50: 17.4:1.</li>
+          <li>Medidor de fuerza: los segmentos son decorativos — el estado legible vive en el checklist de texto.</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>Cada regla cumplida: check hace scale-in con spring corto (250 ms) — nunca re-anima al tipear.</li>
+          <li>Segmentos del medidor crecen con ease-out 200 ms; cambio a verde solo cuando TODAS cumplen.</li>
+          <li>Éxito: anillo 1 s + check pop; reduced-motion ⇒ estado final directo.</li>
+        </ul></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 3 · PIN / BIOMETRÍA -->
+<section class="blk" id="s3">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 3 · v2</span>
+    <h2>Bloqueo por PIN y biometría — y la decisión §9-6</h2>
+    <p>Setup al primer login, unlock por inactividad. El PIN es local al dispositivo (no viaja al backend);
+    N intentos fallidos ⇒ cerrar sesión y volver a login. Usuarios con screenLockExempt no ven este gate.
+    v2: superficie tonal de marca + keypad neumórfico sutil (teclas 64 px), título display, dots con vida.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Setup</span><span class="schip"><i></i>Unlock + error</span>
+      <span class="schip"><i></i>Variante A: modo kiosco</span><span class="schip"><i></i>Variante B: sin modo kiosco</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>3A — Setup del PIN (primer login) <small>paso 1 de 2; luego repite para confirmar</small></figcaption>
+      <div class="phone">
+        <div class="scr tonal-scr">
+          <div class="statusbar on-tonal"><span>9:41</span><span>LTE · 87 %</span></div>
+          <div class="pad">
+          <div class="pinwrap">
+            <div class="pin-title">Crea tu PIN</div>
+            <div class="pin-sub">Lo usarás para desbloquear RideOps en el patio. 4 dígitos.<span class="m">1</span></div>
+            <div class="pdots"><span class="pd f"></span><span class="pd f"></span><span class="pd"></span><span class="pd"></span></div>
+            <span style="font-size:12.5px;color:var(--n-600);font-weight:700">Paso 1 de 2</span>
+          </div>
+          <div class="keypad"><span class="m" style="position:absolute;margin-top:-10px;right:24px">2</span>
+            <div class="key">1</div><div class="key">2</div><div class="key">3</div>
+            <div class="key">4</div><div class="key">5</div><div class="key">6</div>
+            <div class="key">7</div><div class="key">8</div><div class="key">9</div>
+            <div class="key util" style="visibility:hidden"></div><div class="key">0</div><div class="key util">⌫</div>
+          </div>
+        </div></div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>3B — Unlock con error <small>PIN + huella; 2 intentos restantes; dots con pulso</small></figcaption>
+      <div class="phone">
+        <div class="scr tonal-scr">
+          <div class="statusbar on-tonal"><span>9:41</span><span>LTE · 87 %</span></div>
+          <div class="pad">
+          <div class="pinwrap">
+            <div class="avatar">MG</div>
+            <div class="pin-title">Hola, Marco</div>
+            <div class="pin-sub">Ingresa tu PIN para continuar</div>
+            <div class="pdots"><span class="pd e"></span><span class="pd e"></span><span class="pd e"></span><span class="pd e"></span></div>
+            <div class="pin-err">PIN incorrecto — te quedan 2 intentos<span class="m" style="margin-left:6px">3</span></div>
+          </div>
+          <div class="keypad">
+            <div class="key">1</div><div class="key">2</div><div class="key">3</div>
+            <div class="key">4</div><div class="key">5</div><div class="key">6</div>
+            <div class="key">7</div><div class="key">8</div><div class="key">9</div>
+            <div class="key bio"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 11a3 3 0 0 1 3 3c0 2-.4 4-1.3 5.8"/><path d="M9 13.5c0 2.6-.3 4.6-1 6.3"/><path d="M12 7.5a6.5 6.5 0 0 1 6.5 6.5c0 1.4-.15 2.8-.45 4.2"/><path d="M5.5 14a6.5 6.5 0 0 1 1.8-4.5"/><path d="M8.7 5.6A6.5 6.5 0 0 1 12 4.7c1.2 0 2.3.3 3.3.9"/></svg><span class="m" style="position:absolute;margin:-40px 0 0 40px">4</span></div>
+            <div class="key">0</div><div class="key util">⌫</div>
+          </div>
+          <div class="linkline" style="margin-top:6px">¿Olvidaste tu PIN? Cerrar sesión<span class="m" style="margin-left:6px">5</span></div>
+        </div></div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>3C — VARIANTE A · con modo kiosco <small>firma del cliente en el teléfono del empleado</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-0)">
+          <div class="kioskbar"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+            Modo firma · bloqueo en pausa<span class="exit">Salir: mantener 3 s + PIN</span><span class="m">6</span></div>
+          <div class="tenantbar"><div class="tlogo">AV</div>
+            <div><div class="tname">Autos del Valle</div><div class="tsub">Inspección del vehículo · Reserva R-2481</div></div>
+            <span class="m" style="margin-left:auto">7</span></div>
+          <div class="pad" style="padding-top:12px">
+            <p style="font-size:14.5px;color:var(--n-800);font-weight:600;margin:0 0 8px">Firme para confirmar que revisó
+            el estado del vehículo junto al agente.</p>
+            <div class="sigzone">
+              <svg width="200" height="70" viewBox="0 0 200 70" fill="none" stroke="var(--n-800)" stroke-width="2" stroke-linecap="round"><path d="M12 48c14-26 22-30 18-12s8 6 20-8 6 26 22 8 22-18 16-2 10 10 24 0 26-16 20-2 14 12 26 4"/></svg>
+              <div class="sigline"></div><div class="sighint">Firme aquí con el dedo</div>
+            </div>
+            <div class="sigrow">
+              <div class="btn btn-ghost">Borrar</div>
+              <div class="btn btn-primary" style="background:var(--n-800);box-shadow:var(--sh-1)">Confirmar firma<span class="m" style="margin-left:6px">8</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>3D — VARIANTE B · sin modo kiosco <small>solo pausa heurística del timer</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-0)">
+          <div class="tenantbar"><div class="tlogo">AV</div>
+            <div><div class="tname">Autos del Valle</div><div class="tsub">Inspección del vehículo · Reserva R-2481</div></div></div>
+          <div class="pad" style="padding-top:12px">
+            <p style="font-size:14.5px;color:var(--n-800);font-weight:600;margin:0 0 8px">Firme para confirmar que revisó
+            el estado del vehículo junto al agente.</p>
+            <div class="sigzone">
+              <div class="risk-ghost">RIESGO §9-6: si el cliente se detiene más del timeout,
+              la pantalla de PIN puede saltar AQUÍ, a mitad de firma<span class="m" style="margin-left:6px">9</span></div>
+              <div class="sigline"></div><div class="sighint">Firme aquí con el dedo</div>
+            </div>
+            <div class="sigrow">
+              <div class="btn btn-ghost">Borrar</div>
+              <div class="btn btn-primary" style="background:var(--n-800);box-shadow:var(--sh-1)">Confirmar firma</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · PIN / biometría v2</h3>
+      <div class="note"><span class="m">1</span><span><b>4 dígitos:</b> velocidad con guantes gana a entropía — el PIN solo protege la sesión local, el token vive en Keystore. Tras el paso 2 se ofrece activar huella (local_auth). Superficie tonal --tonal (M3): el unlock se siente "de la marca" sin gradiente detrás de texto.</span></div>
+      <div class="note"><span class="m">2</span><span><b>Keypad neumórfico SUTIL:</b> teclas 64 px, radio 20, gradiente blanco→tonal + doble sombra interior/exterior con tinte de marca, y borde --n-300 SIEMPRE — regla del sistema: elevation = border + shadow, nunca shadow sola (las sombras se lavan a pleno sol; el borde delimita la tecla). Profundidad = affordance táctil bajo el sol, no decoración. Al presionar: la tecla se hunde (sombra interior) + haptic light — anotado, no simulado aquí.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Contador de intentos visible;</b> al agotarse ⇒ limpiar sesión y volver a login. Dots en error con pulso rojo (animación ≤ 1 Hz) + shake horizontal del grupo (spring 300 ms) + haptic error. Nunca lockout silencioso.</span></div>
+      <div class="note"><span class="m">4</span><span><b>Huella como tecla del keypad</b> (relleno tonal --p-100, trazo --p-700 = duotone), no flujo aparte: un toque, cero modales.</span></div>
+      <div class="note"><span class="m">5</span><span><b>Escape honesto:</b> "olvidé mi PIN" = cerrar sesión, target 48 px.</span></div>
+      <div class="note"><span class="m">6</span><span><b>Variante A:</b> barra persistente gradiente --p-900→--p-800 (blanco ≥ 11:1) con salida deliberada (mantener 3 s + PIN). Activo: lock suspendido, notificaciones staff silenciadas, navegación bloqueada fuera de la firma.</span></div>
+      <div class="note"><span class="m">7</span><span><b>Superficie volteada al cliente:</b> branding del TENANT (display-data), jamás "RideOps"/"Ride Fleet". Idioma del cliente. Por eso la pantalla de firma NO usa aurora ni morado Ride: fondo blanco, acento en el color/negro del tenant.</span></div>
+      <div class="note"><span class="m">8</span><span><b>CTA de firma en tinta del tenant</b> (aquí --n-800 neutro, 14.07:1 con blanco): el morado Ride se reserva para superficies del staff.</span></div>
+      <div class="note"><span class="m">9</span><span><b>Variante B:</b> el canvas resetea el timer con cada trazo; sin barra, sin salida con PIN. Más simple, pero el riesgo dibujado es real (cliente lee términos y se pausa).</span></div>
+      <div class="contrast"><b>Contraste verificado (3A–3D)</b>
+        <ul>
+          <li>Dígitos --n-900 sobre tecla (peor parada #f7f3ff): 16.9:1 · título sobre tonal: 16.8:1.</li>
+          <li>Blanco sobre kioskbar --p-800: 11.2:1 (peor parada del gradiente).</li>
+          <li>Blanco sobre CTA tenant --n-800: 14.07:1.</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>Dot se llena con scale-in 150 ms por dígito; keypad entra con stagger sutil solo la primera vez.</li>
+          <li>Error: shake del grupo de dots (3 oscilaciones, spring) + haptic error; reduced-motion ⇒ solo color.</li>
+          <li>Huella OK: la tecla bio emite un anillo expansivo y desbloquea con fade 200 ms.</li>
+        </ul></div>
+      <div class="decision"><b>Decisión pendiente de Hector — §9-6</b>
+        Cuando el cliente firma en el teléfono del empleado, el lock por inactividad no debe saltar a mitad de firma.
+        <ul>
+          <li><b>A · Modo kiosco:</b> + a prueba de pausas largas, + bloquea fisgoneo si el cliente navega; − más build (M4 lo lista como "si §9-6 dice que sí").</li>
+          <li><b>B · Sin modo kiosco:</b> + barato, listo en M1; − el lock puede disparar con el teléfono en manos del cliente y pedirle el PIN del EMPLEADO (mala imagen y bloqueo del flujo).</li>
+        </ul>
+        Recomendación de diseño: Variante A; si se pospone a M4, lanzar M1 con B + timeout extendido (p. ej. 5 min) SOLO durante CUSTOMER_SIGN_PENDING.</div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 4 · SHELL + UBICACIÓN -->
+<section class="blk" id="s4">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 4 · v2</span>
+    <h2>Shell con RBAC + selector de ubicación — bento + tab bar flotante</h2>
+    <p>ShellRoute con nav inferior y ubicación activa en el header (header x-view-location en cada request).
+    La nav se esconde por moduleAccess, pero el 403 del backend se maneja igual (DoD-4). El 403 del selector
+    se muestra SIEMPRE como negativa visible, nunca pantalla vacía. v2: KPIs en bento grid (tile hero con
+    gradiente de marca + anillo de progreso ligado a dato real), cards con icono duotone, tab bar flotante
+    tipo pill con blur, saludo display.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Loading (skeleton shimmer)</span><span class="schip"><i></i>Empty (cola vacía)</span>
+      <span class="schip"><i></i>Error 403 ubicación</span><span class="schip"><i></i>Offline con datos viejos</span>
+      <span class="schip"><i></i>Dark preview (M2)</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>4A — Home AGENT <small>bento de KPIs; 4 tabs flotantes; cola vacía inline</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip">Patio Centro <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+            <span class="m">1</span><span class="sp"></span><div class="avatar sm">MG</div></div>
+          <div class="content">
+            <div class="hello">Martes 18<b>Hola, Marco</b></div>
+            <div class="bento"><span class="m inframe" style="margin:-6px 0 0 -6px">2</span>
+              <div class="tile tile-hero">
+                <span class="hblob"></span>
+                <svg class="ringk" width="44" height="44" viewBox="0 0 44 44" fill="none">
+                  <circle class="track" cx="22" cy="22" r="18" stroke-width="5"/>
+                  <circle class="arc" cx="22" cy="22" r="18" stroke-width="5" stroke-dasharray="113" stroke-dashoffset="38" transform="rotate(-90 22 22)"/>
+                </svg>
+                <div class="tl">Salidas hoy</div>
+                <div class="tv">6</div>
+                <div class="tf">4 completadas · 2 por salir</div>
+              </div>
+              <div class="tile"><div class="tl">Retornos</div><div class="tv">0</div><div class="tf">Próx. 72 h</div></div>
+              <div class="tile"><div class="tl">Bandeja</div><div class="tv warn-v">2</div><div class="tf">Pendientes de envío</div></div>
+            </div>
+            <div class="qhead"><span class="ql">Salidas (próx. 72 h)</span><a>Ver todo (6)</a></div>
+            <div class="qcard">
+              <div class="qico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 10l2.2-4.2A2 2 0 0 1 8 4.7h8a2 2 0 0 1 1.8 1.1L20 10"/><rect x="3" y="10" width="18" height="7" rx="2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Laura Méndez</span><span class="tchip">Hoy 10:30</span></div>
+              <div class="qmeta">Corolla 2023 · U-112 · R-2481 · Pre-checkin listo</div></div></div>
+            <div class="qcard">
+              <div class="qico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 10l2.2-4.2A2 2 0 0 1 8 4.7h8a2 2 0 0 1 1.8 1.1L20 10"/><rect x="3" y="10" width="18" height="7" rx="2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Jorge Salas</span><span class="tchip warn">Hoy 11:15</span></div>
+              <div class="qmeta">RAV4 2024 · U-087 · R-2483 · Falta pre-checkin</div></div></div>
+            <div class="qhead"><span class="ql">Retornos (próx. 72 h)</span></div>
+            <div class="empty"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="6" width="16" height="13" rx="2"/><path d="M4 11h16"/></svg>
+              No hay retornos en las próximas 72 h<span class="m">3</span></div>
+          </div>
+          <div class="tabfloat"><span class="m inframe" style="margin:-14px 0 0 160px">4</span>
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 10v10h12V10" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6" fill="rgba(135,82,254,.10)"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf"><span class="tbadge">2</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.10)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" fill="rgba(135,82,254,.12)"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>4B — Home ADMIN, offline <small>5 tabs (+Incidentes); datos viejos declarados</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span class="off">Sin red · 87 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip">Todas <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+            <span class="sp"></span><div class="avatar sm">HP</div></div>
+          <div class="content">
+            <div class="banner b-warn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg>
+              Sin conexión — mostrando datos de hace 4 min. <b style="margin-left:4px">Reintentar</b><span class="m">5</span></div>
+            <div class="bento">
+              <div class="tile tile-hero">
+                <span class="hblob"></span>
+                <div class="tl">Reservas activas</div>
+                <div class="tv">22</div>
+                <div class="tf">14 abiertas por asignar</div>
+              </div>
+              <div class="tile"><div class="tl">Abiertas</div><div class="tv">14</div><div class="tf">Todas las ubicaciones</div></div>
+              <div class="tile"><div class="tl">Incidentes</div><div class="tv" style="color:var(--danger-tx)">3</div><div class="tf">2 sin asignar</div></div>
+            </div>
+            <div class="qhead"><span class="ql">Incidentes abiertos</span><a>Ver todo (3)</a></div>
+            <div class="qcard">
+              <div class="qico" style="background:var(--danger-bg);color:var(--danger-tx)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 4L2.5 20h19z" fill="rgba(192,38,38,.12)"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">U-087 · golpe en defensa</span><span class="tchip danger"><span class="dot"></span>Abierto</span></div>
+              <div class="qmeta">Reportado 9:02 · Sucursal Aeropuerto</div></div></div>
+            <div class="qhead"><span class="ql">Salidas (próx. 72 h)</span><a>Ver todo (9)</a></div>
+            <div class="qcard">
+              <div class="qico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 10l2.2-4.2A2 2 0 0 1 8 4.7h8a2 2 0 0 1 1.8 1.1L20 10"/><rect x="3" y="10" width="18" height="7" rx="2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Laura Méndez</span><span class="tchip">Hoy 10:30</span></div>
+              <div class="qmeta">Corolla 2023 · U-112 · R-2481</div></div></div>
+          </div>
+          <div class="tabfloat">
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 10v10h12V10" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6" fill="rgba(135,82,254,.10)"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf"><span class="tbadge">3</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z" fill="rgba(135,82,254,.10)"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg></span>Incidentes<span class="m" style="position:absolute;top:-10px;right:2px">6</span></div>
+            <div class="tabf"><span class="tbadge">2</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.10)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" fill="rgba(135,82,254,.12)"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>4C — Selector de ubicación <small>bottom sheet glass + scrim; opciones de 56 px</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr">
+          <div class="dim">
+            <div class="appbar"><span class="abrand">RideOps</span>
+              <div class="locchip">Patio Centro <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+              <span class="sp"></span><div class="avatar sm">MG</div></div>
+            <div class="content">
+              <div class="bento">
+                <div class="tile tile-hero"><div class="tl">Salidas hoy</div><div class="tv">6</div></div>
+                <div class="tile"><div class="tl">Retornos</div><div class="tv">0</div></div>
+                <div class="tile"><div class="tl">Bandeja</div><div class="tv">2</div></div>
+              </div>
+              <div class="qcard"><div class="qbody"><div class="qtop"><span class="qname">Laura Méndez</span><span class="tchip">Hoy 10:30</span></div>
+                <div class="qmeta">Corolla 2023 · U-112</div></div></div>
+            </div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <h5>Ubicación activa</h5>
+            <div class="ssub">Filtra colas, búsqueda y capturas nuevas<span class="m" style="margin-left:8px">7</span></div>
+            <div class="opt"><span class="radio"></span>Todas mis ubicaciones</div>
+            <div class="opt sel"><span class="radio"></span><span>Patio Centro<span class="osub">Ubicación actual</span></span></div>
+            <div class="opt"><span class="radio"></span>Sucursal Aeropuerto</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:4px">Cancelar</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>4D — 403 de ubicación <small>negativa visible; NUNCA pantalla vacía</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip" style="background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)">Sucursal Aeropuerto</div>
+            <span class="sp"></span><div class="avatar sm">MG</div></div>
+          <div class="content">
+            <div class="center-state" style="margin:auto 0">
+              <div class="big-ic deny"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l7 3v5c0 5-3 8.2-7 10-4-1.8-7-5-7-10V6z" fill="rgba(192,38,38,.08)"/><path d="M9 9l6 6M15 9l-6 6"/></svg></div>
+              <h4>Sin acceso a esta ubicación</h4>
+              <p>Tu cuenta ya no tiene acceso a Sucursal Aeropuerto. Elige otra ubicación para seguir trabajando.<span class="m">8</span></p>
+            </div>
+            <div class="btn btn-primary">Cambiar ubicación</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:10px">Reintentar</div>
+            <p style="text-align:center;font-size:12.5px;color:var(--n-600);font-weight:600;margin:10px 0 0">
+              Si crees que es un error, avisa a tu administrador.</p>
+          </div>
+          <div class="tabfloat">
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 10v10h12V10" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6" fill="rgba(135,82,254,.10)"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf"><span class="tbadge">2</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.10)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" fill="rgba(135,82,254,.12)"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>4E — Loading (skeleton shimmer) <small>solo primer load; después pull-to-refresh</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip">Patio Centro <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+            <span class="sp"></span><div class="avatar sm">MG</div></div>
+          <div class="content"><span class="m" style="position:absolute;margin:4px 0 0 300px">9</span>
+            <div class="sk" style="height:14px;width:110px"></div>
+            <div class="sk" style="height:24px;width:170px"></div>
+            <div class="bento">
+              <div class="sk r20" style="grid-row:span 2;height:150px"></div>
+              <div class="sk r20" style="height:70px"></div>
+              <div class="sk r20" style="height:70px"></div>
+            </div>
+            <div class="sk" style="height:12px;width:120px;margin-top:6px"></div>
+            <div class="sk r20" style="height:70px"></div>
+            <div class="sk r20" style="height:70px"></div>
+          </div>
+          <div class="tabfloat">
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 10v10h12V10" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6" fill="rgba(135,82,254,.10)"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.10)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" fill="rgba(135,82,254,.12)"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Shell + ubicación v2</h3>
+      <div class="note"><span class="m">1</span><span><b>Ubicación SIEMPRE visible</b> en el header (chip --p-50, 44 px + hit-slop a 48). El appbar lleva blur SOLO como fondo de chrome — texto del brand y chip sobre superficies opacas propias.</span></div>
+      <div class="note"><span class="m">2</span><span><b>Bento M3 Expressive:</b> tile hero con gradiente de marca (#6a35e0→#45189e), número display 44 px y anillo de progreso ligado a dato REAL (4/6 salidas completadas — redundante con el pie de texto, que es quien lleva la información). La sparkline de la iteración anterior se eliminó: parecía dato y no estaba enlazada a ninguno. Tiles secundarios: número 36 px sobre blanco.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Empty por cola, no por pantalla:</b> cada cola vacía lo declara inline (borde punteado, --n-25). La pantalla nunca queda en blanco.</span></div>
+      <div class="note"><span class="m">4</span><span><b>Tab bar flotante tipo pill</b> (glass rgba(255,255,255,.85) + blur 18 + doble borde luz/sombra): patrón premium iOS/Android 2025-26. Tab activa = pill tonal --p-100 con texto --p-800 (7.4:1). El glass es SOLO chrome. <b>Política de blur (gama media, vinculante para build):</b> default = plates opacos ≥ .95 SIN blur; el blur es progressive enhancement si el device lo aguanta; máximo 1 BackdropFilter por pantalla — los candidatos únicos son este tab bar flotante y el sheet de ubicación (el appbar es plate opaco .96 sin blur, no aporta). AGENT = 4 tabs; Bandeja (outbox, ADR-7) SIEMPRE visible, badge con anillo pulsante (≤ 0.5 Hz).</span></div>
+      <div class="note"><span class="m">5</span><span><b>Offline honesto:</b> banner warn con edad del dato ("hace 4 min") + reintento. Los datos cacheados se muestran, no se borran.</span></div>
+      <div class="note"><span class="m">6</span><span><b>ADMIN/OPS suman Incidentes</b> (issueEscalations) por moduleAccess.issueCenter. Máximo 5 tabs; cada request maneja su 403 igualmente (DoD-4).</span></div>
+      <div class="note"><span class="m">7</span><span><b>Sheet glass con scrim obligatorio:</b> scrim rgba(23,18,43,.42) detrás del sheet garantiza el foco; el sheet mismo es rgba(255,255,255,.92) + blur — texto de opciones sobre plate ≥ 97 % blanco compuesto, contraste íntegro. Solo lista ubicaciones del set del usuario (locationIds; null = todas); persiste en sesión y alimenta x-view-location y el outbox.</span></div>
+      <div class="note"><span class="m">8</span><span><b>403 sin code = negativa de ubicación</b> (REGROUND §1): chrome completo, copy claro y 2 salidas (cambiar / reintentar). Prohibido mostrarlo como "no hay datos". Si backend agrega VIEW_LOCATION_DENIED (gap #3), el mapeo se endurece.</span></div>
+      <div class="note"><span class="m">9</span><span><b>Skeleton solo en el primer load</b> — ahora replica la geometría bento (hero alto + 2 tiles) con shimmer 1.4 s. Refrescos por polling silenciosos; pull-to-refresh con su propio indicador.</span></div>
+      <div class="contrast"><b>Contraste verificado (4A–4E)</b>
+        <ul>
+          <li>Blanco sobre tile hero (peor parada #6a35e0): 6.57:1 · pie al 85 %: ≥ 5.5:1 sobre #45189e.</li>
+          <li>Número --n-900 sobre tile blanco: 18.14:1 · label --n-600: 5.04:1.</li>
+          <li>Tab activa --p-800 sobre --p-100: 7.4:1 · inactiva --n-700 sobre glass compuesto — peor caso NO es blanco: es el tile hero #45189e visto a través del glass .85 → ≈ 6.9:1 (AA con margen).</li>
+          <li>Chip danger --danger-tx sobre --danger-bg: 5.9:1 · warn-tx sobre warn-bg: 5.7:1.</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>Tiles del bento entran con stagger 40 ms y spring suave SOLO en el primer load (después: contenido inmediato).</li>
+          <li>Anillo del hero se dibuja 600 ms ease-out; el número cuenta desde 0 solo la primera vez.</li>
+          <li>Cambio de tab: la pill activa se desliza con spring (M3), haptic selection; sheet sube con spring 380 ms.</li>
+          <li>Badge de Bandeja: anillo expansivo cada 2.2 s; se congela con reduced-motion o batería baja.</li>
+        </ul></div>
+    </aside>
+  </div>
+
+  <!-- ---- 4F · DARK PREVIEW ---- -->
+  <div class="blk-head" id="s4f" style="margin-top:8px">
+    <span class="eyebrow">Preview · M2</span>
+    <h2>4F — Modo nocturno (turnos de noche) — preview anotado, NO en alcance M1</h2>
+    <p>Paleta tonal oscura derivada de la marca (#131024 base morada, tiles #211b3e, texto #f2eff9).
+    El tile hero conserva el gradiente de marca — funciona igual en ambos temas. Se construye en M2
+    junto con el toggle por turno; aquí solo valida que el sistema tonal escala a dark.</p>
+  </div>
+  <div class="frames">
+    <figure>
+      <figcaption>4F — Home AGENT · dark <small>mismo layout 4A; tokens oscuros tonales</small></figcaption>
+      <div class="phone dk" style="border-color:#000">
+        <div class="scr">
+          <div class="statusbar"><span>22:14</span><span>LTE · 61 %</span></div>
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip">Patio Centro <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+            <span class="sp"></span><div class="avatar sm">MG</div></div>
+          <div class="content">
+            <div class="hello">Martes 18 · turno noche<b>Hola, Marco</b></div>
+            <div class="bento">
+              <div class="tile tile-hero">
+                <span class="hblob"></span>
+                <svg class="ringk" width="44" height="44" viewBox="0 0 44 44" fill="none">
+                  <circle class="track" cx="22" cy="22" r="18" stroke-width="5"/>
+                  <circle class="arc" cx="22" cy="22" r="18" stroke-width="5" stroke-dasharray="113" stroke-dashoffset="76" transform="rotate(-90 22 22)"/>
+                </svg>
+                <div class="tl">Retornos hoy</div>
+                <div class="tv">3</div>
+                <div class="tf">1 completado · 2 en ruta</div>
+              </div>
+              <div class="tile"><div class="tl">Salidas</div><div class="tv">1</div><div class="tf">Próx. 72 h</div></div>
+              <div class="tile"><div class="tl">Bandeja</div><div class="tv warn-v">1</div><div class="tf">Pendiente de envío</div></div>
+            </div>
+            <div class="qhead"><span class="ql">Retornos (próx. 72 h)</span><a>Ver todo (3)</a></div>
+            <div class="qcard">
+              <div class="qico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2" fill="rgba(159,121,255,.18)" stroke="none"/><path d="M4 10l2.2-4.2A2 2 0 0 1 8 4.7h8a2 2 0 0 1 1.8 1.1L20 10"/><rect x="3" y="10" width="18" height="7" rx="2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Sofía Rangel</span><span class="tchip">Hoy 22:40</span></div>
+              <div class="qmeta">Versa 2022 · U-093 · R-2477</div></div></div>
+            <div class="empty">No hay salidas esta noche</div>
+          </div>
+          <div class="tabfloat">
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf"><span class="tbadge">1</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Dark preview</h3>
+      <div class="note"><span class="m">1</span><span><b>Alcance:</b> M2, con toggle por turno (o automático por hora del patio). En M1 solo existe light — este frame fija la dirección para que los tokens nazcan theme-ready.</span></div>
+      <div class="note"><span class="m">2</span><span><b>Paleta tonal, no gris:</b> los fondos oscuros conservan el matiz morado de la marca (#131024/#211b3e). El tile hero NO cambia — el gradiente #6a35e0→#45189e cumple con blanco en ambos temas.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Turnos de noche:</b> menos luminancia total (blur del tab bar baja a rgba(30,24,58,.82)) y misma geometría — cero re-aprendizaje entre temas.</span></div>
+      <div class="contrast"><b>Contraste verificado (4F)</b>
+        <ul>
+          <li>Texto principal #f2eff9 sobre tile #211b3e: 14.4:1 · muted #b3aac9 (nómbrese --d-text-muted en los tokens Flutter): 7.3:1.</li>
+          <li>Chip tonal #d9c9ff sobre rgba(159,121,255,.16) compuesto: ≥ 9:1.</li>
+          <li>Ámbar dark #f5c66a sobre tile: 8.9:1 (el warn light --warn-tx NO se reutiliza en dark).</li>
+        </ul></div>
+    </aside>
+  </div>
+</section>
+
+<footer class="dod">
+  <div class="card">
+    <b>Qué cambió vs v1</b>
+    <ul class="changelog">
+      <li><b>Lenguaje M3 Expressive:</b> tipografía display (títulos 24 px, KPIs 36–44 px), esquinas XL 20–28 px tipo squircle, superficies tonales --tonal derivadas de #8752FE y blobs decorativos sutiles — la v1 usaba cards planas de 12–14 px y números de 22 px.</li>
+      <li><b>Login con hero aurora:</b> mesh de marca (#1c0f4a→#45189e + acento cálido) reemplaza el fondo neutro; el formulario vive en una hoja blanca opaca que sube sobre el gradiente — profundidad sin sacrificar un solo ratio de contraste.</li>
+      <li><b>Bento grid en la home:</b> tile hero con gradiente de marca y anillo de progreso ligado a dato real + 2 tiles satélite, en lugar de 3 KPIs iguales en fila.</li>
+      <li><b>Tab bar flotante tipo pill</b> (glass + blur + doble borde, tab activa como pill tonal) en vez de barra pegada al borde; el selector de ubicación ahora es sheet glass flotante con scrim obligatorio.</li>
+      <li><b>Keypad PIN neumórfico sutil</b> sobre superficie tonal: teclas 64 px con gradiente y doble sombra con tinte de marca; huella duotone integrada al keypad.</li>
+      <li><b>Estados con vida:</b> skeleton shimmer con geometría bento, badges con anillo pulsante, chips con dot animado, anillo de éxito que se dibuja — todos ≤ 1 Hz y desactivables con prefers-reduced-motion.</li>
+      <li><b>Iconografía duotone</b> (trazo + relleno --brand al 10–16 %) en tabs, colas e incidentes, en vez de outline plano.</li>
+      <li><b>Dark-ready:</b> frame 4F de la home en paleta tonal oscura como preview anotado para M2 (turnos de noche); v1 no contemplaba dark.</li>
+      <li><b>Notas de motion y de contraste por sección:</b> springs/haptics anotados para build y pares de contraste medidos frame por frame (antes solo la regla general).</li>
+      <li><b>Iteración post-review de Graphic Design (mismo día):</b> claims de contraste re-medidos y sincerados (aurora ≈5.9–6.8:1 en texto grande 3:1, statusbar ≈8.3:1, tab inactiva sobre hero ≈6.9:1, pendientes de política a --n-700), teclas del PIN con borde --n-300 (elevation = border + shadow), dots pulsantes retirados de chips de hora estática, sparkline sin dato eliminada, "Ver todo" a 48 px, y política de blur para gama media escrita como regla vinculante (appbar ahora opaco sin blur).</li>
+    </ul>
+  </div>
+  <div class="card">
+    <b>Trazabilidad DoD (§10) — sin cambios de fondo vs v1:</b> #1 todos los strings mostrados van a app_es.arb/app_en.arb ·
+    #2 targets 56–64 px y texto ≥ 4.5:1 contra su fondo REAL (pares medidos en cada bloque de notas; gradiente/glass nunca
+    detrás de datos sin scrim o plate opaco) · #5 estados 401/403/409/429 — el 403 de ubicación es el frame 4D, el gate de
+    contraseña es la pantalla 2 · #10 loading/empty/error dibujados por pantalla. <b>Pendientes marcados para build:</b>
+    política real de contraseña (confirmar contra POST /api/auth/change-password), flujo de reset staff, la decisión §9-6
+    (caja ámbar, pantalla 3), y verificar en device que el enhancement de blur (tab bar / sheet, máx. 1 por pantalla)
+    sostiene 60 fps — la política de blur ya es regla vinculante en este mockup, no un pendiente.
+  </div>
+</footer>
+
+</body>
+</html>
