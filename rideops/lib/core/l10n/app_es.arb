@@ -49,6 +49,37 @@
   "homePlaceholderTitle": "Sesión iniciada",
   "homePlaceholderBody": "El tablero de patio llega en la siguiente historia.",
   "logoutButton": "Cerrar sesión",
+  "tabHome": "Inicio",
+  "tabSearch": "Buscar",
+  "tabIncidents": "Incidentes",
+  "tabOutbox": "Bandeja",
+  "tabProfile": "Perfil",
+  "outboxBadgeSemantics": "{count} pendientes de envío",
+  "@outboxBadgeSemantics": {
+    "description": "Etiqueta de accesibilidad del badge de la tab Bandeja",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "shellPlaceholderBody": "Esta sección llega en una historia siguiente.",
+  "locationChipAll": "Todas",
+  "locationChipSemantics": "Ubicación activa: {location}. Toca para cambiar.",
+  "@locationChipSemantics": {
+    "placeholders": { "location": { "type": "String" } }
+  },
+  "locationSheetTitle": "Ubicación activa",
+  "locationSheetSubtitle": "Filtra colas, búsqueda y capturas nuevas",
+  "locationAllMine": "Todas mis ubicaciones",
+  "locationCurrentLabel": "Ubicación actual",
+  "locationSheetError": "No se pudieron cargar tus ubicaciones. Revisa la señal e intenta de nuevo.",
+  "cancelButton": "Cancelar",
+  "locationDeniedTitle": "Sin acceso a esta ubicación",
+  "locationDeniedBody": "Tu cuenta ya no tiene acceso a {location}. Elige otra ubicación para seguir trabajando.",
+  "@locationDeniedBody": {
+    "placeholders": { "location": { "type": "String" } }
+  },
+  "locationDeniedBodyGeneric": "Tu cuenta ya no tiene acceso a esta ubicación. Elige otra ubicación para seguir trabajando.",
+  "locationDeniedChangeButton": "Cambiar ubicación",
+  "locationDeniedAdminNote": "Si crees que es un error, avisa a tu administrador.",
+  "loadingLabel": "Cargando…",
   "sessionExpired": "Tu sesión venció. Vuelve a entrar.",
   "locationDenied": "No tienes acceso a esa ubicación.",
   "errorConflictReloaded": "Otra pantalla avanzó esta sesión. Se recargó el estado.",

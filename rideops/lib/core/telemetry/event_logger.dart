@@ -46,6 +46,13 @@ abstract final class AuthEvents {
   static const sessionExpiredRelogin = 'auth.session_expired_relogin';
 }
 
+/// Eventos de sesión fuera de auth (03-observability.md §Sesión): selector de
+/// ubicación (H3) y, cuando llegue H2, el PIN lock.
+abstract final class SessionEvents {
+  static const viewLocationSet = 'session.view_location_set';
+  static const viewLocationDenied = 'session.view_location_denied';
+}
+
 /// Punto de enchufe de Sentry: cuando haya DSN, aquí se decide
 /// `SentryEventLogger` en prod y debug en dev. Hoy: debug print en debug,
 /// silencio en release.

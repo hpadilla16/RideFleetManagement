@@ -69,6 +69,7 @@ TokenRefresher refresherFor(String? token) => TokenRefresher(
       readViewLocation: () => viewLocation,
       onSessionExpired: () => calls.add('expired'),
       onPasswordChangeRequired: () => calls.add('pwd-gate'),
+      onViewLocationDenied: () => calls.add('view-denied'),
     ),
   );
   return (dio: dio, adapter: adapter, calls: calls);
@@ -142,8 +143,9 @@ void main() {
     expect(h.calls, ['pwd-gate']);
   });
 
-  test('403 SIN code (selector de ubicación) → forbidden, sin callbacks',
-      () async {
+  test(
+      '403 SIN code y SIN header de ubicación → forbidden, sin callbacks '
+      '(un 403 de módulo no contamina la métrica del selector)', () async {
     // REGROUND §1: el 403 del header x-view-location no trae code.
     final h = build(
       respond: () =>
@@ -152,6 +154,52 @@ void main() {
     final err = await errorOf(() => h.dio.get<dynamic>('/x'));
     expect(err.kind, ApiErrorKind.forbidden);
     expect(h.calls, isEmpty);
+  });
+
+  test('403 SIN code en request CON header → onViewLocationDenied (H3)',
+      () async {
+    final h = build(
+      viewLocation: 'loc-quitada',
+      respond: () =>
+          jsonRes(403, {'error': 'You do not have access to that location.'}),
+    );
+    final err = await errorOf(() => h.dio.get<dynamic>('/x'));
+    expect(err.kind, ApiErrorKind.forbidden);
+    expect(h.calls, ['view-denied']);
+  });
+
+  test('403 CON code y header → pwd-gate, jamás view-denied', () async {
+    final h = build(
+      viewLocation: 'loc-centro',
+      respond: () => jsonRes(403, {
+        'error': 'Password change required',
+        'code': 'PASSWORD_CHANGE_REQUIRED',
+      }),
+    );
+    await errorOf(() => h.dio.get<dynamic>('/x'));
+    expect(h.calls, ['pwd-gate']);
+  });
+
+  test(
+      'extra skipViewLocation suprime el header aunque haya ubicación activa '
+      '(/me y /locations/selectable — WHY en interceptors.dart)', () async {
+    final h = build(
+      viewLocation: 'loc-centro',
+      respond: () => jsonRes(200, {'ok': true}),
+    );
+    await h.dio.get<dynamic>(
+      '/x',
+      options: Options(extra: {AuthInterceptor.skipViewLocation: true}),
+    );
+    expect(
+      h.adapter.last!.headers.containsKey(AuthInterceptor.viewLocationHeader),
+      isFalse,
+    );
+    expect(
+      h.adapter.last!.headers['Authorization'],
+      isNotNull,
+      reason: 'solo salta la ubicación, el bearer va igual',
+    );
   });
 
   group('ApiError.fromDio — mapeo puro de kinds', () {

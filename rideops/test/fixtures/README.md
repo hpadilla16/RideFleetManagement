@@ -12,6 +12,7 @@ actualiza en el mismo PR (DoD #12). Los tests de DTO deserializan estos archivos
 | `reservation_card.json` | `employee-app.service.js` `reservationCard` (:66-122) |
 | `handoff_token.json` | `checkout-session.service.js` `mintHandoffToken` (:727-733 reuso, :766-770 fresco) |
 | `mobile_inspection_state.json` | `mobile-inspection.service.js` `loadSession` (:118-143) |
+| `locations_selectable.json` | `locations-selectable.routes.js` `GET /selectable` (:38-45 — `select: {id, code, name, city, state}`; array plano, sin envoltura) |
 
 Notas de forma que muerden:
 

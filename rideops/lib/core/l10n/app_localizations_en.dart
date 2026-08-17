@@ -126,6 +126,78 @@ class AppLocalizationsEn extends AppLocalizations {
   String get logoutButton => 'Sign out';
 
   @override
+  String get tabHome => 'Home';
+
+  @override
+  String get tabSearch => 'Search';
+
+  @override
+  String get tabIncidents => 'Incidents';
+
+  @override
+  String get tabOutbox => 'Outbox';
+
+  @override
+  String get tabProfile => 'Profile';
+
+  @override
+  String outboxBadgeSemantics(int count) {
+    return '$count pending to send';
+  }
+
+  @override
+  String get shellPlaceholderBody => 'This section arrives in a later story.';
+
+  @override
+  String get locationChipAll => 'All';
+
+  @override
+  String locationChipSemantics(String location) {
+    return 'Active location: $location. Tap to change.';
+  }
+
+  @override
+  String get locationSheetTitle => 'Active location';
+
+  @override
+  String get locationSheetSubtitle => 'Filters queues, search and new captures';
+
+  @override
+  String get locationAllMine => 'All my locations';
+
+  @override
+  String get locationCurrentLabel => 'Current location';
+
+  @override
+  String get locationSheetError =>
+      'Could not load your locations. Check the signal and try again.';
+
+  @override
+  String get cancelButton => 'Cancel';
+
+  @override
+  String get locationDeniedTitle => 'No access to this location';
+
+  @override
+  String locationDeniedBody(String location) {
+    return 'Your account no longer has access to $location. Pick another location to keep working.';
+  }
+
+  @override
+  String get locationDeniedBodyGeneric =>
+      'Your account no longer has access to this location. Pick another location to keep working.';
+
+  @override
+  String get locationDeniedChangeButton => 'Change location';
+
+  @override
+  String get locationDeniedAdminNote =>
+      'If you think this is a mistake, tell your administrator.';
+
+  @override
+  String get loadingLabel => 'Loading…';
+
+  @override
   String get sessionExpired => 'Your session expired. Please sign in again.';
 
   @override

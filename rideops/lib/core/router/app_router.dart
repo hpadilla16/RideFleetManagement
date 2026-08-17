@@ -7,6 +7,8 @@ import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/dashboard/presentation/home_placeholder_screen.dart';
 import '../../features/shell/app_shell.dart';
+import '../../features/shell/shell_placeholder_screen.dart';
+import '../l10n/app_localizations.dart';
 import '../session/session_controller.dart';
 import '../session/session_state.dart';
 
@@ -17,6 +19,14 @@ abstract final class AppRoutes {
   static const login = '/login';
   static const changePassword = '/change-password';
   static const home = '/home';
+
+  // Tabs del shell (H3). Incidentes existe como ruta aunque la nav la
+  // esconda por RBAC: esconder no es proteger — el RBAC real lo aplica el
+  // backend y la pantalla maneja su 403 (DoD-4).
+  static const search = '/search';
+  static const incidents = '/incidents';
+  static const outbox = '/outbox';
+  static const profile = '/profile';
 }
 
 /// Superficies del flujo de auth: NUNCA se preservan como destino de retorno
@@ -122,14 +132,42 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           resumeTo: state.uri.queryParameters['from'],
         ),
       ),
-      // Shell de la app (blueprint §3): en H1 solo envuelve; el bottom nav +
-      // banner de ubicación activa llegan con H3/H4.
+      // Shell de la app (blueprint §3, H3): appbar con chip de ubicación +
+      // tab bar flotante RBAC. Los destinos sin historia todavía montan
+      // ShellPlaceholderScreen — cada historia reemplaza el suyo.
       ShellRoute(
-        builder: (context, state, child) => AppShell(child: child),
+        builder: (context, state, child) => AppShell(
+          currentPath: state.matchedLocation,
+          child: child,
+        ),
         routes: [
           GoRoute(
             path: AppRoutes.home,
             builder: (context, state) => const HomePlaceholderScreen(),
+          ),
+          GoRoute(
+            path: AppRoutes.search,
+            builder: (context, state) => ShellPlaceholderScreen(
+              title: AppLocalizations.of(context)!.tabSearch,
+            ),
+          ),
+          GoRoute(
+            path: AppRoutes.incidents,
+            builder: (context, state) => ShellPlaceholderScreen(
+              title: AppLocalizations.of(context)!.tabIncidents,
+            ),
+          ),
+          GoRoute(
+            path: AppRoutes.outbox,
+            builder: (context, state) => ShellPlaceholderScreen(
+              title: AppLocalizations.of(context)!.tabOutbox,
+            ),
+          ),
+          GoRoute(
+            path: AppRoutes.profile,
+            builder: (context, state) => ShellPlaceholderScreen(
+              title: AppLocalizations.of(context)!.tabProfile,
+            ),
           ),
         ],
       ),

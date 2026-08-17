@@ -7,6 +7,7 @@ import 'package:rideops/core/api/dto/dashboard.dart';
 import 'package:rideops/core/api/dto/inspection.dart';
 import 'package:rideops/core/api/dto/reservation_card.dart';
 import 'package:rideops/core/api/dto/session_user.dart';
+import 'package:rideops/core/api/dto/staff_location.dart';
 import 'package:rideops/core/api/enums.dart';
 
 /// Los 6 DTOs calientes contra fixtures de JSON real (M0-5). Cada fixture
@@ -106,6 +107,19 @@ void main() {
           now: () => DateTime.utc(2026, 8, 16, 14, 26)),
       isFalse,
     );
+  });
+
+  test('locations_selectable.json → List<StaffLocation> (array plano)', () {
+    final raw = json.decode(
+      File('test/fixtures/locations_selectable.json').readAsStringSync(),
+    ) as List<dynamic>;
+    final list = raw
+        .map((e) => StaffLocation.fromJson(e as Map<String, dynamic>))
+        .toList();
+    expect(list, hasLength(2));
+    expect(list.first.name, 'Patio Centro');
+    expect(list.first.code, 'CEN');
+    expect(list[1].city, isNull, reason: 'city/state son nullable en Prisma');
   });
 
   test('mobile_inspection_state.json → MobileInspectionState', () {

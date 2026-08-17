@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 
 import 'api_error.dart';
 import 'dto/session_user.dart';
+import 'interceptors.dart';
 
 /// Retrofit a mano (ADR-2) para /api/auth/*.
 ///
@@ -44,9 +45,19 @@ class AuthApi {
 
   /// GET /api/auth/me → `{ user }` (buildSessionUser). Fuente de la
   /// rehidratación al arrancar.
+  ///
+  /// SALTA `x-view-location` (WHY completo en
+  /// [AuthInterceptor.skipViewLocation]): /me responde `req.user` YA reducido
+  /// por el header (auth.routes.js:95-97) — con override activo la app
+  /// recibiría locationIds de UNA sede y confundiría el set real del usuario;
+  /// y si un admin quitó la sede persistida, la rehidratación entera moriría
+  /// con el 403 duro del selector. La identidad no es dato scoped.
   Future<SessionUser> me() async {
     final res = await _run(
-      () => _authed.get<Map<String, dynamic>>('/api/auth/me'),
+      () => _authed.get<Map<String, dynamic>>(
+        '/api/auth/me',
+        options: Options(extra: {AuthInterceptor.skipViewLocation: true}),
+      ),
     );
     return SessionUser.fromJson(res.data!['user'] as Map<String, dynamic>);
   }
