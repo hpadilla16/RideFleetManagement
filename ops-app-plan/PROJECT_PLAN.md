@@ -163,7 +163,6 @@ bloqueo por PIN y biometría, shell con RBAC y **selector de ubicación**, home 
 operaciones con las 9 colas del dashboard, captura de inspección nativa (cámara →
 comprimir al tomar → soltar el controlador; pipeline offline vía bandeja).
 
-<<<<<<< HEAD
 #### Criterios registrados por revisiones H2/H3 (ciclo de review, 2026-08-16)
 Compromisos que las revisiones de Innovation/GD dejaron para historias futuras — se
 verifican en el DoD de la historia indicada:
