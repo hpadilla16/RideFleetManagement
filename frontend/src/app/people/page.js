@@ -476,7 +476,7 @@ function Inner({ token, me, logout }) {
                 </div>
               ) : null}
 
-              <div className="stack">
+              <div className="stack" data-tour="person-type">
                 <label className="label">Person Type</label>
                 <select
                   value={form.personType}
@@ -505,7 +505,7 @@ function Inner({ token, me, logout }) {
                 ) : null}
               </div>
 
-              <div className="stack">
+              <div className="stack" data-tour="person-access-role">
                 <label className="label">Access Role</label>
                 <select
                   value={form.role}
@@ -705,7 +705,7 @@ function Inner({ token, me, logout }) {
             ) : null}
 
             {!hostMode && locations.length ? (
-              <div className="stack">
+              <div className="stack" data-tour="person-locations">
                 <div className="section-title">Locations</div>
                 <div className="surface-note">
                   Which locations this user can see. Leave all unchecked = sees ALL locations.

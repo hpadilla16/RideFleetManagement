@@ -1096,6 +1096,18 @@
           "view-location-switcher": {
             "title": "Viewing as one branch",
             "body": "Anyone with more than one location gets this switcher. It changes what they see everywhere — including what their exports contain."
+          },
+          "person-type": {
+            "title": "Pick what kind of person this is",
+            "body": "Employee, admin, host or virtual agent. The choice sets their starting permissions, so it is the first thing to get right — changing it later means re-checking everything below it."
+          },
+          "person-access-role": {
+            "title": "Then their access role",
+            "body": "AGENT works the counter. OPS adds the operational screens. ADMIN can change settings and manage people. When in doubt give less: raising someone later is one click, undoing what they changed is an audit."
+          },
+          "person-locations": {
+            "title": "Scope them to their branch",
+            "body": "Check the locations this person works at. Leaving every box UNCHECKED is not \"no access\" — it means they see ALL locations. That is the most common mistake on this screen."
           }
         }
       },

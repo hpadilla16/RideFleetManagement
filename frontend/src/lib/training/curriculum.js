@@ -414,6 +414,21 @@ export const COURSES = [
           },
           {
             // ADMIN only, deliberately: the switcher never renders for a
+            anchor: 'person-type',
+            title: 'Pick what kind of person this is',
+            body: 'Employee, admin, host or virtual agent. The choice sets their starting permissions, so it is the first thing to get right — changing it later means re-checking everything below it.',
+          },
+          {
+            anchor: 'person-access-role',
+            title: 'Then their access role',
+            body: 'AGENT works the counter. OPS adds the operational screens. ADMIN can change settings and manage people. When in doubt give less: raising someone later is one click, undoing what they changed is an audit.',
+          },
+          {
+            anchor: 'person-locations',
+            title: 'Scope them to their branch',
+            body: 'Check the locations this person works at. Leaving every box UNCHECKED is not "no access" — it means they see ALL locations. That is the most common mistake on this screen.',
+          },
+          {
             // SUPER_ADMIN (they pick a tenant instead), so touring a super
             // admin past it would highlight nothing.
             anchor: 'view-location-switcher',
