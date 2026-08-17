@@ -26,6 +26,44 @@ export class CheckoutSessionError extends Error {
 
 const HANDOFF_TOKEN_TTL_MIN = 15;
 
+/**
+ * Absolute base for the customer-facing /sign/:token page.
+ *
+ * ORDER MATTERS, and it is deliberately NOT the CUSTOMER_PORTAL_BASE_URL-first
+ * chain used by the ~11 other link builders in this codebase. /sign/[token] is
+ * a route of the MAIN Next app — the same deployment that serves the agent's
+ * checkout wizard (frontend/src/app/sign/[token]/page.js sits beside
+ * frontend/src/app/reservations/...). CUSTOMER_PORTAL_BASE_URL names the
+ * customer portal, which today is just another route tree in that same app
+ * (frontend/src/app/customer) but is exactly the thing a tenant would peel off
+ * onto its own hostname. Reading it first would then hand customers a URL on a
+ * deployment that does not serve /sign at all.
+ *
+ * So: prefer the vars that name the app itself, and keep CUSTOMER_PORTAL_BASE_URL
+ * as the LAST fallback — it is the var most tenants actually set today, and
+ * while the two are the same origin it still yields a correct link.
+ */
+function signingBaseUrl() {
+  return (
+    process.env.APP_BASE_URL
+    || process.env.FRONTEND_BASE_URL
+    || process.env.CUSTOMER_PORTAL_BASE_URL
+    || 'http://localhost:3000'
+  ).replace(/\/+$/, '');
+}
+
+/**
+ * Absolute link for a minted token, or null for kinds with no verified public
+ * page. Only TERMS_SIGNING is mapped: MOBILE_INSPECTION has no frontend route
+ * that builds a URL from the token (it is exchanged through
+ * /api/public/checkout-handoff), and CUSTOMER_INSPECTION already gets its
+ * /inspect/:token link built by customer-inspection.service.js. Guessing a
+ * path for either would be worse than omitting the field.
+ */
+function publicUrlForToken(kind, token) {
+  return kind === 'TERMS_SIGNING' ? `${signingBaseUrl()}/sign/${token}` : null;
+}
+
 function tokenBytes() {
   return crypto.randomBytes(24).toString('base64url');
 }
@@ -730,6 +768,12 @@ async function mintHandoffToken({ sessionId, kind, actorUserId }) {
       expiresAt: existing.expiresAt,
       kind: existing.kind,
       reused: true,
+      // Additive (2026-08-17). Every caller used to assemble this itself —
+      // the web wizard from window.location.origin, RideOps from a COMPILED
+      // dart-define, which forced a fresh app build per custom-domain tenant.
+      // The server knows its own public origin; hand it over. Existing fields
+      // are untouched, so old clients keep working.
+      signUrl: publicUrlForToken(existing.kind, existing.token),
     };
   }
 
@@ -767,6 +811,7 @@ async function mintHandoffToken({ sessionId, kind, actorUserId }) {
     token: row.token,
     expiresAt: row.expiresAt,
     kind: row.kind,
+    signUrl: publicUrlForToken(row.kind, row.token),
   };
 }
 
@@ -821,6 +866,34 @@ async function exchangeHandoffToken(token) {
  * AND record it in the session event log. Used by step 1 of the wizard.
  * Phase 3 (T&C signing) reads agreement.declinedInsurance to decide
  * whether to inject the addendum section into the customer's signing UI.
+ *
+ * STEP GUARD (2026-08-17). This flag is not a preference — it selects which
+ * sections the customer must initial (terms-content.js sectionsForAgreement)
+ * and whether the PDF carries the declined-insurance acknowledgement page.
+ * terms-signing recomputes that section set on EVERY call, so a late write
+ * here rewrites the requirements of a signature that is already in flight or
+ * already captured. Two windows are refused, with distinct codes so the agent
+ * UI can say which one it hit:
+ *
+ *   TC_ALREADY_COMPLETED  — session.tcCompletedAt is stamped, i.e. the
+ *     customer has signed. The captured initials and the PDF's addendum would
+ *     no longer agree with the flag. Never editable again from here.
+ *
+ *   TC_SIGNING_IN_PROGRESS — a TERMS_SIGNING token is still live AND at least
+ *     one section initial is already on the agreement, i.e. the customer is on
+ *     the signing page right now with ink down. Flipping the flag changes
+ *     `expected` between loadSession and complete, and the customer is met
+ *     with 400 INITIALS_INCOMPLETE on a signature they already drew.
+ *
+ * Deliberately NOT refused: a minted-but-untouched token (no initials yet).
+ * The agent noticing the mistake right after handing over the QR is a
+ * legitimate correction, and the customer's next page load picks up the new
+ * section set on its own. Once expired or consumed the token is also no
+ * longer a hazard — a fresh loadSession recomputes from the current flag.
+ *
+ * NOTE: this closes the checkout-session writer. The pre-check-in portal
+ * (customer-portal.routes.js) writes the same column on its own path and is
+ * out of scope for this change.
  */
 async function setDeclinedInsurance({ id, declined, actorUserId }) {
   if (!id) throw new CheckoutSessionError('sessionId required', 400);
@@ -828,6 +901,34 @@ async function setDeclinedInsurance({ id, declined, actorUserId }) {
   if (!session) throw new CheckoutSessionError('Session not found', 404);
   if (!session.agreementId) {
     throw new CheckoutSessionError('No agreement linked to this session', 409);
+  }
+  if (session.tcCompletedAt) {
+    throw new CheckoutSessionError(
+      'The customer has already signed the Terms & Conditions — the insurance selection can no longer be changed here.',
+      409, 'TC_ALREADY_COMPLETED',
+    );
+  }
+
+  const liveSigningToken = await prisma.handoffToken.findFirst({
+    where: {
+      reservationId: session.reservationId,
+      kind: 'TERMS_SIGNING',
+      consumedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    select: { id: true },
+  });
+  if (liveSigningToken) {
+    const started = await prisma.agreementSectionInitial.findFirst({
+      where: { agreementId: session.agreementId },
+      select: { id: true },
+    });
+    if (started) {
+      throw new CheckoutSessionError(
+        'The customer is signing the Terms & Conditions right now — changing the insurance selection would invalidate the initials they have already given.',
+        409, 'TC_SIGNING_IN_PROGRESS',
+      );
+    }
   }
 
   await prisma.rentalAgreement.update({
