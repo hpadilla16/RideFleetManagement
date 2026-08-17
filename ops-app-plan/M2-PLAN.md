@@ -210,6 +210,32 @@ llaves nuevas, una prueba** — más chico que el arreglo que acababa de shippea
 honesto sigue siendo la reconciliación por re-fetch, que resuelve `connectionLost`,
 `scopeChanged` y el 5xx de una sola vez.
 
+### Lo que la Tanda C destapó y H5 NO puede construir a ciegas
+
+Dos defectos que el diseño encontró **leyendo el backend**, no dibujando. El primero es de
+evidencia contractual y el segundo no tiene pantalla hoy:
+
+1. **El paso de firma se decide por el SELLO, no por `currentStep`.** El `complete` de la
+   inspección estampa `customerSignedAt` **junto** a `inspectionCompletedAt` cuando viene
+   firma (`mobile-inspection.service.js:265-281`), y la captura de RideOps **siempre** la
+   manda (su CTA está deshabilitado sin firma, `inspection_screen.dart:818`). O sea que en
+   el camino normal el paso 8 llega **ya cumplido**. Construirlo mirando el paso significa
+   pedirle al cliente firmar dos veces lo mismo — y `saveCustomerSignature` **sobrescribe**
+   `tcSignatureDataUrl`/`tcSignedAt` sin condición (`checkout-session.service.js:668-690`).
+2. **"Cerrado pero no entregado" existe y no tiene pantalla.** La sesión pasa a `CLOSED` en
+   `:417` y la cascada corre **después**; un 409/422 posterior deja al agente con error,
+   sesión terminal y **sin reintento posible** (`canTransition` es false desde terminal).
+
+Pedidos nuevos que salen de ahí (ninguno bloquea el mockup): **P9** devolver el resultado de
+la cascada en la respuesta de `transition` —hoy varios tramos se tragan su error
+(`:526`, `:533`, `:557`, `:571`), así que un 200 puede convivir con una reserva sin avanzar—
+y **P10** un evento `FINALIZE_FAILED` para que el motivo sobreviva al re-fetch.
+
+**Corrección al reporte de la Tanda C:** marcó como pendiente el copy del correo en la
+pantalla 11E de H7 ("salió por correo"). **Ya estaba arreglado** — H7 lo corrigió en su
+propio ciclo y hoy dice "se pidió el envío del contrato". Verificado en `app_es.arb:652`.
+Es el segundo hallazgo cruzado que llega tarde porque cada agente mira su propio árbol.
+
 ### Orden de fusión: el trinquete de CI vive en UNA sola rama
 
 Dos gates de QA dieron veredictos aparentemente contradictorios sobre el mismo trinquete.
