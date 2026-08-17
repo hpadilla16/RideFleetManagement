@@ -17,6 +17,13 @@ import { CheckoutSessionError } from './checkout-session.service.js';
 import { sectionsForAgreement } from './terms-content.js';
 import { appendEvent } from './state-machine.js';
 import { analyzeSignatureInk } from '../../lib/signature-ink.js';
+import { parseLocationConfig } from '../../lib/location-config.js';
+
+// settings.service.js DEFAULTS.companyName. A tenant that never filled in
+// Settings → Rental agreement reads back the PLATFORM's name from
+// getRentalAgreementConfig(), so this value can never be treated as "the
+// tenant configured their brand" — see resolveSigningBrand below.
+const PLATFORM_DEFAULT_COMPANY_NAME = 'Ride Fleet';
 
 async function loadToken(token) {
   if (!token) throw new CheckoutSessionError('token required', 400);
@@ -25,9 +32,15 @@ async function loadToken(token) {
     include: {
       reservation: {
         include: {
+          // The signer's own language preference. This page renders on the
+          // CUSTOMER's phone, so the staff device's stored UI language is
+          // meaningless here — see the frontend's useSignLang().
+          customer: { select: { locale: true } },
           rentalAgreement: {
             select: {
               id: true, declinedInsurance: true, agreementNumber: true,
+              tenantId: true,
+              tenant: { select: { id: true, name: true } },
               // Per-branch acknowledgement text (2026-07-24). Read off the
               // AGREEMENT, not the reservation, even though both carry a
               // pickupLocationId: reservationsService.update can move
@@ -38,7 +51,7 @@ async function loadToken(token) {
               // would let one signed document show two branches' wording.
               // The agreement is the document of record and its
               // pickupLocationId is non-null.
-              pickupLocation: { select: { id: true, termsSectionsJson: true } },
+              pickupLocation: { select: { id: true, termsSectionsJson: true, name: true, locationConfig: true } },
             },
           },
         },
@@ -55,9 +68,95 @@ async function loadToken(token) {
   return row;
 }
 
+/**
+ * Whose business name does the customer see while they sign?
+ *
+ * The customer scans a QR off the agent's screen and lands on this page on
+ * their OWN phone, with no other context. Before this resolver the page said
+ * "Ride Fleet · Terms & Conditions" — the PLATFORM's brand — on the screen
+ * where the renter signs a legal contract with, say, Autos del Valle. That is
+ * a brand leak from the platform onto another business's customer, at the
+ * worst possible moment.
+ *
+ * The cascade deliberately mirrors the one the signed PDF header uses
+ * (rental-agreements.service.js:3551-3555), so the phone and the printed
+ * agreement never disagree about who the customer contracted with:
+ *
+ *   location config → franchise → branch name → tenant-wide setting → Tenant.name
+ *
+ * Two deviations from the PDF, both about never falling through to the
+ * platform brand:
+ *   • the tenant-wide `companyName` is ignored when it is still the
+ *     'Ride Fleet' DEFAULT (an unconfigured tenant, not a real answer);
+ *   • `Tenant.name` backstops the chain — it is a required column, so a
+ *     tenant that configured nothing at all still gets its own plain-text
+ *     name rather than ours.
+ *
+ * Returns null only if every source is empty, which the UI renders as a
+ * neutral, unbranded header. Never returns the platform's name.
+ */
+async function resolveSigningBrand(ag) {
+  const locCfg = parseLocationConfig(ag?.pickupLocation?.locationConfig);
+  let globalCfg = {};
+  let franchiseCfg = null;
+  try {
+    const { settingsService } = await import('../settings/settings.service.js');
+    globalCfg = await settingsService.getRentalAgreementConfig(
+      ag?.tenantId ? { tenantId: ag.tenantId } : {},
+    );
+  } catch (err) {
+    // Branding must never be able to break signing. Fall through to the
+    // location/tenant names below.
+    logger.warn('[terms-signing] brand settings lookup failed', { message: err.message });
+  }
+  try {
+    const { franchiseService } = await import('../settings/franchise.service.js');
+    franchiseCfg = await franchiseService.getAgreementConfig(
+      ag?.reservation?.franchiseId ?? null, { tenantId: ag?.tenantId },
+    );
+  } catch (err) {
+    logger.warn('[terms-signing] brand franchise lookup failed', { message: err.message });
+  }
+
+  const configuredGlobalName = String(globalCfg?.companyName || '').trim();
+  const companyName =
+    String(locCfg?.companyName || '').trim()
+    || String(franchiseCfg?.companyName || '').trim()
+    || String(ag?.pickupLocation?.name || '').trim()
+    || (configuredGlobalName && configuredGlobalName !== PLATFORM_DEFAULT_COMPANY_NAME
+      ? configuredGlobalName : '')
+    || String(ag?.tenant?.name || '').trim()
+    || null;
+
+  return { companyName };
+}
+
+/**
+ * Narrow the signer's stored locale to a language this page actually ships
+ * strings for. Anything unknown returns null so the frontend can fall back to
+ * the customer's own browser language instead of guessing wrong.
+ *
+ * HONEST STATE OF THIS FIELD: `Customer.locale` is read by
+ * precheckin-invite.scheduler.js and shuttle-link-invite.js to pick an email
+ * language, but NOTHING in backend/src ever writes it — no API, no portal
+ * form, no kiosk field. So in practice it is null for every customer who was
+ * not seeded or hand-edited, and this returns null with them. Wiring it up
+ * here is what makes populating that column pay off later; it is not, today,
+ * a working "the contract knows its language" answer. There is no language
+ * field on Tenant, Location or RentalAgreement at all.
+ */
+function normalizeSignerLocale(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s) return null;
+  if (s.startsWith('es')) return 'es';
+  if (s.startsWith('en')) return 'en';
+  return null;
+}
+
 async function loadSession(token) {
   const row = await loadToken(token);
   const ag = row.reservation.rentalAgreement;
+  const brand = await resolveSigningBrand({ ...ag, reservation: row.reservation });
   const sections = sectionsForAgreement({ declinedInsurance: !!ag.declinedInsurance, sectionOverrides: ag.pickupLocation?.termsSectionsJson });
 
   // Pull already-completed initials so the UI can show what's left.
@@ -70,6 +169,14 @@ async function loadSession(token) {
   return {
     reservationNumber: row.reservation.reservationNumber,
     agreementNumber: ag.agreementNumber,
+    // Who the customer is signing WITH. Business identity only — this is a
+    // no-auth payload, so nothing about the signer, the vehicle or the money
+    // belongs in it (and the frontend puts companyName in the <title>, which
+    // is public and cacheable).
+    brand: { companyName: brand.companyName },
+    // Preferred language of the SIGNER, not of the staff device. null = the
+    // frontend should fall back to the customer's browser language.
+    signerLocale: normalizeSignerLocale(row.reservation.customer?.locale),
     customer: { firstName: row.reservation.customerId },
     sections: sections.map((s) => ({
       key: s.key, label: s.label, body: s.body,
