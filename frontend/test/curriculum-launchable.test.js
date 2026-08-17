@@ -14,7 +14,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { allModules, stepsForModule } from '../src/lib/training/curriculum.js';
-import { startTour, settleStart, TOUR_END } from '../src/lib/training/tour-state.js';
+import { startTour, settleStart, waitForRecord, resumeAt, TOUR_END } from '../src/lib/training/tour-state.js';
 
 describe('every module can be started from Ride University', () => {
   it('a module whose first step has no route declares where to find a record', () => {
@@ -51,5 +51,35 @@ describe('every module can be started from Ride University', () => {
     for (const m of allModules().filter((x) => x.needsRecord)) {
       expect(routes.has(m.needsRecord), `${m.key}.needsRecord (${m.needsRecord}) is not a route the app tours`).toBe(true);
     }
+  });
+});
+
+describe('a parked tour resumes wherever the person actually is', () => {
+  it('picks up at the step on screen, not always the first', () => {
+    const steps = stepsForModule('check-out');
+    const parked = waitForRecord(startTour({ track: 'MODULE', steps, moduleKey: 'check-out' }));
+
+    // Nothing open yet: keep waiting rather than resume or break.
+    expect(resumeAt(parked, steps, () => false)).toBeNull();
+
+    // On the reservation page — the first step's button is there.
+    const onReservation = resumeAt(parked, steps, (a) => a === steps[0].anchor);
+    expect(onReservation.index).toBe(0);
+    expect(onReservation.waiting).toBeUndefined();
+
+    // They pressed the button and moved into the wizard: the first step's
+    // anchor is GONE and later ones exist. This is the case that left the
+    // tour waiting forever on a page full of its own anchors.
+    const inWizard = resumeAt(parked, steps, (a) => a === steps[1].anchor);
+    expect(inWizard.index).toBe(1);
+    expect(inWizard.endedAs).toBeNull();
+  });
+
+  it('resuming clears the parked flag so the host stops polling', () => {
+    const steps = stepsForModule('take-payment');
+    const parked = waitForRecord(startTour({ track: 'MODULE', steps, moduleKey: 'take-payment' }));
+    expect(parked.waiting).toBe(true);
+    const resumed = resumeAt(parked, steps, () => true);
+    expect('waiting' in resumed).toBe(false);
   });
 });
