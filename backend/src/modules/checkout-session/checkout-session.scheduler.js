@@ -69,6 +69,12 @@ async function flagStuckSessions() {
         data: {
           abandonedAt: new Date(),
           abandonedReason: `auto_flagged_stalled_at_${s.currentStep.toLowerCase()}`,
+          // M2 P2 QA re-gate (2026-08-17): this sweep writes the SAME material
+          // state markAbandoned writes (abandonedAt → the "session paused"
+          // banner every surface renders), just via the nightly path instead
+          // of the agent's button — so it bumps under the same "version =
+          // material change" semantics (see schema.prisma).
+          stateVersion: { increment: 1 },
           events: appendEvent(s.events, {
             kind: 'AUTO_FLAGGED_STALLED',
             stalledStep: s.currentStep,

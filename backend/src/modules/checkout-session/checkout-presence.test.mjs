@@ -21,6 +21,7 @@ import {
   CHECKOUT_SURFACES,
 } from './checkout-presence.service.js';
 import { CheckoutSessionError } from './checkout-session.service.js';
+import { _internal as schedulerInternal } from './checkout-session.scheduler.js';
 
 // ── minimal in-memory stubs ─────────────────────────────────────────────────
 
@@ -33,6 +34,7 @@ function matches(row, where) {
     if (val === null) return row[key] == null;
     if (val instanceof Date || typeof val !== 'object') return row[key] === val;
     if ('gte' in val) return row[key] != null && row[key] >= val.gte;
+    if ('lt' in val) return row[key] != null && row[key] < val.lt;
     if ('in' in val) return val.in.includes(row[key]);
     return false;
   });
@@ -60,6 +62,12 @@ function stub(rows) {
       if (!row) throw new Error('stub update: no match');
       Object.assign(row, data);
       return row;
+    },
+    deleteMany: async ({ where } = {}) => {
+      const keep = rows().filter((r) => !matches(r, where));
+      const count = rows().length - keep.length;
+      rows().splice(0, rows().length, ...keep);
+      return { count };
     },
   };
 }
@@ -181,4 +189,66 @@ test('recordPresenceSafe: fire-and-forget writer never rejects, rejects junk qui
 
 test('surface list matches the Prisma enum contract', () => {
   assert.deepEqual(CHECKOUT_SURFACES, ['RIDEOPS', 'COUNTER', 'KIOSK', 'CUSTOMER']);
+});
+
+// ── QA re-gate (2026-08-17): the P2002 first-heartbeat race ─────────────────
+//
+// Two first-heartbeats for the same (session, surface, actor) can both see
+// "no row yet" and both try create; the partial/compound unique index rejects
+// the loser with P2002 and the service must fall back to updating the
+// winner's row — never surface the race to the caller.
+
+test('heartbeat: create losing the unique race (P2002) falls back to updating the winner row', async () => {
+  db.sessions.push({ ...SESSION });
+
+  // findFirst says "no row" (both racers saw pre-insert state) but the
+  // winner's row is already in the table when our create fires.
+  const winner = {
+    id: 'p-winner', sessionId: 'cs1', surface: 'KIOSK', actorUserId: null,
+    displayLabel: 'Lobby 1', lastSeenAt: new Date(Date.now() - 60_000),
+  };
+  let findFirstCalls = 0;
+  prisma.checkoutPresence.findFirst = async () => {
+    findFirstCalls += 1;
+    if (findFirstCalls === 1) return null; // racer's stale read
+    return winner;                          // post-P2002 recovery read
+  };
+  prisma.checkoutPresence.create = async () => {
+    const err = new Error('Unique constraint failed');
+    err.code = 'P2002';
+    throw err;
+  };
+  db.presences.push(winner);
+
+  const before = winner.lastSeenAt;
+  const out = await checkoutPresenceService.heartbeat({ sessionId: 'cs1', surface: 'KIOSK' });
+  assert.equal(out.ok, true, 'the losing racer still heartbeats successfully');
+  assert.equal(db.presences.length, 1, 'no duplicate row minted');
+  assert.ok(winner.lastSeenAt > before, 'winner row refreshed by the loser retry');
+
+  // A NON-P2002 create failure must still propagate (heartbeat is the
+  // validated route path — only the unique race is swallowed-and-retried).
+  prisma.checkoutPresence.findFirst = async () => null;
+  prisma.checkoutPresence.create = async () => { throw new Error('db down'); };
+  await assert.rejects(() => checkoutPresenceService.heartbeat({ sessionId: 'cs1', surface: 'KIOSK' }));
+});
+
+// ── QA re-gate (2026-08-17): nightly presence prune ─────────────────────────
+
+test('prunePresence: deletes rows idle > 7 days, keeps fresh ones, never throws', async () => {
+  const now = Date.now();
+  db.presences.push(
+    { id: 'old1', sessionId: 'cs1', surface: 'KIOSK', lastSeenAt: new Date(now - 8 * 24 * 60 * 60 * 1000) },
+    { id: 'old2', sessionId: 'cs2', surface: 'COUNTER', lastSeenAt: new Date(now - 30 * 24 * 60 * 60 * 1000) },
+    { id: 'fresh', sessionId: 'cs3', surface: 'RIDEOPS', lastSeenAt: new Date(now - 6 * 24 * 60 * 60 * 1000) },
+  );
+
+  const pruned = await schedulerInternal.prunePresence();
+  assert.equal(pruned, 2, 'both >7d rows deleted');
+  assert.deepEqual(db.presences.map((r) => r.id), ['fresh'], 'sub-7d row untouched');
+
+  // Best-effort contract: a prune failure returns 0, never throws (it runs
+  // inside the money-adjacent nightly sweep).
+  prisma.checkoutPresence.deleteMany = async () => { throw new Error('db down'); };
+  assert.equal(await schedulerInternal.prunePresence(), 0);
 });

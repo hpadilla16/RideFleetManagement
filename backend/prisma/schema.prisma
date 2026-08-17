@@ -5085,10 +5085,15 @@ model CheckoutSession {
   // BUMPS: every transition; every writer of the four side-effect stamps
   // (checkoutSessionService.stampSideEffect/saveCustomerSignature AND the
   // direct writers: terms-signing, mobile-inspection, spin-charge x4);
-  // markAbandoned (pause banner); vehicle swap (contract's car changed).
+  // markAbandoned AND the nightly stuck-session sweep (both write the pause
+  // banner state — same semantics via either path); vehicle swap (contract's
+  // car changed).
   // DOES NOT BUMP: tenantId/agreementId backfills and self-heals,
   // autoEmailedAt, mintHandoffToken — events/metadata only, no material
-  // state a snapshot could go stale against.
+  // state a snapshot could go stale against; and the DEALERSHIP_LOANER
+  // paymentCompletedAt pre-stamp in createForReservation — exempt by
+  // construction: it happens AT session create, before any client can hold
+  // an expectedVersion snapshot to go stale.
   stateVersion Int @default(0)
 
   // JSON array of { from, to, actorUserId, at, metadata } — full transition
