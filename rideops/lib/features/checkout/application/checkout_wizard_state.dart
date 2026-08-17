@@ -55,6 +55,13 @@ enum CheckoutConflictKind {
   /// abandon sobre una sesión terminal.
   terminal,
 
+  /// 409 `SWAP_LOCKED` del swap (vehicle-swap.service.js:46-51). Tiene kind
+  /// propio porque su cuerpo del servidor **filtra un enum crudo de base de
+  /// datos** (`currentStep=INSPECTION_IN_PROGRESS`): el mensaje se sigue
+  /// mostrando (DoD #5), pero encima va una línea de causa traducida — mismo
+  /// tratamiento que `ENTRY_GUARD` (review INN-S-2).
+  swapLocked,
+
   /// 409 con code desconocido: se muestra el mensaje del servidor tal cual.
   generic,
 }
@@ -91,6 +98,8 @@ class CheckoutReservationContext {
     this.tenantName,
     this.pickupAt,
     this.precheckinDone = false,
+    this.precheckinAt,
+    this.workflowMode,
     this.customer,
     this.agreement,
     this.vehicleId,
@@ -111,6 +120,24 @@ class CheckoutReservationContext {
   /// `customerInfoCompletedAt` sellado. Se muestra ANTES de que el 422
   /// PRECHECKIN_REQUIRED pueda aparecer al crear la sesión (H7).
   final bool precheckinDone;
+
+  /// CUÁNDO se selló el pre-checkin. El controller ya leía la fecha y solo
+  /// guardaba el bool; la tarjeta 9A dice "Completado 18:42" (review GD-MC-6),
+  /// que es el dato con el que el agente decide si confía en la captura.
+  final DateTime? precheckinAt;
+
+  /// `Reservation.workflowMode` crudo. Decide si el switch del seguro
+  /// EXISTE: un loaner recibe contrato compañero de $0 y el POST del anexo
+  /// funcionaría, estampando un rechazo de cobertura sobre una cortesía
+  /// (review INN-MC-3).
+  final String? workflowMode;
+
+  /// Reserva de cortesía del programa de loaners. Null (backend viejo, o
+  /// display-data que no respondió) NO se trata como loaner: el default del
+  /// modelo es RENTAL y esconder el switch por falta de dato sería inventar.
+  bool get isLoaner =>
+      ReservationWorkflowMode.tryParse(workflowMode) ==
+      ReservationWorkflowMode.dealershipLoaner;
 
   /// Nombre del tenant para el subtítulo del wizbar. OJO: esta es superficie
   /// de STAFF — aquí sí se puede nombrar al tenant; el filtro
@@ -333,12 +360,19 @@ enum CheckoutTransitionOutcome {
 /// que el agente está tratando de entender.
 @immutable
 class CheckoutSwapAttempt {
-  const CheckoutSwapAttempt(this.outcome, {this.message});
+  const CheckoutSwapAttempt(this.outcome, {this.message, this.code});
 
   final CheckoutSwapOutcome outcome;
 
   /// Mensaje del backend tal cual (DoD #5); null si no hubo negativa.
   final String? message;
+
+  /// `code` del 409, cuando lo hay (`VEHICLE_DOUBLE_BOOKED` /
+  /// `VEHICLE_TERMINAL` / `SWAP_LOCKED`). Los tres son estables y están
+  /// documentados en `vehicle-swap.service.js:46-91`, así que el sheet puede
+  /// poner una línea de causa TRADUCIDA encima del cuerpo del servidor sin
+  /// parsear texto en inglés (review INN-S-2).
+  final String? code;
 }
 
 /// Qué pasó con un intento de swap (9E). Se separa de

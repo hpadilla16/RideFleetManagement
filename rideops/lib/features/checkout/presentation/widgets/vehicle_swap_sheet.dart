@@ -66,6 +66,11 @@ class _VehicleSwapSheetState extends ConsumerState<VehicleSwapSheet> {
   /// Negativa del servidor sobre la unidad ELEGIDA (409 del swap). Vive en el
   /// sheet, no en un banner detrás: el agente tiene que elegir otra AQUÍ.
   String? _swapError;
+
+  /// `code` de esa negativa: decide la línea de causa TRADUCIDA que va encima
+  /// del mensaje del servidor (review INN-S-2). Los dos códigos que llegan
+  /// hasta aquí son `VEHICLE_DOUBLE_BOOKED` y `VEHICLE_TERMINAL`.
+  String? _swapErrorCode;
   String? _selectedId;
   bool _loading = true;
 
@@ -106,7 +111,10 @@ class _VehicleSwapSheetState extends ConsumerState<VehicleSwapSheet> {
   Future<void> _confirm(String vehicleId) async {
     final controller =
         ref.read(checkoutWizardProvider(widget.reservationId).notifier);
-    setState(() => _swapError = null);
+    setState(() {
+      _swapError = null;
+      _swapErrorCode = null;
+    });
     final attempt = await controller.swapVehicle(vehicleId);
     if (!mounted) return;
     switch (attempt.outcome) {
@@ -123,6 +131,7 @@ class _VehicleSwapSheetState extends ConsumerState<VehicleSwapSheet> {
           // no puede dejar un hueco en blanco.
           final message = attempt.message ?? '';
           _swapError = message.isEmpty ? l10n.genericError : message;
+          _swapErrorCode = attempt.code;
           _selectedId = null;
         });
         // La lista que produjo esa elección ya es historia: se re-consulta.
@@ -185,7 +194,17 @@ class _VehicleSwapSheetState extends ConsumerState<VehicleSwapSheet> {
           ),
           if (_swapError != null) ...[
             const SizedBox(height: 10),
-            _SheetNotice(message: _swapError!),
+            _SheetNotice(
+              // Causa en el idioma del agente ARRIBA; cuerpo del servidor
+              // debajo, intacto (DoD #5) — trae el número de la reserva que
+              // aparta la unidad, o cuál de los dos estados terminales es.
+              cause: switch (_swapErrorCode) {
+                'VEHICLE_DOUBLE_BOOKED' => l10n.coSwapDoubleBookedCause,
+                'VEHICLE_TERMINAL' => l10n.coSwapTerminalCause,
+                _ => null,
+              },
+              message: _swapError!,
+            ),
           ],
           const SizedBox(height: 10),
           Flexible(
@@ -275,13 +294,18 @@ class _VehicleSwapSheetState extends ConsumerState<VehicleSwapSheet> {
             child: v.id == currentVehicleId
                 ? _InertOption(
                     label: v.label,
-                    // Motivo LEGIBLE, no un código: si hay un 409 de vehículo
-                    // vivo, el motivo es el del servidor; si no, es que una
-                    // unidad no se cambia por sí misma (400 del backend).
+                    // Motivo LEGIBLE y PROPIO, no la cita del servidor: este
+                    // renglón mide 12.5 px y el mensaje del backend viene en
+                    // INGLÉS y del largo de una frase entera (parte de MC-4).
+                    // La cita íntegra del servidor sigue visible donde sí cabe:
+                    // el banner del paso, detrás de este sheet.
                     reason: ref
-                            .watch(checkoutWizardProvider(widget.reservationId))
-                            .vehicleConflictMessage ??
-                        l10n.coSwapCurrentReason,
+                                .watch(checkoutWizardProvider(
+                                    widget.reservationId))
+                                .vehicleConflictMessage !=
+                            null
+                        ? l10n.coSwapCurrentCommitted
+                        : l10n.coSwapCurrentReason,
                   )
                 : _Option(
                     vehicle: v,
@@ -454,13 +478,17 @@ class _InertOption extends StatelessWidget {
   }
 }
 
+/// Negativa del servidor dentro del sheet. Mismo patrón que el banner de
+/// ENTRY_GUARD: [cause] traducida arriba, [message] del servidor debajo.
 class _SheetNotice extends StatelessWidget {
-  const _SheetNotice({required this.message});
+  const _SheetNotice({required this.message, this.cause});
 
   final String message;
+  final String? cause;
 
   @override
   Widget build(BuildContext context) {
+    final cause_ = cause;
     return Container(
       padding: const EdgeInsets.fromLTRB(11, 10, 11, 10),
       decoration: BoxDecoration(
@@ -475,13 +503,28 @@ class _SheetNotice extends StatelessWidget {
               size: 18, color: RideTokens.dangerTx),
           const SizedBox(width: 9),
           Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-                color: RideTokens.n800,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (cause_ != null)
+                  Text(
+                    cause_,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w900,
+                      color: RideTokens.dangerTx,
+                    ),
+                  ),
+                Text(
+                  message,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: RideTokens.n800,
+                  ),
+                ),
+              ],
             ),
           ),
         ],

@@ -1270,6 +1270,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get coConflictGenericTitle => 'The server refused the advance';
 
   @override
+  String get coConflictSwapTitle => 'The server refused the vehicle change';
+
+  @override
   String get coConflictDismiss => 'Got it';
 
   @override
@@ -1365,6 +1368,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get coConfirmPrecheckin => 'Pre-check-in';
 
   @override
+  String get coConfirmPrecheckinDone => 'Completed';
+
+  @override
+  String coConfirmPrecheckinDoneAt(String time) {
+    return 'Completed $time';
+  }
+
+  @override
+  String get coConfirmPrecheckinPending => 'Pending';
+
+  @override
   String get coConfirmMissingValue => 'Not captured';
 
   @override
@@ -1405,7 +1419,15 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get coConfirmRecheck => 'Check again';
+  String get coConfirmRecheck => 'Refresh customer data';
+
+  @override
+  String get coConfirmRecheckPending => 'Asking the server…';
+
+  @override
+  String coConfirmRecheckedStill(String fields) {
+    return 'Checked just now: the server still doesn\'t have $fields.';
+  }
 
   @override
   String get coDeclineTitle => 'Customer declines insurance';
@@ -1461,6 +1483,21 @@ class AppLocalizationsEn extends AppLocalizations {
       'Current unit · a unit cannot be swapped for itself';
 
   @override
+  String get coSwapCurrentCommitted =>
+      'Current unit · the server reports it committed to another rental';
+
+  @override
+  String get coSwapLockedCause =>
+      'This session\'s inspection already started: from there on the unit cannot be changed.';
+
+  @override
+  String get coSwapDoubleBookedCause =>
+      'That unit is already reserved for this same window.';
+
+  @override
+  String get coSwapTerminalCause => 'That unit can no longer be rented.';
+
+  @override
   String coSwapConfirm(String unit) {
     return 'Switch to $unit';
   }
@@ -1478,6 +1515,9 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get coSwapNeedsNetwork =>
       'Changing the unit needs a connection: the server makes the change on the reservation and the contract.';
+
+  @override
+  String get coQrSemanticLabel => 'QR code to sign the terms';
 
   @override
   String get coTermsInstruction =>

@@ -12,6 +12,8 @@ import 'package:rideops/core/api/dto/reservation_display.dart';
 import 'package:rideops/core/api/enums.dart';
 import 'package:rideops/core/api/reservations_api.dart';
 import 'package:rideops/core/session/active_location.dart';
+import 'package:rideops/core/session/lock_controller.dart';
+import 'package:rideops/core/session/lock_state.dart';
 import 'package:rideops/core/session/session_controller.dart';
 import 'package:rideops/core/session/session_state.dart';
 
@@ -276,6 +278,26 @@ class StubActiveLocation extends ActiveLocationController {
 
   @override
   ActiveLocation build() => initial;
+}
+
+/// Candado de personal INERTE que cuenta pares suspend/resume.
+///
+/// El real lee Keystore en `build()` (y en un widget test eso es un plugin que
+/// no existe); aquí lo único que interesa es que el modo presentación suspenda
+/// EXACTAMENTE una vez y reanude exactamente una vez — el candado de 5 min no
+/// puede saltar mientras el cliente lee los términos (review INN-S-3).
+class StubLockController extends LockController {
+  int suspends = 0;
+  int resumes = 0;
+
+  @override
+  LockState build() => const LockState.initial();
+
+  @override
+  void suspendLock() => suspends++;
+
+  @override
+  void resumeLock() => resumes++;
 }
 
 class MutableSessionController extends SessionController {

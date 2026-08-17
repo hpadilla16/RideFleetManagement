@@ -19,6 +19,7 @@ import '../widgets/qr_view.dart';
 import '../widgets/transition_button.dart';
 import '../widgets/verify_cards.dart';
 import '../widgets/wizard_banners.dart';
+import '../widgets/wizard_dock.dart';
 
 /// Paso TC_PENDING (M2-H2, mockup 10A/10C/10D).
 ///
@@ -222,13 +223,7 @@ class _QrPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: RideTokens.n0,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: RideTokens.n200),
-      ),
+    return QrFrame(
       child: Column(
         children: [
           if (url == null)
@@ -250,13 +245,32 @@ class _QrPanel extends StatelessWidget {
             Stack(
               alignment: Alignment.center,
               children: [
-                QrView(data: url!, size: 184, dead: countdown.isExpired),
+                QrView(
+                  data: url!,
+                  // 184 = lado del SÍMBOLO del mockup 10A (antes este número
+                  // incluía la quiet zone y el símbolo real caía a ~145).
+                  size: 184,
+                  dead: countdown.isExpired,
+                  semanticsLabel: l10n.coQrSemanticLabel,
+                ),
                 if (countdown.isExpired)
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.schedule_rounded,
-                          size: 30, color: RideTokens.warnTx),
+                      // `.big-ic warn` del 10D: el icono vive dentro de un
+                      // círculo de 60 px — sobre el QR atenuado, un glifo
+                      // suelto se pierde entre los módulos.
+                      Container(
+                        width: 60,
+                        height: 60,
+                        decoration: const BoxDecoration(
+                          color: RideTokens.warnBg,
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
+                        child: const Icon(Icons.schedule_rounded,
+                            size: 30, color: RideTokens.warnTx),
+                      ),
                       const SizedBox(height: 6),
                       Text(
                         l10n.coTermsExpiredOverlay,
@@ -448,40 +462,23 @@ class _ReMintDock extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final onPressed = minting || offline ? null : onReMint;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(0, 12, 0, 0),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: RideTokens.n200)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (expired)
-            RidePrimaryButton(
+    return WizardDock(
+      why: offline
+          ? l10n.coTermsOfflineWhy
+          : expired
+              ? l10n.coTermsExpiredWhy
+              : l10n.coTermsReissueWhy,
+      primary: expired
+          ? RidePrimaryButton(
               label: l10n.coTermsReissue,
               loading: minting,
               onPressed: onPressed,
             )
-          else
-            RideGhostButton(label: l10n.coTermsReissue, onPressed: onPressed),
-          const SizedBox(height: 9),
-          Text(
-            offline
-                ? l10n.coTermsOfflineWhy
-                : expired
-                    ? l10n.coTermsExpiredWhy
-                    : l10n.coTermsReissueWhy,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: RideTokens.n700,
+          : RideGhostButton(
+              label: l10n.coTermsReissue,
+              loading: minting,
+              onPressed: onPressed,
             ),
-          ),
-        ],
-      ),
     );
   }
 }

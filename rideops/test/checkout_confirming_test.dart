@@ -217,12 +217,312 @@ void main() {
     expect(find.text('Not captured'), findsNWidgets(2));
     expect(find.text('Missing data'), findsOneWidget);
     // Y la salida: volver a preguntarle al servidor (RideOps no captura datos
-    // del cliente — eso vive en el mostrador).
-    expect(find.text('Check again'), findsOneWidget);
+    // del cliente — eso vive en el mostrador). La etiqueta NOMBRA el objeto:
+    // "Volver a consultar" no decía qué se consultaba (GD-MC-5a).
+    expect(find.text('Refresh customer data'), findsOneWidget);
     final before = f.reservations.displayDataCalls;
-    await tester.tap(find.text('Check again'));
+    await tester.tap(find.text('Refresh customer data'));
     await tester.pumpAndSettle();
     expect(f.reservations.displayDataCalls, greaterThan(before));
+    // Y el ACUSE: la consulta terminó y el servidor sigue sin los datos
+    // (GD-MC-5b — antes esto no mostraba absolutamente nada).
+    expect(
+      find.textContaining(
+        "Checked just now: the server still doesn't have the license and the "
+        'phone',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('GD-MC-5 — mientras la re-consulta está en vuelo el botón lo '
+      'MUESTRA: spinner + texto de progreso, y no admite un segundo toque',
+      (tester) async {
+    final f = fakes();
+    f.reservations.patchDisplayData = (raw) {
+      final reservation = raw['reservation'] as Map<String, dynamic>;
+      (reservation['customer'] as Map<String, dynamic>)['phone'] = null;
+      (reservation['rentalAgreement'] as Map<String, dynamic>)['customerPhone'] =
+          null;
+      return raw;
+    };
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    // La lectura de sesión se queda colgada: el botón tiene que declararlo.
+    final gate = Completer<void>();
+    f.api.onGet = () async {
+      await gate.future;
+      return f.api.current!;
+    };
+
+    await tester.tap(find.text('Refresh customer data'));
+    await tester.pump();
+
+    expect(find.text('Asking the server…'), findsOneWidget);
+    final ghost = tester.widget<RideGhostButton>(
+      find.byType(RideGhostButton),
+    );
+    expect(ghost.loading, isTrue);
+    final callsWhileBusy = f.reservations.displayDataCalls;
+    await tester.tap(find.byType(RideGhostButton), warnIfMissed: false);
+    await tester.pump();
+    expect(f.reservations.displayDataCalls, callsWhileBusy,
+        reason: 'un segundo toque con una consulta viva no manda otra');
+
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Refresh customer data'), findsOneWidget);
+  });
+
+  testWidgets('INN-MC-3 — reserva de cortesía (DEALERSHIP_LOANER): el switch '
+      'del seguro NO existe; un anexo de rechazo sobre un contrato de cero no '
+      'tiene sentido y el web ya lo esconde', (tester) async {
+    final f = fakes();
+    f.reservations.patchDisplayData = (raw) {
+      (raw['reservation'] as Map<String, dynamic>)['workflowMode'] =
+          'DEALERSHIP_LOANER';
+      return raw;
+    };
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    expect(find.byType(Switch), findsNothing);
+    expect(find.text('Customer declines insurance'), findsNothing);
+    // El resto del paso sigue completo: lo que se retira es UNA decisión que
+    // no aplica, no la verificación.
+    expect(find.text('Customer'), findsOneWidget);
+    expect(find.text('Vehicle'), findsOneWidget);
+    expect(
+      tester
+          .widget<RidePrimaryButton>(
+            find.widgetWithText(RidePrimaryButton, 'Continue to T&C'),
+          )
+          .onPressed,
+      isNotNull,
+    );
+  });
+
+  testWidgets('una reserva RENTAL conserva el switch (el gate es el modo, no '
+      'un default silencioso)', (tester) async {
+    final f = fakes();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+    await scrollBody(tester, find.byType(Switch));
+    expect(find.byType(Switch), findsOneWidget);
+  });
+
+  testWidgets('GD-MC-6 — la fila de pre-checkin no tartamudea: la clave nombra '
+      'el campo y el VALOR dice estado y hora', (tester) async {
+    final f = fakes();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    expect(find.text('Pre-check-in'), findsOneWidget);
+    expect(find.textContaining('Completed '), findsOneWidget);
+    expect(find.text('Pre-check-in done'), findsNothing);
+  });
+
+  testWidgets('GD-SC-4 — la fila del switch es tocable ENTERA, no solo el '
+      'switch pegado al borde', (tester) async {
+    final f = fakes();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    await scrollBody(tester, find.text('Customer declines insurance'));
+    // Se toca el TÍTULO, en el extremo opuesto al switch.
+    await tester.tap(find.text('Customer declines insurance'));
+    await tester.pumpAndSettle();
+
+    expect(f.api.declinedValues, [true]);
+  });
+
+  testWidgets('INN-S-2 — 409 sobre la unidad elegida: causa TRADUCIDA encima '
+      'del cuerpo del servidor (que sigue visible con su dato)', (tester) async {
+    final f = fakes();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    f.api.onSwapVehicle = (_) async => throw ApiError(
+          kind: ApiErrorKind.conflict,
+          status: 409,
+          code: 'VEHICLE_DOUBLE_BOOKED',
+          message: 'Vehicle already reserved on this window (R-2470)',
+        );
+
+    await scrollBody(tester, find.text('Change vehicle'));
+    await tester.tap(find.text('Change vehicle'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('U-118'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Switch to U-118'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('That unit is already reserved for this same window.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('R-2470'), findsOneWidget,
+        reason: 'DoD #5: el cuerpo del servidor no se sustituye, se enmarca');
+  });
+
+  testWidgets('INN-S-2 — 409 SWAP_LOCKED: el banner traduce la causa y el '
+      'enum crudo del servidor deja de ser la única explicación', (tester) async {
+    final f = fakes();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    f.api.onSwapVehicle = (_) async => throw ApiError(
+          kind: ApiErrorKind.conflict,
+          status: 409,
+          code: 'SWAP_LOCKED',
+          message: 'Cannot swap vehicle once inspection has started '
+              '(currentStep=INSPECTION_IN_PROGRESS)',
+        );
+
+    await scrollBody(tester, find.text('Change vehicle'));
+    await tester.tap(find.text('Change vehicle'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('U-118'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Switch to U-118'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('The server refused the vehicle change'), findsOneWidget);
+    expect(
+      find.text("This session's inspection already started: from there on the "
+          'unit cannot be changed.'),
+      findsOneWidget,
+    );
+    // El cuerpo del servidor sigue ahí, enum crudo incluido (DoD #5).
+    expect(find.textContaining('currentStep=INSPECTION_IN_PROGRESS'),
+        findsOneWidget);
+  });
+
+  testWidgets('MC-4 (parcial) — la unidad inerte no cita al servidor en un '
+      'renglón de 12.5 px: usa copy propia cuando hay conflicto vivo',
+      (tester) async {
+    final f = fakes();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    f.api.onTransition = (_) async => throw ApiError(
+          kind: ApiErrorKind.conflict,
+          status: 409,
+          code: 'VEHICLE_CONFLICT',
+          message: 'Vehicle is still out on open rental R-2466 — complete its '
+              'check-in (or swap vehicles) first',
+        );
+    await tester.tap(find.text('Continue to T&C'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Pick another vehicle'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Current unit · the server reports it committed to another '
+          'rental'),
+      findsOneWidget,
+    );
+    // La cita íntegra del servidor vive donde sí cabe: el banner del paso.
+    expect(find.textContaining('R-2466'), findsOneWidget);
+  });
+
+  /// GD-MC-7 / GD-SC-1 se prueban sobre las primitivas y no sobre el paso
+  /// entero: lo que se está midiendo es la GEOMETRÍA de la tarjeta con el texto
+  /// del sistema en grande, y montar el wizard completo metería el dock y la
+  /// lista en la misma medición.
+  Future<void> pumpCard(WidgetTester tester, double scale, Widget card) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [Locale('es'), Locale('en')],
+        home: MediaQuery(
+          data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+          // 360 dp: el teléfono chico del patio.
+          child: Center(child: SizedBox(width: 360, child: card)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('GD-MC-7 — el encabezado de VerifyCard no desborda a escala 2.0: '
+      'el pill baja de renglón en vez de romper la fila', (tester) async {
+    await pumpCard(
+      tester,
+      2.0,
+      const VerifyCard(
+        title: 'Registro',
+        tone: VerifyTone.ok,
+        pillLabel: 'Confirmado por el servidor',
+        children: [KvRow(label: 'Firmado', value: '09:47')],
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(VerifyCard), findsOneWidget);
+  });
+
+  testWidgets('GD-SC-1 — a escala grande la fila clave-valor se APILA: la '
+      'clave deja de recortarse contra un ancho fijo', (tester) async {
+    const row = KvRow(label: 'Odómetro', value: '48 190 km');
+    await pumpCard(tester, 1.0, const VerifyCard(title: 'x', children: [row]));
+    final tight = tester.getTopLeft(find.text('48 190 km')).dy;
+    final labelTop = tester.getTopLeft(find.text('Odómetro')).dy;
+    expect(tight, labelTop, reason: 'a escala normal van en la misma línea');
+
+    await pumpCard(tester, 2.0, const VerifyCard(title: 'x', children: [row]));
+    expect(
+      tester.getTopLeft(find.text('48 190 km')).dy,
+      greaterThan(tester.getTopLeft(find.text('Odómetro')).dy),
+      reason: 'a escala 2.0 el valor baja debajo de su clave',
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('9C — declinar el seguro: POST, consecuencia declarada y '

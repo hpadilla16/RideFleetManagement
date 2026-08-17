@@ -2084,6 +2084,12 @@ abstract class AppLocalizations {
   /// **'El servidor no aceptó el avance'**
   String get coConflictGenericTitle;
 
+  /// No description provided for @coConflictSwapTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'El servidor no aceptó el cambio de unidad'**
+  String get coConflictSwapTitle;
+
   /// No description provided for @coConflictDismiss.
   ///
   /// In es, this message translates to:
@@ -2246,6 +2252,24 @@ abstract class AppLocalizations {
   /// **'Pre-checkin'**
   String get coConfirmPrecheckin;
 
+  /// VALOR de la fila cuya clave ya dice 'Pre-checkin' (review GD-MC-6): con coPrecheckinReady se leía 'Pre-checkin | Pre-checkin listo'. Se usa cuando el servidor sella el pre-checkin pero no llega la hora.
+  ///
+  /// In es, this message translates to:
+  /// **'Completado'**
+  String get coConfirmPrecheckinDone;
+
+  /// Caso normal: display-data trae customerInfoCompletedAt, así que la fila dice CUÁNDO, como el mockup 9A.
+  ///
+  /// In es, this message translates to:
+  /// **'Completado {time}'**
+  String coConfirmPrecheckinDoneAt(String time);
+
+  /// No description provided for @coConfirmPrecheckinPending.
+  ///
+  /// In es, this message translates to:
+  /// **'Pendiente'**
+  String get coConfirmPrecheckinPending;
+
   /// No description provided for @coConfirmMissingValue.
   ///
   /// In es, this message translates to:
@@ -2318,11 +2342,23 @@ abstract class AppLocalizations {
   /// **'Faltan {fields} del cliente. Se capturan en el mostrador o con el pre-checkin del cliente; esta pantalla se actualiza sola.'**
   String coConfirmBlockedWhy(String fields);
 
-  /// No description provided for @coConfirmRecheck.
+  /// Review GD-MC-5: la etiqueta NOMBRA el objeto. 'Volver a consultar' no decía qué se consulta y chocaba con el why de al lado, que ya promete que la pantalla se actualiza sola.
   ///
   /// In es, this message translates to:
-  /// **'Volver a consultar'**
+  /// **'Actualizar datos del cliente'**
   String get coConfirmRecheck;
+
+  /// No description provided for @coConfirmRecheckPending.
+  ///
+  /// In es, this message translates to:
+  /// **'Consultando al servidor…'**
+  String get coConfirmRecheckPending;
+
+  /// Acuse del re-consultado (GD-MC-5b): el botón disparaba dos peticiones y NO mostraba nada. Reusa la misma lista legible de campos que el bloqueo.
+  ///
+  /// In es, this message translates to:
+  /// **'Consultado ahora: el servidor sigue sin {fields}.'**
+  String coConfirmRecheckedStill(String fields);
 
   /// No description provided for @coDeclineTitle.
   ///
@@ -2414,6 +2450,30 @@ abstract class AppLocalizations {
   /// **'Unidad actual · una unidad no se cambia por sí misma'**
   String get coSwapCurrentReason;
 
+  /// Parte de MC-4 que no depende de la lámina: el 'motivo legible' de la unidad inerte era el string EN INGLÉS del servidor metido en un renglón de 12.5 px donde no cabe una cita. La cita del servidor vive en el banner del paso; aquí va copy propia.
+  ///
+  /// In es, this message translates to:
+  /// **'Unidad actual · el servidor la reporta comprometida en otra renta'**
+  String get coSwapCurrentCommitted;
+
+  /// 409 SWAP_LOCKED (vehicle-swap.service.js:46-51). Línea de causa TRADUCIDA arriba del cuerpo del servidor — mismo tratamiento que ENTRY_GUARD. Importa especialmente aquí: el mensaje del backend filtra un enum crudo de base de datos (currentStep=INSPECTION_IN_PROGRESS), y el agente no tiene por qué descifrarlo.
+  ///
+  /// In es, this message translates to:
+  /// **'La inspección de esta sesión ya empezó: a partir de ahí la unidad ya no se cambia.'**
+  String get coSwapLockedCause;
+
+  /// 409 VEHICLE_DOUBLE_BOOKED (vehicle-swap.service.js:86-91). El cuerpo del servidor sigue visible debajo: trae el número de la reserva que la aparta.
+  ///
+  /// In es, this message translates to:
+  /// **'Esa unidad ya está reservada en esta misma ventana.'**
+  String get coSwapDoubleBookedCause;
+
+  /// 409 VEHICLE_TERMINAL (vehicle-swap.service.js:67-72): vendida o fuera de servicio. Cuál de las dos lo dice el cuerpo del servidor, debajo.
+  ///
+  /// In es, this message translates to:
+  /// **'Esa unidad ya no se puede rentar.'**
+  String get coSwapTerminalCause;
+
   /// No description provided for @coSwapConfirm.
   ///
   /// In es, this message translates to:
@@ -2443,6 +2503,12 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Cambiar de unidad necesita conexión: el cambio lo hace el servidor sobre la reserva y el contrato.'**
   String get coSwapNeedsNetwork;
+
+  /// Etiqueta para lectores de pantalla del QR. Antes era la URL FIRMADA completa: TalkBack dictaba el token en voz alta y ese token es una credencial al portador (review GD-SC-8 / INN-S-4).
+  ///
+  /// In es, this message translates to:
+  /// **'Código QR para firmar los términos'**
+  String get coQrSemanticLabel;
 
   /// No description provided for @coTermsInstruction.
   ///

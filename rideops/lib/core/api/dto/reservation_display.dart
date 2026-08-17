@@ -58,6 +58,17 @@ abstract class DisplayReservation with _$DisplayReservation {
     /// schema.prisma:1526). Es además el gate del 422 PRECHECKIN_REQUIRED en
     /// las sedes que lo exigen: verlo ANTES ahorra el viaje a la negativa.
     @IsoDateTimeConverter() DateTime? customerInfoCompletedAt,
+
+    /// `Reservation.workflowMode` crudo (RENTAL | CAR_SHARING |
+    /// DEALERSHIP_LOANER, schema.prisma:1362). Viaja SIEMPRE en display-data:
+    /// `getById` usa un `include` de nivel superior, así que todo escalar de
+    /// `Reservation` llega (reservations.service.js:1521-1539).
+    ///
+    /// Se guarda como String (no como enum) por la misma regla de resiliencia
+    /// del resto de los DTO: un modo nuevo del backend no puede tumbar el
+    /// parseo. La comparación tipada la hace
+    /// [ReservationWorkflowMode.tryParse], cuya paridad vigila CI.
+    String? workflowMode,
   }) = _DisplayReservation;
 
   factory DisplayReservation.fromJson(Map<String, dynamic> json) =>

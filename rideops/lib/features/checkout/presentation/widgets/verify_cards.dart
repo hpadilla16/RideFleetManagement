@@ -49,16 +49,22 @@ class VerifyCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
+          // Wrap y no Row (review GD-MC-7): en un Row, el pill NO flexible se
+          // mide primero sin límite y el `Expanded` del título se queda con lo
+          // que sobra — que a escala de texto ~1.4 y 360 dp es CERO, y el pill
+          // desbordaba con franjas amarillas. El Wrap baja el pill a su propio
+          // renglón en vez de romper el encabezado.
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w900,
-                    color: RideTokens.n900,
-                  ),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                  color: RideTokens.n900,
                 ),
               ),
               if (pillLabel != null) VerifyPill(label: pillLabel!, tone: tone),
@@ -122,40 +128,53 @@ class KvRow extends StatelessWidget {
   final bool missing;
   final bool tabular;
 
+  /// Ancho de la columna de claves en la escala base del sistema.
+  static const _labelWidth = 104.0;
+
+  /// Por encima de esto la fila se APILA (review GD-SC-1): una clave de ancho
+  /// fijo mientras su texto escala acaba recortando la palabra que nombra el
+  /// dato, y el valor se queda con un canal de dos caracteres. 1.3 es el punto
+  /// donde "Odómetro" ya no cabe en 104 dp.
+  static const _stackAboveScale = 1.3;
+
   @override
   Widget build(BuildContext context) {
+    const labelStyle = TextStyle(
+      fontSize: 13.5,
+      fontWeight: FontWeight.w700,
+      color: RideTokens.n700,
+    );
+    final valueStyle = TextStyle(
+      fontSize: 13.5,
+      fontWeight: FontWeight.w800,
+      color: missing ? RideTokens.dangerTx : RideTokens.n900,
+      fontFeatures: tabular ? const [FontFeature.tabularFigures()] : null,
+    );
+    // Escala EFECTIVA del sistema medida sobre el propio tamaño de la fila:
+    // `textScaleFactor` está deprecado y con `TextScaler` no lineal el factor
+    // real depende del tamaño de fuente.
+    final scale = MediaQuery.textScalerOf(context).scale(13.5) / 13.5;
+    final label_ = Text(label, style: labelStyle);
+    final value_ = Text(value, style: valueStyle);
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 104,
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w700,
-                color: RideTokens.n700,
-              ),
+      child: scale > _stackAboveScale
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [label_, value_],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // La columna de claves ESCALA con el texto mientras se puede
+                // seguir leyendo en dos columnas.
+                SizedBox(width: _labelWidth * scale, child: label_),
+                const SizedBox(width: 8),
+                Expanded(child: value_),
+              ],
             ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w800,
-                color: missing ? RideTokens.dangerTx : RideTokens.n900,
-                fontFeatures: tabular
-                    ? const [FontFeature.tabularFigures()]
-                    : null,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -216,6 +235,10 @@ class CardLink extends StatelessWidget {
 /// ("Apagado · se cobra la cobertura estándar"), porque el color solo no puede
 /// portarlo. Encendida, la fila usa el ámbar como SUPERFICIE (n900 sobre
 /// warnBg = 16.49:1).
+///
+/// El objetivo táctil es la FILA COMPLETA (review GD-SC-4), no el switch: 56 px
+/// de alto con un control de 48 pegado al borde derecho es el peor blanco
+/// posible a una mano, con guantes y con el teléfono a medio girar.
 class DeclineSwitchRow extends StatelessWidget {
   const DeclineSwitchRow({
     super.key,
@@ -237,71 +260,86 @@ class DeclineSwitchRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final onChanged_ = onChanged;
+    // La FILA ENTERA es el objetivo táctil (review GD-SC-4): el switch mide
+    // ~48 dp pegados al borde derecho de una fila de 56, o sea el peor objetivo
+    // posible a una mano y con guantes. El `Semantics` de fuera gana además su
+    // `onTap`, porque el `ExcludeSemantics` deja al lector de pantalla sin
+    // ningún nodo activable debajo.
+    final toggle = onChanged_ == null || busy ? null : () => onChanged_(!value);
     return Semantics(
       toggled: value,
       enabled: onChanged != null,
       label: title,
       hint: subtitle,
+      onTap: toggle,
       child: ExcludeSemantics(
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 56),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: value ? RideTokens.warnBg : RideTokens.n0,
+        child: Material(
+          color: value ? RideTokens.warnBg : RideTokens.n0,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            onTap: toggle,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: value ? RideTokens.warnBd : RideTokens.n200,
-            ),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w900,
-                        color: RideTokens.n900,
-                      ),
-                    ),
-                    Text(
-                      subtitle,
-                      style: const TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                        color: RideTokens.n700,
-                      ),
-                    ),
-                  ],
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 56),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: value ? RideTokens.warnBd : RideTokens.n200,
                 ),
               ),
-              const SizedBox(width: 10),
-              if (busy)
-                const SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    color: RideTokens.p600,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w900,
+                            color: RideTokens.n900,
+                          ),
+                        ),
+                        Text(
+                          subtitle,
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            color: RideTokens.n700,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                )
-              else
-                Switch(
-                  value: value,
-                  onChanged: onChanged,
-                  // El riel encendido usa warnTx (#8A5606) como SUPERFICIE —
-                  // misma decisión que el badge ámbar de la Tanda B: ≥3:1
-                  // contra el fondo de la fila, sin inventar token nuevo.
-                  activeThumbColor: RideTokens.n0,
-                  activeTrackColor: RideTokens.warnTx,
-                  inactiveThumbColor: RideTokens.n0,
-                  inactiveTrackColor: RideTokens.n400,
-                ),
-            ],
+                  const SizedBox(width: 10),
+                  if (busy)
+                    const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: RideTokens.p600,
+                      ),
+                    )
+                  else
+                    Switch(
+                      value: value,
+                      onChanged: onChanged,
+                      // El riel encendido usa warnTx (#8A5606) como SUPERFICIE
+                      // — misma decisión que el badge ámbar de la Tanda B: ≥3:1
+                      // contra el fondo de la fila, sin inventar token nuevo.
+                      activeThumbColor: RideTokens.n0,
+                      activeTrackColor: RideTokens.warnTx,
+                      inactiveThumbColor: RideTokens.n0,
+                      inactiveTrackColor: RideTokens.n400,
+                    ),
+                ],
+              ),
+            ),
           ),
         ),
       ),

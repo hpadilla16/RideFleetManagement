@@ -1275,6 +1275,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get coConflictGenericTitle => 'El servidor no aceptó el avance';
 
   @override
+  String get coConflictSwapTitle => 'El servidor no aceptó el cambio de unidad';
+
+  @override
   String get coConflictDismiss => 'Entendido';
 
   @override
@@ -1370,6 +1373,17 @@ class AppLocalizationsEs extends AppLocalizations {
   String get coConfirmPrecheckin => 'Pre-checkin';
 
   @override
+  String get coConfirmPrecheckinDone => 'Completado';
+
+  @override
+  String coConfirmPrecheckinDoneAt(String time) {
+    return 'Completado $time';
+  }
+
+  @override
+  String get coConfirmPrecheckinPending => 'Pendiente';
+
+  @override
   String get coConfirmMissingValue => 'Sin capturar';
 
   @override
@@ -1410,7 +1424,15 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
-  String get coConfirmRecheck => 'Volver a consultar';
+  String get coConfirmRecheck => 'Actualizar datos del cliente';
+
+  @override
+  String get coConfirmRecheckPending => 'Consultando al servidor…';
+
+  @override
+  String coConfirmRecheckedStill(String fields) {
+    return 'Consultado ahora: el servidor sigue sin $fields.';
+  }
 
   @override
   String get coDeclineTitle => 'El cliente declina el seguro';
@@ -1467,6 +1489,21 @@ class AppLocalizationsEs extends AppLocalizations {
       'Unidad actual · una unidad no se cambia por sí misma';
 
   @override
+  String get coSwapCurrentCommitted =>
+      'Unidad actual · el servidor la reporta comprometida en otra renta';
+
+  @override
+  String get coSwapLockedCause =>
+      'La inspección de esta sesión ya empezó: a partir de ahí la unidad ya no se cambia.';
+
+  @override
+  String get coSwapDoubleBookedCause =>
+      'Esa unidad ya está reservada en esta misma ventana.';
+
+  @override
+  String get coSwapTerminalCause => 'Esa unidad ya no se puede rentar.';
+
+  @override
   String coSwapConfirm(String unit) {
     return 'Cambiar a $unit';
   }
@@ -1484,6 +1521,9 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get coSwapNeedsNetwork =>
       'Cambiar de unidad necesita conexión: el cambio lo hace el servidor sobre la reserva y el contrato.';
+
+  @override
+  String get coQrSemanticLabel => 'Código QR para firmar los términos';
 
   @override
   String get coTermsInstruction =>

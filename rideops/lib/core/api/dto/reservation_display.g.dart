@@ -44,6 +44,7 @@ _DisplayReservation _$DisplayReservationFromJson(Map<String, dynamic> json) =>
       customerInfoCompletedAt: const IsoDateTimeConverter().fromJson(
         json['customerInfoCompletedAt'] as String?,
       ),
+      workflowMode: json['workflowMode'] as String?,
     );
 
 Map<String, dynamic> _$DisplayReservationToJson(_DisplayReservation instance) =>
@@ -58,6 +59,7 @@ Map<String, dynamic> _$DisplayReservationToJson(_DisplayReservation instance) =>
       'customerInfoCompletedAt': const IsoDateTimeConverter().toJson(
         instance.customerInfoCompletedAt,
       ),
+      'workflowMode': instance.workflowMode,
     };
 
 _DisplayCustomer _$DisplayCustomerFromJson(Map<String, dynamic> json) =>

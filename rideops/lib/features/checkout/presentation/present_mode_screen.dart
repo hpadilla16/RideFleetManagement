@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/dto/reservation_display.dart';
+import '../../../core/device/presentation_mode.dart';
 import '../../../core/l10n/app_localizations.dart';
+import '../../../core/session/lock_controller.dart';
 import '../../../core/telemetry/event_logger.dart';
 import '../../../core/theme/ride_tokens.dart';
 import '../application/checkout_wizard_controller.dart';
@@ -27,12 +29,21 @@ Future<void> openPresentMode(
 }) {
   ref.read(eventLoggerProvider).log(CheckoutEvents.presentModeShown);
   return Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => PresentModeScreen(
+    PageRouteBuilder<void>(
+      // Cross-fade de 200 ms en vez del push por defecto: el teléfono va a
+      // GIRAR físicamente hacia el cliente en este momento, y una hoja
+      // deslizándose desde abajo mientras el aparato rota es movimiento sobre
+      // movimiento. El fade además respeta el gesto: nada "viene de" ningún
+      // lado, la pantalla simplemente cambia de dueño.
+      transitionDuration: const Duration(milliseconds: 200),
+      reverseTransitionDuration: const Duration(milliseconds: 200),
+      fullscreenDialog: true,
+      pageBuilder: (_, _, _) => PresentModeScreen(
         reservationId: reservationId,
         sessionId: sessionId,
       ),
-      fullscreenDialog: true,
+      transitionsBuilder: (_, animation, _, child) =>
+          FadeTransition(opacity: animation, child: child),
     ),
   );
 }
@@ -49,9 +60,10 @@ Future<void> openPresentMode(
 ///     entera: no hay fallback de marca (GD-1).
 ///  2. **Modo presentación ≠ modo kiosco** (nota 11): aquí el teléfono NO
 ///     cambia de manos, el cliente solo apunta su cámara. Por eso NO se monta
-///     la barra de kiosco, NO se suspende el candado de inactividad y NO se
-///     pide PIN para salir: fortificar esto sería fricción pura. La salida es
-///     un botón de 48 px al pie, en neutro del tenant.
+///     la barra de kiosco y NO se pide PIN para salir: fortificar esto sería
+///     fricción pura. La salida es un botón de 48 px al pie, en neutro del
+///     tenant. Lo que SÍ se toma prestado del kiosco es la suspensión del
+///     candado por inactividad — ver [_PresentModeScreenState].
 ///  3. **Al cliente no se le pone un reloj en la cara** (nota 12): el
 ///     countdown es herramienta del AGENTE. Aquí solo aparece bajo 2 min y con
 ///     copy tranquilizadora — presionar a alguien para que firme rápido un
@@ -75,12 +87,37 @@ class PresentModeScreen extends ConsumerStatefulWidget {
   ConsumerState<PresentModeScreen> createState() => _PresentModeScreenState();
 }
 
+/// UN SOLO bloque simétrico de entrada/salida, deliberadamente (reviews
+/// GD-MC-2 e INN-S-3 tocan el mismo par):
+///
+///  - **Brillo al máximo + pantalla despierta** ([PresentationScreen]). Sin
+///    wakelock el teléfono se atenúa y se bloquea a los ~30 s mientras el
+///    cliente escanea; sin brillo, el QR pierde contraste justo bajo el sol.
+///  - **Candado de personal suspendido**. `LockController.idleTimeout` son 5
+///    minutos y el token vive 15 (checkout-session.service.js:27): un cliente
+///    que de verdad LEE los términos ve la pantalla del agente convertirse en
+///    un teclado de PIN de personal. El `setState` de 1 Hz no cuenta como
+///    actividad — el candado se reinicia con pointer-down, no con repaints. El
+///    precedente exacto es `kiosk_signature_step.dart:85-89`.
+///
+/// Todo se deshace en [dispose], que corre en TODA salida (botón, back del
+/// sistema, auto-cierre por firma o vencimiento, y también si el build de
+/// arriba explota): pares exactos suspend/resume, enter/exit.
 class _PresentModeScreenState extends ConsumerState<PresentModeScreen> {
   Timer? _tick;
+
+  /// Capturados en initState: `ref` no es seguro dentro de dispose() y la
+  /// restauración TIENE que correr ahí.
+  late final LockController _lock;
+  late final PresentationScreen _screen;
 
   @override
   void initState() {
     super.initState();
+    _lock = ref.read(lockControllerProvider.notifier);
+    _screen = ref.read(presentationScreenProvider);
+    _lock.suspendLock();
+    unawaited(_screen.enter());
     // Mismo tick de 1 Hz del paso: aquí solo decide si ya toca mostrar el
     // aviso de "quedan menos de 2 minutos".
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -91,6 +128,11 @@ class _PresentModeScreenState extends ConsumerState<PresentModeScreen> {
   @override
   void dispose() {
     _tick?.cancel();
+    // Orden inverso al del initState y sin `await` (dispose es síncrono): el
+    // resume del candado es lo primero porque es lo que devuelve la protección
+    // de la superficie de staff.
+    _lock.resumeLock();
+    unawaited(_screen.exit());
     super.dispose();
   }
 
@@ -127,9 +169,8 @@ class _PresentModeScreenState extends ConsumerState<PresentModeScreen> {
             _TenantBar(branding: branding, reservation: reservationNumber),
             Expanded(
               // Scroll aunque el diseño quepa: con el texto del sistema en
-              // grande (o un teléfono corto) el QR de 230 px más las dos
-              // instrucciones se salen, y un QR recortado es un QR que no
-              // escanea. Centrado mientras sobra espacio.
+              // grande (o un teléfono corto) el QR más las dos instrucciones se
+              // salen, y un QR recortado es un QR que no escanea.
               child: SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Column(
@@ -149,8 +190,18 @@ class _PresentModeScreenState extends ConsumerState<PresentModeScreen> {
                     ),
                     const SizedBox(height: 14),
                     if (url != null)
-                      // 230 px: se escanea de lejos, con guantes y con sol.
-                      QrView(data: url, size: 230),
+                      // 230 px de SÍMBOLO (la quiet zone va por fuera): a ~10×
+                      // el lado, es lo que da alcance de escaneo de brazo
+                      // extendido, con guantes y con sol. El marco es lo que le
+                      // dice al cliente dónde apuntar cuando la pantalla
+                      // refleja (GD-SC-2).
+                      QrFrame(
+                        child: QrView(
+                          data: url,
+                          size: 230,
+                          semanticsLabel: l10n.coQrSemanticLabel,
+                        ),
+                      ),
                     const SizedBox(height: 16),
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 290),
@@ -261,7 +312,7 @@ class _TenantBar extends StatelessWidget {
                   style: const TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w700,
-                    color: Color(0xFFE9E4F4),
+                    color: RideTokens.n200,
                   ),
                 ),
               ],

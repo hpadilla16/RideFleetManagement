@@ -15,6 +15,7 @@ import 'package:rideops/core/session/session_state.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
 import 'package:rideops/features/checkout/application/checkout_wizard_controller.dart';
 import 'package:rideops/features/checkout/application/checkout_wizard_state.dart';
+import 'package:rideops/features/checkout/application/terms_token_controller.dart';
 import 'package:rideops/features/checkout/domain/checkout_confirm.dart';
 
 import 'helpers/auth_test_helpers.dart';
@@ -251,6 +252,42 @@ void main() {
             .map((e) => e.$2['code']),
         contains('SWAP_LOCKED'),
       );
+    });
+  });
+
+  test('INN-S-1 — un build() con un mint EN VUELO no deja el guard trabado: el '
+      'paso no se queda girando con los dos botones mudos', () {
+    fakeAsync((async) {
+      final h = harness();
+      async.flushMicrotasks();
+      final gate = Completer<void>();
+      h.api.onMintTermsToken = () async {
+        await gate.future;
+        return termsToken();
+      };
+
+      final provider = termsTokenProvider(kSessionId);
+      h.container.listen(provider, (_, _) {});
+      async.flushMicrotasks();
+      expect(h.api.termsTokenCalls, 1, reason: 'mint al entrar al paso');
+
+      // El build se rehace mientras ese POST sigue vivo (cambio de sede,
+      // login/logout, o simplemente que el paso se vuelva a montar).
+      h.container.invalidate(provider);
+      h.container.listen(provider, (_, _) {});
+      async.flushMicrotasks();
+      expect(h.api.termsTokenCalls, 2,
+          reason: 'la generación nueva SÍ puede pedir su código');
+
+      gate.complete();
+      async.flushMicrotasks();
+
+      // Y después de que la respuesta vieja aterriza, "Generar código nuevo"
+      // sigue vivo. Sin el reset, el `finally` de la generación vieja no
+      // limpiaba el guard y esto se quedaba en 2 para siempre.
+      h.container.read(provider.notifier).mint();
+      async.flushMicrotasks();
+      expect(h.api.termsTokenCalls, 3);
     });
   });
 

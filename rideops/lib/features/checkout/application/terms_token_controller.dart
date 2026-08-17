@@ -86,6 +86,14 @@ class TermsTokenController extends Notifier<TermsTokenState> {
   TermsTokenState build() {
     _generation++;
     final gen = _generation;
+    // Reset del guard en cada build, igual que los dos controllers ya
+    // establecidos (dashboard_controller.dart:121,
+    // checkout_wizard_controller.dart:126). Sin esto: un `build()` mientras hay
+    // un mint EN VUELO deja `_inFlight` en true PARA SIEMPRE — el `finally`
+    // solo lo limpia cuando la generación coincide, y ya no coincide. El
+    // resultado es un paso girando eternamente con "Reintentar" y "Generar
+    // código nuevo" mudos (review INN-S-1).
+    _inFlight = false;
     // Mint al ENTRAR al paso: es lo que el backend espera del wizard
     // (service:708-712 lo dice explícitamente) y es idempotente, así que
     // reabrir el paso no quema tokens.

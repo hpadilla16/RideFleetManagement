@@ -14,6 +14,7 @@ import '../widgets/transition_button.dart';
 import '../widgets/vehicle_swap_sheet.dart';
 import '../widgets/verify_cards.dart';
 import '../widgets/wizard_banners.dart';
+import '../widgets/wizard_dock.dart';
 
 /// Paso CONFIRMING (M2-H2, mockup 9A-9E).
 ///
@@ -45,10 +46,45 @@ class ConfirmingStep extends ConsumerStatefulWidget {
 class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
   final _scroll = ScrollController();
 
+  /// Hay una re-consulta del agente en vuelo ("Actualizar datos del cliente").
+  /// Vive aquí y no en el controller porque es una acción de PANTALLA: el
+  /// wizard no distingue este refresh de los del poll.
+  bool _rechecking = false;
+
+  /// Ya terminó una re-consulta y el servidor SIGUE sin los datos. Es el acuse
+  /// que faltaba (review GD-MC-5): antes el botón disparaba dos peticiones y no
+  /// mostraba absolutamente nada, así que el agente lo volvía a tocar.
+  bool _recheckedStill = false;
+
   @override
   void dispose() {
     _scroll.dispose();
     super.dispose();
+  }
+
+  Future<void> _recheck() async {
+    if (_rechecking) return;
+    setState(() {
+      _rechecking = true;
+      _recheckedStill = false;
+    });
+    final controller =
+        ref.read(checkoutWizardProvider(widget.reservationId).notifier);
+    try {
+      // Las dos lecturas: la sesión (por si otra superficie avanzó mientras
+      // tanto) y display-data, que es donde viven los datos del cliente.
+      await controller.refresh();
+      await controller.reloadContext();
+    } finally {
+      // El acuse se enciende SIEMPRE que la consulta terminó; si los datos ya
+      // llegaron, el bloqueo entero desaparece y con él este texto.
+      if (mounted) {
+        setState(() {
+          _rechecking = false;
+          _recheckedStill = true;
+        });
+      }
+    }
   }
 
   @override
@@ -85,13 +121,19 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
     final vehicleConflict =
         state.conflict?.kind == CheckoutConflictKind.vehicleConflict;
 
+    final customerCard = _CustomerCard(
+      check: check,
+      precheckinDone: ctx?.precheckinDone ?? false,
+      precheckinAt: ctx?.precheckinAt,
+    );
+
     final cards = <Widget>[
       if (vehicleConflict) ...[
         _VehicleCard(state: state, conflict: true, onSwap: null),
         const SizedBox(height: 12),
-        _CustomerCard(check: check, precheckinDone: ctx?.precheckinDone ?? false),
+        customerCard,
       ] else ...[
-        _CustomerCard(check: check, precheckinDone: ctx?.precheckinDone ?? false),
+        customerCard,
         const SizedBox(height: 12),
         _VehicleCard(
           state: state,
@@ -103,8 +145,16 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
               ? () => _openSwapSheet(context, ref)
               : null,
         ),
-        const SizedBox(height: 12),
-        _InsuranceSwitch(reservationId: reservationId, session: session),
+        // El seguro NO se declina en una reserva de cortesía (review INN-MC-3).
+        // No es cosmético: el loaner SÍ recibe un `RentalAgreement` compañero
+        // (checkout-session.service.js:245-255), así que el POST responde 200 y
+        // estampa un anexo de RECHAZO DE COBERTURA sobre un contrato de $0. El
+        // wizard web ya esconde este switch (checkout-wizard-v2/page.js:839);
+        // esta app era la única que lo ofrecía.
+        if (!(ctx?.isLoaner ?? false)) ...[
+          const SizedBox(height: 12),
+          _InsuranceSwitch(reservationId: reservationId, session: session),
+        ],
       ],
     ];
 
@@ -130,9 +180,16 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
                   // nunca por inferencia sobre el catálogo (ADR-4).
                   toStep: CheckoutStep.tcPending,
                   label: l10n.coConfirmCta,
+                  // Tras una re-consulta que no trajo nada, el subtexto ES el
+                  // acuse: "consultado ahora, el servidor sigue sin X". Sigue
+                  // siendo non-null, así que el CTA sigue bloqueado con causa.
                   blockedWhy: check.complete
                       ? null
-                      : l10n.coConfirmBlockedWhy(_missingLabel(l10n, check)),
+                      : (_recheckedStill
+                          ? l10n.coConfirmRecheckedStill(
+                              _missingLabel(l10n, check))
+                          : l10n.coConfirmBlockedWhy(
+                              _missingLabel(l10n, check))),
                   // Bloquear sin salida sería dejar al agente encerrado: la
                   // captura de datos del cliente NO vive en esta app (ADR-1,
                   // se queda en el mostrador web / pre-checkin), así que la
@@ -141,13 +198,9 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
                       ? null
                       : RideGhostButton(
                           label: l10n.coConfirmRecheck,
-                          onPressed: () {
-                            final controller = ref.read(
-                              checkoutWizardProvider(reservationId).notifier,
-                            );
-                            controller.refresh();
-                            controller.reloadContext();
-                          },
+                          loading: _rechecking,
+                          loadingLabel: l10n.coConfirmRecheckPending,
+                          onPressed: _recheck,
                         ),
                 ),
         ),
@@ -176,10 +229,18 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
 }
 
 class _CustomerCard extends StatelessWidget {
-  const _CustomerCard({required this.check, required this.precheckinDone});
+  const _CustomerCard({
+    required this.check,
+    required this.precheckinDone,
+    required this.precheckinAt,
+  });
 
   final ConfirmCustomerCheck check;
   final bool precheckinDone;
+
+  /// Cuándo se selló el pre-checkin. El controller ya leía este campo y solo
+  /// guardaba el bool (review GD-MC-6).
+  final DateTime? precheckinAt;
 
   @override
   Widget build(BuildContext context) {
@@ -218,9 +279,17 @@ class _CustomerCard extends StatelessWidget {
         ),
         KvRow(
           label: l10n.coConfirmPrecheckin,
-          value: precheckinDone
-              ? l10n.coPrecheckinReady
-              : l10n.coPrecheckinPending,
+          // "Pre-checkin | Completado 18:42", no "Pre-checkin | Pre-checkin
+          // listo" (review GD-MC-6): la clave ya nombró el campo, el valor solo
+          // tiene que decir su estado — y la hora, que es el dato con el que el
+          // agente decide si confía en esa captura.
+          value: !precheckinDone
+              ? l10n.coConfirmPrecheckinPending
+              : precheckinAt == null
+                  ? l10n.coConfirmPrecheckinDone
+                  : l10n.coConfirmPrecheckinDoneAt(
+                      DateFormat.Hm(locale).format(precheckinAt!.toLocal()),
+                    ),
         ),
       ],
     );
@@ -355,31 +424,11 @@ class _ConflictDock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(0, 12, 0, 0),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: RideTokens.n200)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          RidePrimaryButton(
-            label: l10n.coConflictSwapCta,
-            onPressed: onSwap,
-          ),
-          const SizedBox(height: 9),
-          Text(
-            l10n.coConflictSwapWhy,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: RideTokens.n700,
-            ),
-          ),
-        ],
+    return WizardDock(
+      why: l10n.coConflictSwapWhy,
+      primary: RidePrimaryButton(
+        label: l10n.coConflictSwapCta,
+        onPressed: onSwap,
       ),
     );
   }

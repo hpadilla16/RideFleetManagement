@@ -366,6 +366,8 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
           odometer: reservation.vehicle?.mileage,
           pickupAt: reservation.pickupAt,
           precheckinDone: reservation.customerInfoCompletedAt != null,
+          precheckinAt: reservation.customerInfoCompletedAt,
+          workflowMode: reservation.workflowMode,
           // Superficie de STAFF: el nombre del tenant sí se muestra aquí.
           tenantName: display.branding.companyName.isEmpty
               ? null
@@ -853,6 +855,7 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
         return CheckoutSwapAttempt(
           CheckoutSwapOutcome.failed,
           message: e.message,
+          code: e.code,
         );
       }
       _logger.log(CheckoutEvents.transition409, data: {'code': e.code ?? 'none'});
@@ -862,11 +865,14 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       if (gen != _generation || !ref.mounted) return blocked;
       if (e.code == 'SWAP_LOCKED') {
         // Ya no es cosa de ESTA unidad: la sesión pasó de inspección y el
-        // swap dejó de existir. El banner sobrevive al cierre del sheet.
-        _setConflict(CheckoutConflictKind.generic, e);
+        // swap dejó de existir. El banner sobrevive al cierre del sheet, y
+        // lleva kind propio para poder traducir la causa encima del cuerpo
+        // del servidor (que aquí filtra `currentStep=` crudo).
+        _setConflict(CheckoutConflictKind.swapLocked, e);
         return CheckoutSwapAttempt(
           CheckoutSwapOutcome.lockedStep,
           message: e.message,
+          code: e.code,
         );
       }
       // VEHICLE_DOUBLE_BOOKED / VEHICLE_TERMINAL: la negativa es de la unidad
@@ -876,6 +882,7 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       return CheckoutSwapAttempt(
         CheckoutSwapOutcome.vehicleRejected,
         message: e.message,
+        code: e.code,
       );
     } finally {
       if (gen == _generation && ref.mounted) {

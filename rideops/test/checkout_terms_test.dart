@@ -10,10 +10,12 @@ import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/api_providers.dart';
 import 'package:rideops/core/api/enums.dart';
 import 'package:rideops/core/config/app_config.dart';
+import 'package:rideops/core/device/presentation_mode.dart';
 import 'package:rideops/core/l10n/app_localizations.dart';
 import 'package:rideops/core/outbox/network_status.dart';
 import 'package:rideops/core/router/app_router.dart';
 import 'package:rideops/core/session/active_location.dart';
+import 'package:rideops/core/session/lock_controller.dart';
 import 'package:rideops/core/session/session_controller.dart';
 import 'package:rideops/core/session/session_state.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
@@ -22,6 +24,7 @@ import 'package:rideops/features/checkout/presentation/checkout_wizard_screen.da
 import 'package:rideops/features/checkout/presentation/present_mode_screen.dart';
 import 'package:rideops/features/checkout/presentation/steps/terms_step.dart';
 import 'package:rideops/features/checkout/presentation/widgets/qr_view.dart';
+import 'package:rideops/features/checkout/presentation/widgets/wizard_dock.dart';
 
 import 'helpers/auth_test_helpers.dart';
 import 'helpers/checkout_test_helpers.dart';
@@ -30,6 +33,21 @@ import 'helpers/shell_test_helpers.dart';
 
 /// Paso T&C (mockup 10A-10D) + modo presentación. Locale `en`, como el resto
 /// de la suite.
+
+/// Geometría REAL del código pintado: lado del símbolo (lo que se escanea) y
+/// lado del módulo. El contenedor mide `símbolo + 8 · módulo`, así que el
+/// módulo se despeja de la diferencia — y así la prueba fija el SÍMBOLO, que es
+/// lo que el mockup aprueba, sin depender de cuántos módulos salga la URL.
+({double symbol, double module}) qrGeometry(WidgetTester tester) {
+  final total = tester.getSize(find.byType(QrView)).width;
+  final paint = tester.widget<CustomPaint>(
+    find.descendant(
+      of: find.byType(QrView),
+      matching: find.byType(CustomPaint),
+    ),
+  );
+  return (symbol: paint.size.width, module: (total - paint.size.width) / 8);
+}
 
 void main() {
   final liveToken = fakeJwt(
@@ -49,13 +67,21 @@ void main() {
         logger: CapturingEventLogger(),
       );
 
+  /// Candado y pantalla del modo presentación: SIEMPRE stubs. El real leería
+  /// Keystore y el de pantalla hablaría con dos plugins que en un widget test
+  /// no existen — y lo que se está probando es el PAR entrar/salir, no el
+  /// plugin.
+  late StubLockController lock;
+
   Future<void> pumpTerms(
     WidgetTester tester, {
     required FakeCheckoutApi api,
     required FakeReservationsApi reservations,
     required FakeNetworkStatus network,
     required CapturingEventLogger logger,
+    NoopPresentationScreen? presentationScreen,
   }) async {
+    lock = StubLockController();
     final router = GoRouter(
       initialLocation: AppRoutes.checkout(kReservationId),
       routes: [
@@ -80,6 +106,10 @@ void main() {
           reservationsApiProvider.overrideWithValue(reservations),
           eventLoggerProvider.overrideWithValue(logger),
           networkStatusProvider.overrideWithValue(network),
+          lockControllerProvider.overrideWith(() => lock),
+          presentationScreenProvider.overrideWithValue(
+            presentationScreen ?? NoopPresentationScreen(),
+          ),
           activeLocationProvider.overrideWith(
             () => StubActiveLocation(
               const ActiveLocation.pinned(
@@ -414,6 +444,22 @@ void main() {
 
       expect(find.byType(PresentModeScreen), findsOneWidget);
       expect(tester.widget<QrView>(find.byType(QrView)).size, 230);
+      // GD-MC-1: `size` describe el SÍMBOLO. Lo que se fija es lo que se
+      // escanea, no el cuadro con la quiet zone incluida.
+      final geometry = qrGeometry(tester);
+      expect(geometry.symbol, lessThanOrEqualTo(230));
+      expect(
+        geometry.symbol,
+        greaterThanOrEqualTo(230 * 0.95),
+        reason: 'el símbolo mide lo aprobado (el snap a píxel físico se come '
+            'menos del 5%); antes de GD-MC-1 la quiet zone iba POR DENTRO y '
+            'el símbolo caía a ~165-185',
+      );
+      expect(
+        tester.getSize(find.byType(QrView)).width,
+        closeTo(geometry.symbol + 8 * geometry.module, 0.01),
+        reason: 'la quiet zone de 4 módulos crece hacia AFUERA',
+      );
       // Marca del tenant, en el idioma del cliente.
       expect(find.text('Autos del Valle'), findsOneWidget);
       expect(find.textContaining('Reservation R-20260816-0042'), findsOneWidget);
@@ -513,6 +559,76 @@ void main() {
       expect(find.text('Terms signed'), findsOneWidget);
     });
 
+    testWidgets('GD-MC-2 + INN-S-3 — al entrar: brillo/wakelock encendidos y '
+        'candado de personal SUSPENDIDO; al salir, los dos se deshacen',
+        (tester) async {
+      final f = fakes();
+      final screen = NoopPresentationScreen();
+      await pumpTerms(
+        tester,
+        api: f.api,
+        reservations: f.reservations,
+        network: f.network,
+        logger: f.logger,
+        presentationScreen: screen,
+      );
+      expect(screen.enters, 0);
+
+      await openPresentation(tester);
+      expect(screen.enters, 1, reason: 'brillo al máximo + pantalla despierta');
+      // El candado de 5 min no puede saltar mientras el cliente lee: el
+      // setState de 1 Hz no cuenta como actividad.
+      expect(lock.suspends, 1);
+      expect(lock.resumes, 0);
+
+      await tester.tap(find.text('Exit presentation'));
+      await tester.pumpAndSettle();
+
+      expect(screen.exits, 1, reason: 'restauración simétrica en dispose');
+      expect(lock.resumes, 1);
+    });
+
+    testWidgets('la restauración también corre cuando el modo se cierra SOLO '
+        '(firma recibida), no solo con el botón de salida', (tester) async {
+      final f = fakes();
+      final screen = NoopPresentationScreen();
+      await pumpTerms(
+        tester,
+        api: f.api,
+        reservations: f.reservations,
+        network: f.network,
+        logger: f.logger,
+        presentationScreen: screen,
+      );
+      await openPresentation(tester);
+
+      f.api.current = sessionAt(CheckoutStep.tcPending, tc: DateTime.now());
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(PresentModeScreen), findsNothing);
+      expect(screen.exits, 1);
+      expect(lock.resumes, 1);
+    });
+
+    testWidgets('GD-SC-2 — el QR del cliente lleva marco: bajo reflejo es lo '
+        'que le dice dónde apuntar', (tester) async {
+      final f = fakes();
+      await pumpTerms(
+        tester,
+        api: f.api,
+        reservations: f.reservations,
+        network: f.network,
+        logger: f.logger,
+      );
+      await openPresentation(tester);
+
+      expect(
+        find.ancestor(of: find.byType(QrView), matching: find.byType(QrFrame)),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('"Salir de presentación" devuelve al paso con su QR',
         (tester) async {
       final f = fakes();
@@ -531,6 +647,100 @@ void main() {
       expect(find.byType(PresentModeScreen), findsNothing);
       expect(find.byType(TermsStep), findsOneWidget);
       expect(f.api.termsTokenCalls, 1, reason: 'salir no re-emite nada');
+    });
+  });
+
+  testWidgets('GD-SC-3 — el dock de re-emisión NO es un tercer dock hecho a '
+      'mano: es el WizardDock común', (tester) async {
+    final f = fakes();
+    await pumpTerms(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    expect(
+      find.widgetWithText(WizardDock, 'Generate a new code'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('GD-MC-1 (10A) — el QR del paso también mide su SÍMBOLO: 184 dp '
+      'de código, no 184 con la quiet zone comiéndose 39', (tester) async {
+    final f = fakes();
+    await pumpTerms(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    final geometry = qrGeometry(tester);
+    expect(geometry.symbol, lessThanOrEqualTo(184));
+    expect(geometry.symbol, greaterThanOrEqualTo(184 * 0.95));
+  });
+
+  testWidgets('GD-SC-8 / INN-S-4 — el lector de pantalla NO dicta el token: la '
+      'etiqueta del QR es copy traducida', (tester) async {
+    final handle = tester.ensureSemantics();
+    final f = fakes();
+    await pumpTerms(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    final qr = tester.widget<QrView>(find.byType(QrView));
+    expect(qr.semanticsLabel, 'QR code to sign the terms');
+    expect(qr.semanticsLabel.contains('tok_terms'), isFalse);
+    expect(qr.semanticsLabel.contains('http'), isFalse);
+    // Y lo que de verdad se publica al árbol de accesibilidad tampoco.
+    final node = tester.getSemantics(find.byType(QrView));
+    expect(node.label, contains('QR code to sign the terms'));
+    expect(node.label.contains('tok_terms'), isFalse,
+        reason: 'el token es una credencial al portador: no se dicta');
+    expect(node.label.contains('/sign/'), isFalse);
+    handle.dispose();
+  });
+
+  group('QrMetrics — la quiet zone va POR FUERA (GD-MC-1)', () {
+    // Rango real de versiones para una URL de firma: 29 (v3) a 37 (v5).
+    for (final count in [29, 33, 37]) {
+      for (final dpr in [1.0, 2.0, 3.0]) {
+        test('símbolo $count módulos @ ${dpr}x', () {
+          final m = QrMetrics.resolve(
+            symbolSide: 230,
+            moduleCount: count,
+            devicePixelRatio: dpr,
+          );
+          expect(m.symbol, m.module * count);
+          expect(m.total, m.symbol + 8 * m.module,
+              reason: 'contenedor = símbolo + 8 módulos de quiet zone');
+          expect(m.symbol, lessThanOrEqualTo(230));
+          expect(m.symbol, greaterThan(230 - count / dpr),
+              reason: 'cada módulo pierde menos de un píxel FÍSICO');
+          expect(
+            (m.module * dpr - (m.module * dpr).roundToDouble()).abs(),
+            lessThan(1e-9),
+            reason: 'el módulo cae en píxel físico entero',
+          );
+        });
+      }
+    }
+
+    test('un símbolo absurdamente chico nunca produce módulos de 0 dp', () {
+      final m = QrMetrics.resolve(
+        symbolSide: 4,
+        moduleCount: 37,
+        devicePixelRatio: 3,
+      );
+      expect(m.module, greaterThan(0));
+      expect(m.total, greaterThan(m.symbol));
     });
   });
 

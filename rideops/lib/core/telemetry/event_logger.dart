@@ -123,6 +123,15 @@ abstract final class CheckoutEvents {
 
   /// Se abrió el modo presentación (10B), la pantalla volteada al cliente.
   static const presentModeShown = 'checkout.present_mode_shown';
+
+  /// El modo presentación no pudo ajustar (o restaurar) brillo o wakelock.
+  /// Tags: `what` (brightness | wakelock) y `phase` (enter | exit).
+  ///
+  /// `phase:exit` es el que importa vigilar: es la señal de que el teléfono
+  /// pudo quedarse con el brillo forzado después de salir (riesgo real solo en
+  /// iOS — en Android el override es de la VENTANA y muere con ella).
+  static const presentModeScreenDegraded =
+      'checkout.present_mode_screen_degraded';
 }
 
 /// Eventos de la bandeja de salida (03-observability.md §Inspección y

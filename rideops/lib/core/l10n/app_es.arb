@@ -617,6 +617,7 @@
   "coConflictEntryGuardTitle": "Falta un paso previo",
   "coConflictVehicleTitle": "El vehículo ya no está libre",
   "coConflictGenericTitle": "El servidor no aceptó el avance",
+  "coConflictSwapTitle": "El servidor no aceptó el cambio de unidad",
   "coConflictDismiss": "Entendido",
   "coPickupToday": "Salida hoy {time}",
   "@coPickupToday": {
@@ -671,6 +672,16 @@
   },
   "coConfirmPhone": "Teléfono",
   "coConfirmPrecheckin": "Pre-checkin",
+  "coConfirmPrecheckinDone": "Completado",
+  "@coConfirmPrecheckinDone": {
+    "description": "VALOR de la fila cuya clave ya dice 'Pre-checkin' (review GD-MC-6): con coPrecheckinReady se leía 'Pre-checkin | Pre-checkin listo'. Se usa cuando el servidor sella el pre-checkin pero no llega la hora."
+  },
+  "coConfirmPrecheckinDoneAt": "Completado {time}",
+  "@coConfirmPrecheckinDoneAt": {
+    "description": "Caso normal: display-data trae customerInfoCompletedAt, así que la fila dice CUÁNDO, como el mockup 9A.",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coConfirmPrecheckinPending": "Pendiente",
   "coConfirmMissingValue": "Sin capturar",
   "coConfirmUnit": "Unidad",
   "coConfirmOdometerLabel": "Odómetro",
@@ -690,7 +701,16 @@
     "description": "Bloqueo LOCAL con causa nombrada (9B). El CTA no se esconde: se bloquea diciendo qué falta y dónde se resuelve. RideOps no captura datos del cliente (ADR-1: eso vive en el mostrador web).",
     "placeholders": { "fields": { "type": "String" } }
   },
-  "coConfirmRecheck": "Volver a consultar",
+  "coConfirmRecheck": "Actualizar datos del cliente",
+  "@coConfirmRecheck": {
+    "description": "Review GD-MC-5: la etiqueta NOMBRA el objeto. 'Volver a consultar' no decía qué se consulta y chocaba con el why de al lado, que ya promete que la pantalla se actualiza sola."
+  },
+  "coConfirmRecheckPending": "Consultando al servidor…",
+  "coConfirmRecheckedStill": "Consultado ahora: el servidor sigue sin {fields}.",
+  "@coConfirmRecheckedStill": {
+    "description": "Acuse del re-consultado (GD-MC-5b): el botón disparaba dos peticiones y NO mostraba nada. Reusa la misma lista legible de campos que el bloqueo.",
+    "placeholders": { "fields": { "type": "String" } }
+  },
   "coDeclineTitle": "El cliente declina el seguro",
   "coDeclineOff": "Apagado · se cobra la cobertura estándar",
   "coDeclineOn": "Encendido · se agrega el anexo",
@@ -711,6 +731,22 @@
   "coSwapSameGroup": "Mismo grupo",
   "coSwapOtherGroup": "Otro grupo · puede cambiar la tarifa",
   "coSwapCurrentReason": "Unidad actual · una unidad no se cambia por sí misma",
+  "coSwapCurrentCommitted": "Unidad actual · el servidor la reporta comprometida en otra renta",
+  "@coSwapCurrentCommitted": {
+    "description": "Parte de MC-4 que no depende de la lámina: el 'motivo legible' de la unidad inerte era el string EN INGLÉS del servidor metido en un renglón de 12.5 px donde no cabe una cita. La cita del servidor vive en el banner del paso; aquí va copy propia."
+  },
+  "coSwapLockedCause": "La inspección de esta sesión ya empezó: a partir de ahí la unidad ya no se cambia.",
+  "@coSwapLockedCause": {
+    "description": "409 SWAP_LOCKED (vehicle-swap.service.js:46-51). Línea de causa TRADUCIDA arriba del cuerpo del servidor — mismo tratamiento que ENTRY_GUARD. Importa especialmente aquí: el mensaje del backend filtra un enum crudo de base de datos (currentStep=INSPECTION_IN_PROGRESS), y el agente no tiene por qué descifrarlo."
+  },
+  "coSwapDoubleBookedCause": "Esa unidad ya está reservada en esta misma ventana.",
+  "@coSwapDoubleBookedCause": {
+    "description": "409 VEHICLE_DOUBLE_BOOKED (vehicle-swap.service.js:86-91). El cuerpo del servidor sigue visible debajo: trae el número de la reserva que la aparta."
+  },
+  "coSwapTerminalCause": "Esa unidad ya no se puede rentar.",
+  "@coSwapTerminalCause": {
+    "description": "409 VEHICLE_TERMINAL (vehicle-swap.service.js:67-72): vendida o fuera de servicio. Cuál de las dos lo dice el cuerpo del servidor, debajo."
+  },
   "coSwapConfirm": "Cambiar a {unit}",
   "@coSwapConfirm": {
     "placeholders": { "unit": { "type": "String" } }
@@ -720,6 +756,10 @@
   "coSwapEmpty": "El servidor no reporta otras unidades libres para esta ventana.",
   "coSwapNeedsNetwork": "Cambiar de unidad necesita conexión: el cambio lo hace el servidor sobre la reserva y el contrato.",
 
+  "coQrSemanticLabel": "Código QR para firmar los términos",
+  "@coQrSemanticLabel": {
+    "description": "Etiqueta para lectores de pantalla del QR. Antes era la URL FIRMADA completa: TalkBack dictaba el token en voz alta y ese token es una credencial al portador (review GD-SC-8 / INN-S-4)."
+  },
   "coTermsInstruction": "Que el cliente lo escanee con la cámara de su teléfono para firmar.",
   "coTermsExpiresIn": "Vence en",
   "coTermsExpired": "Vencido",

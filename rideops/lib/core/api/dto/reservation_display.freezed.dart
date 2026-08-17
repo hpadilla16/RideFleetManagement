@@ -330,7 +330,16 @@ mixin _$DisplayReservation {
 @IsoDateTimeConverter() DateTime? get pickupAt;/// Sello del pre-checkin (`Reservation.customerInfoCompletedAt`,
 /// schema.prisma:1526). Es además el gate del 422 PRECHECKIN_REQUIRED en
 /// las sedes que lo exigen: verlo ANTES ahorra el viaje a la negativa.
-@IsoDateTimeConverter() DateTime? get customerInfoCompletedAt;
+@IsoDateTimeConverter() DateTime? get customerInfoCompletedAt;/// `Reservation.workflowMode` crudo (RENTAL | CAR_SHARING |
+/// DEALERSHIP_LOANER, schema.prisma:1362). Viaja SIEMPRE en display-data:
+/// `getById` usa un `include` de nivel superior, así que todo escalar de
+/// `Reservation` llega (reservations.service.js:1521-1539).
+///
+/// Se guarda como String (no como enum) por la misma regla de resiliencia
+/// del resto de los DTO: un modo nuevo del backend no puede tumbar el
+/// parseo. La comparación tipada la hace
+/// [ReservationWorkflowMode.tryParse], cuya paridad vigila CI.
+ String? get workflowMode;
 /// Create a copy of DisplayReservation
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -343,16 +352,16 @@ $DisplayReservationCopyWith<DisplayReservation> get copyWith => _$DisplayReserva
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is DisplayReservation&&(identical(other.id, id) || other.id == id)&&(identical(other.reservationNumber, reservationNumber) || other.reservationNumber == reservationNumber)&&(identical(other.vehicle, vehicle) || other.vehicle == vehicle)&&(identical(other.customer, customer) || other.customer == customer)&&(identical(other.vehicleTypeId, vehicleTypeId) || other.vehicleTypeId == vehicleTypeId)&&(identical(other.rentalAgreement, rentalAgreement) || other.rentalAgreement == rentalAgreement)&&(identical(other.pickupAt, pickupAt) || other.pickupAt == pickupAt)&&(identical(other.customerInfoCompletedAt, customerInfoCompletedAt) || other.customerInfoCompletedAt == customerInfoCompletedAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is DisplayReservation&&(identical(other.id, id) || other.id == id)&&(identical(other.reservationNumber, reservationNumber) || other.reservationNumber == reservationNumber)&&(identical(other.vehicle, vehicle) || other.vehicle == vehicle)&&(identical(other.customer, customer) || other.customer == customer)&&(identical(other.vehicleTypeId, vehicleTypeId) || other.vehicleTypeId == vehicleTypeId)&&(identical(other.rentalAgreement, rentalAgreement) || other.rentalAgreement == rentalAgreement)&&(identical(other.pickupAt, pickupAt) || other.pickupAt == pickupAt)&&(identical(other.customerInfoCompletedAt, customerInfoCompletedAt) || other.customerInfoCompletedAt == customerInfoCompletedAt)&&(identical(other.workflowMode, workflowMode) || other.workflowMode == workflowMode));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,reservationNumber,vehicle,customer,vehicleTypeId,rentalAgreement,pickupAt,customerInfoCompletedAt);
+int get hashCode => Object.hash(runtimeType,id,reservationNumber,vehicle,customer,vehicleTypeId,rentalAgreement,pickupAt,customerInfoCompletedAt,workflowMode);
 
 @override
 String toString() {
-  return 'DisplayReservation(id: $id, reservationNumber: $reservationNumber, vehicle: $vehicle, customer: $customer, vehicleTypeId: $vehicleTypeId, rentalAgreement: $rentalAgreement, pickupAt: $pickupAt, customerInfoCompletedAt: $customerInfoCompletedAt)';
+  return 'DisplayReservation(id: $id, reservationNumber: $reservationNumber, vehicle: $vehicle, customer: $customer, vehicleTypeId: $vehicleTypeId, rentalAgreement: $rentalAgreement, pickupAt: $pickupAt, customerInfoCompletedAt: $customerInfoCompletedAt, workflowMode: $workflowMode)';
 }
 
 
@@ -363,7 +372,7 @@ abstract mixin class $DisplayReservationCopyWith<$Res>  {
   factory $DisplayReservationCopyWith(DisplayReservation value, $Res Function(DisplayReservation) _then) = _$DisplayReservationCopyWithImpl;
 @useResult
 $Res call({
- String id, String? reservationNumber, DisplayVehicle? vehicle, DisplayCustomer? customer, String? vehicleTypeId, DisplayAgreement? rentalAgreement,@IsoDateTimeConverter() DateTime? pickupAt,@IsoDateTimeConverter() DateTime? customerInfoCompletedAt
+ String id, String? reservationNumber, DisplayVehicle? vehicle, DisplayCustomer? customer, String? vehicleTypeId, DisplayAgreement? rentalAgreement,@IsoDateTimeConverter() DateTime? pickupAt,@IsoDateTimeConverter() DateTime? customerInfoCompletedAt, String? workflowMode
 });
 
 
@@ -380,7 +389,7 @@ class _$DisplayReservationCopyWithImpl<$Res>
 
 /// Create a copy of DisplayReservation
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? reservationNumber = freezed,Object? vehicle = freezed,Object? customer = freezed,Object? vehicleTypeId = freezed,Object? rentalAgreement = freezed,Object? pickupAt = freezed,Object? customerInfoCompletedAt = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? reservationNumber = freezed,Object? vehicle = freezed,Object? customer = freezed,Object? vehicleTypeId = freezed,Object? rentalAgreement = freezed,Object? pickupAt = freezed,Object? customerInfoCompletedAt = freezed,Object? workflowMode = freezed,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,reservationNumber: freezed == reservationNumber ? _self.reservationNumber : reservationNumber // ignore: cast_nullable_to_non_nullable
@@ -390,7 +399,8 @@ as DisplayCustomer?,vehicleTypeId: freezed == vehicleTypeId ? _self.vehicleTypeI
 as String?,rentalAgreement: freezed == rentalAgreement ? _self.rentalAgreement : rentalAgreement // ignore: cast_nullable_to_non_nullable
 as DisplayAgreement?,pickupAt: freezed == pickupAt ? _self.pickupAt : pickupAt // ignore: cast_nullable_to_non_nullable
 as DateTime?,customerInfoCompletedAt: freezed == customerInfoCompletedAt ? _self.customerInfoCompletedAt : customerInfoCompletedAt // ignore: cast_nullable_to_non_nullable
-as DateTime?,
+as DateTime?,workflowMode: freezed == workflowMode ? _self.workflowMode : workflowMode // ignore: cast_nullable_to_non_nullable
+as String?,
   ));
 }
 /// Create a copy of DisplayReservation
@@ -511,10 +521,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String? reservationNumber,  DisplayVehicle? vehicle,  DisplayCustomer? customer,  String? vehicleTypeId,  DisplayAgreement? rentalAgreement, @IsoDateTimeConverter()  DateTime? pickupAt, @IsoDateTimeConverter()  DateTime? customerInfoCompletedAt)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String? reservationNumber,  DisplayVehicle? vehicle,  DisplayCustomer? customer,  String? vehicleTypeId,  DisplayAgreement? rentalAgreement, @IsoDateTimeConverter()  DateTime? pickupAt, @IsoDateTimeConverter()  DateTime? customerInfoCompletedAt,  String? workflowMode)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _DisplayReservation() when $default != null:
-return $default(_that.id,_that.reservationNumber,_that.vehicle,_that.customer,_that.vehicleTypeId,_that.rentalAgreement,_that.pickupAt,_that.customerInfoCompletedAt);case _:
+return $default(_that.id,_that.reservationNumber,_that.vehicle,_that.customer,_that.vehicleTypeId,_that.rentalAgreement,_that.pickupAt,_that.customerInfoCompletedAt,_that.workflowMode);case _:
   return orElse();
 
 }
@@ -532,10 +542,10 @@ return $default(_that.id,_that.reservationNumber,_that.vehicle,_that.customer,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String? reservationNumber,  DisplayVehicle? vehicle,  DisplayCustomer? customer,  String? vehicleTypeId,  DisplayAgreement? rentalAgreement, @IsoDateTimeConverter()  DateTime? pickupAt, @IsoDateTimeConverter()  DateTime? customerInfoCompletedAt)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String? reservationNumber,  DisplayVehicle? vehicle,  DisplayCustomer? customer,  String? vehicleTypeId,  DisplayAgreement? rentalAgreement, @IsoDateTimeConverter()  DateTime? pickupAt, @IsoDateTimeConverter()  DateTime? customerInfoCompletedAt,  String? workflowMode)  $default,) {final _that = this;
 switch (_that) {
 case _DisplayReservation():
-return $default(_that.id,_that.reservationNumber,_that.vehicle,_that.customer,_that.vehicleTypeId,_that.rentalAgreement,_that.pickupAt,_that.customerInfoCompletedAt);case _:
+return $default(_that.id,_that.reservationNumber,_that.vehicle,_that.customer,_that.vehicleTypeId,_that.rentalAgreement,_that.pickupAt,_that.customerInfoCompletedAt,_that.workflowMode);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -552,10 +562,10 @@ return $default(_that.id,_that.reservationNumber,_that.vehicle,_that.customer,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String? reservationNumber,  DisplayVehicle? vehicle,  DisplayCustomer? customer,  String? vehicleTypeId,  DisplayAgreement? rentalAgreement, @IsoDateTimeConverter()  DateTime? pickupAt, @IsoDateTimeConverter()  DateTime? customerInfoCompletedAt)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String? reservationNumber,  DisplayVehicle? vehicle,  DisplayCustomer? customer,  String? vehicleTypeId,  DisplayAgreement? rentalAgreement, @IsoDateTimeConverter()  DateTime? pickupAt, @IsoDateTimeConverter()  DateTime? customerInfoCompletedAt,  String? workflowMode)?  $default,) {final _that = this;
 switch (_that) {
 case _DisplayReservation() when $default != null:
-return $default(_that.id,_that.reservationNumber,_that.vehicle,_that.customer,_that.vehicleTypeId,_that.rentalAgreement,_that.pickupAt,_that.customerInfoCompletedAt);case _:
+return $default(_that.id,_that.reservationNumber,_that.vehicle,_that.customer,_that.vehicleTypeId,_that.rentalAgreement,_that.pickupAt,_that.customerInfoCompletedAt,_that.workflowMode);case _:
   return null;
 
 }
@@ -567,7 +577,7 @@ return $default(_that.id,_that.reservationNumber,_that.vehicle,_that.customer,_t
 @JsonSerializable()
 
 class _DisplayReservation implements DisplayReservation {
-  const _DisplayReservation({required this.id, this.reservationNumber, this.vehicle, this.customer, this.vehicleTypeId, this.rentalAgreement, @IsoDateTimeConverter() this.pickupAt, @IsoDateTimeConverter() this.customerInfoCompletedAt});
+  const _DisplayReservation({required this.id, this.reservationNumber, this.vehicle, this.customer, this.vehicleTypeId, this.rentalAgreement, @IsoDateTimeConverter() this.pickupAt, @IsoDateTimeConverter() this.customerInfoCompletedAt, this.workflowMode});
   factory _DisplayReservation.fromJson(Map<String, dynamic> json) => _$DisplayReservationFromJson(json);
 
 @override final  String id;
@@ -591,6 +601,16 @@ class _DisplayReservation implements DisplayReservation {
 /// schema.prisma:1526). Es además el gate del 422 PRECHECKIN_REQUIRED en
 /// las sedes que lo exigen: verlo ANTES ahorra el viaje a la negativa.
 @override@IsoDateTimeConverter() final  DateTime? customerInfoCompletedAt;
+/// `Reservation.workflowMode` crudo (RENTAL | CAR_SHARING |
+/// DEALERSHIP_LOANER, schema.prisma:1362). Viaja SIEMPRE en display-data:
+/// `getById` usa un `include` de nivel superior, así que todo escalar de
+/// `Reservation` llega (reservations.service.js:1521-1539).
+///
+/// Se guarda como String (no como enum) por la misma regla de resiliencia
+/// del resto de los DTO: un modo nuevo del backend no puede tumbar el
+/// parseo. La comparación tipada la hace
+/// [ReservationWorkflowMode.tryParse], cuya paridad vigila CI.
+@override final  String? workflowMode;
 
 /// Create a copy of DisplayReservation
 /// with the given fields replaced by the non-null parameter values.
@@ -605,16 +625,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _DisplayReservation&&(identical(other.id, id) || other.id == id)&&(identical(other.reservationNumber, reservationNumber) || other.reservationNumber == reservationNumber)&&(identical(other.vehicle, vehicle) || other.vehicle == vehicle)&&(identical(other.customer, customer) || other.customer == customer)&&(identical(other.vehicleTypeId, vehicleTypeId) || other.vehicleTypeId == vehicleTypeId)&&(identical(other.rentalAgreement, rentalAgreement) || other.rentalAgreement == rentalAgreement)&&(identical(other.pickupAt, pickupAt) || other.pickupAt == pickupAt)&&(identical(other.customerInfoCompletedAt, customerInfoCompletedAt) || other.customerInfoCompletedAt == customerInfoCompletedAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _DisplayReservation&&(identical(other.id, id) || other.id == id)&&(identical(other.reservationNumber, reservationNumber) || other.reservationNumber == reservationNumber)&&(identical(other.vehicle, vehicle) || other.vehicle == vehicle)&&(identical(other.customer, customer) || other.customer == customer)&&(identical(other.vehicleTypeId, vehicleTypeId) || other.vehicleTypeId == vehicleTypeId)&&(identical(other.rentalAgreement, rentalAgreement) || other.rentalAgreement == rentalAgreement)&&(identical(other.pickupAt, pickupAt) || other.pickupAt == pickupAt)&&(identical(other.customerInfoCompletedAt, customerInfoCompletedAt) || other.customerInfoCompletedAt == customerInfoCompletedAt)&&(identical(other.workflowMode, workflowMode) || other.workflowMode == workflowMode));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,reservationNumber,vehicle,customer,vehicleTypeId,rentalAgreement,pickupAt,customerInfoCompletedAt);
+int get hashCode => Object.hash(runtimeType,id,reservationNumber,vehicle,customer,vehicleTypeId,rentalAgreement,pickupAt,customerInfoCompletedAt,workflowMode);
 
 @override
 String toString() {
-  return 'DisplayReservation(id: $id, reservationNumber: $reservationNumber, vehicle: $vehicle, customer: $customer, vehicleTypeId: $vehicleTypeId, rentalAgreement: $rentalAgreement, pickupAt: $pickupAt, customerInfoCompletedAt: $customerInfoCompletedAt)';
+  return 'DisplayReservation(id: $id, reservationNumber: $reservationNumber, vehicle: $vehicle, customer: $customer, vehicleTypeId: $vehicleTypeId, rentalAgreement: $rentalAgreement, pickupAt: $pickupAt, customerInfoCompletedAt: $customerInfoCompletedAt, workflowMode: $workflowMode)';
 }
 
 
@@ -625,7 +645,7 @@ abstract mixin class _$DisplayReservationCopyWith<$Res> implements $DisplayReser
   factory _$DisplayReservationCopyWith(_DisplayReservation value, $Res Function(_DisplayReservation) _then) = __$DisplayReservationCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String? reservationNumber, DisplayVehicle? vehicle, DisplayCustomer? customer, String? vehicleTypeId, DisplayAgreement? rentalAgreement,@IsoDateTimeConverter() DateTime? pickupAt,@IsoDateTimeConverter() DateTime? customerInfoCompletedAt
+ String id, String? reservationNumber, DisplayVehicle? vehicle, DisplayCustomer? customer, String? vehicleTypeId, DisplayAgreement? rentalAgreement,@IsoDateTimeConverter() DateTime? pickupAt,@IsoDateTimeConverter() DateTime? customerInfoCompletedAt, String? workflowMode
 });
 
 
@@ -642,7 +662,7 @@ class __$DisplayReservationCopyWithImpl<$Res>
 
 /// Create a copy of DisplayReservation
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? reservationNumber = freezed,Object? vehicle = freezed,Object? customer = freezed,Object? vehicleTypeId = freezed,Object? rentalAgreement = freezed,Object? pickupAt = freezed,Object? customerInfoCompletedAt = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? reservationNumber = freezed,Object? vehicle = freezed,Object? customer = freezed,Object? vehicleTypeId = freezed,Object? rentalAgreement = freezed,Object? pickupAt = freezed,Object? customerInfoCompletedAt = freezed,Object? workflowMode = freezed,}) {
   return _then(_DisplayReservation(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,reservationNumber: freezed == reservationNumber ? _self.reservationNumber : reservationNumber // ignore: cast_nullable_to_non_nullable
@@ -652,7 +672,8 @@ as DisplayCustomer?,vehicleTypeId: freezed == vehicleTypeId ? _self.vehicleTypeI
 as String?,rentalAgreement: freezed == rentalAgreement ? _self.rentalAgreement : rentalAgreement // ignore: cast_nullable_to_non_nullable
 as DisplayAgreement?,pickupAt: freezed == pickupAt ? _self.pickupAt : pickupAt // ignore: cast_nullable_to_non_nullable
 as DateTime?,customerInfoCompletedAt: freezed == customerInfoCompletedAt ? _self.customerInfoCompletedAt : customerInfoCompletedAt // ignore: cast_nullable_to_non_nullable
-as DateTime?,
+as DateTime?,workflowMode: freezed == workflowMode ? _self.workflowMode : workflowMode // ignore: cast_nullable_to_non_nullable
+as String?,
   ));
 }
 
