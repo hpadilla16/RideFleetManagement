@@ -43,11 +43,13 @@ module.exports = {
         ],
       },
       {
-        // The public tracker's token lives in the URL path. The page's meta
-        // referrer covers main-thread requests; this header extends the
-        // guarantee to worker-issued tile fetches on older engines too.
+        // The public tracker's token lives in the URL path — it must never
+        // ride out in a Referer. `origin` (not no-referrer) because Google
+        // Maps validates referrer-restricted API keys against the Referer
+        // header: Google sees "https://ridefleetmanager.com/", never the
+        // path. Keep in sync with the page's metadata.referrer.
         source: '/shuttle/:path*',
-        headers: [{ key: 'Referrer-Policy', value: 'no-referrer' }],
+        headers: [{ key: 'Referrer-Policy', value: 'origin' }],
       },
       {
         // Everything else: an ops app has no business being framed anywhere.

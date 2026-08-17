@@ -18,9 +18,7 @@
     "mobile:sync": "npx cap sync",
     "mobile:open:android": "npx cap open android",
     "mobile:open:ios": "npx cap open ios",
-    "lint:i18n": "next lint --config .eslintrc.i18n.cjs || eslint 'src/**/*.{js,jsx}' -c .eslintrc.i18n.cjs",
-    "predev": "node -e \"require('fs').copyFileSync(require.resolve('maplibre-gl/dist/maplibre-gl-worker.mjs'), 'public/maplibre-gl-worker.mjs')\"",
-    "prebuild": "node -e \"require('fs').copyFileSync(require.resolve('maplibre-gl/dist/maplibre-gl-worker.mjs'), 'public/maplibre-gl-worker.mjs')\""
+    "lint:i18n": "next lint --config .eslintrc.i18n.cjs || eslint 'src/**/*.{js,jsx}' -c .eslintrc.i18n.cjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.2.0",
@@ -33,7 +31,6 @@
     "chart.js": "^4.4.0",
     "i18next": "^26.0.4",
     "jszip": "^3.10.1",
-    "maplibre-gl": "^6.3.0",
     "next": "14.2.35",
     "qrcode": "^1.5.4",
     "react": "18.3.1",

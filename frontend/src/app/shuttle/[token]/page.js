@@ -2,9 +2,11 @@
  * Public shuttle tracker page — /shuttle/<token>.
  *
  * Server wrapper only. The metadata matters as much as the UI:
- *  - referrer no-referrer: the token IS the credential, and it lives in the
- *    URL path — it must never leak to tile servers or any outbound link via
- *    the Referer header.
+ *  - referrer `origin`: the token IS the credential and lives in the URL
+ *    path, so the path must never ride out in a Referer — but Google Maps
+ *    validates referrer-restricted keys against the Referer header, so
+ *    total silence (no-referrer) would break the key. `origin` sends only
+ *    "https://ridefleetmanager.com/". Keep in sync with next.config.js.
  *  - noindex/nofollow: tokenized links are personal and expiring; a search
  *    engine caching one would outlive the link's own death.
  */
@@ -12,7 +14,7 @@ import { ShuttleTrackerClient } from './TrackerClient';
 
 export const metadata = {
   title: 'Shuttle',
-  referrer: 'no-referrer',
+  referrer: 'origin',
   robots: { index: false, follow: false },
 };
 
