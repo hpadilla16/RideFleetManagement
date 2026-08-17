@@ -46,11 +46,14 @@ abstract final class AuthEvents {
   static const sessionExpiredRelogin = 'auth.session_expired_relogin';
 }
 
-/// Eventos de sesión de dispositivo (03-observability.md §Sesión): el candado
-/// por PIN/biometría (H2). `method` en el unlock: pin | biometric.
+/// Eventos de sesión fuera de auth (03-observability.md §Sesión): el candado
+/// por PIN/biometría (H2, `method` en el unlock: pin | biometric) y el
+/// selector de ubicación activa (H3).
 abstract final class SessionEvents {
   static const pinLock = 'session.pin_lock';
   static const pinUnlock = 'session.pin_unlock';
+  static const viewLocationSet = 'session.view_location_set';
+  static const viewLocationDenied = 'session.view_location_denied';
 }
 
 /// Punto de enchufe de Sentry: cuando haya DSN, aquí se decide

@@ -14,6 +14,7 @@ import 'package:rideops/core/telemetry/event_logger.dart';
 import 'package:rideops/features/auth/presentation/login_screen.dart';
 import 'package:rideops/features/auth/presentation/pin_lock_screen.dart';
 import 'package:rideops/features/dashboard/presentation/home_placeholder_screen.dart';
+import 'package:rideops/features/dashboard/presentation/home_skeleton.dart';
 
 import 'helpers/auth_test_helpers.dart';
 
@@ -144,7 +145,17 @@ void main() {
     expect(find.text('Unlock RideOps'), findsOneWidget,
         reason: 'sin user no hay saludo ni avatar, pero el candado funciona');
 
-    await tapPin(tester, '1234');
+    // OJO (integración H2×H3): tras desbloquear DEGRADADO el destino es el
+    // skeleton 4E, cuyo shimmer es infinito — pumpAndSettle avanzaría tiempo
+    // fake hasta que el timer de inactividad (5 min) re-bloqueara. Bombear
+    // acotado, jamás settle con el skeleton en pantalla (ver app_shell_test).
+    for (final d in '1234'.split('')) {
+      await tester.tap(find.text(d));
+      await tester.pump();
+    }
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.byType(HomePlaceholderScreen), findsOneWidget);
+    expect(find.byType(HomeSkeleton), findsOneWidget,
+        reason: 'user null ⇒ skeleton dentro del shell, no pantalla a medias');
   });
 }

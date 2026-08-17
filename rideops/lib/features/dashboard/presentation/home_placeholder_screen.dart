@@ -4,10 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/session/session_controller.dart';
 import '../../../core/theme/ride_tokens.dart';
+import 'home_skeleton.dart';
 
 /// Destino post-login PROVISIONAL: el dashboard real (9 colas + bento) es la
 /// historia H4. Esto solo confirma la sesión y ofrece logout — necesario para
 /// probar el ciclo completo login→gate→app→logout en un teléfono real.
+/// El Scaffold exterior lo pone el shell (H3); aquí solo el body.
 class HomePlaceholderScreen extends ConsumerWidget {
   const HomePlaceholderScreen({super.key});
 
@@ -15,9 +17,13 @@ class HomePlaceholderScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     final user = ref.watch(sessionControllerProvider).user;
-    return Scaffold(
-      backgroundColor: RideTokens.n50,
-      body: SafeArea(
+    // Sesión degradada (token vivo, /me aún sin responder o caído por red):
+    // skeleton 4E, no una pantalla a medias. El re-intento de /me corre al
+    // reanudar la app (AppShell) y este user deja de ser null solo.
+    if (user == null) return const HomeSkeleton();
+    return ColoredBox(
+      color: RideTokens.n50,
+      child: SafeArea(
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -30,10 +36,10 @@ class HomePlaceholderScreen extends ConsumerWidget {
                   color: RideTokens.n900,
                 ),
               ),
-              if (user?.fullName != null) ...[
+              if (user.fullName != null) ...[
                 const SizedBox(height: 4),
                 Text(
-                  user!.fullName!,
+                  user.fullName!,
                   style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,

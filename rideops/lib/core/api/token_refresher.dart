@@ -74,9 +74,10 @@ class TokenRefresher {
     return DateTime.fromMillisecondsSinceEpoch((exp * 1000).round(), isUtc: true);
   }
 
-  /// Claim `sub` = userId del staff (auth.service.js:19). H2 lo usa para atar
-  /// el PIN local al usuario incluso con /me degradado (user null tras un
-  /// restore sin red) — el token es la única identidad disponible ahí.
+  /// Claim `sub` = userId del staff (auth.service.js:19), también sin
+  /// verificar firma. Es la única identidad disponible con /me degradado
+  /// (user null tras un restore sin red): H2 lo usa para atar el PIN local al
+  /// usuario y H3 para saber DE QUIÉN es la ubicación activa persistida.
   static String? subjectOf(String jwt) {
     final sub = _payloadOf(jwt)?['sub'];
     return sub is String && sub.isNotEmpty ? sub : null;

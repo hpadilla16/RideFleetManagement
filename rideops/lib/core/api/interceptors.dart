@@ -18,6 +18,7 @@ class AuthInterceptor extends Interceptor {
     required this.readViewLocation,
     required this.onSessionExpired,
     this.onPasswordChangeRequired,
+    this.onViewLocationDenied,
   });
 
   final TokenRefresher refresher;
@@ -36,7 +37,28 @@ class AuthInterceptor extends Interceptor {
   /// con la app abierta dejaría al usuario viendo errores sueltos.
   final void Function()? onPasswordChangeRequired;
 
+  /// 403 SIN code en una request que SÍ llevaba [viewLocationHeader]: la
+  /// negativa de ubicación de REGROUND §1 (auth.js:75 no manda code de
+  /// máquina). Hoy solo telemetría (`session.view_location_denied`) — la UI
+  /// la maneja cada pantalla con su propio ApiError (DoD-4), este callback no
+  /// navega ni muta sesión. Si el backend agrega VIEW_LOCATION_DENIED
+  /// (gap #3 del plan), el disparo se endurece a code == ese.
+  final void Function()? onViewLocationDenied;
+
   static const viewLocationHeader = 'x-view-location';
+
+  /// `options.extra[skipViewLocation] = true` ⇒ esta request NO lleva el
+  /// header aunque haya ubicación activa. Existe para DOS rutas concretas:
+  ///  - `GET /api/auth/me`: devuelve `req.user` YA reducido por el header
+  ///    (auth.routes.js:95-97) — con override activo llegaría locationIds de
+  ///    UNA sede y la app confundiría el set real del usuario; y si un admin
+  ///    quitó la sede persistida, /me daría 403 duro y la rehidratación de la
+  ///    sesión moriría. Identidad ≠ datos scoped.
+  ///  - `GET /api/locations/selectable`: alimenta el SELECTOR — con el header,
+  ///    requireAuth encoge req.user.locationIds a la sede activa y la lista
+  ///    devolvería solo esa (locations-selectable.routes.js:37-41): imposible
+  ///    salirse de una ubicación denegada.
+  static const skipViewLocation = 'rideops.skip_view_location';
 
   @override
   Future<void> onRequest(
@@ -65,9 +87,11 @@ class AuthInterceptor extends Interceptor {
     // Selector de ubicación (REGROUND §1): requireAuth reduce
     // req.user.locationIds a esta sede antes de correr cualquier ruta. Solo
     // encoge el alcance — fail-closed en el servidor.
-    final loc = readViewLocation();
-    if (loc != null && loc.isNotEmpty) {
-      options.headers[viewLocationHeader] = loc;
+    if (options.extra[skipViewLocation] != true) {
+      final loc = readViewLocation();
+      if (loc != null && loc.isNotEmpty) {
+        options.headers[viewLocationHeader] = loc;
+      }
     }
     handler.next(options);
   }
@@ -83,6 +107,13 @@ class AuthInterceptor extends Interceptor {
       onSessionExpired();
     } else if (apiError.kind == ApiErrorKind.passwordChangeRequired) {
       onPasswordChangeRequired?.call();
+    } else if (apiError.kind == ApiErrorKind.forbidden &&
+        apiError.code == null &&
+        err.requestOptions.headers.containsKey(viewLocationHeader)) {
+      // Solo cuenta como negativa de ubicación si ESTA request llevó el
+      // header: un 403 de módulo/RBAC sin header no debe contaminar la
+      // métrica session.view_location_denied.
+      onViewLocationDenied?.call();
     }
     handler.next(
       err.copyWith(error: apiError),

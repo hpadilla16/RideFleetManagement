@@ -434,6 +434,132 @@ abstract class AppLocalizations {
   /// **'Cerrar sesión'**
   String get logoutButton;
 
+  /// No description provided for @tabHome.
+  ///
+  /// In es, this message translates to:
+  /// **'Inicio'**
+  String get tabHome;
+
+  /// No description provided for @tabSearch.
+  ///
+  /// In es, this message translates to:
+  /// **'Buscar'**
+  String get tabSearch;
+
+  /// No description provided for @tabIncidents.
+  ///
+  /// In es, this message translates to:
+  /// **'Incidentes'**
+  String get tabIncidents;
+
+  /// No description provided for @tabOutbox.
+  ///
+  /// In es, this message translates to:
+  /// **'Bandeja'**
+  String get tabOutbox;
+
+  /// No description provided for @tabProfile.
+  ///
+  /// In es, this message translates to:
+  /// **'Perfil'**
+  String get tabProfile;
+
+  /// Etiqueta de accesibilidad del badge de la tab Bandeja
+  ///
+  /// In es, this message translates to:
+  /// **'{count} pendientes de envío'**
+  String outboxBadgeSemantics(int count);
+
+  /// No description provided for @shellPlaceholderBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Esta sección llega en una historia siguiente.'**
+  String get shellPlaceholderBody;
+
+  /// No description provided for @locationChipAll.
+  ///
+  /// In es, this message translates to:
+  /// **'Todas'**
+  String get locationChipAll;
+
+  /// No description provided for @locationChipSemantics.
+  ///
+  /// In es, this message translates to:
+  /// **'Ubicación activa: {location}. Toca para cambiar.'**
+  String locationChipSemantics(String location);
+
+  /// No description provided for @locationSheetTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Ubicación activa'**
+  String get locationSheetTitle;
+
+  /// No description provided for @locationSheetSubtitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Filtra colas, búsqueda y capturas nuevas'**
+  String get locationSheetSubtitle;
+
+  /// No description provided for @locationAllMine.
+  ///
+  /// In es, this message translates to:
+  /// **'Todas mis ubicaciones'**
+  String get locationAllMine;
+
+  /// No description provided for @locationCurrentLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Ubicación actual'**
+  String get locationCurrentLabel;
+
+  /// No description provided for @locationSheetError.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudieron cargar tus ubicaciones. Revisa la señal e intenta de nuevo.'**
+  String get locationSheetError;
+
+  /// No description provided for @cancelButton.
+  ///
+  /// In es, this message translates to:
+  /// **'Cancelar'**
+  String get cancelButton;
+
+  /// No description provided for @locationDeniedTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin acceso a esta ubicación'**
+  String get locationDeniedTitle;
+
+  /// No description provided for @locationDeniedBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Tu cuenta ya no tiene acceso a {location}. Elige otra ubicación para seguir trabajando.'**
+  String locationDeniedBody(String location);
+
+  /// No description provided for @locationDeniedBodyGeneric.
+  ///
+  /// In es, this message translates to:
+  /// **'Tu cuenta ya no tiene acceso a esta ubicación. Elige otra ubicación para seguir trabajando.'**
+  String get locationDeniedBodyGeneric;
+
+  /// No description provided for @locationDeniedChangeButton.
+  ///
+  /// In es, this message translates to:
+  /// **'Cambiar ubicación'**
+  String get locationDeniedChangeButton;
+
+  /// No description provided for @locationDeniedAdminNote.
+  ///
+  /// In es, this message translates to:
+  /// **'Si crees que es un error, avisa a tu administrador.'**
+  String get locationDeniedAdminNote;
+
+  /// No description provided for @loadingLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Cargando…'**
+  String get loadingLabel;
+
   /// No description provided for @sessionExpired.
   ///
   /// In es, this message translates to:

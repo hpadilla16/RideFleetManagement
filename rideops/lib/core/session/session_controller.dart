@@ -48,6 +48,12 @@ class SessionController extends Notifier<SessionState> {
       return;
     }
     state = SessionState.authenticated(token: token);
+    await _hydrateUser();
+  }
+
+  /// GET /api/auth/me → user al estado, con los guardas de siempre. Lo
+  /// comparten [restore] y [rehydrateUserIfMissing].
+  Future<void> _hydrateUser() async {
     try {
       final user = await ref.read(authApiProvider).me();
       if (!ref.mounted) return;
@@ -64,6 +70,17 @@ class SessionController extends Notifier<SessionState> {
       // HTML con 200 → TypeError en fromJson): degradar a user null igual
       // que un fallo de red — jamás un unhandled async error al arrancar.
     }
+  }
+
+  /// Sesión DEGRADADA (token vivo, `user == null` porque /me falló por red al
+  /// restaurar): re-intento de /me al REANUDAR la app (lifecycle resume — lo
+  /// cablea el AppShell, H3). El shell mientras tanto renderiza con tabs
+  /// mínimas y skeleton (mockup 4E); cada /me exitoso restituye role y
+  /// moduleAccess sin pedirle nada al usuario. No-op si la sesión ya está
+  /// completa o no existe.
+  Future<void> rehydrateUserIfMissing() async {
+    if (!state.isAuthenticated || state.user != null) return;
+    await _hydrateUser();
   }
 
   /// POST /api/auth/login. Lanza [ApiError] para que la pantalla decida

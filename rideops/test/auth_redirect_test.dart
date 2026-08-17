@@ -231,6 +231,41 @@ void main() {
     });
   });
 
+  group('intersección H2 × H3 (candado × rutas del shell)', () {
+    test('bloqueado en una ruta del shell → /lock preservando la tab', () {
+      // El candado gana aunque el usuario esté parado en el shell con sede
+      // activa: la ubicación es estado de datos, no un gate — no compite.
+      expect(
+        redirect(liveNoGate, '/search', lock: lockLocked),
+        '/lock?from=${Uri.encodeComponent('/search')}',
+      );
+      expect(
+        redirect(liveNoGate, '/outbox', lock: lockLocked),
+        '/lock?from=${Uri.encodeComponent('/outbox')}',
+      );
+    });
+
+    test('desbloqueado en /lock con from de shell → reanuda esa tab', () {
+      expect(redirect(liveNoGate, '/lock?from=%2Fsearch'), '/search');
+      expect(redirect(liveNoGate, '/lock?from=%2Foutbox'), '/outbox');
+    });
+
+    test('sin PIN parado en el shell → /pin-setup preservando la tab', () {
+      expect(
+        redirect(liveNoGate, '/search', lock: lockNoPin),
+        '/pin-setup?from=${Uri.encodeComponent('/search')}',
+      );
+    });
+
+    test('tras el setup, /login con from de shell aterriza en el shell', () {
+      // pin-setup navega él mismo a su resumeTo; la tabla verifica que con
+      // todos los gates pasados el from de shell se respeta desde cualquier
+      // superficie de auth.
+      expect(redirect(liveNoGate, '/login?from=%2Fsearch'), '/search');
+      expect(redirect(liveNoGate, '/splash?from=%2Foutbox'), '/outbox');
+    });
+  });
+
   group('token vivo, sin gates', () {
     test('en /login → reanuda el destino preservado', () {
       expect(redirect(liveNoGate, '/login?from=%2Fhome%3Ftab%3D2'),

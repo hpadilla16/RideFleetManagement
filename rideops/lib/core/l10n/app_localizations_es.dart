@@ -207,6 +207,80 @@ class AppLocalizationsEs extends AppLocalizations {
   String get logoutButton => 'Cerrar sesión';
 
   @override
+  String get tabHome => 'Inicio';
+
+  @override
+  String get tabSearch => 'Buscar';
+
+  @override
+  String get tabIncidents => 'Incidentes';
+
+  @override
+  String get tabOutbox => 'Bandeja';
+
+  @override
+  String get tabProfile => 'Perfil';
+
+  @override
+  String outboxBadgeSemantics(int count) {
+    return '$count pendientes de envío';
+  }
+
+  @override
+  String get shellPlaceholderBody =>
+      'Esta sección llega en una historia siguiente.';
+
+  @override
+  String get locationChipAll => 'Todas';
+
+  @override
+  String locationChipSemantics(String location) {
+    return 'Ubicación activa: $location. Toca para cambiar.';
+  }
+
+  @override
+  String get locationSheetTitle => 'Ubicación activa';
+
+  @override
+  String get locationSheetSubtitle =>
+      'Filtra colas, búsqueda y capturas nuevas';
+
+  @override
+  String get locationAllMine => 'Todas mis ubicaciones';
+
+  @override
+  String get locationCurrentLabel => 'Ubicación actual';
+
+  @override
+  String get locationSheetError =>
+      'No se pudieron cargar tus ubicaciones. Revisa la señal e intenta de nuevo.';
+
+  @override
+  String get cancelButton => 'Cancelar';
+
+  @override
+  String get locationDeniedTitle => 'Sin acceso a esta ubicación';
+
+  @override
+  String locationDeniedBody(String location) {
+    return 'Tu cuenta ya no tiene acceso a $location. Elige otra ubicación para seguir trabajando.';
+  }
+
+  @override
+  String get locationDeniedBodyGeneric =>
+      'Tu cuenta ya no tiene acceso a esta ubicación. Elige otra ubicación para seguir trabajando.';
+
+  @override
+  String get locationDeniedChangeButton => 'Cambiar ubicación';
+
+  @override
+  String get locationDeniedAdminNote =>
+      'Si crees que es un error, avisa a tu administrador.';
+
+  @override
+  String get loadingLabel => 'Cargando…';
+
+  @override
   String get sessionExpired => 'Tu sesión venció. Vuelve a entrar.';
 
   @override
