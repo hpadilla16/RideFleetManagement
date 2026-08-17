@@ -12,6 +12,8 @@ import { publicVehicleTelematicsRouter, vehiclesRouter } from './modules/vehicle
 import { inventoryRouter } from './modules/inventory/inventory.routes.js';
 import { locationsRouter } from './modules/locations/locations.routes.js';
 import { locationsSelectableRouter } from './modules/locations/locations-selectable.routes.js';
+import { vehicleTypesSelectableRouter } from './modules/vehicle-types/vehicle-types-selectable.routes.js';
+import { ratesBookingRouter } from './modules/rates/rates-booking.routes.js';
 import { locationHoursRouter } from './modules/locations/location-hours.routes.js';
 import { vehicleTypesRouter } from './modules/vehicle-types/vehicle-types.routes.js';
 import { additionalServicesRouter } from './modules/additional-services/additional-services.routes.js';
@@ -330,10 +332,18 @@ app.use('/api/locations', requireAuth, tenantRateLimit, locationHoursRouter);
 // empty dropdown and could not create reservations at all.
 app.use('/api/locations', requireAuth, tenantRateLimit, locationsSelectableRouter);
 app.use('/api/locations', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), locationsRouter);
+// The class list the booking form needs — any authenticated staff, mounted
+// before the ADMIN/OPS configuration gate below. Same fix, same reason as
+// locations-selectable above: a 403 was rendering as an empty dropdown and
+// no agent could pick a car (2026-08-17).
+app.use('/api/vehicle-types', requireAuth, tenantRateLimit, vehicleTypesSelectableRouter);
 app.use('/api/vehicle-types', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), vehicleTypesRouter);
 app.use('/api/additional-services', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), additionalServicesRouter);
 app.use('/api/fees', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), feesRouter);
 app.use('/api/stop-sales', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), stopSalesRouter);
+// The one rate READ the booking form needs: how short a rental may be. Any
+// authenticated staff, before the ADMIN/OPS pricing gate below (2026-08-17).
+app.use('/api/rates', requireAuth, tenantRateLimit, ratesBookingRouter);
 app.use('/api/rates', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), ratesRouter);
 app.use('/api/market-scraper', requireAuth, tenantRateLimit, requireModuleAccess('marketIntelligence'), requireRole('ADMIN', 'OPS'), marketScraperRouter);
 app.use('/api/market', requireAuth, tenantRateLimit, requireModuleAccess('marketIntelligence'), requireRole('ADMIN', 'OPS'), marketObservationsRouter);
