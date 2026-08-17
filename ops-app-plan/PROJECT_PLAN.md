@@ -237,7 +237,13 @@ Branding para pantallas volteadas al cliente: `GET /api/reservations/:id/display
    autenticado por JWT y sin TTL corto?
 3. ¿Se lanza el MVP sin push, solo con polling?
 4. Parque de aparatos: ¿Android de gama media primero, iOS y tablet después?
-5. ¿Se aceptan web views autenticadas para la cola larga?
+5. ~~¿Se aceptan web views autenticadas para la cola larga?~~
+   **RESUELTA (Hector, 2026-08-17): SÍ — y define el M5.** Web views autenticadas dentro
+   de RideOps para editor de tarifas, administración de personal, config de peajes y
+   reportes/PDFs. Sesión compartida vía token (hand-off seguro por diseñar: token de un
+   solo uso o cookie bridge — probable pedido al backend), navegación integrada, la
+   lógica sigue viva en el web sin duplicarse. Hoja de ruta ordenada por Hector:
+   M0→M1→M2→M3→M4→**M5**, cada milestone dispara el siguiente.
 6. ~~Cuando el cliente firma en el aparato del empleado, el bloqueo por inactividad no debe
    saltar a mitad de la firma. ¿Hace falta un modo kiosco?~~
    **RESUELTA (Hector, 2026-08-16): SÍ — Variante A, modo kiosco.** Barra persistente
