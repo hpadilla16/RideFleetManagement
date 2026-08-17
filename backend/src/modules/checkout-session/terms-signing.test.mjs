@@ -35,6 +35,13 @@ function reset() {
   prisma.appSetting.findMany = async () => [];
   prisma.tenant.findUnique = async () => null;
   prisma.franchise.findFirst = async () => null;
+  // resolveBrandLocation's ONE query, defaulted here so the branch-move test
+  // below cannot leak its own stub into every test that follows it. That leak
+  // would mask exactly the regression those later tests exist to catch: a
+  // resolver that stopped taking the agreement's branch would still be handed
+  // the agreement's branch by the stale stub.
+  prisma.location = prisma.location || {};
+  prisma.location.findFirst = async () => null;
   prisma.agreementSectionInitial.upsert = async (op) => { upserts.push(op); return {}; };
   prisma.checkoutSession.findUnique = async () => ({ id: 's1', events: '[]', reservationId: 'r1' });
   prisma.$transaction = async (ops) => { txOps = ops; return ops; };
@@ -292,10 +299,11 @@ test('the counter screen and the phone name the SAME branch after a move', async
 
   // What display-data passes: the reservation row, whose agreement carries only
   // a pickupLocationId (getById does not load that relation).
-  prisma.location.findUnique = async ({ where }) => (
-    where.id === agreementBranch.id ? agreementBranch : null
+  prisma.location.findFirst = async ({ where }) => (
+    where.id === agreementBranch.id && where.tenantId === 'tn1' ? agreementBranch : null
   );
   const onTheCounter = await resolveBrandLocation({
+    tenantId: 'tn1',
     pickupLocation: reservationBranch,
     rentalAgreement: { pickupLocationId: agreementBranch.id },
   });

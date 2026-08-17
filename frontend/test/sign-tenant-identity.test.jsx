@@ -270,6 +270,17 @@ describe('customerSafeMessage', () => {
     expect(out).not.toContain('terms-signing-write');
   });
 
+  it('still hides the bucket name when a caller forgets to pass tooFast', () => {
+    // The status is the whole signal: a 429 body is never speakable. A future
+    // call site that omits the translated string should degrade to the generic
+    // fallback, not hand the renter the name of an internal guard.
+    const err = new Error('Rate limit exceeded for terms-signing-write. Try again shortly.');
+    err.status = 429;
+    const out = customerSafeMessage(err, { token: TOKEN, fallback: FALLBACK });
+    expect(out).toBe(FALLBACK);
+    expect(out).not.toContain('terms-signing-write');
+  });
+
   it('falls back when there is no message at all (a dropped connection)', () => {
     expect(customerSafeMessage(new Error(''), opts)).toBe(FALLBACK);
     expect(customerSafeMessage(undefined, opts)).toBe(FALLBACK);

@@ -203,7 +203,12 @@ function classifyLoadError(err) {
  * not reachable from a jsdom render without driving a canvas.
  */
 export function customerSafeMessage(err, { token, fallback, tooFast } = {}) {
-  if (Number(err?.status) === 429 && tooFast) return tooFast;
+  // `?? fallback`, not `&& tooFast`: a caller that forgets to pass a tooFast
+  // string must not drop the 429 through to the checks below, where the
+  // limiter's English bucket name ("Rate limit exceeded for
+  // terms-signing-write") passes every one of them and reaches the renter.
+  // The status alone is enough to know the body is unspeakable.
+  if (Number(err?.status) === 429) return tooFast ?? fallback;
   const raw = String(err?.message || '').trim();
   if (!raw) return fallback;
   if (token && raw.includes(token)) return fallback;

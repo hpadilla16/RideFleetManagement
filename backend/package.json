@@ -60,7 +60,7 @@
     "test:market-airports": "node --test --test-force-exit src/modules/market-observations/market-airports.test.mjs",
     "test:terms": "node --test --test-force-exit src/lib/terms/index.test.mjs src/lib/terms/version.test.mjs",
     "test:terms-sections": "node --test src/modules/checkout-session/terms-section-overrides.test.mjs",
-    "test:tenant-brand": "node --test --test-force-exit src/lib/tenant-brand.test.mjs",
+    "test:tenant-brand": "node --test --test-force-exit src/lib/tenant-brand.test.mjs src/modules/reservations/display-data-brand.test.mjs",
     "test:terms-signing": "node --test --test-force-exit src/modules/checkout-session/terms-signing.test.mjs src/modules/checkout-session/terms-signing.routes.test.mjs",
     "test:incident": "node --test --test-force-exit src/modules/incident-report/incident-report-pdf.test.mjs src/modules/incident-report/incident-report.service.test.mjs src/modules/incident-report/incident-report-charges.test.mjs",
     "test:report-damage": "node --test --test-force-exit src/modules/report-damage/report-damage.test.mjs",

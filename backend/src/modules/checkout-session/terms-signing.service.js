@@ -101,8 +101,18 @@ async function loadToken(token) {
  * is a real, known divergence and this resolver does not paper over it: the
  * phone deliberately stays with the branch whose clauses the renter is
  * actually signing. Making those two agree means fixing the move to sync (or
- * the PDF to read the agreement), which is not this change. It is the ONE
- * remaining pair that can disagree — the phone and the counter cannot.
+ * the PDF to read the agreement), which is not this change.
+ *
+ * Scope that claim honestly: it is the one remaining pair that can disagree
+ * AMONG THE SURFACES THIS CASCADE COVERS — the phone and the counter cannot.
+ * It is not the last brand divergence in the product. tenant-brand.js:30-36
+ * lists three surfaces deliberately left unmigrated, and one of them still
+ * leaks the PLATFORM outright: the agreement email the customer receives
+ * minutes after signing on this very screen resolves its brand through
+ * resolveEmailBrand, which falls back to RFM_DEFAULT_BRAND.companyName —
+ * 'Ride Fleet' — for any tenant that never filled in Settings → Rental
+ * agreement (lib/email-template.js:16,50). That is the same leak this file
+ * closed, one surface downstream, and it is still open.
  */
 async function resolveSigningBrand(reservation) {
   const ag = reservation?.rentalAgreement;

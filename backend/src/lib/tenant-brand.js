@@ -68,8 +68,8 @@ export const PLATFORM_DEFAULT_COMPANY_NAME = 'Ride Fleet';
  * screen only has the agreement's `pickupLocationId`, and reads it solely when
  * it differs from the reservation's — i.e. only after somebody moved one.
  *
- * @param {object|null} reservation — `pickupLocation` plus either
- *   `rentalAgreement.pickupLocation` (already loaded) or
+ * @param {object|null} reservation — `tenantId` plus `pickupLocation` and
+ *   either `rentalAgreement.pickupLocation` (already loaded) or
  *   `rentalAgreement.pickupLocationId`
  * @returns {Promise<object|null>} a Location row (id, name, locationConfig)
  */
@@ -84,8 +84,20 @@ export async function resolveBrandLocation(reservation) {
     return reservationLocation;
   }
   try {
-    const moved = await prisma.location.findUnique({
-      where: { id: agreementLocationId },
+    // SCOPED, even though the id came off a row the caller already scoped.
+    // Reaching another tenant's branch from here needs data drift
+    // (RentalAgreement.pickupLocationId pointing outside its own tenant), which
+    // is exactly the class of drift reservations.service.js:312
+    // maskCrossTenantRelations exists to absorb — and this is the one function
+    // whose entire job is to never name the wrong business. Location.tenantId
+    // is right there, and both callers hold the reservation's tenantId.
+    // Omitted only when the caller has none, so behaviour is unchanged for a
+    // tenant-less row rather than silently returning nothing.
+    const moved = await prisma.location.findFirst({
+      where: {
+        id: agreementLocationId,
+        ...(reservation?.tenantId ? { tenantId: reservation.tenantId } : {}),
+      },
       select: { id: true, name: true, locationConfig: true },
     });
     return moved || reservationLocation;

@@ -35,7 +35,7 @@ beforeEach(() => {
   franchiseReads = 0;
   locationLookups = [];
   prisma.location = prisma.location || {};
-  prisma.location.findUnique = async (args) => {
+  prisma.location.findFirst = async (args) => {
     locationLookups.push(args);
     return { id: args?.where?.id, name: 'Autos del Valle — Ponce', locationConfig: null };
   };
@@ -180,15 +180,47 @@ test('an already-loaded agreement branch is used without a query', async () => {
   assert.equal(locationLookups.length, 0);
 });
 
-test('a moved reservation reads the AGREEMENT branch, once', async () => {
+test('a moved reservation reads the AGREEMENT branch, once, within its tenant', async () => {
   // The counter screen holds only the agreement's id (getById does not load
-  // that relation), so this is the one case that costs a query.
+  // that relation), so this is the one case that costs a query. It is also the
+  // only place this module names a row it did not receive already scoped, so
+  // the tenant filter goes on it: an agreement whose pickupLocationId drifted
+  // outside its own tenant must fall back to the reservation's branch, not
+  // print a stranger's business name on a contract screen.
   const out = await resolveBrandLocation({
+    tenantId: 'tn1',
     pickupLocation: { id: 'l2', name: 'Autos del Valle — Mayagüez', locationConfig: null },
     rentalAgreement: { pickupLocationId: 'l1' },
   });
   assert.equal(out.id, 'l1');
   assert.equal(locationLookups.length, 1);
+  assert.deepEqual(locationLookups[0].where, { id: 'l1', tenantId: 'tn1' });
+});
+
+test("another tenant's branch is never named, it falls back", async () => {
+  // What the scoped query does when the id does not belong to this tenant.
+  prisma.location.findFirst = async (args) => {
+    locationLookups.push(args);
+    return args?.where?.tenantId === 'tn1' ? null : { id: 'l1', name: 'Rival Rentals', locationConfig: null };
+  };
+  const own = { id: 'l2', name: 'Autos del Valle — Mayagüez', locationConfig: null };
+  const out = await resolveBrandLocation({
+    tenantId: 'tn1',
+    pickupLocation: own,
+    rentalAgreement: { pickupLocationId: 'l1' },
+  });
+  assert.equal(out, own, "a cross-tenant branch must not reach the customer's screen");
+});
+
+test('a reservation with no tenantId still resolves the moved branch', async () => {
+  // The filter is added only when the caller has a tenant to filter by — an
+  // unscoped row keeps the behaviour it had, rather than silently losing its
+  // branch name.
+  const out = await resolveBrandLocation({
+    pickupLocation: { id: 'l2', name: 'Autos del Valle — Mayagüez', locationConfig: null },
+    rentalAgreement: { pickupLocationId: 'l1' },
+  });
+  assert.equal(out.id, 'l1');
   assert.deepEqual(locationLookups[0].where, { id: 'l1' });
 });
 
@@ -211,7 +243,7 @@ test('a reservation with no agreement yet uses its own branch', async () => {
 });
 
 test('a failed branch lookup degrades to the reservation branch, not to nothing', async () => {
-  prisma.location.findUnique = async () => { throw new Error('db down'); };
+  prisma.location.findFirst = async () => { throw new Error('db down'); };
   const branch = { id: 'l2', name: 'Autos del Valle — Mayagüez', locationConfig: null };
   const out = await resolveBrandLocation({
     pickupLocation: branch,

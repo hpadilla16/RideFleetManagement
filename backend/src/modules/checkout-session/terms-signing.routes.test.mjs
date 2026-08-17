@@ -105,9 +105,14 @@ const initial = (ip) => request('POST', '/api/sign/TOK/initials', {
 
 test('the write cap is still justified by the sections that exist', async () => {
   // The cap is not a round number, it is an argument: "the most a real
-  // customer can post in a minute, plus room". If someone adds an eighth
-  // signing section, the argument stops holding and this says so, instead of
-  // a renter discovering it mid-signature.
+  // customer can post in a minute, plus room".
+  //
+  // The EQUALITY below is the guard that bites, not the inequality under it.
+  // An eighth section would still satisfy 8 × 5 ≤ 45 and sail through; what
+  // stops it is this line, which forces whoever adds one to come here and
+  // re-derive the argument by hand. Keep it exact — the inequality is only the
+  // arithmetic that argument currently rests on, kept honest against the two
+  // constants it cites.
   assert.equal(MAX_SECTIONS, 7, '6 canonical + declined_insurance');
   assert.ok(
     MAX_SECTIONS * REDO_BUDGET <= WRITE_CAP,

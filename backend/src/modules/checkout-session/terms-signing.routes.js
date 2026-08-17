@@ -43,8 +43,10 @@ export const termsSigningPublicRouter = Router();
 // the norm; 10/min is retries after a transient failure, nothing more.
 //
 // WHAT THIS ACTUALLY CAPS IN PRODUCTION. The buckets are a module-level Map
-// (public-endpoint-guards.js), and prod runs start:cluster with
-// CLUSTER_WORKERS=4 (Dockerfile.prod), so each worker counts separately. An
+// (public-endpoint-guards.js), and prod runs start:cluster
+// (backend/Dockerfile.prod's CMD) with CLUSTER_WORKERS=4, set in
+// docker-compose.prod.yml:28 — and 4 is also where cluster.js:4 lands by
+// default, so the number holds either way. Each worker counts separately. An
 // attacker opening parallel connections spreads across all four and reaches
 // ~4× these numbers; the legitimate customer, pinned to one worker by
 // keep-alive, sees exactly the number written here. The asymmetry runs the
