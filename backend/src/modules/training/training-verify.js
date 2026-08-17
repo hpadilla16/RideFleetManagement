@@ -101,14 +101,26 @@ export function parseArmStamp(provenBy) {
 /**
  * May finishing the walkthrough complete this module?
  *
- * Only when nothing was ever going to prove it. A module with real work behind
- * it stays armed however many times someone walks the guide — walking is not
- * doing the job.
+ * YES, for any armed module (Hector, 2026-08-17: "cuentalo como completado
+ * cuando terminen la instruccion").
+ *
+ * It used to be no whenever a module had a verify rule, on the reasoning that
+ * "walking is not doing the job". True of the JOB — and wrong about the
+ * TRAINING: someone who walks all three check-out steps has learned the
+ * check-out, and holding their progress hostage to a real customer showing up
+ * taught them nothing except that the tracker was broken. Three of the four
+ * hands-on modules could sit armed for weeks.
+ *
+ * The verify path is not gone; it is now the OTHER way in. Whichever happens
+ * first completes the module: doing the real work still proves it for someone
+ * who never opened the guide (settle() handles that), and finishing the guide
+ * completes it for someone learning. What a `verify` rule still guarantees is
+ * that nothing is completed by a stray click — the row must have been armed,
+ * and the walkthrough must have reached its end.
  */
 export function canCompleteByWalkthrough(row) {
   if (!row || row.status !== 'ARMED') return false;
-  const { armed, verifyType } = parseArmStamp(row.provenBy);
-  return armed && !verifyType;
+  return parseArmStamp(row.provenBy).armed;
 }
 
 /**
