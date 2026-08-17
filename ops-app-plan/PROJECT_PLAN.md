@@ -125,6 +125,35 @@ bloqueo por PIN y biometría, shell con RBAC y **selector de ubicación**, home 
 operaciones con las 9 colas del dashboard, captura de inspección nativa (cámara →
 comprimir al tomar → soltar el controlador; pipeline offline vía bandeja).
 
+#### Criterios registrados por revisiones H2/H3 (ciclo de review, 2026-08-16)
+Compromisos que las revisiones de Innovation/GD dejaron para historias futuras — se
+verifican en el DoD de la historia indicada:
+
+- **H4 (home de operaciones):**
+  - El chip de ubicación del shell pasa a estado **danger** mientras el dashboard esté
+    en 403 por `x-view-location` (pantalla 4D): la negativa se ve donde se eligió la sede.
+  - Todo provider de datos *scoped* por sede espera `ActiveLocation.hydrated == true`
+    antes del primer fetch — jamás un fetch con el override a medio hidratar.
+  - ANTES de construir la 4D: pedir al backend un `code: VIEW_LOCATION_DENIED` en el 403
+    de view-location (hoy llega sin code — gap #3). Sin el code, la 4D no puede
+    distinguir "sede negada" de un 403 de RBAC genérico.
+- **H5 (captura de inspección / bandeja):**
+  - Sellar el `locationId` activo en **cada fila del outbox al encolar** (REGROUND §1):
+    el header del drenado no puede depender de la sede seleccionada al momento de drenar.
+  - La UI de salida del modo kiosco (mantener 3 s + PIN) **limita reintentos de
+    `checkPin`** — `checkPin` es puro y no cuenta intentos por diseño; el límite vive en
+    la UI que lo llama.
+- **M4 (hardening):**
+  - `FLAG_SECURE`/privacy screen para el task switcher (el candado H2 protege la app
+    viva, no la miniatura de recientes).
+  - Candidato: blocklist de PINs triviales (1234, 0000, fechas) en el setup.
+  - `verifyPin` distingue **error de Keystore vs PIN erróneo**: hoy un Keystore ilegible
+    descuenta un intento como si el PIN fuera incorrecto.
+- **M2 (checkout):**
+  - La tab bar del shell solo adopta glass/`BackdropFilter` tras una señal real de
+    capacidad del dispositivo, con el tope de **máx 1 BackdropFilter por pantalla**
+    (política de blur de la nota 4 del mockup 4A).
+
 ### M2 — el épico de checkout
 Wizard server-driven sobre `/api/checkout-sessions/*` (con identidad de usuario, nunca el
 router de kiosk). Dinero síncrono (ADR-5), preview del servidor (ADR-6), firma del cliente.
