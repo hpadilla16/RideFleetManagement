@@ -38,6 +38,17 @@ ciclo Innovation→QA→CI verde→deploy ANTES de que M2-H6 los consuma).
 > **APROBADO por Hector (2026-08-17): P1+P2+P3 completos.** P4 diferido a M3. El PR-tren
 > arranca de inmediato (en paralelo con M1-H4/H5) para que el deploy tenga margen.
 
+### 1.3 Pedidos nuevos levantados al construir H2 (chicos, ninguno bloquea el build)
+
+Los tres salen de que el cliente tuvo que **suplir** algo que el servidor sabe y no dice.
+Ninguno frena a H2, pero cada uno deja una fragilidad escrita en el cliente.
+
+| # | Pedido | Por qué lo pide el cliente hoy |
+|---|---|---|
+| **P5 · URL absoluta en `POST /:id/terms-token`** | Que la respuesta traiga la URL de firma completa, como ya hace `APP_BASE_URL` para todos los demás enlaces. | Sin ella el QR se arma con `RIDEOPS_WEB_BASE` compilado por dart-define: **un inquilino con dominio propio necesitaría otro build de la app**. |
+| **P6 · 409 al tocar el seguro después del sello** | Que `declined-insurance` responda 409 cuando ya hay `tcCompletedAt`. | Verificado: hoy el backend **no** tiene guard ahí, y `terms-signing` calcula las secciones con el valor del momento de firma. El cliente cierra el switch por su cuenta — es una regla de negocio viviendo en la app, justo lo que ADR-4 prohíbe. |
+| **P7 · Exponer `agreement.declinedInsurance` en display-data** | Que el estado del seguro venga como campo, no deducido. | `getById` no lo incluye, así que el cliente **deriva el estado leyendo `events[]`** — un TEXT con lost-update (que H8 apenas mitiga). Es el dato más frágil de todo el paso. |
+
 ## 2. Historias (una por rama)
 
 | Historia | Contenido | Depende de |
@@ -183,6 +194,18 @@ CTAs de los frames tal cual están dibujados, con su mockup antes de construir:
   cuanto la pantalla tiene cuerpo propio (sheet abierto, offline, y todas las pantallas
   de paso). "Compacta" y "mini" son la MISMA variante — H2 no introduce una tercera
   densidad. El chip de presencia viaja en ambas.
+- **H2 · Dependencia nueva `qr` ^4.0.0 — desviación declarada de ADR-2.** El ADR pide
+  pintar a mano; el pintor SÍ es nuestro (quiet zone, contraste 21:1, estado vencido),
+  pero el **codificador** Reed-Solomon no. Razón: escribir a mano la codificación de un
+  QR que lleva a la firma de un contrato legal es riesgo sin premio — si el código sale
+  mal, el cliente firma otra cosa o no firma. Pendiente de que Innovation juzgue la
+  salud del paquete.
+- **PM · Gap #11 se arregla en su propia rama de frontend (`fix/sign-page-tenant-identity`),
+  decidido 2026-08-17.** Era decisión pendiente de Hector, pero **bloquea el QA de H2** y
+  la cadena no puede esperar; es reversible y pasa por las mismas compuertas. El viaje
+  real que arregla: el agente muestra una pantalla con la marca del inquilino, el cliente
+  escanea, y aterriza en "Ride Fleet · Terms & Conditions" en inglés. Es fuga de marca de
+  la plataforma hacia el cliente final de otro negocio, en la pantalla donde firma.
 
 ## 4. Gates y SHIP del épico
 
