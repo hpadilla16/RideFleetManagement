@@ -207,4 +207,49 @@ describe('getById returns rentalAgreement.declinedInsurance (embedded pg)', () =
     await prisma.handoffToken.delete({ where: { id: token.id } });
     await prisma.checkoutSession.delete({ where: { id: session.id } });
   });
+
+  // -------------------------------------------------------------------------
+  // The customer (pre-check-in portal) writer. Its defining condition is that
+  // there is usually NO CheckoutSession yet, so a guard keyed only on
+  // session.tcCompletedAt would let it write straight through. Proving this
+  // against a real database is the point: the row genuinely does not exist.
+  // -------------------------------------------------------------------------
+  it('locks the customer path off RentalAgreement.tcSignedAt with no session row', async () => {
+    const { assertInsuranceSelectionEditable, INSURANCE_LOCK } =
+      await import('../checkout-session/insurance-selection-gate.js');
+
+    const orphan = await prisma.checkoutSession.findUnique({ where: { reservationId } });
+    assert.equal(orphan, null, 'precondition: pre-check-in runs before any session exists');
+
+    await prisma.rentalAgreement.update({
+      where: { id: agreementId },
+      data: { tcSignedAt: new Date(), declinedInsurance: false },
+    });
+
+    // How the portal calls it: reservationId only, nextValue true, customer copy.
+    await assert.rejects(
+      () => assertInsuranceSelectionEditable({
+        reservationId, nextValue: true, audience: 'customer',
+      }),
+      (err) => {
+        assert.equal(err.status, 409);
+        assert.equal(err.code, INSURANCE_LOCK.SIGNED);
+        assert.match(err.message, /counter/i, 'customer must be told what to do next');
+        return true;
+      },
+    );
+
+    // ...and the no-op re-submit is still let through, so a customer fixing an
+    // address is not refused over a field they never changed.
+    await prisma.rentalAgreement.update({
+      where: { id: agreementId }, data: { declinedInsurance: true },
+    });
+    await assertInsuranceSelectionEditable({
+      reservationId, nextValue: true, audience: 'customer',
+    });
+
+    await prisma.rentalAgreement.update({
+      where: { id: agreementId }, data: { tcSignedAt: null, declinedInsurance: true },
+    });
+  });
 });

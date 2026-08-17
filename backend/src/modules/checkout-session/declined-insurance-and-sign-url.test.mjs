@@ -15,6 +15,7 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '../../lib/prisma.js';
 import { checkoutSessionService } from './checkout-session.service.js';
+import { assertInsuranceSelectionEditable, messageFor, INSURANCE_LOCK } from './insurance-selection-gate.js';
 import { reservationsService } from '../reservations/reservations.service.js';
 import { readEvents } from './state-machine.js';
 
@@ -58,6 +59,7 @@ test('getById asks Prisma for rentalAgreement.declinedInsurance', async () => {
 // ---------------------------------------------------------------------------
 
 let session;
+let agreement;
 let agreementUpdates;
 let sessionUpdates;
 let liveToken;
@@ -67,7 +69,7 @@ const STUBBED = [
   'checkoutSession.findUnique', 'checkoutSession.update',
   'handoffToken.findFirst', 'handoffToken.create',
   'agreementSectionInitial.findFirst',
-  'rentalAgreement.update',
+  'rentalAgreement.findUnique', 'rentalAgreement.update',
 ];
 const realFns = {};
 
@@ -78,6 +80,10 @@ beforeEach(() => {
     agreementId: 'a1',
     events: '[]',
     tcCompletedAt: null,
+  };
+  // The agreement is the document of record the gate reads first.
+  agreement = {
+    id: 'a1', reservationId: 'r1', tcSignedAt: null, declinedInsurance: false,
   };
   agreementUpdates = [];
   sessionUpdates = [];
@@ -93,6 +99,7 @@ beforeEach(() => {
   prisma.checkoutSession.update = async (op) => { sessionUpdates.push(op); return { ...session, ...op.data }; };
   prisma.handoffToken.findFirst = async () => liveToken;
   prisma.agreementSectionInitial.findFirst = async () => existingInitial;
+  prisma.rentalAgreement.findUnique = async () => agreement;
   prisma.rentalAgreement.update = async (op) => { agreementUpdates.push(op); return {}; };
 });
 
@@ -115,7 +122,7 @@ test('setDeclinedInsurance writes the flag when nothing is signed or in flight',
 test('refuses with TC_ALREADY_COMPLETED once the customer has signed', async () => {
   session.tcCompletedAt = new Date();
   await assert.rejects(
-    () => checkoutSessionService.setDeclinedInsurance({ id: 's1', declined: false }),
+    () => checkoutSessionService.setDeclinedInsurance({ id: 's1', declined: true }),
     (err) => {
       assert.equal(err.status, 409);
       // A bare 409 with no code is unactionable for the caller — the agent UI
@@ -164,9 +171,67 @@ test('ALLOWS the correction when no signing token is live, even with old initial
   // from the current flag, so there is no stale `expected` to desync.
   liveToken = null;
   existingInitial = { id: 'i1' };
+  agreement.declinedInsurance = true; // so `declined: false` is a real flip
   await checkoutSessionService.setDeclinedInsurance({ id: 's1', declined: false });
   assert.equal(agreementUpdates.length, 1);
   assert.deepEqual(agreementUpdates[0].data, { declinedInsurance: false });
+});
+
+// ---------------------------------------------------------------------------
+// The shared gate: writer-agnostic behaviour that both surfaces depend on.
+// ---------------------------------------------------------------------------
+
+test('a write that does not FLIP the flag is allowed even on a signed agreement', async () => {
+  // Without this, the portal — which only ever writes `true` — would refuse a
+  // customer who declined earlier and is re-submitting pre-check-in to fix an
+  // address, over a field they never touched.
+  agreement.declinedInsurance = true;
+  agreement.tcSignedAt = new Date();
+  session.tcCompletedAt = new Date();
+  await checkoutSessionService.setDeclinedInsurance({ id: 's1', declined: true });
+  assert.equal(agreementUpdates.length, 1, 'no-op write should pass the gate');
+});
+
+test('agreement.tcSignedAt locks the flag even when NO checkout session exists', async () => {
+  // The hole a session-only guard leaves: pre-check-in normally runs before any
+  // CheckoutSession row is created, so keying solely on session.tcCompletedAt
+  // would let the customer surface write straight through.
+  agreement.tcSignedAt = new Date();
+  session = null; // no session for this reservation
+  await assert.rejects(
+    () => assertInsuranceSelectionEditable({ agreementId: 'a1', reservationId: 'r1', nextValue: true }),
+    (err) => err.status === 409 && err.code === INSURANCE_LOCK.SIGNED,
+  );
+});
+
+test('the gate resolves the agreement from reservationId alone', async () => {
+  // How the portal calls it — it has not looked the agreement up yet.
+  let where = null;
+  prisma.rentalAgreement.findUnique = async (op) => { where = op.where; return agreement; };
+  agreement.tcSignedAt = new Date();
+  await assert.rejects(
+    () => assertInsuranceSelectionEditable({ reservationId: 'r1', nextValue: true }),
+    (err) => err.code === INSURANCE_LOCK.SIGNED,
+  );
+  assert.deepEqual(where, { reservationId: 'r1' });
+});
+
+test('the gate is a no-op when there is no agreement at all', async () => {
+  prisma.rentalAgreement.findUnique = async () => null;
+  await assertInsuranceSelectionEditable({ reservationId: 'r1', nextValue: true });
+});
+
+test('customer wording differs from staff wording for the same code', async () => {
+  // Same machine code across surfaces (one rule, one vocabulary); different
+  // sentence, because nobody is standing next to the customer to interpret it.
+  const staff = messageFor(INSURANCE_LOCK.SIGNED, 'staff');
+  const customer = messageFor(INSURANCE_LOCK.SIGNED, 'customer');
+  assert.notEqual(staff, customer);
+  assert.match(customer, /counter/i, 'customer copy must say what to do next');
+  // No internal vocabulary leaking into customer-facing copy.
+  for (const jargon of ['Terms & Conditions can no longer be changed here', 'session', 'flag', '409']) {
+    assert.ok(!customer.includes(jargon), `customer copy leaks "${jargon}"`);
+  }
 });
 
 test('the guard only counts TERMS_SIGNING tokens that are unconsumed and unexpired', async () => {

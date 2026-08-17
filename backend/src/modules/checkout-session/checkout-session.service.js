@@ -14,6 +14,10 @@ import {
   appendEvent,
   isTerminal,
 } from './state-machine.js';
+// Cyclic by construction (the gate throws CheckoutSessionError, declared
+// below). Safe in ESM: neither module dereferences the other's bindings at
+// evaluation time, only inside function bodies.
+import { assertInsuranceSelectionEditable } from './insurance-selection-gate.js';
 
 export class CheckoutSessionError extends Error {
   constructor(message, status = 400, code = null) {
@@ -867,33 +871,12 @@ async function exchangeHandoffToken(token) {
  * Phase 3 (T&C signing) reads agreement.declinedInsurance to decide
  * whether to inject the addendum section into the customer's signing UI.
  *
- * STEP GUARD (2026-08-17). This flag is not a preference — it selects which
- * sections the customer must initial (terms-content.js sectionsForAgreement)
- * and whether the PDF carries the declined-insurance acknowledgement page.
- * terms-signing recomputes that section set on EVERY call, so a late write
- * here rewrites the requirements of a signature that is already in flight or
- * already captured. Two windows are refused, with distinct codes so the agent
- * UI can say which one it hit:
- *
- *   TC_ALREADY_COMPLETED  — session.tcCompletedAt is stamped, i.e. the
- *     customer has signed. The captured initials and the PDF's addendum would
- *     no longer agree with the flag. Never editable again from here.
- *
- *   TC_SIGNING_IN_PROGRESS — a TERMS_SIGNING token is still live AND at least
- *     one section initial is already on the agreement, i.e. the customer is on
- *     the signing page right now with ink down. Flipping the flag changes
- *     `expected` between loadSession and complete, and the customer is met
- *     with 400 INITIALS_INCOMPLETE on a signature they already drew.
- *
- * Deliberately NOT refused: a minted-but-untouched token (no initials yet).
- * The agent noticing the mistake right after handing over the QR is a
- * legitimate correction, and the customer's next page load picks up the new
- * section set on its own. Once expired or consumed the token is also no
- * longer a hazard — a fresh loadSession recomputes from the current flag.
- *
- * NOTE: this closes the checkout-session writer. The pre-check-in portal
- * (customer-portal.routes.js) writes the same column on its own path and is
- * out of scope for this change.
+ * STEP GUARD (2026-08-17). The rule about WHEN this flag may still be written
+ * lives in insurance-selection-gate.js, shared with the pre-check-in portal —
+ * the other surface that writes the column. It refuses with 409 and a code
+ * (TC_ALREADY_COMPLETED / TC_SIGNING_IN_PROGRESS) so the agent UI can tell
+ * "already signed" apart from "signing right now". See that module for the
+ * reasoning and the full writer inventory.
  */
 async function setDeclinedInsurance({ id, declined, actorUserId }) {
   if (!id) throw new CheckoutSessionError('sessionId required', 400);
@@ -902,34 +885,12 @@ async function setDeclinedInsurance({ id, declined, actorUserId }) {
   if (!session.agreementId) {
     throw new CheckoutSessionError('No agreement linked to this session', 409);
   }
-  if (session.tcCompletedAt) {
-    throw new CheckoutSessionError(
-      'The customer has already signed the Terms & Conditions — the insurance selection can no longer be changed here.',
-      409, 'TC_ALREADY_COMPLETED',
-    );
-  }
-
-  const liveSigningToken = await prisma.handoffToken.findFirst({
-    where: {
-      reservationId: session.reservationId,
-      kind: 'TERMS_SIGNING',
-      consumedAt: null,
-      expiresAt: { gt: new Date() },
-    },
-    select: { id: true },
+  await assertInsuranceSelectionEditable({
+    agreementId: session.agreementId,
+    reservationId: session.reservationId,
+    nextValue: !!declined,
+    audience: 'staff',
   });
-  if (liveSigningToken) {
-    const started = await prisma.agreementSectionInitial.findFirst({
-      where: { agreementId: session.agreementId },
-      select: { id: true },
-    });
-    if (started) {
-      throw new CheckoutSessionError(
-        'The customer is signing the Terms & Conditions right now — changing the insurance selection would invalidate the initials they have already given.',
-        409, 'TC_SIGNING_IN_PROGRESS',
-      );
-    }
-  }
 
   await prisma.rentalAgreement.update({
     where: { id: session.agreementId },

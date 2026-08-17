@@ -18,6 +18,7 @@ import { normalizeDob } from '../../lib/dob.js';
 import { getEffectiveTermsHtml } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 import { analyzeSignatureInk } from '../../lib/signature-ink.js';
+import { assertInsuranceSelectionEditable } from '../checkout-session/insurance-selection-gate.js';
 import {
   attachPublicRequestMeta,
   createPublicRateLimitGuard
@@ -1346,6 +1347,37 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
     const missing = requiredChecks.filter(([, value]) => !value).map(([, , label]) => label);
     if (missing.length) {
       return res.status(400).json({ error: `Complete the required pre-check-in items first: ${missing.join(', ')}` });
+    }
+
+    // PREFLIGHT (2026-08-17) — the same gate the agent's wizard goes through,
+    // because RentalAgreement.declinedInsurance decides which sections the
+    // customer must initial and whether the contract carries the decline
+    // addendum. A lock on only the staff writer is not a control.
+    //
+    // It runs HERE, before the first mutation, and not down beside the update
+    // at the declinedCoverage branch: that branch is already past a
+    // deleteMany() of the reservation's INSURANCE charges and none of this
+    // handler is wrapped in a transaction, so a late refusal would reject the
+    // request only after destroying the charges it meant to protect.
+    //
+    // The gate no-ops unless the flag would actually flip, so a customer who
+    // declined earlier and is re-submitting pre-check-in for some other reason
+    // is not refused over a field they did not touch.
+    if (insuranceSelection?.declinedCoverage) {
+      try {
+        await assertInsuranceSelectionEditable({
+          reservationId: reservation.id,
+          nextValue: true,
+          // Nobody is standing next to the customer to interpret a 409, so the
+          // sentence has to be self-contained and tell them what to do next.
+          audience: 'customer',
+        });
+      } catch (err) {
+        if (err?.status === 409 && err?.code) {
+          return res.status(409).json({ error: err.message, code: err.code });
+        }
+        throw err;
+      }
     }
 
     // Blob -> Storage (Phase 1): when the flag is ON, route inline base64 doc
