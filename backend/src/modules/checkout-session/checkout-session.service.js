@@ -508,10 +508,16 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
         // handing it a clean 200 over a half-finalized checkout would be the
         // same species of lie the "already past toStep" cut refuses to tell.
         //
-        // Safe to re-run: the cascade short-circuits on an already
-        // CHECKED_OUT reservation, the loaner bump is an updateMany guarded
-        // by DRAFT, and the email is a CAS on autoEmailedAt. So the happy
-        // path costs one reservation read, and the broken path self-heals.
+        // The re-run is NOT unconditionally safe, and the first version of
+        // this said it was. Two steps inside the cascade are not idempotent:
+        // rentalAgreement.update rewrites `finalizedAt` with today's date on
+        // an already-FINALIZED contract (audit-trail loss), and
+        // recordMileageEntry is a bare create with no dedup, so repeats pile
+        // up duplicate mileage rows. What actually contains them is the
+        // status short-circuit — which is why SELF_HEAL_OWNS below has to be
+        // an allow-list and not a wish. The loaner bump (updateMany guarded
+        // by DRAFT) and the email (CAS on autoEmailedAt) are genuinely
+        // idempotent on their own.
         alreadyApplied = true;
         updated = session;
         fromStep = session.currentStep;
@@ -545,10 +551,13 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       //
       // This is a PARTIAL close of the events lost-update, and the honest
       // count is FOURTEEN other writers of this TEXT column, all still doing
-      // an unguarded read-modify-write:
-      //   this file — stampSideEffect (:829), saveCustomerSignature (:872),
-      //     mintHandoffToken (:946), setDeclinedInsurance (:1031),
-      //     markAbandoned (:1055)
+      // an unguarded read-modify-write (read → write, this file):
+      //   stampSideEffect        :918 → :926
+      //   saveCustomerSignature  :948 → :969   (read is OUTSIDE the
+      //                                         $transaction that starts :954)
+      //   mintHandoffToken       :992 → :1043
+      //   setDeclinedInsurance  :1114 → :1128
+      //   markAbandoned         :1138 → :1152
       //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
       //   spin-charge.service.js:574, :606, :884, :1038, :1229 (five)
       //   mobile-inspection.service.js:276
@@ -556,9 +565,11 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       //   terms-signing.service.js:175
       // Any of them can still drop an entry written between its own read and
       // its own write. saveCustomerSignature is the sharpest of the fourteen:
-      // its $transaction makes the two WRITES atomic but leaves the READ at
-      // :851 outside, and what it writes is customerSignedAt — an
+      // its $transaction makes the two WRITES atomic but leaves the READ
+      // outside it, and what it writes is customerSignedAt — an
       // ENTRY_REQUIRES field for CLOSED. See the note on stampSideEffect.
+      // (The only other appendEvent calls in the tree write KioskSession.events,
+      // a different column, and :241 here builds a fresh row on create.)
       events: appendEvent(session.events, {
         kind: 'TRANSITION',
         from: session.currentStep,
@@ -665,8 +676,33 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
         where: { id: updated.reservationId },
         select: { id: true, status: true, vehicleId: true, tenantId: true },
       });
-      // Don't downgrade an already checked-in/out reservation.
-      if (resv && !['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(String(resv.status))) {
+      // Don't downgrade an already checked-in/out reservation, and never
+      // finalize onto one staff has since CANCELLED or marked NO_SHOW.
+      //
+      // Those last two are new (2026-08-17, QA blocker on H8). The list was a
+      // DENY-list naming 3 of the 8 ReservationStatus values, so NEW,
+      // CONFIRMED, CANCELLED, NO_SHOW and PENDING_FRANCHISE_IMPORT all fell
+      // through it. A session parked in FINALIZING while staff cancels the
+      // reservation would finalize onto the cancelled row — pre-existing, and
+      // H8's self-heal turned it from "needs a parked session" into "any
+      // repeat POST". Marking the car ON_RENT for a cancelled rental also
+      // makes the NEXT real reservation collide with "still out on open
+      // rental", so the damage does not stay on this row.
+      const cancelledLate = ['CANCELLED', 'NO_SHOW'].includes(String(resv?.status));
+      // Self-heal is OPPORTUNISTIC work nobody asked for, so it gets an
+      // ALLOW-list instead: only run it on a reservation the finalize
+      // legitimately still owns. A deny-list is what failed above, and the
+      // bar is higher here — the caller does not know this is happening, and
+      // the two non-idempotent steps live inside. PENDING_FRANCHISE_IMPORT is
+      // excluded from self-heal for that reason while the winner path is left
+      // untouched for it: refusing to guess is free, guessing is not.
+      const selfHealOwns = ['NEW', 'CONFIRMED'].includes(String(resv?.status));
+      if (alreadyApplied && !selfHealOwns) {
+        logger.info('[checkout-session] self-heal declined — finalize does not own this reservation', {
+          sessionId: id, reservationId: updated.reservationId, reservationStatus: resv?.status ?? null,
+        });
+      } else if (resv && !cancelledLate
+        && !['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(String(resv.status))) {
         // beta.116 — NO-CAR-NO-CHECKOUT guard (defense-in-depth). Never finalize
         // a checkout onto a reservation with no vehicle: that produced FINALIZED
         // agreements with no car on the contract. The session-start gate blocks
@@ -776,9 +812,23 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // agent has to see it at the counter), not be swallowed like the
       // best-effort email/audit failures below.
       if (err?.statusCode === 409 || err instanceof CheckoutSessionError) {
-        throw err instanceof CheckoutSessionError
+        const fail = err instanceof CheckoutSessionError
           ? err
           : new CheckoutSessionError(err.message, 409, 'VEHICLE_CONFLICT');
+        // H8: on the SELF-HEAL path the session is visibly CLOSED, so raising
+        // the raw guard code reads as nonsense to the agent — a 422
+        // PRECHECKIN_REQUIRED on a finished checkout, which the wizard shows
+        // as a red toast because it only swallows 409s. Re-label it as what
+        // it actually is, at a status the existing clients already handle.
+        // The underlying reason is kept in the message, not thrown away.
+        if (alreadyApplied) {
+          throw new CheckoutSessionError(
+            `Checkout is closed but its finalize did not complete: ${fail.message}`,
+            409,
+            'FINALIZE_INCOMPLETE',
+          );
+        }
+        throw fail;
       }
       logger.warn('[checkout-session] failed to advance reservation on finalize', {
         sessionId: id, reservationId: updated.reservationId, error: err?.message || String(err),

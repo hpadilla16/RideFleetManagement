@@ -122,6 +122,12 @@ además `checkoutSessionId` y `reservationId` para poder re-mintear token al dre
   `body.session`: reconciliar **desde ahí** y no disparar el GET. Listarlos es
   obligatorio — un 409 que no esté en esta lista cae en el manejador genérico
   del cliente y se muestra como error crudo.
+  **Y uno más**: `FINALIZE_INCOMPLETE` (M2-H8) — la sesión está CLOSED pero su
+  cascada de finalización no llegó a terminar, y el reintento tampoco pudo
+  completarla; el motivo real va dentro del mensaje. No es un error del paso
+  que pediste: la sesión **sí** está cerrada. Es trabajo de mostrador
+  (reserva sin coche, gate de pre-checkin, conflicto de vehículo) y hay que
+  mostrarlo como aviso accionable, no como "no se pudo avanzar".
 - **200 en `POST /transition`** puede significar "otra superficie ya hizo exactamente
   esta transición" (M2-H8): `transition()` es idempotente cuando la sesión ya está en
   `toStep`, así que un doble-submit o una carrera devuelven la fila fresca en vez de

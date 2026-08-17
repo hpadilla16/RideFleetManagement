@@ -40,8 +40,10 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 |---|---|
 | `checkout.step_rendered` | render desde `currentStep` (tag `step`) |
 | `checkout.transition_ok` / `checkout.transition_409` | POST /transition (tag `code`: ILLEGAL_TRANSITION/ENTRY_GUARD/STALE_VERSION/CONCURRENT_MODIFICATION/…) |
-| `checkout.transition_noop` | 200 que era idempotente: otra superficie ya estaba en `toStep` (M2-H8) |
+| `checkout.transition_noop` | 200 que NO lo movió esta superficie: lo movió otra, o fue doble-submit (M2-H8) |
 | `checkout.reconciled` | 409 → re-fetch → UI reconciliada (tag `steps_jumped`) |
+| `checkout.money_attempt` / `checkout.money_ok` / `checkout.money_fail` | rutas de dinero (tag `kind`: charge_sale/hold_deposit/manual_*; NUNCA montos ni PAN) |
+| `checkout.preview_divergence` | cálculo local ≠ preview del servidor (compuerta ADR-6) |
 
 > **Ruptura de serie por M2-H8 (2026-08-17) — leer antes de comparar contra histórico.**
 > El caso "otra superficie ya hizo esta transición" **cambió de lado**: antes emitía
@@ -50,15 +52,27 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 > despliegue de H8 se lee en los tableros como "los 409 de checkout se desplomaron y las
 > reconciliaciones desaparecieron" — que es exactamente la forma que tendría una regresión
 > de telemetría. Consecuencias:
+>
 > - `checkout.transition_409` baja, `checkout.transition_ok` sube, **misma suma**.
 > - `checkout.reconciled` baja de verdad, porque hay menos que reconciliar.
-> - Para no perder la señal de concurrencia, la app emite `checkout.transition_noop`
->   cuando un 200 no movió nada (`currentStep` de la respuesta == el que ya tenía **y**
->   `stateVersion` sin cambio). Esa es la métrica que hay que vigilar para "cuántas veces
->   dos superficies pisan el mismo paso"; ya **no** sirve `transition_409` para eso.
 > - `STALE_VERSION` y `CONCURRENT_MODIFICATION` son códigos nuevos del tag `code`.
-| `checkout.money_attempt` / `checkout.money_ok` / `checkout.money_fail` | rutas de dinero (tag `kind`: charge_sale/hold_deposit/manual_*; NUNCA montos ni PAN) |
-| `checkout.preview_divergence` | cálculo local ≠ preview del servidor (compuerta ADR-6) |
+> - Para no perder la señal de concurrencia, la app emite `checkout.transition_noop`.
+>   **Cómo se detecta (importa, y la primera versión de esta nota lo tenía al revés):**
+>   un noop **NO** es "el paso volvió igual y la versión no cambió". En la carrera entre
+>   superficies —que es justo lo que esta métrica tiene que vigilar— el cliente está en
+>   `FINALIZING`/v0, otra superficie commitea, y la respuesta llega `CLOSED`/v1: el paso
+>   **sí** cambió y la versión **también**. Esa regla sólo dispara en el doble-submit sin
+>   carrera, o sea que sub-reporta exactamente el caso que motivó la métrica.
+>
+>   La regla correcta es la de atribución, la misma que ya usa
+>   `02-flutter-blueprint.md` §2.2: **es noop cuando el último evento `TRANSITION` de la
+>   respuesta no nombra a esta superficie** (comparar su `actorUserId`/`metadata` con los
+>   propios), o equivalentemente cuando `stateVersion !== localVersion + 1` (si subió más
+>   de uno, o no subió, no fuiste tú el único que escribió).
+>
+>   Nota de parseo: `events` viaja como **string JSON**, no como arreglo — hay que
+>   `jsonDecode` antes de leer el último `TRANSITION`. Llega así por los dos caminos
+>   (`GET /:id` y la respuesta del propio POST).
 
 ### Inspección y bandeja
 | Evento | Cuándo |

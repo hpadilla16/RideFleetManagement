@@ -279,6 +279,81 @@ test('winner already finalized: the re-run cascade short-circuits, no double sid
   assert.equal(db.mileageEntries.length, 1, 'exactly one mileage entry');
 });
 
+// QA blocker (2026-08-17). The self-heal was introduced with a single guard
+// borrowed from the winner path — a DENY-list naming 3 of the 8
+// ReservationStatus values. CANCELLED was not in it, and ensureCheckoutGates
+// only looks at pre-checkin and age rules, never at status. So a plain repeat
+// POST, no race at all, against a session closed days ago, re-ran the whole
+// finalize and resurrected a reservation staff had cancelled: reservation back
+// to CHECKED_OUT, finalizedAt overwritten with today, vehicle back to ON_RENT
+// (which then collides the NEXT real reservation with "still out on open
+// rental"), plus a spurious audit line. The docs shipped in the same change
+// tell every client that re-sending a transition is safe, so this was an
+// invitation to retry.
+test('BLOCKER: session already CLOSED + reservation CANCELLED → 200 and ZERO writes to the world', async () => {
+  const row = seedFinalizeWorld({ reservationStatus: 'CONFIRMED' });
+
+  // A real, completed checkout...
+  await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  assert.equal(db.reservations[0].status, 'CHECKED_OUT');
+  const finalizedAt = db.agreements[0].finalizedAt;
+
+  // ...that staff cancels afterwards (reservations.routes.js allows
+  // CHECKED_OUT → CANCELLED).
+  db.reservations[0].status = 'CANCELLED';
+  db.vehicles[0].status = 'AVAILABLE';
+  const auditsBefore = db.auditLogs.length;
+  const mileageBefore = db.mileageEntries.length;
+
+  // Now an old wizard tab, a retry, anything — fires the transition again.
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+
+  assert.equal(out.currentStep, 'CLOSED', 'still answers idempotently');
+  assert.equal(db.reservations[0].status, 'CANCELLED', 'NOT resurrected');
+  assert.equal(db.vehicles[0].status, 'AVAILABLE', 'car stays in the available fleet');
+  assert.equal(db.agreements[0].finalizedAt, finalizedAt, 'finalizedAt not overwritten with today');
+  assert.equal(db.auditLogs.length, auditsBefore, 'no spurious "Checkout wizard finalized" line');
+  assert.equal(db.mileageEntries.length, mileageBefore, 'no duplicate mileage row');
+  assert.equal(row.stateVersion, 1, 'and no version bump');
+});
+
+test('a NO_SHOW reservation is not finalized onto either', async () => {
+  seedFinalizeWorld({ reservationStatus: 'NO_SHOW' });
+
+  // Winner path this time (a session parked in FINALIZING while staff marked
+  // the customer a no-show) — the deny-list has to stop this one too.
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+
+  assert.equal(out.currentStep, 'CLOSED', 'the session still closes');
+  assert.equal(db.reservations[0].status, 'NO_SHOW', 'but the reservation is left alone');
+  assert.equal(db.vehicles[0].status, 'AVAILABLE');
+  assert.equal(db.auditLogs.length, 0);
+});
+
+// The two guards are deliberately different shapes, so each needs a case only
+// IT catches — otherwise one of them ships unverified. CANCELLED/NO_SHOW above
+// are caught by the deny-list; PENDING_FRANCHISE_IMPORT is caught only by the
+// self-heal allow-list, because the winner path is intentionally left
+// unchanged for that status.
+test('self-heal declines a status it does not understand (PENDING_FRANCHISE_IMPORT)', async () => {
+  seedFinalizeWorld({ reservationStatus: 'PENDING_FRANCHISE_IMPORT' });
+
+  // Winner path first: unchanged: this status is NOT in the deny-list, so the
+  // legitimate finalize still advances it exactly as before H8.
+  await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  assert.equal(db.reservations[0].status, 'CHECKED_OUT', 'winner path untouched');
+
+  // Now put it back and repeat the POST: the OPPORTUNISTIC re-run refuses,
+  // because guessing on a status we do not model is not free.
+  db.reservations[0].status = 'PENDING_FRANCHISE_IMPORT';
+  const auditsBefore = db.auditLogs.length;
+
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  assert.equal(out.currentStep, 'CLOSED');
+  assert.equal(db.reservations[0].status, 'PENDING_FRANCHISE_IMPORT', 'self-heal declined');
+  assert.equal(db.auditLogs.length, auditsBefore);
+});
+
 test('SELF-HEAL: a winner whose cascade died half-way is completed by the idempotent caller', async () => {
   const row = seedFinalizeWorld({ reservationStatus: 'CONFIRMED' });
 
@@ -424,6 +499,39 @@ test('CANCELLED stays legal from wherever the winner left us — the retry commi
     ['CONFIRMING→TC_PENDING', 'TC_PENDING→CANCELLED'],
     'the cancel is recorded from the step it really left',
   );
+});
+
+// ── CONCURRENT_MODIFICATION — documented client contract, so it gets a test ─
+
+test('losing the CAS race every attempt → 409 CONCURRENT_MODIFICATION with the fresh row', async () => {
+  seedSession();
+
+  // A cancel is the only request that stays legal after losing, so it is the
+  // only one that can exhaust the retry budget. Move the step out from under
+  // every single commit attempt.
+  const origUpdateMany = prisma.checkoutSession.updateMany;
+  prisma.checkoutSession.updateMany = async (args) => {
+    const row = db.checkoutSessions[0];
+    if (args?.data?.currentStep === 'CANCELLED') {
+      // Somebody else advances a step between our read and our write, every time.
+      const order = ['CONFIRMING', 'TC_PENDING', 'TC_SIGNED', 'PAYMENT_PENDING'];
+      const next = order[order.indexOf(row.currentStep) + 1];
+      if (next) { row.currentStep = next; row.stateVersion += 1; }
+    }
+    return origUpdateMany(args);
+  };
+  restore.push(() => { prisma.checkoutSession.updateMany = origUpdateMany; });
+
+  await assert.rejects(
+    () => viaWebWizard({ id: 'cs1', toStep: 'CANCELLED' }),
+    (e) => {
+      assert.equal(e.status, 409);
+      assert.equal(e.code, 'CONCURRENT_MODIFICATION');
+      assert.ok(e.session, 'carries the fresh row, as the client contract promises');
+      return true;
+    },
+  );
+  assert.notEqual(db.checkoutSessions[0].currentStep, 'CANCELLED', 'nothing was committed');
 });
 
 // ── 7. what H8 does NOT close ──────────────────────────────────────────────
