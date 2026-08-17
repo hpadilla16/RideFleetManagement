@@ -1,6 +1,31 @@
 # Spike 1 — Leer el token seguro desde un isolate de background
 
-**Estado: PENDIENTE DE CORRER (Android listo para probar; iOS requiere Mac/dispositivo).**
+**Estado: ANDROID PASÓ (2026-08-16, emulador API 36.1). iOS diferido (requiere Mac/dispositivo).**
+
+## Resultado Android
+
+Probe: `rideops/lib/spike/token_probe.dart` (workmanager 0.10.7 +
+flutter_secure_storage 9.2.4 con `encryptedSharedPreferences: true`), APK dev con
+`--dart-define=RIDEOPS_SPIKE1=true`.
+
+| Caso | Resultado |
+|---|---|
+| A · Tarea a 15 s con la app mandada a background y el proceso **matado** (`am kill`) | ✅ `ok:true, tokenLen:195` — WorkManager relanzó el proceso headless y el isolate leyó el token |
+| B · Tarea pendiente + **reboot completo** del dispositivo, sin relanzar la app | ✅ `ok:true, tokenLen:195` — el job persistió el reboot y leyó el token post-boot |
+
+**Decisión: el drenado en background por WorkManager queda APROBADO en Android.**
+
+Caveats honestos:
+- El emulador no tiene credencial de bloqueo → el caso Direct Boot (pre-primer-unlock) no
+  se ejercitó. WorkManager difiere jobs a después del primer unlock por defecto (no usamos
+  `directBootAware`), así que en un teléfono real con PIN el drenado espera al unlock — es
+  el comportamiento aceptable definido en el protocolo. Re-validar en aparato real (QA M1-H6).
+- (Innovation, 2026-08-16) El JWT de staff dura 12 h y el refresh exige JWT vivo: el
+  background solo compra el resto del turno. Jamás pasar el JWT por `inputData` de
+  WorkManager (se persiste en texto plano); el isolate lo lee de secure storage — que es
+  exactamente lo que este spike validó.
+- iOS: BGTaskScheduler es discrecional; el camino realista es drenar-al-abrir + Keychain
+  `first_unlock`. Se prueba cuando toque iOS (§9-4).
 
 ## Qué decide
 

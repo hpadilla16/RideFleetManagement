@@ -3,9 +3,12 @@
 /// de Prisma espeja con el marcador `// mirrors:` y el script truena si
 /// cualquiera de los dos lados agrega/quita valores.
 ///
-/// Regla de resiliencia: TODO parseo de wire usa `parse(...)` con fallback a
-/// `unknown` — un valor nuevo del backend no puede crashear una app vieja en
-/// el patio; la UI muestra el estado como texto crudo y sigue viva.
+/// Regla de resiliencia: TODO parseo de wire usa `tryParse(...)` → `null`, y
+/// el DTO conserva además el string crudo del backend. Un valor nuevo del
+/// servidor no puede crashear una app vieja en el patio: el enum sale null y
+/// la UI muestra el estado como texto crudo y sigue viva. OJO: aquí NO hay
+/// valores `unknown` a propósito — agregarlos rompería la paridad exacta que
+/// vigila `check_enum_parity.mjs` contra los enums de Prisma.
 library;
 
 String _wire(String dartName) {

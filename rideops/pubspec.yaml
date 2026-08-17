@@ -26,6 +26,11 @@ dependencies:
   # Token seguro (Keychain/Keystore). Sujeto del spike M0-1a.
   flutter_secure_storage: ^9.2.0
 
+  # Spike 1 (M0-1a): tareas en background. Si el spike aprueba, se queda para
+  # el drenado; si no, se retira y el drenado va solo en foreground.
+  workmanager: ^0.10.0
+  path_provider: ^2.1.0
+
   # Observabilidad (decisión M0-4: Sentry — el backend ya reporta ahí).
   sentry_flutter: ^9.0.0
 

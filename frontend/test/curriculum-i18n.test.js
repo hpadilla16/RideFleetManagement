@@ -43,7 +43,7 @@ describe('curriculum translations', () => {
   const keys = expectedKeys();
 
   it('derives a key for every translatable string', () => {
-    expect(keys.length).toBe(99);
+    expect(keys.length).toBe(104);
     expect(new Set(keys).size, 'two entries derive the same key — one would overwrite the other').toBe(keys.length);
   });
 
