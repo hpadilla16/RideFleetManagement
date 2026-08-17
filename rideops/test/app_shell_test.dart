@@ -9,6 +9,7 @@ import 'package:rideops/core/api/api_providers.dart';
 import 'package:rideops/core/api/dto/session_user.dart';
 import 'package:rideops/core/db/outbox_db.dart';
 import 'package:rideops/core/db/outbox_providers.dart';
+import 'package:rideops/core/lifecycle/app_visibility.dart';
 import 'package:rideops/core/outbox/network_status.dart';
 import 'package:rideops/core/session/active_location.dart';
 import 'package:rideops/core/session/biometric_auth.dart';
@@ -175,6 +176,41 @@ void main() {
     // degradada; el contenido del dashboard tiene su propia suite.
     expect(find.byType(HomeSkeleton), findsNothing);
     expect(find.byType(HomeScreen), findsOneWidget);
+  });
+
+  testWidgets(
+      'M2-H1: la señal que PAUSA los pollers la alimenta LockObserver — vale '
+      'para TODAS las rutas, no solo las del shell', (tester) async {
+    api.onMe = () async => sessionUserFixture();
+    await tester.pumpWidget(app());
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(RideOpsApp)),
+    );
+    expect(container.read(appVisibilityProvider), isTrue);
+
+    // Secuencia REAL de Android (resumed → inactive → hidden → paused).
+    // `inactive` NO es background: es la cortina de notificaciones.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(container.read(appVisibilityProvider), isTrue);
+
+    // Background real ⇒ pausa total (el wizard de checkout vive fuera del
+    // shell y su poll de 5 s no puede seguir corriendo en el bolsillo).
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    await tester.pump();
+    expect(container.read(appVisibilityProvider), isFalse);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    expect(container.read(appVisibilityProvider), isFalse);
+
+    // Y al volver, visible otra vez.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(container.read(appVisibilityProvider), isTrue);
   });
 
   testWidgets('badge de Bandeja: filas del stream, ámbar sin dead',

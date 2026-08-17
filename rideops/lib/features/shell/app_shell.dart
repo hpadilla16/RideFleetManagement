@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/db/outbox_providers.dart';
 import '../../core/l10n/app_localizations.dart';
-import '../../core/lifecycle/app_visibility.dart';
 import '../../core/outbox/drain_coordinator.dart';
 import '../../core/session/active_location.dart';
 import '../../core/session/session_controller.dart';
@@ -51,6 +50,10 @@ class _AppShellState extends ConsumerState<AppShell> {
     // — y así H2 (que toca app/router) no choca con este archivo.
     // H5: el resume también dispara el drenado de la bandeja (foreground) —
     // el turno pudo pasar horas en background con filas esperando.
+    // La visibilidad para los pollers (appVisibilityProvider) SALIÓ de aquí en
+    // M2-H1: el shell solo está montado en las rutas con tab bar, y el wizard
+    // de checkout —pantalla completa fuera del shell— también poll-ea. Ahora
+    // la alimenta LockObserver, que cubre todas las rutas.
     _lifecycle = AppLifecycleListener(
       onResume: () {
         ref
@@ -58,14 +61,6 @@ class _AppShellState extends ConsumerState<AppShell> {
             .rehydrateUserIfMissing();
         ref.read(drainCoordinatorProvider.notifier).kick('resume');
       },
-      // Visibilidad para el polling del dashboard (H4): background real
-      // (hidden/paused) = pausa total; `inactive` sigue contando como
-      // visible — ver el WHY en app_visibility.dart.
-      onStateChange: (s) =>
-          ref.read(appVisibilityProvider.notifier).setVisible(
-                s == AppLifecycleState.resumed ||
-                    s == AppLifecycleState.inactive,
-              ),
     );
   }
 

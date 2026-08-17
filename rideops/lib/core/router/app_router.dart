@@ -7,6 +7,7 @@ import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/pin_lock_screen.dart';
 import '../../features/auth/presentation/pin_setup_screen.dart';
 import '../../features/auth/presentation/splash_screen.dart';
+import '../../features/checkout/presentation/checkout_wizard_screen.dart';
 import '../../features/dashboard/presentation/home_screen.dart';
 import '../../features/dashboard/presentation/queue_list_screen.dart';
 import '../../features/inspection/presentation/inspection_screen.dart';
@@ -50,6 +51,14 @@ abstract final class AppRoutes {
   static const inspectionPattern = '/inspection/:reservationId';
   static String inspection(String reservationId) =>
       '/inspection/$reservationId';
+
+  // Wizard de checkout (M2-H1): pantalla completa FUERA del shell, por la
+  // misma razón que la inspección — el header del flujo manda y el agente no
+  // debe poder saltar a otra tab a media entrega sin decidir qué hace con la
+  // sesión. La entrada desde la card de la cola de salidas es M2-H7; la ruta
+  // ya queda lista para que esa historia solo tenga que navegar.
+  static const checkoutPattern = '/checkout/:reservationId';
+  static String checkout(String reservationId) => '/checkout/$reservationId';
 }
 
 /// Superficies del flujo de auth: NUNCA se preservan como destino de retorno
@@ -201,6 +210,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.inspectionPattern,
         builder: (context, state) => InspectionScreen(
+          reservationId: state.pathParameters['reservationId']!,
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.checkoutPattern,
+        builder: (context, state) => CheckoutWizardScreen(
           reservationId: state.pathParameters['reservationId']!,
         ),
       ),

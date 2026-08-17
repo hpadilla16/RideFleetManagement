@@ -10,6 +10,7 @@ import 'package:rideops/core/api/dto/reservation_display.dart';
 import 'package:rideops/core/api/dto/session_user.dart';
 import 'package:rideops/core/api/dto/staff_location.dart';
 import 'package:rideops/core/api/enums.dart';
+import 'package:rideops/features/checkout/domain/checkout_presence.dart';
 
 /// Los 6 DTOs calientes contra fixtures de JSON real (M0-5). Cada fixture
 /// está derivado del serializer del backend — ver test/fixtures/README.md.
@@ -61,6 +62,38 @@ void main() {
     expect(cs.isTerminal, isFalse);
     expect(cs.paymentCompletedAt, isNotNull);
     expect(cs.inspectionCompletedAt, isNull);
+  });
+
+  test(
+      'checkout_session.json (API de HOY, sin P1) → presence es NULL, no lista '
+      'vacía: la app no puede afirmar quién más está en la sesión', () {
+    final cs = CheckoutSessionDto.fromJson(readFixture('checkout_session.json'));
+    expect(cs.presence, isNull);
+    expect(pickPresenceChip(cs.presence, DateTime.now()), isNull);
+  });
+
+  test('checkout_session_presence.json (P1 desplegado) → presence tipada', () {
+    final cs =
+        CheckoutSessionDto.fromJson(readFixture('checkout_session_presence.json'));
+    expect(cs.presence, hasLength(2));
+    expect(cs.presence!.first.surface, 'KIOSK');
+    expect(cs.presence!.first.displayName, 'María G.');
+    expect(cs.presence!.first.lastSeenAt, isNotNull);
+    // `stateVersion` (columna de P2) NO está en el DTO y debe ignorarse: un
+    // campo nuevo del backend jamás puede tumbar una app vieja en el patio.
+    expect(cs.step, CheckoutStep.tcPending);
+  });
+
+  test('presence con una superficie DESCONOCIDA no rompe el parseo', () {
+    final raw = readFixture('checkout_session_presence.json');
+    (raw['presence'] as List<dynamic>).add({
+      'surface': 'SUPERFICIE_DEL_FUTURO',
+      'displayName': 'Alguien',
+      'lastSeenAt': '2026-08-16T14:03:55.000Z',
+    });
+    final cs = CheckoutSessionDto.fromJson(raw);
+    expect(cs.presence, hasLength(3));
+    expect(cs.presence!.last.surface, 'SUPERFICIE_DEL_FUTURO');
   });
 
   test('un currentStep desconocido no crashea (resiliencia de enum)', () {

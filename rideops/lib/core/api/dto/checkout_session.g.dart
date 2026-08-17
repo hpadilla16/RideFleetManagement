@@ -40,6 +40,9 @@ _CheckoutSessionDto _$CheckoutSessionDtoFromJson(Map<String, dynamic> json) =>
         json['autoEmailedAt'] as String?,
       ),
       startedByUserId: json['startedByUserId'] as String?,
+      presence: (json['presence'] as List<dynamic>?)
+          ?.map((e) => CheckoutPresenceDto.fromJson(e as Map<String, dynamic>))
+          .toList(),
     );
 
 Map<String, dynamic> _$CheckoutSessionDtoToJson(
@@ -67,4 +70,22 @@ Map<String, dynamic> _$CheckoutSessionDtoToJson(
   'abandonedReason': instance.abandonedReason,
   'autoEmailedAt': const IsoDateTimeConverter().toJson(instance.autoEmailedAt),
   'startedByUserId': instance.startedByUserId,
+  'presence': instance.presence,
+};
+
+_CheckoutPresenceDto _$CheckoutPresenceDtoFromJson(Map<String, dynamic> json) =>
+    _CheckoutPresenceDto(
+      surface: json['surface'] as String? ?? '',
+      displayName: json['displayName'] as String? ?? '',
+      lastSeenAt: const IsoDateTimeConverter().fromJson(
+        json['lastSeenAt'] as String?,
+      ),
+    );
+
+Map<String, dynamic> _$CheckoutPresenceDtoToJson(
+  _CheckoutPresenceDto instance,
+) => <String, dynamic>{
+  'surface': instance.surface,
+  'displayName': instance.displayName,
+  'lastSeenAt': const IsoDateTimeConverter().toJson(instance.lastSeenAt),
 };

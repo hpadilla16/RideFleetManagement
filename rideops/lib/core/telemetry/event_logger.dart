@@ -78,6 +78,27 @@ abstract final class InspectionEvents {
   static const completedLocal = 'inspection.completed_local';
 }
 
+/// Eventos del checkout (03-observability.md §Checkout (M2)) — historia H1
+/// del épico. Los de dinero (`checkout.money_*`, `checkout.preview_divergence`)
+/// llegan con M2-H3: se declaran cuando existe el callsite, no antes.
+abstract final class CheckoutEvents {
+  /// Render desde `currentStep` (tag `step`). Se emite cuando el paso
+  /// RENDERIZADO cambia, no por frame ni por tick del poll.
+  static const stepRendered = 'checkout.step_rendered';
+
+  static const transitionOk = 'checkout.transition_ok';
+
+  /// Tag `code`: ILLEGAL_TRANSITION | ENTRY_GUARD | SESSION_TERMINAL |
+  /// CHECKOUT_TERMINAL | VEHICLE_CONFLICT | none (409 sin code del abandon).
+  static const transition409 = 'checkout.transition_409';
+
+  /// UI reconciliada contra el servidor. Tags: `steps_jumped` y `via`
+  /// (`conflict` = tras un 409, `poll` = otra superficie avanzó y el poll lo
+  /// vio). El tag `via` es dato NUEVO de H1 — documentado en la tabla de
+  /// 03-observability.md en el mismo cambio.
+  static const reconciled = 'checkout.reconciled';
+}
+
 /// Eventos de la bandeja de salida (03-observability.md §Inspección y
 /// bandeja). `entry_dead` con un `code` desconocido es compuerta de release
 /// (bug de manejo de errores, no ruido).

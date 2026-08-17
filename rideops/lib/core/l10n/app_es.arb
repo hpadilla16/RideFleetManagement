@@ -140,6 +140,11 @@
   "@ageHours": {
     "placeholders": { "count": { "type": "int" } }
   },
+  "ageSeconds": "{count} s",
+  "@ageSeconds": {
+    "description": "Edad en SEGUNDOS — la necesita el wizard de checkout (M2-H1): el chip de presencia y el banner de avance ajeno miden en segundos, donde 'un momento' mentiría sobre la frescura del heartbeat (TTL 45 s).",
+    "placeholders": { "count": { "type": "int" } }
+  },
   "homeFreshnessLine": "Actualizado hace {age} · se actualiza solo",
   "@homeFreshnessLine": {
     "placeholders": { "age": { "type": "String" } }
@@ -461,5 +466,170 @@
   "@logoutPendingBody": {
     "placeholders": { "count": { "type": "int" } }
   },
-  "logoutAnyway": "Cerrar sesión de todos modos"
+  "logoutAnyway": "Cerrar sesión de todos modos",
+
+  "coTitle": "Checkout · {reservation}",
+  "@coTitle": {
+    "description": "Título del wizbar del wizard de checkout (mockup 8A)",
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "coTitleNoNumber": "Checkout",
+  "coPause": "Pausar",
+  "coStepOf": "Paso {index} de {total}",
+  "@coStepOf": {
+    "description": "Contador honesto del mockup (nota 4): la cadena lineal CONFIRMING→CLOSED son 10 pasos; CANCELLED es salida alterna, no el paso 11.",
+    "placeholders": {
+      "index": { "type": "int" },
+      "total": { "type": "int" }
+    }
+  },
+  "coSeeAllSteps": "Ver todos los pasos",
+  "coStepsSheetTitle": "{total} pasos + salida alterna",
+  "@coStepsSheetTitle": {
+    "placeholders": { "total": { "type": "int" } }
+  },
+  "coStepsSheetSub": "Estado reportado por el servidor · actualizado hace {age}",
+  "@coStepsSheetSub": {
+    "placeholders": { "age": { "type": "String" } }
+  },
+  "coSheetClose": "Cerrar",
+  "coPhaseConfirm": "Confirmar",
+  "coPhaseTerms": "T&C",
+  "coPhasePayment": "Pago",
+  "coPhaseInspection": "Inspección",
+  "coPhaseClosing": "Cierre",
+  "coStepConfirming": "Confirmar cliente y vehículo",
+  "coStepTcPending": "Términos y condiciones",
+  "coStepTcSigned": "Términos firmados",
+  "coStepPaymentPending": "Cobro en terminal",
+  "coStepPaid": "Pago completo",
+  "coStepInspectionHandoff": "Pasar a inspección",
+  "coStepInspectionInProgress": "Inspección en curso",
+  "coStepCustomerSignPending": "Firma del cliente",
+  "coStepFinalizing": "Generando contrato",
+  "coStepClosed": "Entregado",
+  "coStepCancelled": "Cancelado",
+  "coStepCancelledHint": "Salida alterna desde cualquier paso no terminal",
+  "coStepUnknown": "Paso reportado por el servidor: {step}",
+  "@coStepUnknown": {
+    "description": "Forward-compat (ADR-4): un currentStep que esta versión de la app no conoce se muestra CRUDO, sin corregirlo ni adivinar el siguiente.",
+    "placeholders": { "step": { "type": "String" } }
+  },
+  "coStepPending": "Pendiente",
+  "coStepInProgress": "En curso",
+  "coStepDoneByYou": "Completado por ti · {time}",
+  "@coStepDoneByYou": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coStepDoneKiosk": "Completado en el kiosco · {time}",
+  "@coStepDoneKiosk": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coStepDoneOtherAgent": "Completado por otro agente · {time}",
+  "@coStepDoneOtherAgent": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coStepDone": "Completado · {time}",
+  "@coStepDone": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coGuardTcCompleted": "Espera: firma de T&C del cliente",
+  "coGuardPayment": "Espera: cobro registrado",
+  "coGuardInspection": "Espera: inspección completa",
+  "coGuardSignature": "Espera: firma del cliente",
+  "coSurfaceKiosk": "kiosco",
+  "coSurfaceCounter": "mostrador",
+  "coSurfaceRideops": "otro teléfono",
+  "coSurfaceCustomer": "teléfono del cliente",
+  "coSurfaceOther": "otra superficie",
+  "coPresenceLine": "{name} está en esta sesión · {surface} · hace {age}",
+  "@coPresenceLine": {
+    "description": "Chip de presencia (P1). Informativo, jamás un candado.",
+    "placeholders": {
+      "name": { "type": "String" },
+      "surface": { "type": "String" },
+      "age": { "type": "String" }
+    }
+  },
+  "coPresenceMore": "+{count}",
+  "@coPresenceMore": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "coAdvancedKiosk": "«{step}» se completó en el kiosco hace {age}.",
+  "@coAdvancedKiosk": {
+    "placeholders": {
+      "step": { "type": "String" },
+      "age": { "type": "String" }
+    }
+  },
+  "coAdvancedOtherAgent": "«{step}» lo completó otro agente hace {age}.",
+  "@coAdvancedOtherAgent": {
+    "placeholders": {
+      "step": { "type": "String" },
+      "age": { "type": "String" }
+    }
+  },
+  "coAdvancedOtherSurface": "«{step}» se completó en otra superficie hace {age}.",
+  "@coAdvancedOtherSurface": {
+    "placeholders": {
+      "step": { "type": "String" },
+      "age": { "type": "String" }
+    }
+  },
+  "coAdvancedNow": "Ya vas en: {step}.",
+  "@coAdvancedNow": {
+    "placeholders": { "step": { "type": "String" } }
+  },
+  "coAdvancedSeeChanged": "Ver qué cambió",
+  "coStaleView": "vista de hace {age}",
+  "@coStaleView": {
+    "placeholders": { "age": { "type": "String" } }
+  },
+  "coOfflineBanner": "Sin conexión. Esto es lo último que vio el servidor hace {age} — puede haber cambiado en otra superficie.",
+  "@coOfflineBanner": {
+    "placeholders": { "age": { "type": "String" } }
+  },
+  "coBlockedOfflineWhy": "Avanzar un paso requiere confirmación del servidor. Sin red no se adivina: se espera.\nNada de este paso entra a la Bandeja de salida.",
+  "coBlockedOfflineShort": "Sin conexión: el avance lo confirma el servidor.",
+  "coTransitionWhy": "El servidor confirma el avance; si otra superficie ya lo hizo, esta pantalla se actualiza sola.",
+  "coPauseTitle": "¿Guardar y pausar este checkout?",
+  "coPauseSub": "La sesión queda guardada en el paso {index} de {total}. Nada se pierde.",
+  "@coPauseSub": {
+    "placeholders": {
+      "index": { "type": "int" },
+      "total": { "type": "int" }
+    }
+  },
+  "coPauseSubUnknownStep": "La sesión queda guardada en el paso que reporta el servidor. Nada se pierde.",
+  "coPauseKeeps": "Se conserva: cliente y vehículo verificados, el código de T&C vigente y el registro de quién hizo qué.",
+  "coPauseWarn": "Otro compañero (o el kiosco) puede retomarla desde donde va. Al volver, entras al paso que reporte el servidor, no al que dejaste.",
+  "coPauseConfirm": "Guardar y pausar",
+  "coPauseStay": "Seguir aquí",
+  "coPauseFailed": "No se pudo pausar. Revisa la conexión e intenta de nuevo.",
+  "coTerminalClosedTitle": "Checkout entregado",
+  "coTerminalCancelledTitle": "Checkout cancelado",
+  "coTerminalBody": "Esta sesión ya es terminal: no admite más pasos.",
+  "coTerminalLogTitle": "Registro de la sesión",
+  "coExit": "Salir",
+  "coNoSessionTitle": "Aún no hay sesión de checkout",
+  "coNoSessionBody": "Esta reserva todavía no tiene una sesión abierta. Se inicia desde la cola de salidas del inicio.",
+  "coLoadFailedTitle": "No se pudo abrir el checkout",
+  "coConflictEntryGuardTitle": "Falta un paso previo",
+  "coConflictVehicleTitle": "El vehículo ya no está libre",
+  "coConflictGenericTitle": "El servidor no aceptó el avance",
+  "coConflictDismiss": "Entendido",
+  "coStampsTitle": "Lo que el servidor ya tiene",
+  "coStampTc": "Firma de T&C",
+  "coStampPayment": "Cobro registrado",
+  "coStampInspection": "Inspección completa",
+  "coStampSignature": "Firma del cliente",
+  "coStampDone": "Listo · {time}",
+  "@coStampDone": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coStampPending": "Pendiente",
+  "coSessionAgeLabel": "Estado de hace {age}",
+  "@coSessionAgeLabel": {
+    "placeholders": { "age": { "type": "String" } }
+  }
 }

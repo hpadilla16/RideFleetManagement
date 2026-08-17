@@ -40,9 +40,17 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 |---|---|
 | `checkout.step_rendered` | render desde `currentStep` (tag `step`) |
 | `checkout.transition_ok` / `checkout.transition_409` | POST /transition (tag `code`: ILLEGAL_TRANSITION/ENTRY_GUARD/…) |
-| `checkout.reconciled` | 409 → re-fetch → UI reconciliada (tag `steps_jumped`) |
+| `checkout.reconciled` | UI reconciliada con el servidor (tags `steps_jumped`, `via`) |
 | `checkout.money_attempt` / `checkout.money_ok` / `checkout.money_fail` | rutas de dinero (tag `kind`: charge_sale/hold_deposit/manual_*; NUNCA montos ni PAN) |
 | `checkout.preview_divergence` | cálculo local ≠ preview del servidor (compuerta ADR-6) |
+
+Detalle de `checkout.reconciled` (M2-H1): `via = conflict` cuando el re-render vino de un
+409 re-consultado, `via = poll` cuando el poll de 5 s detectó que OTRA superficie movió el
+paso. Con 4 superficies conviviendo, la frecuencia de `via=poll` es la métrica de cuánto
+se pisan en el patio — y la prueba de concurrencia del SHIP del épico se mide con ella.
+`steps_jumped` puede venir ausente: si alguno de los dos pasos no está en el catálogo de
+la app (paso nuevo del backend), el evento viaja sin el tag antes que con un número
+inventado.
 
 ### Inspección y bandeja
 | Evento | Cuándo |

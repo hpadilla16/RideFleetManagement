@@ -17,7 +17,17 @@ mixin _$CheckoutSessionDto {
 
  String get id; String get reservationId; String? get agreementId; String? get tenantId; String get currentStep;/// JSON string del log de transiciones — se muestra en soporte, no se
 /// parsea en caliente.
- String? get events;@IsoDateTimeConverter() DateTime? get tcCompletedAt;@IsoDateTimeConverter() DateTime? get paymentCompletedAt;@IsoDateTimeConverter() DateTime? get inspectionCompletedAt;@IsoDateTimeConverter() DateTime? get customerSignedAt;@IsoDateTimeConverter() DateTime? get startedAt;@IsoDateTimeConverter() DateTime? get finishedAt;@IsoDateTimeConverter() DateTime? get abandonedAt; String? get abandonedReason;@IsoDateTimeConverter() DateTime? get autoEmailedAt; String? get startedByUserId;
+ String? get events;@IsoDateTimeConverter() DateTime? get tcCompletedAt;@IsoDateTimeConverter() DateTime? get paymentCompletedAt;@IsoDateTimeConverter() DateTime? get inspectionCompletedAt;@IsoDateTimeConverter() DateTime? get customerSignedAt;@IsoDateTimeConverter() DateTime? get startedAt;@IsoDateTimeConverter() DateTime? get finishedAt;@IsoDateTimeConverter() DateTime? get abandonedAt; String? get abandonedReason;@IsoDateTimeConverter() DateTime? get autoEmailedAt; String? get startedByUserId;/// Presencia suave de las otras superficies (M2 P1 —
+/// `checkout-presence.service.js` `withPresence()`, adjunta el campo en
+/// `GET /:id` y `GET /by-reservation/:rid`).
+///
+/// NULO ≠ VACÍO, y la diferencia importa: `null` = este backend todavía
+/// no emite el campo (el PR-tren P1-P3 no está desplegado) ⇒ la app NO
+/// puede afirmar nada sobre quién más está en la sesión; `[]` = el
+/// backend SÍ lo emite y no hay nadie fresco dentro del TTL de 45 s.
+/// Ambas pintan igual (sin chip), pero solo la segunda es una
+/// afirmación — por eso el campo es opcional y jamás tiene default.
+ List<CheckoutPresenceDto>? get presence;
 /// Create a copy of CheckoutSessionDto
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -30,16 +40,16 @@ $CheckoutSessionDtoCopyWith<CheckoutSessionDto> get copyWith => _$CheckoutSessio
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is CheckoutSessionDto&&(identical(other.id, id) || other.id == id)&&(identical(other.reservationId, reservationId) || other.reservationId == reservationId)&&(identical(other.agreementId, agreementId) || other.agreementId == agreementId)&&(identical(other.tenantId, tenantId) || other.tenantId == tenantId)&&(identical(other.currentStep, currentStep) || other.currentStep == currentStep)&&(identical(other.events, events) || other.events == events)&&(identical(other.tcCompletedAt, tcCompletedAt) || other.tcCompletedAt == tcCompletedAt)&&(identical(other.paymentCompletedAt, paymentCompletedAt) || other.paymentCompletedAt == paymentCompletedAt)&&(identical(other.inspectionCompletedAt, inspectionCompletedAt) || other.inspectionCompletedAt == inspectionCompletedAt)&&(identical(other.customerSignedAt, customerSignedAt) || other.customerSignedAt == customerSignedAt)&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.finishedAt, finishedAt) || other.finishedAt == finishedAt)&&(identical(other.abandonedAt, abandonedAt) || other.abandonedAt == abandonedAt)&&(identical(other.abandonedReason, abandonedReason) || other.abandonedReason == abandonedReason)&&(identical(other.autoEmailedAt, autoEmailedAt) || other.autoEmailedAt == autoEmailedAt)&&(identical(other.startedByUserId, startedByUserId) || other.startedByUserId == startedByUserId));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CheckoutSessionDto&&(identical(other.id, id) || other.id == id)&&(identical(other.reservationId, reservationId) || other.reservationId == reservationId)&&(identical(other.agreementId, agreementId) || other.agreementId == agreementId)&&(identical(other.tenantId, tenantId) || other.tenantId == tenantId)&&(identical(other.currentStep, currentStep) || other.currentStep == currentStep)&&(identical(other.events, events) || other.events == events)&&(identical(other.tcCompletedAt, tcCompletedAt) || other.tcCompletedAt == tcCompletedAt)&&(identical(other.paymentCompletedAt, paymentCompletedAt) || other.paymentCompletedAt == paymentCompletedAt)&&(identical(other.inspectionCompletedAt, inspectionCompletedAt) || other.inspectionCompletedAt == inspectionCompletedAt)&&(identical(other.customerSignedAt, customerSignedAt) || other.customerSignedAt == customerSignedAt)&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.finishedAt, finishedAt) || other.finishedAt == finishedAt)&&(identical(other.abandonedAt, abandonedAt) || other.abandonedAt == abandonedAt)&&(identical(other.abandonedReason, abandonedReason) || other.abandonedReason == abandonedReason)&&(identical(other.autoEmailedAt, autoEmailedAt) || other.autoEmailedAt == autoEmailedAt)&&(identical(other.startedByUserId, startedByUserId) || other.startedByUserId == startedByUserId)&&const DeepCollectionEquality().equals(other.presence, presence));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,reservationId,agreementId,tenantId,currentStep,events,tcCompletedAt,paymentCompletedAt,inspectionCompletedAt,customerSignedAt,startedAt,finishedAt,abandonedAt,abandonedReason,autoEmailedAt,startedByUserId);
+int get hashCode => Object.hash(runtimeType,id,reservationId,agreementId,tenantId,currentStep,events,tcCompletedAt,paymentCompletedAt,inspectionCompletedAt,customerSignedAt,startedAt,finishedAt,abandonedAt,abandonedReason,autoEmailedAt,startedByUserId,const DeepCollectionEquality().hash(presence));
 
 @override
 String toString() {
-  return 'CheckoutSessionDto(id: $id, reservationId: $reservationId, agreementId: $agreementId, tenantId: $tenantId, currentStep: $currentStep, events: $events, tcCompletedAt: $tcCompletedAt, paymentCompletedAt: $paymentCompletedAt, inspectionCompletedAt: $inspectionCompletedAt, customerSignedAt: $customerSignedAt, startedAt: $startedAt, finishedAt: $finishedAt, abandonedAt: $abandonedAt, abandonedReason: $abandonedReason, autoEmailedAt: $autoEmailedAt, startedByUserId: $startedByUserId)';
+  return 'CheckoutSessionDto(id: $id, reservationId: $reservationId, agreementId: $agreementId, tenantId: $tenantId, currentStep: $currentStep, events: $events, tcCompletedAt: $tcCompletedAt, paymentCompletedAt: $paymentCompletedAt, inspectionCompletedAt: $inspectionCompletedAt, customerSignedAt: $customerSignedAt, startedAt: $startedAt, finishedAt: $finishedAt, abandonedAt: $abandonedAt, abandonedReason: $abandonedReason, autoEmailedAt: $autoEmailedAt, startedByUserId: $startedByUserId, presence: $presence)';
 }
 
 
@@ -50,7 +60,7 @@ abstract mixin class $CheckoutSessionDtoCopyWith<$Res>  {
   factory $CheckoutSessionDtoCopyWith(CheckoutSessionDto value, $Res Function(CheckoutSessionDto) _then) = _$CheckoutSessionDtoCopyWithImpl;
 @useResult
 $Res call({
- String id, String reservationId, String? agreementId, String? tenantId, String currentStep, String? events,@IsoDateTimeConverter() DateTime? tcCompletedAt,@IsoDateTimeConverter() DateTime? paymentCompletedAt,@IsoDateTimeConverter() DateTime? inspectionCompletedAt,@IsoDateTimeConverter() DateTime? customerSignedAt,@IsoDateTimeConverter() DateTime? startedAt,@IsoDateTimeConverter() DateTime? finishedAt,@IsoDateTimeConverter() DateTime? abandonedAt, String? abandonedReason,@IsoDateTimeConverter() DateTime? autoEmailedAt, String? startedByUserId
+ String id, String reservationId, String? agreementId, String? tenantId, String currentStep, String? events,@IsoDateTimeConverter() DateTime? tcCompletedAt,@IsoDateTimeConverter() DateTime? paymentCompletedAt,@IsoDateTimeConverter() DateTime? inspectionCompletedAt,@IsoDateTimeConverter() DateTime? customerSignedAt,@IsoDateTimeConverter() DateTime? startedAt,@IsoDateTimeConverter() DateTime? finishedAt,@IsoDateTimeConverter() DateTime? abandonedAt, String? abandonedReason,@IsoDateTimeConverter() DateTime? autoEmailedAt, String? startedByUserId, List<CheckoutPresenceDto>? presence
 });
 
 
@@ -67,7 +77,7 @@ class _$CheckoutSessionDtoCopyWithImpl<$Res>
 
 /// Create a copy of CheckoutSessionDto
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? reservationId = null,Object? agreementId = freezed,Object? tenantId = freezed,Object? currentStep = null,Object? events = freezed,Object? tcCompletedAt = freezed,Object? paymentCompletedAt = freezed,Object? inspectionCompletedAt = freezed,Object? customerSignedAt = freezed,Object? startedAt = freezed,Object? finishedAt = freezed,Object? abandonedAt = freezed,Object? abandonedReason = freezed,Object? autoEmailedAt = freezed,Object? startedByUserId = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? reservationId = null,Object? agreementId = freezed,Object? tenantId = freezed,Object? currentStep = null,Object? events = freezed,Object? tcCompletedAt = freezed,Object? paymentCompletedAt = freezed,Object? inspectionCompletedAt = freezed,Object? customerSignedAt = freezed,Object? startedAt = freezed,Object? finishedAt = freezed,Object? abandonedAt = freezed,Object? abandonedReason = freezed,Object? autoEmailedAt = freezed,Object? startedByUserId = freezed,Object? presence = freezed,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,reservationId: null == reservationId ? _self.reservationId : reservationId // ignore: cast_nullable_to_non_nullable
@@ -85,7 +95,8 @@ as DateTime?,abandonedAt: freezed == abandonedAt ? _self.abandonedAt : abandoned
 as DateTime?,abandonedReason: freezed == abandonedReason ? _self.abandonedReason : abandonedReason // ignore: cast_nullable_to_non_nullable
 as String?,autoEmailedAt: freezed == autoEmailedAt ? _self.autoEmailedAt : autoEmailedAt // ignore: cast_nullable_to_non_nullable
 as DateTime?,startedByUserId: freezed == startedByUserId ? _self.startedByUserId : startedByUserId // ignore: cast_nullable_to_non_nullable
-as String?,
+as String?,presence: freezed == presence ? _self.presence : presence // ignore: cast_nullable_to_non_nullable
+as List<CheckoutPresenceDto>?,
   ));
 }
 
@@ -170,10 +181,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String reservationId,  String? agreementId,  String? tenantId,  String currentStep,  String? events, @IsoDateTimeConverter()  DateTime? tcCompletedAt, @IsoDateTimeConverter()  DateTime? paymentCompletedAt, @IsoDateTimeConverter()  DateTime? inspectionCompletedAt, @IsoDateTimeConverter()  DateTime? customerSignedAt, @IsoDateTimeConverter()  DateTime? startedAt, @IsoDateTimeConverter()  DateTime? finishedAt, @IsoDateTimeConverter()  DateTime? abandonedAt,  String? abandonedReason, @IsoDateTimeConverter()  DateTime? autoEmailedAt,  String? startedByUserId)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String reservationId,  String? agreementId,  String? tenantId,  String currentStep,  String? events, @IsoDateTimeConverter()  DateTime? tcCompletedAt, @IsoDateTimeConverter()  DateTime? paymentCompletedAt, @IsoDateTimeConverter()  DateTime? inspectionCompletedAt, @IsoDateTimeConverter()  DateTime? customerSignedAt, @IsoDateTimeConverter()  DateTime? startedAt, @IsoDateTimeConverter()  DateTime? finishedAt, @IsoDateTimeConverter()  DateTime? abandonedAt,  String? abandonedReason, @IsoDateTimeConverter()  DateTime? autoEmailedAt,  String? startedByUserId,  List<CheckoutPresenceDto>? presence)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _CheckoutSessionDto() when $default != null:
-return $default(_that.id,_that.reservationId,_that.agreementId,_that.tenantId,_that.currentStep,_that.events,_that.tcCompletedAt,_that.paymentCompletedAt,_that.inspectionCompletedAt,_that.customerSignedAt,_that.startedAt,_that.finishedAt,_that.abandonedAt,_that.abandonedReason,_that.autoEmailedAt,_that.startedByUserId);case _:
+return $default(_that.id,_that.reservationId,_that.agreementId,_that.tenantId,_that.currentStep,_that.events,_that.tcCompletedAt,_that.paymentCompletedAt,_that.inspectionCompletedAt,_that.customerSignedAt,_that.startedAt,_that.finishedAt,_that.abandonedAt,_that.abandonedReason,_that.autoEmailedAt,_that.startedByUserId,_that.presence);case _:
   return orElse();
 
 }
@@ -191,10 +202,10 @@ return $default(_that.id,_that.reservationId,_that.agreementId,_that.tenantId,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String reservationId,  String? agreementId,  String? tenantId,  String currentStep,  String? events, @IsoDateTimeConverter()  DateTime? tcCompletedAt, @IsoDateTimeConverter()  DateTime? paymentCompletedAt, @IsoDateTimeConverter()  DateTime? inspectionCompletedAt, @IsoDateTimeConverter()  DateTime? customerSignedAt, @IsoDateTimeConverter()  DateTime? startedAt, @IsoDateTimeConverter()  DateTime? finishedAt, @IsoDateTimeConverter()  DateTime? abandonedAt,  String? abandonedReason, @IsoDateTimeConverter()  DateTime? autoEmailedAt,  String? startedByUserId)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String reservationId,  String? agreementId,  String? tenantId,  String currentStep,  String? events, @IsoDateTimeConverter()  DateTime? tcCompletedAt, @IsoDateTimeConverter()  DateTime? paymentCompletedAt, @IsoDateTimeConverter()  DateTime? inspectionCompletedAt, @IsoDateTimeConverter()  DateTime? customerSignedAt, @IsoDateTimeConverter()  DateTime? startedAt, @IsoDateTimeConverter()  DateTime? finishedAt, @IsoDateTimeConverter()  DateTime? abandonedAt,  String? abandonedReason, @IsoDateTimeConverter()  DateTime? autoEmailedAt,  String? startedByUserId,  List<CheckoutPresenceDto>? presence)  $default,) {final _that = this;
 switch (_that) {
 case _CheckoutSessionDto():
-return $default(_that.id,_that.reservationId,_that.agreementId,_that.tenantId,_that.currentStep,_that.events,_that.tcCompletedAt,_that.paymentCompletedAt,_that.inspectionCompletedAt,_that.customerSignedAt,_that.startedAt,_that.finishedAt,_that.abandonedAt,_that.abandonedReason,_that.autoEmailedAt,_that.startedByUserId);case _:
+return $default(_that.id,_that.reservationId,_that.agreementId,_that.tenantId,_that.currentStep,_that.events,_that.tcCompletedAt,_that.paymentCompletedAt,_that.inspectionCompletedAt,_that.customerSignedAt,_that.startedAt,_that.finishedAt,_that.abandonedAt,_that.abandonedReason,_that.autoEmailedAt,_that.startedByUserId,_that.presence);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -211,10 +222,10 @@ return $default(_that.id,_that.reservationId,_that.agreementId,_that.tenantId,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String reservationId,  String? agreementId,  String? tenantId,  String currentStep,  String? events, @IsoDateTimeConverter()  DateTime? tcCompletedAt, @IsoDateTimeConverter()  DateTime? paymentCompletedAt, @IsoDateTimeConverter()  DateTime? inspectionCompletedAt, @IsoDateTimeConverter()  DateTime? customerSignedAt, @IsoDateTimeConverter()  DateTime? startedAt, @IsoDateTimeConverter()  DateTime? finishedAt, @IsoDateTimeConverter()  DateTime? abandonedAt,  String? abandonedReason, @IsoDateTimeConverter()  DateTime? autoEmailedAt,  String? startedByUserId)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String reservationId,  String? agreementId,  String? tenantId,  String currentStep,  String? events, @IsoDateTimeConverter()  DateTime? tcCompletedAt, @IsoDateTimeConverter()  DateTime? paymentCompletedAt, @IsoDateTimeConverter()  DateTime? inspectionCompletedAt, @IsoDateTimeConverter()  DateTime? customerSignedAt, @IsoDateTimeConverter()  DateTime? startedAt, @IsoDateTimeConverter()  DateTime? finishedAt, @IsoDateTimeConverter()  DateTime? abandonedAt,  String? abandonedReason, @IsoDateTimeConverter()  DateTime? autoEmailedAt,  String? startedByUserId,  List<CheckoutPresenceDto>? presence)?  $default,) {final _that = this;
 switch (_that) {
 case _CheckoutSessionDto() when $default != null:
-return $default(_that.id,_that.reservationId,_that.agreementId,_that.tenantId,_that.currentStep,_that.events,_that.tcCompletedAt,_that.paymentCompletedAt,_that.inspectionCompletedAt,_that.customerSignedAt,_that.startedAt,_that.finishedAt,_that.abandonedAt,_that.abandonedReason,_that.autoEmailedAt,_that.startedByUserId);case _:
+return $default(_that.id,_that.reservationId,_that.agreementId,_that.tenantId,_that.currentStep,_that.events,_that.tcCompletedAt,_that.paymentCompletedAt,_that.inspectionCompletedAt,_that.customerSignedAt,_that.startedAt,_that.finishedAt,_that.abandonedAt,_that.abandonedReason,_that.autoEmailedAt,_that.startedByUserId,_that.presence);case _:
   return null;
 
 }
@@ -226,7 +237,7 @@ return $default(_that.id,_that.reservationId,_that.agreementId,_that.tenantId,_t
 @JsonSerializable()
 
 class _CheckoutSessionDto extends CheckoutSessionDto {
-  const _CheckoutSessionDto({required this.id, required this.reservationId, this.agreementId, this.tenantId, required this.currentStep, this.events, @IsoDateTimeConverter() this.tcCompletedAt, @IsoDateTimeConverter() this.paymentCompletedAt, @IsoDateTimeConverter() this.inspectionCompletedAt, @IsoDateTimeConverter() this.customerSignedAt, @IsoDateTimeConverter() this.startedAt, @IsoDateTimeConverter() this.finishedAt, @IsoDateTimeConverter() this.abandonedAt, this.abandonedReason, @IsoDateTimeConverter() this.autoEmailedAt, this.startedByUserId}): super._();
+  const _CheckoutSessionDto({required this.id, required this.reservationId, this.agreementId, this.tenantId, required this.currentStep, this.events, @IsoDateTimeConverter() this.tcCompletedAt, @IsoDateTimeConverter() this.paymentCompletedAt, @IsoDateTimeConverter() this.inspectionCompletedAt, @IsoDateTimeConverter() this.customerSignedAt, @IsoDateTimeConverter() this.startedAt, @IsoDateTimeConverter() this.finishedAt, @IsoDateTimeConverter() this.abandonedAt, this.abandonedReason, @IsoDateTimeConverter() this.autoEmailedAt, this.startedByUserId, final  List<CheckoutPresenceDto>? presence}): _presence = presence,super._();
   factory _CheckoutSessionDto.fromJson(Map<String, dynamic> json) => _$CheckoutSessionDtoFromJson(json);
 
 @override final  String id;
@@ -247,6 +258,35 @@ class _CheckoutSessionDto extends CheckoutSessionDto {
 @override final  String? abandonedReason;
 @override@IsoDateTimeConverter() final  DateTime? autoEmailedAt;
 @override final  String? startedByUserId;
+/// Presencia suave de las otras superficies (M2 P1 —
+/// `checkout-presence.service.js` `withPresence()`, adjunta el campo en
+/// `GET /:id` y `GET /by-reservation/:rid`).
+///
+/// NULO ≠ VACÍO, y la diferencia importa: `null` = este backend todavía
+/// no emite el campo (el PR-tren P1-P3 no está desplegado) ⇒ la app NO
+/// puede afirmar nada sobre quién más está en la sesión; `[]` = el
+/// backend SÍ lo emite y no hay nadie fresco dentro del TTL de 45 s.
+/// Ambas pintan igual (sin chip), pero solo la segunda es una
+/// afirmación — por eso el campo es opcional y jamás tiene default.
+ final  List<CheckoutPresenceDto>? _presence;
+/// Presencia suave de las otras superficies (M2 P1 —
+/// `checkout-presence.service.js` `withPresence()`, adjunta el campo en
+/// `GET /:id` y `GET /by-reservation/:rid`).
+///
+/// NULO ≠ VACÍO, y la diferencia importa: `null` = este backend todavía
+/// no emite el campo (el PR-tren P1-P3 no está desplegado) ⇒ la app NO
+/// puede afirmar nada sobre quién más está en la sesión; `[]` = el
+/// backend SÍ lo emite y no hay nadie fresco dentro del TTL de 45 s.
+/// Ambas pintan igual (sin chip), pero solo la segunda es una
+/// afirmación — por eso el campo es opcional y jamás tiene default.
+@override List<CheckoutPresenceDto>? get presence {
+  final value = _presence;
+  if (value == null) return null;
+  if (_presence is EqualUnmodifiableListView) return _presence;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(value);
+}
+
 
 /// Create a copy of CheckoutSessionDto
 /// with the given fields replaced by the non-null parameter values.
@@ -261,16 +301,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _CheckoutSessionDto&&(identical(other.id, id) || other.id == id)&&(identical(other.reservationId, reservationId) || other.reservationId == reservationId)&&(identical(other.agreementId, agreementId) || other.agreementId == agreementId)&&(identical(other.tenantId, tenantId) || other.tenantId == tenantId)&&(identical(other.currentStep, currentStep) || other.currentStep == currentStep)&&(identical(other.events, events) || other.events == events)&&(identical(other.tcCompletedAt, tcCompletedAt) || other.tcCompletedAt == tcCompletedAt)&&(identical(other.paymentCompletedAt, paymentCompletedAt) || other.paymentCompletedAt == paymentCompletedAt)&&(identical(other.inspectionCompletedAt, inspectionCompletedAt) || other.inspectionCompletedAt == inspectionCompletedAt)&&(identical(other.customerSignedAt, customerSignedAt) || other.customerSignedAt == customerSignedAt)&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.finishedAt, finishedAt) || other.finishedAt == finishedAt)&&(identical(other.abandonedAt, abandonedAt) || other.abandonedAt == abandonedAt)&&(identical(other.abandonedReason, abandonedReason) || other.abandonedReason == abandonedReason)&&(identical(other.autoEmailedAt, autoEmailedAt) || other.autoEmailedAt == autoEmailedAt)&&(identical(other.startedByUserId, startedByUserId) || other.startedByUserId == startedByUserId));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _CheckoutSessionDto&&(identical(other.id, id) || other.id == id)&&(identical(other.reservationId, reservationId) || other.reservationId == reservationId)&&(identical(other.agreementId, agreementId) || other.agreementId == agreementId)&&(identical(other.tenantId, tenantId) || other.tenantId == tenantId)&&(identical(other.currentStep, currentStep) || other.currentStep == currentStep)&&(identical(other.events, events) || other.events == events)&&(identical(other.tcCompletedAt, tcCompletedAt) || other.tcCompletedAt == tcCompletedAt)&&(identical(other.paymentCompletedAt, paymentCompletedAt) || other.paymentCompletedAt == paymentCompletedAt)&&(identical(other.inspectionCompletedAt, inspectionCompletedAt) || other.inspectionCompletedAt == inspectionCompletedAt)&&(identical(other.customerSignedAt, customerSignedAt) || other.customerSignedAt == customerSignedAt)&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.finishedAt, finishedAt) || other.finishedAt == finishedAt)&&(identical(other.abandonedAt, abandonedAt) || other.abandonedAt == abandonedAt)&&(identical(other.abandonedReason, abandonedReason) || other.abandonedReason == abandonedReason)&&(identical(other.autoEmailedAt, autoEmailedAt) || other.autoEmailedAt == autoEmailedAt)&&(identical(other.startedByUserId, startedByUserId) || other.startedByUserId == startedByUserId)&&const DeepCollectionEquality().equals(other._presence, _presence));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,reservationId,agreementId,tenantId,currentStep,events,tcCompletedAt,paymentCompletedAt,inspectionCompletedAt,customerSignedAt,startedAt,finishedAt,abandonedAt,abandonedReason,autoEmailedAt,startedByUserId);
+int get hashCode => Object.hash(runtimeType,id,reservationId,agreementId,tenantId,currentStep,events,tcCompletedAt,paymentCompletedAt,inspectionCompletedAt,customerSignedAt,startedAt,finishedAt,abandonedAt,abandonedReason,autoEmailedAt,startedByUserId,const DeepCollectionEquality().hash(_presence));
 
 @override
 String toString() {
-  return 'CheckoutSessionDto(id: $id, reservationId: $reservationId, agreementId: $agreementId, tenantId: $tenantId, currentStep: $currentStep, events: $events, tcCompletedAt: $tcCompletedAt, paymentCompletedAt: $paymentCompletedAt, inspectionCompletedAt: $inspectionCompletedAt, customerSignedAt: $customerSignedAt, startedAt: $startedAt, finishedAt: $finishedAt, abandonedAt: $abandonedAt, abandonedReason: $abandonedReason, autoEmailedAt: $autoEmailedAt, startedByUserId: $startedByUserId)';
+  return 'CheckoutSessionDto(id: $id, reservationId: $reservationId, agreementId: $agreementId, tenantId: $tenantId, currentStep: $currentStep, events: $events, tcCompletedAt: $tcCompletedAt, paymentCompletedAt: $paymentCompletedAt, inspectionCompletedAt: $inspectionCompletedAt, customerSignedAt: $customerSignedAt, startedAt: $startedAt, finishedAt: $finishedAt, abandonedAt: $abandonedAt, abandonedReason: $abandonedReason, autoEmailedAt: $autoEmailedAt, startedByUserId: $startedByUserId, presence: $presence)';
 }
 
 
@@ -281,7 +321,7 @@ abstract mixin class _$CheckoutSessionDtoCopyWith<$Res> implements $CheckoutSess
   factory _$CheckoutSessionDtoCopyWith(_CheckoutSessionDto value, $Res Function(_CheckoutSessionDto) _then) = __$CheckoutSessionDtoCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String reservationId, String? agreementId, String? tenantId, String currentStep, String? events,@IsoDateTimeConverter() DateTime? tcCompletedAt,@IsoDateTimeConverter() DateTime? paymentCompletedAt,@IsoDateTimeConverter() DateTime? inspectionCompletedAt,@IsoDateTimeConverter() DateTime? customerSignedAt,@IsoDateTimeConverter() DateTime? startedAt,@IsoDateTimeConverter() DateTime? finishedAt,@IsoDateTimeConverter() DateTime? abandonedAt, String? abandonedReason,@IsoDateTimeConverter() DateTime? autoEmailedAt, String? startedByUserId
+ String id, String reservationId, String? agreementId, String? tenantId, String currentStep, String? events,@IsoDateTimeConverter() DateTime? tcCompletedAt,@IsoDateTimeConverter() DateTime? paymentCompletedAt,@IsoDateTimeConverter() DateTime? inspectionCompletedAt,@IsoDateTimeConverter() DateTime? customerSignedAt,@IsoDateTimeConverter() DateTime? startedAt,@IsoDateTimeConverter() DateTime? finishedAt,@IsoDateTimeConverter() DateTime? abandonedAt, String? abandonedReason,@IsoDateTimeConverter() DateTime? autoEmailedAt, String? startedByUserId, List<CheckoutPresenceDto>? presence
 });
 
 
@@ -298,7 +338,7 @@ class __$CheckoutSessionDtoCopyWithImpl<$Res>
 
 /// Create a copy of CheckoutSessionDto
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? reservationId = null,Object? agreementId = freezed,Object? tenantId = freezed,Object? currentStep = null,Object? events = freezed,Object? tcCompletedAt = freezed,Object? paymentCompletedAt = freezed,Object? inspectionCompletedAt = freezed,Object? customerSignedAt = freezed,Object? startedAt = freezed,Object? finishedAt = freezed,Object? abandonedAt = freezed,Object? abandonedReason = freezed,Object? autoEmailedAt = freezed,Object? startedByUserId = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? reservationId = null,Object? agreementId = freezed,Object? tenantId = freezed,Object? currentStep = null,Object? events = freezed,Object? tcCompletedAt = freezed,Object? paymentCompletedAt = freezed,Object? inspectionCompletedAt = freezed,Object? customerSignedAt = freezed,Object? startedAt = freezed,Object? finishedAt = freezed,Object? abandonedAt = freezed,Object? abandonedReason = freezed,Object? autoEmailedAt = freezed,Object? startedByUserId = freezed,Object? presence = freezed,}) {
   return _then(_CheckoutSessionDto(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,reservationId: null == reservationId ? _self.reservationId : reservationId // ignore: cast_nullable_to_non_nullable
@@ -316,7 +356,285 @@ as DateTime?,abandonedAt: freezed == abandonedAt ? _self.abandonedAt : abandoned
 as DateTime?,abandonedReason: freezed == abandonedReason ? _self.abandonedReason : abandonedReason // ignore: cast_nullable_to_non_nullable
 as String?,autoEmailedAt: freezed == autoEmailedAt ? _self.autoEmailedAt : autoEmailedAt // ignore: cast_nullable_to_non_nullable
 as DateTime?,startedByUserId: freezed == startedByUserId ? _self.startedByUserId : startedByUserId // ignore: cast_nullable_to_non_nullable
-as String?,
+as String?,presence: freezed == presence ? _self._presence : presence // ignore: cast_nullable_to_non_nullable
+as List<CheckoutPresenceDto>?,
+  ));
+}
+
+
+}
+
+
+/// @nodoc
+mixin _$CheckoutPresenceDto {
+
+/// RIDEOPS | COUNTER | KIOSK | CUSTOMER (nunca null en el serializer;
+/// el default vacío es cinturón, no expectativa).
+ String get surface;/// El servidor ya resolvió label → fullName del staff → etiqueta genérica
+/// de la superficie, así que nunca llega vacío por el camino feliz.
+ String get displayName;@IsoDateTimeConverter() DateTime? get lastSeenAt;
+/// Create a copy of CheckoutPresenceDto
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$CheckoutPresenceDtoCopyWith<CheckoutPresenceDto> get copyWith => _$CheckoutPresenceDtoCopyWithImpl<CheckoutPresenceDto>(this as CheckoutPresenceDto, _$identity);
+
+  /// Serializes this CheckoutPresenceDto to a JSON map.
+  Map<String, dynamic> toJson();
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CheckoutPresenceDto&&(identical(other.surface, surface) || other.surface == surface)&&(identical(other.displayName, displayName) || other.displayName == displayName)&&(identical(other.lastSeenAt, lastSeenAt) || other.lastSeenAt == lastSeenAt));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,surface,displayName,lastSeenAt);
+
+@override
+String toString() {
+  return 'CheckoutPresenceDto(surface: $surface, displayName: $displayName, lastSeenAt: $lastSeenAt)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $CheckoutPresenceDtoCopyWith<$Res>  {
+  factory $CheckoutPresenceDtoCopyWith(CheckoutPresenceDto value, $Res Function(CheckoutPresenceDto) _then) = _$CheckoutPresenceDtoCopyWithImpl;
+@useResult
+$Res call({
+ String surface, String displayName,@IsoDateTimeConverter() DateTime? lastSeenAt
+});
+
+
+
+
+}
+/// @nodoc
+class _$CheckoutPresenceDtoCopyWithImpl<$Res>
+    implements $CheckoutPresenceDtoCopyWith<$Res> {
+  _$CheckoutPresenceDtoCopyWithImpl(this._self, this._then);
+
+  final CheckoutPresenceDto _self;
+  final $Res Function(CheckoutPresenceDto) _then;
+
+/// Create a copy of CheckoutPresenceDto
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? surface = null,Object? displayName = null,Object? lastSeenAt = freezed,}) {
+  return _then(_self.copyWith(
+surface: null == surface ? _self.surface : surface // ignore: cast_nullable_to_non_nullable
+as String,displayName: null == displayName ? _self.displayName : displayName // ignore: cast_nullable_to_non_nullable
+as String,lastSeenAt: freezed == lastSeenAt ? _self.lastSeenAt : lastSeenAt // ignore: cast_nullable_to_non_nullable
+as DateTime?,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [CheckoutPresenceDto].
+extension CheckoutPresenceDtoPatterns on CheckoutPresenceDto {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _CheckoutPresenceDto value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _CheckoutPresenceDto() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _CheckoutPresenceDto value)  $default,){
+final _that = this;
+switch (_that) {
+case _CheckoutPresenceDto():
+return $default(_that);case _:
+  throw StateError('Unexpected subclass');
+
+}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _CheckoutPresenceDto value)?  $default,){
+final _that = this;
+switch (_that) {
+case _CheckoutPresenceDto() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String surface,  String displayName, @IsoDateTimeConverter()  DateTime? lastSeenAt)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _CheckoutPresenceDto() when $default != null:
+return $default(_that.surface,_that.displayName,_that.lastSeenAt);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String surface,  String displayName, @IsoDateTimeConverter()  DateTime? lastSeenAt)  $default,) {final _that = this;
+switch (_that) {
+case _CheckoutPresenceDto():
+return $default(_that.surface,_that.displayName,_that.lastSeenAt);case _:
+  throw StateError('Unexpected subclass');
+
+}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String surface,  String displayName, @IsoDateTimeConverter()  DateTime? lastSeenAt)?  $default,) {final _that = this;
+switch (_that) {
+case _CheckoutPresenceDto() when $default != null:
+return $default(_that.surface,_that.displayName,_that.lastSeenAt);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _CheckoutPresenceDto extends CheckoutPresenceDto {
+  const _CheckoutPresenceDto({this.surface = '', this.displayName = '', @IsoDateTimeConverter() this.lastSeenAt}): super._();
+  factory _CheckoutPresenceDto.fromJson(Map<String, dynamic> json) => _$CheckoutPresenceDtoFromJson(json);
+
+/// RIDEOPS | COUNTER | KIOSK | CUSTOMER (nunca null en el serializer;
+/// el default vacío es cinturón, no expectativa).
+@override@JsonKey() final  String surface;
+/// El servidor ya resolvió label → fullName del staff → etiqueta genérica
+/// de la superficie, así que nunca llega vacío por el camino feliz.
+@override@JsonKey() final  String displayName;
+@override@IsoDateTimeConverter() final  DateTime? lastSeenAt;
+
+/// Create a copy of CheckoutPresenceDto
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$CheckoutPresenceDtoCopyWith<_CheckoutPresenceDto> get copyWith => __$CheckoutPresenceDtoCopyWithImpl<_CheckoutPresenceDto>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$CheckoutPresenceDtoToJson(this, );
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _CheckoutPresenceDto&&(identical(other.surface, surface) || other.surface == surface)&&(identical(other.displayName, displayName) || other.displayName == displayName)&&(identical(other.lastSeenAt, lastSeenAt) || other.lastSeenAt == lastSeenAt));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,surface,displayName,lastSeenAt);
+
+@override
+String toString() {
+  return 'CheckoutPresenceDto(surface: $surface, displayName: $displayName, lastSeenAt: $lastSeenAt)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$CheckoutPresenceDtoCopyWith<$Res> implements $CheckoutPresenceDtoCopyWith<$Res> {
+  factory _$CheckoutPresenceDtoCopyWith(_CheckoutPresenceDto value, $Res Function(_CheckoutPresenceDto) _then) = __$CheckoutPresenceDtoCopyWithImpl;
+@override @useResult
+$Res call({
+ String surface, String displayName,@IsoDateTimeConverter() DateTime? lastSeenAt
+});
+
+
+
+
+}
+/// @nodoc
+class __$CheckoutPresenceDtoCopyWithImpl<$Res>
+    implements _$CheckoutPresenceDtoCopyWith<$Res> {
+  __$CheckoutPresenceDtoCopyWithImpl(this._self, this._then);
+
+  final _CheckoutPresenceDto _self;
+  final $Res Function(_CheckoutPresenceDto) _then;
+
+/// Create a copy of CheckoutPresenceDto
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? surface = null,Object? displayName = null,Object? lastSeenAt = freezed,}) {
+  return _then(_CheckoutPresenceDto(
+surface: null == surface ? _self.surface : surface // ignore: cast_nullable_to_non_nullable
+as String,displayName: null == displayName ? _self.displayName : displayName // ignore: cast_nullable_to_non_nullable
+as String,lastSeenAt: freezed == lastSeenAt ? _self.lastSeenAt : lastSeenAt // ignore: cast_nullable_to_non_nullable
+as DateTime?,
   ));
 }
 

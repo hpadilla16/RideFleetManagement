@@ -42,6 +42,66 @@ class CheckoutApi {
     }
   }
 
+  /// `GET /api/checkout-sessions/:id` (routes:51) — la lectura del POLL y el
+  /// re-fetch de reconciliación de todo 409 (ADR-4). LLEVA `x-view-location`:
+  /// el wizard es superficie de staff VIVA (a diferencia del drenado, que
+  /// manda evidencia sellada de otra sede) y si el agente ya no tiene la
+  /// sede, la negativa 403 debe verse, no esquivarse.
+  ///
+  /// 404 aquí es un caso real: la sesión existía y el tenant ya no la ve.
+  /// Se propaga como ApiError (a diferencia del `by-reservation`, donde 404
+  /// significa "todavía no hay sesión" y es un estado normal de la pantalla).
+  Future<CheckoutSessionDto> getSession(String id) async {
+    try {
+      final res = await authedDio
+          .get<Map<String, dynamic>>('/api/checkout-sessions/$id');
+      return CheckoutSessionDto.fromJson(res.data!);
+    } on DioException catch (e) {
+      throw ApiError.fromDio(e);
+    }
+  }
+
+  /// `POST /api/checkout-sessions/:id/transition` (routes:84) —
+  /// `{toStep, metadata?}`. El servidor manda: valida el grafo y los entry
+  /// guards y responde 409 con `code` cuando no procede. NO mandamos
+  /// `expectedVersion` (P2): es opt-in y su consumo aterriza en M2-H6 junto
+  /// con el resto de la reconciliación dura.
+  Future<CheckoutSessionDto> transition({
+    required String id,
+    required String toStep,
+    Map<String, Object?>? metadata,
+  }) async {
+    try {
+      final res = await authedDio.post<Map<String, dynamic>>(
+        '/api/checkout-sessions/$id/transition',
+        data: {'toStep': toStep, 'metadata': ?metadata},
+      );
+      return CheckoutSessionDto.fromJson(res.data!);
+    } on DioException catch (e) {
+      throw ApiError.fromDio(e);
+    }
+  }
+
+  /// `POST /api/checkout-sessions/:id/abandon` (routes:380) — el "Guardar y
+  /// pausar" del agente. NO cambia `currentStep`: sella `abandonedAt` +
+  /// `abandonedReason` (service:850-868), por eso la sesión se retoma donde
+  /// iba. Un 409 SIN code aquí significa "la sesión ya es terminal"
+  /// (service:853-855, único 409 del módulo que viaja sin `code`).
+  Future<CheckoutSessionDto> abandon({
+    required String id,
+    String? reason,
+  }) async {
+    try {
+      final res = await authedDio.post<Map<String, dynamic>>(
+        '/api/checkout-sessions/$id/abandon',
+        data: {'reason': ?reason},
+      );
+      return CheckoutSessionDto.fromJson(res.data!);
+    } on DioException catch (e) {
+      throw ApiError.fromDio(e);
+    }
+  }
+
   /// `POST /api/checkout-sessions` (routes:33) — idempotente por
   /// reservationId. Los guards del backend (NO_VEHICLE_ASSIGNED,
   /// PRECHECKIN_REQUIRED, AGE_RULES_*) llegan como ApiError y la pantalla

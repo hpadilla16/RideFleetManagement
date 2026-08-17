@@ -8,7 +8,8 @@ actualiza en el mismo PR (DoD #12). Los tests de DTO deserializan estos archivos
 |---|---|
 | `login_response.json` | `auth.service.js` `login()` → `{ token, user: buildSessionUser }` (:87-115, :250-255) |
 | `dashboard.json` | `employee-app.service.js` `dashboard()` (:451-497), `reservationCard` (:66-122), `incidentCard` (:124-160) |
-| `checkout_session.json` | fila Prisma cruda del modelo `CheckoutSession` (schema.prisma:5067-5111) vía `getById` (:276-280) |
+| `checkout_session.json` | fila Prisma cruda del modelo `CheckoutSession` (schema.prisma:5067-5111) vía `getById` (:276-280); `events` con la forma exacta de `appendEvent` (state-machine.js:111-117) — incluye una entrada del kiosco (`metadata.kiosk`, kiosk-checkout.service.js:769-774) y una entrada LEGACY sin `kind` |
+| `checkout_session_presence.json` | la MISMA fila + lo que agrega el PR-tren P1-P3 (rama `feat/checkout-multisurface-p123`, aún no en main): `presence: [{surface, displayName, lastSeenAt}]` de `checkoutPresenceService.withPresence()` y la columna `stateVersion` de P2. Sirve además de prueba de tolerancia: `stateVersion` NO está declarado en el DTO y debe ignorarse sin romper |
 | `reservation_card.json` | `employee-app.service.js` `reservationCard` (:66-122) |
 | `handoff_token.json` | `checkout-session.service.js` `mintHandoffToken` (:727-733 reuso, :766-770 fresco) |
 | `mobile_inspection_state.json` | `mobile-inspection.service.js` `loadSession` (:118-143) |

@@ -632,6 +632,12 @@ abstract class AppLocalizations {
   /// **'{count} h'**
   String ageHours(int count);
 
+  /// Edad en SEGUNDOS — la necesita el wizard de checkout (M2-H1): el chip de presencia y el banner de avance ajeno miden en segundos, donde 'un momento' mentiría sobre la frescura del heartbeat (TTL 45 s).
+  ///
+  /// In es, this message translates to:
+  /// **'{count} s'**
+  String ageSeconds(int count);
+
   /// No description provided for @homeFreshnessLine.
   ///
   /// In es, this message translates to:
@@ -1645,6 +1651,492 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Cerrar sesión de todos modos'**
   String get logoutAnyway;
+
+  /// Título del wizbar del wizard de checkout (mockup 8A)
+  ///
+  /// In es, this message translates to:
+  /// **'Checkout · {reservation}'**
+  String coTitle(String reservation);
+
+  /// No description provided for @coTitleNoNumber.
+  ///
+  /// In es, this message translates to:
+  /// **'Checkout'**
+  String get coTitleNoNumber;
+
+  /// No description provided for @coPause.
+  ///
+  /// In es, this message translates to:
+  /// **'Pausar'**
+  String get coPause;
+
+  /// Contador honesto del mockup (nota 4): la cadena lineal CONFIRMING→CLOSED son 10 pasos; CANCELLED es salida alterna, no el paso 11.
+  ///
+  /// In es, this message translates to:
+  /// **'Paso {index} de {total}'**
+  String coStepOf(int index, int total);
+
+  /// No description provided for @coSeeAllSteps.
+  ///
+  /// In es, this message translates to:
+  /// **'Ver todos los pasos'**
+  String get coSeeAllSteps;
+
+  /// No description provided for @coStepsSheetTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'{total} pasos + salida alterna'**
+  String coStepsSheetTitle(int total);
+
+  /// No description provided for @coStepsSheetSub.
+  ///
+  /// In es, this message translates to:
+  /// **'Estado reportado por el servidor · actualizado hace {age}'**
+  String coStepsSheetSub(String age);
+
+  /// No description provided for @coSheetClose.
+  ///
+  /// In es, this message translates to:
+  /// **'Cerrar'**
+  String get coSheetClose;
+
+  /// No description provided for @coPhaseConfirm.
+  ///
+  /// In es, this message translates to:
+  /// **'Confirmar'**
+  String get coPhaseConfirm;
+
+  /// No description provided for @coPhaseTerms.
+  ///
+  /// In es, this message translates to:
+  /// **'T&C'**
+  String get coPhaseTerms;
+
+  /// No description provided for @coPhasePayment.
+  ///
+  /// In es, this message translates to:
+  /// **'Pago'**
+  String get coPhasePayment;
+
+  /// No description provided for @coPhaseInspection.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección'**
+  String get coPhaseInspection;
+
+  /// No description provided for @coPhaseClosing.
+  ///
+  /// In es, this message translates to:
+  /// **'Cierre'**
+  String get coPhaseClosing;
+
+  /// No description provided for @coStepConfirming.
+  ///
+  /// In es, this message translates to:
+  /// **'Confirmar cliente y vehículo'**
+  String get coStepConfirming;
+
+  /// No description provided for @coStepTcPending.
+  ///
+  /// In es, this message translates to:
+  /// **'Términos y condiciones'**
+  String get coStepTcPending;
+
+  /// No description provided for @coStepTcSigned.
+  ///
+  /// In es, this message translates to:
+  /// **'Términos firmados'**
+  String get coStepTcSigned;
+
+  /// No description provided for @coStepPaymentPending.
+  ///
+  /// In es, this message translates to:
+  /// **'Cobro en terminal'**
+  String get coStepPaymentPending;
+
+  /// No description provided for @coStepPaid.
+  ///
+  /// In es, this message translates to:
+  /// **'Pago completo'**
+  String get coStepPaid;
+
+  /// No description provided for @coStepInspectionHandoff.
+  ///
+  /// In es, this message translates to:
+  /// **'Pasar a inspección'**
+  String get coStepInspectionHandoff;
+
+  /// No description provided for @coStepInspectionInProgress.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección en curso'**
+  String get coStepInspectionInProgress;
+
+  /// No description provided for @coStepCustomerSignPending.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma del cliente'**
+  String get coStepCustomerSignPending;
+
+  /// No description provided for @coStepFinalizing.
+  ///
+  /// In es, this message translates to:
+  /// **'Generando contrato'**
+  String get coStepFinalizing;
+
+  /// No description provided for @coStepClosed.
+  ///
+  /// In es, this message translates to:
+  /// **'Entregado'**
+  String get coStepClosed;
+
+  /// No description provided for @coStepCancelled.
+  ///
+  /// In es, this message translates to:
+  /// **'Cancelado'**
+  String get coStepCancelled;
+
+  /// No description provided for @coStepCancelledHint.
+  ///
+  /// In es, this message translates to:
+  /// **'Salida alterna desde cualquier paso no terminal'**
+  String get coStepCancelledHint;
+
+  /// Forward-compat (ADR-4): un currentStep que esta versión de la app no conoce se muestra CRUDO, sin corregirlo ni adivinar el siguiente.
+  ///
+  /// In es, this message translates to:
+  /// **'Paso reportado por el servidor: {step}'**
+  String coStepUnknown(String step);
+
+  /// No description provided for @coStepPending.
+  ///
+  /// In es, this message translates to:
+  /// **'Pendiente'**
+  String get coStepPending;
+
+  /// No description provided for @coStepInProgress.
+  ///
+  /// In es, this message translates to:
+  /// **'En curso'**
+  String get coStepInProgress;
+
+  /// No description provided for @coStepDoneByYou.
+  ///
+  /// In es, this message translates to:
+  /// **'Completado por ti · {time}'**
+  String coStepDoneByYou(String time);
+
+  /// No description provided for @coStepDoneKiosk.
+  ///
+  /// In es, this message translates to:
+  /// **'Completado en el kiosco · {time}'**
+  String coStepDoneKiosk(String time);
+
+  /// No description provided for @coStepDoneOtherAgent.
+  ///
+  /// In es, this message translates to:
+  /// **'Completado por otro agente · {time}'**
+  String coStepDoneOtherAgent(String time);
+
+  /// No description provided for @coStepDone.
+  ///
+  /// In es, this message translates to:
+  /// **'Completado · {time}'**
+  String coStepDone(String time);
+
+  /// No description provided for @coGuardTcCompleted.
+  ///
+  /// In es, this message translates to:
+  /// **'Espera: firma de T&C del cliente'**
+  String get coGuardTcCompleted;
+
+  /// No description provided for @coGuardPayment.
+  ///
+  /// In es, this message translates to:
+  /// **'Espera: cobro registrado'**
+  String get coGuardPayment;
+
+  /// No description provided for @coGuardInspection.
+  ///
+  /// In es, this message translates to:
+  /// **'Espera: inspección completa'**
+  String get coGuardInspection;
+
+  /// No description provided for @coGuardSignature.
+  ///
+  /// In es, this message translates to:
+  /// **'Espera: firma del cliente'**
+  String get coGuardSignature;
+
+  /// No description provided for @coSurfaceKiosk.
+  ///
+  /// In es, this message translates to:
+  /// **'kiosco'**
+  String get coSurfaceKiosk;
+
+  /// No description provided for @coSurfaceCounter.
+  ///
+  /// In es, this message translates to:
+  /// **'mostrador'**
+  String get coSurfaceCounter;
+
+  /// No description provided for @coSurfaceRideops.
+  ///
+  /// In es, this message translates to:
+  /// **'otro teléfono'**
+  String get coSurfaceRideops;
+
+  /// No description provided for @coSurfaceCustomer.
+  ///
+  /// In es, this message translates to:
+  /// **'teléfono del cliente'**
+  String get coSurfaceCustomer;
+
+  /// No description provided for @coSurfaceOther.
+  ///
+  /// In es, this message translates to:
+  /// **'otra superficie'**
+  String get coSurfaceOther;
+
+  /// Chip de presencia (P1). Informativo, jamás un candado.
+  ///
+  /// In es, this message translates to:
+  /// **'{name} está en esta sesión · {surface} · hace {age}'**
+  String coPresenceLine(String name, String surface, String age);
+
+  /// No description provided for @coPresenceMore.
+  ///
+  /// In es, this message translates to:
+  /// **'+{count}'**
+  String coPresenceMore(int count);
+
+  /// No description provided for @coAdvancedKiosk.
+  ///
+  /// In es, this message translates to:
+  /// **'«{step}» se completó en el kiosco hace {age}.'**
+  String coAdvancedKiosk(String step, String age);
+
+  /// No description provided for @coAdvancedOtherAgent.
+  ///
+  /// In es, this message translates to:
+  /// **'«{step}» lo completó otro agente hace {age}.'**
+  String coAdvancedOtherAgent(String step, String age);
+
+  /// No description provided for @coAdvancedOtherSurface.
+  ///
+  /// In es, this message translates to:
+  /// **'«{step}» se completó en otra superficie hace {age}.'**
+  String coAdvancedOtherSurface(String step, String age);
+
+  /// No description provided for @coAdvancedNow.
+  ///
+  /// In es, this message translates to:
+  /// **'Ya vas en: {step}.'**
+  String coAdvancedNow(String step);
+
+  /// No description provided for @coAdvancedSeeChanged.
+  ///
+  /// In es, this message translates to:
+  /// **'Ver qué cambió'**
+  String get coAdvancedSeeChanged;
+
+  /// No description provided for @coStaleView.
+  ///
+  /// In es, this message translates to:
+  /// **'vista de hace {age}'**
+  String coStaleView(String age);
+
+  /// No description provided for @coOfflineBanner.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin conexión. Esto es lo último que vio el servidor hace {age} — puede haber cambiado en otra superficie.'**
+  String coOfflineBanner(String age);
+
+  /// No description provided for @coBlockedOfflineWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Avanzar un paso requiere confirmación del servidor. Sin red no se adivina: se espera.\nNada de este paso entra a la Bandeja de salida.'**
+  String get coBlockedOfflineWhy;
+
+  /// No description provided for @coBlockedOfflineShort.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin conexión: el avance lo confirma el servidor.'**
+  String get coBlockedOfflineShort;
+
+  /// No description provided for @coTransitionWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'El servidor confirma el avance; si otra superficie ya lo hizo, esta pantalla se actualiza sola.'**
+  String get coTransitionWhy;
+
+  /// No description provided for @coPauseTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'¿Guardar y pausar este checkout?'**
+  String get coPauseTitle;
+
+  /// No description provided for @coPauseSub.
+  ///
+  /// In es, this message translates to:
+  /// **'La sesión queda guardada en el paso {index} de {total}. Nada se pierde.'**
+  String coPauseSub(int index, int total);
+
+  /// No description provided for @coPauseSubUnknownStep.
+  ///
+  /// In es, this message translates to:
+  /// **'La sesión queda guardada en el paso que reporta el servidor. Nada se pierde.'**
+  String get coPauseSubUnknownStep;
+
+  /// No description provided for @coPauseKeeps.
+  ///
+  /// In es, this message translates to:
+  /// **'Se conserva: cliente y vehículo verificados, el código de T&C vigente y el registro de quién hizo qué.'**
+  String get coPauseKeeps;
+
+  /// No description provided for @coPauseWarn.
+  ///
+  /// In es, this message translates to:
+  /// **'Otro compañero (o el kiosco) puede retomarla desde donde va. Al volver, entras al paso que reporte el servidor, no al que dejaste.'**
+  String get coPauseWarn;
+
+  /// No description provided for @coPauseConfirm.
+  ///
+  /// In es, this message translates to:
+  /// **'Guardar y pausar'**
+  String get coPauseConfirm;
+
+  /// No description provided for @coPauseStay.
+  ///
+  /// In es, this message translates to:
+  /// **'Seguir aquí'**
+  String get coPauseStay;
+
+  /// No description provided for @coPauseFailed.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudo pausar. Revisa la conexión e intenta de nuevo.'**
+  String get coPauseFailed;
+
+  /// No description provided for @coTerminalClosedTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Checkout entregado'**
+  String get coTerminalClosedTitle;
+
+  /// No description provided for @coTerminalCancelledTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Checkout cancelado'**
+  String get coTerminalCancelledTitle;
+
+  /// No description provided for @coTerminalBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Esta sesión ya es terminal: no admite más pasos.'**
+  String get coTerminalBody;
+
+  /// No description provided for @coTerminalLogTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Registro de la sesión'**
+  String get coTerminalLogTitle;
+
+  /// No description provided for @coExit.
+  ///
+  /// In es, this message translates to:
+  /// **'Salir'**
+  String get coExit;
+
+  /// No description provided for @coNoSessionTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Aún no hay sesión de checkout'**
+  String get coNoSessionTitle;
+
+  /// No description provided for @coNoSessionBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Esta reserva todavía no tiene una sesión abierta. Se inicia desde la cola de salidas del inicio.'**
+  String get coNoSessionBody;
+
+  /// No description provided for @coLoadFailedTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudo abrir el checkout'**
+  String get coLoadFailedTitle;
+
+  /// No description provided for @coConflictEntryGuardTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Falta un paso previo'**
+  String get coConflictEntryGuardTitle;
+
+  /// No description provided for @coConflictVehicleTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'El vehículo ya no está libre'**
+  String get coConflictVehicleTitle;
+
+  /// No description provided for @coConflictGenericTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'El servidor no aceptó el avance'**
+  String get coConflictGenericTitle;
+
+  /// No description provided for @coConflictDismiss.
+  ///
+  /// In es, this message translates to:
+  /// **'Entendido'**
+  String get coConflictDismiss;
+
+  /// No description provided for @coStampsTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Lo que el servidor ya tiene'**
+  String get coStampsTitle;
+
+  /// No description provided for @coStampTc.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma de T&C'**
+  String get coStampTc;
+
+  /// No description provided for @coStampPayment.
+  ///
+  /// In es, this message translates to:
+  /// **'Cobro registrado'**
+  String get coStampPayment;
+
+  /// No description provided for @coStampInspection.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección completa'**
+  String get coStampInspection;
+
+  /// No description provided for @coStampSignature.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma del cliente'**
+  String get coStampSignature;
+
+  /// No description provided for @coStampDone.
+  ///
+  /// In es, this message translates to:
+  /// **'Listo · {time}'**
+  String coStampDone(String time);
+
+  /// No description provided for @coStampPending.
+  ///
+  /// In es, this message translates to:
+  /// **'Pendiente'**
+  String get coStampPending;
+
+  /// No description provided for @coSessionAgeLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Estado de hace {age}'**
+  String coSessionAgeLabel(String age);
 }
 
 class _AppLocalizationsDelegate
