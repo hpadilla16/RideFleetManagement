@@ -82,7 +82,7 @@ function Wizard({ token, me, logout }) {
     // no locations (Hector, 2026-08-10).
     Promise.allSettled([
       api('/api/locations/selectable', {}, token),
-      api('/api/vehicle-types', {}, token)
+      api('/api/vehicle-types/selectable', {}, token)
     ]).then(([locs, vts]) => {
       const gotLocs = locs.status === 'fulfilled' && Array.isArray(locs.value) ? locs.value : [];
       const gotTypes = vts.status === 'fulfilled' && Array.isArray(vts.value) ? vts.value : [];
