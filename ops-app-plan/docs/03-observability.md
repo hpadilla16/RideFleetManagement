@@ -33,7 +33,7 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 | `auth.session_expired_relogin` | 401 → re-login | — |
 | `session.view_location_set` | cambio en el selector | — |
 | `session.view_location_denied` | 403 del header | — |
-| `session.pin_lock` / `session.pin_unlock` | bloqueo/desbloqueo | `method` (pin/biometric) |
+| `session.pin_lock` / `session.pin_unlock` | bloqueo/desbloqueo | lock: `reason` (cold_start/idle_timeout/background/manual) · unlock: `method` (pin/biometric) |
 
 ### Checkout (M2)
 | Evento | Cuándo |

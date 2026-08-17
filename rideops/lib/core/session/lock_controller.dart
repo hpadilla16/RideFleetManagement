@@ -240,7 +240,9 @@ class LockController extends Notifier<LockState> {
   ///  - [resumeLock] al llegar a cero reinicia la ventana de inactividad
   ///    COMPLETA — jamás un candado instantáneo al salir del kiosco.
   ///  - La salida deliberada del kiosco (mantener 3 s + PIN) valida con
-  ///    [checkPin], que no toca el estado del candado.
+  ///    [checkPin], que no toca el estado del candado. La UI de salida del
+  ///    kiosco (H5) DEBE limitar reintentos de checkPin; checkPin no cuenta
+  ///    intentos por diseño.
   ///  - Un logout/401 resetea las suspensiones: no sobreviven a la sesión.
   void suspendLock() {
     _suspendCount++;

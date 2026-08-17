@@ -67,6 +67,8 @@ class _PinLockScreenState extends ConsumerState<PinLockScreen> {
 
   void _onBackspace() {
     if (_verifying || _entered.isEmpty) return;
+    // Mismo haptic que los dígitos (GD S1): borrar también es una tecla.
+    unawaited(HapticFeedback.lightImpact());
     setState(() => _entered = _entered.substring(0, _entered.length - 1));
   }
 

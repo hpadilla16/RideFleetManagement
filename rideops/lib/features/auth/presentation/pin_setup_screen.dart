@@ -51,6 +51,8 @@ class _PinSetupScreenState extends ConsumerState<PinSetupScreen> {
 
   void _onBackspace() {
     if (_saving || _entered.isEmpty) return;
+    // Mismo haptic que los dígitos (GD S1): borrar también es una tecla.
+    unawaited(HapticFeedback.lightImpact());
     setState(() => _entered = _entered.substring(0, _entered.length - 1));
   }
 
