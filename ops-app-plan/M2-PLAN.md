@@ -152,6 +152,20 @@ QA de épico (SHIP del M2):
 2. Compuerta de release de la taxonomía + sesiones-sin-crash.
 3. **Prueba de concurrencia real**: RideOps + kiosk en staging sobre la MISMA sesión —
    sin estado corrupto, sin doble cobro, reconciliación visible.
+   **Protocolo obligatorio** (QA H1, verificado con sondas, no razonado):
+   - a) **Cada aparato observador se queda en el wizard toda la corrida.** No comparar
+     "movimientos emitidos" contra "movimientos hechos" cruzando salidas/re-entradas: el
+     controller es autoDispose y la primera lectura de cada visita se aplica con
+     `detectForeign: false`, así que un movimiento ocurrido con nadie mirando cuenta
+     CERO. Es sub-conteo (dirección segura), pero invalida la comparación directa.
+   - b) **Una cuenta de usuario DISTINTA por aparato.** No es cosmético: un movimiento
+     hecho por tu propia cuenta desde otro aparato se suprime en el camino de poll
+     (`actor == you`) pero sí se loguea en el de 409 — si la prueba maneja dos teléfonos
+     con una sola cuenta, `via: poll` leerá cero y la corrida parecerá indicar que no
+     hubo concurrencia.
+   - c) **Corre DESPUÉS de que despliegue el PR P1-P3**: el cinturón de `stateVersion`
+     está inerte hasta entonces, y esa prueba es el único lugar donde el camino de
+     réplica obsoleta recibe cobertura real.
 4. Dinero: jamás encolado; idempotencia dentro del intento vivo probada con corte de
    red; `paymentActions` fail-closed contra la API.
 5. Matriz 409 en toda pantalla; openapi.json diffeado + fixtures si P1–P3 entraron.
