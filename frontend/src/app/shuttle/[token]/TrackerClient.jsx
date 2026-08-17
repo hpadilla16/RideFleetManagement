@@ -5,39 +5,41 @@
  *
  * ARCHITECTURE (Innovation): plain HTTP polling every 12s — no SSE, no
  * websockets. The GET itself is the demand signal that keeps the worker's
- * fast poll armed. MapLibre GL + OpenFreeMap vector tiles, loaded dynamically
- * so the ops bundle never carries a map library.
+ * fast poll armed.
  *
- * WORKER (the prod-blank-map lesson, 2026-08-16): maplibre v6 loads its web
- * worker as a MODULE script whose URL webpack resolves at runtime — and in
- * the production bundle that resolution landed under /shuttle/, a catch-all
- * route that answers HTML with a 200. The worker died, tiles never rendered,
- * and dev never showed it because dev resolves the URL correctly. So the
- * worker is SELF-HOSTED: predev/prebuild copy the exact installed version to
- * /public and setWorkerUrl pins it. Deterministic in every bundler mood.
+ * MAP = GOOGLE MAPS (Hector, 2026-08-16). MapLibre burned us twice in one
+ * day: its v6 web worker loads as a module script whose bundler-resolved URL
+ * fell into the /shuttle catch-all (HTML, dead worker, blank canvas), and the
+ * "fixed" self-hosted worker turned out to be an 18KB stub that imports
+ * MORE relative chunks — same trap one level deeper. Google's JS API is one
+ * script tag, no workers, no bundler interaction, and the customers already
+ * know the map. Key comes from NEXT_PUBLIC_GOOGLE_MAPS_KEY (inlined at
+ * BUILD time — the docker image must be built with it present). Without a
+ * key the page degrades to the card-only layout: instructions, request
+ * button and live distance all still work.
  *
- * FOLLOW RULE (GD review): the camera follows the bus only until the customer
- * pans or zooms — then THEY own the camera and a "recenter" chip hands it
+ * REFERRER NOTE: this page previously sent NO referrer anywhere (the token
+ * lives in the URL path). Google validates referrer-restricted keys against
+ * the Referer header, so total silence would break the key. The policy is
+ * now `origin` — Google sees "https://ridefleetmanager.com/", the token
+ * (path) is still never sent. Keep next.config.js and page metadata in sync
+ * on this.
+ *
+ * FOLLOW RULE (GD review): the camera follows the bus only until the
+ * customer pans — then THEY own the camera and a "recenter" chip hands it
  * back. Marker TWEENS between fixes; ETA is a headway sentence, never a
  * countdown.
  *
- * LANGUAGE (Hector, demo feedback): explicit ES | EN toggle on the card —
- * navigator.language guesses the default, the customer decides, localStorage
- * remembers. Sede-written data (pickup instructions) stays as written.
- *
- * LOCATION (Hector, demo feedback): the payload's `pickup` point (the sede's
- * own coordinates) renders as a pin; "share my location" adds the customer's
- * blue dot, a dashed walk line, and live distance to the waiting spot.
+ * LANGUAGE: explicit ES | EN toggle; navigator.language only guesses the
+ * default; localStorage remembers. Sede-written data stays as written.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_BASE } from '../../../lib/client';
-import 'maplibre-gl/dist/maplibre-gl.css';
 
 const POLL_MS = 12_000;
 const TWEEN_MS = 1600;
-const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
-const WORKER_URL = '/maplibre-gl-worker.mjs';
 const LANG_KEY = 'ride-shuttle-lang';
+const MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY || '';
 
 const STRINGS = {
   es: {
@@ -113,6 +115,27 @@ function useStrings() {
   return { t, lang, setLang };
 }
 
+/**
+ * Load the Google Maps JS API exactly once, however many components ask.
+ * The official async pattern: one script tag with loading=async, then
+ * google.maps.importLibrary() for each library actually used.
+ */
+let mapsApiPromise = null;
+function loadGoogleMaps() {
+  if (!MAPS_KEY) return Promise.resolve(null);
+  if (mapsApiPromise) return mapsApiPromise;
+  mapsApiPromise = new Promise((resolve) => {
+    if (window.google?.maps?.importLibrary) { resolve(window.google); return; }
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(MAPS_KEY)}&v=weekly&loading=async`;
+    script.async = true;
+    script.onload = () => resolve(window.google || null);
+    script.onerror = () => resolve(null); // bad key / blocked — page degrades to card-only
+    document.head.appendChild(script);
+  });
+  return mapsApiPromise;
+}
+
 /** Meters between two coordinates — enough precision for "how far is my walk". */
 function metersBetween(a, b) {
   const R = 6371000;
@@ -123,6 +146,13 @@ function metersBetween(a, b) {
   return 2 * R * Math.asin(Math.sqrt(s));
 }
 const formatDistance = (m) => (m < 950 ? `~${Math.max(10, Math.round(m / 10) * 10)} m` : `~${(m / 1000).toFixed(1)} km`);
+
+const markerDiv = (css, text) => {
+  const el = document.createElement('div');
+  el.style.cssText = css;
+  if (text) el.textContent = text;
+  return el;
+};
 
 export function ShuttleTrackerClient({ token }) {
   const { t, lang, setLang } = useStrings();
@@ -140,6 +170,7 @@ export function ShuttleTrackerClient({ token }) {
   const markerRef = useRef(null);
   const pickupMarkerRef = useRef(null);
   const userMarkerRef = useRef(null);
+  const walkLineRef = useRef(null);
   const geoWatchId = useRef(null);
   const lastFix = useRef(null);
   const tweenRaf = useRef(0);
@@ -171,53 +202,53 @@ export function ShuttleTrackerClient({ token }) {
   const pos = state?.position;
   const pickup = state?.pickup;
   useEffect(() => {
-    if (!pos || !mapRef.current) return;
+    if (!pos || !mapRef.current || !MAPS_KEY) return;
     let cancelled = false;
     (async () => {
-      // CJS/ESM interop differs between dev and the prod bundle — take
-      // whichever shape carries Map.
-      const mod = await import('maplibre-gl');
-      const maplibregl = mod?.default?.Map ? mod.default : mod;
-      // Pin the worker to our self-hosted copy BEFORE any Map exists — see
-      // the WORKER note in the header. setWorkerUrl lives on both shapes.
-      try { (maplibregl.setWorkerUrl || mod.setWorkerUrl)?.(WORKER_URL); } catch { /* older builds */ }
+      const google = await loadGoogleMaps();
+      if (!google || cancelled || !mapRef.current) return;
+      const { Map } = await google.maps.importLibrary('maps');
+      const { AdvancedMarkerElement } = await google.maps.importLibrary('marker');
       if (cancelled || !mapRef.current) return;
 
-      // The map container unmounts whenever the payload goes OFFLINE. A Map
-      // instance bound to that detached node would leave the NEXT container
-      // blank forever (QA, 2026-08-15) — so if the container changed, the old
-      // map dies and a fresh one is built.
-      if (mapObj.current && mapObj.current.getContainer() !== mapRef.current) {
-        mapObj.current.remove();
+      // The map container unmounts whenever the payload goes OFFLINE — a Map
+      // bound to a detached node leaves the next container blank (QA,
+      // 2026-08-15). Container changed → rebuild everything on the fresh one.
+      if (mapObj.current && mapObj.current.getDiv() !== mapRef.current) {
         mapObj.current = null;
         markerRef.current = null;
         pickupMarkerRef.current = null;
         userMarkerRef.current = null;
+        walkLineRef.current = null;
       }
 
       if (!mapObj.current) {
-        const map = new maplibregl.Map({
-          container: mapRef.current,
-          style: MAP_STYLE,
-          center: [pos.longitude, pos.latitude],
+        const map = new Map(mapRef.current, {
+          center: { lat: pos.latitude, lng: pos.longitude },
           zoom: 15,
-          attributionControl: { compact: true },
+          // AdvancedMarkerElement requires a mapId; DEMO_MAP_ID is Google's
+          // documented default-styling id. Register a real one in the Cloud
+          // console later for custom styling — purely cosmetic.
+          mapId: 'DEMO_MAP_ID',
+          disableDefaultUI: true,
+          zoomControl: true,
+          clickableIcons: false,
+          gestureHandling: 'greedy',
         });
         mapObj.current = map;
-        // A gesture means the CUSTOMER owns the camera now (GD review). Only
-        // user-originated moves count — our own easeTo has no originalEvent.
-        const handoff = (e) => { if (e.originalEvent) setFollowing(false); };
-        map.on('dragstart', handoff);
-        map.on('zoomstart', handoff);
-        map.on('rotatestart', handoff);
-        const el = document.createElement('div');
-        el.style.cssText = 'width:38px;height:38px;display:flex;align-items:center;justify-content:center;'
-          + 'background:#1a7f37;border:3px solid #fff;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,.35);'
-          + 'font-size:19px';
-        el.textContent = '🚐';
-        markerRef.current = new maplibregl.Marker({ element: el })
-          .setLngLat([pos.longitude, pos.latitude])
-          .addTo(map);
+        // A drag means the CUSTOMER owns the camera now (GD review). Google
+        // only fires dragstart for real gestures, never for our panTo.
+        map.addListener('dragstart', () => setFollowing(false));
+
+        markerRef.current = new AdvancedMarkerElement({
+          map,
+          position: { lat: pos.latitude, lng: pos.longitude },
+          content: markerDiv(
+            'width:38px;height:38px;display:flex;align-items:center;justify-content:center;'
+            + 'background:#1a7f37;border:3px solid #fff;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,.35);font-size:19px',
+            '🚐',
+          ),
+        });
         lastFix.current = pos;
       } else {
         // Tween from the previous fix to this one.
@@ -229,31 +260,31 @@ export function ShuttleTrackerClient({ token }) {
         const step = (now) => {
           const k = Math.min(1, (now - started) / TWEEN_MS);
           const ease = k < 0.5 ? 2 * k * k : 1 - ((-2 * k + 2) ** 2) / 2;
-          const lng = from.longitude + (to.longitude - from.longitude) * ease;
           const lat = from.latitude + (to.latitude - from.latitude) * ease;
-          markerRef.current?.setLngLat([lng, lat]);
+          const lng = from.longitude + (to.longitude - from.longitude) * ease;
+          if (markerRef.current) markerRef.current.position = { lat, lng };
           if (k < 1) tweenRaf.current = requestAnimationFrame(step);
         };
         tweenRaf.current = requestAnimationFrame(step);
-        if (followRef.current) mapObj.current.easeTo({ center: [to.longitude, to.latitude], duration: TWEEN_MS });
+        if (followRef.current) mapObj.current.panTo({ lat: to.latitude, lng: to.longitude });
       }
 
       // The waiting spot — one pin, kept in sync (it effectively never moves).
       if (pickup && mapObj.current) {
         if (!pickupMarkerRef.current) {
-          const pin = document.createElement('div');
-          pin.style.cssText = 'width:34px;height:34px;display:flex;align-items:center;justify-content:center;'
+          const pin = markerDiv(
+            'width:34px;height:34px;display:flex;align-items:center;justify-content:center;'
             + 'background:#5b21b6;border:3px solid #fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);'
-            + 'box-shadow:0 2px 8px rgba(0,0,0,.35)';
-          const glyph = document.createElement('span');
-          glyph.style.cssText = 'transform:rotate(45deg);font-size:15px';
-          glyph.textContent = '🧍';
-          pin.appendChild(glyph);
-          pickupMarkerRef.current = new maplibregl.Marker({ element: pin, anchor: 'bottom' })
-            .setLngLat([pickup.longitude, pickup.latitude])
-            .addTo(mapObj.current);
+            + 'box-shadow:0 2px 8px rgba(0,0,0,.35)',
+          );
+          pin.appendChild(markerDiv('transform:rotate(45deg);font-size:15px', '🧍'));
+          pickupMarkerRef.current = new AdvancedMarkerElement({
+            map: mapObj.current,
+            position: { lat: pickup.latitude, lng: pickup.longitude },
+            content: pin,
+          });
         } else {
-          pickupMarkerRef.current.setLngLat([pickup.longitude, pickup.latitude]);
+          pickupMarkerRef.current.position = { lat: pickup.latitude, lng: pickup.longitude };
         }
       }
     })();
@@ -263,51 +294,53 @@ export function ShuttleTrackerClient({ token }) {
   // ── the customer's own position: blue dot + dashed walk line ─────────────
   useEffect(() => {
     const map = mapObj.current;
-    if (!userPos || !map) return;
+    if (!userPos || !map || !MAPS_KEY) return;
     (async () => {
-      const mod = await import('maplibre-gl');
-      const maplibregl = mod?.default?.Map ? mod.default : mod;
+      const google = await loadGoogleMaps();
+      if (!google) return;
+      const { AdvancedMarkerElement } = await google.maps.importLibrary('marker');
       if (!userMarkerRef.current) {
-        const dot = document.createElement('div');
-        dot.style.cssText = 'width:18px;height:18px;background:#1d6ef2;border:3px solid #fff;border-radius:50%;'
-          + 'box-shadow:0 0 0 6px rgba(29,110,242,.25)';
-        userMarkerRef.current = new maplibregl.Marker({ element: dot })
-          .setLngLat([userPos.longitude, userPos.latitude])
-          .addTo(map);
+        userMarkerRef.current = new AdvancedMarkerElement({
+          map,
+          position: { lat: userPos.latitude, lng: userPos.longitude },
+          content: markerDiv(
+            'width:18px;height:18px;background:#1d6ef2;border:3px solid #fff;border-radius:50%;'
+            + 'box-shadow:0 0 0 6px rgba(29,110,242,.25)',
+          ),
+        });
         // First fix: frame the walk — you, the waiting spot, and the bus.
         try {
-          const bounds = new maplibregl.LngLatBounds();
-          bounds.extend([userPos.longitude, userPos.latitude]);
-          if (pickup) bounds.extend([pickup.longitude, pickup.latitude]);
-          if (lastFix.current) bounds.extend([lastFix.current.longitude, lastFix.current.latitude]);
+          const bounds = new google.maps.LatLngBounds();
+          bounds.extend({ lat: userPos.latitude, lng: userPos.longitude });
+          if (pickup) bounds.extend({ lat: pickup.latitude, lng: pickup.longitude });
+          if (lastFix.current) bounds.extend({ lat: lastFix.current.latitude, lng: lastFix.current.longitude });
           setFollowing(false);
-          map.fitBounds(bounds, { padding: 70, duration: 800, maxZoom: 16.5 });
+          map.fitBounds(bounds, 70);
         } catch { /* framing is cosmetic */ }
       } else {
-        userMarkerRef.current.setLngLat([userPos.longitude, userPos.latitude]);
+        userMarkerRef.current.position = { lat: userPos.latitude, lng: userPos.longitude };
       }
 
       // Dashed line from you to the waiting spot — direction, not routing.
       if (pickup) {
-        const data = {
-          type: 'Feature',
-          geometry: {
-            type: 'LineString',
-            coordinates: [[userPos.longitude, userPos.latitude], [pickup.longitude, pickup.latitude]],
-          },
-        };
-        const draw = () => {
-          try {
-            const src = map.getSource('walk-line');
-            if (src) { src.setData(data); return; }
-            map.addSource('walk-line', { type: 'geojson', data });
-            map.addLayer({
-              id: 'walk-line', type: 'line', source: 'walk-line',
-              paint: { 'line-color': '#5b21b6', 'line-width': 3, 'line-dasharray': [1.2, 1.6], 'line-opacity': 0.85 },
-            });
-          } catch { /* style still loading — the next fix redraws */ }
-        };
-        if (map.isStyleLoaded()) draw(); else map.once('load', draw);
+        const path = [
+          { lat: userPos.latitude, lng: userPos.longitude },
+          { lat: pickup.latitude, lng: pickup.longitude },
+        ];
+        if (walkLineRef.current) {
+          walkLineRef.current.setPath(path);
+        } else {
+          walkLineRef.current = new google.maps.Polyline({
+            map,
+            path,
+            strokeOpacity: 0,
+            icons: [{
+              icon: { path: 'M 0,-1 0,1', strokeOpacity: 0.85, strokeColor: '#5b21b6', strokeWeight: 3, scale: 3 },
+              offset: '0',
+              repeat: '14px',
+            }],
+          });
+        }
       }
     })();
   }, [userPos?.latitude, userPos?.longitude, pickup?.latitude, pickup?.longitude]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -328,13 +361,15 @@ export function ShuttleTrackerClient({ token }) {
   useEffect(() => () => {
     cancelAnimationFrame(tweenRaf.current);
     if (geoWatchId.current !== null) navigator.geolocation?.clearWatch?.(geoWatchId.current);
-    mapObj.current?.remove?.();
   }, []);
 
   const recenter = () => {
     setFollowing(true);
     const fix = lastFix.current;
-    if (fix && mapObj.current) mapObj.current.easeTo({ center: [fix.longitude, fix.latitude], zoom: 15, duration: 600 });
+    if (fix && mapObj.current) {
+      mapObj.current.panTo({ lat: fix.latitude, lng: fix.longitude });
+      mapObj.current.setZoom(15);
+    }
   };
 
   // ── request the shuttle ──────────────────────────────────────────────────
@@ -417,16 +452,19 @@ export function ShuttleTrackerClient({ token }) {
     );
   }
 
-  const offline = state.status === 'OFFLINE' || !state.position;
+  // No key at build time = no map surface at all; the card still carries the
+  // instructions, the distance math and the request button.
+  const offline = state.status === 'OFFLINE' || !state.position || !MAPS_KEY;
   // Legacy config rows can carry a null headway; never interpolate "null".
   const headway = Number(state.headwayMinutes) >= 1 ? Number(state.headwayMinutes) : 10;
   const ageMin = Math.floor((state.position?.ageSeconds ?? 0) / 60);
+  const transmitting = state.status !== 'OFFLINE' && state.position;
   // Under a minute the freshness IS "live"; raw seconds read as telemetry and
   // freeze between polls (GD review). No position → no badge at all.
   const badge = stale
     ? { bg: '#8a8394', text: t('reconnecting') }
-    : (!offline && ageMin >= 1) ? { bg: '#b45309', text: t('agingMin', { m: ageMin }) }
-      : !offline ? { bg: '#1a7f37', text: t('live') }
+    : (transmitting && ageMin >= 1) ? { bg: '#b45309', text: t('agingMin', { m: ageMin }) }
+      : transmitting ? { bg: '#1a7f37', text: t('live') }
         : null;
 
   const walkMeters = (userPos && pickup) ? metersBetween(userPos, pickup) : null;
@@ -449,7 +487,7 @@ export function ShuttleTrackerClient({ token }) {
             <h1 style={S.h1}>{state.locationName}</h1>
             {langToggle}
           </div>
-          {offline ? (
+          {!transmitting ? (
             <>
               <p style={{ ...S.note, fontWeight: 600 }}>{t('offlineTitle')}</p>
               <p style={S.note}>{t('offlineBody', { n: headway })}</p>
@@ -463,7 +501,7 @@ export function ShuttleTrackerClient({ token }) {
               {state.pickupInstructions}
             </div>
           )}
-          {!offline && pickup && geo !== 'on' && geo !== 'locating' && (
+          {pickup && geo !== 'on' && geo !== 'locating' && (
             <button type="button" style={S.geoBtn} onClick={shareLocation}>{t('shareLocation')}</button>
           )}
           {geo === 'locating' && <p style={{ ...S.note, textAlign: 'center' }} role="status">{t('locating')}</p>}
