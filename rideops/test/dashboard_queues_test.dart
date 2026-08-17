@@ -120,6 +120,41 @@ void main() {
       expect(hero.capped, isTrue,
           reason: 'pudieron quedar salidas de hoy fuera del take:8');
     });
+
+    test(
+        'MAJOR QA-H4 (contraejemplo): cap tocado con un no-show de AYER '
+        'adelante ⇒ capped — un visible viejo no certifica que hoy esté '
+        'completo', () {
+      // La ventana del server arranca en hoy-00:00 de SU zona horaria: con
+      // desfase, un visible se lee como de ayer en el aparato y el orden asc
+      // lo pone primero. El item #9 (fuera del take:8) pudo ser de hoy.
+      final p = payload(
+        checkout: [
+          card(DateTime(2026, 8, 16, 23, 0)), // "ayer" para el aparato
+          for (var i = 0; i < kQueueTake - 1; i++)
+            card(DateTime(2026, 8, 17, 8 + i)),
+        ],
+      );
+      final hero = deriveHero(p, now);
+      expect(hero.departuresToday, kQueueTake - 1);
+      expect(hero.capped, isTrue,
+          reason: '"7 salidas" exactas junto a un header "8+" en la misma '
+              'pantalla sería mentira — solo un visible POSTERIOR a hoy '
+              'garantiza que hoy quedó completo');
+    });
+
+    test('cap tocado PERO con un visible de mañana ⇒ cuenta exacta', () {
+      final p = payload(
+        checkout: [
+          for (var i = 0; i < kQueueTake - 1; i++)
+            card(DateTime(2026, 8, 17, 8 + i)),
+          card(DateTime(2026, 8, 18, 9, 0)), // mañana: hoy quedó completo
+        ],
+      );
+      final hero = deriveHero(p, now);
+      expect(hero.departuresToday, kQueueTake - 1);
+      expect(hero.capped, isFalse);
+    });
   });
 
   group('ApiError.isViewLocationDenied — firma completa (gap #3)', () {

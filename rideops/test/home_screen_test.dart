@@ -12,6 +12,7 @@ import 'package:rideops/core/session/token_store.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
 import 'package:rideops/features/dashboard/application/dashboard_controller.dart';
 import 'package:rideops/features/dashboard/presentation/home_screen.dart';
+import 'package:rideops/features/dashboard/presentation/home_skeleton.dart';
 import 'package:rideops/features/dashboard/presentation/queue_list_screen.dart';
 import 'package:rideops/features/shell/location_denied_view.dart';
 
@@ -334,6 +335,50 @@ void main() {
     await tester.tap(find.byIcon(Icons.arrow_back_rounded));
     await tester.pumpAndSettle();
     expect(find.byType(HomeScreen), findsOneWidget);
+  });
+
+  testWidgets(
+      'MINOR-1 QA-H4: cambio de sede que FALLA estando dentro de la lista de '
+      'cola — error con Reintentar (jamás skeleton eterno) y recuperación',
+      (tester) async {
+    // Una salida en cola para que la home pinte el bento (sin items en
+    // ninguna cola caería en el estado 5D, que no tiene tiles).
+    dashboardApi.onFetch = (_) async => payload(
+          metrics: {'activeRentals': 2},
+          queues: {
+            'checkout': [
+              cardJson(
+                id: 'chk-1',
+                pickupAt: DateTime.now().add(const Duration(hours: 1)),
+              ),
+            ],
+          },
+        );
+    await pumpHome(tester);
+    await tester.tap(find.text('2')); // tile En renta → lista de `active`
+    await tester.pumpAndSettle();
+    expect(find.byType(QueueListScreen), findsOneWidget);
+
+    // El usuario cambia de sede con la red caída: rebuild sin cache + fetch
+    // fallido — antes del fix, skeleton para siempre sin salida.
+    dashboardApi.onFetch = (_) async => throw apiError(ApiErrorKind.network);
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(QueueListScreen)),
+    );
+    await container
+        .read(activeLocationProvider.notifier)
+        .set(locationId: 'loc-aero', locationName: 'Sucursal Aeropuerto');
+    await tester.pumpAndSettle();
+
+    expect(find.byType(HomeSkeleton), findsNothing);
+    expect(find.byType(DashboardErrorView), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+
+    // Vuelve la señal: Reintentar recupera la lista (vacía en la sede nueva).
+    dashboardApi.onFetch = null;
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.text('Nothing in this queue right now.'), findsOneWidget);
   });
 
   testWidgets('chip de cola vacía es tocable y abre su lista vacía',

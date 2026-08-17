@@ -4,9 +4,12 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/router/app_router.dart';
+import '../../../core/session/active_location.dart';
 import '../../../core/theme/ride_tokens.dart';
+import '../../shell/location_denied_view.dart';
 import '../application/dashboard_controller.dart';
 import '../domain/dashboard_queues.dart';
+import 'home_screen.dart';
 import 'home_skeleton.dart';
 import 'widgets/queue_cards.dart';
 
@@ -30,6 +33,24 @@ class QueueListScreen extends ConsumerWidget {
       return _Framed(
         title: l10n.tabHome,
         child: Center(child: Text(l10n.genericError)),
+      );
+    }
+    // Errores SIN cache también aquí (MINOR-1 de QA-H4): un cambio de sede
+    // que falla estando DENTRO de la lista dejaba skeleton eterno sin
+    // salida. Mismo tratamiento que la home: 4D si es la negativa de
+    // ubicación, error genérico con Reintentar para el resto.
+    void retry() =>
+        ref.read(dashboardControllerProvider.notifier).refresh();
+    if (dash.viewLocationDenied) {
+      return LocationDeniedView(
+        locationName: ref.watch(activeLocationProvider).locationName,
+        onRetry: retry,
+      );
+    }
+    if (dash.data == null && dash.error != null) {
+      return _Framed(
+        title: queueNameOf(l10n, queue),
+        child: DashboardErrorView(error: dash.error!, onRetry: retry),
       );
     }
     if (dash.firstLoad || dash.data == null) return const HomeSkeleton();

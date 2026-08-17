@@ -54,7 +54,7 @@ class HomeScreen extends ConsumerWidget {
 
     final data = dash.data;
     if (data == null) {
-      return _HomeErrorView(error: dash.error!, onRetry: retry);
+      return DashboardErrorView(error: dash.error!, onRetry: retry);
     }
 
     return RefreshIndicator(
@@ -246,8 +246,10 @@ class _StaleBanner extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.wifi_off_rounded,
+          // Icono acorde a la causa (NIT QA-H4): wifi-off SOLO cuando el
+          // fallo es de red — el copy ya distingue, el icono no debe mentir.
+          Icon(
+            offline ? Icons.wifi_off_rounded : Icons.error_outline_rounded,
             size: 18,
             color: RideTokens.warnTx,
           ),
@@ -815,9 +817,15 @@ class _EmptyAllView extends StatelessWidget {
 
 /// Error SIN cache: pantalla completa con el mensaje del servidor cuando lo
 /// hay (DoD #5 — un 403 de módulo se muestra como negativa con su copy, un
-/// 429 con su espera, la red con su reintento).
-class _HomeErrorView extends StatelessWidget {
-  const _HomeErrorView({required this.error, required this.onRetry});
+/// 429 con su espera, la red con su reintento). Público porque la vista de
+/// cola lo reusa (MINOR-1 de QA-H4: mismo tratamiento que la home, jamás un
+/// skeleton eterno sin salida).
+class DashboardErrorView extends StatelessWidget {
+  const DashboardErrorView({
+    super.key,
+    required this.error,
+    required this.onRetry,
+  });
 
   final ApiError error;
   final VoidCallback onRetry;

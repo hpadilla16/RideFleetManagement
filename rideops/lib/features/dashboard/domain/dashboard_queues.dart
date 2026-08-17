@@ -142,21 +142,36 @@ class HeroSummary {
 }
 
 HeroSummary deriveHero(DashboardPayload payload, DateTime now) {
+  final today = DateTime(now.year, now.month, now.day);
+
   bool isToday(DateTime? dt) {
     if (dt == null) return false;
     final local = dt.toLocal();
-    return local.year == now.year &&
-        local.month == now.month &&
-        local.day == now.day;
+    return local.year == today.year &&
+        local.month == today.month &&
+        local.day == today.day;
+  }
+
+  bool isAfterToday(DateTime? dt) {
+    if (dt == null) return false;
+    final local = dt.toLocal();
+    return DateTime(local.year, local.month, local.day).isAfter(today);
   }
 
   final departures =
       payload.queues.checkout.where((r) => isToday(r.pickupAt)).length;
-  // Cap tocado Y todos los visibles son de hoy ⇒ pudieron quedar salidas de
-  // hoy fuera del take:8 — el server ordena pickupAt asc, así que si algún
-  // visible NO es de hoy, hoy está completo y la cuenta es exacta.
+  // Cap del take:8 tocado SIN ningún visible POSTERIOR a hoy ⇒ la cola
+  // (orden pickupAt asc) pudo dejar salidas de HOY fuera del corte y la
+  // cuenta visible subestima. OJO (MAJOR de QA-H4): la señal segura es "hay
+  // un visible DESPUÉS de hoy" — no "todos los visibles son de hoy". La
+  // ventana del server arranca en hoy-00:00 DE SU zona horaria
+  // (employee-app.service.js: startOfToday), así que un visible puede
+  // leerse como de AYER en el aparato (no-show con desfase de TZ) y con el
+  // orden asc va PRIMERO: [ayer 23:00, hoy×7] con item #9 = hoy 09:00 daría
+  // "7 salidas" exactas junto a un header "8+" — mentira en pantalla. Solo
+  // un visible de mañana-o-después garantiza que hoy está completo.
   final capped = payload.queues.checkout.length >= kQueueTake &&
-      departures == payload.queues.checkout.length;
+      !payload.queues.checkout.any((r) => isAfterToday(r.pickupAt));
   return HeroSummary(
     departuresToday: departures,
     departuresCapped: capped,
