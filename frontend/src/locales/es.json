@@ -1096,6 +1096,18 @@
           "view-location-switcher": {
             "title": "Viendo como una sucursal",
             "body": "Cualquiera con más de una ubicación tiene este selector. Cambia lo que ve en todas partes — incluyendo lo que traen sus exports."
+          },
+          "person-type": {
+            "title": "Escoge qué tipo de persona es",
+            "body": "Empleado, admin, host o agente virtual. Esa decisión fija sus permisos iniciales, así que es lo primero que hay que acertar — cambiarla después obliga a revisar todo lo de abajo otra vez."
+          },
+          "person-access-role": {
+            "title": "Después su rol de acceso",
+            "body": "AGENT trabaja el mostrador. OPS añade las pantallas de operaciones. ADMIN puede cambiar configuración y manejar personal. En la duda, da menos: subir a alguien después es un clic; deshacer lo que cambió es una auditoría."
+          },
+          "person-locations": {
+            "title": "Limítalo a su sede",
+            "body": "Marca las sedes donde trabaja esta persona. Dejar TODAS las casillas sin marcar no es \"sin acceso\" — significa que ve TODAS las sedes. Ese es el error más común de esta pantalla."
           }
         }
       },
