@@ -167,7 +167,8 @@ verifican en el DoD de la historia indicada:
   - ANTES de construir la 4D: pedir al backend un `code: VIEW_LOCATION_DENIED` en el 403
     de view-location (hoy llega sin code — gap #3). Sin el code, la 4D no puede
     distinguir "sede negada" de un 403 de RBAC genérico.
-  - *Registrado al construir H4 (2026-08-17):* el gap #3 sigue abierto — la app clasifica
+  - *Registrado al construir H4 (2026-08-17):* el gap #3 está EN CURSO vía el PR-tren
+    P1-P3 (ver §4-3); mientras el code aterriza en el backend, la app clasifica
     con la firma puente `403 + request con header + (code == 'VIEW_LOCATION_DENIED' ||
     (code == null && mensaje exacto de view-location.js:48))`; cuando el backend agregue
     el code, el matcheo por mensaje se retira. Y el **cache del dashboard es en memoria**

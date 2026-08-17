@@ -7,7 +7,9 @@ import 'package:rideops/app.dart';
 import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/api_providers.dart';
 import 'package:rideops/core/api/dto/session_user.dart';
+import 'package:rideops/core/db/outbox_db.dart';
 import 'package:rideops/core/db/outbox_providers.dart';
+import 'package:rideops/core/outbox/network_status.dart';
 import 'package:rideops/core/session/active_location.dart';
 import 'package:rideops/core/session/biometric_auth.dart';
 import 'package:rideops/core/session/pin_store.dart';
@@ -17,6 +19,7 @@ import 'package:rideops/features/dashboard/presentation/home_screen.dart';
 import 'package:rideops/features/dashboard/presentation/home_skeleton.dart';
 
 import 'helpers/auth_test_helpers.dart';
+import 'helpers/outbox_test_helpers.dart';
 import 'helpers/shell_test_helpers.dart';
 
 /// Tests del shell montando la app COMPLETA (router + sesión real): sesión
@@ -48,9 +51,11 @@ void main() {
     api = FakeAuthApi();
   });
 
-  // `outboxPending`: H5 abrirá la DB real; mientras tanto el badge se prueba
-  // simulando la cuenta de filas pendientes por override del provider.
-  Widget app({int? outboxPending}) => ProviderScope(
+  // H5: el badge sale del stream de filas del outbox. Aquí las filas van
+  // como stream ESTÁTICO (ver helpers: el watch() real de drift crea un
+  // Timer al cerrarse que rompe el invariante !timersPending del harness;
+  // el stream real se cubre en outbox_db_test).
+  Widget app({List<OutboxEntry> outboxRows = const []}) => ProviderScope(
         overrides: [
           tokenStoreProvider.overrideWithValue(tokenStore),
           activeLocationStoreProvider.overrideWithValue(locationStore),
@@ -61,10 +66,21 @@ void main() {
           // que el fetch resuelva y la pantalla asiente (ver FakeDashboardApi).
           dashboardApiProvider.overrideWithValue(FakeDashboardApi()),
           eventLoggerProvider.overrideWithValue(CapturingEventLogger()),
-          if (outboxPending != null)
-            outboxPendingCountProvider.overrideWith((ref) async => outboxPending),
+          outboxDbProvider.overrideWith(buildMemoryOutboxDb),
+          photoVaultProvider.overrideWith(buildQuietVault),
+          networkStatusProvider.overrideWithValue(FakeNetworkStatus()),
+          outboxRowsProvider.overrideWith((ref) => Stream.value(outboxRows)),
         ],
         child: const RideOpsApp(),
+      );
+
+  /// Fila construida a mano, dueño = el usuario del fixture.
+  OutboxEntry outboxRow(String id, {String status = 'pending'}) =>
+      outboxEntryFixture(
+        id: id,
+        userId: uid,
+        tenantId: 'cmdten001fixture0000000001',
+        status: status,
       );
 
   testWidgets(
@@ -159,10 +175,14 @@ void main() {
     expect(find.byType(HomeScreen), findsOneWidget);
   });
 
-  testWidgets('badge de Bandeja con pendientes > 0 (rama real del contador)',
+  testWidgets('badge de Bandeja: filas del stream, ámbar sin dead',
       (tester) async {
     api.onMe = () async => sessionUserFixture();
-    await tester.pumpWidget(app(outboxPending: 3));
+    await tester.pumpWidget(app(outboxRows: [
+      outboxRow('a'),
+      outboxRow('b'),
+      outboxRow('c'),
+    ]));
     await tester.pumpAndSettle();
     expect(find.text('3'), findsOneWidget, reason: 'badge visible');
     expect(
@@ -170,6 +190,19 @@ void main() {
       findsOneWidget,
       reason: 'el lector de pantalla anuncia la cuenta, no solo el color',
     );
+  });
+
+  testWidgets('badge cambia a rojo (decisión pendiente) cuando hay dead',
+      (tester) async {
+    api.onMe = () async => sessionUserFixture();
+    await tester.pumpWidget(app(outboxRows: [
+      outboxRow('a'),
+      outboxRow('x', status: 'dead'),
+    ]));
+    await tester.pumpAndSettle();
+    // pending + dead se suman en el numeral (mockup 7B: el badge cuenta
+    // pendientes + muertos); el color rojo/ámbar distingue la urgencia.
+    expect(find.text('2'), findsOneWidget);
   });
 
   testWidgets('chip pinta el nombre persistido sin red (offline honesto)',

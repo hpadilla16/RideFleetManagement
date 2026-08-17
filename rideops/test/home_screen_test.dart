@@ -5,6 +5,8 @@ import 'package:rideops/app.dart';
 import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/api_providers.dart';
 import 'package:rideops/core/api/dto/dashboard.dart';
+import 'package:rideops/core/db/outbox_providers.dart';
+import 'package:rideops/core/outbox/network_status.dart';
 import 'package:rideops/core/session/active_location.dart';
 import 'package:rideops/core/session/biometric_auth.dart';
 import 'package:rideops/core/session/pin_store.dart';
@@ -17,6 +19,7 @@ import 'package:rideops/features/dashboard/presentation/queue_list_screen.dart';
 import 'package:rideops/features/shell/location_denied_view.dart';
 
 import 'helpers/auth_test_helpers.dart';
+import 'helpers/outbox_test_helpers.dart';
 import 'helpers/shell_test_helpers.dart';
 
 /// Widget tests de la home de operaciones (H4, mockup 5A–5E) montando la app
@@ -51,6 +54,11 @@ void main() {
           authApiProvider.overrideWithValue(api),
           dashboardApiProvider.overrideWithValue(dashboardApi),
           eventLoggerProvider.overrideWithValue(CapturingEventLogger()),
+          // H5: bandeja silenciada — ver helpers/outbox_test_helpers.dart.
+          outboxDbProvider.overrideWith(buildMemoryOutboxDb),
+          photoVaultProvider.overrideWith(buildQuietVault),
+          networkStatusProvider.overrideWithValue(FakeNetworkStatus()),
+          outboxRowsProvider.overrideWith((ref) => Stream.value(const [])),
         ],
         child: const RideOpsApp(),
       );

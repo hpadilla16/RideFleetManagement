@@ -6,6 +6,7 @@ import 'package:rideops/core/api/dto/checkout_session.dart';
 import 'package:rideops/core/api/dto/dashboard.dart';
 import 'package:rideops/core/api/dto/inspection.dart';
 import 'package:rideops/core/api/dto/reservation_card.dart';
+import 'package:rideops/core/api/dto/reservation_display.dart';
 import 'package:rideops/core/api/dto/session_user.dart';
 import 'package:rideops/core/api/dto/staff_location.dart';
 import 'package:rideops/core/api/enums.dart';
@@ -136,6 +137,37 @@ void main() {
     expect(list.first.name, 'Patio Centro');
     expect(list.first.code, 'CEN');
     expect(list[1].city, isNull, reason: 'city/state son nullable en Prisma');
+  });
+
+  test('reservation_display_data.json → ReservationDisplayData (H5)', () {
+    final d = ReservationDisplayData.fromJson(
+      readFixture('reservation_display_data.json'),
+    );
+    expect(d.reservation.reservationNumber, 'R-20260816-0042');
+    expect(d.reservation.vehicle?.mileage, 48190,
+        reason: 'la "última lectura registrada" del odómetro (mockup 6C n.7)');
+    expect(d.reservation.vehicle?.label, 'Toyota Corolla 2023 · U-112');
+    expect(d.reservation.customer?.fullName, 'María González',
+        reason: 'el firmante que se sella como signerName (INN S-3)');
+    expect(d.branding.companyName, 'Autos del Valle');
+    expect(d.branding.clientSafeCompanyName, 'Autos del Valle',
+        reason: 'un nombre real de tenant pasa intacto');
+    expect(d.branding.companyLogoUrl, isNotEmpty);
+  });
+
+  test('display-data tolera branding con defaults del backend', () {
+    final raw = readFixture('reservation_display_data.json');
+    // routes:618-622: defaults 'Ride Fleet' / '' — y un vehicle null (reserva
+    // sin unidad asignada) no puede tirar el flujo.
+    raw['branding'] = {'companyName': 'Ride Fleet', 'companyLogoUrl': '', 'companyPhone': ''};
+    (raw['reservation'] as Map<String, dynamic>)['vehicle'] = null;
+    final d = ReservationDisplayData.fromJson(raw);
+    expect(d.branding.companyName, 'Ride Fleet');
+    // QA MAJOR: el centinela de plataforma se NEUTRALIZA para superficies
+    // de cara al cliente — un tenant sin branding jamás muestra 'Ride
+    // Fleet' (ni "RF") durante la firma legal.
+    expect(d.branding.clientSafeCompanyName, '');
+    expect(d.reservation.vehicle, isNull);
   });
 
   test('mobile_inspection_state.json → MobileInspectionState', () {

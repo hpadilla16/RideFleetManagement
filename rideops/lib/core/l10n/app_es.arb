@@ -271,5 +271,186 @@
   "searchNoResults": "Sin resultados para “{query}”.",
   "@searchNoResults": {
     "placeholders": { "query": { "type": "String" } }
-  }
+  },
+
+  "inspTitle": "Inspección de salida",
+  "inspProgressChip": "{count} de 8",
+  "@inspProgressChip": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "inspProgressDone": "8 de 8 ✓",
+  "angleFront": "Frente",
+  "angleRear": "Atrás",
+  "angleLeft": "Lado izquierdo",
+  "angleRight": "Lado derecho",
+  "angleFrontSeat": "Asiento del.",
+  "angleRearSeat": "Asiento tras.",
+  "angleDash": "Tablero",
+  "angleTrunk": "Cajuela",
+  "angleRequiredChip": "Obligatorio",
+  "anglePending": "Pendiente",
+  "angleCompressing": "Comprimiendo…",
+  "angleFailedRetry": "Falló — toca para reintentar",
+  "angleQueued": "En bandeja",
+  "angleOnServer": "Ya en el servidor",
+  "inspContinueMetrics": "Continuar a métricas",
+  "inspRequiredFootnote": "Frente y Atrás son obligatorios; el resto suma evidencia.",
+  "inspOfflineBanner": "Sin conexión. Puedes terminar la inspección completa: todo queda en la bandeja y se enviará al reconectar.",
+  "inspOfflineChip": "Sin red",
+  "inspLinkExpires": "El enlace de esta sesión vence a las {time}.",
+  "@inspLinkExpires": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "inspLoadOffline": "Sin conexión. Para iniciar la inspección se necesita señal una vez; después todo funciona sin red.",
+  "inspOutboxFull": "La bandeja está llena. Conéctate a una red para que se vacíe antes de capturar más fotos.",
+  "camAnglePill": "{angle} · {n} de 8",
+  "@camAnglePill": {
+    "placeholders": { "angle": { "type": "String" }, "n": { "type": "int" } }
+  },
+  "camHintExterior": "Encuadra el vehículo completo dentro de las esquinas",
+  "camHintInterior": "Encuadra el área completa dentro de las esquinas",
+  "camFlash": "Flash",
+  "camClose": "Cerrar",
+  "camShutter": "Tomar foto",
+  "camErrorTitle": "No se pudo abrir la cámara",
+  "camErrorPermissionHint": "El permiso de cámara está denegado. Actívalo en los Ajustes del sistema y vuelve a intentar.",
+  "langSpanish": "Español",
+  "langEnglish": "English",
+  "metricsTitle": "Métricas del vehículo",
+  "metricsOdometer": "Odómetro",
+  "metricsOdometerUnit": "mi",
+  "metricsPrevReading": "Última lectura registrada: {value} mi",
+  "@metricsPrevReading": {
+    "placeholders": { "value": { "type": "String" } }
+  },
+  "metricsOdometerLower": "La lectura es menor que la última registrada. Revísala — se enviará tal cual.",
+  "metricsFuel": "Combustible",
+  "fuelEmpty": "Vacío",
+  "fuelFull": "Lleno",
+  "metricsCleanliness": "Limpieza",
+  "cleanDirty": "Sucio",
+  "cleanSpotless": "Impecable",
+  "metricsNotes": "Notas (opcional)",
+  "inspContinueSignature": "Continuar a firma",
+  "kioskBarLabel": "Modo firma · bloqueo en pausa",
+  "kioskBarExit": "Salir: mantener 3 s + PIN",
+  "kioskExitPinTitle": "Salir del modo firma",
+  "kioskExitPinBody": "Escribe tu PIN para volver al modo staff.",
+  "kioskExitWrongPin": "{count, plural, one{PIN incorrecto — te queda 1 intento} other{PIN incorrecto — te quedan {count} intentos}}",
+  "@kioskExitWrongPin": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "kioskExitExhausted": "Demasiados intentos. Volviendo al paso anterior.",
+  "kioskSignSubtitle": "Inspección del vehículo · Reserva {reservation}",
+  "@kioskSignSubtitle": {
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "kioskSignPrompt": "Firme para confirmar que revisó el estado del vehículo junto al agente.",
+  "kioskSignHint": "Firme aquí con el dedo",
+  "kioskSignClear": "Borrar",
+  "kioskSignConfirm": "Confirmar firma",
+  "summaryQueueTitle": "{photos} fotos · métricas · firma",
+  "@summaryQueueTitle": {
+    "placeholders": { "photos": { "type": "int" } }
+  },
+  "summaryQueueBadgeOffline": "Se enviará al reconectar",
+  "summaryQueueBadgeOnline": "Listo para enviar",
+  "summaryQueueMeta": "Guardado local cifrado · orden de envío garantizado",
+  "inspFinishOffline": "Terminar — se enviará al reconectar",
+  "inspFinishOnline": "Terminar y enviar",
+  "inspFinishQueued": "Inspección en la bandeja de salida",
+  "alreadyCompletedTitle": "Esta inspección ya se completó",
+  "alreadyCompletedBody": "Otra pantalla la cerró mientras trabajabas. Tus envíos pendientes de esta sesión se retiraron de la bandeja — no se enviará nada duplicado.",
+  "alreadyCompletedBodyAt": "Otra pantalla la cerró a las {time} mientras trabajabas. Tus envíos pendientes de esta sesión se retiraron de la bandeja — no se enviará nada duplicado.",
+  "@alreadyCompletedBodyAt": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "alreadyCompletedChip": "Reserva {reservation}",
+  "@alreadyCompletedChip": {
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "backToHome": "Volver al inicio",
+
+  "outboxTitle": "Bandeja de salida",
+  "outboxDraining": "Enviando…",
+  "outboxDrainProgress": "{done} de {total} enviados",
+  "@outboxDrainProgress": {
+    "placeholders": { "done": { "type": "int" }, "total": { "type": "int" } }
+  },
+  "outboxDrainRemaining": "quedan ~{size}",
+  "@outboxDrainRemaining": {
+    "placeholders": { "size": { "type": "String" } }
+  },
+  "outboxItemPhoto": "Foto · {angle}",
+  "@outboxItemPhoto": {
+    "placeholders": { "angle": { "type": "String" } }
+  },
+  "outboxItemComplete": "Cierre de inspección",
+  "outboxItemMetaPhoto": "{reservation} · inspección de salida · {size}",
+  "@outboxItemMetaPhoto": {
+    "placeholders": { "reservation": { "type": "String" }, "size": { "type": "String" } }
+  },
+  "outboxItemMetaComplete": "{reservation} · métricas + firma · va al final de su cadena",
+  "@outboxItemMetaComplete": {
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "outboxStatusQueued": "En cola",
+  "outboxStatusUploading": "Subiendo",
+  "outboxStatusWaitsPhotos": "Espera sus fotos",
+  "outboxStatusRejected": "Rechazado",
+  "outboxAttempts": "intentado {count} veces · último {time}",
+  "@outboxAttempts": {
+    "placeholders": { "count": { "type": "int" }, "time": { "type": "String" } }
+  },
+  "outboxReasonAnglesMissing": "El servidor lo rechazó: faltan los ángulos frontal y trasero. Captúralos y reintenta.",
+  "outboxReasonToken": "El permiso para subir venció o se consumió. Reintentar pedirá uno nuevo con tu sesión.",
+  "outboxReasonPhotoLost": "La foto ya no está en este teléfono. Solo puedes descartar este envío.",
+  "outboxReasonSessionGone": "La sesión de checkout ya no existe en el servidor.",
+  "outboxReasonNetwork": "No se pudo enviar tras varios intentos. Reintenta cuando haya señal.",
+  "outboxReasonGeneric": "El servidor rechazó este envío.",
+  "outboxTechnicalDetail": "Detalle técnico: {code} · {message}",
+  "@outboxTechnicalDetail": {
+    "placeholders": { "code": { "type": "String" }, "message": { "type": "String" } }
+  },
+  "outboxActionOpenInspection": "Abrir inspección",
+  "outboxActionDiscard": "Descartar",
+  "outboxDeadBanner": "{count, plural, one{1 envío necesita tu decisión. El resto seguirá enviándose normal.} other{{count} envíos necesitan tu decisión. El resto seguirá enviándose normal.}}",
+  "@outboxDeadBanner": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "outboxDiscardTitle": "¿Descartar este envío?",
+  "outboxDiscardBodyPhoto": "Se borrará la foto ({angle}) de {reservation} de este teléfono. Habrá que capturarla de nuevo. Lo ya enviado al servidor no se toca.",
+  "@outboxDiscardBodyPhoto": {
+    "placeholders": { "angle": { "type": "String" }, "reservation": { "type": "String" } }
+  },
+  "outboxDiscardBodyComplete": "Se borrará el cierre de inspección de {reservation} de este teléfono. Las métricas y la firma capturadas se perderán y habrá que repetirlas. Las fotos ya enviadas al servidor no se tocan.",
+  "@outboxDiscardBodyComplete": {
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "outboxDiscardConfirm": "Sí, descartar",
+  "outboxDiscardKeep": "Conservar en la bandeja",
+  "outboxEmptyTitle": "Todo enviado",
+  "outboxEmptyBody": "No hay nada esperando. Lo que captures sin señal aparecerá aquí y se enviará solo.",
+  "outboxLastDrain": "Último envío: {time}",
+  "@outboxLastDrain": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "outboxFullTitle": "La bandeja está llena",
+  "outboxFullBody": "{count} envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.",
+  "@outboxFullBody": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "outboxFullChip": "{count} de {max} · ~{size} en espera",
+  "@outboxFullChip": {
+    "placeholders": { "count": { "type": "int" }, "max": { "type": "int" }, "size": { "type": "String" } }
+  },
+  "outboxFullCapturesPaused": "Las capturas nuevas están pausadas hasta liberar espacio.",
+  "outboxSendNow": "Enviar ahora",
+  "outboxSendNowNoNetwork": "Enviar ahora (sin red)",
+  "logoutPendingTitle": "¿Cerrar sesión?",
+  "logoutPendingBody": "{count, plural, one{Tienes 1 envío sin mandar; si cierras sesión se borra de este teléfono.} other{Tienes {count} envíos sin mandar; si cierras sesión se borran de este teléfono.}}",
+  "@logoutPendingBody": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "logoutAnyway": "Cerrar sesión igual"
 }

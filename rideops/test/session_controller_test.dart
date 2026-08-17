@@ -5,12 +5,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/api_providers.dart';
 import 'package:rideops/core/api/dto/session_user.dart';
+import 'package:rideops/core/db/outbox_providers.dart';
 import 'package:rideops/core/session/session_controller.dart';
 import 'package:rideops/core/session/session_state.dart';
 import 'package:rideops/core/session/token_store.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
 
 import 'helpers/auth_test_helpers.dart';
+import 'helpers/outbox_test_helpers.dart';
 
 /// Unit tests del estado de sesión (H1): hidratación al arrancar, login,
 /// cambio de contraseña con intercambio de token, expiración y gate.
@@ -25,6 +27,9 @@ void main() {
         tokenStoreProvider.overrideWithValue(store),
         authApiProvider.overrideWithValue(api),
         eventLoggerProvider.overrideWithValue(logger),
+        // H5: login/logout purgan la bandeja — en memoria, sin plugins.
+        outboxDbProvider.overrideWith(buildMemoryOutboxDb),
+        photoVaultProvider.overrideWith(buildQuietVault),
       ],
     );
     addTearDown(container.dispose);

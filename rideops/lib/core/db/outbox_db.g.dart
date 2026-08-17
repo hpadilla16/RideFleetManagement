@@ -49,6 +49,17 @@ class $OutboxEntriesTable extends OutboxEntries
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _groupKeyMeta = const VerificationMeta(
+    'groupKey',
+  );
+  @override
+  late final GeneratedColumn<String> groupKey = GeneratedColumn<String>(
+    'group_key',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _kindMeta = const VerificationMeta('kind');
   @override
   late final GeneratedColumn<String> kind = GeneratedColumn<String>(
@@ -164,6 +175,7 @@ class $OutboxEntriesTable extends OutboxEntries
     userId,
     tenantId,
     locationId,
+    groupKey,
     kind,
     payload,
     dependsOn,
@@ -212,6 +224,12 @@ class $OutboxEntriesTable extends OutboxEntries
       context.handle(
         _locationIdMeta,
         locationId.isAcceptableOrUnknown(data['location_id']!, _locationIdMeta),
+      );
+    }
+    if (data.containsKey('group_key')) {
+      context.handle(
+        _groupKeyMeta,
+        groupKey.isAcceptableOrUnknown(data['group_key']!, _groupKeyMeta),
       );
     }
     if (data.containsKey('kind')) {
@@ -315,6 +333,10 @@ class $OutboxEntriesTable extends OutboxEntries
         DriftSqlType.string,
         data['${effectivePrefix}location_id'],
       ),
+      groupKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}group_key'],
+      ),
       kind: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}kind'],
@@ -370,8 +392,14 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
   final String tenantId;
 
   /// Ubicación activa (`x-view-location`) al momento de crear la fila, o
-  /// null si el usuario opera sin override.
+  /// null si el usuario opera sin override. Criterio registrado H5: se sella
+  /// AL ENCOLAR — el drenado jamás depende del selector vivo.
   final String? locationId;
+
+  /// Agrupador de cadena: para inspección, el checkoutSessionId. Permite la
+  /// purga selectiva de 6F ("otra superficie completó → retirar los envíos
+  /// de ESA sesión") sin parsear payloads en un where.
+  final String? groupKey;
 
   /// Tipo de operación: inspection_photo | inspection_complete | ...
   /// El dinero NUNCA aparece aquí (ADR-5) — el drenador rechaza kinds
@@ -397,6 +425,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
     required this.userId,
     required this.tenantId,
     this.locationId,
+    this.groupKey,
     required this.kind,
     required this.payload,
     this.dependsOn,
@@ -416,6 +445,9 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
     map['tenant_id'] = Variable<String>(tenantId);
     if (!nullToAbsent || locationId != null) {
       map['location_id'] = Variable<String>(locationId);
+    }
+    if (!nullToAbsent || groupKey != null) {
+      map['group_key'] = Variable<String>(groupKey);
     }
     map['kind'] = Variable<String>(kind);
     map['payload'] = Variable<String>(payload);
@@ -444,6 +476,9 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
       locationId: locationId == null && nullToAbsent
           ? const Value.absent()
           : Value(locationId),
+      groupKey: groupKey == null && nullToAbsent
+          ? const Value.absent()
+          : Value(groupKey),
       kind: Value(kind),
       payload: Value(payload),
       dependsOn: dependsOn == null && nullToAbsent
@@ -473,6 +508,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
       userId: serializer.fromJson<String>(json['userId']),
       tenantId: serializer.fromJson<String>(json['tenantId']),
       locationId: serializer.fromJson<String?>(json['locationId']),
+      groupKey: serializer.fromJson<String?>(json['groupKey']),
       kind: serializer.fromJson<String>(json['kind']),
       payload: serializer.fromJson<String>(json['payload']),
       dependsOn: serializer.fromJson<String?>(json['dependsOn']),
@@ -493,6 +529,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
       'userId': serializer.toJson<String>(userId),
       'tenantId': serializer.toJson<String>(tenantId),
       'locationId': serializer.toJson<String?>(locationId),
+      'groupKey': serializer.toJson<String?>(groupKey),
       'kind': serializer.toJson<String>(kind),
       'payload': serializer.toJson<String>(payload),
       'dependsOn': serializer.toJson<String?>(dependsOn),
@@ -511,6 +548,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
     String? userId,
     String? tenantId,
     Value<String?> locationId = const Value.absent(),
+    Value<String?> groupKey = const Value.absent(),
     String? kind,
     String? payload,
     Value<String?> dependsOn = const Value.absent(),
@@ -526,6 +564,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
     userId: userId ?? this.userId,
     tenantId: tenantId ?? this.tenantId,
     locationId: locationId.present ? locationId.value : this.locationId,
+    groupKey: groupKey.present ? groupKey.value : this.groupKey,
     kind: kind ?? this.kind,
     payload: payload ?? this.payload,
     dependsOn: dependsOn.present ? dependsOn.value : this.dependsOn,
@@ -547,6 +586,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
       locationId: data.locationId.present
           ? data.locationId.value
           : this.locationId,
+      groupKey: data.groupKey.present ? data.groupKey.value : this.groupKey,
       kind: data.kind.present ? data.kind.value : this.kind,
       payload: data.payload.present ? data.payload.value : this.payload,
       dependsOn: data.dependsOn.present ? data.dependsOn.value : this.dependsOn,
@@ -571,6 +611,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
           ..write('userId: $userId, ')
           ..write('tenantId: $tenantId, ')
           ..write('locationId: $locationId, ')
+          ..write('groupKey: $groupKey, ')
           ..write('kind: $kind, ')
           ..write('payload: $payload, ')
           ..write('dependsOn: $dependsOn, ')
@@ -591,6 +632,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
     userId,
     tenantId,
     locationId,
+    groupKey,
     kind,
     payload,
     dependsOn,
@@ -610,6 +652,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
           other.userId == this.userId &&
           other.tenantId == this.tenantId &&
           other.locationId == this.locationId &&
+          other.groupKey == this.groupKey &&
           other.kind == this.kind &&
           other.payload == this.payload &&
           other.dependsOn == this.dependsOn &&
@@ -627,6 +670,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
   final Value<String> userId;
   final Value<String> tenantId;
   final Value<String?> locationId;
+  final Value<String?> groupKey;
   final Value<String> kind;
   final Value<String> payload;
   final Value<String?> dependsOn;
@@ -643,6 +687,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
     this.userId = const Value.absent(),
     this.tenantId = const Value.absent(),
     this.locationId = const Value.absent(),
+    this.groupKey = const Value.absent(),
     this.kind = const Value.absent(),
     this.payload = const Value.absent(),
     this.dependsOn = const Value.absent(),
@@ -660,6 +705,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
     required String userId,
     required String tenantId,
     this.locationId = const Value.absent(),
+    this.groupKey = const Value.absent(),
     required String kind,
     required String payload,
     this.dependsOn = const Value.absent(),
@@ -684,6 +730,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
     Expression<String>? userId,
     Expression<String>? tenantId,
     Expression<String>? locationId,
+    Expression<String>? groupKey,
     Expression<String>? kind,
     Expression<String>? payload,
     Expression<String>? dependsOn,
@@ -701,6 +748,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
       if (userId != null) 'user_id': userId,
       if (tenantId != null) 'tenant_id': tenantId,
       if (locationId != null) 'location_id': locationId,
+      if (groupKey != null) 'group_key': groupKey,
       if (kind != null) 'kind': kind,
       if (payload != null) 'payload': payload,
       if (dependsOn != null) 'depends_on': dependsOn,
@@ -720,6 +768,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
     Value<String>? userId,
     Value<String>? tenantId,
     Value<String?>? locationId,
+    Value<String?>? groupKey,
     Value<String>? kind,
     Value<String>? payload,
     Value<String?>? dependsOn,
@@ -737,6 +786,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
       userId: userId ?? this.userId,
       tenantId: tenantId ?? this.tenantId,
       locationId: locationId ?? this.locationId,
+      groupKey: groupKey ?? this.groupKey,
       kind: kind ?? this.kind,
       payload: payload ?? this.payload,
       dependsOn: dependsOn ?? this.dependsOn,
@@ -765,6 +815,9 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
     }
     if (locationId.present) {
       map['location_id'] = Variable<String>(locationId.value);
+    }
+    if (groupKey.present) {
+      map['group_key'] = Variable<String>(groupKey.value);
     }
     if (kind.present) {
       map['kind'] = Variable<String>(kind.value);
@@ -809,6 +862,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
           ..write('userId: $userId, ')
           ..write('tenantId: $tenantId, ')
           ..write('locationId: $locationId, ')
+          ..write('groupKey: $groupKey, ')
           ..write('kind: $kind, ')
           ..write('payload: $payload, ')
           ..write('dependsOn: $dependsOn, ')
@@ -825,15 +879,642 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
   }
 }
 
+class $OutboxAuditEntriesTable extends OutboxAuditEntries
+    with TableInfo<$OutboxAuditEntriesTable, OutboxAuditEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $OutboxAuditEntriesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _userIdMeta = const VerificationMeta('userId');
+  @override
+  late final GeneratedColumn<String> userId = GeneratedColumn<String>(
+    'user_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _tenantIdMeta = const VerificationMeta(
+    'tenantId',
+  );
+  @override
+  late final GeneratedColumn<String> tenantId = GeneratedColumn<String>(
+    'tenant_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _locationIdMeta = const VerificationMeta(
+    'locationId',
+  );
+  @override
+  late final GeneratedColumn<String> locationId = GeneratedColumn<String>(
+    'location_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _rowIdMeta = const VerificationMeta('rowId');
+  @override
+  late final GeneratedColumn<String> rowId = GeneratedColumn<String>(
+    'row_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _rowKindMeta = const VerificationMeta(
+    'rowKind',
+  );
+  @override
+  late final GeneratedColumn<String> rowKind = GeneratedColumn<String>(
+    'row_kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _summaryMeta = const VerificationMeta(
+    'summary',
+  );
+  @override
+  late final GeneratedColumn<String> summary = GeneratedColumn<String>(
+    'summary',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _reasonCodeMeta = const VerificationMeta(
+    'reasonCode',
+  );
+  @override
+  late final GeneratedColumn<String> reasonCode = GeneratedColumn<String>(
+    'reason_code',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _discardedAtMeta = const VerificationMeta(
+    'discardedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> discardedAt = GeneratedColumn<DateTime>(
+    'discarded_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _syncedMeta = const VerificationMeta('synced');
+  @override
+  late final GeneratedColumn<bool> synced = GeneratedColumn<bool>(
+    'synced',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("synced" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    userId,
+    tenantId,
+    locationId,
+    rowId,
+    rowKind,
+    summary,
+    reasonCode,
+    discardedAt,
+    synced,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'outbox_audit_entries';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<OutboxAuditEntry> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('user_id')) {
+      context.handle(
+        _userIdMeta,
+        userId.isAcceptableOrUnknown(data['user_id']!, _userIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_userIdMeta);
+    }
+    if (data.containsKey('tenant_id')) {
+      context.handle(
+        _tenantIdMeta,
+        tenantId.isAcceptableOrUnknown(data['tenant_id']!, _tenantIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_tenantIdMeta);
+    }
+    if (data.containsKey('location_id')) {
+      context.handle(
+        _locationIdMeta,
+        locationId.isAcceptableOrUnknown(data['location_id']!, _locationIdMeta),
+      );
+    }
+    if (data.containsKey('row_id')) {
+      context.handle(
+        _rowIdMeta,
+        rowId.isAcceptableOrUnknown(data['row_id']!, _rowIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_rowIdMeta);
+    }
+    if (data.containsKey('row_kind')) {
+      context.handle(
+        _rowKindMeta,
+        rowKind.isAcceptableOrUnknown(data['row_kind']!, _rowKindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_rowKindMeta);
+    }
+    if (data.containsKey('summary')) {
+      context.handle(
+        _summaryMeta,
+        summary.isAcceptableOrUnknown(data['summary']!, _summaryMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_summaryMeta);
+    }
+    if (data.containsKey('reason_code')) {
+      context.handle(
+        _reasonCodeMeta,
+        reasonCode.isAcceptableOrUnknown(data['reason_code']!, _reasonCodeMeta),
+      );
+    }
+    if (data.containsKey('discarded_at')) {
+      context.handle(
+        _discardedAtMeta,
+        discardedAt.isAcceptableOrUnknown(
+          data['discarded_at']!,
+          _discardedAtMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_discardedAtMeta);
+    }
+    if (data.containsKey('synced')) {
+      context.handle(
+        _syncedMeta,
+        synced.isAcceptableOrUnknown(data['synced']!, _syncedMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  OutboxAuditEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return OutboxAuditEntry(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      userId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}user_id'],
+      )!,
+      tenantId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}tenant_id'],
+      )!,
+      locationId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}location_id'],
+      ),
+      rowId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}row_id'],
+      )!,
+      rowKind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}row_kind'],
+      )!,
+      summary: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}summary'],
+      )!,
+      reasonCode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}reason_code'],
+      ),
+      discardedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}discarded_at'],
+      )!,
+      synced: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}synced'],
+      )!,
+    );
+  }
+
+  @override
+  $OutboxAuditEntriesTable createAlias(String alias) {
+    return $OutboxAuditEntriesTable(attachedDatabase, alias);
+  }
+}
+
+class OutboxAuditEntry extends DataClass
+    implements Insertable<OutboxAuditEntry> {
+  final String id;
+  final String userId;
+  final String tenantId;
+  final String? locationId;
+
+  /// id de la fila de outbox descartada.
+  final String rowId;
+  final String rowKind;
+
+  /// Resumen NO sensible del payload (reserva, ángulo) — jamás la foto/firma.
+  final String summary;
+
+  /// Código del motivo: el lastErrorCode del dead-letter, o un motivo local
+  /// (SESSION_COMPLETED en la purga selectiva de 6F).
+  final String? reasonCode;
+  final DateTime discardedAt;
+  final bool synced;
+  const OutboxAuditEntry({
+    required this.id,
+    required this.userId,
+    required this.tenantId,
+    this.locationId,
+    required this.rowId,
+    required this.rowKind,
+    required this.summary,
+    this.reasonCode,
+    required this.discardedAt,
+    required this.synced,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['user_id'] = Variable<String>(userId);
+    map['tenant_id'] = Variable<String>(tenantId);
+    if (!nullToAbsent || locationId != null) {
+      map['location_id'] = Variable<String>(locationId);
+    }
+    map['row_id'] = Variable<String>(rowId);
+    map['row_kind'] = Variable<String>(rowKind);
+    map['summary'] = Variable<String>(summary);
+    if (!nullToAbsent || reasonCode != null) {
+      map['reason_code'] = Variable<String>(reasonCode);
+    }
+    map['discarded_at'] = Variable<DateTime>(discardedAt);
+    map['synced'] = Variable<bool>(synced);
+    return map;
+  }
+
+  OutboxAuditEntriesCompanion toCompanion(bool nullToAbsent) {
+    return OutboxAuditEntriesCompanion(
+      id: Value(id),
+      userId: Value(userId),
+      tenantId: Value(tenantId),
+      locationId: locationId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(locationId),
+      rowId: Value(rowId),
+      rowKind: Value(rowKind),
+      summary: Value(summary),
+      reasonCode: reasonCode == null && nullToAbsent
+          ? const Value.absent()
+          : Value(reasonCode),
+      discardedAt: Value(discardedAt),
+      synced: Value(synced),
+    );
+  }
+
+  factory OutboxAuditEntry.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return OutboxAuditEntry(
+      id: serializer.fromJson<String>(json['id']),
+      userId: serializer.fromJson<String>(json['userId']),
+      tenantId: serializer.fromJson<String>(json['tenantId']),
+      locationId: serializer.fromJson<String?>(json['locationId']),
+      rowId: serializer.fromJson<String>(json['rowId']),
+      rowKind: serializer.fromJson<String>(json['rowKind']),
+      summary: serializer.fromJson<String>(json['summary']),
+      reasonCode: serializer.fromJson<String?>(json['reasonCode']),
+      discardedAt: serializer.fromJson<DateTime>(json['discardedAt']),
+      synced: serializer.fromJson<bool>(json['synced']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'userId': serializer.toJson<String>(userId),
+      'tenantId': serializer.toJson<String>(tenantId),
+      'locationId': serializer.toJson<String?>(locationId),
+      'rowId': serializer.toJson<String>(rowId),
+      'rowKind': serializer.toJson<String>(rowKind),
+      'summary': serializer.toJson<String>(summary),
+      'reasonCode': serializer.toJson<String?>(reasonCode),
+      'discardedAt': serializer.toJson<DateTime>(discardedAt),
+      'synced': serializer.toJson<bool>(synced),
+    };
+  }
+
+  OutboxAuditEntry copyWith({
+    String? id,
+    String? userId,
+    String? tenantId,
+    Value<String?> locationId = const Value.absent(),
+    String? rowId,
+    String? rowKind,
+    String? summary,
+    Value<String?> reasonCode = const Value.absent(),
+    DateTime? discardedAt,
+    bool? synced,
+  }) => OutboxAuditEntry(
+    id: id ?? this.id,
+    userId: userId ?? this.userId,
+    tenantId: tenantId ?? this.tenantId,
+    locationId: locationId.present ? locationId.value : this.locationId,
+    rowId: rowId ?? this.rowId,
+    rowKind: rowKind ?? this.rowKind,
+    summary: summary ?? this.summary,
+    reasonCode: reasonCode.present ? reasonCode.value : this.reasonCode,
+    discardedAt: discardedAt ?? this.discardedAt,
+    synced: synced ?? this.synced,
+  );
+  OutboxAuditEntry copyWithCompanion(OutboxAuditEntriesCompanion data) {
+    return OutboxAuditEntry(
+      id: data.id.present ? data.id.value : this.id,
+      userId: data.userId.present ? data.userId.value : this.userId,
+      tenantId: data.tenantId.present ? data.tenantId.value : this.tenantId,
+      locationId: data.locationId.present
+          ? data.locationId.value
+          : this.locationId,
+      rowId: data.rowId.present ? data.rowId.value : this.rowId,
+      rowKind: data.rowKind.present ? data.rowKind.value : this.rowKind,
+      summary: data.summary.present ? data.summary.value : this.summary,
+      reasonCode: data.reasonCode.present
+          ? data.reasonCode.value
+          : this.reasonCode,
+      discardedAt: data.discardedAt.present
+          ? data.discardedAt.value
+          : this.discardedAt,
+      synced: data.synced.present ? data.synced.value : this.synced,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('OutboxAuditEntry(')
+          ..write('id: $id, ')
+          ..write('userId: $userId, ')
+          ..write('tenantId: $tenantId, ')
+          ..write('locationId: $locationId, ')
+          ..write('rowId: $rowId, ')
+          ..write('rowKind: $rowKind, ')
+          ..write('summary: $summary, ')
+          ..write('reasonCode: $reasonCode, ')
+          ..write('discardedAt: $discardedAt, ')
+          ..write('synced: $synced')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    userId,
+    tenantId,
+    locationId,
+    rowId,
+    rowKind,
+    summary,
+    reasonCode,
+    discardedAt,
+    synced,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is OutboxAuditEntry &&
+          other.id == this.id &&
+          other.userId == this.userId &&
+          other.tenantId == this.tenantId &&
+          other.locationId == this.locationId &&
+          other.rowId == this.rowId &&
+          other.rowKind == this.rowKind &&
+          other.summary == this.summary &&
+          other.reasonCode == this.reasonCode &&
+          other.discardedAt == this.discardedAt &&
+          other.synced == this.synced);
+}
+
+class OutboxAuditEntriesCompanion extends UpdateCompanion<OutboxAuditEntry> {
+  final Value<String> id;
+  final Value<String> userId;
+  final Value<String> tenantId;
+  final Value<String?> locationId;
+  final Value<String> rowId;
+  final Value<String> rowKind;
+  final Value<String> summary;
+  final Value<String?> reasonCode;
+  final Value<DateTime> discardedAt;
+  final Value<bool> synced;
+  final Value<int> rowid;
+  const OutboxAuditEntriesCompanion({
+    this.id = const Value.absent(),
+    this.userId = const Value.absent(),
+    this.tenantId = const Value.absent(),
+    this.locationId = const Value.absent(),
+    this.rowId = const Value.absent(),
+    this.rowKind = const Value.absent(),
+    this.summary = const Value.absent(),
+    this.reasonCode = const Value.absent(),
+    this.discardedAt = const Value.absent(),
+    this.synced = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  OutboxAuditEntriesCompanion.insert({
+    required String id,
+    required String userId,
+    required String tenantId,
+    this.locationId = const Value.absent(),
+    required String rowId,
+    required String rowKind,
+    required String summary,
+    this.reasonCode = const Value.absent(),
+    required DateTime discardedAt,
+    this.synced = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       userId = Value(userId),
+       tenantId = Value(tenantId),
+       rowId = Value(rowId),
+       rowKind = Value(rowKind),
+       summary = Value(summary),
+       discardedAt = Value(discardedAt);
+  static Insertable<OutboxAuditEntry> custom({
+    Expression<String>? id,
+    Expression<String>? userId,
+    Expression<String>? tenantId,
+    Expression<String>? locationId,
+    Expression<String>? rowId,
+    Expression<String>? rowKind,
+    Expression<String>? summary,
+    Expression<String>? reasonCode,
+    Expression<DateTime>? discardedAt,
+    Expression<bool>? synced,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (userId != null) 'user_id': userId,
+      if (tenantId != null) 'tenant_id': tenantId,
+      if (locationId != null) 'location_id': locationId,
+      if (rowId != null) 'row_id': rowId,
+      if (rowKind != null) 'row_kind': rowKind,
+      if (summary != null) 'summary': summary,
+      if (reasonCode != null) 'reason_code': reasonCode,
+      if (discardedAt != null) 'discarded_at': discardedAt,
+      if (synced != null) 'synced': synced,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  OutboxAuditEntriesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? userId,
+    Value<String>? tenantId,
+    Value<String?>? locationId,
+    Value<String>? rowId,
+    Value<String>? rowKind,
+    Value<String>? summary,
+    Value<String?>? reasonCode,
+    Value<DateTime>? discardedAt,
+    Value<bool>? synced,
+    Value<int>? rowid,
+  }) {
+    return OutboxAuditEntriesCompanion(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      tenantId: tenantId ?? this.tenantId,
+      locationId: locationId ?? this.locationId,
+      rowId: rowId ?? this.rowId,
+      rowKind: rowKind ?? this.rowKind,
+      summary: summary ?? this.summary,
+      reasonCode: reasonCode ?? this.reasonCode,
+      discardedAt: discardedAt ?? this.discardedAt,
+      synced: synced ?? this.synced,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (userId.present) {
+      map['user_id'] = Variable<String>(userId.value);
+    }
+    if (tenantId.present) {
+      map['tenant_id'] = Variable<String>(tenantId.value);
+    }
+    if (locationId.present) {
+      map['location_id'] = Variable<String>(locationId.value);
+    }
+    if (rowId.present) {
+      map['row_id'] = Variable<String>(rowId.value);
+    }
+    if (rowKind.present) {
+      map['row_kind'] = Variable<String>(rowKind.value);
+    }
+    if (summary.present) {
+      map['summary'] = Variable<String>(summary.value);
+    }
+    if (reasonCode.present) {
+      map['reason_code'] = Variable<String>(reasonCode.value);
+    }
+    if (discardedAt.present) {
+      map['discarded_at'] = Variable<DateTime>(discardedAt.value);
+    }
+    if (synced.present) {
+      map['synced'] = Variable<bool>(synced.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('OutboxAuditEntriesCompanion(')
+          ..write('id: $id, ')
+          ..write('userId: $userId, ')
+          ..write('tenantId: $tenantId, ')
+          ..write('locationId: $locationId, ')
+          ..write('rowId: $rowId, ')
+          ..write('rowKind: $rowKind, ')
+          ..write('summary: $summary, ')
+          ..write('reasonCode: $reasonCode, ')
+          ..write('discardedAt: $discardedAt, ')
+          ..write('synced: $synced, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$OutboxDb extends GeneratedDatabase {
   _$OutboxDb(QueryExecutor e) : super(e);
   $OutboxDbManager get managers => $OutboxDbManager(this);
   late final $OutboxEntriesTable outboxEntries = $OutboxEntriesTable(this);
+  late final $OutboxAuditEntriesTable outboxAuditEntries =
+      $OutboxAuditEntriesTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
-  List<DatabaseSchemaEntity> get allSchemaEntities => [outboxEntries];
+  List<DatabaseSchemaEntity> get allSchemaEntities => [
+    outboxEntries,
+    outboxAuditEntries,
+  ];
 }
 
 typedef $$OutboxEntriesTableCreateCompanionBuilder =
@@ -842,6 +1523,7 @@ typedef $$OutboxEntriesTableCreateCompanionBuilder =
       required String userId,
       required String tenantId,
       Value<String?> locationId,
+      Value<String?> groupKey,
       required String kind,
       required String payload,
       Value<String?> dependsOn,
@@ -860,6 +1542,7 @@ typedef $$OutboxEntriesTableUpdateCompanionBuilder =
       Value<String> userId,
       Value<String> tenantId,
       Value<String?> locationId,
+      Value<String?> groupKey,
       Value<String> kind,
       Value<String> payload,
       Value<String?> dependsOn,
@@ -899,6 +1582,11 @@ class $$OutboxEntriesTableFilterComposer
 
   ColumnFilters<String> get locationId => $composableBuilder(
     column: $table.locationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get groupKey => $composableBuilder(
+    column: $table.groupKey,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -982,6 +1670,11 @@ class $$OutboxEntriesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get groupKey => $composableBuilder(
+    column: $table.groupKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get kind => $composableBuilder(
     column: $table.kind,
     builder: (column) => ColumnOrderings(column),
@@ -1056,6 +1749,9 @@ class $$OutboxEntriesTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get groupKey =>
+      $composableBuilder(column: $table.groupKey, builder: (column) => column);
+
   GeneratedColumn<String> get kind =>
       $composableBuilder(column: $table.kind, builder: (column) => column);
 
@@ -1126,6 +1822,7 @@ class $$OutboxEntriesTableTableManager
                 Value<String> userId = const Value.absent(),
                 Value<String> tenantId = const Value.absent(),
                 Value<String?> locationId = const Value.absent(),
+                Value<String?> groupKey = const Value.absent(),
                 Value<String> kind = const Value.absent(),
                 Value<String> payload = const Value.absent(),
                 Value<String?> dependsOn = const Value.absent(),
@@ -1142,6 +1839,7 @@ class $$OutboxEntriesTableTableManager
                 userId: userId,
                 tenantId: tenantId,
                 locationId: locationId,
+                groupKey: groupKey,
                 kind: kind,
                 payload: payload,
                 dependsOn: dependsOn,
@@ -1160,6 +1858,7 @@ class $$OutboxEntriesTableTableManager
                 required String userId,
                 required String tenantId,
                 Value<String?> locationId = const Value.absent(),
+                Value<String?> groupKey = const Value.absent(),
                 required String kind,
                 required String payload,
                 Value<String?> dependsOn = const Value.absent(),
@@ -1176,6 +1875,7 @@ class $$OutboxEntriesTableTableManager
                 userId: userId,
                 tenantId: tenantId,
                 locationId: locationId,
+                groupKey: groupKey,
                 kind: kind,
                 payload: payload,
                 dependsOn: dependsOn,
@@ -1213,10 +1913,322 @@ typedef $$OutboxEntriesTableProcessedTableManager =
       OutboxEntry,
       PrefetchHooks Function()
     >;
+typedef $$OutboxAuditEntriesTableCreateCompanionBuilder =
+    OutboxAuditEntriesCompanion Function({
+      required String id,
+      required String userId,
+      required String tenantId,
+      Value<String?> locationId,
+      required String rowId,
+      required String rowKind,
+      required String summary,
+      Value<String?> reasonCode,
+      required DateTime discardedAt,
+      Value<bool> synced,
+      Value<int> rowid,
+    });
+typedef $$OutboxAuditEntriesTableUpdateCompanionBuilder =
+    OutboxAuditEntriesCompanion Function({
+      Value<String> id,
+      Value<String> userId,
+      Value<String> tenantId,
+      Value<String?> locationId,
+      Value<String> rowId,
+      Value<String> rowKind,
+      Value<String> summary,
+      Value<String?> reasonCode,
+      Value<DateTime> discardedAt,
+      Value<bool> synced,
+      Value<int> rowid,
+    });
+
+class $$OutboxAuditEntriesTableFilterComposer
+    extends Composer<_$OutboxDb, $OutboxAuditEntriesTable> {
+  $$OutboxAuditEntriesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get userId => $composableBuilder(
+    column: $table.userId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get tenantId => $composableBuilder(
+    column: $table.tenantId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get locationId => $composableBuilder(
+    column: $table.locationId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get rowId => $composableBuilder(
+    column: $table.rowId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get rowKind => $composableBuilder(
+    column: $table.rowKind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get summary => $composableBuilder(
+    column: $table.summary,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get reasonCode => $composableBuilder(
+    column: $table.reasonCode,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get discardedAt => $composableBuilder(
+    column: $table.discardedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get synced => $composableBuilder(
+    column: $table.synced,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$OutboxAuditEntriesTableOrderingComposer
+    extends Composer<_$OutboxDb, $OutboxAuditEntriesTable> {
+  $$OutboxAuditEntriesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get userId => $composableBuilder(
+    column: $table.userId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get tenantId => $composableBuilder(
+    column: $table.tenantId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get locationId => $composableBuilder(
+    column: $table.locationId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get rowId => $composableBuilder(
+    column: $table.rowId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get rowKind => $composableBuilder(
+    column: $table.rowKind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get summary => $composableBuilder(
+    column: $table.summary,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get reasonCode => $composableBuilder(
+    column: $table.reasonCode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get discardedAt => $composableBuilder(
+    column: $table.discardedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get synced => $composableBuilder(
+    column: $table.synced,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$OutboxAuditEntriesTableAnnotationComposer
+    extends Composer<_$OutboxDb, $OutboxAuditEntriesTable> {
+  $$OutboxAuditEntriesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get userId =>
+      $composableBuilder(column: $table.userId, builder: (column) => column);
+
+  GeneratedColumn<String> get tenantId =>
+      $composableBuilder(column: $table.tenantId, builder: (column) => column);
+
+  GeneratedColumn<String> get locationId => $composableBuilder(
+    column: $table.locationId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get rowId =>
+      $composableBuilder(column: $table.rowId, builder: (column) => column);
+
+  GeneratedColumn<String> get rowKind =>
+      $composableBuilder(column: $table.rowKind, builder: (column) => column);
+
+  GeneratedColumn<String> get summary =>
+      $composableBuilder(column: $table.summary, builder: (column) => column);
+
+  GeneratedColumn<String> get reasonCode => $composableBuilder(
+    column: $table.reasonCode,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get discardedAt => $composableBuilder(
+    column: $table.discardedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get synced =>
+      $composableBuilder(column: $table.synced, builder: (column) => column);
+}
+
+class $$OutboxAuditEntriesTableTableManager
+    extends
+        RootTableManager<
+          _$OutboxDb,
+          $OutboxAuditEntriesTable,
+          OutboxAuditEntry,
+          $$OutboxAuditEntriesTableFilterComposer,
+          $$OutboxAuditEntriesTableOrderingComposer,
+          $$OutboxAuditEntriesTableAnnotationComposer,
+          $$OutboxAuditEntriesTableCreateCompanionBuilder,
+          $$OutboxAuditEntriesTableUpdateCompanionBuilder,
+          (
+            OutboxAuditEntry,
+            BaseReferences<
+              _$OutboxDb,
+              $OutboxAuditEntriesTable,
+              OutboxAuditEntry
+            >,
+          ),
+          OutboxAuditEntry,
+          PrefetchHooks Function()
+        > {
+  $$OutboxAuditEntriesTableTableManager(
+    _$OutboxDb db,
+    $OutboxAuditEntriesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$OutboxAuditEntriesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$OutboxAuditEntriesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$OutboxAuditEntriesTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> userId = const Value.absent(),
+                Value<String> tenantId = const Value.absent(),
+                Value<String?> locationId = const Value.absent(),
+                Value<String> rowId = const Value.absent(),
+                Value<String> rowKind = const Value.absent(),
+                Value<String> summary = const Value.absent(),
+                Value<String?> reasonCode = const Value.absent(),
+                Value<DateTime> discardedAt = const Value.absent(),
+                Value<bool> synced = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => OutboxAuditEntriesCompanion(
+                id: id,
+                userId: userId,
+                tenantId: tenantId,
+                locationId: locationId,
+                rowId: rowId,
+                rowKind: rowKind,
+                summary: summary,
+                reasonCode: reasonCode,
+                discardedAt: discardedAt,
+                synced: synced,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String userId,
+                required String tenantId,
+                Value<String?> locationId = const Value.absent(),
+                required String rowId,
+                required String rowKind,
+                required String summary,
+                Value<String?> reasonCode = const Value.absent(),
+                required DateTime discardedAt,
+                Value<bool> synced = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => OutboxAuditEntriesCompanion.insert(
+                id: id,
+                userId: userId,
+                tenantId: tenantId,
+                locationId: locationId,
+                rowId: rowId,
+                rowKind: rowKind,
+                summary: summary,
+                reasonCode: reasonCode,
+                discardedAt: discardedAt,
+                synced: synced,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$OutboxAuditEntriesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$OutboxDb,
+      $OutboxAuditEntriesTable,
+      OutboxAuditEntry,
+      $$OutboxAuditEntriesTableFilterComposer,
+      $$OutboxAuditEntriesTableOrderingComposer,
+      $$OutboxAuditEntriesTableAnnotationComposer,
+      $$OutboxAuditEntriesTableCreateCompanionBuilder,
+      $$OutboxAuditEntriesTableUpdateCompanionBuilder,
+      (
+        OutboxAuditEntry,
+        BaseReferences<_$OutboxDb, $OutboxAuditEntriesTable, OutboxAuditEntry>,
+      ),
+      OutboxAuditEntry,
+      PrefetchHooks Function()
+    >;
 
 class $OutboxDbManager {
   final _$OutboxDb _db;
   $OutboxDbManager(this._db);
   $$OutboxEntriesTableTableManager get outboxEntries =>
       $$OutboxEntriesTableTableManager(_db, _db.outboxEntries);
+  $$OutboxAuditEntriesTableTableManager get outboxAuditEntries =>
+      $$OutboxAuditEntriesTableTableManager(_db, _db.outboxAuditEntries);
 }

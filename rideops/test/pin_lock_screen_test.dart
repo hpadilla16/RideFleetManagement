@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/app.dart';
 import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/api_providers.dart';
+import 'package:rideops/core/db/outbox_providers.dart';
+import 'package:rideops/core/outbox/network_status.dart';
 import 'package:rideops/core/session/biometric_auth.dart';
 import 'package:rideops/core/session/lock_state.dart';
 import 'package:rideops/core/session/active_location.dart';
@@ -18,6 +20,7 @@ import 'package:rideops/features/dashboard/presentation/home_screen.dart';
 import 'package:rideops/features/dashboard/presentation/home_skeleton.dart';
 
 import 'helpers/auth_test_helpers.dart';
+import 'helpers/outbox_test_helpers.dart';
 import 'helpers/shell_test_helpers.dart';
 
 /// Widget tests del unlock (mockup 3B) montando la app completa: cold start
@@ -56,6 +59,11 @@ void main() {
           activeLocationStoreProvider.overrideWithValue(InMemoryActiveLocationStore()),
           eventLoggerProvider.overrideWithValue(logger),
           biometricAuthProvider.overrideWithValue(bio),
+          // H5: bandeja silenciada — ver helpers/outbox_test_helpers.dart.
+          outboxDbProvider.overrideWith(buildMemoryOutboxDb),
+          photoVaultProvider.overrideWith(buildQuietVault),
+          networkStatusProvider.overrideWithValue(FakeNetworkStatus()),
+          outboxRowsProvider.overrideWith((ref) => Stream.value(const [])),
         ],
         child: const RideOpsApp(),
       );

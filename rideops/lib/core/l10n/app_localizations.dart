@@ -973,6 +973,666 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Sin resultados para “{query}”.'**
   String searchNoResults(String query);
+
+  /// No description provided for @inspTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección de salida'**
+  String get inspTitle;
+
+  /// No description provided for @inspProgressChip.
+  ///
+  /// In es, this message translates to:
+  /// **'{count} de 8'**
+  String inspProgressChip(int count);
+
+  /// No description provided for @inspProgressDone.
+  ///
+  /// In es, this message translates to:
+  /// **'8 de 8 ✓'**
+  String get inspProgressDone;
+
+  /// No description provided for @angleFront.
+  ///
+  /// In es, this message translates to:
+  /// **'Frente'**
+  String get angleFront;
+
+  /// No description provided for @angleRear.
+  ///
+  /// In es, this message translates to:
+  /// **'Atrás'**
+  String get angleRear;
+
+  /// No description provided for @angleLeft.
+  ///
+  /// In es, this message translates to:
+  /// **'Lado izquierdo'**
+  String get angleLeft;
+
+  /// No description provided for @angleRight.
+  ///
+  /// In es, this message translates to:
+  /// **'Lado derecho'**
+  String get angleRight;
+
+  /// No description provided for @angleFrontSeat.
+  ///
+  /// In es, this message translates to:
+  /// **'Asiento del.'**
+  String get angleFrontSeat;
+
+  /// No description provided for @angleRearSeat.
+  ///
+  /// In es, this message translates to:
+  /// **'Asiento tras.'**
+  String get angleRearSeat;
+
+  /// No description provided for @angleDash.
+  ///
+  /// In es, this message translates to:
+  /// **'Tablero'**
+  String get angleDash;
+
+  /// No description provided for @angleTrunk.
+  ///
+  /// In es, this message translates to:
+  /// **'Cajuela'**
+  String get angleTrunk;
+
+  /// No description provided for @angleRequiredChip.
+  ///
+  /// In es, this message translates to:
+  /// **'Obligatorio'**
+  String get angleRequiredChip;
+
+  /// No description provided for @anglePending.
+  ///
+  /// In es, this message translates to:
+  /// **'Pendiente'**
+  String get anglePending;
+
+  /// No description provided for @angleCompressing.
+  ///
+  /// In es, this message translates to:
+  /// **'Comprimiendo…'**
+  String get angleCompressing;
+
+  /// No description provided for @angleFailedRetry.
+  ///
+  /// In es, this message translates to:
+  /// **'Falló — toca para reintentar'**
+  String get angleFailedRetry;
+
+  /// No description provided for @angleQueued.
+  ///
+  /// In es, this message translates to:
+  /// **'En bandeja'**
+  String get angleQueued;
+
+  /// No description provided for @angleOnServer.
+  ///
+  /// In es, this message translates to:
+  /// **'Ya en el servidor'**
+  String get angleOnServer;
+
+  /// No description provided for @inspContinueMetrics.
+  ///
+  /// In es, this message translates to:
+  /// **'Continuar a métricas'**
+  String get inspContinueMetrics;
+
+  /// No description provided for @inspRequiredFootnote.
+  ///
+  /// In es, this message translates to:
+  /// **'Frente y Atrás son obligatorios; el resto suma evidencia.'**
+  String get inspRequiredFootnote;
+
+  /// No description provided for @inspOfflineBanner.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin conexión. Puedes terminar la inspección completa: todo queda en la bandeja y se enviará al reconectar.'**
+  String get inspOfflineBanner;
+
+  /// No description provided for @inspOfflineChip.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin red'**
+  String get inspOfflineChip;
+
+  /// No description provided for @inspLinkExpires.
+  ///
+  /// In es, this message translates to:
+  /// **'El enlace de esta sesión vence a las {time}.'**
+  String inspLinkExpires(String time);
+
+  /// No description provided for @inspLoadOffline.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin conexión. Para iniciar la inspección se necesita señal una vez; después todo funciona sin red.'**
+  String get inspLoadOffline;
+
+  /// No description provided for @inspOutboxFull.
+  ///
+  /// In es, this message translates to:
+  /// **'La bandeja está llena. Conéctate a una red para que se vacíe antes de capturar más fotos.'**
+  String get inspOutboxFull;
+
+  /// No description provided for @camAnglePill.
+  ///
+  /// In es, this message translates to:
+  /// **'{angle} · {n} de 8'**
+  String camAnglePill(String angle, int n);
+
+  /// No description provided for @camHintExterior.
+  ///
+  /// In es, this message translates to:
+  /// **'Encuadra el vehículo completo dentro de las esquinas'**
+  String get camHintExterior;
+
+  /// No description provided for @camHintInterior.
+  ///
+  /// In es, this message translates to:
+  /// **'Encuadra el área completa dentro de las esquinas'**
+  String get camHintInterior;
+
+  /// No description provided for @camFlash.
+  ///
+  /// In es, this message translates to:
+  /// **'Flash'**
+  String get camFlash;
+
+  /// No description provided for @camClose.
+  ///
+  /// In es, this message translates to:
+  /// **'Cerrar'**
+  String get camClose;
+
+  /// No description provided for @camShutter.
+  ///
+  /// In es, this message translates to:
+  /// **'Tomar foto'**
+  String get camShutter;
+
+  /// No description provided for @camErrorTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudo abrir la cámara'**
+  String get camErrorTitle;
+
+  /// No description provided for @camErrorPermissionHint.
+  ///
+  /// In es, this message translates to:
+  /// **'El permiso de cámara está denegado. Actívalo en los Ajustes del sistema y vuelve a intentar.'**
+  String get camErrorPermissionHint;
+
+  /// No description provided for @langSpanish.
+  ///
+  /// In es, this message translates to:
+  /// **'Español'**
+  String get langSpanish;
+
+  /// No description provided for @langEnglish.
+  ///
+  /// In es, this message translates to:
+  /// **'English'**
+  String get langEnglish;
+
+  /// No description provided for @metricsTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Métricas del vehículo'**
+  String get metricsTitle;
+
+  /// No description provided for @metricsOdometer.
+  ///
+  /// In es, this message translates to:
+  /// **'Odómetro'**
+  String get metricsOdometer;
+
+  /// No description provided for @metricsOdometerUnit.
+  ///
+  /// In es, this message translates to:
+  /// **'mi'**
+  String get metricsOdometerUnit;
+
+  /// No description provided for @metricsPrevReading.
+  ///
+  /// In es, this message translates to:
+  /// **'Última lectura registrada: {value} mi'**
+  String metricsPrevReading(String value);
+
+  /// No description provided for @metricsOdometerLower.
+  ///
+  /// In es, this message translates to:
+  /// **'La lectura es menor que la última registrada. Revísala — se enviará tal cual.'**
+  String get metricsOdometerLower;
+
+  /// No description provided for @metricsFuel.
+  ///
+  /// In es, this message translates to:
+  /// **'Combustible'**
+  String get metricsFuel;
+
+  /// No description provided for @fuelEmpty.
+  ///
+  /// In es, this message translates to:
+  /// **'Vacío'**
+  String get fuelEmpty;
+
+  /// No description provided for @fuelFull.
+  ///
+  /// In es, this message translates to:
+  /// **'Lleno'**
+  String get fuelFull;
+
+  /// No description provided for @metricsCleanliness.
+  ///
+  /// In es, this message translates to:
+  /// **'Limpieza'**
+  String get metricsCleanliness;
+
+  /// No description provided for @cleanDirty.
+  ///
+  /// In es, this message translates to:
+  /// **'Sucio'**
+  String get cleanDirty;
+
+  /// No description provided for @cleanSpotless.
+  ///
+  /// In es, this message translates to:
+  /// **'Impecable'**
+  String get cleanSpotless;
+
+  /// No description provided for @metricsNotes.
+  ///
+  /// In es, this message translates to:
+  /// **'Notas (opcional)'**
+  String get metricsNotes;
+
+  /// No description provided for @inspContinueSignature.
+  ///
+  /// In es, this message translates to:
+  /// **'Continuar a firma'**
+  String get inspContinueSignature;
+
+  /// No description provided for @kioskBarLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Modo firma · bloqueo en pausa'**
+  String get kioskBarLabel;
+
+  /// No description provided for @kioskBarExit.
+  ///
+  /// In es, this message translates to:
+  /// **'Salir: mantener 3 s + PIN'**
+  String get kioskBarExit;
+
+  /// No description provided for @kioskExitPinTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Salir del modo firma'**
+  String get kioskExitPinTitle;
+
+  /// No description provided for @kioskExitPinBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Escribe tu PIN para volver al modo staff.'**
+  String get kioskExitPinBody;
+
+  /// No description provided for @kioskExitWrongPin.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{PIN incorrecto — te queda 1 intento} other{PIN incorrecto — te quedan {count} intentos}}'**
+  String kioskExitWrongPin(int count);
+
+  /// No description provided for @kioskExitExhausted.
+  ///
+  /// In es, this message translates to:
+  /// **'Demasiados intentos. Volviendo al paso anterior.'**
+  String get kioskExitExhausted;
+
+  /// No description provided for @kioskSignSubtitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección del vehículo · Reserva {reservation}'**
+  String kioskSignSubtitle(String reservation);
+
+  /// No description provided for @kioskSignPrompt.
+  ///
+  /// In es, this message translates to:
+  /// **'Firme para confirmar que revisó el estado del vehículo junto al agente.'**
+  String get kioskSignPrompt;
+
+  /// No description provided for @kioskSignHint.
+  ///
+  /// In es, this message translates to:
+  /// **'Firme aquí con el dedo'**
+  String get kioskSignHint;
+
+  /// No description provided for @kioskSignClear.
+  ///
+  /// In es, this message translates to:
+  /// **'Borrar'**
+  String get kioskSignClear;
+
+  /// No description provided for @kioskSignConfirm.
+  ///
+  /// In es, this message translates to:
+  /// **'Confirmar firma'**
+  String get kioskSignConfirm;
+
+  /// No description provided for @summaryQueueTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'{photos} fotos · métricas · firma'**
+  String summaryQueueTitle(int photos);
+
+  /// No description provided for @summaryQueueBadgeOffline.
+  ///
+  /// In es, this message translates to:
+  /// **'Se enviará al reconectar'**
+  String get summaryQueueBadgeOffline;
+
+  /// No description provided for @summaryQueueBadgeOnline.
+  ///
+  /// In es, this message translates to:
+  /// **'Listo para enviar'**
+  String get summaryQueueBadgeOnline;
+
+  /// No description provided for @summaryQueueMeta.
+  ///
+  /// In es, this message translates to:
+  /// **'Guardado local cifrado · orden de envío garantizado'**
+  String get summaryQueueMeta;
+
+  /// No description provided for @inspFinishOffline.
+  ///
+  /// In es, this message translates to:
+  /// **'Terminar — se enviará al reconectar'**
+  String get inspFinishOffline;
+
+  /// No description provided for @inspFinishOnline.
+  ///
+  /// In es, this message translates to:
+  /// **'Terminar y enviar'**
+  String get inspFinishOnline;
+
+  /// No description provided for @inspFinishQueued.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección en la bandeja de salida'**
+  String get inspFinishQueued;
+
+  /// No description provided for @alreadyCompletedTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Esta inspección ya se completó'**
+  String get alreadyCompletedTitle;
+
+  /// No description provided for @alreadyCompletedBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Otra pantalla la cerró mientras trabajabas. Tus envíos pendientes de esta sesión se retiraron de la bandeja — no se enviará nada duplicado.'**
+  String get alreadyCompletedBody;
+
+  /// No description provided for @alreadyCompletedBodyAt.
+  ///
+  /// In es, this message translates to:
+  /// **'Otra pantalla la cerró a las {time} mientras trabajabas. Tus envíos pendientes de esta sesión se retiraron de la bandeja — no se enviará nada duplicado.'**
+  String alreadyCompletedBodyAt(String time);
+
+  /// No description provided for @alreadyCompletedChip.
+  ///
+  /// In es, this message translates to:
+  /// **'Reserva {reservation}'**
+  String alreadyCompletedChip(String reservation);
+
+  /// No description provided for @backToHome.
+  ///
+  /// In es, this message translates to:
+  /// **'Volver al inicio'**
+  String get backToHome;
+
+  /// No description provided for @outboxTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Bandeja de salida'**
+  String get outboxTitle;
+
+  /// No description provided for @outboxDraining.
+  ///
+  /// In es, this message translates to:
+  /// **'Enviando…'**
+  String get outboxDraining;
+
+  /// No description provided for @outboxDrainProgress.
+  ///
+  /// In es, this message translates to:
+  /// **'{done} de {total} enviados'**
+  String outboxDrainProgress(int done, int total);
+
+  /// No description provided for @outboxDrainRemaining.
+  ///
+  /// In es, this message translates to:
+  /// **'quedan ~{size}'**
+  String outboxDrainRemaining(String size);
+
+  /// No description provided for @outboxItemPhoto.
+  ///
+  /// In es, this message translates to:
+  /// **'Foto · {angle}'**
+  String outboxItemPhoto(String angle);
+
+  /// No description provided for @outboxItemComplete.
+  ///
+  /// In es, this message translates to:
+  /// **'Cierre de inspección'**
+  String get outboxItemComplete;
+
+  /// No description provided for @outboxItemMetaPhoto.
+  ///
+  /// In es, this message translates to:
+  /// **'{reservation} · inspección de salida · {size}'**
+  String outboxItemMetaPhoto(String reservation, String size);
+
+  /// No description provided for @outboxItemMetaComplete.
+  ///
+  /// In es, this message translates to:
+  /// **'{reservation} · métricas + firma · va al final de su cadena'**
+  String outboxItemMetaComplete(String reservation);
+
+  /// No description provided for @outboxStatusQueued.
+  ///
+  /// In es, this message translates to:
+  /// **'En cola'**
+  String get outboxStatusQueued;
+
+  /// No description provided for @outboxStatusUploading.
+  ///
+  /// In es, this message translates to:
+  /// **'Subiendo'**
+  String get outboxStatusUploading;
+
+  /// No description provided for @outboxStatusWaitsPhotos.
+  ///
+  /// In es, this message translates to:
+  /// **'Espera sus fotos'**
+  String get outboxStatusWaitsPhotos;
+
+  /// No description provided for @outboxStatusRejected.
+  ///
+  /// In es, this message translates to:
+  /// **'Rechazado'**
+  String get outboxStatusRejected;
+
+  /// No description provided for @outboxAttempts.
+  ///
+  /// In es, this message translates to:
+  /// **'intentado {count} veces · último {time}'**
+  String outboxAttempts(int count, String time);
+
+  /// No description provided for @outboxReasonAnglesMissing.
+  ///
+  /// In es, this message translates to:
+  /// **'El servidor lo rechazó: faltan los ángulos frontal y trasero. Captúralos y reintenta.'**
+  String get outboxReasonAnglesMissing;
+
+  /// No description provided for @outboxReasonToken.
+  ///
+  /// In es, this message translates to:
+  /// **'El permiso para subir venció o se consumió. Reintentar pedirá uno nuevo con tu sesión.'**
+  String get outboxReasonToken;
+
+  /// No description provided for @outboxReasonPhotoLost.
+  ///
+  /// In es, this message translates to:
+  /// **'La foto ya no está en este teléfono. Solo puedes descartar este envío.'**
+  String get outboxReasonPhotoLost;
+
+  /// No description provided for @outboxReasonSessionGone.
+  ///
+  /// In es, this message translates to:
+  /// **'La sesión de checkout ya no existe en el servidor.'**
+  String get outboxReasonSessionGone;
+
+  /// No description provided for @outboxReasonNetwork.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudo enviar tras varios intentos. Reintenta cuando haya señal.'**
+  String get outboxReasonNetwork;
+
+  /// No description provided for @outboxReasonGeneric.
+  ///
+  /// In es, this message translates to:
+  /// **'El servidor rechazó este envío.'**
+  String get outboxReasonGeneric;
+
+  /// No description provided for @outboxTechnicalDetail.
+  ///
+  /// In es, this message translates to:
+  /// **'Detalle técnico: {code} · {message}'**
+  String outboxTechnicalDetail(String code, String message);
+
+  /// No description provided for @outboxActionOpenInspection.
+  ///
+  /// In es, this message translates to:
+  /// **'Abrir inspección'**
+  String get outboxActionOpenInspection;
+
+  /// No description provided for @outboxActionDiscard.
+  ///
+  /// In es, this message translates to:
+  /// **'Descartar'**
+  String get outboxActionDiscard;
+
+  /// No description provided for @outboxDeadBanner.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{1 envío necesita tu decisión. El resto seguirá enviándose normal.} other{{count} envíos necesitan tu decisión. El resto seguirá enviándose normal.}}'**
+  String outboxDeadBanner(int count);
+
+  /// No description provided for @outboxDiscardTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'¿Descartar este envío?'**
+  String get outboxDiscardTitle;
+
+  /// No description provided for @outboxDiscardBodyPhoto.
+  ///
+  /// In es, this message translates to:
+  /// **'Se borrará la foto ({angle}) de {reservation} de este teléfono. Habrá que capturarla de nuevo. Lo ya enviado al servidor no se toca.'**
+  String outboxDiscardBodyPhoto(String angle, String reservation);
+
+  /// No description provided for @outboxDiscardBodyComplete.
+  ///
+  /// In es, this message translates to:
+  /// **'Se borrará el cierre de inspección de {reservation} de este teléfono. Las métricas y la firma capturadas se perderán y habrá que repetirlas. Las fotos ya enviadas al servidor no se tocan.'**
+  String outboxDiscardBodyComplete(String reservation);
+
+  /// No description provided for @outboxDiscardConfirm.
+  ///
+  /// In es, this message translates to:
+  /// **'Sí, descartar'**
+  String get outboxDiscardConfirm;
+
+  /// No description provided for @outboxDiscardKeep.
+  ///
+  /// In es, this message translates to:
+  /// **'Conservar en la bandeja'**
+  String get outboxDiscardKeep;
+
+  /// No description provided for @outboxEmptyTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Todo enviado'**
+  String get outboxEmptyTitle;
+
+  /// No description provided for @outboxEmptyBody.
+  ///
+  /// In es, this message translates to:
+  /// **'No hay nada esperando. Lo que captures sin señal aparecerá aquí y se enviará solo.'**
+  String get outboxEmptyBody;
+
+  /// No description provided for @outboxLastDrain.
+  ///
+  /// In es, this message translates to:
+  /// **'Último envío: {time}'**
+  String outboxLastDrain(String time);
+
+  /// No description provided for @outboxFullTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'La bandeja está llena'**
+  String get outboxFullTitle;
+
+  /// No description provided for @outboxFullBody.
+  ///
+  /// In es, this message translates to:
+  /// **'{count} envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.'**
+  String outboxFullBody(int count);
+
+  /// No description provided for @outboxFullChip.
+  ///
+  /// In es, this message translates to:
+  /// **'{count} de {max} · ~{size} en espera'**
+  String outboxFullChip(int count, int max, String size);
+
+  /// No description provided for @outboxFullCapturesPaused.
+  ///
+  /// In es, this message translates to:
+  /// **'Las capturas nuevas están pausadas hasta liberar espacio.'**
+  String get outboxFullCapturesPaused;
+
+  /// No description provided for @outboxSendNow.
+  ///
+  /// In es, this message translates to:
+  /// **'Enviar ahora'**
+  String get outboxSendNow;
+
+  /// No description provided for @outboxSendNowNoNetwork.
+  ///
+  /// In es, this message translates to:
+  /// **'Enviar ahora (sin red)'**
+  String get outboxSendNowNoNetwork;
+
+  /// No description provided for @logoutPendingTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'¿Cerrar sesión?'**
+  String get logoutPendingTitle;
+
+  /// No description provided for @logoutPendingBody.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{Tienes 1 envío sin mandar; si cierras sesión se borra de este teléfono.} other{Tienes {count} envíos sin mandar; si cierras sesión se borran de este teléfono.}}'**
+  String logoutPendingBody(int count);
+
+  /// No description provided for @logoutAnyway.
+  ///
+  /// In es, this message translates to:
+  /// **'Cerrar sesión igual'**
+  String get logoutAnyway;
 }
 
 class _AppLocalizationsDelegate

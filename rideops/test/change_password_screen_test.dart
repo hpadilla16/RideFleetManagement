@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/app.dart';
 import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/api_providers.dart';
+import 'package:rideops/core/db/outbox_providers.dart';
+import 'package:rideops/core/outbox/network_status.dart';
 import 'package:rideops/core/session/active_location.dart';
 import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/token_store.dart';
@@ -13,6 +15,7 @@ import 'package:rideops/features/auth/presentation/pin_setup_screen.dart';
 import 'package:rideops/features/dashboard/presentation/home_screen.dart';
 
 import 'helpers/auth_test_helpers.dart';
+import 'helpers/outbox_test_helpers.dart';
 import 'helpers/shell_test_helpers.dart';
 
 /// Widget tests del gate de cambio forzado (mockup 2A-2C): el router bloquea
@@ -53,6 +56,11 @@ void main() {
           // quedaría en skeleton hasta disparar el lock de inactividad.
           activeLocationStoreProvider.overrideWithValue(InMemoryActiveLocationStore()),
           eventLoggerProvider.overrideWithValue(logger),
+          // H5: bandeja silenciada — ver helpers/outbox_test_helpers.dart.
+          outboxDbProvider.overrideWith(buildMemoryOutboxDb),
+          photoVaultProvider.overrideWith(buildQuietVault),
+          networkStatusProvider.overrideWithValue(FakeNetworkStatus()),
+          outboxRowsProvider.overrideWith((ref) => Stream.value(const [])),
         ],
         child: const RideOpsApp(),
       );

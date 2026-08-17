@@ -19,9 +19,29 @@ dependencies:
   freezed_annotation: ^3.0.0
   json_annotation: ^4.12.0
 
-  # Bandeja de salida cifrada (ADR-7): Drift sobre SQLCipher.
+  # Bandeja de salida cifrada (ADR-7): Drift sobre SQLCipher. sqlite3 va
+  # PINEADO a 2.x a propósito: el open de H5 enruta el loader nativo a
+  # libsqlcipher vía `package:sqlite3/open.dart` (open.overrideFor), API que
+  # sqlite3 3.x eliminó (bindings @Native estáticos por native-assets, sin
+  # override en runtime — y sqlcipher_flutter_libs 0.7 está EOL). Migrar a
+  # 3.x exige otra vía de carga de SQLCipher: trabajo explícito de M4, no un
+  # bump casual. El pin arrastra drift a 2.31 (compatible con todo lo usado).
   drift: ^2.28.0
   sqlcipher_flutter_libs: ^0.6.0
+  sqlite3: ^2.4.0
+
+  # Cifrado de archivos de foto en disco (H5, ADR-7): AES-GCM 256 con llave en
+  # secure storage. Los binarios NO viven en la fila del outbox — solo el path.
+  cryptography: ^2.7.0
+
+  # Captura de inspección (H5): un controlador por SESIÓN de captura,
+  # compresión NATIVA path-a-path apenas se toma la foto (DoD #8).
+  camera: ^0.11.0
+  flutter_image_compress: ^2.4.0
+
+  # Drenado en foreground (H5): disparo al reconectar. El drenado en
+  # background con WorkManager es H6.
+  connectivity_plus: ^6.1.0
 
   # Token seguro (Keychain/Keystore). Sujeto del spike M0-1a.
   flutter_secure_storage: ^9.2.0
