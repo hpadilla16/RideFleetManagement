@@ -1142,11 +1142,11 @@
       }
     },
     "gotchaLabel": "Where people trip",
-    "practiceBanner": "PRACTICE MODE — demo tenant. Nothing here touches real data, and practice earns no points.",
+    "practiceBanner": "PRACTICE MODE — demo tenant. Nothing here touches real data, and what you complete counts toward your training.",
     "practiceExit": "Back to my account",
     "practiceCta": "🎓 Practice on the demo tenant",
     "practiceOpening": "Opening practice…",
-    "practiceHint": "Rehearse the hands-on modules on the demo tenant — no real data, no points",
+    "practiceHint": "Rehearse the hands-on modules on the demo tenant — no real data, and it counts toward your training",
     "welcomeTitle": "Welcome to Ride Fleet",
     "welcomeBody": "First time here? In five minutes I can walk you through where everything lives — and you can relaunch the tour any time from Ride University.",
     "welcomeStart": "Show me around",
@@ -1158,6 +1158,8 @@
     "needsRecordCta": "Go to reservations",
     "tourUnavailableTitle": "This walkthrough is not available here",
     "tourUnavailableBody": "A step in this guide points at something that is not on screen. Tell an admin so we can fix the guide.",
-    "close": "Close"
+    "close": "Close",
+    "waitingForRecord": "Open any reservation to start \"{{name}}\" — the guide continues there.",
+    "cancel": "Cancel"
   }
 }

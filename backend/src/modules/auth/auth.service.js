@@ -34,13 +34,20 @@ function signToken(user, options = {}) {
  * hours: long enough to rehearse a full counter cycle, short enough that a
  * forgotten kiosk tab does not stay signed into anything overnight.
  */
-export function issueTrainingPracticeToken(user) {
-  // `prac: true` is the whole security model (QA, 2026-08-16): /auth/refresh
-  // refuses it (so 4h means 4h — AuthGate's silent refresh cannot stretch it
-  // to the 12h default) and /training/practice-session refuses it (a practice
-  // session cannot mint further practice sessions). Without the claim, a
-  // copied token was renewable forever and survived offboarding.
-  const claims = { sub: user.id, email: user.email, role: user.role, tenantId: user.tenantId || null, prac: true };
+export function issueTrainingPracticeToken(user, { forUserId = null, forTenantId = null } = {}) {
+  // `prac: true` is the security model (QA, 2026-08-16): /auth/refresh refuses
+  // it (so 4h means 4h — AuthGate's silent refresh cannot stretch it to the
+  // 12h default) and /training/practice-session refuses it (a practice session
+  // cannot mint further practice sessions). Without the claim, a copied token
+  // was renewable forever and survived offboarding.
+  //
+  // `pracFor` / `pracTenant` name the REAL trainee behind the practice user,
+  // so what they do in the demo lands on THEIR training record (Hector,
+  // 2026-08-17: practice is the learning environment, it should count).
+  const claims = {
+    sub: user.id, email: user.email, role: user.role, tenantId: user.tenantId || null,
+    prac: true, pracFor: forUserId, pracTenant: forTenantId,
+  };
   return jwt.sign(claims, getJwtSecret(), { expiresIn: '4h' });
 }
 

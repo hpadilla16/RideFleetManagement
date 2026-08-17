@@ -150,8 +150,17 @@ export const trainingService = {
    * person is right there, and a sweep over every user would read far more
    * than it ever completes.
    */
-  async settle({ tenantId, userId }) {
+  /**
+   * `proofTenantId` / `proofUserId` (optional): where to look for the WORK,
+   * when it did not happen under the same identity that owns the progress.
+   * Practice mode is exactly that case — the trainee's record lives on their
+   * real account, but the reservation they created lives in the demo tenant
+   * under their practice user.
+   */
+  async settle({ tenantId, userId, proofTenantId = null, proofUserId = null }) {
     if (!tenantId || !userId) return [];
+    const lookInTenant = proofTenantId || tenantId;
+    const lookForUser = proofUserId || userId;
     const armed = await prisma.trainingProgress.findMany({
       where: { tenantId, userId, status: 'ARMED' },
     });
@@ -165,14 +174,14 @@ export const trainingService = {
 
       let records = [];
       try {
-        records = await candidatesFor(verifyType, { tenantId, userId, armedAt: row.armedAt });
+        records = await candidatesFor(verifyType, { tenantId: lookInTenant, userId: lookForUser, armedAt: row.armedAt });
       } catch (err) {
         // A broken check must never block someone's training page.
         logger.warn('[training] candidate lookup failed', { moduleKey: row.moduleKey, message: err.message });
         continue;
       }
 
-      const proof = findProof({ verifyType, records, userId, armedAt: row.armedAt });
+      const proof = findProof({ verifyType, records, userId: lookForUser, armedAt: row.armedAt });
       if (!proof.proved) continue;
 
       const updated = await prisma.trainingProgress.update({
@@ -222,11 +231,12 @@ export const trainingService = {
    * inventory or real money. Training never manufactures real work; the demo
    * tenant is the rehearsal space, and this is the bridge into it.
    *
-   * The account is shared and created on first use. Its password is random
-   * and thrown away — nobody ever logs into it directly; the only door is
-   * this endpoint, behind the caller's own real session. Practice earns no
-   * points by construction: progress rows key on userId, and in there you
-   * are the practice user, not yourself.
+   * The account is created on first use, one per trainee. Its password is
+   * random and thrown away — nobody ever logs into it directly; the only door
+   * is this endpoint, behind the caller's own real session. What the trainee
+   * completes in here DOES count: the token names them (pracFor), so progress
+   * lands on their real record while the proof is looked up under the practice
+   * user in the demo tenant.
    */
   /** Deps injectable for tests: { prisma, issueToken }. */
   async practiceSession(actor = {}, deps = {}) {
@@ -240,7 +250,13 @@ export const trainingService = {
     });
     if (!demo) { const e = new Error('No demo tenant is configured'); e.status = 404; throw e; }
 
-    const email = 'practica@ride.university';
+    // ONE PRACTICE USER PER TRAINEE (2026-08-17). It began as a single shared
+    // account, which was fine while practice earned nothing. Now that practice
+    // COUNTS, attribution has to be exact: two trainees rehearsing at the same
+    // time would otherwise prove each other's modules. A per-person account
+    // also ends the shared-screen-lock and shared-audit-trail problems.
+    if (!actor.userId) { const e = new Error('Practice needs a signed-in user'); e.status = 400; throw e; }
+    const email = `practica+${String(actor.userId).toLowerCase()}@ride.university`;
     // Case-insensitive: login lowercases, so a `Practica@...` row would slip
     // past a sensitive lookup AND past the guard below (QA #6c).
     const findPractice = () => db.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } } });
@@ -268,7 +284,7 @@ export const trainingService = {
           data: {
             tenantId: demo.id,
             email,
-            fullName: 'Practica - Ride University',
+            fullName: `Practica - ${actor.email || actor.userId}`,
             role: 'AGENT',
             passwordHash: await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 10),
             isActive: true,
@@ -299,6 +315,9 @@ export const trainingService = {
       practiceUserId: user.id, demoTenantId: demo.id,
     });
 
-    return { token: issueToken(user), tenantName: demo.name };
+    return {
+      token: issueToken(user, { forUserId: actor.userId, forTenantId: actor.tenantId || null }),
+      tenantName: demo.name,
+    };
   },
 };

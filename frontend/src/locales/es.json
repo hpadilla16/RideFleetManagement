@@ -1142,11 +1142,11 @@
       }
     },
     "gotchaLabel": "Dónde se traba la gente",
-    "practiceBanner": "MODO PRÁCTICA — tenant de demostración. Nada de esto toca datos reales, y la práctica no da puntos.",
+    "practiceBanner": "MODO PRÁCTICA — tenant de demostración. Nada de esto toca datos reales, y lo que completes cuenta para tu entrenamiento.",
     "practiceExit": "Volver a mi cuenta",
     "practiceCta": "🎓 Practicar en el tenant Demo",
     "practiceOpening": "Abriendo la práctica…",
-    "practiceHint": "Ensaya los módulos prácticos en el tenant de demostración — sin datos reales, sin puntos",
+    "practiceHint": "Ensaya los módulos prácticos en el tenant de demostración — sin datos reales, y cuenta para tu entrenamiento",
     "welcomeTitle": "Bienvenido a Ride Fleet",
     "welcomeBody": "¿Primera vez por aquí? En cinco minutos te enseño dónde vive todo — y puedes relanzar el tour cuando quieras desde Ride University.",
     "welcomeStart": "Enséñame",
@@ -1158,6 +1158,8 @@
     "needsRecordCta": "Ir a reservaciones",
     "tourUnavailableTitle": "Esta guía no está disponible aquí",
     "tourUnavailableBody": "Un paso de esta guía apunta a algo que no está en pantalla. Avísale a un administrador para que la arreglemos.",
-    "close": "Cerrar"
+    "close": "Cerrar",
+    "waitingForRecord": "Abre cualquier reserva para empezar \"{{name}}\" — la guía sigue ahí.",
+    "cancel": "Cancelar"
   }
 }
