@@ -1,0 +1,1507 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RideOps · Mockups M2 — Tanda B (Paso de PAGO · divergencia de preview · failsafe manual · capacidad denegada · estados feos del dinero)</title>
+<style>
+/* ============================================================
+   TOKENS — idénticos a m1-tanda-a-v2.html, m1-tanda-b.html y
+   m2-tanda-a.html (lenguaje visual aprobado). Nada nuevo salvo
+   lo que se declara como token propio y MEDIDO.
+   ============================================================ */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-200:#d9c9ff; --p-300:#c0a8ff;
+  --p-400:#9f79ff; --p-500:#7f4ff0; --p-600:#6a35e0; --p-700:#5a26c9;
+  --p-800:#45189e; --p-900:#2e1071;
+  --brand:#8752FE;
+  --brand-a08:rgba(135,82,254,.08); --brand-a12:rgba(135,82,254,.12);
+  --brand-a16:rgba(135,82,254,.16); --brand-a20:rgba(135,82,254,.20);
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --badge-warn:#8a5606; /* heredado de la Tanda B del M1: blanco encima = 6.15:1 medido */
+  --focus:#0b63d6; --focus-halo:rgba(11,99,214,.22);
+  --tonal:#f6f2ff;
+  --sh-b1:0 1px 0 rgba(255,255,255,.85) inset,0 2px 6px -2px rgba(69,24,158,.14),0 10px 24px -10px rgba(135,82,254,.22);
+  --sh-float:0 6px 16px -6px rgba(23,18,43,.18),0 24px 48px -18px rgba(69,24,158,.30);
+  --r-xl:24px; --r-2xl:28px;
+  --bd-lite:1px solid rgba(135,82,254,.14);
+  --sh-3:0 1px 3px rgba(24,16,54,.06),0 14px 30px -10px rgba(38,20,90,.14),0 44px 80px -28px rgba(38,20,90,.22);
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+  --card:#fdfcff; /* fondo compuesto real del gradiente de card — todos los contrastes se miden contra ESTE */
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+  background:var(--n-100);color:var(--n-900);font-size:14px;line-height:1.5}
+h1,h2,h3{margin:0;letter-spacing:.005em}
+a{text-decoration:none;color:inherit}
+.tnum{font-variant-numeric:tabular-nums}
+
+/* ---------- chrome del documento (idéntico a las tandas aprobadas) ---------- */
+.doc-head{max-width:1720px;margin:0 auto;padding:26px 24px 10px}
+.doc-head h1{font-size:24px;font-weight:850}
+.doc-head h1 .v2{display:inline-flex;align-items:center;margin-left:10px;padding:3px 12px;border-radius:999px;
+  background:linear-gradient(135deg,var(--p-600),var(--p-800));color:#fff;font-size:13px;font-weight:800;vertical-align:middle}
+.doc-head p{margin:8px 0 0;color:var(--n-700);max-width:1020px}
+.meta-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.mchip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 11px;
+  border-radius:8px;background:var(--p-50);border:1px solid var(--brand-a20);
+  color:var(--p-800);font-size:12.5px;font-weight:700}
+.mchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.mchip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.mchip.danger{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.jump{position:sticky;top:0;z-index:60;display:flex;gap:8px;flex-wrap:wrap;
+  padding:10px 24px;background:rgba(255,255,255,.88);backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--n-200);box-shadow:var(--sh-1)}
+.jump a{display:inline-flex;align-items:center;min-height:40px;padding:6px 14px;border-radius:12px;
+  border:1px solid var(--n-300);background:var(--n-0);font-weight:700;font-size:13px;color:var(--n-800)}
+.jump a:hover{background:var(--p-50);border-color:var(--brand-a20);color:var(--p-800)}
+.jump a:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.jump a.gate{border-color:var(--warn-bd);background:var(--warn-bg);color:var(--warn-tx)}
+section.blk{max-width:1720px;margin:0 auto;padding:30px 24px 8px;scroll-margin-top:76px}
+.blk-head{margin-bottom:16px}
+.blk-head .eyebrow{color:var(--p-700);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.blk-head h2{font-size:20px;font-weight:800;margin-top:2px}
+.blk-head p{color:var(--n-700);margin:6px 0 0;max-width:920px}
+.state-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.schip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:6px;
+  font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--n-50);border:1px solid var(--n-200);color:var(--n-700)}
+.schip i{width:6px;height:6px;border-radius:50%;background:currentColor;font-style:normal}
+.frames{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;padding-bottom:26px}
+figure{margin:0}
+figcaption{font-size:13px;font-weight:800;color:var(--n-800);margin:0 0 8px 6px}
+figcaption small{display:block;font-weight:600;color:var(--n-600);font-size:12px}
+
+/* ---------- notas / anotaciones ---------- */
+.notes{flex:1 1 330px;max-width:410px;background:var(--n-0);border:var(--bd-lite);
+  border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1)}
+.notes h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+.note{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--n-100);font-size:13px;color:var(--n-700)}
+.note:last-child{border-bottom:0}
+.note b{color:var(--n-900)}
+.m{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;
+  border-radius:50%;background:var(--p-600);color:#fff;font-size:12px;font-weight:800;line-height:1}
+.m.inframe{position:absolute;z-index:9;box-shadow:0 0 0 2px #fff}
+.motion{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--info-bg);
+  border:1px solid var(--info-bd);font-size:12.5px;color:var(--n-800)}
+.motion b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--info);margin-bottom:6px}
+.motion ul{margin:0;padding-left:16px}
+.motion li{margin:3px 0}
+.contrast{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--n-50);
+  border:1px solid var(--n-200);font-size:12.5px;color:var(--n-700)}
+.contrast b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:6px}
+.contrast li{margin:3px 0}
+.contrast ul{margin:0;padding-left:16px}
+.decision{margin-top:14px;padding:14px 16px;border-radius:16px;background:var(--warn-bg);
+  border:1.5px dashed var(--warn-bd);color:var(--warn-tx);font-size:13px}
+.decision b{display:block;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.decision ul{margin:6px 0 0;padding-left:18px}
+.decision li{margin:3px 0}
+.decision.hard{background:var(--danger-bg);border:1.5px dashed var(--danger-bd);color:var(--danger-tx)}
+.mini-demo{margin-top:12px;padding:12px;border-radius:14px;background:var(--n-50);border:1px solid var(--n-200)}
+.mini-demo .cap{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:8px}
+.mini-demo .row{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.mini-demo .row:last-child{margin-bottom:0}
+.mini-demo .lbl{font-size:11.5px;font-weight:750;color:var(--n-700);flex:0 0 66px}
+
+/* ---------- frame de teléfono ---------- */
+.phone{position:relative;width:390px;border:9px solid var(--n-900);border-radius:40px;
+  overflow:hidden;background:var(--n-50);box-shadow:var(--sh-3)}
+.statusbar{position:relative;z-index:4;display:flex;justify-content:space-between;align-items:center;height:32px;
+  padding:0 20px;font-size:11.5px;font-weight:700;color:var(--n-700);background:var(--n-50)}
+.statusbar.on-white{background:var(--n-0)}
+.statusbar .off{color:var(--danger-tx)}
+.scr{position:relative;display:flex;flex-direction:column;min-height:724px;padding:0}
+
+/* ---------- WIZARD: barra, header de sesión, stepper (heredado de la Tanda A) ---------- */
+.wizbar{position:relative;z-index:4;display:flex;align-items:center;gap:8px;padding:7px 8px;
+  background:rgba(255,255,255,.98);border-bottom:1px solid var(--n-200)} /* plate opaco, CERO blur en todo el wizard */
+.icobtn{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+  color:var(--n-800);flex:0 0 auto}
+.wizbar .tt{flex:1;min-width:0}
+.wizbar .tt b{display:block;font-size:15.5px;font-weight:850;color:var(--n-900);line-height:1.15}
+.wizbar .tt span{font-size:12px;font-weight:650;color:var(--n-700)}
+.pausebtn{min-height:48px;display:inline-flex;align-items:center;gap:6px;padding:0 12px;border-radius:14px;
+  border:1.5px solid var(--n-300);background:var(--n-0);font-size:13px;font-weight:800;color:var(--n-800);flex:0 0 auto}
+.sesshead{background:var(--tonal);border-bottom:1px solid var(--n-200);padding:11px 14px;display:grid;gap:9px}
+.sesshead.mini{display:flex;align-items:center;gap:9px;padding:7px 12px}
+.sesshead.mini .who{display:flex;align-items:center;gap:8px;min-width:0;flex:1;font-size:13.5px;font-weight:800;color:var(--n-900)}
+.sesshead.mini .who svg{flex:0 0 auto;color:var(--p-800)}
+.presence{display:inline-flex;align-items:center;gap:7px;min-height:32px;padding:2px 9px;border-radius:12px;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800);font-size:11.5px;font-weight:750}
+.presence .pv{width:19px;height:19px;border-radius:50%;background:var(--p-200);color:var(--p-900);
+  font-size:9px;font-weight:850;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.presence .lv{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:led 2.4s ease-in-out infinite;flex:0 0 auto}
+.presence .lv.stale{background:var(--n-500);animation:none}
+@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
+.srail{display:flex;align-items:flex-start;padding:12px 8px 6px;background:var(--n-0)}
+.sr{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:5px;position:relative;min-height:48px}
+.sr .d{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  border:2px solid var(--n-300);background:var(--n-0);color:var(--n-600);font-size:11px;font-weight:850;
+  position:relative;z-index:2}
+.sr .lb{font-size:11.5px;font-weight:800;color:var(--n-600);text-align:center;line-height:1.15}
+.sr::before{content:"";position:absolute;top:11px;right:50%;width:100%;height:3px;background:var(--n-200);z-index:1}
+.sr:first-child::before{display:none}
+.sr.done .d{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.sr.done .lb{color:var(--ok-tx)}
+.sr.done::before,.sr.on::before{background:var(--ok-bd)}
+.sr.on .d{background:var(--p-600);border-color:var(--p-600);color:#fff;box-shadow:0 0 0 4px var(--brand-a16)}
+.sr.on .lb{color:var(--p-800);font-weight:850}
+.stepline{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 14px;background:var(--n-0);
+  border-bottom:1px solid var(--n-200);font-size:13.5px;font-weight:750;color:var(--n-800)}
+.stepline .ix{font-variant-numeric:tabular-nums;font-weight:850;color:var(--p-800);background:var(--p-50);
+  border:1px solid var(--brand-a20);border-radius:8px;padding:2px 8px;font-size:12px;flex:0 0 auto}
+.stepline.stale{background:var(--n-50);color:var(--n-700)}
+.wpad{padding:14px 14px 18px;display:flex;flex-direction:column;flex:1;gap:11px;position:relative;z-index:2}
+.dock{margin-top:auto;display:grid;gap:9px;padding:12px 0 0;position:relative}
+.dock::before{content:"";position:absolute;top:0;left:-14px;right:-14px;height:1px;background:var(--n-200)}
+.dock .why{font-size:12.5px;font-weight:750;color:var(--n-700);text-align:center;line-height:1.4}
+.center-state{margin:auto 0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;padding:0 8px}
+.big-ic{width:76px;height:76px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.big-ic.ok{background:var(--ok-bg);border:1.5px solid var(--ok-bd);color:var(--ok-tx)}
+.big-ic.info{background:var(--info-bg);border:1.5px solid var(--info-bd);color:var(--info)}
+.big-ic.warn{background:var(--warn-bg);border:1.5px solid var(--warn-bd);color:var(--warn-tx)}
+.big-ic.deny{background:var(--danger-bg);border:1.5px solid var(--danger-bd);color:var(--danger-tx)}
+.center-state h4{margin:0;font-size:22px;font-weight:850;color:var(--n-900)}
+.center-state p{margin:0;font-size:14px;color:var(--n-700);max-width:300px}
+
+/* ---------- comunes (heredados) ---------- */
+.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;
+  font-size:13.5px;font-weight:600;line-height:1.45;border:1px solid}
+.banner svg{flex:0 0 auto;margin-top:1px}
+.banner .ba{display:inline-flex;align-items:center;min-height:44px;font-weight:850;text-decoration:underline}
+.b-danger{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.b-warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.b-ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.b-info{background:var(--info-bg);border-color:var(--info-bd);color:var(--n-800)}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:56px;border-radius:18px;
+  font-size:16px;font-weight:800;letter-spacing:.01em}
+.btn-primary{background:linear-gradient(180deg,#7442e8,var(--p-600));color:#fff;
+  box-shadow:0 1px 0 rgba(255,255,255,.28) inset,0 4px 10px -4px rgba(69,24,158,.35),0 14px 28px -12px rgba(135,82,254,.45)}
+.btn-ghost{background:var(--n-0);border:1.5px solid var(--n-300);color:var(--n-800);box-shadow:var(--sh-1)}
+.btn-danger{background:var(--danger);color:#fff;box-shadow:0 1px 0 rgba(255,255,255,.2) inset,0 10px 22px -10px rgba(192,38,38,.5)}
+.btn.is-disabled{opacity:.55}
+.btn-sm{min-height:48px;font-size:14.5px;border-radius:14px}
+.btn-md{min-height:54px;font-size:15.5px;border-radius:16px}
+.spin{width:18px;height:18px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;
+  border-radius:50%;animation:rot 1s linear infinite}
+.spin.dk{border-color:rgba(106,53,224,.25);border-top-color:var(--p-600);width:22px;height:22px}
+@keyframes rot{to{transform:rotate(360deg)}}
+.scrim{position:absolute;inset:0;z-index:5;background:rgba(23,18,43,.42)}
+.sheet{position:absolute;left:8px;right:8px;bottom:8px;z-index:6;
+  background:rgba(255,255,255,.97); /* plate opaco — el wizard NO usa BackdropFilter */
+  border-radius:var(--r-2xl);border:1px solid rgba(255,255,255,.95);outline:1px solid rgba(23,18,43,.06);
+  box-shadow:var(--sh-float);padding:10px 16px 16px}
+.sheet.tall{top:52px;overflow:hidden;display:flex;flex-direction:column}
+.grab{width:44px;height:5px;border-radius:3px;background:var(--n-300);margin:4px auto 12px}
+.sheet h5{margin:0;font-size:18px;font-weight:850;color:var(--n-900)}
+.sheet .ssub{font-size:13px;color:var(--n-700);font-weight:600;margin:4px 0 12px}
+.opt{display:flex;align-items:center;gap:12px;min-height:56px;padding:0 14px;border-radius:16px;
+  border:1.5px solid var(--n-200);background:var(--n-0);margin-bottom:8px;font-size:15px;font-weight:700;color:var(--n-800)}
+.opt .radio{width:22px;height:22px;border-radius:50%;border:2px solid var(--n-400);flex:0 0 auto}
+.opt.sel{border-color:var(--p-600);background:var(--p-50);color:var(--p-800)}
+.opt.sel .radio{border-color:var(--p-600);background:radial-gradient(circle,var(--p-600) 0 45%,transparent 50%)}
+.opt .osub{display:block;font-size:12px;font-weight:650;color:var(--n-700)}
+.opt.off{background:var(--n-25);border-color:var(--n-200);color:var(--n-700)} /* GD-2: sin opacidad */
+.opt.off .radio{border-color:var(--n-400);background:var(--n-100)}
+.dim{opacity:.9;pointer-events:none}
+.vcard{background:linear-gradient(180deg,#fff,var(--card));border:var(--bd-lite);border-radius:20px;
+  padding:12px 14px;box-shadow:var(--sh-b1)}
+.vcard.bad{border:1.5px solid var(--danger-bd);background:#fffbfb}
+.vcard.warn{border:1.5px solid var(--warn-bd);background:#fffdf7}
+.vhead{display:flex;align-items:center;gap:9px}
+.vhead b{font-size:14.5px;font-weight:850;color:var(--n-900);flex:1}
+.kv{display:flex;align-items:flex-start;gap:8px;padding:7px 0 6px;border-top:1px solid var(--n-100);font-size:13.5px}
+.kv:first-of-type{border-top:0}
+.kv .k{color:var(--n-700);font-weight:650;flex:0 0 104px}
+.kv .v{color:var(--n-900);font-weight:750;flex:1;min-width:0}
+.linkbtn{min-height:48px;display:inline-flex;align-items:center;gap:6px;font-size:13.5px;font-weight:800;color:var(--p-700)}
+.tenantbar{display:flex;align-items:center;gap:10px;padding:11px 16px;background:var(--n-0);border-bottom:1px solid var(--n-200)}
+.tlogo{width:36px;height:36px;border-radius:12px;background:var(--n-800);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:850;flex:0 0 auto}
+.tname{font-size:15.5px;font-weight:850;color:var(--n-900)}
+.tsub{font-size:12px;color:var(--n-700);font-weight:600}
+.nobrand{display:flex;gap:8px;align-items:flex-start;margin-top:auto;padding:10px 12px;border-radius:14px;
+  border:1.5px dashed var(--n-300);background:var(--n-25);color:var(--n-700);font-size:12px;font-weight:700}
+
+/* ============================================================
+   COMPONENTES NUEVOS DE LA TANDA B — el vocabulario del DINERO.
+   Regla raíz del sistema (nota 1 de la sección 12):
+   MOVER dinero = gradiente morado. REGISTRAR = tinta --n-800 sin
+   relleno. Rojo = SOLO error, jamás un cobro.
+   ============================================================ */
+
+/* Desglose que llega del PREVIEW DEL SERVIDOR (ADR-6) */
+.money{background:linear-gradient(180deg,#fff,var(--card));border:var(--bd-lite);border-radius:20px;
+  padding:12px 14px 12px;box-shadow:var(--sh-b1)}
+.money .mh{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.money .mh b{font-size:14.5px;font-weight:850;color:var(--n-900);flex:1}
+.mline{display:flex;align-items:baseline;gap:10px;padding:6px 0;border-top:1px solid var(--n-100);font-size:13.5px}
+.mline:first-of-type{border-top:0}
+.mline .c{flex:1;min-width:0;color:var(--n-700);font-weight:650}
+.mline .a{color:var(--n-900);font-weight:750;font-variant-numeric:tabular-nums;flex:0 0 auto}
+.mline.sub{border-top:1.5px solid var(--n-200)}
+.mline.sub .c{font-weight:800;color:var(--n-700)}
+.mline.credit .a{color:var(--ok-tx);font-weight:800}
+.mline.new{background:var(--warn-bg);margin:0 -14px;padding:6px 14px;border-top-color:var(--warn-bd)}
+.mline.new .c{color:var(--warn-tx);font-weight:800}
+.mline.new .a{color:var(--n-900);font-weight:850}
+.mtot{display:flex;align-items:center;gap:10px;margin-top:9px;padding:11px 13px;border-radius:16px;
+  background:var(--tonal);border:1px solid var(--brand-a20)}
+.mtot .c{flex:1;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--n-700);line-height:1.25}
+.mtot .a{font-size:28px;font-weight:850;color:var(--n-900);font-variant-numeric:tabular-nums;line-height:1;flex:0 0 auto}
+.mtot .a .cur{font-size:12px;font-weight:800;color:var(--n-700);margin-left:5px}
+.mtot.hold{background:var(--n-50);border-color:var(--n-200)}
+.mtot.hold .a{font-size:22px}
+
+/* Sello de PROCEDENCIA del número — el recibo visible de ADR-6 */
+.prov{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:2px 10px;border-radius:10px;
+  background:var(--ok-bg);border:1px solid var(--ok-bd);color:var(--ok-tx);font-size:12px;font-weight:800}
+.prov.est{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.prov.div{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.prov.stale{background:var(--n-50);border-color:var(--n-200);color:var(--n-700)}
+.prov .tick{width:7px;height:7px;border-radius:50%;background:currentColor;flex:0 0 auto}
+
+/* Estado del terminal Spin (GET /:id/terminal-status) */
+.term{display:flex;align-items:center;gap:9px;min-height:52px;padding:7px 12px;border-radius:16px;
+  background:var(--ok-bg);border:1px solid var(--ok-bd)}
+.term .ti{width:34px;height:34px;border-radius:12px;background:rgba(255,255,255,.72);color:var(--ok-tx);
+  display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.term .tb{flex:1;min-width:0}
+.term .tb b{display:block;font-size:13.5px;font-weight:850;color:var(--n-900);line-height:1.2}
+.term .tb span{display:block;font-size:12px;font-weight:700;color:var(--ok-tx);margin-top:1px}
+.term.off{background:var(--danger-bg);border-color:var(--danger-bd)}
+.term.off .ti{color:var(--danger-tx)}
+.term.off .tb span{color:var(--danger-tx)}
+.term.busy{background:var(--warn-bg);border-color:var(--warn-bd)}
+.term.busy .ti{color:var(--warn-tx)}
+.term.busy .tb span{color:var(--warn-tx)}
+.term.unk{background:var(--n-50);border-color:var(--n-200)}
+.term.unk .ti{color:var(--n-700)}
+.term.unk .tb span{color:var(--n-700)}
+.term .tre{min-height:44px;display:inline-flex;align-items:center;padding:0 10px;border-radius:12px;
+  font-size:12.5px;font-weight:850;color:var(--n-800);border:1.5px solid var(--n-300);background:var(--n-0);flex:0 0 auto}
+
+/* Los DOS ACTOS del two-tap: cada toque es su propia tarjeta con su propio estado */
+.act{display:flex;gap:11px;align-items:flex-start;padding:12px 13px;border-radius:20px;border:var(--bd-lite);
+  background:linear-gradient(180deg,#fff,var(--card));box-shadow:var(--sh-b1)}
+.act .an{width:29px;height:29px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  font-size:12.5px;font-weight:850;background:var(--p-600);color:#fff;margin-top:1px}
+.act .ab{flex:1;min-width:0}
+.act .ab b{display:block;font-size:14.5px;font-weight:850;color:var(--n-900);line-height:1.25}
+.act .ab span{display:block;font-size:12.5px;font-weight:700;color:var(--n-700);margin-top:2px;line-height:1.35}
+.act .aa{font-size:17px;font-weight:850;color:var(--n-900);font-variant-numeric:tabular-nums;flex:0 0 auto;margin-top:1px}
+/* espera: superficie HUNDIDA, texto a plena fuerza (regla GD-2 — el motivo es el dato) */
+.act.wait{background:var(--n-25);border-color:var(--n-200);box-shadow:none}
+.act.wait .an{background:var(--n-100);border:2px solid var(--n-300);color:var(--n-700)}
+.act.done{background:var(--ok-bg);border-color:var(--ok-bd);box-shadow:none}
+.act.done .an{background:var(--ok);color:#fff}
+.act.done .ab span{color:var(--ok-tx)}
+.act.live{border:1.5px solid var(--p-600);background:var(--p-50);box-shadow:0 0 0 3px var(--brand-a12)}
+
+/* HECHO INMUTABLE — "esto ya pasó y no se deshace desde aquí" */
+.fact{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border-radius:16px;
+  background:var(--ok-bg);border:1px solid var(--ok-bd)}
+.fact.ink{background:var(--n-50);border-color:var(--n-200)}
+.fact .fi{flex:0 0 auto;color:var(--ok-tx);margin-top:1px}
+.fact.ink .fi{color:var(--n-700)}
+.fact .fb{flex:1;min-width:0;font-size:13px;color:var(--n-900);font-weight:700;line-height:1.4}
+.fact .fb i{display:block;font-style:normal;font-size:12px;font-weight:700;color:var(--n-700);margin-top:2px;font-variant-numeric:tabular-nums}
+
+/* COMPARADOR DE DIVERGENCIA (ADR-6) */
+.divcmp{border-radius:20px;overflow:hidden;border:1.5px solid var(--warn-bd);background:var(--n-0)}
+.divcmp .drow{display:flex;align-items:center;gap:10px;padding:11px 14px}
+.divcmp .dbefore{background:var(--n-50);border-bottom:1px solid var(--n-200)}
+.divcmp .dafter{background:var(--warn-bg)}
+.divcmp .dl{flex:1;min-width:0;font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--n-700);line-height:1.3}
+.divcmp .dafter .dl{color:var(--warn-tx)}
+.divcmp .dv{font-size:20px;font-weight:850;color:var(--n-700);font-variant-numeric:tabular-nums;flex:0 0 auto;
+  text-decoration:line-through;text-decoration-thickness:2px}
+.divcmp .dafter .dv{font-size:30px;color:var(--n-900);text-decoration:none}
+.divcmp .ddelta{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--n-0);border-top:1px solid var(--warn-bd)}
+.divcmp .ddelta .dt{flex:1;font-size:12.5px;font-weight:750;color:var(--n-700)}
+.divcmp .ddelta .dn{font-size:15px;font-weight:850;color:var(--danger-tx);font-variant-numeric:tabular-nums}
+
+/* REGISTRAR (record-manual-*) — familia visual PROPIA, nunca la del cobro */
+.btn-record{background:var(--n-0);border:1.5px solid var(--n-800);color:var(--n-800);box-shadow:var(--sh-1)}
+.recbox{border-radius:20px;border:1.5px dashed var(--n-400);background:var(--n-25);padding:12px 13px}
+.recbox .rh{display:flex;align-items:center;gap:9px;margin-bottom:4px}
+.recbox .rh b{flex:1;font-size:14px;font-weight:850;color:var(--n-900)}
+.recbox p{margin:0;font-size:12.5px;font-weight:700;color:var(--n-700);line-height:1.4}
+.rtag{display:inline-flex;align-items:center;gap:6px;min-height:26px;padding:2px 9px;border-radius:8px;
+  background:var(--n-100);border:1px solid var(--n-300);color:var(--n-800);
+  font-size:11px;font-weight:850;text-transform:uppercase;letter-spacing:.05em}
+.field{display:block;border-radius:16px;border:1.5px solid var(--n-300);background:var(--n-0);padding:8px 13px;min-height:60px}
+.field .fl{display:block;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--n-700)}
+.field .fv{display:block;font-size:16px;font-weight:800;color:var(--n-900);margin-top:2px;font-variant-numeric:tabular-nums}
+.field .fv.ph{color:var(--n-700);font-weight:700}
+.field.req{border-color:var(--n-800)}
+.field.on{border-color:var(--focus);box-shadow:0 0 0 3px var(--focus-halo)}
+.reqtag{font-size:11px;font-weight:850;color:var(--danger-tx);text-transform:uppercase;letter-spacing:.04em;margin-left:6px}
+
+/* CAPACIDAD DENEGADA (paymentActions, fail-closed) */
+.capbox{border-radius:20px;border:1px solid var(--n-200);background:var(--n-0);overflow:hidden}
+.capbox .ch{display:flex;align-items:center;gap:8px;padding:10px 13px;background:var(--n-50);border-bottom:1px solid var(--n-200)}
+.capbox .ch b{flex:1;font-size:12.5px;font-weight:850;text-transform:uppercase;letter-spacing:.05em;color:var(--n-700)}
+.caprow{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border-top:1px solid var(--n-100)}
+.caprow:first-of-type{border-top:0}
+.caprow .ci{flex:0 0 auto;color:var(--n-700);margin-top:1px}
+.caprow .cb{flex:1;min-width:0}
+.caprow .cb b{display:block;font-size:13.5px;font-weight:800;color:var(--n-900);line-height:1.25}
+.caprow .cb span{display:block;font-size:12.5px;font-weight:700;color:var(--n-700);margin-top:2px;line-height:1.35}
+.caprow.denied{background:var(--n-25)} /* hundida, texto pleno — NUNCA opacidad, NUNCA escondida (DoD-4) */
+.caprow.allowed .ci{color:var(--ok-tx)}
+
+footer.dod{max-width:1720px;margin:0 auto;padding:10px 24px 50px;color:var(--n-700);font-size:13px}
+footer.dod .card{background:var(--n-0);border:var(--bd-lite);border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1);margin-bottom:14px}
+footer.dod .card.gate{border:1.5px solid var(--warn-bd);background:#fffdf7}
+footer.dod b{color:var(--n-900)}
+.changelog li{margin:5px 0}
+
+@media (prefers-reduced-motion: reduce){
+  .presence .lv,.spin{animation:none}
+}
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <h1>RideOps · Mockups M2 — Tanda B <span class="v2">el paso de PAGO · mismo lenguaje v2</span></h1>
+  <p>Cinco secciones sobre <b>la pantalla de más riesgo del producto</b>: la que mueve dinero real, en el Wi-Fi de un
+  patio, con una sola mano y sol de frente. Mismo sistema visual aprobado en las Tandas A v2 / B del M1 y la Tanda A del
+  M2. Los dos ejes son <b>ADR-6</b> (el número que el cliente firma lo calcula el <b>servidor</b>; el cálculo local
+  existe solo para que la pantalla sea instantánea, y si divergen <b>gana el servidor y el usuario re-confirma</b>) y
+  <b>ADR-5</b> (<b>el dinero JAMÁS se encola</b>: <code>charge-sale</code>, <code>hold-deposit</code> y los
+  <code>record-manual-*</code> son síncronos, en primer plano, solo con conexión; las llaves de idempotencia cubren el
+  reintento <i>dentro</i> del intento vivo, nunca reproducir una autorización más tarde).</p>
+  <div class="meta-chips">
+    <span class="mchip">Targets ≥ 48 pt · CTAs 54–56 · tarjetas de acto 52+</span>
+    <span class="mchip">Texto ≥ 4.5:1 sobre el fondo REAL — todos los pares MEDIDOS con la fórmula WCAG y listados por sección</span>
+    <span class="mchip">Todo string en l10n — app_es.arb / app_en.arb (ADR-8), aquí se muestra ES</span>
+    <span class="mchip">Loading / espera / error por pantalla (DoD-10)</span>
+    <span class="mchip">Foco AZUL #0b63d6 — nunca morado sobre morado</span>
+    <span class="mchip ok">Blur: <b>CERO BackdropFilter</b> en todo el wizard, sheets incluidos (plates opacos ≥ .97). El paso de pago es donde vive el número que se cobra: no se difumina nada.</span>
+    <span class="mchip ok">Motion ≤ 1 Hz + prefers-reduced-motion. El punto de frescura del terminal es <b>tick one-shot al refrescar</b> (enmienda GD aceptada en el M1), no latido; el cronómetro del cobro actualiza 1 vez/s porque es información.</span>
+    <span class="mchip warn">Verbo vinculante: <b>COBRAR</b> (gradiente morado) mueve dinero · <b>REGISTRAR</b> (tinta --n-800 sin relleno) anota lo que ya pasó afuera · <b>rojo = error</b>, jamás un cobro</span>
+    <span class="mchip warn">Superficie que el cliente ve (12B, mientras acerca su tarjeta): branding del TENANT vía <code>display-data</code> — CERO "RideOps" / "Ride Fleet"</span>
+    <span class="mchip danger">Sección 13 = <b>compuerta de release del M2</b>: la telemetría de divergencia debe llegar en 0 a la RC (M2-PLAN §4-1)</span>
+  </div>
+</div>
+
+<nav class="jump">
+  <a href="#s12">12 · Paso de pago (estado normal)</a>
+  <a href="#s13" class="gate">13 · DIVERGENCIA del preview ★ compuerta</a>
+  <a href="#s14">14 · Failsafe manual (registrar)</a>
+  <a href="#s15">15 · Capacidad denegada (paymentActions)</a>
+  <a href="#s16">16 · Los estados feos del dinero</a>
+  <a href="#dod">DoD + decisiones</a>
+</nav>
+
+<!-- ============================================================ 12 · PASO DE PAGO — NORMAL -->
+<section class="blk" id="s12">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 12 · M2-H3</span>
+    <h2>Paso de pago — el desglose viene del servidor y el cobro son DOS actos separados</h2>
+    <p>El wizard entra a este paso con <code>currentStep = TC_SIGNED</code> (paso 3) y pasa a
+    <code>PAYMENT_PENDING</code> (paso 4) cuando el terminal queda esperando el tap — así lo reporta el servidor, así se
+    dibuja (ADR-4). El desglose no se calcula aquí: llega del <b>preview del servidor</b> y se sella con su hora
+    (ADR-6). El cobro son <b>dos llamadas separadas</b> a propósito:
+    <code>POST /:id/charge-sale</code> (la renta; <b>no</b> estampa <code>paymentCompletedAt</code>) y luego
+    <code>POST /:id/hold-deposit</code> (pre-autorización del depósito en un <b>segundo tap físico</b>; ese sí estampa y
+    hace avanzar el wizard a <code>PAID</code>). Encima corre el poll de <code>GET /:id/terminal-status</code>
+    (<code>{online, message}</code>).</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Preview fresco · terminal listo</span><span class="schip"><i></i>Cobro en curso</span>
+      <span class="schip"><i></i>Renta cobrada · falta depósito</span><span class="schip"><i></i>Terminal fuera de línea</span>
+      <span class="schip"><i></i>Pre-pagado ($0 a cobrar)</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>12A — Estado normal <small>desglose del servidor + acto 1 activo, acto 2 en espera con motivo</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:11</span><span>LTE · 82 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span><span class="presence"><span class="lv"></span><span class="pv">AR</span>Ana R. · mostrador · 9 s</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr on"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 3 de 10</span>Cobro y depósito en garantía</div>
+          <div class="wpad">
+            <div class="money"><span class="m inframe" style="margin:-8px 0 0 330px">1</span>
+              <div class="mh"><b>Cuenta del cliente</b><span class="prov"><span class="tick"></span>Servidor · hace 4 s</span></div>
+              <div class="mline"><span class="c">Renta · 3 días × $980.00</span><span class="a">2 940.00</span></div>
+              <div class="mline"><span class="c">Protección estándar</span><span class="a">450.00</span></div>
+              <div class="mline"><span class="c">Conductor adicional</span><span class="a">180.00</span></div>
+              <div class="mline"><span class="c">Cuota de aeropuerto</span><span class="a">120.00</span></div>
+              <div class="mline sub"><span class="c">Subtotal</span><span class="a">3 690.00</span></div>
+              <div class="mline"><span class="c">IVA 16 %</span><span class="a">590.40</span></div>
+              <div class="mline credit"><span class="c">Anticipo pagado en línea</span><span class="a">− 1 000.00</span></div>
+              <div class="mtot"><span class="c">A cobrar ahora</span><span class="a tnum">3 280.40<span class="cur">MXN</span></span></div>
+            </div>
+            <div class="term"><span class="m inframe" style="margin:-8px 0 0 330px">2</span>
+              <span class="ti"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18"/></svg></span>
+              <div class="tb"><b>Terminal Spin · Mostrador 1</b><span>Listo · consultado hace 6 s</span></div>
+              <span class="tre">Volver a consultar</span></div>
+            <div class="act live"><span class="m inframe" style="margin:-9px 0 0 332px">3</span>
+              <span class="an">1</span>
+              <div class="ab"><b>Cobrar la renta</b><span>El cliente acerca su tarjeta al terminal.</span></div>
+              <span class="aa tnum">3 280.40</span></div>
+            <div class="act wait">
+              <span class="an">2</span>
+              <div class="ab"><b>Retener depósito en garantía</b><span>Se habilita cuando la renta quede cobrada. Es un <b>segundo tap</b> del cliente, no un segundo cobro.</span></div>
+              <span class="aa tnum">5 000.00</span></div>
+            <div class="dock">
+              <div class="btn btn-primary">Cobrar $3 280.40</div>
+              <div class="btn btn-record btn-sm"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8.5 10h7"/><path d="M8.5 14h4.5"/></svg>Registrar cobro hecho afuera<span class="m" style="margin-left:2px">4</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>12B — Cobro en curso <small>lo único que el cliente ve: marca del TENANT, monto grande, cero plataforma</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:12</span><span>LTE · 82 %</span></div>
+        <div class="scr" style="background:var(--n-0)">
+          <div class="tenantbar"><span class="tlogo">AV</span>
+            <div><div class="tname">Autos del Valle</div><div class="tsub">Patio Centro · R-2481</div></div>
+            <span class="m" style="margin-left:auto">5</span></div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Terminal esperando la tarjeta</div>
+          <div class="wpad">
+            <div class="center-state" style="gap:14px">
+              <div class="big-ic info"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M2.5 10h19"/><path d="M6 14.5h4"/></svg></div>
+              <h4>Acerca tu tarjeta</h4>
+              <div class="mtot" style="width:100%"><span class="c">Cobro de la renta</span><span class="a tnum">3 280.40<span class="cur">MXN</span></span></div>
+              <p style="color:var(--n-800);font-weight:700">Terminal Spin · Mostrador 1 · esperando desde hace <b class="tnum">18 s</b></p>
+              <div class="banner b-info" style="text-align:left">
+                <span class="spin dk"></span>
+                <span>Cobro en curso. <b>No cierres la app ni vuelvas atrás</b> hasta que el terminal responda.
+                Si algo sale mal, la salida es consultar el estado — nunca cobrar de nuevo.<span class="m">6</span></span></div>
+            </div>
+            <div class="nobrand"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.5"/></svg>
+              <span>Esta es la pantalla que el cliente alcanza a leer. Marca del tenant desde <code>display-data</code>;
+              ni "RideOps" ni "Ride Fleet" aparecen en ningún píxel.</span></div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>12C — Renta cobrada, falta el depósito <small>acto 1 se vuelve HECHO inmutable; acto 2 se activa</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:13</span><span>LTE · 81 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr on"><span class="d">4</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Falta la garantía para cerrar el pago</div>
+          <div class="wpad">
+            <div class="act done"><span class="m inframe" style="margin:-9px 0 0 332px">7</span>
+              <span class="an"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+              <div class="ab"><b>Renta cobrada</b><span>10:12 · aprobación 004512 · Visa ••4417 · por Hugo P.</span></div>
+              <span class="aa tnum">3 280.40</span></div>
+            <div class="act live">
+              <span class="an">2</span>
+              <div class="ab"><b>Retener depósito en garantía</b><span>Pre-autorización, <b>no es un cobro</b>: se libera al devolver la unidad. El cliente vuelve a acercar la tarjeta.</span></div>
+              <span class="aa tnum">5 000.00</span></div>
+            <div class="money">
+              <div class="mh"><b>Depósito según el servidor</b><span class="prov"><span class="tick"></span>Servidor · hace 3 s</span></div>
+              <div class="mline"><span class="c">Origen del monto</span><span class="a" style="font-size:12.5px;font-weight:800">Contrato · garantía</span></div>
+              <div class="mline"><span class="c">Vigencia de la retención</span><span class="a" style="font-size:12.5px;font-weight:800">7 días</span></div>
+              <div class="mtot hold"><span class="c">Se retiene (no se cobra)</span><span class="a tnum">5 000.00<span class="cur">MXN</span></span></div>
+            </div>
+            <div class="term"><span class="ti"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18"/></svg></span>
+              <div class="tb"><b>Terminal Spin · Mostrador 1</b><span>Listo · consultado hace 3 s</span></div></div>
+            <div class="dock">
+              <div class="btn btn-primary">Retener $5 000.00</div>
+              <div class="btn btn-record btn-sm"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8.5 10h7"/><path d="M8.5 14h4.5"/></svg>Registrar garantía tomada afuera</div>
+              <div class="why">El paso de pago se cierra con la garantía: <b>solo esta acción</b> estampa el pago y hace avanzar el wizard.<span class="m" style="margin-left:4px">8</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>12D — Terminal fuera de línea <small>el cobro no se ofrece si no hay a quién cobrarle; el failsafe sube a primario</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:20</span><span>LTE · 79 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2489</b><span>Iván Rojas · U-133</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Iván Rojas · U-133</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr on"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 3 de 10</span>Cobro y depósito en garantía</div>
+          <div class="wpad">
+            <div class="term off"><span class="m inframe" style="margin:-9px 0 0 330px">9</span>
+              <span class="ti"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18"/><path d="M4 20L20 4"/></svg></span>
+              <div class="tb"><b>Terminal Spin · Mostrador 1</b><span>Fuera de línea · "Device not responding", hace 8 s</span></div>
+              <span class="tre">Reintentar</span></div>
+            <div class="money">
+              <div class="mh"><b>Cuenta del cliente</b><span class="prov"><span class="tick"></span>Servidor · hace 11 s</span></div>
+              <div class="mline sub"><span class="c">Subtotal + IVA</span><span class="a">2 088.00</span></div>
+              <div class="mtot"><span class="c">A cobrar ahora</span><span class="a tnum">2 088.00<span class="cur">MXN</span></span></div>
+            </div>
+            <div class="act wait">
+              <span class="an">1</span>
+              <div class="ab"><b>Cobrar la renta</b><span>No disponible: el terminal de Mostrador 1 no responde. Sin terminal no hay tap, y sin tap no hay cobro.</span></div>
+              <span class="aa tnum">2 088.00</span></div>
+            <div class="recbox"><span class="m inframe" style="margin:-9px 0 0 330px">10</span>
+              <div class="rh"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" style="color:var(--n-700)"><path d="M5 4h11l3 3v13H5z"/><path d="M8.5 10h7"/><path d="M8.5 14h4.5"/></svg>
+                <b>¿Cobraste en otra terminal?</b><span class="rtag">Registrar</span></div>
+              <p>Si el cliente ya pagó en la terminal del mostrador vecino, en efectivo o por transferencia, regístralo
+              aquí. <b>Registrar no cobra nada</b>: solo anota en el contrato lo que ya ocurrió.</p>
+            </div>
+            <div class="dock">
+              <div class="btn btn-record"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8.5 10h7"/><path d="M8.5 14h4.5"/></svg>Registrar cobro hecho afuera</div>
+              <div class="btn btn-ghost btn-sm">Volver a consultar el terminal</div>
+              <div class="why">Nada se pierde: la sesión queda en el paso 3 hasta que haya cobro o registro.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>12E — Pre-pagado ($0 a cobrar) <small>"$0" no es un error: se salta la venta y se va directo a la garantía</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:31</span><span>LTE · 78 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2492</b><span>Nadia Cruz · U-076</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Nadia Cruz · U-076</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr on"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 3 de 10</span>Solo garantía · renta ya pagada</div>
+          <div class="wpad">
+            <div class="banner b-ok"><span class="m inframe" style="margin:-9px 0 0 330px">11</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg>
+              <span><b>La renta ya está pagada.</b> El servidor calcula <b>$0.00</b> a cobrar: se pagó en línea al reservar.
+              No hay venta que correr.</span></div>
+            <div class="money">
+              <div class="mh"><b>Cuenta del cliente</b><span class="prov"><span class="tick"></span>Servidor · hace 5 s</span></div>
+              <div class="mline"><span class="c">Total de la renta</span><span class="a">4 060.00</span></div>
+              <div class="mline credit"><span class="c">Pagado en línea (agencia)</span><span class="a">− 4 060.00</span></div>
+              <div class="mtot"><span class="c">A cobrar ahora</span><span class="a tnum">0.00<span class="cur">MXN</span></span></div>
+            </div>
+            <div class="act live">
+              <span class="an">1</span>
+              <div class="ab"><b>Guardar tarjeta y retener garantía</b><span>Un solo tap: se lee la tarjeta para la garantía y queda ligada al contrato por si hay cargos al devolver.</span></div>
+              <span class="aa tnum">5 000.00</span></div>
+            <div class="dock">
+              <div class="btn btn-primary">Retener $5 000.00</div>
+              <div class="why">El acto 1 no aparece porque no hay nada que cobrar — no se dibuja un botón muerto.<span class="m" style="margin-left:4px">12</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Paso de pago</h3>
+      <div class="note"><span class="m">1</span><span><b>El desglose es del servidor y lo dice en la cara.</b> El sello verde "Servidor · hace 4 s" es el recibo visible de ADR-6. <b>Regla de build vinculante:</b> el cálculo local solo se pinta mientras no ha llegado el preview, se marca <b>"Estimado"</b> en ámbar y <b>NUNCA</b> habilita el CTA de cobro. El botón de cobrar solo vive con un preview del servidor en mano y con su hora.</span></div>
+      <div class="note"><span class="m">2</span><span><b>El terminal es un actor, no un detalle.</b> Fila de 52 px con nombre del aparato, veredicto en palabras y <b>edad de la consulta</b> — <code>terminal-status</code> devuelve <code>{online,message}</code>, y el mensaje crudo del proveedor solo se muestra cuando es negativo (12D), porque ahí sí ayuda a llamar a soporte. Poll cada 5 s con el wizard abierto, 15 s tras 3 lecturas iguales.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Dos toques ⇒ dos tarjetas, jamás dos botones seguidos.</b> Cada acto tiene número, monto propio y estado propio. La separación no es capricho del backend: <code>charge-sale</code> deliberadamente NO estampa <code>paymentCompletedAt</code>; el que cierra el paso es <code>hold-deposit</code>. Si la UI los fusionara en un botón, el agente no entendería jamás por qué "ya cobré" y el wizard no avanza.</span></div>
+      <div class="note"><span class="m">4</span><span><b>El acto 2 en espera usa superficie hundida y texto a plena fuerza</b> (regla GD-2 del sistema: prohibido bajar la opacidad, porque el texto crítico ES el motivo). Y dice la frase que evita la llamada a soporte: <b>"es un segundo tap del cliente, no un segundo cobro"</b>.</span></div>
+      <div class="note"><span class="m">5</span><span><b>12B es la única pantalla del paso que el cliente lee de reojo</b> mientras acerca la tarjeta. Por eso lleva la barra del tenant desde <code>display-data</code> y cero cromo de plataforma: sin stepper, sin "Checkout · R-2481" en jerga interna, sin nombre de la app. El monto en 28 px es lo que el cliente tiene que poder verificar de un vistazo.</span></div>
+      <div class="note"><span class="m">6</span><span><b>Aquí no hay botón "Cancelar".</b> Una vez que la venta salió al terminal, el cliente ya puede haber tapeado; un "Cancelar" en pantalla sería una promesa que la app no puede cumplir. Lo que sí hay es la instrucción correcta para el caso feo, escrita ANTES de que ocurra: <b>si algo falla, se consulta el estado, no se cobra otra vez</b> (16B).</span></div>
+      <div class="note"><span class="m">7</span><span><b>Lo cobrado se convierte en HECHO, no en "paso completado".</b> Verde, con hora, aprobación, últimos 4 y quién lo hizo. Es lo que el agente le lee al cliente y lo que un supervisor busca al día siguiente. Y no ofrece "deshacer": desde RideOps no se anula un cobro — eso vive en el escritorio, y ofrecerlo aquí sería mentir.</span></div>
+      <div class="note"><span class="m">8</span><span><b>La garantía es lo que cierra el paso, y se dice.</b> El monto lo resuelve el servidor desde el contrato (columna de garantía → cargos de tipo garantía → hint → sin retención); el número que el cliente ve mientras acerca la tarjeta es el resuelto por el servidor, jamás el hint del cliente. Copy vinculante: <b>"se retiene, no se cobra"</b> + vigencia de 7 días, porque la queja #1 del mostrador es "me cobraron $5 000 de más".</span></div>
+      <div class="note"><span class="m">9</span><span><b>Terminal caído ⇒ el cobro no se ofrece, y se explica por qué</b> (no es un botón gris mudo). El mensaje del proveedor se muestra tal cual porque es lo que soporte pide por teléfono. El chip mantiene su acción de reintento a 44 px: el terminal se recupera solo muy seguido.</span></div>
+      <div class="note"><span class="m">10</span><span><b>El failsafe sube a primario solo cuando de verdad es el camino,</b> y aun así <b>conserva su familia visual</b>: borde de tinta, sin relleno morado. El recuadro punteado con la etiqueta REGISTRAR existe para que nadie confunda "registrar" con "cobrar" ni con las prisas del patio (§14 lo desarrolla).</span></div>
+      <div class="note"><span class="m">11</span><span><b>$0.00 es una respuesta legítima del servidor,</b> no una pantalla rota: la agencia ya cobró en línea. El backend rechaza correr una venta de $0 (<code>NOTHING_TO_CHARGE</code>) y para eso existe la rama pre-pagada: lee la tarjeta y hace solo la pre-autorización. La UI lo anuncia en verde <b>antes</b> de que el agente busque el botón que no existe.</span></div>
+      <div class="note"><span class="m">12</span><span><b>Los botones muertos no se dibujan.</b> Diferencia deliberada con el resto del sistema: en el M2 nunca se esconde una acción que el usuario <i>podría</i> hacer (DoD-4), pero "cobrar $0" no es una acción que exista para nadie — no es una negativa de permisos, es una ausencia de deuda.</span></div>
+      <div class="mini-demo">
+        <div class="cap">Los 3 estados del sello de procedencia (ADR-6)</div>
+        <div class="row"><span class="lbl">Sin servidor</span><span class="prov est"><span class="tick"></span>Estimado · sin confirmar</span></div>
+        <div class="row"><span class="lbl">Confirmado</span><span class="prov"><span class="tick"></span>Servidor · hace 4 s</span></div>
+        <div class="row"><span class="lbl">Divergente</span><span class="prov div"><span class="tick"></span>El total cambió</span></div>
+        <div class="row"><span class="lbl">Sin red</span><span class="prov stale"><span class="tick"></span>Vista de hace 2 min</span></div>
+      </div>
+      <div class="contrast"><b>Contraste MEDIDO (12A–12E)</b>
+        <ul>
+          <li>Concepto del desglose --n-700 sobre card #fdfcff <b>9.02:1</b> · importe --n-900 <b>17.74:1</b> · crédito --ok-tx sobre la misma card <b>6.71:1</b>.</li>
+          <li>Total: etiqueta --n-700 sobre --tonal <b>8.37:1</b> · numeral --n-900 sobre --tonal <b>16.46:1</b> · sufijo "MXN" --n-700 <b>8.37:1</b> (no --n-600, que sobre tonal solo daría 4.58:1 — rechazo heredado de la Tanda A).</li>
+          <li>Sello de procedencia: verde --ok-tx sobre --ok-bg <b>6.19:1</b> · ámbar --warn-tx sobre --warn-bg <b>5.59:1</b> · rojo --danger-tx sobre --danger-bg <b>7.04:1</b> · gris --n-700 sobre --n-50 <b>8.53:1</b>.</li>
+          <li>Fila del terminal: título --n-900 sobre --ok-bg <b>16.36:1</b> / sobre --danger-bg <b>15.86:1</b>; veredicto --ok-tx <b>6.19:1</b>, --danger-tx <b>7.04:1</b>, --warn-tx <b>5.59:1</b>. Botón "Volver a consultar" --n-800 sobre blanco <b>14.07:1</b>.</li>
+          <li>Acto en espera (superficie hundida --n-25): título --n-900 <b>17.46:1</b>, motivo --n-700 <b>8.87:1</b> — a plena fuerza, sin opacidad.</li>
+          <li>Acto hecho (--ok-bg): título y monto --n-900 <b>16.36:1</b> · detalle --ok-tx <b>6.19:1</b> · el check blanco sobre --ok es <b>4.32:1</b> y se declara <b>no-texto</b> (icono ≥ 3:1, acompañado siempre de la palabra).</li>
+          <li>CTA de cobro: blanco sobre el gradiente morado <b>5.70:1</b> en su parada peor. CTA de registro: --n-800 sobre blanco <b>14.07:1</b> con borde de 1.5 px del mismo tinte (≥ 3:1 no-texto).</li>
+          <li>12B: monto --n-900 sobre --tonal <b>16.46:1</b>; instrucción --n-800 sobre blanco <b>14.07:1</b>; banner informativo --n-800 sobre --info-bg <b>12.48:1</b> (el azul --info queda solo en el icono: como texto daría 4.94:1, y esta pantalla se lee al sol).</li>
+          <li>Recuadro "Registrar" punteado: título --n-900 sobre --n-25 <b>17.46:1</b> · cuerpo --n-700 <b>8.87:1</b> · etiqueta REGISTRAR --n-800 sobre --n-100 <b>12.39:1</b>.</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>Punto de frescura del terminal: <b>tick one-shot</b> (escala 1 → 1.25 → 1 en 260 ms) cada vez que responde el poll — no late. Es la enmienda que GD aceptó en el M1 para la Tanda B: batería y testabilidad.</li>
+          <li>12A → 12B: el CTA colapsa a la pantalla de espera con shared-axis Z 280 ms; el botón queda in-flight desde el primer milisegundo (guard anti-doble-tap). Cronómetro tabular a 1 Hz, sin salto de ancho.</li>
+          <li>12B → 12C: el acto 1 hace cross-fade a verde en 260 ms + haptic success una sola vez; el acto 2 se ilumina en el mismo frame. Sin confeti ni celebración: es dinero.</li>
+          <li>Reduced-motion ⇒ todo cambia de estado sin desplazamiento; el spinner se sustituye por la palabra "Cobrando…" con el cronómetro.</li>
+        </ul></div>
+      <div class="decision"><b>A confirmar en build (no bloquea el mockup)</b>
+        <ul>
+          <li><b>De dónde sale el desglose línea por línea.</b> Hoy el contrato no expone un endpoint de "preview de checkout": el total se arma de los cargos del contrato. Antes de H3 hay que fijar la fuente exacta (y su hora) o pedir un <code>GET /:id/payment-preview</code> que devuelva líneas + total + <code>previewedAt</code>. <b>Sin una hora del servidor, el sello de procedencia de ADR-6 no se puede sostener</b> — es el único pendiente que puede cambiar la sección 13.</li>
+          <li>La vigencia de 7 días de la retención está en el backend como constante; confirmar si es por tenant antes de escribirla en pantalla.</li>
+          <li>La rama pre-pagada (12E) muestra "guardar tarjeta + retener": confirmar el copy legal con Hector, porque guardar tarjeta es una promesa distinta a retener.</li>
+        </ul></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 13 · DIVERGENCIA DEL PREVIEW -->
+<section class="blk" id="s13">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 13 · M2-H3 · ★ COMPUERTA DE RELEASE DEL M2</span>
+    <h2>Divergencia del preview — el total cambió entre lo que se mostró y lo que el servidor dice ahora</h2>
+    <p>ADR-6 en su forma dura: <b>si el número local y el del servidor divergen, gana el servidor y el usuario
+    re-confirma</b>. Con las 4 superficies conviviendo (§9-1 resuelta), esto no es un caso teórico: mientras el agente
+    está en el paso de pago, el mostrador web puede agregar un cargo, el pre-checkin del cliente puede aceptar un extra,
+    o una corrección de tarifa puede aterrizar. El patrón ya existe en producción en el flujo web de reprecio
+    (<code>reservations.routes.js</code> rechaza el commit cuando el precio se movió desde el preview y obliga a
+    re-confirmar); esta pantalla es ese mismo principio, en dedo gordo y a pleno sol.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Divergencia al tocar COBRAR (bloqueante)</span>
+      <span class="schip"><i></i>Divergencia detectada por el poll (no bloqueante)</span>
+      <span class="schip"><i></i>Divergencia ENTRE la venta y la garantía (la fea)</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>13A — Divergencia al tocar "Cobrar" <small>bloqueante · NO se cobró nada · re-confirmación deliberada</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:11</span><span>LTE · 82 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 3 de 10</span>Confirma el nuevo total antes de cobrar</div>
+          <div class="wpad" style="gap:12px">
+            <div class="banner b-warn"><span class="m inframe" style="margin:-9px 0 0 330px">1</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg>
+              <span><b>El total cambió mientras estabas en esta pantalla.</b> No se cobró nada. Revisa el monto nuevo
+              con el cliente antes de continuar.</span></div>
+            <div class="divcmp"><span class="m inframe" style="margin:-9px 0 0 330px">2</span>
+              <div class="drow dbefore"><span class="dl">Lo que te mostramos<br>a las 10:09</span><span class="dv tnum">3 280.40</span></div>
+              <div class="drow dafter"><span class="dl">Lo que el servidor<br>cobra ahora</span><span class="dv tnum">3 520.40</span></div>
+              <div class="ddelta"><span class="dt">Diferencia a favor de la agencia</span><span class="dn tnum">+ 240.00</span></div>
+            </div>
+            <div class="money">
+              <div class="mh"><b>Qué cambió</b><span class="prov"><span class="tick"></span>Servidor · hace 2 s</span></div>
+              <div class="mline new"><span class="c">Silla para niño · agregada</span><span class="a">+ 240.00</span></div>
+              <div class="mline"><span class="c">Todo lo demás</span><span class="a" style="font-size:12.5px;font-weight:800;color:var(--n-700)">sin cambios</span></div>
+              <div class="kv" style="border-top:1px solid var(--n-100);margin-top:4px"><span class="k">Lo agregó</span><span class="v">Ana R. · mostrador web · hace 40 s<span class="m" style="margin-left:5px">3</span></span></div>
+            </div>
+            <div class="dock" style="gap:10px">
+              <div class="btn btn-ghost btn-sm">Revisar los cargos con el cliente</div>
+              <div class="btn btn-primary" style="margin-top:6px">Cobrar el nuevo total · $3 520.40<span class="m" style="margin-left:4px">4</span></div>
+              <div class="why">Al tocar, el cobro sale con el número del servidor. <b>Nada se cobró todavía.</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>13B — El poll la detectó antes <small>no bloqueante: el número se actualiza y el CTA se rearma con causa</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:10</span><span>LTE · 82 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span><span class="presence"><span class="lv"></span><span class="pv">AR</span>Ana R. · mostrador · 4 s</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr on"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 3 de 10</span>Cobro y depósito en garantía</div>
+          <div class="wpad">
+            <div class="banner b-info"><span class="m inframe" style="margin:-9px 0 0 330px">5</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5v.5"/></svg>
+              <span><b>Ana R. agregó "Silla para niño" desde el mostrador</b> hace 40 s. El total subió de $3 280.40 a
+              <b>$3 520.40</b>. <span class="ba">Ver el desglose</span></span></div>
+            <div class="money">
+              <div class="mh"><b>Cuenta del cliente</b><span class="prov"><span class="tick"></span>Servidor · hace 3 s</span></div>
+              <div class="mline sub"><span class="c">Subtotal + IVA (actualizado)</span><span class="a">4 520.40</span></div>
+              <div class="mline new"><span class="c">Silla para niño · nuevo</span><span class="a">+ 240.00</span></div>
+              <div class="mline credit"><span class="c">Anticipo pagado en línea</span><span class="a">− 1 000.00</span></div>
+              <div class="mtot"><span class="c">A cobrar ahora</span><span class="a tnum">3 520.40<span class="cur">MXN</span></span></div>
+            </div>
+            <div class="act live">
+              <span class="an">1</span>
+              <div class="ab"><b>Cobrar la renta</b><span>Monto actualizado hace 3 s. Confírmalo con la clienta antes del tap.</span></div>
+              <span class="aa tnum">3 520.40</span></div>
+            <div class="dock">
+              <div class="btn btn-primary">Cobrar $3 520.40</div>
+              <div class="why">El botón volvió a habilitarse con el número nuevo: nunca queda armado con un total viejo.<span class="m" style="margin-left:4px">6</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>13C — La fea: divergencia ENTRE la venta y la garantía <small>lo cobrado no se deshace; se cobra la diferencia</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:13</span><span>LTE · 81 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Falta cubrir una diferencia</div>
+          <div class="wpad" style="gap:11px">
+            <div class="fact"><span class="m inframe" style="margin:-9px 0 0 330px">7</span>
+              <span class="fi"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+              <div class="fb">Ya se cobró la renta por <b class="tnum">$3 280.40</b>
+                <i>10:12 · aprobación 004512 · Visa ••4417 · esto no se deshace desde RideOps</i></div></div>
+            <div class="banner b-warn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg>
+              <span><b>El total subió después de cobrar.</b> Ana R. agregó "Silla para niño" (+$240.00) a las 10:12.
+              El cobro que ya salió sigue siendo válido; falta la diferencia.<span class="m">8</span></span></div>
+            <div class="divcmp">
+              <div class="drow dbefore"><span class="dl">Cobrado<br>10:12</span><span class="dv tnum" style="text-decoration:none;color:var(--n-900)">3 280.40</span></div>
+              <div class="drow dafter"><span class="dl">Total del contrato<br>ahora</span><span class="dv tnum">3 520.40</span></div>
+              <div class="ddelta"><span class="dt">Falta cobrar</span><span class="dn tnum">240.00</span></div>
+            </div>
+            <div class="act live">
+              <span class="an">1b</span>
+              <div class="ab"><b>Cobrar la diferencia</b><span>Nuevo tap del cliente por $240.00. No se re-cobra lo ya pagado.</span></div>
+              <span class="aa tnum">240.00</span></div>
+            <div class="act wait">
+              <span class="an">2</span>
+              <div class="ab"><b>Retener depósito en garantía</b><span>Sigue pendiente. Se habilita cuando el saldo quede en cero.</span></div>
+              <span class="aa tnum">5 000.00</span></div>
+            <div class="dock" style="gap:10px">
+              <div class="btn btn-ghost btn-sm">Revisar cargos · quitar la silla</div>
+              <div class="btn btn-primary" style="margin-top:6px">Cobrar $240.00<span class="m" style="margin-left:4px">9</span></div>
+              <div class="btn btn-record btn-sm">Registrar la diferencia cobrada afuera</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Divergencia (ADR-6)</h3>
+      <div class="note"><span class="m">1</span><span><b>Primera línea, primera obligación: "No se cobró nada".</b> Es lo único que el agente necesita saber en el primer segundo, con el cliente enfrente. Todo lo demás —cuánto, por qué, quién— puede leerse después. Ámbar, no rojo: el servidor no falló, tiene razón.</span></div>
+      <div class="note"><span class="m">2</span><span><b>El comparador enseña los dos números juntos, con jerarquía honesta.</b> El viejo va tachado en --n-700 a 20 px; el nuevo, en --n-900 a 30 px sobre ámbar. Prohibido mostrar solo el nuevo "ya corregido": el agente le dijo un precio al cliente hace 90 s y necesita poder explicar la diferencia sin abrir otra pantalla.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Atribución, porque conviven 4 superficies.</b> "Lo agregó Ana R. · mostrador web · hace 40 s" convierte un misterio en una frase que el agente puede repetir en voz alta. Sale del mismo <code>events[]</code>/atribución que ya usa el banner de avance ajeno de la Tanda A — sin backend nuevo.</span></div>
+      <div class="note"><span class="m">4</span><span><b>La decisión de layout más importante de toda la tanda:</b> el CTA de confirmación está <b>deliberadamente desplazado</b> respecto de donde estaba "Cobrar $3 280.40" en 12A (una acción secundaria ocupa ese lugar y el primario baja ~66 px). <b>La memoria muscular no puede aprobar un monto que cambió.</b> Y el CTA <b>lleva el número dentro</b>: el agente no confirma "Continuar", confirma "$3 520.40".</span></div>
+      <div class="note"><span class="m">5</span><span><b>Si el poll la vio antes que el dedo, no hay pantalla bloqueante:</b> banner informativo azul, desglose actualizado en su sitio, línea nueva marcada en ámbar. Un modal por cada cambio ajeno sería un bloqueo cada pocos minutos (misma regla que la Tanda A aplicó al avance ajeno). La pantalla bloqueante de 13A queda para lo que de verdad la merece: el instante de cobrar.</span></div>
+      <div class="note"><span class="m">6</span><span><b>Regla de build vinculante:</b> el CTA de cobro guarda el total con el que se armó. Si el total cambia, el botón se <b>rearma</b> con el nuevo (y ese cambio de etiqueta es visible). Nunca existe un botón "Cobrar" cargado con un número que la pantalla ya no muestra. Y antes de disparar, re-fetch si el último preview tiene &gt; 3 s — el mismo pre-stamp re-fetch que el M2-PLAN pide para los stamps, aplicado al dinero.</span></div>
+      <div class="note"><span class="m">7</span><span><b>Lo cobrado es un HECHO, y se presenta como hecho:</b> verde, con aprobación y hora, y con la frase incómoda escrita ("esto no se deshace desde RideOps"). Ocultarlo o pintarlo como "error" haría que el agente intentara arreglarlo cobrando de nuevo, que es exactamente el desastre que esta tanda existe para evitar.</span></div>
+      <div class="note"><span class="m">8</span><span><b>La salida NO es reembolsar ni anular.</b> El reembolso vive detrás de <code>paymentActions</code> y en el escritorio; ofrecerlo aquí sería un botón que la mitad del personal no puede pulsar. La salida de patio es cubrir la diferencia — o quitar el cargo que sobra, que es lo que un agente sí puede hacer.</span></div>
+      <div class="note"><span class="m">9</span><span><b>Tres salidas, ninguna ciega:</b> cobrar la diferencia (tap nuevo, monto pequeño y explícito), quitar el cargo que la generó, o registrar que la diferencia se cobró afuera. Las tres dejan el contrato cuadrado; ninguna re-ejecuta la venta original.</span></div>
+      <div class="contrast"><b>Contraste MEDIDO (13A–13C)</b>
+        <ul>
+          <li>Banner de divergencia --warn-tx sobre --warn-bg <b>5.59:1</b>; el negrita de la primera frase, mismo par.</li>
+          <li>Comparador · fila "antes": etiqueta --n-700 sobre --n-50 <b>8.53:1</b>, numeral tachado --n-700 <b>8.53:1</b> (el tachado es de 2 px, decoración adicional al color — el estado nunca depende solo del color).</li>
+          <li>Comparador · fila "ahora": etiqueta --warn-tx sobre --warn-bg <b>5.59:1</b>, numeral --n-900 sobre --warn-bg <b>16.49:1</b>.</li>
+          <li>Fila de diferencia: texto --n-700 sobre blanco <b>9.22:1</b> · cifra --danger-tx sobre blanco <b>8.06:1</b>.</li>
+          <li>Línea nueva del desglose (--warn-bg a sangre): concepto --warn-tx <b>5.59:1</b> · importe --n-900 <b>16.49:1</b>.</li>
+          <li>Banner informativo de 13B: cuerpo --n-800 sobre --info-bg <b>12.48:1</b>, enlace subrayado mismo par (subrayado + peso 850, no solo color).</li>
+          <li>Hecho inmutable de 13C: texto --n-900 sobre --ok-bg <b>16.36:1</b> · detalle --n-700 sobre --ok-bg <b>8.31:1</b> (no --ok-tx: es el dato que se lee para responder una reclamación).</li>
+          <li>CTA con monto dentro: blanco sobre gradiente <b>5.70:1</b> peor parada; secundario --n-800 sobre blanco <b>14.07:1</b>.</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>13A entra como <b>pantalla</b>, no como modal: shared-axis Y 300 ms + haptic warning <b>una sola vez</b>. Nada parpadea: un número de dinero que titila es un número que no se lee.</li>
+          <li>El numeral nuevo hace un count-up de 240 ms desde el viejo <b>solo</b> con motion habilitado y solo la primera vez — hace visible la dirección del cambio. Con reduced-motion aparece ya en su valor final.</li>
+          <li>13B: la línea nueva del desglose entra con fade + expansión de altura 220 ms; el resto de la lista no se reordena.</li>
+          <li>El CTA primario de 13A entra <b>200 ms después</b> que el resto del contenido (una sola vez): impide que un toque en vuelo confirme un monto que el agente todavía no leyó.</li>
+        </ul></div>
+      <div class="decision hard"><b>Compuerta de release · lo que QA debe poder verificar</b>
+        <ul>
+          <li>La telemetría distingue <b>divergencia detectada por poll</b> (13B, esperable) de <b>divergencia al confirmar</b> (13A, la que debe llegar en 0 a la RC según el M2-PLAN §4-1). Un solo evento con las dos causas mezcladas hace la compuerta inverificable.</li>
+          <li>Cada evento carga: total mostrado, total del servidor, delta, edad del preview en ms y superficie que originó el cambio. Sin la edad del preview no se puede saber si el bug fue del poll o del backend.</li>
+          <li><b>13C depende de una confirmación del backend</b>: ¿qué hace hoy el servidor si el total sube después de <code>charge-sale</code> y antes de <code>hold-deposit</code>? Hay que verificarlo contra el código real antes de construir; el mockup dibuja el comportamiento correcto (cobrar la diferencia), pero si el backend hoy re-resuelve la venta completa, es un pedido de backend y no un asunto de UI.</li>
+        </ul></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 14 · FAILSAFE MANUAL -->
+<section class="blk" id="s14">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 14 · M2-H3</span>
+    <h2>Failsafe manual — registrar lo que YA pasó, nunca cobrar</h2>
+    <p><code>POST /:id/record-manual-payment</code> (<code>{amount, method, reference?, notes?}</code>) y
+    <code>POST /:id/record-manual-deposit</code> (<code>{amount, method, reason, reference?}</code>, con
+    <b><code>reason</code> obligatorio</b>). Son el camino que el mostrador usa cuando cobró en una terminal externa, en
+    efectivo o por transferencia: escriben la misma fila que escribiría una venta real, con el método elegido y su rastro
+    de auditoría, y el de garantía además estampa <code>paymentCompletedAt</code> para que el wizard avance. <b>No tocan
+    ningún gateway.</b> Todo el diseño de esta sección existe para que eso sea imposible de confundir.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Hoja de registro</span><span class="schip"><i></i>Motivo obligatorio (garantía)</span>
+      <span class="schip"><i></i>Relectura antes de escribir</span><span class="schip"><i></i>Registrado con autoría</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>14A — Hoja de registro <small>encabezado, verbo y color declaran "esto NO cobra"</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:22</span><span>LTE · 79 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="dim">
+            <div class="wizbar">
+              <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+              <div class="tt"><b>Checkout · R-2489</b><span>Iván Rojas · U-133</span></div>
+              <div class="pausebtn">Pausar</div>
+            </div>
+            <div class="stepline"><span class="ix">Paso 3 de 10</span>Cobro y depósito en garantía</div>
+            <div class="wpad"><div class="term off"><span class="ti"></span><div class="tb"><b>Terminal Spin · Mostrador 1</b><span>Fuera de línea</span></div></div></div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet tall">
+            <div class="grab"></div>
+            <div style="display:flex;align-items:center;gap:9px">
+              <h5 style="flex:1">Registrar cobro hecho afuera</h5><span class="rtag">Registrar</span>
+              <span class="m">1</span></div>
+            <div class="ssub">Anota en el contrato un pago que <b>ya ocurrió</b> fuera de este sistema. Esta pantalla
+              <b>no le cobra nada a nadie</b>: no habla con el terminal ni con el banco.</div>
+            <div style="display:grid;gap:9px;overflow-y:auto;flex:1;min-height:0;padding:2px 1px 4px">
+              <label class="field"><span class="fl">Monto registrado · sugerido por el servidor, hace 6 s<span class="m" style="margin-left:5px">2</span></span><span class="fv tnum">$ 2 088.00 MXN</span></label>
+              <div>
+                <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--n-700);margin:0 0 7px 4px">Cómo cobraste</div>
+                <div class="opt sel"><span class="radio"></span><span>Terminal externa (tarjeta)<span class="osub">Otra terminal del mostrador o de un compañero</span></span></div>
+                <div class="opt"><span class="radio"></span><span>Efectivo<span class="osub">Se recibió en caja</span></span></div>
+                <div class="opt"><span class="radio"></span><span>Cheque</span></div>
+                <div class="opt" style="margin-bottom:2px"><span class="radio"></span><span>Otro<span class="osub">Transferencia, enlace de pago, agencia</span></span></div>
+              </div>
+              <label class="field"><span class="fl">Referencia / folio <span style="font-weight:750;text-transform:none;letter-spacing:0;color:var(--n-700)">(opcional)</span></span><span class="fv tnum">004512-B</span></label>
+              <label class="field req on"><span class="fl">Motivo<span class="reqtag">Obligatorio</span></span><span class="fv ph">¿Por qué no se cobró aquí?<span class="m" style="margin-left:6px">3</span></span></label>
+            </div>
+            <div class="btn btn-record btn-md" style="margin-top:10px">Revisar y registrar</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:9px">Cancelar</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>14B — Relectura antes de escribir <small>el paso que convierte un tecleo en una afirmación</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:23</span><span>LTE · 79 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="dim">
+            <div class="wizbar">
+              <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+              <div class="tt"><b>Checkout · R-2489</b><span>Iván Rojas · U-133</span></div>
+              <div class="pausebtn">Pausar</div>
+            </div>
+            <div class="stepline"><span class="ix">Paso 3 de 10</span>Cobro y depósito en garantía</div>
+            <div class="wpad"></div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div style="display:flex;align-items:center;gap:9px"><h5 style="flex:1">Vas a registrar, no a cobrar</h5><span class="rtag">Registrar</span></div>
+            <div class="ssub">Léelo con el cliente delante. Al confirmar se escribe en el contrato y queda con tu nombre.</div>
+            <div class="recbox" style="background:var(--n-0);border-style:solid;border-color:var(--n-300)">
+              <div class="kv" style="border-top:0"><span class="k">Monto</span><span class="v tnum" style="font-size:17px">$2 088.00 MXN</span></div>
+              <div class="kv"><span class="k">Método</span><span class="v">Terminal externa (tarjeta)</span></div>
+              <div class="kv"><span class="k">Referencia</span><span class="v tnum">004512-B</span></div>
+              <div class="kv"><span class="k">Motivo</span><span class="v">Terminal de Mostrador 1 fuera de línea; se cobró en Mostrador 2</span></div>
+              <div class="kv"><span class="k">Lo registra</span><span class="v">Hugo P. · 10:23<span class="m" style="margin-left:5px">4</span></span></div>
+            </div>
+            <div class="banner b-info" style="margin-top:11px">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5v.5"/></svg>
+              <span>No se enviará ningún cobro al terminal ni al banco. Si el pago externo <b>no</b> se completó,
+              cancela: un registro falso es más difícil de arreglar que un cobro fallido.<span class="m">5</span></span></div>
+            <div class="btn btn-record btn-md" style="margin-top:12px">Registrar $2 088.00 como cobrado</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:9px">Volver a editar</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>14C — Registrado <small>hecho con autoría y motivo visibles; el wizard sigue su curso</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:24</span><span>LTE · 78 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2489</b><span>Iván Rojas · U-133</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Iván Rojas · U-133</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr on"><span class="d">4</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Falta la garantía para cerrar el pago</div>
+          <div class="wpad">
+            <div class="fact ink"><span class="m inframe" style="margin:-9px 0 0 330px">6</span>
+              <span class="fi"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8.5 10h7"/><path d="M8.5 14h4.5"/></svg></span>
+              <div class="fb">Registrado: renta cobrada afuera por <b class="tnum">$2 088.00</b>
+                <i>Terminal externa · folio 004512-B · 10:23 · Hugo P.</i>
+                <i>Motivo: terminal de Mostrador 1 fuera de línea; se cobró en Mostrador 2</i></div></div>
+            <div class="act live">
+              <span class="an">2</span>
+              <div class="ab"><b>Retener depósito en garantía</b><span>El terminal sigue caído: si la garantía también se tomó afuera, regístrala con su motivo.</span></div>
+              <span class="aa tnum">4 000.00</span></div>
+            <div class="term off"><span class="ti"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18"/><path d="M4 20L20 4"/></svg></span>
+              <div class="tb"><b>Terminal Spin · Mostrador 1</b><span>Fuera de línea · hace 12 s</span></div>
+              <span class="tre">Reintentar</span></div>
+            <div class="dock">
+              <div class="btn btn-record"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8.5 10h7"/><path d="M8.5 14h4.5"/></svg>Registrar garantía tomada afuera</div>
+              <div class="why">Registrar la garantía <b>sí</b> cierra el paso de pago y hace avanzar el wizard — por eso su motivo es obligatorio.<span class="m" style="margin-left:4px">7</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Failsafe manual</h3>
+      <div class="note"><span class="m">1</span><span><b>Tres señales redundantes de "esto no cobra",</b> porque una sola se pierde con prisa: el <b>verbo</b> ("Registrar", nunca "Cobrar", en título, botón y confirmación), el <b>color</b> (tinta --n-800 sin relleno; el gradiente morado está reservado a mover dinero), y la <b>etiqueta</b> REGISTRAR presente en la hoja, en la relectura y en el resultado. En l10n: <code>paymentRecordExternal*</code> nunca comparte cadena con <code>paymentCharge*</code>.</span></div>
+      <div class="note"><span class="m">2</span><span><b>El monto viene sugerido por el servidor y es editable</b> — el cobro externo pudo ser parcial. Se declara la procedencia y su edad igual que en el paso de cobro: el registro también se hace contra el número del servidor (ADR-6 no se relaja porque el camino sea manual).</span></div>
+      <div class="note"><span class="m">3</span><span><b><code>reason</code> es obligatorio de verdad,</b> porque el backend lo exige en <code>record-manual-deposit</code>: campo con borde de tinta, etiqueta OBLIGATORIO y botón bloqueado con causa hasta que tenga texto. <b>Regla de build:</b> se ofrecen motivos frecuentes de un toque (terminal caída, cliente pagó en efectivo, cobrado en otra sucursal) + texto libre — un campo vacío obligatorio en el patio se llena con "x".</span></div>
+      <div class="note"><span class="m">4</span><span><b>La relectura muestra quién firma el registro.</b> No es adorno: esta fila es la que un supervisor lee tres días después. La autoría se muestra ANTES de escribir, no solo después, para que el agente entienda que está poniendo su nombre.</span></div>
+      <div class="note"><span class="m">5</span><span><b>La advertencia dice la verdad asimétrica:</b> un cobro fallido se reintenta, un registro falso ensucia el contrato y solo se arregla en el escritorio. Es el único lugar de la tanda donde el copy invita a NO continuar.</span></div>
+      <div class="note"><span class="m">6</span><span><b>El resultado no se disfraza de cobro:</b> ficha en tinta gris (no verde de aprobación bancaria), icono de libreta, y el <b>motivo visible en la propia pantalla</b>. Quien llegue después ve, sin abrir nada, que ese dinero entró por fuera y por qué.</span></div>
+      <div class="note"><span class="m">7</span><span><b>Se declara la consecuencia mecánica:</b> <code>record-manual-deposit</code> estampa <code>paymentCompletedAt</code> y el wizard avanza; <code>record-manual-payment</code> no. Que la UI lo diga en una línea evita el clásico "ya registré el pago, ¿por qué sigue en pago?".</span></div>
+      <div class="contrast"><b>Contraste MEDIDO (14A–14C)</b>
+        <ul>
+          <li>Sheet en plate .97 sobre el wizard: compone a blanco puro. Título --n-900 <b>18.14:1</b> · subtítulo --n-700 <b>9.22:1</b>.</li>
+          <li>Etiqueta REGISTRAR --n-800 sobre --n-100 con borde --n-300 <b>12.39:1</b>.</li>
+          <li>Campo: etiqueta --n-700 sobre blanco <b>9.22:1</b> · valor --n-900 <b>18.14:1</b> · placeholder --n-700 <b>9.22:1</b> (no --n-400: un placeholder de 2.21:1 es el error de contraste más común y aquí lleva la pregunta que hay que responder).</li>
+          <li>"Obligatorio" --danger-tx sobre blanco <b>8.06:1</b> · foco azul --focus con halo de 3 px, nunca morado sobre morado.</li>
+          <li>Opciones de método: seleccionada --p-800 sobre --p-50 <b>9.93:1</b> · sub-línea --n-700 sobre blanco <b>9.22:1</b>.</li>
+          <li>Botón "Registrar": --n-800 sobre blanco <b>14.07:1</b>, borde 1.5 px del mismo tinte (no-texto ≥ 3:1). Nunca usa el gradiente morado ni el rojo.</li>
+          <li>Ficha de resultado (--n-50): texto --n-900 <b>16.78:1</b> · detalle y motivo --n-700 <b>8.53:1</b>.</li>
+          <li>Recuadro punteado de 12D (--n-25): cuerpo --n-700 <b>8.87:1</b>; el punteado es --n-400 (2.21:1) y se declara <b>no-texto decorativo</b>: la distinción la portan el verbo, la etiqueta y el color del texto.</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>Hoja: spring 380 ms al subir; el teclado empuja el contenido sin tapar el campo activo (el CTA queda pegado abajo). Un solo BackdropFilter en el wizard sería cero: el sheet es plate opaco .97.</li>
+          <li>Paso a relectura: shared-axis X 260 ms dentro del mismo sheet — no se cierra y se reabre, para que se sienta un paso y no un cambio de pantalla.</li>
+          <li>Confirmar: el botón colapsa a spinner in-flight sin cambiar de tamaño; al volver, la ficha aterriza con fade 240 ms y <b>haptic light</b> — deliberadamente distinto del haptic success del cobro real.</li>
+          <li>Reduced-motion ⇒ sheet sin spring, transición por cross-fade.</li>
+        </ul></div>
+      <div class="decision"><b>A confirmar en build</b>
+        <ul>
+          <li>Los métodos que acepta el backend son CASH/CHECK/CARD/OTHER; el mapeo a las 4 etiquetas de patio ("terminal externa" → CARD) se fija en l10n y debe verificarse contra la API antes de H3.</li>
+          <li><code>record-manual-payment</code> recibe <code>notes</code> y no <code>reason</code>; el mockup pide motivo en <b>ambos</b> por consistencia de patio. Si Hector quiere paridad estricta con el contrato, en el de renta el motivo pasa a opcional (y el copy cambia), pero la recomendación de diseño es exigirlo en los dos.</li>
+        </ul></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 15 · CAPACIDAD DENEGADA -->
+<section class="blk" id="s15">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 15 · M2-H3 · DoD-4</span>
+    <h2>Capacidad denegada — qué puede y qué no puede un AGENT sin <code>paymentActions</code></h2>
+    <p>El módulo <code>paymentActions</code> es una <b>capacidad</b>, no una página: <code>requireCapability</code> es
+    <b>fail-closed</b> (exige <code>true</code> explícito) y en el cliente <code>user.can('paymentActions')</code>
+    devuelve <code>false</code> cuando falta. Gobierna que el <b>sistema mueva dinero por su cuenta</b>: cobrar a una
+    tarjeta guardada, capturar/liberar/re-autorizar la garantía, reembolsar, borrar un pago, guardar una tarjeta
+    reutilizable. <b>Hallazgo verificado en el código, y es el corazón de esta sección:</b> el two-tap del checkout
+    (<code>charge-sale</code>, <code>hold-deposit</code>) y los <code>record-manual-*</code> están
+    <b>deliberadamente NO gateados</b> — el inventario de rutas de dinero los fija como "card-present" y "record-only"
+    con la razón escrita: el cliente presentando físicamente su tarjeta <b>es</b> la autorización, y gatearlos trabaría
+    todos los mostradores.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>AGENT sin capacidad · el cobro SÍ funciona</span>
+      <span class="schip"><i></i>Acciones de gateway visibles y denegadas</span>
+      <span class="schip"><i></i>403 real de la API</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>15A — AGENT sin <code>paymentActions</code> <small>cobra igual; lo denegado se ve, con motivo</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>11:04</span><span>LTE · 66 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2504</b><span>Sofía Lara · U-095</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Sofía Lara · U-095</span></div>
+          <div class="stepline"><span class="ix">Paso 3 de 10</span>Cobro y depósito en garantía</div>
+          <div class="wpad">
+            <div class="money">
+              <div class="mh"><b>Cuenta del cliente</b><span class="prov"><span class="tick"></span>Servidor · hace 5 s</span></div>
+              <div class="mline sub"><span class="c">Subtotal + IVA</span><span class="a">1 740.00</span></div>
+              <div class="mtot"><span class="c">A cobrar ahora</span><span class="a tnum">1 740.00<span class="cur">MXN</span></span></div>
+            </div>
+            <div class="act live"><span class="m inframe" style="margin:-9px 0 0 332px">1</span>
+              <span class="an">1</span>
+              <div class="ab"><b>Cobrar la renta</b><span>La clienta acerca su tarjeta. <b>Sí puedes hacerlo</b>: la tarjeta presente es la autorización.</span></div>
+              <span class="aa tnum">1 740.00</span></div>
+            <div class="capbox"><span class="m inframe" style="margin:-9px 0 0 330px">2</span>
+              <div class="ch"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="color:var(--n-700)"><rect x="4" y="10.5" width="16" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 018 0v3"/></svg>
+                <b>Tu cuenta · acciones de dinero</b></div>
+              <div class="caprow allowed">
+                <span class="ci"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+                <div class="cb"><b>Cobrar y retener con tarjeta presente</b><span>Permitido: el cliente está aquí y acerca su tarjeta.</span></div></div>
+              <div class="caprow allowed">
+                <span class="ci"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+                <div class="cb"><b>Registrar cobros hechos afuera</b><span>Permitido: registrar no mueve dinero.</span></div></div>
+              <div class="caprow denied">
+                <span class="ci"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="4" y="10.5" width="16" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 018 0v3"/></svg></span>
+                <div class="cb"><b>Cobrar a la tarjeta guardada</b><span>Tu cuenta no puede cobrar sin el cliente presente. Pídelo a un administrador.</span></div></div>
+              <div class="caprow denied">
+                <span class="ci"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="4" y="10.5" width="16" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 018 0v3"/></svg></span>
+                <div class="cb"><b>Liberar o recapturar la garantía</b><span>Se hace desde el escritorio, con una cuenta autorizada.</span></div></div>
+              <div class="caprow denied">
+                <span class="ci"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="4" y="10.5" width="16" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 018 0v3"/></svg></span>
+                <div class="cb"><b>Reembolsar</b><span>Se hace desde el escritorio, con una cuenta autorizada.</span></div></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Cobrar $1 740.00</div>
+              <div class="btn btn-record btn-sm"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8.5 10h7"/><path d="M8.5 14h4.5"/></svg>Registrar cobro hecho afuera</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>15B — El 403 real de la API <small>DoD-4: el botón no se esconde, se intenta y el servidor niega</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>11:06</span><span>LTE · 66 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="dim">
+            <div class="wizbar">
+              <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+              <div class="tt"><b>Checkout · R-2504</b><span>Sofía Lara · U-095</span></div>
+              <div class="pausebtn">Pausar</div>
+            </div>
+            <div class="stepline"><span class="ix">Paso 3 de 10</span>Cobro y depósito en garantía</div>
+            <div class="wpad"></div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div class="center-state" style="margin:6px 0 0;gap:11px">
+              <div class="big-ic deny"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><rect x="4" y="10.5" width="16" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 018 0v3"/></svg></div>
+              <h4 style="font-size:20px">Tu cuenta no puede hacer eso</h4>
+              <p><b>Cobrar a una tarjeta guardada</b> está desactivado para tu usuario. Sí puedes cobrar con la tarjeta
+              del cliente presente y registrar cobros hechos afuera.</p>
+            </div>
+            <div class="recbox" style="margin-top:12px;background:var(--n-50);border-style:solid;border-color:var(--n-200)">
+              <div class="kv" style="border-top:0"><span class="k">Quién lo abre</span><span class="v">Un administrador, desde Personal</span></div>
+              <div class="kv"><span class="k">Tu cuenta</span><span class="v">Hugo P. · AGENT · Patio Centro</span></div>
+              <span class="m" style="position:absolute;margin:-58px 0 0 300px">3</span>
+            </div>
+            <div class="btn btn-ghost btn-md" style="margin-top:12px">Avisar a un supervisor</div>
+            <div class="btn btn-record btn-sm" style="margin-top:9px">Registrar cobro hecho afuera</div>
+            <div class="dock" style="padding-top:10px"><div class="why">La negativa la dio el servidor, no la app: el botón existía y se intentó.<span class="m" style="margin-left:4px">4</span></div></div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Capacidad denegada</h3>
+      <div class="note"><span class="m">1</span><span><b>Lo más importante de esta pantalla es lo que NO cambia.</b> Un AGENT sin <code>paymentActions</code> cobra y retiene <b>igual</b> que un ADMIN, porque las rutas del two-tap están pinneadas como card-present y abiertas a propósito. <b>Regla de build vinculante:</b> prohibido condicionar el CTA de cobro a <code>can('paymentActions')</code>. Sería una jaula que el backend no pide y trabaría cada checkout de cada agente.</span></div>
+      <div class="note"><span class="m">2</span><span><b>Lo denegado se ve, con motivo y con salida</b> (DoD-4: nada de botones escondidos). Fila hundida --n-25 con texto a plena fuerza, candado como refuerzo del texto y no como su sustituto. La frase que hace entendible toda la regla: <b>"tu cuenta no puede cobrar sin el cliente presente"</b> — no es jerarquía, es la diferencia entre tarjeta presente y no presente.</span></div>
+      <div class="note"><span class="m">3</span><span><b>La negativa dice quién la levanta y en qué pantalla,</b> porque un empleado bloqueado sin ruta de escape se convierte en una llamada al dueño. El mensaje que el backend manda hoy es en INGLÉS y sin código de máquina; se usa la copia localizada de la app y el texto del servidor viaja solo a telemetría/soporte (ADR-8: ningún string en código, y menos uno ajeno).</span></div>
+      <div class="note"><span class="m">4</span><span><b>El 403 se muestra porque se intentó de verdad.</b> El cliente fail-closes en el <i>set gateado</i> para no prometer lo imposible, pero igual manda la llamada: la fuente de verdad es la API (una capacidad puede haberse abierto hace 10 s y el <code>/me</code> cacheado no enterarse). Si el 403 llega con la sesión ya cargada, además se refresca <code>/me</code> para que la lista de capacidades quede al día.</span></div>
+      <div class="contrast"><b>Contraste MEDIDO (15A–15B)</b>
+        <ul>
+          <li>Encabezado de la caja de capacidades --n-700 sobre --n-50 <b>8.53:1</b>.</li>
+          <li>Fila permitida: título --n-900 sobre blanco <b>18.14:1</b> · detalle --n-700 <b>9.22:1</b> · check --ok-tx <b>6.86:1</b> sobre blanco.</li>
+          <li><b>Fila denegada SIN opacidad</b> (regla del sistema): fondo --n-25, título --n-900 <b>17.46:1</b>, motivo --n-700 <b>8.87:1</b>, candado --n-700 <b>8.87:1</b>. El motivo es información crítica y se lee al 100 %.</li>
+          <li>Sheet de negativa sobre plate .97 (compone a blanco): título --n-900 <b>18.14:1</b> · cuerpo --n-700 <b>9.22:1</b> · icono --danger-tx sobre --danger-bg <b>7.04:1</b>.</li>
+          <li>Ficha de contexto (--n-50): clave --n-700 <b>8.53:1</b> · valor --n-900 <b>16.78:1</b>.</li>
+          <li>Salidas: "Avisar a un supervisor" --n-800 sobre blanco <b>14.07:1</b> · "Registrar" mismo par con borde de tinta.</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>La caja de capacidades no se anima: es estado, no evento. Aparece con el paso.</li>
+          <li>El sheet de 15B sube con spring 380 ms + haptic warning una sola vez. Sin shake ni rojo pulsante: no es culpa del agente.</li>
+          <li>Reduced-motion ⇒ cross-fade.</li>
+        </ul></div>
+      <div class="decision hard"><b>Corrección al encargo · el PM y Hector deben validarla</b>
+        <ul>
+          <li><b>El encargo pedía dibujar "las acciones de gateway denegadas" en el paso de pago. Verificado contra el código, en ESTE paso no hay ninguna acción gateada:</b> <code>charge-sale</code> y <code>hold-deposit</code> están pinneados como card-present y abiertos <b>a propósito</b>, con la razón escrita en el propio inventario ("gatearlos trabaría cada checkout"); los <code>record-manual-*</code> son record-only, también abiertos. Dibujar el two-tap en gris habría producido un build que traba el mostrador — el fallo exacto contra el que existe el DoD-4.</li>
+          <li>Por eso 15A muestra la capacidad como un <b>mapa honesto</b> (qué sí, qué no, y por qué) y 15B usa la única acción de gateway realmente gateada y alcanzable desde la vecindad del checkout: <b>cobrar a la tarjeta guardada</b> (card-not-present, del set de <code>paymentActions</code>). Si el PM quiere que RideOps NO exponga esa acción en el M2, 15B se cae y la sección queda solo con 15A.</li>
+          <li><b>Pedido de backend recomendado (chico y de la misma familia que los gaps ya abiertos):</b> el 403 de <code>requireCapability</code> responde <code>{error: "&lt;texto en inglés&gt;"}</code> sin <code>code</code> ni <code>module</code>. Para que el cliente localice la negativa sin adivinar por substring —el mismo mal patrón que ya hubo que puentear con el 403 de ubicación— hace falta <code>{ code: 'MODULE_ACCESS_DENIED', module: 'paymentActions' }</code>. Dos líneas, y el patrón queda cerrado para todas las capacidades.</li>
+        </ul></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 16 · ESTADOS FEOS DEL DINERO -->
+<section class="blk" id="s16">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 16 · M2-H3 · ADR-5</span>
+    <h2>Los estados feos del dinero — los que de verdad pasan en el patio</h2>
+    <p>Sin red al momento de cobrar, timeout del terminal (<i>¿cobró o no?</i>), cobro rechazado y garantía ya
+    retenida. La regla que gobierna las cuatro: <b>el dinero jamás se encola</b> (ADR-5) y <b>un timeout jamás se
+    resuelve reintentando a ciegas</b> — la salida correcta es <b>consultar el estado</b>, porque una autorización
+    puede haberse aprobado en el terminal y perderse en el camino de vuelta.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Sin red al cobrar</span><span class="schip"><i></i>Timeout · ¿cobró o no?</span>
+      <span class="schip"><i></i>Resultado de la consulta</span><span class="schip"><i></i>Cobro rechazado</span>
+      <span class="schip"><i></i>Garantía ya retenida</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>16A — Sin red al cobrar <small>ADR-5 dicho en pantalla: el dinero no entra a la Bandeja</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:41</span><span class="off">Sin red · 74 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="stepline stale"><span class="ix">Paso 3 de 10</span>Cobro y depósito · vista de hace 2 min</div>
+          <div class="wpad">
+            <div class="banner b-danger"><span class="m inframe" style="margin:-9px 0 0 330px">1</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2.5 8.5a16 16 0 0119 0"/><path d="M6 12.5a10 10 0 0112 0"/><path d="M9.5 16.3a4.5 4.5 0 015 0"/><path d="M4 20L20 4"/></svg>
+              <span><b>Sin conexión. Aquí no se puede cobrar.</b> El dinero <b>nunca</b> se guarda para enviarse después:
+              si no hay red, no hay cobro.</span></div>
+            <div class="money">
+              <div class="mh"><b>Cuenta del cliente</b><span class="prov stale"><span class="tick"></span>Vista de hace 2 min</span></div>
+              <div class="mline sub"><span class="c">Subtotal + IVA</span><span class="a">4 280.40</span></div>
+              <div class="mline credit"><span class="c">Anticipo pagado en línea</span><span class="a">− 1 000.00</span></div>
+              <div class="mtot"><span class="c">A cobrar (último dato conocido)</span><span class="a tnum">3 280.40<span class="cur">MXN</span></span></div>
+            </div>
+            <div class="act wait"><span class="m inframe" style="margin:-9px 0 0 332px">2</span>
+              <span class="an">1</span>
+              <div class="ab"><b>Cobrar la renta</b><span>No disponible sin red. Además, este total es de hace 2 min y pudo cambiar: cobrar a ciegas es cobrar mal.</span></div>
+              <span class="aa tnum">3 280.40</span></div>
+            <div class="act wait">
+              <span class="an">2</span>
+              <div class="ab"><b>Retener depósito en garantía</b><span>No disponible sin red.</span></div>
+              <span class="aa tnum">5 000.00</span></div>
+            <div class="dock">
+              <div class="btn btn-ghost">Reintentar conexión</div>
+              <div class="why"><b>Nada de este paso entra a la Bandeja de salida.</b> Las fotos de inspección sí esperan;
+              el dinero no.<span class="m" style="margin-left:4px">3</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>16B — Timeout del terminal <small>¿cobró o no? · la única salida es CONSULTAR, no reintentar</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:13</span><span>LTE · 80 %</span></div>
+        <div class="scr" style="background:var(--n-0)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Cobro sin respuesta</div>
+          <div class="wpad">
+            <div class="center-state" style="gap:13px">
+              <div class="big-ic warn"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5.4l3.2 2"/></svg></div>
+              <h4>No sabemos si el cobro pasó</h4>
+              <p style="color:var(--n-800);font-weight:700">El terminal no respondió en 45 s. Puede haberse aprobado
+              y haberse perdido la respuesta.<span class="m" style="margin-left:4px">4</span></p>
+            </div>
+            <div class="banner b-danger">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg>
+              <span><b>No vuelvas a cobrar.</b> Si la venta se aprobó, un segundo intento le cobra dos veces a la
+              clienta. Primero consulta el estado.<span class="m">5</span></span></div>
+            <div class="fact ink">
+              <span class="fi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5v.5"/></svg></span>
+              <div class="fb">Intento en revisión
+                <i>Monto $3 280.40 · iniciado 10:12:04 · referencia R-2481-SALE-M8XQ2T</i>
+                <i>Dile esta referencia a soporte si hace falta.</i></div></div>
+            <div class="dock" style="gap:10px">
+              <div class="btn btn-primary">Consultar el estado del cobro<span class="m" style="margin-left:4px">6</span></div>
+              <div class="btn btn-ghost btn-sm">Ver el terminal (¿imprimió recibo?)</div>
+              <div class="why">Cobrar de nuevo no aparece aquí a propósito. Si tras consultar el cobro no salió, el
+              botón de cobro vuelve solo.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>16C — Resultado de la consulta <small>sí cobró: el estado se reconcilia y el wizard sigue</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:14</span><span>LTE · 80 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr on"><span class="d">4</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Falta la garantía para cerrar el pago</div>
+          <div class="wpad">
+            <div class="banner b-ok"><span class="m inframe" style="margin:-9px 0 0 330px">7</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg>
+              <span><b>Sí se cobró.</b> El terminal había aprobado la venta; se perdió solo la respuesta.
+              No hay nada que reintentar.</span></div>
+            <div class="act done">
+              <span class="an"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+              <div class="ab"><b>Renta cobrada</b><span>10:12 · aprobación 004512 · Visa ••4417 · confirmado al consultar 10:14</span></div>
+              <span class="aa tnum">3 280.40</span></div>
+            <div class="act live">
+              <span class="an">2</span>
+              <div class="ab"><b>Retener depósito en garantía</b><span>Continúa el paso: la clienta acerca de nuevo la tarjeta.</span></div>
+              <span class="aa tnum">5 000.00</span></div>
+            <div class="fact ink">
+              <span class="fi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h10"/></svg></span>
+              <div class="fb">Qué pasó, en orden
+                <i>10:12:04 venta enviada · 10:12:49 sin respuesta · 10:14:02 consulta: aprobada 004512</i></div></div>
+            <div class="dock">
+              <div class="btn btn-primary">Retener $5 000.00</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>16D — Cobro rechazado <small>rechazo ≠ falla del sistema; salidas para el mostrador, no para el banco</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:16</span><span>LTE · 80 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 3 de 10</span>Cobro y depósito en garantía</div>
+          <div class="wpad">
+            <div class="banner b-danger"><span class="m inframe" style="margin:-9px 0 0 330px">8</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.5"/></svg>
+              <span><b>La tarjeta rechazó el cobro.</b> El banco no autorizó los $3 280.40.
+              <b>No se cobró nada</b> y no es un problema de la app.</span></div>
+            <div class="vcard bad">
+              <div class="vhead"><b>Lo que dijo el terminal</b></div>
+              <div class="kv"><span class="k">Respuesta</span><span class="v">Fondos insuficientes</span></div>
+              <div class="kv"><span class="k">Tarjeta</span><span class="v">Visa ••4417 · 10:16</span></div>
+              <div class="kv"><span class="k">Referencia</span><span class="v tnum">R-2481-SALE-M8XR0P</span></div>
+            </div>
+            <div class="act live">
+              <span class="an">1</span>
+              <div class="ab"><b>Intentar con otra tarjeta</b><span>Nuevo tap: la clienta acerca otra tarjeta al terminal.</span></div>
+              <span class="aa tnum">3 280.40</span></div>
+            <div class="dock" style="gap:10px">
+              <div class="btn btn-primary">Cobrar con otra tarjeta<span class="m" style="margin-left:4px">9</span></div>
+              <div class="btn btn-record btn-sm"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8.5 10h7"/><path d="M8.5 14h4.5"/></svg>Registrar cobro hecho afuera</div>
+              <div class="btn btn-ghost btn-sm">Pausar el checkout</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>16E — Garantía ya retenida <small>409 que no es error: es una noticia, con la única salida verdadera</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:18</span><span>LTE · 79 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span><span class="presence"><span class="lv stale"></span><span class="pv">AR</span>Ana R. · mostrador · 38 s</span></div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>La garantía ya está puesta</div>
+          <div class="wpad">
+            <div class="banner b-info"><span class="m inframe" style="margin:-9px 0 0 330px">10</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5v.5"/></svg>
+              <span><b>Este contrato ya tiene una garantía retenida.</b> No se pone una segunda.
+              La retiró Ana R. desde el mostrador a las 10:17.</span></div>
+            <div class="act done">
+              <span class="an"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+              <div class="ab"><b>Garantía retenida</b><span>10:17 · Visa ••4417 · vence en 7 días · por Ana R. (mostrador)</span></div>
+              <span class="aa tnum">5 000.00</span></div>
+            <div class="fact ink"><span class="m inframe" style="margin:-9px 0 0 330px">11</span>
+              <span class="fi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><rect x="4" y="10.5" width="16" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 018 0v3"/></svg></span>
+              <div class="fb">Para liberarla o cambiar el monto hay que hacerlo desde el escritorio
+                <i>Requiere una cuenta con permiso de acciones de dinero. Desde aquí no se puede.</i></div></div>
+            <div class="dock">
+              <div class="btn btn-primary">Continuar a inspección</div>
+              <div class="why">El paso de pago ya está completo con lo que hizo el mostrador: no hay nada que repetir.<span class="m" style="margin-left:4px">12</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Estados feos del dinero</h3>
+      <div class="note"><span class="m">1</span><span><b>ADR-5 escrito con todas sus letras, en el punto de decisión.</b> "El dinero nunca se guarda para enviarse después" no es un aviso genérico de offline: es la promesa que impide que el agente espere un cobro fantasma. Rojo, porque aquí sí hay una acción imposible, no solo un dato viejo.</span></div>
+      <div class="note"><span class="m">2</span><span><b>Doble motivo en el acto bloqueado,</b> y el segundo es el importante: sin red no solo falta el gateway, <b>falta el número fresco</b>. Un total de hace 2 min con 4 superficies vivas es un total que puede estar mal — es ADR-5 y ADR-6 fallando a la vez.</span></div>
+      <div class="note"><span class="m">3</span><span><b>La frontera con la Bandeja de salida se dibuja explícita:</b> "las fotos sí esperan; el dinero no". El agente convive con una bandeja offline que funciona; sin esta línea, asumiría que el cobro también se encoló.</span></div>
+      <div class="note"><span class="m">4</span><span><b>El título es la verdad, no un eufemismo:</b> "No sabemos si el cobro pasó". Cualquier otra redacción ("hubo un problema", "reintenta") empuja al doble cobro. Ámbar y no rojo: no está roto, está <b>indeterminado</b>, y esa distinción es la que gobierna la acción.</span></div>
+      <div class="note"><span class="m">5</span><span><b>La prohibición va ANTES que las salidas</b> y explica la consecuencia en dinero del cliente ("le cobra dos veces"). Es el único banner de la tanda cuya primera palabra es una orden negativa, y se lo ha ganado.</span></div>
+      <div class="note"><span class="m">6</span><span><b>"Cobrar de nuevo" no existe en esta pantalla</b> — no gris, no escondido en un menú: no está. Es la excepción deliberada a "nunca escondas una acción" (DoD-4), y la razón se declara: DoD-4 protege al usuario de una app que juega a ser máquina de estados; aquí el riesgo es un doble cobro real e irreversible. La referencia del intento se muestra porque es lo que soporte pide.</span></div>
+      <div class="note"><span class="m">7</span><span><b>La reconciliación se cuenta como historia, no como estado.</b> "El terminal había aprobado; se perdió la respuesta" es lo que el agente le repite a la clienta que ya está nerviosa. Y la mini-bitácora con las tres horas es la prueba, en lenguaje de patio, sin códigos de máquina.</span></div>
+      <div class="note"><span class="m">8</span><span><b>Un rechazo se atribuye a quien lo decidió: el banco.</b> Se cita la respuesta literal del terminal (es lo que la clienta preguntará) y se dice "no se cobró nada" en la primera frase, porque es la duda que hay en la cabeza de las dos personas.</span></div>
+      <div class="note"><span class="m">9</span><span><b>Tres salidas del rechazo, todas de mostrador:</b> otra tarjeta (tap nuevo), registrar un cobro hecho afuera, o pausar el checkout sin perder nada. Ninguna sugiere "reintentar la misma tarjeta" — repetir lo que el banco ya negó solo gasta el tiempo del cliente y la paciencia de la fila.</span></div>
+      <div class="note"><span class="m">10</span><span><b>"Ya hay garantía" es una noticia, no un fallo</b> (el backend responde un 409 con ese sentido exacto). Con 4 superficies conviviendo esta pantalla se va a ver seguido: azul informativo, con atribución y hora. Pintarla en rojo entrenaría al personal a ignorar los rojos de verdad.</span></div>
+      <div class="note"><span class="m">11</span><span><b>Se nombra la puerta que no está aquí:</b> liberar o cambiar la retención vive en el escritorio y detrás de <code>paymentActions</code>. Decirlo evita que el agente busque durante dos minutos un botón que ninguna versión de esta app va a tener.</span></div>
+      <div class="note"><span class="m">12</span><span><b>Siempre una salida hacia adelante.</b> El paso ya está cumplido por otra superficie, así que el CTA primario es continuar. Ninguna de las cinco pantallas de esta sección deja al agente sin un botón: es la regla heredada del 409 de la Tanda A, aplicada al dinero.</span></div>
+      <div class="contrast"><b>Contraste MEDIDO (16A–16E)</b>
+        <ul>
+          <li>Banner sin red --danger-tx sobre --danger-bg <b>7.04:1</b> · "Sin red" en la barra de estado, mismo color sobre blanco <b>8.06:1</b>.</li>
+          <li>Sello de dato viejo --n-700 sobre --n-50 <b>8.53:1</b> · stepline stale --n-700 sobre --n-50 <b>8.53:1</b>.</li>
+          <li>16B: título --n-900 sobre blanco <b>18.14:1</b> · cuerpo --n-800 <b>14.07:1</b> (subido desde --n-700 a propósito: es la pantalla que se lee a contraluz y con prisa) · icono --warn-tx sobre --warn-bg <b>5.59:1</b>.</li>
+          <li>Ficha del intento (--n-50): texto --n-900 <b>16.78:1</b> · referencia --n-700 tabular <b>8.53:1</b>.</li>
+          <li>16C: banner de éxito --ok-tx sobre --ok-bg <b>6.19:1</b> · acto hecho --n-900 sobre --ok-bg <b>16.36:1</b> · detalle --n-700 sobre --ok-bg <b>8.31:1</b>.</li>
+          <li>16D: tarjeta de rechazo sobre #fffbfb — clave --n-700 <b>8.97:1</b> · valor --n-900 <b>17.66:1</b>; el borde rojo de 1.5 px es no-texto.</li>
+          <li>16E: banner informativo --n-800 sobre --info-bg <b>12.48:1</b> · nota de escritorio --n-900 sobre --n-50 <b>16.78:1</b> con detalle --n-700 <b>8.53:1</b>.</li>
+          <li>Ningún estado de estas 5 pantallas depende solo del color: cada uno lleva icono + palabra + posición ("No disponible sin red", "no sabemos", "rechazó", "ya está puesta").</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>Entrada a 16B: fade 240 ms + haptic warning una sola vez. <b>Nada gira</b>: al llegar el timeout el spinner muere: seguir animando sería seguir prometiendo.</li>
+          <li>"Consultar el estado" se convierte en spinner in-flight con cronómetro tabular a 1 Hz; su resultado (16C) entra con cross-fade 260 ms — nunca con el mismo haptic success del cobro, para no celebrar dos veces el mismo cobro.</li>
+          <li>16A: al volver la red, la pantalla NO cobra sola; refresca el preview, actualiza el sello y rehabilita el acto con un pulso de borde de 300 ms una sola vez.</li>
+          <li>Reduced-motion ⇒ solo cambios de estado; el cronómetro se mantiene (es información).</li>
+        </ul></div>
+      <div class="decision"><b>A confirmar en build</b>
+        <ul>
+          <li><b>"Consultar el estado del cobro" necesita una fuente.</b> Hoy hay <code>GET /:id/terminal-status</code> (estado del aparato) y <code>GET /:id</code> (la sesión con su bitácora de eventos de cobro). La secuencia propuesta es: <code>GET /:id</code> → si hay evento de venta aprobada, reconciliar; si no, <code>terminal-status</code> y decidir. Si eso no basta para responder "¿cobró o no?" con certeza, es un pedido de backend (consulta de la transacción por referencia) y hay que levantarlo <b>antes</b> de construir H3, no después.</li>
+          <li>El umbral de timeout (45 s en el mockup) debe salir del timeout real del cliente del terminal, no de un número de diseño.</li>
+          <li>16E asume que el 409 de garantía existente trae quién y cuándo. Si no lo trae, la atribución sale de la bitácora de la sesión; verificar antes de prometer el nombre en pantalla.</li>
+        </ul></div>
+    </aside>
+  </div>
+</section>
+
+<footer class="dod" id="dod">
+  <div class="card">
+    <b>Decisiones clave de la Tanda B del M2 — el paso de pago</b>
+    <ul class="changelog">
+      <li><b>Un vocabulario de dinero, con tres reglas de color irrompibles:</b> <b>gradiente morado = mover dinero</b> (cobrar, retener), <b>tinta --n-800 sin relleno = registrar</b> lo que ya pasó afuera, <b>rojo = error</b> y nunca un cobro. Con eso, "Registrar $2 088.00 como cobrado" y "Cobrar $2 088.00" son imposibles de confundir con el rabillo del ojo, que es como se leen los botones en una fila de mostrador.</li>
+      <li><b>El sello de procedencia hace visible a ADR-6 en cada pantalla que muestra un número.</b> Cuatro estados medidos (estimado / confirmado por el servidor con su edad / divergente / vista vieja sin red) y una regla de build vinculante: <b>el cálculo local nunca habilita el botón de cobro</b>; el CTA solo vive con un preview del servidor y su hora en mano, y se re-consulta si tiene más de 3 s.</li>
+      <li><b>Dos toques ⇒ dos tarjetas-acto, no dos botones.</b> Refleja la mecánica real del backend (<code>charge-sale</code> no estampa el pago; <code>hold-deposit</code> sí y por eso avanza el wizard) y elimina el malentendido más caro del paso: "ya cobré, ¿por qué sigue en pago?". Lo cobrado deja de ser "paso completado" y pasa a ser <b>hecho inmutable</b> con hora, aprobación y autor.</li>
+      <li><b>La divergencia se diseñó en dos temperaturas, no en una.</b> Detectada por el poll ⇒ banner informativo y número actualizado en su sitio (con 4 superficies vivas, un modal por cambio ajeno sería un bloqueo cada pocos minutos). Detectada al confirmar ⇒ pantalla bloqueante con comparador antes/ahora, atribución de quién lo cambió, y <b>"no se cobró nada" como primera línea</b>.</li>
+      <li><b>La decisión anti-memoria-muscular:</b> en la pantalla de divergencia el CTA de confirmación <b>no ocupa el mismo lugar</b> que el botón "Cobrar" del estado normal, entra 200 ms después que el resto del contenido y <b>lleva el monto nuevo dentro de su etiqueta</b>. Un monto que cambió no puede aprobarse con el dedo en piloto automático.</li>
+      <li><b>El failsafe manual se diseñó como declaración, no como atajo:</b> verbo, color y etiqueta REGISTRAR redundantes en hoja, relectura y resultado; motivo obligatorio con motivos frecuentes de un toque; autoría mostrada <b>antes</b> de escribir; y la advertencia asimétrica ("un registro falso es más difícil de arreglar que un cobro fallido") — el único copy de la tanda que invita a no continuar.</li>
+      <li><b>Capacidad denegada, dibujada contra el código y no contra la intuición:</b> el two-tap y los <code>record-manual-*</code> están abiertos a propósito (card-present / record-only), así que un AGENT sin <code>paymentActions</code> <b>cobra y retiene igual</b>; lo que su cuenta no puede es mover dinero <i>sin el cliente presente</i>. Eso se muestra como mapa de capacidades con motivo y salida (DoD-4: visible, nunca escondido), y el 403 se dispara de verdad contra la API.</li>
+      <li><b>El timeout tiene una sola salida y es consultar.</b> "Cobrar de nuevo" no aparece —ni siquiera en gris— en la pantalla de indeterminación: es la excepción declarada a la regla de no esconder acciones, porque el riesgo aquí es un doble cobro irreversible sobre una persona real. Se muestra la referencia del intento porque es lo que soporte pide por teléfono.</li>
+      <li><b>Contraste medido, no estimado:</b> todos los pares de las 18 pantallas se calcularon con la fórmula WCAG contra el fondo compuesto real y se reportan con su número por sección. Rechazos concretos que cambiaron el diseño: --n-600 sobre --tonal (4.58:1) fuera del total, sustituido por --n-700 (8.37:1); --n-400 descartado como placeholder (2.21:1) en favor de --n-700 (9.22:1) porque ese placeholder <b>lleva la pregunta que hay que responder</b>; y el cuerpo de la pantalla de timeout subido de --n-700 a --n-800 (14.07:1) por ser la que se lee a contraluz.</li>
+      <li><b>Blur cero y motion honesto:</b> el paso de pago mantiene la política del wizard (ningún <code>BackdropFilter</code>, sheets en plate opaco ≥ .97) porque aquí vive el número que se cobra; el punto de frescura del terminal es tick one-shot (enmienda GD del M1), y las únicas cosas que se mueven a 1 Hz son cronómetros — es decir, información.</li>
+    </ul>
+  </div>
+
+  <div class="card gate">
+    <b>★ Compuerta de release del M2 (sección 13) — lo que esta tanda le entrega a QA</b><br><br>
+    El M2-PLAN §4-1 exige <b>cero divergencias del preview del servidor en la RC</b>. Para que eso sea verificable y no
+    una frase, el mockup fija tres requisitos de instrumentación que la build debe cumplir:
+    <b>(a)</b> dos eventos distintos —divergencia <i>detectada por poll</i> (esperada, no bloquea) y divergencia
+    <i>al confirmar</i> (la que debe llegar en 0)— porque un solo evento con las dos causas mezcladas hace la compuerta
+    inverificable; <b>(b)</b> cada evento carga total mostrado, total del servidor, delta, <b>edad del preview en ms</b>
+    y superficie que originó el cambio; <b>(c)</b> la prueba de concurrencia real del §4-3 (RideOps + kiosco sobre la
+    misma sesión) debe incluir un cambio de cargos desde el mostrador <b>mientras</b> el paso de pago está abierto —
+    ese es exactamente el caso que dibuja 13A/13B, y el que no puede terminar en doble cobro ni en estado corrupto.
+  </div>
+
+  <div class="card">
+    <b>Trazabilidad DoD (PROJECT_PLAN §10):</b>
+    <b>#1</b> todos los strings van a app_es.arb / app_en.arb (aquí ES), con la separación dura de familias
+    <code>paymentCharge*</code> (mover dinero) y <code>paymentRecordExternal*</code> (registrar) para que ninguna
+    traducción pueda cruzar los verbos; los métodos de pago se traducen desde los 4 valores del backend
+    (CASH / CHECK / CARD / OTHER) con fallback para valores desconocidos ·
+    <b>#2</b> targets: CTAs 54–56, tarjetas de acto y opciones 52–56, campos 60, filas de terminal 52, acciones dentro
+    de chip a 44–48; contraste ≥ 4.5:1 de todo texto contra el fondo REAL, con los pares medidos listados por sección y
+    los ≥ 3:1 declarados explícitamente como no-texto (check blanco sobre --ok 4.32:1, bordes, punteados, tachado) ·
+    <b>#3</b> ruta offline: <b>deliberadamente NO existe</b> para el dinero (ADR-5) y la pantalla 16A lo dice con esas
+    palabras; la única escritura no financiera de este paso —el registro manual— también exige red, y se declara ·
+    <b>#4</b> RBAC contra la API: 15A dibuja la capacidad como mapa visible con motivo (nada escondido) y 15B muestra el
+    403 real disparado por una llamada verdadera; se documenta que el two-tap <b>no</b> debe gatearse en cliente porque
+    el backend lo tiene abierto a propósito ·
+    <b>#5</b> estados de error: <b>402 venta rechazada</b> (16D) · <b>402 garantía rechazada</b> (mismo patrón, copy de
+    garantía) · <b>409 garantía ya retenida</b> (16E) · <b>409 paso equivocado</b> (el servidor rechaza cobrar fuera de
+    los dos pasos válidos ⇒ re-fetch + re-render, ADR-4) · <b>timeout indeterminado</b> (16B → 16C) · <b>sin red</b>
+    (16A) · <b>divergencia de preview</b> (13A–13C) · <b>403 de capacidad</b> (15B) · 401 → re-login y 429 → backoff del
+    poll, heredados ·
+    <b>#9</b> telemetría: taxonomía propia del dinero con los dos eventos de divergencia separados, timeout con su
+    referencia de intento, y rechazo con su código de respuesta ·
+    <b>#10</b> loading (12B cobro en curso, in-flight de cada CTA), espera (12A acto 2, 12D terminal caído) y error
+    (13A, 15B, 16A–16E) dibujados por pantalla.
+    <br><br>
+    <b>Pendientes marcados para build (dos de ellos pueden cambiar el diseño y conviene resolverlos ANTES de H3):</b>
+    <b>(a) ★</b> fijar la fuente del desglose y de la <b>hora del preview</b> — sin un <code>previewedAt</code> del
+    servidor, el sello de procedencia de ADR-6 y toda la sección 13 quedan sin cimiento;
+    <b>(b) ★</b> confirmar cómo responde hoy el backend si el total cambia <b>entre</b> la venta y la garantía (13C) y
+    si la consulta de estado tras un timeout (16B) puede afirmar con certeza "cobró / no cobró" — si no, es pedido de
+    backend;
+    <b>(c)</b> pedir <code>{ code: 'MODULE_ACCESS_DENIED', module }</code> en el 403 de capacidad, para no repetir el
+    parche por substring que ya hubo que hacer con el 403 del selector de ubicación;
+    <b>(d)</b> confirmar si la vigencia de la retención (7 días) es por tenant antes de escribirla en pantalla;
+    <b>(e)</b> alinear el umbral de timeout de 16B con el timeout real del cliente del terminal;
+    <b>(f)</b> decidir con Hector si <code>record-manual-payment</code> exige motivo como su gemelo de garantía (la
+    recomendación de diseño es que sí).
+  </div>
+</footer>
+
+</body>
+</html>

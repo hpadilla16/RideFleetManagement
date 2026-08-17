@@ -69,6 +69,29 @@ Tanda A se encarga de inmediato al cerrar H6; B y C durante la construcción de 
 > sincronización de la capa de anotación). Desbloquea H1, H2 y H7. Tanda B (pago) en
 > diseño desde el mismo día.
 
+### Bloqueantes de M2-H3 (pago) levantados por la Tanda B — resolver ANTES de construir
+
+1. **Fijar la fuente del desglose y pedir un `previewedAt` del servidor.** Sin una marca
+   de cuándo calculó el servidor ese total, la pantalla de divergencia (§13, compuerta de
+   release del M2 por ADR-6) no tiene cimiento: no se puede decir "este número es de hace
+   4 s" ni detectar que envejeció. Pedido chico de backend.
+2. **Confirmar el comportamiento real del backend en el caso 13C** (divergencia entre la
+   venta ya cobrada y la garantía: se cobra la diferencia, jamás se reembolsa) **y si la
+   consulta post-timeout puede afirmar con certeza "cobró / no cobró"**. Si no puede, el
+   copy de §16 tiene que decirlo con esa honestidad.
+3. **Pedir `{ code: 'MODULE_ACCESS_DENIED', module }` en el 403 de `requireCapability`**
+   → registrado como gap #12. Hoy llega en inglés y sin código: exactamente el mismo mal
+   patrón que ya hubo que puentear con el 403 de ubicación (gap #3), y aquí decide si el
+   agente ve "no tienes esta capacidad" o un error genérico sobre una pantalla de dinero.
+
+**Corrección del encargo del PM, verificada en código:** `charge-sale` y `hold-deposit`
+**NO** están gateados por `paymentActions` (`money-route-gate.test.mjs` los fija como
+card-present/record-only abiertos a propósito — "gatearlos trabaría cada checkout"). El
+PM había pedido dibujarlos en estado denegado; hacerlo habría producido una app que traba
+el mostrador. La §15 muestra en su lugar un mapa de capacidades honesto (un AGENT cobra
+igual; lo que no puede es mover dinero **sin el cliente presente**) y usa la única acción
+realmente gateada y alcanzable: cobrar a la tarjeta guardada.
+
 ### Decisiones registradas durante la construcción (PM)
 
 - **H1 · El rail de fases se pinta desde la POSICIÓN en la cadena, no desde `events[]`**

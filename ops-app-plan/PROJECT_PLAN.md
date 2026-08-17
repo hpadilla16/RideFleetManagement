@@ -123,6 +123,15 @@ y números de línea en [00-REGROUND.md](00-REGROUND.md):
      branding por tenant (REGROUND §4) en la superficie más sensible: la firma legal.
    - **Es criterio de aceptación BLOQUEANTE de M2-H2** (paso T&C) y merece un PR propio
      de frontend/backend: `/sign/[token]` debe tomar branding e idioma del tenant.
+12. **El 403 de `requireCapability` llega sin `code` y en inglés** (diseño de la Tanda B
+   del M2, 2026-08-17): el mismo mal patrón del 403 de ubicación (gap #3), pero en una
+   pantalla de DINERO — decide si el agente lee "no tienes esta capacidad, pide a un
+   admin" o un error genérico sobre un cobro. Pedido:
+   `{ error, code: 'MODULE_ACCESS_DENIED', module }`. **Bloqueante de M2-H3.**
+13. **Falta un `previewedAt` del servidor en el preview de la cuenta** (diseño Tanda B):
+   sin marca de cuándo se calculó el total, la pantalla de divergencia que ADR-6 exige
+   —y que es compuerta de release del M2— no puede decir "este número es de hace 4 s" ni
+   detectar que envejeció. **Bloqueante de M2-H3.**
 
 ### Política resuelta en H6 (decisión del PM): EL KIOSCO IGNORA LA EXENCIÓN
 - **Modo kiosco vs navegación del sistema**: Flutter puro no puede bloquear home/app-switcher.
