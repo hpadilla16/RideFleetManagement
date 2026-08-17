@@ -16,6 +16,11 @@ class AppConfig {
   final String env; // dev | stg | prod
   final String apiBaseUrl;
 
+  /// Versión mostrada en el pie del login (mockup 1A). Manual y en sincronía
+  /// con pubspec.yaml hasta que entre package_info_plus (TODO H4, junto con
+  /// connectivity_plus).
+  static const appVersion = '0.1.0';
+
   /// Vacío = Sentry apagado (dev local). El DSN real entra por dart-define
   /// desde CI; jamás se hardcodea.
   final String sentryDsn;
