@@ -116,6 +116,87 @@ class AppLocalizationsEs extends AppLocalizations {
   String get continueButton => 'Continuar';
 
   @override
+  String get changePasswordNextPin =>
+      'Siguiente: crea tu PIN para desbloquear rápido en el patio.';
+
+  @override
+  String get pinSetupTitle => 'Crea tu PIN';
+
+  @override
+  String get pinSetupSubtitle =>
+      'Lo usarás para desbloquear RideOps en el patio. 4 dígitos.';
+
+  @override
+  String get pinSetupConfirmTitle => 'Confirma tu PIN';
+
+  @override
+  String get pinSetupConfirmSubtitle => 'Escríbelo otra vez para confirmarlo.';
+
+  @override
+  String pinSetupStep(int step) {
+    return 'Paso $step de 2';
+  }
+
+  @override
+  String get pinSetupMismatch => 'Los PIN no coinciden. Empieza de nuevo.';
+
+  @override
+  String get pinBioOfferTitle => '¿Activar huella?';
+
+  @override
+  String get pinBioOfferBody =>
+      'Desbloquea con tu huella, sin escribir el PIN. Tu PIN sigue funcionando siempre.';
+
+  @override
+  String get pinBioEnable => 'Activar huella';
+
+  @override
+  String get pinBioSkip => 'Ahora no';
+
+  @override
+  String get pinBioEnrollFailed =>
+      'No se pudo activar la huella. Puedes seguir con tu PIN.';
+
+  @override
+  String get pinBioPrompt => 'Confirma tu identidad para desbloquear RideOps';
+
+  @override
+  String get pinBioKeyLabel => 'Desbloquear con huella';
+
+  @override
+  String get keypadDeleteLabel => 'Borrar dígito';
+
+  @override
+  String pinDigitsProgress(int count) {
+    return '$count de 4 dígitos';
+  }
+
+  @override
+  String lockGreeting(String name) {
+    return 'Hola, $name';
+  }
+
+  @override
+  String get lockTitleGeneric => 'Desbloquea RideOps';
+
+  @override
+  String get lockSubtitle => 'Ingresa tu PIN para continuar';
+
+  @override
+  String lockWrongPin(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'PIN incorrecto — te quedan $count intentos',
+      one: 'PIN incorrecto — te queda 1 intento',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get lockForgotPin => '¿Olvidaste tu PIN? Cerrar sesión';
+
+  @override
   String get homePlaceholderTitle => 'Sesión iniciada';
 
   @override

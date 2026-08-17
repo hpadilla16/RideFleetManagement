@@ -1,0 +1,307 @@
+import 'dart:async';
+
+import 'package:clock/clock.dart';
+// Solo AppLifecycleState: widgets.dart también exporta un LockState (el de
+// Shortcuts) que chocaría con el nuestro.
+import 'package:flutter/widgets.dart' show AppLifecycleState;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../api/token_refresher.dart';
+import '../telemetry/event_logger.dart';
+import 'biometric_auth.dart';
+import 'lock_state.dart';
+import 'pin_store.dart';
+import 'session_controller.dart';
+import 'session_state.dart';
+
+/// Candado por PIN/biometría (H2) — el `pinLockProvider` del blueprint §3.
+///
+/// Reglas:
+///  - Cold start (restore) llega BLOQUEADO si hay PIN; login fresco llega
+///    desbloqueado — acabas de probar tu contraseña, pedir el PIN es teatro.
+///  - Timer de inactividad ([idleTimeout]) + volver del background tras
+///    [backgroundGrace] ⇒ lock. `screenLockExempt` salta todo.
+///  - Agotar [LockState.maxAttempts] ⇒ purgar PIN + logout limpio: el
+///    re-login con contraseña crea un PIN nuevo (escape honesto).
+///  - [suspendLock]/[resumeLock]: API para H5 (modo kiosco de la firma,
+///    decisión §9-6) — aquí solo se deja lista y testeada, nadie la llama.
+class LockController extends Notifier<LockState> {
+  /// 5 min sin tocar la pantalla ⇒ lock (default de la historia H2).
+  static const idleTimeout = Duration(minutes: 5);
+
+  /// Ir al background y volver dentro de esta gracia NO bloquea (contestar
+  /// un WhatsApp, una llamada corta); más allá, lock. Cubre también el caso
+  /// de timers congelados por Android: el chequeo es por timestamp al volver.
+  static const backgroundGrace = Duration(seconds: 30);
+
+  Timer? _idleTimer;
+  int _suspendCount = 0;
+  DateTime? _backgroundedAt;
+
+  /// Secuencia de sincronización: invalida lecturas del Keystore en vuelo
+  /// cuando la sesión cambió mientras esperábamos.
+  int _syncSeq = 0;
+
+  EventLogger get _logger => ref.read(eventLoggerProvider);
+  PinStore get _pinStore => ref.read(pinStoreProvider);
+
+  @override
+  LockState build() {
+    ref.onDispose(() => _idleTimer?.cancel());
+    ref.listen<SessionState>(sessionControllerProvider, _onSessionChange);
+    // La sesión pudo autenticarse antes de que alguien observara este
+    // provider (tests, hot reload): sincronizar el estado inicial. prev=null
+    // se trata como cold start — lo seguro es llegar bloqueado.
+    Future.microtask(() {
+      if (!ref.mounted) return;
+      _onSessionChange(null, ref.read(sessionControllerProvider));
+    });
+    return const LockState.initial();
+  }
+
+  void _onSessionChange(SessionState? prev, SessionState next) {
+    if (!next.isAuthenticated) {
+      // Sesión muerta (logout, 401): nada del candado sobrevive — ni el
+      // timer, ni las suspensiones del kiosco, ni los intentos.
+      _idleTimer?.cancel();
+      _backgroundedAt = null;
+      _suspendCount = 0;
+      _syncSeq++; // invalida cualquier lectura en vuelo
+      state = const LockState.initial();
+      return;
+    }
+    if (prev?.isAuthenticated ?? false) {
+      // Transición DENTRO de la sesión (hidratación de /me, refresh de
+      // token): no recalcular el candado — solo honrar una exención recién
+      // conocida (restore degradado que hidrata screenLockExempt=true).
+      if (!state.ready) return; // la sincronización inicial sigue en vuelo
+      if (_isExempt(next)) {
+        _idleTimer?.cancel();
+        if (state.locked) state = state.copyWith(locked: false);
+      }
+      return;
+    }
+    // Sesión recién autenticada: login fresco (prev unauthenticated) o cold
+    // start (prev restoring / null).
+    _fullSync(fromRestore: prev == null || prev.status == SessionStatus.restoring);
+  }
+
+  Future<void> _fullSync({required bool fromRestore}) async {
+    final seq = ++_syncSeq;
+    StoredPin? record;
+    try {
+      record = await _pinStore.read();
+    } catch (_) {
+      // Keystore ilegible: tratar como "sin PIN" (el gate de setup re-crea)
+      // antes que dejar un candado imposible de abrir.
+      record = null;
+    }
+    if (!ref.mounted || seq != _syncSeq) return;
+    // Releer la sesión: /me pudo hidratar el user mientras esperábamos.
+    final session = ref.read(sessionControllerProvider);
+    if (!session.isAuthenticated) return; // el listener ya reseteó
+    final userId = _userIdOf(session);
+    if (record != null && userId != null && record.userId != userId) {
+      // Cambio de cuenta: el PIN pertenece a OTRO usuario — purgarlo (regla
+      // H2: cambio de cuenta = PIN nuevo) y forzar setup.
+      try {
+        await _pinStore.clear();
+      } catch (_) {}
+      if (!ref.mounted || seq != _syncSeq) return;
+      record = null;
+    }
+    final configured = record != null;
+    final exempt = _isExempt(session);
+    final locked = configured && !exempt && fromRestore;
+    state = LockState(
+      ready: true,
+      pinConfigured: configured,
+      biometricEnabled: record?.biometricEnabled ?? false,
+      locked: locked,
+      attemptsLeft: LockState.maxAttempts,
+    );
+    if (locked) {
+      _logger.log(SessionEvents.pinLock, data: {'reason': 'cold_start'});
+    } else if (configured && !exempt) {
+      _restartIdleTimer();
+    }
+  }
+
+  /// Bloquea YA (si aplica). Ignorado si no hay PIN, el usuario está exento,
+  /// el lock está suspendido (kiosco H5) o ya está bloqueado.
+  void lock({String reason = 'manual'}) {
+    if (state.locked || !state.ready || !state.pinConfigured) return;
+    if (_suspendCount > 0) return;
+    final session = ref.read(sessionControllerProvider);
+    if (!session.isAuthenticated || _isExempt(session)) return;
+    _idleTimer?.cancel();
+    state = state.copyWith(locked: true, attemptsLeft: LockState.maxAttempts);
+    _logger.log(SessionEvents.pinLock, data: {'reason': reason});
+  }
+
+  /// Intento de desbloqueo por PIN. false = incorrecto (la UI muestra los
+  /// intentos restantes de [LockState.attemptsLeft]); al agotarse, purga el
+  /// PIN y cierra la sesión — el router lleva a /login solo.
+  Future<bool> verifyPin(String pin) async {
+    if (!state.locked) return true;
+    StoredPin? record;
+    try {
+      record = await _pinStore.read();
+    } catch (_) {
+      record = null;
+    }
+    if (!ref.mounted || !state.locked) return false;
+    if (record != null && record.matches(pin)) {
+      state = state.copyWith(
+        locked: false,
+        attemptsLeft: LockState.maxAttempts,
+      );
+      _logger.log(SessionEvents.pinUnlock, data: {'method': 'pin'});
+      _restartIdleTimer();
+      return true;
+    }
+    final left = state.attemptsLeft - 1;
+    if (left <= 0) {
+      await _purgeAndLogout();
+      return false;
+    }
+    state = state.copyWith(attemptsLeft: left);
+    return false;
+  }
+
+  /// Desbloqueo por huella: dispara el prompt del sistema y, si pasa, abre el
+  /// candado. [reason] llega localizado desde la pantalla.
+  Future<bool> unlockWithBiometrics({required String reason}) async {
+    if (!state.locked) return true;
+    final ok =
+        await ref.read(biometricAuthProvider).authenticate(reason: reason);
+    if (!ref.mounted || !ok || !state.locked) return false;
+    state = state.copyWith(locked: false, attemptsLeft: LockState.maxAttempts);
+    _logger.log(SessionEvents.pinUnlock, data: {'method': 'biometric'});
+    _restartIdleTimer();
+    return true;
+  }
+
+  /// Comprobación PURA del PIN: no toca candado ni intentos. Para H5 (salida
+  /// del modo kiosco: mantener 3 s + PIN) y futuros usos de confirmación.
+  Future<bool> checkPin(String pin) async {
+    try {
+      final record = await _pinStore.read();
+      return record != null && record.matches(pin);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Setup completado (mockup 3A, pasos 1-2 + oferta de huella): persiste el
+  /// registro atado al userId de la sesión y deja la app desbloqueada.
+  Future<void> completeSetup({
+    required String pin,
+    required bool biometricEnabled,
+  }) async {
+    final session = ref.read(sessionControllerProvider);
+    final userId = _userIdOf(session);
+    if (userId == null) return; // sin identidad no hay a quién atar el PIN
+    await _pinStore.write(StoredPin.create(
+      userId: userId,
+      pin: pin,
+      biometricEnabled: biometricEnabled,
+    ));
+    if (!ref.mounted) return;
+    state = LockState(
+      ready: true,
+      pinConfigured: true,
+      biometricEnabled: biometricEnabled,
+      locked: false,
+      attemptsLeft: LockState.maxAttempts,
+    );
+    _restartIdleTimer();
+  }
+
+  /// Escape honesto del mockup 3B: "¿Olvidaste tu PIN? Cerrar sesión". Purga
+  /// el PIN para que el re-login con contraseña cree uno nuevo.
+  Future<void> forgotPinLogout() => _purgeAndLogout();
+
+  /// Cada interacción del usuario reinicia la ventana de inactividad (lo
+  /// llama LockObserver en cada pointer-down, para TODAS las rutas).
+  void noteActivity() {
+    if (state.locked || !state.pinConfigured || _suspendCount > 0) return;
+    if (_isExempt(ref.read(sessionControllerProvider))) return;
+    _restartIdleTimer();
+  }
+
+  /// ── API para H5 (modo kiosco de la firma — decisión §9-6) ──────────────
+  ///
+  /// Mientras el teléfono está volteado al cliente, el lock por inactividad
+  /// NO debe saltar a mitad de firma. Contrato:
+  ///  - [suspendLock] detiene el timer y hace no-op cualquier [lock] (timer,
+  ///    background, manual). Re-entrante: N suspensiones requieren N
+  ///    reanudaciones (por si se anidan flujos).
+  ///  - [resumeLock] al llegar a cero reinicia la ventana de inactividad
+  ///    COMPLETA — jamás un candado instantáneo al salir del kiosco.
+  ///  - La salida deliberada del kiosco (mantener 3 s + PIN) valida con
+  ///    [checkPin], que no toca el estado del candado.
+  ///  - Un logout/401 resetea las suspensiones: no sobreviven a la sesión.
+  void suspendLock() {
+    _suspendCount++;
+    _idleTimer?.cancel();
+  }
+
+  void resumeLock() {
+    if (_suspendCount == 0) return;
+    _suspendCount--;
+    if (_suspendCount == 0) noteActivity();
+  }
+
+  /// Ciclo de vida (lo alimenta LockObserver): al volver del background tras
+  /// [backgroundGrace], lock. Por timestamp — los timers de Dart se congelan
+  /// con el proceso en background, el reloj no.
+  void onLifecycleChanged(AppLifecycleState lifecycle) {
+    switch (lifecycle) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+        _backgroundedAt ??= clock.now();
+      case AppLifecycleState.resumed:
+        final away = _backgroundedAt;
+        _backgroundedAt = null;
+        if (away != null &&
+            clock.now().difference(away) >= backgroundGrace) {
+          lock(reason: 'background');
+        }
+        noteActivity();
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+        // inactive salta con cualquier diálogo/notificación encima: no es
+        // "salir de la app". detached no vuelve — nada que hacer.
+        break;
+    }
+  }
+
+  Future<void> _purgeAndLogout() async {
+    try {
+      await _pinStore.clear();
+    } catch (_) {}
+    if (!ref.mounted) return;
+    await ref.read(sessionControllerProvider.notifier).logout();
+  }
+
+  void _restartIdleTimer() {
+    _idleTimer?.cancel();
+    _idleTimer = Timer(idleTimeout, () => lock(reason: 'idle_timeout'));
+  }
+
+  bool _isExempt(SessionState session) =>
+      session.user?.screenLockExempt ?? false;
+
+  /// Identidad del dueño del PIN: el user de /me o, degradado, el `sub` del
+  /// JWT (mismo valor — auth.service.js:19).
+  String? _userIdOf(SessionState session) {
+    final fromUser = session.user?.id;
+    if (fromUser != null) return fromUser;
+    final token = session.token;
+    return token == null ? null : TokenRefresher.subjectOf(token);
+  }
+}
+
+final NotifierProvider<LockController, LockState> lockControllerProvider =
+    NotifierProvider<LockController, LockState>(LockController.new);

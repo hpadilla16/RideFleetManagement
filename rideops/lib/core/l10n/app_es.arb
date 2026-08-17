@@ -46,6 +46,40 @@
   "changePasswordSuccessBody": "Tu sesión sigue activa — no necesitas volver a entrar.",
   "changePasswordFootnote": "La sesión temporal sigue viva durante este paso",
   "continueButton": "Continuar",
+  "changePasswordNextPin": "Siguiente: crea tu PIN para desbloquear rápido en el patio.",
+  "pinSetupTitle": "Crea tu PIN",
+  "pinSetupSubtitle": "Lo usarás para desbloquear RideOps en el patio. 4 dígitos.",
+  "pinSetupConfirmTitle": "Confirma tu PIN",
+  "pinSetupConfirmSubtitle": "Escríbelo otra vez para confirmarlo.",
+  "pinSetupStep": "Paso {step} de 2",
+  "@pinSetupStep": {
+    "placeholders": { "step": { "type": "int" } }
+  },
+  "pinSetupMismatch": "Los PIN no coinciden. Empieza de nuevo.",
+  "pinBioOfferTitle": "¿Activar huella?",
+  "pinBioOfferBody": "Desbloquea con tu huella, sin escribir el PIN. Tu PIN sigue funcionando siempre.",
+  "pinBioEnable": "Activar huella",
+  "pinBioSkip": "Ahora no",
+  "pinBioEnrollFailed": "No se pudo activar la huella. Puedes seguir con tu PIN.",
+  "pinBioPrompt": "Confirma tu identidad para desbloquear RideOps",
+  "pinBioKeyLabel": "Desbloquear con huella",
+  "keypadDeleteLabel": "Borrar dígito",
+  "pinDigitsProgress": "{count} de 4 dígitos",
+  "@pinDigitsProgress": {
+    "description": "Semántica de los dots del PIN para lector de pantalla",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "lockGreeting": "Hola, {name}",
+  "@lockGreeting": {
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "lockTitleGeneric": "Desbloquea RideOps",
+  "lockSubtitle": "Ingresa tu PIN para continuar",
+  "lockWrongPin": "{count, plural, one{PIN incorrecto — te queda 1 intento} other{PIN incorrecto — te quedan {count} intentos}}",
+  "@lockWrongPin": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "lockForgotPin": "¿Olvidaste tu PIN? Cerrar sesión",
   "homePlaceholderTitle": "Sesión iniciada",
   "homePlaceholderBody": "El tablero de patio llega en la siguiente historia.",
   "logoutButton": "Cerrar sesión",

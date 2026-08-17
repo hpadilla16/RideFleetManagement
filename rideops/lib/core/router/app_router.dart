@@ -4,9 +4,13 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/change_password_screen.dart';
 import '../../features/auth/presentation/login_screen.dart';
+import '../../features/auth/presentation/pin_lock_screen.dart';
+import '../../features/auth/presentation/pin_setup_screen.dart';
 import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/dashboard/presentation/home_placeholder_screen.dart';
 import '../../features/shell/app_shell.dart';
+import '../session/lock_controller.dart';
+import '../session/lock_state.dart';
 import '../session/session_controller.dart';
 import '../session/session_state.dart';
 
@@ -16,6 +20,8 @@ abstract final class AppRoutes {
   static const splash = '/splash';
   static const login = '/login';
   static const changePassword = '/change-password';
+  static const lock = '/lock';
+  static const pinSetup = '/pin-setup';
   static const home = '/home';
 }
 
@@ -25,17 +31,20 @@ const _authSurfaces = {
   AppRoutes.splash,
   AppRoutes.login,
   AppRoutes.changePassword,
+  AppRoutes.lock,
+  AppRoutes.pinSetup,
 };
 
 /// Redirect top-level (blueprint §3) como FUNCIÓN PURA para testear la tabla
 /// de casos sin montar un router.
 ///
-/// Orden de gates: auth → [PIN-lock, HUECO H2] → password-gate → app.
-/// Regla anti-loop: devolver null cuando [matchedLocation] ya es el destino
-/// del gate activo. Regla de reanudación: el destino original viaja en
-/// `?from=` y se restaura al pasar todos los gates.
+/// Orden de gates (Innovation H1): auth → PIN-lock → password-gate →
+/// PIN-setup → app. Regla anti-loop: devolver null cuando [matchedLocation]
+/// ya es el destino del gate activo. Regla de reanudación: el destino
+/// original viaja en `?from=` y se restaura al pasar todos los gates.
 String? computeAuthRedirect({
   required SessionState session,
+  required LockState lock,
   required Uri uri,
   required String matchedLocation,
 }) {
@@ -60,12 +69,21 @@ String? computeAuthRedirect({
           : withFrom(AppRoutes.login);
 
     case SessionStatus.authenticated:
-      // ── HUECO H2 (PIN-lock) ─────────────────────────────────────────────
-      // Aquí va el gate de bloqueo por PIN/biometría cuando exista:
-      //   if (locked) return matched == AppRoutes.lock ? null : AppRoutes.lock;
-      // Va ANTES del password-gate a propósito: un teléfono desbloqueable no
-      // debe exponer ni la pantalla de cambio de contraseña.
-      // ────────────────────────────────────────────────────────────────────
+      // ── Gate PIN-lock (H2) — ANTES del password-gate a propósito: un
+      // teléfono desbloqueable no debe exponer ni la pantalla de cambio de
+      // contraseña. Mientras el candado hidrata su registro del Keystore
+      // (!ready) se retiene /splash para no flashear contenido protegido en
+      // un cold start bloqueado.
+      if (!lock.ready) {
+        return matchedLocation == AppRoutes.splash
+            ? null
+            : withFrom(AppRoutes.splash);
+      }
+      if (lock.locked) {
+        return matchedLocation == AppRoutes.lock
+            ? null
+            : withFrom(AppRoutes.lock);
+      }
 
       if (session.mustChangePassword) {
         return matchedLocation == AppRoutes.changePassword
@@ -73,23 +91,40 @@ String? computeAuthRedirect({
             : withFrom(AppRoutes.changePassword);
       }
 
-      // Gates pasados: sacar al usuario de splash/login hacia su destino.
-      // /change-password NO se expulsa: ahí vive el frame de éxito post-gate
-      // (mockup 2C) y su botón "Continuar" navega explícitamente.
+      // Setup del PIN (mockup 3A): DESPUÉS del password-gate — el éxito 2C
+      // encadena "Siguiente: crea tu PIN". screenLockExempt salta el gate
+      // completo; user null (restore degradado) no fuerza setup.
+      // /change-password se tolera: ahí vive el frame de éxito 2C (recién
+      // cayó mustChangePassword) y su "Continuar" navega — entonces sí, este
+      // gate atrapa el destino.
+      if (lock.needsSetupFor(session.user) &&
+          matchedLocation != AppRoutes.pinSetup &&
+          matchedLocation != AppRoutes.changePassword) {
+        return withFrom(AppRoutes.pinSetup);
+      }
+
+      // Gates pasados: sacar al usuario de splash/login/lock hacia su
+      // destino. /change-password y /pin-setup NO se expulsan: ahí viven los
+      // frames de éxito/oferta de huella y navegan explícitamente.
       if (matchedLocation == AppRoutes.splash ||
-          matchedLocation == AppRoutes.login) {
+          matchedLocation == AppRoutes.login ||
+          matchedLocation == AppRoutes.lock) {
         return from ?? AppRoutes.home;
       }
       return null;
   }
 }
 
-/// Puente sesión → router: go_router re-evalúa redirect cuando este
-/// Listenable notifica; lo bumpeamos con ref.listen sobre la sesión.
+/// Puente sesión/candado → router: go_router re-evalúa redirect cuando este
+/// Listenable notifica; lo bumpeamos con ref.listen sobre sesión Y candado.
 class _SessionRouterBump extends ChangeNotifier {
   _SessionRouterBump(Ref ref) {
     ref.listen<SessionState>(
       sessionControllerProvider,
+      (_, _) => notifyListeners(),
+    );
+    ref.listen<LockState>(
+      lockControllerProvider,
       (_, _) => notifyListeners(),
     );
   }
@@ -104,6 +139,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     refreshListenable: bump,
     redirect: (context, state) => computeAuthRedirect(
       session: ref.read(sessionControllerProvider),
+      lock: ref.read(lockControllerProvider),
       uri: state.uri,
       matchedLocation: state.matchedLocation,
     ),
@@ -119,6 +155,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.changePassword,
         builder: (context, state) => ChangePasswordScreen(
+          resumeTo: state.uri.queryParameters['from'],
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.lock,
+        builder: (context, state) => const PinLockScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.pinSetup,
+        builder: (context, state) => PinSetupScreen(
           resumeTo: state.uri.queryParameters['from'],
         ),
       ),

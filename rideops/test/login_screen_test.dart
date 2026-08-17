@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/app.dart';
 import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/api_providers.dart';
+import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/token_store.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
 import 'package:rideops/features/auth/presentation/login_screen.dart';
@@ -28,6 +29,11 @@ void main() {
   Widget app() => ProviderScope(
         overrides: [
           tokenStoreProvider.overrideWithValue(store),
+          // PIN ya configurado (H2): estos tests ejercitan el LOGIN — el
+          // gate de setup del PIN tiene los suyos en pin_setup_screen_test.
+          pinStoreProvider.overrideWithValue(
+            InMemoryPinStore.configured(userId: kFixtureUserId),
+          ),
           authApiProvider.overrideWithValue(api),
           eventLoggerProvider.overrideWithValue(logger),
         ],

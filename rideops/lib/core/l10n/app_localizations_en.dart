@@ -116,6 +116,87 @@ class AppLocalizationsEn extends AppLocalizations {
   String get continueButton => 'Continue';
 
   @override
+  String get changePasswordNextPin =>
+      'Next: create your PIN to unlock quickly in the yard.';
+
+  @override
+  String get pinSetupTitle => 'Create your PIN';
+
+  @override
+  String get pinSetupSubtitle =>
+      'You\'ll use it to unlock RideOps in the yard. 4 digits.';
+
+  @override
+  String get pinSetupConfirmTitle => 'Confirm your PIN';
+
+  @override
+  String get pinSetupConfirmSubtitle => 'Type it again to confirm.';
+
+  @override
+  String pinSetupStep(int step) {
+    return 'Step $step of 2';
+  }
+
+  @override
+  String get pinSetupMismatch => 'The PINs don\'t match. Start over.';
+
+  @override
+  String get pinBioOfferTitle => 'Enable fingerprint?';
+
+  @override
+  String get pinBioOfferBody =>
+      'Unlock with your fingerprint, no PIN typing. Your PIN always keeps working.';
+
+  @override
+  String get pinBioEnable => 'Enable fingerprint';
+
+  @override
+  String get pinBioSkip => 'Not now';
+
+  @override
+  String get pinBioEnrollFailed =>
+      'Couldn\'t enable fingerprint. You can keep using your PIN.';
+
+  @override
+  String get pinBioPrompt => 'Confirm your identity to unlock RideOps';
+
+  @override
+  String get pinBioKeyLabel => 'Unlock with fingerprint';
+
+  @override
+  String get keypadDeleteLabel => 'Delete digit';
+
+  @override
+  String pinDigitsProgress(int count) {
+    return '$count of 4 digits';
+  }
+
+  @override
+  String lockGreeting(String name) {
+    return 'Hi, $name';
+  }
+
+  @override
+  String get lockTitleGeneric => 'Unlock RideOps';
+
+  @override
+  String get lockSubtitle => 'Enter your PIN to continue';
+
+  @override
+  String lockWrongPin(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Wrong PIN — $count attempts left',
+      one: 'Wrong PIN — 1 attempt left',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get lockForgotPin => 'Forgot your PIN? Sign out';
+
+  @override
   String get homePlaceholderTitle => 'Signed in';
 
   @override

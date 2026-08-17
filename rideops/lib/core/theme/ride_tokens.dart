@@ -25,6 +25,8 @@ abstract final class RideTokens {
   // Rampa púrpura de marca
   static const p50 = Color(0xFFF4EFFF);
   static const p100 = Color(0xFFEBE2FF);
+  static const p200 = Color(0xFFD9C9FF);
+  static const p300 = Color(0xFFC0A8FF);
   static const p600 = Color(0xFF6A35E0);
   static const p700 = Color(0xFF5A26C9);
   static const p800 = Color(0xFF45189E);

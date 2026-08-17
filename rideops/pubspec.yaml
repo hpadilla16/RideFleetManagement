@@ -26,6 +26,13 @@ dependencies:
   # Token seguro (Keychain/Keystore). Sujeto del spike M0-1a.
   flutter_secure_storage: ^9.2.0
 
+  # PIN local + biometría (H2). crypto: hash del PIN (nunca texto plano);
+  # local_auth: huella como tecla del keypad; clock: reloj inyectable para
+  # testear el timer de inactividad con fake_async.
+  crypto: ^3.0.3
+  local_auth: ^2.3.0
+  clock: ^1.1.1
+
   # Spike 1 (M0-1a): tareas en background. Si el spike aprueba, se queda para
   # el drenado; si no, se retira y el drenado va solo en foreground.
   workmanager: ^0.10.0
@@ -39,6 +46,8 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # Timer de inactividad + reloj fake en los tests del LockController (H2).
+  fake_async: ^1.3.1
   flutter_lints: ^6.0.0
   build_runner: ^2.4.13
   freezed: ^3.0.0

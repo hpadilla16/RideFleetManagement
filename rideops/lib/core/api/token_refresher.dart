@@ -69,16 +69,27 @@ class TokenRefresher {
   /// Decodifica el claim `exp` de un JWT sin verificar firma (la firma la
   /// verifica el servidor; aquí solo agendamos el refresco).
   static DateTime? expiryOf(String jwt) {
+    final exp = _payloadOf(jwt)?['exp'];
+    if (exp is! num) return null;
+    return DateTime.fromMillisecondsSinceEpoch((exp * 1000).round(), isUtc: true);
+  }
+
+  /// Claim `sub` = userId del staff (auth.service.js:19). H2 lo usa para atar
+  /// el PIN local al usuario incluso con /me degradado (user null tras un
+  /// restore sin red) — el token es la única identidad disponible ahí.
+  static String? subjectOf(String jwt) {
+    final sub = _payloadOf(jwt)?['sub'];
+    return sub is String && sub.isNotEmpty ? sub : null;
+  }
+
+  static Map<String, dynamic>? _payloadOf(String jwt) {
     final parts = jwt.split('.');
     if (parts.length != 3) return null;
     try {
       final payload = utf8.decode(
         base64Url.decode(base64Url.normalize(parts[1])),
       );
-      final map = json.decode(payload) as Map<String, dynamic>;
-      final exp = map['exp'];
-      if (exp is! num) return null;
-      return DateTime.fromMillisecondsSinceEpoch((exp * 1000).round(), isUtc: true);
+      return json.decode(payload) as Map<String, dynamic>;
     } catch (_) {
       return null;
     }

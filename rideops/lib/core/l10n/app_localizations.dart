@@ -290,6 +290,132 @@ abstract class AppLocalizations {
   /// **'Continuar'**
   String get continueButton;
 
+  /// No description provided for @changePasswordNextPin.
+  ///
+  /// In es, this message translates to:
+  /// **'Siguiente: crea tu PIN para desbloquear rápido en el patio.'**
+  String get changePasswordNextPin;
+
+  /// No description provided for @pinSetupTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Crea tu PIN'**
+  String get pinSetupTitle;
+
+  /// No description provided for @pinSetupSubtitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Lo usarás para desbloquear RideOps en el patio. 4 dígitos.'**
+  String get pinSetupSubtitle;
+
+  /// No description provided for @pinSetupConfirmTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Confirma tu PIN'**
+  String get pinSetupConfirmTitle;
+
+  /// No description provided for @pinSetupConfirmSubtitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Escríbelo otra vez para confirmarlo.'**
+  String get pinSetupConfirmSubtitle;
+
+  /// No description provided for @pinSetupStep.
+  ///
+  /// In es, this message translates to:
+  /// **'Paso {step} de 2'**
+  String pinSetupStep(int step);
+
+  /// No description provided for @pinSetupMismatch.
+  ///
+  /// In es, this message translates to:
+  /// **'Los PIN no coinciden. Empieza de nuevo.'**
+  String get pinSetupMismatch;
+
+  /// No description provided for @pinBioOfferTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'¿Activar huella?'**
+  String get pinBioOfferTitle;
+
+  /// No description provided for @pinBioOfferBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Desbloquea con tu huella, sin escribir el PIN. Tu PIN sigue funcionando siempre.'**
+  String get pinBioOfferBody;
+
+  /// No description provided for @pinBioEnable.
+  ///
+  /// In es, this message translates to:
+  /// **'Activar huella'**
+  String get pinBioEnable;
+
+  /// No description provided for @pinBioSkip.
+  ///
+  /// In es, this message translates to:
+  /// **'Ahora no'**
+  String get pinBioSkip;
+
+  /// No description provided for @pinBioEnrollFailed.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudo activar la huella. Puedes seguir con tu PIN.'**
+  String get pinBioEnrollFailed;
+
+  /// No description provided for @pinBioPrompt.
+  ///
+  /// In es, this message translates to:
+  /// **'Confirma tu identidad para desbloquear RideOps'**
+  String get pinBioPrompt;
+
+  /// No description provided for @pinBioKeyLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Desbloquear con huella'**
+  String get pinBioKeyLabel;
+
+  /// No description provided for @keypadDeleteLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Borrar dígito'**
+  String get keypadDeleteLabel;
+
+  /// Semántica de los dots del PIN para lector de pantalla
+  ///
+  /// In es, this message translates to:
+  /// **'{count} de 4 dígitos'**
+  String pinDigitsProgress(int count);
+
+  /// No description provided for @lockGreeting.
+  ///
+  /// In es, this message translates to:
+  /// **'Hola, {name}'**
+  String lockGreeting(String name);
+
+  /// No description provided for @lockTitleGeneric.
+  ///
+  /// In es, this message translates to:
+  /// **'Desbloquea RideOps'**
+  String get lockTitleGeneric;
+
+  /// No description provided for @lockSubtitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Ingresa tu PIN para continuar'**
+  String get lockSubtitle;
+
+  /// No description provided for @lockWrongPin.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{PIN incorrecto — te queda 1 intento} other{PIN incorrecto — te quedan {count} intentos}}'**
+  String lockWrongPin(int count);
+
+  /// No description provided for @lockForgotPin.
+  ///
+  /// In es, this message translates to:
+  /// **'¿Olvidaste tu PIN? Cerrar sesión'**
+  String get lockForgotPin;
+
   /// No description provided for @homePlaceholderTitle.
   ///
   /// In es, this message translates to:

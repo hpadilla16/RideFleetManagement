@@ -46,6 +46,13 @@ abstract final class AuthEvents {
   static const sessionExpiredRelogin = 'auth.session_expired_relogin';
 }
 
+/// Eventos de sesión de dispositivo (03-observability.md §Sesión): el candado
+/// por PIN/biometría (H2). `method` en el unlock: pin | biometric.
+abstract final class SessionEvents {
+  static const pinLock = 'session.pin_lock';
+  static const pinUnlock = 'session.pin_unlock';
+}
+
 /// Punto de enchufe de Sentry: cuando haya DSN, aquí se decide
 /// `SentryEventLogger` en prod y debug en dev. Hoy: debug print en debug,
 /// silencio en release.
