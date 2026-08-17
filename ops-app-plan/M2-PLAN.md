@@ -49,6 +49,7 @@ ciclo Innovation→QA→CI verde→deploy ANTES de que M2-H6 los consuma).
 | M2-H5 · Firma y cierre | CUSTOMER_SIGN_PENDING con modo kiosco, customer-signature, cascada a CLOSED, branding vía display-data. | H4 |
 | M2-H6 · Reconciliación multi-superficie | UX de presencia, banner de avance ajeno con atribución, matriz 409 completa, adjuntarse a sesión en cualquier paso. Consume P1/P2; si no se aprueban → Plan B (§5). | H1 (+ deploy P1–P3) |
 | M2-H7 · Entrada desde cards de H4 | CTA cola checkout → crear/reanudar sesión; guards de creación (422 PRECHECKIN_REQUIRED / AGE_RULES_*, 409 VEHICLE_CONFLICT / SESSION_TERMINAL). | H1 |
+| M2-H8 · Backend: CAS en `transition()` | **Obligatoria dentro del M2, prerrequisito de H6** (Innovation, review del PR P1-P3): `updateMany` condicionado por `currentStep` (+ `stateVersion` cuando venga `expectedVersion`), `count===0` → re-leer → STALE_VERSION/ILLEGAL. Cierra el TRANSITION duplicado con dos superficies en el mismo paso, la ventana TOCTOU del assertExpectedVersion, y reduce el lost-update del string `events`. | PR P1-P3 deployado |
 
 Paralelización: H1 primero → H2 ∥ H3 ∥ H7 → H4 → H5. H6 parte cliente tras H1, cierra
 al final. El PR-tren de backend corre en paralelo a H2/H3 apenas Hector apruebe.
