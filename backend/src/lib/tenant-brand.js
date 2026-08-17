@@ -9,7 +9,9 @@
  * whatever the page says is who they believe they are renting from.
  *
  * The two screens of that journey — the counter display that shows the QR and
- * the phone that opens it — must agree, so they both resolve through here.
+ * the phone that opens it — must agree. Sharing this function is NOT what
+ * makes them agree; feeding it the same branch is. `resolveBrandLocation`
+ * below is that second half, and both callers go through it.
  *
  *   location config → franchise → branch name → tenant-wide setting → Tenant.name
  *
@@ -46,6 +48,55 @@ import { parseLocationConfig } from './location-config.js';
 export const PLATFORM_DEFAULT_COMPANY_NAME = 'Ride Fleet';
 
 /**
+ * WHICH branch brands a reservation — the half that actually keeps the counter
+ * and the phone saying the same thing.
+ *
+ * `reservationsService.update` can move `Reservation.pickupLocationId` after
+ * the agreement exists, and nothing syncs it back to the agreement. So a
+ * reservation and its own agreement can name two different branches, and two
+ * screens that each pick "the obvious one" end up disagreeing about which
+ * business the customer is standing in front of.
+ *
+ * The AGREEMENT's branch wins, everywhere. It is the row that supplies the
+ * clause text the renter initials, so identity and clauses always name the
+ * same place. The reservation's branch is the fallback, for a reservation with
+ * no agreement yet (the counter screen renders long before one exists) or an
+ * agreement with no location.
+ *
+ * Costs nothing on either caller's common path. The phone's query already
+ * loads `rentalAgreement.pickupLocation`, so it is returned as-is; the counter
+ * screen only has the agreement's `pickupLocationId`, and reads it solely when
+ * it differs from the reservation's — i.e. only after somebody moved one.
+ *
+ * @param {object|null} reservation — `pickupLocation` plus either
+ *   `rentalAgreement.pickupLocation` (already loaded) or
+ *   `rentalAgreement.pickupLocationId`
+ * @returns {Promise<object|null>} a Location row (id, name, locationConfig)
+ */
+export async function resolveBrandLocation(reservation) {
+  const reservationLocation = reservation?.pickupLocation || null;
+  // Already in hand — never pay for a round trip to re-read it.
+  const loadedAgreementLocation = reservation?.rentalAgreement?.pickupLocation || null;
+  if (loadedAgreementLocation) return loadedAgreementLocation;
+
+  const agreementLocationId = reservation?.rentalAgreement?.pickupLocationId || null;
+  if (!agreementLocationId || agreementLocationId === reservationLocation?.id) {
+    return reservationLocation;
+  }
+  try {
+    const moved = await prisma.location.findUnique({
+      where: { id: agreementLocationId },
+      select: { id: true, name: true, locationConfig: true },
+    });
+    return moved || reservationLocation;
+  } catch (err) {
+    // Branding may never break the surface that renders it.
+    logger.warn('[tenant-brand] agreement location lookup failed', { message: err.message });
+    return reservationLocation;
+  }
+}
+
+/**
  * Resolve the customer-facing business name.
  *
  * @param {object} input
@@ -57,31 +108,48 @@ export const PLATFORM_DEFAULT_COMPANY_NAME = 'Ride Fleet';
  *                                           has it; omit to let this look it up
  *                                           lazily, and only if the rest of the
  *                                           cascade came back empty
+ * @param {object} [input.globalConfig]      an already-fetched
+ *                                           getRentalAgreementConfig() result
+ * @param {object|null} [input.franchiseConfig] an already-fetched
+ *                                           franchise getAgreementConfig()
  * @returns {Promise<{ companyName: string|null }>}
+ *
+ * INJECT WHAT YOU ALREADY HAVE. `getRentalAgreementConfig` is NOT memoised
+ * (settings.service.js: an appSetting.findMany plus a tenant.findUnique on
+ * every call) and neither is the franchise read. A caller that fetched either
+ * for its own payload must pass it in rather than paying for it twice —
+ * display-data is polled every 1.5s per open counter screen, so "twice" means
+ * ~80 redundant queries a minute per till.
  */
 export async function resolveCustomerFacingBrand({
   tenantId = null,
   franchiseId = null,
   location = null,
   tenantName = undefined,
+  globalConfig = undefined,
+  franchiseConfig = undefined,
 } = {}) {
   const locCfg = parseLocationConfig(location?.locationConfig);
 
-  let globalCfg = {};
-  let franchiseCfg = null;
-  try {
-    const { settingsService } = await import('../modules/settings/settings.service.js');
-    globalCfg = await settingsService.getRentalAgreementConfig(tenantId ? { tenantId } : {});
-  } catch (err) {
-    // Branding must never be able to break the surface that renders it —
-    // signing least of all. Fall through to the location/tenant names.
-    logger.warn('[tenant-brand] settings lookup failed', { message: err.message });
+  let globalCfg = globalConfig ?? {};
+  let franchiseCfg = franchiseConfig ?? null;
+  if (globalConfig === undefined) {
+    try {
+      const { settingsService } = await import('../modules/settings/settings.service.js');
+      globalCfg = await settingsService.getRentalAgreementConfig(tenantId ? { tenantId } : {});
+    } catch (err) {
+      // Branding must never be able to break the surface that renders it —
+      // signing least of all. Fall through to the location/tenant names.
+      logger.warn('[tenant-brand] settings lookup failed', { message: err.message });
+    }
   }
-  try {
-    const { franchiseService } = await import('../modules/settings/franchise.service.js');
-    franchiseCfg = await franchiseService.getAgreementConfig(franchiseId ?? null, { tenantId });
-  } catch (err) {
-    logger.warn('[tenant-brand] franchise lookup failed', { message: err.message });
+  if (franchiseConfig === undefined) {
+    try {
+      const { franchiseService } = await import('../modules/settings/franchise.service.js');
+      franchiseCfg = await franchiseService.getAgreementConfig(franchiseId ?? null, { tenantId });
+    } catch (err) {
+      logger.warn('[tenant-brand] franchise lookup failed', { message: err.message });
+    }
   }
 
   const configuredGlobalName = String(globalCfg?.companyName || '').trim();

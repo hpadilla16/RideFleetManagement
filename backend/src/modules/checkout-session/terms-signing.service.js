@@ -17,7 +17,7 @@ import { CheckoutSessionError } from './checkout-session.service.js';
 import { sectionsForAgreement } from './terms-content.js';
 import { appendEvent } from './state-machine.js';
 import { analyzeSignatureInk } from '../../lib/signature-ink.js';
-import { resolveCustomerFacingBrand } from '../../lib/tenant-brand.js';
+import { resolveCustomerFacingBrand, resolveBrandLocation } from '../../lib/tenant-brand.js';
 
 async function loadToken(token) {
   if (!token) throw new CheckoutSessionError('token required', 400);
@@ -30,11 +30,13 @@ async function loadToken(token) {
           // CUSTOMER's phone, so the staff device's stored UI language is
           // meaningless here — see the frontend's useSignLang().
           customer: { select: { locale: true } },
-          // BRAND FALLBACK ONLY (see resolveSigningBrand). The agreement's own
-          // pickupLocation stays the primary source; this one is read solely so
-          // an agreement whose location relation is empty still names a
-          // business instead of nothing. Precedent:
+          // BRAND FALLBACK ONLY (lib/tenant-brand.js resolveBrandLocation).
+          // The agreement's own pickupLocation stays the primary source; this
+          // one is read solely so an agreement whose location relation is empty
+          // still names a business instead of nothing. Precedent:
           // rental-agreements.service.js:5848 does the same for locationConfig.
+          // Loading it here is also what lets resolveBrandLocation answer for
+          // this caller without a single extra query.
           pickupLocation: { select: { id: true, name: true, locationConfig: true } },
           rentalAgreement: {
             select: {
@@ -78,17 +80,18 @@ async function loadToken(token) {
  * a brand leak from the platform onto another business's customer, at the
  * worst possible moment.
  *
- * The cascade itself lives in lib/tenant-brand.js, shared with the counter
- * display that shows the QR (reservations.routes.js display-data). Those two
- * screens are thirty seconds apart in the same handoff, so they must never
- * name two different businesses.
+ * Both halves live in lib/tenant-brand.js and are shared with the counter
+ * display that shows the QR (reservations.routes.js display-data): the same
+ * cascade AND the same choice of branch (resolveBrandLocation — the
+ * agreement's pickup location, falling back to the reservation's). Those two
+ * screens are thirty seconds apart in the same handoff; sharing the cascade
+ * alone would not have stopped them naming two different branches.
  *
- * WHICH LOCATION FEEDS THE CASCADE — and where the PDF can legitimately differ
+ * WHY THE AGREEMENT'S BRANCH — and where the PDF still legitimately differs
  * ---------------------------------------------------------------------------
- * Primary is the AGREEMENT's pickupLocation, because that is the same row that
- * supplies the section text being initialed (see loadToken's comment). The
- * RESERVATION's pickupLocation is only a fallback, for an agreement whose
- * location relation is empty — better a real business name than none.
+ * The agreement's pickupLocation is the same row that supplies the section
+ * text being initialed (see loadToken's comment), so identity and clauses
+ * always name the same place.
  *
  * The printed PDF resolves its header from `agreement.reservation.
  * pickupLocation` instead (rental-agreements.service.js:3539,3552). So if
@@ -97,14 +100,16 @@ async function loadToken(token) {
  * agreement — the phone and the PDF CAN print different business names. That
  * is a real, known divergence and this resolver does not paper over it: the
  * phone deliberately stays with the branch whose clauses the renter is
- * actually signing. Making the two agree everywhere means fixing the move to
- * sync (or the PDF to read the agreement), which is not this change.
+ * actually signing. Making those two agree means fixing the move to sync (or
+ * the PDF to read the agreement), which is not this change. It is the ONE
+ * remaining pair that can disagree — the phone and the counter cannot.
  */
-async function resolveSigningBrand(ag) {
+async function resolveSigningBrand(reservation) {
+  const ag = reservation?.rentalAgreement;
   return resolveCustomerFacingBrand({
     tenantId: ag?.tenantId ?? null,
-    franchiseId: ag?.reservation?.franchiseId ?? null,
-    location: ag?.pickupLocation || ag?.reservation?.pickupLocation || null,
+    franchiseId: reservation?.franchiseId ?? null,
+    location: await resolveBrandLocation(reservation),
     // Already loaded on the token row — never make the resolver re-read it.
     tenantName: ag?.tenant?.name ?? null,
   });
@@ -135,7 +140,7 @@ function normalizeSignerLocale(raw) {
 async function loadSession(token) {
   const row = await loadToken(token);
   const ag = row.reservation.rentalAgreement;
-  const brand = await resolveSigningBrand({ ...ag, reservation: row.reservation });
+  const brand = await resolveSigningBrand(row.reservation);
   const sections = sectionsForAgreement({ declinedInsurance: !!ag.declinedInsurance, sectionOverrides: ag.pickupLocation?.termsSectionsJson });
 
   // Pull already-completed initials so the UI can show what's left.

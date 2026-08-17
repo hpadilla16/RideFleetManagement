@@ -33,7 +33,7 @@ beforeAll(() => {
   HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,stub';
 });
 
-const { SignClient } = await import('../src/app/(public)/sign/[token]/SignClient.jsx');
+const { SignClient, customerSafeMessage } = await import('../src/app/(public)/sign/[token]/SignClient.jsx');
 
 const SECTIONS = [
   { key: 'rental_period', label: 'Rental period', body: 'I agree to return the vehicle…', signed: false },
@@ -221,5 +221,57 @@ describe('sign page — failure states', () => {
 
     await screen.findByText('This link is no longer active');
     expect(document.body.textContent).not.toContain('Ride Fleet');
+  });
+});
+
+/**
+ * The OTHER half of the token defence — the one that runs mid-signature, when
+ * the customer's POST to /initials or /complete fails behind an nginx 502.
+ * The load path above is covered through the component; this path is not
+ * reachable from jsdom without driving a canvas, so it is tested directly.
+ *
+ * It is also the half that matters most: by then the renter has already
+ * started signing, and the screen they get is the one they will screenshot to
+ * show the agent.
+ */
+describe('customerSafeMessage', () => {
+  const FALLBACK = 'No se pudo guardar';
+  const TOO_FAST = 'Espera un minuto';
+
+  const opts = { token: TOKEN, fallback: FALLBACK, tooFast: TOO_FAST };
+
+  it('drops a synthesised message that carries the token', () => {
+    const err = new Error(`/api/sign/${TOKEN}/initials failed (502)`);
+    err.status = 502;
+    expect(customerSafeMessage(err, opts)).toBe(FALLBACK);
+  });
+
+  it('drops anything shaped like a bare API path, token or not', () => {
+    // A 504 from nginx can truncate the body; the path prefix is the tell.
+    expect(customerSafeMessage(new Error('/api/sign/x/complete failed (504)'), opts)).toBe(FALLBACK);
+  });
+
+  it('keeps a real server instruction, because the customer needs it', () => {
+    // The blank-canvas guard: this exact sentence is how a renter learns to
+    // actually draw something. Swallowing it would be its own bug.
+    const err = new Error('The signature is blank — please sign before submitting');
+    err.status = 400;
+    expect(customerSafeMessage(err, opts))
+      .toBe('The signature is blank — please sign before submitting');
+  });
+
+  it('translates a 429 instead of printing our rate limiter’s bucket name', () => {
+    // The guard's own body — no token, no leading slash, so it would otherwise
+    // pass straight through to a Spanish-speaking customer, in English.
+    const err = new Error('Rate limit exceeded for terms-signing-write. Try again shortly.');
+    err.status = 429;
+    const out = customerSafeMessage(err, opts);
+    expect(out).toBe(TOO_FAST);
+    expect(out).not.toContain('terms-signing-write');
+  });
+
+  it('falls back when there is no message at all (a dropped connection)', () => {
+    expect(customerSafeMessage(new Error(''), opts)).toBe(FALLBACK);
+    expect(customerSafeMessage(undefined, opts)).toBe(FALLBACK);
   });
 });

@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { prisma } from '../../lib/prisma.js';
 import { termsSigningService } from './terms-signing.service.js';
 import { TC_SECTIONS } from './terms-content.js';
+import { resolveBrandLocation } from '../../lib/tenant-brand.js';
 
 const FUTURE = new Date(Date.now() + 15 * 60_000);
 const PAST = new Date(Date.now() - 60_000);
@@ -266,6 +267,41 @@ test('brand falls back to the reservation branch when the agreement has no locat
     out.brand.companyName, 'Autos del Valle — Mayagüez',
     'a real business name beats the tenant-level backstop',
   );
+});
+
+/**
+ * The pair this branch exists to fix. The counter screen and the phone are
+ * thirty seconds apart in one handoff, and they read DIFFERENT rows: the
+ * counter starts from the reservation, the phone from the agreement. Sharing
+ * the cascade would not have stopped them naming two branches — sharing
+ * resolveBrandLocation is what does.
+ *
+ * So this asserts the actual invariant, not the implementation: after a branch
+ * move, both screens land on the same Location.
+ */
+test('the counter screen and the phone name the SAME branch after a move', async () => {
+  const agreementBranch = { id: 'l1', name: 'Autos del Valle — Ponce', locationConfig: null };
+  const reservationBranch = { id: 'l2', name: 'Autos del Valle — Mayagüez', locationConfig: null };
+
+  prisma.handoffToken.findUnique = async () => tokenRowWith({
+    location: agreementBranch,
+    reservationLocation: reservationBranch,
+    tenant: { id: 'tn1', name: 'Tenant Legal Name' },
+  });
+  const onThePhone = (await termsSigningService.loadSession('TOK')).brand.companyName;
+
+  // What display-data passes: the reservation row, whose agreement carries only
+  // a pickupLocationId (getById does not load that relation).
+  prisma.location.findUnique = async ({ where }) => (
+    where.id === agreementBranch.id ? agreementBranch : null
+  );
+  const onTheCounter = await resolveBrandLocation({
+    pickupLocation: reservationBranch,
+    rentalAgreement: { pickupLocationId: agreementBranch.id },
+  });
+
+  assert.equal(onThePhone, agreementBranch.name);
+  assert.equal(onTheCounter.name, onThePhone, 'the two screens must not disagree');
 });
 
 test('the reservation branch never overrides a configured agreement branch', async () => {

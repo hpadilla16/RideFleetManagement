@@ -23,17 +23,34 @@ export const termsSigningPublicRouter = Router();
 // mounted bare: uncapped reads let a token be probed for existence, and the
 // POSTs take base64 images with no ceiling at all.
 //
-// WRITE CAP — sized off the worst LEGITIMATE minute, not off a round number.
-// A signing session posts one initial per section and one final signature. The
-// most sections a customer can ever be shown is 8 (TC_SECTIONS' 6, plus
-// declined_insurance and damage_acknowledgement — see terms-content.js), and a
-// customer correcting sloppy initials re-posts the same section: the pad fires
-// on every finger-lift. 8 sections × 5 attempts + completes ≈ 45, so 45/min
-// leaves a renter who redoes EVERY section five times inside one minute
-// untouched, while still capping an attacker at ~45 images/min/IP. It also
-// absorbs two or three customers signing at once from the counter's guest
-// wi-fi, which shares one public IP — a real signing spans minutes, so their
-// posts do not stack inside a single window.
+// INITIALS CAP — sized off the worst LEGITIMATE minute, not off a round number.
+// A signing session posts one initial per section. The most sections a
+// customer can ever be shown is SEVEN: TC_SECTIONS' 6, plus declined_insurance
+// when they waived counter coverage. (damage_acknowledgement is NOT one of
+// them — terms-content.js is explicit that it belongs to the Report Damage
+// wizard and never reaches AgreementSectionInitial.) A customer correcting
+// sloppy initials re-posts the same section, because the pad fires on every
+// finger-lift. 7 × 5 attempts = 35, so 45/min leaves a renter who redoes EVERY
+// section five times inside one minute untouched, and still absorbs two or
+// three customers signing at once from the counter's guest wi-fi, which shares
+// one public IP — a real signing spans minutes, so their posts do not stack
+// inside one window.
+//
+// COMPLETE gets its own, much smaller bucket. It used to share the initials
+// budget, which meant an over-eager initialer could be locked out of
+// SUBMITTING the signature they had just finished drawing — a new way to block
+// a signature on a route that previously had no cap at all. One submission is
+// the norm; 10/min is retries after a transient failure, nothing more.
+//
+// WHAT THIS ACTUALLY CAPS IN PRODUCTION. The buckets are a module-level Map
+// (public-endpoint-guards.js), and prod runs start:cluster with
+// CLUSTER_WORKERS=4 (Dockerfile.prod), so each worker counts separately. An
+// attacker opening parallel connections spreads across all four and reaches
+// ~4× these numbers; the legitimate customer, pinned to one worker by
+// keep-alive, sees exactly the number written here. The asymmetry runs the
+// wrong way and it predates this router — but do not read "45/min" as a
+// system-wide ceiling. A shared store (the Redis the tenant limiter already
+// uses) is what would make it one.
 const signRead = [
   attachPublicRequestMeta('terms-signing-read'),
   createPublicRateLimitGuard({ name: 'terms-signing-read', maxRequests: 60, windowMs: 60 * 1000 }),
@@ -41,6 +58,10 @@ const signRead = [
 const signWrite = [
   attachPublicRequestMeta('terms-signing-write'),
   createPublicRateLimitGuard({ name: 'terms-signing-write', maxRequests: 45, windowMs: 60 * 1000 }),
+];
+const signComplete = [
+  attachPublicRequestMeta('terms-signing-complete'),
+  createPublicRateLimitGuard({ name: 'terms-signing-complete', maxRequests: 10, windowMs: 60 * 1000 }),
 ];
 
 function handleError(res, err) {
@@ -82,7 +103,7 @@ termsSigningPublicRouter.post('/:token/initials', signWrite, async (req, res) =>
 });
 
 // POST /api/sign/:token/complete — body { signatureDataUrl, signerName }
-termsSigningPublicRouter.post('/:token/complete', signWrite, async (req, res) => {
+termsSigningPublicRouter.post('/:token/complete', signComplete, async (req, res) => {
   try {
     const { signatureDataUrl, signerName } = req.body || {};
     const result = await termsSigningService.complete({

@@ -68,6 +68,7 @@ const STRINGS = {
     loadFailedBody: 'Ask your agent to show you the code again.',
     goneTitle: 'This link is no longer active',
     goneBody: 'Signing links are personal and they expire. Ask your agent for a new code.',
+    tooFast: 'We received too many attempts in a row. Wait a minute, then open your link again.',
     saveFailed: 'Save failed',
     completeFailed: 'Complete failed',
     thanks: 'Thanks! Return to your rental agent.',
@@ -90,6 +91,7 @@ const STRINGS = {
     loadFailedBody: 'Pídele a tu agente que te muestre el código otra vez.',
     goneTitle: 'Este enlace ya no está activo',
     goneBody: 'Los enlaces para firmar son personales y expiran. Pídele a tu agente un código nuevo.',
+    tooFast: 'Recibimos demasiados intentos seguidos. Espera un minuto y vuelve a abrir tu enlace.',
     saveFailed: 'No se pudo guardar',
     completeFailed: 'No se pudo completar',
     thanks: '¡Gracias! Regresa con tu agente de renta.',
@@ -187,11 +189,21 @@ function classifyLoadError(err) {
 /**
  * Mid-flow failures still show whatever the SERVER said — "The signature is
  * blank — please sign before submitting" is a real instruction the customer
- * needs. But a message the API client synthesised from the URL carries the
- * token, so anything containing it (or shaped like a bare path) is dropped in
- * favour of the translated fallback.
+ * needs. Two kinds of message must never reach them anyway:
+ *
+ *   • anything the API client synthesised from the URL, because on this route
+ *     the URL contains the token. This is the half of the token defence that
+ *     runs mid-signature, after the customer has already started;
+ *   • a 429, whose body is our rate limiter's internal bucket name in English
+ *     ("Rate limit exceeded for terms-signing-write"). It carries no token and
+ *     no leading slash, so it would sail straight through the check above and
+ *     hand a Spanish-speaking renter the name of a guard they cannot act on.
+ *
+ * Exported for its own tests: this is the security-relevant half, and it is
+ * not reachable from a jsdom render without driving a canvas.
  */
-function customerSafeMessage(err, token, fallback) {
+export function customerSafeMessage(err, { token, fallback, tooFast } = {}) {
+  if (Number(err?.status) === 429 && tooFast) return tooFast;
   const raw = String(err?.message || '').trim();
   if (!raw) return fallback;
   if (token && raw.includes(token)) return fallback;
@@ -305,7 +317,9 @@ function SignFlow({ token, data, t, onComplete, onError }) {
       });
       setSections((curr) => curr.map((s) => (s.key === sectionKey ? { ...s, signed: true } : s)));
     } catch (err) {
-      onError(customerSafeMessage(err, token, t('saveFailed')));
+      onError(customerSafeMessage(err, {
+        token, fallback: t('saveFailed'), tooFast: t('tooFast'),
+      }));
     }
   };
 
@@ -318,7 +332,9 @@ function SignFlow({ token, data, t, onComplete, onError }) {
       });
       onComplete();
     } catch (err) {
-      onError(customerSafeMessage(err, token, t('completeFailed')));
+      onError(customerSafeMessage(err, {
+        token, fallback: t('completeFailed'), tooFast: t('tooFast'),
+      }));
     } finally {
       setSubmitting(false);
     }

@@ -26,7 +26,7 @@ import { franchiseService } from '../settings/franchise.service.js';
 import { crossTenantScopeFor as scopeFor, scopeVisibilityCacheSegment } from '../../lib/tenant-scope.js';
 import { vehicleProgramWhereForScope } from '../../lib/program-category.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
-import { resolveCustomerFacingBrand } from '../../lib/tenant-brand.js';
+import { resolveCustomerFacingBrand, resolveBrandLocation } from '../../lib/tenant-brand.js';
 import { missingRequiredCustomerFields } from '../../lib/precheckin-fields.js';
 import { parseDepositRules, evaluateDepositRule } from '../../lib/deposit-rules.js';
 import { cache } from '../../lib/cache.js';
@@ -598,7 +598,7 @@ reservationsRouter.get('/:id/display-data', async (req, res, next) => {
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
     }));
     row.charges = reservationCharges;
-    const [insurancePlans, additionalServices, rentalSettings] = await Promise.all([
+    const [insurancePlans, additionalServices, rentalSettings, franchiseCfg, brandLocation] = await Promise.all([
       tenantId ? settingsService.getInsurancePlans({ tenantId }) : [],
       tenantId ? withTenantSchema(req.user.tenantId, (db) => db.additionalService.findMany({
         where: { tenantId, isActive: true, displayOnline: true },
@@ -610,22 +610,35 @@ reservationsRouter.get('/:id/display-data', async (req, res, next) => {
           linkedFee: { select: { id: true, name: true, amount: true, description: true, mode: true } }
         }
       })) : [],
-      tenantId ? settingsService.getRentalAgreementConfig({ tenantId }) : {}
+      tenantId ? settingsService.getRentalAgreementConfig({ tenantId }) : {},
+      // WHOSE NAME IS ON THE COUNTER SCREEN (2026-08-17)
+      // This payload drives customer-display — the screen that shows the QR the
+      // renter scans, and that keeps showing a name while they sign on their
+      // phone. It used to fall back to 'Ride Fleet' whenever the tenant had not
+      // filled in Settings → Rental agreement, so the counter said OUR name and
+      // the phone (which resolves a real cascade) said the tenant's, thirty
+      // seconds apart, to the same customer.
+      //
+      // Both sides now resolve the same BRANCH (resolveBrandLocation: the
+      // agreement's, falling back to the reservation's) through the same
+      // cascade (lib/tenant-brand.js). companyName may come back null when a
+      // tenant has configured nothing AND has no name; the display renders no
+      // wordmark rather than ours.
+      //
+      // Everything the cascade needs is gathered HERE, in the same fan-out, and
+      // injected below. This endpoint is polled every 1.5s per open till, so a
+      // resolver left to fetch its own settings would re-run an unmemoised
+      // appSetting.findMany + tenant.findUnique ~40 times a minute per screen,
+      // on top of a sequential round trip before the response could render.
+      tenantId ? franchiseService.getAgreementConfig(row?.franchiseId ?? null, { tenantId }) : null,
+      resolveBrandLocation(row)
     ]);
-    // WHOSE NAME IS ON THE COUNTER SCREEN (2026-08-17)
-    // This payload drives customer-display — the screen that shows the QR the
-    // renter scans, and that keeps showing a name while they sign on their
-    // phone. It used to fall back to 'Ride Fleet' whenever the tenant had not
-    // filled in Settings → Rental agreement, so the counter said OUR name and
-    // the phone (which resolves a real cascade) said the tenant's, thirty
-    // seconds apart, to the same customer. Both sides now go through
-    // lib/tenant-brand.js. companyName may come back null when a tenant has
-    // configured nothing AND has no name; the display renders no wordmark
-    // rather than ours.
     const brand = await resolveCustomerFacingBrand({
       tenantId,
       franchiseId: row?.franchiseId ?? null,
-      location: row?.pickupLocation ?? null,
+      location: brandLocation,
+      globalConfig: rentalSettings,
+      franchiseConfig: franchiseCfg
     });
     res.json({
       reservation: row,

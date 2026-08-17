@@ -26,15 +26,28 @@ import http from 'node:http';
 import express from 'express';
 import { termsSigningPublicRouter } from './terms-signing.routes.js';
 import { termsSigningService } from './terms-signing.service.js';
+import { sectionsForAgreement } from './terms-content.js';
 
 // The docker-compose CI job exports RATE_LIMIT_DISABLED=1 to keep the
 // integration suite from throttling itself, and some dev .env files carry it.
 // This file is ABOUT the guard, so it must never run against a passthrough.
 delete process.env.RATE_LIMIT_DISABLED;
 
-// Max sections a signing session can ever show: TC_SECTIONS' 6, plus
-// declined_insurance and damage_acknowledgement (terms-content.js).
-const MAX_SECTIONS = 8;
+/**
+ * Max sections a signing session can ever show: TC_SECTIONS' 6, plus
+ * declined_insurance when the customer waived counter coverage.
+ *
+ * Derived from terms-content.js rather than typed as a literal — the first
+ * version of this file said 8, counting damage_acknowledgement, which
+ * terms-content.js states plainly is NOT a signing section and never lands in
+ * AgreementSectionInitial. The write cap is justified by this number, so the
+ * number has to come from the source of truth.
+ */
+const MAX_SECTIONS = sectionsForAgreement({ declinedInsurance: true }).length;
+
+/** Must match terms-signing.routes.js. Asserted against the live header below. */
+const WRITE_CAP = 45;
+const REDO_BUDGET = 5;
 
 let server;
 let lastReq = null;
@@ -90,6 +103,18 @@ const initial = (ip) => request('POST', '/api/sign/TOK/initials', {
 // The customer must get through
 // ---------------------------------------------------------------------------
 
+test('the write cap is still justified by the sections that exist', async () => {
+  // The cap is not a round number, it is an argument: "the most a real
+  // customer can post in a minute, plus room". If someone adds an eighth
+  // signing section, the argument stops holding and this says so, instead of
+  // a renter discovering it mid-signature.
+  assert.equal(MAX_SECTIONS, 7, '6 canonical + declined_insurance');
+  assert.ok(
+    MAX_SECTIONS * REDO_BUDGET <= WRITE_CAP,
+    `${MAX_SECTIONS} sections × ${REDO_BUDGET} attempts exceeds the ${WRITE_CAP}/min cap`,
+  );
+});
+
 test('a renter who re-initials every section three times is never throttled', async () => {
   const ip = '203.0.113.10';
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -101,7 +126,7 @@ test('a renter who re-initials every section three times is never throttled', as
   const done = await request('POST', '/api/sign/TOK/complete', {
     ip, body: { signatureDataUrl: 'data:image/png;base64,AAAA', signerName: 'Erick Bou' },
   });
-  assert.equal(done.status, 200, `completing after 24 initials was rejected: ${done.body}`);
+  assert.equal(done.status, 200, `completing after ${MAX_SECTIONS * 3} initials was rejected: ${done.body}`);
 });
 
 // ---------------------------------------------------------------------------
@@ -111,27 +136,46 @@ test('a renter who re-initials every section three times is never throttled', as
 test('writes are capped per IP', async () => {
   const ip = '203.0.113.20';
   let limit = null;
-  for (let i = 0; i < 45; i += 1) {
+  for (let i = 0; i < WRITE_CAP; i += 1) {
     const res = await initial(ip);
     limit = Number(res.headers['x-public-rate-limit-limit']);
     assert.equal(res.status, 200, `write ${i + 1} should still be allowed`);
   }
-  assert.equal(limit, 45, 'the documented write ceiling');
+  assert.equal(limit, WRITE_CAP, 'the documented write ceiling');
   const over = await initial(ip);
   assert.equal(over.status, 429);
 });
 
-test('initials and complete share one write budget', async () => {
-  // They are the same abuse surface — base64 into an unauthenticated POST — so
-  // an attacker must not get a second allowance by alternating endpoints.
+test('a customer throttled on initials can still submit the signature', async () => {
+  // The two used to share one bucket, which meant an over-eager initialer
+  // could be locked out of SUBMITTING the signature they had just drawn — a
+  // new way to block a signature on a route that previously had no cap at all.
+  // The realistic path there is a slow connection, not abuse: CanvasPad fires
+  // a POST on every finger-lift and the box only disables once the POST
+  // returns, so on bad signal the customer keeps drawing and keeps posting.
   const ip = '203.0.113.21';
-  for (let i = 0; i < 45; i += 1) {
-    assert.equal((await initial(ip)).status, 200);
-  }
-  const over = await request('POST', '/api/sign/TOK/complete', {
+  for (let i = 0; i < 46; i += 1) await initial(ip);
+  assert.equal((await initial(ip)).status, 429, 'initials are exhausted');
+
+  const done = await request('POST', '/api/sign/TOK/complete', {
     ip, body: { signatureDataUrl: 'data:image/png;base64,AAAA', signerName: 'Erick Bou' },
   });
-  assert.equal(over.status, 429, 'complete draws from the same bucket as initials');
+  assert.equal(done.status, 200, 'complete has its own budget');
+});
+
+test('complete is capped too, and far lower — one submission is the norm', async () => {
+  const ip = '203.0.113.22';
+  const submit = () => request('POST', '/api/sign/TOK/complete', {
+    ip, body: { signatureDataUrl: 'data:image/png;base64,AAAA', signerName: 'Erick Bou' },
+  });
+  let limit = null;
+  for (let i = 0; i < 10; i += 1) {
+    const res = await submit();
+    limit = Number(res.headers['x-public-rate-limit-limit']);
+    assert.equal(res.status, 200, `submission ${i + 1} should still be allowed`);
+  }
+  assert.equal(limit, 10, 'retries after a transient failure, nothing more');
+  assert.equal((await submit()).status, 429);
 });
 
 test('reads are capped per IP', async () => {
@@ -158,7 +202,7 @@ test('every /api/sign route carries the public meta and the limiter', async () =
   const cases = [
     ['GET', '/api/sign/TOK', 'terms-signing-read', undefined],
     ['POST', '/api/sign/TOK/initials', 'terms-signing-write', { sectionKey: 'rental_period', initialDataUrl: 'x' }],
-    ['POST', '/api/sign/TOK/complete', 'terms-signing-write', { signatureDataUrl: 'x', signerName: 'E' }],
+    ['POST', '/api/sign/TOK/complete', 'terms-signing-complete', { signatureDataUrl: 'x', signerName: 'E' }],
   ];
   for (const [method, path, expectedName, body] of cases) {
     const res = await request(method, path, { ip: '203.0.113.50', body });
