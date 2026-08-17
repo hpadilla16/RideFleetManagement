@@ -89,6 +89,10 @@ y números de línea en [00-REGROUND.md](00-REGROUND.md):
    columna en `CheckoutSession`).
 5. **Sin versioning optimista en `CheckoutSession`** — la reconciliación multi-superficie
    depende solo de la state machine (ver §9, pregunta 1).
+6. **El 400 de "contraseña actual incorrecta" no trae `code`** (QA H1, 2026-08-16): el
+   cliente lo detecta por substring del mensaje (frágil, documentado en
+   `change_password_screen.dart`). Pedido: `code: 'CURRENT_PASSWORD_INCORRECT'` en
+   `auth.routes.js` — 2 líneas en el próximo PR que toque backend.
 
 ## 5. Milestones
 
@@ -124,6 +128,16 @@ Login (+ pantalla de **cambio de contraseña forzado** — gate `PASSWORD_CHANGE
 bloqueo por PIN y biometría, shell con RBAC y **selector de ubicación**, home de
 operaciones con las 9 colas del dashboard, captura de inspección nativa (cámara →
 comprimir al tomar → soltar el controlador; pipeline offline vía bandeja).
+
+Criterios transversales heredados de H1 (QA SHIP 2026-08-16):
+- **Sesión degradada**: toda pantalla post-login debe renderizar con
+  `session.user == null` (restore sin red) — skeleton, jamás crash. H3 añade el
+  re-intento de `/me` al reanudar la app.
+- **H4 restaura** la rehabilitación automática del botón de login al volver la señal
+  (connectivity_plus) y revierte el copy honesto temporal de `loginOffline` (TODO en
+  el .arb).
+- **H2 restaura** el hint "Siguiente: crea tu PIN" en el éxito 2C (omitido en H1 para
+  no prometer UI inexistente).
 
 ### M2 — el épico de checkout
 Wizard server-driven sobre `/api/checkout-sessions/*` (con identidad de usuario, nunca el
