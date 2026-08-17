@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/db/outbox_providers.dart';
 import '../../core/l10n/app_localizations.dart';
+import '../../core/outbox/drain_coordinator.dart';
 import '../../core/session/active_location.dart';
 import '../../core/session/session_controller.dart';
 import '../../core/theme/ride_tokens.dart';
@@ -46,10 +47,15 @@ class _AppShellState extends ConsumerState<AppShell> {
     // Contrato de sesión degradada: re-intento de /me al volver a primer
     // plano. Vive en el shell (no en app.dart) porque solo aplica con sesión
     // — y así H2 (que toca app/router) no choca con este archivo.
+    // H5: el resume también dispara el drenado de la bandeja (foreground) —
+    // el turno pudo pasar horas en background con filas esperando.
     _lifecycle = AppLifecycleListener(
-      onResume: () => ref
-          .read(sessionControllerProvider.notifier)
-          .rehydrateUserIfMissing(),
+      onResume: () {
+        ref
+            .read(sessionControllerProvider.notifier)
+            .rehydrateUserIfMissing();
+        ref.read(drainCoordinatorProvider.notifier).kick('resume');
+      },
     );
   }
 
@@ -64,6 +70,9 @@ class _AppShellState extends ConsumerState<AppShell> {
     final user =
         ref.watch(sessionControllerProvider.select((s) => s.user));
     final tabs = tabsFor(user);
+    // Mantener VIVO el coordinador del drenado mientras el shell exista:
+    // su build engancha connectivity + barrido de huérfanos + kick inicial.
+    ref.watch(drainCoordinatorProvider.select((_) => 0));
     return Scaffold(
       backgroundColor: RideTokens.n50,
       appBar: const _ShellAppBar(),
@@ -299,11 +308,13 @@ class _TabItem extends ConsumerWidget {
       ShellTab.outbox => l10n.tabOutbox,
       ShellTab.profile => l10n.tabProfile,
     };
-    // Badge de Bandeja: cuenta de filas 'pending' del outbox. Hoy la DB abre
-    // en H5 — el provider corto devuelve 0 y el badge no se pinta.
-    final pending = tab == ShellTab.outbox
-        ? (ref.watch(outboxPendingCountProvider).value ?? 0)
-        : 0;
+    // Badge de Bandeja (H5): cuenta pendientes + muertos desde el stream de
+    // la DB real. Color por semántica del mockup 7: ámbar oscuro
+    // (--badge-warn) = esperando red · rojo = dead-letter, necesita decisión.
+    final badge = tab == ShellTab.outbox
+        ? ref.watch(outboxBadgeProvider)
+        : (waiting: 0, dead: 0);
+    final pending = badge.waiting + badge.dead;
     // GD MC-1: onTap en Semantics — ver _LocationChip.
     return Semantics(
       button: true,
@@ -340,10 +351,13 @@ class _TabItem extends ConsumerWidget {
                             vertical: 1,
                           ),
                           decoration: BoxDecoration(
-                            // GD MC-2: el badge es contador de trabajo
-                            // PENDIENTE — rojo danger (blanco ≈6.3:1), no
-                            // morado de marca.
-                            color: RideTokens.danger,
+                            // GD MC-2 + decisión PM (mockup 7): rojo danger
+                            // cuando hay dead-letter (necesita decisión);
+                            // ámbar oscuro accesible cuando solo hay filas
+                            // esperando red (blanco 6.15:1).
+                            color: badge.dead > 0
+                                ? RideTokens.danger
+                                : RideTokens.badgeWarn,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           constraints: const BoxConstraints(minWidth: 14),

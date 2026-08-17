@@ -199,6 +199,23 @@ void main() {
         reason: 'las filas ajenas no se tocan (se purgan al cambiar cuenta)');
   });
 
+  test('watchAllFor emite con cada escritura (el badge del shell vive de él)',
+      () async {
+    final snapshots = <int>[];
+    final sub = db
+        .watchAllFor(userId: 'u1', tenantId: 't1')
+        .listen((rows) => snapshots.add(rows.length));
+    await pumpEventQueue();
+    await db.into(db.outboxEntries).insert(entry('a'));
+    await pumpEventQueue();
+    await db.into(db.outboxEntries).insert(entry('b', userId: 'u2'));
+    await pumpEventQueue();
+    expect(snapshots.first, 0);
+    expect(snapshots.last, 1,
+        reason: 'las filas de OTRO dueño no aparecen en el stream');
+    await sub.cancel();
+  });
+
   test('purgeNotOwnedBy devuelve las filas borradas con sus payloads',
       () async {
     await db.into(db.outboxEntries).insert(entry('a', userId: 'saliente'));

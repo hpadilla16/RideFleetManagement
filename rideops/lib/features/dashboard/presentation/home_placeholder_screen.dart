@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/db/outbox_providers.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/session/session_controller.dart';
 import '../../../core/theme/ride_tokens.dart';
@@ -58,8 +59,7 @@ class HomePlaceholderScreen extends ConsumerWidget {
                   minimumSize: const Size(48, 48), // target DoD #2
                   foregroundColor: RideTokens.p700,
                 ),
-                onPressed: () =>
-                    ref.read(sessionControllerProvider.notifier).logout(),
+                onPressed: () => _logout(context, ref, l10n),
                 child: Text(l10n.logoutButton),
               ),
             ],
@@ -67,5 +67,44 @@ class HomePlaceholderScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  /// Logout con la advertencia del mockup 7C (nota 6): si hay envíos en la
+  /// bandeja, se dice EXPLÍCITO que cerrarán con el teléfono — la bandeja
+  /// pertenece a la cuenta y no sobrevive a otra (ADR-7). Bandeja vacía:
+  /// sin fricción.
+  Future<void> _logout(
+    BuildContext context,
+    WidgetRef ref,
+    AppLocalizations l10n,
+  ) async {
+    final badge = ref.read(outboxBadgeProvider);
+    final total = badge.waiting + badge.dead;
+    if (total > 0) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(l10n.logoutPendingTitle),
+          content: Text(l10n.logoutPendingBody(total)),
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(l10n.cancelButton),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(48, 48),
+                foregroundColor: RideTokens.dangerTx,
+              ),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(l10n.logoutAnyway),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    await ref.read(sessionControllerProvider.notifier).logout();
   }
 }

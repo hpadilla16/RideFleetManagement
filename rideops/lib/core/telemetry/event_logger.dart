@@ -56,6 +56,30 @@ abstract final class SessionEvents {
   static const viewLocationDenied = 'session.view_location_denied';
 }
 
+/// Eventos de inspección (03-observability.md §Inspección y bandeja) y de
+/// salud de cámara (§Salud) — historia H5.
+abstract final class InspectionEvents {
+  static const photoCaptured = 'inspection.photo_captured';
+  static const completedLocal = 'inspection.completed_local';
+}
+
+/// Eventos de la bandeja de salida (03-observability.md §Inspección y
+/// bandeja). `entry_dead` con un `code` desconocido es compuerta de release
+/// (bug de manejo de errores, no ruido).
+abstract final class OutboxEvents {
+  static const enqueued = 'outbox.enqueued';
+  static const drainedOk = 'outbox.drained_ok';
+  static const remintToken = 'outbox.remint_token';
+  static const entryDead = 'outbox.entry_dead';
+  static const purgedAccountSwitch = 'outbox.purged_account_switch';
+}
+
+/// Salud de cámara (03-observability.md §Salud): presión de memoria durante
+/// la captura — el guard del OOM de gama media (DoD #8).
+abstract final class CameraEvents {
+  static const oomGuard = 'camera.oom_guard';
+}
+
 /// Punto de enchufe de Sentry: cuando haya DSN, aquí se decide
 /// `SentryEventLogger` en prod y debug en dev. Hoy: debug print en debug,
 /// silencio en release.

@@ -8,6 +8,8 @@ import '../../features/auth/presentation/pin_lock_screen.dart';
 import '../../features/auth/presentation/pin_setup_screen.dart';
 import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/dashboard/presentation/home_placeholder_screen.dart';
+import '../../features/inspection/presentation/inspection_screen.dart';
+import '../../features/outbox/presentation/outbox_screen.dart';
 import '../../features/shell/app_shell.dart';
 import '../../features/shell/shell_placeholder_screen.dart';
 import '../l10n/app_localizations.dart';
@@ -33,6 +35,13 @@ abstract final class AppRoutes {
   static const incidents = '/incidents';
   static const outbox = '/outbox';
   static const profile = '/profile';
+
+  // Flujo de inspección (H5): pantalla completa FUERA del shell — sin tabs
+  // ni chip de sede (el header propio del flujo manda; el paso de firma es
+  // superficie del cliente). La entrada desde las cards del home es H4.
+  static const inspectionPattern = '/inspection/:reservationId';
+  static String inspection(String reservationId) =>
+      '/inspection/$reservationId';
 }
 
 /// Superficies del flujo de auth: NUNCA se preservan como destino de retorno
@@ -181,6 +190,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           resumeTo: state.uri.queryParameters['from'],
         ),
       ),
+      GoRoute(
+        path: AppRoutes.inspectionPattern,
+        builder: (context, state) => InspectionScreen(
+          reservationId: state.pathParameters['reservationId']!,
+        ),
+      ),
       // Shell de la app (blueprint §3, H3): appbar con chip de ubicación +
       // tab bar flotante RBAC. Los destinos sin historia todavía montan
       // ShellPlaceholderScreen — cada historia reemplaza el suyo.
@@ -208,9 +223,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: AppRoutes.outbox,
-            builder: (context, state) => ShellPlaceholderScreen(
-              title: AppLocalizations.of(context)!.tabOutbox,
-            ),
+            builder: (context, state) => const OutboxScreen(),
           ),
           GoRoute(
             path: AppRoutes.profile,

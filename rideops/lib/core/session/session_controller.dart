@@ -6,6 +6,7 @@ import '../api/api_error.dart';
 import '../api/api_providers.dart';
 import '../api/dto/session_user.dart';
 import '../api/token_refresher.dart';
+import '../db/outbox_providers.dart';
 import '../telemetry/event_logger.dart';
 import 'session_state.dart';
 import 'token_store.dart';
@@ -93,6 +94,13 @@ class SessionController extends Notifier<SessionState> {
       await _store.write(res.token);
       state = SessionState.authenticated(token: res.token, user: res.user);
       _logger.log(AuthEvents.loginOk);
+      // Purga por cambio de cuenta AL ENTRAR (ADR-7): filas de OTRO usuario
+      // que sobrevivieron a un 401/crash (el logout explícito ya purga) se
+      // van con sus archivos de foto. Best-effort: un Keystore/disco raro no
+      // puede tirar el login.
+      try {
+        await ref.read(outboxServiceProvider).purgeForeign(res.user.id);
+      } catch (_) {}
     } on ApiError catch (e) {
       _logger.log(
         AuthEvents.loginFail,
@@ -127,10 +135,17 @@ class SessionController extends Notifier<SessionState> {
     _logger.log(AuthEvents.passwordChanged);
   }
 
-  /// Logout explícito del usuario. El purge de la bandeja de salida por
-  /// cambio de cuenta (ADR-7) se conecta aquí cuando el outbox tenga filas
-  /// reales (M1-H5): hoy no hay escrituras encoladas en H1.
+  /// Logout explícito del usuario. La bandeja pertenece a la cuenta (ADR-7,
+  /// mockup 7C nota 6): filas Y archivos de foto se purgan — la UI del
+  /// logout advierte ANTES si hay envíos sin mandar. Un 401 involuntario NO
+  /// purga (onSessionExpired): el mismo usuario re-entra y su cola sigue;
+  /// si entra OTRO, la purga del login lo cubre.
   Future<void> logout() async {
+    try {
+      await ref.read(outboxServiceProvider).purgeAllForLogout();
+    } catch (_) {
+      // Best-effort: sin DB abierta no hay nada que purgar.
+    }
     await _store.clear();
     state = const SessionState.unauthenticated();
   }

@@ -7,8 +7,10 @@ import '../session/session_controller.dart';
 import '../session/token_store.dart';
 import '../telemetry/event_logger.dart';
 import 'auth_api.dart';
+import 'checkout_api.dart';
 import 'dio_factory.dart';
 import 'locations_api.dart';
+import 'reservations_api.dart';
 import 'token_refresher.dart';
 
 /// Cableado Riverpod de la capa API (M0-5 → M1-H1).
@@ -94,6 +96,21 @@ final Provider<Dio> authedDioProvider = Provider<Dio>((ref) {
 
 final Provider<LocationsApi> locationsApiProvider = Provider<LocationsApi>(
   (ref) => LocationsApi(authedDio: ref.watch(authedDioProvider)),
+);
+
+/// Checkout + inspección móvil (H5). El Dio público va SIN interceptores:
+/// las rutas /api/mobile-inspection/:token/* se autentican con el token de
+/// handoff, jamás con el bearer de staff (M0-5).
+final Provider<CheckoutApi> checkoutApiProvider = Provider<CheckoutApi>(
+  (ref) => CheckoutApi(
+    authedDio: ref.watch(authedDioProvider),
+    publicDio: ref.watch(publicDioProvider),
+  ),
+);
+
+final Provider<ReservationsApi> reservationsApiProvider =
+    Provider<ReservationsApi>(
+  (ref) => ReservationsApi(authedDio: ref.watch(authedDioProvider)),
 );
 
 final Provider<AuthApi> authApiProvider = Provider<AuthApi>((ref) {

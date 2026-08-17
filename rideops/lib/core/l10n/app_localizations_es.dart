@@ -309,4 +309,402 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get genericError => 'Algo salió mal. Intenta de nuevo.';
+
+  @override
+  String get inspTitle => 'Inspección de salida';
+
+  @override
+  String inspProgressChip(int count) {
+    return '$count de 8';
+  }
+
+  @override
+  String get inspProgressDone => '8 de 8 ✓';
+
+  @override
+  String get angleFront => 'Frente';
+
+  @override
+  String get angleRear => 'Atrás';
+
+  @override
+  String get angleLeft => 'Lado izquierdo';
+
+  @override
+  String get angleRight => 'Lado derecho';
+
+  @override
+  String get angleFrontSeat => 'Asiento del.';
+
+  @override
+  String get angleRearSeat => 'Asiento tras.';
+
+  @override
+  String get angleDash => 'Tablero';
+
+  @override
+  String get angleTrunk => 'Cajuela';
+
+  @override
+  String get angleRequiredChip => 'Obligatorio';
+
+  @override
+  String get anglePending => 'Pendiente';
+
+  @override
+  String get angleCompressing => 'Comprimiendo…';
+
+  @override
+  String get angleFailedRetry => 'Falló — toca para reintentar';
+
+  @override
+  String get angleQueued => 'En bandeja';
+
+  @override
+  String get angleOnServer => 'Ya en el servidor';
+
+  @override
+  String get inspContinueMetrics => 'Continuar a métricas';
+
+  @override
+  String get inspRequiredFootnote =>
+      'Frente y Atrás son obligatorios; el resto suma evidencia.';
+
+  @override
+  String get inspOfflineBanner =>
+      'Sin conexión. Puedes terminar la inspección completa: todo queda en la bandeja y se enviará al reconectar.';
+
+  @override
+  String get inspOfflineChip => 'Sin red';
+
+  @override
+  String inspLinkExpires(String time) {
+    return 'El enlace de esta sesión vence a las $time.';
+  }
+
+  @override
+  String get inspLoadOffline =>
+      'Sin conexión. Para iniciar la inspección se necesita señal una vez; después todo funciona sin red.';
+
+  @override
+  String get inspOutboxFull =>
+      'La bandeja está llena. Conéctate a una red para que se vacíe antes de capturar más fotos.';
+
+  @override
+  String camAnglePill(String angle, int n) {
+    return '$angle · $n de 8';
+  }
+
+  @override
+  String get camHintExterior =>
+      'Encuadra el vehículo completo dentro de las esquinas';
+
+  @override
+  String get camHintInterior =>
+      'Encuadra el área completa dentro de las esquinas';
+
+  @override
+  String get camFlash => 'Flash';
+
+  @override
+  String get camClose => 'Cerrar';
+
+  @override
+  String get camShutter => 'Tomar foto';
+
+  @override
+  String get metricsTitle => 'Métricas del vehículo';
+
+  @override
+  String get metricsOdometer => 'Odómetro';
+
+  @override
+  String get metricsOdometerUnit => 'mi';
+
+  @override
+  String metricsPrevReading(String value) {
+    return 'Última lectura registrada: $value mi';
+  }
+
+  @override
+  String get metricsOdometerLower =>
+      'La lectura es menor que la última registrada. Revísala — se enviará tal cual.';
+
+  @override
+  String get metricsFuel => 'Combustible';
+
+  @override
+  String get fuelEmpty => 'Vacío';
+
+  @override
+  String get fuelFull => 'Lleno';
+
+  @override
+  String get metricsCleanliness => 'Limpieza';
+
+  @override
+  String get cleanDirty => 'Sucio';
+
+  @override
+  String get cleanSpotless => 'Impecable';
+
+  @override
+  String get metricsNotes => 'Notas (opcional)';
+
+  @override
+  String get inspContinueSignature => 'Continuar a firma';
+
+  @override
+  String get kioskBarLabel => 'Modo firma · bloqueo en pausa';
+
+  @override
+  String get kioskBarExit => 'Salir: mantener 3 s + PIN';
+
+  @override
+  String get kioskExitPinTitle => 'Salir del modo firma';
+
+  @override
+  String get kioskExitPinBody => 'Escribe tu PIN para volver al modo staff.';
+
+  @override
+  String kioskExitWrongPin(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'PIN incorrecto — te quedan $count intentos',
+      one: 'PIN incorrecto — te queda 1 intento',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get kioskExitExhausted =>
+      'Demasiados intentos. Volviendo al paso anterior.';
+
+  @override
+  String kioskSignSubtitle(String reservation) {
+    return 'Inspección del vehículo · Reserva $reservation';
+  }
+
+  @override
+  String get kioskSignPrompt =>
+      'Firme para confirmar que revisó el estado del vehículo junto al agente.';
+
+  @override
+  String get kioskSignHint => 'Firme aquí con el dedo';
+
+  @override
+  String get kioskSignClear => 'Borrar';
+
+  @override
+  String get kioskSignConfirm => 'Confirmar firma';
+
+  @override
+  String summaryQueueTitle(int photos) {
+    return '$photos fotos · métricas · firma';
+  }
+
+  @override
+  String get summaryQueueBadgeOffline => 'Se enviará al reconectar';
+
+  @override
+  String get summaryQueueBadgeOnline => 'Listo para enviar';
+
+  @override
+  String get summaryQueueMeta =>
+      'Guardado local cifrado · orden de envío garantizado';
+
+  @override
+  String get inspFinishOffline => 'Terminar — se enviará al reconectar';
+
+  @override
+  String get inspFinishOnline => 'Terminar y enviar';
+
+  @override
+  String get inspFinishQueued => 'Inspección en la bandeja de salida';
+
+  @override
+  String get alreadyCompletedTitle => 'Esta inspección ya se completó';
+
+  @override
+  String get alreadyCompletedBody =>
+      'Otra pantalla la cerró mientras trabajabas. Tus envíos pendientes de esta sesión se retiraron de la bandeja — no se enviará nada duplicado.';
+
+  @override
+  String alreadyCompletedChip(String reservation) {
+    return 'Reserva $reservation';
+  }
+
+  @override
+  String get backToHome => 'Volver al inicio';
+
+  @override
+  String get outboxTitle => 'Bandeja de salida';
+
+  @override
+  String get outboxDraining => 'Enviando…';
+
+  @override
+  String outboxDrainProgress(int done, int total) {
+    return '$done de $total enviados';
+  }
+
+  @override
+  String outboxDrainRemaining(String size) {
+    return 'quedan ~$size';
+  }
+
+  @override
+  String outboxItemPhoto(String angle) {
+    return 'Foto · $angle';
+  }
+
+  @override
+  String get outboxItemComplete => 'Cierre de inspección';
+
+  @override
+  String outboxItemMetaPhoto(String reservation, String size) {
+    return '$reservation · inspección de salida · $size';
+  }
+
+  @override
+  String outboxItemMetaComplete(String reservation) {
+    return '$reservation · métricas + firma · va al final de su cadena';
+  }
+
+  @override
+  String get outboxStatusQueued => 'En cola';
+
+  @override
+  String get outboxStatusUploading => 'Subiendo';
+
+  @override
+  String get outboxStatusWaitsPhotos => 'Espera sus fotos';
+
+  @override
+  String get outboxStatusRejected => 'Rechazado';
+
+  @override
+  String outboxAttempts(int count, String time) {
+    return 'intentado $count veces · último $time';
+  }
+
+  @override
+  String get outboxReasonAnglesMissing =>
+      'El servidor lo rechazó: faltan los ángulos frontal y trasero. Captúralos y reintenta.';
+
+  @override
+  String get outboxReasonToken =>
+      'El permiso para subir venció o se consumió. Reintentar pedirá uno nuevo con tu sesión.';
+
+  @override
+  String get outboxReasonPhotoLost =>
+      'La foto ya no está en este teléfono. Solo puedes descartar este envío.';
+
+  @override
+  String get outboxReasonSessionGone =>
+      'La sesión de checkout ya no existe en el servidor.';
+
+  @override
+  String get outboxReasonNetwork =>
+      'No se pudo enviar tras varios intentos. Reintenta cuando haya señal.';
+
+  @override
+  String get outboxReasonGeneric => 'El servidor rechazó este envío.';
+
+  @override
+  String outboxTechnicalDetail(String code, String message) {
+    return 'Detalle técnico: $code · $message';
+  }
+
+  @override
+  String get outboxActionOpenInspection => 'Abrir inspección';
+
+  @override
+  String get outboxActionDiscard => 'Descartar';
+
+  @override
+  String outboxDeadBanner(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count envíos necesitan tu decisión. El resto seguirá enviándose normal.',
+      one: '1 envío necesita tu decisión. El resto seguirá enviándose normal.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get outboxDiscardTitle => '¿Descartar este envío?';
+
+  @override
+  String outboxDiscardBodyPhoto(String angle, String reservation) {
+    return 'Se borrará la foto ($angle) de $reservation de este teléfono. Habrá que capturarla de nuevo. Lo ya enviado al servidor no se toca.';
+  }
+
+  @override
+  String outboxDiscardBodyComplete(String reservation) {
+    return 'Se borrará el cierre de inspección de $reservation de este teléfono. Las métricas y la firma capturadas se perderán y habrá que repetirlas. Las fotos ya enviadas al servidor no se tocan.';
+  }
+
+  @override
+  String get outboxDiscardConfirm => 'Sí, descartar';
+
+  @override
+  String get outboxDiscardKeep => 'Conservar en la bandeja';
+
+  @override
+  String get outboxEmptyTitle => 'Todo enviado';
+
+  @override
+  String get outboxEmptyBody =>
+      'No hay nada esperando. Lo que captures sin señal aparecerá aquí y se enviará solo.';
+
+  @override
+  String outboxLastDrain(String time) {
+    return 'Último envío: $time';
+  }
+
+  @override
+  String get outboxFullTitle => 'La bandeja está llena';
+
+  @override
+  String outboxFullBody(int count) {
+    return '$count envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.';
+  }
+
+  @override
+  String outboxFullChip(int count, int max, String size) {
+    return '$count de $max · ~$size en espera';
+  }
+
+  @override
+  String get outboxFullCapturesPaused =>
+      'Las capturas nuevas están pausadas hasta liberar espacio.';
+
+  @override
+  String get outboxSendNow => 'Enviar ahora';
+
+  @override
+  String get outboxSendNowNoNetwork => 'Enviar ahora (sin red)';
+
+  @override
+  String get logoutPendingTitle => '¿Cerrar sesión?';
+
+  @override
+  String logoutPendingBody(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'Tienes $count envíos sin mandar; si cierras sesión se borran de este teléfono.',
+      one:
+          'Tienes 1 envío sin mandar; si cierras sesión se borra de este teléfono.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get logoutAnyway => 'Cerrar sesión igual';
 }

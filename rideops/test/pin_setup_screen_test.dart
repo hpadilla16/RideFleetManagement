@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/app.dart';
 import 'package:rideops/core/api/api_providers.dart';
+import 'package:rideops/core/db/outbox_providers.dart';
+import 'package:rideops/core/outbox/network_status.dart';
 import 'package:rideops/core/session/biometric_auth.dart';
 import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/token_store.dart';
@@ -11,6 +13,7 @@ import 'package:rideops/features/auth/presentation/pin_setup_screen.dart';
 import 'package:rideops/features/dashboard/presentation/home_placeholder_screen.dart';
 
 import 'helpers/auth_test_helpers.dart';
+import 'helpers/outbox_test_helpers.dart';
 
 /// Widget tests del setup del PIN (mockup 3A): sesión sin PIN ⇒ el redirect
 /// fuerza /pin-setup; 2 pasos (crear + confirmar) + oferta de huella si el
@@ -42,6 +45,11 @@ void main() {
           authApiProvider.overrideWithValue(api),
           eventLoggerProvider.overrideWithValue(logger),
           biometricAuthProvider.overrideWithValue(bio),
+          // H5: bandeja silenciada — ver helpers/outbox_test_helpers.dart.
+          outboxDbProvider.overrideWith(buildMemoryOutboxDb),
+          photoVaultProvider.overrideWith(buildQuietVault),
+          networkStatusProvider.overrideWithValue(FakeNetworkStatus()),
+          outboxRowsProvider.overrideWith((ref) => Stream.value(const [])),
         ],
         child: const RideOpsApp(),
       );

@@ -307,4 +307,400 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get genericError => 'Something went wrong. Try again.';
+
+  @override
+  String get inspTitle => 'Checkout inspection';
+
+  @override
+  String inspProgressChip(int count) {
+    return '$count of 8';
+  }
+
+  @override
+  String get inspProgressDone => '8 of 8 ✓';
+
+  @override
+  String get angleFront => 'Front';
+
+  @override
+  String get angleRear => 'Rear';
+
+  @override
+  String get angleLeft => 'Left side';
+
+  @override
+  String get angleRight => 'Right side';
+
+  @override
+  String get angleFrontSeat => 'Front seat';
+
+  @override
+  String get angleRearSeat => 'Rear seat';
+
+  @override
+  String get angleDash => 'Dashboard';
+
+  @override
+  String get angleTrunk => 'Trunk';
+
+  @override
+  String get angleRequiredChip => 'Required';
+
+  @override
+  String get anglePending => 'Pending';
+
+  @override
+  String get angleCompressing => 'Compressing…';
+
+  @override
+  String get angleFailedRetry => 'Failed — tap to retry';
+
+  @override
+  String get angleQueued => 'In outbox';
+
+  @override
+  String get angleOnServer => 'Already on server';
+
+  @override
+  String get inspContinueMetrics => 'Continue to metrics';
+
+  @override
+  String get inspRequiredFootnote =>
+      'Front and Rear are required; the rest adds evidence.';
+
+  @override
+  String get inspOfflineBanner =>
+      'No connection. You can finish the whole inspection: everything stays in the outbox and will send once you reconnect.';
+
+  @override
+  String get inspOfflineChip => 'No signal';
+
+  @override
+  String inspLinkExpires(String time) {
+    return 'This session\'s link expires at $time.';
+  }
+
+  @override
+  String get inspLoadOffline =>
+      'No connection. Starting an inspection needs signal once; after that everything works offline.';
+
+  @override
+  String get inspOutboxFull =>
+      'The outbox is full. Connect to a network so it can drain before capturing more photos.';
+
+  @override
+  String camAnglePill(String angle, int n) {
+    return '$angle · $n of 8';
+  }
+
+  @override
+  String get camHintExterior => 'Frame the whole vehicle inside the corners';
+
+  @override
+  String get camHintInterior => 'Frame the whole area inside the corners';
+
+  @override
+  String get camFlash => 'Flash';
+
+  @override
+  String get camClose => 'Close';
+
+  @override
+  String get camShutter => 'Take photo';
+
+  @override
+  String get metricsTitle => 'Vehicle metrics';
+
+  @override
+  String get metricsOdometer => 'Odometer';
+
+  @override
+  String get metricsOdometerUnit => 'mi';
+
+  @override
+  String metricsPrevReading(String value) {
+    return 'Last recorded reading: $value mi';
+  }
+
+  @override
+  String get metricsOdometerLower =>
+      'The reading is lower than the last recorded one. Double-check it — it will be sent as is.';
+
+  @override
+  String get metricsFuel => 'Fuel';
+
+  @override
+  String get fuelEmpty => 'Empty';
+
+  @override
+  String get fuelFull => 'Full';
+
+  @override
+  String get metricsCleanliness => 'Cleanliness';
+
+  @override
+  String get cleanDirty => 'Dirty';
+
+  @override
+  String get cleanSpotless => 'Spotless';
+
+  @override
+  String get metricsNotes => 'Notes (optional)';
+
+  @override
+  String get inspContinueSignature => 'Continue to signature';
+
+  @override
+  String get kioskBarLabel => 'Signing mode · lock paused';
+
+  @override
+  String get kioskBarExit => 'Exit: hold 3 s + PIN';
+
+  @override
+  String get kioskExitPinTitle => 'Exit signing mode';
+
+  @override
+  String get kioskExitPinBody => 'Enter your PIN to return to staff mode.';
+
+  @override
+  String kioskExitWrongPin(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Wrong PIN — $count attempts left',
+      one: 'Wrong PIN — 1 attempt left',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get kioskExitExhausted =>
+      'Too many attempts. Going back to the previous step.';
+
+  @override
+  String kioskSignSubtitle(String reservation) {
+    return 'Vehicle inspection · Reservation $reservation';
+  }
+
+  @override
+  String get kioskSignPrompt =>
+      'Sign to confirm you reviewed the vehicle\'s condition with the agent.';
+
+  @override
+  String get kioskSignHint => 'Sign here with your finger';
+
+  @override
+  String get kioskSignClear => 'Clear';
+
+  @override
+  String get kioskSignConfirm => 'Confirm signature';
+
+  @override
+  String summaryQueueTitle(int photos) {
+    return '$photos photos · metrics · signature';
+  }
+
+  @override
+  String get summaryQueueBadgeOffline => 'Will send on reconnect';
+
+  @override
+  String get summaryQueueBadgeOnline => 'Ready to send';
+
+  @override
+  String get summaryQueueMeta =>
+      'Encrypted local storage · guaranteed send order';
+
+  @override
+  String get inspFinishOffline => 'Finish — will send on reconnect';
+
+  @override
+  String get inspFinishOnline => 'Finish and send';
+
+  @override
+  String get inspFinishQueued => 'Inspection placed in the outbox';
+
+  @override
+  String get alreadyCompletedTitle => 'This inspection is already complete';
+
+  @override
+  String get alreadyCompletedBody =>
+      'Another screen closed it while you were working. Your pending items for this session were removed from the outbox — nothing duplicate will be sent.';
+
+  @override
+  String alreadyCompletedChip(String reservation) {
+    return 'Reservation $reservation';
+  }
+
+  @override
+  String get backToHome => 'Back to home';
+
+  @override
+  String get outboxTitle => 'Outbox';
+
+  @override
+  String get outboxDraining => 'Sending…';
+
+  @override
+  String outboxDrainProgress(int done, int total) {
+    return '$done of $total sent';
+  }
+
+  @override
+  String outboxDrainRemaining(String size) {
+    return '~$size left';
+  }
+
+  @override
+  String outboxItemPhoto(String angle) {
+    return 'Photo · $angle';
+  }
+
+  @override
+  String get outboxItemComplete => 'Inspection completion';
+
+  @override
+  String outboxItemMetaPhoto(String reservation, String size) {
+    return '$reservation · checkout inspection · $size';
+  }
+
+  @override
+  String outboxItemMetaComplete(String reservation) {
+    return '$reservation · metrics + signature · goes last in its chain';
+  }
+
+  @override
+  String get outboxStatusQueued => 'Queued';
+
+  @override
+  String get outboxStatusUploading => 'Uploading';
+
+  @override
+  String get outboxStatusWaitsPhotos => 'Waits for its photos';
+
+  @override
+  String get outboxStatusRejected => 'Rejected';
+
+  @override
+  String outboxAttempts(int count, String time) {
+    return 'tried $count times · last $time';
+  }
+
+  @override
+  String get outboxReasonAnglesMissing =>
+      'The server rejected it: the front and rear angles are missing. Capture them and retry.';
+
+  @override
+  String get outboxReasonToken =>
+      'The upload permit expired or was consumed. Retrying will request a new one with your session.';
+
+  @override
+  String get outboxReasonPhotoLost =>
+      'The photo is no longer on this phone. You can only discard this item.';
+
+  @override
+  String get outboxReasonSessionGone =>
+      'The checkout session no longer exists on the server.';
+
+  @override
+  String get outboxReasonNetwork =>
+      'Could not send after several attempts. Retry when there is signal.';
+
+  @override
+  String get outboxReasonGeneric => 'The server rejected this item.';
+
+  @override
+  String outboxTechnicalDetail(String code, String message) {
+    return 'Technical detail: $code · $message';
+  }
+
+  @override
+  String get outboxActionOpenInspection => 'Open inspection';
+
+  @override
+  String get outboxActionDiscard => 'Discard';
+
+  @override
+  String outboxDeadBanner(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count items need your decision. Everything else keeps sending normally.',
+      one:
+          '1 item needs your decision. Everything else keeps sending normally.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get outboxDiscardTitle => 'Discard this item?';
+
+  @override
+  String outboxDiscardBodyPhoto(String angle, String reservation) {
+    return 'The photo ($angle) for $reservation will be deleted from this phone. It will need to be captured again. Anything already sent to the server is untouched.';
+  }
+
+  @override
+  String outboxDiscardBodyComplete(String reservation) {
+    return 'The inspection completion for $reservation will be deleted from this phone. The captured metrics and signature will be lost and must be redone. Photos already sent to the server are untouched.';
+  }
+
+  @override
+  String get outboxDiscardConfirm => 'Yes, discard';
+
+  @override
+  String get outboxDiscardKeep => 'Keep in outbox';
+
+  @override
+  String get outboxEmptyTitle => 'All sent';
+
+  @override
+  String get outboxEmptyBody =>
+      'Nothing is waiting. Anything you capture without signal will show up here and send on its own.';
+
+  @override
+  String outboxLastDrain(String time) {
+    return 'Last send: $time';
+  }
+
+  @override
+  String get outboxFullTitle => 'The outbox is full';
+
+  @override
+  String outboxFullBody(int count) {
+    return '$count items waiting (phone limit). Nothing more fits — connect to a network so it drains and you can keep capturing.';
+  }
+
+  @override
+  String outboxFullChip(int count, int max, String size) {
+    return '$count of $max · ~$size waiting';
+  }
+
+  @override
+  String get outboxFullCapturesPaused =>
+      'New captures are paused until space is freed.';
+
+  @override
+  String get outboxSendNow => 'Send now';
+
+  @override
+  String get outboxSendNowNoNetwork => 'Send now (no signal)';
+
+  @override
+  String get logoutPendingTitle => 'Sign out?';
+
+  @override
+  String logoutPendingBody(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'You have $count items not sent; signing out deletes them from this phone.',
+      one: 'You have 1 item not sent; signing out deletes it from this phone.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get logoutAnyway => 'Sign out anyway';
 }
