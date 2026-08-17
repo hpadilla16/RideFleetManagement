@@ -195,7 +195,8 @@ figcaption small{display:block;font-weight:600;color:var(--n-600);font-size:12px
 .presence .lv{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:led 2.4s ease-in-out infinite;flex:0 0 auto}
 .presence .lv.stale{background:var(--n-500);animation:none} /* heartbeat 20–45 s: sigue ahí, pero no "ahora mismo" */
 /* GD-5: el header de sesión es CROMO PERSISTENTE del wizard. Variante completa al entrar / con el scroll arriba;
-   variante mini al hacer scroll. El chip de presencia NUNCA se oculta en ninguna de las dos. */
+   variante mini al hacer scroll. El chip de presencia se muestra en ambas variantes SALVO sin red (8D): estando
+   offline no se puede afirmar presencia viva, y un chip verde con datos de hace minutos sería una mentira. */
 .sesshead.mini{display:flex;align-items:center;gap:9px;padding:7px 12px}
 .sesshead.mini .who{display:flex;align-items:center;gap:8px;min-width:0;flex:1;font-size:13.5px;font-weight:800;color:var(--n-900)}
 .sesshead.mini .who svg{flex:0 0 auto;color:var(--p-800)}
@@ -410,7 +411,7 @@ footer.dod b{color:var(--n-900)}
     <code>events[]</code> y deja el resto en gris inerte. Con 4 superficies conviviendo, el avance ajeno es
     <b>normalidad</b>: banner informativo + auto-avance del stepper, nunca un modal que bloquee al agente.</p>
     <div class="state-chips">
-      <span class="schip"><i></i>Normal (paso 1/11)</span><span class="schip"><i></i>Los 11 pasos</span>
+      <span class="schip"><i></i>Normal (paso 1 de 10)</span><span class="schip"><i></i>Lista completa de pasos</span>
       <span class="schip"><i></i>Avance ajeno (no bloqueante)</span><span class="schip"><i></i>Sin red</span>
       <span class="schip"><i></i>Guardar y pausar</span><span class="schip"><i></i>Loading</span>
     </div>
@@ -935,7 +936,7 @@ footer.dod b{color:var(--n-900)}
             <div class="opt sel"><span class="radio"></span><span>U-118 · Corolla 2023<span class="osub">Mismo grupo · 19 402 km · listo</span></span></div>
             <div class="opt"><span class="radio"></span><span>U-121 · Sentra 2023<span class="osub">Mismo grupo · 31 980 km · listo</span></span></div>
             <div class="opt"><span class="radio"></span><span>U-140 · RAV4 2024<span class="osub">Grupo superior · puede cambiar la tarifa</span></span></div>
-            <div class="opt off"><span class="radio"></span><span>U-112 · Corolla 2023<span class="osub">No disponible · en renta R-2466</span></span></div>
+            <div class="opt off"><span class="radio"></span><span>U-112 · Corolla 2023<span class="osub">No disponible · en renta R-2466</span></span><span class="tchip mut">No disponible</span></div>
             <div class="btn btn-primary btn-md" style="margin-top:4px">Cambiar a U-118</div>
             <div class="btn btn-ghost btn-sm" style="margin-top:9px">Cancelar</div>
           </div>
@@ -953,7 +954,7 @@ footer.dod b{color:var(--n-900)}
       <div class="note"><span class="m">6</span><span><b>Consecuencia + ventana de arrepentimiento</b> en el mismo bloque. Deliberadamente NO hay diálogo de confirmación: el switch es reversible hasta que se firman los términos, y el aviso dice exactamente eso.</span></div>
       <div class="note"><span class="m">7</span><span><b>409 VEHICLE_CONFLICT en lenguaje de patio:</b> qué unidad, en qué renta, desde cuándo. El código de máquina nunca se muestra (va a telemetría). Los datos del conflicto salen del re-fetch posterior al 409, no de una suposición del cliente.</span></div>
       <div class="note"><span class="m">8</span><span><b>Una salida primaria, siempre.</b> "Elegir otro vehículo" es la acción que desatasca en el 95 % de los casos; "Abrir R-2466" es para el caso raro (el otro checkout quedó abierto por error). Prohibido dejar al agente con un error y ningún botón.</span></div>
-      <div class="note"><span class="m">9</span><span><b>El sheet declara la frescura de su lista</b> ("hace 4 s") y muestra la unidad en conflicto <b>atenuada con su motivo</b> en vez de omitirla: el agente ya la tenía en la mano y necesita entender por qué no puede. Tras el swap, re-fetch y re-render — el paso no cambia, cambian los datos.</span></div>
+      <div class="note"><span class="m">9</span><span><b>El sheet declara la frescura de su lista</b> ("hace 4 s") y muestra la unidad en conflicto <b>en estado inerte con su motivo legible</b> (sin opacidad: el motivo es información crítica) en vez de omitirla: el agente ya la tenía en la mano y necesita entender por qué no puede. Tras el swap, re-fetch y re-render — el paso no cambia, cambian los datos.</span></div>
       <div class="contrast"><b>Contraste MEDIDO (9A–9E)</b>
         <ul>
           <li>Valor de fila --n-900 sobre card #fdfcff <b>17.74:1</b> · clave --n-700 <b>9.02:1</b> sobre la misma card (9.22:1 sobre blanco puro).</li>
@@ -961,7 +962,7 @@ footer.dod b{color:var(--n-900)}
           <li>Dato faltante --danger-tx sobre card blanca <b>8.06:1</b> · enlace de captura mismo color <b>8.06:1</b>.</li>
           <li>Switch encendido: texto --n-900 sobre --warn-bg <b>16.49:1</b>; el riel ámbar usa --warn-tx #8a5606 como <b>superficie</b> (no-texto, ≥ 3:1 contra el fondo de la fila) — misma decisión que el badge --badge-warn de la Tanda B, no se inventa token nuevo.</li>
           <li>Banner de conflicto --danger-tx sobre --danger-bg <b>7.04:1</b> · CTA primario blanco sobre gradiente <b>5.70:1</b> peor parada.</li>
-          <li>Sheet: opción seleccionada --p-800 sobre --p-50 <b>9.93:1</b> · subtítulo --n-700 sobre blanco <b>9.22:1</b> · opción deshabilitada al 55 % — su información crítica se repite en texto ("No disponible · en renta R-2466"), el atenuado no es el único portador.</li>
+          <li>Sheet: opción seleccionada --p-800 sobre --p-50 <b>9.93:1</b> · subtítulo --n-700 sobre blanco <b>9.22:1</b> · <b>opción deshabilitada SIN opacidad</b> (regla del sistema): fondo --n-25, texto y motivo --n-700 <b>8.88:1</b> — el motivo "No disponible · en renta R-2466" es información crítica y se lee al 100 %; el radio inerte es el único elemento no-texto.</li>
         </ul></div>
       <div class="motion"><b>Motion</b>
         <ul>
@@ -1209,7 +1210,7 @@ footer.dod b{color:var(--n-900)}
     <div class="state-chips">
       <span class="schip"><i></i>Card lista + creando sesión</span><span class="schip"><i></i>Reanudar (idempotente)</span>
       <span class="schip"><i></i>422 PRECHECKIN_REQUIRED</span><span class="schip"><i></i>422 sin vehículo</span>
-      <span class="schip"><i></i>409 sesión terminal</span>
+      <span class="schip"><i></i>409 conflicto de vehículo (al crear)</span><span class="schip"><i></i>409 sesión terminal</span>
     </div>
   </div>
   <div class="frames">
@@ -1422,10 +1423,10 @@ footer.dod b{color:var(--n-900)}
       <div class="note"><span class="m">6</span><span><b>409 SESSION_TERMINAL no es un error, es una noticia.</b> Icono verde si terminó en CLOSED (trabajo hecho por otro), ámbar/danger si terminó en CANCELLED. El copy dice dónde y cuándo terminó — con 4 superficies conviviendo, esta pantalla la va a ver mucha gente y no puede sonar a fallo.</span></div>
       <div class="note"><span class="m">7</span><span><b>Resumen desde <code>events[]</code>, en lenguaje humano y con atribución</b> (<code>actorUserId</code> + <code>metadata.kiosk</code>). Es la respuesta a "¿y entonces quién lo entregó?" sin ir al escritorio. Los eventos crudos quedan para soporte, no para el patio.</span></div>
       <div class="note"><span class="m">8</span><span><b>Terminal significa terminal:</b> no se ofrece "reintentar" ni "reabrir" — ofrecerlo sería mentir sobre la máquina de estados. La única puerta es la reserva, donde sí hay herramientas.</span></div>
-      <div class="contrast"><b>Contraste MEDIDO (11A–11D)</b>
+      <div class="contrast"><b>Contraste MEDIDO (11A–11E)</b>
         <ul>
           <li>Nombre de la card --n-900 sobre #fdfcff <b>17.74:1</b> · meta --n-600 <b>4.93:1</b> (sobre blanco puro 5.04:1) · la meta crítica ("Falta pre-checkin") se sube a --n-900 en negrita, <b>17.74:1</b>.</li>
-          <li>Card en arranque: chip y texto --p-800 sobre --p-50 <b>9.93:1</b> · spinner blanco sobre CTA gradiente (no-texto).</li>
+          <li><b>Card en arranque (<code>.qcard.busy</code>, componente NUEVO del M2):</b> su fondo es --p-50, así que la meta NO puede quedarse en --n-600 (daría 4.48:1, bajo AA) — se sube a <b>--n-700 sobre --p-50 = 8.18:1</b>, la misma regla que ya se aplicó al header de sesión. Chip y texto --p-800 sobre --p-50 <b>9.93:1</b> · spinner blanco sobre CTA gradiente (no-texto).</li>
           <li>Chip "En curso" --ok-tx sobre --ok-bg <b>6.19:1</b> · chip ámbar --warn-tx sobre --warn-bg <b>5.59:1</b>.</li>
           <li>Sheets de negativa: el plate .96 sobre la home compone a blanco puro, así que título --n-900 <b>18.14:1</b> · subtítulo y nota de cierre --n-700 <b>9.22:1</b>. Ningún texto vive sobre el scrim.</li>
           <li>Events log: hora --n-700 <b>9.22:1</b> · evento --n-900 <b>18.14:1</b> · atribución --n-700 <b>9.22:1</b> (no --n-600: es el dato que se lee al sol para responder una reclamación).</li>
@@ -1456,8 +1457,8 @@ footer.dod b{color:var(--n-900)}
       <li><b>Avance ajeno = banner informativo + auto-avance, nunca modal.</b> Con las 4 superficies conviviendo (§9-1), un diálogo por cada cambio ajeno sería un bloqueo cada pocos minutos. La atribución sale de <code>events[]</code>, sin backend nuevo; el chip de presencia (P1) es informativo y expira solo al pasar el TTL de 45 s.</li>
       <li><b>Offline que congela afirmaciones, no el trabajo:</b> se lee la sesión cacheada con edad visible en la propia stepline, las transiciones se deshabilitan <b>con causa nombrada</b>, y se declara explícitamente que los pasos del checkout no entran a la Bandeja (ADR-5 recordado en el punto de decisión, no en un aviso genérico).</li>
       <li><b>Countdown del QR como información, no decoración:</b> mm:ss tabular, ámbar a los 2 min restantes —umbral que coincide con la ventana de re-minteo del backend, así que el color significa algo verificable— y re-emisión de un toque cuya copy admite cuándo el backend reusa el mismo token.</li>
-      <li><b>Superficie del cliente sin marca de plataforma,</b> y el riesgo real señalado donde vive: la página pública de términos es del backend, y el mockup deja como requisito de QA verificar que su branding sale de display-data (el M1 ya cazó un "Ride Fleet" colado por un default).</li>
-      <li><b>Cada guard de creación tiene salida:</b> 422 pre-checkin (enviar link / capturar aquí), 422 sin vehículo (asignar / abrir reserva), 409 conflicto de vehículo (swap con la unidad en conflicto atenuada y explicada), 409 terminal (resumen del events log, sin falsas puertas de reintento).</li>
+      <li><b>Superficie del cliente sin marca de plataforma — y el destino del QR hoy SÍ la filtra.</b> Verificado en código, no es sospecha: <code>frontend/src/app/sign/[token]/page.js</code> pinta "Terms &amp; Conditions" en inglés y sin identidad del tenant, y <code>frontend/src/app/layout.js</code> fija <code>metadata.title = 'Ride Fleet'</code> sin override en <code>/sign</code>. Es <b>criterio de aceptación BLOQUEANTE de M2-H2</b> (nota 5 de la sección 10) y está registrado como gap #11 del PROJECT_PLAN por afectar a clientes hoy.</li>
+      <li><b>Cada guard de creación tiene salida:</b> 422 pre-checkin (enviar link / capturar aquí), 422 sin vehículo (asignar / abrir reserva), <b>409 conflicto de vehículo en sus dos caminos</b> (11D al crear, sin sesión que exista todavía; 9D+9E con sesión viva, donde el swap sí es posible), 409 terminal (resumen del events log, sin falsas puertas de reintento).</li>
       <li><b>Política de blur sostenida y endurecida:</b> el wizard completo va con CERO BackdropFilter (plates opacos ≥ .96) porque es donde viven los datos que se firman y se cobran; en la home el único blur sigue siendo el tab bar, que cae a plate cuando sube un sheet.</li>
       <li><b>Contraste medido, no estimado:</b> todos los pares de estas 4 pantallas se calcularon con la fórmula WCAG sobre el fondo compuesto real y se reportan con su número. Dos rechazos concretos que cambiaron el diseño: --n-600 sobre --tonal (4.58:1) sustituido por --n-700 (8.37:1) en todo el header de sesión, y el azul --info descartado como texto sobre --info-bg (4.94:1) en favor de --n-800 (12.48:1), quedando el azul solo en el icono.</li>
     </ul>
@@ -1468,8 +1469,8 @@ footer.dod b{color:var(--n-900)}
     <b>#2</b> targets: CTAs 54–56, filas de paso y opciones 52–56, chips e iconos con hit-slop a 48, QR de presentación 230 px; contraste ≥ 4.5:1 de texto contra el fondo REAL con los pares medidos listados en cada bloque de notas (los ≥ 3:1 declarados explícitamente como no-texto: check blanco sobre --ok 4.32:1, riel del switch, QR atenuado) ·
     <b>#3</b> ruta offline dibujada (8D): lectura con edad del dato, transiciones bloqueadas con causa, y la regla explícita de que ni los pasos del checkout ni el dinero entran a la Bandeja (ADR-5) ·
     <b>#4</b> RBAC/scoping contra la API: el wizard vive bajo <code>requireModuleAccess('reservations')</code> y el 403 se maneja aunque la nav esconda entradas; el CTA de la cola no se auto-deshabilita — el guard lo aplica el servidor ·
-    <b>#5</b> estados de error: <b>409 <code>VEHICLE_CONFLICT</code></b> (9D + swap 9E) · <b>409 <code>SESSION_TERMINAL</code></b> (11D) · <b>409 <code>ENTRY_GUARD</code></b> anticipado en la lista de pasos (8B) · <b>409 <code>ILLEGAL_TRANSITION</code></b> resuelto como no-op + re-render (8C: si el paso ya lo hizo otra superficie, el banner sustituye al error) · <b>422 <code>PRECHECKIN_REQUIRED</code></b> (11B) y <b>422 <code>NO_VEHICLE_ASSIGNED</code></b> (11C) · 401 → re-login (Tanda A del M1) · 403 de ubicación → negativa visible (M1 4D) · 429 absorbido por el backoff del poll ·
-    <b>#10</b> loading (8F skeleton con la geometría real del shell, 11A arranque en la card), estado de espera (10A) y error (8D, 9B, 9D, 10D, 11B–11D) por pantalla.
+    <b>#5</b> estados de error: <b>409 <code>VEHICLE_CONFLICT</code></b> en sus DOS caminos — <b>11D</b> al CREAR (la sesión todavía no existe: no hay <code>:id</code> al que hacerle swap) y <b>9D + 9E</b> con sesión viva (swap real) · <b>409 <code>SESSION_TERMINAL</code></b> (<b>11E</b>) · <b>409 <code>ENTRY_GUARD</code></b> anticipado en la lista de pasos (8B) · <b>409 <code>ILLEGAL_TRANSITION</code></b> resuelto como no-op + re-render (8C: si el paso ya lo hizo otra superficie, el banner sustituye al error) · <b>422 <code>PRECHECKIN_REQUIRED</code></b> (11B) y <b>422 <code>NO_VEHICLE_ASSIGNED</code></b> (11C) · 401 → re-login (Tanda A del M1) · 403 de ubicación → negativa visible (M1 4D) · 429 absorbido por el backoff del poll ·
+    <b>#10</b> loading (8F skeleton con la geometría real del shell, 11A arranque en la card), estado de espera (10A) y error (8D, 9B, 9D, 10D, 11B–11E) por pantalla.
     <br><br>
     <b>Pendientes marcados para build (ninguno bloquea la aprobación de esta tanda):</b>
     (a) pedido opcional al backend de <code>steps[]</code> en <code>GET /:id</code> para que el rail sea 100 % server-driven;
