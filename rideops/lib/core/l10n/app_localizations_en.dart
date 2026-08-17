@@ -581,6 +581,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String cardOpenInspectionSemantics(String name) {
+    return '$name: open checkout inspection';
+  }
+
+  @override
   String get inspTitle => 'Checkout inspection';
 
   @override

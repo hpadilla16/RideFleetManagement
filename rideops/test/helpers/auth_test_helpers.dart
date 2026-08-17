@@ -8,6 +8,7 @@ import 'package:rideops/core/api/dashboard_api.dart';
 import 'package:rideops/core/api/dto/dashboard.dart';
 import 'package:rideops/core/api/dto/session_user.dart';
 import 'package:rideops/core/session/biometric_auth.dart';
+import 'package:rideops/core/session/kiosk_guard.dart';
 import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/token_store.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
@@ -50,6 +51,25 @@ AuthResponse authResponseFromFixture({
   user['screenLockExempt'] = screenLockExempt;
   if (token != null) raw['token'] = token;
   return AuthResponse.fromJson(raw);
+}
+
+/// KioskGuardStore en memoria — como todo secreto del Keystore, el real hace
+/// IO async que jamás resuelve dentro de testWidgets: TODO test que monte la
+/// app (o toque lockControllerProvider) debe overridear
+/// `kioskGuardStoreProvider` con esto.
+class InMemoryKioskGuardStore implements KioskGuardStore {
+  InMemoryKioskGuardStore({this.flag = false});
+
+  bool flag;
+
+  @override
+  Future<bool> read() async => flag;
+
+  @override
+  Future<void> set() async => flag = true;
+
+  @override
+  Future<void> clear() async => flag = false;
 }
 
 class InMemoryTokenStore implements TokenStore {

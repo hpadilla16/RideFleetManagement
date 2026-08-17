@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +10,7 @@ import 'package:rideops/core/db/outbox_providers.dart';
 import 'package:rideops/core/outbox/network_status.dart';
 import 'package:rideops/core/session/active_location.dart';
 import 'package:rideops/core/session/biometric_auth.dart';
+import 'package:rideops/core/session/kiosk_guard.dart';
 import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/token_store.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
@@ -16,6 +18,7 @@ import 'package:rideops/features/dashboard/application/dashboard_controller.dart
 import 'package:rideops/features/dashboard/presentation/home_screen.dart';
 import 'package:rideops/features/dashboard/presentation/home_skeleton.dart';
 import 'package:rideops/features/dashboard/presentation/queue_list_screen.dart';
+import 'package:rideops/features/inspection/presentation/inspection_screen.dart';
 import 'package:rideops/features/shell/location_denied_view.dart';
 
 import 'helpers/auth_test_helpers.dart';
@@ -50,10 +53,22 @@ void main() {
           tokenStoreProvider.overrideWithValue(tokenStore),
           activeLocationStoreProvider.overrideWithValue(locationStore),
           pinStoreProvider.overrideWithValue(InMemoryPinStore()),
+          kioskGuardStoreProvider.overrideWithValue(InMemoryKioskGuardStore()),
           biometricAuthProvider.overrideWithValue(FakeBiometricAuth()),
           authApiProvider.overrideWithValue(api),
           dashboardApiProvider.overrideWithValue(dashboardApi),
           eventLoggerProvider.overrideWithValue(CapturingEventLogger()),
+          // Dio sin rutas (offline simulado): la navegación a la inspección
+          // (CTA H6) debe ser determinista — la pantalla cae en su estado
+          // offline, jamás una request real desde el test.
+          authedDioProvider.overrideWithValue(
+            Dio(BaseOptions(baseUrl: 'https://rideops.test'))
+              ..httpClientAdapter = RouteAdapter(),
+          ),
+          publicDioProvider.overrideWithValue(
+            Dio(BaseOptions(baseUrl: 'https://rideops.test'))
+              ..httpClientAdapter = RouteAdapter(),
+          ),
           // H5: bandeja silenciada — ver helpers/outbox_test_helpers.dart.
           outboxDbProvider.overrideWith(buildMemoryOutboxDb),
           photoVaultProvider.overrideWith(buildQuietVault),
@@ -190,6 +205,40 @@ void main() {
     final returnsY = tester.getTopLeft(find.text('Returns (72 h)')).dy;
     expect(incidentsY, lessThan(pickupsY));
     expect(pickupsY, lessThan(returnsY));
+  });
+
+  testWidgets(
+      'CTA de la cola de salidas (H6): SOLO la card de checkout es tocable y '
+      'navega a /inspection/:reservationId', (tester) async {
+    final now = DateTime.now();
+    dashboardApi.onFetch = (_) async => payload(
+          queues: {
+            'checkout': [
+              cardJson(
+                id: 'chk-nav',
+                pickupAt: now.add(const Duration(hours: 2)),
+              ),
+            ],
+            'returns': [
+              cardJson(
+                id: 'ret-1',
+                returnAt: now.add(const Duration(hours: 3)),
+              ),
+            ],
+          },
+        );
+    await pumpHome(tester);
+
+    // Affordance explícita SOLO en la cola de salidas: entre 2 cards de
+    // reserva hay exactamente UNA con CTA (la de retornos sigue no-tocable
+    // a propósito — el detalle general es M3).
+    final cta = find.bySemanticsLabel(RegExp('open checkout inspection'));
+    expect(cta, findsOneWidget);
+
+    await tester.tap(cta);
+    await tester.pumpAndSettle();
+    expect(find.byType(InspectionScreen), findsOneWidget,
+        reason: 'la card gana su entrada al flujo de inspección de H5');
   });
 
   testWidgets(

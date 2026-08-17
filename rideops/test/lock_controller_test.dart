@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/core/api/api_providers.dart';
 import 'package:rideops/core/session/biometric_auth.dart';
+import 'package:rideops/core/session/kiosk_guard.dart';
 import 'package:rideops/core/session/lock_controller.dart';
 import 'package:rideops/core/session/lock_state.dart';
 import 'package:rideops/core/session/pin_store.dart';
@@ -18,15 +19,16 @@ import 'package:rideops/core/telemetry/event_logger.dart';
 import 'helpers/auth_test_helpers.dart';
 
 /// Unit tests del LockController (H2): timer de inactividad, intentos,
-/// exención, background, suspend/resume (contrato para el kiosco H5) y
-/// pureza del PIN en el Keystore. Todo bajo fakeAsync: los timers y el reloj
-/// (package:clock) avanzan con async.elapse.
+/// exención, background, suspend/resume (contrato para el kiosco H5),
+/// recuperación de kiosco (H6) y pureza del PIN en el Keystore. Todo bajo
+/// fakeAsync: los timers y el reloj (package:clock) avanzan con async.elapse.
 void main() {
   late InMemoryTokenStore tokenStore;
   late InMemoryPinStore pinStore;
   late FakeAuthApi api;
   late CapturingEventLogger logger;
   late FakeBiometricAuth bio;
+  late InMemoryKioskGuardStore kioskStore;
 
   setUp(() {
     tokenStore = InMemoryTokenStore();
@@ -34,6 +36,7 @@ void main() {
     api = FakeAuthApi();
     logger = CapturingEventLogger();
     bio = FakeBiometricAuth();
+    kioskStore = InMemoryKioskGuardStore();
     api.onMe = () async => authResponseFromFixture().user;
   });
 
@@ -45,6 +48,7 @@ void main() {
         authApiProvider.overrideWithValue(api),
         eventLoggerProvider.overrideWithValue(logger),
         biometricAuthProvider.overrideWithValue(bio),
+        kioskGuardStoreProvider.overrideWithValue(kioskStore),
       ],
     );
     addTearDown(container.dispose);
@@ -421,6 +425,85 @@ void main() {
         async.flushMicrotasks();
         async.elapse(LockController.idleTimeout);
         expect(lockOf(c).locked, isTrue);
+      });
+    });
+  });
+
+  group('recuperación de kiosco (H6 — el kiosco IGNORA la exención)', () {
+    test(
+        'flag + PIN + usuario exempt: cold start aterriza BLOQUEADO, el flag '
+        'se consume y la exención hidratada NO abre; el PIN sí', () {
+      fakeAsync((async) {
+        pinStore = InMemoryPinStore.configured(userId: kFixtureUserId);
+        kioskStore.flag = true;
+        api.onMe =
+            () async => authResponseFromFixture(screenLockExempt: true).user;
+        final c = coldStart(async);
+
+        expect(lockOf(c).locked, isTrue,
+            reason: 'quien relanza tras matar el kiosco no probó ser el dueño');
+        expect(kioskStore.flag, isFalse, reason: 'flag one-shot consumido');
+        expect(eventData(SessionEvents.pinLock)?['reason'], 'kiosk_recovery');
+
+        // /me ya hidrató screenLockExempt=true — y el candado NO cede.
+        expect(
+          c.read(sessionControllerProvider).user?.screenLockExempt,
+          isTrue,
+        );
+        async.flushMicrotasks();
+        expect(lockOf(c).locked, isTrue,
+            reason: 'la exención protege de fricción, no al teléfono ajeno');
+
+        var ok = false;
+        unawaited(ctrlOf(c).verifyPin('1234').then((v) => ok = v));
+        async.flushMicrotasks();
+        expect(ok, isTrue);
+        expect(lockOf(c).locked, isFalse);
+      });
+    });
+
+    test('flag SIN PIN (exempt sin setup): cold start fuerza re-login con '
+        'contraseña y consume el flag', () {
+      fakeAsync((async) {
+        kioskStore.flag = true;
+        api.onMe =
+            () async => authResponseFromFixture(screenLockExempt: true).user;
+        final c = coldStart(async);
+
+        expect(
+          c.read(sessionControllerProvider).status,
+          SessionStatus.unauthenticated,
+          reason: 'sin PIN la única credencial local es la contraseña',
+        );
+        expect(kioskStore.flag, isFalse);
+        expect(
+          eventData(SessionEvents.pinLock)?['reason'],
+          'kiosk_recovery_relogin',
+        );
+      });
+    });
+
+    test('login FRESCO con flag colgado: no bloquea (la contraseña acaba de '
+        'probarse) pero el flag se limpia', () {
+      fakeAsync((async) {
+        pinStore = InMemoryPinStore.configured(userId: kFixtureUserId);
+        kioskStore.flag = true;
+        final c = freshLogin(async);
+        expect(lockOf(c).locked, isFalse);
+        expect(kioskStore.flag, isFalse);
+      });
+    });
+
+    test('noteKioskEntered persiste el flag; noteKioskExited lo limpia', () {
+      fakeAsync((async) {
+        pinStore = InMemoryPinStore.configured(userId: kFixtureUserId);
+        final c = freshLogin(async);
+        ctrlOf(c).noteKioskEntered();
+        async.flushMicrotasks();
+        expect(kioskStore.flag, isTrue);
+        ctrlOf(c).noteKioskExited();
+        async.flushMicrotasks();
+        expect(kioskStore.flag, isFalse);
       });
     });
   });

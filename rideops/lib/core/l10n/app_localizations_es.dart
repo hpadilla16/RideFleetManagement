@@ -583,6 +583,11 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String cardOpenInspectionSemantics(String name) {
+    return '$name: abrir inspección de salida';
+  }
+
+  @override
   String get inspTitle => 'Inspección de salida';
 
   @override

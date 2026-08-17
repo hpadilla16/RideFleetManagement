@@ -15,6 +15,7 @@ import 'package:rideops/core/outbox/network_status.dart';
 import 'package:rideops/core/outbox/outbox_service.dart';
 import 'package:rideops/core/outbox/photo_vault.dart';
 import 'package:rideops/core/session/active_location.dart';
+import 'package:rideops/core/session/kiosk_guard.dart';
 import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/session_controller.dart';
 import 'package:rideops/core/session/session_state.dart';
@@ -105,6 +106,7 @@ void main() {
       pinStoreProvider.overrideWithValue(
         InMemoryPinStore.configured(userId: kFixtureUserId),
       ),
+      kioskGuardStoreProvider.overrideWithValue(InMemoryKioskGuardStore()),
       activeLocationStoreProvider.overrideWithValue(
         InMemoryActiveLocationStore(json.encode({
           'userId': kFixtureUserId,

@@ -272,6 +272,11 @@
   "@searchNoResults": {
     "placeholders": { "query": { "type": "String" } }
   },
+  "cardOpenInspectionSemantics": "{name}: abrir inspección de salida",
+  "@cardOpenInspectionSemantics": {
+    "description": "Card tocable de la cola de salidas (H6) — CTA hacia /inspection/:reservationId",
+    "placeholders": { "name": { "type": "String" } }
+  },
 
   "inspTitle": "Inspección de salida",
   "inspProgressChip": "{count} de 8",

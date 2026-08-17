@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/api/dto/dashboard.dart';
 import '../../../../core/api/dto/reservation_card.dart';
 import '../../../../core/l10n/app_localizations.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/ride_tokens.dart';
 import '../../domain/dashboard_queues.dart';
 
@@ -122,6 +124,7 @@ class _QueueCardShell extends StatelessWidget {
     required this.title,
     required this.chip,
     required this.meta,
+    this.trailing,
   });
 
   final IconData icon;
@@ -130,6 +133,11 @@ class _QueueCardShell extends StatelessWidget {
   final String title;
   final Widget chip;
   final String meta;
+
+  /// Affordance de acción al final de la fila (hoy: solo la cola de salidas
+  /// — H6). Las demás cards siguen sin CTA a propósito: el detalle general
+  /// de reserva es M3 y una card que "parece botón" sin destino miente.
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -196,6 +204,10 @@ class _QueueCardShell extends StatelessWidget {
               ],
             ),
           ),
+          if (trailing != null) ...[
+            const SizedBox(width: 8),
+            trailing!,
+          ],
         ],
       ),
     );
@@ -233,7 +245,13 @@ class ReservationQueueCard extends StatelessWidget {
     final chip = _chipFor(l10n, locale);
     final meta = _metaFor(l10n);
 
-    return _QueueCardShell(
+    // CTA de la cola de SALIDAS (H6, el cabo H4↔H5): la card gana entrada a
+    // la inspección de checkout (/inspection/:reservationId). SOLO esta cola
+    // — las demás cards siguen no-tocables a propósito (detalle general en
+    // M3). Affordance explícita: chevron tonal + toda la card tocable.
+    final tappable = queue == DashboardQueue.checkout;
+
+    final shell = _QueueCardShell(
       icon: _iconFor(),
       iconBg: queue == DashboardQueue.loanerAdvisorFollowup
           ? RideTokens.warnBg
@@ -244,6 +262,42 @@ class ReservationQueueCard extends StatelessWidget {
       title: title,
       chip: chip,
       meta: meta,
+      trailing: tappable
+          ? Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: RideTokens.p50,
+                border: Border.all(color: RideTokens.brandA20),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                Icons.chevron_right_rounded,
+                size: 18,
+                color: RideTokens.p700,
+              ),
+            )
+          : null,
+    );
+    if (!tappable) return shell;
+
+    void open() => context.push(AppRoutes.inspection(item.id));
+    // GD MC-1 (patrón del shell): la acción también en el nodo Semantics —
+    // la card completa (~68 px) es el target táctil (DoD #2).
+    return Semantics(
+      button: true,
+      label: l10n.cardOpenInspectionSemantics(title),
+      onTap: open,
+      child: ExcludeSemantics(
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: open,
+            borderRadius: BorderRadius.circular(20),
+            child: shell,
+          ),
+        ),
+      ),
     );
   }
 

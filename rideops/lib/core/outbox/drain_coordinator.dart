@@ -8,6 +8,7 @@ import '../db/outbox_db.dart';
 import '../db/outbox_providers.dart';
 import '../session/session_controller.dart';
 import '../telemetry/event_logger.dart';
+import 'background_drain.dart';
 import 'drainer.dart';
 import 'network_status.dart';
 import 'outbox_service.dart';
@@ -130,9 +131,11 @@ class DbOutboxStore implements OutboxStore {
 ///    nota 3 del mockup 7B) cuando una corrida deja pendientes por fallos
 ///    transitorios.
 ///
-/// El drenado en BACKGROUND (WorkManager) es historia H6: [kick] es el punto
-/// de enchufe — el worker de H6 solo necesita invocar el drenador con el
-/// mismo store/ops, sin tocar esta clase.
+/// El drenado en BACKGROUND (WorkManager, H6) toma el relevo cuando este
+/// coordinador no puede seguir: [kick] agenda una one-off con constraint de
+/// red si hay filas y no hay red (o si una corrida dejó pendientes — un
+/// proceso muerto no cancela el relevo del OS) y la cancela cuando la
+/// bandeja queda limpia. El worker vive en background_drain.dart.
 class DrainCoordinator extends Notifier<DrainStatus> {
   Timer? _retryTimer;
   int _consecutiveIncompleteRuns = 0;
@@ -193,15 +196,24 @@ class DrainCoordinator extends Notifier<DrainStatus> {
   Future<void> kick(String reason) async {
     if (!ref.mounted || state.running) return;
     final network = ref.read(networkStatusProvider);
+    bool online;
     try {
-      if (!await network.hasNetwork()) return;
+      online = await network.hasNetwork();
     } catch (_) {
       return; // plugin ausente (tests): sin señal no hay drenado
     }
+    if (!ref.mounted) return;
     final store = ref.read(outboxStoreProvider);
     final drainer = ref.read(outboxDrainerProvider);
     final pendingBefore = (await store.pending()).length;
     if (!ref.mounted) return;
+    if (!online) {
+      // Sin red con filas esperando (p. ej. encolado en modo avión): el
+      // relevo pasa a WorkManager — su constraint de red dispara el drenado
+      // aunque la app muera antes de reconectar (H6).
+      if (pendingBefore > 0) _scheduleBackgroundRelay();
+      return;
+    }
     if (pendingBefore == 0) return;
 
     state = state.copyWith(running: true, done: 0, total: pendingBefore);
@@ -222,10 +234,36 @@ class DrainCoordinator extends Notifier<DrainStatus> {
     if (pendingAfter > 0) {
       _consecutiveIncompleteRuns++;
       _scheduleRetry();
+      // El timer de backoff muere con el proceso; la one-off de WorkManager
+      // no — doble red de seguridad para pendientes transitorios.
+      _scheduleBackgroundRelay();
     } else {
       _consecutiveIncompleteRuns = 0;
       _retryTimer?.cancel();
+      // Bandeja limpia: cancelar el relevo para no despertar el proceso en
+      // balde (y no quemar la cuota de background del OS).
+      _cancelBackgroundRelay();
     }
+  }
+
+  /// Best-effort ambos: en tests/plataformas sin plugin, MissingPlugin no
+  /// debe tumbar el kick — el drenado foreground ya cumplió su parte.
+  /// Closures async auto-invocadas (microtask), no `Future(...)`: Future()
+  /// agenda un Timer y rompe el !timersPending de los widget tests.
+  void _scheduleBackgroundRelay() {
+    unawaited(() async {
+      try {
+        await ref.read(backgroundDrainSchedulerProvider).ensureScheduled();
+      } catch (_) {}
+    }());
+  }
+
+  void _cancelBackgroundRelay() {
+    unawaited(() async {
+      try {
+        await ref.read(backgroundDrainSchedulerProvider).cancel();
+      } catch (_) {}
+    }());
   }
 
   /// El anillo 7A avanza por fila que sale (DrainOk o dead) — lo alimenta

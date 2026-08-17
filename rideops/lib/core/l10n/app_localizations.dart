@@ -974,6 +974,12 @@ abstract class AppLocalizations {
   /// **'Sin resultados para “{query}”.'**
   String searchNoResults(String query);
 
+  /// Card tocable de la cola de salidas (H6) — CTA hacia /inspection/:reservationId
+  ///
+  /// In es, this message translates to:
+  /// **'{name}: abrir inspección de salida'**
+  String cardOpenInspectionSemantics(String name);
+
   /// No description provided for @inspTitle.
   ///
   /// In es, this message translates to:

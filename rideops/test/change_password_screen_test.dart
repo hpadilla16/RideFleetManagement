@@ -7,6 +7,7 @@ import 'package:rideops/core/api/api_providers.dart';
 import 'package:rideops/core/db/outbox_providers.dart';
 import 'package:rideops/core/outbox/network_status.dart';
 import 'package:rideops/core/session/active_location.dart';
+import 'package:rideops/core/session/kiosk_guard.dart';
 import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/token_store.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
@@ -47,6 +48,7 @@ void main() {
         overrides: [
           tokenStoreProvider.overrideWithValue(store),
           pinStoreProvider.overrideWithValue(pinStore),
+          kioskGuardStoreProvider.overrideWithValue(InMemoryKioskGuardStore()),
           authApiProvider.overrideWithValue(api),
           // H4: la home real fetchea el dashboard — stub con el fixture para
           // que el fetch resuelva y la pantalla asiente (ver FakeDashboardApi).

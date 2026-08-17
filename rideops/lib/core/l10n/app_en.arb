@@ -146,6 +146,7 @@
   "searchClearLabel": "Clear search",
   "searchPrompt": "Search reservations in your active location.",
   "searchNoResults": "No results for “{query}”.",
+  "cardOpenInspectionSemantics": "{name}: open checkout inspection",
 
   "inspTitle": "Checkout inspection",
   "inspProgressChip": "{count} of 8",

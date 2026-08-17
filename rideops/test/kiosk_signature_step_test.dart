@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/core/api/dto/reservation_display.dart';
 import 'package:rideops/core/session/lock_controller.dart';
+import 'package:rideops/core/session/kiosk_guard.dart';
 import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/session_controller.dart';
 import 'package:rideops/core/session/session_state.dart';
@@ -66,6 +67,7 @@ void main() {
       pinStoreProvider.overrideWithValue(
         InMemoryPinStore.configured(userId: kFixtureUserId),
       ),
+      kioskGuardStoreProvider.overrideWithValue(InMemoryKioskGuardStore()),
       lockControllerProvider.overrideWith(() {
         probe = ProbeLockController();
         return probe;

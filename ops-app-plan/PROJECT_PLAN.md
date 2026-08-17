@@ -105,11 +105,15 @@ y números de línea en [00-REGROUND.md](00-REGROUND.md):
    guarda el rastro local con flag `synced`; falta `POST /api/employee-app/outbox-audit`
    (batch, idempotente por id, tenant del JWT) para subirlo.
 
-### Política pendiente registrada (QA H5, decidir en H6)
+### Política resuelta en H6 (decisión del PM): EL KIOSCO IGNORA LA EXENCIÓN
 - **Modo kiosco vs navegación del sistema**: Flutter puro no puede bloquear home/app-switcher.
-  Matar y relanzar aterriza en el candado de arranque — SALVO usuarios `screenLockExempt`,
-  que relanzarían a la superficie de staff abierta. Decidir en H6 (con emulador): ¿el modo
-  kiosco ignora la exención, o se documenta la política de que exempt = sin esa protección?
+  Resolución (H6): al entrar al modo kiosco se persiste un flag `kiosk_in_progress` en
+  Keystore (`KioskGuardStore`); si sobrevive a un cold start, `LockController._fullSync`
+  fuerza el candado UNA vez AUNQUE el usuario sea `screenLockExempt` (la exención protege
+  al empleado de fricción, no al teléfono en manos del cliente). Exempt SIN PIN ⇒ re-login
+  forzado con contraseña (`onSessionExpired`, sin purga de bandeja). La hidratación tardía
+  de la exención vía /me NO abre ese candado; solo PIN/huella. Salida limpia del kiosco
+  limpia el flag. Implementado en lock_controller.dart + kiosk_guard.dart, con tests.
 
 ### Enmiendas de mockup aceptadas por GD en builds (registro para training/M2)
 - **Tanda B nota de motion (dot de frescura)**: latido ≤0.5 Hz sustituido por tick

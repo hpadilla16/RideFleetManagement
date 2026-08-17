@@ -87,12 +87,17 @@ class _KioskSignatureStepState extends ConsumerState<KioskSignatureStep> {
     // desmontaje, así el contador del LockController nunca queda colgado.
     _lock = ref.read(lockControllerProvider.notifier);
     _lock.suspendLock();
+    // H6 (política kiosco-vs-exempt): flag persistente "kiosco en curso" —
+    // si el proceso muere aquí (cliente mata la app), el cold start aterriza
+    // en el candado AUNQUE el usuario sea exempt. Se limpia en dispose.
+    _lock.noteKioskEntered();
   }
 
   @override
   void dispose() {
     _holdTimer?.cancel();
     _lock.resumeLock();
+    _lock.noteKioskExited(); // salida limpia: el flag de recuperación se va
     if (_lockOnExit) {
       // INN MC-1b: intentos del kiosco agotados ⇒ la superficie de staff NO
       // queda abierta — candado inmediato (el resume de arriba ya soltó la

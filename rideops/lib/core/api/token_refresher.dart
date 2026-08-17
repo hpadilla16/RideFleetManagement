@@ -83,6 +83,14 @@ class TokenRefresher {
     return sub is String && sub.isNotEmpty ? sub : null;
   }
 
+  /// Claim `tenantId` (auth.service.js:19). El drenador de BACKGROUND (H6)
+  /// lo necesita para servir SOLO filas del dueño: en ese isolate no hay /me
+  /// ni SessionUser — el JWT es la única identidad disponible.
+  static String? tenantIdOf(String jwt) {
+    final tenant = _payloadOf(jwt)?['tenantId'];
+    return tenant is String && tenant.isNotEmpty ? tenant : null;
+  }
+
   static Map<String, dynamic>? _payloadOf(String jwt) {
     final parts = jwt.split('.');
     if (parts.length != 3) return null;

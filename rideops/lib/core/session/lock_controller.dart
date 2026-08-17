@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/token_refresher.dart';
 import '../telemetry/event_logger.dart';
 import 'biometric_auth.dart';
+import 'kiosk_guard.dart';
 import 'lock_state.dart';
 import 'pin_store.dart';
 import 'session_controller.dart';
@@ -38,6 +39,11 @@ class LockController extends Notifier<LockState> {
   int _suspendCount = 0;
   DateTime? _backgroundedAt;
 
+  /// Candado forzado por recuperación de kiosco (H6): mientras esté activo,
+  /// la hidratación tardía de una exención (/me con screenLockExempt=true)
+  /// NO lo abre — solo el PIN/huella del dueño. Ver [_fullSync].
+  bool _kioskRecoveryLock = false;
+
   /// Secuencia de sincronización: invalida lecturas del Keystore en vuelo
   /// cuando la sesión cambió mientras esperábamos.
   int _syncSeq = 0;
@@ -66,6 +72,7 @@ class LockController extends Notifier<LockState> {
       _idleTimer?.cancel();
       _backgroundedAt = null;
       _suspendCount = 0;
+      _kioskRecoveryLock = false;
       _syncSeq++; // invalida cualquier lectura en vuelo
       state = const LockState.initial();
       return;
@@ -75,7 +82,9 @@ class LockController extends Notifier<LockState> {
       // token): no recalcular el candado — solo honrar una exención recién
       // conocida (restore degradado que hidrata screenLockExempt=true).
       if (!state.ready) return; // la sincronización inicial sigue en vuelo
-      if (_isExempt(next)) {
+      // Un candado de recuperación de kiosco NO se abre por exención (H6:
+      // el kiosco ignora la exención) — solo PIN/huella.
+      if (_isExempt(next) && !_kioskRecoveryLock) {
         _idleTimer?.cancel();
         if (state.locked) state = state.copyWith(locked: false);
       }
@@ -96,6 +105,19 @@ class LockController extends Notifier<LockState> {
       // antes que dejar un candado imposible de abrir.
       record = null;
     }
+    // Recuperación de kiosco (H6, política del PM: EL KIOSCO IGNORA LA
+    // EXENCIÓN): si el flag `kiosk_in_progress` sobrevivió al arranque, el
+    // proceso murió con el teléfono volteado al cliente — quien relanza la
+    // app NO es necesariamente el dueño de la sesión. El flag es one-shot:
+    // se limpia aquí y el candado forzado (o el re-login) cobran UNA vez.
+    var kioskPending = false;
+    try {
+      final guard = ref.read(kioskGuardStoreProvider);
+      kioskPending = await guard.read();
+      if (kioskPending) await guard.clear();
+    } catch (_) {
+      // Keystore ilegible: sin flag no hay recuperación que forzar.
+    }
     if (!ref.mounted || seq != _syncSeq) return;
     // Releer la sesión: /me pudo hidratar el user mientras esperábamos.
     final session = ref.read(sessionControllerProvider);
@@ -112,7 +134,20 @@ class LockController extends Notifier<LockState> {
     }
     final configured = record != null;
     final exempt = _isExempt(session);
-    final locked = configured && !exempt && fromRestore;
+    // En un login FRESCO el flag no fuerza nada (la contraseña se acaba de
+    // probar); en cold start sí — aunque el usuario sea exempt.
+    final kioskRecovery = kioskPending && fromRestore;
+    if (kioskRecovery && !configured) {
+      // Usuario exempt sin PIN (el gate de setup lo salta): la única
+      // credencial local es la contraseña — re-login forzado. La bandeja NO
+      // se purga: onSessionExpired limpia sesión sin tocar filas y el mismo
+      // usuario re-entra con su cola intacta.
+      _logger.log(SessionEvents.pinLock, data: {'reason': 'kiosk_recovery_relogin'});
+      ref.read(sessionControllerProvider.notifier).onSessionExpired();
+      return;
+    }
+    final locked = configured && fromRestore && (!exempt || kioskRecovery);
+    _kioskRecoveryLock = kioskRecovery && locked;
     state = LockState(
       ready: true,
       pinConfigured: configured,
@@ -121,7 +156,9 @@ class LockController extends Notifier<LockState> {
       attemptsLeft: LockState.maxAttempts,
     );
     if (locked) {
-      _logger.log(SessionEvents.pinLock, data: {'reason': 'cold_start'});
+      _logger.log(SessionEvents.pinLock, data: {
+        'reason': kioskRecovery ? 'kiosk_recovery' : 'cold_start',
+      });
     } else if (configured && !exempt) {
       _restartIdleTimer();
     }
@@ -152,6 +189,7 @@ class LockController extends Notifier<LockState> {
     }
     if (!ref.mounted || !state.locked) return false;
     if (record != null && record.matches(pin)) {
+      _kioskRecoveryLock = false; // el dueño probó su PIN — recuperación cerrada
       state = state.copyWith(
         locked: false,
         attemptsLeft: LockState.maxAttempts,
@@ -176,6 +214,7 @@ class LockController extends Notifier<LockState> {
     final ok =
         await ref.read(biometricAuthProvider).authenticate(reason: reason);
     if (!ref.mounted || !ok || !state.locked) return false;
+    _kioskRecoveryLock = false; // el dueño probó su huella
     state = state.copyWith(locked: false, attemptsLeft: LockState.maxAttempts);
     _logger.log(SessionEvents.pinUnlock, data: {'method': 'biometric'});
     _restartIdleTimer();
@@ -253,6 +292,36 @@ class LockController extends Notifier<LockState> {
     if (_suspendCount == 0) return;
     _suspendCount--;
     if (_suspendCount == 0) noteActivity();
+  }
+
+  /// ── Recuperación de kiosco (H6) ─────────────────────────────────────────
+  ///
+  /// Política (decisión del PM, registrada en PROJECT_PLAN §4): EL KIOSCO
+  /// IGNORA LA EXENCIÓN. Con el teléfono volteado al cliente, matar y
+  /// relanzar la app debe aterrizar en el candado aunque el dueño de la
+  /// sesión sea `screenLockExempt`; si el exempt no tiene PIN, el arranque
+  /// fuerza re-login con CONTRASEÑA. El flag persiste en Keystore
+  /// ([KioskGuardStore]) y es one-shot: [_fullSync] lo consume al arrancar.
+  ///
+  /// Best-effort ambos: un Keystore caído no debe impedir firmar — el costo
+  /// es perder ESTA protección extra, no el flujo.
+  // OJO: closures async auto-invocadas (microtask), NUNCA `Future(...)` —
+  // Future() agenda un Timer y rompe el invariante !timersPending de los
+  // widget tests.
+  void noteKioskEntered() {
+    unawaited(() async {
+      try {
+        await ref.read(kioskGuardStoreProvider).set();
+      } catch (_) {}
+    }());
+  }
+
+  void noteKioskExited() {
+    unawaited(() async {
+      try {
+        await ref.read(kioskGuardStoreProvider).clear();
+      } catch (_) {}
+    }());
   }
 
   /// Ciclo de vida (lo alimenta LockObserver): al volver del background tras
