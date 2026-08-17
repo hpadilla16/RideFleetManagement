@@ -31,6 +31,7 @@ import { stepKey, moduleKey as mKeyOf, trainingText } from '../../lib/training/i
 import {
   TOUR_STORAGE_KEY, TOUR_END,
   startTour, settleStart, currentStep, advance, retreat, dismiss,
+  waitForRecord, stopWaiting,
   progressOf, serialize, deserialize,
 } from '../../lib/training/tour-state.js';
 
@@ -117,7 +118,14 @@ export function TourHost({ viewer }) {
       walkedModules.current = new Set();
       // The showcase runs itself until a person takes over.
       setAutoPlay(track === TOUR_TRACKS.SHOWCASE);
-      persist(settleStart(fresh, list, isPresent));
+      const settled = settleStart(fresh, list, isPresent);
+      // A module that walks through one record (a reservation's own page)
+      // finds nothing from Ride University. Park the tour instead of ending
+      // it, and pick up the moment the person opens one.
+      const mod = moduleKey ? findModule(moduleKey) : null;
+      persist(settled.endedAs === TOUR_END.BROKEN && mod?.needsRecord
+        ? waitForRecord(fresh)
+        : settled);
     };
     window.addEventListener(TOUR_START_EVENT, onStart);
     return () => window.removeEventListener(TOUR_START_EVENT, onStart);
@@ -134,6 +142,20 @@ export function TourHost({ viewer }) {
     setSteps(list);
     setState(saved);
   }, [state, viewer]);
+
+  // ── a parked tour watches for its record ─────────────────────────────────
+  useEffect(() => {
+    if (!state?.waiting || !steps.length) return undefined;
+    // Give the new route time to paint before judging the anchors absent.
+    const timer = setTimeout(() => {
+      const settled = settleStart(stopWaiting(state), steps, isPresent);
+      // Still nowhere to be found: keep waiting rather than break. The person
+      // may still be navigating.
+      if (settled.endedAs !== TOUR_END.BROKEN) persist(settled);
+    }, SETTLE_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.waiting, pathname, steps.length]);
 
   const step = currentStep(state, steps);
 
@@ -238,6 +260,52 @@ export function TourHost({ viewer }) {
    * BROKEN, and BROKEN rendered nothing at all: the button looked dead.
    * Now the same dead end explains itself and offers the way forward.
    */
+  /**
+   * PARKED: the walkthrough lives inside a record and the person is on their
+   * way to open one. A persistent bar keeps the guide alive and tells them
+   * exactly what to do next — the previous version dropped them at
+   * /reservations with no thread back (Hector, 2026-08-17).
+   */
+  if (state?.waiting) {
+    const waitModule = state.moduleKey ? findModule(state.moduleKey) : null;
+    const waitName = waitModule
+      ? trainingText(t, mKeyOf(waitModule, 'title'), waitModule.title)
+      : '';
+    return createPortal(
+      <div
+        role="status"
+        style={{
+          position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 100000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14,
+          flexWrap: 'wrap', padding: '12px 16px calc(12px + env(safe-area-inset-bottom, 0px))',
+          background: '#1e1a2b', color: '#fff', boxShadow: '0 -2px 14px rgba(0,0,0,.3)',
+        }}
+      >
+        <span aria-hidden="true">🎓</span>
+        <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+          {t('training.waitingForRecord', 'Open any reservation to start “{{name}}” — the guide continues there.', { name: waitName })}
+        </span>
+        {waitModule?.needsRecord && pathname !== waitModule.needsRecord && (
+          <button
+            type="button"
+            onClick={() => router.push(waitModule.needsRecord)}
+            style={{ background: '#fff', color: '#1e1a2b', border: 'none', borderRadius: 999, padding: '6px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}
+          >
+            {t('training.needsRecordCta', 'Go to reservations')}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={close}
+          style={{ background: 'transparent', color: '#cfc7dd', border: '1px solid #4a4458', borderRadius: 999, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer' }}
+        >
+          {t('training.cancel', 'Cancel')}
+        </button>
+      </div>,
+      document.body,
+    );
+  }
+
   if (state?.endedAs === TOUR_END.BROKEN) {
     const brokenModule = state.moduleKey ? findModule(state.moduleKey) : null;
     const where = brokenModule?.needsRecord;

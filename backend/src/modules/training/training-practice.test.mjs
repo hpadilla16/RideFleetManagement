@@ -10,9 +10,10 @@ const { trainingService } = await import('./training.service.js');
 
 const DEMO = { id: 'demo1', name: 'Demo' };
 const ACTOR = { userId: 'u9', email: 'agent@irc.com', tenantId: 't-real' };
+const PRACTICE_EMAIL = `practica+${ACTOR.userId}@ride.university`;
 
 const HEALTHY = {
-  id: 'prac1', tenantId: 'demo1', email: 'practica@ride.university',
+  id: 'prac1', tenantId: 'demo1', email: PRACTICE_EMAIL,
   role: 'AGENT', isActive: true, mustChangePassword: false,
   isServiceAccount: false, screenLockExempt: true,
 };
@@ -44,12 +45,12 @@ function world({ tenants = [DEMO], practiceUser = null, failCreateOnce = false }
   return { prisma, created, updated };
 }
 
-const issueToken = (u) => `tok:${u.id}`;
+const issueToken = (u, opts = {}) => `tok:${u.id}|for:${opts.forUserId || '-'}|tenant:${opts.forTenantId || '-'}`;
 
 test('happy path: existing healthy account mints without writes', async () => {
   const w = world({ practiceUser: HEALTHY });
   const out = await trainingService.practiceSession(ACTOR, { prisma: w.prisma, issueToken });
-  assert.equal(out.token, 'tok:prac1');
+  assert.equal(out.token, 'tok:prac1|for:u9|tenant:t-real', 'el token debe nombrar al trainee real');
   assert.equal(out.tenantName, 'Demo');
   assert.equal(w.created.length, 0);
   assert.equal(w.updated.length, 0);
@@ -58,7 +59,7 @@ test('happy path: existing healthy account mints without writes', async () => {
 test('first use creates the account screen-lock exempt and password-stable', async () => {
   const w = world();
   const out = await trainingService.practiceSession(ACTOR, { prisma: w.prisma, issueToken });
-  assert.equal(out.token, 'tok:prac-new');
+  assert.equal(out.token, 'tok:prac-new|for:u9|tenant:t-real');
   assert.equal(w.created.length, 1);
   assert.equal(w.created[0].screenLockExempt, true);
   assert.equal(w.created[0].mustChangePassword, false);
@@ -94,7 +95,7 @@ for (const [label, bad] of [
 test('losing the first-use race falls back to the winner row (no 500)', async () => {
   const w = world({ failCreateOnce: true });
   const out = await trainingService.practiceSession(ACTOR, { prisma: w.prisma, issueToken });
-  assert.equal(out.token, 'tok:prac-winner');
+  assert.equal(out.token, 'tok:prac-winner|for:u9|tenant:t-real');
 });
 
 test('a pre-exemption row is healed to screenLockExempt', async () => {
@@ -102,5 +103,22 @@ test('a pre-exemption row is healed to screenLockExempt', async () => {
   const out = await trainingService.practiceSession(ACTOR, { prisma: w.prisma, issueToken });
   assert.equal(w.updated.length, 1);
   assert.equal(w.updated[0].data.screenLockExempt, true);
-  assert.equal(out.token, 'tok:prac1');
+  assert.equal(out.token, 'tok:prac1|for:u9|tenant:t-real');
+});
+
+test('the practice account is per trainee, so two rehearsals cannot cross-credit', async () => {
+  const w = world();
+  await trainingService.practiceSession(ACTOR, { prisma: w.prisma, issueToken });
+  assert.equal(w.created[0].email, PRACTICE_EMAIL);
+  assert.match(w.created[0].email, /^practica\+u9@/, 'the email must be derived from the trainee id');
+  assert.match(w.created[0].fullName, /agent@irc.com/, 'name it so staff can tell whose practice account it is');
+});
+
+test('practice without a signed-in trainee is refused — points would have no owner', async () => {
+  const w = world();
+  await assert.rejects(
+    () => trainingService.practiceSession({}, { prisma: w.prisma, issueToken }),
+    (e) => e.status === 400,
+  );
+  assert.equal(w.created.length, 0);
 });

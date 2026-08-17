@@ -44,7 +44,7 @@ export function PracticeBanner() {
     >
       <span aria-hidden="true">🎓</span>
       <span>
-        {t('training.practiceBanner', 'PRACTICE MODE — demo tenant. Nothing here touches real data, and practice earns no points.')}
+        {t('training.practiceBanner', 'PRACTICE MODE — demo tenant. Nothing here touches real data, and what you complete counts toward your training.')}
       </span>
       <button
         type="button"

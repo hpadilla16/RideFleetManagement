@@ -14,10 +14,27 @@ import { trainingService } from './training.service.js';
 
 export const trainingRouter = Router();
 
-const actorOf = (req) => ({
-  tenantId: req.user?.tenantId || null,
-  userId: req.user?.id || req.user?.sub || null,
-});
+/**
+ * Who this progress belongs to — and where to look for the work.
+ *
+ * In PRACTICE mode the two split apart: the trainee's record lives on their
+ * real account and tenant (`pracFor` / `pracTenant` from the token), while the
+ * reservation they just created lives in the demo tenant under their practice
+ * user. Practice is the learning environment, so it counts (Hector,
+ * 2026-08-17) — this is what makes the points land on the right person.
+ */
+const actorOf = (req) => {
+  const self = { tenantId: req.user?.tenantId || null, userId: req.user?.id || req.user?.sub || null };
+  if (req.user?.prac && req.user?.pracFor) {
+    return {
+      tenantId: req.user.pracTenant || null,
+      userId: req.user.pracFor,
+      proofTenantId: self.tenantId,
+      proofUserId: self.userId,
+    };
+  }
+  return self;
+};
 
 /**
  * Which tenant's team to report on.

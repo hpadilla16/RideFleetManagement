@@ -35,10 +35,37 @@ export function startTour({ track, steps, moduleKey = null }) {
   return { track, moduleKey, index: 0, total: steps.length, endedAs: null };
 }
 
-/** The step a state points at, or null once the tour has ended. */
+/**
+ * The step a state points at — or null when the tour has ended, OR while it
+ * is WAITING for the person to open the record it walks through.
+ *
+ * Waiting is not a step: the host must not hunt for an anchor, time out, and
+ * declare the tour broken while the person is still on their way to a
+ * reservation (Hector, 2026-08-17: "no me guía paso por paso").
+ */
 export function currentStep(state, steps) {
-  if (!state || state.endedAs) return null;
+  if (!state || state.endedAs || state.waiting) return null;
   return steps?.[state.index] || null;
+}
+
+/**
+ * Park a tour until its record is open, instead of ending it BROKEN.
+ *
+ * Only meaningful for modules that declare where the record lives: check-out,
+ * check-in and take-payment happen inside one reservation's page, so starting
+ * them from Ride University finds nothing. Rather than fail, the tour waits
+ * and springs to life the moment those anchors appear.
+ */
+export function waitForRecord(state) {
+  if (!state) return null;
+  return { ...state, index: 0, endedAs: null, waiting: true };
+}
+
+/** Resume a parked tour — the host calls this when the route changes. */
+export function stopWaiting(state) {
+  if (!state) return null;
+  const { waiting, ...rest } = state;
+  return rest;
 }
 
 /**

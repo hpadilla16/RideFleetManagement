@@ -167,6 +167,39 @@ function Inner({ token, me, logout }) {
     }
   };
 
+  /**
+   * Reset the demo tenant (2026-08-17). Ride University's practice mode lets
+   * trainees rehearse on the demo, which is also what sales demos run on —
+   * this puts the stage back. Only ever offered for the tenant flagged as
+   * demo; the server refuses anything else regardless of what we send.
+   */
+  const resetDemo = async () => {
+    const target = rows.find((r) => r.id === activeTenantId);
+    if (!target?.isDemo) return setMsg('Only the demo tenant can be reset.');
+    const typed = prompt(
+      [
+        `This deletes every reservation, agreement and shuttle request in "${target.name}"`,
+        'and puts all vehicles back on the lot.',
+        '',
+        'Fleet, customers, locations, rates and users are kept.',
+        '',
+        'Type RESET DEMO to confirm:',
+      ].join('\n'),
+      '',
+    );
+    if (typed === null) return undefined;
+    try {
+      const out = await api(`/api/tenants/${activeTenantId}/reset-demo`, {
+        method: 'POST', body: JSON.stringify({ confirm: typed }),
+      }, token);
+      setMsg(`${out.tenantName} reset — ${out.summary}.`
+        + (out.shuttleLinksInvalidated ? ' Shuttle demo links were removed; mint a new one before your next demo.' : ''));
+      return undefined;
+    } catch (e) {
+      return setMsg(e.message);
+    }
+  };
+
   const impersonateTenant = async (userId = null) => {
     try {
       if (!activeTenantId) return setMsg('Select a tenant first');
@@ -398,6 +431,16 @@ function Inner({ token, me, logout }) {
           <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
             <button onClick={createTenantAdmin}>Create Tenant Admin</button>
             <button type="button" onClick={() => impersonateTenant(null)}>Impersonate Tenant</button>
+            {rows.find((r) => r.id === activeTenantId)?.isDemo && (
+              <button
+                type="button"
+                onClick={resetDemo}
+                title="Clear trainee bookings and put the demo back to a clean stage"
+                style={{ background: '#fbeceb', color: '#a32b1f', border: '1px solid #f0c8c4' }}
+              >
+                Reset Demo Data
+              </button>
+            )}
           </div>
 
           <div style={{ marginTop: 10 }}>

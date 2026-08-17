@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { isSuperAdmin } from '../../middleware/auth.js';
 import { tenantsService } from './tenants.service.js';
+import { demoResetService } from './demo-reset.service.js';
 
 export const tenantsRouter = Router();
 
@@ -52,6 +53,23 @@ tenantsRouter.patch('/:id', async (req, res, next) => {
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
+});
+
+/**
+ * Reset the demo tenant — Ride University's practice mode leaves trainee
+ * bookings behind, and the same tenant is what sales demos run on.
+ *
+ * SUPER_ADMIN only, and the service refuses any tenant whose isDemo is not
+ * exactly true, so the worst a wrong id can do is 403. The confirmation
+ * phrase in the body is the second lock: this deletes data.
+ */
+tenantsRouter.post('/:id/reset-demo', requireSuperAdmin, async (req, res, next) => {
+  try {
+    res.json(await demoResetService.reset(req.params.id, req.body?.confirm, {
+      userId: req.user?.id || req.user?.sub || null,
+      email: req.user?.email || null,
+    }));
+  } catch (e) { next(e); }
 });
 
 tenantsRouter.get('/:id/admins', async (req, res, next) => {
