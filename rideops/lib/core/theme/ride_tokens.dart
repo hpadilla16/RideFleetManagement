@@ -60,6 +60,15 @@ abstract final class RideTokens {
     stops: [0.0, 0.42, 0.80, 1.0],
   );
   static const auroraWarm = Color(0x52FF8A5C); // rgba(255,138,92,.32)
+  static const auroraWarmEnd = Color(0x00FF8A5C); // mismo tono, alpha 0
+
+  /// Fondo .tonal-scr del mockup (éxito 2C, PIN H2): tonal → n50 al 60%.
+  static const tonalScreenGradient = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [tonal, n50],
+    stops: [0.0, 0.6],
+  );
 
   /// Botón primario del mockup: gradiente vertical #7442e8 → p600.
   static const primaryButtonGradient = LinearGradient(

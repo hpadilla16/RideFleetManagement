@@ -146,10 +146,10 @@ abstract class AppLocalizations {
   /// **'Correo o contraseña incorrectos. Revisa e intenta de nuevo.'**
   String get loginInvalidCredentials;
 
-  /// No description provided for @loginOffline.
+  /// TODO H4: al integrar connectivity_plus y el auto-reintento, volver al copy del mockup 1C ('se reintentará al volver la señal'). Hoy el reintento es manual — no prometerlo.
   ///
   /// In es, this message translates to:
-  /// **'No hay conexión a internet. Iniciar sesión necesita red — se reintentará al volver la señal.'**
+  /// **'No hay conexión a internet. Revisa la señal y toca Reintentar ahora.'**
   String get loginOffline;
 
   /// No description provided for @loginRetryNow.

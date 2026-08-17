@@ -127,6 +127,16 @@ además `checkoutSessionId` y `reservationId` para poder re-mintear token al dre
 - `tokenProvider` (Notifier persistido en flutter_secure_storage): JWT + exp decodificado.
 - `sessionUserProvider`: `SessionUser` del último login/me/refresh; expone
   `mustChangePassword`, `moduleAccess`, `role`.
+
+> **Desviación aceptada (H1, review de Innovation):** `tokenProvider` y
+> `sessionUserProvider` NO existen como providers separados — se fusionaron en
+> `sessionControllerProvider` (`core/session/session_controller.dart`), un solo
+> `Notifier<SessionState>` con `{status, token, user, passwordChangeRequired}`.
+> Razón: token y user cambian JUNTOS (login, refresh, change-password) y dos
+> providers separados abren carreras token-nuevo/user-viejo. H2+ debe leer
+> `sessionControllerProvider`, no buscar los providers de esta lista. El flag
+> `passwordChangeRequired` vive en el estado (no en el user) para que un 403
+> del gate observado con `user == null` (restore sin red) también bloquee.
 - `activeLocationProvider`: ubicación activa (persistida; null = todas las del usuario).
   Alimenta el `ViewLocationInterceptor` y se escribe en cada fila nueva del outbox.
 - `pinLockProvider`: estado de bloqueo por PIN/biometría (timeout de inactividad;

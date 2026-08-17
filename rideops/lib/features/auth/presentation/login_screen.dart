@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/api_error.dart';
@@ -55,10 +56,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _error = null;
     });
     try {
-      await ref.read(sessionControllerProvider.notifier).login(
-            email: _email.text.trim(),
-            password: _password.text,
-          );
+      await ref
+          .read(sessionControllerProvider.notifier)
+          .login(email: _email.text.trim(), password: _password.text);
       // Éxito: el router nos saca de /login solo (refreshListenable).
     } on ApiError catch (e) {
       if (mounted) setState(() => _error = e);
@@ -73,184 +73,191 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final offline = _error?.kind == ApiErrorKind.network;
     final credsError = _error?.kind == ApiErrorKind.unauthorized;
 
-    return Scaffold(
-      resizeToAvoidBottomInset: true,
-      body: Container(
-        decoration: const BoxDecoration(gradient: RideTokens.aurora),
-        child: Column(
-          children: [
-            // ── Hero aurora: SOLO branding, ningún dato ni control encima ──
-            SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(22, 26, 22, 22),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _BrandMark(letter: l10n.appTitle.substring(0, 1)),
-                          const SizedBox(height: 14),
-                          Text(
-                            l10n.appTitle,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 30,
-                              fontWeight: FontWeight.w900,
-                              height: 1.05,
-                              letterSpacing: -0.3,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            l10n.loginSubtitle,
-                            style: const TextStyle(
-                              color: Color(0xE6FFFFFF),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Chip de flavor (mockup nota 1): invisible en prod.
-                    if (!AppConfig.current.isProd)
-                      _FlavorChip(label: AppConfig.current.env.toUpperCase()),
-                  ],
-                ),
-              ),
-            ),
-            // ── Hoja blanca opaca: formulario, banners, CTA ──
-            Expanded(
-              child: Container(
-                width: double.infinity,
-                decoration: const BoxDecoration(
-                  color: RideTokens.n0,
-                  borderRadius:
-                      BorderRadius.vertical(top: Radius.circular(28)),
-                ),
-                child: SafeArea(
-                  top: false,
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-                    child: AutofillGroup(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Center(
-                            child: Container(
-                              width: 44,
-                              height: 5,
-                              decoration: BoxDecoration(
-                                color: RideTokens.n200,
-                                borderRadius: BorderRadius.circular(3),
+    // Status bar en claro: los iconos del sistema viven sobre la aurora
+    // oscura (GD MUST-3).
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        resizeToAvoidBottomInset: true,
+        body: AuroraBackdrop(
+          child: Column(
+            children: [
+              // ── Hero aurora: SOLO branding, ningún dato ni control encima ──
+              SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 26, 22, 22),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _BrandMark(letter: l10n.appTitle.substring(0, 1)),
+                            const SizedBox(height: 14),
+                            Text(
+                              l10n.appTitle,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 30,
+                                fontWeight: FontWeight.w900,
+                                height: 1.05,
+                                letterSpacing: -0.3,
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 14),
-                          if (credsError)
-                            RideBanner(
-                              kind: RideBannerKind.danger,
-                              text: l10n.loginInvalidCredentials,
-                            )
-                          else if (offline)
-                            RideBanner(
-                              kind: RideBannerKind.warn,
-                              text: l10n.loginOffline,
-                            )
-                          else if (_error?.kind == ApiErrorKind.rateLimited)
-                            RideBanner(
-                              kind: RideBannerKind.warn,
-                              text: l10n.errorRateLimited,
-                            )
-                          else if (_error != null)
-                            RideBanner(
-                              kind: RideBannerKind.danger,
-                              text: l10n.genericError,
-                              detail: _error!.message,
-                            ),
-                          FieldLabel(l10n.loginEmailLabel),
-                          RideTextField(
-                            controller: _email,
-                            hasError: credsError,
-                            keyboardType: TextInputType.emailAddress,
-                            textInputAction: TextInputAction.next,
-                            autofillHints: const [AutofillHints.username],
-                            onChanged: (_) => setState(() {}),
-                          ),
-                          FieldLabel(l10n.loginPasswordLabel),
-                          RideTextField(
-                            controller: _password,
-                            hasError: credsError,
-                            obscure: _obscure,
-                            onToggleObscure: () =>
-                                setState(() => _obscure = !_obscure),
-                            obscureToggleLabel: _obscure
-                                ? l10n.showPassword
-                                : l10n.hidePassword,
-                            textInputAction: TextInputAction.done,
-                            autofillHints: const [AutofillHints.password],
-                            onChanged: (_) => setState(() {}),
-                            onSubmitted: (_) {
-                              if (_canSubmit) _submit();
-                            },
-                          ),
-                          const SizedBox(height: 20),
-                          RidePrimaryButton(
-                            label: l10n.loginButton,
-                            loading: _submitting,
-                            loadingLabel: l10n.loginButtonLoading,
-                            onPressed: _canSubmit ? _submit : null,
-                          ),
-                          if (offline) ...[
-                            const SizedBox(height: 10),
-                            RideGhostButton(
-                              label: l10n.loginRetryNow,
-                              onPressed: _submitting ? null : _retryFromOffline,
+                            const SizedBox(height: 4),
+                            Text(
+                              l10n.loginSubtitle,
+                              style: const TextStyle(
+                                color: Color(0xE6FFFFFF),
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ],
-                          // Sin "olvidé mi contraseña" self-service: el flujo
-                          // staff es reset por admin + contraseña temporal
-                          // (confirmado contra auth.service.js — no existe
-                          // endpoint de reset público).
-                          Container(
-                            constraints: const BoxConstraints(minHeight: 48),
-                            alignment: Alignment.center,
-                            child: Text(
-                              l10n.loginHelpLine,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w700,
-                                color: RideTokens.p700,
+                        ),
+                      ),
+                      // Chip de flavor (mockup nota 1): invisible en prod.
+                      if (!AppConfig.current.isProd)
+                        _FlavorChip(label: AppConfig.current.env.toUpperCase()),
+                    ],
+                  ),
+                ),
+              ),
+              // ── Hoja blanca opaca: formulario, banners, CTA ──
+              Expanded(
+                child: Container(
+                  width: double.infinity,
+                  decoration: const BoxDecoration(
+                    color: RideTokens.n0,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(28),
+                    ),
+                  ),
+                  child: SafeArea(
+                    top: false,
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                      child: AutofillGroup(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Center(
+                              child: Container(
+                                width: 44,
+                                height: 5,
+                                decoration: BoxDecoration(
+                                  color: RideTokens.n200,
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 8),
-                          Center(
-                            child: Text(
-                              l10n.loginVersionLine(
-                                AppConfig.appVersion,
-                                AppConfig.current.env,
-                                Localizations.localeOf(context).languageCode,
+                            const SizedBox(height: 14),
+                            if (credsError)
+                              RideBanner(
+                                kind: RideBannerKind.danger,
+                                text: l10n.loginInvalidCredentials,
+                              )
+                            else if (offline)
+                              RideBanner(
+                                kind: RideBannerKind.warn,
+                                text: l10n.loginOffline,
+                              )
+                            else if (_error?.kind == ApiErrorKind.rateLimited)
+                              RideBanner(
+                                kind: RideBannerKind.warn,
+                                text: l10n.errorRateLimited,
+                              )
+                            else if (_error != null)
+                              RideBanner(
+                                kind: RideBannerKind.danger,
+                                text: l10n.genericError,
+                                detail: _error!.message,
                               ),
-                              style: const TextStyle(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600,
-                                color: RideTokens.n600,
+                            FieldLabel(l10n.loginEmailLabel),
+                            RideTextField(
+                              controller: _email,
+                              hasError: credsError,
+                              keyboardType: TextInputType.emailAddress,
+                              textInputAction: TextInputAction.next,
+                              autofillHints: const [AutofillHints.username],
+                              onChanged: (_) => setState(() {}),
+                            ),
+                            FieldLabel(l10n.loginPasswordLabel),
+                            RideTextField(
+                              controller: _password,
+                              hasError: credsError,
+                              obscure: _obscure,
+                              onToggleObscure: () =>
+                                  setState(() => _obscure = !_obscure),
+                              obscureToggleLabel: _obscure
+                                  ? l10n.showPassword
+                                  : l10n.hidePassword,
+                              textInputAction: TextInputAction.done,
+                              autofillHints: const [AutofillHints.password],
+                              onChanged: (_) => setState(() {}),
+                              onSubmitted: (_) {
+                                if (_canSubmit) _submit();
+                              },
+                            ),
+                            const SizedBox(height: 20),
+                            RidePrimaryButton(
+                              label: l10n.loginButton,
+                              loading: _submitting,
+                              loadingLabel: l10n.loginButtonLoading,
+                              onPressed: _canSubmit ? _submit : null,
+                            ),
+                            if (offline) ...[
+                              const SizedBox(height: 10),
+                              RideGhostButton(
+                                label: l10n.loginRetryNow,
+                                onPressed: _submitting
+                                    ? null
+                                    : _retryFromOffline,
+                              ),
+                            ],
+                            // Sin "olvidé mi contraseña" self-service: el flujo
+                            // staff es reset por admin + contraseña temporal
+                            // (confirmado contra auth.service.js — no existe
+                            // endpoint de reset público).
+                            Container(
+                              constraints: const BoxConstraints(minHeight: 48),
+                              alignment: Alignment.center,
+                              child: Text(
+                                l10n.loginHelpLine,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: RideTokens.p700,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 8),
+                            Center(
+                              child: Text(
+                                l10n.loginVersionLine(
+                                  AppConfig.appVersion,
+                                  AppConfig.current.env,
+                                  Localizations.localeOf(context).languageCode,
+                                ),
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: RideTokens.n600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

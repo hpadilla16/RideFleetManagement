@@ -45,7 +45,10 @@ class AuthInterceptor extends Interceptor {
   ) async {
     final token = await refresher.freshToken();
     if (token == null) {
-      onSessionExpired();
+      // OJO: aquí NO se llama onSessionExpired — este reject fluye por el
+      // onError de este mismo interceptor, que ya dispara el callback al ver
+      // kind unauthorized. Llamarlo en ambos lados lo duplicaba (lo atrapó
+      // el test del review S-1).
       return handler.reject(
         DioException(
           requestOptions: options,

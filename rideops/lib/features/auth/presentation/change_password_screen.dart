@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -57,10 +58,8 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
     super.dispose();
   }
 
-  PasswordPolicyResult get _policy => PasswordPolicy.evaluate(
-        candidate: _next.text,
-        current: _current.text,
-      );
+  PasswordPolicyResult get _policy =>
+      PasswordPolicy.evaluate(candidate: _next.text, current: _current.text);
 
   bool get _canSubmit =>
       !_submitting && _current.text.isNotEmpty && _policy.allMet;
@@ -79,7 +78,9 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
       _error = null;
     });
     try {
-      await ref.read(sessionControllerProvider.notifier).changePassword(
+      await ref
+          .read(sessionControllerProvider.notifier)
+          .changePassword(
             currentPassword: _current.text,
             newPassword: _next.text,
           );
@@ -97,12 +98,23 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    return PopScope(
-      canPop: false,
-      child: Scaffold(
-        backgroundColor: _success ? RideTokens.tonal : RideTokens.n50,
-        body: SafeArea(
-          child: _success ? _buildSuccess(l10n) : _buildForm(l10n),
+    // Status bar en oscuro: esta pantalla es clara (n50/tonal), sin aurora
+    // (GD MUST-3).
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.dark,
+      child: PopScope(
+        canPop: false,
+        child: Scaffold(
+          backgroundColor: RideTokens.n50,
+          body: _success
+              // Fondo .tonal-scr del mockup 2C: tonal → n50 (GD S-4).
+              ? DecoratedBox(
+                  decoration: const BoxDecoration(
+                    gradient: RideTokens.tonalScreenGradient,
+                  ),
+                  child: SafeArea(child: _buildSuccess(l10n)),
+                )
+              : SafeArea(child: _buildForm(l10n)),
         ),
       ),
     );
@@ -133,10 +145,7 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
           const SizedBox(height: 4),
           Text(
             l10n.changePasswordBody,
-            style: const TextStyle(
-              fontSize: 13.5,
-              color: RideTokens.n700,
-            ),
+            style: const TextStyle(fontSize: 13.5, color: RideTokens.n700),
           ),
           if (_isCurrentWrong) ...[
             const SizedBox(height: 8),
@@ -167,8 +176,9 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
             obscure: _obscureCurrent,
             onToggleObscure: () =>
                 setState(() => _obscureCurrent = !_obscureCurrent),
-            obscureToggleLabel:
-                _obscureCurrent ? l10n.showPassword : l10n.hidePassword,
+            obscureToggleLabel: _obscureCurrent
+                ? l10n.showPassword
+                : l10n.hidePassword,
             textInputAction: TextInputAction.next,
             onChanged: (_) => setState(() {}),
           ),
@@ -177,8 +187,9 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
             controller: _next,
             obscure: _obscureNext,
             onToggleObscure: () => setState(() => _obscureNext = !_obscureNext),
-            obscureToggleLabel:
-                _obscureNext ? l10n.showPassword : l10n.hidePassword,
+            obscureToggleLabel: _obscureNext
+                ? l10n.showPassword
+                : l10n.hidePassword,
             textInputAction: TextInputAction.done,
             onChanged: (_) => setState(() {}),
             onSubmitted: (_) => _submit(),

@@ -183,6 +183,47 @@ void main() {
     expect(c.read(sessionControllerProvider).mustChangePassword, isTrue);
   });
 
+  test(
+      'MUST-1 review H1: 403 del gate con user NULL también bloquea, y '
+      'changePassword lo limpia', () async {
+    // Escenario exacto del bug: restore sin red deja user null; vuelve la
+    // señal y la primera llamada autenticada responde 403
+    // PASSWORD_CHANGE_REQUIRED → el flag debe levantarse SIN user.
+    store.value = fakeJwt(exp: DateTime.now().add(const Duration(hours: 8)));
+    api.onMe = () async => throw apiError(ApiErrorKind.network);
+    final c = makeContainer();
+    await settle();
+    expect(c.read(sessionControllerProvider).user, isNull);
+
+    c.read(sessionControllerProvider.notifier).notePasswordChangeRequired();
+    expect(c.read(sessionControllerProvider).mustChangePassword, isTrue,
+        reason: 'el flag vive en el estado, no en el user');
+
+    // El único camino que limpia el gate: change-password exitoso.
+    final fresh =
+        fakeJwt(exp: DateTime.now().add(const Duration(hours: 12)), sub: 'u2');
+    api.onChangePassword =
+        (current, next) async => authResponseFromFixture(token: fresh);
+    await c.read(sessionControllerProvider.notifier).changePassword(
+        currentPassword: 'temporal', newPassword: 'NuevaClave#2026x');
+    final s = c.read(sessionControllerProvider);
+    expect(s.mustChangePassword, isFalse);
+    expect(s.token, fresh);
+  });
+
+  test('restore con /me devolviendo basura no-JSON degrada a user null',
+      () async {
+    // Portal cautivo de Wi-Fi: 200 con HTML → error de parseo en fromJson.
+    // Jamás un unhandled async error al arrancar (Innovation S-4).
+    store.value = fakeJwt(exp: DateTime.now().add(const Duration(hours: 8)));
+    api.onMe = () async => throw const FormatException('<html>portal</html>');
+    final c = makeContainer();
+    await settle();
+    final s = c.read(sessionControllerProvider);
+    expect(s.status, SessionStatus.authenticated);
+    expect(s.user, isNull);
+  });
+
   test('logout limpia token y estado', () async {
     store.value = fakeJwt(exp: DateTime.now().add(const Duration(hours: 8)));
     api.onMe = () async => authResponseFromFixture().user;

@@ -59,6 +59,10 @@ class SessionController extends Notifier<SessionState> {
       // queda null (ver arriba). PASSWORD_CHANGE_REQUIRED no aplica: /me está
       // en la allowlist del gate.
       if (e.kind == ApiErrorKind.unauthorized) return;
+    } catch (_) {
+      // Respuesta no parseable (p. ej. portal cautivo de Wi-Fi devolviendo
+      // HTML con 200 → TypeError en fromJson): degradar a user null igual
+      // que un fallo de red — jamás un unhandled async error al arrancar.
     }
   }
 
@@ -100,6 +104,8 @@ class SessionController extends Notifier<SessionState> {
           newPassword: newPassword,
         );
     await _store.write(res.token);
+    // Estado reconstruido desde cero: passwordChangeRequired vuelve a false
+    // (el constructor no lo arrastra) y el user fresco trae el claim limpio.
     state = SessionState.authenticated(token: res.token, user: res.user);
     _logger.log(AuthEvents.passwordChanged);
   }
@@ -122,14 +128,13 @@ class SessionController extends Notifier<SessionState> {
   }
 
   /// 403 PASSWORD_CHANGE_REQUIRED observado fuera del login (p. ej. un admin
-  /// reseteó la contraseña con la app abierta): levantar el flag local para
-  /// que el router bloquee en /change-password.
+  /// reseteó la contraseña con la app abierta, o restore sin red dejó user
+  /// null y al volver la señal la primera llamada respondió 403): levantar
+  /// el flag DE ESTADO para que el router bloquee en /change-password. No
+  /// depende de que exista user — ese era el bug del review H1.
   void notePasswordChangeRequired() {
-    final user = state.user;
-    if (!state.isAuthenticated || user == null || user.mustChangePassword) {
-      return;
-    }
-    state = state.withUser(user.copyWith(mustChangePassword: true));
+    if (!state.isAuthenticated || state.mustChangePassword) return;
+    state = state.withPasswordChangeRequired();
   }
 
   /// El refresco proactivo devolvió `{ token, user }`: sincronizar el estado

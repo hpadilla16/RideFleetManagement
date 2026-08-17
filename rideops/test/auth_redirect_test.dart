@@ -54,6 +54,12 @@ void main() {
         () {
       expect(redirect(unauth, '/change-password'), '/login');
     });
+
+    test('en /splash sin sesión → /login (arrastrando from si lo hay)', () {
+      expect(redirect(unauth, '/splash'), '/login');
+      expect(redirect(unauth, '/splash?from=%2Fhome'),
+          '/login?from=${Uri.encodeComponent('/home')}');
+    });
   });
 
   group('restaurando', () {
@@ -86,6 +92,18 @@ void main() {
 
     test('anti-loop: ya en /change-password → null', () {
       expect(redirect(liveMustChange, '/change-password'), isNull);
+    });
+
+    test('flag de estado con user NULL también bloquea (MUST-1 review H1)',
+        () {
+      final flagged = const SessionState.authenticated(token: 't')
+          .withPasswordChangeRequired();
+      expect(flagged.user, isNull);
+      expect(
+        redirect(flagged, '/home'),
+        '/change-password?from=${Uri.encodeComponent('/home')}',
+      );
+      expect(redirect(flagged, '/change-password'), isNull);
     });
   });
 

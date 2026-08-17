@@ -43,8 +43,14 @@ class PasswordPolicyResult {
   bool get allMet => metCount == ruleCount;
 
   /// Medidor de fuerza del mockup: 4 segmentos proporcionales a las reglas
-  /// cumplidas (decorativo — el estado legible vive en el checklist).
-  int get strengthSegments => (metCount * 4) ~/ ruleCount;
+  /// cumplidas (decorativo — el estado legible vive en el checklist). Piso
+  /// de 1 segmento con cualquier regla cumplida (GD S-2): el usuario teclea
+  /// su primera letra y el medidor YA responde, no a la tercera regla.
+  int get strengthSegments {
+    if (metCount == 0) return 0;
+    final raw = (metCount * 4) ~/ ruleCount;
+    return raw < 1 ? 1 : raw;
+  }
 }
 
 abstract final class PasswordPolicy {

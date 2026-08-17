@@ -50,4 +50,12 @@ void main() {
     expect(eval('abc').metCount, 2);
     expect(eval('abc').strengthSegments, 1);
   });
+
+  test('piso de 1 segmento con la primera regla cumplida (GD S-2)', () {
+    // Igual a la actual y solo minúsculas: 1 sola regla cumplida — el
+    // medidor debe responder YA, no quedarse en cero.
+    final r = eval('abc', current: 'abc');
+    expect(r.metCount, 1);
+    expect(r.strengthSegments, 1);
+  });
 }

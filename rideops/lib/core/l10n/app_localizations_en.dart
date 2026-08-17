@@ -35,7 +35,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get loginOffline =>
-      'No internet connection. Signing in needs a network — it will retry when the signal is back.';
+      'No internet connection. Signing in requires a connection — check the signal and tap Retry now.';
 
   @override
   String get loginRetryNow => 'Retry now';

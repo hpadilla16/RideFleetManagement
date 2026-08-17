@@ -6,6 +6,45 @@ import '../../../../core/theme/ride_tokens.dart';
 /// inputs de 54 px con foco AZUL, botón primario de 56 px con gradiente,
 /// banners semánticos. Targets ≥ 48 pt en todo lo tocable (DoD #2).
 
+/// Fondo aurora del mockup: linear de marca + acento CÁLIDO radial
+/// arriba-derecha (la respuesta al feedback "se ve muy simple" de Hector —
+/// review GD H1: sin el radial, el hero quedaba como linear plano). Estático,
+/// decorativo puro: ningún dato vive sobre él.
+class AuroraBackdrop extends StatelessWidget {
+  const AuroraBackdrop({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(gradient: RideTokens.aurora),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned(
+            top: -60,
+            right: -70,
+            child: IgnorePointer(
+              child: Container(
+                width: 260,
+                height: 240,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [RideTokens.auroraWarm, RideTokens.auroraWarmEnd],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
 /// Botón primario del mockup (56 px, gradiente + glow). [loading] colapsa a
 /// spinner + texto de progreso; [onPressed] null = deshabilitado (opacidad
 /// .55 como el mockup, y sin ink).
@@ -83,7 +122,11 @@ class RidePrimaryButton extends StatelessWidget {
 
 /// Botón secundario "ghost" (48 px, borde neutro) — p. ej. "Reintentar ahora".
 class RideGhostButton extends StatelessWidget {
-  const RideGhostButton({super.key, required this.label, required this.onPressed});
+  const RideGhostButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+  });
 
   final String label;
   final VoidCallback? onPressed;
@@ -137,65 +180,70 @@ class RideBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final (bg, bd, tx, icon) = switch (kind) {
       RideBannerKind.danger => (
-          RideTokens.dangerBg,
-          RideTokens.dangerBd,
-          RideTokens.dangerTx,
-          Icons.error_outline,
-        ),
-      RideBannerKind.warn => (
-          RideTokens.warnBg,
-          RideTokens.warnBd,
-          RideTokens.warnTx,
-          Icons.warning_amber_outlined,
-        ),
-      RideBannerKind.ok => (
-          RideTokens.okBg,
-          RideTokens.okBd,
-          RideTokens.okTx,
-          Icons.check_circle_outline,
-        ),
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: bg,
-        border: Border.all(color: bd),
-        borderRadius: BorderRadius.circular(14),
+        RideTokens.dangerBg,
+        RideTokens.dangerBd,
+        RideTokens.dangerTx,
+        Icons.error_outline,
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: tx),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  text,
-                  style: TextStyle(
-                    color: tx,
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w600,
-                    height: 1.45,
-                  ),
-                ),
-                if (detail != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      detail!,
-                      style: TextStyle(
-                        color: tx,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
+      RideBannerKind.warn => (
+        RideTokens.warnBg,
+        RideTokens.warnBd,
+        RideTokens.warnTx,
+        Icons.warning_amber_outlined,
+      ),
+      RideBannerKind.ok => (
+        RideTokens.okBg,
+        RideTokens.okBd,
+        RideTokens.okTx,
+        Icons.check_circle_outline,
+      ),
+    };
+    // liveRegion: el lector de pantalla anuncia el error/aviso al aparecer
+    // sin exigir que el usuario navegue hasta el banner (GD S-3).
+    return Semantics(
+      liveRegion: true,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: bg,
+          border: Border.all(color: bd),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 18, color: tx),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    text,
+                    style: TextStyle(
+                      color: tx,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      height: 1.45,
                     ),
                   ),
-              ],
+                  if (detail != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        detail!,
+                        style: TextStyle(
+                          color: tx,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -224,10 +272,11 @@ class FieldLabel extends StatelessWidget {
   }
 }
 
-/// Input de 54 px del mockup: borde 1.5, radio 16, foco AZUL con halo, estado
-/// de error rojo. El toggle de ojo mide 44 px visuales dentro de un hit-target
-/// de 48 (IconButton respeta el mínimo material de 48).
-class RideTextField extends StatelessWidget {
+/// Input de 54 px del mockup: borde 1.5, radio 16, foco AZUL con halo de
+/// 4 px (box-shadow 0 0 0 4px --focus-halo — GD S-1), estado de error rojo.
+/// El toggle de ojo mide 44 px visuales dentro de un hit-target de 48
+/// (IconButton respeta el mínimo material de 48).
+class RideTextField extends StatefulWidget {
   const RideTextField({
     super.key,
     required this.controller,
@@ -258,49 +307,85 @@ class RideTextField extends StatelessWidget {
   final bool enabled;
 
   @override
+  State<RideTextField> createState() => _RideTextFieldState();
+}
+
+class _RideTextFieldState extends State<RideTextField> {
+  final _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_onFocusChange);
+  }
+
+  void _onFocusChange() => setState(() {});
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     OutlineInputBorder border(Color color, [double width = 1.5]) =>
         OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: BorderSide(color: color, width: width),
         );
-    return TextField(
-      controller: controller,
-      obscureText: obscure,
-      enabled: enabled,
-      keyboardType: keyboardType,
-      textInputAction: textInputAction,
-      autofillHints: autofillHints,
-      onChanged: onChanged,
-      onSubmitted: onSubmitted,
-      style: const TextStyle(
-        fontSize: 15.5,
-        fontWeight: FontWeight.w600,
-        color: RideTokens.n900,
+    return DecoratedBox(
+      // Halo de foco del design system: 0 0 0 4px --focus-halo (spread sin
+      // blur, como el CSS del mockup). El borde azul lo pinta focusedBorder;
+      // el halo va por fuera para no comerse el padding del input.
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: _focusNode.hasFocus
+            ? const [BoxShadow(color: RideTokens.focusHalo, spreadRadius: 4)]
+            : const [],
       ),
-      decoration: InputDecoration(
-        filled: true,
-        fillColor: hasError ? const Color(0xFFFFFBFB) : RideTokens.n0,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
-        constraints: const BoxConstraints(minHeight: 54),
-        enabledBorder:
-            border(hasError ? RideTokens.danger : RideTokens.n300),
-        focusedBorder: border(RideTokens.focus, 2),
-        disabledBorder: border(RideTokens.n200),
-        suffixIcon: onToggleObscure == null
-            ? null
-            : IconButton(
-                onPressed: onToggleObscure,
-                tooltip: obscureToggleLabel,
-                iconSize: 22,
-                color: RideTokens.n600,
-                icon: Icon(
-                  obscure
-                      ? Icons.visibility_outlined
-                      : Icons.visibility_off_outlined,
+      child: TextField(
+        controller: widget.controller,
+        focusNode: _focusNode,
+        obscureText: widget.obscure,
+        enabled: widget.enabled,
+        keyboardType: widget.keyboardType,
+        textInputAction: widget.textInputAction,
+        autofillHints: widget.autofillHints,
+        onChanged: widget.onChanged,
+        onSubmitted: widget.onSubmitted,
+        style: const TextStyle(
+          fontSize: 15.5,
+          fontWeight: FontWeight.w600,
+          color: RideTokens.n900,
+        ),
+        decoration: InputDecoration(
+          filled: true,
+          fillColor: widget.hasError ? const Color(0xFFFFFBFB) : RideTokens.n0,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 16,
+          ),
+          constraints: const BoxConstraints(minHeight: 54),
+          enabledBorder: border(
+            widget.hasError ? RideTokens.danger : RideTokens.n300,
+          ),
+          focusedBorder: border(RideTokens.focus, 2),
+          disabledBorder: border(RideTokens.n200),
+          suffixIcon: widget.onToggleObscure == null
+              ? null
+              : IconButton(
+                  onPressed: widget.onToggleObscure,
+                  tooltip: widget.obscureToggleLabel,
+                  iconSize: 22,
+                  color: RideTokens.n600,
+                  icon: Icon(
+                    widget.obscure
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
                 ),
-              ),
+        ),
       ),
     );
   }
