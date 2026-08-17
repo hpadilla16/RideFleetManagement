@@ -188,6 +188,38 @@ Arreglo: **un renglón** — agregar `declinedInsurance: true` al select de `get
 además el pedido P7, porque RideOps deja de deducir el estado leyendo `events[]`. Va en la
 rama `fix/insurance-flag-and-terms-url` junto con P6 y P5.
 
+### Alcance de la rama del gap #11 (decisión del PM, review GD de la página de firma)
+
+GD encontró **siete MUST** en `fix/sign-page-tenant-identity`, pero solo tres son la fuga
+de marca; el resto son defectos preexistentes de una pantalla que nadie había mirado con
+lupa. **La rama cierra la fuga y nada más.** Lo demás se separa para que el gap #11 no se
+convierta en un rediseño de la pantalla de firma con el M2 detenido detrás.
+
+Dentro de la rama (es la fuga):
+- **M1 · el logo sigue ahí.** Se arregló el título y se heredó todo lo demás de
+  `layout.js`: el cliente ve el logotipo de Ride Fleet junto a "Autos del Valle" en el
+  selector de pestañas, y "añadir a pantalla de inicio" le propone "Ride Fleet". **Es lo
+  ÚNICO que GD dice que no necesita mockup**, así que es lo mínimo que desbloquea el QA
+  de H2.
+- **M3 · la identidad no sobrevive al scroll**: el nombre aparece una vez arriba y no hay
+  nada junto al pad de firma. El instante del consentimiento es justo el que el gap
+  quería arreglar.
+- **M4 · la costura de idioma**, incluido el `documentElement.lang='es'` sobre cláusulas
+  en inglés, que hace que los lectores de pantalla lean texto legal inglés con fonética
+  española.
+
+Fuera de la rama, historia propia:
+- **M6 · la iniciación accidental que se auto-guarda sin deshacer.** Preexistente y con
+  consecuencia legal: queda una inicial registrada que el cliente no quiso poner. Ticket
+  aparte, necesita mockup y decisión de Hector.
+- **M2 · el estado de error** que borra la pantalla e imprime `/api/sign/<token> failed
+  (410)` — el token del cliente en pantalla. El texto viene de `client.js:86`, así que la
+  causa es compartida con otras superficies. Lo único que sí entra aquí es dejar de
+  imprimir `err.message`.
+- **M5 y M7** (objetivos de toque, tamaño del cuerpo legal, hairlines de 0.5 px, `100vh`
+  sin safe-area, semántica de formulario) y las **seis fugas hermanas** en otras pantallas
+  de cliente, con sus causas raíz en `layout.js:9` y `:120`.
+
 ### Capacidades ausentes que se vuelven historia propia (GD, review H7)
 
 El mockup de la §11 dibuja CTAs que la app **no puede cumplir hoy**. GD aprobó no
