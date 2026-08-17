@@ -134,8 +134,8 @@ router de kiosk). Dinero síncrono (ADR-5), preview del servidor (ADR-6), firma 
 Check-in/return flow, colas de loaner (4 de las 9), issue escalations, búsqueda.
 
 ### M4 — hardening y push
-Registro de dispositivos + push (si se aprueba el pedido de backend), modo kiosco para
-firma (si §9-6 dice que sí), tablet/iOS según §9-4.
+Registro de dispositivos + push (si se aprueba el pedido de backend), tablet/iOS según
+§9-4. *(El modo kiosco para firma se movió a M1-H5 — §9-6 resuelta el 2026-08-16.)*
 
 ## 6. Cómo trabajar
 
@@ -182,8 +182,14 @@ Branding para pantallas volteadas al cliente: `GET /api/reservations/:id/display
 3. ¿Se lanza el MVP sin push, solo con polling?
 4. Parque de aparatos: ¿Android de gama media primero, iOS y tablet después?
 5. ¿Se aceptan web views autenticadas para la cola larga?
-6. Cuando el cliente firma en el aparato del empleado, el bloqueo por inactividad no debe
-   saltar a mitad de la firma. ¿Hace falta un modo kiosco?
+6. ~~Cuando el cliente firma en el aparato del empleado, el bloqueo por inactividad no debe
+   saltar a mitad de la firma. ¿Hace falta un modo kiosco?~~
+   **RESUELTA (Hector, 2026-08-16): SÍ — Variante A, modo kiosco.** Barra persistente
+   "Modo firma · bloqueo en pausa", lock por inactividad suspendido, notificaciones de
+   staff silenciadas, navegación fuera del flujo de firma bloqueada, salida deliberada
+   (mantener 3 s + PIN). Mockup de referencia: `mockups/m1-tanda-a-v2.html` pantalla 3C.
+   Impacto de alcance: el modo kiosco sale de M4 y entra a la historia **H5 (captura de
+   inspección)** del M1 — la firma del cliente no se construye sin él.
 
 ## 10. Definition of Done — 12 puntos por historia
 
