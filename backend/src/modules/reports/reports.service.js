@@ -741,7 +741,7 @@ export const reportsService = {
       vars
     );
 
-    await sendEmail({
+    await sendEmail({ tenantId: effectiveTenantId,
       to: recipients,
       subject,
       text,

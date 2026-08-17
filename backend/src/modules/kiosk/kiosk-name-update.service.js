@@ -215,7 +215,7 @@ async function sendCode(sessionId, device) {
     bodyText: text,
     preheader: 'Kiosk verification code',
   });
-  await sendEmail({
+  await sendEmail({ tenantId: device?.tenantId,
     to: emailTo,
     subject: `Your verification code${resv.reservationNumber ? ` — reservation #${resv.reservationNumber}` : ''}`,
     text: rendered.text,

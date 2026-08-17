@@ -2608,6 +2608,17 @@ function SettingsInner({ token, me, logout }) {
               </div>
             </div>
             <div className="stack" style={{ marginTop: 6 }}>
+              <label className="label">Send customer email from your own domain</label>
+              <div className="hint" style={{ fontSize: 12, color: '#6b7a9a' }}>
+                Every email to your customers goes out from this address instead of @ridefleetmanager.com. <strong>Set this only after we verify your domain</strong> (SPF + DKIM) — ask us first. Leave blank to send from the platform address.
+              </div>
+              <input
+                placeholder="reservas@tudominio.com"
+                value={cfg.emailFromAddress || ''}
+                onChange={(e) => setCfg({ ...cfg, emailFromAddress: e.target.value.trim() })}
+              />
+            </div>
+            <div className="stack" style={{ marginTop: 6 }}>
               <label className="label">Affidavit owner (transfer-of-liability)</label>
               <div className="hint" style={{ fontSize: 12, color: '#6b7a9a' }}>
                 The registered legal entity that submits citation affidavits — may differ from the rental brand above. Leave blank to use the company name / address / phone above.

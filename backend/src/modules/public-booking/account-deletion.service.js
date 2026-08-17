@@ -142,7 +142,7 @@ export const accountDeletionService = {
     });
 
     try {
-      await sendEmail({ to: customer.email, subject, text, html });
+      await sendEmail({ tenantId: tenantId, to: customer.email, subject, text, html });
     } catch (e) {
       logger.error('account-deletion-email-failed', { customerId: customer.id, message: e.message });
       const err = new Error('We could not send the confirmation email. Please try again in a few minutes.');

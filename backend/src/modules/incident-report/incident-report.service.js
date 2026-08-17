@@ -341,7 +341,7 @@ export const incidentReportService = {
       }];
     }
 
-    await sendEmail({
+    await sendEmail({ tenantId: user?.tenantId,
       to: recipient,
       subject,
       html: bodyHtml,

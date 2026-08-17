@@ -662,7 +662,7 @@ export const loanerAgreementService = {
       // Tenant notification -> the LOCATION email (primary); advisor email as an additional recipient. Email only (no SMS).
       const recipients = [...new Set([locEmail, resv?.serviceAdvisorEmail].filter(Boolean))];
       for (const to of recipients) {
-        try { await sendEmail({ to, subject: `Loaner ${label} request${ro}`, text: body }); } catch {}
+        try { await sendEmail({ tenantId: row?.tenantId, to, subject: `Loaner ${label} request${ro}`, text: body }); } catch {}
       }
       // Customer confirmation by email (texting not enabled yet).
       if (row.customerEmail) {
@@ -678,7 +678,7 @@ export const loanerAgreementService = {
             bodyText: confirmText,
             preheader: `We received your loaner ${label} request`,
           });
-          await sendEmail({ to: row.customerEmail, subject: `Your loaner ${label} request`, text: confirmRenderedText, html: confirmHtml });
+          await sendEmail({ tenantId: row?.tenantId, to: row.customerEmail, subject: `Your loaner ${label} request`, text: confirmRenderedText, html: confirmHtml });
         } catch {}
       }
     } catch (e) {

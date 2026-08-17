@@ -160,7 +160,7 @@ export async function runShuttleLinkInviteSweep(deps = {}) {
           const msg = buildLinkEmail({
             reservationNumber: row.reservationNumber, customerName, link, locale, locationName,
           }, brand);
-          await mailer.sendEmail({ to: email, ...msg });
+          await mailer.sendEmail({ tenantId: row.tenantId, to: email, ...msg });
           emailed = true;
           counts.emailed += 1;
         } catch (err) {

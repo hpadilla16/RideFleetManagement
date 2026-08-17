@@ -32,6 +32,12 @@
  *   module.points — weighted by how expensive the task is to get wrong, not by
  *                   how long it takes.
  *   module.showcase — position in the convention track, or null to leave it out.
+ *   module.needsRecord — some walkthroughs live INSIDE a record (a
+ *                   reservation's own page), so their anchors cannot exist
+ *                   until one is open. This names where to go find one.
+ *                   Without it the tour would start, find nothing, and end
+ *                   as BROKEN — which looked to the person like a dead
+ *                   button (Hector, 2026-08-17).
  */
 
 export const TOUR_TRACKS = Object.freeze({
@@ -209,6 +215,7 @@ export const COURSES = [
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'reservations',
         kind: 'OPPORTUNISTIC',
+        needsRecord: '/reservations',
         verify: { type: VERIFY.RESERVATION_CHECKED_OUT },
         points: 30,
         showcase: 4,
@@ -243,6 +250,7 @@ export const COURSES = [
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'reservations',
         kind: 'OPPORTUNISTIC',
+        needsRecord: '/reservations',
         verify: { type: VERIFY.RESERVATION_CHECKED_IN },
         points: 30,
         showcase: 5,
@@ -273,6 +281,7 @@ export const COURSES = [
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'reservations',
         kind: 'OPPORTUNISTIC',
+        needsRecord: '/reservations',
         verify: { type: VERIFY.PAYMENT_RECORDED },
         points: 15,
         showcase: null,

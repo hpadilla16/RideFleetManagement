@@ -1152,6 +1152,12 @@
     "welcomeStart": "Enséñame",
     "welcomeLater": "Ahora no",
     "practiceError": "No se pudo abrir el modo práctica — intenta de nuevo.",
-    "practiceImpersonation": "Sal de la vista de tenant primero y luego inicia la práctica."
+    "practiceImpersonation": "Sal de la vista de tenant primero y luego inicia la práctica.",
+    "needsRecordTitle": "Primero abre una reserva",
+    "needsRecordBody": "\"{{name}}\" se recorre dentro de una reserva — por eso no pasó nada. Abre cualquier reserva (o usa Practicar en el tenant Demo) y vuelve a pulsar Empezar.",
+    "needsRecordCta": "Ir a reservaciones",
+    "tourUnavailableTitle": "Esta guía no está disponible aquí",
+    "tourUnavailableBody": "Un paso de esta guía apunta a algo que no está en pantalla. Avísale a un administrador para que la arreglemos.",
+    "close": "Cerrar"
   }
 }

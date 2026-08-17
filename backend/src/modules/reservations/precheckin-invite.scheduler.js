@@ -171,7 +171,7 @@ export async function runPrecheckinInviteSweep(deps = {}) {
       await prisma.reservation.update({ where: { id: row.id }, data });
       const brand = await brandFor(row.tenantId);
       const { subject, text, html } = buildInviteEmail(kind, { reservationNumber: row.reservationNumber, customerName, link, locale }, brand);
-      await mailer.sendEmail({ to: email, subject, text, html });
+      await mailer.sendEmail({ tenantId: row.tenantId, to: email, subject, text, html });
       if (kind === 'INVITE') counts.invited += 1; else counts.reminded += 1;
     } catch (err) {
       counts.failed += 1;

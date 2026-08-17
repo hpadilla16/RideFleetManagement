@@ -475,7 +475,7 @@ export async function sendIssueEmail({ to, subject, lines = [], htmlExtra = '', 
     cta: cta && cta.url && cta.label ? cta : undefined,
     locale,
   });
-  return sendEmail({ to, subject, text: brandedText, html });
+  return sendEmail({ tenantId: tenantId, to, subject, text: brandedText, html });
 }
 
 export function recipientForVehicleSubmission(submission) {

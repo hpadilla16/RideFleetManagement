@@ -228,7 +228,60 @@ export function TourHost({ viewer }) {
     if (step && cardRef.current) cardRef.current.focus();
   }, [step?.anchor]);
 
-  if (!step || typeof document === 'undefined') return null;
+  if (typeof document === 'undefined') return null;
+
+  /**
+   * A tour that cannot start must SAY SO (Hector, 2026-08-17: "show me again
+   * no está reiniciando"). Three modules — check-out, check-in, take-payment —
+   * walk you through a single reservation's own page, so their anchors do not
+   * exist until one is open. Launched from Ride University they ended as
+   * BROKEN, and BROKEN rendered nothing at all: the button looked dead.
+   * Now the same dead end explains itself and offers the way forward.
+   */
+  if (state?.endedAs === TOUR_END.BROKEN) {
+    const brokenModule = state.moduleKey ? findModule(state.moduleKey) : null;
+    const where = brokenModule?.needsRecord;
+    const modName = brokenModule
+      ? trainingText(t, mKeyOf(brokenModule, 'title'), brokenModule.title)
+      : '';
+    return createPortal(
+      <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+        <Scrim style={{ inset: 0 }} onClick={close} />
+        <div
+          ref={cardRef}
+          tabIndex={-1}
+          style={{
+            position: 'relative', width: 'min(380px, 100%)', background: '#fff', color: '#1e1a2b',
+            borderRadius: 14, padding: '18px 20px', boxShadow: '0 10px 40px rgba(30,26,43,.3)', pointerEvents: 'auto',
+          }}
+        >
+          <h3 style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 700 }}>
+            {where
+              ? t('training.needsRecordTitle', 'Open a reservation first')
+              : t('training.tourUnavailableTitle', 'This walkthrough is not available here')}
+          </h3>
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: 'var(--text-2, #5b5266)' }}>
+            {where
+              ? t('training.needsRecordBody', '“{{name}}” is walked inside a reservation — that is why nothing happened. Open any reservation (or use Practice on the demo tenant), then press Start again.', { name: modName })
+              : t('training.tourUnavailableBody', 'A step in this guide points at something that is not on screen. Tell an admin so we can fix the guide.')}
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+            <button type="button" className="button-subtle" onClick={close}>
+              {t('training.close', 'Close')}
+            </button>
+            {where && (
+              <button type="button" onClick={() => { close(); router.push(where); }}>
+                {t('training.needsRecordCta', 'Go to reservations')}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
+
+  if (!step) return null;
 
   const { position, total, fraction } = progressOf(state, steps);
   const isShowcase = state.track === TOUR_TRACKS.SHOWCASE;
