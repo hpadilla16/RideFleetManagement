@@ -210,6 +210,23 @@ llaves nuevas, una prueba** — más chico que el arreglo que acababa de shippea
 honesto sigue siendo la reconciliación por re-fetch, que resuelve `connectionLost`,
 `scopeChanged` y el 5xx de una sola vez.
 
+### Orden de fusión: el trinquete de CI vive en UNA sola rama
+
+Dos gates de QA dieron veredictos aparentemente contradictorios sobre el mismo trinquete.
+No lo son: **la capacidad la añade `fix/sign-page-tenant-identity` y `fix/insurance-flag-and-terms-url`
+salió de main, así que no la tiene.**
+
+El guardia `backend/src/lib/npm-test-chain.test.mjs` vigilaba solo la definición **débil**
+de "la prueba corre" (alcanzable desde `npm test`) — y CI **nunca invoca `npm test`**, cosa
+que el propio workflow documenta. La rama de la página de firma le agrega una tercera
+comprobación que **sí lee `beta-ci.yml`** y exige que las suites gateadas estén en la lista
+explícita. QA lo verificó rompiéndolo: quitó la línea del workflow y vio fallar el guardia.
+
+Consecuencia práctica: **hasta que esa rama entre, quitar una suite de la lista de CI no lo
+caza nadie** — ni la de `test:declined-insurance`, ni las otras 22. Al fusionar ambas, hay
+que confirmar que la suite del seguro quede cubierta por la comprobación nueva; si no, se
+arreglaron dos síntomas y el mecanismo sigue abierto.
+
 ### Alcance de la rama del gap #11 (decisión del PM, review GD de la página de firma)
 
 GD encontró **siete MUST** en `fix/sign-page-tenant-identity`, pero solo tres son la fuga
