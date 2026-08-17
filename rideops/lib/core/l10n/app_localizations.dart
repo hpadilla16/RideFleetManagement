@@ -929,7 +929,7 @@ abstract class AppLocalizations {
   /// No description provided for @queueListShowingFirst.
   ///
   /// In es, this message translates to:
-  /// **'Mostrando los primeros {count} — el server manda hasta {count} por cola'**
+  /// **'Mostrando los primeros {count} — puede haber más'**
   String queueListShowingFirst(int count);
 
   /// No description provided for @queueListShowingOf.
@@ -955,6 +955,12 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Buscar'**
   String get searchFieldLabel;
+
+  /// No description provided for @searchClearLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Borrar búsqueda'**
+  String get searchClearLabel;
 
   /// No description provided for @searchPrompt.
   ///

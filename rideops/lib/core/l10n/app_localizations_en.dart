@@ -552,7 +552,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String queueListShowingFirst(int count) {
-    return 'Showing the first $count — the server sends up to $count per queue';
+    return 'Showing the first $count — there may be more';
   }
 
   @override
@@ -568,6 +568,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get searchFieldLabel => 'Search';
+
+  @override
+  String get searchClearLabel => 'Clear search';
 
   @override
   String get searchPrompt => 'Search reservations in your active location.';

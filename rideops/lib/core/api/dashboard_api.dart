@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 
 import 'api_error.dart';
 import 'dto/dashboard.dart';
+import 'interceptors.dart';
 
 /// Retrofit a mano (ADR-2) para el dashboard de employee-app.
 ///
@@ -21,11 +22,21 @@ class DashboardApi {
 
   /// [query] no vacío activa searchResults (take 12 en el server); las colas
   /// y métricas llegan igual en ambos casos.
-  Future<DashboardPayload> fetch({String query = ''}) async {
+  ///
+  /// [skipRateLimitRetry]: el POLLER lo pone en true (SC-1 review H4) — su
+  /// timer ya trae backoff decorrelacionado y el retry del interceptor solo
+  /// amplificaría un 429 sostenido. La búsqueda interactiva lo deja en false.
+  Future<DashboardPayload> fetch({
+    String query = '',
+    bool skipRateLimitRetry = false,
+  }) async {
     try {
       final res = await _authed.get<Map<String, dynamic>>(
         route,
         queryParameters: query.isEmpty ? null : {'q': query},
+        options: skipRateLimitRetry
+            ? Options(extra: {RateLimitRetryInterceptor.skipRetry: true})
+            : null,
       );
       return DashboardPayload.fromJson(res.data ?? const {});
     } on DioException catch (e) {

@@ -37,12 +37,16 @@ class AuthInterceptor extends Interceptor {
   /// con la app abierta dejaría al usuario viendo errores sueltos.
   final void Function()? onPasswordChangeRequired;
 
-  /// 403 SIN code en una request que SÍ llevaba [viewLocationHeader]: la
-  /// negativa de ubicación de REGROUND §1 (auth.js:75 no manda code de
-  /// máquina). Hoy solo telemetría (`session.view_location_denied`) — la UI
-  /// la maneja cada pantalla con su propio ApiError (DoD-4), este callback no
-  /// navega ni muta sesión. Si el backend agrega VIEW_LOCATION_DENIED
-  /// (gap #3 del plan), el disparo se endurece a code == ese.
+  /// La negativa de ubicación de REGROUND §1 observada en una request que SÍ
+  /// llevaba [viewLocationHeader]. Hoy solo telemetría
+  /// (`session.view_location_denied`) — la UI la maneja cada pantalla con su
+  /// propio ApiError (DoD-4), este callback no navega ni muta sesión.
+  ///
+  /// La FIRMA vive en UN solo lugar: [ApiError.isViewLocationDenied] (MC-1
+  /// review H4) — acepta tanto el 403 sin code de hoy (mensaje exacto de
+  /// view-location.js) como el `code: VIEW_LOCATION_DENIED` que el PR de
+  /// backend del gap #3 va a desplegar; sin eso, la métrica moriría en
+  /// silencio el día del deploy.
   final void Function()? onViewLocationDenied;
 
   static const viewLocationHeader = 'x-view-location';
@@ -107,12 +111,13 @@ class AuthInterceptor extends Interceptor {
       onSessionExpired();
     } else if (apiError.kind == ApiErrorKind.passwordChangeRequired) {
       onPasswordChangeRequired?.call();
-    } else if (apiError.kind == ApiErrorKind.forbidden &&
-        apiError.code == null &&
-        err.requestOptions.headers.containsKey(viewLocationHeader)) {
+    } else if (apiError.isViewLocationDenied(
       // Solo cuenta como negativa de ubicación si ESTA request llevó el
-      // header: un 403 de módulo/RBAC sin header no debe contaminar la
-      // métrica session.view_location_denied.
+      // header: un 403 de módulo/RBAC no debe contaminar la métrica
+      // session.view_location_denied (misma firma que usa la UI — MC-1 H4).
+      requestHadHeader:
+          err.requestOptions.headers.containsKey(viewLocationHeader),
+    )) {
       onViewLocationDenied?.call();
     }
     handler.next(
@@ -155,6 +160,15 @@ class RateLimitRetryInterceptor extends Interceptor {
   /// sincronizadas produce valores casi idénticos y no des-sincroniza nada).
   final Random _random;
 
+  /// `options.extra[skipRetry] = true` ⇒ esta request NO se reintenta aquí
+  /// aunque sea throttle. Para el POLLER del dashboard (Innovation SC-1,
+  /// review H4): bajo un 429 sostenido, el retry por-request amplifica hasta
+  /// 4× el tráfico sin beneficio — el timer del poller ya trae su propio
+  /// backoff decorrelacionado y el próximo tick reintenta igual. Los GETs
+  /// interactivos (búsqueda, selector de sedes) conservan el retry: ahí hay
+  /// un humano esperando UNA respuesta.
+  static const skipRetry = 'rideops.skip_rate_limit_retry';
+
   static const _attemptKey = 'rateLimitAttempt';
   static const _retriableMethods = {'GET', 'HEAD'};
   static const _jitterMs = 250;
@@ -190,7 +204,8 @@ class RateLimitRetryInterceptor extends Interceptor {
     final method = err.requestOptions.method.toUpperCase();
     final attempt = (err.requestOptions.extra[_attemptKey] as int?) ?? 0;
 
-    if (!_isThrottle(err.response) ||
+    if (err.requestOptions.extra[skipRetry] == true ||
+        !_isThrottle(err.response) ||
         !_retriableMethods.contains(method) ||
         attempt >= maxRetries) {
       return handler.next(err);

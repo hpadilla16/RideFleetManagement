@@ -160,6 +160,16 @@ class DashboardController extends Notifier<DashboardState> {
 
   Future<void> _fetch(int gen) async {
     if (gen != _generation || !ref.mounted) return;
+    // MC-2 review H4: refresh() (resume, pull-to-refresh) NO bypasea el gate
+    // de arranque. Sin sesión no hay a quién consultar — un resume sobre el
+    // login tras un logout armaría polling zombie con onSessionExpired por
+    // tick; y con la sede a medio hidratar el fetch saldría SIN header
+    // (criterio registrado H4). El build re-dispara solo cuando ambos gates
+    // abren, así que aquí no se pierde nada con retornar.
+    if (!ref.read(sessionControllerProvider).isAuthenticated ||
+        !ref.read(activeLocationProvider).hydrated) {
+      return;
+    }
     if (_inFlight) return;
     _inFlight = true;
     state = DashboardState(
@@ -174,7 +184,9 @@ class DashboardController extends Notifier<DashboardState> {
     // puso). Leerlo después clasificaría contra una selección ya cambiada.
     final hadHeader = ref.read(activeLocationProvider).isPinned;
     try {
-      final payload = await _api.fetch();
+      // skipRateLimitRetry: el backoff del POLLER (abajo) es la respuesta a
+      // un 429 — el retry por-request del interceptor solo lo amplificaría.
+      final payload = await _api.fetch(skipRateLimitRetry: true);
       if (gen != _generation || !ref.mounted) return;
       _backoff = null;
       state = DashboardState(data: payload, fetchedAt: clock.now());
@@ -201,6 +213,9 @@ class DashboardController extends Notifier<DashboardState> {
   void _scheduleNext(int gen) {
     if (gen != _generation || !ref.mounted) return;
     if (!ref.read(appVisibilityProvider)) return; // pausa total en background
+    // MC-2: sin sesión no se programan ticks — el 401 de un tick zombie
+    // dispararía onSessionExpired cada 52 s contra la pantalla de login.
+    if (!ref.read(sessionControllerProvider).isAuthenticated) return;
     _timer?.cancel();
     _timer = Timer(_nextInterval(), () {
       // Métrica de frecuencia sampleada — jamás log por tick completo.

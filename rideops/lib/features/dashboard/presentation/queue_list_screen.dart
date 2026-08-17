@@ -77,12 +77,18 @@ class QueueListScreen extends ConsumerWidget {
                       ),
                     ),
                   ),
+                // Key por id: diff estable frente al polling (nota 1).
                 if (queue == DashboardQueue.issueEscalations)
                   for (final i in data.queues.issueEscalations)
-                    IncidentQueueCard(item: i, now: now)
+                    IncidentQueueCard(key: ValueKey(i.id), item: i, now: now)
                 else
                   for (final r in reservationItemsOf(data.queues, queue))
-                    ReservationQueueCard(item: r, queue: queue, now: now),
+                    ReservationQueueCard(
+                      key: ValueKey(r.id),
+                      item: r,
+                      queue: queue,
+                      now: now,
+                    ),
               ],
             ),
     );

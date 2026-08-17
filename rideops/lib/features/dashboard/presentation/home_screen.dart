@@ -136,9 +136,12 @@ class _HomeContent extends ConsumerWidget {
 
 /// "Actualizado hace X min · se actualiza solo" — frescura honesta SIEMPRE
 /// visible (nota 1). El dot hace un TICK (un pulso corto) cada vez que llega
-/// dato nuevo — la nota de motion del mockup ("al terminar, la fila hace tick
-/// a 'ahora'") sin una animación infinita: un latido perpetuo obliga un frame
-/// por ciclo para siempre (batería en patio) y con reduced-motion se omite.
+/// dato nuevo, en lugar del latido perpetuo ≤0.5 Hz que dibuja el mockup:
+/// **enmienda aceptada por GD para M1 (review H4, S-4)** — un latido infinito
+/// obliga un frame por ciclo para siempre (batería en patio de gama media) y
+/// el tick cumple la misma nota de motion ("al terminar, la fila hace tick a
+/// 'ahora'"). El PM registra la enmienda en el mockup. Con reduced-motion el
+/// tick se omite.
 class _FreshnessLine extends StatefulWidget {
   const _FreshnessLine({required this.fetchedAt, required this.now});
 
@@ -595,12 +598,19 @@ class _QueueSection extends StatelessWidget {
             ],
           ),
         ),
+        // Key por id (nota 1 del mockup: diff por id — el polling no debe
+        // recrear cards que no cambiaron ni mover el scroll).
         if (queue == DashboardQueue.issueEscalations)
           for (final i in data.queues.issueEscalations)
-            IncidentQueueCard(item: i, now: now)
+            IncidentQueueCard(key: ValueKey(i.id), item: i, now: now)
         else
           for (final r in reservationItemsOf(data.queues, queue))
-            ReservationQueueCard(item: r, queue: queue, now: now),
+            ReservationQueueCard(
+              key: ValueKey(r.id),
+              item: r,
+              queue: queue,
+              now: now,
+            ),
       ],
     );
   }

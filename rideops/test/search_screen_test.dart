@@ -84,6 +84,37 @@ void main() {
 
     expect(dashboardApi.lastQuery, 'maria');
     expect(find.text('María González'), findsOneWidget);
+    // GD MC-2 (review H4): card NEUTRA — el resultado es una reserva en
+    // cualquier estado, jamás disfrazada de "salida" con su juicio.
+    expect(find.text('Pre-checkin done'), findsNothing);
+    expect(find.text('Pre-checkin missing'), findsNothing);
+  });
+
+  testWidgets(
+      'GD S-7: Enter busca SIN esperar el debounce y el ✕ limpia el campo',
+      (tester) async {
+    dashboardApi.onFetch = (query) async {
+      final raw = readJsonFixture('dashboard.json');
+      raw['searchResults'] =
+          query.isEmpty ? <Object>[] : [readJsonFixture('reservation_card.json')];
+      return DashboardPayload.fromJson(raw);
+    };
+    await pumpToSearch(tester);
+
+    await tester.enterText(find.byType(TextField), 'maria');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pump(); // cero espera de debounce
+    await tester.pumpAndSettle();
+    expect(dashboardApi.lastQuery, 'maria');
+    expect(find.text('María González'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.close_rounded));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Search reservations in your active location.'),
+      findsOneWidget,
+      reason: 'limpiar vuelve al prompt, no deja resultados fantasma',
+    );
   });
 
   testWidgets('sin resultados: mensaje con el término, no pantalla vacía',

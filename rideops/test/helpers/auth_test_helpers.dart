@@ -155,7 +155,10 @@ class FakeDashboardApi extends DashboardApi {
   String? lastQuery;
 
   @override
-  Future<DashboardPayload> fetch({String query = ''}) {
+  Future<DashboardPayload> fetch({
+    String query = '',
+    bool skipRateLimitRetry = false,
+  }) {
     calls++;
     lastQuery = query;
     if (onFetch != null) return onFetch!(query);

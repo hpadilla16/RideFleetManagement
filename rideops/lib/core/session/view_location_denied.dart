@@ -10,6 +10,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 /// cuanto un fetch vuelve a pasar o la sede cambia. El shell solo lo observa;
 /// jamás lo muta ni navega por él (DoD-4: la negativa la renderiza cada
 /// pantalla con su propio ApiError).
+///
+/// **UN SOLO ESCRITOR por diseño** (Innovation OP-3, review H4): en M1 el
+/// DashboardController es el ÚNICO que muta esta señal — un bool no soporta
+/// dos escritores (el éxito de una pantalla apagaría la negativa viva de
+/// otra). Si otra superficie scoped necesita pintarla (búsqueda M3, colas
+/// M3), NO agregues un segundo `set()`: promueve la señal a un contador o a
+/// un set de dueños, o consolida la clasificación en un provider compartido.
 class ViewLocationDeniedSignal extends Notifier<bool> {
   @override
   bool build() => false;

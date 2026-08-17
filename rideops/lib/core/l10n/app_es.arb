@@ -252,7 +252,7 @@
   "@advisorLabel": {
     "placeholders": { "name": { "type": "String" } }
   },
-  "queueListShowingFirst": "Mostrando los primeros {count} — el server manda hasta {count} por cola",
+  "queueListShowingFirst": "Mostrando los primeros {count} — puede haber más",
   "@queueListShowingFirst": {
     "placeholders": { "count": { "type": "int" } }
   },
@@ -266,6 +266,7 @@
   "queueEmptyBody": "Nada en esta cola ahora mismo.",
   "searchFieldHint": "Cliente, reserva, placa o unidad",
   "searchFieldLabel": "Buscar",
+  "searchClearLabel": "Borrar búsqueda",
   "searchPrompt": "Busca en las reservas de tu sede activa.",
   "searchNoResults": "Sin resultados para “{query}”.",
   "@searchNoResults": {

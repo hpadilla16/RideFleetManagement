@@ -53,6 +53,18 @@ class StubActiveLocation extends ActiveLocationController {
   void emit(ActiveLocation next) => state = next;
 }
 
+/// Sesión controlable a mano — para simular logout/login en caliente (MC-2).
+class MutableSessionController extends SessionController {
+  MutableSessionController(this.initial);
+
+  final SessionState initial;
+
+  @override
+  SessionState build() => initial;
+
+  void emit(SessionState next) => state = next;
+}
+
 void main() {
   final liveToken = fakeJwt(
     exp: DateTime.now().add(const Duration(hours: 8)),
@@ -67,6 +79,7 @@ void main() {
     FakeDashboardApi api,
     CapturingEventLogger logger,
     StubActiveLocation location,
+    MutableSessionController session,
   }) harness({
     ActiveLocation initialLocation = const ActiveLocation.all(),
     bool authenticated = true,
@@ -75,21 +88,20 @@ void main() {
     final api = FakeDashboardApi();
     final logger = CapturingEventLogger();
     final location = StubActiveLocation(initialLocation);
+    final session = MutableSessionController(
+      authenticated
+          ? SessionState.authenticated(
+              token: liveToken,
+              user: sessionUserFixture(),
+            )
+          : const SessionState.unauthenticated(),
+    );
     final container = ProviderContainer(
       overrides: [
         dashboardApiProvider.overrideWithValue(api),
         eventLoggerProvider.overrideWithValue(logger),
         activeLocationProvider.overrideWith(() => location),
-        sessionControllerProvider.overrideWith(
-          () => StubSessionController(
-            authenticated
-                ? SessionState.authenticated(
-                    token: liveToken,
-                    user: sessionUserFixture(),
-                  )
-                : const SessionState.unauthenticated(),
-          ),
-        ),
+        sessionControllerProvider.overrideWith(() => session),
         dashboardPollConfigProvider.overrideWithValue(
           DashboardPollConfig(random: random ?? ScriptedRandom()),
         ),
@@ -101,7 +113,8 @@ void main() {
       container: container,
       api: api,
       logger: logger,
-      location: location
+      location: location,
+      session: session,
     );
   }
 
@@ -137,6 +150,50 @@ void main() {
       async.flushMicrotasks();
       async.elapse(const Duration(minutes: 10));
       expect(h.api.calls, 0);
+    });
+  });
+
+  test('MC-2a review H4: refresh() durante la hidratación NO despacha — el '
+      'gate registrado aplica también a resume/pull-to-refresh', () {
+    fakeAsync((async) {
+      final h = harness(initialLocation: const ActiveLocation.hydrating());
+      async.flushMicrotasks();
+      unawaited(
+        h.container.read(dashboardControllerProvider.notifier).refresh(),
+      );
+      async.flushMicrotasks();
+      expect(h.api.calls, 0,
+          reason: 'un resume a media hidratación despacharía SIN header');
+
+      // El gate abre por el camino normal: hidratación → primer fetch.
+      h.location.emit(const ActiveLocation.all());
+      h.container.read(dashboardControllerProvider);
+      async.flushMicrotasks();
+      expect(h.api.calls, 1);
+    });
+  });
+
+  test('MC-2b review H4: tras logout, un resume sobre el login NO resucita '
+      'el polling (cero ticks zombie)', () {
+    fakeAsync((async) {
+      final h = harness();
+      async.flushMicrotasks();
+      expect(h.api.calls, 1);
+
+      h.session.emit(const SessionState.unauthenticated());
+      h.container.read(dashboardControllerProvider); // rebuild → pending
+      async.flushMicrotasks();
+
+      // Background + resume en la pantalla de login: el listener de
+      // visibilidad dispara refresh() — debe morir en el gate.
+      h.container.read(appVisibilityProvider.notifier).setVisible(false);
+      async.flushMicrotasks();
+      h.container.read(appVisibilityProvider.notifier).setVisible(true);
+      async.flushMicrotasks();
+      async.elapse(const Duration(minutes: 10));
+      async.flushMicrotasks();
+      expect(h.api.calls, 1,
+          reason: 'sin sesión, ni el refresh de resume ni ticks cada 52 s');
     });
   });
 

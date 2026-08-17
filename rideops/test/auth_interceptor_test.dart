@@ -169,6 +169,38 @@ void main() {
     expect(h.calls, ['view-denied']);
   });
 
+  test(
+      'MC-1 review H4: el code VIEW_LOCATION_DENIED del backend futuro '
+      '(gap #3) también dispara la métrica — aunque el copy cambie', () async {
+    final h = build(
+      viewLocation: 'loc-quitada',
+      respond: () => jsonRes(403, {
+        'error': 'Copy nuevo cualquiera',
+        'code': 'VIEW_LOCATION_DENIED',
+      }),
+    );
+    final err = await errorOf(() => h.dio.get<dynamic>('/x'));
+    expect(err.kind, ApiErrorKind.forbidden);
+    expect(h.calls, ['view-denied'],
+        reason: 'la firma vive en ApiError.isViewLocationDenied: cuando el '
+            'PR de backend despliegue el code, la métrica sigue viva');
+  });
+
+  test(
+      'MC-1: un 403 de MÓDULO (sin code, mensaje distinto) CON header NO '
+      'contamina la métrica del selector', () async {
+    final h = build(
+      viewLocation: 'loc-centro',
+      respond: () => jsonRes(
+        403,
+        {'error': 'The Reservations module is not enabled for your account.'},
+      ),
+    );
+    final err = await errorOf(() => h.dio.get<dynamic>('/x'));
+    expect(err.kind, ApiErrorKind.forbidden);
+    expect(h.calls, isEmpty);
+  });
+
   test('403 CON code y header → pwd-gate, jamás view-denied', () async {
     final h = build(
       viewLocation: 'loc-centro',

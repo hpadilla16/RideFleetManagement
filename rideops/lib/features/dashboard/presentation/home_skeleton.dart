@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/theme/ride_tokens.dart';
 
-/// Skeleton del home (mockup 4E): replica la geometría bento (saludo, hero
-/// alto + 2 tiles, label de cola, 2 cards) con shimmer de 1.4 s. Se muestra
-/// SOLO en el primer load / sesión degradada — los refrescos por polling son
+/// Skeleton del home (mockups 4E/5C): replica la geometría REAL de la home
+/// H4 (fila de frescura, hero alto + 2 tiles, label de cola, 2 cards) con
+/// shimmer de 1.4 s — sin huesos de saludo que la pantalla no tiene, para
+/// que el primer load no salte (GD S-6, review H4). Se muestra SOLO en el
+/// primer load / sesión degradada — los refrescos por polling son
 /// silenciosos (nota 9 del mockup).
 ///
 /// El shimmer es un pulso de opacidad (no un gradiente que barre): mismo
@@ -61,9 +63,9 @@ class _HomeSkeletonState extends State<HomeSkeleton>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const _Bone(width: 110, height: 14),
-                  const SizedBox(height: 8),
-                  const _Bone(width: 170, height: 24),
+                  // Fila de frescura (200×14, geometría del 5C) — lo primero
+                  // que la home real pinta en su lugar.
+                  const _Bone(width: 200, height: 14),
                   const SizedBox(height: 16),
                   // Bento: hero alto + 2 tiles apilados (geometría de 4E).
                   SizedBox(

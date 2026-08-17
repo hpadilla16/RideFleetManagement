@@ -96,6 +96,23 @@ void main() {
         reason: 'un POST jamás se re-manda a ciegas desde aquí (ADR-5)');
   });
 
+  test(
+      'SC-1 review H4: extra skipRetry apaga el reintento del throttle — el '
+      'poller trae su propio backoff y no debe amplificar un 429', () async {
+    final adapter = SeqAdapter([res(429), res(200)]);
+    final dio = buildDio(adapter);
+    await expectLater(
+      dio.get<dynamic>(
+        '/x',
+        options: Options(
+          extra: {RateLimitRetryInterceptor.skipRetry: true},
+        ),
+      ),
+      throwsA(isA<DioException>()),
+    );
+    expect(adapter.calls, 1, reason: 'el 429 se propaga sin reintento');
+  });
+
   test('429 GET se sigue reintentando como antes', () async {
     final adapter = SeqAdapter([res(429), res(200)]);
     final dio = buildDio(adapter);

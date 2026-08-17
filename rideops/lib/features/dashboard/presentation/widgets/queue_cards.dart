@@ -348,6 +348,57 @@ class ReservationQueueCard extends StatelessWidget {
   }
 }
 
+/// Card NEUTRA para resultados de búsqueda (GD MC-2, review H4): los
+/// resultados son reservas en CUALQUIER estado — vestirlas de "salida"
+/// mentía (una reserva ya en renta mostraba "Falta pre-checkin" y una hora
+/// de pickup pasada). Chip neutral con la fecha de pickup o el número de
+/// reserva, meta factual, CERO capa interpretativa warn/pre-checkin; el
+/// juicio de estado llega con el detalle de reserva en M3.
+class SearchResultCard extends StatelessWidget {
+  const SearchResultCard({super.key, required this.item, required this.now});
+
+  final ReservationCard item;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final locale = Localizations.localeOf(context).toString();
+
+    final customer = [
+      item.customer?.firstName,
+      item.customer?.lastName,
+    ].whereType<String>().where((s) => s.isNotEmpty).join(' ');
+    final title = customer.isNotEmpty
+        ? customer
+        : (item.reservationNumber ?? item.id);
+
+    final pickupAt = item.pickupAt;
+    final chipLabel = pickupAt != null
+        ? formatWhen(l10n, locale, pickupAt, now)
+        : item.reservationNumber;
+
+    final v = item.vehicle;
+    final meta = <String>[
+      if (v?.make != null) '${v!.make}${v.year != null ? ' ${v.year}' : ''}',
+      if (v?.internalNumber != null && v!.internalNumber!.isNotEmpty)
+        v.internalNumber!,
+      if (item.reservationNumber != null) item.reservationNumber!,
+    ].join(' · ');
+
+    return _QueueCardShell(
+      icon: Icons.description_outlined,
+      iconBg: RideTokens.p50,
+      iconColor: RideTokens.p700,
+      title: title,
+      chip: chipLabel == null
+          ? const SizedBox.shrink()
+          : QueueStatusChip(label: chipLabel),
+      meta: meta,
+    );
+  }
+}
+
 /// Card de incidente (cola issueEscalations, shape incidentCard). Chip VIVO:
 /// OPEN en danger, UNDER_REVIEW en warn — con dot, porque el estado respira.
 class IncidentQueueCard extends StatelessWidget {

@@ -138,11 +138,12 @@
   "loanerFollowupBilling": "Billing denied",
   "loanerReadyChip": "Ready for pickup",
   "advisorLabel": "Advisor: {name}",
-  "queueListShowingFirst": "Showing the first {count} — the server sends up to {count} per queue",
+  "queueListShowingFirst": "Showing the first {count} — there may be more",
   "queueListShowingOf": "Showing {shown} of {total}",
   "queueEmptyBody": "Nothing in this queue right now.",
   "searchFieldHint": "Customer, reservation, plate or unit",
   "searchFieldLabel": "Search",
+  "searchClearLabel": "Clear search",
   "searchPrompt": "Search reservations in your active location.",
   "searchNoResults": "No results for “{query}”."
 }

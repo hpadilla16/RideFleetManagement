@@ -9,7 +9,6 @@ import '../../../core/api/dto/reservation_card.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/session/active_location.dart';
 import '../../../core/theme/ride_tokens.dart';
-import '../../dashboard/domain/dashboard_queues.dart';
 import '../../dashboard/presentation/widgets/queue_cards.dart';
 import '../../shell/location_denied_view.dart';
 
@@ -48,13 +47,29 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   /// Debounce de 350 ms: el patio teclea con guantes — un request por letra
-  /// contra un endpoint que arma 13 queries sería castigo gratuito.
+  /// contra un endpoint que arma 13 queries sería castigo gratuito. El
+  /// setState inmediato es solo para el ✕ de limpiar (GD S-7): aparece con
+  /// la primera letra sin esperar al debounce.
   void _onChanged(String raw) {
     _debounce?.cancel();
+    setState(() {});
     _debounce = Timer(const Duration(milliseconds: 350), () {
       if (!mounted) return;
       setState(() => _query = raw.trim());
     });
+  }
+
+  /// Enter/lupa del teclado: busca YA, sin esperar el debounce (GD S-7 —
+  /// con guantes, el gesto natural es rematar con el botón de buscar).
+  void _submit(String raw) {
+    _debounce?.cancel();
+    setState(() => _query = raw.trim());
+  }
+
+  void _clear() {
+    _debounce?.cancel();
+    _controller.clear();
+    setState(() => _query = '');
   }
 
   @override
@@ -71,6 +86,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             child: TextField(
               controller: _controller,
               onChanged: _onChanged,
+              onSubmitted: _submit,
               textInputAction: TextInputAction.search,
               style: const TextStyle(
                 fontSize: 15,
@@ -84,6 +100,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   Icons.search_rounded,
                   color: RideTokens.n600,
                 ),
+                // ✕ para limpiar con guantes (GD S-7) — target 48 del
+                // IconButton estándar.
+                suffixIcon: _controller.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: l10n.searchClearLabel,
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: RideTokens.n600,
+                        ),
+                        onPressed: _clear,
+                      ),
                 filled: true,
                 fillColor: RideTokens.n0,
                 contentPadding: const EdgeInsets.symmetric(
@@ -144,14 +172,9 @@ class _Results extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(16, 6, 16, 96),
               children: [
                 for (final r in list)
-                  // La card genérica lee mejor como "salida" (pickup +
-                  // pre-checkin) — los resultados son reservas de cualquier
-                  // estado y el detalle real llega en M3.
-                  ReservationQueueCard(
-                    item: r,
-                    queue: DashboardQueue.checkout,
-                    now: now,
-                  ),
+                  // Card NEUTRA (GD MC-2 review H4): resultados sin capa
+                  // interpretativa de cola. Key por id: diff estable.
+                  SearchResultCard(key: ValueKey(r.id), item: r, now: now),
               ],
             ),
       error: (e, _) {
