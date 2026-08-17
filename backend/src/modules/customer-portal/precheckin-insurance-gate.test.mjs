@@ -41,6 +41,27 @@ function mockRes() {
   return res;
 }
 
+/**
+ * The literal default the real pre-check-in page holds and posts —
+ * frontend/src/app/customer/precheckin/page.js. Copied verbatim on purpose:
+ * the earlier version of these tests hand-built a selection object that echoed
+ * the stored value back, which tested the assumption instead of the client and
+ * hid a regression that refused a returning customer's entire pre-check-in.
+ *
+ * The load path rehydrates ONLY selectedPlanCode (from an existing INSURANCE
+ * charge); declinedCoverage is never restored. So this exact object is what a
+ * customer who declined earlier posts when they come back.
+ */
+const PAGE_DEFAULT_SELECTION = Object.freeze({
+  selectedPlanCode: '',
+  declinedCoverage: false,
+  denyInitials: '',
+  responsibilityInitials: '',
+  chargeInitials: '',
+  ownPolicyNumber: '',
+  signatureDataUrl: '',
+});
+
 /** A complete pre-check-in body — every required field present. */
 function body(insuranceSelection) {
   return {
@@ -59,7 +80,7 @@ let writes;
 const STUBBED = [
   'reservation.findFirst', 'rentalAgreement.findUnique', 'rentalAgreement.update',
   'checkoutSession.findUnique', 'handoffToken.findFirst', 'agreementSectionInitial.findFirst',
-  'customer.update', 'reservationCharge.deleteMany',
+  'customer.update', 'reservationCharge.deleteMany', 'rentalAgreement.updateMany',
 ];
 const realFns = {};
 
@@ -78,6 +99,11 @@ beforeEach(() => {
   prisma.agreementSectionInitial.findFirst = async () => null;
   prisma.customer.update = async (op) => { writes.push(['customer.update', op]); return {}; };
   prisma.reservationCharge.deleteMany = async (op) => { writes.push(['charges.deleteMany', op]); return {}; };
+  prisma.rentalAgreement.updateMany = async (op) => {
+    writes.push(['rentalAgreement.updateMany', op]);
+    // The fence is `tcSignedAt: null`; mirror what that predicate would match.
+    return { count: agreement.tcSignedAt ? 0 : 1 };
+  };
 });
 
 afterEach(() => {
@@ -98,7 +124,7 @@ async function post(reqBody) {
 
 test('decline after signing → 409 with a code, not a 500 via next(e)', async () => {
   agreement.tcSignedAt = new Date();
-  const { res, nextErr } = await post(body({ declinedCoverage: true }));
+  const { res, nextErr } = await post(body({ ...PAGE_DEFAULT_SELECTION, declinedCoverage: true }));
 
   assert.equal(nextErr, undefined, 'must not fall through to the error middleware');
   assert.equal(res.statusCode, 409);
@@ -113,7 +139,7 @@ test('PLAN selection after a signed DECLINE is refused too', async () => {
   // whose decline addendum contradicts its insurance charge, silently.
   agreement.tcSignedAt = new Date();
   agreement.declinedInsurance = true;
-  const { res, nextErr } = await post(body({ selectedPlanCode: 'PREMIUM' }));
+  const { res, nextErr } = await post(body({ ...PAGE_DEFAULT_SELECTION, selectedPlanCode: 'PREMIUM' }));
 
   assert.equal(nextErr, undefined);
   assert.equal(res.statusCode, 409);
@@ -124,7 +150,7 @@ test('PLAN selection after a signed DECLINE is refused too', async () => {
 test('mid-signature decline → 409 TC_SIGNING_IN_PROGRESS', async () => {
   prisma.handoffToken.findFirst = async () => ({ id: 'tok' });
   prisma.agreementSectionInitial.findFirst = async () => ({ id: 'i1' });
-  const { res } = await post(body({ declinedCoverage: true }));
+  const { res } = await post(body({ ...PAGE_DEFAULT_SELECTION, declinedCoverage: true }));
 
   assert.equal(res.statusCode, 409);
   assert.equal(res.body.code, INSURANCE_LOCK.SIGNING);
@@ -144,16 +170,45 @@ function passedTheGate({ res, writes: w }) {
   );
 }
 
+test('returning customer who declined + signed is NOT refused (real page default)', async () => {
+  // The MAJOR regression: neither branch writes the flag for this payload, so
+  // deriving a next value from it read as a flip to false and 409'd a request
+  // that only wanted to fix a phone number.
+  agreement.declinedInsurance = true;
+  agreement.tcSignedAt = new Date();
+  // NOTE: the handler runs on and fails later on models this test does not stub,
+  // so `nextErr` is expected here — see passedTheGate.
+  const { res } = await post(body({ ...PAGE_DEFAULT_SELECTION }));
+  passedTheGate({ res, writes });
+});
+
+test('the page default is also fine on an unsigned declined agreement', async () => {
+  agreement.declinedInsurance = true;
+  const { res } = await post(body({ ...PAGE_DEFAULT_SELECTION }));
+  passedTheGate({ res, writes });
+});
+
+test('the page default never reaches the gate at all', async () => {
+  // Proves the fix is "no write follows, so do not gate" and not a lucky
+  // comparison: the gate's first read must not even happen.
+  let gateRead = false;
+  prisma.rentalAgreement.findUnique = async () => { gateRead = true; return agreement; };
+  agreement.declinedInsurance = true;
+  agreement.tcSignedAt = new Date();
+  await post(body({ ...PAGE_DEFAULT_SELECTION }));
+  assert.equal(gateRead, false, 'no insurance write follows, so the gate must not run');
+});
+
 test('a normal plan selection on an unsigned agreement is NOT refused', async () => {
   // false-vs-false is a no-op by the gate's own rule; the common case must not
   // start 409ing just because the preflight now covers both branches.
-  const { res } = await post(body({ selectedPlanCode: 'PREMIUM' }));
+  const { res } = await post(body({ ...PAGE_DEFAULT_SELECTION, selectedPlanCode: 'PREMIUM' }));
   passedTheGate({ res, writes });
 });
 
 test('a re-submitted decline on an unsigned agreement is NOT refused', async () => {
   agreement.declinedInsurance = true;
-  const { res } = await post(body({ declinedCoverage: true }));
+  const { res } = await post(body({ ...PAGE_DEFAULT_SELECTION, declinedCoverage: true }));
   passedTheGate({ res, writes });
 });
 
@@ -183,7 +238,7 @@ test('a sealed contract keeps its original decline signature and date', async ()
   try {
     agreement.declinedInsurance = true;   // no flip -> gate allows the request
     agreement.tcSignedAt = new Date();    // ...but the contract is already signed
-    const { res } = await post(body({ declinedCoverage: true, signatureDataUrl: SIGNATURE }));
+    const { res } = await post(body({ ...PAGE_DEFAULT_SELECTION, declinedCoverage: true, signatureDataUrl: SIGNATURE }));
     assert.notEqual(res.statusCode, 409, 'the no-flip re-submit must still be accepted');
 
     const update = writes.find(([name]) => name === 'rentalAgreement.update');
@@ -204,12 +259,14 @@ test('an unsigned contract still records the decline signature', async () => {
   // where this signature is legitimately captured in the first place.
   const restore = stubPathToDeclineBranch();
   try {
-    const { res } = await post(body({ declinedCoverage: true, signatureDataUrl: SIGNATURE }));
+    const { res } = await post(body({ ...PAGE_DEFAULT_SELECTION, declinedCoverage: true, signatureDataUrl: SIGNATURE }));
     assert.notEqual(res.statusCode, 409);
-    const update = writes.find(([name]) => name === 'rentalAgreement.update');
-    const data = update[1].data;
-    assert.equal(data.declinedInsuranceSignatureDataUrl, SIGNATURE);
-    assert.ok(data.declinedInsuranceSignedAt instanceof Date);
+    // Written through the fenced updateMany, not a bare update.
+    const fenced = writes.find(([name]) => name === 'rentalAgreement.updateMany');
+    assert.ok(fenced, 'the signature write must be fenced');
+    assert.deepEqual(fenced[1].where, { id: 'a1', tcSignedAt: null });
+    assert.equal(fenced[1].data.declinedInsuranceSignatureDataUrl, SIGNATURE);
+    assert.ok(fenced[1].data.declinedInsuranceSignedAt instanceof Date);
   } finally {
     restore();
   }
@@ -218,7 +275,7 @@ test('an unsigned contract still records the decline signature', async () => {
 test('validation still runs before the gate', async () => {
   // The preflight sits after field validation; a body missing required fields
   // must still get the 400 rather than a confusing 409.
-  const incomplete = { ...body({ declinedCoverage: true }), city: '' };
+  const incomplete = { ...body({ ...PAGE_DEFAULT_SELECTION, declinedCoverage: true }), city: '' };
   agreement.tcSignedAt = new Date();
   const { res } = await post(incomplete);
   assert.equal(res.statusCode, 400);

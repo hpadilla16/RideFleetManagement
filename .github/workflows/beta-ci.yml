@@ -135,9 +135,20 @@ jobs:
         #
         # This is the identical dummy value the "Resolve transitive imports" step
         # above already uses. Same reason: satisfy a constructor, never connect.
+        #
+        #   test:declined-insurance — RentalAgreement.declinedInsurance decides
+        #     which sections the customer must initial and whether the contract
+        #     carries the decline addendum. The bug it guards was live: the
+        #     reservation detail payload dropped the column, so the wizard's
+        #     switch read OFF for a customer who HAD declined, and an agent
+        #     touching it POSTed declined:false and erased the addendum from a
+        #     signed contract. It also covers the step guard on the two writers
+        #     and the 409-with-code mapping on the customer route. Being in the
+        #     `npm test` chain is NOT enough — nothing in this workflow invokes
+        #     `npm test`, which is the trap documented above.
         env:
           DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_unit_only?schema=public'
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:

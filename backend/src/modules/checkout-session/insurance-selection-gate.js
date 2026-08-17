@@ -11,15 +11,21 @@
  * enforced in one of them is not a control, and the same rule pasted into both
  * is a rule that will drift. It lives here, once.
  *
- * WRITER INVENTORY (backend/src, verified 2026-08-17 — keep current):
+ * WRITER INVENTORY as of 2026-08-17:
  *   1. checkout-session.service.js  setDeclinedInsurance()  — agent, wizard step 1
  *   2. customer-portal.routes.js    POST /customer-info/:token — customer, pre-check-in
  * Everything else that names the column only READS it: kiosk-checkout.service.js
  * (2 selects + 2 response mappings), rental-agreements.service.js (select, PDF
  * addendum, buildDeclinedInsuranceBlock), reservations.service.js (list + detail
  * selects), terms-signing.service.js and terms-content.js. No backfill script,
- * no raw-SQL UPDATE, and no RideOps/Flutter writer touches it. New writers call
- * this gate BEFORE their first mutation.
+ * no raw-SQL UPDATE, and no RideOps/Flutter writer touched it at that date.
+ *
+ * That list is a SNAPSHOT, not a guarantee, and a comment cannot keep itself
+ * honest — so it is ratcheted by a test: `the set of files naming
+ * declinedInsurance is a ratchet` in declined-insurance-and-sign-url.test.mjs
+ * fails the build when a file starts touching the column, forcing whoever added
+ * it to classify it here. New writers call this gate BEFORE their first
+ * mutation.
  *
  * WHY tcSignedAt AND NOT ONLY session.tcCompletedAt. The agreement is the
  * document of record and the two are stamped in the same transaction by
@@ -27,6 +33,13 @@
  * CheckoutSession row exists, so a session-only check would silently pass for
  * the portal — the exact hole this module closes. Check the agreement first and
  * treat the session as corroboration.
+ *
+ * How much tcSignedAt covers: the later signature steps (saveCustomerSignature,
+ * mobile-inspection) sit downstream of T&C in the CHECKOUT_STEPS graph, so in
+ * practice the stamp is already set by the time they run. That ordering is
+ * imposed by the transition endpoint and the wizard, though — neither service
+ * asserts the step itself — so treat this as "the transition graph enforces
+ * it", not as something the data model makes impossible.
  */
 
 import { prisma } from '../../lib/prisma.js';

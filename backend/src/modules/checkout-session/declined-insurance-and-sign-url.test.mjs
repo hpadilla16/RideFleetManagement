@@ -18,6 +18,8 @@ import { checkoutSessionService } from './checkout-session.service.js';
 import { assertInsuranceSelectionEditable, messageFor, INSURANCE_LOCK } from './insurance-selection-gate.js';
 import { reservationsService } from '../reservations/reservations.service.js';
 import { readEvents } from './state-machine.js';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, sep } from 'node:path';
 
 const FUTURE = new Date(Date.now() + 15 * 60_000);
 
@@ -395,4 +397,62 @@ test('non-signing kinds get signUrl null rather than a guessed path', async () =
     checkoutSessionService.mintHandoffToken({ sessionId: 's1', kind: 'MOBILE_INSPECTION' }));
   assert.equal(out.signUrl, null);
   assert.equal(out.kind, 'MOBILE_INSPECTION');
+});
+
+// ---------------------------------------------------------------------------
+// Writer ratchet.
+// ---------------------------------------------------------------------------
+
+test('the set of files naming declinedInsurance is a ratchet', () => {
+  // The gate's header carries a writer inventory, and a comment cannot keep
+  // itself honest — the whole premise of that module is that a rule enforced on
+  // SOME writers is not a control. This fails the build when a file starts
+  // touching the column, so whoever adds it has to decide whether it is a
+  // reader (add it here) or a writer (route it through the gate first).
+  //
+  // Deliberately matches READS as well as writes: telling them apart from text
+  // is unreliable (`declinedInsurance: true` is both a select and a write), and
+  // a ratchet that under-matches is the failure mode being guarded against.
+  const KNOWN = new Set([
+    // Writers — both go through assertInsuranceSelectionEditable().
+    'src/modules/checkout-session/checkout-session.service.js',
+    'src/modules/customer-portal/customer-portal.routes.js',
+    // Route comment only.
+    'src/modules/checkout-session/checkout-session.routes.js',
+    // The gate itself.
+    'src/modules/checkout-session/insurance-selection-gate.js',
+    // Readers.
+    'src/modules/checkout-session/terms-content.js',
+    'src/modules/checkout-session/terms-signing.service.js',
+    'src/modules/kiosk/kiosk-checkout.service.js',
+    'src/modules/rental-agreements/rental-agreements.service.js',
+    'src/modules/reservations/reservations.service.js',
+    // Tests.
+    'src/modules/checkout-session/declined-insurance-and-sign-url.test.mjs',
+    'src/modules/checkout-session/terms-section-overrides.test.mjs',
+    'src/modules/checkout-session/terms-signing.test.mjs',
+    'src/modules/customer-portal/precheckin-insurance-gate.test.mjs',
+    'src/modules/kiosk/kiosk-checkout.test.mjs',
+    'src/modules/kiosk/kiosk-staff-assist.test.mjs',
+    'src/modules/reservations/declined-insurance-getbyid.embedded.test.mjs',
+  ]);
+
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, entry.name);
+      if (entry.isDirectory()) { walk(p); continue; }
+      if (!/\.(js|mjs)$/.test(entry.name)) continue;
+      if (readFileSync(p, 'utf8').includes('declinedInsurance')) {
+        found.push(p.split(sep).join('/'));
+      }
+    }
+  };
+  walk('src');
+
+  const added = found.filter((f) => !KNOWN.has(f)).sort();
+  assert.deepEqual(added, [], `File(s) now touching declinedInsurance — classify them in insurance-selection-gate.js's inventory, and route any WRITER through the gate: ${added.join(', ')}`);
+
+  const stale = [...KNOWN].filter((f) => !found.includes(f)).sort();
+  assert.deepEqual(stale, [], `Inventory entries that no longer touch the column — delete them: ${stale.join(', ')}`);
 });

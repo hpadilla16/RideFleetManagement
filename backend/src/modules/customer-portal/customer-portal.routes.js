@@ -1364,16 +1364,31 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
     // declined earlier and is re-submitting pre-check-in for some other reason
     // is not refused over a field they did not touch.
     //
-    // It covers BOTH branches below, not just the decline one. Picking a plan
-    // is the mirror image of declining, sits downstream of the same
-    // deleteMany(), and is the branch where the silent damage lives today: a
-    // customer who declined, signed, and then buys coverage here ends up with a
-    // contract whose decline addendum contradicts its insurance charge, with
-    // nothing raised. Gating on the computed next value turns that into the
-    // same 409 the counter can resolve. Plan-on-a-normal-agreement is
-    // false-vs-false, so the common case stays a no-op.
+    // It covers the two branches that WRITE, not `insuranceSelection` being
+    // present. The block below has THREE branches — plan, decline, and neither
+    // — and the third writes no insurance flag at all.
+    //
+    // That third branch is the one real customers hit. The pre-check-in page
+    // always sends insuranceSelection (customer/precheckin/page.js), its
+    // default is { selectedPlanCode: '', declinedCoverage: false, ... }, and on
+    // load it rehydrates ONLY selectedPlanCode from existing charges —
+    // declinedCoverage is never restored. So a customer who declined earlier
+    // and comes back to fix a phone number posts
+    // { selectedPlanCode: '', declinedCoverage: false }. Deriving a next value
+    // from that reads as a flip to `false` and refused their whole
+    // pre-check-in — name, licence, documents and services included — for a
+    // field they never touched and a write that was never going to happen.
+    //
+    // Gating on "will a write actually follow?" keeps the protection where it
+    // belongs: picking a plan is the mirror image of declining and is where the
+    // silent damage lives (declined + signed + later buys coverage yields a
+    // contract whose decline addendum contradicts its insurance charge), while
+    // plan-on-a-normal-agreement stays false-vs-false and no-ops.
     let insuranceVerdict = { locked: false, signed: false };
-    if (insuranceSelection) {
+    const writesInsuranceFlag = !!(
+      insuranceSelection?.selectedPlanCode || insuranceSelection?.declinedCoverage
+    );
+    if (writesInsuranceFlag) {
       // Mirrors the branch precedence below: selectedPlanCode wins over
       // declinedCoverage.
       const nextDeclined = insuranceSelection.selectedPlanCode
@@ -1609,15 +1624,33 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
           const sealed = insuranceVerdict.signed;
           const canWriteDeclineSignature =
             !sealed && declineSig && String(declineSig).length > 200;
-          await prisma.rentalAgreement.update({
-            where: { id: declAg.id },
-            data: {
-              declinedInsurance: true,
-              ...(canWriteDeclineSignature
-                ? { declinedInsuranceSignatureDataUrl: declineSig, declinedInsuranceSignedAt: new Date() }
-                : {}),
-            },
-          });
+          if (canWriteDeclineSignature) {
+            // Fenced like the agent's write. `insuranceVerdict` was computed
+            // back at the preflight, and everything between — the customer
+            // update, the deposit, every charge delete and create — runs before
+            // we get here, so the contract can be signed in the meantime. The
+            // WHERE makes the database decide: if the signature landed first,
+            // count is 0 and the columns the PDF prints are left alone.
+            const fenced = await prisma.rentalAgreement.updateMany({
+              where: { id: declAg.id, tcSignedAt: null },
+              data: {
+                declinedInsurance: true,
+                declinedInsuranceSignatureDataUrl: declineSig,
+                declinedInsuranceSignedAt: new Date(),
+              },
+            });
+            if (fenced.count === 0) {
+              await prisma.rentalAgreement.update({
+                where: { id: declAg.id },
+                data: { declinedInsurance: true },
+              });
+            }
+          } else {
+            await prisma.rentalAgreement.update({
+              where: { id: declAg.id },
+              data: { declinedInsurance: true },
+            });
+          }
         }
       }
     }
