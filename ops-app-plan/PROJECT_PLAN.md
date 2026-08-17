@@ -108,6 +108,21 @@ y números de línea en [00-REGROUND.md](00-REGROUND.md):
    cliente lo detecta por substring del mensaje (frágil, documentado en
    `change_password_screen.dart`). Pedido: `code: 'CURRENT_PASSWORD_INCORRECT'` en
    `auth.routes.js` — 2 líneas en el próximo PR que toque backend.
+11. **🔴 FUGA DE MARCA EN PRODUCCIÓN — la página pública de términos** (GD, review de
+   mockups M2, 2026-08-17; **verificado en código, afecta clientes HOY**, no es un
+   hallazgo de mockup):
+   - `frontend/src/app/sign/[token]/page.js` renderiza `<Shell title="Terms &
+     Conditions" …>` — **inglés hardcodeado** y **cero identidad del tenant** (ni
+     nombre, ni logo, ni `display-data`), con gris neutro de plataforma.
+   - `frontend/src/app/layout.js:8-16` fija `metadata.title = 'Ride Fleet'` y
+     `appleWebApp.title = 'Ride Fleet'` **sin override en la ruta `/sign`**: el cliente
+     ve "Ride Fleet" en la pestaña del navegador, en el preview del enlace y al añadir
+     a inicio.
+   - Viaje real hoy: pantalla del agente con marca "Autos del Valle" → el cliente abre
+     el QR → pestaña "Ride Fleet · Terms & Conditions" en inglés. Rompe la regla de
+     branding por tenant (REGROUND §4) en la superficie más sensible: la firma legal.
+   - **Es criterio de aceptación BLOQUEANTE de M2-H2** (paso T&C) y merece un PR propio
+     de frontend/backend: `/sign/[token]` debe tomar branding e idioma del tenant.
 
 ### Política resuelta en H6 (decisión del PM): EL KIOSCO IGNORA LA EXENCIÓN
 - **Modo kiosco vs navegación del sistema**: Flutter puro no puede bloquear home/app-switcher.
