@@ -120,6 +120,29 @@ el mostrador. La §15 muestra en su lugar un mapa de capacidades honesto (un AGE
 igual; lo que no puede es mover dinero **sin el cliente presente**) y usa la única acción
 realmente gateada y alcanzable: cobrar a la tarjeta guardada.
 
+### Capacidades ausentes que se vuelven historia propia (GD, review H7)
+
+El mockup de la §11 dibuja CTAs que la app **no puede cumplir hoy**. GD aprobó no
+construirlos (un botón muerto es la "falsa puerta" que prohíbe la nota 8) **a condición
+de que la app diga dónde vive la acción**. Cuando estas capacidades existan, vuelven los
+CTAs de los frames tal cual están dibujados, con su mockup antes de construir:
+
+- **Asignar / cambiar el vehículo de una reserva** — depende de la edición de reserva,
+  que es del M3.
+- **Ver el contrato** — hoy el PDF vive tras un endpoint con bearer y el stack cerrado
+  del ADR-2 no tiene visor ni `url_launcher`. Requiere visor in-app o una URL firmada de
+  vida corta. Mientras tanto, 11E muestra el DATO (`autoEmailedAt` → "El contrato salió
+  por correo a las 11:04"), que GD calificó como **mejor** que el botón del mockup porque
+  responde la pregunta real sin prometer un visor.
+- **Chip "En curso · paso N de 10" en la card de la home** (nota 2 del frame 11A) — no es
+  construible: `reservationCard` del dashboard **no emite nada de `CheckoutSession`**
+  (`employee-app.service.js`). Pedido de backend, no trabajo de cliente.
+- **`conflictReservationId` en el 409 `VEHICLE_CONFLICT`** — hoy el número de la otra
+  reserva se extrae del TEXTO del mensaje (puente documentado que degrada a "sin botón"
+  si el copy cambia). El campo lo cierra de verdad.
+- **`send-request-email` no está en `extra-routes.generated.js`** → no aparece en
+  `openapi.json`. Endpoint preexistente que la app ahora consume, sin documentar.
+
 ### Decisiones registradas durante la construcción (PM)
 
 - **H1 · El rail de fases se pinta desde la POSICIÓN en la cadena, no desde `events[]`**
