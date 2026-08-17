@@ -150,6 +150,27 @@ conserva su entrada intacta, pero el M2 parcial no puede salir en esa ventana.
 de longitud que el cliente no espeja. **Misma trampa que el correo, con más en juego: es
 la firma del cliente.** Ticket propio, no de H7.
 
+### Bug VIVO en producción destapado al construir H2 (Innovation, verificado en código)
+
+No es deuda ni riesgo futuro: **el switch de seguro del wizard web arranca apagado en
+cada carga, sin importar lo guardado.** `getById` usa un `select` explícito para
+`rentalAgreement` (`reservations.service.js:1585-1669`) que omite `declinedInsurance` —
+el select de la LISTA sí lo trae (`:285`). El wizard siembra el switch desde ese campo
+(`checkout-wizard-v2/page.js:750-752`), recibe `undefined`, y `!!undefined === false`.
+
+Por qué importa y no es cosmético:
+- el **kiosco sí lee bien** la columna (`kiosk-checkout.service.js:585`), así que un
+  cliente que rechaza el seguro ahí queda persistido en `true`;
+- el agente abre el wizard, ve el switch apagado, y si lo enciende y apaga para revisar,
+  el viaje manda `declined: false` (`page.js:755-767`) y **borra el anexo de un contrato
+  que el cliente esperaba**;
+- de esa columna dependen las iniciales requeridas (`terms-signing.service.js:132`) y el
+  bloque impreso (`rental-agreements.service.js:1184`).
+
+Arreglo: **un renglón** — agregar `declinedInsurance: true` al select de `getById`. Cierra
+además el pedido P7, porque RideOps deja de deducir el estado leyendo `events[]`. Va en la
+rama `fix/insurance-flag-and-terms-url` junto con P6 y P5.
+
 ### Capacidades ausentes que se vuelven historia propia (GD, review H7)
 
 El mockup de la §11 dibuja CTAs que la app **no puede cumplir hoy**. GD aprobó no
