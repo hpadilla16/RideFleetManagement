@@ -275,6 +275,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sessionExpired => 'Your session expired. Please sign in again.';
 
   @override
+  String get loginKioskRelogin =>
+      'For security, please sign in again with your password.';
+
+  @override
   String get locationDenied => 'You do not have access to that location.';
 
   @override
@@ -581,8 +585,8 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String cardOpenInspectionSemantics(String name) {
-    return '$name: open checkout inspection';
+  String cardOpenInspectionSemantics(String details) {
+    return '$details: open checkout inspection';
   }
 
   @override

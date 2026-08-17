@@ -59,6 +59,52 @@ void outboxBackgroundDispatcher() {
   });
 }
 
+/// Identidad resuelta para una corrida de background: viene ENTERA del JWT
+/// (en el isolate no hay /me ni SessionUser). tenantId = claim de
+/// auth.service.js:19 — su paridad con el user de /me la clava un test de
+/// fixtures (INN S-3).
+@immutable
+class BackgroundDrainIdentity {
+  const BackgroundDrainIdentity({
+    required this.userId,
+    required this.tenantId,
+    required this.token,
+  });
+
+  final String userId;
+  final String tenantId;
+  final String token;
+}
+
+/// Decisión de CORTE del worker (INN S-2, extraída para testearla sin
+/// Keystore ni red): null = la tarea se consume con `true` — nada drenable:
+///  - sin token / Keystore roto → no hay sesión que drenar (y un Keystore
+///    permanentemente roto NO debe reintentar para siempre — INN O-1);
+///  - token VENCIDO → turno terminado (JWT de 12 h): el background jamás
+///    re-loguea; las filas esperan cifradas al próximo foreground;
+///  - sin claim `sub` → token irreconocible, no hay dueño que servir.
+Future<BackgroundDrainIdentity?> resolveBackgroundIdentity({
+  required Future<String?> Function() readToken,
+  DateTime Function() now = DateTime.now,
+}) async {
+  String? token;
+  try {
+    token = await readToken();
+  } catch (_) {
+    return null; // Keystore roto: reintentar no lo va a arreglar (INN O-1)
+  }
+  if (token == null || token.isEmpty) return null;
+  final exp = TokenRefresher.expiryOf(token);
+  if (exp != null && now().toUtc().isAfter(exp)) return null;
+  final userId = TokenRefresher.subjectOf(token);
+  if (userId == null) return null;
+  return BackgroundDrainIdentity(
+    userId: userId,
+    tenantId: TokenRefresher.tenantIdOf(token) ?? '',
+    token: token,
+  );
+}
+
 /// Una corrida del drenador con dependencias construidas a mano (sin
 /// Riverpod). Devuelve `true` si no queda nada drenable (bandeja limpia,
 /// sin sesión o token vencido) y `false` si quedaron pendientes que un
@@ -66,18 +112,11 @@ void outboxBackgroundDispatcher() {
 Future<bool> runBackgroundDrainOnce() async {
   // 1. Identidad: JWT del Keystore (spike M0-1a: legible desde background
   //    con encryptedSharedPreferences y sin auth de usuario).
-  final token = await const SecureTokenStore().read();
-  if (token == null || token.isEmpty) return true; // sin sesión: nada que hacer
-  final exp = TokenRefresher.expiryOf(token);
-  if (exp != null && DateTime.now().toUtc().isAfter(exp)) {
-    // Turno terminado (JWT de 12 h): el background NO re-loguea. Las filas
-    // esperan cifradas al próximo arranque en foreground.
-    return true;
-  }
-  final userId = TokenRefresher.subjectOf(token);
-  if (userId == null) return true;
-  // tenantId del claim (auth.service.js:19) — el /me no está disponible aquí.
-  final tenantId = TokenRefresher.tenantIdOf(token) ?? '';
+  final identity = await resolveBackgroundIdentity(
+    readToken: const SecureTokenStore().read,
+  );
+  if (identity == null) return true; // nada drenable — ver resolveBackgroundIdentity
+  final token = identity.token;
 
   // 2. Bandeja cifrada: misma llave del Keystore que abre el foreground.
   const keys = SecureOutboxKeyStore();
@@ -86,7 +125,8 @@ Future<bool> runBackgroundDrainOnce() async {
   );
   try {
     final logger = kDebugMode ? const DebugEventLogger() : const NoopEventLogger();
-    final owner = OutboxOwner(userId: userId, tenantId: tenantId);
+    final owner =
+        OutboxOwner(userId: identity.userId, tenantId: identity.tenantId);
     final store = DbOutboxStore(db: db, ownerOf: () => owner, logger: logger);
 
     // 3. Red: dos Dio pelones (M0-5). El "autenticado" lleva el bearer a

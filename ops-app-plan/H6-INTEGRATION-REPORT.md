@@ -107,7 +107,10 @@ Backend log al reconectar (la app NUNCA se abrió después del reboot):
   banner de debug (`21-prod-release-login.png`).
 - API base del build prod: sin `RIDEOPS_API_BASE` el default compilado es
   el de dev (`http://10.0.2.2:4000`) — el build de DISTRIBUCIÓN debe pasar
-  el define real por CI.
+  el define real por CI. *Post-review (INN S-4):* `bootstrap()` ahora
+  TRUENA en el primer frame si un build prod apunta a `http://` — el APK
+  archivado de este pase es anterior al guard; cualquier rebuild prod sin
+  el define correcto ya no llega ni al login (deliberado).
 
 ## 5. Riesgos residuales DECLARADOS (no probados aquí)
 

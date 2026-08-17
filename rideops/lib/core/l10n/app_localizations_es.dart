@@ -277,6 +277,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String get sessionExpired => 'Tu sesión venció. Vuelve a entrar.';
 
   @override
+  String get loginKioskRelogin =>
+      'Por seguridad, vuelve a entrar con tu contraseña.';
+
+  @override
   String get locationDenied => 'No tienes acceso a esa ubicación.';
 
   @override
@@ -583,8 +587,8 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
-  String cardOpenInspectionSemantics(String name) {
-    return '$name: abrir inspección de salida';
+  String cardOpenInspectionSemantics(String details) {
+    return '$details: abrir inspección de salida';
   }
 
   @override
@@ -1001,5 +1005,5 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
-  String get logoutAnyway => 'Cerrar sesión igual';
+  String get logoutAnyway => 'Cerrar sesión de todos modos';
 }

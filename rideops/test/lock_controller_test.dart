@@ -432,7 +432,8 @@ void main() {
   group('recuperación de kiosco (H6 — el kiosco IGNORA la exención)', () {
     test(
         'flag + PIN + usuario exempt: cold start aterriza BLOQUEADO, el flag '
-        'se consume y la exención hidratada NO abre; el PIN sí', () {
+        'SOBREVIVE hasta el desbloqueo (INN MC-1) y la exención hidratada NO '
+        'abre; el PIN sí — y AHÍ se consume', () {
       fakeAsync((async) {
         pinStore = InMemoryPinStore.configured(userId: kFixtureUserId);
         kioskStore.flag = true;
@@ -442,7 +443,9 @@ void main() {
 
         expect(lockOf(c).locked, isTrue,
             reason: 'quien relanza tras matar el kiosco no probó ser el dueño');
-        expect(kioskStore.flag, isFalse, reason: 'flag one-shot consumido');
+        expect(kioskStore.flag, isTrue,
+            reason: 'INN MC-1: consumir al LEER regalaba el bypass '
+                'kill→relaunch×2 — el flag solo muere con identidad probada');
         expect(eventData(SessionEvents.pinLock)?['reason'], 'kiosk_recovery');
 
         // /me ya hidrató screenLockExempt=true — y el candado NO cede.
@@ -459,23 +462,54 @@ void main() {
         async.flushMicrotasks();
         expect(ok, isTrue);
         expect(lockOf(c).locked, isFalse);
+        expect(kioskStore.flag, isFalse,
+            reason: 'el PIN correcto cierra la recuperación y consume el flag');
+      });
+    });
+
+    test(
+        'INN MC-1: doble cold start SIN desbloquear ⇒ el segundo arranque '
+        'sigue BLOQUEADO (el flag no se gastó en el primero)', () {
+      fakeAsync((async) {
+        pinStore = InMemoryPinStore.configured(userId: kFixtureUserId);
+        kioskStore.flag = true;
+        api.onMe =
+            () async => authResponseFromFixture(screenLockExempt: true).user;
+
+        // Primer relanzamiento tras matar el kiosco: bloqueado, sin unlock.
+        final c1 = coldStart(async);
+        expect(lockOf(c1).locked, isTrue);
+        expect(kioskStore.flag, isTrue);
+
+        // El "cliente" mata la app otra vez y relanza: contenedor NUEVO
+        // sobre los MISMOS stores persistidos.
+        final c2 = coldStart(async);
+        expect(lockOf(c2).locked, isTrue,
+            reason: 'kill→relaunch×2 era el bypass del flag one-shot-al-leer');
+        expect(kioskStore.flag, isTrue, reason: 'sigue sin identidad probada');
       });
     });
 
     test('flag SIN PIN (exempt sin setup): cold start fuerza re-login con '
-        'contraseña y consume el flag', () {
+        'contraseña (razón kioskRecovery para el aviso del login — GD MC-3) '
+        'y consume el flag DESPUÉS de expulsar', () {
       fakeAsync((async) {
         kioskStore.flag = true;
         api.onMe =
             () async => authResponseFromFixture(screenLockExempt: true).user;
         final c = coldStart(async);
 
+        final session = c.read(sessionControllerProvider);
         expect(
-          c.read(sessionControllerProvider).status,
+          session.status,
           SessionStatus.unauthenticated,
           reason: 'sin PIN la única credencial local es la contraseña',
         );
-        expect(kioskStore.flag, isFalse);
+        expect(session.signOutReason, SignOutReason.kioskRecovery,
+            reason: 'el login explica la expulsión, no parece crash');
+        expect(kioskStore.flag, isFalse,
+            reason: 'consumido tras la expulsión — la ventana inversa '
+                '(crash post-clear con sesión viva) queda cerrada');
         expect(
           eventData(SessionEvents.pinLock)?['reason'],
           'kiosk_recovery_relogin',

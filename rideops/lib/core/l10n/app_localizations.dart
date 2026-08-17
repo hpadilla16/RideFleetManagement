@@ -554,6 +554,12 @@ abstract class AppLocalizations {
   /// **'Tu sesión venció. Vuelve a entrar.'**
   String get sessionExpired;
 
+  /// Aviso en login tras la recuperación de kiosco sin PIN (política H6): la expulsión fue deliberada, no un crash
+  ///
+  /// In es, this message translates to:
+  /// **'Por seguridad, vuelve a entrar con tu contraseña.'**
+  String get loginKioskRelogin;
+
   /// No description provided for @locationDenied.
   ///
   /// In es, this message translates to:
@@ -974,11 +980,11 @@ abstract class AppLocalizations {
   /// **'Sin resultados para “{query}”.'**
   String searchNoResults(String query);
 
-  /// Card tocable de la cola de salidas (H6) — CTA hacia /inspection/:reservationId
+  /// Card tocable de la cola de salidas (H6). GD MC-2: {details} = nombre · hora del chip · meta — TalkBack no puede perder la hora ni el estado de pre-checkin
   ///
   /// In es, this message translates to:
-  /// **'{name}: abrir inspección de salida'**
-  String cardOpenInspectionSemantics(String name);
+  /// **'{details}: abrir inspección de salida'**
+  String cardOpenInspectionSemantics(String details);
 
   /// No description provided for @inspTitle.
   ///
@@ -1637,7 +1643,7 @@ abstract class AppLocalizations {
   /// No description provided for @logoutAnyway.
   ///
   /// In es, this message translates to:
-  /// **'Cerrar sesión igual'**
+  /// **'Cerrar sesión de todos modos'**
   String get logoutAnyway;
 }
 

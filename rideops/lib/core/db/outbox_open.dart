@@ -50,6 +50,10 @@ QueryExecutor openEncryptedOutboxExecutor({
       },
       setup: (db) {
         db.execute('PRAGMA key = "x\'$keyHex\'";');
+        // INN S-1 (review H6): el drenado en FOREGROUND y el de BACKGROUND
+        // (WorkManager) pueden abrir este archivo a la vez — sin timeout,
+        // el segundo escritor truena con SQLITE_BUSY en vez de esperar.
+        db.execute('PRAGMA busy_timeout = 5000;');
         // Verificación de que REALMENTE es SQLCipher: en un sqlite3 pelón
         // cipher_version devuelve vacío y este archivo quedaría sin cifrar.
         // Mejor morir ruidosamente que prometer "guardado local cifrado"

@@ -108,13 +108,16 @@ class LockController extends Notifier<LockState> {
     // Recuperación de kiosco (H6, política del PM: EL KIOSCO IGNORA LA
     // EXENCIÓN): si el flag `kiosk_in_progress` sobrevivió al arranque, el
     // proceso murió con el teléfono volteado al cliente — quien relanza la
-    // app NO es necesariamente el dueño de la sesión. El flag es one-shot:
-    // se limpia aquí y el candado forzado (o el re-login) cobran UNA vez.
+    // app NO es necesariamente el dueño de la sesión.
+    //
+    // INN MC-1 (review H6): el flag se consume al CERRAR la recuperación
+    // (PIN/huella correctos, re-login con contraseña, login fresco) — NUNCA
+    // al leerlo. Consumirlo en la lectura regalaba el bypass kill→relaunch
+    // ×2: el segundo arranque ya no veía flag y el exempt aterrizaba
+    // desbloqueado.
     var kioskPending = false;
     try {
-      final guard = ref.read(kioskGuardStoreProvider);
-      kioskPending = await guard.read();
-      if (kioskPending) await guard.clear();
+      kioskPending = await ref.read(kioskGuardStoreProvider).read();
     } catch (_) {
       // Keystore ilegible: sin flag no hay recuperación que forzar.
     }
@@ -135,15 +138,26 @@ class LockController extends Notifier<LockState> {
     final configured = record != null;
     final exempt = _isExempt(session);
     // En un login FRESCO el flag no fuerza nada (la contraseña se acaba de
-    // probar); en cold start sí — aunque el usuario sea exempt.
+    // probar): la recuperación se cierra AQUÍ y el flag se consume.
     final kioskRecovery = kioskPending && fromRestore;
+    if (kioskPending && !fromRestore) {
+      _clearKioskFlag();
+    }
     if (kioskRecovery && !configured) {
       // Usuario exempt sin PIN (el gate de setup lo salta): la única
       // credencial local es la contraseña — re-login forzado. La bandeja NO
       // se purga: onSessionExpired limpia sesión sin tocar filas y el mismo
       // usuario re-entra con su cola intacta.
+      //
+      // Orden DELIBERADO (INN MC-1): primero la expulsión, DESPUÉS el
+      // clear del flag. Un crash entre ambos deja el flag puesto (peor
+      // caso: otra expulsión) — al revés dejaría la sesión viva sin
+      // candado ni flag.
       _logger.log(SessionEvents.pinLock, data: {'reason': 'kiosk_recovery_relogin'});
-      ref.read(sessionControllerProvider.notifier).onSessionExpired();
+      ref
+          .read(sessionControllerProvider.notifier)
+          .onSessionExpired(reason: SignOutReason.kioskRecovery);
+      _clearKioskFlag();
       return;
     }
     final locked = configured && fromRestore && (!exempt || kioskRecovery);
@@ -189,7 +203,7 @@ class LockController extends Notifier<LockState> {
     }
     if (!ref.mounted || !state.locked) return false;
     if (record != null && record.matches(pin)) {
-      _kioskRecoveryLock = false; // el dueño probó su PIN — recuperación cerrada
+      _closeKioskRecovery(); // el dueño probó su PIN — flag consumido AQUÍ
       state = state.copyWith(
         locked: false,
         attemptsLeft: LockState.maxAttempts,
@@ -214,7 +228,7 @@ class LockController extends Notifier<LockState> {
     final ok =
         await ref.read(biometricAuthProvider).authenticate(reason: reason);
     if (!ref.mounted || !ok || !state.locked) return false;
-    _kioskRecoveryLock = false; // el dueño probó su huella
+    _closeKioskRecovery(); // el dueño probó su huella — flag consumido AQUÍ
     state = state.copyWith(locked: false, attemptsLeft: LockState.maxAttempts);
     _logger.log(SessionEvents.pinUnlock, data: {'method': 'biometric'});
     _restartIdleTimer();
@@ -316,12 +330,24 @@ class LockController extends Notifier<LockState> {
     }());
   }
 
-  void noteKioskExited() {
+  void noteKioskExited() => _clearKioskFlag();
+
+  /// Consume el flag de recuperación (best-effort). Los ÚNICOS callsites
+  /// son los cierres legítimos: salida limpia del kiosco, PIN/huella
+  /// correctos, re-login forzado y login fresco (INN MC-1).
+  void _clearKioskFlag() {
     unawaited(() async {
       try {
         await ref.read(kioskGuardStoreProvider).clear();
       } catch (_) {}
     }());
+  }
+
+  /// Cierre de la recuperación de kiosco tras probar identidad (PIN/huella).
+  void _closeKioskRecovery() {
+    if (!_kioskRecoveryLock) return;
+    _kioskRecoveryLock = false;
+    _clearKioskFlag();
   }
 
   /// Ciclo de vida (lo alimenta LockObserver): al volver del background tras

@@ -169,11 +169,15 @@ class SessionController extends Notifier<SessionState> {
 
   /// 401 en cualquier ruta autenticada, o token vencido al despachar: la
   /// sesión murió. Limpieza + re-login (nunca refresh — ADR-3a).
-  void onSessionExpired() {
+  ///
+  /// [reason] viaja al estado para que el login EXPLIQUE la expulsión
+  /// (GD MC-3): default = sesión vencida; la recuperación de kiosco sin PIN
+  /// (H6) manda su propia razón.
+  void onSessionExpired({SignOutReason reason = SignOutReason.sessionExpired}) {
     if (!state.isAuthenticated) return; // 401s en ráfaga: loguear uno solo
     _identityGen++;
     _logger.log(AuthEvents.sessionExpiredRelogin);
-    state = const SessionState.unauthenticated();
+    state = SessionState.unauthenticated(signOutReason: reason);
     unawaited(_store.clear());
   }
 

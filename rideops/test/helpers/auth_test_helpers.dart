@@ -22,11 +22,21 @@ const kFixtureUserId = 'cmdusr001fixture0000000001';
 
 /// JWT bien formado (sin firma real) con `exp` controlable — lo que
 /// TokenRefresher.expiryOf necesita para decidir vivo/vencido.
-String fakeJwt({required DateTime exp, String sub = 'u1'}) {
+/// [extraClaims] permite espejar el payload real de auth.service.js:19
+/// (email, role, tenantId) en los tests de paridad.
+String fakeJwt({
+  required DateTime exp,
+  String sub = 'u1',
+  Map<String, Object?> extraClaims = const {},
+}) {
   final header = base64Url.encode(utf8.encode('{"alg":"HS256","typ":"JWT"}'));
   final payload = base64Url.encode(
     utf8.encode(
-      json.encode({'sub': sub, 'exp': exp.millisecondsSinceEpoch ~/ 1000}),
+      json.encode({
+        'sub': sub,
+        'exp': exp.millisecondsSinceEpoch ~/ 1000,
+        ...extraClaims,
+      }),
     ),
   );
   return '$header.$payload.firma';

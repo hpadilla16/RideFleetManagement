@@ -76,6 +76,7 @@
   "locationDeniedAdminNote": "If you think this is a mistake, tell your administrator.",
   "loadingLabel": "Loading…",
   "sessionExpired": "Your session expired. Please sign in again.",
+  "loginKioskRelogin": "For security, please sign in again with your password.",
   "locationDenied": "You do not have access to that location.",
   "errorConflictReloaded": "Another screen advanced this session. State was reloaded.",
   "errorRateLimited": "Too many requests. Wait a moment and try again.",
@@ -146,7 +147,7 @@
   "searchClearLabel": "Clear search",
   "searchPrompt": "Search reservations in your active location.",
   "searchNoResults": "No results for “{query}”.",
-  "cardOpenInspectionSemantics": "{name}: open checkout inspection",
+  "cardOpenInspectionSemantics": "{details}: open checkout inspection",
 
   "inspTitle": "Checkout inspection",
   "inspProgressChip": "{count} of 8",

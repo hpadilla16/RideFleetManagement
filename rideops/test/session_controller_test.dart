@@ -178,6 +178,28 @@ void main() {
           .length,
       1,
     );
+    // GD MC-3: la expulsión involuntaria viaja con razón — el login la
+    // pinta como aviso (default: sesión vencida).
+    expect(
+      c.read(sessionControllerProvider).signOutReason,
+      SignOutReason.sessionExpired,
+    );
+  });
+
+  test('onSessionExpired con razón kioskRecovery la publica para el login '
+      '(política H6)', () async {
+    store.value = fakeJwt(exp: DateTime.now().add(const Duration(hours: 8)));
+    api.onMe = () async => authResponseFromFixture().user;
+    final c = makeContainer();
+    await settle();
+    c
+        .read(sessionControllerProvider.notifier)
+        .onSessionExpired(reason: SignOutReason.kioskRecovery);
+    await settle();
+    expect(
+      c.read(sessionControllerProvider).signOutReason,
+      SignOutReason.kioskRecovery,
+    );
   });
 
   test('notePasswordChangeRequired levanta el flag local (403 observado)',

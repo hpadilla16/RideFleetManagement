@@ -113,6 +113,10 @@
   "locationDeniedAdminNote": "Si crees que es un error, avisa a tu administrador.",
   "loadingLabel": "Cargando…",
   "sessionExpired": "Tu sesión venció. Vuelve a entrar.",
+  "loginKioskRelogin": "Por seguridad, vuelve a entrar con tu contraseña.",
+  "@loginKioskRelogin": {
+    "description": "Aviso en login tras la recuperación de kiosco sin PIN (política H6): la expulsión fue deliberada, no un crash"
+  },
   "locationDenied": "No tienes acceso a esa ubicación.",
   "errorConflictReloaded": "Otra pantalla avanzó esta sesión. Se recargó el estado.",
   "errorRateLimited": "Demasiadas solicitudes. Espera un momento e intenta de nuevo.",
@@ -272,10 +276,10 @@
   "@searchNoResults": {
     "placeholders": { "query": { "type": "String" } }
   },
-  "cardOpenInspectionSemantics": "{name}: abrir inspección de salida",
+  "cardOpenInspectionSemantics": "{details}: abrir inspección de salida",
   "@cardOpenInspectionSemantics": {
-    "description": "Card tocable de la cola de salidas (H6) — CTA hacia /inspection/:reservationId",
-    "placeholders": { "name": { "type": "String" } }
+    "description": "Card tocable de la cola de salidas (H6). GD MC-2: {details} = nombre · hora del chip · meta — TalkBack no puede perder la hora ni el estado de pre-checkin",
+    "placeholders": { "details": { "type": "String" } }
   },
 
   "inspTitle": "Inspección de salida",
@@ -457,5 +461,5 @@
   "@logoutPendingBody": {
     "placeholders": { "count": { "type": "int" } }
   },
-  "logoutAnyway": "Cerrar sesión igual"
+  "logoutAnyway": "Cerrar sesión de todos modos"
 }

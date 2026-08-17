@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
@@ -125,6 +126,7 @@ class _QueueCardShell extends StatelessWidget {
     required this.chip,
     required this.meta,
     this.trailing,
+    this.onTap,
   });
 
   final IconData icon;
@@ -139,76 +141,119 @@ class _QueueCardShell extends StatelessWidget {
   /// de reserva es M3 y una card que "parece botón" sin destino miente.
   final Widget? trailing;
 
+  /// GD MC-2 (review H6): con [onTap], la superficie es un [Material] BLANCO
+  /// con [InkWell] encima — el ripple pinta de verdad (antes el Ink quedaba
+  /// bajo un Container opaco y era invisible). La sombra vive en un wrapper
+  /// sin color (la tinta no pinta sombras) y el margin inferior queda FUERA
+  /// del target: el hueco entre cards no navega.
+  final VoidCallback? onTap;
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: RideTokens.n0,
-        border: Border.all(color: RideTokens.n200),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x1417122B),
-            blurRadius: 14,
-            offset: Offset(0, 4),
+    final body = Row(
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: iconBg,
+            borderRadius: BorderRadius.circular(13),
           ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: iconBg,
-              borderRadius: BorderRadius.circular(13),
-            ),
-            child: Icon(icon, size: 22, color: iconColor),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w800,
-                          color: RideTokens.n900,
-                        ),
+          child: Icon(icon, size: 22, color: iconColor),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w800,
+                        color: RideTokens.n900,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    chip,
-                  ],
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  meta,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: RideTokens.n700,
                   ),
+                  const SizedBox(width: 8),
+                  chip,
+                ],
+              ),
+              const SizedBox(height: 3),
+              Text(
+                meta,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: RideTokens.n700,
                 ),
-              ],
+              ),
+            ],
+          ),
+        ),
+        if (trailing != null) ...[
+          const SizedBox(width: 8),
+          trailing!,
+        ],
+      ],
+    );
+
+    if (onTap == null) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: RideTokens.n0,
+          border: Border.all(color: RideTokens.n200),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x1417122B),
+              blurRadius: 14,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: body,
+      );
+    }
+
+    return Padding(
+      // Margin FUERA del hit-test (GD MC-2): entre cards no hay botón.
+      padding: const EdgeInsets.only(bottom: 10),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x1417122B),
+              blurRadius: 14,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Material(
+          color: RideTokens.n0,
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            side: const BorderSide(color: RideTokens.n200),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: body,
             ),
           ),
-          if (trailing != null) ...[
-            const SizedBox(width: 8),
-            trailing!,
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -251,6 +296,13 @@ class ReservationQueueCard extends StatelessWidget {
     // M3). Affordance explícita: chevron tonal + toda la card tocable.
     final tappable = queue == DashboardQueue.checkout;
 
+    void open() {
+      // Confirmación táctil ligera (GD O-1): la card es la única superficie
+      // tocable del grid — el dedo merece saber que mordió.
+      HapticFeedback.selectionClick();
+      context.push(AppRoutes.inspection(item.id));
+    }
+
     final shell = _QueueCardShell(
       icon: _iconFor(),
       iconBg: queue == DashboardQueue.loanerAdvisorFollowup
@@ -262,6 +314,7 @@ class ReservationQueueCard extends StatelessWidget {
       title: title,
       chip: chip,
       meta: meta,
+      onTap: tappable ? open : null,
       trailing: tappable
           ? Container(
               width: 28,
@@ -281,23 +334,21 @@ class ReservationQueueCard extends StatelessWidget {
     );
     if (!tappable) return shell;
 
-    void open() => context.push(AppRoutes.inspection(item.id));
-    // GD MC-1 (patrón del shell): la acción también en el nodo Semantics —
-    // la card completa (~68 px) es el target táctil (DoD #2).
+    // GD MC-3 (review H6): el label lleva título + hora del chip + meta —
+    // TalkBack no puede perder "Hoy 2:03 PM" ni "Falta pre-checkin" por el
+    // ExcludeSemantics. GD MC-1: la acción también en el nodo Semantics.
+    final chipText =
+        item.pickupAt == null ? null : formatWhen(l10n, locale, item.pickupAt!, now);
+    final details = [
+      title,
+      ?chipText,
+      if (meta.isNotEmpty) meta,
+    ].join(' · ');
     return Semantics(
       button: true,
-      label: l10n.cardOpenInspectionSemantics(title),
+      label: l10n.cardOpenInspectionSemantics(details),
       onTap: open,
-      child: ExcludeSemantics(
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: open,
-            borderRadius: BorderRadius.circular(20),
-            child: shell,
-          ),
-        ),
-      ),
+      child: ExcludeSemantics(child: shell),
     );
   }
 
