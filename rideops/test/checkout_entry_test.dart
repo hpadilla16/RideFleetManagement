@@ -220,6 +220,9 @@ void main() {
     return (container: container, api: api, log: log);
   }
 
+  StubActiveLocation locationOf(ProviderContainer c) =>
+      c.read(activeLocationProvider.notifier) as StubActiveLocation;
+
   CheckoutEntryController controllerOf(ProviderContainer c) =>
       c.read(checkoutEntryProvider(kReservationId).notifier);
 
@@ -258,9 +261,40 @@ void main() {
     expect(await first, CheckoutEntryOutcome.opened);
   });
 
+  test('cambio de sede con el POST en vuelo: NO se traga como doble tap — se '
+      'aborta y se dice que la sesión pudo crearse', () async {
+    final h = harness();
+    final gate = Completer<void>();
+    h.api.onCreate = (_) async {
+      await gate.future;
+      return sessionAt(CheckoutStep.confirming);
+    };
+
+    final pending = controllerOf(h.container).start();
+    await Future<void>.delayed(Duration.zero);
+    // El agente cambia de sede mientras el POST viaja: el controller se
+    // reconstruye y la respuesta ya no pertenece a lo que ve.
+    locationOf(h.container).emit(
+      const ActiveLocation.pinned(locationId: 'loc-2', locationName: 'Norte'),
+    );
+    // Riverpod invalida perezosamente: esta lectura fuerza el rebuild ANTES de
+    // que aterrice la respuesta (en la app lo fuerza el repintado de la card).
+    h.container.read(checkoutEntryProvider(kReservationId));
+    gate.complete();
+
+    expect(await pending, CheckoutEntryOutcome.aborted);
+    // Ni "abierto" (no se navega a un alcance que ya no es) ni "busy" (que se
+    // tragaría en silencio un POST que pudo crear la sesión).
+    expect(h.log.has(CheckoutEvents.entryOpen), isFalse);
+    expect(
+      h.log.events.where((e) => e.$1 == CheckoutEvents.entryBlocked).single.$2,
+      {'code': 'scopeChanged'},
+    );
+  });
+
   test('gate de hidratación: sin sede hidratada NO sale el POST', () async {
     final h = harness(location: const ActiveLocation.hydrating());
-    // El POST esperaría 5 s a que hidrate; se comprueba que a los 200 ms
+    // El POST espera acotado a que hidrate; se comprueba que a los 200 ms
     // todavía no salió nada (y el estado sigue "abriendo" en la card).
     final pending = controllerOf(h.container).start();
     await Future<void>.delayed(const Duration(milliseconds: 200));
@@ -369,6 +403,9 @@ void main() {
     bool online = true,
     Future<void> Function(String)? onCreate,
     FakePrecheckinReservationsApi? reservations,
+
+    /// Escala de texto del sistema: en el patio, 1.5–2.0 es normal.
+    double textScale = 1,
   }) async {
     final api = FakeCheckoutApi();
     if (onCreate != null) {
@@ -447,6 +484,12 @@ void main() {
             GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: const [Locale('es'), Locale('en')],
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              textScaler: TextScaler.linear(textScale),
+            ),
+            child: child!,
+          ),
         ),
       ),
     );
@@ -576,8 +619,8 @@ void main() {
     expect(find.text('RES-1001'), findsWidgets);
   });
 
-  testWidgets('11B — enviar el link: confirmación DENTRO del sheet y el botón '
-      'no se puede disparar dos veces', (tester) async {
+  testWidgets('11B — enviar el link: comprobante DENTRO del sheet y el primario '
+      'pasa a "Cerrar" (no un botón muerto al 55 %)', (tester) async {
     final reservations = FakePrecheckinReservationsApi();
     final f = await pumpCard(tester, reservations: reservations);
     f.api.onCreate = (_) async => throw ApiError(
@@ -599,11 +642,14 @@ void main() {
       findsOneWidget,
     );
 
-    // Re-toque: el primario queda inerte tras el envío (no se spamea al
-    // cliente ni se quema el cooldown del backend).
-    await tester.tap(find.text('Send pre-check-in to the customer'));
+    // El botón de enviar YA NO ESTÁ: se convirtió en la salida. Así no se
+    // spamea al cliente ni se quema el cooldown del backend, y no queda un
+    // primario apagado sin explicación.
+    expect(find.text('Send pre-check-in to the customer'), findsNothing);
+    await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
     expect(reservations.linkCalls, 1);
+    expect(find.byType(CheckoutEntryGuardSheet), findsNothing);
   });
 
   testWidgets('sin red desde la card: pantalla honesta con reintento manual y '
@@ -667,8 +713,8 @@ void main() {
     expect(find.text('Retry'), findsNothing);
   });
 
-  testWidgets('el sheet NO inventa botones para lo que la app no puede hacer',
-      (tester) async {
+  testWidgets('el sheet NO inventa botones para lo que la app no puede hacer, '
+      'pero SÍ dice dónde se hace', (tester) async {
     final f = await pumpCard(tester);
     f.api.onCreate = (_) async => throw ApiError(
           kind: ApiErrorKind.badRequest,
@@ -687,5 +733,180 @@ void main() {
         .map((b) => b.label)
         .toList();
     expect(buttons, ['Retry']);
+    // …y la mitigación está EN PANTALLA, no solo en el razonamiento: sin esta
+    // línea el agente busca en la app un botón que no existe.
+    expect(
+      find.textContaining('is still done from the desk'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('11B — la nota que sostiene la ausencia de "Capturar aquí" se '
+      'RENDERIZA', (tester) async {
+    final f = await pumpCard(tester);
+    f.api.onCreate = (_) async => throw ApiError(
+          kind: ApiErrorKind.badRequest,
+          message: 'Pre-check-in must be completed…',
+          code: 'PRECHECKIN_REQUIRED',
+        );
+
+    await tester.tap(find.byType(ReservationQueueCard));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'Capturing the details at the counter is still done from the desk: '
+        'this app does not have that form yet.',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('11D — el mensaje del servidor viaja: "sigue en otra renta" y '
+      '"choque de reservas" no pueden verse igual', (tester) async {
+    final f = await pumpCard(tester);
+    const message = 'Vehicle is still out on open rental RES-1001 — complete '
+        'its check-in (or swap vehicles) first';
+    f.api.onCreate = (_) async => throw ApiError(
+          kind: ApiErrorKind.conflict,
+          message: message,
+          code: 'VEHICLE_CONFLICT',
+        );
+
+    await tester.tap(find.byType(ReservationQueueCard));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining(message), findsOneWidget);
+  });
+
+  group('fallos del envío del link (11B) con su hecho accionable', () {
+    Future<void> pumpWithLinkError(WidgetTester tester, ApiError error) async {
+      final reservations = FakePrecheckinReservationsApi()
+        ..onSendLink = () async => throw error;
+      final f = await pumpCard(tester, reservations: reservations);
+      f.api.onCreate = (_) async => throw ApiError(
+            kind: ApiErrorKind.badRequest,
+            message: 'Pre-check-in must be completed…',
+            code: 'PRECHECKIN_REQUIRED',
+          );
+      await tester.tap(find.byType(ReservationQueueCard));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Send pre-check-in to the customer'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('429 es COOLDOWN por reserva ("ya salió"), no saturación',
+        (tester) async {
+      await pumpWithLinkError(
+        tester,
+        ApiError(
+          kind: ApiErrorKind.rateLimited,
+          message: 'A customer info email was just sent for this reservation.',
+          status: 429,
+        ),
+      );
+
+      expect(find.textContaining('That link was just sent'), findsOneWidget);
+      // El copy de saturación invitaría a martillar el botón.
+      expect(find.textContaining('Too many requests'), findsNothing);
+    });
+
+    testWidgets('400 sin destinatario: el dato que falta, en español del patio',
+        (tester) async {
+      await pumpWithLinkError(
+        tester,
+        ApiError(
+          kind: ApiErrorKind.badRequest,
+          message: 'No recipient email found',
+          status: 400,
+        ),
+      );
+
+      expect(
+        find.textContaining('The reservation has no customer email'),
+        findsOneWidget,
+      );
+      // El mensaje crudo en inglés no se cuela dentro del copy.
+      expect(find.textContaining('No recipient email found'), findsNothing);
+    });
+  });
+
+  testWidgets('cerrar el sheet por el scrim limpia su estado: la próxima vez '
+      'no aparece el aviso viejo', (tester) async {
+    final reservations = FakePrecheckinReservationsApi();
+    final f = await pumpCard(tester, reservations: reservations);
+    f.api.onCreate = (_) async => throw ApiError(
+          kind: ApiErrorKind.badRequest,
+          message: 'Pre-check-in must be completed…',
+          code: 'PRECHECKIN_REQUIRED',
+        );
+
+    await tester.tap(find.byType(ReservationQueueCard));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Send pre-check-in to the customer'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CheckoutEntryGuardSheet), findsOneWidget);
+
+    // Toque en el SCRIM (ni "Cancelar" ni "Cerrar"): el camino que dejaba el
+    // estado colgado porque no pasaba por ningún callback del sheet.
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    expect(find.byType(CheckoutEntryGuardSheet), findsNothing);
+
+    await tester.tap(find.byType(ReservationQueueCard));
+    await tester.pumpAndSettle();
+
+    // Sheet nuevo, estado nuevo: el primario vuelve a ser "enviar" y no hay
+    // aviso verde de un envío anterior.
+    expect(find.text('Send pre-check-in to the customer'), findsOneWidget);
+    expect(
+      find.textContaining("the pre-check-in link went to the customer's email"),
+      findsNothing,
+    );
+  });
+
+  testWidgets('sheet desconocido (404 de reserva): mensaje del servidor con '
+      'sus salidas, nunca "algo salió mal"', (tester) async {
+    final f = await pumpCard(tester);
+    f.api.onCreate = (_) async => throw ApiError(
+          kind: ApiErrorKind.badRequest,
+          message: 'Reservation not found',
+          status: 404,
+        );
+
+    await tester.tap(find.byType(ReservationQueueCard));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Could not open the checkout'), findsOneWidget);
+    expect(find.text('Reservation not found'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
+  });
+
+  testWidgets('a escala de texto 2.0 el sheet scrollea en vez de desbordar',
+      (tester) async {
+    final f = await pumpCard(tester, textScale: 2);
+    f.api.onCreate = (_) async => throw ApiError(
+          kind: ApiErrorKind.badRequest,
+          message: 'Customer must be at least 25 years old at pickup and the '
+              'branch requires a valid license issued more than 12 months ago.',
+          code: 'AGE_RULES_UNDER_MIN',
+        );
+
+    await tester.tap(find.byType(ReservationQueueCard));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(CheckoutEntryGuardSheet), findsOneWidget);
+    // Sin el Flexible + ListView, aquí saltaba el overflow amarillo justo en
+    // la pantalla que explica un bloqueo.
+    expect(tester.takeException(), isNull);
+
+    // Y la salida sigue ALCANZABLE: el contenido scrollea (a esta escala el
+    // último botón nace fuera del viewport, que es exactamente el caso).
+    expect(find.text('Cancel'), findsNothing);
+    await tester.drag(find.byType(CheckoutEntryGuardSheet), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    expect(find.text('Cancel'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

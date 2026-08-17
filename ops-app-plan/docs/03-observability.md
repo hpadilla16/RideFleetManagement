@@ -51,10 +51,13 @@ Detalle de `checkout.entry_blocked` (M2-H7). El tag `code` lleva el código del 
 cuando existe (`NO_VEHICLE_ASSIGNED`, `VEHICLE_CONFLICT`, `PRECHECKIN_REQUIRED`,
 `AGE_RULES_*`, `SESSION_TERMINAL`) y, cuando el arranque se cortó del lado del cliente, el
 motivo local (`offline`, `locationNotReady`, `forbidden`, `locationDenied`, `rateLimited`,
-`unknown`). Se separan a propósito: "el patio no tiene señal" y "el backend negó" son dos
-problemas distintos y colapsarlos en `none` haría inútil la métrica. `entry_open` NO lleva
-tag `resumed` — el backend responde 201 igual al crear que al reanudar, y la app no puede
-afirmar la diferencia sin inventarla.
+`scopeChanged`, `unknown`). Se separan a propósito: "el patio no tiene señal" y "el backend
+negó" son dos problemas distintos y colapsarlos en `none` haría inútil la métrica.
+`scopeChanged` es el único que puede haber dejado una sesión CREADA (el POST salió y su
+respuesta llegó tras un cambio de sede/cuenta): si su frecuencia sube, hay un patrón de
+uso —cambiar de sede con el checkout abriéndose— que merece diseño, no un bug que ocultar.
+`entry_open` NO lleva tag `resumed` — el backend responde 201 igual al crear que al
+reanudar, y la app no puede afirmar la diferencia sin inventarla.
 
 Detalle de `checkout.reconciled` (M2-H1). Tres valores de `via`, deliberadamente
 separados porque miden cosas distintas:

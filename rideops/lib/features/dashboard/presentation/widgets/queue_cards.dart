@@ -12,6 +12,7 @@ import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/ride_tokens.dart';
 import '../../../checkout/application/checkout_entry_controller.dart';
+import '../../../checkout/domain/checkout_entry.dart';
 import '../../../checkout/presentation/widgets/entry_guard_sheet.dart';
 import '../../../shell/location_sheet.dart';
 import '../../domain/dashboard_queues.dart';
@@ -317,8 +318,13 @@ class ReservationQueueCard extends ConsumerWidget {
     // propósito (detalle general en M3). Affordance explícita: chevron tonal
     // + toda la card tocable.
     final tappable = queue == DashboardQueue.checkout;
-    final busy =
-        tappable && ref.watch(checkoutEntryProvider(item.id)).starting;
+    // `.select`: la card solo re-construye por ESTE bool. Sin él, cada cambio
+    // del sheet (enviando el link, link enviado, error) repintaría la card
+    // entera detrás del scrim (Innovation #9).
+    final busy = tappable &&
+        ref.watch(
+          checkoutEntryProvider(item.id).select((s) => s.starting),
+        );
 
     final chip = busy
         ? QueueStatusChip(label: l10n.cardOpeningCheckoutChip, live: true)
@@ -367,17 +373,25 @@ class ReservationQueueCard extends ConsumerWidget {
     // GD MC-3 (review H6): el label lleva título + hora del chip + meta —
     // TalkBack no puede perder "Hoy 2:03 PM" ni "Falta pre-checkin" por el
     // ExcludeSemantics. GD MC-1: la acción también en el nodo Semantics.
+    //
+    // En marcha, el `details` se arma con el chip y la meta ESTÁTICOS: si se
+    // reusara el visual, el label diría "Abriendo… · abriendo checkout…"
+    // además de la frase de acción — tres veces lo mismo en el oído del
+    // agente. El estado lo aporta la frase de acción, una sola vez.
     final chipText =
         item.pickupAt == null ? null : formatWhen(l10n, locale, item.pickupAt!, now);
+    final staticMeta = _metaFor(l10n);
     final details = [
       title,
       ?chipText,
-      if (meta.isNotEmpty) meta,
+      if (staticMeta.isNotEmpty) staticMeta,
     ].join(' · ');
     return Semantics(
       button: true,
-      // El estado en marcha TAMBIÉN se anuncia: con TalkBack, una card que
-      // cambió de color no comunica nada.
+      // liveRegion (GD MC-3): el nodo ya está enfocado cuando el label cambia,
+      // y sin esto TalkBack NO re-anuncia — la card se tiñe y el lector calla
+      // durante los 400 ms a 12 s que tarda el POST.
+      liveRegion: busy,
       label: busy
           ? l10n.cardOpeningCheckoutSemantics(details)
           : l10n.cardOpenCheckoutSemantics(details),
@@ -404,32 +418,57 @@ class ReservationQueueCard extends ConsumerWidget {
         await context.push(AppRoutes.checkout(item.id));
       case CheckoutEntryOutcome.busy:
         return; // anti-doble-tap: ya hay un POST en vuelo
+      case CheckoutEntryOutcome.aborted:
+        // El alcance cambió con el POST en vuelo. El estado del controller ya
+        // no aplica (es de otra sede), así que el bloque se construye AQUÍ y
+        // se dice lo único cierto: pudo haberse creado, vuelve a tocar.
+        await _showGuard(
+          context,
+          ref,
+          const CheckoutEntryBlock(kind: CheckoutEntryBlockKind.scopeChanged),
+        );
       case CheckoutEntryOutcome.blocked:
         final block = ref.read(checkoutEntryProvider(item.id)).block;
         if (block == null) return;
-        final action = await showCheckoutEntryGuardSheet(
-          context,
-          reservationId: item.id,
-          block: block,
-        );
-        if (!context.mounted) return;
-        switch (action) {
-          case CheckoutEntrySheetAction.retry:
-            await _openCheckout(context, ref);
-          case CheckoutEntrySheetAction.searchConflict:
-            // Lo que la app SÍ puede hacer hoy con la otra reserva: buscarla.
-            // El detalle de reserva llega en M3.
-            final number = block.conflictReservationNumber;
-            if (number != null) {
-              await context.push(
-                '${AppRoutes.search}?q=${Uri.encodeQueryComponent(number)}',
-              );
-            }
-          case CheckoutEntrySheetAction.changeLocation:
-            await showActiveLocationSheet(context);
-          case null:
-            return;
+        await _showGuard(context, ref, block);
+    }
+  }
+
+  /// Monta el sheet del guard y ejecuta su salida.
+  ///
+  /// El estado del sheet (link enviado / fallo) se limpia SIEMPRE al cerrarse
+  /// —botón, swipe o toque en el scrim— (GD MC-7): si sobreviviera, el agente
+  /// que desliza el sheet y vuelve a tocar la card se encontraría el aviso
+  /// verde de un envío viejo y el primario ya consumido, sin explicación.
+  Future<void> _showGuard(
+    BuildContext context,
+    WidgetRef ref,
+    CheckoutEntryBlock block,
+  ) async {
+    final action = await showCheckoutEntryGuardSheet(
+      context,
+      reservationId: item.id,
+      block: block,
+    ).whenComplete(
+      () => ref.read(checkoutEntryProvider(item.id).notifier).dismissBlock(),
+    );
+    if (!context.mounted) return;
+    switch (action) {
+      case CheckoutEntrySheetAction.retry:
+        await _openCheckout(context, ref);
+      case CheckoutEntrySheetAction.searchConflict:
+        // Lo que la app SÍ puede hacer hoy con la otra reserva: buscarla.
+        // El detalle de reserva llega en M3.
+        final number = block.conflictReservationNumber;
+        if (number != null) {
+          await context.push(
+            '${AppRoutes.search}?q=${Uri.encodeQueryComponent(number)}',
+          );
         }
+      case CheckoutEntrySheetAction.changeLocation:
+        await showActiveLocationSheet(context);
+      case null:
+        return;
     }
   }
 

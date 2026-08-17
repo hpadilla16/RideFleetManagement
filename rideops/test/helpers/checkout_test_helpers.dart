@@ -211,6 +211,11 @@ class StubActiveLocation extends ActiveLocationController {
 
   @override
   ActiveLocation build() => initial;
+
+  /// Cambio de sede EN VIVO: los controllers que hacen
+  /// `ref.watch(activeLocationProvider)` se reconstruyen, que es justo el
+  /// escenario del fencing (una escritura en vuelo cuyo alcance cambió).
+  void emit(ActiveLocation next) => state = next;
 }
 
 class MutableSessionController extends SessionController {

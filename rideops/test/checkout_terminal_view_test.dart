@@ -69,42 +69,53 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('11E — badge circular grande (76) en verde: es una noticia de '
-      'trabajo hecho, no un error', (tester) async {
+  Container badgeOf(WidgetTester tester, IconData icon) =>
+      tester.widget<Container>(
+        find
+            .ancestor(of: find.byIcon(icon), matching: find.byType(Container))
+            .first,
+      );
+
+  testWidgets('11E — el badge del cierre normal es el `.big-ic` de 64 que '
+      'renderiza el frame, en verde y con superficie', (tester) async {
     await pumpTerminal(tester);
 
-    final badge = tester.widget<Container>(
-      find
-          .ancestor(
-            of: find.byIcon(Icons.check_rounded),
-            matching: find.byType(Container),
-          )
-          .first,
-    );
-    final size = badge.constraints;
-    expect(size?.maxWidth, 76);
-    expect(size?.maxHeight, 76);
+    final badge = badgeOf(tester, Icons.check_rounded);
+    // El TAMAÑO CODIFICA SEVERIDAD: un veredicto verde no puede ser el badge
+    // más grande del sistema (los 76 son de .warn/.deny).
+    expect(badge.constraints?.maxWidth, 64);
+    expect(badge.constraints?.maxHeight, 64);
     final decoration = badge.decoration! as BoxDecoration;
     expect(decoration.shape, BoxShape.circle);
     expect(decoration.color, RideTokens.okBg);
+    // La superficie es lo que arregla el icono suelto de H1: disco + borde.
+    expect(decoration.border, isNotNull);
 
     expect(find.text('This checkout is already closed'), findsOneWidget);
   });
 
-  testWidgets('11E cancelado: mismo badge, tono danger y su propio título',
+  testWidgets('11E cancelado: badge de 76 en danger — ahí sí sube la severidad',
       (tester) async {
     await pumpTerminal(tester, cancelled: true);
 
     expect(find.text('This checkout was cancelled'), findsOneWidget);
-    final badge = tester.widget<Container>(
-      find
-          .ancestor(
-            of: find.byIcon(Icons.close_rounded),
-            matching: find.byType(Container),
-          )
-          .first,
-    );
+    final badge = badgeOf(tester, Icons.close_rounded);
+    expect(badge.constraints?.maxWidth, 76);
     expect((badge.decoration! as BoxDecoration).color, RideTokens.dangerBg);
+  });
+
+  testWidgets('cancelado: el copy dice quién y cuándo, no lenguaje de máquina',
+      (tester) async {
+    await pumpTerminal(tester, cancelled: true);
+
+    final at = DateTime.parse('2026-08-16T14:14:00.000Z').toLocal();
+    expect(
+      find.text(
+        'It was cancelled at the kiosk at ${hm(at)}. '
+        'This session takes no more steps.',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('el copy dice DÓNDE y CUÁNDO terminó (atribución del events log)',
@@ -162,24 +173,49 @@ void main() {
     expect(exited, isTrue);
   });
 
-  testWidgets('el contrato se declara con el DATO real (autoEmailedAt), no con '
-      'un botón que la app no puede cumplir', (tester) async {
+  testWidgets('el contrato se declara con el DATO real y con la fuerza que ese '
+      'dato aguanta: se PIDIÓ el envío, no que llegó', (tester) async {
     final emailedAt = DateTime.parse('2026-08-16T14:15:30.000Z');
     await pumpTerminal(tester, autoEmailedAt: emailedAt);
-    // La línea vive bajo el events log: en una pantalla de test hay que
-    // bajar hasta ella (el dock, en cambio, está pegado y no scrollea).
-    await tester.drag(find.byType(ListView), const Offset(0, -260));
-    await tester.pumpAndSettle();
 
+    // `autoEmailedAt` se estampa ANTES de disparar un envío fire-and-forget
+    // (checkout-session.service.js:597-612): con el SMTP caído el sello queda
+    // igual. Afirmar la entrega sería mentirle al agente que se lo dice al
+    // cliente — mismo bug que el emailSent:false de send-request-email.
     expect(
-      find.text('The contract was emailed at ${hm(emailedAt.toLocal())}.'),
+      find.text(
+        'The contract email was requested at ${hm(emailedAt.toLocal())}.',
+      ),
       findsOneWidget,
     );
+    expect(find.textContaining('was emailed at'), findsNothing);
 
     // Sin sello no se afirma nada.
     await pumpTerminal(tester);
-    await tester.drag(find.byType(ListView), const Offset(0, -260));
+    expect(find.textContaining('contract email'), findsNothing);
+  });
+
+  testWidgets('sin events log el hero no se queda pegado arriba y el evlog no '
+      'se dibuja vacío', (tester) async {
+    await tester.pumpWidget(
+      l10nApp(
+        Scaffold(
+          body: CheckoutTerminalView(
+            session: closedSession().copyWith(events: '[]'),
+            myUserId: kMyUserId,
+            onExit: () {},
+          ),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
-    expect(find.textContaining('The contract was emailed'), findsNothing);
+
+    // Cae al copy honesto (no hay a quién ni a cuándo atribuir) y la salida
+    // sigue ahí.
+    expect(
+      find.text('This session is already terminal: it takes no more steps.'),
+      findsOneWidget,
+    );
+    expect(find.text('Back to the list'), findsOneWidget);
   });
 }

@@ -42,14 +42,10 @@ class InspectionController extends Notifier<InspectionFlowState> {
     state = const InspectionFlowState(); // reset (reintentos)
     // Criterio registrado H4/H5: ningún fetch scoped por sede (display-data
     // va con x-view-location) ni sello de sede en filas nuevas con el
-    // override a MEDIO hidratar. La hidratación es un microtask tras el
-    // primer read — espera acotada, jamás un spin infinito.
-    for (var i = 0;
-        i < 50 && !ref.read(activeLocationProvider).hydrated;
-        i++) {
-      await Future<void>.delayed(Duration.zero);
-      if (!ref.mounted) return;
-    }
+    // override a MEDIO hidratar. Espera acotada compartida (H7): una sola
+    // implementación para todos los controllers imperativos.
+    await awaitActiveLocationHydrated(ref);
+    if (!ref.mounted) return;
     try {
       final api = ref.read(checkoutApiProvider);
       var session = await api.getByReservation(reservationId);

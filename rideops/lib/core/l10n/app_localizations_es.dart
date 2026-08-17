@@ -1281,8 +1281,28 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
-  String coTerminalContractEmailed(String time) {
-    return 'El contrato salió por correo a las $time.';
+  String coTerminalCancelledByYou(String time) {
+    return 'Lo cancelaste tú a las $time. Esta sesión ya no admite pasos.';
+  }
+
+  @override
+  String coTerminalCancelledKiosk(String time) {
+    return 'Se canceló en el kiosco a las $time. Esta sesión ya no admite pasos.';
+  }
+
+  @override
+  String coTerminalCancelledOtherAgent(String time) {
+    return 'Lo canceló otro agente a las $time. Esta sesión ya no admite pasos.';
+  }
+
+  @override
+  String coTerminalCancelledAt(String time) {
+    return 'Se canceló a las $time. Esta sesión ya no admite pasos.';
+  }
+
+  @override
+  String coTerminalContractRequested(String time) {
+    return 'Se pidió el envío del contrato al correo del cliente a las $time.';
   }
 
   @override
@@ -1397,14 +1417,14 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get coEntryNoVehicleBody =>
-      'Sin unidad no se puede entregar. Asigna el vehículo a la reserva y vuelve a intentarlo desde aquí.';
+      'Sin unidad no se puede entregar. Asignar el vehículo a la reserva se hace hoy desde el escritorio; en cuanto quede asignado, vuelve a tocar la card.';
 
   @override
   String get coEntryVehicleConflictTitle => 'Esa unidad ya está en otra renta';
 
   @override
   String get coEntryVehicleConflictBody =>
-      'El servidor lo bloqueó para que la misma unidad no se entregue dos veces. Cambia el vehículo de la reserva o cierra la otra renta.';
+      'El servidor lo bloqueó para que la misma unidad no se entregue dos veces. Cambiar el vehículo de la reserva —o cerrar la otra renta— se hace hoy desde el escritorio.';
 
   @override
   String coEntryConflictWith(String reservation) {
@@ -1439,6 +1459,14 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String get coEntryPrecheckinLinkCooldown =>
+      'Ese link ya se envió hace un momento: el servidor no manda otro tan seguido. Pídele al cliente que revise su correo (y el spam) antes de reintentar.';
+
+  @override
+  String get coEntryPrecheckinNoEmail =>
+      'La reserva no tiene correo del cliente, así que no hay a dónde mandarlo. Agrégalo desde el escritorio o pide el pre-checkin por teléfono.';
+
+  @override
   String get coEntryPrecheckinDeskNote =>
       'Capturar los datos en el mostrador todavía se hace desde el escritorio: esta app aún no tiene ese formulario.';
 
@@ -1451,7 +1479,22 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get coEntryAgeBody =>
-      'La sucursal bloquea esta salida por su política de edad. Corrige la fecha de nacimiento en la reserva si está mal, o avisa a tu supervisor.';
+      'La sucursal bloquea esta salida por su política de edad.';
+
+  @override
+  String get coEntryAgeDeskNote =>
+      'La fecha de nacimiento se corrige en la reserva, desde el escritorio. Si la regla está mal, eso lo cambia tu supervisor en la configuración de la sucursal.';
+
+  @override
+  String get coEntryScopeChangedTitle => 'Se interrumpió la apertura';
+
+  @override
+  String get coEntryScopeChangedBody =>
+      'Cambió tu sede o tu sesión mientras se abría el checkout, así que la respuesta del servidor ya no corresponde a lo que ves.';
+
+  @override
+  String get coEntryScopeChangedFoot =>
+      'La sesión pudo haberse creado. Vuelve a tocar la card: si existe, se reanuda.';
 
   @override
   String get coEntryOfflineTitle => 'Sin conexión para abrir el checkout';

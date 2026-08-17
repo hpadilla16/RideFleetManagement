@@ -1276,8 +1276,28 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String coTerminalContractEmailed(String time) {
-    return 'The contract was emailed at $time.';
+  String coTerminalCancelledByYou(String time) {
+    return 'You cancelled it at $time. This session takes no more steps.';
+  }
+
+  @override
+  String coTerminalCancelledKiosk(String time) {
+    return 'It was cancelled at the kiosk at $time. This session takes no more steps.';
+  }
+
+  @override
+  String coTerminalCancelledOtherAgent(String time) {
+    return 'Another agent cancelled it at $time. This session takes no more steps.';
+  }
+
+  @override
+  String coTerminalCancelledAt(String time) {
+    return 'It was cancelled at $time. This session takes no more steps.';
+  }
+
+  @override
+  String coTerminalContractRequested(String time) {
+    return 'The contract email was requested at $time.';
   }
 
   @override
@@ -1393,7 +1413,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get coEntryNoVehicleBody =>
-      'You cannot hand over without a unit. Assign the vehicle to the reservation and try again from here.';
+      'You cannot hand over without a unit. Assigning the vehicle to the reservation is still done from the desk; once it is assigned, tap the card again.';
 
   @override
   String get coEntryVehicleConflictTitle =>
@@ -1401,7 +1421,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get coEntryVehicleConflictBody =>
-      'The server blocked it so the same unit is not handed over twice. Change the vehicle on the reservation or close the other rental.';
+      'The server blocked it so the same unit is not handed over twice. Changing the vehicle on the reservation — or closing the other rental — is still done from the desk.';
 
   @override
   String coEntryConflictWith(String reservation) {
@@ -1436,6 +1456,14 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get coEntryPrecheckinLinkCooldown =>
+      'That link was just sent: the server will not send another so soon. Ask the customer to check their email (and spam) before retrying.';
+
+  @override
+  String get coEntryPrecheckinNoEmail =>
+      'The reservation has no customer email, so there is nowhere to send it. Add it from the desk, or take the pre-check-in over the phone.';
+
+  @override
   String get coEntryPrecheckinDeskNote =>
       'Capturing the details at the counter is still done from the desk: this app does not have that form yet.';
 
@@ -1448,7 +1476,22 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get coEntryAgeBody =>
-      'The branch blocks this departure under its age policy. Fix the date of birth on the reservation if it is wrong, or tell your supervisor.';
+      'The branch blocks this departure under its age policy.';
+
+  @override
+  String get coEntryAgeDeskNote =>
+      'The date of birth is fixed on the reservation, from the desk. If the rule itself is wrong, your supervisor changes it in the branch settings.';
+
+  @override
+  String get coEntryScopeChangedTitle => 'Opening was interrupted';
+
+  @override
+  String get coEntryScopeChangedBody =>
+      'Your location or your session changed while the checkout was opening, so the server\'s answer no longer matches what you see.';
+
+  @override
+  String get coEntryScopeChangedFoot =>
+      'The session may have been created. Tap the card again: if it exists, it resumes.';
 
   @override
   String get coEntryOfflineTitle => 'No connection to open the checkout';

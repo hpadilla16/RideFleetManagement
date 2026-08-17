@@ -2078,11 +2078,35 @@ abstract class AppLocalizations {
   /// **'Se completó a las {time}. No hay nada más que hacer aquí.'**
   String coTerminalDoneAt(String time);
 
-  /// Se muestra solo con autoEmailedAt sellado — es el dato real que responde «¿y el contrato?» sin ofrecer un botón que esta app todavía no puede cumplir
+  /// No description provided for @coTerminalCancelledByYou.
   ///
   /// In es, this message translates to:
-  /// **'El contrato salió por correo a las {time}.'**
-  String coTerminalContractEmailed(String time);
+  /// **'Lo cancelaste tú a las {time}. Esta sesión ya no admite pasos.'**
+  String coTerminalCancelledByYou(String time);
+
+  /// No description provided for @coTerminalCancelledKiosk.
+  ///
+  /// In es, this message translates to:
+  /// **'Se canceló en el kiosco a las {time}. Esta sesión ya no admite pasos.'**
+  String coTerminalCancelledKiosk(String time);
+
+  /// No description provided for @coTerminalCancelledOtherAgent.
+  ///
+  /// In es, this message translates to:
+  /// **'Lo canceló otro agente a las {time}. Esta sesión ya no admite pasos.'**
+  String coTerminalCancelledOtherAgent(String time);
+
+  /// No description provided for @coTerminalCancelledAt.
+  ///
+  /// In es, this message translates to:
+  /// **'Se canceló a las {time}. Esta sesión ya no admite pasos.'**
+  String coTerminalCancelledAt(String time);
+
+  /// Solo con autoEmailedAt sellado. Dice «se pidió», NUNCA «salió»: el backend estampa el sello ANTES de disparar el envío (checkout-session.service.js:597-612) y el envío es fire-and-forget — un SMTP caído deja el sello puesto igual. Afirmar la entrega sería mentirle al agente que se lo va a decir al cliente.
+  ///
+  /// In es, this message translates to:
+  /// **'Se pidió el envío del contrato al correo del cliente a las {time}.'**
+  String coTerminalContractRequested(String time);
 
   /// No description provided for @coTerminalByYou.
   ///
@@ -2279,7 +2303,7 @@ abstract class AppLocalizations {
   /// No description provided for @coEntryNoVehicleBody.
   ///
   /// In es, this message translates to:
-  /// **'Sin unidad no se puede entregar. Asigna el vehículo a la reserva y vuelve a intentarlo desde aquí.'**
+  /// **'Sin unidad no se puede entregar. Asignar el vehículo a la reserva se hace hoy desde el escritorio; en cuanto quede asignado, vuelve a tocar la card.'**
   String get coEntryNoVehicleBody;
 
   /// Frame 11D — 409 VEHICLE_CONFLICT al CREAR: aquí la sesión NO llegó a existir
@@ -2291,7 +2315,7 @@ abstract class AppLocalizations {
   /// No description provided for @coEntryVehicleConflictBody.
   ///
   /// In es, this message translates to:
-  /// **'El servidor lo bloqueó para que la misma unidad no se entregue dos veces. Cambia el vehículo de la reserva o cierra la otra renta.'**
+  /// **'El servidor lo bloqueó para que la misma unidad no se entregue dos veces. Cambiar el vehículo de la reserva —o cerrar la otra renta— se hace hoy desde el escritorio.'**
   String get coEntryVehicleConflictBody;
 
   /// No description provided for @coEntryConflictWith.
@@ -2342,6 +2366,18 @@ abstract class AppLocalizations {
   /// **'No se pudo enviar el link. {reason}'**
   String coEntryPrecheckinLinkFailed(String reason);
 
+  /// 429 de send-request-email = cooldown POR RESERVA (routes:1621), no saturación. El hecho accionable es «ya salió», no «espera a que baje la carga».
+  ///
+  /// In es, this message translates to:
+  /// **'Ese link ya se envió hace un momento: el servidor no manda otro tan seguido. Pídele al cliente que revise su correo (y el spam) antes de reintentar.'**
+  String get coEntryPrecheckinLinkCooldown;
+
+  /// 400 «No recipient email found» (routes:1634) — el fallo más probable de esta acción
+  ///
+  /// In es, this message translates to:
+  /// **'La reserva no tiene correo del cliente, así que no hay a dónde mandarlo. Agrégalo desde el escritorio o pide el pre-checkin por teléfono.'**
+  String get coEntryPrecheckinNoEmail;
+
   /// No description provided for @coEntryPrecheckinDeskNote.
   ///
   /// In es, this message translates to:
@@ -2363,8 +2399,32 @@ abstract class AppLocalizations {
   /// No description provided for @coEntryAgeBody.
   ///
   /// In es, this message translates to:
-  /// **'La sucursal bloquea esta salida por su política de edad. Corrige la fecha de nacimiento en la reserva si está mal, o avisa a tu supervisor.'**
+  /// **'La sucursal bloquea esta salida por su política de edad.'**
   String get coEntryAgeBody;
+
+  /// No description provided for @coEntryAgeDeskNote.
+  ///
+  /// In es, this message translates to:
+  /// **'La fecha de nacimiento se corrige en la reserva, desde el escritorio. Si la regla está mal, eso lo cambia tu supervisor en la configuración de la sucursal.'**
+  String get coEntryAgeDeskNote;
+
+  /// No description provided for @coEntryScopeChangedTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Se interrumpió la apertura'**
+  String get coEntryScopeChangedTitle;
+
+  /// No description provided for @coEntryScopeChangedBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Cambió tu sede o tu sesión mientras se abría el checkout, así que la respuesta del servidor ya no corresponde a lo que ves.'**
+  String get coEntryScopeChangedBody;
+
+  /// No description provided for @coEntryScopeChangedFoot.
+  ///
+  /// In es, this message translates to:
+  /// **'La sesión pudo haberse creado. Vuelve a tocar la card: si existe, se reanuda.'**
+  String get coEntryScopeChangedFoot;
 
   /// No description provided for @coEntryOfflineTitle.
   ///

@@ -23,7 +23,8 @@ enum CheckoutEntrySheetAction {
 }
 
 /// Sheet de negativa de creación. Plate OPACO (política de blur del M1: nada
-/// de BackdropFilter sin señal de capacidad) y scrim de marca.
+/// de BackdropFilter sin señal de capacidad), scrim de marca y radio 28
+/// (`--r-2xl` del mockup, el mismo del selector de sedes).
 ///
 /// Devuelve la acción elegida, o null si el agente canceló.
 Future<CheckoutEntrySheetAction?> showCheckoutEntryGuardSheet(
@@ -38,7 +39,7 @@ Future<CheckoutEntrySheetAction?> showCheckoutEntryGuardSheet(
     useSafeArea: true,
     backgroundColor: RideTokens.n0,
     shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
     ),
     builder: (_) => CheckoutEntryGuardSheet(
       reservationId: reservationId,
@@ -62,7 +63,6 @@ class CheckoutEntryGuardSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     final entry = ref.watch(checkoutEntryProvider(reservationId));
-    final tone = _toneOf(block.kind);
 
     return SafeArea(
       top: false,
@@ -83,63 +83,30 @@ class CheckoutEntryGuardSheet extends ConsumerWidget {
                 ),
               ),
             ),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _Badge(tone: tone, icon: _iconOf(block.kind)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _titleOf(l10n),
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
-                          color: RideTokens.n900,
-                          height: 1.25,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _bodyOf(l10n),
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: RideTokens.n700,
-                          height: 1.4,
-                        ),
-                      ),
-                      if (block.conflictReservationNumber != null) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          l10n.coEntryConflictWith(
-                            block.conflictReservationNumber!,
-                          ),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                            color: RideTokens.n900,
-                          ),
-                        ),
-                      ],
-                    ],
+            // Flexible + shrinkWrap (patrón de steps_sheet): a escala de texto
+            // 1.5–2.0 —normal en un teléfono de patio— el copy + el mensaje
+            // crudo del servidor + tres botones no caben en el alto del sheet.
+            // Sin esto, overflow amarillo justo en la pantalla que explica un
+            // bloqueo.
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  _Header(block: block, l10n: l10n),
+                  const SizedBox(height: 14),
+                  ..._actions(context, ref, l10n, entry),
+                  const SizedBox(height: 12),
+                  Text(
+                    _footOf(l10n),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: RideTokens.n700,
+                      height: 1.4,
+                    ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            ..._actions(context, ref, l10n, entry),
-            const SizedBox(height: 12),
-            Text(
-              _footOf(l10n),
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-                color: RideTokens.n700,
-                height: 1.4,
+                ],
               ),
             ),
           ],
@@ -157,7 +124,6 @@ class CheckoutEntryGuardSheet extends ConsumerWidget {
     CheckoutEntryState entry,
   ) {
     void close([CheckoutEntrySheetAction? action]) {
-      ref.read(checkoutEntryProvider(reservationId).notifier).dismissBlock();
       Navigator.of(context).pop(action);
     }
 
@@ -169,17 +135,25 @@ class CheckoutEntryGuardSheet extends ConsumerWidget {
         // (POST /:id/send-request-email kind=customer-info). El sheet se queda
         // abierto con el resultado — en el patio, la confirmación es el
         // comprobante.
+        //
+        // Enviado ⇒ el primario se convierte en "Cerrar" (GD): dejar el botón
+        // de enviar al 55 % sin decir por qué se lee como una app trabada.
         actions.add(
-          RidePrimaryButton(
-            label: l10n.coEntrySendPrecheckinLink,
-            loading: entry.sendingLink,
-            loadingLabel: l10n.coEntrySendingPrecheckinLink,
-            onPressed: entry.sendingLink || entry.linkSent
-                ? null
-                : () => ref
-                    .read(checkoutEntryProvider(reservationId).notifier)
-                    .sendPrecheckinLink(),
-          ),
+          entry.linkSent
+              ? RidePrimaryButton(
+                  label: l10n.coEntryClose,
+                  onPressed: close,
+                )
+              : RidePrimaryButton(
+                  label: l10n.coEntrySendPrecheckinLink,
+                  loading: entry.sendingLink,
+                  loadingLabel: l10n.coEntrySendingPrecheckinLink,
+                  onPressed: entry.sendingLink
+                      ? null
+                      : () => ref
+                          .read(checkoutEntryProvider(reservationId).notifier)
+                          .sendPrecheckinLink(),
+                ),
         );
         if (entry.linkSent) {
           actions.addAll([
@@ -189,12 +163,7 @@ class CheckoutEntryGuardSheet extends ConsumerWidget {
         } else if (entry.linkError != null) {
           actions.addAll([
             const SizedBox(height: 9),
-            _Notice(
-              text: l10n.coEntryPrecheckinLinkFailed(
-                _reasonOf(l10n, entry.linkError!),
-              ),
-              ok: false,
-            ),
+            _Notice(text: _linkFailureOf(l10n, entry.linkError!), ok: false),
           ]);
         }
 
@@ -231,6 +200,7 @@ class CheckoutEntryGuardSheet extends ConsumerWidget {
       case CheckoutEntryBlockKind.offline:
       case CheckoutEntryBlockKind.rateLimited:
       case CheckoutEntryBlockKind.locationNotReady:
+      case CheckoutEntryBlockKind.scopeChanged:
       case CheckoutEntryBlockKind.unknown:
         break;
     }
@@ -260,10 +230,116 @@ class CheckoutEntryGuardSheet extends ConsumerWidget {
     return actions;
   }
 
-  // ── copy ──────────────────────────────────────────────────────────────────
-
-  String _titleOf(AppLocalizations l10n) =>
+  /// Pie del sheet. TODOS estos guards abortan ANTES de crear la fila, y
+  /// decirlo importa: sin esa línea el agente no sabe si dejó basura a medias
+  /// (nota 5). El de pre-checkin además promete que la reserva no se tocó y
+  /// que la card se desbloquea sola (nota 4).
+  String _footOf(AppLocalizations l10n) =>
       switch (block.kind) {
+        CheckoutEntryBlockKind.precheckin => l10n.coEntryReservationUntouched,
+        // Aquí la sesión SÍ pudo crearse: el POST salió y su respuesta se
+        // perdió con el cambio de alcance. Prometer lo contrario sería mentir.
+        CheckoutEntryBlockKind.scopeChanged => l10n.coEntryScopeChangedFoot,
+        _ => l10n.coEntryNoSessionCreated,
+      };
+
+  /// Por qué falló el envío del link. Los dos casos que el backend produce de
+  /// verdad NO son "algo salió mal":
+  ///  - **429**: es un COOLDOWN POR RESERVA (reservations.routes.js:1621) —
+  ///    "ese correo ya salió hace un momento", no saturación del sistema.
+  ///    Decirle al agente que espere por carga lo invita a martillar el botón;
+  ///    decirle que ya salió le da el hecho accionable (avisar al cliente que
+  ///    revise su bandeja).
+  ///  - **400**: la única 400 que esta app puede provocar es
+  ///    `No recipient email found` (routes:1634) — el `kind` va fijo en el
+  ///    cliente, así que no hay otro 400 alcanzable. Es el fallo MÁS probable
+  ///    (cliente sin correo en la reserva) y merece copy propio en vez de un
+  ///    mensaje en inglés incrustado.
+  String _linkFailureOf(AppLocalizations l10n, ApiError error) =>
+      switch (error) {
+        ApiError(kind: ApiErrorKind.rateLimited) =>
+          l10n.coEntryPrecheckinLinkCooldown,
+        ApiError(status: 400) => l10n.coEntryPrecheckinNoEmail,
+        ApiError(kind: ApiErrorKind.network) =>
+          l10n.coEntryPrecheckinLinkFailed(l10n.errorNoConnectionRetry),
+        _ => l10n.coEntryPrecheckinLinkFailed(
+            error.message.isEmpty ? l10n.genericError : error.message,
+          ),
+      };
+}
+
+/// Badge + título + cuerpo + los datos que solo el servidor tiene.
+class _Header extends StatelessWidget {
+  const _Header({required this.block, required this.l10n});
+
+  final CheckoutEntryBlock block;
+  final AppLocalizations l10n;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _Badge(tone: _toneOf(block.kind), icon: _iconOf(block.kind)),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _titleOf(l10n),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  color: RideTokens.n900,
+                  height: 1.25,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _bodyOf(l10n),
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: RideTokens.n700,
+                  height: 1.4,
+                ),
+              ),
+              if (block.conflictReservationNumber != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  l10n.coEntryConflictWith(block.conflictReservationNumber!),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: RideTokens.n900,
+                  ),
+                ),
+              ],
+              // Notas de cierre por guard: la del 11B sostiene la decisión de
+              // NO dibujar "Capturar sus datos aquí" (esa captura vive en el
+              // escritorio) — sin renderizarla, el agente busca en la app un
+              // botón que no existe.
+              if (_noteOf(l10n) case final note?) ...[
+                const SizedBox(height: 8),
+                Text(
+                  note,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: RideTokens.n700,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _titleOf(AppLocalizations l10n) => switch (block.kind) {
         CheckoutEntryBlockKind.noVehicle => l10n.coEntryNoVehicleTitle,
         CheckoutEntryBlockKind.vehicleConflict =>
           l10n.coEntryVehicleConflictTitle,
@@ -271,6 +347,7 @@ class CheckoutEntryGuardSheet extends ConsumerWidget {
         CheckoutEntryBlockKind.ageRules => l10n.coEntryAgeTitle,
         CheckoutEntryBlockKind.offline => l10n.coEntryOfflineTitle,
         CheckoutEntryBlockKind.locationNotReady => l10n.coEntryNotReadyTitle,
+        CheckoutEntryBlockKind.scopeChanged => l10n.coEntryScopeChangedTitle,
         CheckoutEntryBlockKind.locationDenied => l10n.locationDeniedTitle,
         CheckoutEntryBlockKind.forbidden => l10n.forbiddenTitle,
         CheckoutEntryBlockKind.rateLimited ||
@@ -284,7 +361,13 @@ class CheckoutEntryGuardSheet extends ConsumerWidget {
       case CheckoutEntryBlockKind.noVehicle:
         return l10n.coEntryNoVehicleBody;
       case CheckoutEntryBlockKind.vehicleConflict:
-        return l10n.coEntryVehicleConflictBody;
+        // El mensaje del servidor es el ÚNICO portador de la diferencia entre
+        // "still out on open rental RES-1001" (la unidad no volvió al patio:
+        // hay que cerrar esa renta o buscar el carro) y "conflict with
+        // reservation RES-1001" (choque de fechas: hay que reasignar). Dos
+        // siguientes pasos distintos que sin esta línea se ven idénticos.
+        return '${l10n.coEntryVehicleConflictBody}\n'
+            '${l10n.coEntryServerSaid(block.message)}';
       case CheckoutEntryBlockKind.precheckin:
         return l10n.coEntryPrecheckinBody;
       case CheckoutEntryBlockKind.ageRules:
@@ -295,6 +378,8 @@ class CheckoutEntryGuardSheet extends ConsumerWidget {
         return l10n.coEntryOfflineBody;
       case CheckoutEntryBlockKind.locationNotReady:
         return l10n.coEntryNotReadyBody;
+      case CheckoutEntryBlockKind.scopeChanged:
+        return l10n.coEntryScopeChangedBody;
       case CheckoutEntryBlockKind.locationDenied:
         return l10n.locationDeniedBodyGeneric;
       case CheckoutEntryBlockKind.forbidden:
@@ -309,20 +394,11 @@ class CheckoutEntryGuardSheet extends ConsumerWidget {
     }
   }
 
-  /// Pie del sheet. TODOS estos guards abortan ANTES de crear la fila, y
-  /// decirlo importa: sin esa línea el agente no sabe si dejó basura a medias
-  /// (nota 5). El de pre-checkin además promete que la reserva no se tocó y
-  /// que la card se desbloquea sola (nota 4).
-  String _footOf(AppLocalizations l10n) =>
-      block.kind == CheckoutEntryBlockKind.precheckin
-          ? l10n.coEntryReservationUntouched
-          : l10n.coEntryNoSessionCreated;
-
-  String _reasonOf(AppLocalizations l10n, ApiError error) =>
-      switch (error.kind) {
-        ApiErrorKind.network => l10n.errorNoConnectionRetry,
-        ApiErrorKind.rateLimited => l10n.errorRateLimited,
-        _ => error.message.isEmpty ? l10n.genericError : error.message,
+  /// Nota que nombra DÓNDE vive lo que esta app todavía no hace.
+  String? _noteOf(AppLocalizations l10n) => switch (block.kind) {
+        CheckoutEntryBlockKind.precheckin => l10n.coEntryPrecheckinDeskNote,
+        CheckoutEntryBlockKind.ageRules => l10n.coEntryAgeDeskNote,
+        _ => null,
       };
 
   _Tone _toneOf(CheckoutEntryBlockKind kind) => switch (kind) {
@@ -349,8 +425,8 @@ class CheckoutEntryGuardSheet extends ConsumerWidget {
 
 enum _Tone { warn, deny }
 
-/// `.big-ic` de 52 del frame (el sheet usa el badge chico; el grande de 76 es
-/// el de la pantalla terminal).
+/// `.big-ic` de 52 del frame (el sheet usa el badge chico; el grande es el de
+/// la pantalla terminal).
 class _Badge extends StatelessWidget {
   const _Badge({required this.tone, required this.icon});
 

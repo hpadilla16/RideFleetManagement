@@ -66,6 +66,12 @@ enum CheckoutEntryBlockKind {
   /// `x-view-location` lleva (criterio registrado H4).
   locationNotReady,
 
+  /// El alcance cambió con el POST en vuelo (el agente cambió de sede o de
+  /// cuenta). La respuesta ya no pertenece a lo que está viendo, así que NO se
+  /// aplica — pero tampoco se traga en silencio: la sesión pudo crearse y el
+  /// agente tiene que saberlo para volver a tocar (Innovation #7).
+  scopeChanged,
+
   /// Todo lo demás (404 de reserva, 500, `AGREEMENT_AUTO_CREATE_FAILED`…):
   /// mensaje del servidor tal cual, nunca "algo salió mal".
   unknown,

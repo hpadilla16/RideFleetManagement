@@ -27,8 +27,14 @@ enum CheckoutEntryOutcome {
   /// [CheckoutEntryState.block].
   blocked,
 
-  /// Ni POST ni sheet: ya había uno en vuelo (anti-doble-tap).
+  /// Ni POST ni sheet: ya había uno en vuelo (anti-doble-tap). Tragárselo es
+  /// lo correcto — el agente ya tiene su respuesta en camino.
   busy,
+
+  /// La escritura salió pero el alcance cambió antes de que volviera (cambio de
+  /// sede/cuenta). NO es lo mismo que [busy]: aquí el servidor pudo crear la
+  /// sesión y el agente merece saberlo.
+  aborted,
 }
 
 @immutable
@@ -113,19 +119,22 @@ class CheckoutEntryController extends Notifier<CheckoutEntryState> {
   ReservationsApi get _reservations => ref.read(reservationsApiProvider);
   EventLogger get _logger => ref.read(eventLoggerProvider);
 
-  /// Cuántas esperas de 40 ms antes de rendirse con la hidratación de la sede
-  /// (~5 s). En la práctica es una lectura de Keystore en un microtask: esto
-  /// es el cinturón, no el camino.
-  static const _hydrationTries = 125;
-  static const _hydrationStep = Duration(milliseconds: 40);
-
   /// Toque en la card: crea o REANUDA la sesión.
+  ///
+  /// **keepAlive mientras el POST vuela** (Innovation #7): el provider es
+  /// autoDispose y su único oyente es la card. Si el poll del dashboard saca la
+  /// reserva de la cola a mitad del POST, la card se desmonta, el notifier se
+  /// dispone… y la respuesta de una escritura que PUDO crear la sesión aterriza
+  /// en el vacío. El link mantiene vivo al notifier hasta el `finally`, así que
+  /// la respuesta siempre se procesa (y se loguea) aunque nadie la mire.
   Future<CheckoutEntryOutcome> start() async {
     if (state.starting) return CheckoutEntryOutcome.busy;
     final gen = _generation;
+    final link = ref.keepAlive();
     state = state.copyWith(starting: true, clearBlock: true);
     try {
-      if (!await _awaitLocationHydrated(gen)) {
+      if (!await awaitActiveLocationHydrated(ref)) {
+        if (gen != _generation || !ref.mounted) return _aborted();
         return _block(const CheckoutEntryBlock(
           kind: CheckoutEntryBlockKind.locationNotReady,
         ));
@@ -142,22 +151,33 @@ class CheckoutEntryController extends Notifier<CheckoutEntryState> {
       final hadHeader = ref.read(activeLocationProvider).isPinned;
       try {
         await _api.createForReservation(reservationId);
-        if (gen != _generation || !ref.mounted) {
-          return CheckoutEntryOutcome.busy;
-        }
+        if (gen != _generation || !ref.mounted) return _aborted();
         _logger.log(CheckoutEvents.entryOpen);
         return CheckoutEntryOutcome.opened;
       } on ApiError catch (e) {
-        if (gen != _generation || !ref.mounted) {
-          return CheckoutEntryOutcome.busy;
-        }
+        if (gen != _generation || !ref.mounted) return _aborted();
         return _block(classifyEntryError(e, requestHadHeader: hadHeader));
       }
     } finally {
       if (gen == _generation && ref.mounted) {
         state = state.copyWith(starting: false);
       }
+      link.close();
     }
+  }
+
+  /// El alcance cambió con la escritura en vuelo. NO se publica estado (sería
+  /// del alcance anterior) pero tampoco se traga: se cuenta y el outcome es
+  /// distinto de [CheckoutEntryOutcome.busy] — tragarse un doble tap es
+  /// correcto; tragarse un POST abortado que pudo crear la sesión, no.
+  CheckoutEntryOutcome _aborted() {
+    if (ref.mounted) {
+      _logger.log(
+        CheckoutEvents.entryBlocked,
+        data: {'code': CheckoutEntryBlockKind.scopeChanged.name},
+      );
+    }
+    return CheckoutEntryOutcome.aborted;
   }
 
   /// Publica el guard, lo cuenta y traduce a outcome. La sesión terminal es el
@@ -217,16 +237,6 @@ class CheckoutEntryController extends Notifier<CheckoutEntryState> {
   /// confirmación del link, que pertenece a ese sheet y no a la card).
   void dismissBlock() {
     state = const CheckoutEntryState();
-  }
-
-  Future<bool> _awaitLocationHydrated(int gen) async {
-    if (ref.read(activeLocationProvider).hydrated) return true;
-    for (var i = 0; i < _hydrationTries; i++) {
-      await Future<void>.delayed(_hydrationStep);
-      if (gen != _generation || !ref.mounted) return false;
-      if (ref.read(activeLocationProvider).hydrated) return true;
-    }
-    return false;
   }
 
   Future<bool> _hasNetwork() async {
