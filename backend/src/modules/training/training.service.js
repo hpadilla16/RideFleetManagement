@@ -12,7 +12,10 @@
  * ALWAYS decided from records this service reads itself. A caller can ask to
  * arm anything; it cannot assert that it finished.
  */
+import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { prisma } from '../../lib/prisma.js';
+import { issueTrainingPracticeToken } from '../auth/auth.service.js';
 import logger from '../../lib/logger.js';
 import { findProof, standing, parseArmStamp, canCompleteByWalkthrough, VERIFY_TYPES, PROOF_SHAPE } from './training-verify.js';
 
@@ -210,5 +213,92 @@ export const trainingService = {
       userId,
       ...standing(progress, pointsAvailableByUser[userId] || 0),
     }));
+  },
+
+  /**
+   * Practice mode (2026-08-16): a 4h session as the shared practice AGENT on
+   * the DEMO tenant, so a trainee can rehearse the OPPORTUNISTIC modules —
+   * create, check out, check in, take a payment — without touching real
+   * inventory or real money. Training never manufactures real work; the demo
+   * tenant is the rehearsal space, and this is the bridge into it.
+   *
+   * The account is shared and created on first use. Its password is random
+   * and thrown away — nobody ever logs into it directly; the only door is
+   * this endpoint, behind the caller's own real session. Practice earns no
+   * points by construction: progress rows key on userId, and in there you
+   * are the practice user, not yourself.
+   */
+  /** Deps injectable for tests: { prisma, issueToken }. */
+  async practiceSession(actor = {}, deps = {}) {
+    const db = deps.prisma || prisma;
+    const issueToken = deps.issueToken || issueTrainingPracticeToken;
+    // Deterministic even if a second demo tenant ever appears (QA #6d).
+    const demo = await db.tenant.findFirst({
+      where: { isDemo: true },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, name: true },
+    });
+    if (!demo) { const e = new Error('No demo tenant is configured'); e.status = 404; throw e; }
+
+    const email = 'practica@ride.university';
+    // Case-insensitive: login lowercases, so a `Practica@...` row would slip
+    // past a sensitive lookup AND past the guard below (QA #6c).
+    const findPractice = () => db.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } } });
+    let user = await findPractice();
+    if (user && (
+      user.tenantId !== demo.id || !user.isActive || user.role !== 'AGENT'
+      || user.mustChangePassword || user.isServiceAccount
+    )) {
+      // The practice account may only ever be an active, password-stable,
+      // human AGENT on the demo tenant. Anything else means someone squatted
+      // the address or repurposed the account (a password reset sets
+      // mustChangePassword and would trap every trainee in the forced-change
+      // screen for a SHARED account) — refuse loudly, and leave a trace.
+      logger.warn('[training] practice account misconfigured — session refused', {
+        practiceUserId: user.id, practiceTenantId: user.tenantId,
+        byUserId: actor.userId || null, byTenantId: actor.tenantId || null,
+      });
+      const e = new Error('The practice account is misconfigured — contact an admin');
+      e.status = 409;
+      throw e;
+    }
+    if (!user) {
+      try {
+        user = await db.user.create({
+          data: {
+            tenantId: demo.id,
+            email,
+            fullName: 'Practica - Ride University',
+            role: 'AGENT',
+            passwordHash: await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 10),
+            isActive: true,
+            mustChangePassword: false,
+            passwordChangedAt: new Date(),
+            // The idle screen lock would have trainee #1 SET a PIN on the
+            // shared account and trainee #2 locked out by it (QA #5).
+            screenLockExempt: true,
+          },
+        });
+        logger.info('[training] practice user created', { userId: user.id, tenantId: demo.id });
+      } catch (err) {
+        // Two first-ever trainees racing: unique(email) fires for one of
+        // them — the row now exists, use it (QA #6a).
+        if (err?.code === 'P2002') user = await findPractice();
+        if (!user) throw err;
+      }
+    } else if (!user.screenLockExempt) {
+      // Heal rows created before the exemption existed.
+      user = await db.user.update({ where: { id: user.id }, data: { screenLockExempt: true } });
+    }
+
+    // EVERY mint is attributed (QA #2): inside the demo tenant all actions
+    // show the shared practice user, so this log line is the only record of
+    // which human, on which tenant, was behind a given practice session.
+    logger.info('[training] practice session minted', {
+      byUserId: actor.userId || null, byEmail: actor.email || null, byTenantId: actor.tenantId || null,
+      practiceUserId: user.id, demoTenantId: demo.id,
+    });
+
+    return { token: issueToken(user), tenantName: demo.name };
   },
 };

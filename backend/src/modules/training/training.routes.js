@@ -90,6 +90,30 @@ trainingRouter.post('/progress/:moduleKey/walkthrough-complete', async (req, res
  * person's role and the tenant's enabled modules — that lives in the
  * curriculum, on the client. The response is percentages.
  */
+/**
+ * Practice mode: swap into the demo tenant to rehearse. Any authenticated
+ * HUMAN may practice — but never a service account (a VozIA token has no
+ * business minting sessions), and the response is a token the CLIENT swaps
+ * in; nothing about the caller's own session changes server-side.
+ */
+trainingRouter.post('/practice-session', async (req, res, next) => {
+  try {
+    if (req.user?.isServiceAccount || req.user?.svc) {
+      return res.status(403).json({ error: 'Service accounts cannot practice' });
+    }
+    // A practice session minting further practice sessions would let one
+    // leaked 4h token become a perpetual chain (QA #1/#7).
+    if (req.user?.prac) {
+      return res.status(403).json({ error: 'Already in a practice session' });
+    }
+    res.json(await trainingService.practiceSession({
+      userId: req.user?.id || req.user?.sub || null,
+      email: req.user?.email || null,
+      tenantId: req.user?.tenantId || null,
+    }));
+  } catch (e) { next(e); }
+});
+
 trainingRouter.get('/team', requireRole('SUPER_ADMIN', 'ADMIN', 'OPS'), async (req, res, next) => {
   try {
     const tenantId = teamTenantOf(req);
