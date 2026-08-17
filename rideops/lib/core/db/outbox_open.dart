@@ -19,22 +19,35 @@ QueryExecutor openEncryptedOutboxExecutor({
   required Future<String> Function() obtainDbKeyHex,
 }) {
   return LazyDatabase(() async {
-    // Android carga libsqlcipher en vez del sqlite3 del sistema (el del
-    // sistema ignoraría PRAGMA key y dejaría el archivo EN CLARO — por eso
-    // el setup verifica cipher_version y truena si no está).
-    if (Platform.isAndroid) {
-      await applyWorkaroundToOpenSqlCipherOnOldAndroidVersions();
-      open.overrideFor(OperatingSystem.android, openCipherOnAndroid);
-    }
-    // iOS/macOS: el pod de sqlcipher_flutter_libs enlaza SQLCipher estático
-    // y pisa los símbolos de sqlite3 — no hay override que hacer.
-
     final dir = await getApplicationSupportDirectory();
     final file = File('${dir.path}${Platform.pathSeparator}outbox.db');
     final keyHex = await obtainDbKeyHex();
 
     return NativeDatabase.createInBackground(
       file,
+      // Android carga libsqlcipher en vez del sqlite3 del sistema (el del
+      // sistema ignoraría PRAGMA key y dejaría el archivo EN CLARO — por eso
+      // el setup verifica cipher_version y truena si no está).
+      //
+      // OJO (pase de integración H6): el override DEBE correr en
+      // [isolateSetup] — createInBackground abre la DB en OTRO isolate y el
+      // `open.overrideFor` del isolate principal no viaja; hecho afuera, el
+      // isolate de la DB intentaba `libsqlite3.so` (inexistente en el APK)
+      // y tronaba con "Failed to load dynamic library".
+      isolateSetup: () async {
+        if (Platform.isAndroid) {
+          try {
+            await applyWorkaroundToOpenSqlCipherOnOldAndroidVersions();
+          } catch (_) {
+            // Workaround de Android viejo: usa un canal de plataforma que
+            // puede no existir en isolates sin messenger — en Android
+            // moderno el override directo basta.
+          }
+          open.overrideFor(OperatingSystem.android, openCipherOnAndroid);
+        }
+        // iOS/macOS: el pod de sqlcipher_flutter_libs enlaza SQLCipher
+        // estático y pisa los símbolos de sqlite3 — no hay override.
+      },
       setup: (db) {
         db.execute('PRAGMA key = "x\'$keyHex\'";');
         // Verificación de que REALMENTE es SQLCipher: en un sqlite3 pelón
