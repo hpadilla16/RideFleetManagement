@@ -80,8 +80,6 @@
     "placeholders": { "count": { "type": "int" } }
   },
   "lockForgotPin": "¿Olvidaste tu PIN? Cerrar sesión",
-  "homePlaceholderTitle": "Sesión iniciada",
-  "homePlaceholderBody": "El tablero de patio llega en la siguiente historia.",
   "logoutButton": "Cerrar sesión",
   "tabHome": "Inicio",
   "tabSearch": "Buscar",
@@ -122,5 +120,155 @@
   "errorOffline": "Sin conexión. Se guardó para enviar después.",
   "outboxDeadLetterTitle": "Pendientes con error",
   "retryButton": "Reintentar",
-  "genericError": "Algo salió mal. Intenta de nuevo."
+  "genericError": "Algo salió mal. Intenta de nuevo.",
+  "locationChipDeniedSemantics": "Ubicación activa: {location}. Acceso denegado. Toca para cambiar.",
+  "@locationChipDeniedSemantics": {
+    "description": "Chip del shell en danger mientras el 403 de view-location esté activo",
+    "placeholders": { "location": { "type": "String" } }
+  },
+  "ageMoment": "un momento",
+  "ageMinutes": "{count} min",
+  "@ageMinutes": {
+    "description": "Edad corta del dato (fila de frescura y banners)",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "ageHours": "{count} h",
+  "@ageHours": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "homeFreshnessLine": "Actualizado hace {age} · se actualiza solo",
+  "@homeFreshnessLine": {
+    "placeholders": { "age": { "type": "String" } }
+  },
+  "homeOfflineBanner": "Sin conexión — mostrando datos de hace {age}. Se actualizará solo al volver la señal.",
+  "@homeOfflineBanner": {
+    "placeholders": { "age": { "type": "String" } }
+  },
+  "homeStaleBanner": "No se pudo actualizar — mostrando datos de hace {age}.",
+  "@homeStaleBanner": {
+    "placeholders": { "age": { "type": "String" } }
+  },
+  "homeErrorTitle": "No se pudo cargar el tablero",
+  "forbiddenTitle": "Sin acceso",
+  "heroTitle": "Para ahora",
+  "heroPartDepartures": "{count, plural, one{1 salida} other{{count} salidas}}",
+  "@heroPartDepartures": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "heroPartDeparturesCapped": "{count}+ salidas",
+  "@heroPartDeparturesCapped": {
+    "description": "La cola de salidas tocó el take:8 con puros items de hoy — el total real puede ser mayor",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "heroPartReturns": "{count, plural, one{1 retorno} other{{count} retornos}}",
+  "@heroPartReturns": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "heroPartIncidents": "{count, plural, one{1 incidente} other{{count} incidentes}}",
+  "@heroPartIncidents": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "heroCalmFoot": "Sin pendientes inmediatos",
+  "heroCutoffFoot": "al corte de las {time}",
+  "@heroCutoffFoot": {
+    "description": "Pie del hero en offline: hora del último dato bueno (mockup 5E)",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "tileActiveTitle": "En renta",
+  "tileActiveFoot": "{count, plural, =0{Ver lista ›} one{1 vence hoy · ver lista ›} other{{count} vencen hoy · ver lista ›}}",
+  "@tileActiveFoot": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "tileActiveSemantics": "En renta: {count}. Toca para ver la lista completa.",
+  "@tileActiveSemantics": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "tileLoanerTitle": "Loaner",
+  "tileLoanerFoot": "{count, plural, =0{Sin seguimientos} one{1 pide seguimiento} other{{count} piden seguimiento}}",
+  "@tileLoanerFoot": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "tileLoanerFootCapped": "{count}+ piden seguimiento",
+  "@tileLoanerFootCapped": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "tilePrecheckinTitle": "Pre-checkin",
+  "tilePrecheckinFoot": "Enviado, sin completar",
+  "queueIssueEscalations": "Incidentes",
+  "queueCheckout": "Salidas (72 h)",
+  "queueReturns": "Retornos (72 h)",
+  "queuePrecheckin": "Pre-checkin",
+  "queueLoanerAdvisorFollowup": "Seguimiento loaner",
+  "queueLoanerReady": "Loaner listos",
+  "queueLoanerBillingReview": "Facturación loaner",
+  "queueLoanerReturns": "Retornos loaner",
+  "queueActive": "En renta",
+  "seeAllButton": "Ver todo",
+  "queueCountCapped": "{count}+",
+  "@queueCountCapped": {
+    "description": "Contador honesto al tocar el take:8 del server — nunca un total inventado",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "calmRowTitle": "Sin actividad ahora",
+  "calmChipSemantics": "{queue}: sin pendientes. Toca para abrir la cola.",
+  "@calmChipSemantics": {
+    "placeholders": { "queue": { "type": "String" } }
+  },
+  "emptyAllTitle": "Patio en calma",
+  "emptyAllBody": "No hay nada pendiente en ninguna cola ahora mismo. Desliza hacia abajo para actualizar cuando quieras.",
+  "emptyAllQueuesLabel": "Las {count} colas, en cero",
+  "@emptyAllQueuesLabel": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "cardToday": "Hoy {time}",
+  "@cardToday": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "cardTomorrow": "Mañana {time}",
+  "@cardTomorrow": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "cardOverdueHours": "{count, plural, one{Vencido 1 h} other{Vencido {count} h}}",
+  "@cardOverdueHours": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "cardOverdueMinutes": "Vencido {count} min",
+  "@cardOverdueMinutes": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "precheckinReady": "Pre-checkin listo",
+  "precheckinMissing": "Falta pre-checkin",
+  "incidentOpen": "Abierto",
+  "incidentUnderReview": "En revisión",
+  "incidentReported": "Reportado {time}",
+  "@incidentReported": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "loanerFollowupPacket": "Expediente sin completar",
+  "loanerFollowupService": "Servicio vencido",
+  "loanerFollowupBilling": "Facturación rechazada",
+  "loanerReadyChip": "Listo para entrega",
+  "advisorLabel": "Asesor: {name}",
+  "@advisorLabel": {
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "queueListShowingFirst": "Mostrando los primeros {count} — el server manda hasta {count} por cola",
+  "@queueListShowingFirst": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "queueListShowingOf": "Mostrando {shown} de {total}",
+  "@queueListShowingOf": {
+    "placeholders": {
+      "shown": { "type": "int" },
+      "total": { "type": "int" }
+    }
+  },
+  "queueEmptyBody": "Nada en esta cola ahora mismo.",
+  "searchFieldHint": "Cliente, reserva, placa o unidad",
+  "searchFieldLabel": "Buscar",
+  "searchPrompt": "Busca en las reservas de tu sede activa.",
+  "searchNoResults": "Sin resultados para “{query}”.",
+  "@searchNoResults": {
+    "placeholders": { "query": { "type": "String" } }
+  }
 }

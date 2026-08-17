@@ -4,14 +4,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/app.dart';
 import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/api_providers.dart';
+import 'package:rideops/core/session/active_location.dart';
 import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/token_store.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
 import 'package:rideops/features/auth/presentation/change_password_screen.dart';
 import 'package:rideops/features/auth/presentation/pin_setup_screen.dart';
-import 'package:rideops/features/dashboard/presentation/home_placeholder_screen.dart';
+import 'package:rideops/features/dashboard/presentation/home_screen.dart';
 
 import 'helpers/auth_test_helpers.dart';
+import 'helpers/shell_test_helpers.dart';
 
 /// Widget tests del gate de cambio forzado (mockup 2A-2C): el router bloquea
 /// ahí al hidratar un user con mustChangePassword, el checklist vive contra
@@ -43,6 +45,13 @@ void main() {
           tokenStoreProvider.overrideWithValue(store),
           pinStoreProvider.overrideWithValue(pinStore),
           authApiProvider.overrideWithValue(api),
+          // H4: la home real fetchea el dashboard — stub con el fixture para
+          // que el fetch resuelva y la pantalla asiente (ver FakeDashboardApi).
+          dashboardApiProvider.overrideWithValue(FakeDashboardApi()),
+          // …y la sede activa hidrata de memoria: el Keystore real hace IO async
+          // que jamás resuelve dentro de testWidgets — la home (gate hydrated)
+          // quedaría en skeleton hasta disparar el lock de inactividad.
+          activeLocationStoreProvider.overrideWithValue(InMemoryActiveLocationStore()),
           eventLoggerProvider.overrideWithValue(logger),
         ],
         child: const RideOpsApp(),
@@ -137,7 +146,7 @@ void main() {
     );
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
-    expect(find.byType(HomePlaceholderScreen), findsOneWidget);
+    expect(find.byType(HomeScreen), findsOneWidget);
   });
 
   testWidgets('contraseña actual incorrecta: banner específico del 400',

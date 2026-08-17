@@ -40,45 +40,52 @@ class LocationDeniedView extends StatelessWidget {
         child: Column(
           children: [
             Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    width: 72,
-                    height: 72,
-                    decoration: BoxDecoration(
-                      color: RideTokens.dangerBg,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: RideTokens.dangerBd),
-                    ),
-                    child: const Icon(
-                      Icons.gpp_bad_outlined,
-                      size: 34,
-                      color: RideTokens.dangerTx,
-                    ),
+              // Center + scroll: centrado cuando sobra espacio y sin
+              // desbordar cuando la pantalla anfitriona deja poco alto (la
+              // 4D también se monta bajo el campo de búsqueda en H4).
+              child: Center(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 72,
+                        height: 72,
+                        decoration: BoxDecoration(
+                          color: RideTokens.dangerBg,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: RideTokens.dangerBd),
+                        ),
+                        child: const Icon(
+                          Icons.gpp_bad_outlined,
+                          size: 34,
+                          color: RideTokens.dangerTx,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        l10n.locationDeniedTitle,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w900,
+                          color: RideTokens.n900,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        body,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: RideTokens.n700,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  Text(
-                    l10n.locationDeniedTitle,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 19,
-                      fontWeight: FontWeight.w900,
-                      color: RideTokens.n900,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    body,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: RideTokens.n700,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
             // GD MC-4: el .btn-primary REAL del design system (core/widgets)

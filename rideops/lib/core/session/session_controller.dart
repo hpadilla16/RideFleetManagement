@@ -14,6 +14,15 @@ import 'token_store.dart';
 /// hidratación al arrancar y logout limpio. El router observa este provider
 /// vía refreshListenable y re-evalúa sus gates en cada cambio.
 class SessionController extends Notifier<SessionState> {
+  /// Generación de IDENTIDAD (herencia QA-H3, mismo patrón que
+  /// ActiveLocationController): se bumpea en cada transición que cambia de
+  /// quién es la sesión (restore, login, change-password, logout, expiración).
+  /// Un /me en vuelo de la identidad ANTERIOR — logout + login de otro
+  /// usuario mientras la respuesta viajaba — se descarta al llegar: el guard
+  /// `state.isAuthenticated` solo no alcanza, porque la sesión NUEVA también
+  /// está autenticada y el user viejo la pisaría.
+  int _identityGen = 0;
+
   @override
   SessionState build() {
     // La restauración es async (Keystore + /me); build debe ser síncrono.
@@ -34,6 +43,7 @@ class SessionController extends Notifier<SessionState> {
   /// sin señal que expulsar a re-login — cualquier 401/403 real posterior
   /// corrige el rumbo vía los observadores del Dio autenticado.
   Future<void> restore() async {
+    _identityGen++;
     final token = await _store.read();
     if (!ref.mounted) return; // container muerto mientras leíamos el Keystore
     if (token == null || token.isEmpty) {
@@ -54,9 +64,13 @@ class SessionController extends Notifier<SessionState> {
   /// GET /api/auth/me → user al estado, con los guardas de siempre. Lo
   /// comparten [restore] y [rehydrateUserIfMissing].
   Future<void> _hydrateUser() async {
+    final gen = _identityGen;
     try {
       final user = await ref.read(authApiProvider).me();
       if (!ref.mounted) return;
+      // La identidad cambió mientras /me volaba (logout + login de OTRO
+      // usuario en la misma ventana): este user ya no es de esta sesión.
+      if (gen != _identityGen) return;
       // onSessionExpired pudo dispararse mientras /me volaba (401): no
       // resucitar una sesión ya limpiada.
       if (state.isAuthenticated) state = state.withUser(user);
@@ -90,6 +104,7 @@ class SessionController extends Notifier<SessionState> {
       final res = await ref
           .read(authApiProvider)
           .login(email: email, password: password);
+      _identityGen++;
       await _store.write(res.token);
       state = SessionState.authenticated(token: res.token, user: res.user);
       _logger.log(AuthEvents.loginOk);
@@ -120,6 +135,7 @@ class SessionController extends Notifier<SessionState> {
           currentPassword: currentPassword,
           newPassword: newPassword,
         );
+    _identityGen++; // un /me viejo no debe pisar el user fresco del gate
     await _store.write(res.token);
     // Estado reconstruido desde cero: passwordChangeRequired vuelve a false
     // (el constructor no lo arrastra) y el user fresco trae el claim limpio.
@@ -131,6 +147,7 @@ class SessionController extends Notifier<SessionState> {
   /// cambio de cuenta (ADR-7) se conecta aquí cuando el outbox tenga filas
   /// reales (M1-H5): hoy no hay escrituras encoladas en H1.
   Future<void> logout() async {
+    _identityGen++;
     await _store.clear();
     state = const SessionState.unauthenticated();
   }
@@ -139,6 +156,7 @@ class SessionController extends Notifier<SessionState> {
   /// sesión murió. Limpieza + re-login (nunca refresh — ADR-3a).
   void onSessionExpired() {
     if (!state.isAuthenticated) return; // 401s en ráfaga: loguear uno solo
+    _identityGen++;
     _logger.log(AuthEvents.sessionExpiredRelogin);
     state = const SessionState.unauthenticated();
     unawaited(_store.clear());

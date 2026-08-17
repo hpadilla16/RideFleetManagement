@@ -7,7 +7,9 @@ import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/pin_lock_screen.dart';
 import '../../features/auth/presentation/pin_setup_screen.dart';
 import '../../features/auth/presentation/splash_screen.dart';
-import '../../features/dashboard/presentation/home_placeholder_screen.dart';
+import '../../features/dashboard/presentation/home_screen.dart';
+import '../../features/dashboard/presentation/queue_list_screen.dart';
+import '../../features/search/presentation/search_screen.dart';
 import '../../features/shell/app_shell.dart';
 import '../../features/shell/shell_placeholder_screen.dart';
 import '../l10n/app_localizations.dart';
@@ -33,6 +35,11 @@ abstract final class AppRoutes {
   static const incidents = '/incidents';
   static const outbox = '/outbox';
   static const profile = '/profile';
+
+  /// Vista de lista de una cola del dashboard (H4): destino de "Ver todo",
+  /// del tile "En renta" y de los chips colapsados. [key] es el name del
+  /// enum DashboardQueue (= llave del JSON del payload).
+  static String queueList(String key) => '$home/queue/$key';
 }
 
 /// Superficies del flujo de auth: NUNCA se preservan como destino de retorno
@@ -192,13 +199,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(
             path: AppRoutes.home,
-            builder: (context, state) => const HomePlaceholderScreen(),
+            builder: (context, state) => const HomeScreen(),
+            routes: [
+              GoRoute(
+                path: 'queue/:key',
+                builder: (context, state) => QueueListScreen(
+                  queueKey: state.pathParameters['key'] ?? '',
+                ),
+              ),
+            ],
           ),
           GoRoute(
             path: AppRoutes.search,
-            builder: (context, state) => ShellPlaceholderScreen(
-              title: AppLocalizations.of(context)!.tabSearch,
-            ),
+            builder: (context, state) => const SearchScreen(),
           ),
           GoRoute(
             path: AppRoutes.incidents,
@@ -214,8 +227,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: AppRoutes.profile,
+            // showLogout: el logout vivía en el placeholder del home (H1);
+            // con la home real (H4) su casa provisional es Perfil — donde
+            // vivirá el de verdad.
             builder: (context, state) => ShellPlaceholderScreen(
               title: AppLocalizations.of(context)!.tabProfile,
+              showLogout: true,
             ),
           ),
         ],

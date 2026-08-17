@@ -30,6 +30,22 @@ void main() {
     expect(auth.user.can('modulo_inexistente'), isFalse);
   });
 
+  test(
+      'herencia QA-H3: SessionUser.can() es fail-closed — llave AUSENTE del '
+      'mapa == false, igual que llave presente en false', () {
+    final raw = readFixture('login_response.json');
+    final access =
+        (raw['user'] as Map<String, dynamic>)['moduleAccess'] as Map<String, dynamic>;
+    access.remove('reservations'); // presente en el fixture → ausente
+    final user = AuthResponse.fromJson(raw).user;
+    expect(access.containsKey('reservations'), isFalse);
+    expect(user.can('reservations'), isFalse,
+        reason: 'ausencia = NO (el ?? false del DTO): un backend viejo que '
+            'aún no emite la llave jamás debe encender superficies nuevas');
+    expect(user.can('paymentActions'), isFalse,
+        reason: 'presente y en false — mismo resultado por otra vía');
+  });
+
   test('locationIds null significa UNRESTRICTED, no lista vacía', () {
     final raw = readFixture('login_response.json');
     (raw['user'] as Map<String, dynamic>)['locationIds'] = null;

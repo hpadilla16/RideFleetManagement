@@ -197,13 +197,6 @@ class AppLocalizationsEs extends AppLocalizations {
   String get lockForgotPin => '¿Olvidaste tu PIN? Cerrar sesión';
 
   @override
-  String get homePlaceholderTitle => 'Sesión iniciada';
-
-  @override
-  String get homePlaceholderBody =>
-      'El tablero de patio llega en la siguiente historia.';
-
-  @override
   String get logoutButton => 'Cerrar sesión';
 
   @override
@@ -309,4 +302,280 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get genericError => 'Algo salió mal. Intenta de nuevo.';
+
+  @override
+  String locationChipDeniedSemantics(String location) {
+    return 'Ubicación activa: $location. Acceso denegado. Toca para cambiar.';
+  }
+
+  @override
+  String get ageMoment => 'un momento';
+
+  @override
+  String ageMinutes(int count) {
+    return '$count min';
+  }
+
+  @override
+  String ageHours(int count) {
+    return '$count h';
+  }
+
+  @override
+  String homeFreshnessLine(String age) {
+    return 'Actualizado hace $age · se actualiza solo';
+  }
+
+  @override
+  String homeOfflineBanner(String age) {
+    return 'Sin conexión — mostrando datos de hace $age. Se actualizará solo al volver la señal.';
+  }
+
+  @override
+  String homeStaleBanner(String age) {
+    return 'No se pudo actualizar — mostrando datos de hace $age.';
+  }
+
+  @override
+  String get homeErrorTitle => 'No se pudo cargar el tablero';
+
+  @override
+  String get forbiddenTitle => 'Sin acceso';
+
+  @override
+  String get heroTitle => 'Para ahora';
+
+  @override
+  String heroPartDepartures(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count salidas',
+      one: '1 salida',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String heroPartDeparturesCapped(int count) {
+    return '$count+ salidas';
+  }
+
+  @override
+  String heroPartReturns(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count retornos',
+      one: '1 retorno',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String heroPartIncidents(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count incidentes',
+      one: '1 incidente',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get heroCalmFoot => 'Sin pendientes inmediatos';
+
+  @override
+  String heroCutoffFoot(String time) {
+    return 'al corte de las $time';
+  }
+
+  @override
+  String get tileActiveTitle => 'En renta';
+
+  @override
+  String tileActiveFoot(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count vencen hoy · ver lista ›',
+      one: '1 vence hoy · ver lista ›',
+      zero: 'Ver lista ›',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String tileActiveSemantics(int count) {
+    return 'En renta: $count. Toca para ver la lista completa.';
+  }
+
+  @override
+  String get tileLoanerTitle => 'Loaner';
+
+  @override
+  String tileLoanerFoot(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count piden seguimiento',
+      one: '1 pide seguimiento',
+      zero: 'Sin seguimientos',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String tileLoanerFootCapped(int count) {
+    return '$count+ piden seguimiento';
+  }
+
+  @override
+  String get tilePrecheckinTitle => 'Pre-checkin';
+
+  @override
+  String get tilePrecheckinFoot => 'Enviado, sin completar';
+
+  @override
+  String get queueIssueEscalations => 'Incidentes';
+
+  @override
+  String get queueCheckout => 'Salidas (72 h)';
+
+  @override
+  String get queueReturns => 'Retornos (72 h)';
+
+  @override
+  String get queuePrecheckin => 'Pre-checkin';
+
+  @override
+  String get queueLoanerAdvisorFollowup => 'Seguimiento loaner';
+
+  @override
+  String get queueLoanerReady => 'Loaner listos';
+
+  @override
+  String get queueLoanerBillingReview => 'Facturación loaner';
+
+  @override
+  String get queueLoanerReturns => 'Retornos loaner';
+
+  @override
+  String get queueActive => 'En renta';
+
+  @override
+  String get seeAllButton => 'Ver todo';
+
+  @override
+  String queueCountCapped(int count) {
+    return '$count+';
+  }
+
+  @override
+  String get calmRowTitle => 'Sin actividad ahora';
+
+  @override
+  String calmChipSemantics(String queue) {
+    return '$queue: sin pendientes. Toca para abrir la cola.';
+  }
+
+  @override
+  String get emptyAllTitle => 'Patio en calma';
+
+  @override
+  String get emptyAllBody =>
+      'No hay nada pendiente en ninguna cola ahora mismo. Desliza hacia abajo para actualizar cuando quieras.';
+
+  @override
+  String emptyAllQueuesLabel(int count) {
+    return 'Las $count colas, en cero';
+  }
+
+  @override
+  String cardToday(String time) {
+    return 'Hoy $time';
+  }
+
+  @override
+  String cardTomorrow(String time) {
+    return 'Mañana $time';
+  }
+
+  @override
+  String cardOverdueHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Vencido $count h',
+      one: 'Vencido 1 h',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String cardOverdueMinutes(int count) {
+    return 'Vencido $count min';
+  }
+
+  @override
+  String get precheckinReady => 'Pre-checkin listo';
+
+  @override
+  String get precheckinMissing => 'Falta pre-checkin';
+
+  @override
+  String get incidentOpen => 'Abierto';
+
+  @override
+  String get incidentUnderReview => 'En revisión';
+
+  @override
+  String incidentReported(String time) {
+    return 'Reportado $time';
+  }
+
+  @override
+  String get loanerFollowupPacket => 'Expediente sin completar';
+
+  @override
+  String get loanerFollowupService => 'Servicio vencido';
+
+  @override
+  String get loanerFollowupBilling => 'Facturación rechazada';
+
+  @override
+  String get loanerReadyChip => 'Listo para entrega';
+
+  @override
+  String advisorLabel(String name) {
+    return 'Asesor: $name';
+  }
+
+  @override
+  String queueListShowingFirst(int count) {
+    return 'Mostrando los primeros $count — el server manda hasta $count por cola';
+  }
+
+  @override
+  String queueListShowingOf(int shown, int total) {
+    return 'Mostrando $shown de $total';
+  }
+
+  @override
+  String get queueEmptyBody => 'Nada en esta cola ahora mismo.';
+
+  @override
+  String get searchFieldHint => 'Cliente, reserva, placa o unidad';
+
+  @override
+  String get searchFieldLabel => 'Buscar';
+
+  @override
+  String get searchPrompt => 'Busca en las reservas de tu sede activa.';
+
+  @override
+  String searchNoResults(String query) {
+    return 'Sin resultados para “$query”.';
+  }
 }

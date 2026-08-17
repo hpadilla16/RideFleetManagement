@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/auth_api.dart';
+import 'package:rideops/core/api/dashboard_api.dart';
+import 'package:rideops/core/api/dto/dashboard.dart';
 import 'package:rideops/core/api/dto/session_user.dart';
 import 'package:rideops/core/session/biometric_auth.dart';
 import 'package:rideops/core/session/pin_store.dart';
@@ -138,6 +140,35 @@ class FakeAuthApi extends AuthApi {
   @override
   Future<AuthResponse> refreshWithToken(String currentToken) =>
       onRefresh!(currentToken);
+}
+
+/// DashboardApi con handler inyectable. Default: el fixture real de
+/// dashboard.json — los tests de flujo de auth que aterrizan en la home (H4)
+/// necesitan que el fetch RESUELVA: con la red real del harness colgando, el
+/// skeleton animaría por siempre y pumpAndSettle avanzaría el reloj fake
+/// hasta disparar el lock de inactividad (5 min) a mitad del assert.
+class FakeDashboardApi extends DashboardApi {
+  FakeDashboardApi() : super(authedDio: Dio());
+
+  Future<DashboardPayload> Function(String query)? onFetch;
+  int calls = 0;
+  String? lastQuery;
+
+  @override
+  Future<DashboardPayload> fetch({String query = ''}) {
+    calls++;
+    lastQuery = query;
+    if (onFetch != null) return onFetch!(query);
+    return Future.value(
+      DashboardPayload.fromJson(readJsonFixture('dashboard.json')),
+    );
+  }
+}
+
+/// Fixture arbitrario de test/fixtures (dashboard.json, reservation_card…).
+Map<String, dynamic> readJsonFixture(String name) {
+  final file = File('test/fixtures/$name');
+  return json.decode(file.readAsStringSync()) as Map<String, dynamic>;
 }
 
 /// Logger que captura eventos para asertar la taxonomía.

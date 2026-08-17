@@ -13,6 +13,7 @@ import 'package:rideops/core/session/biometric_auth.dart';
 import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/token_store.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
+import 'package:rideops/features/dashboard/presentation/home_screen.dart';
 import 'package:rideops/features/dashboard/presentation/home_skeleton.dart';
 
 import 'helpers/auth_test_helpers.dart';
@@ -56,6 +57,9 @@ void main() {
           pinStoreProvider.overrideWithValue(pinStore),
           biometricAuthProvider.overrideWithValue(FakeBiometricAuth()),
           authApiProvider.overrideWithValue(api),
+          // H4: la home real fetchea el dashboard — stub con el fixture para
+          // que el fetch resuelva y la pantalla asiente (ver FakeDashboardApi).
+          dashboardApiProvider.overrideWithValue(FakeDashboardApi()),
           eventLoggerProvider.overrideWithValue(CapturingEventLogger()),
           if (outboxPending != null)
             outboxPendingCountProvider.overrideWith((ref) async => outboxPending),
@@ -81,7 +85,7 @@ void main() {
     expect(find.text('Search'), findsOneWidget);
     expect(find.text('Outbox'), findsOneWidget);
     expect(find.text('Profile'), findsOneWidget);
-    expect(find.text('Incidents'), findsNothing,
+    expect(find.byKey(const ValueKey('shell-tab-incidents')), findsNothing,
         reason: 'degradado = tabs mínimas de AGENT');
     expect(find.text('All'), findsOneWidget,
         reason: 'chip de ubicación SIEMPRE visible, incluso degradado');
@@ -91,7 +95,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.byType(HomeSkeleton), findsNothing);
-    expect(find.text('Incidents'), findsOneWidget,
+    // byKey y no byText: desde H4 "Incidents" también existe como sección
+    // de la home — aquí se asierta LA TAB.
+    expect(find.byKey(const ValueKey('shell-tab-incidents')), findsOneWidget,
         reason: 'ADMIN + issueCenter ⇒ 5ª tab');
   });
 
@@ -100,11 +106,11 @@ void main() {
     api.onMe = () async => sessionUserFixture(issueCenter: true);
     await tester.pumpWidget(app());
     await tester.pumpAndSettle();
-    expect(find.text('Incidents'), findsNothing);
+    expect(find.byKey(const ValueKey('shell-tab-incidents')), findsNothing);
     expect(find.text('Outbox'), findsOneWidget);
   });
 
-  testWidgets('tabs navegan: Buscar muestra su placeholder dentro del shell',
+  testWidgets('tabs navegan: Buscar muestra su pantalla dentro del shell',
       (tester) async {
     api.onMe = () async => sessionUserFixture();
     await tester.pumpWidget(app());
@@ -112,7 +118,11 @@ void main() {
 
     await tester.tap(find.text('Search'));
     await tester.pumpAndSettle();
-    expect(find.text('This section arrives in a later story.'), findsOneWidget);
+    // Desde H4 la tab Buscar monta la pantalla real (prompt de búsqueda).
+    expect(
+      find.text('Search reservations in your active location.'),
+      findsOneWidget,
+    );
     expect(find.text('All'), findsOneWidget, reason: 'el chrome persiste');
   });
 
@@ -143,8 +153,10 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     expect(meCalls, 2, reason: 'rehydrateUserIfMissing al reanudar');
+    // Con el user recuperado, la home real (H4) deja el skeleton de sesión
+    // degradada; el contenido del dashboard tiene su propia suite.
     expect(find.byType(HomeSkeleton), findsNothing);
-    expect(find.text('Signed in'), findsOneWidget);
+    expect(find.byType(HomeScreen), findsOneWidget);
   });
 
   testWidgets('badge de Bandeja con pendientes > 0 (rama real del contador)',

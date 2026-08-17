@@ -4,8 +4,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/db/outbox_providers.dart';
 import '../../core/l10n/app_localizations.dart';
+import '../../core/lifecycle/app_visibility.dart';
 import '../../core/session/active_location.dart';
 import '../../core/session/session_controller.dart';
+import '../../core/session/view_location_denied.dart';
 import '../../core/theme/ride_tokens.dart';
 import 'location_sheet.dart';
 import 'shell_tabs.dart';
@@ -50,6 +52,14 @@ class _AppShellState extends ConsumerState<AppShell> {
       onResume: () => ref
           .read(sessionControllerProvider.notifier)
           .rehydrateUserIfMissing(),
+      // Visibilidad para el polling del dashboard (H4): background real
+      // (hidden/paused) = pausa total; `inactive` sigue contando como
+      // visible — ver el WHY en app_visibility.dart.
+      onStateChange: (s) =>
+          ref.read(appVisibilityProvider.notifier).setVisible(
+                s == AppLifecycleState.resumed ||
+                    s == AppLifecycleState.inactive,
+              ),
     );
   }
 
@@ -160,6 +170,12 @@ class _ShellAppBar extends ConsumerWidget implements PreferredSizeWidget {
 /// 44 px dentro de un área táctil de 48 (hit-slop anotado, DoD #2). Abre el
 /// sheet 4C. Pinta el nombre persistido — funciona offline sin esperar a
 /// /api/locations/selectable.
+///
+/// Estado DANGER (criterio registrado H4, pantalla 4D): mientras un fetch
+/// scoped esté en 403 por `x-view-location`
+/// ([viewLocationDeniedSignalProvider]), el chip se pinta en danger — la
+/// negativa se ve donde se eligió la sede, y el tap sigue abriendo el sheet
+/// de escape.
 class _LocationChip extends ConsumerWidget {
   const _LocationChip();
 
@@ -167,13 +183,16 @@ class _LocationChip extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     final active = ref.watch(activeLocationProvider);
+    final denied = ref.watch(viewLocationDeniedSignalProvider);
     final label = active.locationName ?? l10n.locationChipAll;
     // GD MC-1 (review H3): la acción de tap TAMBIÉN va en el nodo Semantics —
     // con ExcludeSemantics debajo, el InkWell pierde su acción y TalkBack
     // anunciaría "botón" sin que el doble-tap hiciera nada.
     return Semantics(
       button: true,
-      label: l10n.locationChipSemantics(label),
+      label: denied
+          ? l10n.locationChipDeniedSemantics(label)
+          : l10n.locationChipSemantics(label),
       onTap: () => showActiveLocationSheet(context),
       child: ExcludeSemantics(
         // Área táctil 48 px (hit-slop): el InkWell cubre el SizedBox de 48;
@@ -190,32 +209,48 @@ class _LocationChip extends ConsumerWidget {
                   height: 44,
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   decoration: BoxDecoration(
-                    color: RideTokens.p50,
+                    color: denied ? RideTokens.dangerBg : RideTokens.p50,
                     // Silueta aprobada del mockup (GD SHOULD H3): radio 14,
                     // no píldora, con borde de marca al 20 %.
-                    border: Border.all(color: RideTokens.brandA20),
+                    border: Border.all(
+                      color:
+                          denied ? RideTokens.dangerBd : RideTokens.brandA20,
+                    ),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (denied) ...[
+                        // Señal no-solo-color (dangerTx 7.04:1 sobre
+                        // dangerBg): icono + tinte, mismo par del sistema.
+                        const Icon(
+                          Icons.gpp_bad_outlined,
+                          size: 16,
+                          color: RideTokens.dangerTx,
+                        ),
+                        const SizedBox(width: 4),
+                      ],
                       Flexible(
                         child: Text(
                           label,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w800,
-                            color: RideTokens.p800,
+                            color: denied
+                                ? RideTokens.dangerTx
+                                : RideTokens.p800,
                           ),
                         ),
                       ),
                       const SizedBox(width: 4),
-                      const Icon(
+                      Icon(
                         Icons.keyboard_arrow_down_rounded,
                         size: 18,
-                        color: RideTokens.p800,
+                        color:
+                            denied ? RideTokens.dangerTx : RideTokens.p800,
                       ),
                     ],
                   ),
@@ -304,8 +339,11 @@ class _TabItem extends ConsumerWidget {
     final pending = tab == ShellTab.outbox
         ? (ref.watch(outboxPendingCountProvider).value ?? 0)
         : 0;
-    // GD MC-1: onTap en Semantics — ver _LocationChip.
+    // GD MC-1: onTap en Semantics — ver _LocationChip. La Key permite a los
+    // tests apuntar a LA TAB aunque el mismo texto exista en el contenido
+    // (p. ej. "Incidentes" como sección de la home H4).
     return Semantics(
+      key: ValueKey('shell-tab-${tab.name}'),
       button: true,
       selected: active,
       label: pending > 0 ? '$label. ${l10n.outboxBadgeSemantics(pending)}' : label,

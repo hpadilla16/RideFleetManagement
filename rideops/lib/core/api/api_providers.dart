@@ -7,6 +7,7 @@ import '../session/session_controller.dart';
 import '../session/token_store.dart';
 import '../telemetry/event_logger.dart';
 import 'auth_api.dart';
+import 'dashboard_api.dart';
 import 'dio_factory.dart';
 import 'locations_api.dart';
 import 'token_refresher.dart';
@@ -94,6 +95,10 @@ final Provider<Dio> authedDioProvider = Provider<Dio>((ref) {
 
 final Provider<LocationsApi> locationsApiProvider = Provider<LocationsApi>(
   (ref) => LocationsApi(authedDio: ref.watch(authedDioProvider)),
+);
+
+final Provider<DashboardApi> dashboardApiProvider = Provider<DashboardApi>(
+  (ref) => DashboardApi(authedDio: ref.watch(authedDioProvider)),
 );
 
 final Provider<AuthApi> authApiProvider = Provider<AuthApi>((ref) {
