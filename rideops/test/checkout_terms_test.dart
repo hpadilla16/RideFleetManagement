@@ -451,9 +451,12 @@ void main() {
       expect(
         geometry.symbol,
         greaterThanOrEqualTo(230 * 0.95),
-        reason: 'el símbolo mide lo aprobado (el snap a píxel físico se come '
-            'menos del 5%); antes de GD-MC-1 la quiet zone iba POR DENTRO y '
-            'el símbolo caía a ~165-185',
+        reason: 'a la dpr 3.0 del binding de test el snap a píxel físico se '
+            'come menos del 5% del lado (a 1× el MISMO código bajaría a 86-88%: '
+            'este 95% describe este entorno, no una garantía universal — la '
+            'cota independiente del dpr se asserta en el grupo de QrMetrics). '
+            'Antes de GD-MC-1 la quiet zone iba POR DENTRO y el símbolo caía a '
+            '~165-185',
       );
       expect(
         tester.getSize(find.byType(QrView)).width,

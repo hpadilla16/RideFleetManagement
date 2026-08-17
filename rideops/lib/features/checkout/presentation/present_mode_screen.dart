@@ -21,6 +21,13 @@ import 'widgets/qr_view.dart';
 /// corriendo y la firma del cliente se detecta aunque la pantalla esté
 /// volteada. Una ruta que reemplazara al wizard apagaría justamente el
 /// mecanismo por el que este paso se entera de que ya se firmó.
+///
+/// El `rootNavigator: true` no es decorativo: HOY el navegador local ya es el
+/// raíz porque `checkoutPattern` vive FUERA del `ShellRoute`
+/// (`app_router.dart:216-221`), pero eso es una decisión de ruteo que puede
+/// cambiar. Si el wizard entrara al shell, un push local pintaría la pantalla
+/// del CLIENTE con la tab bar de personal encima. Pedir el raíz explícitamente
+/// hace que este archivo no dependa de dónde esté enganchada la ruta.
 Future<void> openPresentMode(
   BuildContext context,
   WidgetRef ref, {
@@ -28,7 +35,7 @@ Future<void> openPresentMode(
   required String sessionId,
 }) {
   ref.read(eventLoggerProvider).log(CheckoutEvents.presentModeShown);
-  return Navigator.of(context).push(
+  return Navigator.of(context, rootNavigator: true).push(
     PageRouteBuilder<void>(
       // Cross-fade de 200 ms en vez del push por defecto: el teléfono va a
       // GIRAR físicamente hacia el cliente en este momento, y una hoja

@@ -518,9 +518,15 @@ void main() {
     testWidgets('el header responde "para cuándo" y no repite el número de '
         'reserva del wizbar', (tester) async {
       final f = fakes();
-      // Paso SIN cuerpo propio ⇒ header COMPLETO, que es el que responde las
-      // tres preguntas del patio. Con CONFIRMING el header va mini y lo que se
-      // estaría midiendo son las tarjetas del paso, no el header.
+      // Se ancla en un paso SIN cuerpo propio, que es donde el header va
+      // COMPLETO y responde las tres preguntas del patio.
+      //
+      // Ojo con el porqué: esta prueba NO estaba mal. En H1 la regla era
+      // `mini = _sheetOpen || state.offline`, así que en CONFIRMING el header
+      // iba completo y aquí se medía el header de verdad. Lo invalidó H2 al
+      // meter `_hasStepBody` en esa regla (checkout_wizard_screen.dart:165):
+      // desde entonces CONFIRMING tiene cuerpo propio, el header va mini y lo
+      // que se estaría midiendo serían las tarjetas del paso.
       f.api.current = sessionAt(CheckoutStep.paymentPending);
       await pumpWizard(tester, api: f.api, network: f.network);
 

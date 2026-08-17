@@ -32,13 +32,23 @@ import '../telemetry/event_logger.dart';
 /// proceso se caiga con la pantalla volteada al cliente, el sistema recupera
 /// brillo y apagado solo. Nuestro [exit] es la ruta normal, no la única red.
 ///
-/// **En iOS, el brillo no del todo.** Ahí el plugin escribe
-/// `UIScreen.main.brightness`, que es global del dispositivo: si el proceso
-/// muere sin pasar por [exit], el teléfono se queda al 100% hasta que el
-/// usuario lo baje. El plugin ofrece un `setAutoReset` (iOS-only) que restaura
-/// al cambiar el ciclo de vida, pero **no cubre un kill duro**. Se deja dicho
-/// en vez de fingirlo; esta máquina no compila iOS (sin Mac) y cuando M4 abra
-/// esa plataforma hay que re-evaluarlo.
+/// **En iOS, el brillo no del todo**, y por dos motivos distintos:
+///  - Ahí el plugin escribe `UIScreen.main.brightness`, que es global del
+///    dispositivo: si el proceso muere sin pasar por [exit], el teléfono se
+///    queda al 100% hasta que el usuario lo baje. El plugin ofrece un
+///    `setAutoReset` (iOS-only) que restaura al cambiar el ciclo de vida, pero
+///    **no cubre un kill duro**.
+///  - Y `resetApplicationScreenBrightness` **no lee el brillo vivo**: reescribe
+///    el valor que el plugin MEMORIZÓ al registrarse
+///    (`ScreenBrightnessIosPlugin.swift:29`), que solo se refresca al volver a
+///    primer plano — el observador de `brightnessDidChangeNotification` se
+///    instala al resignar (`:204`) y se quita al re-activarse (`:212`). O sea:
+///    si el agente bajó el brillo A MANO con la app en primer plano, salir del
+///    modo presentación se lo pisa con el brillo de arranque en vez de
+///    devolverle el suyo.
+///
+/// Se deja dicho en vez de fingirlo; esta máquina no compila iOS (sin Mac) y
+/// cuando M4 abra esa plataforma hay que re-evaluarlo.
 abstract class PresentationScreen {
   /// Brillo al máximo + pantalla despierta. Best-effort: lo que falle se
   /// reporta a telemetría y el modo presentación sigue — un QR que no se puede

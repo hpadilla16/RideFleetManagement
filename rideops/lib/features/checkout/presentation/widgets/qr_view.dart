@@ -143,10 +143,15 @@ class QrMetrics {
 
   /// [symbolSide] es lo que el diseño aprobó para el SÍMBOLO.
   ///
-  /// El módulo se trunca a píxel **físico** entero (no lógico): en un teléfono
-  /// de 3× truncar a dp regalaba hasta 3 dp por módulo — ~12% del símbolo — sin
-  /// comprar nada, porque lo que el rasterizador alinea son píxeles físicos.
-  /// Con el snap correcto la pérdida queda por debajo del 4%.
+  /// El módulo se trunca a píxel **físico** entero (no lógico): truncar a dp
+  /// tira hasta 1 dp por módulo sin comprar nada, porque lo que el rasterizador
+  /// alinea son píxeles físicos. Sobre el rango real de este código (29–37
+  /// módulos) y a 3×, el snap correcto devuelve **entre 0 y 9.6 puntos** del
+  /// lado del símbolo: con 29 módulos la pérdida pasa de 11.7% a 3.3% (+8.4),
+  /// con 33 de 13.9% a 4.3% (+9.6) y con 37 no cambia nada (3.5% en los dos,
+  /// porque ahí truncar a dp ya caía en píxel físico). La cota que SÍ es
+  /// independiente del dpr —y la que asserta la prueba de [QrMetrics]— es que
+  /// cada módulo pierde menos de un píxel físico.
   static QrMetrics resolve({
     required double symbolSide,
     required int moduleCount,
