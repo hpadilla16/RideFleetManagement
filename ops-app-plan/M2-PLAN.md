@@ -120,6 +120,25 @@ el mostrador. La §15 muestra en su lugar un mapa de capacidades honesto (un AGE
 igual; lo que no puede es mover dinero **sin el cliente presente**) y usa la única acción
 realmente gateada y alcanzable: cobrar a la tarjeta guardada.
 
+### Restricción de orden de despliegue (decisión del PM, review H7)
+
+**La rama del M2 NO se despliega al patio antes de que M2-H4 aterrice.** H7 quitó de la
+card la entrada a `/inspection/:id` —que siempre fue un cabo temporal de M1-H6— porque el
+estado final correcto es card → wizard → paso 4 = inspección, y eso lo construye H4. Entre
+H7 y H4 no queda ninguna forma de INICIAR una inspección nueva (la entrada de la bandeja
+solo aparece para filas ya encoladas). No hay regresión en campo porque el M1 desplegable
+conserva su entrada intacta, pero el M2 parcial no puede salir en esa ventana.
+
+### Bug pre-existente del M1 a atender aparte (Innovation, review H7)
+
+`POST /api/mobile-inspection/:token/complete` devuelve **200 con `{ok:true}` aunque
+`hasSignature` sea false** (`mobile-inspection.service.js:319`): en ese caso NO se estampa
+`customerSignedAt` ni se escriben las columnas de firma (`:272`, `:293-303`).
+`CheckoutApi.completeInspection` descarta el body por completo. Hoy es difícil de alcanzar
+(la UI exige firma no nula antes de terminar), pero el umbral del servidor es un chequeo
+de longitud que el cliente no espeja. **Misma trampa que el correo, con más en juego: es
+la firma del cliente.** Ticket propio, no de H7.
+
 ### Capacidades ausentes que se vuelven historia propia (GD, review H7)
 
 El mockup de la §11 dibuja CTAs que la app **no puede cumplir hoy**. GD aprobó no
