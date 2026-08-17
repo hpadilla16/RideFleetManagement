@@ -400,6 +400,21 @@ app.use(appErrorHandler);
 
 // Catch-all: log to Sentry + return 500
 app.use((err, req, res, _next) => {
+  /**
+   * A 4xx a service DELIBERATELY threw is information for the caller, not an
+   * incident. This handler used to flatten everything to "Internal server
+   * error", so "No demo tenant is configured" (a 404 with a fix attached)
+   * reached the screen as an opaque 500 and cost an afternoon of debugging a
+   * feature that was working correctly (2026-08-17). 121 sites across the app
+   * throw AppError/.status 4xx and every one of them was being buried.
+   *
+   * 5xx keeps the old behavior exactly — opaque message, Sentry, console —
+   * because an UNEXPECTED error must never leak internals.
+   */
+  const status = Number(err?.status || err?.statusCode) || 500;
+  if (status >= 400 && status < 500) {
+    return res.status(status).json({ error: err?.message || 'Request failed' });
+  }
   captureBackendException(err, {
     request: {
       method: req.method,
@@ -409,7 +424,7 @@ app.use((err, req, res, _next) => {
     user: req.user?.sub ? { id: req.user.sub, tenantId: req.user?.tenantId || null, role: req.user?.role || null } : undefined
   });
   console.error(err);
-  res.status(500).json({ error: 'Internal server error' });
+  return res.status(500).json({ error: 'Internal server error' });
 });
 
 const port = process.env.PORT || 4000;
