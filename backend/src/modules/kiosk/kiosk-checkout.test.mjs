@@ -950,15 +950,22 @@ test('sign resumes after a mid-cascade failure with zero double side-effects; po
 
   // Inject a failure on the transition INTO FINALIZING (mid-walk, after all
   // stamps + signature but before the CLOSED cascade).
-  const realUpdate = prisma.checkoutSession.update;
+  //
+  // M2-H8 (2026-08-17): the injection moved from `update` to `updateMany` —
+  // transition() now commits through a conditional updateMany (compare-and-set
+  // on currentStep). Same injection point in behavior terms (the write that
+  // moves the step), same assertions below; only the delegate changed. Left on
+  // `update` it silently stopped firing and the whole resume regression went
+  // untested while still reporting green.
+  const realUpdateMany = prisma.checkoutSession.updateMany;
   let failFinalizing = true;
-  prisma.checkoutSession.update = async (args) => {
+  prisma.checkoutSession.updateMany = async (args) => {
     if (failFinalizing && args?.data?.currentStep === 'FINALIZING') {
       throw new Error('injected mid-cascade failure');
     }
-    return realUpdate(args);
+    return realUpdateMany(args);
   };
-  t.after(() => { prisma.checkoutSession.update = realUpdate; });
+  t.after(() => { prisma.checkoutSession.updateMany = realUpdateMany; });
 
   await assert.rejects(
     kioskCheckoutService.sign('ks1', DEVICE, {

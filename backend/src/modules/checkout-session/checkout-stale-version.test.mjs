@@ -53,6 +53,12 @@ function stub(rows) {
       if (!row) throw new Error('stub update: no match');
       return applyData(row, data);
     },
+    // M2-H8: transition() now commits through a conditional updateMany.
+    updateMany: async ({ where, data } = {}) => {
+      const hits = rows().filter((r) => matches(r, where));
+      hits.forEach((r) => applyData(r, data));
+      return { count: hits.length };
+    },
   };
 }
 
