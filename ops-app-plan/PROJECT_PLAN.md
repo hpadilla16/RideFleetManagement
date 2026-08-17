@@ -46,7 +46,15 @@ y números de línea en [00-REGROUND.md](00-REGROUND.md):
 - **ADR-2 · Stack:** Riverpod 3.x · go_router con ShellRoute · **Drift** (no Isar) ·
   retrofit+dio+freezed **escritos a mano** sobre los endpoints que de verdad se usan. Nada
   de codegen desde OpenAPI (rutas sin tipar ⇒ modelos inútiles); se versiona una copia de
-  `openapi.json` solo para diff.
+  `openapi.json` solo para diff. *(Desviación declarada 2026-08, M2-H2: el stack cerrado no
+  cubre APIs de plataforma que el mockup 10B exige, así que entran tres paquetes fuera de él
+  — `qr` (codificador puro; el QR se pinta a mano, y uno mal codificado deja al cliente sin
+  poder firmar), `wakelock_plus` (sin él el teléfono se atenúa y se bloquea a los ~30 s con
+  el QR en la cara del cliente; en Android es `FLAG_KEEP_SCREEN_ON` sobre la ventana de la
+  actividad, sin permiso `WAKE_LOCK`) y `screen_brightness` (brillo por VENTANA, no del
+  sistema: por eso en Android la restauración está garantizada aunque el proceso muera). El
+  WHY largo vive en `rideops/pubspec.yaml` y en `rideops/lib/core/device/presentation_mode.dart`;
+  iOS restaura contra un valor memorizado y no cubre un kill duro — re-evaluar en M4.)*
 - **ADR-3 · Tenancy y alcance:** el tenant es claim del JWT y no se toca. *(Matiz 2026-08:
   el alcance de ubicación ahora viaja en el header `x-view-location`; entra al stack de
   interceptores y la ubicación activa vive en el estado de sesión.)*
