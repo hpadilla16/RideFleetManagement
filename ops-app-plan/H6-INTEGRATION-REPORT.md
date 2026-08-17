@@ -99,18 +99,31 @@ Backend log al reconectar (la app NUNCA se abrió después del reboot):
 
 - `app-dev-debug.apk`: 174 MB (debug, JIT+assets de debug — no
   representativo de release).
-- `app-prod-release.apk`: **73.7 MB** (`flutter build apk --flavor prod
-  --release`). **Firmado con la llave de DEBUG**: el firmado real espera
-  los secretos `RIDEOPS_*` (keystore) de Hector — hasta entonces el APK
-  prod no es distribuible por Play, solo instalable a mano. Verificado en
-  el emulador: instala, arranca y muestra el login "v0.1.0 (prod)" sin
-  banner de debug (`21-prod-release-login.png`).
-- API base del build prod: sin `RIDEOPS_API_BASE` el default compilado es
-  el de dev (`http://10.0.2.2:4000`) — el build de DISTRIBUCIÓN debe pasar
-  el define real por CI. *Post-review (INN S-4):* `bootstrap()` ahora
-  TRUENA en el primer frame si un build prod apunta a `http://` — el APK
-  archivado de este pase es anterior al guard; cualquier rebuild prod sin
-  el define correcto ya no llega ni al login (deliberado).
+- `app-prod-release.apk`: **73.7 MB**. **Firmado con la llave de DEBUG**: el
+  firmado real espera los secretos `RIDEOPS_*` (keystore) de Hector — hasta
+  entonces el APK prod no es distribuible por Play, solo instalable a mano.
+  Verificado en el emulador: instala, arranca y muestra el login
+  "v0.1.0 (prod)" sin banner de debug (`21-prod-release-login.png`).
+- **El comando completo** (el `--flavor prod` NO basta: decide el
+  applicationId de Android, no la config de la app — `AppConfig.env` sale de
+  `RIDEOPS_ENV`):
+
+  ```
+  flutter build apk --flavor prod --release \
+    --dart-define=RIDEOPS_ENV=prod \
+    --dart-define=RIDEOPS_API_BASE=https://<api real> \
+    --dart-define=RIDEOPS_SENTRY_DSN=<dsn>
+  ```
+
+  Sin los defines el APK compila verde con `env=dev` y
+  `apiBase=http://10.0.2.2:4000`, el guard de `bootstrap()` queda mudo
+  (`isProd=false`) y el manifest de prod bloquea cleartext ⇒ **APK firmado
+  sin red**. Es el MAJOR-1 del QA de milestone: el job `android-build` de
+  `rideops-ci.yml` ahora inyecta los tres defines y **falla en rojo** si la
+  variable de repo `RIDEOPS_API_BASE` falta o no es `https://`.
+- *Post-review (INN S-4):* `bootstrap()` truena en el primer frame si un
+  build prod apunta a `http://` — el APK archivado de este pase es anterior
+  al guard y a los defines.
 
 ## 5. Riesgos residuales DECLARADOS (no probados aquí)
 
@@ -127,16 +140,23 @@ Backend log al reconectar (la app NUNCA se abrió después del reboot):
    del emulador; teléfono físico pendiente.
 5. **Kiosco-vs-exempt en vivo**: el usuario del pase NO es
    `screenLockExempt`, así que el aterrizaje forzado post-kill se validó
-   con el candado normal + los 4 unit tests nuevos de la política (flag
-   consumido, exempt bloqueado, exempt sin PIN → re-login, login fresco
-   limpia). Un pase manual con usuario exempt real queda anotado para QA
-   de M2.
+   con el candado normal + los **5** unit tests de la política. Tras el
+   MC-1 de Innovation, la semántica es: el flag `kiosk_in_progress`
+   **NO se consume al leerlo** — sobrevive al cold start y solo muere al
+   CERRAR la recuperación (PIN/huella correctos, login fresco, o después
+   del re-login forzado del exento sin PIN). Antes se consumía al leer, y
+   matar la app dos veces seguidas devolvía la superficie de staff
+   desbloqueada a un usuario exento; el test "doble cold start sin
+   desbloquear ⇒ sigue bloqueado" clava el arreglo. Un pase manual con
+   usuario exempt real queda anotado para QA de M2.
 6. **Contrato Docker/compose** — el pase corrió el backend nativo; el
    empaquetado del contenedor no se ejercitó aquí (lo cubre la CI de beta).
 
 ## 6. Estado final
 
-- Suite completa: **309 tests** verdes (`flutter test`).
+- Suite completa: **327 tests** verdes (`flutter test`) — 309 al cerrar el
+  pase, 319 tras el lote de review (Innovation + GD) y 327 tras los
+  must-fix del QA de milestone (cableado de Sentry).
 - `flutter analyze --fatal-infos`: limpio.
 - Paridad de enums: OK (CheckoutStep 11 · HandoffTokenKind 3 · UserRole 4 ·
   InspectionPhase 2).

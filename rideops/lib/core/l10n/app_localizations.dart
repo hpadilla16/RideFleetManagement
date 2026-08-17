@@ -146,7 +146,7 @@ abstract class AppLocalizations {
   /// **'Correo o contraseña incorrectos. Revisa e intenta de nuevo.'**
   String get loginInvalidCredentials;
 
-  /// TODO H4: al integrar connectivity_plus y el auto-reintento, volver al copy del mockup 1C ('se reintentará al volver la señal'). Hoy el reintento es manual — no prometerlo.
+  /// Backlog (ya NO depende de H4: connectivity_plus entró con H5): cuando el login gane auto-reintento al volver la señal, volver al copy del mockup 1C ('se reintentará al volver la señal'). Hoy el reintento es manual — no prometerlo.
   ///
   /// In es, this message translates to:
   /// **'No hay conexión a internet. Revisa la señal y toca Reintentar ahora.'**

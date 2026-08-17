@@ -4,18 +4,21 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:workmanager/workmanager.dart';
 
 import 'app.dart';
 import 'core/config/app_config.dart';
 import 'core/outbox/background_drain.dart';
+import 'core/telemetry/sentry_setup.dart';
 
-/// Entry point neutro. Los flavors (dev/stg/prod) entran por
-/// main_dev.dart / main_stg.dart / main_prod.dart, que configuran
-/// [AppConfig] y Sentry antes de llamar [bootstrap].
-void main() => bootstrap();
+/// Entry point único. Los flavors NO tienen entrypoint propio: el flavor de
+/// Android decide el applicationId y los `--dart-define` (RIDEOPS_ENV,
+/// RIDEOPS_API_BASE, RIDEOPS_SENTRY_DSN) deciden a qué API habla y si
+/// reporta — ver [AppConfig] y el job android-build de rideops-ci.yml.
+Future<void> main() => bootstrap();
 
-void bootstrap() {
+Future<void> bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
   // INN S-4 (review H6): el footgun declarado en el reporte del pase — sin
   // RIDEOPS_API_BASE el default compilado es el localhost de dev. Un build
@@ -39,5 +42,19 @@ void bootstrap() {
           .catchError((Object _) {}),
     );
   }
-  runApp(const ProviderScope(child: RideOpsApp()));
+
+  // Observabilidad (M0-4). Con DSN, Sentry envuelve el runApp para capturar
+  // también los errores de arranque; sin DSN arrancamos directo — un dev sin
+  // secretos corre la app idéntica, solo que muda.
+  final config = AppConfig.current;
+  if (config.sentryEnabled) {
+    await SentryFlutter.init(
+      (options) => configureSentryOptions(options, config),
+      appRunner: _runApp,
+    );
+  } else {
+    _runApp();
+  }
 }
+
+void _runApp() => runApp(const ProviderScope(child: RideOpsApp()));

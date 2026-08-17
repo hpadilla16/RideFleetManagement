@@ -8,7 +8,7 @@
   "loginButton": "Sign in",
   "loginButtonLoading": "Signing in…",
   "loginInvalidCredentials": "Wrong email or password. Check and try again.",
-  "loginOffline": "No internet connection. Signing in requires a connection — check the signal and tap Retry now.",
+  "loginOffline": "No internet connection. Check the signal and tap Retry now.",
   "loginRetryNow": "Retry now",
   "loginHelpLine": "Trouble signing in? Ask your admin to reset your password",
   "loginVersionLine": "v{version} ({env}) · {locale}",
