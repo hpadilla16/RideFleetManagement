@@ -163,7 +163,7 @@ export async function runLoanerRemindersSweep(deps = {}) {
     const { subject, text, html } = buildEmail(kind, row, brand);
     try {
       for (const to of recipients) {
-        await mailer.sendEmail({ to, subject, text, html });
+        await mailer.sendEmail({ tenantId: row?.tenantId, to, subject, text, html });
       }
       await store.set(dedupeKey, '1', overdue ? OVERDUE_TTL_MS : DUE_SOON_TTL_MS);
       counts.sent += 1;

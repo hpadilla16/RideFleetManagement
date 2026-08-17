@@ -559,7 +559,7 @@ async function issuePortalRequest(kind, reservation, { sendEmailToCustomer = fal
         cta: link ? { label: kind === 'payment' ? 'Pay now' : kind === 'signature' ? 'Review & sign' : 'Complete now', url: link } : undefined,
         preheader: render(subjectTpl),
       });
-      await sendEmail({
+      await sendEmail({ tenantId: fullReservation.tenantId,
         to: fullReservation.customer.email,
         subject: render(subjectTpl),
         text: portalText,

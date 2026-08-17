@@ -302,7 +302,7 @@ export async function sendLongTermEmail(kind, { plan, cycle, config = null }) {
       bodyText: innerText,
       preheader: subject,
     });
-    await sendEmail({ to: ctx.toEmail, subject, text, html });
+    await sendEmail({ tenantId: plan.tenantId, to: ctx.toEmail, subject, text, html });
 
     logger.info('[long-term-emails] sent', {
       // `email` (not `to`) so the Winston redactor masks the recipient —

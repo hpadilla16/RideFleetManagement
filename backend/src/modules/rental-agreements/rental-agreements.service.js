@@ -3943,7 +3943,7 @@ export const rentalAgreementsService = {
       preheader: subject,
     });
 
-    await sendEmail({
+    await sendEmail({ tenantId: agreement.tenantId || agreement.reservation?.tenantId || undefined,
       to,
       subject,
       text,
@@ -5669,7 +5669,7 @@ export const rentalAgreementsService = {
           bodyText: receiptInnerText,
           preheader: receiptSubject,
         });
-        await sendEmail({
+        await sendEmail({ tenantId: agreement.tenantId,
           to,
           subject: receiptSubject,
           text: receiptRendered.text,
@@ -5688,7 +5688,7 @@ export const rentalAgreementsService = {
               bodyText: reviewText,
               preheader: reviewSubject,
             });
-            await sendEmail({
+            await sendEmail({ tenantId: agreement.tenantId,
               to,
               subject: reviewSubject,
               text: reviewRendered.text,

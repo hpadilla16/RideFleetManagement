@@ -220,7 +220,7 @@ export const hostReviewsService = {
         cta: { label: 'Leave your host review', url: link },
         preheader: 'Share a quick review of your trip',
       });
-      await sendEmail({
+      await sendEmail({ tenantId: trip?.tenantId,
         to: trip.guestCustomer.email,
         subject,
         text: brandedText,

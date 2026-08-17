@@ -156,7 +156,7 @@ async function issueGuestAccess({ customers = [], email, customerName, subject =
 
   const displayName = customerName || customers[0]?.firstName || 'Guest';
   const link = guestLink(token);
-  await sendEmail({
+  await sendEmail({ tenantId: customers[0]?.tenantId,
     to: normalizedEmail,
     subject,
     text: [
@@ -1268,7 +1268,7 @@ export const publicBookingService = {
     // Best-effort host notification — never fail the cancel on email.
     try {
       if (trip.hostProfile?.email) {
-        await sendEmail({
+        await sendEmail({ tenantId: trip?.tenantId,
           to: trip.hostProfile.email,
           subject: `Trip ${trip.tripCode} cancelled by guest`,
           text: [
@@ -1342,7 +1342,7 @@ export const publicBookingService = {
         bodyHtml: _lines.map((l) => `<p style="margin:0 0 10px">${l}</p>`).join(''),
         bodyText: _lines.join('\n'),
       });
-      await sendEmail({
+      await sendEmail({ tenantId: reservation.tenantId,
         to: custEmail,
         subject: `Reservation ${reservation.reservationNumber} cancelled`,
         html: _email.html,
@@ -1401,7 +1401,7 @@ export const publicBookingService = {
     try { brand = await resolveEmailBrand({ tenantId }); } catch { brand = undefined; }
     const rendered = renderBrandedEmail({ brand, heading: 'New website contact message', bodyHtml, bodyText: textLines.join('\n') });
     try {
-      await sendEmail({
+      await sendEmail({ tenantId: tenantId,
         to: recipients.join(','),
         subject: `Website contact${subjectIn ? `: ${subjectIn}` : ''} - ${name}`,
         html: rendered.html,
@@ -1706,7 +1706,7 @@ async function notifyTenantAdminsNewSubmission({ tenantId, tenantName, hostDispl
     </div>
   `;
 
-  return sendEmail({ to: adminEmails.join(','), subject, text, html });
+  return sendEmail({ tenantId: tenantId, to: adminEmails.join(','), subject, text, html });
 }
 
 // ── Pre-check-in helpers (Sprint 4) ─────────────────────────────────
@@ -1810,7 +1810,7 @@ async function _notifyHostOfDocumentSubmission(trip, typesSubmitted) {
     </div>
   `;
 
-  return sendEmail({ to: hostEmail, subject, text, html });
+  return sendEmail({ tenantId: trip?.tenantId, to: hostEmail, subject, text, html });
 }
 
 function _prettyDocType(type) {

@@ -211,14 +211,62 @@ async function sendViaSmtp({ to, subject, text, html, attachments }) {
 }
 
 /**
- * `fromName` (optional): the display name the recipient's inbox shows. A VPH
- * customer's confirmation must arrive from "Rent & Go by VPH Motors", not
- * "Ride Fleet" (Hector, 2026-08-11) — the body was already tenant-branded via
- * renderBrandedEmail, but the SENDER name was a global env var, and the sender
- * is the first branding anyone sees. Callers that resolve a brand pass
- * brand.companyName; everything else keeps the env default.
+ * Tenant sender resolution — the CHOKEPOINT (2026-08-17).
+ *
+ * Passing `fromName`/`fromEmail` by hand worked and did not scale: an audit
+ * found 6 of ~46 send sites doing it, so a Rent & Go customer got their
+ * confirmation from rentandgopr.com and their toll notice from
+ * ridefleetmanager.com. Same failure shape as the export/x-view-location bug
+ * (Hector, 2026-08-11): per-caller plumbing that a new caller silently
+ * forgets. So resolution moved HERE — a call site only has to say WHICH
+ * tenant, and this decides the sender. Explicit fromName/fromEmail still win,
+ * for the few places that legitimately send as the platform.
+ *
+ * Cached 5 minutes per tenant: transactional email is bursty (a checkout
+ * sends several), and this would otherwise add a settings read to each one.
  */
-export async function sendEmail({ to, subject, text, html, attachments, fromName, fromEmail }) {
+const SENDER_TTL_MS = 5 * 60 * 1000;
+const _senderCache = new Map();
+let _resolveBrand = null;
+
+export function _clearSenderCache() { _senderCache.clear(); }
+
+async function resolveTenantSender(tenantId) {
+  if (!tenantId) return {};
+  const hit = _senderCache.get(tenantId);
+  if (hit && Date.now() - hit.at < SENDER_TTL_MS) return hit;
+  try {
+    // Dynamic: email-template pulls in settings → prisma, and mailer is
+    // imported by nearly everything. Loading it lazily keeps that graph out
+    // of module-init order.
+    if (!_resolveBrand) ({ resolveEmailBrand: _resolveBrand } = await import('./email-template.js'));
+    const brand = await _resolveBrand({ tenantId });
+    const row = { at: Date.now(), fromEmail: brand?.fromEmail || '', fromName: brand?.companyName || '' };
+    _senderCache.set(tenantId, row);
+    return row;
+  } catch {
+    // Never let a settings hiccup stop an email — the platform default sends.
+    return {};
+  }
+}
+
+/**
+ * `tenantId` (preferred): the sender is resolved from that tenant's settings —
+ * display name always, and the FROM address when they have a verified domain
+ * configured. `fromName`/`fromEmail` (optional) override it explicitly.
+ *
+ * The sender is the first branding anyone sees: a VPH customer's mail must
+ * arrive from "Rent & Go by VPH Motors" <…@rentandgopr.com>, not from Ride
+ * Fleet. An unverified from-domain is a hard reject at the provider, not a
+ * spam-folder problem, so sendViaMailersend retries on the platform default —
+ * a misconfigured tenant degrades the ADDRESS, never the delivery.
+ */
+export async function sendEmail({ to, subject, text, html, attachments, fromName, fromEmail, tenantId }) {
+  if (tenantId && (!fromEmail || !fromName)) {
+    const sender = await resolveTenantSender(tenantId);
+    fromEmail = fromEmail || sender.fromEmail || undefined;
+    fromName = fromName || sender.fromName || undefined;
+  }
   const provider = preferredProvider();
   if (provider === 'mailersend') {
     return sendViaMailersend({ to, subject, text, html, attachments, fromName, fromEmail });

@@ -1145,7 +1145,7 @@ export const carSharingService = {
           bodyText: handoffText,
           preheader: 'Confirm your trip handoff details',
         });
-        await sendEmail({
+        await sendEmail({ tenantId: trip?.tenantId,
           to: trip.hostProfile.email,
           subject: `Action needed: Confirm handoff for trip ${trip.tripCode}`,
           text: handoffRenderedText,

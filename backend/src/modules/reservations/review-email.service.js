@@ -76,7 +76,7 @@ export async function maybeSendReviewRequestEmail({ reservation, previousStatus 
       preheader: 'We would love your feedback',
     });
 
-    await sendEmail({ to: customerRow.email, subject, text, html });
+    await sendEmail({ tenantId: reservation.tenantId, to: customerRow.email, subject, text, html });
     logger?.info?.('review-email sent', {
       reservationId: reservation.id,
       tenantId: reservation.tenantId,

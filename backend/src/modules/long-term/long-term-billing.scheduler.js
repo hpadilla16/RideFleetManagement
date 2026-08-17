@@ -342,7 +342,7 @@ async function notifyStaffCycleOverdue({ plan, cycle, agreement }) {
   try {
     const { sendEmail } = await import('../../lib/mailer.js');
     const amount = round2(cycle.amount);
-    await sendEmail({
+    await sendEmail({ tenantId: plan?.tenantId,
       to: recipient,
       subject: `[Monthly cycle OVERDUE] ${agreement?.agreementNumber || plan.reservationId} — $${amount.toFixed(2)} cycle ${cycle.cycleNumber}`,
       html: `

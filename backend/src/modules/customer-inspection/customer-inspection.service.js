@@ -154,7 +154,7 @@ async function sendCustomerInspection({ sessionId, actorUserId, closedSession = 
     cta: { label: 'Start inspection', url: link },
     preheader: 'Complete your vehicle inspection',
   });
-  await sendEmail({
+  await sendEmail({ tenantId: session.tenantId || resv.tenantId || undefined,
     to: emailTo,
     subject: `Vehicle inspection for your rental ${resv.reservationNumber ? `#${resv.reservationNumber}` : ''}`.trim(),
     text: inspectRendered1.text,
@@ -278,7 +278,7 @@ async function sendCheckinInspection({ reservationId, actorUserId = null, force 
     cta: { label: 'Start inspection', url: link },
     preheader: 'Quick self-inspection before you return',
   });
-  await sendEmail({
+  await sendEmail({ tenantId: resv.tenantId,
     to: emailTo,
     subject: `Before you return your rental ${resv.reservationNumber ? `#${resv.reservationNumber}` : ''} — quick inspection`.trim(),
     text: inspectRendered2.text,

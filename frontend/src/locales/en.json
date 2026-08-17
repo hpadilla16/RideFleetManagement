@@ -1152,6 +1152,12 @@
     "welcomeStart": "Show me around",
     "welcomeLater": "Not now",
     "practiceError": "Could not open practice mode — try again.",
-    "practiceImpersonation": "Exit tenant view first, then start practice."
+    "practiceImpersonation": "Exit tenant view first, then start practice.",
+    "needsRecordTitle": "Open a reservation first",
+    "needsRecordBody": "\"{{name}}\" is walked inside a reservation — that is why nothing happened. Open any reservation (or use Practice on the demo tenant), then press Start again.",
+    "needsRecordCta": "Go to reservations",
+    "tourUnavailableTitle": "This walkthrough is not available here",
+    "tourUnavailableBody": "A step in this guide points at something that is not on screen. Tell an admin so we can fix the guide.",
+    "close": "Close"
   }
 }
