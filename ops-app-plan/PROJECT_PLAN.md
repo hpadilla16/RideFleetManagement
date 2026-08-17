@@ -202,10 +202,20 @@ Branding para pantallas volteadas al cliente: `GET /api/reservations/:id/display
 
 ## 9. Preguntas abiertas — SOLO Hector decide; si el trabajo se topa con una, parar
 
-1. ¿RideOps es el checkout principal o convive con los otros? Con el kiosco son **cuatro**
-   superficies sobre la misma sesión. Si conviven, hace falta historia de reconciliación
-   más allá del 409 (no hay versioning optimista) y el épico M2 cambia de tamaño.
-   **Decidir antes del M2.**
+1. ~~¿RideOps es el checkout principal o convive con los otros?~~
+   **RESUELTA (Hector, 2026-08-17): CONVIVEN LAS CUATRO superficies** (mostrador web,
+   precheckin del cliente, kiosco, RideOps) sobre la misma sesión, en simultáneo.
+   Consecuencias asumidas para el M2:
+   - El épico incluye una **historia de reconciliación multi-superficie** más allá del
+     409→re-fetch: presencia/claim suave por sesión ("la está atendiendo X en Y"),
+     detección de avance ajeno sin esperar al 409 (poll del `currentStep` mientras el
+     wizard está abierto), y UX de "otra superficie completó este paso".
+   - Requiere **pedidos al backend** (diseñar en el plan del M2, aprobar con Hector antes
+     de tocar backend): mínimo un mecanismo de presencia/heartbeat por sesión de checkout
+     y/o versioning optimista ligero; el loop de `sign` del kiosk sin transacción
+     (REGROUND §2) se vuelve riesgo activo y entra a ese diseño.
+   - El PM diseña el épico M2 con esto ANTES de que cierre H6 (orden de Hector
+     2026-08-17: M2 arranca al terminar H6).
 2. Si el spike del token falla, ¿se aprueba pedir al backend un endpoint de fotos
    autenticado por JWT y sin TTL corto?
 3. ¿Se lanza el MVP sin push, solo con polling?
