@@ -125,9 +125,7 @@ export function TourHost({ viewer }) {
       // finds nothing from Ride University. Park the tour instead of ending
       // it, and pick up the moment the person opens one.
       const mod = moduleKey ? findModule(moduleKey) : null;
-      persist(settled.endedAs === TOUR_END.BROKEN && mod?.needsRecord
-        ? waitForRecord(fresh)
-        : settled);
+      persist(parkIfRecordScoped(settled));
     };
     window.addEventListener(TOUR_START_EVENT, onStart);
     return () => window.removeEventListener(TOUR_START_EVENT, onStart);
@@ -192,7 +190,7 @@ export function TourHost({ viewer }) {
       // Still absent after the route settled — let the state machine decide
       // whether that is expected (optional) or a broken step.
       setRect(null);
-      persist(advance(state, steps, isPresent, state.index - 1));
+      persist(parkIfRecordScoped(advance(state, steps, isPresent, state.index - 1)));
     };
     raf = requestAnimationFrame(look);
     return () => cancelAnimationFrame(raf);
@@ -214,6 +212,23 @@ export function TourHost({ viewer }) {
     };
   }, [step?.anchor]);
 
+  /**
+   * A missing anchor is only BROKEN when the step should have been there.
+   *
+   * For a module that walks a record, it usually means the person has not
+   * moved to the next screen yet: step one is the button on the reservation,
+   * steps two and three live inside the check-out wizard it opens. Ending the
+   * tour there told them to "open a reservation" while they were looking at
+   * one (Hector, 2026-08-17). Park instead, and the watcher picks the guide
+   * back up wherever they land.
+   */
+  const parkIfRecordScoped = useCallback((next) => {
+    if (next?.endedAs !== TOUR_END.BROKEN) return next;
+    const mod = next.moduleKey ? findModule(next.moduleKey) : null;
+    if (!mod?.needsRecord) return next;
+    return waitForRecord(next, { midTour: (next.index || 0) > 0 });
+  }, []);
+
   const close = useCallback(() => {
     persist(dismiss(state));
     setRect(null);
@@ -229,13 +244,13 @@ export function TourHost({ viewer }) {
       walkedModules.current.add(state.moduleKey);
       window.dispatchEvent(new CustomEvent(TOUR_MODULE_DONE_EVENT, { detail: { moduleKey: state.moduleKey } }));
     }
-    persist(after);
-  }, [state, steps, isPresent, persist]);
+    persist(parkIfRecordScoped(after));
+  }, [state, steps, isPresent, persist, parkIfRecordScoped]);
 
   // Any manual move stops the showcase advancing on its own — a person is
   // driving now.
   const next = useCallback(() => { setAutoPlay(false); goNext(); }, [goNext]);
-  const back = useCallback(() => { setAutoPlay(false); persist(retreat(state, steps, isPresent)); }, [state, steps, isPresent, persist]);
+  const back = useCallback(() => { setAutoPlay(false); persist(parkIfRecordScoped(retreat(state, steps, isPresent))); }, [state, steps, isPresent, persist, parkIfRecordScoped]);
 
   // ── showcase autoplay ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -296,9 +311,11 @@ export function TourHost({ viewer }) {
       >
         <span aria-hidden="true">🎓</span>
         <span style={{ fontSize: 13.5, fontWeight: 600 }}>
-          {t('training.waitingForRecord', 'Open any reservation to start “{{name}}” — the guide continues there.', { name: waitName })}
+          {state.midTour
+            ? t('training.waitingNextScreen', 'Keep going — open the next screen and the guide picks up there.')
+            : t('training.waitingForRecord', 'Open any reservation to start “{{name}}” — the guide continues there.', { name: waitName })}
         </span>
-        {waitModule?.needsRecord && pathname !== waitModule.needsRecord && (
+        {!state.midTour && waitModule?.needsRecord && pathname !== waitModule.needsRecord && (
           <button
             type="button"
             onClick={() => router.push(waitModule.needsRecord)}

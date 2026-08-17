@@ -14,7 +14,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { allModules, stepsForModule } from '../src/lib/training/curriculum.js';
-import { startTour, settleStart, waitForRecord, resumeAt, TOUR_END } from '../src/lib/training/tour-state.js';
+import { startTour, settleStart, advance, waitForRecord, resumeAt, TOUR_END } from '../src/lib/training/tour-state.js';
 
 describe('every module can be started from Ride University', () => {
   it('a module whose first step has no route declares where to find a record', () => {
@@ -81,5 +81,38 @@ describe('a parked tour resumes wherever the person actually is', () => {
     expect(parked.waiting).toBe(true);
     const resumed = resumeAt(parked, steps, () => true);
     expect('waiting' in resumed).toBe(false);
+  });
+});
+
+describe('a record-scoped tour parks mid-flight instead of breaking', () => {
+  it('advancing past the on-screen step parks rather than ending BROKEN', () => {
+    const steps = stepsForModule('check-out');
+    // On the reservation page: step 0 visible, the wizard steps are not.
+    const onReservation = (a) => a === steps[0].anchor;
+    let state = settleStart(startTour({ track: 'MODULE', steps, moduleKey: 'check-out' }), steps, onReservation);
+    expect(state.index).toBe(0);
+
+    // Pressing Next looks for step 1, which lives inside the check-out
+    // wizard — the screen they have not opened yet.
+    const advanced = advance(state, steps, onReservation);
+    expect(advanced.endedAs).toBe(TOUR_END.BROKEN);
+
+    // The host must convert that into a park, flagged as mid-tour so the copy
+    // says "open the next screen", not "open a reservation" — they are in one.
+    const parked = waitForRecord(advanced, { midTour: true });
+    expect(parked.waiting).toBe(true);
+    expect(parked.midTour).toBe(true);
+    expect(parked.endedAs).toBeNull();
+
+    // And once they reach the wizard, the guide resumes on its own step.
+    const inWizard = resumeAt(parked, steps, (a) => a === steps[1].anchor);
+    expect(inWizard.index).toBe(1);
+  });
+
+  it('parking before anything was shown is NOT flagged mid-tour', () => {
+    const steps = stepsForModule('check-in');
+    const cold = settleStart(startTour({ track: 'MODULE', steps, moduleKey: 'check-in' }), steps, () => false);
+    const parked = waitForRecord(cold, { midTour: (cold.index || 0) > 0 });
+    expect(parked.midTour).toBe(false);
   });
 });

@@ -56,9 +56,14 @@ export function currentStep(state, steps) {
  * them from Ride University finds nothing. Rather than fail, the tour waits
  * and springs to life the moment those anchors appear.
  */
-export function waitForRecord(state) {
+export function waitForRecord(state, { midTour = false } = {}) {
   if (!state) return null;
-  return { ...state, index: 0, endedAs: null, waiting: true };
+  // `midTour` separates the two moments this happens, because they need
+  // different words: before anything has been shown the person must OPEN a
+  // reservation, but once the walkthrough is running they are already in one
+  // and simply have to move to the next screen (the check-out wizard), where
+  // the remaining steps live.
+  return { ...state, endedAs: null, waiting: true, midTour };
 }
 
 /**

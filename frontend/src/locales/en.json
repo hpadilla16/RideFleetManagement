@@ -1160,6 +1160,7 @@
     "tourUnavailableBody": "A step in this guide points at something that is not on screen. Tell an admin so we can fix the guide.",
     "close": "Close",
     "waitingForRecord": "Open any reservation to start \"{{name}}\" — the guide continues there.",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "waitingNextScreen": "Keep going — open the next screen and the guide picks up there."
   }
 }
