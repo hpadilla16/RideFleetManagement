@@ -432,6 +432,9 @@ const CAS_MAX_ATTEMPTS = 3;
  *     past toStep?" → swallow), so this only moves an existing truth to the
  *     server and saves the round-trip. Attribution stays honest: we append NO
  *     event, so events[] keeps naming the surface that really moved it.
+ *     Because canTransition(S, S) is false, this branch also answers the
+ *     plain double-submit with no race at all — the endpoint is properly
+ *     idempotent, not merely race-tolerant.
  *   • expectedVersion was sent → STALE_VERSION with the fresh row, even when
  *     the step matches. Opting in is opting into strictness: that caller
  *     asked to be told when its snapshot died, and it gets the row back to
@@ -449,6 +452,17 @@ const CAS_MAX_ATTEMPTS = 3;
  * only turn a FAILING guard into a passing one — never the reverse. Guarding
  * on them would buy no safety and would add a `count === 0` branch that means
  * something else. Pre-check is enough; documented so nobody "fixes" it later.
+ *
+ * ISOLATION LEVEL — this is correct ONLY under READ COMMITTED (Postgres's
+ * default, and what every caller here runs under). The loser of the race
+ * blocks on the winner's row lock, RE-EVALUATES the WHERE against the
+ * committed row, finds currentStep no longer matches, and returns count: 0 —
+ * which is the entire mechanism. Wrap transition() in
+ * `$transaction({ isolationLevel: 'Serializable' })` and the loser aborts
+ * with P2034 instead: every branch below `count === 0` becomes unreachable,
+ * idempotency included, and the caller gets a raw serialization error where
+ * it used to get a 200 or a typed 409. If you ever need that isolation
+ * level, the `count === 0` handling has to be duplicated in a P2034 catch.
  */
 async function transition({ id, toStep, actorUserId, metadata, expectedVersion }) {
   if (!id) throw new CheckoutSessionError('session id required', 400);
@@ -461,6 +475,7 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
 
   let updated = null;
   let fromStep = null;
+  let alreadyApplied = false;
 
   for (let attempt = 1; attempt <= CAS_MAX_ATTEMPTS && !updated; attempt += 1) {
     const session = await prisma.checkoutSession.findUnique({ where: { id } });
@@ -482,7 +497,25 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
         logger.info('[checkout-session] transition already applied by another surface', {
           sessionId: id, toStep, actorUserId, attempt,
         });
-        return session;
+        // NOT an early return. We fall through to the CLOSED cascade below,
+        // because "somebody already did it" does not mean "somebody already
+        // FINISHED it". The cascade's own failures are swallowed by a
+        // logger.warn (see the catch at the end of this function), so a
+        // winner whose cascade died half-way leaves the session CLOSED with
+        // the reservation still CONFIRMED, the agreement still DRAFT and the
+        // vehicle unmarked — and nothing ever retries it. Before H8 the
+        // second caller got a 409 that an agent would eventually report;
+        // handing it a clean 200 over a half-finalized checkout would be the
+        // same species of lie the "already past toStep" cut refuses to tell.
+        //
+        // Safe to re-run: the cascade short-circuits on an already
+        // CHECKED_OUT reservation, the loaner bump is an updateMany guarded
+        // by DRAFT, and the email is a CAS on autoEmailedAt. So the happy
+        // path costs one reservation read, and the broken path self-heals.
+        alreadyApplied = true;
+        updated = session;
+        fromStep = session.currentStep;
+        break;
       }
       throw new CheckoutSessionError(
         `Illegal transition ${session.currentStep} → ${toStep}`,
@@ -508,12 +541,24 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       stateVersion: { increment: 1 },
       // H8: computed from the row we are about to CAS on, so two concurrent
       // transitions can no longer clobber each other's TRANSITION entry — the
-      // loser never writes. This is a PARTIAL close of the events lost-update:
-      // every other writer of this TEXT column (stampSideEffect, spin-charge,
-      // vehicle swap, terms-signing, mobile-inspection, setDeclinedInsurance,
-      // mintHandoffToken, markAbandoned, the nightly sweep) still does an
-      // unguarded read-modify-write and can still drop an entry written
-      // between its own read and write. See the note on stampSideEffect.
+      // loser never writes.
+      //
+      // This is a PARTIAL close of the events lost-update, and the honest
+      // count is FOURTEEN other writers of this TEXT column, all still doing
+      // an unguarded read-modify-write:
+      //   this file — stampSideEffect (:829), saveCustomerSignature (:872),
+      //     mintHandoffToken (:946), setDeclinedInsurance (:1031),
+      //     markAbandoned (:1055)
+      //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
+      //   spin-charge.service.js:574, :606, :884, :1038, :1229 (five)
+      //   mobile-inspection.service.js:276
+      //   vehicle-swap.service.js:130
+      //   terms-signing.service.js:175
+      // Any of them can still drop an entry written between its own read and
+      // its own write. saveCustomerSignature is the sharpest of the fourteen:
+      // its $transaction makes the two WRITES atomic but leaves the READ at
+      // :851 outside, and what it writes is customerSignedAt — an
+      // ENTRY_REQUIRES field for CLOSED. See the note on stampSideEffect.
       events: appendEvent(session.events, {
         kind: 'TRANSITION',
         from: session.currentStep,
@@ -580,9 +625,11 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
     throw err;
   }
 
-  logger.info('[checkout-session] transition', {
-    sessionId: id, from: fromStep, to: toStep, actorUserId,
-  });
+  if (!alreadyApplied) {
+    logger.info('[checkout-session] transition', {
+      sessionId: id, from: fromStep, to: toStep, actorUserId,
+    });
+  }
 
   // 2026-05-28 — Phase 3.5 — Email-on-finalize.
   //

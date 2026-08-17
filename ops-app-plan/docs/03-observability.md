@@ -39,8 +39,24 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 | Evento | Cuándo |
 |---|---|
 | `checkout.step_rendered` | render desde `currentStep` (tag `step`) |
-| `checkout.transition_ok` / `checkout.transition_409` | POST /transition (tag `code`: ILLEGAL_TRANSITION/ENTRY_GUARD/…) |
+| `checkout.transition_ok` / `checkout.transition_409` | POST /transition (tag `code`: ILLEGAL_TRANSITION/ENTRY_GUARD/STALE_VERSION/CONCURRENT_MODIFICATION/…) |
+| `checkout.transition_noop` | 200 que era idempotente: otra superficie ya estaba en `toStep` (M2-H8) |
 | `checkout.reconciled` | 409 → re-fetch → UI reconciliada (tag `steps_jumped`) |
+
+> **Ruptura de serie por M2-H8 (2026-08-17) — leer antes de comparar contra histórico.**
+> El caso "otra superficie ya hizo esta transición" **cambió de lado**: antes emitía
+> `checkout.transition_409` (code `ILLEGAL_TRANSITION`) seguido de `checkout.reconciled`;
+> ahora el backend responde 200 y emite `checkout.transition_ok`. Sin este aviso, el
+> despliegue de H8 se lee en los tableros como "los 409 de checkout se desplomaron y las
+> reconciliaciones desaparecieron" — que es exactamente la forma que tendría una regresión
+> de telemetría. Consecuencias:
+> - `checkout.transition_409` baja, `checkout.transition_ok` sube, **misma suma**.
+> - `checkout.reconciled` baja de verdad, porque hay menos que reconciliar.
+> - Para no perder la señal de concurrencia, la app emite `checkout.transition_noop`
+>   cuando un 200 no movió nada (`currentStep` de la respuesta == el que ya tenía **y**
+>   `stateVersion` sin cambio). Esa es la métrica que hay que vigilar para "cuántas veces
+>   dos superficies pisan el mismo paso"; ya **no** sirve `transition_409` para eso.
+> - `STALE_VERSION` y `CONCURRENT_MODIFICATION` son códigos nuevos del tag `code`.
 | `checkout.money_attempt` / `checkout.money_ok` / `checkout.money_fail` | rutas de dinero (tag `kind`: charge_sale/hold_deposit/manual_*; NUNCA montos ni PAN) |
 | `checkout.preview_divergence` | cálculo local ≠ preview del servidor (compuerta ADR-6) |
 

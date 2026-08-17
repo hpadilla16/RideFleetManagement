@@ -115,6 +115,19 @@ además `checkoutSessionId` y `reservationId` para poder re-mintear token al dre
 - **409** → códigos de ADR-4: `ILLEGAL_TRANSITION`, `ENTRY_GUARD`, `SESSION_TERMINAL`,
   `VEHICLE_CONFLICT`, `CHECKOUT_TERMINAL` ⇒ re-fetch `GET /:id` (o by-reservation) y
   reconciliar UI. `PAYMENT_REQUIRED`/`ID_VERIFY_REQUIRED` solo existen en kiosk.
+  **Más dos que traen la fila fresca y NO necesitan re-fetch** (2026-08-17):
+  `STALE_VERSION` (M2-P2 — sólo si mandaste `expectedVersion`) y
+  `CONCURRENT_MODIFICATION` (M2-H8 — perdiste la carrera de escritura 3 veces
+  seguidas; raro, pero es un 409 real). Los dos llevan la sesión completa en
+  `body.session`: reconciliar **desde ahí** y no disparar el GET. Listarlos es
+  obligatorio — un 409 que no esté en esta lista cae en el manejador genérico
+  del cliente y se muestra como error crudo.
+- **200 en `POST /transition`** puede significar "otra superficie ya hizo exactamente
+  esta transición" (M2-H8): `transition()` es idempotente cuando la sesión ya está en
+  `toStep`, así que un doble-submit o una carrera devuelven la fila fresca en vez de
+  `ILLEGAL_TRANSITION`. La app **no** debe asumir que un 200 significa "yo la moví":
+  la atribución está en el último evento `TRANSITION` de `events[]`, no en el 200.
+  Pedir un paso ya PASADO sigue siendo `ILLEGAL_TRANSITION`.
 - **410** (rutas de token): `TOKEN_INVALID|TOKEN_WRONG_KIND|TOKEN_EXPIRED|TOKEN_CONSUMED`
   ⇒ re-mint (autenticado) o abortar el drenado de esa cadena.
 - **422**: `PRECHECKIN_REQUIRED`, `AGE_RULES_*`, `NO_VEHICLE_ASSIGNED` ⇒ blockers de paso 1

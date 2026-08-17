@@ -17,9 +17,12 @@
  *      opted in (the regression that guarding everyone on stateVersion would
  *      have caused)
  *   6. a cancel that loses the race still cancels
- *   7. what H8 does NOT close: the `events` lost-update against every OTHER
- *      writer of that TEXT column. Pinned on purpose so the honesty is
- *      executable and the day someone closes it, this test tells them.
+ *   7. the idempotent answer still runs the CLOSED cascade, so a winner whose
+ *      finalize died half-way gets self-healed instead of papered over
+ *   8. what H8 does NOT close: the `events` lost-update against the FOURTEEN
+ *      other writers of that TEXT column. Written as a `todo` asserting the
+ *      DESIRED result, not as a passing test asserting the defect — a todo
+ *      that starts passing is the signal that the hole closed.
  */
 import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -43,17 +46,59 @@ function applyData(row, data) {
   return row;
 }
 
+// Operator support is NOT optional here (kiosk-checkout.test.mjs shape). The
+// CLOSED cascade runs ensureNoVehicleConflict, whose where clauses are built
+// out of `not` / `in` / date ranges. A matcher that waves operator objects
+// through as `true` makes the reservation conflict with ITSELF and the
+// cascade dies on a VEHICLE_CONFLICT that no real database would produce.
+function condMatch(rowVal, cond) {
+  for (const [op, val] of Object.entries(cond)) {
+    if (op === 'mode') continue;
+    if (op === 'not') {
+      if (val === null ? rowVal == null : rowVal === val) return false;
+    } else if (op === 'in') {
+      if (!val.includes(rowVal)) return false;
+    } else if (op === 'notIn') {
+      if (val.includes(rowVal)) return false;
+    } else if (op === 'gt' || op === 'gte' || op === 'lt' || op === 'lte') {
+      if (rowVal == null) return false;
+      if (op === 'gt' && !(rowVal > val)) return false;
+      if (op === 'gte' && !(rowVal >= val)) return false;
+      if (op === 'lt' && !(rowVal < val)) return false;
+      if (op === 'lte' && !(rowVal <= val)) return false;
+    } else if (op === 'equals') {
+      if (rowVal !== val) return false;
+    }
+  }
+  return true;
+}
+
 function matches(row, where) {
   return Object.entries(where || {}).every(([key, val]) => {
     if (val === undefined) return true;
+    if (key === 'OR') return val.some((clause) => matches(row, clause));
+    if (key === 'AND') return val.every((clause) => matches(row, clause));
+    if (key === 'NOT') return !matches(row, val);
     if (val === null) return row[key] == null;
     if (val instanceof Date || typeof val !== 'object') return row[key] === val;
-    return true; // ignore operator objects — not needed by these paths
+    return condMatch(row[key], val);
   });
 }
 
+let seq = 0;
+
 function stub(rows) {
   return {
+    // `create` matters more than it looks: the cascade's auditLog and mileage
+    // writes are wrapped in .catch(() => {}), so a stub missing this method
+    // fails SILENTLY and the "exactly one audit line" assertion below would
+    // pass against zero of them.
+    create: async ({ data } = {}) => {
+      const row = { id: `row_${++seq}`, ...data };
+      rows().push(row);
+      return row;
+    },
+    count: async ({ where } = {}) => rows().filter((r) => matches(r, where)).length,
     findFirst: async ({ where } = {}) => rows().find((r) => matches(r, where)) || null,
     findUnique: async ({ where } = {}) => rows().find((r) => matches(r, where)) || null,
     findMany: async ({ where } = {}) => rows().filter((r) => matches(r, where)),
@@ -71,10 +116,19 @@ function stub(rows) {
 }
 
 beforeEach(() => {
-  db = { checkoutSessions: [], agreements: [], reservations: [] };
+  db = {
+    checkoutSessions: [], agreements: [], reservations: [], vehicles: [],
+    inspections: [], loanerAgreements: [], auditLogs: [], mileageEntries: [],
+  };
   Object.assign(prisma.checkoutSession, stub(() => db.checkoutSessions));
   Object.assign(prisma.rentalAgreement, stub(() => db.agreements));
   Object.assign(prisma.reservation, stub(() => db.reservations));
+  // Only the CLOSED-cascade tests reach these; the rest never touch them.
+  Object.assign(prisma.vehicle, stub(() => db.vehicles));
+  Object.assign(prisma.rentalAgreementInspection, stub(() => db.inspections));
+  Object.assign(prisma.loanerAgreement, stub(() => db.loanerAgreements));
+  Object.assign(prisma.auditLog, stub(() => db.auditLogs));
+  Object.assign(prisma.vehicleMileageEntry, stub(() => db.mileageEntries));
   prisma.$transaction = async (arg) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma));
   restore = [];
 });
@@ -167,31 +221,98 @@ test('two surfaces on the same step: exactly ONE commit, and the loser gets the 
   assert.equal(out.stateVersion, 1, 'the loser is handed the FRESH row, not its own snapshot');
 });
 
-test('idempotent answer appends nothing and never re-runs the CLOSED cascade', async () => {
+/**
+ * Seeds a session one hop from CLOSED plus the world its finalize cascade
+ * touches. autoEmailedAt is PRE-STAMPED so maybeSendFinalizeEmail returns at
+ * its first line: it dynamic-imports the rental-agreements service (Puppeteer
+ * underneath) and is fire-and-forget anyway, so it is not what these two
+ * tests are about. The reservation/agreement/vehicle triple is.
+ */
+function seedFinalizeWorld({ reservationStatus = 'CONFIRMED' } = {}) {
   const row = seedSession({
-    currentStep: 'FINALIZING', customerSignedAt: new Date(), agreementId: 'ra1',
+    currentStep: 'FINALIZING', customerSignedAt: new Date(),
+    agreementId: 'ra1', autoEmailedAt: new Date(),
   });
-  db.agreements.push({ id: 'ra1', reservationId: 'res1' });
+  db.agreements.push({
+    id: 'ra1', reservationId: 'res1', status: 'DRAFT',
+    odometerOut: null, fuelOut: null, agreementNumber: 'AG-1',
+  });
+  db.reservations.push({
+    id: 'res1', tenantId: 't1', status: reservationStatus, vehicleId: 'veh1',
+    pickupAt: new Date('2026-08-17T10:00:00Z'), returnAt: new Date('2026-08-20T10:00:00Z'),
+    customerInfoCompletedAt: new Date(), customer: null, pickupLocation: null,
+  });
+  db.vehicles.push({ id: 'veh1', status: 'AVAILABLE', mileage: 1000 });
+  // A real finalize has a CHECKOUT inspection to copy odometer/fuel from —
+  // without it `checkoutOdometer` is null and the cascade legitimately writes
+  // no mileage entry, which would make the "exactly one" assertions vacuous.
+  db.inspections.push({
+    id: 'insp1', rentalAgreementId: 'ra1', phase: 'CHECKOUT',
+    odometer: 45000, fuelLevel: 'HALF',
+  });
+  return row;
+}
 
-  // Anyone reaching the finalize cascade has to read the reservation first.
-  let reservationReads = 0;
-  const origResv = prisma.reservation.findUnique;
-  prisma.reservation.findUnique = async (args) => { reservationReads += 1; return origResv(args); };
-  restore.push(() => { prisma.reservation.findUnique = origResv; });
+test('idempotent answer appends no event and does not bump the version', async () => {
+  const row = seedFinalizeWorld({ reservationStatus: 'CONFIRMED' });
 
   armRace('FINALIZING', () => viaKiosk({ id: 'cs1', toStep: 'CLOSED' }));
-  const cascadeAfterWinner = () => reservationReads;
-
   const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
-  const readsAfterBoth = reservationReads;
 
   assert.equal(out.currentStep, 'CLOSED');
   assert.equal(readEvents(row.events).filter((e) => e.kind === 'TRANSITION').length, 1);
   assert.equal(row.stateVersion, 1, 'the no-op did not bump the version');
-  assert.ok(
-    readsAfterBoth === cascadeAfterWinner(),
-    'the idempotent answer returned BEFORE the finalize cascade — it ran once, for the winner',
-  );
+});
+
+test('winner already finalized: the re-run cascade short-circuits, no double side-effects', async () => {
+  seedFinalizeWorld({ reservationStatus: 'CONFIRMED' });
+
+  // The winner runs the whole cascade; the reservation ends CHECKED_OUT.
+  armRace('FINALIZING', () => viaKiosk({ id: 'cs1', toStep: 'CLOSED' }));
+  await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+
+  assert.equal(db.reservations[0].status, 'CHECKED_OUT');
+  assert.equal(db.agreements[0].status, 'FINALIZED');
+  // The loser re-entered the cascade, found an already CHECKED_OUT
+  // reservation and stopped there — one audit line, not two.
+  assert.equal(db.auditLogs.length, 1, 'exactly one STATUS_CHANGE audit line');
+  assert.equal(db.mileageEntries.length, 1, 'exactly one mileage entry');
+});
+
+test('SELF-HEAL: a winner whose cascade died half-way is completed by the idempotent caller', async () => {
+  const row = seedFinalizeWorld({ reservationStatus: 'CONFIRMED' });
+
+  // The winner reaches CLOSED, then its cascade dies. The catch at the end of
+  // transition() swallows anything that is not a CheckoutSessionError with a
+  // logger.warn, so the winner returns 200 over a half-finalized checkout and
+  // NOTHING ever retries it. That is the state the loser walks into.
+  let breakCascade = true;
+  const origResvUpdate = prisma.reservation.update;
+  prisma.reservation.update = async (args) => {
+    if (breakCascade) throw new Error('injected half-way cascade failure');
+    return origResvUpdate(args);
+  };
+  restore.push(() => { prisma.reservation.update = origResvUpdate; });
+
+  armRace('FINALIZING', () => viaKiosk({ id: 'cs1', toStep: 'CLOSED' }));
+
+  await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  assert.equal(row.currentStep, 'CLOSED', 'the step moved...');
+  assert.equal(db.reservations[0].status, 'CONFIRMED', '...but the reservation was left behind');
+  assert.equal(db.agreements[0].status, 'DRAFT', 'and so was the contract');
+
+  // A later caller — the agent's screen retrying, RideOps polling — now
+  // finishes the job instead of being told a clean 200 over a broken finalize.
+  breakCascade = false;
+  const healed = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+
+  assert.equal(healed.currentStep, 'CLOSED');
+  assert.equal(db.reservations[0].status, 'CHECKED_OUT', 'self-healed');
+  assert.equal(db.agreements[0].status, 'FINALIZED', 'self-healed');
+  assert.equal(db.vehicles[0].status, 'ON_RENT', 'self-healed');
+  // Still no second hop in the log — healing is not a transition.
+  assert.equal(readEvents(row.events).filter((e) => e.kind === 'TRANSITION').length, 1);
+  assert.equal(row.stateVersion, 1);
 });
 
 // ── 3. idempotency stays narrow ────────────────────────────────────────────
@@ -307,23 +428,37 @@ test('CANCELLED stays legal from wherever the winner left us — the retry commi
 
 // ── 7. what H8 does NOT close ──────────────────────────────────────────────
 
-test('RESIDUAL: a concurrent stampSideEffect still eats the TRANSITION event', async () => {
+// What H8 DOES hold when a stamp races a transition: the step and both
+// version bumps. These are permanent invariants, so they are a normal test.
+test('a stamp racing a transition still loses neither the step nor a version bump', async () => {
   const row = seedSession({ currentStep: 'TC_PENDING', tcCompletedAt: new Date() });
 
-  // Same TEXT column, opposite order: the STAMP reads events, a transition
-  // commits, then the stamp writes the string it computed before that. H8
-  // guards transition-vs-transition (both move currentStep, so the CAS
-  // serialises them). It cannot guard transition-vs-anything-else: a stamp
-  // has no step to compare against — see the note on stampSideEffect.
-  //
-  // If this test ever fails, the lost-update was closed for real (row locking
-  // or events moved off TEXT). Delete it and update M2-PLAN — do not "fix" it.
   armRace('TC_PENDING', () => viaKiosk({ id: 'cs1', toStep: 'TC_SIGNED' }));
-
   await checkoutSessionService.stampSideEffect({ id: 'cs1', field: 'paymentCompletedAt' });
 
-  const kinds = readEvents(row.events).map((e) => e.kind);
-  assert.deepEqual(kinds, ['SIDE_EFFECT'], 'the TRANSITION entry is gone — still lost');
-  assert.equal(row.currentStep, 'TC_SIGNED', 'the STEP itself survived; only the log entry was lost');
-  assert.equal(row.stateVersion, 2, 'both version bumps survived (increment is atomic)');
+  assert.equal(row.currentStep, 'TC_SIGNED', 'the step survived');
+  assert.ok(row.paymentCompletedAt instanceof Date, 'the stamp survived');
+  assert.equal(row.stateVersion, 2, 'both bumps survived — increment is atomic, unlike the string');
+});
+
+// ...and what it does NOT hold. Written as a todo asserting the result we
+// WANT, not as a green test asserting the defect: pinning the bug means the
+// day somebody fixes it the suite turns red and reads like a regression.
+// node:test reports a failing todo as expected; a todo that starts PASSING is
+// the signal that the lost-update was really closed (row locking, or a CAS on
+// the observed `events` value, or moving it off TEXT) — at which point delete
+// the todo marker and update ops-app-plan.
+test('RESIDUAL (14 unguarded writers): a concurrent stamp should not eat the TRANSITION entry', {
+  todo: 'events is a TEXT column with unguarded read-modify-write in 14 places; H8 only serialises transition-vs-transition',
+}, async () => {
+  const row = seedSession({ currentStep: 'TC_PENDING', tcCompletedAt: new Date() });
+
+  // Same column, opposite order: the STAMP reads events, a transition commits,
+  // then the stamp writes the string it computed before that. H8's CAS is on
+  // currentStep, and a stamp has no step to compare against.
+  armRace('TC_PENDING', () => viaKiosk({ id: 'cs1', toStep: 'TC_SIGNED' }));
+  await checkoutSessionService.stampSideEffect({ id: 'cs1', field: 'paymentCompletedAt' });
+
+  const kinds = readEvents(row.events).map((e) => e.kind).sort();
+  assert.deepEqual(kinds, ['SIDE_EFFECT', 'TRANSITION'], 'both entries should survive');
 });
