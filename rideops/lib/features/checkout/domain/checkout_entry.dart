@@ -55,11 +55,36 @@ enum CheckoutEntryBlockKind {
   /// 403 de módulo/RBAC — negativa con el mensaje del servidor.
   forbidden,
 
-  /// Sin red: el arranque exige UNA confirmación del servidor y **no se
-  /// encola** (ADR-5 aplica a todo el checkout, no solo al dinero).
+  /// Sin red, cortado ANTES de mandar nada (`_hasNetwork()` dijo que no):
+  /// el arranque exige UNA confirmación del servidor y **no se encola**
+  /// (ADR-5 aplica a todo el checkout, no solo al dinero).
+  ///
+  /// Es el ÚNICO camino donde la app puede afirmar que no se creó nada: la
+  /// petición nunca salió del aparato. Todo lo que falla DESPUÉS de llamar a
+  /// `createForReservation` es [connectionLost], no esto.
   offline,
 
-  /// 429/503: el patio está saturado; se espera y se reintenta a mano.
+  /// La petición SALIÓ y no volvió respuesta (timeout de recepción/envío,
+  /// socket caído, Wi-Fi de patio que se desconectó a media petición).
+  ///
+  /// Se separa de [offline] a propósito: aquí el servidor pudo haber corrido
+  /// `createForReservation` entero —CheckoutSession + RentalAgreement con sus
+  /// renglones de precio (checkout-session.service.js:194-209)— y contestado
+  /// al vacío. Decir "no se creó ninguna sesión" sería afirmar un hecho que el
+  /// backend no garantiza. Es el mismo temple que [scopeChanged].
+  ///
+  /// Cubre TODA `DioException` sin `response` (api_error.dart:70-75) y no
+  /// intenta separar `connectionTimeout` ("no llegó a salir") de
+  /// `receiveTimeout` ("salió y se procesó"): esa distinción depende de en qué
+  /// byte murió el socket, y un `connectionError` de Android puede lanzarse
+  /// después de escribir la petición. Sobre-avisar es seguro; sub-avisar fue
+  /// justamente el bug.
+  connectionLost,
+
+  /// 429: el patio está saturado; se espera y se reintenta a mano. Un 503 NO
+  /// cae aquí — `ApiError.fromDio` lo manda a `server` y termina en [unknown],
+  /// que muestra el texto del servidor tal cual (DoD #5) en vez de traducirlo
+  /// a "espera un momento", que para una caída no es cierto.
   rateLimited,
 
   /// La sede activa no terminó de hidratar: no se manda el POST sin saber qué
@@ -131,14 +156,17 @@ CheckoutEntryBlock classifyEntryError(
     'NO_VEHICLE_ASSIGNED' => CheckoutEntryBlockKind.noVehicle,
     'VEHICLE_CONFLICT' => CheckoutEntryBlockKind.vehicleConflict,
     'PRECHECKIN_REQUIRED' => CheckoutEntryBlockKind.precheckin,
-    // AGE_RULES_NO_DOB / AGE_RULES_UNDER_MIN / AGE_RULES_OVER_MAX: el sufijo
-    // lo pone `evaluateAgeRules` (service:97) y puede crecer — se matchea el
+    // AGE_RULES_DOB_REQUIRED / _DOB_IMPLAUSIBLE / _UNDER_MIN / _ABOVE_MAX: el
+    // sufijo es un `AGE_RULE_STATUS` (backend/src/lib/age-rules.js:31-39) que
+    // pega `evaluateAgeRules` (service:97) y puede crecer — se matchea el
     // prefijo para que una regla nueva caiga en su pantalla, no en el genérico.
     _ when code != null && code.startsWith('AGE_RULES_') =>
       CheckoutEntryBlockKind.ageRules,
     'SESSION_TERMINAL' || 'CHECKOUT_TERMINAL' => CheckoutEntryBlockKind.terminal,
     _ => switch (error.kind) {
-        ApiErrorKind.network => CheckoutEntryBlockKind.offline,
+        // NUNCA `offline`: a esta función solo se llega desde el catch del
+        // POST, o sea con la petición ya en vuelo. Ver [connectionLost].
+        ApiErrorKind.network => CheckoutEntryBlockKind.connectionLost,
         ApiErrorKind.rateLimited => CheckoutEntryBlockKind.rateLimited,
         ApiErrorKind.forbidden =>
           error.isViewLocationDenied(requestHadHeader: requestHadHeader)

@@ -50,12 +50,32 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 Detalle de `checkout.entry_blocked` (M2-H7). El tag `code` lleva el código del SERVIDOR
 cuando existe (`NO_VEHICLE_ASSIGNED`, `VEHICLE_CONFLICT`, `PRECHECKIN_REQUIRED`,
 `AGE_RULES_*`, `SESSION_TERMINAL`) y, cuando el arranque se cortó del lado del cliente, el
-motivo local (`offline`, `locationNotReady`, `forbidden`, `locationDenied`, `rateLimited`,
-`scopeChanged`, `unknown`). Se separan a propósito: "el patio no tiene señal" y "el backend
-negó" son dos problemas distintos y colapsarlos en `none` haría inútil la métrica.
-`scopeChanged` es el único que puede haber dejado una sesión CREADA (el POST salió y su
-respuesta llegó tras un cambio de sede/cuenta): si su frecuencia sube, hay un patrón de
-uso —cambiar de sede con el checkout abriéndose— que merece diseño, no un bug que ocultar.
+motivo local (`offline`, `connectionLost`, `locationNotReady`, `forbidden`,
+`locationDenied`, `rateLimited`, `scopeChanged`, `unknown`). Se separan a propósito: "el
+patio no tiene señal" y "el backend negó" son dos problemas distintos y colapsarlos en
+`none` haría inútil la métrica.
+
+**Sin veredicto del servidor = la sesión pudo quedar CREADA.** Son DOS los códigos con esa
+propiedad, no uno:
+
+- `connectionLost` — el POST salió y no volvió respuesta (timeout de recepción/envío,
+  socket caído). El servidor pudo correr `createForReservation` entero y dejar
+  `CheckoutSession` + `RentalAgreement` con renglones de precio
+  (`checkout-session.service.js:194-209`).
+- `scopeChanged` — el POST salió y su respuesta llegó tras un cambio de sede/cuenta.
+
+Los dos imprimen el pie "la sesión pudo haberse creado; vuelve a tocar la card: si existe,
+se reanuda" en vez de "no se creó ninguna sesión", que es una afirmación que el backend no
+garantiza. `offline` (el corte previo, con la petición sin salir del aparato) y los códigos
+del servidor SÍ pueden afirmarla. Si `connectionLost` sube, es salud de red del patio; si
+sube `scopeChanged`, hay un patrón de uso —cambiar de sede con el checkout abriéndose— que
+merece diseño, no un bug que ocultar.
+
+Nota de honestidad pendiente: un 5xx del servidor cae en `unknown` y el pie ahí sí afirma
+"no se creó ninguna sesión". Es cierto para el 500 de `ensureAgreementExists` (corre ANTES
+del `create`, service:194-197) y falso para el caso raro del `update` de
+`DEALERSHIP_LOANER` (service:215-220, después del create). Queda registrado, no corregido:
+la superficie que lo resolvería es el re-fetch por reserva, no un cambio de copy.
 `entry_open` NO lleva tag `resumed` — el backend responde 201 igual al crear que al
 reanudar, y la app no puede afirmar la diferencia sin inventarla.
 

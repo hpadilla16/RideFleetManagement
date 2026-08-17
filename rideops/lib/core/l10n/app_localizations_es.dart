@@ -1504,6 +1504,17 @@ class AppLocalizationsEs extends AppLocalizations {
       'Abrir un checkout necesita la confirmación del servidor una sola vez. No se encola en la Bandeja: cuando haya señal, vuelve a tocar la card.';
 
   @override
+  String get coEntryConnectionLostTitle => 'Se cortó la conexión al abrir';
+
+  @override
+  String get coEntryConnectionLostBody =>
+      'La solicitud salió del teléfono pero el servidor no alcanzó a responder, así que la app no puede saber si el checkout quedó abierto.';
+
+  @override
+  String get coEntryConnectionLostFoot =>
+      'La sesión pudo haberse creado. Cuando haya señal, vuelve a tocar la card: si existe, se reanuda.';
+
+  @override
   String get coEntryNotReadyTitle => 'Un momento';
 
   @override

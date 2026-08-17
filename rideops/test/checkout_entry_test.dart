@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -116,17 +117,48 @@ void main() {
       expect(moduleDenied.kind, CheckoutEntryBlockKind.forbidden);
     });
 
-    test('sin red y 429 se separan del "algo salió mal"', () {
+    test('un fallo de red EN VUELO no es "offline": la petición ya salió', () {
+      // classifyEntryError SOLO se llama desde el catch del POST. Mapear esto
+      // a `offline` hacía que el sheet imprimiera "no se creó ninguna sesión"
+      // sobre una petición que el servidor pudo procesar entera.
       expect(
         classifyEntryError(err(ApiErrorKind.network), requestHadHeader: false)
             .kind,
-        CheckoutEntryBlockKind.offline,
+        CheckoutEntryBlockKind.connectionLost,
       );
+      // Y la cadena REAL: un receiveTimeout de Dio no trae `response`, así que
+      // ApiError.fromDio lo hace `network` (api_error.dart:70-75) — el mismo
+      // valor que producían el corte de radio y el socket muerto.
+      expect(
+        classifyEntryError(
+          ApiError.fromDio(
+            DioException(
+              requestOptions: RequestOptions(path: '/api/checkout-sessions'),
+              type: DioExceptionType.receiveTimeout,
+              message: 'Receive timeout',
+            ),
+          ),
+          requestHadHeader: true,
+        ).kind,
+        CheckoutEntryBlockKind.connectionLost,
+      );
+    });
+
+    test('429 se separa del "algo salió mal" (y el 503 NO es 429)', () {
       expect(
         classifyEntryError(err(ApiErrorKind.rateLimited),
                 requestHadHeader: false)
             .kind,
         CheckoutEntryBlockKind.rateLimited,
+      );
+      // El 503 llega como `server` (api_error.dart:88-91) y termina en el
+      // genérico, que muestra el texto del servidor tal cual — no en el copy
+      // de saturación, que para una caída no sería cierto.
+      expect(
+        classifyEntryError(err(ApiErrorKind.server, status: 503),
+                requestHadHeader: false)
+            .kind,
+        CheckoutEntryBlockKind.unknown,
       );
       expect(
         classifyEntryError(err(ApiErrorKind.server), requestHadHeader: false)
@@ -328,6 +360,61 @@ void main() {
     );
   });
 
+  /// Timeout de RECEPCIÓN: la petición salió del teléfono y el servidor pudo
+  /// procesarla entera. Es el caso que el test de "sin red" NO cubre (ese usa
+  /// `online:false` y corta antes de mandar nada).
+  ApiError receiveTimeoutError() => ApiError.fromDio(
+        DioException(
+          requestOptions: RequestOptions(path: '/api/checkout-sessions'),
+          type: DioExceptionType.receiveTimeout,
+          message: 'Receive timeout',
+        ),
+      );
+
+  test('timeout EN VUELO: el POST SÍ salió — se cuenta como connectionLost, '
+      'no como offline', () async {
+    final h = harness();
+    h.api.onCreate = (_) async => throw receiveTimeoutError();
+
+    final outcome = await controllerOf(h.container).start();
+
+    expect(outcome, CheckoutEntryOutcome.blocked);
+    expect(h.api.createCalls, 1, reason: 'la petición salió del aparato');
+    expect(
+      h.container.read(checkoutEntryProvider(kReservationId)).block!.kind,
+      CheckoutEntryBlockKind.connectionLost,
+    );
+    // La métrica los separa: "el patio no tiene señal" y "salió y no volvió"
+    // son dos problemas distintos y solo el segundo pudo dejar sesión.
+    expect(
+      h.log.events.where((e) => e.$1 == CheckoutEvents.entryBlocked).single.$2,
+      {'code': 'connectionLost'},
+    );
+  });
+
+  test('cambio de sede durante el chequeo de conectividad: no se publica un '
+      'bloqueo del alcance viejo', () async {
+    // Sin señal, para que el camino termine en el corte pre-vuelo: era la
+    // única rama de start() sin fence de generación, y publicaba el sheet
+    // "sin conexión" sobre la sede NUEVA.
+    final h = harness(online: false);
+    final pending = controllerOf(h.container).start();
+    // El await de `hasNetwork()` es un canal de plataforma: el agente alcanza
+    // a cambiar de sede ahí dentro.
+    locationOf(h.container).emit(
+      const ActiveLocation.pinned(locationId: 'loc-2', locationName: 'Norte'),
+    );
+    h.container.read(checkoutEntryProvider(kReservationId));
+
+    expect(await pending, CheckoutEntryOutcome.aborted);
+    expect(h.api.createCalls, 0);
+    expect(
+      h.container.read(checkoutEntryProvider(kReservationId)).block,
+      isNull,
+      reason: 'el bloqueo pertenecía a la sede anterior',
+    );
+  });
+
   test('409 SESSION_TERMINAL: se cuenta como bloqueo Y se navega (el wizard '
       'tiene la fila real)', () async {
     final h = harness();
@@ -398,6 +485,7 @@ void main() {
         FakeCheckoutApi api,
         FakePrecheckinReservationsApi reservations,
         GoRouter router,
+        CapturingEventLogger log,
       })> pumpCard(
     WidgetTester tester, {
     bool online = true,
@@ -406,7 +494,15 @@ void main() {
 
     /// Escala de texto del sistema: en el patio, 1.5–2.0 es normal.
     double textScale = 1,
+
+    /// Presencia de la card en la home. El poll del dashboard la saca de la
+    /// cola cuando otra superficie mueve la reserva: apagarlo a media escritura
+    /// es el escenario del keepAlive.
+    ValueNotifier<bool>? cardVisible,
   }) async {
+    final visible = cardVisible ?? ValueNotifier(true);
+    if (cardVisible == null) addTearDown(visible.dispose);
+    final log = CapturingEventLogger();
     final api = FakeCheckoutApi();
     if (onCreate != null) {
       api.onCreate = (id) async {
@@ -421,14 +517,18 @@ void main() {
         GoRoute(
           path: AppRoutes.home,
           builder: (_, _) => Scaffold(
-            body: ListView(
-              children: [
-                ReservationQueueCard(
-                  item: checkoutCard(),
-                  queue: DashboardQueue.checkout,
-                  now: DateTime.parse('2026-08-16T12:00:00Z'),
-                ),
-              ],
+            body: ValueListenableBuilder<bool>(
+              valueListenable: visible,
+              builder: (_, showCard, _) => ListView(
+                children: [
+                  if (showCard)
+                    ReservationQueueCard(
+                      item: checkoutCard(),
+                      queue: DashboardQueue.checkout,
+                      now: DateTime.parse('2026-08-16T12:00:00Z'),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -455,7 +555,7 @@ void main() {
           // La búsqueda es el destino real del 11D: sin este fake, su fetch
           // saldría por un Dio de verdad.
           dashboardApiProvider.overrideWithValue(FakeDashboardApi()),
-          eventLoggerProvider.overrideWithValue(CapturingEventLogger()),
+          eventLoggerProvider.overrideWithValue(log),
           networkStatusProvider
               .overrideWithValue(FakeNetworkStatus(online: online)),
           activeLocationProvider.overrideWith(
@@ -494,7 +594,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    return (api: api, reservations: resApi, router: router);
+    return (api: api, reservations: resApi, router: router, log: log);
   }
 
   testWidgets('11A — el arranque se siente EN la card: tinte, spinner y '
@@ -667,6 +767,68 @@ void main() {
     );
     expect(f.api.createCalls, 0);
     expect(find.text('Retry'), findsOneWidget);
+  });
+
+  testWidgets('timeout EN VUELO: el pie NO afirma que no se creó nada',
+      (tester) async {
+    final f = await pumpCard(tester);
+    // Wi-Fi de patio: la petición salió, el servidor pudo crear la sesión Y el
+    // contrato con sus renglones de precio (service:194-209), y la respuesta
+    // nunca llegó. `online:false` NO ejerce esto: corta antes de mandar.
+    f.api.onCreate = (_) async => throw receiveTimeoutError();
+
+    await tester.tap(find.byType(ReservationQueueCard));
+    await tester.pumpAndSettle();
+
+    expect(f.api.createCalls, 1);
+    expect(find.text('The connection dropped while opening'), findsOneWidget);
+    expect(
+      find.text(
+        'The session may have been created. Tap the card again when you have '
+        'signal: if it exists, it resumes.',
+      ),
+      findsOneWidget,
+    );
+    // LA regresión: este pie afirmaba un hecho que el backend no garantiza.
+    expect(find.text('No checkout session was created.'), findsNothing);
+    // Y no se navega: la app no sabe si hay sesión, así que el wizard no puede
+    // abrirse a ciegas — se vuelve a tocar la card (el POST es idempotente).
+    expect(find.text('wizard'), findsNothing);
+    expect(find.text('Retry'), findsOneWidget);
+  });
+
+  testWidgets('keepAlive: si el poll saca la card con el POST en vuelo, la '
+      'respuesta se procesa igual (no aterriza en el vacío)', (tester) async {
+    final cardVisible = ValueNotifier(true);
+    addTearDown(cardVisible.dispose);
+    final gate = Completer<void>();
+    final f = await pumpCard(
+      tester,
+      cardVisible: cardVisible,
+      onCreate: (_) => gate.future,
+    );
+
+    await tester.tap(find.byType(ReservationQueueCard));
+    await tester.pump();
+    expect(f.api.createCalls, 1);
+
+    // El poll del dashboard refresca la home SIN esta reserva (otra superficie
+    // la movió): la card se desmonta con la escritura en vuelo.
+    cardVisible.value = false;
+    await tester.pump();
+    expect(find.byType(ReservationQueueCard), findsNothing);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+
+    // Sin el ref.keepAlive() el notifier autoDispose habría muerto con su
+    // único oyente y la respuesta de una escritura que CREA la sesión se
+    // perdería sin dejar rastro. Con él, se procesa y se cuenta.
+    expect(f.log.has(CheckoutEvents.entryOpen), isTrue);
+    expect(tester.takeException(), isNull);
+    // Nadie navega: el contexto de la card ya no está montado. El agente
+    // vuelve a encontrar la sesión por la cola o por la búsqueda.
+    expect(find.text('wizard'), findsNothing);
   });
 
   testWidgets('el "Reintentar" del sheet vuelve a intentar de verdad',

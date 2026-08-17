@@ -2438,6 +2438,24 @@ abstract class AppLocalizations {
   /// **'Abrir un checkout necesita la confirmación del servidor una sola vez. No se encola en la Bandeja: cuando haya señal, vuelve a tocar la card.'**
   String get coEntryOfflineBody;
 
+  /// La petición SALIÓ del aparato y no volvió respuesta (timeout / socket caído). Distinto del corte sin señal: aquí el servidor pudo procesarla entera
+  ///
+  /// In es, this message translates to:
+  /// **'Se cortó la conexión al abrir'**
+  String get coEntryConnectionLostTitle;
+
+  /// No description provided for @coEntryConnectionLostBody.
+  ///
+  /// In es, this message translates to:
+  /// **'La solicitud salió del teléfono pero el servidor no alcanzó a responder, así que la app no puede saber si el checkout quedó abierto.'**
+  String get coEntryConnectionLostBody;
+
+  /// No description provided for @coEntryConnectionLostFoot.
+  ///
+  /// In es, this message translates to:
+  /// **'La sesión pudo haberse creado. Cuando haya señal, vuelve a tocar la card: si existe, se reanuda.'**
+  String get coEntryConnectionLostFoot;
+
   /// No description provided for @coEntryNotReadyTitle.
   ///
   /// In es, this message translates to:

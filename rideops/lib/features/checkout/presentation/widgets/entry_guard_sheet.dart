@@ -198,6 +198,7 @@ class CheckoutEntryGuardSheet extends ConsumerWidget {
       case CheckoutEntryBlockKind.terminal:
       case CheckoutEntryBlockKind.forbidden:
       case CheckoutEntryBlockKind.offline:
+      case CheckoutEntryBlockKind.connectionLost:
       case CheckoutEntryBlockKind.rateLimited:
       case CheckoutEntryBlockKind.locationNotReady:
       case CheckoutEntryBlockKind.scopeChanged:
@@ -230,16 +231,25 @@ class CheckoutEntryGuardSheet extends ConsumerWidget {
     return actions;
   }
 
-  /// Pie del sheet. TODOS estos guards abortan ANTES de crear la fila, y
-  /// decirlo importa: sin esa línea el agente no sabe si dejó basura a medias
-  /// (nota 5). El de pre-checkin además promete que la reserva no se tocó y
-  /// que la card se desbloquea sola (nota 4).
+  /// Pie del sheet. La pregunta que responde es UNA: ¿quedó basura a medias?
+  /// (nota 5). "No se creó ninguna sesión" es una AFIRMACIÓN, y solo se
+  /// imprime donde la app puede sostenerla:
+  ///
+  ///  - los guards con veredicto del servidor (404/409/422/403): el backend
+  ///    abortó antes del `checkoutSession.create` (service:127-181) y lo dijo;
+  ///  - el corte por falta de red y el de sede sin hidratar: la petición nunca
+  ///    salió del aparato.
+  ///
+  /// Los dos casos SIN veredicto —el POST salió y su respuesta se perdió (por
+  /// timeout o por cambio de alcance)— llevan el pie honesto: el servidor pudo
+  /// haber creado la sesión Y el contrato con sus renglones de precio
+  /// (service:194-209) mientras la app se quedaba sin respuesta.
   String _footOf(AppLocalizations l10n) =>
       switch (block.kind) {
         CheckoutEntryBlockKind.precheckin => l10n.coEntryReservationUntouched,
-        // Aquí la sesión SÍ pudo crearse: el POST salió y su respuesta se
-        // perdió con el cambio de alcance. Prometer lo contrario sería mentir.
         CheckoutEntryBlockKind.scopeChanged => l10n.coEntryScopeChangedFoot,
+        CheckoutEntryBlockKind.connectionLost =>
+          l10n.coEntryConnectionLostFoot,
         _ => l10n.coEntryNoSessionCreated,
       };
 
@@ -346,6 +356,8 @@ class _Header extends StatelessWidget {
         CheckoutEntryBlockKind.precheckin => l10n.coEntryPrecheckinTitle,
         CheckoutEntryBlockKind.ageRules => l10n.coEntryAgeTitle,
         CheckoutEntryBlockKind.offline => l10n.coEntryOfflineTitle,
+        CheckoutEntryBlockKind.connectionLost =>
+          l10n.coEntryConnectionLostTitle,
         CheckoutEntryBlockKind.locationNotReady => l10n.coEntryNotReadyTitle,
         CheckoutEntryBlockKind.scopeChanged => l10n.coEntryScopeChangedTitle,
         CheckoutEntryBlockKind.locationDenied => l10n.locationDeniedTitle,
@@ -376,6 +388,8 @@ class _Header extends StatelessWidget {
         return '${l10n.coEntryAgeBody}\n${l10n.coEntryServerSaid(block.message)}';
       case CheckoutEntryBlockKind.offline:
         return l10n.coEntryOfflineBody;
+      case CheckoutEntryBlockKind.connectionLost:
+        return l10n.coEntryConnectionLostBody;
       case CheckoutEntryBlockKind.locationNotReady:
         return l10n.coEntryNotReadyBody;
       case CheckoutEntryBlockKind.scopeChanged:
@@ -416,6 +430,9 @@ class _Header extends StatelessWidget {
         CheckoutEntryBlockKind.precheckin => Icons.assignment_late_outlined,
         CheckoutEntryBlockKind.ageRules => Icons.badge_outlined,
         CheckoutEntryBlockKind.offline => Icons.wifi_off_rounded,
+        // Distinto del wifi_off a propósito: "salió y no volvió" no es "no hay
+        // señal", y el icono es lo primero que el agente lee en el patio.
+        CheckoutEntryBlockKind.connectionLost => Icons.sync_problem_rounded,
         CheckoutEntryBlockKind.locationDenied ||
         CheckoutEntryBlockKind.forbidden =>
           Icons.gpp_bad_outlined,

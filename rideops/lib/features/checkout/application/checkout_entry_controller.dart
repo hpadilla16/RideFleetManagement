@@ -139,10 +139,20 @@ class CheckoutEntryController extends Notifier<CheckoutEntryState> {
           kind: CheckoutEntryBlockKind.locationNotReady,
         ));
       }
-      if (!await _hasNetwork()) {
+      final online = await _hasNetwork();
+      // Mismo fence que sus tres hermanas: el plugin de conectividad es un
+      // canal de plataforma y el agente puede cambiar de sede durante ese
+      // await. Sin esto se publicaría un bloqueo del alcance VIEJO en el
+      // nuevo.
+      if (gen != _generation || !ref.mounted) return _aborted();
+      if (!online) {
         // Corte honesto ANTES de gastar el timeout completo de Dio con la
         // radio apagada. Un Wi-Fi cautivo dice "hay red" y ahí el veredicto lo
         // da la request — por eso esto solo corta el "no" rotundo.
+        //
+        // Es el único punto donde `offline` es la verdad: nada salió del
+        // aparato. Si el POST llega a salir, su fallo de red es
+        // `connectionLost` (ver classifyEntryError).
         return _block(const CheckoutEntryBlock(
           kind: CheckoutEntryBlockKind.offline,
         ));

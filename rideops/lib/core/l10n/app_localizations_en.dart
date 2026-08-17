@@ -1501,6 +1501,18 @@ class AppLocalizationsEn extends AppLocalizations {
       'Opening a checkout needs the server to confirm it once. It is not queued in the Outbox: tap the card again when there is signal.';
 
   @override
+  String get coEntryConnectionLostTitle =>
+      'The connection dropped while opening';
+
+  @override
+  String get coEntryConnectionLostBody =>
+      'The request left the phone but the server did not answer in time, so the app cannot tell whether the checkout was opened.';
+
+  @override
+  String get coEntryConnectionLostFoot =>
+      'The session may have been created. Tap the card again when you have signal: if it exists, it resumes.';
+
+  @override
   String get coEntryNotReadyTitle => 'One moment';
 
   @override

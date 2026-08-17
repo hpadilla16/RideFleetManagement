@@ -757,6 +757,12 @@
   "coEntryScopeChangedFoot": "La sesión pudo haberse creado. Vuelve a tocar la card: si existe, se reanuda.",
   "coEntryOfflineTitle": "Sin conexión para abrir el checkout",
   "coEntryOfflineBody": "Abrir un checkout necesita la confirmación del servidor una sola vez. No se encola en la Bandeja: cuando haya señal, vuelve a tocar la card.",
+  "coEntryConnectionLostTitle": "Se cortó la conexión al abrir",
+  "@coEntryConnectionLostTitle": {
+    "description": "La petición SALIÓ del aparato y no volvió respuesta (timeout / socket caído). Distinto del corte sin señal: aquí el servidor pudo procesarla entera"
+  },
+  "coEntryConnectionLostBody": "La solicitud salió del teléfono pero el servidor no alcanzó a responder, así que la app no puede saber si el checkout quedó abierto.",
+  "coEntryConnectionLostFoot": "La sesión pudo haberse creado. Cuando haya señal, vuelve a tocar la card: si existe, se reanuda.",
   "coEntryNotReadyTitle": "Un momento",
   "coEntryNotReadyBody": "La app todavía está cargando tu ubicación activa. Intenta de nuevo en un segundo.",
   "coEntryNoSessionCreated": "No se creó ninguna sesión de checkout.",
