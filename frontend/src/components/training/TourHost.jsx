@@ -31,7 +31,7 @@ import { stepKey, moduleKey as mKeyOf, trainingText } from '../../lib/training/i
 import {
   TOUR_STORAGE_KEY, TOUR_END,
   startTour, settleStart, currentStep, advance, retreat, dismiss,
-  waitForRecord, stopWaiting,
+  waitForRecord, resumeAt,
   progressOf, serialize, deserialize,
 } from '../../lib/training/tour-state.js';
 
@@ -49,6 +49,8 @@ const SETTLE_MS = 700;
  * took over.
  */
 const SHOWCASE_STEP_MS = 9000;
+/** How often a parked tour checks whether its record is finally open. */
+const WAIT_POLL_MS = 700;
 const CARD_WIDTH = 340;
 const GAP = 12;
 
@@ -143,17 +145,28 @@ export function TourHost({ viewer }) {
     setState(saved);
   }, [state, viewer]);
 
-  // ── a parked tour watches for its record ─────────────────────────────────
+  /**
+   * A parked tour WATCHES for its record — it does not check once and give up.
+   *
+   * The first version fired a single timer on route change (Hector,
+   * 2026-08-17: "se queda esperando"). A reservation page still fetching at
+   * that instant meant the anchors were not there yet, and nothing ever looked
+   * again. So this polls, and resumeAt takes whichever step is actually on
+   * screen: the button on the reservation page, or — if they pressed it and
+   * moved into the wizard — the step that lives there.
+   *
+   * The cost is one querySelector per tick against a page we are already
+   * waiting on, and it stops the moment the tour resumes.
+   */
   useEffect(() => {
     if (!state?.waiting || !steps.length) return undefined;
-    // Give the new route time to paint before judging the anchors absent.
-    const timer = setTimeout(() => {
-      const settled = settleStart(stopWaiting(state), steps, isPresent);
-      // Still nowhere to be found: keep waiting rather than break. The person
-      // may still be navigating.
-      if (settled.endedAs !== TOUR_END.BROKEN) persist(settled);
-    }, SETTLE_MS);
-    return () => clearTimeout(timer);
+    const look = () => {
+      const resumed = resumeAt(state, steps, isPresent);
+      if (resumed) persist(resumed);
+    };
+    const timer = setInterval(look, WAIT_POLL_MS);
+    const settle = setTimeout(look, SETTLE_MS);
+    return () => { clearInterval(timer); clearTimeout(settle); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state?.waiting, pathname, steps.length]);
 
