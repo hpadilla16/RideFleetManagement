@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -32,6 +33,24 @@ import 'helpers/shell_test_helpers.dart';
 /// decide pasos. Todo lo que se afirma en pantalla sale de una respuesta del
 /// servidor.
 
+/// Random guionizado (mismo patrón que dashboard_controller_test): nextInt
+/// devuelve [intValue] capado — determinismo total para el backoff.
+class ScriptedRandom implements Random {
+  ScriptedRandom({this.intValue = 0, this.doubleValue = 1.0});
+
+  int intValue;
+  double doubleValue;
+
+  @override
+  int nextInt(int max) => intValue.clamp(0, max - 1);
+
+  @override
+  double nextDouble() => doubleValue;
+
+  @override
+  bool nextBool() => false;
+}
+
 void main() {
   final liveToken = fakeJwt(
     exp: DateTime.now().add(const Duration(hours: 8)),
@@ -48,6 +67,7 @@ void main() {
     ActiveLocation initialLocation = const ActiveLocation.all(),
     bool authenticated = true,
     bool online = true,
+    Random? random,
   }) {
     final api = FakeCheckoutApi();
     final logger = CapturingEventLogger();
@@ -70,6 +90,11 @@ void main() {
           () => StubActiveLocation(initialLocation),
         ),
         sessionControllerProvider.overrideWith(() => session),
+        // Random guionizado: el backoff decorrelacionado ante 429 tiene que
+        // ser determinista en los tests (nextInt=0 ⇒ el piso del carril).
+        checkoutPollConfigProvider.overrideWithValue(
+          CheckoutPollConfig(random: random ?? ScriptedRandom()),
+        ),
       ],
     );
     addTearDown(container.dispose);
@@ -256,9 +281,11 @@ void main() {
       });
     });
 
-    test('429 en el poll: carril lento + telemetría de backoff', () {
+    test('429 en el poll: backoff decorrelacionado + telemetría', () {
       fakeAsync((async) {
-        final h = harness();
+        // nextInt = 0 ⇒ el backoff cae en su piso (el carril lento de 15 s):
+        // determinismo para poder asertar el reloj.
+        final h = harness(random: ScriptedRandom());
         async.flushMicrotasks();
         h.api.onGet = () async => throw ApiError(
               kind: ApiErrorKind.rateLimited,
@@ -269,7 +296,7 @@ void main() {
         async.flushMicrotasks();
         expect(h.api.getCalls, 1);
         expect(h.logger.has(NetEvents.request429Backoff), isTrue);
-        // Ya en carril lento: a los 5 s no hay tick, a los 15 s sí.
+        // Ya en backoff: a los 5 s no hay tick, a los 15 s sí.
         h.api.onGet = null;
         async.elapse(const Duration(seconds: 5));
         async.flushMicrotasks();
@@ -277,6 +304,69 @@ void main() {
         async.elapse(const Duration(seconds: 10));
         async.flushMicrotasks();
         expect(h.api.getCalls, 2);
+      });
+    });
+
+    test('el backoff CRECE con 429 sostenidos, con tope (SC-7)', () {
+      fakeAsync((async) {
+        // nextInt = máximo ⇒ el backoff toma el techo de cada ventana.
+        final h = harness(random: ScriptedRandom(intValue: 1 << 30));
+        async.flushMicrotasks();
+        h.api.onGet = () async => throw ApiError(
+              kind: ApiErrorKind.rateLimited,
+              message: 'slow down',
+              status: 429,
+            );
+        // 1º 429 (tras el tick base de 5 s): ventana [15 s, 45 s] ⇒ 45 s.
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+        expect(h.api.getCalls, 1);
+        async.elapse(const Duration(seconds: 44));
+        async.flushMicrotasks();
+        expect(h.api.getCalls, 1, reason: 'el tick es a los 45 s, no antes');
+        async.elapse(const Duration(seconds: 1));
+        async.flushMicrotasks();
+        expect(h.api.getCalls, 2);
+
+        // 2º 429: ventana [15 s, min(135 s, tope 5 min)] ⇒ 135 s.
+        async.elapse(const Duration(seconds: 134));
+        async.flushMicrotasks();
+        expect(h.api.getCalls, 2);
+        async.elapse(const Duration(seconds: 1));
+        async.flushMicrotasks();
+        expect(h.api.getCalls, 3);
+
+        // Y al recuperarse, el poll vuelve al carril de 5 s.
+        h.api.onGet = null;
+        h.api.current = sessionAt(
+          CheckoutStep.tcPending,
+          actorUserId: null,
+          kiosk: true,
+        );
+        async.elapse(const Duration(minutes: 5));
+        async.flushMicrotasks();
+        final calls = h.api.getCalls;
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+        expect(h.api.getCalls, calls + 1);
+      });
+    });
+
+    test('MC-3: el POLL pide NO reintentar (el retry por-request amplifica un '
+        '429); el re-fetch del AGENTE sí conserva el retry', () {
+      fakeAsync((async) {
+        final h = harness();
+        async.flushMicrotasks();
+        expect(h.api.skipRetryFlags, [true], reason: 'arranque automático');
+
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+        expect(h.api.skipRetryFlags, [true, true], reason: 'tick del poll');
+
+        unawaited(notifier(h.container).refresh());
+        async.flushMicrotasks();
+        expect(h.api.skipRetryFlags.last, isFalse,
+            reason: 'aquí hay un humano esperando UNA respuesta');
       });
     });
 
@@ -290,6 +380,216 @@ void main() {
         expect(read(h.container).isTerminal, isTrue);
         async.elapse(const Duration(minutes: 5));
         expect(h.api.getCalls, 0);
+      });
+    });
+  });
+
+  group('ciclo de vida', () {
+    test('MC-1: al soltar el último listener el poller MUERE (autoDispose) — '
+        'si no, cada reserva visitada dejaría un poll eterno', () {
+      fakeAsync((async) {
+        final api = FakeCheckoutApi();
+        final container = ProviderContainer(
+          overrides: [
+            checkoutApiProvider.overrideWithValue(api),
+            reservationsApiProvider.overrideWithValue(FakeReservationsApi()),
+            eventLoggerProvider.overrideWithValue(CapturingEventLogger()),
+            networkStatusProvider
+                .overrideWithValue(FakeNetworkStatus(online: true)),
+            activeLocationProvider.overrideWith(
+              () => StubActiveLocation(const ActiveLocation.all()),
+            ),
+            sessionControllerProvider.overrideWith(
+              () => MutableSessionController(
+                SessionState.authenticated(
+                  token: liveToken,
+                  user: sessionUserFixture(),
+                ),
+              ),
+            ),
+            checkoutPollConfigProvider
+                .overrideWithValue(CheckoutPollConfig(random: ScriptedRandom())),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        // La pantalla "abre" el wizard…
+        final sub = container.listen(
+          checkoutWizardProvider(kReservationId),
+          (_, _) {},
+        );
+        async.flushMicrotasks();
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+        expect(api.getCalls, 1);
+
+        // …y el agente sale del wizard.
+        sub.close();
+        async.flushMicrotasks();
+        final frozen = api.getCalls;
+        async.elapse(const Duration(minutes: 5));
+        async.flushMicrotasks();
+        expect(api.getCalls, frozen,
+            reason: 'un Notifier sin autoDispose seguiría re-armando el timer '
+                'para siempre: 3 checkouts = ~12 req/min permanentes');
+      });
+    });
+  });
+
+  group('fencing de respuestas (MC-2)', () {
+    test('una lectura que aterriza DESPUÉS de la escritura se descarta: el '
+        'stepper no retrocede ni se emite steps_jumped negativo', () {
+      fakeAsync((async) {
+        final h = harness();
+        async.flushMicrotasks();
+
+        // Lectura en vuelo, colgada, con el estado VIEJO (CONFIRMING). Se
+        // lanza a los 2 s para que la transición de abajo NO dispare el
+        // re-fetch previo (<3 s) y el POST salga con la lectura aún viajando:
+        // ese es exactamente el solape que el fence tiene que cubrir.
+        final gate = Completer<void>();
+        h.api.onGet = () async {
+          await gate.future;
+          return sessionAt(CheckoutStep.confirming);
+        };
+        async.elapse(const Duration(seconds: 2));
+        unawaited(notifier(h.container).refresh());
+        async.flushMicrotasks();
+        expect(h.api.getCalls, 1);
+
+        // El agente transiciona y el POST responde PRIMERO.
+        h.api.onTransition = (_) async => sessionAt(CheckoutStep.tcPending);
+        unawaited(notifier(h.container).transitionTo(CheckoutStep.tcPending));
+        async.flushMicrotasks();
+        expect(read(h.container).session!.currentStep, 'TC_PENDING');
+
+        // Ahora aterriza el GET viejo.
+        gate.complete();
+        async.flushMicrotasks();
+
+        expect(read(h.container).session!.currentStep, 'TC_PENDING',
+            reason: 'la lectura obsoleta NO puede publicar el pasado');
+        expect(read(h.container).advance, isNull,
+            reason: 'nada de "otra superficie movió el paso" hacia atrás');
+        final jumps = h.logger.events
+            .where((e) => e.$1 == CheckoutEvents.reconciled)
+            .map((e) => e.$2['steps_jumped']);
+        expect(jumps.where((j) => j is int && j < 0), isEmpty,
+            reason: 'steps_jumped negativo corrompe la métrica del SHIP');
+      });
+    });
+
+    test('cinturón de stateVersion (P2): una lectura con versión MENOR que la '
+        'aplicada se descarta aunque el epoch local coincida', () {
+      fakeAsync((async) {
+        final h = harness();
+        h.api.current = sessionAt(CheckoutStep.tcPending, stateVersion: 7);
+        h.container.invalidate(checkoutWizardProvider(kReservationId));
+        h.container.listen(checkoutWizardProvider(kReservationId), (_, _) {});
+        async.flushMicrotasks();
+        expect(read(h.container).session!.currentStep, 'TC_PENDING');
+
+        // Réplica atrasada / respuesta cacheada: versión anterior.
+        h.api.current = sessionAt(
+          CheckoutStep.confirming,
+          stateVersion: 6,
+          actorUserId: null,
+          kiosk: true,
+        );
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+        expect(read(h.container).session!.currentStep, 'TC_PENDING');
+        expect(read(h.container).advance, isNull);
+
+        // Una versión MAYOR sí entra (el fence no congela la sesión).
+        h.api.current = sessionAt(
+          CheckoutStep.tcSigned,
+          stateVersion: 8,
+          actorUserId: null,
+          kiosk: true,
+        );
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+        expect(read(h.container).session!.currentStep, 'TC_SIGNED');
+      });
+    });
+
+    test('con backend VIEJO (stateVersion null) el fence local sigue '
+        'protegiendo', () {
+      fakeAsync((async) {
+        final h = harness();
+        async.flushMicrotasks();
+        expect(read(h.container).session!.stateVersion, isNull);
+
+        final gate = Completer<void>();
+        h.api.onGet = () async {
+          await gate.future;
+          return sessionAt(CheckoutStep.confirming);
+        };
+        async.elapse(const Duration(seconds: 2));
+        unawaited(notifier(h.container).refresh());
+        async.flushMicrotasks();
+
+        h.api.onTransition = (_) async => sessionAt(CheckoutStep.tcPending);
+        unawaited(notifier(h.container).transitionTo(CheckoutStep.tcPending));
+        async.flushMicrotasks();
+        gate.complete();
+        async.flushMicrotasks();
+        expect(read(h.container).session!.currentStep, 'TC_PENDING');
+      });
+    });
+
+    test('mientras hay una escritura en vuelo, el tick del poll NO despacha',
+        () {
+      fakeAsync((async) {
+        final h = harness();
+        async.flushMicrotasks();
+        final gate = Completer<void>();
+        h.api.onTransition = (_) async {
+          await gate.future;
+          return sessionAt(CheckoutStep.tcPending);
+        };
+        unawaited(notifier(h.container).transitionTo(CheckoutStep.tcPending));
+        async.flushMicrotasks();
+        final before = h.api.getCalls;
+
+        async.elapse(const Duration(seconds: 30));
+        async.flushMicrotasks();
+        expect(h.api.getCalls, before,
+            reason: 'la respuesta del POST es más nueva por definición');
+
+        gate.complete();
+        async.flushMicrotasks();
+      });
+    });
+
+    test('SC-2: la presencia SOBREVIVE a una respuesta de escritura que no la '
+        'trae (los POST no pasan por withPresence)', () {
+      fakeAsync((async) {
+        final h = harness();
+        h.api.current = sessionAt(
+          CheckoutStep.confirming,
+          presence: [
+            CheckoutPresenceDto(
+              surface: 'KIOSK',
+              displayName: 'María G.',
+              lastSeenAt: DateTime.now(),
+            ),
+          ],
+        );
+        h.container.invalidate(checkoutWizardProvider(kReservationId));
+        h.container.listen(checkoutWizardProvider(kReservationId), (_, _) {});
+        async.flushMicrotasks();
+        expect(read(h.container).session!.presence, hasLength(1));
+
+        // La respuesta del POST viene SIN el campo.
+        h.api.onTransition = (_) async => sessionAt(CheckoutStep.tcPending);
+        unawaited(notifier(h.container).transitionTo(CheckoutStep.tcPending));
+        async.flushMicrotasks();
+
+        expect(read(h.container).session!.presence, hasLength(1),
+            reason: 'borrar el chip justo al escribir es perderlo en el '
+                'instante de máxima colisión');
       });
     });
   });
@@ -456,6 +756,15 @@ void main() {
         expect(outcome, CheckoutTransitionOutcome.alreadyDone);
         expect(read(h.container).session!.currentStep, 'TC_PENDING');
         expect(read(h.container).advance, isNotNull);
+        // SC-4: esta reconciliación NO vino de un 409 y no debe contarse como
+        // tal — mezclarlas mentiría sobre cuántas colisiones reales hay.
+        expect(
+          h.logger.events
+              .where((e) => e.$1 == CheckoutEvents.reconciled)
+              .map((e) => e.$2['via']),
+          ['preflight'],
+        );
+        expect(h.logger.has(CheckoutEvents.transition409), isFalse);
       });
     });
 

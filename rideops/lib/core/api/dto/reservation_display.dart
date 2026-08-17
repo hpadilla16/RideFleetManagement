@@ -1,5 +1,7 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import 'json_converters.dart';
+
 part 'reservation_display.freezed.dart';
 part 'reservation_display.g.dart';
 
@@ -35,6 +37,16 @@ abstract class DisplayReservation with _$DisplayReservation {
     String? reservationNumber,
     DisplayVehicle? vehicle,
     DisplayCustomer? customer,
+
+    /// Cuándo sale el coche. Es la TERCERA respuesta que el patio necesita en
+    /// el header del wizard (mockup 8A: "Salida hoy 10:30"): a quién atiendo,
+    /// qué unidad entrego, **para cuándo**.
+    @IsoDateTimeConverter() DateTime? pickupAt,
+
+    /// Sello del pre-checkin (`Reservation.customerInfoCompletedAt`,
+    /// schema.prisma:1526). Es además el gate del 422 PRECHECKIN_REQUIRED en
+    /// las sedes que lo exigen: verlo ANTES ahorra el viaje a la negativa.
+    @IsoDateTimeConverter() DateTime? customerInfoCompletedAt,
   }) = _DisplayReservation;
 
   factory DisplayReservation.fromJson(Map<String, dynamic> json) =>

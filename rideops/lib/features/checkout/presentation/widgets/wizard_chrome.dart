@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/theme/ride_tokens.dart';
@@ -182,11 +183,18 @@ class SessionHead extends StatelessWidget {
     required this.context_,
     required this.presence,
     this.mini = false,
+    this.offline = false,
   });
 
   final CheckoutReservationContext? context_;
   final PresenceChipData? presence;
   final bool mini;
+
+  /// Sin red el punto vivo se degrada a gris: el verde afirma "está AHORA" y
+  /// sin conexión no podemos sostener esa afirmación (el heartbeat que la
+  /// respalda es del servidor). El chip NO desaparece — desaparecer sigue
+  /// siendo cosa exclusiva del TTL.
+  final bool offline;
 
   @override
   Widget build(BuildContext context) {
@@ -195,7 +203,7 @@ class SessionHead extends StatelessWidget {
     final vehicle = context_?.vehicleLabel;
     final chip = presence == null
         ? null
-        : PresenceChip(data: presence!, mini: mini);
+        : PresenceChip(data: presence!, mini: mini, offline: offline);
 
     if (mini) {
       final who = [customer, vehicle].nonNulls
@@ -230,10 +238,21 @@ class SessionHead extends StatelessWidget {
       );
     }
 
+    // "Placa IKL-427 · Odómetro 48 190 km" — dato que ya se captura y que el
+    // agente confronta con el tablero antes de entregar.
+    final odometer = context_?.odometer;
     final plateLine = [
       if (context_?.plate != null && context_!.plate!.isNotEmpty)
         context_!.plate!,
+      if (odometer != null)
+        l10n.coOdometer(NumberFormat.decimalPattern(
+          Localizations.localeOf(context).toString(),
+        ).format(odometer)),
     ].join(' · ');
+
+    // La TERCERA respuesta del patio: para cuándo. El número de reserva NO se
+    // repite aquí — ya vive en el wizbar.
+    final departure = _departureLine(context, l10n);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
@@ -247,7 +266,7 @@ class SessionHead extends StatelessWidget {
           _SessionRow(
             icon: Icons.person_outline_rounded,
             title: customer ?? '—',
-            subtitle: context_?.reservationNumber,
+            subtitle: departure,
           ),
           if (vehicle != null && vehicle.isNotEmpty) ...[
             const SizedBox(height: 9),
@@ -264,6 +283,34 @@ class SessionHead extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// "Salida hoy 10:30 · Pre-checkin listo". Se omite lo que no se sabe en
+  /// lugar de rellenar con guiones.
+  String? _departureLine(BuildContext context, AppLocalizations l10n) {
+    final locale = Localizations.localeOf(context).toString();
+    final pickup = context_?.pickupAt?.toLocal();
+    final parts = <String>[];
+    if (pickup != null) {
+      final now = DateTime.now();
+      final time = DateFormat.Hm(locale).format(pickup);
+      final isToday = pickup.year == now.year &&
+          pickup.month == now.month &&
+          pickup.day == now.day;
+      parts.add(
+        isToday
+            ? l10n.coPickupToday(time)
+            : l10n.coPickupOn(DateFormat.MMMd(locale).format(pickup), time),
+      );
+    }
+    if (context_ != null) {
+      parts.add(
+        context_!.precheckinDone
+            ? l10n.coPrecheckinReady
+            : l10n.coPrecheckinPending,
+      );
+    }
+    return parts.isEmpty ? null : parts.join(' · ');
   }
 }
 
@@ -334,10 +381,18 @@ class _SessionRow extends StatelessWidget {
 /// El punto sale de la EDAD del `lastSeenAt`, no de un booleano del servidor:
 /// verde solo mientras el dato respalda la afirmación "está AHORA".
 class PresenceChip extends StatelessWidget {
-  const PresenceChip({super.key, required this.data, this.mini = false});
+  const PresenceChip({
+    super.key,
+    required this.data,
+    this.mini = false,
+    this.offline = false,
+  });
 
   final PresenceChipData data;
   final bool mini;
+
+  /// Ver [SessionHead.offline]: sin red el punto no puede seguir verde.
+  final bool offline;
 
   @override
   Widget build(BuildContext context) {
@@ -351,13 +406,14 @@ class PresenceChip extends StatelessWidget {
       surfaceLabel(l10n, data.entry.surface),
       checkoutAgeLabel(l10n, age),
     );
+    final live = !offline && data.freshness == PresenceFreshness.live;
     return Container(
       constraints: BoxConstraints(minHeight: mini ? 32 : 34),
       padding: EdgeInsets.symmetric(horizontal: mini ? 9 : 10, vertical: 4),
       decoration: BoxDecoration(
         color: RideTokens.p50,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: RideTokens.p200),
+        border: Border.all(color: RideTokens.brandA20),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -367,9 +423,9 @@ class PresenceChip extends StatelessWidget {
             height: 7,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: data.freshness == PresenceFreshness.live
-                  ? RideTokens.ok
-                  : RideTokens.n400,
+              // n500 y no n400: el gris "envejecido" tiene que VERSE (3.26:1
+              // contra el 1.96:1 de n400), o el chip tendría un solo estado.
+              color: live ? RideTokens.ok : RideTokens.n500,
             ),
           ),
           const SizedBox(width: 6),
@@ -405,6 +461,12 @@ class PresenceChip extends StatelessWidget {
 /// Rail de 5 fases. La agrupación es SOLO presentación (nota 4): 10 nodos de
 /// 24 px no caben legibles en 390 px con guantes. Lo que viene se dibuja gris
 /// inerte y no se calcula.
+///
+/// Jerarquía del mockup, en orden de peso visual: la fase ACTUAL es relleno
+/// sólido de marca con halo (lo primero que el ojo encuentra), la HECHA es
+/// tonal verde, la pendiente es un contorno neutro. Y el conector entre nodos
+/// es lo que convierte 5 chips sueltos en un rail: sin él no se lee que hay
+/// un camino.
 class PhaseRail extends StatelessWidget {
   const PhaseRail({super.key, required this.currentPosition});
 
@@ -415,17 +477,27 @@ class PhaseRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final states = [
+      for (final phase in kCheckoutPhases) phaseStateFor(phase, currentPosition),
+    ];
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       color: RideTokens.n0,
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (var i = 0; i < kCheckoutPhases.length; i++)
             Expanded(
               child: _PhaseNode(
                 index: i + 1,
                 label: phaseLabel(l10n, kCheckoutPhases[i]),
-                state: phaseStateFor(kCheckoutPhases[i], currentPosition),
+                state: states[i],
+                // El tramo de conector a la IZQUIERDA/DERECHA se tiñe con el
+                // estado del nodo que lo origina: verde mientras el camino
+                // está recorrido, neutro cuando aún no.
+                connectorBefore: i == 0 ? null : states[i - 1],
+                connectorAfter:
+                    i == kCheckoutPhases.length - 1 ? null : states[i],
               ),
             ),
         ],
@@ -439,57 +511,141 @@ class _PhaseNode extends StatelessWidget {
     required this.index,
     required this.label,
     required this.state,
+    required this.connectorBefore,
+    required this.connectorAfter,
   });
 
   final int index;
   final String label;
   final PhaseNodeState state;
+  final PhaseNodeState? connectorBefore;
+  final PhaseNodeState? connectorAfter;
+
+  static const _dotSize = 24.0;
+
+  Color _connectorColor(PhaseNodeState? from) => switch (from) {
+        null => Colors.transparent,
+        PhaseNodeState.done => RideTokens.okBd,
+        PhaseNodeState.current => RideTokens.okBd,
+        PhaseNodeState.pending => RideTokens.n200,
+      };
 
   @override
   Widget build(BuildContext context) {
-    final (bg, fg, border) = switch (state) {
-      PhaseNodeState.done => (RideTokens.okBg, RideTokens.okTx, RideTokens.okBd),
-      PhaseNodeState.current => (RideTokens.p50, RideTokens.p800, RideTokens.p200),
-      PhaseNodeState.pending => (RideTokens.n0, RideTokens.n600, RideTokens.n300),
+    final l10n = AppLocalizations.of(context)!;
+    // Fase ACTUAL: relleno sólido p600 + texto blanco (6.58:1) + halo de
+    // marca. La hecha ya no puede pesar más que ella.
+    final (bg, fg, border, labelColor) = switch (state) {
+      PhaseNodeState.done => (
+          RideTokens.okBg,
+          RideTokens.okTx,
+          RideTokens.okBd,
+          RideTokens.okTx,
+        ),
+      PhaseNodeState.current => (
+          RideTokens.p600,
+          RideTokens.n0,
+          RideTokens.p600,
+          RideTokens.p800,
+        ),
+      PhaseNodeState.pending => (
+          RideTokens.n0,
+          RideTokens.n600,
+          RideTokens.n300,
+          RideTokens.n600,
+        ),
     };
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 24,
-          height: 24,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: bg,
-            shape: BoxShape.circle,
-            border: Border.all(color: border, width: 1.5),
-          ),
-          // El glifo ✓ es NO-TEXTO (icono ≥ 3:1): el estado legible es la
-          // etiqueta de abajo, no el símbolo.
-          child: state == PhaseNodeState.done
-              ? const Icon(Icons.check_rounded, size: 14, color: RideTokens.okTx)
-              : Text(
-                  '$index',
+    return Semantics(
+      label: label,
+      value: switch (state) {
+        PhaseNodeState.done => l10n.coStepDone(''),
+        PhaseNodeState.current => l10n.coStepInProgress,
+        PhaseNodeState.pending => l10n.coStepPending,
+      },
+      child: ExcludeSemantics(
+        child: ConstrainedBox(
+          // 48 px de alto: el rail comparte fila de pulgar con la stepline y
+          // no puede ser una tira de 30 px en un teléfono con guantes.
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                height: _dotSize,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        height: 3,
+                        color: _connectorColor(connectorBefore),
+                      ),
+                    ),
+                    Container(
+                      width: _dotSize,
+                      height: _dotSize,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: bg,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: border, width: 1.5),
+                        boxShadow: state == PhaseNodeState.current
+                            ? const [
+                                BoxShadow(
+                                  color: RideTokens.brandA20,
+                                  blurRadius: 0,
+                                  spreadRadius: 3,
+                                ),
+                              ]
+                            : null,
+                      ),
+                      // El glifo ✓ es NO-TEXTO (icono ≥ 3:1): el estado
+                      // legible es la etiqueta de abajo, no el símbolo.
+                      child: state == PhaseNodeState.done
+                          ? const Icon(Icons.check_rounded,
+                              size: 14, color: RideTokens.okTx)
+                          : Text(
+                              '$index',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w900,
+                                color: fg,
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures(),
+                                ],
+                              ),
+                            ),
+                    ),
+                    Expanded(
+                      child: Container(
+                        height: 3,
+                        color: _connectorColor(connectorAfter),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Text(
+                  label,
+                  // 11.5 px y hasta 2 líneas: "Inspección" en es no cabe en
+                  // una línea de 78 px sin comerse la mitad del nombre.
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 11.5,
-                    fontWeight: FontWeight.w900,
-                    color: fg,
+                    height: 1.15,
+                    fontWeight: FontWeight.w800,
+                    color: labelColor,
                   ),
                 ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 10.5,
-            fontWeight: FontWeight.w800,
-            color: fg,
+              ),
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 }
@@ -550,6 +706,9 @@ class StepLine extends StatelessWidget {
                       fontSize: 11.5,
                       fontWeight: FontWeight.w900,
                       color: RideTokens.p800,
+                      // Cifras tabulares: el contador cambia cada paso y sin
+                      // esto la etiqueta "salta" de ancho al pasar de 9 a 10.
+                      fontFeatures: [FontFeature.tabularFigures()],
                     ),
                   ),
                 ),

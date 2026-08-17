@@ -69,6 +69,18 @@ void main() {
       'vacía: la app no puede afirmar quién más está en la sesión', () {
     final cs = CheckoutSessionDto.fromJson(readFixture('checkout_session.json'));
     expect(cs.presence, isNull);
+    expect(cs.stateVersion, isNull, reason: 'columna de P2 aún no desplegada');
+    expect(pickPresenceChip(cs.presence, DateTime.now()), isNull);
+  });
+
+  test('presence: [] NO afirma soledad — withPresence() degrada a lista vacía '
+      'ante un fallo de lectura, así que "vacío" y "no hay nadie" son '
+      'indistinguibles desde el cliente', () {
+    final raw = readFixture('checkout_session_presence.json');
+    raw['presence'] = <dynamic>[];
+    final cs = CheckoutSessionDto.fromJson(raw);
+    expect(cs.presence, isEmpty);
+    // Se pinta IGUAL que null (sin chip): la UI nunca dice "estás solo".
     expect(pickPresenceChip(cs.presence, DateTime.now()), isNull);
   });
 
@@ -79,9 +91,10 @@ void main() {
     expect(cs.presence!.first.surface, 'KIOSK');
     expect(cs.presence!.first.displayName, 'María G.');
     expect(cs.presence!.first.lastSeenAt, isNotNull);
-    // `stateVersion` (columna de P2) NO está en el DTO y debe ignorarse: un
-    // campo nuevo del backend jamás puede tumbar una app vieja en el patio.
     expect(cs.step, CheckoutStep.tcPending);
+    // `stateVersion` (columna de P2) se lee para el FENCING de respuestas
+    // tardías; NO se envía como `expectedVersion` todavía (eso es H6).
+    expect(cs.stateVersion, 3);
   });
 
   test('presence con una superficie DESCONOCIDA no rompe el parseo', () {

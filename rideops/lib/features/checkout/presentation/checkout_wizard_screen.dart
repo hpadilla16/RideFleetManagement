@@ -124,12 +124,21 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
 
     final session = state.session;
     if (session == null) {
+      final message = state.error?.message ?? '';
       return _MessageView(
         icon: Icons.error_outline_rounded,
         title: l10n.coLoadFailedTitle,
-        // Mensaje del backend tal cual (DoD #5): la app no lo inventa.
-        body: state.error?.message ?? '',
+        // Mensaje del backend tal cual (DoD #5): la app no lo inventa. Pero
+        // un error SIN mensaje (5xx pelado, socket cortado) no puede dejar un
+        // hueco en blanco: ahí sí toca un copy traducido.
+        body: message.isNotEmpty
+            ? message
+            : (state.offline
+                ? l10n.errorNoConnectionRetry
+                : l10n.genericError),
         actionLabel: l10n.retryButton,
+        // Recuperarse es la acción PRINCIPAL de esta pantalla: va en primario.
+        primary: true,
         onAction: _controller.refresh,
       );
     }
@@ -153,6 +162,10 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
           context_: state.context,
           presence: pickPresenceChip(session.presence, clock.now()),
           mini: mini,
+          // Sin red el punto de presencia se apaga: el verde afirma "está
+          // AHORA" y esa afirmación la sostiene un heartbeat del servidor que
+          // ahora mismo no podemos leer.
+          offline: state.offline,
         ),
         PhaseRail(currentPosition: state.position),
         StepLine(
@@ -187,8 +200,8 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
               // (CONFIRMING H2, pago H3, inspección H4, firma H5) reemplaza
               // esto por el suyo. Mientras tanto se muestra lo único que el
               // shell puede afirmar por sí mismo: los sellos que el servidor
-              // ya tiene.
-              _StampsCard(session: session),
+              // ya tiene, fechados.
+              _StampsCard(session: session, dataAge: age),
             ],
           ),
         ),
@@ -214,6 +227,12 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      // Scrim de marca rgba(23,18,43,.42) — el mismo del selector de sedes
+      // (nota 7 del 4C). El black54 por default de Material no es el nuestro.
+      barrierColor: const Color(0x6B17122B),
+      // useSafeArea: sin esto el botón de cerrar queda bajo la barra de
+      // gestos en teléfonos con notch.
+      useSafeArea: true,
       // Plate OPACO, no blur (política del M1: nada de BackdropFilter sin
       // señal de capacidad del dispositivo).
       backgroundColor: RideTokens.n0,
@@ -236,47 +255,64 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     final state = ref.read(_provider);
     if (state.session == null) return;
     setState(() => _sheetOpen = true);
-    final paused = await showModalBottomSheet<bool>(
+    var pauseFailed = false;
+    final outcome = await showModalBottomSheet<_PauseOutcome>(
       context: context,
       isScrollControlled: true,
+      barrierColor: const Color(0x6B17122B),
+      useSafeArea: true,
       backgroundColor: RideTokens.n0,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
-      builder: (sheetContext) => Consumer(
-        builder: (_, sheetRef, _) => PauseSheet(
-          position: sheetRef.watch(_provider).position,
-          pausing: sheetRef.watch(_provider).pausing,
-          onConfirm: () async {
-            final ok = await _controller.pause();
-            if (!sheetContext.mounted) return;
-            Navigator.of(sheetContext).pop(ok);
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (_, setSheetState) => Consumer(
+          builder: (_, sheetRef, _) {
+            final live = sheetRef.watch(_provider);
+            return PauseSheet(
+              position: live.position,
+              pausing: live.pausing,
+              offline: live.offline,
+              pauseFailed: pauseFailed,
+              onConfirm: () async {
+                final ok = await _controller.pause();
+                if (!sheetContext.mounted) return;
+                if (ok) {
+                  Navigator.of(sheetContext).pop(_PauseOutcome.paused);
+                } else {
+                  // Se queda ABIERTO: el fallo aparece dentro del sheet junto
+                  // a la salida sin pausar, que es lo que el agente necesita.
+                  setSheetState(() => pauseFailed = true);
+                }
+              },
+              onStay: () => Navigator.of(sheetContext).pop(_PauseOutcome.stay),
+              onLeaveWithoutPausing: () =>
+                  Navigator.of(sheetContext).pop(_PauseOutcome.leave),
+            );
           },
-          onStay: () => Navigator.of(sheetContext).pop(false),
         ),
       ),
     );
     if (!mounted) return;
     setState(() => _sheetOpen = false);
-    if (paused == true) {
+    if (outcome == _PauseOutcome.paused || outcome == _PauseOutcome.leave) {
       _leave();
-    } else if (paused == false && ref.read(_provider).error != null) {
-      // El abandon falló (sin red, o 409 de sesión terminal): se dice, no se
-      // simula que pausó.
-      final l10n = AppLocalizations.of(context)!;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(l10n.coPauseFailed)));
     }
   }
 }
+
+/// Qué hizo el agente en el sheet de pausa. `leave` es la salida honesta sin
+/// POST (INN MC-4): no se pausó nada y se dice así.
+enum _PauseOutcome { paused, stay, leave }
 
 /// Los 4 sellos de side-effect tal como el servidor los reporta. Es la única
 /// afirmación que el shell puede hacer sin el cuerpo del paso — y es la que
 /// hace visible el diff del poll (un sello puede caer mientras miras).
 class _StampsCard extends StatelessWidget {
-  const _StampsCard({required this.session});
+  const _StampsCard({required this.session, required this.dataAge});
 
   final CheckoutSessionDto session;
+  final Duration dataAge;
 
   @override
   Widget build(BuildContext context) {
@@ -304,6 +340,16 @@ class _StampsCard extends StatelessWidget {
               fontSize: 14,
               fontWeight: FontWeight.w900,
               color: RideTokens.n900,
+            ),
+          ),
+          // De cuándo es lo que se está afirmando: la tarjeta muestra sellos
+          // del SERVIDOR, y su verdad tiene fecha de caducidad.
+          Text(
+            l10n.coSessionAgeLabel(checkoutAgeLabel(l10n, dataAge)),
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: RideTokens.n700,
             ),
           ),
           const SizedBox(height: 8),
@@ -338,6 +384,9 @@ class _StampsCard extends StatelessWidget {
                       fontSize: 12.5,
                       fontWeight: FontWeight.w700,
                       color: at == null ? RideTokens.n600 : RideTokens.okTx,
+                      // Horas en cifras tabulares: una columna de horas que
+                      // no se alinea se lee mal de un vistazo.
+                      fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
                 ],
@@ -440,6 +489,7 @@ class _TerminalView extends StatelessWidget {
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
                             color: RideTokens.n700,
+                            fontFeatures: [FontFeature.tabularFigures()],
                           ),
                         ),
                       ],
@@ -462,6 +512,7 @@ class _MessageView extends StatelessWidget {
     required this.body,
     required this.actionLabel,
     required this.onAction,
+    this.primary = false,
   });
 
   final IconData icon;
@@ -469,6 +520,10 @@ class _MessageView extends StatelessWidget {
   final String body;
   final String actionLabel;
   final VoidCallback onAction;
+
+  /// La acción de RECUPERACIÓN va en primario (reintentar); "salir" de un
+  /// estado que no es un error se queda en ghost.
+  final bool primary;
 
   @override
   Widget build(BuildContext context) {
@@ -502,7 +557,9 @@ class _MessageView extends StatelessWidget {
             const SizedBox(height: 16),
             SizedBox(
               width: 220,
-              child: RideGhostButton(label: actionLabel, onPressed: onAction),
+              child: primary
+                  ? RidePrimaryButton(label: actionLabel, onPressed: onAction)
+                  : RideGhostButton(label: actionLabel, onPressed: onAction),
             ),
           ],
         ),

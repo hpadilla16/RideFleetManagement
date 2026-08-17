@@ -37,16 +37,30 @@ abstract class CheckoutSessionDto with _$CheckoutSessionDto {
     @IsoDateTimeConverter() DateTime? autoEmailedAt,
     String? startedByUserId,
 
+    /// Versión optimista de la fila (M2 P2). Se lee para FENCING de
+    /// respuestas: una lectura que llega tarde con versión MENOR que la ya
+    /// aplicada es un fantasma del pasado y se descarta (INN MC-2). No se
+    /// ENVÍA `expectedVersion` todavía — eso es opt-in y aterriza con M2-H6.
+    ///
+    /// Null con backend viejo (columna inexistente) ⇒ el fence cae al
+    /// contador local de escrituras, que no depende del servidor.
+    int? stateVersion,
+
     /// Presencia suave de las otras superficies (M2 P1 —
     /// `checkout-presence.service.js` `withPresence()`, adjunta el campo en
     /// `GET /:id` y `GET /by-reservation/:rid`).
     ///
-    /// NULO ≠ VACÍO, y la diferencia importa: `null` = este backend todavía
-    /// no emite el campo (el PR-tren P1-P3 no está desplegado) ⇒ la app NO
-    /// puede afirmar nada sobre quién más está en la sesión; `[]` = el
-    /// backend SÍ lo emite y no hay nadie fresco dentro del TTL de 45 s.
-    /// Ambas pintan igual (sin chip), pero solo la segunda es una
-    /// afirmación — por eso el campo es opcional y jamás tiene default.
+    /// **La presencia solo puede afirmar PRESENCIA, jamás SOLEDAD.** Tres
+    /// estados, dos de ellos indistinguibles a propósito:
+    ///  - `null`: este backend no emite el campo (P1 sin desplegar), o la
+    ///    respuesta no pasó por `withPresence()` — los POST de transición y
+    ///    abandon NO pasan.
+    ///  - `[]`: el campo vino vacío… lo que puede significar "nadie dentro
+    ///    del TTL de 45 s" **o** que la lectura de presencia falló y
+    ///    `withPresence()` degradó a `[]` (es best-effort por contrato).
+    ///  - lista con filas: lo ÚNICO que la app puede afirmar.
+    /// Por eso el campo es opcional, jamás tiene default, y la UI nunca dice
+    /// "estás solo en esta sesión".
     List<CheckoutPresenceDto>? presence,
   }) = _CheckoutSessionDto;
 

@@ -9,7 +9,7 @@ actualiza en el mismo PR (DoD #12). Los tests de DTO deserializan estos archivos
 | `login_response.json` | `auth.service.js` `login()` → `{ token, user: buildSessionUser }` (:87-115, :250-255) |
 | `dashboard.json` | `employee-app.service.js` `dashboard()` (:451-497), `reservationCard` (:66-122), `incidentCard` (:124-160) |
 | `checkout_session.json` | fila Prisma cruda del modelo `CheckoutSession` (schema.prisma:5067-5111) vía `getById` (:276-280); `events` con la forma exacta de `appendEvent` (state-machine.js:111-117) — incluye una entrada del kiosco (`metadata.kiosk`, kiosk-checkout.service.js:769-774) y una entrada LEGACY sin `kind` |
-| `checkout_session_presence.json` | la MISMA fila + lo que agrega el PR-tren P1-P3 (rama `feat/checkout-multisurface-p123`, aún no en main): `presence: [{surface, displayName, lastSeenAt}]` de `checkoutPresenceService.withPresence()` y la columna `stateVersion` de P2. Sirve además de prueba de tolerancia: `stateVersion` NO está declarado en el DTO y debe ignorarse sin romper |
+| `checkout_session_presence.json` | la MISMA fila + lo que agrega el PR-tren P1-P3 (rama `feat/checkout-multisurface-p123`, aún no en main): `presence: [{surface, displayName, lastSeenAt}]` de `checkoutPresenceService.withPresence()` y la columna `stateVersion` de P2 (que el cliente LEE para descartar respuestas tardías, pero todavía no envía como `expectedVersion` — eso es M2-H6) |
 | `reservation_card.json` | `employee-app.service.js` `reservationCard` (:66-122) |
 | `handoff_token.json` | `checkout-session.service.js` `mintHandoffToken` (:727-733 reuso, :766-770 fresco) |
 | `mobile_inspection_state.json` | `mobile-inspection.service.js` `loadSession` (:118-143) |
@@ -26,3 +26,10 @@ Notas de forma que muerden:
   Prisma (`Decimal` serializa a string). El DTO debe aceptar ambos.
 - `reservationCard.vehicle.plate` hace fallback `plate || licensePlate || ''` en servidor.
 - `handoff_token` trae `reused: true` solo cuando devolvió un token existente.
+- `reservation_display_data.reservation` es la fila COMPLETA (el `getById` usa `include`,
+  no `select`): además de lo ya declarado trae `pickupAt` y `customerInfoCompletedAt`, que
+  el header del wizard de checkout usa para responder "para cuándo" y si el pre-checkin
+  está listo (M2-H1). El resto de columnas sigue ignorándose por json_serializable.
+- `presence: []` **no** significa "no hay nadie": `withPresence()` es best-effort y
+  degrada a lista vacía si la lectura de presencia falla. La presencia solo puede afirmar
+  presencia, jamás soledad.

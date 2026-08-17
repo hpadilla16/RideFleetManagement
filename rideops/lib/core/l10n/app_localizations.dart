@@ -2090,6 +2090,54 @@ abstract class AppLocalizations {
   /// **'Entendido'**
   String get coConflictDismiss;
 
+  /// Tercera respuesta del patio en el header de sesión (8A): para cuándo
+  ///
+  /// In es, this message translates to:
+  /// **'Salida hoy {time}'**
+  String coPickupToday(String time);
+
+  /// No description provided for @coPickupOn.
+  ///
+  /// In es, this message translates to:
+  /// **'Salida {date} {time}'**
+  String coPickupOn(String date, String time);
+
+  /// No description provided for @coPrecheckinReady.
+  ///
+  /// In es, this message translates to:
+  /// **'Pre-checkin listo'**
+  String get coPrecheckinReady;
+
+  /// No description provided for @coPrecheckinPending.
+  ///
+  /// In es, this message translates to:
+  /// **'Pre-checkin pendiente'**
+  String get coPrecheckinPending;
+
+  /// No description provided for @coOdometer.
+  ///
+  /// In es, this message translates to:
+  /// **'Odómetro {km} km'**
+  String coOdometer(String km);
+
+  /// No description provided for @coExitWithoutPausing.
+  ///
+  /// In es, this message translates to:
+  /// **'Salir sin pausar'**
+  String get coExitWithoutPausing;
+
+  /// No description provided for @coExitWithoutPausingWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Nada se bloquea: la sesión queda como está y el patio puede seguirla desde otra superficie.'**
+  String get coExitWithoutPausingWhy;
+
+  /// No description provided for @coPauseNeedsNetwork.
+  ///
+  /// In es, this message translates to:
+  /// **'Pausar necesita conexión: es un aviso que se guarda en el servidor. Sin red puedes salir igual.'**
+  String get coPauseNeedsNetwork;
+
   /// No description provided for @coStampsTitle.
   ///
   /// In es, this message translates to:

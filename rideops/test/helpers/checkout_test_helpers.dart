@@ -39,9 +39,14 @@ CheckoutSessionDto sessionAt(
   String? rawStep,
   List<CheckoutPresenceDto>? presence,
   DateTime? abandonedAt,
+
+  /// Columna de P2. null = backend sin desplegar (el fence cae al epoch
+  /// local); un entero permite probar el descarte por versión.
+  int? stateVersion,
 }) {
   final raw = rawCheckoutSession();
   raw['currentStep'] = rawStep ?? step.wire;
+  raw['stateVersion'] = stateVersion;
   raw['events'] = json.encode([
     {
       'kind': 'SESSION_STARTED',
@@ -102,19 +107,29 @@ class FakeCheckoutApi extends CheckoutApi {
     return value;
   }
 
+  /// `skipRateLimitRetry` de cada lectura, en orden — el poll debe pedir que
+  /// el interceptor NO reintente; el re-fetch del agente, sí.
+  final skipRetryFlags = <bool>[];
+
   @override
   Future<CheckoutSessionDto?> getByReservation(
     String reservationId, {
     bool skipViewLocation = false,
+    bool skipRateLimitRetry = false,
   }) async {
     byReservationCalls++;
+    skipRetryFlags.add(skipRateLimitRetry);
     if (onByReservation != null) return onByReservation!();
     return _maybeGate(current);
   }
 
   @override
-  Future<CheckoutSessionDto> getSession(String id) async {
+  Future<CheckoutSessionDto> getSession(
+    String id, {
+    bool skipRateLimitRetry = false,
+  }) async {
     getCalls++;
+    skipRetryFlags.add(skipRateLimitRetry);
     if (onGet != null) return onGet!();
     return _maybeGate(current!);
   }

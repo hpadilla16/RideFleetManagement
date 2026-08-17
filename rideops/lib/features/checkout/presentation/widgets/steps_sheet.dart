@@ -213,6 +213,9 @@ class _StepItem extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+      // 52 px explícitos: la lista se lee y se recorre con el pulgar, y una
+      // fila que encoge según el largo del subtítulo hace saltar el ritmo.
+      constraints: const BoxConstraints(minHeight: 52),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(14),

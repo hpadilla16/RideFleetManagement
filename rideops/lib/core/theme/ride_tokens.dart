@@ -17,6 +17,12 @@ abstract final class RideTokens {
   static const n200 = Color(0xFFE9E4F4);
   static const n300 = Color(0xFFD9D2EA);
   static const n400 = Color(0xFFB3AAC9);
+
+  /// n500 (M2-H1): el gris MÁS CLARO que un elemento no-textual puede usar y
+  /// seguir viéndose — 3.26:1 sobre blanco, justo encima del mínimo 3:1 de
+  /// icono/gráfico. Existe porque el punto "presencia envejecida" se pintaba
+  /// con [n400] (1.96:1): invisible, o sea un chip con un solo estado real.
+  static const n500 = Color(0xFF8A819F);
   static const n600 = Color(0xFF736A8B);
   static const n700 = Color(0xFF4B4362);
   static const n800 = Color(0xFF2E2745);
@@ -49,6 +55,12 @@ abstract final class RideTokens {
   /// fondo daba 3.73:1 y se descartó). Semántica: ámbar = esperando red,
   /// rojo = necesita decisión.
   static const badgeWarn = Color(0xFF8A5606);
+  /// Banner informativo (--info-bg / --info-bd del mockup M2). El azul --info
+  /// se reserva al ICONO: como texto sobre su propio fondo mide 4.94:1 y no
+  /// da margen al sol; el texto va en --n-800 (12.48:1).
+  static const infoBg = Color(0xFFEAF2FE);
+  static const infoBd = Color(0xFFC5DCFB);
+
   static const dangerBg = Color(0xFFFDECEA);
   static const dangerBd = Color(0xFFF6CDC9);
   static const dangerTx = Color(0xFF9C1D1D);

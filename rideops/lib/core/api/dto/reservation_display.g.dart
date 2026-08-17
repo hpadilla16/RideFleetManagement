@@ -32,6 +32,12 @@ _DisplayReservation _$DisplayReservationFromJson(Map<String, dynamic> json) =>
       customer: json['customer'] == null
           ? null
           : DisplayCustomer.fromJson(json['customer'] as Map<String, dynamic>),
+      pickupAt: const IsoDateTimeConverter().fromJson(
+        json['pickupAt'] as String?,
+      ),
+      customerInfoCompletedAt: const IsoDateTimeConverter().fromJson(
+        json['customerInfoCompletedAt'] as String?,
+      ),
     );
 
 Map<String, dynamic> _$DisplayReservationToJson(_DisplayReservation instance) =>
@@ -40,6 +46,10 @@ Map<String, dynamic> _$DisplayReservationToJson(_DisplayReservation instance) =>
       'reservationNumber': instance.reservationNumber,
       'vehicle': instance.vehicle,
       'customer': instance.customer,
+      'pickupAt': const IsoDateTimeConverter().toJson(instance.pickupAt),
+      'customerInfoCompletedAt': const IsoDateTimeConverter().toJson(
+        instance.customerInfoCompletedAt,
+      ),
     };
 
 _DisplayCustomer _$DisplayCustomerFromJson(Map<String, dynamic> json) =>

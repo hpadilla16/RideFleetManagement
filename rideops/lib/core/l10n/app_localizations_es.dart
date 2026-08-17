@@ -1278,6 +1278,38 @@ class AppLocalizationsEs extends AppLocalizations {
   String get coConflictDismiss => 'Entendido';
 
   @override
+  String coPickupToday(String time) {
+    return 'Salida hoy $time';
+  }
+
+  @override
+  String coPickupOn(String date, String time) {
+    return 'Salida $date $time';
+  }
+
+  @override
+  String get coPrecheckinReady => 'Pre-checkin listo';
+
+  @override
+  String get coPrecheckinPending => 'Pre-checkin pendiente';
+
+  @override
+  String coOdometer(String km) {
+    return 'Odómetro $km km';
+  }
+
+  @override
+  String get coExitWithoutPausing => 'Salir sin pausar';
+
+  @override
+  String get coExitWithoutPausingWhy =>
+      'Nada se bloquea: la sesión queda como está y el patio puede seguirla desde otra superficie.';
+
+  @override
+  String get coPauseNeedsNetwork =>
+      'Pausar necesita conexión: es un aviso que se guarda en el servidor. Sin red puedes salir igual.';
+
+  @override
   String get coStampsTitle => 'Lo que el servidor ya tiene';
 
   @override

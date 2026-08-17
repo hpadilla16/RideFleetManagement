@@ -44,10 +44,19 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 | `checkout.money_attempt` / `checkout.money_ok` / `checkout.money_fail` | rutas de dinero (tag `kind`: charge_sale/hold_deposit/manual_*; NUNCA montos ni PAN) |
 | `checkout.preview_divergence` | cálculo local ≠ preview del servidor (compuerta ADR-6) |
 
-Detalle de `checkout.reconciled` (M2-H1): `via = conflict` cuando el re-render vino de un
-409 re-consultado, `via = poll` cuando el poll de 5 s detectó que OTRA superficie movió el
-paso. Con 4 superficies conviviendo, la frecuencia de `via=poll` es la métrica de cuánto
-se pisan en el patio — y la prueba de concurrencia del SHIP del épico se mide con ella.
+Detalle de `checkout.reconciled` (M2-H1). Tres valores de `via`, deliberadamente
+separados porque miden cosas distintas:
+
+- `poll` — el poll de 5 s detectó que OTRA superficie movió el paso. Su frecuencia ES la
+  métrica de cuánto se pisan las superficies en el patio, y con ella se mide la prueba de
+  concurrencia del SHIP del épico.
+- `conflict` — el servidor rechazó una transición con 409 y el re-fetch reconcilió.
+- `preflight` — el re-fetch previo a escribir (>3 s de antigüedad) encontró la sesión ya
+  movida y ABORTÓ el POST. No hubo 409: contarlo como tal inflaría las colisiones reales.
+
+Nunca se emite con `steps_jumped` negativo: una lectura que aterriza después de una
+escritura se descarta por fencing (`stateVersion` de P2 + epoch local) en vez de publicar
+el pasado.
 `steps_jumped` puede venir ausente: si alguno de los dos pasos no está en el catálogo de
 la app (paso nuevo del backend), el evento viaja sin el tag antes que con un número
 inventado.

@@ -618,6 +618,27 @@
   "coConflictVehicleTitle": "El vehículo ya no está libre",
   "coConflictGenericTitle": "El servidor no aceptó el avance",
   "coConflictDismiss": "Entendido",
+  "coPickupToday": "Salida hoy {time}",
+  "@coPickupToday": {
+    "description": "Tercera respuesta del patio en el header de sesión (8A): para cuándo",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coPickupOn": "Salida {date} {time}",
+  "@coPickupOn": {
+    "placeholders": {
+      "date": { "type": "String" },
+      "time": { "type": "String" }
+    }
+  },
+  "coPrecheckinReady": "Pre-checkin listo",
+  "coPrecheckinPending": "Pre-checkin pendiente",
+  "coOdometer": "Odómetro {km} km",
+  "@coOdometer": {
+    "placeholders": { "km": { "type": "String" } }
+  },
+  "coExitWithoutPausing": "Salir sin pausar",
+  "coExitWithoutPausingWhy": "Nada se bloquea: la sesión queda como está y el patio puede seguirla desde otra superficie.",
+  "coPauseNeedsNetwork": "Pausar necesita conexión: es un aviso que se guarda en el servidor. Sin red puedes salir igual.",
   "coStampsTitle": "Lo que el servidor ya tiene",
   "coStampTc": "Firma de T&C",
   "coStampPayment": "Cobro registrado",

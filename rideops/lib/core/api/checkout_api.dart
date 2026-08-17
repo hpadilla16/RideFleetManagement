@@ -26,12 +26,14 @@ class CheckoutApi {
   Future<CheckoutSessionDto?> getByReservation(
     String reservationId, {
     bool skipViewLocation = false,
+    bool skipRateLimitRetry = false,
   }) async {
     try {
       final res = await authedDio.get<Map<String, dynamic>>(
         '/api/checkout-sessions/by-reservation/$reservationId',
         options: Options(extra: {
           if (skipViewLocation) AuthInterceptor.skipViewLocation: true,
+          if (skipRateLimitRetry) RateLimitRetryInterceptor.skipRetry: true,
         }),
       );
       return CheckoutSessionDto.fromJson(res.data!);
@@ -51,10 +53,23 @@ class CheckoutApi {
   /// 404 aquí es un caso real: la sesión existía y el tenant ya no la ve.
   /// Se propaga como ApiError (a diferencia del `by-reservation`, donde 404
   /// significa "todavía no hay sesión" y es un estado normal de la pantalla).
-  Future<CheckoutSessionDto> getSession(String id) async {
+  ///
+  /// [skipRateLimitRetry]: el POLLER lo pone en true (misma regla adoptada en
+  /// M1-H4 para el dashboard, interceptors.dart:163-169) — su timer ya trae
+  /// backoff decorrelacionado y el retry por-request amplificaría hasta 4× un
+  /// 429 sostenido. El re-fetch del AGENTE lo deja en false: ahí hay un humano
+  /// esperando UNA respuesta.
+  Future<CheckoutSessionDto> getSession(
+    String id, {
+    bool skipRateLimitRetry = false,
+  }) async {
     try {
-      final res = await authedDio
-          .get<Map<String, dynamic>>('/api/checkout-sessions/$id');
+      final res = await authedDio.get<Map<String, dynamic>>(
+        '/api/checkout-sessions/$id',
+        options: skipRateLimitRetry
+            ? Options(extra: {RateLimitRetryInterceptor.skipRetry: true})
+            : null,
+      );
       return CheckoutSessionDto.fromJson(res.data!);
     } on DioException catch (e) {
       throw ApiError.fromDio(e);

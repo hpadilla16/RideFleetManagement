@@ -5,6 +5,7 @@
     "reservationNumber": "R-20260816-0042",
     "status": "CONFIRMED",
     "pickupAt": "2026-08-16T17:30:00.000Z",
+    "customerInfoCompletedAt": "2026-08-15T22:10:00.000Z",
     "returnAt": "2026-08-19T17:30:00.000Z",
     "pickupLocationId": "cme9q0l0c0001locctr",
     "returnLocationId": "cme9q0l0c0001locctr",

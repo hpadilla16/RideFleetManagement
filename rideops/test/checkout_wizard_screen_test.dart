@@ -10,12 +10,14 @@ import 'package:rideops/core/api/api_providers.dart';
 import 'package:rideops/core/api/dto/checkout_session.dart';
 import 'package:rideops/core/api/enums.dart';
 import 'package:rideops/core/l10n/app_localizations.dart';
+import 'package:rideops/core/lifecycle/app_visibility.dart';
 import 'package:rideops/core/outbox/network_status.dart';
 import 'package:rideops/core/router/app_router.dart';
 import 'package:rideops/core/session/active_location.dart';
 import 'package:rideops/core/session/session_controller.dart';
 import 'package:rideops/core/session/session_state.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
+import 'package:rideops/core/theme/ride_tokens.dart';
 import 'package:rideops/core/widgets/ride_buttons.dart';
 import 'package:rideops/features/checkout/presentation/checkout_wizard_screen.dart';
 import 'package:rideops/features/checkout/presentation/widgets/transition_button.dart';
@@ -289,6 +291,249 @@ void main() {
     await tester.tap(find.text('Save and pause'));
     await tester.pumpAndSettle();
     expect(f.api.abandonCalls, 1);
+  });
+
+  testWidgets('MC-4 — sin red el agente NO queda encerrado: pausar se apaga '
+      'con su causa y hay salida honesta sin POST', (tester) async {
+    final f = fakes();
+    f.api.current = sessionAt(CheckoutStep.tcPending);
+    await pumpWizard(tester, api: f.api, network: f.network);
+
+    f.api.onGet = () async =>
+        throw ApiError(kind: ApiErrorKind.network, message: 'sin red');
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pump();
+
+    await tester.tap(find.text('Pause'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Pausing needs a connection'), findsOneWidget);
+
+    // El primario está apagado (un POST offline falla siempre) y la salida
+    // real existe.
+    await tester.tap(find.text('Save and pause'));
+    await tester.pumpAndSettle();
+    expect(f.api.abandonCalls, 0);
+
+    await tester.tap(find.text('Leave without pausing'));
+    await tester.pumpAndSettle();
+    expect(f.api.abandonCalls, 0, reason: 'salir no inventa un POST');
+    expect(find.byType(PauseSheet), findsNothing);
+    expect(find.text('home'), findsOneWidget, reason: 'salió de verdad');
+  });
+
+  testWidgets('MC-4 — si el POST de pausa falla, el sheet se queda con el '
+      'error y la salida a un toque', (tester) async {
+    final f = fakes();
+    f.api.current = sessionAt(CheckoutStep.tcPending);
+    f.api.onAbandon = () async => throw ApiError(
+          kind: ApiErrorKind.conflict,
+          message: 'Session is already terminal',
+          status: 409,
+        );
+    await pumpWizard(tester, api: f.api, network: f.network);
+
+    await tester.tap(find.text('Pause'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save and pause'));
+    await tester.pumpAndSettle();
+
+    expect(f.api.abandonCalls, 1);
+    expect(find.byType(PauseSheet), findsOneWidget, reason: 'no se cierra en '
+        'silencio fingiendo que pausó');
+    expect(find.textContaining('Could not pause'), findsOneWidget);
+    expect(find.text('Leave without pausing'), findsOneWidget);
+  });
+
+  testWidgets('SC-5 — la pausa del poll también funciona AQUÍ: el wizard vive '
+      'fuera del shell y la señal de visibilidad la da LockObserver',
+      (tester) async {
+    final f = fakes();
+    await pumpWizard(tester, api: f.api, network: f.network);
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(CheckoutWizardScreen)),
+    );
+
+    // Un tick normal ocurre a los 5 s…
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pump();
+    expect(f.api.getCalls, 1);
+
+    // …y con la app en background, ninguno.
+    container.read(appVisibilityProvider.notifier).setVisible(false);
+    await tester.pump();
+    await tester.pump(const Duration(minutes: 2));
+    expect(f.api.getCalls, 1, reason: 'el poll de 5 s no corre en el bolsillo');
+
+    // Al volver: lectura inmediata, que es cuando el dato viejo más miente.
+    container.read(appVisibilityProvider.notifier).setVisible(true);
+    await tester.pump();
+    expect(f.api.getCalls, 2);
+  });
+
+  group('acabado del mockup (review de GD)', () {
+    testWidgets('el rail lleva conector y la fase ACTUAL es relleno sólido de '
+        'marca (no puede pesar menos que la hecha)', (tester) async {
+      final f = fakes();
+      f.api.current = sessionAt(CheckoutStep.paymentPending);
+      await pumpWizard(tester, api: f.api, network: f.network);
+
+      // Conectores: 4 tramos entre 5 nodos ⇒ 8 mitades, ninguna transparente
+      // salvo los extremos.
+      final rail = find.byType(PhaseRail);
+      expect(rail, findsOneWidget);
+
+      final dots = tester.widgetList<Container>(
+        find.descendant(of: rail, matching: find.byType(Container)),
+      );
+      final solids = dots.where((c) {
+        final d = c.decoration;
+        return d is BoxDecoration &&
+            d.shape == BoxShape.circle &&
+            d.color == RideTokens.p600;
+      });
+      expect(solids, hasLength(1), reason: 'una sola fase actual, sólida');
+      final halo = solids.first.decoration as BoxDecoration;
+      expect(halo.boxShadow?.first.color, RideTokens.brandA20);
+
+      final connectors = dots.where((c) =>
+          c.constraints == null &&
+          c.decoration == null &&
+          c.color != null &&
+          c.color != Colors.transparent);
+      expect(connectors, isNotEmpty, reason: 'sin conector son 5 chips sueltos');
+
+      // Alto táctil del rail.
+      expect(tester.getSize(rail).height, greaterThanOrEqualTo(48));
+    });
+
+    testWidgets('las acciones de banner tienen 44 px de alto y área más ancha '
+        'que su texto', (tester) async {
+      final f = fakes();
+      await pumpWizard(tester, api: f.api, network: f.network);
+      f.api.current = sessionAt(
+        CheckoutStep.tcPending,
+        actorUserId: null,
+        kiosk: true,
+      );
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pump();
+
+      final action = find.byType(BannerAction);
+      expect(action, findsOneWidget);
+      final box = tester.getRect(action);
+      expect(box.height, greaterThanOrEqualTo(44));
+      expect(
+        box.width,
+        greaterThan(tester.getRect(find.text('See what changed')).width),
+        reason: 'hit-slop real, no el ancho exacto del texto',
+      );
+    });
+
+    testWidgets('sin red el punto de presencia deja de ser verde (no se '
+        'afirma liveness que no podemos leer) pero el chip NO desaparece',
+        (tester) async {
+      final f = fakes();
+      f.api.current = sessionAt(
+        CheckoutStep.confirming,
+        presence: [
+          CheckoutPresenceDto(
+            surface: 'KIOSK',
+            displayName: 'María G.',
+            lastSeenAt: DateTime.now().subtract(const Duration(seconds: 5)),
+          ),
+        ],
+      );
+      await pumpWizard(tester, api: f.api, network: f.network);
+
+      Color dotColor() {
+        final dot = tester.widgetList<Container>(
+          find.descendant(
+            of: find.byType(PresenceChip),
+            matching: find.byType(Container),
+          ),
+        ).firstWhere((c) {
+          final d = c.decoration;
+          return d is BoxDecoration && d.shape == BoxShape.circle;
+        });
+        return (dot.decoration! as BoxDecoration).color!;
+      }
+
+      expect(dotColor(), RideTokens.ok);
+
+      f.api.onGet = () async =>
+          throw ApiError(kind: ApiErrorKind.network, message: 'sin red');
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pump();
+
+      expect(find.byType(PresenceChip), findsOneWidget,
+          reason: 'desaparecer sigue siendo cosa EXCLUSIVA del TTL');
+      expect(dotColor(), RideTokens.n500);
+    });
+
+    testWidgets('el header responde "para cuándo" y no repite el número de '
+        'reserva del wizbar', (tester) async {
+      final f = fakes();
+      await pumpWizard(tester, api: f.api, network: f.network);
+
+      expect(find.textContaining('Pre-check-in done'), findsOneWidget);
+      expect(find.textContaining('Odometer'), findsOneWidget);
+      // El número vive SOLO en el wizbar.
+      expect(find.textContaining('R-20260816-0042'), findsOneWidget);
+    });
+
+    testWidgets('el dock del CTA trae hairline y el "why" centrado',
+        (tester) async {
+      final f = fakes();
+      await pumpWizard(
+        tester,
+        api: f.api,
+        network: f.network,
+        child: const TransitionButton(
+          reservationId: kReservationId,
+          toStep: CheckoutStep.tcPending,
+          label: 'Continue to T&C',
+        ),
+      );
+      final dock = tester.widget<Container>(
+        find
+            .descendant(
+              of: find.byType(TransitionButton),
+              matching: find.byType(Container),
+            )
+            .first,
+      );
+      final border = (dock.decoration! as BoxDecoration).border!;
+      expect(border.top.color, RideTokens.n200);
+
+      final why = tester.widget<Text>(
+        find.textContaining('The server confirms the advance'),
+      );
+      expect(why.textAlign, TextAlign.center);
+      expect(why.style!.fontSize, 12.5);
+    });
+
+    testWidgets('los sheets usan el scrim de marca y respetan la safe area',
+        (tester) async {
+      final f = fakes();
+      await pumpWizard(tester, api: f.api, network: f.network);
+      await tester.tap(find.text('See every step'));
+      await tester.pumpAndSettle();
+
+      final barrier = tester.widgetList<ModalBarrier>(
+        find.byType(ModalBarrier),
+      ).firstWhere((b) => b.color != null);
+      expect(barrier.color, const Color(0x6B17122B));
+      // useSafeArea envuelve el sheet POR FUERA: el SafeArea es ancestro del
+      // contenido, no descendiente.
+      expect(
+        find.ancestor(
+          of: find.byType(StepsSheet),
+          matching: find.byType(SafeArea),
+        ),
+        findsWidgets,
+        reason: 'sin esto el botón queda bajo la barra de gestos',
+      );
+    });
   });
 
   testWidgets('la flecha de atrás no sale sin decidir: abre el mismo sheet',

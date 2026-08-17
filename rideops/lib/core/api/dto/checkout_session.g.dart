@@ -40,6 +40,7 @@ _CheckoutSessionDto _$CheckoutSessionDtoFromJson(Map<String, dynamic> json) =>
         json['autoEmailedAt'] as String?,
       ),
       startedByUserId: json['startedByUserId'] as String?,
+      stateVersion: (json['stateVersion'] as num?)?.toInt(),
       presence: (json['presence'] as List<dynamic>?)
           ?.map((e) => CheckoutPresenceDto.fromJson(e as Map<String, dynamic>))
           .toList(),
@@ -70,6 +71,7 @@ Map<String, dynamic> _$CheckoutSessionDtoToJson(
   'abandonedReason': instance.abandonedReason,
   'autoEmailedAt': const IsoDateTimeConverter().toJson(instance.autoEmailedAt),
   'startedByUserId': instance.startedByUserId,
+  'stateVersion': instance.stateVersion,
   'presence': instance.presence,
 };
 

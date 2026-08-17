@@ -79,6 +79,8 @@ class CheckoutReservationContext {
     this.plate,
     this.odometer,
     this.tenantName,
+    this.pickupAt,
+    this.precheckinDone = false,
   });
 
   final String? reservationNumber;
@@ -86,6 +88,13 @@ class CheckoutReservationContext {
   final String? vehicleLabel;
   final String? plate;
   final int? odometer;
+
+  /// "Salida hoy 10:30" — la tercera respuesta del patio (mockup 8A).
+  final DateTime? pickupAt;
+
+  /// `customerInfoCompletedAt` sellado. Se muestra ANTES de que el 422
+  /// PRECHECKIN_REQUIRED pueda aparecer al crear la sesión (H7).
+  final bool precheckinDone;
 
   /// Nombre del tenant para el subtítulo del wizbar. OJO: esta es superficie
   /// de STAFF — aquí sí se puede nombrar al tenant; el filtro

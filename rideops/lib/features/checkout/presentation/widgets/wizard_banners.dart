@@ -8,6 +8,55 @@ import '../checkout_labels.dart';
 
 /// Banners del shell: avance ajeno (8C) y sin red (8D).
 
+/// Acción textual dentro de un banner ("Ver qué cambió", "Reintentar",
+/// "Entendido").
+///
+/// 44 px de alto y padding horizontal REAL: el mockup manda 44 y el DoD pide
+/// hit-slop cómodo. Un enlace cuyo área táctil es exactamente el ancho del
+/// texto es un enlace que en el patio, con guantes, se falla.
+class BannerAction extends StatelessWidget {
+  const BannerAction({
+    super.key,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 44),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            alignment: Alignment.centerLeft,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w900,
+                color: color,
+                decoration: TextDecoration.underline,
+                decorationColor: color,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Contenedor común. El color del icono es semántico; el TEXTO siempre va en
 /// la rampa neutra alta — un azul/ámbar de texto sobre su propio fondo no da
 /// margen al sol del patio.
@@ -82,8 +131,8 @@ class ForeignAdvanceBanner extends StatelessWidget {
     return WizardBanner(
       icon: Icons.info_outline_rounded,
       iconColor: RideTokens.focus,
-      background: const Color(0xFFEAF2FE),
-      border: const Color(0xFFC9DDF8),
+      background: RideTokens.infoBg,
+      border: RideTokens.infoBd,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -96,22 +145,10 @@ class ForeignAdvanceBanner extends StatelessWidget {
               color: RideTokens.n800,
             ),
           ),
-          const SizedBox(height: 4),
-          InkWell(
+          BannerAction(
+            label: l10n.coAdvancedSeeChanged,
+            color: RideTokens.p700,
             onTap: onSeeChanged,
-            child: Container(
-              constraints: const BoxConstraints(minHeight: 32),
-              alignment: Alignment.centerLeft,
-              child: Text(
-                l10n.coAdvancedSeeChanged,
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w900,
-                  color: RideTokens.p700,
-                  decoration: TextDecoration.underline,
-                ),
-              ),
-            ),
           ),
         ],
       ),
@@ -149,22 +186,10 @@ class OfflineBanner extends StatelessWidget {
               color: RideTokens.warnTx,
             ),
           ),
-          const SizedBox(height: 4),
-          InkWell(
+          BannerAction(
+            label: l10n.retryButton,
+            color: RideTokens.warnTx,
             onTap: onRetry,
-            child: Container(
-              constraints: const BoxConstraints(minHeight: 32),
-              alignment: Alignment.centerLeft,
-              child: Text(
-                l10n.retryButton,
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w900,
-                  color: RideTokens.warnTx,
-                  decoration: TextDecoration.underline,
-                ),
-              ),
-            ),
           ),
         ],
       ),
@@ -232,22 +257,10 @@ class ConflictBanner extends StatelessWidget {
               color: RideTokens.n800,
             ),
           ),
-          const SizedBox(height: 4),
-          InkWell(
+          BannerAction(
+            label: l10n.coConflictDismiss,
+            color: RideTokens.dangerTx,
             onTap: onDismiss,
-            child: Container(
-              constraints: const BoxConstraints(minHeight: 32),
-              alignment: Alignment.centerLeft,
-              child: Text(
-                l10n.coConflictDismiss,
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w900,
-                  color: RideTokens.dangerTx,
-                  decoration: TextDecoration.underline,
-                ),
-              ),
-            ),
           ),
         ],
       ),

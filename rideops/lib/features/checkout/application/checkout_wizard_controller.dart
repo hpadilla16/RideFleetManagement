@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:clock/clock.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,20 +20,21 @@ import 'checkout_wizard_state.dart';
 
 /// Ritmo del poll del wizard — inyectable para que fakeAsync mueva el reloj.
 class CheckoutPollConfig {
-  const CheckoutPollConfig({
+  CheckoutPollConfig({
     this.baseInterval = const Duration(seconds: 5),
     this.slowInterval = const Duration(seconds: 15),
     this.unchangedCyclesBeforeSlowLane = 3,
     this.preTransitionMaxAge = const Duration(seconds: 3),
-  });
+    this.backoffCap = const Duration(minutes: 5),
+    Random? random,
+  }) : random = random ?? Random();
 
   /// 5 s con el wizard abierto: es la ventana en la que el kiosco puede
   /// firmar T&C mientras el agente mira la pantalla.
   final Duration baseInterval;
 
-  /// Carril lento tras [unchangedCyclesBeforeSlowLane] ciclos sin cambio (y
-  /// también tras un 429/503): la sesión que no se mueve no merece 12
-  /// requests por minuto por teléfono.
+  /// Carril lento tras [unchangedCyclesBeforeSlowLane] ciclos sin cambio: la
+  /// sesión que no se mueve no merece 12 requests por minuto por teléfono.
   final Duration slowInterval;
   final int unchangedCyclesBeforeSlowLane;
 
@@ -40,10 +42,17 @@ class CheckoutPollConfig {
   /// de esto, se re-consulta. Achica la ventana read-then-write que
   /// `stampSideEffect` deja abierta (checkout-session.service.js:621-645).
   final Duration preTransitionMaxAge;
+
+  /// Tope del backoff DECORRELACIONADO ante 429/503 — mismo mecanismo que el
+  /// poller del dashboard (SC-7 del review): un carril lento fijo devuelve a
+  /// N teléfonos en coro cada 15 s contra un backend que ya está pidiendo
+  /// aire; el decorrelacionado los dispersa.
+  final Duration backoffCap;
+  final Random random;
 }
 
 final Provider<CheckoutPollConfig> checkoutPollConfigProvider =
-    Provider<CheckoutPollConfig>((ref) => const CheckoutPollConfig());
+    Provider<CheckoutPollConfig>((ref) => CheckoutPollConfig());
 
 /// Controller del shell del wizard (M2-H1, mockup 8A-8F).
 ///
@@ -71,6 +80,27 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
   bool _inFlight = false;
   int _unchangedCycles = 0;
   bool _slowLane = false;
+  Duration? _backoff;
+
+  /// FENCING de respuestas (INN MC-2). El problema real: un tick del poll sale
+  /// volando, el agente transiciona, el POST responde primero y DESPUÉS
+  /// aterriza el GET viejo. Sin fence, esa lectura obsoleta publica un estado
+  /// ANTERIOR, el stepper retrocede, y se emite `checkout.reconciled` con
+  /// `steps_jumped` negativo — corrompiendo justo la métrica con la que el
+  /// épico mide su SHIP.
+  ///
+  /// Dos cinturones, en este orden:
+  ///  1. [stateVersion] del servidor (P2) cuando existe: una lectura con
+  ///     versión MENOR que la aplicada es un fantasma del pasado.
+  ///  2. [_writeEpoch] local: sube en cada aplicación de una ESCRITURA
+  ///     (transition/abandon). Toda lectura captura el epoch al despachar y
+  ///     se descarta si cambió mientras viajaba. Funciona con backend viejo,
+  ///     donde `stateVersion` llega null.
+  int _writeEpoch = 0;
+
+  /// Última `stateVersion` efectivamente aplicada (null mientras el backend
+  /// no emita la columna).
+  int? _appliedVersion;
 
   /// Último paso REPORTADO que ya se logueó como renderizado — evita que
   /// `checkout.step_rendered` se emita por tick del poll.
@@ -85,6 +115,9 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
     _inFlight = false;
     _unchangedCycles = 0;
     _slowLane = false;
+    _backoff = null;
+    _writeEpoch = 0;
+    _appliedVersion = null;
     _renderedStep = null;
     ref.onDispose(() {
       _timer?.cancel();
@@ -147,19 +180,27 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
   /// del banner offline.
   Future<void> refresh() async {
     final id = state.session?.id;
-    if (id == null) return _load(_generation);
+    if (id == null) return _load(_generation, byUser: true);
     return _poll(_generation, byUser: true);
   }
 
   /// Primera lectura: `by-reservation` es la fuente de verdad al entrar.
-  Future<void> _load(int gen) async {
+  ///
+  /// [byUser] false = arranque automático ⇒ sin retry por-request del
+  /// interceptor (el timer ya trae su propio backoff). El reintento del
+  /// AGENTE sí lo conserva: ahí hay un humano esperando UNA respuesta.
+  Future<void> _load(int gen, {bool byUser = false}) async {
     if (gen != _generation || !ref.mounted) return;
     if (_inFlight) return;
     _inFlight = true;
     state = state.copyWith(fetching: true, clearError: true);
     final hadHeader = ref.read(activeLocationProvider).isPinned;
+    final epoch = _writeEpoch;
     try {
-      final session = await _api.getByReservation(reservationId);
+      final session = await _api.getByReservation(
+        reservationId,
+        skipRateLimitRetry: !byUser,
+      );
       if (gen != _generation || !ref.mounted) return;
       if (session == null) {
         // 404: la reserva no tiene sesión. NO es error — crearla es H7, con
@@ -168,8 +209,10 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
         state = state.copyWith(fetching: false, notFound: true);
         return;
       }
-      _apply(session, detectForeign: false);
-      unawaited(_loadContext(gen));
+      if (!_isStaleRead(session, epoch)) {
+        _apply(session, detectForeign: false);
+        unawaited(_loadContext(gen));
+      }
     } on ApiError catch (e) {
       if (gen != _generation || !ref.mounted) return;
       _onReadError(e, hadHeader: hadHeader);
@@ -186,21 +229,35 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
     if (id == null) return;
     // Skip si hay request en vuelo: no encimar, pero el reloj sigue.
     if (_inFlight) return;
+    // Y skip mientras hay una ESCRITURA viva (transición o pausa): la
+    // respuesta del POST es más nueva por definición, y una lectura lanzada
+    // en paralelo solo puede aterrizar tarde y vieja (INN MC-2). El refresh
+    // manual del agente respeta lo mismo — no hay nada que refrescar cuando
+    // la escritura que va a cambiar el estado ya está en vuelo.
+    if (state.transitionInFlight || state.pausing) return;
     _inFlight = true;
     if (byUser) state = state.copyWith(fetching: true);
     final hadHeader = ref.read(activeLocationProvider).isPinned;
+    final epoch = _writeEpoch;
     try {
-      final fresh = await _api.getSession(id);
+      final fresh = await _api.getSession(id, skipRateLimitRetry: !byUser);
       if (gen != _generation || !ref.mounted) return;
-      final changed = _hasMaterialChange(state.session, fresh);
-      _apply(fresh, detectForeign: true);
-      if (changed) {
-        _unchangedCycles = 0;
-        _slowLane = false;
-      } else {
-        _unchangedCycles++;
-        if (_unchangedCycles >= _cfg.unchangedCyclesBeforeSlowLane) {
-          _slowLane = true;
+      // Descartar una lectura obsoleta NO puede matar el poll: se salta el
+      // cuerpo, pero el reloj se re-arma abajo igual (si esto hiciera
+      // `return`, una sola carrera dejaría la pantalla congelada para
+      // siempre — lo cazó el test del cinturón de stateVersion).
+      if (!_isStaleRead(fresh, epoch)) {
+        final changed = _hasMaterialChange(state.session, fresh);
+        _apply(fresh, detectForeign: true);
+        if (changed) {
+          _unchangedCycles = 0;
+          _slowLane = false;
+          _backoff = null;
+        } else {
+          _unchangedCycles++;
+          if (_unchangedCycles >= _cfg.unchangedCyclesBeforeSlowLane) {
+            _slowLane = true;
+          }
         }
       }
     } on ApiError catch (e) {
@@ -210,6 +267,21 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       if (gen == _generation) _inFlight = false;
     }
     _scheduleNext(gen);
+  }
+
+  /// ¿Esta respuesta de LECTURA llegó tarde y trae un estado ya superado?
+  ///
+  /// Se descarta en silencio (no es un error: es una carrera normal con 4
+  /// superficies y un poll de 5 s). Publicarla haría retroceder el stepper y
+  /// emitiría un `checkout.reconciled` con `steps_jumped` negativo.
+  bool _isStaleRead(CheckoutSessionDto fresh, int dispatchEpoch) {
+    // Cinturón 1 — versión del servidor (P2), cuando ambas existen.
+    final applied = _appliedVersion;
+    final incoming = fresh.stateVersion;
+    if (applied != null && incoming != null && incoming < applied) return true;
+    // Cinturón 2 — epoch local: hubo una escritura aplicada mientras esta
+    // lectura viajaba. Sirve igual con backend viejo (stateVersion null).
+    return dispatchEpoch != _writeEpoch;
   }
 
   /// Cambio MATERIAL: el paso, o cualquiera de los 4 sellos. Un sello puede
@@ -225,9 +297,10 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
   void _onReadError(ApiError e, {required bool hadHeader}) {
     final denied = e.isViewLocationDenied(requestHadHeader: hadHeader);
     if (e.kind == ApiErrorKind.rateLimited || e.status == 503) {
-      // 429 absorbido por el carril lento del poll (el interceptor ya
-      // respeta Retry-After por request; esto es el timer).
-      _slowLane = true;
+      // 429 absorbido por el TIMER (el interceptor ya respeta Retry-After por
+      // request, y el poll le pide que no reintente: amplificar 4× un 429
+      // sostenido no ayuda a nadie).
+      _enterBackoff();
       _logger.log(NetEvents.request429Backoff, data: {'route': _pollRoute});
     }
     // El dato viejo NO se borra: se queda con su edad visible (8D).
@@ -255,6 +328,9 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
           vehicleLabel: display.reservation.vehicle?.label,
           plate: display.reservation.vehicle?.plate,
           odometer: display.reservation.vehicle?.mileage,
+          pickupAt: display.reservation.pickupAt,
+          precheckinDone:
+              display.reservation.customerInfoCompletedAt != null,
           // Superficie de STAFF: el nombre del tenant sí se muestra aquí.
           tenantName: display.branding.companyName.isEmpty
               ? null
@@ -270,13 +346,19 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
   /// avance ajeno (8C): SOLO para lecturas del servidor que no provocamos
   /// nosotros — la respuesta de nuestro propio POST jamás debe banderizarse
   /// como "otra superficie avanzó".
+  ///
+  /// [isWrite] marca las respuestas de POST (transition/abandon): suben el
+  /// epoch de escritura, que invalida toda lectura que venga viajando.
   void _apply(
     CheckoutSessionDto fresh, {
     required bool detectForeign,
     String via = 'poll',
+    bool isWrite = false,
   }) {
     final prev = state.session;
     var advance = state.advance;
+    if (isWrite) _writeEpoch++;
+    if (fresh.stateVersion != null) _appliedVersion = fresh.stateVersion;
     if (detectForeign &&
         prev != null &&
         prev.currentStep != fresh.currentStep) {
@@ -297,8 +379,16 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
         _logReconciled(from: prev.step, to: fresh.step, via: via);
       }
     }
+    // La presencia SOBREVIVE a una respuesta que no la trae (INN SC-2): los
+    // POST de transition/abandon no pasan por `withPresence()`, así que
+    // adoptar su `presence: null` borraría el chip justo en el instante de
+    // máxima colisión — cuando el agente acaba de escribir y el compañero del
+    // kiosco sigue ahí. Solo una LECTURA que sí trae el campo puede cambiarlo.
+    final merged = fresh.presence == null && prev?.presence != null
+        ? fresh.copyWith(presence: prev!.presence)
+        : fresh;
     state = state.copyWith(
-      session: fresh,
+      session: merged,
       fetchedAt: clock.now(),
       fetching: false,
       clearError: true,
@@ -342,9 +432,9 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
     if (!ref.read(sessionControllerProvider).isAuthenticated) return;
     _timer?.cancel();
     _timer = Timer(
-      _slowLane ? _cfg.slowInterval : _cfg.baseInterval,
+      _nextInterval(),
       () {
-        if (_inFlight) {
+        if (_inFlight || state.transitionInFlight || state.pausing) {
           // Request en vuelo (una transición larga): se salta el tick, no se
           // encima — y se re-arma el reloj.
           _scheduleNext(gen);
@@ -352,6 +442,26 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
         }
         unawaited(_poll(gen));
       },
+    );
+  }
+
+  Duration _nextInterval() {
+    if (_backoff != null) return _backoff!;
+    return _slowLane ? _cfg.slowInterval : _cfg.baseInterval;
+  }
+
+  /// Backoff DECORRELACIONADO (mismo que el poller del dashboard): siguiente
+  /// espera uniforme entre el carril lento y 3× la anterior, con tope
+  /// [CheckoutPollConfig.backoffCap]. N teléfonos que entraron al throttle
+  /// juntos se dispersan en vez de volver en oleadas cada 15 s.
+  void _enterBackoff() {
+    _slowLane = true;
+    final baseMs = _cfg.slowInterval.inMilliseconds;
+    final prevMs = (_backoff ?? _cfg.slowInterval).inMilliseconds;
+    final upperMs = min(prevMs * 3, _cfg.backoffCap.inMilliseconds);
+    final span = max(0, upperMs - baseMs);
+    _backoff = Duration(
+      milliseconds: baseMs + (span == 0 ? 0 : _cfg.random.nextInt(span + 1)),
     );
   }
 
@@ -387,11 +497,12 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       }
       // Nuestro propio avance: se aplica sin detección de avance ajeno y el
       // banner previo se retira (el agente ya interactuó con el paso nuevo).
-      _apply(updated, detectForeign: false);
+      _apply(updated, detectForeign: false, isWrite: true);
       state = state.copyWith(clearAdvance: true);
       _logger.log(CheckoutEvents.transitionOk, data: {'to': toStep.wire});
       _unchangedCycles = 0;
       _slowLane = false;
+      _backoff = null;
       return CheckoutTransitionOutcome.ok;
     } on ApiError catch (e) {
       if (gen != _generation || !ref.mounted) {
@@ -428,11 +539,15 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
         : clock.now().difference(fetchedAt);
     if (age <= _cfg.preTransitionMaxAge) return null;
 
+    // Sin skipRateLimitRetry: hay un humano con el dedo en el botón esperando
+    // ESTA respuesta antes de que salga la escritura.
     final fresh = await _api.getSession(session.id);
     if (gen != _generation || !ref.mounted) {
       return CheckoutTransitionOutcome.blocked;
     }
-    _apply(fresh, detectForeign: true, via: 'conflict');
+    // `via: preflight` — esta reconciliación NO vino de un 409 (SC-4): mezclar
+    // ambas mentiría sobre cuántas colisiones reales produce el patio.
+    _apply(fresh, detectForeign: true, via: 'preflight');
     if (fresh.currentStep == renderedStep) return null;
 
     // El servidor se movió mientras el agente decidía.
@@ -536,7 +651,7 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
     try {
       final updated = await _api.abandon(id: session.id, reason: 'agent_paused');
       if (gen != _generation || !ref.mounted) return false;
-      _apply(updated, detectForeign: false);
+      _apply(updated, detectForeign: false, isWrite: true);
       return true;
     } on ApiError catch (e) {
       if (gen != _generation || !ref.mounted) return false;
@@ -565,5 +680,14 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
   }
 }
 
-final checkoutWizardProvider = NotifierProvider.family<CheckoutWizardController,
-    CheckoutWizardState, String>(CheckoutWizardController.new);
+/// **autoDispose OBLIGATORIO** (INN MC-1): en Riverpod 3 los providers ya no
+/// se sueltan solos. Sin esto, el Notifier de cada reserva visitada sobrevive
+/// a la salida del wizard y `_scheduleNext` sigue re-armando el timer para
+/// siempre: tres checkouts abiertos en un turno = ~12 req/min permanentes por
+/// teléfono contra `GET /api/checkout-sessions/:id`, y batería quemándose en
+/// el bolsillo. El `ref.onDispose` del build ya cancela timer y suscripción;
+/// lo único que faltaba era que el dispose LLEGARA a ocurrir.
+final checkoutWizardProvider = NotifierProvider.autoDispose
+    .family<CheckoutWizardController, CheckoutWizardState, String>(
+  CheckoutWizardController.new,
+);
