@@ -17,13 +17,7 @@ import { CheckoutSessionError } from './checkout-session.service.js';
 import { sectionsForAgreement } from './terms-content.js';
 import { appendEvent } from './state-machine.js';
 import { analyzeSignatureInk } from '../../lib/signature-ink.js';
-import { parseLocationConfig } from '../../lib/location-config.js';
-
-// settings.service.js DEFAULTS.companyName. A tenant that never filled in
-// Settings → Rental agreement reads back the PLATFORM's name from
-// getRentalAgreementConfig(), so this value can never be treated as "the
-// tenant configured their brand" — see resolveSigningBrand below.
-const PLATFORM_DEFAULT_COMPANY_NAME = 'Ride Fleet';
+import { resolveCustomerFacingBrand } from '../../lib/tenant-brand.js';
 
 async function loadToken(token) {
   if (!token) throw new CheckoutSessionError('token required', 400);
@@ -36,6 +30,12 @@ async function loadToken(token) {
           // CUSTOMER's phone, so the staff device's stored UI language is
           // meaningless here — see the frontend's useSignLang().
           customer: { select: { locale: true } },
+          // BRAND FALLBACK ONLY (see resolveSigningBrand). The agreement's own
+          // pickupLocation stays the primary source; this one is read solely so
+          // an agreement whose location relation is empty still names a
+          // business instead of nothing. Precedent:
+          // rental-agreements.service.js:5848 does the same for locationConfig.
+          pickupLocation: { select: { id: true, name: true, locationConfig: true } },
           rentalAgreement: {
             select: {
               id: true, declinedInsurance: true, agreementNumber: true,
@@ -78,57 +78,36 @@ async function loadToken(token) {
  * a brand leak from the platform onto another business's customer, at the
  * worst possible moment.
  *
- * The cascade deliberately mirrors the one the signed PDF header uses
- * (rental-agreements.service.js:3551-3555), so the phone and the printed
- * agreement never disagree about who the customer contracted with:
+ * The cascade itself lives in lib/tenant-brand.js, shared with the counter
+ * display that shows the QR (reservations.routes.js display-data). Those two
+ * screens are thirty seconds apart in the same handoff, so they must never
+ * name two different businesses.
  *
- *   location config → franchise → branch name → tenant-wide setting → Tenant.name
+ * WHICH LOCATION FEEDS THE CASCADE — and where the PDF can legitimately differ
+ * ---------------------------------------------------------------------------
+ * Primary is the AGREEMENT's pickupLocation, because that is the same row that
+ * supplies the section text being initialed (see loadToken's comment). The
+ * RESERVATION's pickupLocation is only a fallback, for an agreement whose
+ * location relation is empty — better a real business name than none.
  *
- * Two deviations from the PDF, both about never falling through to the
- * platform brand:
- *   • the tenant-wide `companyName` is ignored when it is still the
- *     'Ride Fleet' DEFAULT (an unconfigured tenant, not a real answer);
- *   • `Tenant.name` backstops the chain — it is a required column, so a
- *     tenant that configured nothing at all still gets its own plain-text
- *     name rather than ours.
- *
- * Returns null only if every source is empty, which the UI renders as a
- * neutral, unbranded header. Never returns the platform's name.
+ * The printed PDF resolves its header from `agreement.reservation.
+ * pickupLocation` instead (rental-agreements.service.js:3539,3552). So if
+ * someone moves `Reservation.pickupLocationId` AFTER the agreement is created
+ * — which reservationsService.update permits, with no sync back to the
+ * agreement — the phone and the PDF CAN print different business names. That
+ * is a real, known divergence and this resolver does not paper over it: the
+ * phone deliberately stays with the branch whose clauses the renter is
+ * actually signing. Making the two agree everywhere means fixing the move to
+ * sync (or the PDF to read the agreement), which is not this change.
  */
 async function resolveSigningBrand(ag) {
-  const locCfg = parseLocationConfig(ag?.pickupLocation?.locationConfig);
-  let globalCfg = {};
-  let franchiseCfg = null;
-  try {
-    const { settingsService } = await import('../settings/settings.service.js');
-    globalCfg = await settingsService.getRentalAgreementConfig(
-      ag?.tenantId ? { tenantId: ag.tenantId } : {},
-    );
-  } catch (err) {
-    // Branding must never be able to break signing. Fall through to the
-    // location/tenant names below.
-    logger.warn('[terms-signing] brand settings lookup failed', { message: err.message });
-  }
-  try {
-    const { franchiseService } = await import('../settings/franchise.service.js');
-    franchiseCfg = await franchiseService.getAgreementConfig(
-      ag?.reservation?.franchiseId ?? null, { tenantId: ag?.tenantId },
-    );
-  } catch (err) {
-    logger.warn('[terms-signing] brand franchise lookup failed', { message: err.message });
-  }
-
-  const configuredGlobalName = String(globalCfg?.companyName || '').trim();
-  const companyName =
-    String(locCfg?.companyName || '').trim()
-    || String(franchiseCfg?.companyName || '').trim()
-    || String(ag?.pickupLocation?.name || '').trim()
-    || (configuredGlobalName && configuredGlobalName !== PLATFORM_DEFAULT_COMPANY_NAME
-      ? configuredGlobalName : '')
-    || String(ag?.tenant?.name || '').trim()
-    || null;
-
-  return { companyName };
+  return resolveCustomerFacingBrand({
+    tenantId: ag?.tenantId ?? null,
+    franchiseId: ag?.reservation?.franchiseId ?? null,
+    location: ag?.pickupLocation || ag?.reservation?.pickupLocation || null,
+    // Already loaded on the token row — never make the resolver re-read it.
+    tenantName: ag?.tenant?.name ?? null,
+  });
 }
 
 /**
@@ -177,7 +156,6 @@ async function loadSession(token) {
     // Preferred language of the SIGNER, not of the staff device. null = the
     // frontend should fall back to the customer's browser language.
     signerLocale: normalizeSignerLocale(row.reservation.customer?.locale),
-    customer: { firstName: row.reservation.customerId },
     sections: sections.map((s) => ({
       key: s.key, label: s.label, body: s.body,
       signed: completedKeys.has(s.key),

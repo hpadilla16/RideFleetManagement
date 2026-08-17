@@ -33,7 +33,7 @@ beforeAll(() => {
   HTMLCanvasElement.prototype.toDataURL = () => 'data:image/png;base64,stub';
 });
 
-const { SignClient } = await import('../src/app/sign/[token]/SignClient.jsx');
+const { SignClient } = await import('../src/app/(public)/sign/[token]/SignClient.jsx');
 
 const SECTIONS = [
   { key: 'rental_period', label: 'Rental period', body: 'I agree to return the vehicle…', signed: false },
@@ -144,5 +144,82 @@ describe('sign page — language', () => {
     await screen.findByText('Autos del Valle');
     expect(screen.getByRole('button', { name: 'ES' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'EN' })).toBeInTheDocument();
+  });
+});
+
+/**
+ * When the page cannot load, what the customer used to see was
+ * `/api/sign/<their token> failed (410)` — their own credential, rendered in
+ * English in the register of a console log, with nothing to do about it.
+ *
+ * The token has to stay out of the DOM entirely: this page is on a phone the
+ * customer may hand to somebody, and a screenshot of it travels.
+ */
+const TOKEN = 'hh7Qm2v9TokenLooksLikeThis';
+
+/** The exact string lib/client.js synthesises when a response has no JSON. */
+function gatewayError(status) {
+  const err = new Error(`/api/sign/${TOKEN} failed (${status})`);
+  err.status = status;
+  return err;
+}
+
+describe('sign page — failure states', () => {
+  it('never prints the token when the load fails', async () => {
+    apiMock.mockRejectedValue(gatewayError(502));
+    render(<SignClient token={TOKEN} />);
+
+    await screen.findByText("We couldn't open your agreement");
+    expect(document.body.textContent).not.toContain(TOKEN);
+    expect(document.body.textContent).not.toContain('/api/sign');
+    expect(document.body.textContent).not.toContain('502');
+  });
+
+  it('tells a customer with a dead link what actually helps', async () => {
+    apiMock.mockRejectedValue(gatewayError(410));
+    render(<SignClient token={TOKEN} />);
+
+    expect(await screen.findByText('This link is no longer active')).toBeInTheDocument();
+    expect(screen.getByText(/Ask your agent for a new code/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(TOKEN);
+  });
+
+  it('treats a 404 the same as a 410 — the link is gone either way', async () => {
+    apiMock.mockRejectedValue(gatewayError(404));
+    render(<SignClient token={TOKEN} />);
+
+    expect(await screen.findByText('This link is no longer active')).toBeInTheDocument();
+  });
+
+  it('separates a link that died from a request that merely failed', async () => {
+    // A 500, or no network at all, is worth retrying with the SAME code —
+    // telling that customer to go ask for a new one sends them to the counter
+    // for nothing.
+    apiMock.mockRejectedValue(new Error('Failed to fetch'));
+    render(<SignClient token={TOKEN} />);
+
+    expect(await screen.findByText("We couldn't open your agreement")).toBeInTheDocument();
+    expect(screen.getByText('Ask your agent to show you the code again.')).toBeInTheDocument();
+  });
+
+  it('speaks the customer’s language on the dead end, and lets them switch', async () => {
+    vi.stubGlobal('navigator', { ...window.navigator, language: 'es-PR' });
+    apiMock.mockRejectedValue(gatewayError(410));
+    render(<SignClient token={TOKEN} />);
+
+    expect(await screen.findByText('Este enlace ya no está activo')).toBeInTheDocument();
+    expect(screen.getByText(/Pídele a tu agente un código nuevo/)).toBeInTheDocument();
+    // The toggle has to be reachable HERE too: a failure state with no way to
+    // change language strands whoever the guess got wrong.
+    expect(screen.getByRole('button', { name: 'ES' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'EN' })).toBeInTheDocument();
+  });
+
+  it('shows no platform branding on the failure states either', async () => {
+    apiMock.mockRejectedValue(gatewayError(410));
+    render(<SignClient token={TOKEN} />);
+
+    await screen.findByText('This link is no longer active');
+    expect(document.body.textContent).not.toContain('Ride Fleet');
   });
 });

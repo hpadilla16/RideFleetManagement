@@ -55,7 +55,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from '../../../lib/client';
+import { api } from '../../../../lib/client';
 
 const LANG_KEY = 'ride-sign-lang';
 
@@ -64,7 +64,10 @@ const STRINGS = {
     docTitle: 'Terms & Conditions',
     agreement: 'Agreement {n}',
     loading: 'Loading…',
-    loadFailed: 'Failed to load',
+    loadFailedTitle: "We couldn't open your agreement",
+    loadFailedBody: 'Ask your agent to show you the code again.',
+    goneTitle: 'This link is no longer active',
+    goneBody: 'Signing links are personal and they expire. Ask your agent for a new code.',
     saveFailed: 'Save failed',
     completeFailed: 'Complete failed',
     thanks: 'Thanks! Return to your rental agent.',
@@ -83,7 +86,10 @@ const STRINGS = {
     docTitle: 'Términos y Condiciones',
     agreement: 'Contrato {n}',
     loading: 'Cargando…',
-    loadFailed: 'No se pudo cargar',
+    loadFailedTitle: 'No pudimos abrir tu contrato',
+    loadFailedBody: 'Pídele a tu agente que te muestre el código otra vez.',
+    goneTitle: 'Este enlace ya no está activo',
+    goneBody: 'Los enlaces para firmar son personales y expiran. Pídele a tu agente un código nuevo.',
     saveFailed: 'No se pudo guardar',
     completeFailed: 'No se pudo completar',
     thanks: '¡Gracias! Regresa con tu agente de renta.',
@@ -157,9 +163,46 @@ function useSignLang(signerLocale) {
   return { t, lang, setLang };
 }
 
+/**
+ * Why the customer never sees `err.message` here.
+ *
+ * lib/client.js builds `"<path> failed (<status>)"` whenever a response has no
+ * JSON body of its own — which is exactly what an nginx 502/504 returns. On
+ * this route the path CONTAINS THE TOKEN, so the failure state was printing
+ * the customer's own credential back at them, in English, in the register of a
+ * console log. That string is load-bearing for staff screens, which is why
+ * client.js keeps producing it; the fix belongs on the one page whose paths
+ * are secrets.
+ *
+ * Two failure shapes, because the customer's next move differs:
+ *   'gone'   (404/410) — the link itself is finished. Only a new code helps.
+ *   'failed' (anything else, including no network) — worth another try, and
+ *            the agent still has the QR on screen.
+ */
+function classifyLoadError(err) {
+  const status = Number(err?.status || 0);
+  return status === 404 || status === 410 ? 'gone' : 'failed';
+}
+
+/**
+ * Mid-flow failures still show whatever the SERVER said — "The signature is
+ * blank — please sign before submitting" is a real instruction the customer
+ * needs. But a message the API client synthesised from the URL carries the
+ * token, so anything containing it (or shaped like a bare path) is dropped in
+ * favour of the translated fallback.
+ */
+function customerSafeMessage(err, token, fallback) {
+  const raw = String(err?.message || '').trim();
+  if (!raw) return fallback;
+  if (token && raw.includes(token)) return fallback;
+  if (raw.startsWith('/api/')) return fallback;
+  return raw;
+}
+
 export function SignClient({ token }) {
   const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [flowError, setFlowError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [completed, setCompleted] = useState(false);
   const { t, lang, setLang } = useSignLang(data?.signerLocale);
@@ -174,7 +217,7 @@ export function SignClient({ token }) {
         const json = await api(`/api/sign/${token}`, { bypassCache: true });
         setData(json);
       } catch (err) {
-        setError(err?.message || null);
+        setLoadError(classifyLoadError(err));
       } finally {
         setLoading(false);
       }
@@ -196,7 +239,26 @@ export function SignClient({ token }) {
   }, [companyName, t]);
 
   if (loading) return <ShellMessage>{t('loading')}</ShellMessage>;
-  if (error) return <ShellMessage tone="error">{error || t('loadFailed')}</ShellMessage>;
+  if (loadError) {
+    // The toggle belongs on the dead end too: a Spanish speaker who lands on
+    // an expired link would otherwise be told, in English, to go ask for a new
+    // one. Same call as the public shuttle tracker's `gone` state.
+    return (
+      <ShellMessage tone="error" lang={lang} setLang={setLang}>
+        <div style={{ fontWeight: 700, fontSize: 16, color: '#111827' }}>
+          {t(loadError === 'gone' ? 'goneTitle' : 'loadFailedTitle')}
+        </div>
+        <p style={{ margin: '8px 0 0', fontSize: 14, color: '#374151' }}>
+          {t(loadError === 'gone' ? 'goneBody' : 'loadFailedBody')}
+        </p>
+      </ShellMessage>
+    );
+  }
+  if (flowError) {
+    return (
+      <ShellMessage tone="error" lang={lang} setLang={setLang}>{flowError}</ShellMessage>
+    );
+  }
   if (completed) return <ShellMessage tone="ok">{t('thanks')}</ShellMessage>;
   if (!data) return null;
 
@@ -208,7 +270,13 @@ export function SignClient({ token }) {
       lang={lang}
       setLang={setLang}
     >
-      <SignFlow token={token} data={data} t={t} onComplete={() => setCompleted(true)} onError={setError} />
+      <SignFlow
+        token={token}
+        data={data}
+        t={t}
+        onComplete={() => setCompleted(true)}
+        onError={setFlowError}
+      />
     </Shell>
   );
 }
@@ -237,7 +305,7 @@ function SignFlow({ token, data, t, onComplete, onError }) {
       });
       setSections((curr) => curr.map((s) => (s.key === sectionKey ? { ...s, signed: true } : s)));
     } catch (err) {
-      onError(err?.message || t('saveFailed'));
+      onError(customerSafeMessage(err, token, t('saveFailed')));
     }
   };
 
@@ -250,7 +318,7 @@ function SignFlow({ token, data, t, onComplete, onError }) {
       });
       onComplete();
     } catch (err) {
-      onError(err?.message || t('completeFailed'));
+      onError(customerSafeMessage(err, token, t('completeFailed')));
     } finally {
       setSubmitting(false);
     }
@@ -497,7 +565,7 @@ function LangToggle({ lang, setLang }) {
   );
 }
 
-function ShellMessage({ children, tone = 'neutral' }) {
+function ShellMessage({ children, tone = 'neutral', lang, setLang }) {
   const color = tone === 'error' ? '#B91C1C' : tone === 'ok' ? '#065F46' : '#374151';
   return (
     <div style={{ minHeight: '100vh', background: '#F9FAFB', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
@@ -507,6 +575,11 @@ function ShellMessage({ children, tone = 'neutral' }) {
         border: '0.5px solid #E5E7EB',
       }}>
         <div style={{ color, fontSize: 15 }}>{children}</div>
+        {setLang && (
+          <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center' }}>
+            <LangToggle lang={lang} setLang={setLang} />
+          </div>
+        )}
       </div>
     </div>
   );

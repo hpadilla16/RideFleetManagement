@@ -24,11 +24,23 @@
  *  - referrer no-referrer: nothing on this page loads a third-party origin,
  *    so unlike /shuttle (which must satisfy the Google Maps key) the token
  *    path can stay completely silent.
+ *
+ *  - manifest: null. This one line is the reason "Add to Home Screen" no
+ *    longer offers to install "Ride Fleet" on the renter's phone. It is the
+ *    ONLY inherited identity field that a layout cannot neutralise in
+ *    next 14.2 — see the (public)/layout.js comment for the mechanism, and
+ *    test/public-route-group.test.jsx, which fails if a public page omits it.
+ *
+ * The rest of the inherited identity — icons, appleWebApp, description — is
+ * not here on purpose: a page that must remember to override each one will
+ * eventually forget, so those are neutralised for the whole group in
+ * (public)/layout.js.
  */
 import { SignClient } from './SignClient';
 
 export const metadata = {
   title: 'Terms & Conditions',
+  manifest: null,
   referrer: 'no-referrer',
   robots: { index: false, follow: false },
 };

@@ -87,14 +87,24 @@ test('loadSession reflects signed state from prior initials', async () => {
 // one thing it must never say is the platform's own name.
 // ---------------------------------------------------------------------------
 
-/** Token row with the brand-relevant relations the resolver reads. */
-function tokenRowWith({ location = null, tenant = null, customerLocale = null, franchiseId = null } = {}) {
+/**
+ * Token row with the brand-relevant relations the resolver reads.
+ *
+ * `location` is the AGREEMENT's pickup location (the primary source);
+ * `reservationLocation` is the RESERVATION's, which the resolver only reads as
+ * a fallback. They are separate arguments precisely because the two can drift.
+ */
+function tokenRowWith({
+  location = null, reservationLocation = null, tenant = null,
+  customerLocale = null, franchiseId = null,
+} = {}) {
   return {
     id: 't1', token: 'TOK', kind: 'TERMS_SIGNING',
     expiresAt: FUTURE, consumedAt: null, reservationId: 'r1',
     reservation: {
       id: 'r1', reservationNumber: 'RES-1', customerId: 'c1', franchiseId,
       customer: customerLocale ? { locale: customerLocale } : null,
+      pickupLocation: reservationLocation,
       rentalAgreement: {
         id: 'a1', declinedInsurance: false, agreementNumber: 'RA-1',
         tenantId: tenant ? tenant.id : null,
@@ -195,6 +205,77 @@ test('the public payload carries no signer, vehicle or money data', async () => 
   const out = await termsSigningService.loadSession('TOK');
   // brand is rendered into a public, cacheable <title> — business identity only.
   assert.deepEqual(Object.keys(out.brand), ['companyName']);
+});
+
+/**
+ * The payload above is served with NO authentication — the token is the only
+ * credential, and the token is in a URL the customer's phone may hand to a
+ * keyboard app, a QR scanner's history or a shared browser. It once carried
+ * `customer: { firstName: <the internal Customer id> }`: a field the frontend
+ * never read, mislabelled, leaking a database identifier. The comment beside
+ * it already claimed nothing about the signer was in this payload — a false
+ * comment about an anonymous payload is worse than the leak it hides.
+ */
+test('the public payload names nothing about the signer, not even an internal id', async () => {
+  prisma.handoffToken.findUnique = async () => tokenRowWith({
+    location: { id: 'l1', name: 'Ponce', locationConfig: null },
+    tenant: { id: 'tn1', name: 'Autos del Valle LLC' },
+    customerLocale: 'es-PR',
+  });
+  const out = await termsSigningService.loadSession('TOK');
+  assert.equal('customer' in out, false, 'no customer object on a no-auth payload');
+  // Belt and braces: the id must not reappear under any other key, at any depth.
+  assert.equal(
+    JSON.stringify(out).includes('c1'), false,
+    'the internal Customer id must not appear anywhere in the payload',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// WHICH branch's brand — and the one place the printed PDF can legitimately
+// disagree with the phone.
+// ---------------------------------------------------------------------------
+
+test('brand follows the AGREEMENT branch when the reservation was moved to another one', async () => {
+  // reservationsService.update can move Reservation.pickupLocationId after the
+  // agreement exists, with no sync back. The phone stays with the agreement:
+  // that is the row whose termsSectionsJson supplies the very clauses being
+  // initialed, so identity and clauses always name the same branch.
+  //
+  // The PDF header resolves from agreement.reservation.pickupLocation
+  // (rental-agreements.service.js:3539,3552), so in exactly this state the
+  // printed copy will say "Autos del Valle — Mayagüez". Known and deliberate;
+  // closing it means syncing the move, not guessing here.
+  prisma.handoffToken.findUnique = async () => tokenRowWith({
+    location: { id: 'l1', name: 'Autos del Valle — Ponce', locationConfig: null },
+    reservationLocation: { id: 'l2', name: 'Autos del Valle — Mayagüez', locationConfig: null },
+    tenant: { id: 'tn1', name: 'Tenant Legal Name' },
+  });
+  const out = await termsSigningService.loadSession('TOK');
+  assert.equal(out.brand.companyName, 'Autos del Valle — Ponce');
+});
+
+test('brand falls back to the reservation branch when the agreement has no location', async () => {
+  prisma.handoffToken.findUnique = async () => tokenRowWith({
+    location: null,
+    reservationLocation: { id: 'l2', name: 'Autos del Valle — Mayagüez', locationConfig: null },
+    tenant: { id: 'tn1', name: 'Tenant Legal Name' },
+  });
+  const out = await termsSigningService.loadSession('TOK');
+  assert.equal(
+    out.brand.companyName, 'Autos del Valle — Mayagüez',
+    'a real business name beats the tenant-level backstop',
+  );
+});
+
+test('the reservation branch never overrides a configured agreement branch', async () => {
+  prisma.handoffToken.findUnique = async () => tokenRowWith({
+    location: { id: 'l1', name: 'Branch One', locationConfig: JSON.stringify({ companyName: 'Autos del Valle' }) },
+    reservationLocation: { id: 'l2', name: 'Branch Two', locationConfig: JSON.stringify({ companyName: 'Otra Renta' }) },
+    tenant: { id: 'tn1', name: 'Tenant Legal Name' },
+  });
+  const out = await termsSigningService.loadSession('TOK');
+  assert.equal(out.brand.companyName, 'Autos del Valle');
 });
 
 // ---------------------------------------------------------------------------
