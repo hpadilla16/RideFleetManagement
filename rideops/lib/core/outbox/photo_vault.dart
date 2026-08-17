@@ -49,6 +49,13 @@ class PhotoVault {
     return dir;
   }
 
+  /// Saneo (QA NIT-2): el nombre viene de un payload PERSISTIDO — jamás se
+  /// concatena un separador o `..` al path de la bóveda. Un nombre sucio se
+  /// trata como archivo perdido (read → null → PHOTO_LOST; delete → no-op),
+  /// nunca como acceso fuera del directorio.
+  static bool _unsafeName(String name) =>
+      name.contains('/') || name.contains('\\') || name.contains('..');
+
   Future<File> _fileFor(String name) async {
     final dir = await _dir();
     return File('${dir.path}${Platform.pathSeparator}$name');
@@ -71,6 +78,7 @@ class PhotoVault {
   /// Descifra el archivo [name] o null si ya no existe / está corrupto (el
   /// drenador lo convierte en PHOTO_LOST — dead-letter visible, no crash).
   Future<Uint8List?> read(String name) async {
+    if (_unsafeName(name)) return null;
     final file = await _fileFor(name);
     if (!file.existsSync()) return null;
     final raw = file.readAsBytesSync();
@@ -92,6 +100,7 @@ class PhotoVault {
   /// Borra el archivo. Best-effort e idempotente: si ya no existe NO es
   /// error (contrato de OutboxOps.deletePhotoFile).
   Future<void> delete(String name) async {
+    if (_unsafeName(name)) return;
     try {
       final file = await _fileFor(name);
       if (file.existsSync()) file.deleteSync();

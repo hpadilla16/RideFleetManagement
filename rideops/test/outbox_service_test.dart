@@ -217,6 +217,14 @@ void main() {
     expect(await vault.totalBytes(), 0,
         reason: 'PII fuera de disco al cerrar sesión (ADR-7)');
     expect(logger.names, contains(OutboxEvents.purgedAccountSwitch));
+    // QA MINOR-2: la purga de cuenta deja fila resumen de auditoría.
+    final audit = (await db.auditRows()).single;
+    expect(audit.reasonCode, 'ACCOUNT_LOGOUT');
+    expect(audit.rowKind, 'account_purge');
+    expect(audit.userId, 'u1', reason: 'el dueño sale de lo purgado');
+    final summary = json.decode(audit.summary) as Map<String, dynamic>;
+    expect(summary['rows'], 1);
+    expect(summary['photos'], 1);
   });
 
   test('purgeForeign al entrar OTRA cuenta se lleva filas y archivos ajenos',
@@ -232,6 +240,10 @@ void main() {
     expect(purged, 1);
     expect(await db.totalRows(), 0);
     expect(await vault.totalBytes(), 0);
+    // QA MINOR-2: también la purga por cuenta ajena deja resumen.
+    final audit = (await db.auditRows()).single;
+    expect(audit.reasonCode, 'ACCOUNT_FOREIGN');
+    expect(audit.rowKind, 'account_purge');
   });
 
   test('discardDead deja RASTRO de auditoría (quién/qué/motivo/hora)',

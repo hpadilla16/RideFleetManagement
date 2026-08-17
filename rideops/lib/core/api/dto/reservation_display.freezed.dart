@@ -1383,8 +1383,8 @@ return $default(_that.companyName,_that.companyLogoUrl,_that.companyPhone);case 
 /// @nodoc
 @JsonSerializable()
 
-class _TenantBranding implements TenantBranding {
-  const _TenantBranding({this.companyName = '', this.companyLogoUrl = '', this.companyPhone = ''});
+class _TenantBranding extends TenantBranding {
+  const _TenantBranding({this.companyName = '', this.companyLogoUrl = '', this.companyPhone = ''}): super._();
   factory _TenantBranding.fromJson(Map<String, dynamic> json) => _$TenantBrandingFromJson(json);
 
 @override@JsonKey() final  String companyName;

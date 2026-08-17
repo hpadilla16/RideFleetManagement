@@ -95,9 +95,11 @@ abstract class DisplayVehicle with _$DisplayVehicle {
 }
 
 /// Branding del tenant resuelto en servidor (routes:618-622) — con defaults
-/// del backend ('Ride Fleet', '') que la UI trata como "sin logo".
+/// del backend ('Ride Fleet', '') que la UI trata como "sin branding".
 @freezed
 abstract class TenantBranding with _$TenantBranding {
+  const TenantBranding._();
+
   const factory TenantBranding({
     @Default('') String companyName,
     @Default('') String companyLogoUrl,
@@ -106,4 +108,22 @@ abstract class TenantBranding with _$TenantBranding {
 
   factory TenantBranding.fromJson(Map<String, dynamic> json) =>
       _$TenantBrandingFromJson(json);
+
+  /// Default de PLATAFORMA que el backend inyecta cuando el tenant no
+  /// configuró branding (`rentalSettings?.companyName || 'Ride Fleet'`,
+  /// reservations.routes.js:619).
+  static const platformDefaultName = 'Ride Fleet';
+
+  /// Nombre APTO para superficies volteadas al cliente (QA MAJOR de H5):
+  /// el centinela 'Ride Fleet' viaja del backend y aquí se NEUTRALIZA a
+  /// vacío — un tenant sin branding no puede mostrarle nuestra marca (ni
+  /// las iniciales "RF" derivadas) al cliente durante la firma legal
+  /// (regla GD-1). Punto ÚNICO del filtro: todo consumidor de cara al
+  /// cliente usa este getter, nunca [companyName] crudo.
+  ///
+  /// Gap anotado para backend: que display-data devuelva null en vez del
+  /// default de plataforma — este filtro es el parche del cliente y
+  /// sacrificaría a un tenant legítimamente llamado "Ride Fleet".
+  String get clientSafeCompanyName =>
+      companyName == platformDefaultName ? '' : companyName;
 }

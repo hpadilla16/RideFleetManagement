@@ -221,14 +221,7 @@ class OutboxService {
   /// se llevó (para telemetría/aviso).
   Future<int> purgeAllForLogout() async {
     final purged = await db.purgeAll();
-    for (final row in purged) {
-      final path = _photoPathOf(row);
-      if (path != null) await vault.delete(path);
-    }
-    if (purged.isNotEmpty) {
-      logger.log(OutboxEvents.purgedAccountSwitch,
-          data: {'rows': purged.length});
-    }
+    await _finishAccountPurge(purged, reasonCode: 'ACCOUNT_LOGOUT');
     return purged.length;
   }
 
@@ -237,15 +230,42 @@ class OutboxService {
   /// de la cuenta anterior sin el purge del logout explícito.
   Future<int> purgeForeign(String incomingUserId) async {
     final purged = await db.purgeNotOwnedBy(userId: incomingUserId);
+    await _finishAccountPurge(purged, reasonCode: 'ACCOUNT_FOREIGN');
+    return purged.length;
+  }
+
+  /// Cola común de las purgas de cuenta (QA MINOR-2): borrar archivos +
+  /// telemetría + UNA fila resumen de auditoría — lo purgado pudo ser
+  /// evidencia y hasta ahora TTL y descartes auditaban pero las purgas de
+  /// cuenta no. El dueño del resumen sale de las propias filas purgadas
+  /// (en logout la sesión puede estar ya a medio morir).
+  Future<void> _finishAccountPurge(
+    List<OutboxEntry> purged, {
+    required String reasonCode,
+  }) async {
+    var photos = 0;
     for (final row in purged) {
       final path = _photoPathOf(row);
-      if (path != null) await vault.delete(path);
+      if (path != null) {
+        photos++;
+        await vault.delete(path);
+      }
     }
-    if (purged.isNotEmpty) {
-      logger.log(OutboxEvents.purgedAccountSwitch,
-          data: {'rows': purged.length});
-    }
-    return purged.length;
+    if (purged.isEmpty) return;
+    logger.log(OutboxEvents.purgedAccountSwitch,
+        data: {'rows': purged.length, 'reason': reasonCode});
+    final owner = purged.first;
+    await db.insertAudit(OutboxAuditEntriesCompanion.insert(
+      id: newOutboxId(),
+      userId: owner.userId,
+      tenantId: owner.tenantId,
+      locationId: Value(owner.locationId),
+      rowId: 'batch',
+      rowKind: 'account_purge',
+      summary: json.encode({'rows': purged.length, 'photos': photos}),
+      reasonCode: Value(reasonCode),
+      discardedAt: DateTime.now(),
+    ));
   }
 
   /// TTL de arranque (ADR-7 "purga agresiva", review INN O-1): filas —y sus

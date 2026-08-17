@@ -113,9 +113,11 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
     // staff, sin stepper — cero rastro de RideOps (nota 10).
     if (state.step == InspectionStep.signature) {
       return KioskSignatureStep(
-        // GD-1: JAMÁS marca propia frente al cliente. Sin companyName el
-        // paso oculta la fila del nombre (queda el subtítulo del trámite).
-        tenantName: state.branding?.companyName ?? '',
+        // GD-1 + QA MAJOR: JAMÁS marca propia frente al cliente — el getter
+        // neutraliza además el centinela 'Ride Fleet' que el backend manda
+        // como default de plataforma. Sin nombre, el paso oculta la fila
+        // (queda el subtítulo del trámite).
+        tenantName: state.branding?.clientSafeCompanyName ?? '',
         tenantLogoUrl: state.branding?.companyLogoUrl ?? '',
         reservationLabel: state.reservationNumber ?? '—',
         onConfirmed: controller.confirmSignature,

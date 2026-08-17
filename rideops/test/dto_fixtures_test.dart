@@ -134,6 +134,8 @@ void main() {
     expect(d.reservation.customer?.fullName, 'María González',
         reason: 'el firmante que se sella como signerName (INN S-3)');
     expect(d.branding.companyName, 'Autos del Valle');
+    expect(d.branding.clientSafeCompanyName, 'Autos del Valle',
+        reason: 'un nombre real de tenant pasa intacto');
     expect(d.branding.companyLogoUrl, isNotEmpty);
   });
 
@@ -145,6 +147,10 @@ void main() {
     (raw['reservation'] as Map<String, dynamic>)['vehicle'] = null;
     final d = ReservationDisplayData.fromJson(raw);
     expect(d.branding.companyName, 'Ride Fleet');
+    // QA MAJOR: el centinela de plataforma se NEUTRALIZA para superficies
+    // de cara al cliente — un tenant sin branding jamás muestra 'Ride
+    // Fleet' (ni "RF") durante la firma legal.
+    expect(d.branding.clientSafeCompanyName, '');
     expect(d.reservation.vehicle, isNull);
   });
 

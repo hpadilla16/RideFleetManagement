@@ -1,6 +1,10 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rideops/core/api/dto/reservation_display.dart';
 import 'package:rideops/core/session/lock_controller.dart';
 import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/session_controller.dart';
@@ -141,6 +145,46 @@ void main() {
     expect(find.text('Ride Fleet'), findsNothing);
     expect(find.text('RideOps'), findsNothing);
     // El subtítulo del trámite sigue anclando la superficie.
+    expect(find.textContaining('Reservation R-42'), findsOneWidget);
+  });
+
+  testWidgets(
+      'QA MAJOR: tenant SIN branding (default "Ride Fleet" del backend) — '
+      'la superficie del cliente no muestra ni el nombre ni "RF"',
+      (tester) async {
+    // Exactamente lo que el backend responde sin branding configurado
+    // (routes:619) — el fixture con defaults + el getter que usa la
+    // pantalla real para armar el paso.
+    final raw = json.decode(
+      File('test/fixtures/reservation_display_data.json')
+          .readAsStringSync(),
+    ) as Map<String, dynamic>;
+    raw['branding'] = {
+      'companyName': 'Ride Fleet',
+      'companyLogoUrl': '',
+      'companyPhone': '',
+    };
+    final branding = ReservationDisplayData.fromJson(raw).branding;
+
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: l10nApp(
+        Scaffold(
+          body: KioskSignatureStep(
+            tenantName: branding.clientSafeCompanyName,
+            tenantLogoUrl: branding.companyLogoUrl,
+            reservationLabel: 'R-42',
+            onConfirmed: (_) {},
+            onExitToStaff: () {},
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Ride Fleet'), findsNothing,
+        reason: 'el centinela del backend no llega al cliente');
+    expect(find.text('RF'), findsNothing,
+        reason: 'tampoco sus iniciales en el logo placeholder');
     expect(find.textContaining('Reservation R-42'), findsOneWidget);
   });
 

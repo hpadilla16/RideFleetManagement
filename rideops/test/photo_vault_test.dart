@@ -71,6 +71,16 @@ void main() {
     expect(await vault.read(name), isNull);
   });
 
+  test('nombres sucios (separadores, ..) se tratan como perdidos, jamás '
+      'como path (QA NIT-2)', () async {
+    expect(await vault.read('../evil.bin'), isNull);
+    expect(await vault.read('a/b.bin'), isNull);
+    expect(await vault.read(r'a\b.bin'), isNull);
+    // delete: no-op silencioso, sin tocar nada fuera de la bóveda.
+    await vault.delete('../evil.bin');
+    await vault.delete('..');
+  });
+
   test('sweepOrphans borra SOLO lo no referenciado', () async {
     final keep = await vault.store(Uint8List.fromList([1]));
     final orphan1 = await vault.store(Uint8List.fromList([2]));
