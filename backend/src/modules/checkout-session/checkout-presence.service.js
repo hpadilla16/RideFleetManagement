@@ -51,8 +51,9 @@ function normalizeSurface(surface) {
 
 /**
  * POST /api/checkout-sessions/:id/presence — the heartbeat. Validates the
- * session exists (tenant soft-scoped, same forgiving rule as getById) and
- * upserts the (sessionId, surface, actorUserId) row's lastSeenAt/label.
+ * session exists (tenant soft-scoped, same forgiving null-tenant rule as
+ * getByReservationId) and upserts the (sessionId, surface, actorUserId)
+ * row's lastSeenAt/label.
  */
 async function heartbeat({ sessionId, surface, actorUserId, label, tenantId }) {
   if (!sessionId) throw new CheckoutSessionError('session id required', 400);

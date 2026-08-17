@@ -568,6 +568,9 @@ async function runChargeSequence({
     where: { id: sessionId },
     data: {
       paymentCompletedAt: new Date(),
+      // M2 P2 review MUST-1 (2026-08-17): direct writer of a versioned
+      // field → bump stateVersion (see schema.prisma invariant).
+      stateVersion: { increment: 1 },
       events: appendEvents(session.events, events, {
         kind: 'CHARGE_SEQUENCE_COMPLETE',
         actorUserId: actorUserId || null,
@@ -875,6 +878,9 @@ async function runDepositHold({ sessionId, depositAmount: depositAmountHint, act
       where: { id: sessionId },
       data: {
         paymentCompletedAt: new Date(),
+        // M2 P2 review MUST-1 (2026-08-17): direct writer of a versioned
+        // field → bump stateVersion (see schema.prisma invariant).
+        stateVersion: { increment: 1 },
         events: appendEvents(session.events, [{
           kind: 'DEPOSIT_SKIPPED_ZERO', actorUserId: actorUserId || null, at: new Date().toISOString(),
         }]),
@@ -1026,6 +1032,9 @@ async function runDepositHold({ sessionId, depositAmount: depositAmountHint, act
     where: { id: sessionId },
     data: {
       paymentCompletedAt: new Date(),
+      // M2 P2 review MUST-1 (2026-08-17): direct writer of a versioned
+      // field → bump stateVersion (see schema.prisma invariant).
+      stateVersion: { increment: 1 },
       events: appendEvents(session.events, events, {
         kind: 'DEPOSIT_HOLD_COMPLETE', actorUserId: actorUserId || null,
       }),
@@ -1214,6 +1223,9 @@ async function recordManualDeposit({
     where: { id: sessionId },
     data: {
       paymentCompletedAt: new Date(),
+      // M2 P2 review MUST-1 (2026-08-17): direct writer of a versioned
+      // field → bump stateVersion (see schema.prisma invariant).
+      stateVersion: { increment: 1 },
       events: appendEvents(session.events, [{
         kind: 'MANUAL_DEPOSIT_RECORDED',
         amount: requestedAmount,

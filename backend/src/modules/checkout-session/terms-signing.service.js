@@ -166,6 +166,12 @@ async function complete({ token, signatureDataUrl, signerName, customerIp }) {
       where: { id: session.id },
       data: {
         tcCompletedAt: new Date(),
+        // M2 P2 review MUST-1 (2026-08-17): every REAL writer of a versioned
+        // field bumps stateVersion, not just checkoutSessionService — this is
+        // the customer's phone signing T&C while an H6 client holds an
+        // expectedVersion snapshot; without the bump its guard would pass
+        // believing nothing changed.
+        stateVersion: { increment: 1 },
         events: appendEvent(session.events, {
           kind: 'TC_SIGNED_BY_CUSTOMER',
           signerName: signerName || null,

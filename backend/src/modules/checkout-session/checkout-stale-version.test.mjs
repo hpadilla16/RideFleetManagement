@@ -14,6 +14,8 @@ import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '../../lib/prisma.js';
 import { checkoutSessionService, CheckoutSessionError } from './checkout-session.service.js';
+import { termsSigningService } from './terms-signing.service.js';
+import { sectionsForAgreement } from './terms-content.js';
 
 // ── minimal in-memory stubs (kiosk-checkout.test.mjs style) ─────────────────
 
@@ -30,12 +32,24 @@ function applyData(row, data) {
   return row;
 }
 
+// Scalar-equality matcher: every key in `where` must equal the row's value.
+// Enough for the id / reservationId / token / agreementId lookups here.
+function matches(row, where) {
+  return Object.entries(where || {}).every(([key, val]) => {
+    if (val === undefined) return true;
+    if (val === null) return row[key] == null;
+    if (val instanceof Date || typeof val !== 'object') return row[key] === val;
+    return true; // ignore operator objects — not needed by these paths
+  });
+}
+
 function stub(rows) {
   return {
-    findFirst: async ({ where } = {}) => rows().find((r) => r.id === where?.id) || null,
-    findUnique: async ({ where } = {}) => rows().find((r) => r.id === where?.id) || null,
+    findFirst: async ({ where } = {}) => rows().find((r) => matches(r, where)) || null,
+    findUnique: async ({ where } = {}) => rows().find((r) => matches(r, where)) || null,
+    findMany: async ({ where } = {}) => rows().filter((r) => matches(r, where)),
     update: async ({ where, data } = {}) => {
-      const row = rows().find((r) => r.id === where.id);
+      const row = rows().find((r) => matches(r, where));
       if (!row) throw new Error('stub update: no match');
       return applyData(row, data);
     },
@@ -43,9 +57,11 @@ function stub(rows) {
 }
 
 beforeEach(() => {
-  db = { checkoutSessions: [], agreements: [] };
+  db = { checkoutSessions: [], agreements: [], handoffTokens: [], initials: [] };
   Object.assign(prisma.checkoutSession, stub(() => db.checkoutSessions));
   Object.assign(prisma.rentalAgreement, stub(() => db.agreements));
+  Object.assign(prisma.handoffToken, stub(() => db.handoffTokens));
+  Object.assign(prisma.agreementSectionInitial, stub(() => db.initials));
   prisma.$transaction = async (arg) => (Array.isArray(arg) ? Promise.all(arg) : arg(prisma));
 });
 
@@ -135,6 +151,50 @@ test('matching expectedVersion proceeds normally', async () => {
 
   await checkoutSessionService.saveCustomerSignature({ id: 'cs1', signatureDataUrl: SIG, expectedVersion: 2 });
   assert.equal(row.stateVersion, 3);
+});
+
+// ── 4. MUST-1 (Innovation review 2026-08-17): DIRECT writers bump too ───────
+//
+// checkoutSessionService is not the only writer of the versioned fields —
+// the customer's phone stamps tcCompletedAt through termsSigningService
+// directly. If that write skipped the bump, an H6 client's expectedVersion
+// guard would pass believing nothing changed while the customer was signing
+// T&C. This drives the REAL terms-signing complete() and pins the bump.
+
+test('terms-signing complete (direct tcCompletedAt writer) bumps stateVersion', async () => {
+  const session = seedSession({ currentStep: 'TC_PENDING', stateVersion: 2 });
+  db.handoffTokens.push({
+    id: 'tok1', token: 'tok-abc', kind: 'TERMS_SIGNING',
+    expiresAt: new Date(Date.now() + 10 * 60_000), consumedAt: null,
+    reservationId: 'res1',
+    // embedded relation — the stub ignores `include`
+    reservation: {
+      id: 'res1', reservationNumber: 'RES-1', customerId: 'cust1',
+      rentalAgreement: { id: 'ra1', declinedInsurance: false, agreementNumber: 'AG-1', pickupLocation: null },
+    },
+  });
+  // every expected section already carries an initial
+  for (const s of sectionsForAgreement({ declinedInsurance: false })) {
+    db.initials.push({ id: `ini-${s.key}`, agreementId: 'ra1', sectionKey: s.key });
+  }
+
+  const out = await termsSigningService.complete({
+    token: 'tok-abc',
+    signatureDataUrl: 'data:image/png;base64,' + 'A'.repeat(400),
+    signerName: 'Maria Gonzalez',
+    customerIp: '1.2.3.4',
+  });
+
+  assert.equal(out.ok, true);
+  assert.ok(session.tcCompletedAt instanceof Date, 'tcCompletedAt stamped');
+  assert.equal(session.stateVersion, 3, 'direct writer bumped stateVersion (MUST-1 invariant)');
+
+  // ...and the now-stale snapshot is actually refused downstream.
+  await assert.rejects(
+    () => checkoutSessionService.transition({ id: 'cs1', toStep: 'TC_SIGNED', expectedVersion: 2 }),
+    (e) => e.code === 'STALE_VERSION',
+    'a snapshot taken before the phone signing must read STALE_VERSION',
+  );
 });
 
 test('malformed expectedVersion: 400 BAD_EXPECTED_VERSION (never a silent pass)', async () => {

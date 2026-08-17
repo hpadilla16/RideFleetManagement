@@ -5073,12 +5073,22 @@ model CheckoutSession {
   tenantId      String?
   currentStep   CheckoutStep     @default(CONFIRMING)
 
-  // M2 P2 (2026-08-17) — lightweight optimistic versioning. Bumped on every
-  // transition / side-effect stamp / customer signature. Clients MAY send
-  // `expectedVersion` on those POSTs to get a 409 STALE_VERSION (with the
-  // fresh row) instead of acting on a state another surface already moved.
-  // Opt-in on purpose: web wizard, kiosk and precheckin never send it, so
-  // their behavior is byte-for-byte identical to before this column existed.
+  // M2 P2 (2026-08-17) — lightweight optimistic versioning. Clients MAY send
+  // `expectedVersion` on transition/stamp/customer-signature POSTs to get a
+  // 409 STALE_VERSION (with the fresh row) instead of acting on a state
+  // another surface already moved. Opt-in on purpose: web wizard, kiosk and
+  // precheckin never send it, so their behavior is byte-for-byte identical
+  // to before this column existed.
+  //
+  // SEMANTICS (PM decision, Innovation review 2026-08-17): version = MATERIAL
+  // change of the session — anything another surface would render differently.
+  // BUMPS: every transition; every writer of the four side-effect stamps
+  // (checkoutSessionService.stampSideEffect/saveCustomerSignature AND the
+  // direct writers: terms-signing, mobile-inspection, spin-charge x4);
+  // markAbandoned (pause banner); vehicle swap (contract's car changed).
+  // DOES NOT BUMP: tenantId/agreementId backfills and self-heals,
+  // autoEmailedAt, mintHandoffToken — events/metadata only, no material
+  // state a snapshot could go stale against.
   stateVersion Int @default(0)
 
   // JSON array of { from, to, actorUserId, at, metadata } — full transition

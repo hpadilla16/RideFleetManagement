@@ -1,7 +1,7 @@
 /**
  * Nightly cleanup for stuck CheckoutSession rows.
  *
- * Two operations every 24h at 07:00 UTC (= 03:00 AST in PR):
+ * Three operations every 24h at 07:00 UTC (= 03:00 AST in PR):
  *   1. Flag sessions stuck in a non-terminal step for > 4 hours by
  *      setting abandonedAt. The dashboard picks them up the next time
  *      it renders.
@@ -10,6 +10,12 @@
  *      (2026-07-24: this step used to STAMP depositHoldVoidedAt without
  *      calling any gateway — it now records the outstanding work instead
  *      of falsely claiming the customer's money was released.)
+ *   3. Prune CheckoutPresence rows idle > 7 days (M2 P1, 2026-08-17).
+ *      Pure hygiene: the 45 s TTL is enforced at READ time and nothing
+ *      anywhere gates on presence, so stale rows are already invisible —
+ *      this just keeps the table from accumulating one dead row per
+ *      surface per session forever. Best-effort, failure never blocks
+ *      the money-adjacent sweeps above.
  *
  * Read-only mode: set CHECKOUT_SESSION_CLEANUP_ENABLED=false to disable
  * the entire sweep (e.g. while debugging without auto-voiding state).
@@ -23,6 +29,7 @@ import { paymentOpsQueue } from '../payment-gateway/payment-ops-queue.service.js
 const SWEEP_HOUR_UTC = 7;             // 07:00 UTC = 03:00 AST
 const STALL_THRESHOLD_MS = 4 * 60 * 60 * 1000;       // 4 hours
 const PREAUTH_VOID_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 24 hours
+const PRESENCE_PRUNE_AFTER_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 let sweepTimer = null;
 let sweepInProgress = false;
@@ -150,6 +157,26 @@ async function voidStalePreauths() {
   return flagged;
 }
 
+/**
+ * Prune presence rows idle > 7 days (M2 P1 review SHOULD, 2026-08-17).
+ * Correctness never needs this — the 45 s logical TTL filters at read time
+ * and nothing gates on presence — it only stops CheckoutPresence from
+ * growing by a few dead rows per checkout forever. deleteMany on the
+ * indexed lastSeenAt; any failure is logged and swallowed.
+ */
+async function prunePresence() {
+  const cutoff = new Date(Date.now() - PRESENCE_PRUNE_AFTER_MS);
+  try {
+    const { count } = await prisma.checkoutPresence.deleteMany({
+      where: { lastSeenAt: { lt: cutoff } },
+    });
+    return count;
+  } catch (err) {
+    logger.warn('[checkout-session] presence prune failed (non-fatal)', { err: err.message });
+    return 0;
+  }
+}
+
 async function runSweep() {
   if (sweepInProgress) {
     logger.info('[checkout-session] cleanup sweep skipped — already running');
@@ -159,7 +186,8 @@ async function runSweep() {
   try {
     const flagged = await flagStuckSessions();
     const strandedHoldsFlagged = await voidStalePreauths();
-    logger.info('[checkout-session] cleanup sweep done', { flagged, strandedHoldsFlagged });
+    const presencePruned = await prunePresence();
+    logger.info('[checkout-session] cleanup sweep done', { flagged, strandedHoldsFlagged, presencePruned });
   } catch (err) {
     logger.error('[checkout-session] cleanup sweep failed', { err: err.message });
   } finally {
@@ -188,4 +216,4 @@ export function stopCheckoutSessionCleanupScheduler() {
 }
 
 // Exported for tests / manual triggering.
-export const _internal = { runSweep, flagStuckSessions, voidStalePreauths };
+export const _internal = { runSweep, flagStuckSessions, voidStalePreauths, prunePresence };

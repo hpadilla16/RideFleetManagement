@@ -910,6 +910,10 @@ async function markAbandoned({ id, reason, actorUserId }) {
     data: {
       abandonedAt: new Date(),
       abandonedReason: reason || 'agent_paused',
+      // M2 P2 review, PM decision (2026-08-17): version = MATERIAL change of
+      // the session. A pause is state every other surface renders ("session
+      // paused" banner), so it bumps even though no versioned stamp moved.
+      stateVersion: { increment: 1 },
       events: appendEvent(session.events, {
         kind: 'ABANDONED',
         reason: reason || 'agent_paused',
