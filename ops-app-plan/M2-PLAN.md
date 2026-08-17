@@ -122,6 +122,23 @@ Tanda A se encarga de inmediato al cerrar H6; B y C durante la construcción de 
   "the ARMING step". Hoy la app lo menciona en una sola pantalla y calla en las otras dos
   donde ocurre igual. El texto que ve el agente —y lo que se le dice al cliente— necesita
   el visto bueno de Hector.
+- **Lámina delta de H2** (`mockups/m2-delta-h2.html`) — tres estados que no existen en el
+  mockup aprobado: la tarjeta de cliente "no se pudo leer" (D1), el mensaje del servidor
+  presentado como cita (D2) y el pill `Actual` en la unidad inerte (D3, propuesta pura).
+  El build de esos tres está DETENIDO hasta la aprobación; el resto del lote de H2 sigue.
+- **Copy de la consecuencia del rechazo de seguro (GD SC-6).** La copy aprobada solo
+  promete que "se adjunta un anexo": un agente explicándoselo al cliente en el patio no
+  tiene con qué. GD propone decir que los daños quedan a cargo del cliente. **Cambia copy
+  ya aprobada y afirma alcance legal** — necesita tu visto bueno y confirmación de qué
+  cubre realmente la póliza. Va junto con el copy legal del guardado de tarjeta.
+- **Desviaciones de ADR-2 por plugins nuevos.** `qr` (codificador del QR) quedó aprobada
+  por Innovation con evidencia de salud del paquete. El brillo forzado y el wakelock del
+  modo presentación —que el mockup fijó como requisito de build para sol directo— exigen
+  otros dos plugins. Autorizados por el PM como desviación declarada, sujetos a tu veto.
+- **SC-5 y SC-7 (alcance, no defectos).** SC-5: bajar a la tarjeta roja una línea que diga
+  dónde se capturan los datos, ahora que ADR-1 borró el enlace del mockup. SC-7: el
+  mockup dibuja "Ver documento firmado" en 10C y no se construyó; si no hay URL de PDF en
+  el contrato la omisión es correcta, pero debe quedar escrita como decisión, no olvido.
 
 **Corrección del encargo del PM, verificada en código:** `charge-sale` y `hold-deposit`
 **NO** están gateados por `paymentActions` (`money-route-gate.test.mjs` los fija como
