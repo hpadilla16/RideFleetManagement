@@ -8,15 +8,17 @@ import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/api_providers.dart';
 import 'package:rideops/core/session/biometric_auth.dart';
 import 'package:rideops/core/session/lock_state.dart';
+import 'package:rideops/core/session/active_location.dart';
 import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/token_store.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
 import 'package:rideops/features/auth/presentation/login_screen.dart';
 import 'package:rideops/features/auth/presentation/pin_lock_screen.dart';
-import 'package:rideops/features/dashboard/presentation/home_placeholder_screen.dart';
+import 'package:rideops/features/dashboard/presentation/home_screen.dart';
 import 'package:rideops/features/dashboard/presentation/home_skeleton.dart';
 
 import 'helpers/auth_test_helpers.dart';
+import 'helpers/shell_test_helpers.dart';
 
 /// Widget tests del unlock (mockup 3B) montando la app completa: cold start
 /// con PIN ⇒ el redirect bloquea en /lock. Locale del harness = en.
@@ -45,6 +47,13 @@ void main() {
           tokenStoreProvider.overrideWithValue(tokenStore),
           pinStoreProvider.overrideWithValue(pinStore),
           authApiProvider.overrideWithValue(api),
+          // H4: la home real fetchea el dashboard — stub con el fixture para
+          // que el fetch resuelva y la pantalla asiente (ver FakeDashboardApi).
+          dashboardApiProvider.overrideWithValue(FakeDashboardApi()),
+          // …y la sede activa hidrata de memoria: el Keystore real hace IO async
+          // que jamás resuelve dentro de testWidgets — la home (gate hydrated)
+          // quedaría en skeleton hasta disparar el lock de inactividad.
+          activeLocationStoreProvider.overrideWithValue(InMemoryActiveLocationStore()),
           eventLoggerProvider.overrideWithValue(logger),
           biometricAuthProvider.overrideWithValue(bio),
         ],
@@ -73,7 +82,7 @@ void main() {
     expect(find.text('Hi, Agente'), findsOneWidget);
 
     await tapPin(tester, '1234');
-    expect(find.byType(HomePlaceholderScreen), findsOneWidget);
+    expect(find.byType(HomeScreen), findsOneWidget);
     final unlock =
         logger.events.singleWhere((e) => e.$1 == SessionEvents.pinUnlock);
     expect(unlock.$2['method'], 'pin');
@@ -113,7 +122,7 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.fingerprint));
     await tester.pumpAndSettle();
-    expect(find.byType(HomePlaceholderScreen), findsOneWidget);
+    expect(find.byType(HomeScreen), findsOneWidget);
     final unlock =
         logger.events.singleWhere((e) => e.$1 == SessionEvents.pinUnlock);
     expect(unlock.$2['method'], 'biometric');
@@ -154,7 +163,7 @@ void main() {
       await tester.pump();
     }
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.byType(HomePlaceholderScreen), findsOneWidget);
+    expect(find.byType(HomeScreen), findsOneWidget);
     expect(find.byType(HomeSkeleton), findsOneWidget,
         reason: 'user null ⇒ skeleton dentro del shell, no pantalla a medias');
   });

@@ -167,6 +167,14 @@ verifican en el DoD de la historia indicada:
   - ANTES de construir la 4D: pedir al backend un `code: VIEW_LOCATION_DENIED` en el 403
     de view-location (hoy llega sin code — gap #3). Sin el code, la 4D no puede
     distinguir "sede negada" de un 403 de RBAC genérico.
+  - *Registrado al construir H4 (2026-08-17):* el gap #3 sigue abierto — la app clasifica
+    con la firma puente `403 + request con header + (code == 'VIEW_LOCATION_DENIED' ||
+    (code == null && mensaje exacto de view-location.js:48))`; cuando el backend agregue
+    el code, el matcheo por mensaje se retira. Y el **cache del dashboard es en memoria**
+    (basta para M1: dato viejo + edad visibles en el 5E); el cache **persistente en Drift**
+    que menciona la nota 8 del mockup pasa a **M2** — sobrevivir reinicios de proceso no
+    aporta a la cuña de captura y sí arrastra el costo de la llave SQLCipher en cada
+    arranque antes de H5.
 - **H5 (captura de inspección / bandeja):**
   - Sellar el `locationId` activo en **cada fila del outbox al encolar** (REGROUND §1):
     el header del drenado no puede depender de la sede seleccionada al momento de drenar.

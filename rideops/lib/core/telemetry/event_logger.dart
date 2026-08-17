@@ -56,6 +56,18 @@ abstract final class SessionEvents {
   static const viewLocationDenied = 'session.view_location_denied';
 }
 
+/// Eventos del dashboard (03-observability.md §Salud). `poll_tick` es SOLO
+/// métrica de frecuencia — el callsite lo samplea al 1% antes de loguear.
+abstract final class DashboardEvents {
+  static const pollTick = 'dashboard.poll_tick';
+}
+
+/// Salud de red (03-observability.md §Salud): el poller del dashboard entró
+/// en backoff por 429/503 (tag `route`).
+abstract final class NetEvents {
+  static const request429Backoff = 'net.request_429_backoff';
+}
+
 /// Punto de enchufe de Sentry: cuando haya DSN, aquí se decide
 /// `SentryEventLogger` en prod y debug en dev. Hoy: debug print en debug,
 /// silencio en release.

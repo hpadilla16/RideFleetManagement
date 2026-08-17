@@ -59,10 +59,12 @@ SessionUser sessionUserFixture({
   List<String>? locationIdsOverride,
   bool issueCenter = true,
   bool screenLockExempt = true,
+  String programScope = 'BOTH',
 }) {
   final raw = readAuthFixture()['user'] as Map<String, dynamic>;
   raw['role'] = role;
   raw['screenLockExempt'] = screenLockExempt;
+  raw['programScope'] = programScope;
   if (unrestricted) {
     raw['locationIds'] = null;
   } else if (locationIdsOverride != null) {

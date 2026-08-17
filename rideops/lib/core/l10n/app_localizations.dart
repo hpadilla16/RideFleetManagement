@@ -416,18 +416,6 @@ abstract class AppLocalizations {
   /// **'¿Olvidaste tu PIN? Cerrar sesión'**
   String get lockForgotPin;
 
-  /// No description provided for @homePlaceholderTitle.
-  ///
-  /// In es, this message translates to:
-  /// **'Sesión iniciada'**
-  String get homePlaceholderTitle;
-
-  /// No description provided for @homePlaceholderBody.
-  ///
-  /// In es, this message translates to:
-  /// **'El tablero de patio llega en la siguiente historia.'**
-  String get homePlaceholderBody;
-
   /// No description provided for @logoutButton.
   ///
   /// In es, this message translates to:
@@ -613,6 +601,378 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Algo salió mal. Intenta de nuevo.'**
   String get genericError;
+
+  /// Chip del shell en danger mientras el 403 de view-location esté activo
+  ///
+  /// In es, this message translates to:
+  /// **'Ubicación activa: {location}. Acceso denegado. Toca para cambiar.'**
+  String locationChipDeniedSemantics(String location);
+
+  /// No description provided for @ageMoment.
+  ///
+  /// In es, this message translates to:
+  /// **'un momento'**
+  String get ageMoment;
+
+  /// Edad corta del dato (fila de frescura y banners)
+  ///
+  /// In es, this message translates to:
+  /// **'{count} min'**
+  String ageMinutes(int count);
+
+  /// No description provided for @ageHours.
+  ///
+  /// In es, this message translates to:
+  /// **'{count} h'**
+  String ageHours(int count);
+
+  /// No description provided for @homeFreshnessLine.
+  ///
+  /// In es, this message translates to:
+  /// **'Actualizado hace {age} · se actualiza solo'**
+  String homeFreshnessLine(String age);
+
+  /// No description provided for @homeOfflineBanner.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin conexión — mostrando datos de hace {age}. Se actualizará solo al volver la señal.'**
+  String homeOfflineBanner(String age);
+
+  /// No description provided for @homeStaleBanner.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudo actualizar — mostrando datos de hace {age}.'**
+  String homeStaleBanner(String age);
+
+  /// No description provided for @homeErrorTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudo cargar el tablero'**
+  String get homeErrorTitle;
+
+  /// No description provided for @forbiddenTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin acceso'**
+  String get forbiddenTitle;
+
+  /// No description provided for @heroTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Para ahora'**
+  String get heroTitle;
+
+  /// No description provided for @heroPartDepartures.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{1 salida} other{{count} salidas}}'**
+  String heroPartDepartures(int count);
+
+  /// La cola de salidas tocó el take:8 con puros items de hoy — el total real puede ser mayor
+  ///
+  /// In es, this message translates to:
+  /// **'{count}+ salidas'**
+  String heroPartDeparturesCapped(int count);
+
+  /// No description provided for @heroPartReturns.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{1 retorno} other{{count} retornos}}'**
+  String heroPartReturns(int count);
+
+  /// No description provided for @heroPartIncidents.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{1 incidente} other{{count} incidentes}}'**
+  String heroPartIncidents(int count);
+
+  /// No description provided for @heroCalmFoot.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin pendientes inmediatos'**
+  String get heroCalmFoot;
+
+  /// Pie del hero en offline: hora del último dato bueno (mockup 5E)
+  ///
+  /// In es, this message translates to:
+  /// **'al corte de las {time}'**
+  String heroCutoffFoot(String time);
+
+  /// No description provided for @tileActiveTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'En renta'**
+  String get tileActiveTitle;
+
+  /// No description provided for @tileActiveFoot.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, =0{Ver lista ›} one{1 vence hoy · ver lista ›} other{{count} vencen hoy · ver lista ›}}'**
+  String tileActiveFoot(int count);
+
+  /// No description provided for @tileActiveSemantics.
+  ///
+  /// In es, this message translates to:
+  /// **'En renta: {count}. Toca para ver la lista completa.'**
+  String tileActiveSemantics(int count);
+
+  /// No description provided for @tileLoanerTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Loaner'**
+  String get tileLoanerTitle;
+
+  /// No description provided for @tileLoanerFoot.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, =0{Sin seguimientos} one{1 pide seguimiento} other{{count} piden seguimiento}}'**
+  String tileLoanerFoot(int count);
+
+  /// No description provided for @tileLoanerFootCapped.
+  ///
+  /// In es, this message translates to:
+  /// **'{count}+ piden seguimiento'**
+  String tileLoanerFootCapped(int count);
+
+  /// No description provided for @tilePrecheckinTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Pre-checkin'**
+  String get tilePrecheckinTitle;
+
+  /// No description provided for @tilePrecheckinFoot.
+  ///
+  /// In es, this message translates to:
+  /// **'Enviado, sin completar'**
+  String get tilePrecheckinFoot;
+
+  /// No description provided for @queueIssueEscalations.
+  ///
+  /// In es, this message translates to:
+  /// **'Incidentes'**
+  String get queueIssueEscalations;
+
+  /// No description provided for @queueCheckout.
+  ///
+  /// In es, this message translates to:
+  /// **'Salidas (72 h)'**
+  String get queueCheckout;
+
+  /// No description provided for @queueReturns.
+  ///
+  /// In es, this message translates to:
+  /// **'Retornos (72 h)'**
+  String get queueReturns;
+
+  /// No description provided for @queuePrecheckin.
+  ///
+  /// In es, this message translates to:
+  /// **'Pre-checkin'**
+  String get queuePrecheckin;
+
+  /// No description provided for @queueLoanerAdvisorFollowup.
+  ///
+  /// In es, this message translates to:
+  /// **'Seguimiento loaner'**
+  String get queueLoanerAdvisorFollowup;
+
+  /// No description provided for @queueLoanerReady.
+  ///
+  /// In es, this message translates to:
+  /// **'Loaner listos'**
+  String get queueLoanerReady;
+
+  /// No description provided for @queueLoanerBillingReview.
+  ///
+  /// In es, this message translates to:
+  /// **'Facturación loaner'**
+  String get queueLoanerBillingReview;
+
+  /// No description provided for @queueLoanerReturns.
+  ///
+  /// In es, this message translates to:
+  /// **'Retornos loaner'**
+  String get queueLoanerReturns;
+
+  /// No description provided for @queueActive.
+  ///
+  /// In es, this message translates to:
+  /// **'En renta'**
+  String get queueActive;
+
+  /// No description provided for @seeAllButton.
+  ///
+  /// In es, this message translates to:
+  /// **'Ver todo'**
+  String get seeAllButton;
+
+  /// Contador honesto al tocar el take:8 del server — nunca un total inventado
+  ///
+  /// In es, this message translates to:
+  /// **'{count}+'**
+  String queueCountCapped(int count);
+
+  /// No description provided for @calmRowTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin actividad ahora'**
+  String get calmRowTitle;
+
+  /// No description provided for @calmChipSemantics.
+  ///
+  /// In es, this message translates to:
+  /// **'{queue}: sin pendientes. Toca para abrir la cola.'**
+  String calmChipSemantics(String queue);
+
+  /// No description provided for @emptyAllTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Patio en calma'**
+  String get emptyAllTitle;
+
+  /// No description provided for @emptyAllBody.
+  ///
+  /// In es, this message translates to:
+  /// **'No hay nada pendiente en ninguna cola ahora mismo. Desliza hacia abajo para actualizar cuando quieras.'**
+  String get emptyAllBody;
+
+  /// No description provided for @emptyAllQueuesLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Las {count} colas, en cero'**
+  String emptyAllQueuesLabel(int count);
+
+  /// No description provided for @cardToday.
+  ///
+  /// In es, this message translates to:
+  /// **'Hoy {time}'**
+  String cardToday(String time);
+
+  /// No description provided for @cardTomorrow.
+  ///
+  /// In es, this message translates to:
+  /// **'Mañana {time}'**
+  String cardTomorrow(String time);
+
+  /// No description provided for @cardOverdueHours.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{Vencido 1 h} other{Vencido {count} h}}'**
+  String cardOverdueHours(int count);
+
+  /// No description provided for @cardOverdueMinutes.
+  ///
+  /// In es, this message translates to:
+  /// **'Vencido {count} min'**
+  String cardOverdueMinutes(int count);
+
+  /// No description provided for @precheckinReady.
+  ///
+  /// In es, this message translates to:
+  /// **'Pre-checkin listo'**
+  String get precheckinReady;
+
+  /// No description provided for @precheckinMissing.
+  ///
+  /// In es, this message translates to:
+  /// **'Falta pre-checkin'**
+  String get precheckinMissing;
+
+  /// No description provided for @incidentOpen.
+  ///
+  /// In es, this message translates to:
+  /// **'Abierto'**
+  String get incidentOpen;
+
+  /// No description provided for @incidentUnderReview.
+  ///
+  /// In es, this message translates to:
+  /// **'En revisión'**
+  String get incidentUnderReview;
+
+  /// No description provided for @incidentReported.
+  ///
+  /// In es, this message translates to:
+  /// **'Reportado {time}'**
+  String incidentReported(String time);
+
+  /// No description provided for @loanerFollowupPacket.
+  ///
+  /// In es, this message translates to:
+  /// **'Expediente sin completar'**
+  String get loanerFollowupPacket;
+
+  /// No description provided for @loanerFollowupService.
+  ///
+  /// In es, this message translates to:
+  /// **'Servicio vencido'**
+  String get loanerFollowupService;
+
+  /// No description provided for @loanerFollowupBilling.
+  ///
+  /// In es, this message translates to:
+  /// **'Facturación rechazada'**
+  String get loanerFollowupBilling;
+
+  /// No description provided for @loanerReadyChip.
+  ///
+  /// In es, this message translates to:
+  /// **'Listo para entrega'**
+  String get loanerReadyChip;
+
+  /// No description provided for @advisorLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Asesor: {name}'**
+  String advisorLabel(String name);
+
+  /// No description provided for @queueListShowingFirst.
+  ///
+  /// In es, this message translates to:
+  /// **'Mostrando los primeros {count} — puede haber más'**
+  String queueListShowingFirst(int count);
+
+  /// No description provided for @queueListShowingOf.
+  ///
+  /// In es, this message translates to:
+  /// **'Mostrando {shown} de {total}'**
+  String queueListShowingOf(int shown, int total);
+
+  /// No description provided for @queueEmptyBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Nada en esta cola ahora mismo.'**
+  String get queueEmptyBody;
+
+  /// No description provided for @searchFieldHint.
+  ///
+  /// In es, this message translates to:
+  /// **'Cliente, reserva, placa o unidad'**
+  String get searchFieldHint;
+
+  /// No description provided for @searchFieldLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Buscar'**
+  String get searchFieldLabel;
+
+  /// No description provided for @searchClearLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Borrar búsqueda'**
+  String get searchClearLabel;
+
+  /// No description provided for @searchPrompt.
+  ///
+  /// In es, this message translates to:
+  /// **'Busca en las reservas de tu sede activa.'**
+  String get searchPrompt;
+
+  /// No description provided for @searchNoResults.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin resultados para “{query}”.'**
+  String searchNoResults(String query);
 }
 
 class _AppLocalizationsDelegate
