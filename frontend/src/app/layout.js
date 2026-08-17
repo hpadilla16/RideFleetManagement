@@ -2,6 +2,8 @@ import './globals.css';
 import { SentryBoot } from '../components/SentryBoot';
 import { I18nBoot } from '../components/I18nBoot';
 import { TourMount } from '../components/training/TourMount';
+import { PracticeBanner } from '../components/training/PracticeBanner';
+import { WelcomeOffer } from '../components/training/WelcomeOffer';
 
 export const metadata = {
   title: 'Ride Fleet',
@@ -124,6 +126,10 @@ export default function RootLayout({ children }) {
             imported per page, so it remounts on every navigation and would
             drop the tour's state mid-walk. The layout persists. */}
         <TourMount />
+        {/* Same reason as TourMount: both survive navigation. The banner
+            frames practice mode; the offer greets a first login exactly once. */}
+        <PracticeBanner />
+        <WelcomeOffer />
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
         {children}
       </body>

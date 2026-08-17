@@ -290,6 +290,26 @@ export const COURSES = [
           },
         ],
       },
+      {
+        key: 'shuttle-tracker',
+        title: 'The live shuttle tracker',
+        summary: 'Customers watch the shuttle move on a live map and request it with one tap.',
+        roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
+        gate: 'reservations',
+        kind: 'ON_DEMAND',
+        verify: null,
+        points: 5,
+        showcase: 8,
+        gotcha: 'Never screenshot or forward a tracker link — each one is personal to a single reservation and expires when the rental ends. The next customer gets their own automatically, by email and SMS. A shared link that suddenly dies at the curb is worse than no link.',
+        steps: [
+          {
+            anchor: 'shuttle-queue',
+            route: '/shuttle',
+            title: 'Every request lands here',
+            body: 'Customers picking up at a tracker-enabled location get a personal, expiring link by email and SMS. They watch the shuttle move on a live map, see exactly where to stand, and one tap requests the pickup — it appears on this screen for the floor team. Repeat taps and repeat calls fold into the same request: one anxious customer is one bus, not three.',
+          },
+        ],
+      },
     ],
   },
 

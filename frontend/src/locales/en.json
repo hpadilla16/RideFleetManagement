@@ -1128,8 +1128,30 @@
             "body": "You choose where to sit — second cheapest, for instance — and how far a price may move on its own. Anything bigger lands in this inbox for you to approve."
           }
         }
+      },
+      "shuttle-tracker": {
+        "title": "The live shuttle tracker",
+        "summary": "Customers watch the shuttle move on a live map and request it with one tap.",
+        "gotcha": "Never screenshot or forward a tracker link — each one is personal to a single reservation and expires when the rental ends. The next customer gets their own automatically, by email and SMS. A shared link that suddenly dies at the curb is worse than no link.",
+        "steps": {
+          "shuttle-queue": {
+            "title": "Every request lands here",
+            "body": "Customers picking up at a tracker-enabled location get a personal, expiring link by email and SMS. They watch the shuttle move on a live map, see exactly where to stand, and one tap requests the pickup — it appears on this screen for the floor team. Repeat taps and repeat calls fold into the same request: one anxious customer is one bus, not three."
+          }
+        }
       }
     },
-    "gotchaLabel": "Where people trip"
+    "gotchaLabel": "Where people trip",
+    "practiceBanner": "PRACTICE MODE — demo tenant. Nothing here touches real data, and practice earns no points.",
+    "practiceExit": "Back to my account",
+    "practiceCta": "🎓 Practice on the demo tenant",
+    "practiceOpening": "Opening practice…",
+    "practiceHint": "Rehearse the hands-on modules on the demo tenant — no real data, no points",
+    "welcomeTitle": "Welcome to Ride Fleet",
+    "welcomeBody": "First time here? In five minutes I can walk you through where everything lives — and you can relaunch the tour any time from Ride University.",
+    "welcomeStart": "Show me around",
+    "welcomeLater": "Not now",
+    "practiceError": "Could not open practice mode — try again.",
+    "practiceImpersonation": "Exit tenant view first, then start practice."
   }
 }

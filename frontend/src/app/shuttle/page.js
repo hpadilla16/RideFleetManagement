@@ -187,7 +187,7 @@ function ShuttleInner({ me, token, logout }) {
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg section-card">
         <div className="row-between">
-          <h2 style={{ margin: 0 }}>{t('shuttle.queueTitle', 'Shuttle requests')}</h2>
+          <h2 style={{ margin: 0 }} data-tour="shuttle-queue">{t('shuttle.queueTitle', 'Shuttle requests')}</h2>
           <span className="ui-muted">{t('shuttle.queueSubtitle', 'Customers waiting for airport pickup. Check-out closes these automatically.')}</span>
         </div>
 

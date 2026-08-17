@@ -104,6 +104,10 @@ y números de línea en [00-REGROUND.md](00-REGROUND.md):
 9. **Endpoint receptor de auditoría de descartes del outbox** (Innovation H5): la app
    guarda el rastro local con flag `synced`; falta `POST /api/employee-app/outbox-audit`
    (batch, idempotente por id, tenant del JWT) para subirlo.
+10. **El 400 de "contraseña actual incorrecta" no trae `code`** (QA H1, 2026-08-16): el
+   cliente lo detecta por substring del mensaje (frágil, documentado en
+   `change_password_screen.dart`). Pedido: `code: 'CURRENT_PASSWORD_INCORRECT'` en
+   `auth.routes.js` — 2 líneas en el próximo PR que toque backend.
 
 ### Política resuelta en H6 (decisión del PM): EL KIOSCO IGNORA LA EXENCIÓN
 - **Modo kiosco vs navegación del sistema**: Flutter puro no puede bloquear home/app-switcher.
@@ -159,6 +163,7 @@ bloqueo por PIN y biometría, shell con RBAC y **selector de ubicación**, home 
 operaciones con las 9 colas del dashboard, captura de inspección nativa (cámara →
 comprimir al tomar → soltar el controlador; pipeline offline vía bandeja).
 
+<<<<<<< HEAD
 #### Criterios registrados por revisiones H2/H3 (ciclo de review, 2026-08-16)
 Compromisos que las revisiones de Innovation/GD dejaron para historias futuras — se
 verifican en el DoD de la historia indicada:
@@ -196,6 +201,21 @@ verifican en el DoD de la historia indicada:
   - La tab bar del shell solo adopta glass/`BackdropFilter` tras una señal real de
     capacidad del dispositivo, con el tope de **máx 1 BackdropFilter por pantalla**
     (política de blur de la nota 4 del mockup 4A).
+
+#### Criterios transversales heredados de H1 (QA SHIP 2026-08-16) — estado al cerrar el M1
+- **Sesión degradada**: toda pantalla post-login renderiza con `session.user == null`
+  (restore sin red) — skeleton, jamás crash. ✅ CUMPLIDO: H3 añadió el re-intento de
+  `/me` al reanudar y H4 el guard de generación en `_hydrateUser`; verificado en el QA
+  de milestone.
+- **H2 restaura** el hint "Siguiente: crea tu PIN" en el éxito 2C (omitido en H1 para
+  no prometer UI inexistente). ✅ CUMPLIDO (`changePasswordNextPin`, verificado por QA
+  de milestone en `change_password_screen.dart`).
+- **H4 restauraba** la rehabilitación automática del botón de login al volver la señal
+  y el copy del mockup 1C. ⚠️ **NO se hizo, y es correcto que no se hiciera**:
+  `connectivity_plus` entró con H5, pero el login sigue con reintento MANUAL, así que
+  el copy honesto de `loginOffline` se queda tal cual (prometer auto-reintento sería
+  mentir). Pasa a backlog como "auto-reintento del login al volver la señal", con la
+  nota re-fechada en el `.arb`.
 
 ### M2 — el épico de checkout
 Wizard server-driven sobre `/api/checkout-sessions/*` (con identidad de usuario, nunca el

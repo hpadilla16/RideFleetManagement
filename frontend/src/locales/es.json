@@ -1128,8 +1128,30 @@
             "body": "Tú escoges dónde quieres estar — el segundo más barato, por ejemplo — y cuánto puede moverse un precio por su cuenta. Lo que se pase de ahí cae en esta bandeja para que lo apruebes."
           }
         }
+      },
+      "shuttle-tracker": {
+        "title": "El shuttle tracker en vivo",
+        "summary": "El cliente ve la guagua moverse en un mapa en vivo y la solicita con un toque.",
+        "gotcha": "Nunca le hagas screenshot ni reenvíes un link del tracker — cada uno es personal de UNA reserva y expira cuando termina la renta. El próximo cliente recibe el suyo automáticamente, por email y SMS. Un link compartido que muere de repente en el curb es peor que no tener link.",
+        "steps": {
+          "shuttle-queue": {
+            "title": "Toda solicitud cae aquí",
+            "body": "Los clientes que recogen en una sede con tracker activo reciben un enlace personal y con expiración por email y SMS. Ven la guagua moverse en un mapa en vivo, saben exactamente dónde pararse, y con un toque solicitan el pickup — que aparece en esta pantalla para el equipo de piso. Los toques y llamadas repetidas se funden en la misma solicitud: un cliente ansioso es UNA guagua, no tres."
+          }
+        }
       }
     },
-    "gotchaLabel": "Dónde se traba la gente"
+    "gotchaLabel": "Dónde se traba la gente",
+    "practiceBanner": "MODO PRÁCTICA — tenant de demostración. Nada de esto toca datos reales, y la práctica no da puntos.",
+    "practiceExit": "Volver a mi cuenta",
+    "practiceCta": "🎓 Practicar en el tenant Demo",
+    "practiceOpening": "Abriendo la práctica…",
+    "practiceHint": "Ensaya los módulos prácticos en el tenant de demostración — sin datos reales, sin puntos",
+    "welcomeTitle": "Bienvenido a Ride Fleet",
+    "welcomeBody": "¿Primera vez por aquí? En cinco minutos te enseño dónde vive todo — y puedes relanzar el tour cuando quieras desde Ride University.",
+    "welcomeStart": "Enséñame",
+    "welcomeLater": "Ahora no",
+    "practiceError": "No se pudo abrir el modo práctica — intenta de nuevo.",
+    "practiceImpersonation": "Sal de la vista de tenant primero y luego inicia la práctica."
   }
 }

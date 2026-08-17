@@ -305,6 +305,12 @@ export const peopleService = {
     let tempPassword = null;
 
     if (email) {
+      // Reserved by Ride University's practice mode (2026-08-16): User.email
+      // is globally unique, so a tenant registering this address would
+      // permanently brick practice sessions for EVERY tenant.
+      if (email.toLowerCase() === 'practica@ride.university') {
+        throw new Error('That email address is reserved by the platform');
+      }
       const existing = await prisma.user.findUnique({ where: { email } });
       if (existing) throw new Error('Email already registered');
     }

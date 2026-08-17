@@ -20,7 +20,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 
@@ -148,7 +148,9 @@ const UNRUN_FILES_BASELINE = new Set([
 function testFiles(dir) {
   return readdirSync(dir).flatMap((name) => {
     const p = join(dir, name);
-    return statSync(p).isDirectory() ? testFiles(p) : p.endsWith('.test.mjs') ? [p] : [];
+    // POSIX separators regardless of platform: these paths are compared against
+    // package.json scripts and UNRUN_FILES_BASELINE, which use forward slashes.
+    return statSync(p).isDirectory() ? testFiles(p) : p.endsWith('.test.mjs') ? [p.split(sep).join('/')] : [];
   });
 }
 

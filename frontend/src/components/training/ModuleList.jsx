@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../../lib/client';
 import { COURSES, modulesFor, pointsAvailable } from '../../lib/training/curriculum.js';
 import { moduleKey as mKey, trainingText } from '../../lib/training/i18n-keys.js';
+import { enterPractice, inPracticeMode, practiceBlockedByImpersonation } from '../../lib/training/practice';
 import { TOUR_START_EVENT, TOUR_MODULE_DONE_EVENT } from './TourHost';
 
 export function ModuleList({ token, me }) {
@@ -25,6 +26,7 @@ export function ModuleList({ token, me }) {
   const [progress, setProgress] = useState([]);
   const [justCompleted, setJustCompleted] = useState([]);
   const [busyKey, setBusyKey] = useState(null);
+  const [practiceError, setPracticeError] = useState('');
 
   const viewer = useMemo(() => ({
     role: me?.role,
@@ -88,16 +90,68 @@ export function ModuleList({ token, me }) {
     window.dispatchEvent(new CustomEvent(TOUR_START_EVENT, { detail: { track: 'MODULE', moduleKey: module.key } }));
   };
 
+  /**
+   * The bridge into the demo tenant (2026-08-16). OPPORTUNISTIC modules only
+   * complete on real work — correct, and useless for rehearsal. This swaps
+   * the session for the shared practice AGENT on the demo tenant so a
+   * trainee can run the same flows against inventory that isn't real.
+   * Practice earns no points by construction: over there, you are the
+   * practice user. The PracticeBanner is the way back.
+   */
+  const practice = async () => {
+    setPracticeError('');
+    if (practiceBlockedByImpersonation()) {
+      // A super admin mid-impersonation has a backup stack of their own;
+      // nesting the two swaps tangles them (QA #9).
+      setPracticeError(t('training.practiceImpersonation', 'Exit tenant view first, then start practice.'));
+      return;
+    }
+    setBusyKey('__practice');
+    try {
+      const out = await api('/api/training/practice-session', { method: 'POST' }, token);
+      if (!out?.token) throw new Error('no token');
+      const meResp = await api('/api/auth/me', {}, out.token);
+      const swapped = enterPractice({ token: out.token, user: meResp?.user || meResp });
+      if (swapped) { window.location.href = '/'; return; }
+      setBusyKey(null);
+      setPracticeError(t('training.practiceError', 'Could not open practice mode — try again.'));
+    } catch (err) {
+      // 404 (no demo tenant) and 409 (account misconfigured) are both
+      // admin-actionable — silence here just breeds "the button is broken".
+      setBusyKey(null);
+      setPracticeError(err?.message || t('training.practiceError', 'Could not open practice mode — try again.'));
+    }
+  };
+
   if (!mine.length) return null;
 
   return (
     <section className="glass card-lg" style={{ marginBottom: 16 }}>
       <div className="row-between" style={{ alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
         <h2 style={{ margin: 0 }}>{t('training.yourTraining', 'Your training')}</h2>
-        <span className="ui-muted" style={{ fontSize: 13 }}>
-          {t('training.standing', `${percent}% complete · ${earned} of ${available} points`, { percent, earned, available })}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+          <span className="ui-muted" style={{ fontSize: 13 }}>
+            {t('training.standing', `${percent}% complete · ${earned} of ${available} points`, { percent, earned, available })}
+          </span>
+          {!inPracticeMode() && (
+            <button
+              type="button"
+              className="button-subtle"
+              disabled={busyKey === '__practice'}
+              onClick={practice}
+              title={t('training.practiceHint', 'Rehearse the hands-on modules on the demo tenant — no real data, no points')}
+            >
+              {busyKey === '__practice'
+                ? t('training.practiceOpening', 'Opening practice…')
+                : t('training.practiceCta', '🎓 Practice on the demo tenant')}
+            </button>
+          )}
+        </div>
       </div>
+
+      {practiceError && (
+        <div className="surface-note" style={{ marginTop: 8, color: '#b3261e' }} role="alert">{practiceError}</div>
+      )}
 
       <div style={{ height: 4, background: 'var(--surface-2, #f0edf9)', borderRadius: 2, overflow: 'hidden', margin: '10px 0 16px' }}>
         <i style={{ display: 'block', height: '100%', width: `${percent}%`, background: '#8752FE', borderRadius: 2 }} />
