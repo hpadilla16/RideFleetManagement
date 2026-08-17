@@ -97,6 +97,19 @@ y números de línea en [00-REGROUND.md](00-REGROUND.md):
 7. **El scope efectivo de programa se espeja en cliente** (tenant-scope.js → tabla Dart
    con test referenciado): a futuro, que `/me` o el dashboard expongan el scope EFECTIVO
    calculado por el server y el espejo muera.
+8. **display-data devuelve el default de plataforma como branding** (QA H5):
+   `reservations.routes.js:619` responde `companyName || 'Ride Fleet'` — el cliente
+   neutraliza el centinela, pero el endpoint debería devolver null y dejar el fallback a
+   cada superficie. Pedido chico para el próximo PR de backend.
+9. **Endpoint receptor de auditoría de descartes del outbox** (Innovation H5): la app
+   guarda el rastro local con flag `synced`; falta `POST /api/employee-app/outbox-audit`
+   (batch, idempotente por id, tenant del JWT) para subirlo.
+
+### Política pendiente registrada (QA H5, decidir en H6)
+- **Modo kiosco vs navegación del sistema**: Flutter puro no puede bloquear home/app-switcher.
+  Matar y relanzar aterriza en el candado de arranque — SALVO usuarios `screenLockExempt`,
+  que relanzarían a la superficie de staff abierta. Decidir en H6 (con emulador): ¿el modo
+  kiosco ignora la exención, o se documenta la política de que exempt = sin esa protección?
 
 ### Enmiendas de mockup aceptadas por GD en builds (registro para training/M2)
 - **Tanda B nota de motion (dot de frescura)**: latido ≤0.5 Hz sustituido por tick
