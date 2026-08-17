@@ -1,0 +1,50 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# VS Code
+.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+
+# FVM Version Cache (la versión se fija en .fvmrc, que SÍ se versiona)
+.fvm/
+
+# Firma Android (M0-3): el keystore y sus contraseñas jamás se versionan.
+# CI los materializa desde los secretos RIDEOPS_*.
+android/key.properties
+android/app/*.keystore
+android/app/*.jks
+
+# Symbolication
+app.*.symbols
+app.*.map.json
+
+# Android Studio build artifacts
+android/app/debug
+android/app/profile
+android/app/release

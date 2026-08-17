@@ -1,0 +1,40 @@
+{
+  "id": "cmdres001fixture0000000001",
+  "reservationNumber": "R-20260816-0042",
+  "status": "CONFIRMED",
+  "workflowMode": "RENTAL",
+  "paymentStatus": "PENDING",
+  "pickupAt": "2026-08-16T15:00:00.000Z",
+  "returnAt": "2026-08-20T15:00:00.000Z",
+  "estimatedTotal": "412.50",
+  "readyForPickupAt": null,
+  "customerInfoCompletedAt": "2026-08-15T22:11:03.000Z",
+  "customerInfoReviewedAt": null,
+  "estimatedServiceCompletionAt": null,
+  "repairOrderNumber": "",
+  "claimNumber": "",
+  "serviceAdvisorName": "",
+  "loanerBillingMode": "",
+  "loanerBillingStatus": "",
+  "loanerBorrowerPacketCompletedAt": null,
+  "loanerReturnExceptionFlag": false,
+  "customer": {
+    "id": "cmdcus001fixture0000000001",
+    "firstName": "María",
+    "lastName": "González",
+    "email": "maria@example.com",
+    "phone": "+1 787 555 0142"
+  },
+  "vehicle": {
+    "id": "cmdveh001fixture0000000001",
+    "make": "Toyota",
+    "model": "Corolla",
+    "year": 2024,
+    "internalNumber": "RF-118",
+    "plate": "IKL-427"
+  },
+  "vehicleType": {
+    "id": "cmdvt0001fixture0000000001",
+    "name": "Economy"
+  }
+}

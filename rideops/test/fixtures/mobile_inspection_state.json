@@ -1,0 +1,16 @@
+{
+  "reservationNumber": "R-20260816-0042",
+  "agreementNumber": "RA-20260816140211-0042",
+  "vehicle": "2024 Toyota Corolla · IKL-427",
+  "angles": [
+    { "key": "front", "label": "Front (exterior)", "captured": true },
+    { "key": "rear", "label": "Rear (exterior)", "captured": true },
+    { "key": "left", "label": "Left side", "captured": false },
+    { "key": "right", "label": "Right side", "captured": false },
+    { "key": "front_seat", "label": "Front seat", "captured": false },
+    { "key": "rear_seat", "label": "Rear seat", "captured": false },
+    { "key": "dash", "label": "Dashboard", "captured": false },
+    { "key": "trunk", "label": "Trunk", "captured": false }
+  ],
+  "expiresAt": "2026-08-16T14:27:00.000Z"
+}

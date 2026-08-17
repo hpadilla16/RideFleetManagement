@@ -1,0 +1,116 @@
+name: rideops-ci
+
+# RideOps (app Flutter de staff) — M0-3 del PROJECT_PLAN (ops-app-plan/).
+#
+# POR QUÉ GITHUB ACTIONS Y NO CODEMAGIC (decisión M0, 2026-08-16): el repo ya
+# corre beta-ci.yml aquí, los secretos ya viven aquí, y no añadimos un vendor
+# nuevo por conveniencia de UI. Lo único que Codemagic regala es macOS
+# preconfigurado para iOS — y el parque de aparatos es Android-first (pregunta
+# §9-4 del plan, pendiente de Hector); cuando toque iOS, GH Actions también
+# tiene runners macOS. Si el mantenimiento de fastlane/firma en YAML se vuelve
+# un dolor real, se revisita con evidencia.
+#
+# PATHS: además de rideops/**, este workflow corre cuando el BACKEND toca
+# prisma/schema.prisma o state-machine.js — las dos fuentes de verdad del
+# chequeo de paridad de enums. Un enum nuevo en el backend debe romper ESTE
+# workflow en el mismo PR, no descubrirse cuando la app crashee parseando.
+on:
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'rideops/**'
+      - 'backend/prisma/schema.prisma'
+      - 'backend/src/modules/checkout-session/state-machine.js'
+      - '.github/workflows/rideops-ci.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'rideops/**'
+      - 'backend/prisma/schema.prisma'
+      - 'backend/src/modules/checkout-session/state-machine.js'
+      - '.github/workflows/rideops-ci.yml'
+
+jobs:
+  enum-parity:
+    # Corre primero y solo: es la compuerta barata (<1s) que protege el
+    # contrato. Lee schema.prisma + state-machine.js y los compara contra
+    # rideops/lib/core/api/enums.dart. Ver rideops/tool/check_enum_parity.mjs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node rideops/tool/check_enum_parity.mjs
+
+  analyze-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rideops
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          # Misma versión que fija .fvmrc — si subes una, sube la otra en el
+          # mismo commit o el build local y el de CI divergen.
+          flutter-version: '3.44.9'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze --fatal-infos
+      - run: flutter test
+
+  android-build:
+    # El artefacto instalable. En PRs construye SIN firmar (suficiente para
+    # probar que el build no está roto); en main firma con el keystore de los
+    # secretos y sube el .apk como artifact. La firma se activa sola cuando
+    # los 4 secretos existen: RIDEOPS_ANDROID_KEYSTORE_BASE64,
+    # RIDEOPS_KEYSTORE_PASSWORD, RIDEOPS_KEY_ALIAS, RIDEOPS_KEY_PASSWORD.
+    runs-on: ubuntu-latest
+    needs: [ enum-parity ]
+    defaults:
+      run:
+        working-directory: rideops
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - name: Materialize keystore (solo si hay secretos)
+        env:
+          KEYSTORE_B64: ${{ secrets.RIDEOPS_ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.RIDEOPS_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RIDEOPS_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RIDEOPS_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > android/app/rideops-release.keystore
+            cat > android/key.properties <<EOF
+          storeFile=rideops-release.keystore
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          EOF
+            echo "signing=release" >> "$GITHUB_ENV"
+          else
+            echo "signing=debug" >> "$GITHUB_ENV"
+          fi
+      - name: Build APK (flavor prod)
+        run: flutter build apk --flavor prod --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rideops-prod-apk-${{ env.signing }}
+          path: rideops/build/app/outputs/flutter-apk/*.apk
+          retention-days: 14
+
+  # iOS: pendiente de la decisión §9-4 (Android-first). Cuando se apruebe:
+  # runner macos-14, fastlane match o certificados en secretos, build ipa,
+  # y subida de dSYMs a Sentry en el mismo job (compuerta de release).

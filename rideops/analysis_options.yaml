@@ -1,0 +1,18 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+  language:
+    strict-casts: true
+    strict-inference: true
+
+linter:
+  rules:
+    # ADR-8: ningún texto de UI en el código. El lint no puede probarlo solo,
+    # pero prefer_single_quotes + revisión en PR (DoD #1) lo sostienen.
+    prefer_single_quotes: true
+    always_declare_return_types: true
+    unawaited_futures: true
+    avoid_dynamic_calls: true
