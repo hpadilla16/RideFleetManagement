@@ -404,7 +404,16 @@ mixin _$CheckoutPresenceDto {
 /// el default vacío es cinturón, no expectativa).
  String get surface;/// El servidor ya resolvió label → fullName del staff → etiqueta genérica
 /// de la superficie, así que nunca llega vacío por el camino feliz.
- String get displayName;@IsoDateTimeConverter() DateTime? get lastSeenAt;
+ String get displayName;@IsoDateTimeConverter() DateTime? get lastSeenAt;/// Quién late. **El serializer de P1 NO lo emite todavía**
+/// (`activePresence()` mapea solo `{surface, displayName, lastSeenAt}`):
+/// aquí queda mapeado y el filtro de "no me listes a mí mismo" ya está
+/// escrito en `pickPresenceChip`, inerte mientras el campo llegue null.
+///
+/// **Pedido para H6, ANTES de que RideOps empiece a latir**: sin este id
+/// el agente se vería a sí mismo en el chip de acompañantes en cuanto la
+/// app haga su propio heartbeat — y "María G. está en esta sesión" cuando
+/// María G. eres tú destruye la única señal que el chip aporta.
+ String? get actorUserId;
 /// Create a copy of CheckoutPresenceDto
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -417,16 +426,16 @@ $CheckoutPresenceDtoCopyWith<CheckoutPresenceDto> get copyWith => _$CheckoutPres
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is CheckoutPresenceDto&&(identical(other.surface, surface) || other.surface == surface)&&(identical(other.displayName, displayName) || other.displayName == displayName)&&(identical(other.lastSeenAt, lastSeenAt) || other.lastSeenAt == lastSeenAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CheckoutPresenceDto&&(identical(other.surface, surface) || other.surface == surface)&&(identical(other.displayName, displayName) || other.displayName == displayName)&&(identical(other.lastSeenAt, lastSeenAt) || other.lastSeenAt == lastSeenAt)&&(identical(other.actorUserId, actorUserId) || other.actorUserId == actorUserId));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,surface,displayName,lastSeenAt);
+int get hashCode => Object.hash(runtimeType,surface,displayName,lastSeenAt,actorUserId);
 
 @override
 String toString() {
-  return 'CheckoutPresenceDto(surface: $surface, displayName: $displayName, lastSeenAt: $lastSeenAt)';
+  return 'CheckoutPresenceDto(surface: $surface, displayName: $displayName, lastSeenAt: $lastSeenAt, actorUserId: $actorUserId)';
 }
 
 
@@ -437,7 +446,7 @@ abstract mixin class $CheckoutPresenceDtoCopyWith<$Res>  {
   factory $CheckoutPresenceDtoCopyWith(CheckoutPresenceDto value, $Res Function(CheckoutPresenceDto) _then) = _$CheckoutPresenceDtoCopyWithImpl;
 @useResult
 $Res call({
- String surface, String displayName,@IsoDateTimeConverter() DateTime? lastSeenAt
+ String surface, String displayName,@IsoDateTimeConverter() DateTime? lastSeenAt, String? actorUserId
 });
 
 
@@ -454,12 +463,13 @@ class _$CheckoutPresenceDtoCopyWithImpl<$Res>
 
 /// Create a copy of CheckoutPresenceDto
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? surface = null,Object? displayName = null,Object? lastSeenAt = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? surface = null,Object? displayName = null,Object? lastSeenAt = freezed,Object? actorUserId = freezed,}) {
   return _then(_self.copyWith(
 surface: null == surface ? _self.surface : surface // ignore: cast_nullable_to_non_nullable
 as String,displayName: null == displayName ? _self.displayName : displayName // ignore: cast_nullable_to_non_nullable
 as String,lastSeenAt: freezed == lastSeenAt ? _self.lastSeenAt : lastSeenAt // ignore: cast_nullable_to_non_nullable
-as DateTime?,
+as DateTime?,actorUserId: freezed == actorUserId ? _self.actorUserId : actorUserId // ignore: cast_nullable_to_non_nullable
+as String?,
   ));
 }
 
@@ -544,10 +554,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String surface,  String displayName, @IsoDateTimeConverter()  DateTime? lastSeenAt)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String surface,  String displayName, @IsoDateTimeConverter()  DateTime? lastSeenAt,  String? actorUserId)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _CheckoutPresenceDto() when $default != null:
-return $default(_that.surface,_that.displayName,_that.lastSeenAt);case _:
+return $default(_that.surface,_that.displayName,_that.lastSeenAt,_that.actorUserId);case _:
   return orElse();
 
 }
@@ -565,10 +575,10 @@ return $default(_that.surface,_that.displayName,_that.lastSeenAt);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String surface,  String displayName, @IsoDateTimeConverter()  DateTime? lastSeenAt)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String surface,  String displayName, @IsoDateTimeConverter()  DateTime? lastSeenAt,  String? actorUserId)  $default,) {final _that = this;
 switch (_that) {
 case _CheckoutPresenceDto():
-return $default(_that.surface,_that.displayName,_that.lastSeenAt);case _:
+return $default(_that.surface,_that.displayName,_that.lastSeenAt,_that.actorUserId);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -585,10 +595,10 @@ return $default(_that.surface,_that.displayName,_that.lastSeenAt);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String surface,  String displayName, @IsoDateTimeConverter()  DateTime? lastSeenAt)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String surface,  String displayName, @IsoDateTimeConverter()  DateTime? lastSeenAt,  String? actorUserId)?  $default,) {final _that = this;
 switch (_that) {
 case _CheckoutPresenceDto() when $default != null:
-return $default(_that.surface,_that.displayName,_that.lastSeenAt);case _:
+return $default(_that.surface,_that.displayName,_that.lastSeenAt,_that.actorUserId);case _:
   return null;
 
 }
@@ -600,7 +610,7 @@ return $default(_that.surface,_that.displayName,_that.lastSeenAt);case _:
 @JsonSerializable()
 
 class _CheckoutPresenceDto extends CheckoutPresenceDto {
-  const _CheckoutPresenceDto({this.surface = '', this.displayName = '', @IsoDateTimeConverter() this.lastSeenAt}): super._();
+  const _CheckoutPresenceDto({this.surface = '', this.displayName = '', @IsoDateTimeConverter() this.lastSeenAt, this.actorUserId}): super._();
   factory _CheckoutPresenceDto.fromJson(Map<String, dynamic> json) => _$CheckoutPresenceDtoFromJson(json);
 
 /// RIDEOPS | COUNTER | KIOSK | CUSTOMER (nunca null en el serializer;
@@ -610,6 +620,16 @@ class _CheckoutPresenceDto extends CheckoutPresenceDto {
 /// de la superficie, así que nunca llega vacío por el camino feliz.
 @override@JsonKey() final  String displayName;
 @override@IsoDateTimeConverter() final  DateTime? lastSeenAt;
+/// Quién late. **El serializer de P1 NO lo emite todavía**
+/// (`activePresence()` mapea solo `{surface, displayName, lastSeenAt}`):
+/// aquí queda mapeado y el filtro de "no me listes a mí mismo" ya está
+/// escrito en `pickPresenceChip`, inerte mientras el campo llegue null.
+///
+/// **Pedido para H6, ANTES de que RideOps empiece a latir**: sin este id
+/// el agente se vería a sí mismo en el chip de acompañantes en cuanto la
+/// app haga su propio heartbeat — y "María G. está en esta sesión" cuando
+/// María G. eres tú destruye la única señal que el chip aporta.
+@override final  String? actorUserId;
 
 /// Create a copy of CheckoutPresenceDto
 /// with the given fields replaced by the non-null parameter values.
@@ -624,16 +644,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _CheckoutPresenceDto&&(identical(other.surface, surface) || other.surface == surface)&&(identical(other.displayName, displayName) || other.displayName == displayName)&&(identical(other.lastSeenAt, lastSeenAt) || other.lastSeenAt == lastSeenAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _CheckoutPresenceDto&&(identical(other.surface, surface) || other.surface == surface)&&(identical(other.displayName, displayName) || other.displayName == displayName)&&(identical(other.lastSeenAt, lastSeenAt) || other.lastSeenAt == lastSeenAt)&&(identical(other.actorUserId, actorUserId) || other.actorUserId == actorUserId));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,surface,displayName,lastSeenAt);
+int get hashCode => Object.hash(runtimeType,surface,displayName,lastSeenAt,actorUserId);
 
 @override
 String toString() {
-  return 'CheckoutPresenceDto(surface: $surface, displayName: $displayName, lastSeenAt: $lastSeenAt)';
+  return 'CheckoutPresenceDto(surface: $surface, displayName: $displayName, lastSeenAt: $lastSeenAt, actorUserId: $actorUserId)';
 }
 
 
@@ -644,7 +664,7 @@ abstract mixin class _$CheckoutPresenceDtoCopyWith<$Res> implements $CheckoutPre
   factory _$CheckoutPresenceDtoCopyWith(_CheckoutPresenceDto value, $Res Function(_CheckoutPresenceDto) _then) = __$CheckoutPresenceDtoCopyWithImpl;
 @override @useResult
 $Res call({
- String surface, String displayName,@IsoDateTimeConverter() DateTime? lastSeenAt
+ String surface, String displayName,@IsoDateTimeConverter() DateTime? lastSeenAt, String? actorUserId
 });
 
 
@@ -661,12 +681,13 @@ class __$CheckoutPresenceDtoCopyWithImpl<$Res>
 
 /// Create a copy of CheckoutPresenceDto
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? surface = null,Object? displayName = null,Object? lastSeenAt = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? surface = null,Object? displayName = null,Object? lastSeenAt = freezed,Object? actorUserId = freezed,}) {
   return _then(_CheckoutPresenceDto(
 surface: null == surface ? _self.surface : surface // ignore: cast_nullable_to_non_nullable
 as String,displayName: null == displayName ? _self.displayName : displayName // ignore: cast_nullable_to_non_nullable
 as String,lastSeenAt: freezed == lastSeenAt ? _self.lastSeenAt : lastSeenAt // ignore: cast_nullable_to_non_nullable
-as DateTime?,
+as DateTime?,actorUserId: freezed == actorUserId ? _self.actorUserId : actorUserId // ignore: cast_nullable_to_non_nullable
+as String?,
   ));
 }
 

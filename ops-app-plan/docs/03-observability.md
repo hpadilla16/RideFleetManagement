@@ -54,6 +54,12 @@ separados porque miden cosas distintas:
 - `preflight` — el re-fetch previo a escribir (>3 s de antigüedad) encontró la sesión ya
   movida y ABORTÓ el POST. No hubo 409: contarlo como tal inflaría las colisiones reales.
 
+**Un movimiento = un evento.** El emisor deduplica por movimiento (`FROM>TO`): un 409 que
+re-consulta y reconcilia produce UNA línea, no una por cada capa que la detectó. Contarlo
+dos veces duplicaría exactamente la señal con la que se mide la concurrencia. Y una
+reconciliación que no movió nada (el 409 que encuentra la sesión donde ya estaba) no se
+emite.
+
 Nunca se emite con `steps_jumped` negativo: una lectura que aterriza después de una
 escritura se descarta por fencing (`stateVersion` de P2 + epoch local) en vez de publicar
 el pasado.

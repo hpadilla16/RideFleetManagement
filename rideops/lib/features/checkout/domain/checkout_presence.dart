@@ -50,13 +50,25 @@ class PresenceChipData {
   final int others;
 }
 
+/// [myUserId]: el empleado de ESTE teléfono. Su propia presencia jamás se
+/// pinta — un chip que dice "María G. está en esta sesión" cuando María G.
+/// eres tú no informa de nada y destruye la única señal que el chip aporta.
+///
+/// El filtro está listo pero HOY es inerte: el serializer de P1 no manda
+/// `actorUserId` (ver el WHY en el DTO) y RideOps todavía no late. Cuando H6
+/// encienda el heartbeat, este filtro tiene que estar respaldado por el campo
+/// del backend — si no llega, la alternativa es que la app no pinte presencias
+/// de su propia superficie, que es peor (ocultaría a un compañero en otro
+/// teléfono RideOps).
 PresenceChipData? pickPresenceChip(
   List<CheckoutPresenceDto>? presence,
-  DateTime now,
-) {
+  DateTime now, {
+  String? myUserId,
+}) {
   if (presence == null || presence.isEmpty) return null;
   final fresh = <(CheckoutPresenceDto, PresenceFreshness)>[];
   for (final p in presence) {
+    if (myUserId != null && p.actorUserId == myUserId) continue;
     final f = presenceFreshness(p.lastSeenAt, now);
     if (f != PresenceFreshness.expired) fresh.add((p, f));
   }

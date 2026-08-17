@@ -47,9 +47,24 @@ class _StepsSheetState extends State<StepsSheet> {
     super.initState();
     // Auto-scroll al paso actual: con 10 pasos y guantes, abrir la lista y
     // tener que buscar dónde vas es una tarea extra que nadie pidió.
+    _scrollToCurrent();
+  }
+
+  @override
+  void didUpdateWidget(StepsSheet oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // El sheet es VIVO: si otra superficie mueve el paso con la lista abierta,
+    // se sigue al nodo nuevo. Solo cuando el paso cambió — un re-render por
+    // envejecer la edad del dato no debe robarle el scroll al agente.
+    if (oldWidget.session.currentStep != widget.session.currentStep) {
+      _scrollToCurrent();
+    }
+  }
+
+  void _scrollToCurrent() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final ctx = _currentKey.currentContext;
-      if (ctx == null) return;
+      if (ctx == null || !mounted) return;
       Scrollable.ensureVisible(
         ctx,
         alignment: 0.35,

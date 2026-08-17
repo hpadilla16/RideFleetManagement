@@ -199,6 +199,7 @@ class CheckoutWizardState {
     CheckoutConflict? conflict,
     bool clearConflict = false,
     CheckoutReservationContext? context,
+    bool? pending,
   }) {
     return CheckoutWizardState(
       session: session ?? this.session,
@@ -213,6 +214,10 @@ class CheckoutWizardState {
       advance: clearAdvance ? null : (advance ?? this.advance),
       conflict: clearConflict ? null : (conflict ?? this.conflict),
       context: context ?? this.context,
+      // Se REENVÍA: sin esto, cualquier copyWith sobre un estado `.pending()`
+      // lo apagaba en silencio (hoy lo enmascaran las otras condiciones de
+      // [firstLoad], pero es una trampa puesta para H2-H7).
+      pending: pending ?? this.pending,
     );
   }
 }

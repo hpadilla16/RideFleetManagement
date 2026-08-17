@@ -110,6 +110,17 @@ abstract class CheckoutPresenceDto with _$CheckoutPresenceDto {
     /// de la superficie, así que nunca llega vacío por el camino feliz.
     @Default('') String displayName,
     @IsoDateTimeConverter() DateTime? lastSeenAt,
+
+    /// Quién late. **El serializer de P1 NO lo emite todavía**
+    /// (`activePresence()` mapea solo `{surface, displayName, lastSeenAt}`):
+    /// aquí queda mapeado y el filtro de "no me listes a mí mismo" ya está
+    /// escrito en `pickPresenceChip`, inerte mientras el campo llegue null.
+    ///
+    /// **Pedido para H6, ANTES de que RideOps empiece a latir**: sin este id
+    /// el agente se vería a sí mismo en el chip de acompañantes en cuanto la
+    /// app haga su propio heartbeat — y "María G. está en esta sesión" cuando
+    /// María G. eres tú destruye la única señal que el chip aporta.
+    String? actorUserId,
   }) = _CheckoutPresenceDto;
 
   factory CheckoutPresenceDto.fromJson(Map<String, dynamic> json) =>

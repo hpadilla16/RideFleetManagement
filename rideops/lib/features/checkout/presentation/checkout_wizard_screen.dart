@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/api/dto/checkout_session.dart';
+import '../../../core/api/enums.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/session/active_location.dart';
@@ -160,7 +161,13 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
       children: [
         SessionHead(
           context_: state.context,
-          presence: pickPresenceChip(session.presence, clock.now()),
+          presence: pickPresenceChip(
+            session.presence,
+            clock.now(),
+            // Nunca listarse a uno mismo como acompañante (inerte hasta que
+            // el backend mande `actorUserId` — ver el WHY en el DTO).
+            myUserId: ref.watch(sessionControllerProvider).user?.id,
+          ),
           mini: mini,
           // Sin red el punto de presencia se apaga: el verde afirma "está
           // AHORA" y esa afirmación la sostiene un heartbeat del servidor que
@@ -218,9 +225,7 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
   }
 
   Future<void> _openStepsSheet() async {
-    final state = ref.read(_provider);
-    final session = state.session;
-    if (session == null) return;
+    if (ref.read(_provider).session == null) return;
     // El agente ya está viendo qué cambió: el banner cumplió su trabajo.
     _controller.dismissAdvance();
     setState(() => _sheetOpen = true);
@@ -240,12 +245,27 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
       constraints: const BoxConstraints(maxHeight: 620),
-      builder: (_) => StepsSheet(
-        session: session,
-        myUserId: ref.read(sessionControllerProvider).user?.id,
-        dataAge: state.fetchedAt == null
-            ? Duration.zero
-            : clock.now().difference(state.fetchedAt!),
+      // VIVO, no una foto: con `ref.read` la lista, los candados de entry
+      // guard y la edad quedaban clavados al instante de apertura — diría
+      // "hace 3 s" dos minutos después. Y este sheet es justo el destino del
+      // "Ver qué cambió" del banner de avance ajeno: mostrar ahí una lista
+      // incapaz de reflejar un movimiento posterior sería mentir en la
+      // historia cuyo propósito ENTERO es la verdad multi-superficie (y
+      // contradiría la regla escrita en checkout_wizard_state: "nunca se
+      // disfraza de vivo").
+      builder: (_) => Consumer(
+        builder: (_, sheetRef, _) {
+          final live = sheetRef.watch(_provider);
+          final session = live.session;
+          if (session == null) return const SizedBox.shrink();
+          return StepsSheet(
+            session: session,
+            myUserId: sheetRef.watch(sessionControllerProvider).user?.id,
+            dataAge: live.fetchedAt == null
+                ? Duration.zero
+                : clock.now().difference(live.fetchedAt!),
+          );
+        },
       ),
     );
     if (mounted) setState(() => _sheetOpen = false);
@@ -417,7 +437,7 @@ class _TerminalView extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final format = DateFormat.Hm(Localizations.localeOf(context).toString());
     final events = parseCheckoutEvents(session.events).reversed.toList();
-    final cancelled = session.currentStep == 'CANCELLED';
+    final cancelled = session.currentStep == CheckoutStep.cancelled.wire;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 18, 16, 20),
       children: [

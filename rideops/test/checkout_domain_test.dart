@@ -218,6 +218,28 @@ void main() {
       expect(pickPresenceChip(null, now), isNull);
     });
 
+    test('MINOR-5: el filtro de "no me listes a mí mismo" está listo — inerte '
+        'mientras el backend no mande actorUserId', () {
+      final rows = [
+        p('KIOSK', const Duration(seconds: 6), name: 'María'),
+        p('RIDEOPS', const Duration(seconds: 3), name: 'Yo mismo'),
+      ];
+      // HOY: el serializer de P1 no manda actorUserId ⇒ el filtro no puede
+      // actuar y se ve todo (comportamiento actual, documentado).
+      expect(pickPresenceChip(rows, now, myUserId: 'u-yo')!.entry.displayName,
+          'Yo mismo');
+
+      // CUANDO el backend lo mande (pedido para H6, antes de que RideOps
+      // empiece a latir): el propio heartbeat desaparece del chip.
+      final withActor = [
+        rows.first,
+        rows.last.copyWith(actorUserId: 'u-yo'),
+      ];
+      final chip = pickPresenceChip(withActor, now, myUserId: 'u-yo')!;
+      expect(chip.entry.displayName, 'María');
+      expect(chip.others, 0, reason: 'tampoco se cuenta en el "+N"');
+    });
+
     test('el fixture de P1 pinta el chip del kiosco', () {
       final session = CheckoutSessionDto.fromJson(
         _fixture('checkout_session_presence.json'),

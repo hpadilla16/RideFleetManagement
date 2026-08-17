@@ -1,3 +1,4 @@
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/l10n/app_localizations.dart';
@@ -117,7 +118,7 @@ class ForeignAdvanceBanner extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final age = notice.at == null
         ? null
-        : checkoutAgeLabel(l10n, DateTime.now().difference(notice.at!));
+        : checkoutAgeLabel(l10n, clock.now().difference(notice.at!));
     final completed = stepLabel(l10n, notice.completedStep);
     final head = switch (notice.actor) {
       CheckoutActorKind.kiosk =>

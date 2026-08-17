@@ -106,6 +106,17 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
   /// `checkout.step_rendered` se emita por tick del poll.
   String? _renderedStep;
 
+  /// Último movimiento ya contado como `checkout.reconciled` (`FROM>TO`).
+  ///
+  /// Sin esto, UN SOLO 409 emitía el evento DOS veces: `_refetchQuiet` aplica
+  /// la lectura fresca (y `_apply` ya loguea porque el paso se movió) y
+  /// después `_resolveConflict` volvía a loguear el MISMO movimiento. El
+  /// resultado era ×2 en la frecuencia de `via:conflict` y en `steps_jumped`
+  /// — o sea, la métrica con la que el épico mide cuánto se pisan las
+  /// superficies, y sobre la que se apoya la prueba de concurrencia en
+  /// staging, contando el doble. Un movimiento = un evento.
+  String? _reconciledMovement;
+
   @override
   CheckoutWizardState build() {
     _generation++;
@@ -119,6 +130,7 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
     _writeEpoch = 0;
     _appliedVersion = null;
     _renderedStep = null;
+    _reconciledMovement = null;
     ref.onDispose(() {
       _timer?.cancel();
       _reconnect?.cancel();
@@ -191,6 +203,14 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
   /// AGENTE sí lo conserva: ahí hay un humano esperando UNA respuesta.
   Future<void> _load(int gen, {bool byUser = false}) async {
     if (gen != _generation || !ref.mounted) return;
+    // Gate propio (no basta el de `_scheduleNext`): el listener de visibilidad
+    // se registra ANTES del gate de arranque, así que un background→foreground
+    // sin sesión o con la sede a medio hidratar entraba aquí y disparaba un
+    // GET real — sin bearer útil, o sin el header `x-view-location`.
+    if (!ref.read(sessionControllerProvider).isAuthenticated ||
+        !ref.read(activeLocationProvider).hydrated) {
+      return;
+    }
     if (_inFlight) return;
     _inFlight = true;
     state = state.copyWith(fetching: true, clearError: true);
@@ -246,7 +266,12 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       // cuerpo, pero el reloj se re-arma abajo igual (si esto hiciera
       // `return`, una sola carrera dejaría la pantalla congelada para
       // siempre — lo cazó el test del cinturón de stateVersion).
-      if (!_isStaleRead(fresh, epoch)) {
+      if (_isStaleRead(fresh, epoch)) {
+        // Descartada, pero CUENTA como ciclo sin cambio: un bucle patológico
+        // de réplica atrasada dejaría el poll a 5 s para siempre pidiendo
+        // lecturas que nunca se aplican.
+        _noteUnchangedCycle();
+      } else {
         final changed = _hasMaterialChange(state.session, fresh);
         _apply(fresh, detectForeign: true);
         if (changed) {
@@ -254,10 +279,7 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
           _slowLane = false;
           _backoff = null;
         } else {
-          _unchangedCycles++;
-          if (_unchangedCycles >= _cfg.unchangedCyclesBeforeSlowLane) {
-            _slowLane = true;
-          }
+          _noteUnchangedCycle();
         }
       }
     } on ApiError catch (e) {
@@ -267,6 +289,13 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       if (gen == _generation) _inFlight = false;
     }
     _scheduleNext(gen);
+  }
+
+  void _noteUnchangedCycle() {
+    _unchangedCycles++;
+    if (_unchangedCycles >= _cfg.unchangedCyclesBeforeSlowLane) {
+      _slowLane = true;
+    }
   }
 
   /// ¿Esta respuesta de LECTURA llegó tarde y trae un estado ya superado?
@@ -376,7 +405,13 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
           actor: actor,
           at: event?.at,
         );
-        _logReconciled(from: prev.step, to: fresh.step, via: via);
+        _logReconciled(
+          from: prev.step,
+          to: fresh.step,
+          fromRaw: prev.currentStep,
+          toRaw: fresh.currentStep,
+          via: via,
+        );
       }
     }
     // La presencia SOBREVIVE a una respuesta que no la trae (INN SC-2): los
@@ -409,11 +444,23 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
     _logger.log(CheckoutEvents.stepRendered, data: {'step': step});
   }
 
+  /// UN movimiento = UN evento (dedup, igual que [_logStepRendered]).
+  ///
+  /// [from]/[to] tipados pueden ser null (paso que la app no conoce): el token
+  /// cae al string crudo para no colapsar dos movimientos distintos en uno.
   void _logReconciled({
     CheckoutStep? from,
     CheckoutStep? to,
     required String via,
+    String? fromRaw,
+    String? toRaw,
   }) {
+    // Nada se movió: no hay reconciliación que contar (p. ej. el 409 que se
+    // resuelve encontrando la sesión donde ya estaba).
+    if (from != null && to != null && from == to) return;
+    final token = '${from?.wire ?? fromRaw ?? '?'}>${to?.wire ?? toRaw ?? '?'}';
+    if (_reconciledMovement == token) return;
+    _reconciledMovement = token;
     final jumped = stepsJumped(from: from, to: to);
     _logger.log(CheckoutEvents.reconciled, data: {
       'steps_jumped': ?jumped,
@@ -566,6 +613,7 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
   ) async {
     _logger.log(CheckoutEvents.transition409, data: {'code': e.code ?? 'none'});
     final before = state.session?.step;
+    final beforeRaw = state.session?.currentStep;
     final fresh = await _refetchQuiet(gen);
     if (gen != _generation || !ref.mounted) {
       return CheckoutTransitionOutcome.blocked;
@@ -577,7 +625,16 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
         // Ya-en-o-pasado el destino ⇒ no-op SILENCIOSO (el banner de avance
         // ajeno que puso el re-fetch es todo lo que el agente necesita ver).
         if (isAtOrPast(current: fresh?.step, target: toStep)) {
-          _logReconciled(from: before, to: fresh?.step, via: 'conflict');
+          // Normalmente el `_apply` del re-fetch YA contó este movimiento; el
+          // dedup de [_logReconciled] evita el doble conteo y esta llamada
+          // cubre el caso en que el re-fetch falló y no llegó a aplicar nada.
+          _logReconciled(
+            from: before,
+            to: fresh?.step,
+            fromRaw: beforeRaw,
+            toRaw: fresh?.currentStep,
+            via: 'conflict',
+          );
           return CheckoutTransitionOutcome.alreadyDone;
         }
         _setConflict(CheckoutConflictKind.generic, e);

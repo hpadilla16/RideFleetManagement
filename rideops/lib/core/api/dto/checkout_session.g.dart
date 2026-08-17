@@ -82,6 +82,7 @@ _CheckoutPresenceDto _$CheckoutPresenceDtoFromJson(Map<String, dynamic> json) =>
       lastSeenAt: const IsoDateTimeConverter().fromJson(
         json['lastSeenAt'] as String?,
       ),
+      actorUserId: json['actorUserId'] as String?,
     );
 
 Map<String, dynamic> _$CheckoutPresenceDtoToJson(
@@ -90,4 +91,5 @@ Map<String, dynamic> _$CheckoutPresenceDtoToJson(
   'surface': instance.surface,
   'displayName': instance.displayName,
   'lastSeenAt': const IsoDateTimeConverter().toJson(instance.lastSeenAt),
+  'actorUserId': instance.actorUserId,
 };

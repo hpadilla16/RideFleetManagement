@@ -263,6 +263,50 @@ void main() {
     );
   });
 
+  testWidgets('MAJOR-2 — el sheet de pasos está VIVO: con la lista abierta, un '
+      'avance de otra superficie mueve el paso actual y suelta su candado',
+      (tester) async {
+    final f = fakes();
+    f.api.current = sessionAt(CheckoutStep.tcPending);
+    await pumpWizard(tester, api: f.api, network: f.network);
+
+    await tester.tap(find.text('See every step'));
+    await tester.pumpAndSettle();
+    expect(find.byType(StepsSheet), findsOneWidget);
+    // El guard de TC_SIGNED se anuncia porque tcCompletedAt no está sellado.
+    expect(find.text("Waiting on: customer's T&C signature"), findsOneWidget);
+    expect(find.text('In progress'), findsOneWidget);
+
+    // El cliente firma en su teléfono y el kiosco avanza — con el sheet
+    // abierto, que es justo el destino del "Ver qué cambió".
+    f.api.current = sessionAt(
+      CheckoutStep.tcSigned,
+      actorUserId: null,
+      kiosk: true,
+      tc: DateTime.now(),
+    );
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(StepsSheet), findsOneWidget, reason: 'sigue abierta');
+    expect(
+      find.text("Waiting on: customer's T&C signature"),
+      findsNothing,
+      reason: 'el sello llegó: el candado ya no puede seguir puesto',
+    );
+    // El paso actual de la LISTA se movió: "Términos firmados" pasa a estar en
+    // curso y el anterior queda como completado.
+    expect(
+      find.descendant(
+        of: find.byType(StepsSheet),
+        matching: find.textContaining('Completed'),
+      ),
+      findsWidgets,
+    );
+    // Y el stepline de atrás también: la pantalla entera reaccionó.
+    expect(find.text('Step 3 of 10'), findsOneWidget);
+  });
+
   testWidgets('8E — pausar: consecuencias explícitas y POST /abandon',
       (tester) async {
     final f = fakes();

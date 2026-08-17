@@ -187,6 +187,32 @@ void main() {
         expect(h.api.getCalls, 0);
       });
     });
+
+    test('MINOR-3: un background→foreground SIN sesión no dispara un GET real '
+        '(el listener de visibilidad se registra antes del gate)', () {
+      fakeAsync((async) {
+        final h = harness(authenticated: false);
+        async.flushMicrotasks();
+        h.container.read(appVisibilityProvider.notifier).setVisible(false);
+        async.flushMicrotasks();
+        h.container.read(appVisibilityProvider.notifier).setVisible(true);
+        async.flushMicrotasks();
+        expect(h.api.byReservationCalls, 0);
+      });
+    });
+
+    test('MINOR-3: tampoco con la sede a MEDIO hidratar (saldría sin el '
+        'header x-view-location)', () {
+      fakeAsync((async) {
+        final h = harness(initialLocation: const ActiveLocation.hydrating());
+        async.flushMicrotasks();
+        h.container.read(appVisibilityProvider.notifier).setVisible(false);
+        async.flushMicrotasks();
+        h.container.read(appVisibilityProvider.notifier).setVisible(true);
+        async.flushMicrotasks();
+        expect(h.api.byReservationCalls, 0);
+      });
+    });
   });
 
   group('poll', () {
@@ -563,6 +589,34 @@ void main() {
       });
     });
 
+    test('NIT: una lectura DESCARTADA también cuenta como ciclo sin cambio — '
+        'si no, un bucle de réplica atrasada se queda a 5 s para siempre', () {
+      fakeAsync((async) {
+        final h = harness();
+        h.api.current = sessionAt(CheckoutStep.tcPending, stateVersion: 9);
+        h.container.invalidate(checkoutWizardProvider(kReservationId));
+        h.container.listen(checkoutWizardProvider(kReservationId), (_, _) {});
+        async.flushMicrotasks();
+
+        // Réplica atrasada permanente: todas las lecturas se descartan.
+        h.api.current = sessionAt(CheckoutStep.confirming, stateVersion: 4);
+        for (var i = 1; i <= 3; i++) {
+          async.elapse(const Duration(seconds: 5));
+          async.flushMicrotasks();
+          expect(h.api.getCalls, i);
+        }
+        // Carril lento: a los 5 s ya no hay tick.
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+        expect(h.api.getCalls, 3);
+        async.elapse(const Duration(seconds: 10));
+        async.flushMicrotasks();
+        expect(h.api.getCalls, 4);
+        // Y el estado nunca retrocedió.
+        expect(read(h.container).session!.currentStep, 'TC_PENDING');
+      });
+    });
+
     test('SC-2: la presencia SOBREVIVE a una respuesta de escritura que no la '
         'trae (los POST no pasan por withPresence)', () {
       fakeAsync((async) {
@@ -615,9 +669,11 @@ void main() {
         expect(advance.actor, CheckoutActorKind.kiosk);
 
         final reconciled = h.logger.events
-            .firstWhere((e) => e.$1 == CheckoutEvents.reconciled);
-        expect(reconciled.$2['via'], 'poll');
-        expect(reconciled.$2['steps_jumped'], 1);
+            .where((e) => e.$1 == CheckoutEvents.reconciled)
+            .toList();
+        expect(reconciled, hasLength(1), reason: 'un movimiento, un evento');
+        expect(reconciled.single.$2['via'], 'poll');
+        expect(reconciled.single.$2['steps_jumped'], 1);
       });
     });
 
@@ -841,12 +897,17 @@ void main() {
               e.$2['code'] == 'ILLEGAL_TRANSITION'),
           isTrue,
         );
-        expect(
-          h.logger.events
-              .where((e) => e.$1 == CheckoutEvents.reconciled)
-              .any((e) => e.$2['via'] == 'conflict'),
-          isTrue,
-        );
+        // MAJOR-1: se asierta el CONTEO, no `.any(...)`. Un 409 movió la
+        // sesión UNA vez; emitirlo dos veces (lo hacía: `_refetchQuiet` y
+        // luego `_resolveConflict`) duplica la frecuencia de `via:conflict` y
+        // `steps_jumped`, que es justo la métrica con la que el épico mide
+        // cuánto se pisan las superficies.
+        final reconciled = h.logger.events
+            .where((e) => e.$1 == CheckoutEvents.reconciled)
+            .toList();
+        expect(reconciled, hasLength(1));
+        expect(reconciled.single.$2['via'], 'conflict');
+        expect(reconciled.single.$2['steps_jumped'], 3);
       });
     });
 
@@ -949,6 +1010,71 @@ void main() {
         unawaited(notifier(h.container).transitionTo(CheckoutStep.tcSigned));
         async.flushMicrotasks();
         expect(read(h.container).conflict!.kind, CheckoutConflictKind.entryGuard);
+      });
+    });
+  });
+
+  group('higiene de la instrumentación (MAJOR-1)', () {
+    test('un poll que ve el MISMO movimiento dos veces no lo cuenta dos veces',
+        () {
+      fakeAsync((async) {
+        final h = harness();
+        async.flushMicrotasks();
+        // El kiosco avanza…
+        h.api.current = sessionAt(
+          CheckoutStep.tcPending,
+          actorUserId: null,
+          kiosk: true,
+        );
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+        // …y el agente fuerza un refresh que devuelve lo MISMO.
+        unawaited(notifier(h.container).refresh());
+        async.flushMicrotasks();
+        expect(
+          h.logger.events.where((e) => e.$1 == CheckoutEvents.reconciled),
+          hasLength(1),
+        );
+      });
+    });
+
+    test('dos movimientos DISTINTOS sí son dos eventos (el dedup no se come '
+        'el segundo)', () {
+      fakeAsync((async) {
+        final h = harness();
+        async.flushMicrotasks();
+        h.api.current = sessionAt(
+          CheckoutStep.tcPending,
+          actorUserId: null,
+          kiosk: true,
+        );
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+        h.api.current = sessionAt(
+          CheckoutStep.tcSigned,
+          actorUserId: null,
+          kiosk: true,
+        );
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+        final reconciled = h.logger.events
+            .where((e) => e.$1 == CheckoutEvents.reconciled)
+            .toList();
+        expect(reconciled, hasLength(2));
+        expect(reconciled.map((e) => e.$2['steps_jumped']), [1, 1]);
+      });
+    });
+
+    test('un 409 que encuentra la sesión donde YA estaba no inventa una '
+        'reconciliación', () {
+      fakeAsync((async) {
+        final h = harness();
+        async.flushMicrotasks();
+        h.api.onTransition = (_) async => throw conflict('ILLEGAL_TRANSITION');
+        // El servidor sigue en CONFIRMING: nada se movió.
+        unawaited(notifier(h.container).transitionTo(CheckoutStep.confirming));
+        async.flushMicrotasks();
+        expect(h.logger.has(CheckoutEvents.reconciled), isFalse);
       });
     });
   });

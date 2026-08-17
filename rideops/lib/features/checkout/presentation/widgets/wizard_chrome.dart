@@ -1,3 +1,4 @@
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -292,7 +293,7 @@ class SessionHead extends StatelessWidget {
     final pickup = context_?.pickupAt?.toLocal();
     final parts = <String>[];
     if (pickup != null) {
-      final now = DateTime.now();
+      final now = clock.now();
       final time = DateFormat.Hm(locale).format(pickup);
       final isToday = pickup.year == now.year &&
           pickup.month == now.month &&
@@ -400,7 +401,7 @@ class PresenceChip extends StatelessWidget {
     final lastSeen = data.entry.lastSeenAt;
     final age = lastSeen == null
         ? Duration.zero
-        : DateTime.now().difference(lastSeen);
+        : clock.now().difference(lastSeen);
     final text = l10n.coPresenceLine(
       data.entry.displayName,
       surfaceLabel(l10n, data.entry.surface),
