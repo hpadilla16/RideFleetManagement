@@ -104,8 +104,10 @@ class _AngleTile extends StatelessWidget {
                       cacheWidth: 360,
                       gaplessPlayback: true,
                     ),
-                    // Scrim .85 abajo → texto blanco 5.1:1 en el peor caso
-                    // (contraste medido del mockup, nota 1).
+                    // Scrim .85 SOSTENIDO bajo las dos líneas de texto y
+                    // recién ahí desvanecido (review GD-3: si el .85 solo
+                    // vive en el borde inferior, el subtexto cae en la zona
+                    // desvanecida y sobre foto blanca da ≈2-3:1).
                     const DecoratedBox(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
@@ -113,10 +115,10 @@ class _AngleTile extends StatelessWidget {
                           end: Alignment.topCenter,
                           colors: [
                             Color(0xD917122B),
-                            Color(0x2617122B),
+                            Color(0xD917122B),
                             Color(0x0017122B),
                           ],
-                          stops: [0.0, 0.54, 0.62],
+                          stops: [0.0, 0.42, 0.62],
                         ),
                       ),
                     ),
@@ -177,8 +179,10 @@ class _AngleTile extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
+                          // Plate .85 medido sobre foto (review GD-4) — el
+                          // .55 del primer corte no aguantaba foto clara.
                           color: angle.thumbnail != null
-                              ? const Color(0x8C17122B)
+                              ? const Color(0xD917122B)
                               : RideTokens.warnBg,
                           borderRadius: BorderRadius.circular(7),
                           border: angle.thumbnail != null

@@ -117,12 +117,14 @@ class InspectionFlowState {
     this.angles = const {},
     this.step = InspectionStep.photos,
     this.odometer,
-    this.fuelEighths = 8,
+    this.fuelEighths,
     this.cleanliness,
     this.notes = '',
     this.signatureDataUrl,
     this.completeQueued = false,
     this.outboxFull = false,
+    this.customerName,
+    this.completedAt,
   });
 
   final InspectionFlowPhase phase;
@@ -148,8 +150,10 @@ class InspectionFlowState {
   final int? odometer;
 
   /// Combustible en OCTAVOS en la UI (fuelbar de 8) → fracción 0..1 al
-  /// contrato del complete.
-  final int fuelEighths;
+  /// contrato del complete. SIN default (review GD-5/INN S-4): es evidencia
+  /// contractual — un "lleno" que nadie tocó registraría datos falsos. El
+  /// CTA a firma lo exige igual que odómetro y limpieza.
+  final int? fuelEighths;
   final int? cleanliness;
   final String notes;
   final String? signatureDataUrl;
@@ -159,15 +163,25 @@ class InspectionFlowState {
   /// abrir la cámara (mockup 7D nota 7).
   final bool outboxFull;
 
+  /// Nombre del cliente (display-data) — se SELLA como signerName en el
+  /// complete: la firma legal queda con firmante (review INN S-3).
+  final String? customerName;
+
+  /// inspectionCompletedAt de la sesión cuando otra superficie ya terminó —
+  /// el 6F cuenta la historia con hora (review GD).
+  final DateTime? completedAt;
+
   int get capturedCount =>
       angles.values.where((a) => a.countsAsCaptured).length;
 
   bool get requiredCaptured =>
       kRequiredAngleKeys.every((k) => angles[k]?.countsAsCaptured ?? false);
 
-  double get fuelFraction => fuelEighths / 8;
+  double? get fuelFraction =>
+      fuelEighths == null ? null : fuelEighths! / 8;
 
-  bool get metricsComplete => odometer != null && cleanliness != null;
+  bool get metricsComplete =>
+      odometer != null && cleanliness != null && fuelEighths != null;
 
   InspectionFlowState copyWith({
     InspectionFlowPhase? phase,
@@ -187,6 +201,8 @@ class InspectionFlowState {
     String? signatureDataUrl,
     bool? completeQueued,
     bool? outboxFull,
+    String? customerName,
+    DateTime? completedAt,
   }) =>
       InspectionFlowState(
         phase: phase ?? this.phase,
@@ -206,5 +222,7 @@ class InspectionFlowState {
         signatureDataUrl: signatureDataUrl ?? this.signatureDataUrl,
         completeQueued: completeQueued ?? this.completeQueued,
         outboxFull: outboxFull ?? this.outboxFull,
+        customerName: customerName ?? this.customerName,
+        completedAt: completedAt ?? this.completedAt,
       );
 }

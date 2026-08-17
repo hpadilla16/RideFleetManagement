@@ -58,7 +58,16 @@ class InspectionController extends Notifier<InspectionFlowState> {
 
       if (session.inspectionCompletedAt != null) {
         // 6F: otra superficie terminó — retirar los envíos de esta sesión
-        // (no se manda nada duplicado) y contar la historia en pasado.
+        // (no se manda nada duplicado) y contar la historia en pasado, CON
+        // reserva y hora (review GD: el chip debe pintar, el copy lleva la
+        // hora del cierre).
+        String? reservationNumber;
+        try {
+          final display = await ref
+              .read(reservationsApiProvider)
+              .getDisplayData(reservationId);
+          reservationNumber = display.reservation.reservationNumber;
+        } catch (_) {}
         try {
           await _outbox.discardSession(session.id);
         } catch (_) {}
@@ -66,6 +75,8 @@ class InspectionController extends Notifier<InspectionFlowState> {
         state = state.copyWith(
           phase: InspectionFlowPhase.alreadyCompleted,
           sessionId: session.id,
+          reservationNumber: reservationNumber,
+          completedAt: session.inspectionCompletedAt,
         );
         return;
       }
@@ -90,6 +101,9 @@ class InspectionController extends Notifier<InspectionFlowState> {
           vehicleLabel: display.reservation.vehicle?.label,
           previousOdometer: display.reservation.vehicle?.mileage,
           branding: display.branding,
+          // Firmante para el complete (INN S-3): la firma legal no viaja
+          // anónima si el dato existe.
+          customerName: display.reservation.customer?.fullName,
         );
       } catch (_) {
         // Sin display-data el flujo sigue; la firma usa el fallback neutro.
@@ -235,6 +249,9 @@ class InspectionController extends Notifier<InspectionFlowState> {
   // ── métricas / firma / cierre ────────────────────────────────────────────
 
   void setOdometer(int? value) => state = InspectionFlowState(
+        // Constructor COMPLETO (no copyWith): borrar el campo debe poder
+        // volver a null. Al agregar campos al estado, agregarlos AQUÍ —
+        // omitirlos los resetea en silencio (mordió con customerName).
         phase: state.phase,
         error: state.error,
         sessionId: state.sessionId,
@@ -252,6 +269,8 @@ class InspectionController extends Notifier<InspectionFlowState> {
         signatureDataUrl: state.signatureDataUrl,
         completeQueued: state.completeQueued,
         outboxFull: state.outboxFull,
+        customerName: state.customerName,
+        completedAt: state.completedAt,
       );
 
   void setFuelEighths(int eighths) =>
@@ -290,7 +309,9 @@ class InspectionController extends Notifier<InspectionFlowState> {
         'cleanliness': state.cleanliness,
         'notes': state.notes.isEmpty ? null : state.notes,
         'signatureDataUrl': state.signatureDataUrl,
-        'signerName': null,
+        // INN S-3: el firmante viaja sellado desde display-data — la firma
+        // del agreement queda atribuida.
+        'signerName': state.customerName,
       },
     );
     if (!ref.mounted) return result;

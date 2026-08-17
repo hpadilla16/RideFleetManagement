@@ -117,6 +117,10 @@
   "camFlash": "Flash",
   "camClose": "Close",
   "camShutter": "Take photo",
+  "camErrorTitle": "Could not open the camera",
+  "camErrorPermissionHint": "Camera permission is denied. Enable it in the system Settings and try again.",
+  "langSpanish": "Español",
+  "langEnglish": "English",
   "metricsTitle": "Vehicle metrics",
   "metricsOdometer": "Odometer",
   "metricsOdometerUnit": "mi",
@@ -150,6 +154,7 @@
   "inspFinishQueued": "Inspection placed in the outbox",
   "alreadyCompletedTitle": "This inspection is already complete",
   "alreadyCompletedBody": "Another screen closed it while you were working. Your pending items for this session were removed from the outbox — nothing duplicate will be sent.",
+  "alreadyCompletedBodyAt": "Another screen closed it at {time} while you were working. Your pending items for this session were removed from the outbox — nothing duplicate will be sent.",
   "alreadyCompletedChip": "Reservation {reservation}",
   "backToHome": "Back to home",
 

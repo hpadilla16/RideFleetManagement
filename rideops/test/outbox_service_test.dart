@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/core/db/outbox_db.dart';
@@ -314,6 +315,46 @@ void main() {
       (await db.allFor(userId: 'u1', tenantId: 't1')).single.payload,
     ) as Map<String, dynamic>;
     expect(await vault.read(payload['photoPath'] as String), isNotNull);
+  });
+
+  test('purgeStale (TTL 14 días): fila vieja fuera CON rastro y sin archivo',
+      () async {
+    await service.enqueuePhoto(
+      checkoutSessionId: 'cs-vieja',
+      reservationId: 'r-vieja',
+      reservationNumber: 'R-1',
+      angleKey: 'front',
+      jpegBytes: photo(1),
+    );
+    await service.enqueuePhoto(
+      checkoutSessionId: 'cs-fresca',
+      reservationId: 'r-fresca',
+      reservationNumber: 'R-2',
+      angleKey: 'front',
+      jpegBytes: photo(2),
+    );
+    // Envejecer la primera fila 20 días (residuo de un 401 sin re-login).
+    final oldRow = (await db.byGroupKey('cs-vieja')).single;
+    await (db.update(db.outboxEntries)..where((t) => t.id.equals(oldRow.id)))
+        .write(OutboxEntriesCompanion(
+      createdAt: Value(DateTime.now().subtract(const Duration(days: 20))),
+    ));
+
+    final purged = await service.purgeStale();
+    expect(purged, 1);
+    final remaining = await db.allFor(userId: 'u1', tenantId: 't1');
+    expect(remaining.single.groupKey, 'cs-fresca',
+        reason: 'lo fresco no se toca');
+    final freshPath = (json.decode(remaining.single.payload)
+        as Map<String, dynamic>)['photoPath'] as String;
+    expect(await vault.read(freshPath), isNotNull);
+    final oldPath = (json.decode(oldRow.payload)
+        as Map<String, dynamic>)['photoPath'] as String;
+    expect(await vault.read(oldPath), isNull,
+        reason: 'la foto vieja (PII) también se va');
+    final audit = await db.auditRows();
+    expect(audit.single.reasonCode, 'TTL_EXPIRED',
+        reason: 'nada se evapora sin registro');
   });
 
   test('sin dueño de sesión, encolar truena (bug de orquestación, no dato)',

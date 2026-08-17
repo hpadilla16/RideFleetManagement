@@ -163,6 +163,10 @@
   "camFlash": "Flash",
   "camClose": "Cerrar",
   "camShutter": "Tomar foto",
+  "camErrorTitle": "No se pudo abrir la cámara",
+  "camErrorPermissionHint": "El permiso de cámara está denegado. Actívalo en los Ajustes del sistema y vuelve a intentar.",
+  "langSpanish": "Español",
+  "langEnglish": "English",
   "metricsTitle": "Métricas del vehículo",
   "metricsOdometer": "Odómetro",
   "metricsOdometerUnit": "mi",
@@ -208,6 +212,10 @@
   "inspFinishQueued": "Inspección en la bandeja de salida",
   "alreadyCompletedTitle": "Esta inspección ya se completó",
   "alreadyCompletedBody": "Otra pantalla la cerró mientras trabajabas. Tus envíos pendientes de esta sesión se retiraron de la bandeja — no se enviará nada duplicado.",
+  "alreadyCompletedBodyAt": "Otra pantalla la cerró a las {time} mientras trabajabas. Tus envíos pendientes de esta sesión se retiraron de la bandeja — no se enviará nada duplicado.",
+  "@alreadyCompletedBodyAt": {
+    "placeholders": { "time": { "type": "String" } }
+  },
   "alreadyCompletedChip": "Reserva {reservation}",
   "@alreadyCompletedChip": {
     "placeholders": { "reservation": { "type": "String" } }

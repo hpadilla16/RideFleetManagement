@@ -20,12 +20,16 @@ import 'photo_vault.dart';
 ///  - 400/403/404/409 de negocio → [DrainReject] permanente con el code del
 ///    backend (dead-letter visible).
 ///
-/// Contrato de errores del MINT y del pre-check: aquí un fallo transitorio
-/// LANZA (no devuelve null) — null significa "la sesión ya no existe" y el
-/// drenador lo convierte en SESSION_GONE permanente. Un mint caído por red
-/// no puede matar la fila: la excepción tumba la corrida, el coordinador la
-/// atrapa y las filas inflight vuelven a pending en la siguiente
-/// (resetInflight).
+/// Contrato de errores del MINT y del pre-check (review INN S-1):
+///  - transitorio (red / 5xx / 429 / 401) → LANZA: la corrida se tumba, el
+///    coordinador la atrapa y las filas inflight vuelven a pending. Un blip
+///    de red jamás mata una fila.
+///  - 4xx PERMANENTE de negocio (404, 403 de rol, 400, 409, 410) → NO
+///    lanza: en el mint devuelve null (el drenador lo dead-letterea como
+///    SESSION_GONE — visible, no livelock); en el pre-check devuelve false
+///    y deja que el COMPLETE cobre el error real del servidor, que sí llega
+///    como DrainReject con su code verdadero. Antes, un 403 eterno en el
+///    mint tumbaba cada corrida para siempre sin dead-letter.
 class ApiOutboxOps implements OutboxOps {
   ApiOutboxOps({
     required this.api,
@@ -44,9 +48,10 @@ class ApiOutboxOps implements OutboxOps {
       logger.log(OutboxEvents.remintToken, data: {'reused': token.reused});
       return token.token;
     } on ApiError catch (e) {
-      // 404 = la sesión ya no existe → null (SESSION_GONE aguas arriba).
-      if (e.status == 404) return null;
-      rethrow;
+      // Transitorio → relanzar (la fila queda pending); 4xx permanente de
+      // negocio → null (dead-letter visible, sin livelock — INN S-1).
+      if (_isTransient(e)) rethrow;
+      return null;
     }
   }
 
@@ -74,9 +79,16 @@ class ApiOutboxOps implements OutboxOps {
   Future<bool> inspectionAlreadyCompleted(String reservationId) async {
     // skipViewLocation: la fila pudo capturarse con OTRA sede activa; el
     // pre-check del complete no puede depender del selector vivo.
-    final session =
-        await api.getByReservation(reservationId, skipViewLocation: true);
-    return session?.inspectionCompletedAt != null;
+    try {
+      final session =
+          await api.getByReservation(reservationId, skipViewLocation: true);
+      return session?.inspectionCompletedAt != null;
+    } on ApiError catch (e) {
+      if (_isTransient(e)) rethrow;
+      // 4xx permanente en el pre-check: seguir — el complete cobrará el
+      // error REAL del servidor como DrainReject con su code (INN S-1).
+      return false;
+    }
   }
 
   @override
@@ -103,6 +115,19 @@ class ApiOutboxOps implements OutboxOps {
 
   @override
   Future<void> deletePhotoFile(String path) => vault.delete(path);
+
+  /// Transitorio = vale la pena reintentar la CORRIDA: red, 5xx, 429 y 401
+  /// (la sesión de staff murió — el re-login la revive; dead-letterear por
+  /// eso destruiría trabajo bueno).
+  static bool _isTransient(ApiError e) => switch (e.kind) {
+        ApiErrorKind.network ||
+        ApiErrorKind.server ||
+        ApiErrorKind.rateLimited ||
+        ApiErrorKind.unauthorized ||
+        ApiErrorKind.passwordChangeRequired =>
+          true,
+        _ => false,
+      };
 
   static DrainOutcome _outcomeOf(ApiError e) {
     switch (e.kind) {

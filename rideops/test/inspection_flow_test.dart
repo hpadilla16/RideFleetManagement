@@ -194,12 +194,43 @@ void main() {
     expect(rows, hasLength(2));
     expect(rows.map((r) => r.locationId).toSet(), {activeLocationId});
     expect(rows.map((r) => r.groupKey).toSet(), {'cs1'});
+
+    // GD-5/INN S-4: el combustible SIN default no deja avanzar a firma —
+    // odómetro y limpieza solos no bastan.
+    controller.setOdometer(48212);
+    controller.setCleanliness(4);
+    expect(container.read(inspectionControllerProvider('r1')).metricsComplete,
+        isFalse, reason: 'fuel sin capturar = evidencia sin capturar');
+    controller.setFuelEighths(6);
+    expect(container.read(inspectionControllerProvider('r1')).metricsComplete,
+        isTrue);
+
+    // INN S-3: el complete viaja con el firmante sellado desde display-data.
+    controller
+        .confirmSignature('data:image/png;base64,${'x' * 300}');
+    await controller.finish();
+    final complete = (await db.allFor(
+            userId: kFixtureUserId, tenantId: tenantId))
+        .singleWhere((r) => r.kind == OutboxKinds.inspectionComplete);
+    final body = (json.decode(complete.payload)
+        as Map<String, dynamic>)['body'] as Map<String, dynamic>;
+    expect(body['signerName'], 'María González');
+    expect(body['fuelLevel'], 0.75);
   });
 
   testWidgets('6F: sesión ya completada → reconciliación + purga selectiva',
       (tester) async {
     authed.routes['GET /api/checkout-sessions/by-reservation/r1'] = (_) =>
         jsonRes(200, sessionJson(completedAt: '2026-08-16T14:14:00.000Z'));
+    // Review GD: el 6F pinta la reserva (display-data también en esta rama)
+    // y cuenta la historia con hora.
+    authed.routes['GET /api/reservations/r1/display-data'] = (_) => jsonRes(
+          200,
+          json.decode(
+            File('test/fixtures/reservation_display_data.json')
+                .readAsStringSync(),
+          ) as Map<String, dynamic>,
+        );
     // Fila pendiente de ESA sesión que debe retirarse.
     final now = DateTime.now();
     await db.into(db.outboxEntries).insert(OutboxEntriesCompanion.insert(
@@ -222,6 +253,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('This inspection is already complete'), findsOneWidget);
+    // Chip con la reserva (display-data llegó también en la rama 6F) y el
+    // copy con hora del cierre (review GD).
+    expect(find.text('Reservation R-20260816-0042'), findsOneWidget);
+    expect(
+      find.textContaining('Another screen closed it at'),
+      findsOneWidget,
+    );
     expect(await db.totalRows(), 0,
         reason: 'los envíos de esa sesión se retiraron de la bandeja');
     final audit = await db.auditRows();

@@ -409,6 +409,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get camShutter => 'Take photo';
 
   @override
+  String get camErrorTitle => 'Could not open the camera';
+
+  @override
+  String get camErrorPermissionHint =>
+      'Camera permission is denied. Enable it in the system Settings and try again.';
+
+  @override
+  String get langSpanish => 'Español';
+
+  @override
+  String get langEnglish => 'English';
+
+  @override
   String get metricsTitle => 'Vehicle metrics';
 
   @override
@@ -525,6 +538,11 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get alreadyCompletedBody =>
       'Another screen closed it while you were working. Your pending items for this session were removed from the outbox — nothing duplicate will be sent.';
+
+  @override
+  String alreadyCompletedBodyAt(String time) {
+    return 'Another screen closed it at $time while you were working. Your pending items for this session were removed from the outbox — nothing duplicate will be sent.';
+  }
 
   @override
   String alreadyCompletedChip(String reservation) {

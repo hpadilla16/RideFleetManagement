@@ -27,17 +27,40 @@ abstract class ReservationDisplayData with _$ReservationDisplayData {
 }
 
 /// Subconjunto de la fila de reserva (reservationsService.getById incluye
-/// `vehicle: true` — la fila Prisma completa del vehículo).
+/// `vehicle: true` y `customer` con select — :1539-1580).
 @freezed
 abstract class DisplayReservation with _$DisplayReservation {
   const factory DisplayReservation({
     required String id,
     String? reservationNumber,
     DisplayVehicle? vehicle,
+    DisplayCustomer? customer,
   }) = _DisplayReservation;
 
   factory DisplayReservation.fromJson(Map<String, dynamic> json) =>
       _$DisplayReservationFromJson(json);
+}
+
+/// Cliente de la reserva — solo el nombre: se sella como `signerName` del
+/// complete de inspección (la firma legal lleva firmante, review INN S-3).
+@freezed
+abstract class DisplayCustomer with _$DisplayCustomer {
+  const DisplayCustomer._();
+
+  const factory DisplayCustomer({
+    String? firstName,
+    String? lastName,
+  }) = _DisplayCustomer;
+
+  factory DisplayCustomer.fromJson(Map<String, dynamic> json) =>
+      _$DisplayCustomerFromJson(json);
+
+  /// "María González" o null si no hay nada que sellar.
+  String? get fullName {
+    final name =
+        [firstName, lastName].nonNulls.where((p) => p.isNotEmpty).join(' ');
+    return name.isEmpty ? null : name;
+  }
 }
 
 /// Campos del modelo `Vehicle` (schema.prisma:776+) que la inspección usa.

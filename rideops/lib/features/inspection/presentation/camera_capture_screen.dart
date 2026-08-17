@@ -153,6 +153,13 @@ class _CameraCaptureScreenState extends ConsumerState<CameraCaptureScreen>
     }
   }
 
+  /// Heurística del permiso denegado: el plugin de cámara reporta
+  /// CameraException con code 'CameraAccessDenied*' (Android/iOS).
+  static bool _looksLikePermissionError(Object error) {
+    final text = error.toString().toLowerCase();
+    return text.contains('accessdenied') || text.contains('permission');
+  }
+
   Future<void> _toggleFlash() async {
     final session = _session;
     if (session == null) return;
@@ -185,27 +192,45 @@ class _CameraCaptureScreenState extends ConsumerState<CameraCaptureScreen>
                       color: RideTokens.n900,
                       child: Center(
                         child: _cameraError != null
-                            ? Padding(
-                                padding: const EdgeInsets.all(24),
-                                child: Text(
-                                  l10n.genericError,
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
+                            ? _CameraErrorState(
+                                l10n: l10n,
+                                permissionDenied:
+                                    _looksLikePermissionError(_cameraError!),
+                                onRetry: _openCamera,
+                                onClose: () => Navigator.of(context).pop(),
                               )
                             : const CircularProgressIndicator(
                                 color: Colors.white),
                       ),
                     ),
-                  // Guía de encuadre honesta (nota 6): esquinas — ayuda de
-                  // composición, NO detección automática.
-                  const Positioned.fill(
-                    child: Padding(
-                      padding: EdgeInsets.fromLTRB(28, 90, 28, 120),
-                      child: _CornerGuide(),
+                  // Guía de encuadre honesta (nota 6): esquinas + silueta
+                  // del ángulo al 55 % — ayuda de composición, NO detección
+                  // automática (el mockup aprobado la dibuja; decisión PM).
+                  if (_cameraError == null)
+                    Positioned.fill(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(28, 90, 28, 120),
+                        child: _CornerGuide(angleKey: _angleKey),
+                      ),
+                    ),
+                  // Scrim inferior bajo el hint (review GD): franja oscura
+                  // real en vez de confiar solo en text-shadow sobre un
+                  // viewport claro.
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: IgnorePointer(
+                      child: Container(
+                        height: 76,
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.bottomCenter,
+                            end: Alignment.topCenter,
+                            colors: [Color(0xB317122B), Color(0x0017122B)],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                   Positioned(
@@ -361,16 +386,116 @@ class _DockButton extends StatelessWidget {
   }
 }
 
-class _CornerGuide extends StatelessWidget {
-  const _CornerGuide();
+/// Estado de error de cámara con SALIDA (review GD): reintentar siempre, y
+/// con permiso denegado la pista de ir a Ajustes — nunca un callejón con
+/// solo texto.
+class _CameraErrorState extends StatelessWidget {
+  const _CameraErrorState({
+    required this.l10n,
+    required this.permissionDenied,
+    required this.onRetry,
+    required this.onClose,
+  });
+
+  final AppLocalizations l10n;
+  final bool permissionDenied;
+  final Future<void> Function() onRetry;
+  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(painter: _CornerPainter());
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Icon(Icons.no_photography_outlined,
+              size: 40, color: Colors.white),
+          const SizedBox(height: 12),
+          Text(
+            l10n.camErrorTitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          if (permissionDenied) ...[
+            const SizedBox(height: 8),
+            Text(
+              l10n.camErrorPermissionHint,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xE0FFFFFF),
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                height: 1.45,
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          _OutlinedLightButton(label: l10n.retryButton, onTap: onRetry),
+          const SizedBox(height: 8),
+          _OutlinedLightButton(label: l10n.camClose, onTap: onClose),
+        ],
+      ),
+    );
+  }
+}
+
+class _OutlinedLightButton extends StatelessWidget {
+  const _OutlinedLightButton({required this.label, required this.onTap});
+
+  final String label;
+  final void Function() onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0x1AFFFFFF),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 48),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            border: Border.all(color: const Color(0x59FFFFFF), width: 1.5),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14.5,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CornerGuide extends StatelessWidget {
+  const _CornerGuide({required this.angleKey});
+
+  final String angleKey;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(painter: _CornerPainter(angleKey: angleKey));
   }
 }
 
 class _CornerPainter extends CustomPainter {
+  _CornerPainter({required this.angleKey});
+
+  final String angleKey;
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
@@ -390,8 +515,96 @@ class _CornerPainter extends CustomPainter {
     corner(Offset(size.width, 0), true, false);
     corner(Offset(0, size.height), false, true);
     corner(Offset(size.width, size.height), true, true);
+
+    _paintSilhouette(canvas, size);
+  }
+
+  /// Silueta del ángulo al 55 % (nota 6 del mockup / decisión PM): costado
+  /// para left/right, frente/atrás para front/rear, glifo de habitáculo
+  /// para interiores. Ayuda de composición estilizada — jamás promete
+  /// detección.
+  void _paintSilhouette(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0x8CFFFFFF) // blanco al 55 %
+      ..strokeWidth = 2.5
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+
+    // Caja de diseño 240×110 centrada un poco arriba del medio (el hint y
+    // el dock viven abajo).
+    const dw = 240.0, dh = 110.0;
+    final scale = (size.width * 0.72 / dw).clamp(0.5, 2.0);
+    canvas.save();
+    canvas.translate(
+      (size.width - dw * scale) / 2,
+      size.height * 0.44 - (dh * scale) / 2,
+    );
+    canvas.scale(scale);
+
+    switch (angleKey) {
+      case 'left' || 'right':
+        // Costado (el path del mockup 6B).
+        final body = Path()
+          ..moveTo(18, 78)
+          ..cubicTo(22, 60, 38, 48, 62, 44)
+          ..lineTo(88, 26)
+          ..cubicTo(96, 21, 104, 19, 118, 19)
+          ..lineTo(156, 19)
+          ..cubicTo(178, 19, 200, 29, 214, 44)
+          ..lineTo(222, 54)
+          ..cubicTo(230, 56, 234, 62, 234, 70)
+          ..lineTo(234, 78)
+          ..lineTo(218, 78);
+        canvas.drawPath(body, paint);
+        canvas.drawCircle(const Offset(62, 82), 15, paint);
+        canvas.drawCircle(const Offset(182, 82), 15, paint);
+        canvas.drawLine(const Offset(77, 82), const Offset(167, 82), paint);
+      case 'front' || 'rear':
+        // Frente/atrás: capó + parabrisas + faros/llantas.
+        final front = Path()
+          ..moveTo(40, 90)
+          ..lineTo(40, 62)
+          ..cubicTo(40, 50, 48, 42, 60, 40)
+          ..lineTo(76, 18)
+          ..cubicTo(80, 13, 86, 10, 94, 10)
+          ..lineTo(146, 10)
+          ..cubicTo(154, 10, 160, 13, 164, 18)
+          ..lineTo(180, 40)
+          ..cubicTo(192, 42, 200, 50, 200, 62)
+          ..lineTo(200, 90);
+        canvas.drawPath(front, paint);
+        canvas.drawLine(const Offset(84, 40), const Offset(156, 40), paint);
+        canvas.drawOval(
+            const Rect.fromLTWH(52, 58, 28, 12), paint); // faro izq
+        canvas.drawOval(
+            const Rect.fromLTWH(160, 58, 28, 12), paint); // faro der
+        canvas.drawLine(const Offset(46, 96), const Offset(76, 96), paint);
+        canvas.drawLine(const Offset(164, 96), const Offset(194, 96), paint);
+      default:
+        // Interior (asientos/tablero/cajuela): marco redondeado + asiento.
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            const Rect.fromLTWH(50, 10, 140, 90),
+            const Radius.circular(16),
+          ),
+          paint,
+        );
+        final seat = Path()
+          ..moveTo(96, 78)
+          ..lineTo(96, 40)
+          ..cubicTo(96, 30, 104, 26, 112, 28)
+          ..lineTo(120, 30)
+          ..cubicTo(126, 32, 128, 38, 128, 44)
+          ..lineTo(128, 64)
+          ..cubicTo(140, 66, 146, 70, 146, 78)
+          ..close();
+        canvas.drawPath(seat, paint);
+    }
+    canvas.restore();
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _CornerPainter oldDelegate) =>
+      oldDelegate.angleKey != angleKey;
 }

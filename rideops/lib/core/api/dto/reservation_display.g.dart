@@ -29,6 +29,9 @@ _DisplayReservation _$DisplayReservationFromJson(Map<String, dynamic> json) =>
       vehicle: json['vehicle'] == null
           ? null
           : DisplayVehicle.fromJson(json['vehicle'] as Map<String, dynamic>),
+      customer: json['customer'] == null
+          ? null
+          : DisplayCustomer.fromJson(json['customer'] as Map<String, dynamic>),
     );
 
 Map<String, dynamic> _$DisplayReservationToJson(_DisplayReservation instance) =>
@@ -36,6 +39,19 @@ Map<String, dynamic> _$DisplayReservationToJson(_DisplayReservation instance) =>
       'id': instance.id,
       'reservationNumber': instance.reservationNumber,
       'vehicle': instance.vehicle,
+      'customer': instance.customer,
+    };
+
+_DisplayCustomer _$DisplayCustomerFromJson(Map<String, dynamic> json) =>
+    _DisplayCustomer(
+      firstName: json['firstName'] as String?,
+      lastName: json['lastName'] as String?,
+    );
+
+Map<String, dynamic> _$DisplayCustomerToJson(_DisplayCustomer instance) =>
+    <String, dynamic>{
+      'firstName': instance.firstName,
+      'lastName': instance.lastName,
     };
 
 _DisplayVehicle _$DisplayVehicleFromJson(Map<String, dynamic> json) =>

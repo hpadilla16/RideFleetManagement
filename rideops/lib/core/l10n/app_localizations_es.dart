@@ -413,6 +413,19 @@ class AppLocalizationsEs extends AppLocalizations {
   String get camShutter => 'Tomar foto';
 
   @override
+  String get camErrorTitle => 'No se pudo abrir la cámara';
+
+  @override
+  String get camErrorPermissionHint =>
+      'El permiso de cámara está denegado. Actívalo en los Ajustes del sistema y vuelve a intentar.';
+
+  @override
+  String get langSpanish => 'Español';
+
+  @override
+  String get langEnglish => 'English';
+
+  @override
   String get metricsTitle => 'Métricas del vehículo';
 
   @override
@@ -529,6 +542,11 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get alreadyCompletedBody =>
       'Otra pantalla la cerró mientras trabajabas. Tus envíos pendientes de esta sesión se retiraron de la bandeja — no se enviará nada duplicado.';
+
+  @override
+  String alreadyCompletedBodyAt(String time) {
+    return 'Otra pantalla la cerró a las $time mientras trabajabas. Tus envíos pendientes de esta sesión se retiraron de la bandeja — no se enviará nada duplicado.';
+  }
 
   @override
   String alreadyCompletedChip(String reservation) {

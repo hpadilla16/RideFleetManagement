@@ -207,6 +207,36 @@ class OutboxDb extends _$OutboxDb {
     return delete(outboxEntries).goAndReturn();
   }
 
+  /// TTL de la bandeja (ADR-7 "purga agresiva", review INN O-1): filas más
+  /// viejas que el corte — cualquier estado y cualquier dueño — se van.
+  /// Cierra el residuo del 401 sin re-login: sin logout explícito ni login
+  /// de otra cuenta, las filas huérfanas no viven para siempre en un
+  /// teléfono compartido. Devuelve lo borrado (el caller borra archivos).
+  Future<List<OutboxEntry>> purgeOlderThan(DateTime cutoff) {
+    return (delete(outboxEntries)
+          ..where((t) => t.createdAt.isSmallerThanValue(cutoff)))
+        .goAndReturn();
+  }
+
+  /// Retención del rastro de auditoría (review INN O-2): 90 días O las
+  /// últimas [keepMax] filas — lo que corte primero. El rastro existe para
+  /// soporte/evidencia reciente, no como archivo eterno en el aparato.
+  Future<void> pruneAudit({
+    required DateTime olderThan,
+    int keepMax = 500,
+  }) async {
+    await (delete(outboxAuditEntries)
+          ..where((t) => t.discardedAt.isSmallerThanValue(olderThan)))
+        .go();
+    final rows = await (select(outboxAuditEntries)
+          ..orderBy([(t) => OrderingTerm.desc(t.discardedAt)]))
+        .get();
+    if (rows.length <= keepMax) return;
+    final excessIds = rows.skip(keepMax).map((r) => r.id).toList();
+    await (delete(outboxAuditEntries)..where((t) => t.id.isIn(excessIds)))
+        .go();
+  }
+
   Future<void> deleteRow(String id) =>
       (delete(outboxEntries)..where((t) => t.id.equals(id))).go();
 

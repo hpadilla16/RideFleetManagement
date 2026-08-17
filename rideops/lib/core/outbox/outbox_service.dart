@@ -248,6 +248,41 @@ class OutboxService {
     return purged.length;
   }
 
+  /// TTL de arranque (ADR-7 "purga agresiva", review INN O-1): filas —y sus
+  /// fotos— más viejas que [ttl] se van, con rastro de auditoría
+  /// TTL_EXPIRED (lo purgado pudo ser evidencia; no se evapora sin
+  /// registro). Cubre el residuo de un 401 sin re-login posterior.
+  Future<int> purgeStale({Duration ttl = const Duration(days: 14)}) async {
+    final purged = await db.purgeOlderThan(DateTime.now().subtract(ttl));
+    for (final row in purged) {
+      final payload = _payloadOf(row);
+      final summary = json.encode({
+        'reservationNumber': payload['reservationNumber'],
+        'reservationId': payload['reservationId'],
+        'angleKey': payload['angleKey'],
+        'attempts': row.attempts,
+      });
+      await db.insertAudit(OutboxAuditEntriesCompanion.insert(
+        id: newOutboxId(),
+        userId: row.userId,
+        tenantId: row.tenantId,
+        locationId: Value(row.locationId),
+        rowId: row.id,
+        rowKind: row.kind,
+        summary: summary,
+        reasonCode: const Value('TTL_EXPIRED'),
+        discardedAt: DateTime.now(),
+      ));
+      final path = _photoPathOf(row);
+      if (path != null) await vault.delete(path);
+    }
+    if (purged.isNotEmpty) {
+      logger.log(OutboxEvents.purgedAccountSwitch,
+          data: {'rows': purged.length, 'reason': 'ttl'});
+    }
+    return purged.length;
+  }
+
   /// Barrido de arranque: archivos de la bóveda SIN fila que los referencie
   /// (crash entre borrar fila y borrar archivo) se borran. Historia M1.
   Future<int> sweepOrphanFiles() async {

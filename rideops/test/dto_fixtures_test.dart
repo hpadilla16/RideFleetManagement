@@ -131,6 +131,8 @@ void main() {
     expect(d.reservation.vehicle?.mileage, 48190,
         reason: 'la "última lectura registrada" del odómetro (mockup 6C n.7)');
     expect(d.reservation.vehicle?.label, 'Toyota Corolla 2023 · U-112');
+    expect(d.reservation.customer?.fullName, 'María González',
+        reason: 'el firmante que se sella como signerName (INN S-3)');
     expect(d.branding.companyName, 'Autos del Valle');
     expect(d.branding.companyLogoUrl, isNotEmpty);
   });

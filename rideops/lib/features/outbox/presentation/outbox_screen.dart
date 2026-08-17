@@ -58,11 +58,14 @@ class OutboxScreen extends ConsumerWidget {
           _DangerBanner(text: l10n.outboxDeadBanner(dead.length)),
           const SizedBox(height: 10),
         ],
-        for (final row in rows) ...[
-          if (row.status == 'dead')
-            _DeadRow(row: row, l10n: l10n)
-          else
-            _LiveRow(row: row, l10n: l10n, pendingIds: pendingIds),
+        // Los muertos ARRIBA (review GD): piden una decisión del humano; lo
+        // vivo fluye solo y puede esperar debajo.
+        for (final row in dead) ...[
+          _DeadRow(row: row, l10n: l10n),
+          const SizedBox(height: 10),
+        ],
+        for (final row in live) ...[
+          _LiveRow(row: row, l10n: l10n, pendingIds: pendingIds),
           const SizedBox(height: 10),
         ],
         if (!drain.running && live.isNotEmpty) ...[
@@ -209,10 +212,15 @@ class _LiveRow extends StatelessWidget {
           ),
           if (uploading) ...[
             const SizedBox(height: 6),
-            const ClipRRect(
-              borderRadius: BorderRadius.all(Radius.circular(4)),
+            // TODO(M2): progreso determinista por bytes reales vía
+            // onSendProgress de Dio enchufado al drenador — hoy la barra es
+            // de actividad. Con reduced-motion se CONGELA (review GD): el
+            // estado ya lo dice el chip "Subiendo".
+            ClipRRect(
+              borderRadius: const BorderRadius.all(Radius.circular(4)),
               child: LinearProgressIndicator(
                 minHeight: 7,
+                value: MediaQuery.of(context).disableAnimations ? 1 : null,
                 color: RideTokens.p600,
                 backgroundColor: RideTokens.n200,
               ),
@@ -243,23 +251,27 @@ class _DeadRow extends ConsumerWidget {
 
     // Motivo en humano + acción a la medida (nota 4 del mockup 7B). Codes
     // del drenador: REQUIRED_ANGLES_MISSING → abrir inspección; TOKEN_* →
-    // reintentar (el drenado re-mintea con la sesión); PHOTO_LOST /
-    // SESSION_GONE → solo descartar.
-    final (reason, canRetry, canOpenInspection) = switch (code) {
+    // reintentar como acción PRIMARIA (mockup 7B — es 100 % recuperable: el
+    // drenado re-mintea con la sesión y el pre-check evita duplicados);
+    // PHOTO_LOST / SESSION_GONE → solo descartar.
+    final (reason, canRetry, retryIsPrimary, canOpenInspection) =
+        switch (code) {
       'REQUIRED_ANGLES_MISSING' => (
           l10n.outboxReasonAnglesMissing,
+          false,
           false,
           true
         ),
       _ when code?.startsWith('TOKEN_') ?? false => (
           l10n.outboxReasonToken,
           true,
+          true,
           false
         ),
-      'PHOTO_LOST' => (l10n.outboxReasonPhotoLost, false, false),
-      'SESSION_GONE' => (l10n.outboxReasonSessionGone, false, false),
-      null => (l10n.outboxReasonNetwork, true, false),
-      _ => (l10n.outboxReasonGeneric, true, false),
+      'PHOTO_LOST' => (l10n.outboxReasonPhotoLost, false, false, false),
+      'SESSION_GONE' => (l10n.outboxReasonSessionGone, false, false, false),
+      null => (l10n.outboxReasonNetwork, true, false, false),
+      _ => (l10n.outboxReasonGeneric, true, false, false),
     };
 
     final title = isPhoto ? l10n.outboxItemPhoto(angle) : l10n.outboxItemComplete;
@@ -405,15 +417,15 @@ class _DeadRow extends ConsumerWidget {
               ],
               if (canRetry) ...[
                 Expanded(
-                  child: RideGhostButton(
-                    label: l10n.retryButton,
-                    onPressed: () async {
-                      await ref.read(outboxServiceProvider).retryDead(row.id);
-                      await ref
-                          .read(drainCoordinatorProvider.notifier)
-                          .kick('manual_retry');
-                    },
-                  ),
+                  child: retryIsPrimary
+                      ? RidePrimaryButton(
+                          label: l10n.retryButton,
+                          onPressed: () => _retry(ref),
+                        )
+                      : RideGhostButton(
+                          label: l10n.retryButton,
+                          onPressed: () => _retry(ref),
+                        ),
                 ),
                 const SizedBox(width: 8),
               ],
@@ -428,6 +440,11 @@ class _DeadRow extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _retry(WidgetRef ref) async {
+    await ref.read(outboxServiceProvider).retryDead(row.id);
+    await ref.read(drainCoordinatorProvider.notifier).kick('manual_retry');
   }
 
   Future<void> _confirmDiscard(BuildContext context, WidgetRef ref) async {

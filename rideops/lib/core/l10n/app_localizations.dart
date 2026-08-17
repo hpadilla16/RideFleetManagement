@@ -794,6 +794,30 @@ abstract class AppLocalizations {
   /// **'Tomar foto'**
   String get camShutter;
 
+  /// No description provided for @camErrorTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudo abrir la cámara'**
+  String get camErrorTitle;
+
+  /// No description provided for @camErrorPermissionHint.
+  ///
+  /// In es, this message translates to:
+  /// **'El permiso de cámara está denegado. Actívalo en los Ajustes del sistema y vuelve a intentar.'**
+  String get camErrorPermissionHint;
+
+  /// No description provided for @langSpanish.
+  ///
+  /// In es, this message translates to:
+  /// **'Español'**
+  String get langSpanish;
+
+  /// No description provided for @langEnglish.
+  ///
+  /// In es, this message translates to:
+  /// **'English'**
+  String get langEnglish;
+
   /// No description provided for @metricsTitle.
   ///
   /// In es, this message translates to:
@@ -991,6 +1015,12 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Otra pantalla la cerró mientras trabajabas. Tus envíos pendientes de esta sesión se retiraron de la bandeja — no se enviará nada duplicado.'**
   String get alreadyCompletedBody;
+
+  /// No description provided for @alreadyCompletedBodyAt.
+  ///
+  /// In es, this message translates to:
+  /// **'Otra pantalla la cerró a las {time} mientras trabajabas. Tus envíos pendientes de esta sesión se retiraron de la bandeja — no se enviará nada duplicado.'**
+  String alreadyCompletedBodyAt(String time);
 
   /// No description provided for @alreadyCompletedChip.
   ///

@@ -169,14 +169,21 @@ class DrainCoordinator extends Notifier<DrainStatus> {
       _bootstrapped = true;
       Future.microtask(() async {
         if (!ref.mounted) return;
-        // Barrido de huérfanos (historia M1): una vez por arranque, antes
-        // del primer drenado — así el disco nunca acumula PII sin fila.
+        // Mantenimiento de arranque, una vez, ANTES del primer drenado:
+        //  1. TTL de la bandeja (>14 días → fuera, con rastro — INN O-1),
+        //  2. retención del rastro de auditoría (90 días / 500 — INN O-2),
+        //  3. barrido de archivos huérfanos (historia M1).
+        // Best-effort: sin DB/paths (tests, arranque raro) se reintenta al
+        // siguiente arranque.
         try {
-          await ref.read(outboxServiceProvider).sweepOrphanFiles();
-        } catch (_) {
-          // Sin DB/paths (tests, primer arranque raro): el próximo arranque
-          // lo reintenta.
-        }
+          final service = ref.read(outboxServiceProvider);
+          await service.purgeStale();
+          await ref.read(outboxDbProvider).pruneAudit(
+                olderThan:
+                    DateTime.now().subtract(const Duration(days: 90)),
+              );
+          await service.sweepOrphanFiles();
+        } catch (_) {}
         await kick('startup');
       });
     }

@@ -317,7 +317,7 @@ $TenantBrandingCopyWith<$Res> get branding {
 /// @nodoc
 mixin _$DisplayReservation {
 
- String get id; String? get reservationNumber; DisplayVehicle? get vehicle;
+ String get id; String? get reservationNumber; DisplayVehicle? get vehicle; DisplayCustomer? get customer;
 /// Create a copy of DisplayReservation
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -330,16 +330,16 @@ $DisplayReservationCopyWith<DisplayReservation> get copyWith => _$DisplayReserva
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is DisplayReservation&&(identical(other.id, id) || other.id == id)&&(identical(other.reservationNumber, reservationNumber) || other.reservationNumber == reservationNumber)&&(identical(other.vehicle, vehicle) || other.vehicle == vehicle));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is DisplayReservation&&(identical(other.id, id) || other.id == id)&&(identical(other.reservationNumber, reservationNumber) || other.reservationNumber == reservationNumber)&&(identical(other.vehicle, vehicle) || other.vehicle == vehicle)&&(identical(other.customer, customer) || other.customer == customer));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,reservationNumber,vehicle);
+int get hashCode => Object.hash(runtimeType,id,reservationNumber,vehicle,customer);
 
 @override
 String toString() {
-  return 'DisplayReservation(id: $id, reservationNumber: $reservationNumber, vehicle: $vehicle)';
+  return 'DisplayReservation(id: $id, reservationNumber: $reservationNumber, vehicle: $vehicle, customer: $customer)';
 }
 
 
@@ -350,11 +350,11 @@ abstract mixin class $DisplayReservationCopyWith<$Res>  {
   factory $DisplayReservationCopyWith(DisplayReservation value, $Res Function(DisplayReservation) _then) = _$DisplayReservationCopyWithImpl;
 @useResult
 $Res call({
- String id, String? reservationNumber, DisplayVehicle? vehicle
+ String id, String? reservationNumber, DisplayVehicle? vehicle, DisplayCustomer? customer
 });
 
 
-$DisplayVehicleCopyWith<$Res>? get vehicle;
+$DisplayVehicleCopyWith<$Res>? get vehicle;$DisplayCustomerCopyWith<$Res>? get customer;
 
 }
 /// @nodoc
@@ -367,12 +367,13 @@ class _$DisplayReservationCopyWithImpl<$Res>
 
 /// Create a copy of DisplayReservation
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? reservationNumber = freezed,Object? vehicle = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? reservationNumber = freezed,Object? vehicle = freezed,Object? customer = freezed,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,reservationNumber: freezed == reservationNumber ? _self.reservationNumber : reservationNumber // ignore: cast_nullable_to_non_nullable
 as String?,vehicle: freezed == vehicle ? _self.vehicle : vehicle // ignore: cast_nullable_to_non_nullable
-as DisplayVehicle?,
+as DisplayVehicle?,customer: freezed == customer ? _self.customer : customer // ignore: cast_nullable_to_non_nullable
+as DisplayCustomer?,
   ));
 }
 /// Create a copy of DisplayReservation
@@ -386,6 +387,18 @@ $DisplayVehicleCopyWith<$Res>? get vehicle {
 
   return $DisplayVehicleCopyWith<$Res>(_self.vehicle!, (value) {
     return _then(_self.copyWith(vehicle: value));
+  });
+}/// Create a copy of DisplayReservation
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$DisplayCustomerCopyWith<$Res>? get customer {
+    if (_self.customer == null) {
+    return null;
+  }
+
+  return $DisplayCustomerCopyWith<$Res>(_self.customer!, (value) {
+    return _then(_self.copyWith(customer: value));
   });
 }
 }
@@ -469,10 +482,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String? reservationNumber,  DisplayVehicle? vehicle)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String? reservationNumber,  DisplayVehicle? vehicle,  DisplayCustomer? customer)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _DisplayReservation() when $default != null:
-return $default(_that.id,_that.reservationNumber,_that.vehicle);case _:
+return $default(_that.id,_that.reservationNumber,_that.vehicle,_that.customer);case _:
   return orElse();
 
 }
@@ -490,10 +503,10 @@ return $default(_that.id,_that.reservationNumber,_that.vehicle);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String? reservationNumber,  DisplayVehicle? vehicle)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String? reservationNumber,  DisplayVehicle? vehicle,  DisplayCustomer? customer)  $default,) {final _that = this;
 switch (_that) {
 case _DisplayReservation():
-return $default(_that.id,_that.reservationNumber,_that.vehicle);case _:
+return $default(_that.id,_that.reservationNumber,_that.vehicle,_that.customer);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -510,10 +523,10 @@ return $default(_that.id,_that.reservationNumber,_that.vehicle);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String? reservationNumber,  DisplayVehicle? vehicle)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String? reservationNumber,  DisplayVehicle? vehicle,  DisplayCustomer? customer)?  $default,) {final _that = this;
 switch (_that) {
 case _DisplayReservation() when $default != null:
-return $default(_that.id,_that.reservationNumber,_that.vehicle);case _:
+return $default(_that.id,_that.reservationNumber,_that.vehicle,_that.customer);case _:
   return null;
 
 }
@@ -525,12 +538,13 @@ return $default(_that.id,_that.reservationNumber,_that.vehicle);case _:
 @JsonSerializable()
 
 class _DisplayReservation implements DisplayReservation {
-  const _DisplayReservation({required this.id, this.reservationNumber, this.vehicle});
+  const _DisplayReservation({required this.id, this.reservationNumber, this.vehicle, this.customer});
   factory _DisplayReservation.fromJson(Map<String, dynamic> json) => _$DisplayReservationFromJson(json);
 
 @override final  String id;
 @override final  String? reservationNumber;
 @override final  DisplayVehicle? vehicle;
+@override final  DisplayCustomer? customer;
 
 /// Create a copy of DisplayReservation
 /// with the given fields replaced by the non-null parameter values.
@@ -545,16 +559,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _DisplayReservation&&(identical(other.id, id) || other.id == id)&&(identical(other.reservationNumber, reservationNumber) || other.reservationNumber == reservationNumber)&&(identical(other.vehicle, vehicle) || other.vehicle == vehicle));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _DisplayReservation&&(identical(other.id, id) || other.id == id)&&(identical(other.reservationNumber, reservationNumber) || other.reservationNumber == reservationNumber)&&(identical(other.vehicle, vehicle) || other.vehicle == vehicle)&&(identical(other.customer, customer) || other.customer == customer));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,reservationNumber,vehicle);
+int get hashCode => Object.hash(runtimeType,id,reservationNumber,vehicle,customer);
 
 @override
 String toString() {
-  return 'DisplayReservation(id: $id, reservationNumber: $reservationNumber, vehicle: $vehicle)';
+  return 'DisplayReservation(id: $id, reservationNumber: $reservationNumber, vehicle: $vehicle, customer: $customer)';
 }
 
 
@@ -565,11 +579,11 @@ abstract mixin class _$DisplayReservationCopyWith<$Res> implements $DisplayReser
   factory _$DisplayReservationCopyWith(_DisplayReservation value, $Res Function(_DisplayReservation) _then) = __$DisplayReservationCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String? reservationNumber, DisplayVehicle? vehicle
+ String id, String? reservationNumber, DisplayVehicle? vehicle, DisplayCustomer? customer
 });
 
 
-@override $DisplayVehicleCopyWith<$Res>? get vehicle;
+@override $DisplayVehicleCopyWith<$Res>? get vehicle;@override $DisplayCustomerCopyWith<$Res>? get customer;
 
 }
 /// @nodoc
@@ -582,12 +596,13 @@ class __$DisplayReservationCopyWithImpl<$Res>
 
 /// Create a copy of DisplayReservation
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? reservationNumber = freezed,Object? vehicle = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? reservationNumber = freezed,Object? vehicle = freezed,Object? customer = freezed,}) {
   return _then(_DisplayReservation(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,reservationNumber: freezed == reservationNumber ? _self.reservationNumber : reservationNumber // ignore: cast_nullable_to_non_nullable
 as String?,vehicle: freezed == vehicle ? _self.vehicle : vehicle // ignore: cast_nullable_to_non_nullable
-as DisplayVehicle?,
+as DisplayVehicle?,customer: freezed == customer ? _self.customer : customer // ignore: cast_nullable_to_non_nullable
+as DisplayCustomer?,
   ));
 }
 
@@ -603,7 +618,285 @@ $DisplayVehicleCopyWith<$Res>? get vehicle {
   return $DisplayVehicleCopyWith<$Res>(_self.vehicle!, (value) {
     return _then(_self.copyWith(vehicle: value));
   });
+}/// Create a copy of DisplayReservation
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$DisplayCustomerCopyWith<$Res>? get customer {
+    if (_self.customer == null) {
+    return null;
+  }
+
+  return $DisplayCustomerCopyWith<$Res>(_self.customer!, (value) {
+    return _then(_self.copyWith(customer: value));
+  });
 }
+}
+
+
+/// @nodoc
+mixin _$DisplayCustomer {
+
+ String? get firstName; String? get lastName;
+/// Create a copy of DisplayCustomer
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$DisplayCustomerCopyWith<DisplayCustomer> get copyWith => _$DisplayCustomerCopyWithImpl<DisplayCustomer>(this as DisplayCustomer, _$identity);
+
+  /// Serializes this DisplayCustomer to a JSON map.
+  Map<String, dynamic> toJson();
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is DisplayCustomer&&(identical(other.firstName, firstName) || other.firstName == firstName)&&(identical(other.lastName, lastName) || other.lastName == lastName));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,firstName,lastName);
+
+@override
+String toString() {
+  return 'DisplayCustomer(firstName: $firstName, lastName: $lastName)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $DisplayCustomerCopyWith<$Res>  {
+  factory $DisplayCustomerCopyWith(DisplayCustomer value, $Res Function(DisplayCustomer) _then) = _$DisplayCustomerCopyWithImpl;
+@useResult
+$Res call({
+ String? firstName, String? lastName
+});
+
+
+
+
+}
+/// @nodoc
+class _$DisplayCustomerCopyWithImpl<$Res>
+    implements $DisplayCustomerCopyWith<$Res> {
+  _$DisplayCustomerCopyWithImpl(this._self, this._then);
+
+  final DisplayCustomer _self;
+  final $Res Function(DisplayCustomer) _then;
+
+/// Create a copy of DisplayCustomer
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? firstName = freezed,Object? lastName = freezed,}) {
+  return _then(_self.copyWith(
+firstName: freezed == firstName ? _self.firstName : firstName // ignore: cast_nullable_to_non_nullable
+as String?,lastName: freezed == lastName ? _self.lastName : lastName // ignore: cast_nullable_to_non_nullable
+as String?,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [DisplayCustomer].
+extension DisplayCustomerPatterns on DisplayCustomer {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _DisplayCustomer value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _DisplayCustomer() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _DisplayCustomer value)  $default,){
+final _that = this;
+switch (_that) {
+case _DisplayCustomer():
+return $default(_that);case _:
+  throw StateError('Unexpected subclass');
+
+}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _DisplayCustomer value)?  $default,){
+final _that = this;
+switch (_that) {
+case _DisplayCustomer() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String? firstName,  String? lastName)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _DisplayCustomer() when $default != null:
+return $default(_that.firstName,_that.lastName);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String? firstName,  String? lastName)  $default,) {final _that = this;
+switch (_that) {
+case _DisplayCustomer():
+return $default(_that.firstName,_that.lastName);case _:
+  throw StateError('Unexpected subclass');
+
+}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String? firstName,  String? lastName)?  $default,) {final _that = this;
+switch (_that) {
+case _DisplayCustomer() when $default != null:
+return $default(_that.firstName,_that.lastName);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _DisplayCustomer extends DisplayCustomer {
+  const _DisplayCustomer({this.firstName, this.lastName}): super._();
+  factory _DisplayCustomer.fromJson(Map<String, dynamic> json) => _$DisplayCustomerFromJson(json);
+
+@override final  String? firstName;
+@override final  String? lastName;
+
+/// Create a copy of DisplayCustomer
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$DisplayCustomerCopyWith<_DisplayCustomer> get copyWith => __$DisplayCustomerCopyWithImpl<_DisplayCustomer>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$DisplayCustomerToJson(this, );
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _DisplayCustomer&&(identical(other.firstName, firstName) || other.firstName == firstName)&&(identical(other.lastName, lastName) || other.lastName == lastName));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,firstName,lastName);
+
+@override
+String toString() {
+  return 'DisplayCustomer(firstName: $firstName, lastName: $lastName)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$DisplayCustomerCopyWith<$Res> implements $DisplayCustomerCopyWith<$Res> {
+  factory _$DisplayCustomerCopyWith(_DisplayCustomer value, $Res Function(_DisplayCustomer) _then) = __$DisplayCustomerCopyWithImpl;
+@override @useResult
+$Res call({
+ String? firstName, String? lastName
+});
+
+
+
+
+}
+/// @nodoc
+class __$DisplayCustomerCopyWithImpl<$Res>
+    implements _$DisplayCustomerCopyWith<$Res> {
+  __$DisplayCustomerCopyWithImpl(this._self, this._then);
+
+  final _DisplayCustomer _self;
+  final $Res Function(_DisplayCustomer) _then;
+
+/// Create a copy of DisplayCustomer
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? firstName = freezed,Object? lastName = freezed,}) {
+  return _then(_DisplayCustomer(
+firstName: freezed == firstName ? _self.firstName : firstName // ignore: cast_nullable_to_non_nullable
+as String?,lastName: freezed == lastName ? _self.lastName : lastName // ignore: cast_nullable_to_non_nullable
+as String?,
+  ));
+}
+
+
 }
 
 

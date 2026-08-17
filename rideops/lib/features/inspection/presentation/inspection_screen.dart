@@ -113,9 +113,9 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
     // staff, sin stepper — cero rastro de RideOps (nota 10).
     if (state.step == InspectionStep.signature) {
       return KioskSignatureStep(
-        tenantName: state.branding?.companyName.isNotEmpty ?? false
-            ? state.branding!.companyName
-            : 'Ride Fleet',
+        // GD-1: JAMÁS marca propia frente al cliente. Sin companyName el
+        // paso oculta la fila del nombre (queda el subtítulo del trámite).
+        tenantName: state.branding?.companyName ?? '',
         tenantLogoUrl: state.branding?.companyLogoUrl ?? '',
         reservationLabel: state.reservationNumber ?? '—',
         onConfirmed: controller.confirmSignature,
@@ -544,7 +544,9 @@ class _FieldLabel extends StatelessWidget {
 }
 
 /// Combustible en octavos (fuelbar del mockup 6C) — targets por segmento
-/// ≥48 px de alto vía el gesto sobre toda la fila.
+/// ≥48 px de alto vía el gesto sobre toda la fila. [eighths] null = SIN
+/// seleccionar (GD-5/INN S-4: sin default de "lleno" — evidencia
+/// contractual se captura, no se presume).
 class _FuelBar extends StatelessWidget {
   const _FuelBar({
     required this.eighths,
@@ -553,13 +555,14 @@ class _FuelBar extends StatelessWidget {
     required this.fullLabel,
   });
 
-  final int eighths;
+  final int? eighths;
   final ValueChanged<int> onChanged;
   final String emptyLabel;
   final String fullLabel;
 
   @override
   Widget build(BuildContext context) {
+    final filled = eighths ?? 0;
     return Column(
       children: [
         Row(
@@ -580,16 +583,16 @@ class _FuelBar extends StatelessWidget {
                         height: 48,
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(7),
-                          gradient: i <= eighths
+                          gradient: i <= filled
                               ? const LinearGradient(
                                   begin: Alignment.topCenter,
                                   end: Alignment.bottomCenter,
                                   colors: [Color(0xFF9F79FF), RideTokens.p600],
                                 )
                               : null,
-                          color: i <= eighths ? null : RideTokens.n200,
+                          color: i <= filled ? null : RideTokens.n200,
                           border: Border.all(
-                            color: i <= eighths
+                            color: i <= filled
                                 ? RideTokens.p600
                                 : RideTokens.n300,
                           ),
@@ -608,7 +611,7 @@ class _FuelBar extends StatelessWidget {
           children: [
             Text(emptyLabel, style: _edgeStyle),
             Text(
-              '$eighths/8',
+              eighths == null ? '—' : '$eighths/8',
               style: const TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w800,
@@ -873,7 +876,14 @@ class _AlreadyCompleted extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            l10n.alreadyCompletedBody,
+            // Con hora del cierre cuando la sesión la trae (review GD): la
+            // reconciliación se cuenta en pasado y con dato.
+            state.completedAt == null
+                ? l10n.alreadyCompletedBody
+                : l10n.alreadyCompletedBodyAt(
+                    TimeOfDay.fromDateTime(state.completedAt!.toLocal())
+                        .format(context),
+                  ),
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 14,

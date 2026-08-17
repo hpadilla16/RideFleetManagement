@@ -126,6 +126,24 @@ void main() {
       // null mataría la fila como SESSION_GONE por un blip de red).
       expect(ops.mintInspectionToken('offline'), throwsA(anything));
     });
+
+    test('S1: 4xx de negocio (403/409/400) → null, NO lanza (sin livelock)',
+        () async {
+      authedAdapter.routes['POST /api/checkout-sessions/denied/handoff-token'] =
+          (_) => jsonRes(403, {'error': 'Access denied'});
+      expect(await ops.mintInspectionToken('denied'), isNull,
+          reason: 'un 403 eterno tumbaba cada corrida sin dead-letter');
+
+      authedAdapter
+              .routes['POST /api/checkout-sessions/conflict/handoff-token'] =
+          (_) => jsonRes(409, {'error': 'No agreement linked'});
+      expect(await ops.mintInspectionToken('conflict'), isNull);
+
+      // 5xx sigue siendo transitorio: lanza y la fila queda pending.
+      authedAdapter.routes['POST /api/checkout-sessions/s5/handoff-token'] =
+          (_) => jsonRes(500, {'error': 'Internal error'});
+      expect(ops.mintInspectionToken('s5'), throwsA(anything));
+    });
   });
 
   group('uploadPhoto', () {
@@ -212,6 +230,16 @@ void main() {
           (_) => jsonRes(404, {'error': 'not found'});
       expect(await ops.inspectionAlreadyCompleted('r2'), isFalse);
     });
+
+    test('S1: 4xx de negocio en el pre-check → false (el complete cobra el '
+        'error real); red → lanza', () async {
+      authedAdapter
+              .routes['GET /api/checkout-sessions/by-reservation/denied'] =
+          (_) => jsonRes(403, {'error': 'Access denied'});
+      expect(await ops.inspectionAlreadyCompleted('denied'), isFalse);
+
+      expect(ops.inspectionAlreadyCompleted('offline'), throwsA(anything));
+    });
   });
 
   group('completeInspection', () {
@@ -291,6 +319,63 @@ void main() {
     expect(completed, 1);
     expect(await vault.read(name), isNull,
         reason: 'DrainOk borra el binario (PII fuera de disco)');
+  });
+
+  test(
+      'S15: retry de un TOKEN_CONSUMED jamás es callejón — el re-check del '
+      'drenador lo cierra como éxito si otra superficie completó', () async {
+    authedAdapter.routes['POST /api/checkout-sessions/cs1/handoff-token'] =
+        (_) => jsonRes(201, {
+              'token': 'tok-1',
+              'kind': 'MOBILE_INSPECTION',
+              'expiresAt': '2026-08-17T14:25:00.000Z',
+              'reused': false,
+            });
+    // Pre-check: la 1a consulta dice "aún no completada"; tras el 410, la
+    // re-verificación descubre que OTRA superficie ya completó.
+    var byReservationCalls = 0;
+    authedAdapter.routes['GET /api/checkout-sessions/by-reservation/r1'] =
+        (_) {
+      byReservationCalls++;
+      return jsonRes(200, {
+        'id': 'cs1',
+        'reservationId': 'r1',
+        'currentStep': 'CLOSED',
+        'inspectionCompletedAt':
+            byReservationCalls == 1 ? null : '2026-08-17T14:14:00.000Z',
+      });
+    };
+    var completeAttempts = 0;
+    publicAdapter.routes['POST /api/mobile-inspection/tok-1/complete'] = (_) {
+      completeAttempts++;
+      return jsonRes(
+          410, {'error': 'Token already used', 'code': 'TOKEN_CONSUMED'});
+    };
+
+    final store = _ListStore([
+      OutboxRow(
+        id: 'c1',
+        kind: 'inspection_complete',
+        payload: json.encode({
+          'checkoutSessionId': 'cs1',
+          'reservationId': 'r1',
+          'body': {'odometer': 1},
+        }),
+      ),
+    ]);
+    // Es exactamente lo que corre tras el "Reintentar" de la bandeja (la
+    // fila vuelve a pending y el coordinador dispara este drain).
+    await OutboxDrainer(store: store, ops: ops).drain();
+
+    expect(store.drained, ['c1'],
+        reason: 'se descarta como ÉXITO — no re-estampa una sesión cerrada');
+    expect(completeAttempts, 1, reason: 'un intento, no un loop');
+    expect(byReservationCalls, 2, reason: 'pre-check + re-check tras el 410');
+
+    // Y no queda nada que reintentar: otra corrida no toca la red.
+    completeAttempts = 0;
+    await OutboxDrainer(store: store, ops: ops).drain();
+    expect(completeAttempts, 0);
   });
 }
 
