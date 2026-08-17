@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign page del CLIENTE · Mockup para aprobación — fix/sign-page-tenant-identity</title>
+<style>
+:root{
+  --n-0:#fff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9; --n-200:#e9e4f4;
+  --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f; --n-600:#736a8b;
+  --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-700:#5a26c9; --p-800:#45189e;
+  --brand:#8752FE; --border-brand:rgba(135,82,254,.20);
+  --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --dg-bg:#fdecea; --dg-bd:#f6cdc9; --dg-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --sh-1:0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+  --sh-3:0 1px 3px rgba(24,16,54,.06),0 14px 30px -10px rgba(38,20,90,.14),0 44px 80px -28px rgba(38,20,90,.22);
+  --bd-lite:1px solid rgba(135,82,254,.14);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+  background:var(--n-100);color:var(--n-900);font-size:14px;line-height:1.5}
+h1,h2,h3,h4{margin:0}
+code{font-family:ui-monospace,'Cascadia Mono',Consolas,monospace;font-size:.92em;
+  background:var(--n-100);border:1px solid var(--n-200);border-radius:5px;padding:1px 5px}
+
+/* ---------- chrome del documento (convención m2-tanda-a.html) ---------- */
+.doc-head{max-width:1780px;margin:0 auto;padding:26px 24px 10px}
+.doc-head h1{font-size:24px;font-weight:850}
+.doc-head h1 .v2{display:inline-flex;align-items:center;margin-left:10px;padding:3px 12px;border-radius:999px;
+  background:linear-gradient(135deg,#6a35e0,var(--p-800));color:#fff;font-size:13px;font-weight:800;vertical-align:middle}
+.doc-head p{margin:8px 0 0;color:var(--n-700);max-width:1060px}
+.meta-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.mchip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 11px;border-radius:8px;
+  background:var(--p-50);border:1px solid var(--border-brand);color:var(--p-800);font-size:12.5px;font-weight:700}
+.mchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.mchip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.mchip.dg{background:var(--dg-bg);border-color:var(--dg-bd);color:var(--dg-tx)}
+.jump{position:sticky;top:0;z-index:60;display:flex;gap:8px;flex-wrap:wrap;padding:10px 24px;
+  background:rgba(255,255,255,.9);backdrop-filter:blur(14px);border-bottom:1px solid var(--n-200);box-shadow:var(--sh-1)}
+.jump a{display:inline-flex;align-items:center;min-height:40px;padding:6px 14px;border-radius:12px;
+  border:1px solid var(--n-300);background:var(--n-0);font-weight:700;font-size:13px;color:var(--n-800);text-decoration:none}
+.jump a:hover{background:var(--p-50);border-color:var(--border-brand);color:var(--p-800)}
+section.blk{max-width:1780px;margin:0 auto;padding:30px 24px 8px;scroll-margin-top:76px}
+.blk-head{margin-bottom:16px}
+.blk-head .eyebrow{color:var(--p-700);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.blk-head h2{font-size:20px;font-weight:800;margin-top:2px}
+.blk-head p{color:var(--n-700);margin:6px 0 0;max-width:980px}
+.must{display:inline-flex;align-items:center;gap:6px;min-height:26px;padding:2px 11px;border-radius:8px;
+  background:#17122b;color:#fff;font-size:12px;font-weight:850;letter-spacing:.04em;margin-left:8px;vertical-align:middle}
+.must.off{background:var(--n-200);color:var(--n-700)}
+.frames{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;padding-bottom:26px}
+figure{margin:0}
+figcaption{font-size:13px;font-weight:800;color:var(--n-800);margin:0 0 8px 6px;max-width:376px}
+figcaption small{display:block;font-weight:600;color:var(--n-600);font-size:12px}
+
+/* ---------- notas ---------- */
+.notes{flex:1 1 360px;max-width:440px;background:var(--n-0);border:var(--bd-lite);border-radius:20px;
+  padding:16px 18px;box-shadow:var(--sh-1)}
+.notes h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+.note{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--n-100);font-size:13px;color:var(--n-700)}
+.note:last-child{border-bottom:0}
+.note b{color:var(--n-900)}
+.m{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;border-radius:50%;
+  background:#6a35e0;color:#fff;font-size:12px;font-weight:800;line-height:1}
+.m.inframe{position:absolute;z-index:9;box-shadow:0 0 0 2px #fff}
+.cp{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--n-50);border:1px solid var(--n-200);font-size:12.5px}
+.cp b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:8px}
+.cp dl{margin:0}
+.cp dt{font-weight:800;color:var(--p-800);margin-top:8px;font-size:11.5px;letter-spacing:.04em;text-transform:uppercase}
+.cp dt:first-child{margin-top:0}
+.cp dd{margin:3px 0 0;color:var(--n-800)}
+.cp dd i{font-style:normal;font-weight:800;color:var(--n-600);display:inline-block;width:22px}
+.meas{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--info-bg);border:1px solid var(--info-bd);font-size:12.5px;color:var(--n-800)}
+.meas b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--info);margin-bottom:6px}
+.meas table{border-collapse:collapse;width:100%;font-size:12px}
+.meas td{padding:2px 0;border-bottom:1px solid rgba(11,99,214,.14)}
+.meas td:last-child{text-align:right;font-weight:800;font-variant-numeric:tabular-nums}
+.meas tr:last-child td{border-bottom:0;padding-top:5px;font-weight:850}
+.decision{margin-top:14px;padding:14px 16px;border-radius:16px;background:var(--warn-bg);
+  border:1.5px dashed var(--warn-bd);color:var(--warn-tx);font-size:13px}
+.decision b{display:block;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.decision ul{margin:6px 0 0;padding-left:18px}
+
+/* =========================================================================
+   TELÉFONO — 360 px de ANCHO REAL de viewport.
+   .phone lleva box-sizing:border-box y borde de 8px ⇒ 376 - 16 = 360 de contenido.
+   Los tamaños de dentro son los REALES que se exigieron: cuerpo legal ≥15 px,
+   objetivos táctiles ≥44 px. Nada está a escala.
+   ========================================================================= */
+.phone{position:relative;width:376px;border:8px solid var(--n-900);border-radius:34px;overflow:hidden;
+  background:#fff;box-shadow:var(--sh-3)}
+.sbar{display:flex;justify-content:space-between;align-items:center;height:28px;padding:0 16px;
+  font-size:11.5px;font-weight:700;color:var(--n-700);background:#fff}
+.urlbar{display:flex;align-items:center;gap:8px;height:44px;padding:0 12px;background:#f1f1f4;
+  border-bottom:1px solid #dcdce2;font-size:12.5px;color:#4b4b55;font-weight:600}
+.urlbar .pill{flex:1;min-width:0;display:flex;align-items:center;gap:6px;height:30px;padding:0 10px;
+  background:#fff;border-radius:8px;border:1px solid #d7d7de;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.vp{position:relative;height:708px;overflow:hidden;background:#f9f9fb}
+.vp .doc{position:absolute;inset:0;padding:16px 16px 0;overflow:hidden}
+.vp.scrolled .doc{padding-top:0}
+/* línea de pliegue del teléfono chico (360x640 ⇒ 568 px de viewport útil) */
+.fold{position:absolute;left:0;right:0;top:568px;z-index:7;border-top:2px dashed #c02626;pointer-events:none}
+.fold span{position:absolute;right:6px;top:-9px;background:#c02626;color:#fff;font-size:9.5px;font-weight:800;
+  padding:1px 6px;border-radius:5px;letter-spacing:.03em}
+.reserve{position:absolute;left:0;right:0;z-index:6;border:2px dashed var(--brand);background:rgba(135,82,254,.07);
+  pointer-events:none;display:flex;align-items:flex-start;justify-content:center}
+.reserve span{margin-top:4px;background:var(--brand);color:#fff;font-size:9.5px;font-weight:800;padding:1px 7px;border-radius:5px}
+
+/* --- encabezado de identidad (el objeto del fix) --- */
+.hd{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:0 0 14px}
+.hd .who{min-width:0}
+.hd .co{font-size:18px;font-weight:800;color:#111827;line-height:1.25;overflow-wrap:anywhere}
+.hd .dt{font-size:15px;color:#374151;margin-top:3px}
+.hd .dt.solo{font-size:18px;font-weight:800;color:#111827;margin-top:0}
+.hd .ag{font-size:13.5px;color:#6B7280;margin-top:3px}
+.lang{display:flex;flex:0 0 auto;border:1px solid #D1D5DB;border-radius:9px;overflow:hidden;background:#fff}
+.lang b{width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:800;color:#6B7280}
+.lang b.on{background:#1F2937;color:#fff}
+
+/* --- mini encabezado sticky (identidad siempre en pantalla) --- */
+.minihd{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:10px;height:44px;padding:0 16px;
+  background:rgba(255,255,255,.97);border-bottom:1px solid var(--n-200)}
+.minihd .co{flex:1;min-width:0;font-size:14.5px;font-weight:800;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.minihd .lang b{width:36px;height:32px;font-size:11.5px}
+.minihd .lang{border-radius:7px}
+
+/* --- aviso de costura de idioma: surface-note, NUNCA ámbar --- */
+.seam{display:flex;gap:10px;padding:12px 14px;border-radius:14px;background:var(--p-50);
+  border:1px solid var(--border-brand);color:#433b63;font-size:14.5px;line-height:1.5;margin-bottom:14px}
+.seam svg{flex:0 0 auto;margin-top:2px;color:var(--p-700)}
+
+/* --- card de sección --- */
+.sec{background:#fff;border:1px solid #E5E7EB;border-radius:14px;padding:16px;margin-bottom:12px}
+.sec.ok{background:#F3FBF8;border-color:var(--ok-bd)}
+.sec.bad{border:1.5px solid var(--dg-bd);background:#fffbfb}
+.sec .ey{font-size:12.5px;color:#6B7280;font-weight:700}
+.sec h3{margin:4px 0 8px;font-size:16px;font-weight:700;color:#111827}
+.sec p{margin:0;font-size:15px;line-height:1.55;color:#374151}   /* cuerpo legal ≥ 15 px */
+.inrow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px}
+.inlbl{font-size:13.5px;color:#6B7280;font-weight:650}
+.inlbl.done{color:var(--ok-tx);font-weight:800}
+.inlbl.unsaved{color:var(--dg-tx);font-weight:800}
+.ipad{flex:0 0 auto;width:120px;height:60px;border:1.5px dashed #9CA3AF;border-radius:8px;background:#fff;
+  display:flex;align-items:center;justify-content:center}
+.ipad.done{border:1.5px solid var(--ok-tx);background:#fff}
+.ipad.pending{border-color:var(--dg-tx)}
+.ink{font-family:'Segoe Script','Brush Script MT',cursive;font-size:22px;color:#1F2937}
+
+/* --- error inline NO destructivo --- */
+.errstrip{display:flex;gap:10px;align-items:flex-start;margin-top:14px;padding:11px 12px;border-radius:11px;
+  background:var(--dg-bg);border:1px solid var(--dg-bd);color:var(--dg-tx);font-size:14px;line-height:1.45}
+.errstrip svg{flex:0 0 auto;margin-top:2px}
+.retry{margin-top:9px;min-height:44px;display:inline-flex;align-items:center;gap:7px;padding:0 16px;border-radius:10px;
+  background:#fff;border:1.5px solid var(--dg-tx);color:var(--dg-tx);font-size:14.5px;font-weight:800}
+.offstrip{background:var(--n-50);border-color:var(--n-300);color:var(--n-700)}
+
+/* --- pie de firma --- */
+.rule{height:1px;background:#E5E7EB;margin:20px 0 16px}
+.attest{display:flex;gap:9px;align-items:flex-start;padding:12px 14px;border-radius:12px;background:var(--p-50);
+  border:1px solid var(--border-brand);color:#2e2745;font-size:15px;font-weight:700;line-height:1.45;margin-bottom:16px}
+.attest svg{flex:0 0 auto;margin-top:2px;color:var(--p-700)}
+.attest.plain{background:var(--n-50);border-color:var(--n-200);color:var(--n-700);font-weight:650}
+.fld{margin-bottom:16px}
+.fld label{display:block;font-size:13.5px;color:#4B5563;font-weight:700;margin-bottom:6px}
+.fld input{width:100%;height:48px;padding:0 12px;font-size:16px;border:1px solid #D1D5DB;border-radius:10px;background:#fff;color:#111827}
+.fld input.ph{color:#9CA3AF}
+.sigpad{width:100%;height:140px;border:1.5px dashed #9CA3AF;border-radius:10px;background:#fff;
+  display:flex;align-items:center;justify-content:center}
+.sigpad.done{border:1.5px solid var(--ok-tx)}
+.sigpad .ink{font-size:40px}
+
+/* --- barra inferior fija --- */
+.bbar{position:absolute;left:0;right:0;bottom:0;z-index:8;background:#fff;border-top:1px solid #E5E7EB;
+  padding:12px 16px calc(12px + 34px);box-shadow:0 -6px 18px -10px rgba(24,16,54,.22)}
+.bbar.nosafe{padding-bottom:12px}
+.safe{position:absolute;left:0;right:0;bottom:0;height:34px;background:repeating-linear-gradient(45deg,
+  rgba(135,82,254,.10) 0 6px,transparent 6px 12px);border-top:1px dashed var(--border-brand);
+  display:flex;align-items:center;justify-content:center;font-size:9.5px;font-weight:800;color:var(--p-800);letter-spacing:.04em}
+.ptxt{display:flex;align-items:baseline;justify-content:space-between;font-size:13.5px;font-weight:800;color:#374151;margin-bottom:7px}
+.ptxt em{font-style:normal;font-weight:700;color:#6B7280;font-size:12.5px;font-variant-numeric:tabular-nums}
+.prog{display:flex;gap:4px;height:6px;margin-bottom:10px}
+.prog i{flex:1;border-radius:3px;background:#E5E7EB}
+.prog i.on{background:var(--brand)}
+.why{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;background:var(--n-50);
+  border:1px solid var(--n-200);font-size:13.5px;color:#374151;font-weight:650;margin-bottom:10px}
+.why b{color:#111827;font-weight:800}
+.why a{margin-left:auto;flex:0 0 auto;display:inline-flex;align-items:center;min-height:44px;padding:0 6px;
+  color:var(--p-700);font-weight:800;font-size:13.5px;text-decoration:none;white-space:nowrap}
+.cta{display:flex;align-items:center;justify-content:center;min-height:52px;border-radius:12px;font-size:16px;font-weight:800}
+.cta.ready{background:#17122b;color:#fff}
+.cta.ready.alt{background:var(--brand);color:#fff}
+.cta.blocked{background:#E5E7EB;color:#4b4362}
+
+/* --- estados terminales --- */
+.term{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;background:#f9f9fb}
+.tcard{width:100%;background:#fff;border:1px solid #E5E7EB;border-radius:16px;padding:24px 20px;text-align:center}
+.tico{width:64px;height:64px;border-radius:50%;margin:0 auto 14px;display:flex;align-items:center;justify-content:center}
+.tico.warn{background:var(--warn-bg);border:1.5px solid var(--warn-bd);color:var(--warn-tx)}
+.tico.ok{background:var(--ok-bg);border:1.5px solid var(--ok-bd);color:var(--ok-tx)}
+.tcard h4{font-size:20px;font-weight:800;color:#111827;margin-bottom:8px}
+.tcard p{margin:0;font-size:15px;line-height:1.55;color:#374151}
+.tcard .co{font-size:16px;font-weight:800;color:#111827;margin-top:14px}
+.tcard .rcpt{margin-top:14px;padding:10px 12px;border-radius:10px;background:var(--n-50);border:1px solid var(--n-200);
+  font-size:13.5px;color:#4b4362;font-weight:700}
+
+/* --- anatomía de la barra (diagrama) --- */
+.anat{width:376px;background:#fff;border:var(--bd-lite);border-radius:16px;padding:14px;box-shadow:var(--sh-1)}
+.anat .row{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700;color:var(--n-700);
+  border-bottom:1px dashed var(--n-200);padding:5px 0}
+.anat .row:last-child{border-bottom:0}
+.anat .row .bx{flex:0 0 46px;text-align:right;font-variant-numeric:tabular-nums;color:var(--p-800);font-weight:850}
+
+/* --- comparación de CTA --- */
+.ctacmp{display:flex;gap:12px;margin-top:12px}
+.ctacmp>div{flex:1}
+.ctacmp .lbl{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--n-600);margin-bottom:6px}
+
+footer.dod{max-width:1780px;margin:0 auto;padding:10px 24px 60px;color:var(--n-700);font-size:13px}
+footer.dod .card{background:var(--n-0);border:var(--bd-lite);border-radius:20px;padding:16px 18px;box-shadow:var(--sh-1);margin-bottom:14px}
+footer.dod b{color:var(--n-900)}
+footer.dod li{margin:6px 0}
+.rej{display:grid;gap:0}
+.rej div{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--n-100);font-size:13px}
+.rej div:last-child{border-bottom:0}
+.rej .fr{flex:0 0 92px;font-weight:850;color:var(--p-800)}
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <h1>Página de firma del CLIENTE — mockup para aprobación <span class="v2">360 px · tamaños reales</span></h1>
+  <p>Cinco vistas de <code>/sign/:token</code>, la pantalla que el cliente abre <b>en su propio teléfono</b> después de
+  escanear el QR del mostrador. No tiene login, no tiene navegación, no tiene contexto: lo único que sabe sobre con quién
+  está firmando un contrato es lo que esta pantalla le diga. Corresponde a los MUST que levanté al revisar
+  <code>fix/sign-page-tenant-identity</code>. Fuente actual:
+  <code>frontend/src/app/sign/[token]/SignClient.jsx</code>.</p>
+  <p><b>Ojo con el contexto:</b> los demás mockups de esta carpeta son de <b>RideOps</b>, la app del personal, y sí llevan
+  el tema Ride #8752FE de frente. Ésta <b>no</b>. Aquí el morado es cromo funcional (foco, links, relleno de progreso),
+  nunca marca — la marca que debe leerse es la del <b>tenant</b>. Todo dibujado a 360 px de ancho de viewport real, con
+  cuerpo legal a 15 px y objetivos táctiles de 44 px, para que se vea si de verdad entra.</p>
+  <div class="meta-chips">
+    <span class="mchip">Ancho de viewport: 360 px REALES (frame de 376 con borde de 8)</span>
+    <span class="mchip">Cuerpo legal <code>section.body</code> ≥ 15 px · objetivos ≥ 44 px · CTA 52 px</span>
+    <span class="mchip">Línea roja punteada = pliegue del teléfono chico (360×640 ⇒ 568 px útiles tras barra de estado + URL)</span>
+    <span class="mchip ok">Copy exacta es/en junto a cada frame — nada queda a interpretación del desarrollador</span>
+    <span class="mchip warn">CERO marca de plataforma dentro del teléfono. El único "ridefleet" visible es la barra de URL, y está anotado</span>
+    <span class="mchip dg">FUERA DE ALCANCE: M6 (la iniciación accidental que se autoguarda). Va a Hector como decisión aparte por ser preexistente y de consecuencia legal</span>
+  </div>
+</div>
+
+<nav class="jump">
+  <a href="#v1">1 · Encabezado + costura de idioma <b>M2</b></a>
+  <a href="#v2">2 · Identidad degradada y nombre largo <b>M3</b></a>
+  <a href="#v3">3 · Atestación · bloqueo · barra fija <b>M4 M5</b></a>
+  <a href="#v4">4 · Error inline no destructivo <b>M7</b></a>
+  <a href="#v5">5 · Enlace vencido y éxito <b>M3 M7</b></a>
+  <a href="#dod">Decisiones + rechazo</a>
+</nav>
+
+<!-- ==================================================== VISTA 1 -->
+<section class="blk" id="v1">
+  <div class="blk-head">
+    <span class="eyebrow">Vista 1</span>
+    <h2>Encabezado de identidad + aviso de costura de idioma + primera sección<span class="must">M2</span></h2>
+    <p>El aviso de costura existe porque sólo el <b>cromo</b> de esta página está traducido: los títulos y el cuerpo de
+    las secciones son el instrumento legal y llegan del backend tal como se redactaron (<code>terms-content.js</code> es
+    English-only). Un cliente hispanohablante ve instrucciones en español alrededor de cláusulas en inglés. Callarlo es
+    peor que decirlo. <b>Regla de render: el aviso sólo aparece cuando <code>lang !== clauseLang</code></b> — en inglés
+    no hay costura y el aviso no se dibuja (1B), lo que devuelve 88 px de pantalla.</p>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>1A — Español, con costura <small>el aviso vive debajo del encabezado y encima de la sección 1</small></figcaption>
+      <div class="phone">
+        <div class="sbar"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="urlbar"><span class="pill">🔒 app.ridefleet.com/sign/9f2c…<span class="m inframe" style="position:static;margin-left:6px">6</span></span></div>
+        <div class="vp">
+          <div class="doc">
+            <div class="hd">
+              <div class="who">
+                <div class="co">Autos del Valle</div>
+                <div class="dt">Términos y Condiciones</div>
+                <div class="ag">Contrato RA-20260817</div>
+              </div>
+              <div class="lang"><b class="on">ES</b><b>EN</b><span class="m inframe" style="margin:-10px 0 0 -14px">2</span></div>
+              <span class="m inframe" style="margin:2px 0 0 -8px">1</span>
+            </div>
+            <div class="seam">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.5"/></svg>
+              <div>Las instrucciones de esta página están en español. Las cláusulas del contrato se muestran en
+              inglés porque ese es el texto legal que firmas.</div>
+              <span class="m inframe" style="margin:-8px 0 0 -10px">3</span>
+            </div>
+            <div class="sec">
+              <div class="ey">Sección 1 de 6</div>
+              <h3>Rental period</h3>
+              <p>I agree to return the vehicle by the scheduled return date and time. Late returns are billed in hourly
+              increments after a 30-minute grace period. Extensions must be authorized in advance through the rental
+              agent or the customer portal.</p>
+              <div class="inrow">
+                <span class="inlbl">Tus iniciales aquí →</span>
+                <div class="ipad"></div>
+                <span class="m inframe" style="margin:14px 0 0 -12px">4</span>
+              </div>
+            </div>
+            <div class="sec">
+              <div class="ey">Sección 2 de 6</div>
+              <h3>Mileage and fuel</h3>
+              <p>I will return the vehicle at the fuel level shown at pickup. Refueling at the counter is billed…</p>
+            </div>
+          </div>
+          <div class="fold"><span>PLIEGUE 360×640</span></div>
+          <div class="bbar nosafe">
+            <div class="ptxt"><span>0 de 6 secciones</span><em>0 %</em></div>
+            <div class="prog"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="cta blocked">Firmar y terminar</div>
+            <span class="m inframe" style="margin:-96px 0 0 320px">5</span>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>1B — Inglés, sin costura <small>no hay desajuste ⇒ el aviso no existe y el pad sube sobre el pliegue</small></figcaption>
+      <div class="phone">
+        <div class="sbar"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="urlbar"><span class="pill">🔒 app.ridefleet.com/sign/9f2c…</span></div>
+        <div class="vp">
+          <div class="doc">
+            <div class="hd">
+              <div class="who">
+                <div class="co">Autos del Valle</div>
+                <div class="dt">Terms &amp; Conditions</div>
+                <div class="ag">Agreement RA-20260817</div>
+              </div>
+              <div class="lang"><b>ES</b><b class="on">EN</b></div>
+            </div>
+            <div class="sec">
+              <div class="ey">Section 1 of 6</div>
+              <h3>Rental period</h3>
+              <p>I agree to return the vehicle by the scheduled return date and time. Late returns are billed in hourly
+              increments after a 30-minute grace period. Extensions must be authorized in advance through the rental
+              agent or the customer portal.</p>
+              <div class="inrow">
+                <span class="inlbl">Initial here →</span>
+                <div class="ipad"></div>
+              </div>
+            </div>
+            <div class="sec">
+              <div class="ey">Section 2 of 6</div>
+              <h3>Mileage and fuel</h3>
+              <p>I will return the vehicle at the fuel level shown at pickup. Refueling at the counter is billed at the
+              prevailing market rate plus a service fee…</p>
+            </div>
+          </div>
+          <div class="fold"><span>PLIEGUE 360×640</span></div>
+          <div class="bbar nosafe">
+            <div class="ptxt"><span>0 of 6 sections</span><em>0 %</em></div>
+            <div class="prog"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="cta blocked">Sign and finish</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes">
+      <h3>Vista 1 · notas</h3>
+      <div class="note"><span class="m">1</span><div><b>Orden QUIÉN → QUÉ → CUÁL.</b> <code>companyName</code> a 18/800 arriba
+      de todo; el nombre del documento a 15 px debajo; el número de contrato a 13.5. Es lo que ya hace la rama; aquí sólo
+      queda fijada la métrica.</div></div>
+      <div class="note"><span class="m">2</span><div><b>Toggle de idioma inline, 44×44 por botón.</b> Hoy mide 22 px de alto
+      (<code>padding:'4px 10px', fontSize:12</code>) — <b>no pasa</b> el mínimo táctil. Va a 44 y con
+      <code>aria-pressed</code>, que ya existe.</div></div>
+      <div class="note"><span class="m">3</span><div><b>Aquí vive el aviso.</b> Debajo del encabezado, encima de la sección 1,
+      con <code>surface-note</code> (fondo <code>--p-50</code>, borde <code>--border-brand</code>) e ícono de
+      <b>información</b>. Deliberadamente NO ámbar ni rojo: no es un peligro, es una aclaración. No es descartable —
+      pero cabe en 3 líneas y no compite con el acto de firmar porque no hay ningún control dentro.</div></div>
+      <div class="note"><span class="m">4</span><div><b>Se eliminó el párrafo <code>hint</code></b> ("Lee cada sección, pon tus
+      iniciales…", 52 px). Duplicaba la microcopia por sección y el texto de la barra. Ese ahorro es el que paga el
+      aviso de costura.</div></div>
+      <div class="note"><span class="m">5</span><div><b>La barra inferior ya está presente en 0 %.</b> Aparecer sólo al hacer
+      scroll haría que el cliente no supiera cuánto le falta hasta la mitad del documento.</div></div>
+      <div class="note"><span class="m">6</span><div><b>Fuga que el diseño no puede tapar:</b> la barra de URL dice
+      <code>app.ridefleet.com</code>. Dominio por tenant está fuera de alcance de este fix; lo dejo dibujado para que
+      Hector lo vea y decida si abre ticket.</div></div>
+
+      <div class="meas">
+        <b>¿Cabe el aviso a 360 px? — medido</b>
+        Dispositivo chico real 360×640 ⇒ 708-140 = <b>568 px</b> de viewport. Barra inferior 106 px ⇒
+        <b>462 px de zona limpia</b>.
+        <table>
+          <tr><td>padding superior</td><td>16</td></tr>
+          <tr><td>encabezado de identidad</td><td>92</td></tr>
+          <tr><td>gap</td><td>12</td></tr>
+          <tr><td>aviso de costura (3 líneas)</td><td>74</td></tr>
+          <tr><td>gap</td><td>14</td></tr>
+          <tr><td>eyebrow + título + 4 líneas de cláusula</td><td>145</td></tr>
+          <tr><td>VISIBLE SOBRE EL PLIEGUE</td><td>353 / 462 ✓</td></tr>
+        </table>
+        <div style="margin-top:8px">El <b>pad de iniciales</b> de la sección 1 cae ~41 px por debajo del borde de la barra.
+        Sin el aviso sí entraría (415 &lt; 462): <b>el aviso es exactamente lo que cuesta esa visibilidad</b>.
+        Recomiendo pagarlo — que no se pueda iniciar sin hacer scroll sobre la cláusula es la conducta correcta, y es
+        vecina directa de M6.</div>
+      </div>
+
+      <div class="cp">
+        <b>Copy exacta — aviso de costura</b>
+        <dl>
+          <dt>langSeam · es</dt>
+          <dd>Las instrucciones de esta página están en español. Las cláusulas del contrato se muestran en
+          {clauseLang} porque ese es el texto legal que firmas.</dd>
+          <dt>langSeam · en</dt>
+          <dd>The instructions on this page are in English. The contract clauses are shown in {clauseLang} because that
+          is the legal text you are signing.</dd>
+          <dt>clauseLang</dt>
+          <dd><i>es</i>inglés / español &nbsp;·&nbsp; <i>en</i>English / Spanish</dd>
+        </dl>
+        <div style="margin-top:10px;color:var(--n-700)">
+        <b>Para el desarrollador:</b> <code>clauseLang</code> aún no existe en el payload.
+        <code>loadSession()</code> debe devolver <code>clauseLocale</code> (default <code>'en'</code>; lo pisa el
+        override por sucursal <code>Location.termsSectionsJson</code>). El aviso se renderiza sólo si
+        <code>lang !== clauseLocale</code>. Hardcodear "inglés" funciona hoy y miente el día que una sucursal traduzca
+        sus cláusulas.</div>
+      </div>
+
+      <div class="decision">
+        <b>Nota de tamaños — que no se lea como que relajé mi propio piso</b>
+        El piso de <b>15 px</b> que exigí aplica al <b>cuerpo legal</b> (<code>section.body</code>), y aquí se cumple.
+        El aviso de costura es cromo instructivo y va a <b>14.5 px</b>. El eyebrow de sección sube de 11 → 12.5 px y la
+        etiqueta de iniciales de 12 → 13.5 px, porque los valores actuales del archivo son ilegibles en un teléfono a la
+        luz del sol de un mostrador.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================================================== VISTA 2 -->
+<section class="blk" id="v2">
+  <div class="blk-head">
+    <span class="eyebrow">Vista 2</span>
+    <h2>Identidad degradada (<code>companyName</code> vacío) y nombre largo que envuelve<span class="must">M3</span></h2>
+    <p><code>resolveSigningBrand()</code> baja por cascada <i>location → franquicia → nombre de sucursal → ajuste global
+    → Tenant.name</i> y devuelve <code>null</code> sólo si todo está vacío. Ese <code>null</code> tiene que verse bien
+    y no puede, bajo ninguna circunstancia, degradar a "Ride Fleet". Y en el extremo opuesto: una razón social mexicana
+    completa mide 60+ caracteres y a 18 px envuelve a tres líneas — tampoco puede romperse ni truncarse.</p>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>2A — <code>companyName = null</code> <small>el nombre del documento sube a ser el titular; cero marca</small></figcaption>
+      <div class="phone">
+        <div class="sbar"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="urlbar"><span class="pill">🔒 app.ridefleet.com/sign/9f2c…</span></div>
+        <div class="vp">
+          <div class="doc">
+            <div class="hd">
+              <div class="who">
+                <div class="dt solo">Términos y Condiciones</div>
+                <div class="ag">Contrato RA-20260817</div>
+                <span class="m inframe" style="margin:-46px 0 0 200px">7</span>
+              </div>
+              <div class="lang"><b class="on">ES</b><b>EN</b></div>
+            </div>
+            <div class="seam">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.5"/></svg>
+              <div>Las instrucciones de esta página están en español. Las cláusulas del contrato se muestran en
+              inglés porque ese es el texto legal que firmas.</div>
+            </div>
+            <div class="sec">
+              <div class="ey">Sección 1 de 6</div>
+              <h3>Rental period</h3>
+              <p>I agree to return the vehicle by the scheduled return date and time. Late returns are billed in hourly
+              increments after a 30-minute grace period. Extensions must be authorized in advance through the rental
+              agent or the customer portal.</p>
+              <div class="inrow"><span class="inlbl">Tus iniciales aquí →</span><div class="ipad"></div></div>
+            </div>
+          </div>
+          <div class="fold"><span>PLIEGUE 360×640</span></div>
+          <div class="bbar nosafe">
+            <div class="ptxt"><span>0 de 6 secciones</span><em>0 %</em></div>
+            <div class="prog"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="cta blocked">Firmar y terminar</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>2B — razón social larga <small>envuelve a 3 líneas, sin truncar, sin encoger la tipografía</small></figcaption>
+      <div class="phone">
+        <div class="sbar"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="urlbar"><span class="pill">🔒 app.ridefleet.com/sign/9f2c…</span></div>
+        <div class="vp">
+          <div class="doc">
+            <div class="hd">
+              <div class="who">
+                <div class="co">Renta de Autos y Camionetas del Valle de Guadalupe, S.A. de C.V.</div>
+                <div class="dt">Términos y Condiciones</div>
+                <div class="ag">Contrato RA-20260817</div>
+                <span class="m inframe" style="margin:-104px 0 0 214px">8</span>
+              </div>
+              <div class="lang"><b class="on">ES</b><b>EN</b></div>
+            </div>
+            <div class="seam">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.5"/></svg>
+              <div>Las instrucciones de esta página están en español. Las cláusulas del contrato se muestran en
+              inglés porque ese es el texto legal que firmas.</div>
+            </div>
+            <div class="sec">
+              <div class="ey">Sección 1 de 6</div>
+              <h3>Rental period</h3>
+              <p>I agree to return the vehicle by the scheduled return date and time. Late returns are billed in hourly
+              increments after a 30-minute grace period. Extensions must be authorized in advance…</p>
+              <div class="inrow"><span class="inlbl">Tus iniciales aquí →</span><div class="ipad"></div></div>
+            </div>
+          </div>
+          <div class="fold"><span>PLIEGUE 360×640</span></div>
+          <div class="bbar nosafe">
+            <div class="ptxt"><span>0 de 6 secciones</span><em>0 %</em></div>
+            <div class="prog"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="cta blocked">Firmar y terminar</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes">
+      <h3>Vista 2 · notas</h3>
+      <div class="note"><span class="m">7</span><div><b>Degradación limpia.</b> Sin <code>companyName</code>, el nombre del
+      documento asciende a 18/800 y el bloque queda 24 px más corto — no queda hueco, no aparece placeholder, no
+      aparece logo genérico, y sobre todo <b>no aparece nunca "Ride Fleet"</b>. El test
+      <code>frontend/test/sign-tenant-identity.test.jsx</code> ya lo cubre; esto sólo fija cómo se ve.</div></div>
+      <div class="note"><span class="m">8</span><div><b>El nombre envuelve completo, a 3 líneas.</b>
+      <code>overflow-wrap:anywhere</code> ya está; falta <code>line-height:1.25</code>. <b>Prohibido truncar con
+      ellipsis</b> la identidad de la contraparte de un contrato. Se mantiene a 18 px — no se encoge la tipografía para
+      "que quepa", porque encoger es exactamente lo contrario de lo que el fix persigue.</div></div>
+      <div class="note"><span class="m">·</span><div><b>Alternativa que descarté:</b> mover el toggle de idioma a su propia
+      fila para dar al nombre los 328 px completos. Baja el nombre largo de 3 a 2 líneas pero cuesta 52 px de pliegue
+      en <b>todas</b> las pantallas, incluidas las del 95 % de tenants con nombre corto. Tres líneas es honesto y
+      gratis.</div></div>
+
+      <div class="cp">
+        <b>Copy exacta — atestación degradada (enlaza con Vista 3)</b>
+        <dl>
+          <dt>attest · es (con empresa)</dt><dd>Firmas este contrato con <b>{company}</b>.</dd>
+          <dt>attest · en (con empresa)</dt><dd>You are signing this agreement with <b>{company}</b>.</dd>
+          <dt>attestNoCompany · es</dt><dd>Firmas el documento <b>{docTitle}</b> · {agreementNumber}.</dd>
+          <dt>attestNoCompany · en</dt><dd>You are signing <b>{docTitle}</b> · {agreementNumber}.</dd>
+        </dl>
+        <div style="margin-top:10px;color:var(--n-700)"><b>Regla:</b> sin <code>companyName</code> la atestación
+        <b>no afirma una contraparte</b>. Nada de "con la empresa que renta el vehículo": si no lo sabemos, no lo
+        decimos. Se ancla al documento, que sí conocemos.</div>
+      </div>
+      <div class="cp">
+        <b>Casos de prueba para QA</b>
+        <dl>
+          <dt>corto</dt><dd>Autos del Valle</dd>
+          <dt>largo</dt><dd>Renta de Autos y Camionetas del Valle de Guadalupe, S.A. de C.V.</dd>
+          <dt>sin espacios</dt><dd>AutosDelValleDeGuadalupeSAdeCV (prueba <code>overflow-wrap</code>)</dd>
+          <dt>nulo</dt><dd>null · '' · '   ' — los tres deben caer al mismo render de 2A</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================================================== VISTA 3 -->
+<section class="blk" id="v3">
+  <div class="blk-head">
+    <span class="eyebrow">Vista 3</span>
+    <h2>Pie de firma con atestación · estado bloqueado con motivo explícito · barra inferior fija<span class="must">M4</span><span class="must">M5</span></h2>
+    <p>Para cuando el cliente llega a firmar ya pasó seis secciones: el encabezado con el nombre de la empresa lleva
+    ~2 000 px de scroll fuera de pantalla. La atestación (M4) vuelve a poner la identidad <b>en el momento del
+    compromiso</b>, y el mini encabezado sticky la mantiene presente todo el rato. El bloqueo (M5) deja de ser un botón
+    a <code>opacity:.4</code> sin explicación y pasa a decir exactamente qué falta y a llevar hasta ahí.</p>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>3A — listo para firmar <small>atestación + nombre + firma, todo despejado sobre la barra</small></figcaption>
+      <div class="phone">
+        <div class="sbar"><span>9:52</span><span>LTE · 84 %</span></div>
+        <div class="urlbar"><span class="pill">🔒 app.ridefleet.com/sign/9f2c…</span></div>
+        <div class="vp scrolled">
+          <div class="doc">
+            <div class="minihd">
+              <div class="co">Autos del Valle</div>
+              <div class="lang"><b class="on">ES</b><b>EN</b></div>
+              <span class="m inframe" style="margin:12px 0 0 128px">9</span>
+            </div>
+            <div style="padding:14px 16px 0">
+              <div class="sec ok">
+                <div class="ey">Sección 6 de 6</div>
+                <h3>Prohibited use and authorized drivers</h3>
+                <p>I will not drive the vehicle off paved roads, race or test it, use it to tow, smoke or allow smoking
+                in it, or permit anyone other than authorized drivers listed on the agreement to operate it.</p>
+                <div class="inrow">
+                  <span class="inlbl done">✓ Iniciales puestas</span>
+                  <div class="ipad done"><span class="ink">LM</span></div>
+                </div>
+              </div>
+              <div class="rule"></div>
+              <div class="attest">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 12.5l2.2 2.2L15.5 10"/><circle cx="12" cy="12" r="9"/></svg>
+                <div>Firmas este contrato con <b>Autos del Valle</b>.</div>
+                <span class="m inframe" style="margin:-8px 0 0 -10px">10</span>
+              </div>
+              <div class="fld">
+                <label>Escribe tu nombre completo</label>
+                <input value="Laura Méndez">
+              </div>
+              <div class="fld">
+                <label>Firma en el recuadro</label>
+                <div class="sigpad done"><span class="ink">Laura Méndez</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="reserve" style="top:598px;height:76px"><span>PADDING RESERVADO 106 + 16</span></div>
+          <div class="bbar">
+            <div class="ptxt"><span>6 de 6 secciones</span><em>100 %</em></div>
+            <div class="prog"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></div>
+            <div class="cta ready">Firmar y terminar</div>
+            <div class="safe">SAFE-AREA-INSET-BOTTOM</div>
+            <span class="m inframe" style="margin:-124px 0 0 318px">11</span>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>3B — bloqueado, con el motivo dicho <small>ya no es un botón apagado sin explicación</small></figcaption>
+      <div class="phone">
+        <div class="sbar"><span>9:49</span><span>LTE · 85 %</span></div>
+        <div class="urlbar"><span class="pill">🔒 app.ridefleet.com/sign/9f2c…</span></div>
+        <div class="vp scrolled">
+          <div class="doc">
+            <div class="minihd">
+              <div class="co">Autos del Valle</div>
+              <div class="lang"><b class="on">ES</b><b>EN</b></div>
+            </div>
+            <div style="padding:14px 16px 0">
+              <div class="sec ok">
+                <div class="ey">Sección 6 de 6</div>
+                <h3>Prohibited use and authorized drivers</h3>
+                <p>I will not drive the vehicle off paved roads, race or test it, use it to tow, smoke or allow smoking
+                in it, or permit anyone other than authorized drivers listed on the agreement to operate it.</p>
+                <div class="inrow"><span class="inlbl done">✓ Iniciales puestas</span><div class="ipad done"><span class="ink">LM</span></div></div>
+              </div>
+              <div class="rule"></div>
+              <div class="attest"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 12.5l2.2 2.2L15.5 10"/><circle cx="12" cy="12" r="9"/></svg><div>Firmas este contrato con <b>Autos del Valle</b>.</div></div>
+              <div class="fld">
+                <label>Escribe tu nombre completo</label>
+                <input class="ph" value="Nombre y Apellido">
+              </div>
+              <div class="fld">
+                <label>Firma en el recuadro</label>
+                <div class="sigpad"></div>
+              </div>
+            </div>
+          </div>
+          <div class="bbar">
+            <div class="ptxt"><span>4 de 6 secciones</span><em>67 %</em></div>
+            <div class="prog"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></div>
+            <div class="why">
+              <span>Faltan iniciales en <b>2 secciones</b></span>
+              <a href="#v3">Ir a la sección 3 →</a>
+              <span class="m inframe" style="margin:-6px 0 0 -12px">12</span>
+            </div>
+            <div class="cta blocked">Firmar y terminar</div>
+            <div class="safe">SAFE-AREA-INSET-BOTTOM</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes">
+      <h3>Vista 3 · notas</h3>
+      <div class="note"><span class="m">9</span><div><b>Mini encabezado sticky de 44 px.</b> Sin él, a partir de la sección 2
+      el cliente pierde de vista con quién firma. Mismo patrón que <code>.sesshead.mini</code> de los mockups de
+      RideOps. El toggle de idioma sigue accesible aquí, en su versión reducida.</div></div>
+      <div class="note"><span class="m">10</span><div><b>La atestación (M4) va justo encima del campo de nombre</b>, no en el
+      encabezado: el encabezado ya no está en pantalla cuando llega el compromiso. <code>surface-note</code>, 15 px, con
+      el nombre de la empresa en negrita. Si <code>companyName</code> es nulo se usa la variante
+      <code>attestNoCompany</code> y el bloque baja a estilo neutro (<code>.attest.plain</code>).</div></div>
+      <div class="note"><span class="m">11</span><div><b>La barra no tapa nada.</b> El contenedor de scroll lleva
+      <code>padding-bottom: calc(106px + env(safe-area-inset-bottom) + 16px)</code> — el recuadro punteado morado es esa
+      reserva. El pad de firma se despeja por completo con 16 px de aire.</div></div>
+      <div class="note"><span class="m">12</span><div><b>Un solo motivo a la vez, el primero incumplido</b>, con enlace de
+      44 px a la primera sección pendiente (<code>scrollIntoView</code> + foco). El CTA usa
+      <code>aria-disabled="true"</code> y NO <code>disabled</code>, para que un lector de pantalla pueda alcanzarlo y
+      oír el motivo vía <code>aria-describedby</code>. Contraste del CTA bloqueado: <code>#4b4362</code> sobre
+      <code>#E5E7EB</code> = 7.4:1 ✓ (el <code>opacity:.4</code> actual da ~2.1:1 y <b>reprueba</b>).</div></div>
+
+      <div class="anat" style="margin-top:14px">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:8px">3C · anatomía de la barra fija</div>
+        <div class="row"><span class="bx">1</span>hairline superior · plate OPACO, sin blur (va sobre texto legal)</div>
+        <div class="row"><span class="bx">12</span>padding-top</div>
+        <div class="row"><span class="bx">22</span>fila de progreso — "4 de 6 secciones" + %</div>
+        <div class="row"><span class="bx">6</span>6 segmentos discretos (no fill continuo)</div>
+        <div class="row"><span class="bx">10</span>gap</div>
+        <div class="row"><span class="bx">40</span>strip de motivo — SÓLO en estado bloqueado</div>
+        <div class="row"><span class="bx">10</span>gap</div>
+        <div class="row"><span class="bx">52</span>CTA primario</div>
+        <div class="row"><span class="bx">12</span>padding-bottom base</div>
+        <div class="row"><span class="bx">+34</span><code>env(safe-area-inset-bottom)</code> en iPhone con home indicator</div>
+        <div class="row" style="color:var(--p-800);font-weight:850"><span class="bx">106</span>total sin safe-area · <b>140</b> con safe-area</div>
+      </div>
+
+      <div class="cp">
+        <b>Copy exacta — progreso, motivos, atestación</b>
+        <dl>
+          <dt>progress</dt>
+          <dd><i>es</i>{done} de {total} secciones &nbsp;·&nbsp; <i>en</i>{done} of {total} sections</dd>
+          <dt>blockedInitials</dt>
+          <dd><i>es</i>Faltan iniciales en <b>{n} secciones</b> — singular: Falta iniciar <b>1 sección</b><br>
+          <i>en</i><b>{n} sections</b> still need your initials — singular: <b>1 section</b> still needs your initials</dd>
+          <dt>goToSection</dt>
+          <dd><i>es</i>Ir a la sección {i} → &nbsp;·&nbsp; <i>en</i>Go to section {i} →</dd>
+          <dt>blockedName</dt>
+          <dd><i>es</i>Escribe tu nombre completo para continuar<br><i>en</i>Type your full name to continue</dd>
+          <dt>blockedSignature</dt>
+          <dd><i>es</i>Firma en el recuadro para continuar<br><i>en</i>Draw your signature to continue</dd>
+          <dt>cta</dt>
+          <dd><i>es</i>Firmar y terminar &nbsp;·&nbsp; <i>en</i>Sign and finish</dd>
+          <dt>ctaBusy</dt>
+          <dd><i>es</i>Enviando… &nbsp;·&nbsp; <i>en</i>Submitting…</dd>
+        </dl>
+        <div style="margin-top:10px;color:var(--n-700)"><b>Orden de prioridad del motivo:</b> iniciales → nombre → firma.
+        El CTA deja de llevar el conteo dentro (<code>Completar (4/6 iniciales)</code>): el conteo vive en la fila de
+        progreso y el botón dice qué hace.</div>
+      </div>
+
+      <div class="decision">
+        <b>Decisión abierta para Hector — color del CTA</b>
+        El código pinta hoy el botón en gris pizarra <code>#1F2937</code>, no en morado Ride.
+        <ul>
+          <li><b>Variante A (mi recomendación, la dibujada):</b> tinta neutra <code>#17122b</code>. El morado #8752FE
+          queda para foco, links y relleno de progreso. En una página cuyo propósito entero es que el cliente crea que
+          firma con <i>Autos del Valle</i>, inundar de morado de plataforma es una versión suave de la misma fuga que
+          venimos a cerrar.</li>
+          <li><b>Variante B:</b> CTA en #8752FE, coherente con el resto de RFM.</li>
+        </ul>
+        El día que los tenants configuren color propio, ese token sustituye lo que se elija aquí.
+        <div class="ctacmp">
+          <div><div class="lbl">A · neutra</div><div class="cta ready">Firmar y terminar</div></div>
+          <div><div class="lbl">B · #8752FE</div><div class="cta ready alt">Firmar y terminar</div></div>
+        </div>
+      </div>
+
+      <div class="meas">
+        <b>Teclado — no se puede omitir</b>
+        Con <code>position:fixed</code> a secas, en Android la barra queda <b>debajo</b> del teclado justo cuando el
+        cliente teclea su nombre. Requiere:<br>
+        <code>&lt;meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"&gt;</code><br>
+        <code>viewport-fit=cover</code> es además lo que habilita <code>env(safe-area-inset-bottom)</code>.
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================================================== VISTA 4 -->
+<section class="blk" id="v4">
+  <div class="blk-head">
+    <span class="eyebrow">Vista 4</span>
+    <h2>Error de guardado inline y NO destructivo, con reintento<span class="must">M7</span></h2>
+    <p>Hoy, cualquier fallo al guardar unas iniciales llama a <code>onError()</code>, que sube al estado
+    <code>error</code> del componente raíz, y <code>if (error) return &lt;ShellMessage tone="error"&gt;</code> reemplaza
+    la página entera. El nombre tecleado y la firma dibujada <b>se pierden</b>, y el cliente lee un
+    <code>err.message</code> crudo del backend. Un fallo de <b>escritura</b> jamás puede reemplazar la pantalla.
+    Sólo un fallo de la <b>carga inicial</b> puede (Vista 5) — porque ahí no hay nada que perder.</p>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>4A — falló guardar la sección 6 <small>el nombre y la firma siguen intactos, visibles en la misma pantalla</small></figcaption>
+      <div class="phone">
+        <div class="sbar"><span>9:54</span><span>LTE · 82 %</span></div>
+        <div class="urlbar"><span class="pill">🔒 app.ridefleet.com/sign/9f2c…</span></div>
+        <div class="vp scrolled">
+          <div class="doc">
+            <div class="minihd">
+              <div class="co">Autos del Valle</div>
+              <div class="lang"><b class="on">ES</b><b>EN</b></div>
+            </div>
+            <div style="padding:14px 16px 0">
+              <div class="sec bad">
+                <div class="ey">Sección 6 de 6</div>
+                <h3>Prohibited use and authorized drivers</h3>
+                <p>I will not drive the vehicle off paved roads, race or test it, use it to tow, smoke or allow smoking
+                in it, or permit anyone other than authorized drivers listed on the agreement to operate it.</p>
+                <div class="inrow">
+                  <span class="inlbl unsaved">Sin guardar</span>
+                  <div class="ipad pending"><span class="ink">LM</span></div>
+                  <span class="m inframe" style="margin:16px 0 0 -12px">14</span>
+                </div>
+                <div class="errstrip">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 8.5v4.2M12 16.2v.4"/><circle cx="12" cy="12" r="9"/></svg>
+                  <div>No pudimos guardar tus iniciales. Tu nombre y tu firma siguen aquí.
+                    <div class="retry">↻ Reintentar</div>
+                  </div>
+                </div>
+                <span class="m inframe" style="margin:-118px 0 0 -8px">13</span>
+              </div>
+              <div class="rule"></div>
+              <div class="attest"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 12.5l2.2 2.2L15.5 10"/><circle cx="12" cy="12" r="9"/></svg><div>Firmas este contrato con <b>Autos del Valle</b>.</div></div>
+              <div class="fld">
+                <label>Escribe tu nombre completo</label>
+                <input value="Laura Méndez">
+                <span class="m inframe" style="margin:-42px 0 0 330px">15</span>
+              </div>
+              <div class="fld">
+                <label>Firma en el recuadro</label>
+                <div class="sigpad done"><span class="ink">Laura Méndez</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="bbar">
+            <div class="ptxt"><span>5 de 6 secciones</span><em>83 %</em></div>
+            <div class="prog"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
+            <div class="why"><span>Hay <b>1 sección sin guardar</b></span><a href="#v4">Ir a la sección 6 →</a></div>
+            <div class="cta blocked">Firmar y terminar</div>
+            <div class="safe">SAFE-AREA-INSET-BOTTOM</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes">
+      <h3>Vista 4 · notas</h3>
+      <div class="note"><span class="m">13</span><div><b>El error vive DENTRO de la card que falló</b>, con borde
+      <code>--dg-bd</code>. Nada más de la página cambia. El cliente ve exactamente qué se rompió y dónde.</div></div>
+      <div class="note"><span class="m">14</span><div><b>El trazo se queda en el canvas.</b> No se borra el pad: el dibujo es
+      local, sólo el POST falló. El chip pasa de "✓ Iniciales puestas" a <b>"Sin guardar"</b> — la sección
+      <b>no</b> se marca como <code>signed</code> y el progreso <b>no</b> avanza. Nunca decimos que guardamos algo que
+      no guardamos.</div></div>
+      <div class="note"><span class="m">15</span><div><b>Lo que M7 tiene que demostrar:</b> el nombre tecleado y la firma
+      dibujada están ahí, en la misma pantalla, intactos. Con el comportamiento actual esta captura sería imposible —
+      el componente ya se habría desmontado.</div></div>
+      <div class="note"><span class="m">·</span><div><b>Reintento automático antes de molestar.</b> 2 reintentos con backoff
+      (600 ms, 1 800 ms) en silencio; el strip sólo aparece si los dos fallan. El botón <b>Reintentar</b> (44 px)
+      reenvía el mismo <code>dataUrl</code>; el backend ya hace upsert por
+      <code>(agreementId, sectionKey)</code>, así que reintentar es seguro.</div></div>
+      <div class="note"><span class="m">·</span><div><b>Nunca se muestra <code>err.message</code> crudo.</b> Se mapea por
+      <code>code</code>; lo no mapeado cae al genérico. "initialDataUrl missing or too small" no es algo que un cliente
+      deba leer mientras firma un contrato.</div></div>
+
+      <div class="cp">
+        <b>Copy exacta — errores de escritura</b>
+        <dl>
+          <dt>saveInitialFailed</dt>
+          <dd><i>es</i>No pudimos guardar tus iniciales. Tu nombre y tu firma siguen aquí.<br>
+          <i>en</i>We couldn't save your initials. Your name and signature are still here.</dd>
+          <dt>retry</dt>
+          <dd><i>es</i>Reintentar &nbsp;·&nbsp; <i>en</i>Try again</dd>
+          <dt>unsavedChip</dt>
+          <dd><i>es</i>Sin guardar &nbsp;·&nbsp; <i>en</i>Not saved</dd>
+          <dt>offline</dt>
+          <dd><i>es</i>Sin conexión. Guardaremos tus iniciales en cuanto vuelva el internet.<br>
+          <i>en</i>You're offline. We'll save your initials as soon as you're back online.</dd>
+          <dt>completeFailed</dt>
+          <dd><i>es</i>No pudimos enviar tu firma. Nada se perdió — inténtalo de nuevo.<br>
+          <i>en</i>We couldn't submit your signature. Nothing was lost — please try again.</dd>
+          <dt>blankSignature (400 del backend)</dt>
+          <dd><i>es</i>El recuadro de firma está en blanco. Firma antes de enviar.<br>
+          <i>en</i>The signature box is blank. Please sign before submitting.</dd>
+          <dt>blockedUnsaved</dt>
+          <dd><i>es</i>Hay <b>{n} secciones sin guardar</b> &nbsp;·&nbsp; <i>en</i><b>{n} sections</b> aren't saved yet</dd>
+        </dl>
+      </div>
+
+      <div class="decision">
+        <b>Variante offline (misma anatomía, tono neutro)</b>
+        Estar sin señal no es un fallo del cliente ni nuestro: usa <code>.errstrip.offstrip</code> (gris, no rojo) y
+        <b>sin</b> botón de reintento — la cola reintenta sola al volver <code>online</code>. Rojo se reserva para
+        fallos que sí exigen una acción del cliente.
+        <div class="errstrip offstrip" style="margin-top:10px">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 5l16 14M6.5 10.5a10 10 0 0 1 3-1.9M2.5 7.5a15 15 0 0 1 4-2.6M12 18.5v.01M9.2 14.4a5 5 0 0 1 5.6-.6"/></svg>
+          <div>Sin conexión. Guardaremos tus iniciales en cuanto vuelva el internet.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================================================== VISTA 5 -->
+<section class="blk" id="v5">
+  <div class="blk-head">
+    <span class="eyebrow">Vista 5</span>
+    <h2>Enlace vencido y estado de éxito con identidad<span class="must">M3</span><span class="must">M7</span></h2>
+    <p>Son los dos únicos estados a los que sí les corresponde ocupar la pantalla completa: en el vencido no hay nada
+    que preservar, y en el éxito ya no hay nada que hacer. Hoy el vencido enseña el string crudo
+    <code>"Token expired"</code> y el éxito dice sólo <code>"¡Gracias! Regresa con tu agente de renta."</code>, sin
+    decir qué firmó ni con quién. <b>Asimetría importante:</b> en vencido/inválido el backend lanza 410 <i>antes</i> de
+    resolver la marca, así que no conocemos la empresa y <b>no la inventamos</b> — tarjeta neutra. En el éxito sí
+    tenemos el payload, y ahí la identidad cierra el círculo.</p>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>5A — enlace vencido <small>410 TOKEN_EXPIRED · sin marca, porque no la conocemos</small></figcaption>
+      <div class="phone">
+        <div class="sbar"><span>11:20</span><span>LTE · 71 %</span></div>
+        <div class="urlbar"><span class="pill">🔒 app.ridefleet.com/sign/9f2c…</span></div>
+        <div class="vp">
+          <div class="term">
+            <div class="tcard">
+              <div class="tico warn">
+                <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5.4l3.2 2"/></svg>
+              </div>
+              <h4>Este enlace ya venció</h4>
+              <p>Por seguridad, el enlace para firmar caduca a las pocas horas. Pídele a tu agente de renta que te
+              muestre un código nuevo.</p>
+              <span class="m inframe" style="margin:-150px 0 0 300px">16</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>5B — éxito, con identidad y recibo <small>qué firmaste, con quién y cuándo</small></figcaption>
+      <div class="phone">
+        <div class="sbar"><span>9:58</span><span>LTE · 82 %</span></div>
+        <div class="urlbar"><span class="pill">🔒 app.ridefleet.com/sign/9f2c…</span></div>
+        <div class="vp">
+          <div class="term">
+            <div class="tcard">
+              <div class="tico ok">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 12.5l4 4 8-8.5"/></svg>
+              </div>
+              <h4>Listo, firmaste</h4>
+              <p>Firmaste el contrato <b>RA-20260817</b> con:</p>
+              <div class="co">Autos del Valle</div>
+              <div class="rcpt">Firmado el 17 ago 2026, 9:58</div>
+              <p style="margin-top:16px">Regresa con tu agente de renta.</p>
+              <span class="m inframe" style="margin:-206px 0 0 300px">17</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes">
+      <h3>Vista 5 · notas</h3>
+      <div class="note"><span class="m">16</span><div><b>Nunca el string del backend.</b> <code>loadToken()</code> lanza
+      <code>TOKEN_INVALID</code>, <code>TOKEN_WRONG_KIND</code>, <code>TOKEN_EXPIRED</code> y
+      <code>TOKEN_CONSUMED</code>, todos 410. Hoy se pintan crudos, en inglés. Se mapean por <code>code</code>, en el
+      idioma del cliente, con <b>salida</b> ("pide un código nuevo") y sin culpar a nadie. Ámbar de reloj, no rojo de
+      error: el cliente no hizo nada mal, sólo tardó.</div></div>
+      <div class="note"><span class="m">17</span><div><b>El éxito cierra el círculo de identidad.</b> Número de contrato +
+      empresa + sello de tiempo. Es lo único que le queda al cliente como recibo tras cerrar la pestaña. Si
+      <code>companyName</code> es nulo, se omite el bloque de empresa y el texto queda "Firmaste el contrato
+      RA-20260817." — nunca "con Ride Fleet".</div></div>
+      <div class="note"><span class="m">·</span><div><b>Sin CTA en el éxito.</b> No hay "Cerrar" ni "Volver": no podemos
+      cerrar la pestaña del cliente ni tenemos a dónde llevarlo. Un botón que no funciona es peor que ninguno.</div></div>
+      <div class="note"><span class="m">·</span><div><b>Pregunta abierta:</b> ¿se le envía copia del PDF al cliente? Si sí,
+      añadir una línea. Si no, <b>no prometerlo</b>. No lo dibujo porque no lo sé.</div></div>
+
+      <div class="cp">
+        <b>Copy exacta — estados terminales</b>
+        <dl>
+          <dt>TOKEN_EXPIRED</dt>
+          <dd><i>es</i><b>Este enlace ya venció</b> / Por seguridad, el enlace para firmar caduca a las pocas horas.
+          Pídele a tu agente de renta que te muestre un código nuevo.<br>
+          <i>en</i><b>This link has expired</b> / For security, the signing link expires after a few hours. Ask your
+          rental agent to show you a new code.</dd>
+          <dt>TOKEN_CONSUMED</dt>
+          <dd><i>es</i><b>Ya firmaste este contrato</b> / Este enlace sólo se puede usar una vez. Si necesitas una
+          copia, pídesela a tu agente de renta.<br>
+          <i>en</i><b>You've already signed this agreement</b> / This link can only be used once. If you need a copy,
+          ask your rental agent.</dd>
+          <dt>TOKEN_INVALID / WRONG_KIND</dt>
+          <dd><i>es</i><b>Este enlace no es válido</b> / Revisa que hayas escaneado el código correcto, o pídele a tu
+          agente de renta uno nuevo.<br>
+          <i>en</i><b>This link isn't valid</b> / Check that you scanned the right code, or ask your rental agent for a
+          new one.</dd>
+          <dt>loadFailed (red / 5xx)</dt>
+          <dd><i>es</i><b>No pudimos cargar el contrato</b> / Revisa tu conexión e inténtalo de nuevo. — botón:
+          Reintentar<br>
+          <i>en</i><b>We couldn't load the agreement</b> / Check your connection and try again. — button: Try again</dd>
+          <dt>success</dt>
+          <dd><i>es</i><b>Listo, firmaste</b> / Firmaste el contrato {agreementNumber} con: <b>{company}</b> /
+          Firmado el {fecha} / Regresa con tu agente de renta.<br>
+          <i>en</i><b>Done — you've signed</b> / You signed agreement {agreementNumber} with: <b>{company}</b> /
+          Signed on {date} / Return to your rental agent.</dd>
+          <dt>successNoCompany</dt>
+          <dd><i>es</i>Firmaste el contrato {agreementNumber}. Regresa con tu agente de renta.<br>
+          <i>en</i>You signed agreement {agreementNumber}. Return to your rental agent.</dd>
+          <dt>loading</dt>
+          <dd><i>es</i>Cargando el contrato… &nbsp;·&nbsp; <i>en</i>Loading the agreement…</dd>
+        </dl>
+        <div style="margin-top:10px;color:var(--n-700)"><b>Idioma de los estados terminales:</b> en un 410 no hay
+        <code>signerLocale</code>, así que se resuelve por navegador → inglés, y el toggle ES|EN debe seguir presente
+        en la tarjeta terminal.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================================================== FOOTER -->
+<footer class="dod" id="dod">
+  <div class="card">
+    <h3 style="font-size:16px;font-weight:850;margin-bottom:10px">Mapa MUST → frame (para que el desarrollador no adivine)</h3>
+    <ul style="margin:0;padding-left:18px">
+      <li><b>M2 — costura de idioma:</b> frames <b>1A</b> (aviso presente, es) y <b>1B</b> (ausente, en). Regla de render
+      <code>lang !== clauseLocale</code>. Requiere exponer <code>clauseLocale</code> en <code>loadSession()</code>.</li>
+      <li><b>M3 — identidad del tenant en todos los estados:</b> frames <b>2A</b> (nulo), <b>2B</b> (largo),
+      <b>5B</b> (éxito con identidad), <b>5A</b> (terminal sin identidad, porque no la conocemos).</li>
+      <li><b>M4 — atestación en el acto de firmar:</b> frame <b>3A</b> + mini encabezado sticky (nota 9) + copy
+      <code>attest</code> / <code>attestNoCompany</code>.</li>
+      <li><b>M5 — bloqueo con motivo y barra de progreso:</b> frame <b>3B</b> + anatomía <b>3C</b>. Incluye
+      <code>aria-disabled</code> + <code>aria-describedby</code> y el arreglo de contraste del CTA bloqueado.</li>
+      <li><b>M7 — error de escritura no destructivo:</b> frame <b>4A</b> + variante offline. Regla: un fallo de
+      escritura jamás reemplaza la pantalla; sólo un fallo de la carga inicial puede.</li>
+      <li class="off"><b>M6 — iniciación accidental que se autoguarda: NO DIBUJADO</b>, por instrucción. Es preexistente
+      y de consecuencia legal; va a Hector como decisión aparte. Si aprueba atacarlo, se entrega su lámina entonces.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3 style="font-size:16px;font-weight:850;margin-bottom:10px">Las dos preguntas visuales que estaban abiertas — resueltas</h3>
+    <ul style="margin:0;padding-left:18px">
+      <li><b>Dónde vive el aviso de costura.</b> Confirmado en 1A: debajo del encabezado, encima de la sección 1,
+      <code>surface-note</code> con ícono de información. A 360 px <b>no</b> empuja la primera sección fuera de la
+      primera pantalla — sobre el pliegue del teléfono chico (462 px limpios) quedan encabezado, aviso, título de la
+      sección 1 y 4 líneas de cláusula = 353 px. <b>Sí</b> empuja el pad de iniciales ~41 px por debajo; recomiendo
+      aceptarlo, porque obligar a hacer scroll sobre la cláusula antes de iniciar es la conducta correcta.</li>
+      <li><b>La barra inferior fija.</b> 106 px sin safe-area / 140 con ella. No tapa nada porque el contenedor de
+      scroll reserva <code>calc(106px + env(safe-area-inset-bottom) + 16px)</code> (dibujado en 3A). Requiere
+      <code>viewport-fit=cover</code> + <code>interactive-widget=resizes-content</code>, o en Android queda debajo del
+      teclado justo al teclear el nombre.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3 style="font-size:16px;font-weight:850;margin-bottom:10px">Decisiones que necesito de Hector</h3>
+    <ul style="margin:0;padding-left:18px">
+      <li><b>Color del CTA</b> — variante A neutra (recomendada) vs. B en #8752FE. Ver comparación a tamaño real en la Vista 3.</li>
+      <li><b>Costo del aviso de costura</b> — ¿se acepta que el pad de iniciales de la sección 1 quede bajo el pliegue en
+      teléfonos de 640 px?</li>
+      <li><b>Mini encabezado sticky</b> — cuesta 44 px permanentes; a cambio la identidad nunca sale de pantalla.</li>
+      <li><b>Copia por correo al cliente tras firmar</b> — ¿existe? Si sí, se añade línea en 5B; si no, no se promete.</li>
+      <li><b>Dominio</b> — la barra de URL dice <code>app.ridefleet.com</code>. Fuera de alcance de este fix; ¿se abre ticket?</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3 style="font-size:16px;font-weight:850;margin-bottom:10px">Qué pasa si Hector rechaza cada frame</h3>
+    <div class="rej">
+      <div><span class="fr">1A / 1B</span><span>Se cae M2: el cliente hispanohablante sigue leyendo instrucciones en español
+      alrededor de cláusulas en inglés sin que nadie se lo advierta. Alternativa si se rechaza sólo la <i>ubicación</i>:
+      moverlo al mini encabezado sticky como línea de una sola frase — cuesta menos pliegue pero se lee como cromo y se
+      ignora. Rechazar el aviso completo exige traducir <code>terms-content.js</code> al español antes de enviar esta
+      página a producción; sale del alcance del fix y bloquea el ship.</span></div>
+      <div><span class="fr">2A / 2B</span><span>Se cae M3. Si se rechaza 2A, hay que decidir qué se muestra cuando
+      <code>companyName</code> es nulo — y toda alternativa que llene ese hueco con algo nuestro reabre exactamente el
+      bug que la rama vino a cerrar. Si se rechaza 2B (tres líneas), la única salida es truncar la razón social de la
+      contraparte de un contrato: no lo firmo como diseño. Volvería con la variante de toggle en fila propia, que cuesta
+      52 px de pliegue en todas las pantallas.</span></div>
+      <div><span class="fr">3A</span><span>Se cae M4. La identidad se queda sólo en el encabezado, a ~2 000 px de scroll del
+      punto donde el cliente teclea su nombre y firma. El fix quedaría a medias: identidad al entrar, anonimato al
+      comprometerse. Si el rechazo es sólo al mini encabezado sticky, la atestación sola ya cubre M4 y lo acepto.</span></div>
+      <div><span class="fr">3B</span><span>Se cae M5. El botón vuelve a <code>opacity:.4</code> sin motivo — 2.1:1 de
+      contraste, reprueba WCAG AA, y el cliente queda atorado sin saber qué le falta, lo que termina en el mostrador
+      con el agente. Si el rechazo es sólo al enlace "Ir a la sección N", el motivo escrito solo ya cubre el mínimo,
+      aunque obliga a buscar a mano entre seis secciones.</span></div>
+      <div><span class="fr">4A</span><span>Se cae M7 y es el único rechazo que considero <b>bloqueante para QA</b>: sin este
+      cambio, un fallo de red destruye el nombre y la firma ya capturados y le enseña al cliente un error interno en
+      inglés en mitad de la firma de un contrato. No es preferencia estética, es pérdida de datos del cliente. Si se
+      rechaza el diseño, pido igualmente el comportamiento (error inline, estado preservado) con el estilo que Hector
+      prefiera.</span></div>
+      <div><span class="fr">5A / 5B</span><span>Se cae la mitad de M7 y el cierre de M3. El cliente sigue leyendo
+      <code>"Token expired"</code> —string interno, en inglés, sin salida— y el éxito sigue sin decir qué firmó ni con
+      quién, dejándolo sin ningún recibo. Bajo impacto técnico, alto impacto de confianza: es literalmente la última
+      pantalla que ve del proceso.</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="font-size:16px;font-weight:850;margin-bottom:10px">Nota de implementación — consistencia con RFM</h3>
+    <p style="margin:0 0 8px">La página hoy no usa <b>ninguna</b> clase de <code>globals.css</code>: todo son estilos
+    inline con hexadecimales sueltos (<code>#1F2937</code>, <code>#E5E7EB</code>, <code>#6B7280</code>), que es
+    justamente por lo que parece un producto distinto al resto de RFM. Al construir, mapear a lo que ya existe:</p>
+    <ul style="margin:0;padding-left:18px">
+      <li>aviso de costura y atestación → <code>.surface-note</code></li>
+      <li>cards de sección → <code>.glass .card .section-card</code> (variante clara, sin <code>backdrop-filter</code>: va sobre texto legal)</li>
+      <li>chips "Iniciales puestas" / "Sin guardar" → <code>.status-chip.good</code> / <code>.status-chip.bad</code></li>
+      <li>etiquetas de campo → <code>.label</code>; CTA → <code>.button</code>; enlace "Ir a la sección N" → <code>.button-subtle</code></li>
+      <li>tokens: <code>--p-50</code>, <code>--border-brand</code>, <code>--ok-*</code>, <code>--warn-*</code>,
+      <code>--danger-*</code>, <code>--brand-purple</code> — nada de hexadecimales nuevos</li>
+    </ul>
+  </div>
+</footer>
+
+</body>
+</html>
