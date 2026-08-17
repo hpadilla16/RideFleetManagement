@@ -152,7 +152,7 @@
     "test:error-status": "node --test --test-force-exit src/lib/error-status-passthrough.test.mjs",
     "test:demo-reset": "node --test --test-force-exit src/modules/tenants/demo-reset.test.mjs",
     "test:booking-reachable": "node --test --test-force-exit src/lib/booking-reachable-by-agent.test.mjs",
-    "test:declined-insurance": "node --test --test-force-exit src/modules/checkout-session/declined-insurance-and-sign-url.test.mjs",
+    "test:declined-insurance": "node --test --test-force-exit src/modules/checkout-session/declined-insurance-and-sign-url.test.mjs src/modules/customer-portal/precheckin-insurance-gate.test.mjs",
     "test:declined-insurance-embedded": "node --test --test-force-exit src/modules/reservations/declined-insurance-getbyid.embedded.test.mjs"
   },
   "dependencies": {

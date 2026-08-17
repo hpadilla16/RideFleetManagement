@@ -1363,11 +1363,26 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
     // The gate no-ops unless the flag would actually flip, so a customer who
     // declined earlier and is re-submitting pre-check-in for some other reason
     // is not refused over a field they did not touch.
-    if (insuranceSelection?.declinedCoverage) {
+    //
+    // It covers BOTH branches below, not just the decline one. Picking a plan
+    // is the mirror image of declining, sits downstream of the same
+    // deleteMany(), and is the branch where the silent damage lives today: a
+    // customer who declined, signed, and then buys coverage here ends up with a
+    // contract whose decline addendum contradicts its insurance charge, with
+    // nothing raised. Gating on the computed next value turns that into the
+    // same 409 the counter can resolve. Plan-on-a-normal-agreement is
+    // false-vs-false, so the common case stays a no-op.
+    let insuranceVerdict = { locked: false, signed: false };
+    if (insuranceSelection) {
+      // Mirrors the branch precedence below: selectedPlanCode wins over
+      // declinedCoverage.
+      const nextDeclined = insuranceSelection.selectedPlanCode
+        ? false
+        : !!insuranceSelection.declinedCoverage;
       try {
-        await assertInsuranceSelectionEditable({
+        insuranceVerdict = await assertInsuranceSelectionEditable({
           reservationId: reservation.id,
-          nextValue: true,
+          nextValue: nextDeclined,
           // Nobody is standing next to the customer to interpret a 409, so the
           // sentence has to be self-contained and tell them what to do next.
           audience: 'customer',
@@ -1584,11 +1599,21 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
         const declineSig = insuranceSelection.signatureDataUrl;
         const declAg = await prisma.rentalAgreement.findUnique({ where: { reservationId: reservation.id }, select: { id: true } });
         if (declAg) {
+          // The signature columns are NOT covered by the flag's no-flip rule.
+          // buildDeclinedInsuranceBlock prints declinedInsuranceSignatureDataUrl
+          // on the contract, so re-submitting pre-check-in after the agreement
+          // was signed would replace the addendum's signature and re-date it to
+          // after the signing — silently, since the flag itself did not move and
+          // the gate rightly let the request through. Once the contract is
+          // sealed the flag write is a no-op anyway; these two stay frozen.
+          const sealed = insuranceVerdict.signed;
+          const canWriteDeclineSignature =
+            !sealed && declineSig && String(declineSig).length > 200;
           await prisma.rentalAgreement.update({
             where: { id: declAg.id },
             data: {
               declinedInsurance: true,
-              ...(declineSig && String(declineSig).length > 200
+              ...(canWriteDeclineSignature
                 ? { declinedInsuranceSignatureDataUrl: declineSig, declinedInsuranceSignedAt: new Date() }
                 : {}),
             },

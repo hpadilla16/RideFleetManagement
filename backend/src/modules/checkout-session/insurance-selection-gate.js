@@ -30,7 +30,7 @@
  */
 
 import { prisma } from '../../lib/prisma.js';
-import { CheckoutSessionError } from './checkout-session.service.js';
+import { CheckoutSessionError } from './checkout-session.errors.js';
 
 /**
  * Machine codes. DELIBERATELY SHARED between the agent and customer surfaces:
@@ -81,49 +81,62 @@ export function messageFor(code, audience = 'staff') {
  * re-submits pre-check-in (to fix an address, say) would be refused over a
  * field they never changed.
  *
+ * Returns a VERDICT rather than only throwing, because "may I write the flag?"
+ * and "is this contract already signed?" are different questions and a caller
+ * can need the second even when the first says yes. The portal is exactly that
+ * case: on a no-flip re-submit the gate allows the write, but the surrounding
+ * update also carries declinedInsuranceSignatureDataUrl / ...SignedAt, and
+ * those ARE printed on the contract (rental-agreements.service.js
+ * buildDeclinedInsuranceBlock). Overwriting them would replace the addendum
+ * signature and re-date it to AFTER the customer signed the agreement. The
+ * caller reads `signed` and omits those columns; the gate does not need to know
+ * which columns exist.
+ *
  * @param {object}  args
  * @param {string}  [args.agreementId]   RentalAgreement being written. Resolved
  *                                       from reservationId when omitted.
  * @param {string}  [args.reservationId] Owning reservation (for the token lookup).
  * @param {boolean} [args.nextValue]     Value about to be written, if known.
- * @param {'staff'|'customer'} [args.audience]  Wording of the thrown message.
- * @throws {CheckoutSessionError} 409 with .code set to an INSURANCE_LOCK value.
+ * @param {object}  [args.client]        Prisma client or $transaction handle.
+ * @returns {Promise<{locked: boolean, code: string|null, signed: boolean,
+ *                    agreementId: string|null}>}
  */
-export async function assertInsuranceSelectionEditable({
-  agreementId, reservationId, nextValue, audience = 'staff',
+export async function inspectInsuranceSelection({
+  agreementId, reservationId, nextValue, client = prisma,
 } = {}) {
-  if (!agreementId && !reservationId) return;
+  const open = { locked: false, code: null, signed: false, agreementId: agreementId || null };
+  if (!agreementId && !reservationId) return open;
 
   // RentalAgreement.reservationId is @unique, so either key resolves the row.
   // The portal reaches this gate before it has looked the agreement up.
-  const agreement = agreementId
-    ? await prisma.rentalAgreement.findUnique({
-      where: { id: agreementId },
-      select: { id: true, tcSignedAt: true, reservationId: true, declinedInsurance: true },
-    })
-    : await prisma.rentalAgreement.findUnique({
-      where: { reservationId },
-      select: { id: true, tcSignedAt: true, reservationId: true, declinedInsurance: true },
-    });
+  const agreement = await client.rentalAgreement.findUnique({
+    where: agreementId ? { id: agreementId } : { reservationId },
+    select: { id: true, tcSignedAt: true, reservationId: true, declinedInsurance: true },
+  });
   // No agreement yet — nothing is signed and nothing can desync.
-  if (!agreement) return;
+  if (!agreement) return open;
 
-  if (typeof nextValue === 'boolean' && !!agreement.declinedInsurance === nextValue) return;
-
-  agreementId = agreement.id;
   const resId = reservationId || agreement.reservationId;
+  const verdict = { locked: false, code: null, signed: false, agreementId: agreement.id };
 
   // 1. Already signed. The captured initials and the PDF's addendum would no
   //    longer agree with the flag, so this is final — not a timing window.
-  if (agreement.tcSignedAt) throwLocked(INSURANCE_LOCK.SIGNED, audience);
-
+  //    `signed` is reported even when the write is allowed through as a no-op.
   const session = resId
-    ? await prisma.checkoutSession.findUnique({
+    ? await client.checkoutSession.findUnique({
       where: { reservationId: resId },
       select: { tcCompletedAt: true },
     })
     : null;
-  if (session?.tcCompletedAt) throwLocked(INSURANCE_LOCK.SIGNED, audience);
+  verdict.signed = !!agreement.tcSignedAt || !!session?.tcCompletedAt;
+
+  // A write that does not FLIP the flag cannot desync the section set, so it is
+  // allowed even on a signed agreement. Evaluated after `signed` so the caller
+  // still learns the contract is closed.
+  const flips = !(typeof nextValue === 'boolean' && !!agreement.declinedInsurance === nextValue);
+  if (!flips) return verdict;
+
+  if (verdict.signed) return { ...verdict, locked: true, code: INSURANCE_LOCK.SIGNED };
 
   // 2. Signing in progress. tcCompletedAt is only stamped inside complete(),
   //    so during the signature itself both stamps above are still null while
@@ -136,8 +149,8 @@ export async function assertInsuranceSelectionEditable({
   //    over the QR is legitimate, and the customer's next page load picks up
   //    the new section set on its own. An expired or consumed token is not a
   //    hazard either — a fresh loadSession recomputes from the current flag.
-  if (!resId) return;
-  const liveSigningToken = await prisma.handoffToken.findFirst({
+  if (!resId) return verdict;
+  const liveSigningToken = await client.handoffToken.findFirst({
     where: {
       reservationId: resId,
       kind: 'TERMS_SIGNING',
@@ -146,15 +159,28 @@ export async function assertInsuranceSelectionEditable({
     },
     select: { id: true },
   });
-  if (!liveSigningToken) return;
+  if (!liveSigningToken) return verdict;
 
-  const started = await prisma.agreementSectionInitial.findFirst({
-    where: { agreementId },
+  const started = await client.agreementSectionInitial.findFirst({
+    where: { agreementId: agreement.id },
     select: { id: true },
   });
-  if (started) throwLocked(INSURANCE_LOCK.SIGNING, audience);
+  if (started) return { ...verdict, locked: true, code: INSURANCE_LOCK.SIGNING };
+  return verdict;
 }
 
-function throwLocked(code, audience) {
-  throw new CheckoutSessionError(messageFor(code, audience), 409, code);
+/**
+ * inspectInsuranceSelection(), but throws on a locked verdict. Returns the
+ * verdict when the write is allowed, so callers that also need `signed` can use
+ * this one and skip the two-call dance.
+ *
+ * @param {'staff'|'customer'} [args.audience] Wording of the thrown message.
+ * @throws {CheckoutSessionError} 409 with .code set to an INSURANCE_LOCK value.
+ */
+export async function assertInsuranceSelectionEditable({ audience = 'staff', ...args } = {}) {
+  const verdict = await inspectInsuranceSelection(args);
+  if (verdict.locked) {
+    throw new CheckoutSessionError(messageFor(verdict.code, audience), 409, verdict.code);
+  }
+  return verdict;
 }

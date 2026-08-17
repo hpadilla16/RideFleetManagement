@@ -64,12 +64,13 @@ let agreementUpdates;
 let sessionUpdates;
 let liveToken;
 let existingInitial;
+let writeCount;
 
 const STUBBED = [
   'checkoutSession.findUnique', 'checkoutSession.update',
   'handoffToken.findFirst', 'handoffToken.create',
   'agreementSectionInitial.findFirst',
-  'rentalAgreement.findUnique', 'rentalAgreement.update',
+  'rentalAgreement.findUnique', 'rentalAgreement.update', 'rentalAgreement.updateMany',
 ];
 const realFns = {};
 
@@ -87,6 +88,7 @@ beforeEach(() => {
   };
   agreementUpdates = [];
   sessionUpdates = [];
+  writeCount = 1;          // rows matched by the optimistic-guard updateMany
   liveToken = null;        // handoffToken.findFirst result
   existingInitial = null;  // agreementSectionInitial.findFirst result
 
@@ -101,6 +103,13 @@ beforeEach(() => {
   prisma.agreementSectionInitial.findFirst = async () => existingInitial;
   prisma.rentalAgreement.findUnique = async () => agreement;
   prisma.rentalAgreement.update = async (op) => { agreementUpdates.push(op); return {}; };
+  // The agent write is an updateMany carrying `tcSignedAt: null` in its WHERE —
+  // the optimistic guard. `writeCount` stands in for what that predicate would
+  // match, so a test can simulate the signature landing mid-request.
+  prisma.rentalAgreement.updateMany = async (op) => {
+    agreementUpdates.push(op);
+    return { count: writeCount };
+  };
 });
 
 afterEach(() => {
@@ -181,15 +190,60 @@ test('ALLOWS the correction when no signing token is live, even with old initial
 // The shared gate: writer-agnostic behaviour that both surfaces depend on.
 // ---------------------------------------------------------------------------
 
-test('a write that does not FLIP the flag is allowed even on a signed agreement', async () => {
-  // Without this, the portal — which only ever writes `true` — would refuse a
-  // customer who declined earlier and is re-submitting pre-check-in to fix an
-  // address, over a field they never touched.
+test('a write that does not FLIP the flag is not locked, but reports signed', async () => {
+  // Asserted at the gate, because this rule exists for the PORTAL: without it a
+  // customer who declined earlier and re-submits pre-check-in to fix an address
+  // would be refused over a field they never touched. `signed` still comes back
+  // true so the caller knows to leave the decline-signature columns alone.
+  // (The agent path is stricter — see the optimistic-guard test below.)
   agreement.declinedInsurance = true;
   agreement.tcSignedAt = new Date();
-  session.tcCompletedAt = new Date();
+  const verdict = await assertInsuranceSelectionEditable({
+    agreementId: 'a1', reservationId: 'r1', nextValue: true,
+  });
+  assert.equal(verdict.locked, false, 'no-op write must not be locked');
+  assert.equal(verdict.signed, true, 'caller must still learn the contract is sealed');
+});
+
+test('the agent write is an updateMany fenced on tcSignedAt: null', async () => {
   await checkoutSessionService.setDeclinedInsurance({ id: 's1', declined: true });
-  assert.equal(agreementUpdates.length, 1, 'no-op write should pass the gate');
+  const op = agreementUpdates[0];
+  assert.deepEqual(op.where, { id: 'a1', tcSignedAt: null },
+    'the WHERE must carry the fence, or the check-then-act window stays open');
+});
+
+test('optimistic guard: a signature landing mid-request refuses the write', async () => {
+  // The gate passes (nothing is signed when it reads), then the customer
+  // completes signing before the UPDATE lands. The fence makes the database
+  // settle it: zero rows matched, so nobody wrote and the agent is told why.
+  writeCount = 0;
+  await assert.rejects(
+    () => checkoutSessionService.setDeclinedInsurance({ id: 's1', declined: true }),
+    (err) => {
+      assert.equal(err.status, 409);
+      assert.equal(err.code, INSURANCE_LOCK.SIGNED);
+      return true;
+    },
+  );
+  assert.equal(sessionUpdates.length, 0, 'no DECLINED_INSURANCE event for a write that did not happen');
+});
+
+test('the gate accepts an injected client (transaction handle)', async () => {
+  // Without this, a writer that later moves into $transaction would have the
+  // gate reading OUTSIDE the transaction and the check-then-act go invisible.
+  const calls = [];
+  const tx = {
+    rentalAgreement: { findUnique: async () => { calls.push('agreement'); return agreement; } },
+    checkoutSession: { findUnique: async () => { calls.push('session'); return null; } },
+    handoffToken: { findFirst: async () => { calls.push('token'); return null; } },
+    agreementSectionInitial: { findFirst: async () => null },
+  };
+  prisma.rentalAgreement.findUnique = async () => { throw new Error('gate must not touch the global client'); };
+  const verdict = await assertInsuranceSelectionEditable({
+    agreementId: 'a1', reservationId: 'r1', nextValue: true, client: tx,
+  });
+  assert.equal(verdict.locked, false);
+  assert.deepEqual(calls, ['agreement', 'session', 'token']);
 });
 
 test('agreement.tcSignedAt locks the flag even when NO checkout session exists', async () => {

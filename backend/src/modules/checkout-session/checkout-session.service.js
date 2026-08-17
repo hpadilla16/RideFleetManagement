@@ -14,19 +14,13 @@ import {
   appendEvent,
   isTerminal,
 } from './state-machine.js';
-// Cyclic by construction (the gate throws CheckoutSessionError, declared
-// below). Safe in ESM: neither module dereferences the other's bindings at
-// evaluation time, only inside function bodies.
-import { assertInsuranceSelectionEditable } from './insurance-selection-gate.js';
+import { assertInsuranceSelectionEditable, messageFor, INSURANCE_LOCK } from './insurance-selection-gate.js';
+import { CheckoutSessionError } from './checkout-session.errors.js';
 
-export class CheckoutSessionError extends Error {
-  constructor(message, status = 400, code = null) {
-    super(message);
-    this.name = 'CheckoutSessionError';
-    this.status = status;
-    this.code = code;
-  }
-}
+// Re-exported so the 13 modules that import CheckoutSessionError from here keep
+// working. The class itself moved to a leaf module so helpers this service
+// depends on can throw it without forming an import cycle — see that file.
+export { CheckoutSessionError };
 
 const HANDOFF_TOKEN_TTL_MIN = 15;
 
@@ -892,10 +886,22 @@ async function setDeclinedInsurance({ id, declined, actorUserId }) {
     audience: 'staff',
   });
 
-  await prisma.rentalAgreement.update({
-    where: { id: session.agreementId },
+  // Optimistic concurrency on the read-then-write above. The gate's checks and
+  // this write are not in one transaction, so the customer can finish signing
+  // in between and the agent's edit would land on a sealed contract. Folding
+  // `tcSignedAt: null` into the WHERE makes the database settle it: if the
+  // signature landed first, count is 0 and nobody wrote. Cheaper than wrapping
+  // the whole thing in a transaction, and it closes the window rather than
+  // narrowing it.
+  const written = await prisma.rentalAgreement.updateMany({
+    where: { id: session.agreementId, tcSignedAt: null },
     data: { declinedInsurance: !!declined },
   });
+  if (written.count === 0) {
+    throw new CheckoutSessionError(
+      messageFor(INSURANCE_LOCK.SIGNED, 'staff'), 409, INSURANCE_LOCK.SIGNED,
+    );
+  }
 
   return prisma.checkoutSession.update({
     where: { id },
