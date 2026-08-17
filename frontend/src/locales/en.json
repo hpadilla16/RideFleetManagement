@@ -1141,6 +1141,17 @@
         }
       }
     },
-    "gotchaLabel": "Where people trip"
+    "gotchaLabel": "Where people trip",
+    "practiceBanner": "PRACTICE MODE — demo tenant. Nothing here touches real data, and practice earns no points.",
+    "practiceExit": "Back to my account",
+    "practiceCta": "🎓 Practice on the demo tenant",
+    "practiceOpening": "Opening practice…",
+    "practiceHint": "Rehearse the hands-on modules on the demo tenant — no real data, no points",
+    "welcomeTitle": "Welcome to Ride Fleet",
+    "welcomeBody": "First time here? In five minutes I can walk you through where everything lives — and you can relaunch the tour any time from Ride University.",
+    "welcomeStart": "Show me around",
+    "welcomeLater": "Not now",
+    "practiceError": "Could not open practice mode — try again.",
+    "practiceImpersonation": "Exit tenant view first, then start practice."
   }
 }

@@ -27,6 +27,23 @@ function signToken(user, options = {}) {
   return jwt.sign(claims, getJwtSecret(), { expiresIn: options.expiresIn || getJwtExpiresIn() });
 }
 
+/**
+ * Ride University practice mode (2026-08-16): a short-lived token for the
+ * shared practice user on the DEMO tenant. Exported narrowly so signToken
+ * itself stays private — callers hand over a user ROW, never claims. Four
+ * hours: long enough to rehearse a full counter cycle, short enough that a
+ * forgotten kiosk tab does not stay signed into anything overnight.
+ */
+export function issueTrainingPracticeToken(user) {
+  // `prac: true` is the whole security model (QA, 2026-08-16): /auth/refresh
+  // refuses it (so 4h means 4h — AuthGate's silent refresh cannot stretch it
+  // to the 12h default) and /training/practice-session refuses it (a practice
+  // session cannot mint further practice sessions). Without the claim, a
+  // copied token was renewable forever and survived offboarding.
+  const claims = { sub: user.id, email: user.email, role: user.role, tenantId: user.tenantId || null, prac: true };
+  return jwt.sign(claims, getJwtSecret(), { expiresIn: '4h' });
+}
+
 // VozIA Fase 3 (2026-07-03) — service-token expiry policy. Default 90d,
 // hard cap 365d. Pure + exported for unit tests. Accepts vercel/ms-style
 // "<n>s|m|h|d" strings or bare digits (seconds, per jsonwebtoken).

@@ -17,6 +17,7 @@ class AuthInterceptor extends Interceptor {
     required this.refresher,
     required this.readViewLocation,
     required this.onSessionExpired,
+    this.onPasswordChangeRequired,
   });
 
   final TokenRefresher refresher;
@@ -28,6 +29,13 @@ class AuthInterceptor extends Interceptor {
   /// 401 o token vencido → la sesión murió: limpiar y mandar a re-login.
   final void Function() onSessionExpired;
 
+  /// 403 con code PASSWORD_CHANGE_REQUIRED observado en CUALQUIER ruta
+  /// autenticada (REGROUND §3: el gate del backend responde así fuera de su
+  /// allowlist). La sesión marca mustChangePassword y el router bloquea en
+  /// /change-password — sin esto, un reset de contraseña hecho por el admin
+  /// con la app abierta dejaría al usuario viendo errores sueltos.
+  final void Function()? onPasswordChangeRequired;
+
   static const viewLocationHeader = 'x-view-location';
 
   @override
@@ -37,7 +45,10 @@ class AuthInterceptor extends Interceptor {
   ) async {
     final token = await refresher.freshToken();
     if (token == null) {
-      onSessionExpired();
+      // OJO: aquí NO se llama onSessionExpired — este reject fluye por el
+      // onError de este mismo interceptor, que ya dispara el callback al ver
+      // kind unauthorized. Llamarlo en ambos lados lo duplicaba (lo atrapó
+      // el test del review S-1).
       return handler.reject(
         DioException(
           requestOptions: options,
@@ -70,6 +81,8 @@ class AuthInterceptor extends Interceptor {
       // ADR-3a: NO refrescar aquí — un 401 significa que el JWT ya no sirve y
       // el refresh (detrás de requireAuth) daría 401 igual. Re-login.
       onSessionExpired();
+    } else if (apiError.kind == ApiErrorKind.passwordChangeRequired) {
+      onPasswordChangeRequired?.call();
     }
     handler.next(
       err.copyWith(error: apiError),

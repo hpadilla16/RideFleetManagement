@@ -15,7 +15,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String get loginTitle => 'Iniciar sesión';
 
   @override
-  String get loginEmailLabel => 'Correo electrónico';
+  String get loginSubtitle => 'Operaciones de patio';
+
+  @override
+  String get loginEmailLabel => 'Correo';
 
   @override
   String get loginPasswordLabel => 'Contraseña';
@@ -24,23 +27,103 @@ class AppLocalizationsEs extends AppLocalizations {
   String get loginButton => 'Entrar';
 
   @override
-  String get loginInvalidCredentials => 'Correo o contraseña incorrectos';
+  String get loginButtonLoading => 'Entrando…';
 
   @override
-  String get forcedPasswordChangeTitle => 'Cambia tu contraseña temporal';
+  String get loginInvalidCredentials =>
+      'Correo o contraseña incorrectos. Revisa e intenta de nuevo.';
 
   @override
-  String get forcedPasswordChangeBody =>
-      'Antes de usar la app tienes que crear tu propia contraseña.';
+  String get loginOffline =>
+      'No hay conexión a internet. Revisa la señal y toca Reintentar ahora.';
 
   @override
-  String get currentPasswordLabel => 'Contraseña actual';
+  String get loginRetryNow => 'Reintentar ahora';
 
   @override
-  String get newPasswordLabel => 'Contraseña nueva';
+  String get loginHelpLine =>
+      '¿Problemas para entrar? Pide a tu admin restablecer tu contraseña';
 
   @override
-  String get changePasswordButton => 'Cambiar contraseña';
+  String loginVersionLine(String version, String env, String locale) {
+    return 'v$version ($env) · $locale';
+  }
+
+  @override
+  String get showPassword => 'Mostrar contraseña';
+
+  @override
+  String get hidePassword => 'Ocultar contraseña';
+
+  @override
+  String get changePasswordChip => 'Paso obligatorio';
+
+  @override
+  String get changePasswordTitle => 'Crea tu contraseña';
+
+  @override
+  String get changePasswordBody =>
+      'Entraste con una contraseña temporal. Por seguridad, crea la tuya antes de continuar.';
+
+  @override
+  String get currentPasswordLabel => 'Contraseña temporal (actual)';
+
+  @override
+  String get newPasswordLabel => 'Nueva contraseña';
+
+  @override
+  String policyRuleMinLength(int count) {
+    return 'Mínimo $count caracteres';
+  }
+
+  @override
+  String get policyRuleLowercase => 'Al menos una minúscula';
+
+  @override
+  String get policyRuleUppercase => 'Al menos una mayúscula';
+
+  @override
+  String get policyRuleDigit => 'Al menos un número';
+
+  @override
+  String get policyRuleSpecial => 'Al menos un símbolo (p. ej. ! # \$)';
+
+  @override
+  String get policyRuleDifferent => 'Distinta de la contraseña temporal';
+
+  @override
+  String get changePasswordButton => 'Guardar y continuar';
+
+  @override
+  String get changePasswordSaving => 'Guardando…';
+
+  @override
+  String get changePasswordCurrentWrong =>
+      'La contraseña temporal no es correcta. Revísala o pide a tu admin una nueva.';
+
+  @override
+  String get changePasswordSuccessTitle => 'Contraseña actualizada';
+
+  @override
+  String get changePasswordSuccessBody =>
+      'Tu sesión sigue activa — no necesitas volver a entrar.';
+
+  @override
+  String get changePasswordFootnote =>
+      'La sesión temporal sigue viva durante este paso';
+
+  @override
+  String get continueButton => 'Continuar';
+
+  @override
+  String get homePlaceholderTitle => 'Sesión iniciada';
+
+  @override
+  String get homePlaceholderBody =>
+      'El tablero de patio llega en la siguiente historia.';
+
+  @override
+  String get logoutButton => 'Cerrar sesión';
 
   @override
   String get sessionExpired => 'Tu sesión venció. Vuelve a entrar.';
@@ -53,7 +136,12 @@ class AppLocalizationsEs extends AppLocalizations {
       'Otra pantalla avanzó esta sesión. Se recargó el estado.';
 
   @override
-  String get errorRateLimited => 'Demasiadas solicitudes. Reintentando…';
+  String get errorRateLimited =>
+      'Demasiadas solicitudes. Espera un momento e intenta de nuevo.';
+
+  @override
+  String get errorNoConnectionRetry =>
+      'No hay conexión a internet. Revisa la señal e intenta de nuevo.';
 
   @override
   String get errorOffline => 'Sin conexión. Se guardó para enviar después.';

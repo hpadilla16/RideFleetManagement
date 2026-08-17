@@ -121,11 +121,26 @@ async function parseApiResponse(res, path) {
   return res.json();
 }
 
+// Ride University practice mode (2026-08-16). The keys live HERE, not in
+// lib/training/practice.js, because clearStoredAuth must clear them and
+// practice.js already imports this module. On a shared counter PC, a logout
+// that left the backup keys behind let the NEXT person who pressed "Back to
+// my account" install the PREVIOUS employee's real session (QA #3) — so
+// logout and auth-expiry wipe practice state along with the session.
+export const PRACTICE_FLAG_KEY = 'ride-university:practice-mode';
+export const PRACTICE_REAL_TOKEN_KEY = 'ride-university:real-jwt';
+export const PRACTICE_REAL_USER_KEY = 'ride-university:real-user';
+export const PRACTICE_REAL_VIEW_LOCATION_KEY = 'ride-university:real-view-location';
+
 export function clearStoredAuth() {
   if (typeof window === 'undefined') return;
   try {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(PRACTICE_FLAG_KEY);
+    localStorage.removeItem(PRACTICE_REAL_TOKEN_KEY);
+    localStorage.removeItem(PRACTICE_REAL_USER_KEY);
+    localStorage.removeItem(PRACTICE_REAL_VIEW_LOCATION_KEY);
   } catch {}
 }
 

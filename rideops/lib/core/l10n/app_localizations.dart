@@ -110,10 +110,16 @@ abstract class AppLocalizations {
   /// **'Iniciar sesión'**
   String get loginTitle;
 
+  /// No description provided for @loginSubtitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Operaciones de patio'**
+  String get loginSubtitle;
+
   /// No description provided for @loginEmailLabel.
   ///
   /// In es, this message translates to:
-  /// **'Correo electrónico'**
+  /// **'Correo'**
   String get loginEmailLabel;
 
   /// No description provided for @loginPasswordLabel.
@@ -128,41 +134,179 @@ abstract class AppLocalizations {
   /// **'Entrar'**
   String get loginButton;
 
+  /// No description provided for @loginButtonLoading.
+  ///
+  /// In es, this message translates to:
+  /// **'Entrando…'**
+  String get loginButtonLoading;
+
   /// No description provided for @loginInvalidCredentials.
   ///
   /// In es, this message translates to:
-  /// **'Correo o contraseña incorrectos'**
+  /// **'Correo o contraseña incorrectos. Revisa e intenta de nuevo.'**
   String get loginInvalidCredentials;
 
-  /// No description provided for @forcedPasswordChangeTitle.
+  /// TODO H4: al integrar connectivity_plus y el auto-reintento, volver al copy del mockup 1C ('se reintentará al volver la señal'). Hoy el reintento es manual — no prometerlo.
   ///
   /// In es, this message translates to:
-  /// **'Cambia tu contraseña temporal'**
-  String get forcedPasswordChangeTitle;
+  /// **'No hay conexión a internet. Revisa la señal y toca Reintentar ahora.'**
+  String get loginOffline;
 
-  /// No description provided for @forcedPasswordChangeBody.
+  /// No description provided for @loginRetryNow.
   ///
   /// In es, this message translates to:
-  /// **'Antes de usar la app tienes que crear tu propia contraseña.'**
-  String get forcedPasswordChangeBody;
+  /// **'Reintentar ahora'**
+  String get loginRetryNow;
+
+  /// No description provided for @loginHelpLine.
+  ///
+  /// In es, this message translates to:
+  /// **'¿Problemas para entrar? Pide a tu admin restablecer tu contraseña'**
+  String get loginHelpLine;
+
+  /// Pie del login: versión de la app, flavor y locale activo
+  ///
+  /// In es, this message translates to:
+  /// **'v{version} ({env}) · {locale}'**
+  String loginVersionLine(String version, String env, String locale);
+
+  /// No description provided for @showPassword.
+  ///
+  /// In es, this message translates to:
+  /// **'Mostrar contraseña'**
+  String get showPassword;
+
+  /// No description provided for @hidePassword.
+  ///
+  /// In es, this message translates to:
+  /// **'Ocultar contraseña'**
+  String get hidePassword;
+
+  /// No description provided for @changePasswordChip.
+  ///
+  /// In es, this message translates to:
+  /// **'Paso obligatorio'**
+  String get changePasswordChip;
+
+  /// No description provided for @changePasswordTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Crea tu contraseña'**
+  String get changePasswordTitle;
+
+  /// No description provided for @changePasswordBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Entraste con una contraseña temporal. Por seguridad, crea la tuya antes de continuar.'**
+  String get changePasswordBody;
 
   /// No description provided for @currentPasswordLabel.
   ///
   /// In es, this message translates to:
-  /// **'Contraseña actual'**
+  /// **'Contraseña temporal (actual)'**
   String get currentPasswordLabel;
 
   /// No description provided for @newPasswordLabel.
   ///
   /// In es, this message translates to:
-  /// **'Contraseña nueva'**
+  /// **'Nueva contraseña'**
   String get newPasswordLabel;
+
+  /// No description provided for @policyRuleMinLength.
+  ///
+  /// In es, this message translates to:
+  /// **'Mínimo {count} caracteres'**
+  String policyRuleMinLength(int count);
+
+  /// No description provided for @policyRuleLowercase.
+  ///
+  /// In es, this message translates to:
+  /// **'Al menos una minúscula'**
+  String get policyRuleLowercase;
+
+  /// No description provided for @policyRuleUppercase.
+  ///
+  /// In es, this message translates to:
+  /// **'Al menos una mayúscula'**
+  String get policyRuleUppercase;
+
+  /// No description provided for @policyRuleDigit.
+  ///
+  /// In es, this message translates to:
+  /// **'Al menos un número'**
+  String get policyRuleDigit;
+
+  /// No description provided for @policyRuleSpecial.
+  ///
+  /// In es, this message translates to:
+  /// **'Al menos un símbolo (p. ej. ! # \$)'**
+  String get policyRuleSpecial;
+
+  /// No description provided for @policyRuleDifferent.
+  ///
+  /// In es, this message translates to:
+  /// **'Distinta de la contraseña temporal'**
+  String get policyRuleDifferent;
 
   /// No description provided for @changePasswordButton.
   ///
   /// In es, this message translates to:
-  /// **'Cambiar contraseña'**
+  /// **'Guardar y continuar'**
   String get changePasswordButton;
+
+  /// No description provided for @changePasswordSaving.
+  ///
+  /// In es, this message translates to:
+  /// **'Guardando…'**
+  String get changePasswordSaving;
+
+  /// No description provided for @changePasswordCurrentWrong.
+  ///
+  /// In es, this message translates to:
+  /// **'La contraseña temporal no es correcta. Revísala o pide a tu admin una nueva.'**
+  String get changePasswordCurrentWrong;
+
+  /// No description provided for @changePasswordSuccessTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Contraseña actualizada'**
+  String get changePasswordSuccessTitle;
+
+  /// No description provided for @changePasswordSuccessBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Tu sesión sigue activa — no necesitas volver a entrar.'**
+  String get changePasswordSuccessBody;
+
+  /// No description provided for @changePasswordFootnote.
+  ///
+  /// In es, this message translates to:
+  /// **'La sesión temporal sigue viva durante este paso'**
+  String get changePasswordFootnote;
+
+  /// No description provided for @continueButton.
+  ///
+  /// In es, this message translates to:
+  /// **'Continuar'**
+  String get continueButton;
+
+  /// No description provided for @homePlaceholderTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Sesión iniciada'**
+  String get homePlaceholderTitle;
+
+  /// No description provided for @homePlaceholderBody.
+  ///
+  /// In es, this message translates to:
+  /// **'El tablero de patio llega en la siguiente historia.'**
+  String get homePlaceholderBody;
+
+  /// No description provided for @logoutButton.
+  ///
+  /// In es, this message translates to:
+  /// **'Cerrar sesión'**
+  String get logoutButton;
 
   /// No description provided for @sessionExpired.
   ///
@@ -185,8 +329,14 @@ abstract class AppLocalizations {
   /// No description provided for @errorRateLimited.
   ///
   /// In es, this message translates to:
-  /// **'Demasiadas solicitudes. Reintentando…'**
+  /// **'Demasiadas solicitudes. Espera un momento e intenta de nuevo.'**
   String get errorRateLimited;
+
+  /// No description provided for @errorNoConnectionRetry.
+  ///
+  /// In es, this message translates to:
+  /// **'No hay conexión a internet. Revisa la señal e intenta de nuevo.'**
+  String get errorNoConnectionRetry;
 
   /// No description provided for @errorOffline.
   ///

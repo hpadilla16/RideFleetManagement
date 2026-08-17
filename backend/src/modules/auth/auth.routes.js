@@ -104,6 +104,9 @@ authRouter.post('/refresh', requireAuth, async (req, res, next) => {
   try {
     const userId = req.user?.id || req.user?.sub;
     if (!userId) return res.status(401).json({ error: 'Invalid session' });
+    // Practice sessions (Ride University) are hard-capped at their minted 4h:
+    // refresh would silently convert them into 12h tokens, renewable forever.
+    if (req.user?.prac) return res.status(403).json({ error: 'Practice sessions cannot be refreshed' });
     res.json(await authService.refreshToken(userId));
   } catch (e) {
     res.status(401).json({ error: e.message });

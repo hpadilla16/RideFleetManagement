@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RideOps · Mockups M1 — Tanda B (Home de operaciones · Inspección nativa · Bandeja de salida)</title>
+<style>
+/* ============================================================
+   TOKENS — idénticos a m1-tanda-a-v2.html (lenguaje aprobado).
+   Rampas neutra/púrpura, semánticos, foco AZUL + capa premium:
+   aurora, sombras con tinte de marca, radios XL, tonal M3.
+   ============================================================ */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-200:#d9c9ff; --p-300:#c0a8ff;
+  --p-400:#9f79ff; --p-500:#7f4ff0; --p-600:#6a35e0; --p-700:#5a26c9;
+  --p-800:#45189e; --p-900:#2e1071;
+  --brand:#8752FE;
+  --brand-a08:rgba(135,82,254,.08); --brand-a12:rgba(135,82,254,.12);
+  --brand-a16:rgba(135,82,254,.16); --brand-a20:rgba(135,82,254,.20);
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --badge-warn:#8a5606; /* fondo de badge ámbar accesible: blanco encima = 6.15:1 (decisión PM; --warn puro daba 3.73:1) */
+  --focus:#0b63d6; --focus-halo:rgba(11,99,214,.22);
+  --tonal:#f6f2ff;
+  --sh-b1:0 1px 0 rgba(255,255,255,.85) inset,0 2px 6px -2px rgba(69,24,158,.14),0 10px 24px -10px rgba(135,82,254,.22);
+  --sh-float:0 6px 16px -6px rgba(23,18,43,.18),0 24px 48px -18px rgba(69,24,158,.30);
+  --r-xl:24px; --r-2xl:28px;
+  --bd-lite:1px solid rgba(135,82,254,.14);
+  --sh-3:0 1px 3px rgba(24,16,54,.06),0 14px 30px -10px rgba(38,20,90,.14),0 44px 80px -28px rgba(38,20,90,.22);
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+  background:var(--n-100);color:var(--n-900);font-size:14px;line-height:1.5}
+h1,h2,h3{margin:0;letter-spacing:.005em}
+a{text-decoration:none;color:inherit}
+.tnum{font-variant-numeric:tabular-nums}
+
+/* ---------- chrome del documento ---------- */
+.doc-head{max-width:1720px;margin:0 auto;padding:26px 24px 10px}
+.doc-head h1{font-size:24px;font-weight:850}
+.doc-head h1 .v2{display:inline-flex;align-items:center;margin-left:10px;padding:3px 12px;border-radius:999px;
+  background:linear-gradient(135deg,var(--p-600),var(--p-800));color:#fff;font-size:13px;font-weight:800;vertical-align:middle}
+.doc-head p{margin:8px 0 0;color:var(--n-700);max-width:1020px}
+.meta-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.mchip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 11px;
+  border-radius:8px;background:var(--p-50);border:1px solid var(--brand-a20);
+  color:var(--p-800);font-size:12.5px;font-weight:700}
+.mchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.mchip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.jump{position:sticky;top:0;z-index:60;display:flex;gap:8px;flex-wrap:wrap;
+  padding:10px 24px;background:rgba(255,255,255,.88);backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--n-200);box-shadow:var(--sh-1)}
+.jump a{display:inline-flex;align-items:center;min-height:40px;padding:6px 14px;border-radius:12px;
+  border:1px solid var(--n-300);background:var(--n-0);font-weight:700;font-size:13px;color:var(--n-800)}
+.jump a:hover{background:var(--p-50);border-color:var(--brand-a20);color:var(--p-800)}
+.jump a:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+section.blk{max-width:1720px;margin:0 auto;padding:30px 24px 8px;scroll-margin-top:76px}
+.blk-head{margin-bottom:16px}
+.blk-head .eyebrow{color:var(--p-700);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.blk-head h2{font-size:20px;font-weight:800;margin-top:2px}
+.blk-head p{color:var(--n-700);margin:6px 0 0;max-width:920px}
+.state-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.schip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:6px;
+  font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--n-50);border:1px solid var(--n-200);color:var(--n-700)}
+.schip i{width:6px;height:6px;border-radius:50%;background:currentColor;font-style:normal}
+.frames{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;padding-bottom:26px}
+figure{margin:0}
+figcaption{font-size:13px;font-weight:800;color:var(--n-800);margin:0 0 8px 6px}
+figcaption small{display:block;font-weight:600;color:var(--n-600);font-size:12px}
+
+/* ---------- notas / anotaciones ---------- */
+.notes{flex:1 1 330px;max-width:410px;background:var(--n-0);border:var(--bd-lite);
+  border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1)}
+.notes h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+.note{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--n-100);font-size:13px;color:var(--n-700)}
+.note:last-child{border-bottom:0}
+.note b{color:var(--n-900)}
+.m{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;
+  border-radius:50%;background:var(--p-600);color:#fff;font-size:12px;font-weight:800;line-height:1}
+.m.inframe{position:absolute;z-index:9;box-shadow:0 0 0 2px #fff}
+.motion{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--info-bg);
+  border:1px solid var(--info-bd);font-size:12.5px;color:var(--n-800)}
+.motion b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--info);margin-bottom:6px}
+.motion ul{margin:0;padding-left:16px}
+.motion li{margin:3px 0}
+.contrast{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--n-50);
+  border:1px solid var(--n-200);font-size:12.5px;color:var(--n-700)}
+.contrast b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:6px}
+.contrast li{margin:3px 0}
+.contrast ul{margin:0;padding-left:16px}
+.decision{margin-top:14px;padding:14px 16px;border-radius:16px;background:var(--warn-bg);
+  border:1.5px dashed var(--warn-bd);color:var(--warn-tx);font-size:13px}
+.decision b{display:block;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.decision ul{margin:6px 0 0;padding-left:18px}
+.decision li{margin:3px 0}
+.mini-demo{margin-top:12px;padding:12px;border-radius:14px;background:var(--n-50);border:1px solid var(--n-200)}
+.mini-demo .cap{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:8px}
+
+/* ---------- frame de teléfono ---------- */
+.phone{position:relative;width:390px;border:9px solid var(--n-900);border-radius:40px;
+  overflow:hidden;background:var(--n-50);box-shadow:var(--sh-3)}
+.statusbar{position:relative;z-index:4;display:flex;justify-content:space-between;align-items:center;height:32px;
+  padding:0 20px;font-size:11.5px;font-weight:700;color:var(--n-700);background:var(--n-50)}
+.statusbar.on-white{background:var(--n-0)}
+.statusbar.on-dark{background:var(--n-900);color:rgba(255,255,255,.92)}
+.statusbar .off{color:var(--danger-tx)}
+.statusbar.on-dark .off{color:#ffc9c2}
+.scr{position:relative;display:flex;flex-direction:column;min-height:724px;padding:0}
+.pad{padding:18px 18px 22px;display:flex;flex-direction:column;flex:1;position:relative;z-index:2}
+
+/* ---------- shell (idéntico a Tanda A v2) ---------- */
+.appbar{position:relative;z-index:4;display:flex;align-items:center;gap:10px;padding:10px 14px;
+  background:rgba(255,255,255,.96);border-bottom:1px solid var(--n-200)} /* plate opaco, SIN blur */
+.appbar .abrand{font-size:15px;font-weight:850;color:var(--n-900)}
+.locchip{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 13px;border-radius:14px;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800);font-size:13px;font-weight:800;
+  box-shadow:0 1px 0 rgba(255,255,255,.7) inset}
+.appbar .sp{flex:1}
+.avatar{width:60px;height:60px;border-radius:50%;background:linear-gradient(150deg,var(--p-100),var(--p-200));
+  color:var(--p-800);display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:850}
+.avatar.sm{width:40px;height:40px;font-size:15px}
+.content{flex:1;padding:14px 14px 96px;display:flex;flex-direction:column;gap:12px;overflow:hidden;position:relative}
+.hello{font-size:13px;font-weight:650;color:var(--n-600)}
+.hello b{display:block;font-size:22px;font-weight:850;color:var(--n-900);letter-spacing:-.01em;margin-top:1px}
+.refreshline{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:650;color:var(--n-700)}
+.refreshline svg{color:var(--n-600)}
+.refreshline .livedot{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:led 2.4s ease-in-out infinite}
+@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* bento */
+.bento{display:grid;grid-template-columns:1.25fr 1fr;grid-auto-rows:minmax(64px,auto);gap:10px}
+.tile{position:relative;border-radius:var(--r-xl);padding:14px 16px;background:linear-gradient(180deg,#fff,#fdfcff);
+  border:var(--bd-lite);box-shadow:var(--sh-b1);min-width:0}
+.tile .tl{font-size:11px;font-weight:750;letter-spacing:.07em;text-transform:uppercase;color:var(--n-600)}
+.tile .tv{font-size:36px;font-weight:850;color:var(--n-900);letter-spacing:-.03em;line-height:1.02;margin-top:4px;
+  font-variant-numeric:tabular-nums}
+.tile .tf{font-size:12px;font-weight:650;color:var(--n-600);margin-top:4px}
+.tile-hero{grid-row:span 2;background:linear-gradient(155deg,#6a35e0 0%,#5a26c9 55%,#45189e 100%);
+  border:1px solid rgba(255,255,255,.22);color:#fff;
+  box-shadow:0 1px 0 rgba(255,255,255,.35) inset,0 8px 18px -8px rgba(69,24,158,.5),0 22px 44px -16px rgba(135,82,254,.5)}
+.tile-hero .tl{color:rgba(255,255,255,.85)}
+.tile-hero .tv{color:#fff;font-size:44px}
+.tile-hero .tf{color:rgba(255,255,255,.85)}
+.tile-hero .hblob{position:absolute;right:-24px;bottom:-30px;width:110px;height:104px;
+  border-radius:48% 52% 60% 40%/54% 46% 54% 46%;background:radial-gradient(circle at 35% 30%,rgba(255,255,255,.22),transparent 70%)}
+.tile .warn-v{color:var(--warn-tx)}
+.tile .danger-v{color:var(--danger-tx)}
+
+/* queue cards */
+.qhead{display:flex;align-items:baseline;justify-content:space-between;margin-top:2px}
+.qhead .ql{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600)}
+.qhead .qct{font-size:12px;font-weight:800;color:var(--p-800);background:var(--p-50);border:1px solid var(--brand-a20);
+  border-radius:8px;padding:1px 8px;margin-left:8px}
+.qhead a{font-size:13px;font-weight:800;color:var(--p-700);min-height:48px;display:inline-flex;align-items:center}
+.qcard{display:flex;align-items:center;gap:12px;background:linear-gradient(180deg,#fff,#fdfcff);
+  border:var(--bd-lite);border-radius:20px;padding:12px 14px;box-shadow:var(--sh-b1)}
+.qico{flex:0 0 auto;width:42px;height:42px;border-radius:14px;background:var(--brand-a08);
+  display:flex;align-items:center;justify-content:center;color:var(--p-700)}
+.qbody{flex:1;min-width:0;display:grid;gap:3px}
+.qtop{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.qname{font-size:15px;font-weight:800;color:var(--n-900)}
+.qmeta{font-size:12.5px;color:var(--n-600);font-weight:600}
+.tchip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:8px;
+  font-size:12.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800)}
+.tchip .dot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:led 2s ease-in-out infinite}
+.tchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.tchip.danger{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.tchip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.empty{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;
+  padding:18px 14px;border:1.5px dashed var(--n-300);border-radius:20px;background:var(--n-25);
+  color:var(--n-600);font-size:13px;font-weight:600}
+/* fila de colas vacías colapsadas */
+.calm{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:12px 14px;border:1.5px dashed var(--n-300);
+  border-radius:20px;background:var(--n-25)}
+.calm .cl{flex:0 0 100%;font-size:11.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600)}
+.calm .cchip{display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:2px 10px;border-radius:9px;
+  background:var(--n-0);border:1px solid var(--n-200);color:var(--n-700);font-size:12px;font-weight:700}
+.calm .cchip i{font-style:normal;color:var(--n-500);font-weight:800}
+
+/* tab bar flotante tipo pill (único BackdropFilter del home) */
+.tabfloat{position:absolute;left:14px;right:14px;bottom:12px;z-index:8;display:flex;padding:6px;
+  background:rgba(255,255,255,.85);backdrop-filter:blur(18px);
+  border:1px solid rgba(255,255,255,.9);outline:1px solid rgba(23,18,43,.07);
+  border-radius:30px;box-shadow:var(--sh-float)}
+.tabfloat.plate{background:rgba(255,255,255,.96);backdrop-filter:none} /* cuando hay sheet abierto: el blur migra al sheet */
+.tabf{position:relative;flex:1;min-height:56px;display:flex;flex-direction:column;gap:2px;
+  align-items:center;justify-content:center;font-size:11px;font-weight:750;color:var(--n-700);border-radius:24px}
+.tabf .tico{display:flex;align-items:center;justify-content:center;width:46px;height:26px;border-radius:13px}
+.tabf.on{color:var(--p-800);background:var(--p-100);box-shadow:0 1px 0 rgba(255,255,255,.8) inset}
+.tbadge{position:absolute;top:5px;right:50%;margin-right:-25px;min-width:17px;height:17px;padding:0 4px;
+  border-radius:9px;background:var(--danger);color:#fff;font-size:10.5px;font-weight:800;
+  display:flex;align-items:center;justify-content:center}
+.tbadge.warn{background:var(--badge-warn)} /* blanco sobre #8a5606 = 6.15:1; NUNCA --warn #b8760a de fondo (3.73:1) */
+.tbadge::after{content:"";position:absolute;inset:-4px;border-radius:14px;border:2px solid var(--danger);
+  opacity:0;animation:ping 2.2s ease-out infinite}
+.tbadge.warn::after{border-color:var(--badge-warn)}
+@keyframes ping{0%{transform:scale(.65);opacity:.55}70%,100%{transform:scale(1.25);opacity:0}}
+
+/* banners / botones */
+.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;
+  font-size:13.5px;font-weight:600;line-height:1.45;border:1px solid}
+.banner svg{flex:0 0 auto;margin-top:1px}
+.b-danger{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.b-warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.b-ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.b-info{background:var(--info-bg);border-color:var(--info-bd);color:var(--n-800)}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:56px;border-radius:18px;
+  font-size:16px;font-weight:800;letter-spacing:.01em}
+.btn-primary{background:linear-gradient(180deg,#7442e8,var(--p-600));color:#fff;
+  box-shadow:0 1px 0 rgba(255,255,255,.28) inset,0 4px 10px -4px rgba(69,24,158,.35),0 14px 28px -12px rgba(135,82,254,.45)}
+.btn-ghost{background:var(--n-0);border:1.5px solid var(--n-300);color:var(--n-800);box-shadow:var(--sh-1)}
+.btn-danger{background:var(--danger);color:#fff;box-shadow:0 1px 0 rgba(255,255,255,.2) inset,0 10px 22px -10px rgba(192,38,38,.5)}
+.btn.is-disabled{opacity:.55}
+.btn-sm{min-height:48px;font-size:14.5px;border-radius:14px}
+.spin{width:18px;height:18px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;
+  border-radius:50%;animation:rot 1s linear infinite}
+.spin.dk{border-color:rgba(106,53,224,.25);border-top-color:var(--p-600)}
+@keyframes rot{to{transform:rotate(360deg)}}
+.center-state{margin:auto 0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;padding:0 8px}
+.big-ic{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.big-ic.ok{background:var(--ok-bg);color:var(--ok-tx)}
+.big-ic.info{background:var(--info-bg);border:1.5px solid var(--info-bd);color:var(--info)}
+.big-ic.warn{background:var(--warn-bg);border:1.5px solid var(--warn-bd);color:var(--warn-tx);width:76px;height:76px}
+.center-state h4{margin:0;font-size:22px;font-weight:850;color:var(--n-900)}
+.center-state p{margin:0;font-size:14px;color:var(--n-700);max-width:290px}
+
+/* skeleton shimmer */
+.sk{background:linear-gradient(90deg,var(--n-100),var(--n-200),var(--n-100));
+  background-size:200% 100%;animation:shim 1.4s infinite;border-radius:14px}
+.sk.r20{border-radius:20px}
+@keyframes shim{to{background-position:-200% 0}}
+
+/* ---------- INSPECCIÓN: header de sesión + grid de ángulos ---------- */
+.insphead{display:flex;align-items:center;gap:10px;padding:12px 14px;background:rgba(255,255,255,.96);
+  border-bottom:1px solid var(--n-200)}
+.insphead .back{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+  border:1.5px solid var(--n-300);background:var(--n-0);color:var(--n-800)}
+.insphead .tt{flex:1;min-width:0}
+.insphead .tt b{display:block;font-size:15.5px;font-weight:850;color:var(--n-900)}
+.insphead .tt span{font-size:12px;font-weight:650;color:var(--n-600)}
+.stepper{display:flex;gap:6px;padding:10px 18px 0}
+.stepper i{flex:1;height:5px;border-radius:3px;background:var(--n-200);font-style:normal}
+.stepper i.on{background:linear-gradient(90deg,var(--p-500),var(--p-600))}
+.agrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.atile{position:relative;min-height:96px;border-radius:20px;border:1.5px solid var(--n-300);background:var(--n-0);
+  display:flex;flex-direction:column;justify-content:flex-end;padding:10px 12px;box-shadow:var(--sh-1);overflow:hidden}
+.atile .al{font-size:13.5px;font-weight:800;color:var(--n-800);position:relative;z-index:2}
+.atile .as{font-size:11.5px;font-weight:650;color:var(--n-600);position:relative;z-index:2}
+.atile .reqchip{position:absolute;top:8px;left:8px;z-index:3;display:inline-flex;min-height:22px;align-items:center;
+  padding:1px 8px;border-radius:7px;font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
+  background:var(--warn-bg);border:1px solid var(--warn-bd);color:var(--warn-tx)}
+.atile .aic{position:absolute;top:8px;right:8px;z-index:3;width:26px;height:26px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center}
+.atile.done{border-color:var(--ok-bd)}
+.atile.done .photo{position:absolute;inset:0;background:
+  linear-gradient(0deg,rgba(23,18,43,.85) 0%,rgba(23,18,43,.15) 46%,rgba(23,18,43,0) 60%),
+  linear-gradient(135deg,#cfc8e2 0%,#a99ec6 50%,#8d82ad 100%)} /* placeholder de foto + scrim .85 abajo */
+.atile.done .al,.atile.done .as{color:#fff}
+.atile.done .as{color:rgba(255,255,255,.88)}
+.atile.done .aic{background:var(--ok);color:#fff;box-shadow:0 0 0 2px #fff}
+.atile.done .reqchip{background:rgba(23,18,43,.55);border-color:transparent;color:#fff}
+.atile.busy .aic{background:var(--n-0);border:1.5px solid var(--n-300)}
+.atile.fail{border-color:var(--danger-bd);background:#fffbfb}
+.atile.fail .aic{background:var(--danger-bg);border:1.5px solid var(--danger-bd);color:var(--danger-tx)}
+.atile.fail .as{color:var(--danger-tx);font-weight:750}
+.atile .camic{position:relative;z-index:2;margin:0 0 auto;padding-top:14px;color:var(--n-400);display:flex;justify-content:center}
+.qbadge{display:inline-flex;align-items:center;gap:5px;min-height:22px;padding:1px 8px;border-radius:7px;
+  font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
+  background:var(--info-bg);border:1px solid var(--info-bd);color:var(--n-800)}
+
+/* ---------- cámara ---------- */
+.cam{background:var(--n-900);color:#fff}
+.cam .viewport{position:relative;flex:1;background:
+  radial-gradient(90% 70% at 50% 45%,#3a3357 0%,#241e3d 60%,#17122b 100%)}
+.cam .guide{position:absolute;inset:12% 7% 22%;border-radius:18px}
+.cam .guide .c{position:absolute;width:34px;height:34px;border:3.5px solid rgba(255,255,255,.95);border-radius:6px}
+.cam .guide .c1{top:0;left:0;border-right:0;border-bottom:0}
+.cam .guide .c2{top:0;right:0;border-left:0;border-bottom:0}
+.cam .guide .c3{bottom:0;left:0;border-right:0;border-top:0}
+.cam .guide .c4{bottom:0;right:0;border-left:0;border-top:0}
+.cam .carsil{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);opacity:.55}
+.cam .anglepill{position:absolute;top:14px;left:50%;transform:translateX(-50%);display:inline-flex;align-items:center;gap:8px;
+  min-height:36px;padding:5px 14px;border-radius:12px;background:rgba(23,18,43,.85);color:#fff;
+  font-size:13.5px;font-weight:800;border:1px solid rgba(255,255,255,.18)}
+.cam .hint{position:absolute;left:0;right:0;bottom:12px;text-align:center;font-size:13px;font-weight:700;color:rgba(255,255,255,.92);
+  text-shadow:0 1px 3px rgba(0,0,0,.6)}
+.camdock{display:flex;align-items:center;justify-content:space-between;padding:16px 26px 26px;background:var(--n-900)}
+.camdock .side{width:56px;height:56px;border-radius:18px;background:rgba(255,255,255,.10);
+  border:1px solid rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;color:#fff;
+  font-size:11px;font-weight:750;flex-direction:column;gap:2px}
+.shutter{width:76px;height:76px;border-radius:50%;background:#fff;border:5px solid rgba(255,255,255,.35);
+  background-clip:padding-box;box-shadow:0 6px 20px -6px rgba(0,0,0,.6)}
+
+/* ---------- métricas ---------- */
+.f-label{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--n-600);margin:14px 0 6px}
+.inp{position:relative;display:flex;align-items:center;min-height:54px;border:1.5px solid var(--n-300);
+  border-radius:16px;background:var(--n-0);padding:0 14px;font-size:15.5px;color:var(--n-900);font-weight:600;
+  box-shadow:0 1px 0 rgba(255,255,255,.8) inset,0 1px 2px rgba(24,16,54,.04)}
+.inp .ph{color:var(--n-600);font-weight:500}
+.inp.focus{border-color:var(--focus);box-shadow:0 0 0 4px var(--focus-halo)}
+.inp .unit{margin-left:auto;font-size:13px;font-weight:750;color:var(--n-600)}
+.inp.big{min-height:60px;font-size:24px;font-weight:850;font-variant-numeric:tabular-nums}
+.seg{display:flex;gap:8px}
+.seg .sg{flex:1;min-height:52px;border-radius:14px;border:1.5px solid var(--n-300);background:var(--n-0);
+  display:flex;align-items:center;justify-content:center;font-size:14.5px;font-weight:800;color:var(--n-700);box-shadow:var(--sh-1)}
+.seg .sg.on{border-color:var(--p-600);background:var(--p-50);color:var(--p-800);
+  box-shadow:0 1px 0 rgba(255,255,255,.8) inset,0 6px 14px -8px rgba(106,53,224,.4)}
+.fuelbar{display:flex;gap:4px;margin-top:4px}
+.fuelbar i{flex:1;height:26px;border-radius:7px;background:var(--n-200);font-style:normal;border:1px solid var(--n-300)}
+.fuelbar i.on{background:linear-gradient(180deg,var(--p-400),var(--p-600));border-color:var(--p-600)}
+.fuelrow{display:flex;align-items:center;justify-content:space-between;margin-top:6px;font-size:12.5px;font-weight:700;color:var(--n-700)}
+.txtarea{min-height:84px;border:1.5px solid var(--n-300);border-radius:16px;background:var(--n-0);padding:12px 14px;
+  font-size:14px;color:var(--n-600);font-weight:500;box-shadow:0 1px 0 rgba(255,255,255,.8) inset}
+
+/* ---------- firma (tenant) + modo firma ---------- */
+.kioskbar{display:flex;align-items:center;gap:8px;background:linear-gradient(90deg,var(--p-900),var(--p-800));color:#fff;
+  padding:10px 14px;font-size:12.5px;font-weight:800;letter-spacing:.03em}
+.kioskbar .exit{margin-left:auto;font-weight:700;font-size:12px;opacity:.92}
+.tenantbar{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--n-0);border-bottom:1px solid var(--n-200)}
+.tlogo{width:38px;height:38px;border-radius:12px;background:var(--n-800);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:850}
+.tname{font-size:16px;font-weight:850;color:var(--n-900)}
+.tsub{font-size:12px;color:var(--n-600);font-weight:600}
+.sigzone{flex:1;margin:6px 0;border:2px dashed var(--n-300);border-radius:22px;background:var(--n-0);
+  display:flex;align-items:center;justify-content:center;position:relative;min-height:230px;box-shadow:var(--sh-1)}
+.sigline{position:absolute;left:26px;right:26px;bottom:44px;border-bottom:1.5px solid var(--n-300)}
+.sighint{position:absolute;bottom:18px;left:0;right:0;text-align:center;font-size:12.5px;color:var(--n-600);font-weight:600}
+.sigrow{display:flex;gap:10px}
+.sigrow .btn{flex:1}
+
+/* ---------- bandeja / outbox ---------- */
+.obrow{display:flex;gap:12px;align-items:center;background:linear-gradient(180deg,#fff,#fdfcff);
+  border:var(--bd-lite);border-radius:20px;padding:12px 14px;box-shadow:var(--sh-b1)}
+.obrow.dead{border:1.5px solid var(--danger-bd);background:#fffbfb;flex-wrap:wrap}
+.obico{flex:0 0 auto;width:42px;height:42px;border-radius:14px;background:var(--brand-a08);
+  display:flex;align-items:center;justify-content:center;color:var(--p-700)}
+.obico.err{background:var(--danger-bg);color:var(--danger-tx)}
+.obico.okk{background:var(--ok-bg);color:var(--ok-tx)}
+.obbody{flex:1;min-width:0;display:grid;gap:3px}
+.obname{font-size:14.5px;font-weight:800;color:var(--n-900)}
+.obmeta{font-size:12.5px;color:var(--n-600);font-weight:600}
+.obreason{flex:0 0 100%;display:flex;gap:8px;align-items:flex-start;margin-top:4px;padding:9px 11px;border-radius:12px;
+  background:var(--danger-bg);border:1px solid var(--danger-bd);color:var(--danger-tx);font-size:13px;font-weight:700;line-height:1.4}
+.obacts{flex:0 0 100%;display:flex;gap:8px;margin-top:8px}
+.obacts .btn{flex:1;min-height:48px;font-size:14px;border-radius:14px}
+.pbar{height:7px;border-radius:4px;background:var(--n-200);overflow:hidden;margin-top:5px}
+.pbar i{display:block;height:100%;width:45%;border-radius:4px;background:linear-gradient(90deg,var(--p-500),var(--p-600));font-style:normal}
+.ringwrap{position:relative;width:64px;height:64px;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.ringwrap svg{position:absolute;inset:0}
+.ringwrap .track{stroke:var(--n-200)}
+.ringwrap .arc{stroke:var(--p-600);stroke-linecap:round}
+.ringwrap b{font-size:13px;font-weight:850;color:var(--n-900);font-variant-numeric:tabular-nums}
+.drainhead{display:flex;align-items:center;gap:14px;background:var(--tonal);border:var(--bd-lite);
+  border-radius:var(--r-xl);padding:14px 16px;box-shadow:var(--sh-b1)}
+.drainhead .dt b{display:block;font-size:16px;font-weight:850;color:var(--n-900)}
+.drainhead .dt span{font-size:12.5px;font-weight:650;color:var(--n-700)}
+.scrim{position:absolute;inset:0;z-index:5;background:rgba(23,18,43,.42)}
+.sheet{position:absolute;left:8px;right:8px;bottom:8px;z-index:6;
+  background:rgba(255,255,255,.96); /* plate opaco: el único blur de esta pantalla lo tiene el tab bar; aquí NO se suma otro */
+  border-radius:var(--r-2xl);border:1px solid rgba(255,255,255,.95);outline:1px solid rgba(23,18,43,.06);
+  box-shadow:var(--sh-float);padding:10px 16px 16px}
+.grab{width:44px;height:5px;border-radius:3px;background:var(--n-300);margin:4px auto 12px}
+.sheet h5{margin:0;font-size:18px;font-weight:850;color:var(--n-900)}
+.sheet .ssub{font-size:13px;color:var(--n-700);font-weight:600;margin:4px 0 12px}
+.dim{opacity:.9;pointer-events:none}
+
+footer.dod{max-width:1720px;margin:0 auto;padding:10px 24px 50px;color:var(--n-700);font-size:13px}
+footer.dod .card{background:var(--n-0);border:var(--bd-lite);border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1);margin-bottom:14px}
+footer.dod b{color:var(--n-900)}
+.changelog li{margin:5px 0}
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <h1>RideOps · Mockups M1 — Tanda B <span class="v2">mismo lenguaje v2 · PREMIUM</span></h1>
+  <p>Continúa la dirección de arte aprobada en la Tanda A v2 (M3 Expressive, superficies tonales de #8752FE,
+  bento, tab bar flotante pill, duotone, estados con vida) aplicada a las tres pantallas de operación pura:
+  la home con las <b>9 colas reales</b> del dashboard de employee-app, la <b>captura de inspección nativa de 8 ángulos</b>
+  (contrato de /api/mobile-inspection) y la <b>bandeja de salida offline</b> (outbox + dead-letter, ADR-7).
+  Los límites duros del patio (sol directo, guantes, una mano, gama media) siguen siendo NO negociables.</p>
+  <div class="meta-chips">
+    <span class="mchip">Targets ≥ 48 pt (tiles de ángulo 96, shutter 76, segmentos 52)</span>
+    <span class="mchip">Texto ≥ 4.5:1 contra su fondo REAL — pares medidos en cada bloque de notas</span>
+    <span class="mchip">Todo string en l10n — app_es.arb / app_en.arb (ADR-8), aquí se muestra ES</span>
+    <span class="mchip">Loading / empty / error por pantalla (DoD-10)</span>
+    <span class="mchip">Foco AZUL #0b63d6 — nunca morado sobre morado</span>
+    <span class="mchip ok">Política de blur vinculante (Tanda A): plates opacos ≥ .95 por defecto; máx. 1 BackdropFilter por pantalla — aquí SIEMPRE lo tiene el tab bar flotante; sheets y appbars van en plate opaco</span>
+    <span class="mchip ok">Gradiente/glass jamás detrás de datos críticos sin scrim u superficie opaca</span>
+    <span class="mchip warn">Superficies volteadas al cliente (firma): branding del tenant, nunca "RideOps"</span>
+    <span class="mchip warn">Offline honesto: edad del dato visible, escrituras encoladas con destino declarado</span>
+  </div>
+</div>
+
+<nav class="jump">
+  <a href="#s5">5 · Home de operaciones (9 colas)</a>
+  <a href="#s6">6 · Inspección nativa (8 ángulos)</a>
+  <a href="#s7">7 · Bandeja de salida / dead-letter</a>
+</nav>
+
+<!-- ============================================================ 5 · HOME DE OPERACIONES -->
+<section class="blk" id="s5">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 5</span>
+    <h2>Home de operaciones — las 9 colas del dashboard, organizadas para patio</h2>
+    <p>GET /api/employee-app/dashboard (un solo payload: 11 métricas + 9 colas, take 8 c/u). Regla de oro:
+    <b>arriba lo accionable AHORA, abajo lo que respira, colapsado lo vacío</b>. El scoping por programa lo decide
+    el backend (reservationProgramWhereForScope): un usuario RENTAL_ONLY recibe las colas loaner vacías por
+    contradicción — la UI las OMITE, no las pinta como "0". Pull-to-refresh honesto con edad del dato;
+    polling silencioso cada 45–60 s con jitter, pausado en background.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Cargando (skeleton bento)</span><span class="schip"><i></i>Todo vacío</span>
+      <span class="schip"><i></i>Offline con datos viejos</span><span class="schip"><i></i>Scoping RENTAL_ONLY</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>5A — Home OPS · programa completo <small>9 colas: 4 con actividad, 5 colapsadas al final</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip">Patio Centro <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+            <span class="sp"></span><div class="avatar sm">MG</div></div>
+          <div class="content">
+            <div class="refreshline"><span class="livedot"></span>Actualizado hace 2 min · se actualiza solo<span class="m" style="margin-left:4px">1</span></div>
+            <div class="bento"><span class="m inframe" style="margin:-6px 0 0 -6px">2</span>
+              <div class="tile tile-hero">
+                <span class="hblob"></span>
+                <div class="tl">Para ahora</div>
+                <div class="tv">5</div>
+                <div class="tf">2 salidas · 2 retornos · 1 incidente</div>
+              </div>
+              <div class="tile"><div class="tl">En renta</div><div class="tv">22</div><div class="tf">3 vencen hoy · ver lista ›</div></div>
+              <div class="tile"><div class="tl">Loaner</div><div class="tv warn-v">4</div><div class="tf">2 piden seguimiento</div></div>
+            </div>
+
+            <div class="qhead"><span class="ql">Incidentes<span class="qct">1</span></span><a>Ver todo</a></div>
+            <div class="qcard">
+              <div class="qico" style="background:var(--danger-bg);color:var(--danger-tx)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 4L2.5 20h19z" fill="rgba(192,38,38,.12)"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">U-087 · golpe en defensa</span><span class="tchip danger"><span class="dot"></span>Abierto</span></div>
+              <div class="qmeta">Reportado 9:02 · en revisión</div></div></div>
+
+            <div class="qhead"><span class="ql">Salidas (72 h)<span class="qct">6</span></span><a>Ver todo</a></div>
+            <div class="qcard">
+              <div class="qico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 10l2.2-4.2A2 2 0 0 1 8 4.7h8a2 2 0 0 1 1.8 1.1L20 10"/><rect x="3" y="10" width="18" height="7" rx="2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Laura Méndez</span><span class="tchip">Hoy 10:30</span></div>
+              <div class="qmeta">Corolla 2023 · U-112 · R-2481 · Pre-checkin listo</div></div></div>
+            <div class="qcard">
+              <div class="qico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 10l2.2-4.2A2 2 0 0 1 8 4.7h8a2 2 0 0 1 1.8 1.1L20 10"/><rect x="3" y="10" width="18" height="7" rx="2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Jorge Salas</span><span class="tchip warn">Hoy 11:15</span></div>
+              <div class="qmeta">RAV4 2024 · U-087 · R-2483 · Falta pre-checkin</div></div></div>
+
+            <div class="qhead"><span class="ql">Retornos (72 h)<span class="qct">3</span></span><a>Ver todo</a></div>
+            <div class="qcard">
+              <div class="qico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M20 10l-2.2-4.2A2 2 0 0 0 16 4.7H8a2 2 0 0 0-1.8 1.1L4 10"/><rect x="3" y="10" width="18" height="7" rx="2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Sofía Rangel</span><span class="tchip danger">Vencido 1 h</span></div>
+              <div class="qmeta">Versa 2022 · U-093 · R-2477</div></div></div>
+
+            <div class="qhead"><span class="ql">Seguimiento loaner<span class="qct">2</span></span><a>Ver todo</a></div>
+            <div class="qcard">
+              <div class="qico" style="background:var(--warn-bg);color:var(--warn-tx)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9" fill="rgba(184,118,10,.10)"/><path d="M12 7v5l3 3"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Karla Núñez · L-0032</span><span class="tchip warn">Servicio vencido</span></div>
+              <div class="qmeta">Asesor: R. Peña · est. terminaba ayer</div></div></div>
+
+            <div class="calm"><span class="m inframe" style="margin:-22px 0 0 300px">3</span>
+              <span class="cl">Sin actividad ahora</span>
+              <span class="cchip">Pre-checkin <i>0</i></span>
+              <span class="cchip">Loaner listos <i>0</i></span>
+              <span class="cchip">Facturación loaner <i>0</i></span>
+              <span class="cchip">Retornos loaner <i>0</i></span>
+            </div>
+          </div>
+          <div class="tabfloat"><span class="m inframe" style="margin:-14px 0 0 160px">4</span>
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 10v10h12V10" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6" fill="rgba(135,82,254,.10)"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf"><span class="tbadge">3</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z" fill="rgba(135,82,254,.10)"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg></span>Incidentes</div>
+            <div class="tabf"><span class="tbadge">2</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.10)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" fill="rgba(135,82,254,.12)"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>5B — Home AGENT · RENTAL_ONLY <small>las colas loaner NO existen para este usuario</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip">Patio Centro <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+            <span class="sp"></span><div class="avatar sm">DL</div></div>
+          <div class="content">
+            <div class="refreshline"><span class="livedot"></span>Actualizado hace 1 min · se actualiza solo</div>
+            <div class="bento"><span class="m inframe" style="margin:-6px 0 0 -6px">5</span>
+              <div class="tile tile-hero">
+                <span class="hblob"></span>
+                <div class="tl">Para ahora</div>
+                <div class="tv">3</div>
+                <div class="tf">2 salidas · 1 retorno</div>
+              </div>
+              <div class="tile"><div class="tl">En renta</div><div class="tv">17</div><div class="tf">2 vencen hoy · ver lista ›</div></div>
+              <div class="tile"><div class="tl">Pre-checkin</div><div class="tv">1</div><div class="tf">Enviado, sin completar</div></div>
+            </div>
+            <div class="qhead"><span class="ql">Salidas (72 h)<span class="qct">4</span></span><a>Ver todo</a></div>
+            <div class="qcard">
+              <div class="qico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 10l2.2-4.2A2 2 0 0 1 8 4.7h8a2 2 0 0 1 1.8 1.1L20 10"/><rect x="3" y="10" width="18" height="7" rx="2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Iván Cortés</span><span class="tchip">Hoy 12:00</span></div>
+              <div class="qmeta">Sentra 2023 · U-104 · R-2486</div></div></div>
+            <div class="qhead"><span class="ql">Pre-checkin<span class="qct">1</span></span><a>Ver todo</a></div>
+            <div class="qcard">
+              <div class="qico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="5" y="4" width="14" height="17" rx="2" fill="rgba(135,82,254,.10)"/><path d="M9 9h6M9 13h6M9 17h3"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Nadia Flores</span><span class="tchip warn">Enviado ayer</span></div>
+              <div class="qmeta">R-2488 · el cliente no lo ha completado</div></div></div>
+            <div class="qhead"><span class="ql">Retornos (72 h)<span class="qct">1</span></span></div>
+            <div class="qcard">
+              <div class="qico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M20 10l-2.2-4.2A2 2 0 0 0 16 4.7H8a2 2 0 0 0-1.8 1.1L4 10"/><rect x="3" y="10" width="18" height="7" rx="2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Pablo Ríos</span><span class="tchip">Mañana 9:00</span></div>
+              <div class="qmeta">Aveo 2022 · U-071 · R-2470</div></div></div>
+            <div class="calm">
+              <span class="cl">Sin actividad ahora</span>
+              <span class="cchip">Incidentes <i>0</i></span>
+            </div>
+          </div>
+          <div class="tabfloat">
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 10v10h12V10" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6" fill="rgba(135,82,254,.10)"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.10)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" fill="rgba(135,82,254,.12)"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>5C — Cargando <small>skeleton bento; solo primer load</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip">Patio Centro <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+            <span class="sp"></span><div class="avatar sm">MG</div></div>
+          <div class="content"><span class="m" style="position:absolute;margin:4px 0 0 300px">6</span>
+            <div class="sk" style="height:14px;width:200px"></div>
+            <div class="bento">
+              <div class="sk r20" style="grid-row:span 2;height:150px"></div>
+              <div class="sk r20" style="height:70px"></div>
+              <div class="sk r20" style="height:70px"></div>
+            </div>
+            <div class="sk" style="height:12px;width:120px;margin-top:6px"></div>
+            <div class="sk r20" style="height:70px"></div>
+            <div class="sk r20" style="height:70px"></div>
+            <div class="sk" style="height:12px;width:140px;margin-top:6px"></div>
+            <div class="sk r20" style="height:70px"></div>
+          </div>
+          <div class="tabfloat">
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 10v10h12V10" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6" fill="rgba(135,82,254,.10)"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.10)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" fill="rgba(135,82,254,.12)"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>5D — Todo vacío <small>patio en calma: estado feliz, no error</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>15:20</span><span>LTE · 64 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip">Patio Centro <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+            <span class="sp"></span><div class="avatar sm">MG</div></div>
+          <div class="content">
+            <div class="refreshline"><span class="livedot"></span>Actualizado hace 1 min · se actualiza solo</div>
+            <div class="center-state">
+              <div class="big-ic ok"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></div>
+              <h4>Patio en calma</h4>
+              <p>No hay nada pendiente en ninguna cola ahora mismo. Desliza hacia abajo para actualizar cuando quieras.<span class="m">7</span></p>
+            </div>
+            <div class="calm" style="margin-top:auto">
+              <span class="cl">Las 9 colas, en cero</span>
+              <span class="cchip">Salidas <i>0</i></span><span class="cchip">Retornos <i>0</i></span>
+              <span class="cchip">En renta <i>0</i></span><span class="cchip">Pre-checkin <i>0</i></span>
+              <span class="cchip">Incidentes <i>0</i></span><span class="cchip">Loaner <i>0 en 4 colas</i></span>
+            </div>
+          </div>
+          <div class="tabfloat">
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 10v10h12V10" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6" fill="rgba(135,82,254,.10)"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z" fill="rgba(135,82,254,.10)"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg></span>Incidentes</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.10)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" fill="rgba(135,82,254,.12)"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>5E — Offline con datos viejos <small>cache visible + edad; polling pausado y declarado</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span class="off">Sin red · 87 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip">Patio Centro <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+            <span class="sp"></span><div class="avatar sm">MG</div></div>
+          <div class="content">
+            <div class="banner b-warn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg>
+              Sin conexión — mostrando datos de hace 12 min. Se actualizará solo al volver la señal. <b style="margin-left:4px">Reintentar</b><span class="m">8</span></div>
+            <div class="bento">
+              <div class="tile tile-hero">
+                <span class="hblob"></span>
+                <div class="tl">Para ahora</div>
+                <div class="tv">5</div>
+                <div class="tf">al corte de las 9:29</div>
+              </div>
+              <div class="tile"><div class="tl">En renta</div><div class="tv">22</div><div class="tf">3 vencen hoy</div></div>
+              <div class="tile"><div class="tl">Bandeja</div><div class="tv warn-v">2</div><div class="tf">Esperando red</div></div>
+            </div>
+            <div class="qhead"><span class="ql">Salidas (72 h)<span class="qct">6</span></span></div>
+            <div class="qcard">
+              <div class="qico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 10l2.2-4.2A2 2 0 0 1 8 4.7h8a2 2 0 0 1 1.8 1.1L20 10"/><rect x="3" y="10" width="18" height="7" rx="2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Laura Méndez</span><span class="tchip">Hoy 10:30</span></div>
+              <div class="qmeta">Corolla 2023 · U-112 · R-2481</div></div></div>
+          </div>
+          <div class="tabfloat">
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 10v10h12V10" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6" fill="rgba(135,82,254,.10)"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf"><span class="tbadge warn">2</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.10)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" fill="rgba(135,82,254,.12)"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Home de operaciones</h3>
+      <div class="note"><span class="m">1</span><span><b>Frescura honesta, siempre visible:</b> "Actualizado hace X min" bajo el appbar, en --n-700. Polling silencioso cada 45–60 s con jitter aleatorio (no martillar el backend en sincronía); se PAUSA con la app en background y al volver dispara un refresh inmediato. Pull-to-refresh manual con indicador propio; el polling nunca mueve el scroll ni parpadea las cards (diff por id).</span></div>
+      <div class="note"><span class="m">2</span><span><b>Bento re-jerarquizado a "Para ahora":</b> el tile hero deriva SOLO de métricas reales del payload (dueBackToday, issueOpen) + items de hoy visibles en las colas — nunca una métrica inventada; su pie lo desglosa. Tiles satélite: `activeRentals` y el grupo loaner (o pre-checkin en RENTAL_ONLY). <b>El tile "En renta" ES la ruta de la cola `active`:</b> tappable (todo el tile, ≥ 48 pt) → vista de lista completa de la cola; el "ver lista ›" del pie lo hace explícito. <b>Contadores honestos:</b> las colas llegan capadas a take:8 — al tocar el cap, el contador muestra "8+" (nunca un total que el payload no trae); los tiles usan las 11 métricas, que sí son totales reales.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Colapso de colas vacías:</b> las colas en cero no ganan una sección con card vacía cada una (9 secciones = muro de "no hay nada"); se agrupan en UNA fila punteada al final con chips "cola · 0". Tocar un chip abre la vista de esa cola igualmente (target 48 con hit-slop). Regla de orden completa para las 9: secciones activas en incidentes → salidas → retornos → pre-checkin → las 4 loaner; la cola `active` (En renta) NO gana sección — es volumen, no acción — y su camino permanente es el tile del bento (tappable → lista); las vacías, chips en "Sin actividad". Toda cola tiene exactamente un camino visible en cada estado. Dentro de cada cola, orden del backend (asc por fecha).</span></div>
+      <div class="note"><span class="m">4</span><span><b>Tab bar flotante = el único BackdropFilter</b> de esta pantalla (política Tanda A). OPS/ADMIN con moduleAccess.issueCenter ven la tab Incidentes (5 tabs máx.); AGENT ve 4. Bandeja SIEMPRE visible con badge (ADR-7). Cada request maneja su 403 aunque la nav esconda entradas (DoD-4).</span></div>
+      <div class="note"><span class="m">5</span><span><b>Scoping por programa OMITE, no vacía:</b> para RENTAL_ONLY el backend devuelve las 4 colas loaner vacías por contradicción — la UI ni las lista en "Sin actividad" ni muestra el tile loaner. Regla: cola fuera de programa = no existe; cola en programa sin items = chip en "Sin actividad". Así "0" siempre significa "hoy no hay", nunca "no te toca".</span></div>
+      <div class="note"><span class="m">6</span><span><b>Skeleton solo el primer load,</b> con la geometría real (fila de frescura + bento + 2 secciones). Refrescos posteriores: silenciosos, datos anteriores en pantalla hasta tener los nuevos.</span></div>
+      <div class="note"><span class="m">7</span><span><b>Todo-vacío = estado feliz</b> ("Patio en calma", check en verde), nunca pantalla en blanco ni tono de error; la fila de chips confirma que las 9 colas se consultaron y están en cero — distinción explícita frente a un fallo de red.</span></div>
+      <div class="note"><span class="m">8</span><span><b>Offline honesto:</b> banner warn con edad real del dato + hora de corte en el hero ("al corte de las 9:29"); cache Drift se muestra, no se borra. El polling queda pausado y el banner lo declara; "Reintentar" fuerza un intento ya. El badge de Bandeja cambia a ámbar: hay escrituras esperando red, no errores.</span></div>
+      <div class="contrast"><b>Contraste verificado (5A–5E)</b>
+        <ul>
+          <li>Fila de frescura --n-700 sobre --n-50: 8.5:1 (con --n-600 daba ≈4.7:1 — pasaba AA pero sin margen al sol; se subió).</li>
+          <li>Blanco sobre tile hero (peor parada #6a35e0): 6.57:1 · pie al 85 %: ≥ 5.5:1 sobre #45189e (pares Tanda A, sin cambios).</li>
+          <li>Número --n-900 sobre tile blanco: 18.14:1 · label --n-600 sobre blanco: 5.04:1.</li>
+          <li>Chips colapsados --n-700 sobre --n-0: 9.21:1 · contador --n-500 es decorativo, el número accesible vive en el aria-label.</li>
+          <li>Chip danger --danger-tx sobre --danger-bg: 7.04:1 · warn-tx sobre warn-bg: 5.59:1 · tab activa --p-800 sobre --p-100: 7.4:1.</li>
+        </ul></div>
+      <div class="motion"><b>Motion (build, no en HTML)</b>
+        <ul>
+          <li>Polling: si llegan cambios, la card nueva entra con fade+lift 250 ms y un flash tonal --p-50 de 1 ciclo; nada se mueve si no cambió.</li>
+          <li>Dot "en vivo" de la fila de frescura late a ≤ 0.5 Hz; se congela con reduced-motion o polling pausado.</li>
+          <li>Pull-to-refresh: indicador circular de marca; al soltar, haptic light; al terminar, la fila de frescura hace tick a "ahora".</li>
+        </ul></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 6 · INSPECCIÓN NATIVA -->
+<section class="blk" id="s6">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 6</span>
+    <h2>Captura de inspección nativa — 8 ángulos, métricas y firma del cliente</h2>
+    <p>Reemplaza la web de /api/mobile-inspection manteniendo su contrato: 8 ángulos canónicos (front, rear,
+    left, right, front_seat, rear_seat, dash, trunk), <b>front + rear obligatorios</b> (409 REQUIRED_ANGLES_MISSING),
+    POST /:token/photo por ángulo y POST /:token/complete con firma/odómetro/fuel/limpieza/notas. Flujo en 3 pasos:
+    fotos → métricas → firma. Toda escritura pasa por la bandeja (ADR-7): offline se encola con destino declarado.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Grid con progreso</span><span class="schip"><i></i>Cámara con guía</span>
+      <span class="schip"><i></i>Ángulo fallido</span><span class="schip"><i></i>Offline encolado</span>
+      <span class="schip"><i></i>410 sesión completada</span><span class="schip"><i></i>Firma (tenant)</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>6A — Grid de 8 ángulos <small>2 listos · 1 comprimiendo · 1 fallido · obligatorios marcados</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:02</span><span>LTE · 82 %</span></div>
+        <div class="scr">
+          <div class="insphead">
+            <div class="back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Inspección de salida</b><span>R-2481 · Corolla 2023 · U-112</span></div>
+            <span class="tchip">3 de 8</span>
+          </div>
+          <div class="stepper"><i class="on"></i><i></i><i></i></div>
+          <div class="pad" style="gap:10px;padding-top:12px">
+            <div class="agrid"><span class="m inframe" style="margin:-4px 0 0 -4px">1</span>
+              <div class="atile done"><div class="photo"></div><span class="reqchip">Obligatorio</span>
+                <span class="aic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+                <div class="al">Frente</div><div class="as">10:01 · 412 KB</div></div>
+              <div class="atile done"><div class="photo"></div><span class="reqchip">Obligatorio</span>
+                <span class="aic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+                <div class="al">Atrás</div><div class="as">10:02 · 388 KB</div></div>
+              <div class="atile busy"><span class="m inframe" style="margin:-4px 0 0 148px">2</span>
+                <span class="aic"><span class="spin dk" style="width:14px;height:14px;border-width:2.5px"></span></span>
+                <div class="camic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13" r="3.6"/><path d="M8.5 7l1.2-2h4.6l1.2 2"/></svg></div>
+                <div class="al">Lado izquierdo</div><div class="as">Comprimiendo…</div></div>
+              <div class="atile fail"><span class="m inframe" style="margin:-4px 0 0 148px">3</span>
+                <span class="aic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></span>
+                <div class="camic" style="color:var(--danger-bd)"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13" r="3.6"/><path d="M8.5 7l1.2-2h4.6l1.2 2"/></svg></div>
+                <div class="al">Lado derecho</div><div class="as">Falló — toca para reintentar</div></div>
+              <div class="atile"><div class="camic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13" r="3.6"/><path d="M8.5 7l1.2-2h4.6l1.2 2"/></svg></div>
+                <div class="al">Asiento del.</div><div class="as">Pendiente</div></div>
+              <div class="atile"><div class="camic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13" r="3.6"/><path d="M8.5 7l1.2-2h4.6l1.2 2"/></svg></div>
+                <div class="al">Asiento tras.</div><div class="as">Pendiente</div></div>
+              <div class="atile"><div class="camic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13" r="3.6"/><path d="M8.5 7l1.2-2h4.6l1.2 2"/></svg></div>
+                <div class="al">Tablero</div><div class="as">Pendiente</div></div>
+              <div class="atile"><div class="camic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13" r="3.6"/><path d="M8.5 7l1.2-2h4.6l1.2 2"/></svg></div>
+                <div class="al">Cajuela</div><div class="as">Pendiente</div></div>
+            </div>
+            <div style="margin-top:auto"></div>
+            <div class="btn btn-primary is-disabled">Continuar a métricas<span class="m">4</span></div>
+            <p style="text-align:center;font-size:12.5px;color:var(--n-700);font-weight:650;margin:8px 0 0">
+              Frente y Atrás son obligatorios; el resto suma evidencia.</p>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>6B — Cámara con guía <small>overlay de encuadre + etiqueta del ángulo; shutter 76 px</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-dark"><span>10:03</span><span>LTE · 82 %</span></div>
+        <div class="scr cam">
+          <div class="viewport">
+            <div class="anglepill"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="7" width="18" height="13" rx="3"/><circle cx="12" cy="13" r="3.6"/></svg>Lado derecho · 4 de 8<span class="m" style="margin-left:4px">5</span></div>
+            <div class="guide"><span class="c c1"></span><span class="c c2"></span><span class="c c3"></span><span class="c c4"></span>
+              <svg class="carsil" width="240" height="110" viewBox="0 0 240 110" fill="none" stroke="rgba(255,255,255,.9)" stroke-width="2.5" stroke-linecap="round">
+                <path d="M18 78c4-18 20-30 44-34l26-18c8-5 16-7 30-7h38c22 0 44 10 58 25l8 10c8 2 12 8 12 16v8h-16"/>
+                <path d="M18 78h-8v-6c0-4 3-8 8-8"/><circle cx="62" cy="82" r="15"/><circle cx="182" cy="82" r="15"/>
+                <path d="M77 82h90M10 72h8"/></svg>
+            </div>
+            <div class="hint">Encuadra el costado completo dentro de las esquinas<span class="m" style="margin-left:6px">6</span></div>
+          </div>
+          <div class="camdock">
+            <div class="side"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M13 3L4 14h6l-1 7 9-11h-6z"/></svg>Flash</div>
+            <div class="shutter"></div>
+            <div class="side"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>Cerrar</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>6C — Métricas <small>odómetro · combustible · limpieza 1–5 · notas</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:08</span><span>LTE · 81 %</span></div>
+        <div class="scr">
+          <div class="insphead">
+            <div class="back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Métricas del vehículo</b><span>R-2481 · Corolla 2023 · U-112</span></div>
+            <span class="tchip ok">8 de 8 ✓</span>
+          </div>
+          <div class="stepper"><i class="on"></i><i class="on"></i><i></i></div>
+          <div class="pad" style="padding-top:10px">
+            <div class="f-label" style="margin-top:4px">Odómetro</div>
+            <div class="inp big focus">48 212<span class="unit">mi</span></div>
+            <p style="font-size:12.5px;color:var(--n-700);font-weight:650;margin:6px 0 0">Última lectura registrada: 48 190 mi<span class="m" style="margin-left:6px">7</span></p>
+            <div class="f-label">Combustible</div>
+            <div class="fuelbar"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i></div>
+            <div class="fuelrow"><span>Vacío</span><b class="tnum" style="color:var(--n-900);font-size:15px">3/4</b><span>Lleno</span></div>
+            <div class="f-label">Limpieza<span class="m" style="margin-left:8px">8</span></div>
+            <div class="seg">
+              <div class="sg">1</div><div class="sg">2</div><div class="sg">3</div><div class="sg on">4</div><div class="sg">5</div>
+            </div>
+            <div class="fuelrow"><span>Sucio</span><span>Impecable</span></div>
+            <div class="f-label">Notas (opcional)</div>
+            <div class="txtarea">Rayón leve en rin trasero derecho, ya documentado en foto.</div>
+            <div style="margin-top:auto"></div>
+            <div class="btn btn-primary">Continuar a firma</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>6D — Firma del cliente <small>superficie volteada: tenant + modo firma (Tanda A 3C)</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:10</span><span>LTE · 81 %</span></div>
+        <div class="scr" style="background:var(--n-0)">
+          <div class="kioskbar"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+            Modo firma · bloqueo en pausa<span class="exit">Salir: mantener 3 s + PIN</span><span class="m">9</span></div>
+          <div class="tenantbar"><div class="tlogo">AV</div>
+            <div><div class="tname">Autos del Valle</div><div class="tsub">Inspección del vehículo · Reserva R-2481</div></div>
+            <span class="m" style="margin-left:auto">10</span></div>
+          <div class="pad" style="padding-top:12px">
+            <p style="font-size:14.5px;color:var(--n-800);font-weight:600;margin:0 0 8px">Firme para confirmar que revisó
+            el estado del vehículo junto al agente.</p>
+            <div class="sigzone">
+              <svg width="200" height="70" viewBox="0 0 200 70" fill="none" stroke="var(--n-800)" stroke-width="2" stroke-linecap="round"><path d="M12 48c14-26 22-30 18-12s8 6 20-8 6 26 22 8 22-18 16-2 10 10 24 0 26-16 20-2 14 12 26 4"/></svg>
+              <div class="sigline"></div><div class="sighint">Firme aquí con el dedo</div>
+            </div>
+            <div class="sigrow">
+              <div class="btn btn-ghost">Borrar</div>
+              <div class="btn" style="background:var(--n-800);color:#fff;box-shadow:var(--sh-1)">Confirmar firma</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>6E — Offline: todo encolado <small>cada pieza declara su destino; nada se pierde</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:12</span><span class="off">Sin red · 80 %</span></div>
+        <div class="scr">
+          <div class="insphead">
+            <div class="back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Inspección de salida</b><span>R-2481 · Corolla 2023 · U-112</span></div>
+            <span class="tchip warn">Sin red</span>
+          </div>
+          <div class="stepper"><i class="on"></i><i class="on"></i><i class="on"></i></div>
+          <div class="pad" style="padding-top:10px;gap:10px">
+            <div class="banner b-warn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg>
+              Sin conexión. Puedes terminar la inspección completa: todo queda en la bandeja y se enviará al reconectar.<span class="m">11</span></div>
+            <div class="agrid">
+              <div class="atile done" style="min-height:84px"><div class="photo"></div>
+                <span class="aic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+                <div class="al">Frente</div><div class="as">En bandeja</div></div>
+              <div class="atile done" style="min-height:84px"><div class="photo"></div>
+                <span class="aic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+                <div class="al">Atrás</div><div class="as">En bandeja</div></div>
+            </div>
+            <div class="qcard">
+              <div class="obico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.10)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">8 fotos · métricas · firma</span><span class="qbadge">Se enviará al reconectar</span></div>
+              <div class="qmeta">Guardado local cifrado · orden de envío garantizado</div></div></div>
+            <div style="margin-top:auto"></div>
+            <div class="btn btn-primary">Terminar — se enviará al reconectar<span class="m" style="margin-left:6px">12</span></div>
+            <p style="text-align:center;font-size:12.5px;color:var(--n-700);font-weight:650;margin:8px 0 0">
+              El enlace de esta sesión vence a las 10:17.</p>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>6F — 410: sesión ya completada <small>otra superficie terminó primero; reconciliación</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:15</span><span>LTE · 80 %</span></div>
+        <div class="scr">
+          <div class="insphead">
+            <div class="back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Inspección de salida</b><span>R-2481 · Corolla 2023 · U-112</span></div>
+          </div>
+          <div class="pad">
+            <div class="center-state">
+              <div class="big-ic info"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v.5"/><path d="M12 11.5V16"/></svg></div>
+              <h4>Esta inspección ya se completó</h4>
+              <p>El mostrador la cerró a las 10:14 mientras trabajabas. Tus fotos pendientes de esta sesión se
+              retiraron de la bandeja — no se enviará nada duplicado.<span class="m">13</span></p>
+              <span class="tchip ok">Reserva R-2481 · lista para firma</span>
+            </div>
+            <div class="btn btn-primary">Volver al inicio</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:10px">Ver la reserva</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Inspección nativa</h3>
+      <div class="note"><span class="m">1</span><span><b>Grid 2×4, tiles de 96 px:</b> los 8 ángulos canónicos del backend en su orden (front, rear, left, right, front_seat, rear_seat, dash, trunk). Obligatorios con chip ámbar persistente; al capturarse, el chip pasa a plate oscuro sobre la foto. La miniatura lleva scrim inferior rgba(23,18,43,.85) bajo el texto — regla del sistema: nunca texto sobre imagen sin plate/scrim medido.</span></div>
+      <div class="note"><span class="m">2</span><span><b>Compresión visible y con datos:</b> tras el shutter, la foto se comprime en isolate (~1600 px, calidad 80) y el tile muestra spinner → check verde + peso final (412 KB). El check es icono sobre --ok (4.3:1, umbral no-texto 3:1); la palabra de estado vive en el subtexto y en el contador "3 de 8" del header. Controlador de cámara liberado al salir (DoD-8).</span></div>
+      <div class="note"><span class="m">3</span><span><b>Ángulo fallido, reintento local:</b> si la captura/compresión falla, el tile queda en danger con "toca para reintentar" — reabre la cámara en ese ángulo. Los fallos de RED no viven aquí: la subida es asunto de la bandeja (pantalla 7); el tile pasa a "en bandeja" en cuanto la foto está comprimida y encolada.</span></div>
+      <div class="note"><span class="m">4</span><span><b>CTA gateado por lo mismo que el backend:</b> "Continuar a métricas" se habilita con front+rear capturados (el 409 REQUIRED_ANGLES_MISSING no debería ocurrir nunca desde esta UI; si ocurre, el item cae a dead-letter con ese motivo en humano). El pie explica la regla en positivo.</span></div>
+      <div class="note"><span class="m">5</span><span><b>Etiqueta del ángulo sobre plate oscuro</b> rgba(23,18,43,.85) + borde sutil — legible sobre cualquier viewport. Al terminar un ángulo, avanza solo al siguiente pendiente (flujo continuo, una mano).</span></div>
+      <div class="note"><span class="m">6</span><span><b>Guía de encuadre honesta:</b> esquinas + silueta del costado (cambia por ángulo: frente/costado/interior) al 55 % — es ayuda de composición, NO detección automática; no promete validación que no existe. Hint sobre text-shadow + zona inferior oscura del viewport.</span></div>
+      <div class="note"><span class="m">7</span><span><b>Odómetro con cordura:</b> teclado numérico, display 24 px tabular; bajo el campo, la última lectura conocida del vehículo — <b>fuente: endpoint autenticado aparte</b> (datos del vehículo vía la sesión JWT; el payload del token de inspección NO trae la lectura), con fallback silencioso a ocultar la línea si no llega. Si el valor nuevo es menor, warning inline no bloqueante (el backend acepta — la corrección es humana). Combustible en octavos (UI) → fracción 0..1 del contrato; limpieza 1–5 en segmentos de 52 px (guantes), extremos etiquetados.</span></div>
+      <div class="note"><span class="m">8</span><span><b>Los 5 segmentos llevan número,</b> no solo color: bajo el sol el color se lava, el dígito no. Selección = borde --p-600 + fondo --p-50 (mismo patrón "opt sel" del sistema).</span></div>
+      <div class="note"><span class="m">9</span><span><b>§9-6 RESUELTA (Hector, 2026-08-16): Variante A — modo kiosco, definitivo.</b> La barra de modo firma (--p-900→--p-800, salida "mantener 3 s + PIN", idéntica a Tanda A 3C) es parte del build M1: lock por inactividad suspendido, notificaciones de staff silenciadas y navegación bloqueada fuera de la firma mientras el teléfono está en manos del cliente. Sin cláusula de degradación. Referencia: PROJECT_PLAN §9-6.</span></div>
+      <div class="note"><span class="m">10</span><span><b>Superficie volteada = branding del tenant</b> (display-data): logo, nombre y tinta neutra del tenant; ni morado Ride ni "RideOps" a la vista del cliente. Idioma del cliente (es/en). Firma >200 chars estampa customerSignedAt junto a inspectionCompletedAt en el complete (contrato §2).</span></div>
+      <div class="note"><span class="m">11</span><span><b>Offline de punta a punta:</b> fotos, métricas y firma se encolan como UNA cadena ordenada por sesión (photos → complete) en la bandeja; el banner lo declara al entrar en offline, cada tile marca "En bandeja" y el resumen dice qué viaja y cuándo. "Guardado local cifrado" no es adorno: la promesa la cumple ADR-7 (Drift + SQLCipher) — verificado. Escritura no financiera ⇒ ruta offline obligatoria (DoD-3).</span></div>
+      <div class="note"><span class="m">12</span><span><b>El CTA dice la verdad:</b> "Terminar — se enviará al reconectar" en vez de un "Enviar" que mentiría. El pie dentro del teléfono solo informa la hora de vencimiento del enlace; el RIESGO vive aquí, en las notas de diseño: el TTL del token es 15 min y la bandeja offline puede sobrevivirlo — el spike M0-1b decide si la bandeja re-mintea token vía la sesión autenticada o si el backend extiende el TTL.</span></div>
+      <div class="note"><span class="m">13</span><span><b>410 reconciliado, no callejón:</b> si otra superficie (mostrador/kiosk) completó la sesión, el router de mobile-inspection responde <b>410 TOKEN_CONSUMED</b> (el 409 CHECKOUT_TERMINAL es del router kiosk, que RideOps no usa); la app lo cuenta en pasado, con hora y superficie, retira de la bandeja los envíos de ESA sesión (purga selectiva anotada en pantalla 7) y ofrece 2 salidas. Tono informativo (azul), no error: el trabajo del patio no se perdió, ya estaba hecho.</span></div>
+      <div class="contrast"><b>Contraste verificado (6A–6F)</b>
+        <ul>
+          <li>Texto blanco sobre miniatura con scrim .85 (peor caso: foto blanca): 5.1:1 — por eso el scrim es .85 y no .72 (que daba 3.1:1 y se rechazó).</li>
+          <li>Blanco sobre viewport/base de cámara #17122b: 18:1 · anglepill blanco sobre plate .85: ≥ 5.1:1 en el peor viewport claro.</li>
+          <li>Check blanco sobre --ok #0f8a68: 4.3:1 — icono (umbral 3:1). NUNCA texto blanco sobre --ok: para texto se usa --ok-tx sobre --ok-bg (6.2:1) o sobre blanco (6.8:1).</li>
+          <li>Chip "Obligatorio" --warn-tx sobre --warn-bg: 5.59:1 · estado fallido --danger-tx sobre #fffbfb: ≈ 7:1.</li>
+          <li>Dígitos odómetro --n-900 sobre blanco: 18.14:1 · ayuda bajo campo --n-700 sobre --n-50: 8.5:1 · segmentos --n-700 sobre blanco: 9.21:1.</li>
+          <li>Blanco sobre kioskbar --p-800 (peor parada): 11.2:1 · CTA tenant --n-800 con blanco: 14.07:1 (pares Tanda A).</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>Shutter: flash blanco 80 ms + haptic light; el tile recibe la miniatura con scale-in 250 ms y el check dibuja su trazo 300 ms.</li>
+          <li>Avance de ángulo: la anglepill hace crossfade 200 ms; stepper crece con ease-out. Reduced-motion ⇒ cortes secos.</li>
+          <li>Ningún loop >1 Hz: el spinner de compresión es el único giro y muere con la tarea.</li>
+        </ul></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 7 · BANDEJA DE SALIDA -->
+<section class="blk" id="s7">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 7</span>
+    <h2>Bandeja de salida — outbox con dead-letter visible</h2>
+    <p>La cola local (Drift) de TODA escritura no financiera (ADR-7): fotos de inspección, completes, check-ins.
+    Drena en orden por sesión al recuperar red. Nada falla en silencio: lo pendiente muestra progreso, lo muerto
+    (dead-letter) muestra el motivo en lenguaje humano y acciones. El dinero jamás pasa por aquí.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Drenando (anillo)</span><span class="schip"><i></i>Dead-letter + acciones</span>
+      <span class="schip"><i></i>Vacía (feliz)</span><span class="schip"><i></i>Llena (tope)</span>
+      <span class="schip"><i></i>Confirmar descarte</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>7A — Drenando <small>anillo de progreso global + item activo con barra</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:22</span><span>LTE · 79 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">Bandeja de salida</span><span class="sp"></span>
+            <div class="locchip">Patio Centro</div></div>
+          <div class="content">
+            <div class="drainhead"><span class="m inframe" style="margin:-24px 0 0 -6px">1</span>
+              <div class="ringwrap">
+                <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+                  <circle class="track" cx="32" cy="32" r="26" stroke-width="6"/>
+                  <circle class="arc" cx="32" cy="32" r="26" stroke-width="6" stroke-dasharray="163" stroke-dashoffset="98" transform="rotate(-90 32 32)"/>
+                </svg><b class="tnum">2/5</b>
+              </div>
+              <div class="dt"><b>Enviando…</b><span>2 de 5 enviados · quedan ~1.2 MB</span></div>
+            </div>
+            <div class="obrow">
+              <div class="obico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="7" width="18" height="13" rx="3" fill="rgba(135,82,254,.10)"/><circle cx="12" cy="13" r="3.6"/><path d="M8.5 7l1.2-2h4.6l1.2 2"/></svg></div>
+              <div class="obbody"><div class="qtop"><span class="obname">Foto · Lado izquierdo</span><span class="tchip"><span class="dot"></span>Subiendo</span></div>
+                <div class="obmeta">R-2481 · inspección de salida · 388 KB</div>
+                <div class="pbar"><i style="width:62%"></i></div></div></div>
+            <div class="obrow">
+              <div class="obico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="7" width="18" height="13" rx="3" fill="rgba(135,82,254,.10)"/><circle cx="12" cy="13" r="3.6"/><path d="M8.5 7l1.2-2h4.6l1.2 2"/></svg></div>
+              <div class="obbody"><div class="qtop"><span class="obname">Foto · Tablero</span><span class="tchip" style="background:var(--n-50);border-color:var(--n-200);color:var(--n-700)">En cola</span></div>
+                <div class="obmeta">R-2481 · inspección de salida · 356 KB</div></div></div>
+            <div class="obrow">
+              <div class="obico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5 4h14v16H5z" fill="rgba(135,82,254,.10)"/><path d="M9 8h6M9 12h6M9 16h4"/></svg></div>
+              <div class="obbody"><div class="qtop"><span class="obname">Cierre de inspección</span><span class="tchip" style="background:var(--n-50);border-color:var(--n-200);color:var(--n-700)">Espera sus fotos</span></div>
+                <div class="obmeta">R-2481 · métricas + firma · va al final de su cadena<span class="m" style="margin-left:6px">2</span></div></div></div>
+            <div class="obrow">
+              <div class="obico okk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></div>
+              <div class="obbody"><div class="qtop"><span class="obname">Check-in · U-071</span><span class="tchip ok">Enviado 10:21</span></div>
+                <div class="obmeta">Desaparece de la lista en el próximo refresh</div></div></div>
+          </div>
+          <div class="tabfloat">
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf on"><span class="tbadge">3</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.16)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" fill="rgba(135,82,254,.12)"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>7B — Dead-letter <small>motivo humano + reintentar / descartar</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:30</span><span>LTE · 78 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">Bandeja de salida</span><span class="sp"></span>
+            <div class="locchip">Patio Centro</div></div>
+          <div class="content">
+            <div class="banner b-danger"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.5"/></svg>
+              2 envíos necesitan tu decisión. El resto seguirá enviándose normal.<span class="m">3</span></div>
+            <div class="obrow dead">
+              <div class="obico err"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5 4h14v16H5z" fill="rgba(192,38,38,.08)"/><path d="M9 8h6M9 12h6M9 16h4"/></svg></div>
+              <div class="obbody"><div class="qtop"><span class="obname">Cierre de inspección</span><span class="tchip danger">Rechazado</span></div>
+                <div class="obmeta">R-2492 · intentado 5 veces · último a las 10:28</div></div>
+              <div class="obreason"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg>
+                El servidor lo rechazó: faltan los ángulos frontal y trasero. Captúralos y reintenta.<span class="m" style="margin-left:4px">4</span></div>
+              <div class="obacts">
+                <div class="btn btn-ghost">Abrir inspección</div>
+                <div class="btn btn-ghost" style="color:var(--danger-tx);border-color:var(--danger-bd)">Descartar</div>
+              </div></div>
+            <div class="obrow dead">
+              <div class="obico err"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="7" width="18" height="13" rx="3" fill="rgba(192,38,38,.08)"/><circle cx="12" cy="13" r="3.6"/><path d="M8.5 7l1.2-2h4.6l1.2 2"/></svg></div>
+              <div class="obbody"><div class="qtop"><span class="obname">Foto · Cajuela</span><span class="tchip danger">Enlace vencido</span></div>
+                <div class="obmeta">R-2489 · el enlace de la sesión caducó (15 min)</div></div>
+              <div class="obreason"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg>
+                El permiso para subir esta foto venció. Reintentar pedirá uno nuevo con tu sesión.</div>
+              <div class="obacts">
+                <div class="btn btn-primary" style="min-height:48px;font-size:14px;border-radius:14px">Reintentar</div>
+                <div class="btn btn-ghost" style="color:var(--danger-tx);border-color:var(--danger-bd)">Descartar</div>
+              </div></div>
+            <div class="obrow">
+              <div class="obico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="7" width="18" height="13" rx="3" fill="rgba(135,82,254,.10)"/><circle cx="12" cy="13" r="3.6"/><path d="M8.5 7l1.2-2h4.6l1.2 2"/></svg></div>
+              <div class="obbody"><div class="qtop"><span class="obname">Foto · Frente</span><span class="tchip" style="background:var(--n-50);border-color:var(--n-200);color:var(--n-700)">En cola</span></div>
+                <div class="obmeta">R-2495 · 402 KB · no está afectado</div></div></div>
+          </div>
+          <div class="tabfloat">
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf on"><span class="tbadge">2</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.16)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" fill="rgba(135,82,254,.12)"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>7B′ — Confirmar descarte <small>sheet en plate opaco; consecuencias explícitas</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:31</span><span>LTE · 78 %</span></div>
+        <div class="scr">
+          <div class="dim">
+            <div class="appbar"><span class="abrand">Bandeja de salida</span><span class="sp"></span>
+              <div class="locchip">Patio Centro</div></div>
+            <div class="content">
+              <div class="obrow dead">
+                <div class="obico err"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M5 4h14v16H5z" fill="rgba(192,38,38,.08)"/><path d="M9 8h6M9 12h6M9 16h4"/></svg></div>
+                <div class="obbody"><div class="qtop"><span class="obname">Cierre de inspección</span><span class="tchip danger">Rechazado</span></div>
+                  <div class="obmeta">R-2492 · intentado 5 veces</div></div></div>
+            </div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet"><span class="m inframe" style="margin:-24px 0 0 300px">5</span>
+            <div class="grab"></div>
+            <h5>¿Descartar este envío?</h5>
+            <div class="ssub">Se borrará el cierre de inspección de R-2492 <b>de este teléfono</b>. Las métricas y la firma
+            capturadas se perderán y habrá que repetirlas. Las fotos ya enviadas al servidor no se tocan.</div>
+            <div class="btn btn-danger">Sí, descartar</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:8px">Conservar en la bandeja</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>7C — Vacía <small>estado feliz: todo enviado</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:40</span><span>LTE · 77 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">Bandeja de salida</span><span class="sp"></span>
+            <div class="locchip">Patio Centro</div></div>
+          <div class="content">
+            <div class="center-state">
+              <div class="big-ic ok"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></div>
+              <h4>Todo enviado</h4>
+              <p>No hay nada esperando. Lo que captures sin señal aparecerá aquí y se enviará solo.<span class="m">6</span></p>
+              <span class="tchip ok">Último envío: hoy 10:38</span>
+            </div>
+          </div>
+          <div class="tabfloat">
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.16)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" fill="rgba(135,82,254,.12)"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>7D — Llena <small>tope alcanzado; captura nueva bloqueada con instrucción clara</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>13:05</span><span class="off">Sin red · 41 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">Bandeja de salida</span><span class="sp"></span>
+            <div class="locchip">Patio Centro</div></div>
+          <div class="content">
+            <div class="center-state" style="margin-top:24px">
+              <div class="big-ic warn"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 13h4l2 3h4l2-3h4"/><path d="M12 2v.5" opacity="0"/></svg></div>
+              <h4>La bandeja está llena</h4>
+              <p>50 envíos esperando (límite del teléfono). No cabe más — <b>conéctate a una red</b> para que se
+              vacíe y puedas seguir capturando.<span class="m">7</span></p>
+              <span class="tchip warn">50 de 50 · ~19 MB en espera</span>
+            </div>
+            <div class="btn btn-primary is-disabled" style="margin-top:auto">Enviar ahora (sin red)</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:10px">Ver los 50 pendientes</div>
+            <p style="text-align:center;font-size:12.5px;color:var(--n-700);font-weight:650;margin:10px 0 0">
+              Las capturas nuevas están pausadas hasta liberar espacio.</p>
+          </div>
+          <div class="tabfloat">
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf on"><span class="tbadge warn">50</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.16)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" fill="rgba(135,82,254,.12)"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Bandeja / dead-letter</h3>
+      <div class="note"><span class="m">1</span><span><b>Cabecera de drenado sobre superficie tonal:</b> anillo de progreso (fracción 2/5 en texto tabular DENTRO del anillo — el arco es redundante, el número manda) + bytes restantes. El drenado respeta orden por cadena: dentro de una sesión de inspección, fotos primero, complete al final; cadenas distintas en FIFO.</span></div>
+      <div class="note"><span class="m">2</span><span><b>Dependencias visibles:</b> un complete "Espera sus fotos" — nunca se manda antes que ellas (el backend exige front+rear al complete). Los enviados quedan un ciclo con check verde y se van solos; sin funerales por cada éxito.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Dead-letter = decisión del humano, no purgatorio:</b> tras N reintentos con backoff exponencial + jitter (tope ~15 min entre intentos), el item pasa a "Rechazado" y DEJA de reintentarse solo. El banner dice cuántos esperan decisión y aclara que el resto fluye. El badge del tab cuenta pendientes + muertos.</span></div>
+      <div class="note"><span class="m">4</span><span><b>Motivo en lenguaje humano, acción a la medida:</b> el código del backend se traduce (REQUIRED_ANGLES_MISSING → "faltan los ángulos frontal y trasero"; TOKEN_EXPIRED → "el permiso venció, se pedirá uno nuevo"). La acción primaria depende del motivo: si falta trabajo, "Abrir inspección" (lleva al grid); si es recuperable, "Reintentar". El motivo técnico crudo vive en un detalle expandible para soporte.</span></div>
+      <div class="note"><span class="m">5</span><span><b>Descartar exige confirmación con consecuencias:</b> sheet en PLATE OPACO .96 (el único BackdropFilter de la pantalla ya lo usa el tab bar — política Tanda A: cuando el sheet sube, el tab bar cae a plate; jamás 2 blurs). Botón destructivo --danger con verbo explícito; la opción segura es la secundaria. Dice exactamente qué se pierde y qué no. <b>Requisito de build:</b> todo descarte deja rastro de auditoría sincronizable (quién, qué item, motivo del dead-letter, hora) que se envía al backend al reconectar — lo descartado puede ser evidencia de daños y no puede evaporarse sin registro.</span></div>
+      <div class="note"><span class="m">6</span><span><b>Vacía = confianza:</b> check + "último envío" con hora para que el patio confíe en que el sistema drena. <b>Purga por cambio de cuenta:</b> al cerrar sesión (o expulsión por intentos de PIN) con items pendientes, se advierte "Tienes N envíos sin mandar; si cierras sesión se borran de este teléfono" — la bandeja pertenece a la cuenta, nunca sobrevive a otra (aislamiento de tenant/actor). Logout con bandeja vacía: sin fricción.</span></div>
+      <div class="note"><span class="m">7</span><span><b>Tope honesto (50 items / ~250 MB de fotos):</b> al llegar al tope, la captura nueva se bloquea ANTES de abrir la cámara (no después de tomar la foto) y la instrucción es una sola: conéctate. El CTA "Enviar ahora" queda visible pero deshabilitado con la causa entre paréntesis — mejor que esconderlo. Nada se descarta solo: el tope pausa, no purga.</span></div>
+      <div class="contrast"><b>Contraste verificado (7A–7D)</b>
+        <ul>
+          <li>Fracción 2/5 --n-900 sobre tonal #f6f2ff: 16.47:1 · subtítulo --n-700 sobre tonal: 8.4:1.</li>
+          <li>Motivo dead-letter --danger-tx sobre --danger-bg: 7.04:1 · chip "Rechazado": mismo par.</li>
+          <li>Blanco sobre botón destructivo --danger #c02626: 5.9:1 AA.</li>
+          <li>Nombre de item --n-900 sobre card blanca: 18.14:1 · meta --n-600: 5.04:1 · chip "En cola" --n-700 sobre --n-50: 8.5:1.</li>
+          <li>Badge ámbar del tab: numeral blanco sobre --badge-warn #8a5606 = 6.15:1 AA (el fondo --warn #b8760a se descartó: daba 3.73:1). Semántica intacta: ámbar = esperando red, rojo = necesita decisión.</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>Anillo de drenado avanza con ease-out por item completado (no giro continuo); la barra del item activo es determinista (bytes reales), nunca indeterminada si hay progreso medible.</li>
+          <li>Item enviado: check scale-in + fila colapsa 250 ms en el siguiente ciclo. Item a dead-letter: la fila se tiñe danger con fade 300 ms + haptic error.</li>
+          <li>Reduced-motion ⇒ cambios de estado sin animación; el anillo salta directo a su fracción.</li>
+        </ul></div>
+      <div class="decision"><b>Resuelto (PM) — badge ámbar accesible</b>
+        Ya no es decisión abierta. El badge ámbar usa un token NUEVO de fondo <b>--badge-warn: #8a5606</b> con numeral
+        blanco = <b>6.15:1</b> medido (≥ 4.5:1). El fondo --warn #b8760a se descartó (blanco encima = 3.73:1) y el token
+        de texto --warn-tx no se reutiliza como fondo sin declararlo: --badge-warn comparte valor hex pero es un token de
+        superficie propio en los tokens Flutter. Se conserva la semántica de color: ámbar = esperando red · rojo --danger
+        (blanco 5.9:1) = necesita decisión.</div>
+    </aside>
+  </div>
+</section>
+
+<footer class="dod">
+  <div class="card">
+    <b>Decisiones clave de la Tanda B (mismo sistema que Tanda A v2)</b>
+    <ul class="changelog">
+      <li><b>Home "para ahora":</b> el tile hero agrega solo lo accionable ya (salidas hoy + retornos hoy/vencidos + incidentes); las 9 colas existen pero solo las activas ganan sección — las vacías colapsan en una fila de chips y las fuera de programa (RENTAL_ONLY) se omiten por completo.</li>
+      <li><b>Frescura como ciudadana de primera:</b> "Actualizado hace X min" persistente, polling 45–60 s con jitter pausado en background, pull-to-refresh manual, y en offline la edad del dato + hora de corte en el propio hero.</li>
+      <li><b>Inspección en 3 pasos con el gate del backend replicado en UI:</b> front+rear habilitan el avance; compresión visible con peso final; fallo de captura ≠ fallo de red (el primero se reintenta en sitio, el segundo es de la bandeja).</li>
+      <li><b>Firma = superficie del tenant + modo kiosco definitivo:</b> §9-6 quedó resuelta por Hector (2026-08-16) en Variante A — la barra de modo firma de Tanda A 3C es parte del build M1, sin cláusula de degradación.</li>
+      <li><b>Bandeja con dead-letter de primera clase:</b> motivo en humano + acción a la medida del motivo, descarte solo con confirmación de consecuencias en sheet opaco, tope que pausa sin purgar, y purga por cambio de cuenta advertida antes del logout.</li>
+      <li><b>Política de blur sostenida:</b> en cada pantalla de esta tanda el único BackdropFilter es el tab bar flotante; sheets, appbars y plates de cámara son opacos ≥ .95. Scrim de miniaturas subido a .85 tras medir que .72 daba 3.1:1.</li>
+      <li><b>Iteración post-review de Graphic Design (2026-08-16):</b> §9-6 marcada como RESUELTA (Variante A definitiva, sin cláusula de degradación en 6D); claims de contraste re-medidos por GD y corregidos (n-700/blanco 9.21:1, warn-tx/warn-bg 5.59:1, danger-tx/danger-bg 7.04:1, 2/5 sobre tonal 16.47:1); badge ámbar resuelto por el PM con token nuevo --badge-warn #8a5606 (blanco 6.15:1, el --warn de fondo daba 3.73:1); anotación de riesgo TTL sacada del teléfono en 6E; la cola `active` ganó camino explícito (tile "En renta" tappable + regla de orden que cubre las 9); TOKEN_CONSUMED corregido de 409 a 410 (el 409 CHECKOUT_TERMINAL es del router kiosk); regla de contadores honestos "8+" al cap de take:8; fuente del odómetro previo anotada (endpoint autenticado, no el token); descarte de dead-letter con rastro de auditoría sincronizable; y "guardado local cifrado" respaldado por ADR-7 (Drift + SQLCipher).</li>
+    </ul>
+  </div>
+  <div class="card">
+    <b>Trazabilidad DoD (PROJECT_PLAN §10):</b>
+    #1 todos los strings mostrados van a app_es.arb/app_en.arb (aquí ES) ·
+    #2 targets: tiles de ángulo 96 px, shutter 76, teclas/segmentos 52, botones 48–56, chips con hit-slop a 48; contraste ≥ 4.5:1 texto contra fondo REAL con pares medidos por sección (no-texto ≥ 3:1 señalado: check sobre --ok 4.3:1; el badge ámbar cumple como texto: blanco sobre --badge-warn #8a5606 = 6.15:1) ·
+    #3 ruta offline dibujada para TODA escritura no financiera: captura completa encolada (6E), bandeja con drenado/dead-letter/tope (7A–7D); el dinero nunca pasa por la bandeja ·
+    #4 RBAC/scoping contra la API: colas loaner omitidas por programa (5B), tab Incidentes por moduleAccess, y cada request maneja su 403 aunque la nav esconda entradas ·
+    #5 estados de error: 401 → re-login (Tanda A) · 403 ubicación → negativa visible (Tanda A 4D) · <b>conflicto de sesión → reconciliar dibujado en 6F</b> (410 TOKEN_CONSUMED de mobile-inspection cuando otra superficie completó, con purga selectiva de bandeja; el 409 CHECKOUT_TERMINAL es del router kiosk que RideOps no usa) y en dead-letter (REQUIRED_ANGLES_MISSING) · 429 → el backoff con jitter de la bandeja y el polling con jitter lo absorben ·
+    #8 compresión en captura + liberación del controlador anotadas (6A/6B) ·
+    #10 loading (5C skeleton bento), empty (5D patio en calma, 7C todo enviado), error (6F, 7B, 7D) por pantalla.
+    <b>Pendientes marcados para build:</b> spike M0-1b (TTL 15 min del token vs bandeja offline — el mockup expone el vencimiento en 6E y el re-minteo en 7B) y verificar en device que el blur del tab bar sostiene 60 fps. §9-6 ya NO es pendiente (resuelta: Variante A, modo kiosco, 6D es definitivo); el badge ámbar quedó resuelto con el token --badge-warn (6.15:1, pantalla 7).
+  </div>
+</footer>
+
+</body>
+</html>

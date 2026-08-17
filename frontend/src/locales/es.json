@@ -1141,6 +1141,17 @@
         }
       }
     },
-    "gotchaLabel": "Dónde se traba la gente"
+    "gotchaLabel": "Dónde se traba la gente",
+    "practiceBanner": "MODO PRÁCTICA — tenant de demostración. Nada de esto toca datos reales, y la práctica no da puntos.",
+    "practiceExit": "Volver a mi cuenta",
+    "practiceCta": "🎓 Practicar en el tenant Demo",
+    "practiceOpening": "Abriendo la práctica…",
+    "practiceHint": "Ensaya los módulos prácticos en el tenant de demostración — sin datos reales, sin puntos",
+    "welcomeTitle": "Bienvenido a Ride Fleet",
+    "welcomeBody": "¿Primera vez por aquí? En cinco minutos te enseño dónde vive todo — y puedes relanzar el tour cuando quieras desde Ride University.",
+    "welcomeStart": "Enséñame",
+    "welcomeLater": "Ahora no",
+    "practiceError": "No se pudo abrir el modo práctica — intenta de nuevo.",
+    "practiceImpersonation": "Sal de la vista de tenant primero y luego inicia la práctica."
   }
 }
