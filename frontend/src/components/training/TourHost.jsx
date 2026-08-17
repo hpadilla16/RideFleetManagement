@@ -31,6 +31,7 @@ import { stepKey, moduleKey as mKeyOf, trainingText } from '../../lib/training/i
 import {
   TOUR_STORAGE_KEY, TOUR_END,
   startTour, settleStart, currentStep, advance, retreat, dismiss,
+  waitForRecord, resumeAt,
   progressOf, serialize, deserialize,
 } from '../../lib/training/tour-state.js';
 
@@ -48,6 +49,8 @@ const SETTLE_MS = 700;
  * took over.
  */
 const SHOWCASE_STEP_MS = 9000;
+/** How often a parked tour checks whether its record is finally open. */
+const WAIT_POLL_MS = 700;
 const CARD_WIDTH = 340;
 const GAP = 12;
 
@@ -117,7 +120,12 @@ export function TourHost({ viewer }) {
       walkedModules.current = new Set();
       // The showcase runs itself until a person takes over.
       setAutoPlay(track === TOUR_TRACKS.SHOWCASE);
-      persist(settleStart(fresh, list, isPresent));
+      const settled = settleStart(fresh, list, isPresent);
+      // A module that walks through one record (a reservation's own page)
+      // finds nothing from Ride University. Park the tour instead of ending
+      // it, and pick up the moment the person opens one.
+      const mod = moduleKey ? findModule(moduleKey) : null;
+      persist(parkIfRecordScoped(settled));
     };
     window.addEventListener(TOUR_START_EVENT, onStart);
     return () => window.removeEventListener(TOUR_START_EVENT, onStart);
@@ -134,6 +142,31 @@ export function TourHost({ viewer }) {
     setSteps(list);
     setState(saved);
   }, [state, viewer]);
+
+  /**
+   * A parked tour WATCHES for its record — it does not check once and give up.
+   *
+   * The first version fired a single timer on route change (Hector,
+   * 2026-08-17: "se queda esperando"). A reservation page still fetching at
+   * that instant meant the anchors were not there yet, and nothing ever looked
+   * again. So this polls, and resumeAt takes whichever step is actually on
+   * screen: the button on the reservation page, or — if they pressed it and
+   * moved into the wizard — the step that lives there.
+   *
+   * The cost is one querySelector per tick against a page we are already
+   * waiting on, and it stops the moment the tour resumes.
+   */
+  useEffect(() => {
+    if (!state?.waiting || !steps.length) return undefined;
+    const look = () => {
+      const resumed = resumeAt(state, steps, isPresent);
+      if (resumed) persist(resumed);
+    };
+    const timer = setInterval(look, WAIT_POLL_MS);
+    const settle = setTimeout(look, SETTLE_MS);
+    return () => { clearInterval(timer); clearTimeout(settle); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.waiting, pathname, steps.length]);
 
   const step = currentStep(state, steps);
 
@@ -157,7 +190,7 @@ export function TourHost({ viewer }) {
       // Still absent after the route settled — let the state machine decide
       // whether that is expected (optional) or a broken step.
       setRect(null);
-      persist(advance(state, steps, isPresent, state.index - 1));
+      persist(parkIfRecordScoped(advance(state, steps, isPresent, state.index - 1)));
     };
     raf = requestAnimationFrame(look);
     return () => cancelAnimationFrame(raf);
@@ -179,6 +212,23 @@ export function TourHost({ viewer }) {
     };
   }, [step?.anchor]);
 
+  /**
+   * A missing anchor is only BROKEN when the step should have been there.
+   *
+   * For a module that walks a record, it usually means the person has not
+   * moved to the next screen yet: step one is the button on the reservation,
+   * steps two and three live inside the check-out wizard it opens. Ending the
+   * tour there told them to "open a reservation" while they were looking at
+   * one (Hector, 2026-08-17). Park instead, and the watcher picks the guide
+   * back up wherever they land.
+   */
+  const parkIfRecordScoped = useCallback((next) => {
+    if (next?.endedAs !== TOUR_END.BROKEN) return next;
+    const mod = next.moduleKey ? findModule(next.moduleKey) : null;
+    if (!mod?.needsRecord) return next;
+    return waitForRecord(next, { midTour: (next.index || 0) > 0 });
+  }, []);
+
   const close = useCallback(() => {
     persist(dismiss(state));
     setRect(null);
@@ -194,13 +244,13 @@ export function TourHost({ viewer }) {
       walkedModules.current.add(state.moduleKey);
       window.dispatchEvent(new CustomEvent(TOUR_MODULE_DONE_EVENT, { detail: { moduleKey: state.moduleKey } }));
     }
-    persist(after);
-  }, [state, steps, isPresent, persist]);
+    persist(parkIfRecordScoped(after));
+  }, [state, steps, isPresent, persist, parkIfRecordScoped]);
 
   // Any manual move stops the showcase advancing on its own — a person is
   // driving now.
   const next = useCallback(() => { setAutoPlay(false); goNext(); }, [goNext]);
-  const back = useCallback(() => { setAutoPlay(false); persist(retreat(state, steps, isPresent)); }, [state, steps, isPresent, persist]);
+  const back = useCallback(() => { setAutoPlay(false); persist(parkIfRecordScoped(retreat(state, steps, isPresent))); }, [state, steps, isPresent, persist, parkIfRecordScoped]);
 
   // ── showcase autoplay ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -228,7 +278,108 @@ export function TourHost({ viewer }) {
     if (step && cardRef.current) cardRef.current.focus();
   }, [step?.anchor]);
 
-  if (!step || typeof document === 'undefined') return null;
+  if (typeof document === 'undefined') return null;
+
+  /**
+   * A tour that cannot start must SAY SO (Hector, 2026-08-17: "show me again
+   * no está reiniciando"). Three modules — check-out, check-in, take-payment —
+   * walk you through a single reservation's own page, so their anchors do not
+   * exist until one is open. Launched from Ride University they ended as
+   * BROKEN, and BROKEN rendered nothing at all: the button looked dead.
+   * Now the same dead end explains itself and offers the way forward.
+   */
+  /**
+   * PARKED: the walkthrough lives inside a record and the person is on their
+   * way to open one. A persistent bar keeps the guide alive and tells them
+   * exactly what to do next — the previous version dropped them at
+   * /reservations with no thread back (Hector, 2026-08-17).
+   */
+  if (state?.waiting) {
+    const waitModule = state.moduleKey ? findModule(state.moduleKey) : null;
+    const waitName = waitModule
+      ? trainingText(t, mKeyOf(waitModule, 'title'), waitModule.title)
+      : '';
+    return createPortal(
+      <div
+        role="status"
+        style={{
+          position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 100000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14,
+          flexWrap: 'wrap', padding: '12px 16px calc(12px + env(safe-area-inset-bottom, 0px))',
+          background: '#1e1a2b', color: '#fff', boxShadow: '0 -2px 14px rgba(0,0,0,.3)',
+        }}
+      >
+        <span aria-hidden="true">🎓</span>
+        <span style={{ fontSize: 13.5, fontWeight: 600 }}>
+          {state.midTour
+            ? t('training.waitingNextScreen', 'Keep going — open the next screen and the guide picks up there.')
+            : t('training.waitingForRecord', 'Open any reservation to start “{{name}}” — the guide continues there.', { name: waitName })}
+        </span>
+        {!state.midTour && waitModule?.needsRecord && pathname !== waitModule.needsRecord && (
+          <button
+            type="button"
+            onClick={() => router.push(waitModule.needsRecord)}
+            style={{ background: '#fff', color: '#1e1a2b', border: 'none', borderRadius: 999, padding: '6px 14px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' }}
+          >
+            {t('training.needsRecordCta', 'Go to reservations')}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={close}
+          style={{ background: 'transparent', color: '#cfc7dd', border: '1px solid #4a4458', borderRadius: 999, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer' }}
+        >
+          {t('training.cancel', 'Cancel')}
+        </button>
+      </div>,
+      document.body,
+    );
+  }
+
+  if (state?.endedAs === TOUR_END.BROKEN) {
+    const brokenModule = state.moduleKey ? findModule(state.moduleKey) : null;
+    const where = brokenModule?.needsRecord;
+    const modName = brokenModule
+      ? trainingText(t, mKeyOf(brokenModule, 'title'), brokenModule.title)
+      : '';
+    return createPortal(
+      <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+        <Scrim style={{ inset: 0 }} onClick={close} />
+        <div
+          ref={cardRef}
+          tabIndex={-1}
+          style={{
+            position: 'relative', width: 'min(380px, 100%)', background: '#fff', color: '#1e1a2b',
+            borderRadius: 14, padding: '18px 20px', boxShadow: '0 10px 40px rgba(30,26,43,.3)', pointerEvents: 'auto',
+          }}
+        >
+          <h3 style={{ margin: '0 0 6px', fontSize: 15, fontWeight: 700 }}>
+            {where
+              ? t('training.needsRecordTitle', 'Open a reservation first')
+              : t('training.tourUnavailableTitle', 'This walkthrough is not available here')}
+          </h3>
+          <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: 'var(--text-2, #5b5266)' }}>
+            {where
+              ? t('training.needsRecordBody', '“{{name}}” is walked inside a reservation — that is why nothing happened. Open any reservation (or use Practice on the demo tenant), then press Start again.', { name: modName })
+              : t('training.tourUnavailableBody', 'A step in this guide points at something that is not on screen. Tell an admin so we can fix the guide.')}
+          </p>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+            <button type="button" className="button-subtle" onClick={close}>
+              {t('training.close', 'Close')}
+            </button>
+            {where && (
+              <button type="button" onClick={() => { close(); router.push(where); }}>
+                {t('training.needsRecordCta', 'Go to reservations')}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
+
+  if (!step) return null;
 
   const { position, total, fraction } = progressOf(state, steps);
   const isShowcase = state.track === TOUR_TRACKS.SHOWCASE;

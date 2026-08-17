@@ -227,7 +227,7 @@ async function notifyStaffAutochargeFailed({ reservationId, agreement, customer,
 
   try {
     const { sendEmail } = await import('../../lib/mailer.js');
-    await sendEmail({
+    await sendEmail({ tenantId: agreement?.tenantId,
       to: recipient,
       subject: `[Auto-charge FAILED] ${agreement.agreementNumber} — $${balance.toFixed(2)} owed`,
       html: `

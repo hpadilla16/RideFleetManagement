@@ -14,10 +14,27 @@ import { trainingService } from './training.service.js';
 
 export const trainingRouter = Router();
 
-const actorOf = (req) => ({
-  tenantId: req.user?.tenantId || null,
-  userId: req.user?.id || req.user?.sub || null,
-});
+/**
+ * Who this progress belongs to — and where to look for the work.
+ *
+ * In PRACTICE mode the two split apart: the trainee's record lives on their
+ * real account and tenant (`pracFor` / `pracTenant` from the token), while the
+ * reservation they just created lives in the demo tenant under their practice
+ * user. Practice is the learning environment, so it counts (Hector,
+ * 2026-08-17) — this is what makes the points land on the right person.
+ */
+const actorOf = (req) => {
+  const self = { tenantId: req.user?.tenantId || null, userId: req.user?.id || req.user?.sub || null };
+  if (req.user?.prac && req.user?.pracFor) {
+    return {
+      tenantId: req.user.pracTenant || null,
+      userId: req.user.pracFor,
+      proofTenantId: self.tenantId,
+      proofUserId: self.userId,
+    };
+  }
+  return self;
+};
 
 /**
  * Which tenant's team to report on.
@@ -90,6 +107,15 @@ trainingRouter.post('/progress/:moduleKey/walkthrough-complete', async (req, res
  * person's role and the tenant's enabled modules — that lives in the
  * curriculum, on the client. The response is percentages.
  */
+/** Start a module over — clears the record so it can be taken again. */
+trainingRouter.post('/progress/:moduleKey/reset', async (req, res, next) => {
+  try {
+    const who = actorOf(req);
+    if (!who.tenantId || !who.userId) return res.status(400).json({ error: 'A tenant and a user are required' });
+    res.json(await trainingService.reset({ ...who, moduleKey: String(req.params.moduleKey) }));
+  } catch (e) { next(e); }
+});
+
 /**
  * Practice mode: swap into the demo tenant to rehearse. Any authenticated
  * HUMAN may practice — but never a service account (a VozIA token has no

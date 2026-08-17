@@ -1096,6 +1096,18 @@
           "view-location-switcher": {
             "title": "Viewing as one branch",
             "body": "Anyone with more than one location gets this switcher. It changes what they see everywhere — including what their exports contain."
+          },
+          "person-type": {
+            "title": "Pick what kind of person this is",
+            "body": "Employee, admin, host or virtual agent. The choice sets their starting permissions, so it is the first thing to get right — changing it later means re-checking everything below it."
+          },
+          "person-access-role": {
+            "title": "Then their access role",
+            "body": "AGENT works the counter. OPS adds the operational screens. ADMIN can change settings and manage people. When in doubt give less: raising someone later is one click, undoing what they changed is an audit."
+          },
+          "person-locations": {
+            "title": "Scope them to their branch",
+            "body": "Check the locations this person works at. Leaving every box UNCHECKED is not \"no access\" — it means they see ALL locations. That is the most common mistake on this screen."
           }
         }
       },
@@ -1142,16 +1154,27 @@
       }
     },
     "gotchaLabel": "Where people trip",
-    "practiceBanner": "PRACTICE MODE — demo tenant. Nothing here touches real data, and practice earns no points.",
+    "practiceBanner": "PRACTICE MODE — demo tenant. Nothing here touches real data, and what you complete counts toward your training.",
     "practiceExit": "Back to my account",
     "practiceCta": "🎓 Practice on the demo tenant",
     "practiceOpening": "Opening practice…",
-    "practiceHint": "Rehearse the hands-on modules on the demo tenant — no real data, no points",
+    "practiceHint": "Rehearse the hands-on modules on the demo tenant — no real data, and it counts toward your training",
     "welcomeTitle": "Welcome to Ride Fleet",
     "welcomeBody": "First time here? In five minutes I can walk you through where everything lives — and you can relaunch the tour any time from Ride University.",
     "welcomeStart": "Show me around",
     "welcomeLater": "Not now",
     "practiceError": "Could not open practice mode — try again.",
-    "practiceImpersonation": "Exit tenant view first, then start practice."
+    "practiceImpersonation": "Exit tenant view first, then start practice.",
+    "needsRecordTitle": "Open a reservation first",
+    "needsRecordBody": "\"{{name}}\" is walked inside a reservation — that is why nothing happened. Open any reservation (or use Practice on the demo tenant), then press Start again.",
+    "needsRecordCta": "Go to reservations",
+    "tourUnavailableTitle": "This walkthrough is not available here",
+    "tourUnavailableBody": "A step in this guide points at something that is not on screen. Tell an admin so we can fix the guide.",
+    "close": "Close",
+    "waitingForRecord": "Open any reservation to start \"{{name}}\" — the guide continues there.",
+    "cancel": "Cancel",
+    "waitingNextScreen": "Keep going — open the next screen and the guide picks up there.",
+    "restart": "Start over",
+    "restartHint": "Clear this module and take it from the beginning"
   }
 }

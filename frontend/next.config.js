@@ -36,8 +36,14 @@ module.exports = {
         source: '/showcase',
         headers: [
           {
+            // The two Vercel origins are the marketing site's STABLE aliases
+            // (project alias + git-main branch alias, 2026-08-17) so the team
+            // can verify the embed before ridefleet.com goes live. Hashed
+            // per-deployment/per-PR URLs stay blocked BY DESIGN — never add
+            // one, and never the *.vercel.app wildcard (it would let anyone
+            // with a Vercel account frame the showcase as their own).
             key: 'Content-Security-Policy',
-            value: "frame-ancestors 'self' https://ridefleet.com https://www.ridefleet.com",
+            value: "frame-ancestors 'self' https://ridefleet.com https://www.ridefleet.com https://ridefleet-web.vercel.app https://ridefleet-web-git-main-hpadilla16s-projects.vercel.app",
           },
           NOAI,
         ],

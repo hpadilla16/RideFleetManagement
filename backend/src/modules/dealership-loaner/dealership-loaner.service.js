@@ -65,7 +65,7 @@ export async function issuePreArrivalPrecheckin(reservation) {
         cta: { label: 'Complete check-in', url: link },
         preheader: 'Complete your loaner check-in before pickup',
       });
-      await sendEmail({
+      await sendEmail({ tenantId: reservation?.tenantId,
         to: email,
         subject: 'Complete your loaner check-in before you arrive',
         text: preArrivalRenderedText,
@@ -1476,7 +1476,7 @@ export const dealershipLoanerService = {
           const ro = current.repairOrderNumber ? `RO ${current.repairOrderNumber}` : 'Service';
           const due = current.returnAt ? new Date(current.returnAt).toLocaleString('en-US', { timeZone: 'America/Puerto_Rico' }) : '';
           const body = `${ro} is complete. ${who} still has the loaner (${veh}). Time to coordinate the return${due ? ` (expected ${due})` : ''}.`;
-          for (const to of recipients) { try { await sendEmail({ to, subject: `${ro} complete — loaner still out`, text: body }); } catch {} }
+          for (const to of recipients) { try { await sendEmail({ tenantId: current?.tenantId || user?.tenantId || undefined, to, subject: `${ro} complete — loaner still out`, text: body }); } catch {} }
         }
       }
     } catch { /* notification is best-effort */ }

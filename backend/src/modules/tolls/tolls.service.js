@@ -1537,7 +1537,7 @@ async function notifyStaffOfNewTolls(reservation, transactions = []) {
     // Fire-and-forget (same pattern as booking confirmation emails): the sync
     // must not block or fail on SMTP. On failure, release the claim so the
     // next sync retries the email.
-    sendEmail({ to, subject, text: lines.join('\n') }).catch(async (err) => {
+    sendEmail({ tenantId: reservation.tenantId, to, subject, text: lines.join('\n') }).catch(async (err) => {
       logger.error('[tolls] staff alert email FAILED - releasing claim for retry on next sync', {
         tollTransactionId: toll.id,
         err: String(err?.message || err)

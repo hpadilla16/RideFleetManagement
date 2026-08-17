@@ -32,6 +32,12 @@
  *   module.points — weighted by how expensive the task is to get wrong, not by
  *                   how long it takes.
  *   module.showcase — position in the convention track, or null to leave it out.
+ *   module.needsRecord — some walkthroughs live INSIDE a record (a
+ *                   reservation's own page), so their anchors cannot exist
+ *                   until one is open. This names where to go find one.
+ *                   Without it the tour would start, find nothing, and end
+ *                   as BROKEN — which looked to the person like a dead
+ *                   button (Hector, 2026-08-17).
  */
 
 export const TOUR_TRACKS = Object.freeze({
@@ -209,6 +215,7 @@ export const COURSES = [
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'reservations',
         kind: 'OPPORTUNISTIC',
+        needsRecord: '/reservations',
         verify: { type: VERIFY.RESERVATION_CHECKED_OUT },
         points: 30,
         showcase: 4,
@@ -243,6 +250,7 @@ export const COURSES = [
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'reservations',
         kind: 'OPPORTUNISTIC',
+        needsRecord: '/reservations',
         verify: { type: VERIFY.RESERVATION_CHECKED_IN },
         points: 30,
         showcase: 5,
@@ -273,6 +281,7 @@ export const COURSES = [
         roles: ['AGENT', 'OPS', 'ADMIN', 'SUPER_ADMIN'],
         gate: 'reservations',
         kind: 'OPPORTUNISTIC',
+        needsRecord: '/reservations',
         verify: { type: VERIFY.PAYMENT_RECORDED },
         points: 15,
         showcase: null,
@@ -405,6 +414,21 @@ export const COURSES = [
           },
           {
             // ADMIN only, deliberately: the switcher never renders for a
+            anchor: 'person-type',
+            title: 'Pick what kind of person this is',
+            body: 'Employee, admin, host or virtual agent. The choice sets their starting permissions, so it is the first thing to get right — changing it later means re-checking everything below it.',
+          },
+          {
+            anchor: 'person-access-role',
+            title: 'Then their access role',
+            body: 'AGENT works the counter. OPS adds the operational screens. ADMIN can change settings and manage people. When in doubt give less: raising someone later is one click, undoing what they changed is an audit.',
+          },
+          {
+            anchor: 'person-locations',
+            title: 'Scope them to their branch',
+            body: 'Check the locations this person works at. Leaving every box UNCHECKED is not "no access" — it means they see ALL locations. That is the most common mistake on this screen.',
+          },
+          {
             // SUPER_ADMIN (they pick a tenant instead), so touring a super
             // admin past it would highlight nothing.
             anchor: 'view-location-switcher',

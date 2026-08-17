@@ -35,10 +35,67 @@ export function startTour({ track, steps, moduleKey = null }) {
   return { track, moduleKey, index: 0, total: steps.length, endedAs: null };
 }
 
-/** The step a state points at, or null once the tour has ended. */
+/**
+ * The step a state points at — or null when the tour has ended, OR while it
+ * is WAITING for the person to open the record it walks through.
+ *
+ * Waiting is not a step: the host must not hunt for an anchor, time out, and
+ * declare the tour broken while the person is still on their way to a
+ * reservation (Hector, 2026-08-17: "no me guía paso por paso").
+ */
 export function currentStep(state, steps) {
-  if (!state || state.endedAs) return null;
+  if (!state || state.endedAs || state.waiting) return null;
   return steps?.[state.index] || null;
+}
+
+/**
+ * Park a tour until its record is open, instead of ending it BROKEN.
+ *
+ * Only meaningful for modules that declare where the record lives: check-out,
+ * check-in and take-payment happen inside one reservation's page, so starting
+ * them from Ride University finds nothing. Rather than fail, the tour waits
+ * and springs to life the moment those anchors appear.
+ */
+export function waitForRecord(state, { midTour = false } = {}) {
+  if (!state) return null;
+  // `midTour` separates the two moments this happens, because they need
+  // different words: before anything has been shown the person must OPEN a
+  // reservation, but once the walkthrough is running they are already in one
+  // and simply have to move to the next screen (the check-out wizard), where
+  // the remaining steps live.
+  return { ...state, endedAs: null, waiting: true, midTour };
+}
+
+/**
+ * Where a parked tour should pick up: the FIRST step whose anchor is on
+ * screen right now — not necessarily step one.
+ *
+ * Both halves matter (Hector, 2026-08-17). Landing on the reservation page
+ * finds step one. But pressing "Start Check-out" navigates into the wizard,
+ * where step one's button no longer exists and steps two and three do — a
+ * scan that only ever checked step one would wait there forever, watching a
+ * page full of its own anchors.
+ *
+ * Returns null when nothing is showable yet, which means: keep waiting.
+ */
+export function resumeAt(state, steps, isPresent) {
+  if (!state || !Array.isArray(steps)) return null;
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    if (!step) continue;
+    if (isPresent(step.anchor)) {
+      const { waiting, ...rest } = state;
+      return { ...rest, index: i, endedAs: null };
+    }
+  }
+  return null;
+}
+
+/** Resume a parked tour — the host calls this when the route changes. */
+export function stopWaiting(state) {
+  if (!state) return null;
+  const { waiting, ...rest } = state;
+  return rest;
 }
 
 /**

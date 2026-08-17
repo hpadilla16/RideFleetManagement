@@ -111,7 +111,7 @@ export async function applyVoziaCustomerPatch(
   let oldEmailNotified = false;
   if (field === 'email' && before && before !== value && typeof sendEmail === 'function') {
     try {
-      await sendEmail({
+      await sendEmail({ tenantId: customer?.tenantId,
         to: before,
         subject: 'Your email on file was changed / Tu email en archivo fue cambiado',
         text:

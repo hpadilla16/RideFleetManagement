@@ -106,7 +106,7 @@ async function sendInviteEmail({ email, fullName, tempPassword, tenantName, role
     cta: { label: 'Sign in', url: loginUrl },
     preheader: 'Your account is ready',
   });
-  await sendEmail({ to: email, subject, text, html, fromName: tenantName || undefined });
+  await sendEmail({ tenantId: tenantId, to: email, subject, text, html, fromName: tenantName || undefined });
 }
 
 async function resolveTenant(tenantId) {
@@ -308,8 +308,8 @@ export const peopleService = {
       // Reserved by Ride University's practice mode (2026-08-16): User.email
       // is globally unique, so a tenant registering this address would
       // permanently brick practice sessions for EVERY tenant.
-      if (email.toLowerCase() === 'practica@ride.university') {
-        throw new Error('That email address is reserved by the platform');
+      if (email.toLowerCase().endsWith('@ride.university')) {
+        throw new Error('That email domain is reserved by the platform');
       }
       const existing = await prisma.user.findUnique({ where: { email } });
       if (existing) throw new Error('Email already registered');

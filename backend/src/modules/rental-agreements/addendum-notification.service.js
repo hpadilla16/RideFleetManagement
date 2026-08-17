@@ -262,7 +262,7 @@ async function _notifyAddendumAdmins({ agreement, addendum, tenantId }) {
       `the customer, or void the addendum.`
     ].join('\n');
 
-    await sendEmail({ to: adminEmails.join(','), subject, text });
+    await sendEmail({ tenantId: tenantId, to: adminEmails.join(','), subject, text });
 
     logger?.info?.('addendum-notification admins sent', {
       rentalAgreementId: agreement.id,

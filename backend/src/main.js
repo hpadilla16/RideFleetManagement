@@ -12,6 +12,8 @@ import { publicVehicleTelematicsRouter, vehiclesRouter } from './modules/vehicle
 import { inventoryRouter } from './modules/inventory/inventory.routes.js';
 import { locationsRouter } from './modules/locations/locations.routes.js';
 import { locationsSelectableRouter } from './modules/locations/locations-selectable.routes.js';
+import { vehicleTypesSelectableRouter } from './modules/vehicle-types/vehicle-types-selectable.routes.js';
+import { ratesBookingRouter } from './modules/rates/rates-booking.routes.js';
 import { locationHoursRouter } from './modules/locations/location-hours.routes.js';
 import { vehicleTypesRouter } from './modules/vehicle-types/vehicle-types.routes.js';
 import { additionalServicesRouter } from './modules/additional-services/additional-services.routes.js';
@@ -330,10 +332,18 @@ app.use('/api/locations', requireAuth, tenantRateLimit, locationHoursRouter);
 // empty dropdown and could not create reservations at all.
 app.use('/api/locations', requireAuth, tenantRateLimit, locationsSelectableRouter);
 app.use('/api/locations', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), locationsRouter);
+// The class list the booking form needs — any authenticated staff, mounted
+// before the ADMIN/OPS configuration gate below. Same fix, same reason as
+// locations-selectable above: a 403 was rendering as an empty dropdown and
+// no agent could pick a car (2026-08-17).
+app.use('/api/vehicle-types', requireAuth, tenantRateLimit, vehicleTypesSelectableRouter);
 app.use('/api/vehicle-types', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), vehicleTypesRouter);
 app.use('/api/additional-services', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), additionalServicesRouter);
 app.use('/api/fees', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), feesRouter);
 app.use('/api/stop-sales', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), stopSalesRouter);
+// The one rate READ the booking form needs: how short a rental may be. Any
+// authenticated staff, before the ADMIN/OPS pricing gate below (2026-08-17).
+app.use('/api/rates', requireAuth, tenantRateLimit, ratesBookingRouter);
 app.use('/api/rates', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), ratesRouter);
 app.use('/api/market-scraper', requireAuth, tenantRateLimit, requireModuleAccess('marketIntelligence'), requireRole('ADMIN', 'OPS'), marketScraperRouter);
 app.use('/api/market', requireAuth, tenantRateLimit, requireModuleAccess('marketIntelligence'), requireRole('ADMIN', 'OPS'), marketObservationsRouter);
@@ -400,6 +410,21 @@ app.use(appErrorHandler);
 
 // Catch-all: log to Sentry + return 500
 app.use((err, req, res, _next) => {
+  /**
+   * A 4xx a service DELIBERATELY threw is information for the caller, not an
+   * incident. This handler used to flatten everything to "Internal server
+   * error", so "No demo tenant is configured" (a 404 with a fix attached)
+   * reached the screen as an opaque 500 and cost an afternoon of debugging a
+   * feature that was working correctly (2026-08-17). 121 sites across the app
+   * throw AppError/.status 4xx and every one of them was being buried.
+   *
+   * 5xx keeps the old behavior exactly — opaque message, Sentry, console —
+   * because an UNEXPECTED error must never leak internals.
+   */
+  const status = Number(err?.status || err?.statusCode) || 500;
+  if (status >= 400 && status < 500) {
+    return res.status(status).json({ error: err?.message || 'Request failed' });
+  }
   captureBackendException(err, {
     request: {
       method: req.method,
@@ -409,7 +434,7 @@ app.use((err, req, res, _next) => {
     user: req.user?.sub ? { id: req.user.sub, tenantId: req.user?.tenantId || null, role: req.user?.role || null } : undefined
   });
   console.error(err);
-  res.status(500).json({ error: 'Internal server error' });
+  return res.status(500).json({ error: 'Internal server error' });
 });
 
 const port = process.env.PORT || 4000;

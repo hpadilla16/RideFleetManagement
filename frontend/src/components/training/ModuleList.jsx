@@ -49,10 +49,10 @@ export function ModuleList({ token, me }) {
 
   useEffect(() => { if (token) load(); }, [token, load]);
 
-  // Walking a module's steps to the end completes it — but only when there is
-  // nothing to prove. The server decides that from what was stamped at arming,
-  // so a module whose point is doing the real work stays armed no matter how
-  // many times someone walks the guide (2026-08-15).
+  // Reaching the end of a module's steps completes it (2026-08-17). The server
+  // still decides — the row must have been armed and not already completed —
+  // but a verify rule is no longer a gate on the guide: it is the other way
+  // in, for someone who does the real work without walking anything.
   useEffect(() => {
     const onWalked = async (event) => {
       const moduleKey = event?.detail?.moduleKey;
@@ -90,13 +90,23 @@ export function ModuleList({ token, me }) {
     window.dispatchEvent(new CustomEvent(TOUR_START_EVENT, { detail: { track: 'MODULE', moduleKey: module.key } }));
   };
 
+  /** Take a module again — clears the record so it starts from zero. */
+  const restartModule = async (module) => {
+    setBusyKey(module.key);
+    try {
+      await api(`/api/training/progress/${encodeURIComponent(module.key)}/reset`, { method: 'POST' }, token);
+      await load();
+    } catch { /* leave the row as it was; the button can be pressed again */ }
+    setBusyKey(null);
+  };
+
   /**
-   * The bridge into the demo tenant (2026-08-16). OPPORTUNISTIC modules only
-   * complete on real work — correct, and useless for rehearsal. This swaps
-   * the session for the shared practice AGENT on the demo tenant so a
-   * trainee can run the same flows against inventory that isn't real.
-   * Practice earns no points by construction: over there, you are the
-   * practice user. The PracticeBanner is the way back.
+   * The bridge into the demo tenant (2026-08-16). The hands-on modules run
+   * against real inventory, which a trainee does not have — this swaps the
+   * session for their own practice AGENT on the demo tenant so they can run
+   * the same flows against data that is not. What they finish in there DOES
+   * count: the token names them, so progress lands on their real record.
+   * The PracticeBanner is the way back.
    */
   const practice = async () => {
     setPracticeError('');
@@ -139,7 +149,7 @@ export function ModuleList({ token, me }) {
               className="button-subtle"
               disabled={busyKey === '__practice'}
               onClick={practice}
-              title={t('training.practiceHint', 'Rehearse the hands-on modules on the demo tenant — no real data, no points')}
+              title={t('training.practiceHint', 'Rehearse the hands-on modules on the demo tenant — no real data, and it counts toward your training')}
             >
               {busyKey === '__practice'
                 ? t('training.practiceOpening', 'Opening practice…')
@@ -214,6 +224,17 @@ export function ModuleList({ token, me }) {
                             ? t('training.showMeAgain', 'Show me again')
                             : t('training.start', 'Start')}
                       </button>
+                      {(done || armed) && (
+                        <button
+                          type="button"
+                          className="button-subtle"
+                          disabled={busyKey === m.key}
+                          onClick={() => restartModule(m)}
+                          title={t('training.restartHint', 'Clear this module and take it from the beginning')}
+                        >
+                          {t('training.restart', 'Start over')}
+                        </button>
+                      )}
                     </div>
                   </div>
                 );

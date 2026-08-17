@@ -1096,6 +1096,18 @@
           "view-location-switcher": {
             "title": "Viendo como una sucursal",
             "body": "Cualquiera con más de una ubicación tiene este selector. Cambia lo que ve en todas partes — incluyendo lo que traen sus exports."
+          },
+          "person-type": {
+            "title": "Escoge qué tipo de persona es",
+            "body": "Empleado, admin, host o agente virtual. Esa decisión fija sus permisos iniciales, así que es lo primero que hay que acertar — cambiarla después obliga a revisar todo lo de abajo otra vez."
+          },
+          "person-access-role": {
+            "title": "Después su rol de acceso",
+            "body": "AGENT trabaja el mostrador. OPS añade las pantallas de operaciones. ADMIN puede cambiar configuración y manejar personal. En la duda, da menos: subir a alguien después es un clic; deshacer lo que cambió es una auditoría."
+          },
+          "person-locations": {
+            "title": "Limítalo a su sede",
+            "body": "Marca las sedes donde trabaja esta persona. Dejar TODAS las casillas sin marcar no es \"sin acceso\" — significa que ve TODAS las sedes. Ese es el error más común de esta pantalla."
           }
         }
       },
@@ -1142,16 +1154,27 @@
       }
     },
     "gotchaLabel": "Dónde se traba la gente",
-    "practiceBanner": "MODO PRÁCTICA — tenant de demostración. Nada de esto toca datos reales, y la práctica no da puntos.",
+    "practiceBanner": "MODO PRÁCTICA — tenant de demostración. Nada de esto toca datos reales, y lo que completes cuenta para tu entrenamiento.",
     "practiceExit": "Volver a mi cuenta",
     "practiceCta": "🎓 Practicar en el tenant Demo",
     "practiceOpening": "Abriendo la práctica…",
-    "practiceHint": "Ensaya los módulos prácticos en el tenant de demostración — sin datos reales, sin puntos",
+    "practiceHint": "Ensaya los módulos prácticos en el tenant de demostración — sin datos reales, y cuenta para tu entrenamiento",
     "welcomeTitle": "Bienvenido a Ride Fleet",
     "welcomeBody": "¿Primera vez por aquí? En cinco minutos te enseño dónde vive todo — y puedes relanzar el tour cuando quieras desde Ride University.",
     "welcomeStart": "Enséñame",
     "welcomeLater": "Ahora no",
     "practiceError": "No se pudo abrir el modo práctica — intenta de nuevo.",
-    "practiceImpersonation": "Sal de la vista de tenant primero y luego inicia la práctica."
+    "practiceImpersonation": "Sal de la vista de tenant primero y luego inicia la práctica.",
+    "needsRecordTitle": "Primero abre una reserva",
+    "needsRecordBody": "\"{{name}}\" se recorre dentro de una reserva — por eso no pasó nada. Abre cualquier reserva (o usa Practicar en el tenant Demo) y vuelve a pulsar Empezar.",
+    "needsRecordCta": "Ir a reservaciones",
+    "tourUnavailableTitle": "Esta guía no está disponible aquí",
+    "tourUnavailableBody": "Un paso de esta guía apunta a algo que no está en pantalla. Avísale a un administrador para que la arreglemos.",
+    "close": "Cerrar",
+    "waitingForRecord": "Abre cualquier reserva para empezar \"{{name}}\" — la guía sigue ahí.",
+    "cancel": "Cancelar",
+    "waitingNextScreen": "Sigue — abre la siguiente pantalla y la guía continúa ahí.",
+    "restart": "Empezar de nuevo",
+    "restartHint": "Borra este módulo y lo tomas desde el principio"
   }
 }

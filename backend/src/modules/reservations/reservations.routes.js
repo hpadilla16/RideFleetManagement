@@ -1680,7 +1680,7 @@ reservationsRouter.post('/:id/send-request-email', async (req, res, next) => {
         cta: link ? { label: kind === 'payment' ? 'Pay now' : kind === 'signature' ? 'Review & sign' : 'Complete now', url: link } : undefined,
         preheader: render(subjectTpl) || `${actionLabel} - Reservation ${current.reservationNumber}`,
       });
-      await sendEmail({
+      await sendEmail({ tenantId: current.tenantId,
         to: recipients.join(','), fromName: companyName,
         subject: render(subjectTpl) || `${actionLabel} - Reservation ${current.reservationNumber}`,
         text: reqText,
@@ -2093,7 +2093,7 @@ reservationsRouter.post('/:id/send-detail-email', async (req, res, next) => {
       preheader: subject,
     });
 
-    await sendEmail({
+    await sendEmail({ tenantId: current.tenantId,
       to: recipients.join(','), fromName: current.pickupLocation?.name || undefined,
       subject,
       text,
