@@ -35,6 +35,9 @@
 Recomendación PM: aprobar P1+P2+P3 juntos (≤2.5 días backend, un solo PR-tren con su
 ciclo Innovation→QA→CI verde→deploy ANTES de que M2-H6 los consuma).
 
+> **APROBADO por Hector (2026-08-17): P1+P2+P3 completos.** P4 diferido a M3. El PR-tren
+> arranca de inmediato (en paralelo con M1-H4/H5) para que el deploy tenga margen.
+
 ## 2. Historias (una por rama)
 
 | Historia | Contenido | Depende de |
