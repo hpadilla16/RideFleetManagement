@@ -217,13 +217,19 @@ class ConflictBanner extends StatelessWidget {
       CheckoutConflictKind.entryGuard => l10n.coConflictEntryGuardTitle,
       CheckoutConflictKind.vehicleConflict => l10n.coConflictVehicleTitle,
       CheckoutConflictKind.terminal => l10n.coTerminalBody,
+      CheckoutConflictKind.swapLocked => l10n.coConflictSwapTitle,
       CheckoutConflictKind.generic => l10n.coConflictGenericTitle,
     };
-    // ENTRY_GUARD: además del mensaje del servidor, se nombra QUÉ falta con
-    // el mismo copy que la lista de pasos ya anticipaba con el candado.
-    final guardLine = conflict.guard == null
-        ? null
-        : guardLabel(l10n, conflict.guard!);
+    // Línea de CAUSA traducida encima del cuerpo del servidor. Nació con
+    // ENTRY_GUARD (se nombra QUÉ falta, con el mismo copy que la lista de
+    // pasos ya anticipaba con el candado) y la reusa `SWAP_LOCKED`, cuyo
+    // mensaje del backend filtra un enum crudo de base de datos
+    // (`currentStep=INSPECTION_IN_PROGRESS`, review INN-S-2). El cuerpo del
+    // servidor NO se sustituye: se enmarca.
+    final guardLine = switch (conflict.kind) {
+      CheckoutConflictKind.swapLocked => l10n.coSwapLockedCause,
+      _ => conflict.guard == null ? null : guardLabel(l10n, conflict.guard!),
+    };
     return WizardBanner(
       icon: Icons.error_outline_rounded,
       iconColor: RideTokens.dangerTx,

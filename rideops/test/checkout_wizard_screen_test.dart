@@ -26,6 +26,7 @@ import 'package:rideops/features/checkout/presentation/widgets/steps_sheet.dart'
 import 'package:rideops/features/checkout/presentation/widgets/terminal_view.dart';
 import 'package:rideops/features/checkout/presentation/widgets/wizard_banners.dart';
 import 'package:rideops/features/checkout/presentation/widgets/wizard_chrome.dart';
+import 'package:rideops/features/checkout/presentation/widgets/wizard_dock.dart';
 import 'package:rideops/features/checkout/presentation/widgets/wizard_skeleton.dart';
 
 import 'helpers/auth_test_helpers.dart';
@@ -518,8 +519,19 @@ void main() {
     testWidgets('el header responde "para cuándo" y no repite el número de '
         'reserva del wizbar', (tester) async {
       final f = fakes();
+      // Se ancla en un paso SIN cuerpo propio, que es donde el header va
+      // COMPLETO y responde las tres preguntas del patio.
+      //
+      // Ojo con el porqué: esta prueba NO estaba mal. En H1 la regla era
+      // `mini = _sheetOpen || state.offline`, así que en CONFIRMING el header
+      // iba completo y aquí se medía el header de verdad. Lo invalidó H2 al
+      // meter `_hasStepBody` en esa regla (checkout_wizard_screen.dart:165):
+      // desde entonces CONFIRMING tiene cuerpo propio, el header va mini y lo
+      // que se estaría midiendo serían las tarjetas del paso.
+      f.api.current = sessionAt(CheckoutStep.paymentPending);
       await pumpWizard(tester, api: f.api, network: f.network);
 
+      expect(find.textContaining('Departs'), findsOneWidget);
       expect(find.textContaining('Pre-check-in done'), findsOneWidget);
       expect(find.textContaining('Odometer'), findsOneWidget);
       // El número vive SOLO en el wizbar.
@@ -555,6 +567,41 @@ void main() {
       );
       expect(why.textAlign, TextAlign.center);
       expect(why.style!.fontSize, 12.5);
+    });
+
+    testWidgets('GD-SC-3 — hay UN dock, no tres: el CTA de avance y el dock de '
+        'conflicto salen del mismo WizardDock', (tester) async {
+      final f = fakes();
+      await pumpWizard(
+        tester,
+        api: f.api,
+        network: f.network,
+        child: const TransitionButton(
+          reservationId: kReservationId,
+          toStep: CheckoutStep.tcPending,
+          label: 'Continue to T&C',
+        ),
+      );
+      expect(
+        find.descendant(
+          of: find.byType(TransitionButton),
+          matching: find.byType(WizardDock),
+        ),
+        findsOneWidget,
+      );
+
+      // Y el del 9D, que H2 había reimplementado con la misma geometría copiada.
+      f.api.onTransition = (_) async => throw ApiError(
+            kind: ApiErrorKind.conflict,
+            status: 409,
+            code: 'VEHICLE_CONFLICT',
+            message: 'Vehicle is still out on open rental R-2466',
+          );
+      await pumpWizard(tester, api: f.api, network: f.network);
+      await tester.tap(find.text('Continue to T&C'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(WizardDock, 'Pick another vehicle'),
+          findsOneWidget);
     });
 
     testWidgets('los sheets usan el scrim de marca y respetan la safe area',

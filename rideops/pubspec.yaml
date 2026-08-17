@@ -61,6 +61,37 @@ dependencies:
   # Observabilidad (decisión M0-4: Sentry — el backend ya reporta ahí).
   sentry_flutter: ^9.0.0
 
+  # QR del paso T&C (M2-H2). Se elige el codificador PURO (`qr`, sin widget)
+  # en vez de `qr_flutter`: el paquete Flutter no se publica desde 2023 y lo
+  # único que aporta es un CustomPainter que aquí tiene que ser NUESTRO —
+  # quiet zone de 4 módulos, negro puro 21:1 y el estado "vencido" del 10D son
+  # reglas del sistema de diseño, no de un paquete. Codificar QR a mano
+  # (Reed–Solomon + máscaras) sí sería temerario en una ruta de firma legal:
+  # un QR mal codificado deja al cliente sin poder firmar.
+  qr: ^4.0.0
+
+  # Modo PRESENTACIÓN del paso T&C (M2-H2, review GD-MC-2). Desviación
+  # DECLARADA de ADR-2 (stack cerrado), autorizada junto con `qr`: el mockup
+  # 10B pide brillo al máximo y pantalla despierta mientras el cliente escanea,
+  # y las dos cosas son APIs de plataforma — no hay forma de hacerlas desde
+  # Dart puro.
+  #
+  #  - wakelock_plus: sucesor mantenido de `wakelock` (discontinuado), del
+  #    flutter-community; federado y con implementación Android actual. En
+  #    Android NO pide permiso ninguno: pone `FLAG_KEEP_SCREEN_ON` sobre la
+  #    ventana de la actividad (Wakelock.kt:24-26), no un PowerManager.WakeLock
+  #    — su manifest no declara WAKE_LOCK y no hace falta. Sin él, el teléfono
+  #    se atenúa y se bloquea a los ~30 s CON EL QR EN LA CARA DEL CLIENTE.
+  #  - screen_brightness: el único paquete vivo que ajusta el brillo por
+  #    VENTANA de la app en Android (WindowManager.LayoutParams.screenBrightness)
+  #    en vez de tocar el brillo del SISTEMA. Esa distinción es la que hace que
+  #    la restauración sea garantizada en Android: si el proceso muere, el
+  #    override muere con la ventana. iOS sí es global (UIScreen.brightness) y
+  #    ahí la garantía es solo la de nuestro `dispose` — anotado en
+  #    `presentation_mode.dart`, y en esta máquina no hay build de iOS.
+  wakelock_plus: ^1.5.2
+  screen_brightness: ^2.1.11
+
   intl: any
 
 dev_dependencies:

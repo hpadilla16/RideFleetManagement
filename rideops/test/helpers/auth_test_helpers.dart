@@ -204,6 +204,18 @@ Map<String, dynamic> readJsonFixture(String name) {
   return json.decode(file.readAsStringSync()) as Map<String, dynamic>;
 }
 
+/// Fixture de un endpoint que responde ARRAY PLANO (sin envoltura), como
+/// `GET /api/reservations/:id/available-vehicles` o `/locations/selectable`.
+/// El fixture guarda la forma REAL del serializer; envolverlo en un objeto
+/// para que quepa en [readJsonFixture] sería falsear el contrato.
+List<Map<String, dynamic>> readJsonListFixture(String name) {
+  final file = File('test/fixtures/$name');
+  return [
+    for (final row in json.decode(file.readAsStringSync()) as List<dynamic>)
+      row as Map<String, dynamic>,
+  ];
+}
+
 /// Logger que captura eventos para asertar la taxonomía.
 class CapturingEventLogger implements EventLogger {
   final events = <(String, Map<String, Object?>)>[];

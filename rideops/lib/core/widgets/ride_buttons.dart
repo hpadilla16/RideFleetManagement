@@ -86,37 +86,69 @@ class RidePrimaryButton extends StatelessWidget {
 }
 
 /// Botón secundario "ghost" (48 px, borde neutro) — p. ej. "Reintentar".
+///
+/// [loading] existe por el review GD-MC-5: "Volver a consultar" disparaba dos
+/// peticiones y **no mostraba nada**, así que el agente no podía distinguir
+/// "está consultando" de "el botón no hizo nada" y volvía a tocarlo. Mismo
+/// contrato que [RidePrimaryButton]: cargando ⇒ spinner + deshabilitado.
 class RideGhostButton extends StatelessWidget {
   const RideGhostButton({
     super.key,
     required this.label,
     required this.onPressed,
+    this.loading = false,
+    this.loadingLabel,
   });
 
   final String label;
   final VoidCallback? onPressed;
+  final bool loading;
+  final String? loadingLabel;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: RideTokens.n0,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: onPressed,
+    final enabled = onPressed != null && !loading;
+    return Opacity(
+      opacity: onPressed == null ? 0.55 : 1,
+      child: Material(
+        color: RideTokens.n0,
         borderRadius: BorderRadius.circular(14),
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 48),
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            border: Border.all(color: RideTokens.n300, width: 1.5),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Text(
-            label,
-            style: const TextStyle(
-              color: RideTokens.n800,
-              fontSize: 14.5,
-              fontWeight: FontWeight.w800,
+        child: InkWell(
+          onTap: enabled ? onPressed : null,
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 48),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              border: Border.all(color: RideTokens.n300, width: 1.5),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (loading) ...[
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: RideTokens.p600,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                Flexible(
+                  child: Text(
+                    loading ? (loadingLabel ?? label) : label,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: RideTokens.n800,
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),

@@ -40,6 +40,7 @@ class CheckoutEvent {
     this.at,
     this.kiosk = false,
     this.reason,
+    this.declined,
   });
 
   /// SESSION_STARTED | TRANSITION | ABANDONED | … (puede faltar en filas
@@ -53,6 +54,11 @@ class CheckoutEvent {
   /// `metadata.kiosk == true`.
   final bool kiosk;
   final String? reason;
+
+  /// Payload del evento `DECLINED_INSURANCE` (service:841-845). Es la ÚNICA
+  /// lectura server-side del switch de 9C que existe hoy: display-data no
+  /// devuelve `agreement.declinedInsurance` (ver el WHY en el DTO).
+  final bool? declined;
 
   /// Una entrada con destino ES una transición aunque no traiga `kind`
   /// (tolerancia a filas escritas antes de que `appendEvent` lo sellara).
@@ -79,6 +85,7 @@ class CheckoutEvent {
       at: DateTime.tryParse(map['at'] as String? ?? ''),
       kiosk: metadata is Map && metadata['kiosk'] == true,
       reason: map['reason'] as String?,
+      declined: map['declined'] as bool?,
     );
   }
 }
@@ -108,6 +115,15 @@ CheckoutEvent? lastTransitionTo(List<CheckoutEvent> events, String toStep) {
   for (var i = events.length - 1; i >= 0; i--) {
     final e = events[i];
     if (e.isTransition && e.to == toStep) return e;
+  }
+  return null;
+}
+
+/// Último evento de [kind] (`DECLINED_INSURANCE`, `VEHICLE_SWAP`,
+/// `TOKEN_MINTED`…). El backend hace push, así que el último gana.
+CheckoutEvent? lastEventOfKind(List<CheckoutEvent> events, String kind) {
+  for (var i = events.length - 1; i >= 0; i--) {
+    if (events[i].kind == kind) return events[i];
   }
   return null;
 }

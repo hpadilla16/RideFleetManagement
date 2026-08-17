@@ -668,6 +668,7 @@
   "coConflictEntryGuardTitle": "Falta un paso previo",
   "coConflictVehicleTitle": "El vehículo ya no está libre",
   "coConflictGenericTitle": "El servidor no aceptó el avance",
+  "coConflictSwapTitle": "El servidor no aceptó el cambio de unidad",
   "coConflictDismiss": "Entendido",
   "coPickupToday": "Salida hoy {time}",
   "@coPickupToday": {
@@ -771,5 +772,167 @@
     "description": "El texto del backend se muestra tal cual (DoD #5) junto al copy localizado: trae los datos concretos (la regla de edad exacta, el número de la otra reserva)",
     "placeholders": { "message": { "type": "String" } }
   },
-  "coEntryClose": "Cerrar"
+  "coEntryClose": "Cerrar",
+
+  "coConfirmCustomer": "Cliente",
+  "coConfirmVehicle": "Vehículo",
+  "coConfirmVerified": "Verificado",
+  "coConfirmMissingPill": "Faltan datos",
+  "coConfirmConflictPill": "En conflicto",
+  "coConfirmName": "Nombre",
+  "coConfirmLicense": "Licencia",
+  "coConfirmLicenseWithExpiry": "{number} · vence {date}",
+  "@coConfirmLicenseWithExpiry": {
+    "description": "El vencimiento sale del snapshot del contrato: el modelo Customer no tiene esa columna.",
+    "placeholders": {
+      "number": { "type": "String" },
+      "date": { "type": "String" }
+    }
+  },
+  "coConfirmPhone": "Teléfono",
+  "coConfirmPrecheckin": "Pre-checkin",
+  "coConfirmPrecheckinDone": "Completado",
+  "@coConfirmPrecheckinDone": {
+    "description": "VALOR de la fila cuya clave ya dice 'Pre-checkin' (review GD-MC-6): con coPrecheckinReady se leía 'Pre-checkin | Pre-checkin listo'. Se usa cuando el servidor sella el pre-checkin pero no llega la hora."
+  },
+  "coConfirmPrecheckinDoneAt": "Completado {time}",
+  "@coConfirmPrecheckinDoneAt": {
+    "description": "Caso normal: display-data trae customerInfoCompletedAt, así que la fila dice CUÁNDO, como el mockup 9A.",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coConfirmPrecheckinPending": "Pendiente",
+  "coConfirmMissingValue": "Sin capturar",
+  "coConfirmUnit": "Unidad",
+  "coConfirmOdometerLabel": "Odómetro",
+  "coOdometerValue": "{km} km",
+  "@coOdometerValue": {
+    "placeholders": { "km": { "type": "String" } }
+  },
+  "coConfirmVehicleAvailable": "Disponible",
+  "coConfirmChangeVehicle": "Cambiar vehículo",
+  "coConfirmCta": "Continuar a T&C",
+  "coConfirmFieldName": "el nombre",
+  "coConfirmFieldLicense": "la licencia",
+  "coConfirmFieldPhone": "el teléfono",
+  "coConfirmFieldJoin": "y",
+  "coConfirmBlockedWhy": "Faltan {fields} del cliente. Se capturan en el mostrador o con el pre-checkin del cliente; esta pantalla se actualiza sola.",
+  "@coConfirmBlockedWhy": {
+    "description": "Bloqueo LOCAL con causa nombrada (9B). El CTA no se esconde: se bloquea diciendo qué falta y dónde se resuelve. RideOps no captura datos del cliente (ADR-1: eso vive en el mostrador web).",
+    "placeholders": { "fields": { "type": "String" } }
+  },
+  "coConfirmRecheck": "Actualizar datos del cliente",
+  "@coConfirmRecheck": {
+    "description": "Review GD-MC-5: la etiqueta NOMBRA el objeto. 'Volver a consultar' no decía qué se consulta y chocaba con el why de al lado, que ya promete que la pantalla se actualiza sola."
+  },
+  "coConfirmRecheckPending": "Consultando al servidor…",
+  "coConfirmRecheckedStill": "Consultado ahora: el servidor sigue sin {fields}.",
+  "@coConfirmRecheckedStill": {
+    "description": "Acuse del re-consultado (GD-MC-5b): el botón disparaba dos peticiones y NO mostraba nada. Reusa la misma lista legible de campos que el bloqueo.",
+    "placeholders": { "fields": { "type": "String" } }
+  },
+  "coDeclineTitle": "El cliente declina el seguro",
+  "coDeclineOff": "Apagado · se cobra la cobertura estándar",
+  "coDeclineOn": "Encendido · se agrega el anexo",
+  "coDeclineLocked": "Los términos ya se firmaron: el anexo del seguro ya no cambia aquí",
+  "coDeclineNeedsNetwork": "Sin conexión: esta bandera la registra el servidor",
+  "coDeclineConsequence": "Se agregará el anexo de rechazo de cobertura a los términos que firma el cliente y al contrato PDF. Puedes apagarlo mientras no se firmen los términos.",
+  "coDeclineSignedNote": "El cliente ya firmó los términos con este anexo. Para cambiarlo, el contrato se ajusta desde el mostrador.",
+  "coConflictSwapCta": "Elegir otro vehículo",
+  "coConflictSwapWhy": "Nada se perdió: al cambiar la unidad sigues en el paso 1 con el cliente ya verificado.",
+
+  "coSwapTitle": "Cambiar vehículo",
+  "coSwapSub": "Disponibles según el servidor · hace {age}",
+  "@coSwapSub": {
+    "description": "El endpoint filtra por tenant y ventana de la reserva, NO por la sede activa: la copy no promete una sede que el servidor no filtró; cada opción muestra la suya.",
+    "placeholders": { "age": { "type": "String" } }
+  },
+  "coSwapSubLoading": "Preguntando al servidor qué unidades están libres…",
+  "coSwapSameGroup": "Mismo grupo",
+  "coSwapOtherGroup": "Otro grupo · puede cambiar la tarifa",
+  "coSwapCurrentReason": "Unidad actual · una unidad no se cambia por sí misma",
+  "coSwapCurrentCommitted": "Unidad actual · el servidor la reporta comprometida en otra renta",
+  "@coSwapCurrentCommitted": {
+    "description": "Parte de MC-4 que no depende de la lámina: el 'motivo legible' de la unidad inerte era el string EN INGLÉS del servidor metido en un renglón de 12.5 px donde no cabe una cita. La cita del servidor vive en el banner del paso; aquí va copy propia."
+  },
+  "coSwapLockedCause": "La inspección de esta sesión ya empezó: a partir de ahí la unidad ya no se cambia.",
+  "@coSwapLockedCause": {
+    "description": "409 SWAP_LOCKED (vehicle-swap.service.js:46-51). Línea de causa TRADUCIDA arriba del cuerpo del servidor — mismo tratamiento que ENTRY_GUARD. Importa especialmente aquí: el mensaje del backend filtra un enum crudo de base de datos (currentStep=INSPECTION_IN_PROGRESS), y el agente no tiene por qué descifrarlo."
+  },
+  "coSwapDoubleBookedCause": "Esa unidad ya está reservada en esta misma ventana.",
+  "@coSwapDoubleBookedCause": {
+    "description": "409 VEHICLE_DOUBLE_BOOKED (vehicle-swap.service.js:86-91). El cuerpo del servidor sigue visible debajo: trae el número de la reserva que la aparta."
+  },
+  "coSwapTerminalCause": "Esa unidad ya no se puede rentar.",
+  "@coSwapTerminalCause": {
+    "description": "409 VEHICLE_TERMINAL (vehicle-swap.service.js:67-72): vendida o fuera de servicio. Cuál de las dos lo dice el cuerpo del servidor, debajo."
+  },
+  "coSwapConfirm": "Cambiar a {unit}",
+  "@coSwapConfirm": {
+    "placeholders": { "unit": { "type": "String" } }
+  },
+  "coSwapConfirmNone": "Elige una unidad",
+  "coSwapCancel": "Cancelar",
+  "coSwapEmpty": "El servidor no reporta otras unidades libres para esta ventana.",
+  "coSwapNeedsNetwork": "Cambiar de unidad necesita conexión: el cambio lo hace el servidor sobre la reserva y el contrato.",
+
+  "coQrSemanticLabel": "Código QR para firmar los términos",
+  "@coQrSemanticLabel": {
+    "description": "Etiqueta para lectores de pantalla del QR. Antes era la URL FIRMADA completa: TalkBack dictaba el token en voz alta y ese token es una credencial al portador (review GD-SC-8 / INN-S-4)."
+  },
+  "coTermsInstruction": "Que el cliente lo escanee con la cámara de su teléfono para firmar.",
+  "coTermsExpiresIn": "Vence en",
+  "coTermsExpired": "Vencido",
+  "coTermsPresent": "Mostrar al cliente (pantalla completa)",
+  "coTermsWaiting": "Esperando la firma del cliente. Esta pantalla se actualiza sola.",
+  "coTermsReissue": "Generar código nuevo",
+  "coTermsReissueWhy": "Si al código vigente le quedan más de 2 minutos, el servidor devuelve el mismo: el cliente puede seguir con el QR que ya tiene.",
+  "coTermsReused": "Sigue siendo el mismo código: al vigente le quedan más de 2 minutos y el servidor lo reusa. Si el cliente ya lo escaneó, no tiene que volver a hacerlo.",
+  "@coTermsReused": {
+    "description": "Nota 9 del mockup: la re-emisión admite cuándo el backend reusó el token en vez de fingir que emitió otro."
+  },
+  "coTermsReissued": "Código nuevo listo. El anterior dejó de servir.",
+  "coTermsExpiredBanner": "El código venció a las {time}. Nada se perdió: genera uno nuevo y el cliente firma igual.",
+  "@coTermsExpiredBanner": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTermsExpiredOverlay": "Código vencido",
+  "coTermsExpiredWhy": "El código nuevo dura otros 15 minutos. Si el cliente ya había abierto el anterior, tendrá que abrir el nuevo.",
+  "coTermsMinting": "Pidiendo el código al servidor…",
+  "coTermsMintFailed": "No se pudo emitir el código.",
+  "coTermsOfflineWhy": "El código lo emite el servidor: sin conexión no hay QR que mostrar.",
+  "coTermsSignedTitle": "Términos firmados",
+  "coTermsSignedBody": "{name} firmó a las {time}. Ya puedes seguir con el cobro.",
+  "@coTermsSignedBody": {
+    "description": "No se afirma DÓNDE firmó: el sello puede venir del teléfono del cliente o del kiosco, y la sesión no lo distingue.",
+    "placeholders": {
+      "name": { "type": "String" },
+      "time": { "type": "String" }
+    }
+  },
+  "coTermsSignedBodyNoName": "Los términos se firmaron a las {time}. Ya puedes seguir con el cobro.",
+  "@coTermsSignedBodyNoName": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTermsRecord": "Registro",
+  "coTermsRecordConfirmed": "Confirmado por el servidor",
+  "coTermsRecordSigned": "Firmado",
+  "coTermsRecordAddenda": "Anexos",
+  "coTermsAddendaNone": "Ninguno (seguro aceptado)",
+  "coTermsAddendaDecline": "Anexo de rechazo de cobertura",
+  "coTermsCta": "Continuar al cobro",
+  "coTermsCtaWhy": "Este botón solo existe porque el servidor ya tiene la firma registrada.",
+
+  "coPresentInstruction": "Escanee este código con la cámara de su teléfono para leer y firmar los términos.",
+  "coPresentHelp": "¿Problemas para escanear? El agente puede ayudarle.",
+  "coPresentExit": "Salir de presentación",
+  "coPresentSubtitle": "Términos de renta · Reserva {number}",
+  "@coPresentSubtitle": {
+    "placeholders": { "number": { "type": "String" } }
+  },
+  "coPresentSubtitleNoNumber": "Términos de renta",
+  "coPresentClosingSoon": "Quedan {mmss} — si se vence, el agente le genera otro al instante.",
+  "@coPresentClosingSoon": {
+    "description": "Nota 12: al cliente NO se le pone un reloj en la cara; el countdown solo aparece bajo 2 min y con copy tranquilizadora.",
+    "placeholders": { "mmss": { "type": "String" } }
+  }
 }

@@ -2,14 +2,19 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:clock/clock.dart';
 import 'package:dio/dio.dart';
 import 'package:rideops/core/api/checkout_api.dart';
+import 'package:rideops/core/api/dto/available_vehicle.dart';
 import 'package:rideops/core/api/dto/checkout_session.dart';
+import 'package:rideops/core/api/dto/inspection.dart';
 import 'package:rideops/core/api/dto/reservation_display.dart';
 import 'package:rideops/core/api/enums.dart';
 // PrecheckinLinkResult vive junto a ReservationsApi.
 import 'package:rideops/core/api/reservations_api.dart';
 import 'package:rideops/core/session/active_location.dart';
+import 'package:rideops/core/session/lock_controller.dart';
+import 'package:rideops/core/session/lock_state.dart';
 import 'package:rideops/core/session/session_controller.dart';
 import 'package:rideops/core/session/session_state.dart';
 
@@ -81,6 +86,27 @@ CheckoutSessionDto sessionAt(
   return CheckoutSessionDto.fromJson(raw);
 }
 
+/// Sesión a partir de un mapa ya manipulado por el test (events a medida).
+CheckoutSessionDto sessionFromRaw(Map<String, dynamic> raw) =>
+    CheckoutSessionDto.fromJson(raw);
+
+/// Token de T&C del fixture, vivo por [ttl] desde ahora.
+///
+/// [reused] refleja el re-uso idempotente del backend (>2 min restantes
+/// devuelven el MISMO token) — es lo que decide la copy de la re-emisión.
+HandoffToken termsToken({
+  Duration ttl = const Duration(minutes: 15),
+  bool reused = false,
+  String token = 'tok_terms_fixture_0001',
+}) {
+  return HandoffToken(
+    token: token,
+    expiresAt: clock.now().add(ttl),
+    kind: 'TERMS_SIGNING',
+    reused: reused,
+  );
+}
+
 /// CheckoutApi con handlers inyectables. Los Dio de super nunca se usan.
 class FakeCheckoutApi extends CheckoutApi {
   FakeCheckoutApi() : super(authedDio: Dio(), publicDio: Dio());
@@ -99,11 +125,20 @@ class FakeCheckoutApi extends CheckoutApi {
   /// idempotencia se prueba contando llamadas, no adivinando.
   final created = <String>[];
 
+  int termsTokenCalls = 0;
+  int declinedInsuranceCalls = 0;
+  int swapCalls = 0;
+  final declinedValues = <bool>[];
+  final swappedVehicleIds = <String>[];
+
   Future<CheckoutSessionDto?> Function()? onByReservation;
   Future<CheckoutSessionDto> Function()? onGet;
   Future<CheckoutSessionDto> Function(String toStep)? onTransition;
   Future<CheckoutSessionDto> Function()? onAbandon;
   Future<CheckoutSessionDto> Function(String reservationId)? onCreate;
+  Future<HandoffToken> Function()? onMintTermsToken;
+  Future<CheckoutSessionDto> Function(bool declined)? onDeclinedInsurance;
+  Future<VehicleSwapResult> Function(String newVehicleId)? onSwapVehicle;
 
   /// Cuando está puesto, TODA respuesta espera a que el test lo complete —
   /// así se prueban el skip con request en vuelo y el anti-doble-tap.
@@ -163,6 +198,46 @@ class FakeCheckoutApi extends CheckoutApi {
     return _maybeGate(current!);
   }
 
+  /// Mint del token de T&C. Responde SIEMPRE algo válido por defecto: sin
+  /// esto, cualquier test que aterrice en TC_PENDING dejaría la pantalla en
+  /// "pidiendo el código" con su spinner — y un spinner vivo hace que
+  /// `pumpAndSettle` no termine nunca.
+  @override
+  Future<HandoffToken> mintTermsToken(String checkoutSessionId) async {
+    termsTokenCalls++;
+    if (onMintTermsToken != null) return onMintTermsToken!();
+    return _maybeGate(termsToken());
+  }
+
+  @override
+  Future<CheckoutSessionDto> setDeclinedInsurance({
+    required String id,
+    required bool declined,
+  }) async {
+    declinedInsuranceCalls++;
+    declinedValues.add(declined);
+    if (onDeclinedInsurance != null) return onDeclinedInsurance!(declined);
+    return _maybeGate(current!);
+  }
+
+  @override
+  Future<VehicleSwapResult> swapVehicle({
+    required String id,
+    required String newVehicleId,
+  }) async {
+    swapCalls++;
+    swappedVehicleIds.add(newVehicleId);
+    if (onSwapVehicle != null) return onSwapVehicle!(newVehicleId);
+    return _maybeGate(
+      VehicleSwapResult(
+        sessionId: id,
+        fromVehicleId: 'cmea77xh20003vehu112',
+        toVehicleId: newVehicleId,
+        session: current!,
+      ),
+    );
+  }
+
   @override
   Future<CheckoutSessionDto> createForReservation(String reservationId) async {
     createCalls++;
@@ -189,18 +264,42 @@ class FakePrecheckinReservationsApi extends FakeReservationsApi {
   }
 }
 
-/// display-data del fixture real (contexto best-effort del header).
+/// display-data del fixture real (contexto best-effort del header) y las
+/// unidades disponibles del sheet de swap.
 class FakeReservationsApi extends ReservationsApi {
   FakeReservationsApi({this.fail = false}) : super(authedDio: Dio());
 
   final bool fail;
 
+  /// Permite mutar el payload por escenario (dato faltante, unidad cambiada
+  /// tras el swap) sin tocar el fixture en disco.
+  Map<String, dynamic> Function(Map<String, dynamic> raw)? patchDisplayData;
+
+  int displayDataCalls = 0;
+  int availableVehiclesCalls = 0;
+  Future<List<AvailableVehicle>> Function()? onAvailableVehicles;
+
   @override
   Future<ReservationDisplayData> getDisplayData(String reservationId) async {
+    displayDataCalls++;
     if (fail) throw StateError('display-data caído');
+    final raw = readJsonFixture('reservation_display_data.json');
     return ReservationDisplayData.fromJson(
-      readJsonFixture('reservation_display_data.json'),
+      patchDisplayData == null ? raw : patchDisplayData!(raw),
     );
+  }
+
+  @override
+  Future<List<AvailableVehicle>> getAvailableVehicles(
+    String reservationId,
+  ) async {
+    availableVehiclesCalls++;
+    if (onAvailableVehicles != null) return onAvailableVehicles!();
+    return [
+      for (final row
+          in readJsonListFixture('reservation_available_vehicles.json'))
+        AvailableVehicle.fromJson(row),
+    ];
   }
 }
 
@@ -216,6 +315,26 @@ class StubActiveLocation extends ActiveLocationController {
   /// `ref.watch(activeLocationProvider)` se reconstruyen, que es justo el
   /// escenario del fencing (una escritura en vuelo cuyo alcance cambió).
   void emit(ActiveLocation next) => state = next;
+}
+
+/// Candado de personal INERTE que cuenta pares suspend/resume.
+///
+/// El real lee Keystore en `build()` (y en un widget test eso es un plugin que
+/// no existe); aquí lo único que interesa es que el modo presentación suspenda
+/// EXACTAMENTE una vez y reanude exactamente una vez — el candado de 5 min no
+/// puede saltar mientras el cliente lee los términos (review INN-S-3).
+class StubLockController extends LockController {
+  int suspends = 0;
+  int resumes = 0;
+
+  @override
+  LockState build() => const LockState.initial();
+
+  @override
+  void suspendLock() => suspends++;
+
+  @override
+  void resumeLock() => resumes++;
 }
 
 class MutableSessionController extends SessionController {

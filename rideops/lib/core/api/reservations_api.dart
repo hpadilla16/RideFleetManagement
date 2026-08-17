@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 
 import 'api_error.dart';
+import 'dto/available_vehicle.dart';
 import 'dto/reservation_display.dart';
 
 /// Resultado de pedirle al backend que mande el link de pre-checkin.
@@ -13,9 +14,10 @@ import 'dto/reservation_display.dart';
 /// la UI ramifica sobre [sent], no sobre el 200.
 typedef PrecheckinLinkResult = ({bool sent, String? warning});
 
-/// Rutas de reservas que consume la app. display-data (H5) + el envío del link
-/// de pre-checkin (H7, salida real del guard 422 PRECHECKIN_REQUIRED); el
-/// detalle completo de reserva es historia futura.
+/// Rutas de reservas que consume la app: display-data (H5 + header y tarjetas
+/// del wizard), las unidades disponibles del swap (M2-H2) y el envío del link
+/// de pre-checkin (H7, salida real del guard 422 PRECHECKIN_REQUIRED). El
+/// detalle completo de reserva sigue siendo historia futura.
 class ReservationsApi {
   ReservationsApi({required this.authedDio});
 
@@ -30,6 +32,29 @@ class ReservationsApi {
         '/api/reservations/$reservationId/display-data',
       );
       return ReservationDisplayData.fromJson(res.data!);
+    } on DioException catch (e) {
+      throw ApiError.fromDio(e);
+    }
+  }
+
+  /// `GET /api/reservations/:id/available-vehicles` (routes:992) — candidatas
+  /// del swap YA filtradas por el servidor (ver el WHY largo en
+  /// `dto/available_vehicle.dart`). Array plano, sin envoltura.
+  ///
+  /// El endpoint acepta `?pickupAt&returnAt`; NO se mandan a propósito: sin
+  /// ellos usa la ventana real de la reserva, que es contra la que el swap va
+  /// a validar. Mandar otra ventana produciría una lista que el POST rechaza.
+  Future<List<AvailableVehicle>> getAvailableVehicles(
+    String reservationId,
+  ) async {
+    try {
+      final res = await authedDio.get<List<dynamic>>(
+        '/api/reservations/$reservationId/available-vehicles',
+      );
+      return [
+        for (final row in res.data ?? const [])
+          if (row is Map<String, dynamic>) AvailableVehicle.fromJson(row),
+      ];
     } on DioException catch (e) {
       throw ApiError.fromDio(e);
     }

@@ -1,0 +1,71 @@
+[
+  {
+    "id": "cmea77xh20003vehu112",
+    "tenantId": "cme8xk3l40000tenantcancun",
+    "internalNumber": "U-112",
+    "vin": "JTDBAMDE7NJ012345",
+    "plate": "IKL-427",
+    "make": "Toyota",
+    "model": "Corolla",
+    "year": 2023,
+    "color": "Silver",
+    "mileage": 48190,
+    "status": "AVAILABLE",
+    "fleetMode": "RENTAL",
+    "vehicleTypeId": "cme9r1t2b0002vtcompact",
+    "homeLocationId": "cme9q0l0c0001locctr",
+    "vehicleType": { "id": "cme9r1t2b0002vtcompact", "name": "Compact" },
+    "homeLocation": {
+      "id": "cme9q0l0c0001locctr",
+      "name": "Patio Centro",
+      "city": "Cancún",
+      "state": "QR"
+    }
+  },
+  {
+    "id": "cmea77xh20004vehu118",
+    "tenantId": "cme8xk3l40000tenantcancun",
+    "internalNumber": "U-118",
+    "vin": "JTDBAMDE7NJ019876",
+    "plate": "JPR-901",
+    "make": "Toyota",
+    "model": "Corolla",
+    "year": 2023,
+    "color": "White",
+    "mileage": 19402,
+    "status": "AVAILABLE",
+    "fleetMode": "RENTAL",
+    "vehicleTypeId": "cme9r1t2b0002vtcompact",
+    "homeLocationId": "cme9q0l0c0001locctr",
+    "vehicleType": { "id": "cme9r1t2b0002vtcompact", "name": "Compact" },
+    "homeLocation": {
+      "id": "cme9q0l0c0001locctr",
+      "name": "Patio Centro",
+      "city": "Cancún",
+      "state": "QR"
+    }
+  },
+  {
+    "id": "cmea77xh20005vehu140",
+    "tenantId": "cme8xk3l40000tenantcancun",
+    "internalNumber": "U-140",
+    "vin": "JTMBB3FV5ND012233",
+    "plate": "KLM-118",
+    "make": "Toyota",
+    "model": "RAV4",
+    "year": 2024,
+    "color": "Blue",
+    "mileage": 8110,
+    "status": "RESERVED",
+    "fleetMode": "RENTAL",
+    "vehicleTypeId": "cme9r1t2b0009vtsuv",
+    "homeLocationId": "cme9q0l0c0002locaero",
+    "vehicleType": { "id": "cme9r1t2b0009vtsuv", "name": "SUV" },
+    "homeLocation": {
+      "id": "cme9q0l0c0002locaero",
+      "name": "Aeropuerto",
+      "city": "Cancún",
+      "state": "QR"
+    }
+  }
+]

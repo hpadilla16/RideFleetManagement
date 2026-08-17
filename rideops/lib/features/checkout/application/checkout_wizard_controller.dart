@@ -249,12 +249,13 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
     if (id == null) return;
     // Skip si hay request en vuelo: no encimar, pero el reloj sigue.
     if (_inFlight) return;
-    // Y skip mientras hay una ESCRITURA viva (transición o pausa): la
-    // respuesta del POST es más nueva por definición, y una lectura lanzada
-    // en paralelo solo puede aterrizar tarde y vieja (INN MC-2). El refresh
-    // manual del agente respeta lo mismo — no hay nada que refrescar cuando
-    // la escritura que va a cambiar el estado ya está en vuelo.
-    if (state.transitionInFlight || state.pausing) return;
+    // Y skip mientras hay una ESCRITURA viva (transición, pausa, o las del
+    // paso: seguro declinado / swap): la respuesta del POST es más nueva por
+    // definición, y una lectura lanzada en paralelo solo puede aterrizar tarde
+    // y vieja (INN MC-2). El refresh manual del agente respeta lo mismo — no
+    // hay nada que refrescar cuando la escritura que va a cambiar el estado ya
+    // está en vuelo.
+    if (state.transitionInFlight || state.pausing || state.isMutating) return;
     _inFlight = true;
     if (byUser) state = state.copyWith(fetching: true);
     final hadHeader = ref.read(activeLocationProvider).isPinned;
@@ -344,26 +345,39 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
 
   static const _pollRoute = '/api/checkout-sessions/:id';
 
-  /// Contexto de la reserva para el header de sesión — best-effort, una vez.
+  /// Re-lee display-data. Lo llama el swap: cambió la unidad de la reserva, y
+  /// el header + la tarjeta de vehículo tienen que dejar de mostrar la vieja.
+  Future<void> reloadContext() => _loadContext(_generation);
+
+  /// Contexto de la reserva para el header de sesión y las tarjetas de
+  /// verificación (9A/9B) — best-effort, no bloquea el wizard.
   Future<void> _loadContext(int gen) async {
     try {
       final display =
           await ref.read(reservationsApiProvider).getDisplayData(reservationId);
       if (gen != _generation || !ref.mounted) return;
+      final reservation = display.reservation;
       state = state.copyWith(
         context: CheckoutReservationContext(
-          reservationNumber: display.reservation.reservationNumber,
-          customerName: display.reservation.customer?.fullName,
-          vehicleLabel: display.reservation.vehicle?.label,
-          plate: display.reservation.vehicle?.plate,
-          odometer: display.reservation.vehicle?.mileage,
-          pickupAt: display.reservation.pickupAt,
-          precheckinDone:
-              display.reservation.customerInfoCompletedAt != null,
+          reservationNumber: reservation.reservationNumber,
+          customerName: reservation.customer?.fullName,
+          vehicleLabel: reservation.vehicle?.label,
+          plate: reservation.vehicle?.plate,
+          odometer: reservation.vehicle?.mileage,
+          pickupAt: reservation.pickupAt,
+          precheckinDone: reservation.customerInfoCompletedAt != null,
+          precheckinAt: reservation.customerInfoCompletedAt,
+          workflowMode: reservation.workflowMode,
           // Superficie de STAFF: el nombre del tenant sí se muestra aquí.
           tenantName: display.branding.companyName.isEmpty
               ? null
               : display.branding.companyName,
+          customer: reservation.customer,
+          agreement: reservation.rentalAgreement,
+          vehicleId: reservation.vehicle?.id,
+          vehicleStatus: reservation.vehicle?.status,
+          vehicleTypeId: reservation.vehicleTypeId,
+          branding: display.branding,
         ),
       );
     } catch (_) {
@@ -387,6 +401,16 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
     final prev = state.session;
     var advance = state.advance;
     if (isWrite) _writeEpoch++;
+    // La firma del cliente LLEGÓ mientras mirábamos (10C). Se emite una sola
+    // vez, en la lectura que ve el sello caer de null a fechado: es la métrica
+    // de "el QR funcionó" y el paso T&C no tiene otra señal de éxito. Requiere
+    // [prev] no nulo — encontrar el sello ya puesto al ENTRAR no es un evento,
+    // es el estado de la sesión.
+    if (prev != null &&
+        prev.tcCompletedAt == null &&
+        fresh.tcCompletedAt != null) {
+      _logger.log(CheckoutEvents.termsSignedSeen);
+    }
     if (fresh.stateVersion != null) _appliedVersion = fresh.stateVersion;
     if (detectForeign &&
         prev != null &&
@@ -481,7 +505,10 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
     _timer = Timer(
       _nextInterval(),
       () {
-        if (_inFlight || state.transitionInFlight || state.pausing) {
+        if (_inFlight ||
+            state.transitionInFlight ||
+            state.pausing ||
+            state.isMutating) {
           // Request en vuelo (una transición larga): se salta el tick, no se
           // encima — y se re-arma el reloj.
           _scheduleNext(gen);
@@ -723,6 +750,145 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       if (gen == _generation && ref.mounted) {
         state = state.copyWith(pausing: false);
       }
+    }
+  }
+
+  // ── escrituras del paso CONFIRMING (M2-H2) ───────────────────────────────
+
+  /// Switch "el cliente declina el seguro" (9C) — `POST
+  /// /:id/declined-insurance`.
+  ///
+  /// No hay estado local del switch: se manda el valor DESEADO y la pantalla
+  /// se re-dibuja desde la sesión que responde el servidor (su `events[]` trae
+  /// el `DECLINED_INSURANCE` recién escrito). Si el POST falla, el switch se
+  /// queda donde estaba porque nunca se movió solo — que es exactamente lo que
+  /// debe pasar con una bandera que decide un anexo legal.
+  ///
+  /// Offline: se bloquea ANTES de salir. La bandera no entra a la bandeja
+  /// (ADR-5 se escribió para el dinero, pero la regla del wizard es más
+  /// simple: ningún paso del checkout se encola).
+  Future<bool> setDeclinedInsurance(bool declined) async {
+    final session = state.session;
+    if (session == null || state.isMutating || state.transitionInFlight) {
+      return false;
+    }
+    if (state.isTerminal || state.offline) return false;
+    final gen = _generation;
+    state = state.copyWith(
+      mutating: CheckoutMutation.declinedInsurance,
+      clearConflict: true,
+    );
+    try {
+      final updated = await _api.setDeclinedInsurance(
+        id: session.id,
+        declined: declined,
+      );
+      if (gen != _generation || !ref.mounted) return false;
+      _apply(updated, detectForeign: false, isWrite: true);
+      _logger.log(
+        CheckoutEvents.declinedInsuranceSet,
+        data: {'declined': declined},
+      );
+      return true;
+    } on ApiError catch (e) {
+      if (gen != _generation || !ref.mounted) return false;
+      if (e.kind == ApiErrorKind.conflict) {
+        // Único 409 del endpoint: "no hay contrato ligado" (service:829-831).
+        // Viene SIN code, así que se muestra el mensaje del servidor tal cual.
+        await _refetchQuiet(gen);
+        _setConflict(CheckoutConflictKind.generic, e);
+      } else {
+        state = state.copyWith(
+          error: e,
+          networkAvailable:
+              e.kind == ApiErrorKind.network ? false : state.networkAvailable,
+        );
+      }
+      return false;
+    } finally {
+      if (gen == _generation && ref.mounted) {
+        state = state.copyWith(clearMutating: true);
+      }
+      _scheduleNext(gen);
+    }
+  }
+
+  /// Swap de unidad (9E) — `POST /:id/vehicle`.
+  ///
+  /// El servidor cambia reserva y contrato en una transacción y devuelve la
+  /// sesión actualizada; aquí se aplica como ESCRITURA (sube el epoch de
+  /// fencing) y se re-lee display-data, porque lo que cambió no vive en la
+  /// sesión sino en la reserva: el header y la tarjeta seguirían mostrando la
+  /// unidad vieja.
+  ///
+  /// El paso NO se mueve — cambian los datos (nota 9 del mockup).
+  Future<CheckoutSwapAttempt> swapVehicle(String newVehicleId) async {
+    const blocked = CheckoutSwapAttempt(CheckoutSwapOutcome.blocked);
+    final session = state.session;
+    if (session == null || state.isMutating || state.transitionInFlight) {
+      return blocked;
+    }
+    if (state.isTerminal || state.offline) return blocked;
+    final gen = _generation;
+    state = state.copyWith(
+      mutating: CheckoutMutation.vehicleSwap,
+      clearConflict: true,
+    );
+    try {
+      final result = await _api.swapVehicle(
+        id: session.id,
+        newVehicleId: newVehicleId,
+      );
+      if (gen != _generation || !ref.mounted) return blocked;
+      _apply(result.session, detectForeign: false, isWrite: true);
+      _logger.log(CheckoutEvents.vehicleSwapped);
+      await reloadContext();
+      return const CheckoutSwapAttempt(CheckoutSwapOutcome.ok);
+    } on ApiError catch (e) {
+      if (gen != _generation || !ref.mounted) return blocked;
+      if (e.kind != ApiErrorKind.conflict) {
+        state = state.copyWith(
+          error: e,
+          networkAvailable:
+              e.kind == ApiErrorKind.network ? false : state.networkAvailable,
+        );
+        return CheckoutSwapAttempt(
+          CheckoutSwapOutcome.failed,
+          message: e.message,
+          code: e.code,
+        );
+      }
+      _logger.log(CheckoutEvents.transition409, data: {'code': e.code ?? 'none'});
+      // Todo 409 se reconcilia (ADR-4): la lista del sheet y el candado del
+      // swap se dibujan desde el estado fresco, no desde el que había.
+      await _refetchQuiet(gen);
+      if (gen != _generation || !ref.mounted) return blocked;
+      if (e.code == 'SWAP_LOCKED') {
+        // Ya no es cosa de ESTA unidad: la sesión pasó de inspección y el
+        // swap dejó de existir. El banner sobrevive al cierre del sheet, y
+        // lleva kind propio para poder traducir la causa encima del cuerpo
+        // del servidor (que aquí filtra `currentStep=` crudo).
+        _setConflict(CheckoutConflictKind.swapLocked, e);
+        return CheckoutSwapAttempt(
+          CheckoutSwapOutcome.lockedStep,
+          message: e.message,
+          code: e.code,
+        );
+      }
+      // VEHICLE_DOUBLE_BOOKED / VEHICLE_TERMINAL: la negativa es de la unidad
+      // elegida y se muestra DENTRO del sheet, junto a las otras opciones —
+      // sacar al agente de la lista para leer un banner y volver a entrar es
+      // exactamente la fricción que 9E existe para evitar.
+      return CheckoutSwapAttempt(
+        CheckoutSwapOutcome.vehicleRejected,
+        message: e.message,
+        code: e.code,
+      );
+    } finally {
+      if (gen == _generation && ref.mounted) {
+        state = state.copyWith(clearMutating: true);
+      }
+      _scheduleNext(gen);
     }
   }
 

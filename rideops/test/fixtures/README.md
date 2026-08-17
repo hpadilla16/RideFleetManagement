@@ -14,7 +14,8 @@ actualiza en el mismo PR (DoD #12). Los tests de DTO deserializan estos archivos
 | `handoff_token.json` | `checkout-session.service.js` `mintHandoffToken` (:727-733 reuso, :766-770 fresco) |
 | `mobile_inspection_state.json` | `mobile-inspection.service.js` `loadSession` (:118-143) |
 | `locations_selectable.json` | `locations-selectable.routes.js` `GET /selectable` (:38-45 — `select: {id, code, name, city, state}`; array plano, sin envoltura) |
-| `reservation_display_data.json` | `reservations.routes.js` `GET /:id/display-data` (:588-627 — `{reservation: getById+charges, insurancePlans, additionalServices, branding}`; branding con defaults `'Ride Fleet'`/`''` en :618-622; `reservation.vehicle` es la fila Prisma completa vía `include {vehicle: true}` de `getById` :1539-1580) |
+| `reservation_display_data.json` | `reservations.routes.js` `GET /:id/display-data` (:588-627 — `{reservation: getById+charges, insurancePlans, additionalServices, branding}`; branding con defaults `'Ride Fleet'`/`''` en :618-622; `reservation.vehicle` es la fila Prisma completa vía `include {vehicle: true}` de `getById` :1539-1580; `customer` y `rentalAgreement` con los `select` EXACTOS de `getById` :1540-1576 y :1585-1668, re-leídos para M2-H2) |
+| `reservation_available_vehicles.json` | `reservations.routes.js` `GET /:id/available-vehicles` (:992-1092 — array PLANO con el `vehicleSelect` de :1003-1009; la unidad ya asignada viaja SIEMPRE y de primera, :1064-1067) |
 
 Notas de forma que muerden:
 
@@ -30,6 +31,14 @@ Notas de forma que muerden:
   no `select`): además de lo ya declarado trae `pickupAt` y `customerInfoCompletedAt`, que
   el header del wizard de checkout usa para responder "para cuándo" y si el pre-checkin
   está listo (M2-H1). El resto de columnas sigue ignorándose por json_serializable.
+- `reservation_display_data.reservation.rentalAgreement` **no trae**
+  `declinedInsurance`: el `select` de `getById` no la incluye (solo el select de LISTA,
+  `reservations.service.js:285`). El fixture respeta esa ausencia a propósito — es la
+  razón por la que RideOps deriva el switch del seguro desde el `events[]` de la sesión, y
+  la razón por la que el switch del wizard WEB arranca siempre apagado.
+- `reservation_available_vehicles.json` es un **array plano** (sin envoltura): se lee con
+  `readJsonListFixture`. Su primera fila es la unidad ya asignada — el endpoint la incluye
+  siempre, y es la que el sheet de swap pinta INERTE con su motivo.
 - `presence: []` **no** significa "no hay nadie": `withPresence()` es best-effort y
   degrada a lista vacía si la lectura de presencia falla. La presencia solo puede afirmar
   presencia, jamás soledad.

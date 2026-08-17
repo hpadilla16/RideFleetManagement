@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/api/dto/checkout_session.dart';
+import '../../../core/api/enums.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/session/active_location.dart';
@@ -16,6 +17,8 @@ import '../application/checkout_wizard_controller.dart';
 import '../application/checkout_wizard_state.dart';
 import '../domain/checkout_presence.dart';
 import 'checkout_labels.dart';
+import 'steps/confirming_step.dart';
+import 'steps/terms_step.dart';
 import 'widgets/pause_sheet.dart';
 import 'widgets/steps_sheet.dart';
 import 'widgets/terminal_view.dart';
@@ -157,7 +160,12 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     final age = state.fetchedAt == null
         ? Duration.zero
         : clock.now().difference(state.fetchedAt!);
-    final mini = _sheetOpen || state.offline;
+    // Regla de variante del header (canon del PM para H2-H5, confirmada por
+    // GD): COMPLETA solo cuando el shell ES el contenido (entrada, avance
+    // ajeno, skeleton); `mini` en cuanto la pantalla tiene cuerpo propio —
+    // sheet abierto, offline, y TODAS las pantallas de paso. "Compacta" y
+    // "mini" son la MISMA variante: H2 no introduce una tercera densidad.
+    final mini = _sheetOpen || state.offline || _hasStepBody(state.step);
 
     return Column(
       children: [
@@ -183,39 +191,67 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
           staleAge: state.offline ? age : null,
           onTap: _openStepsSheet,
         ),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
-            children: [
-              if (state.offline) ...[
-                OfflineBanner(age: age, onRetry: _controller.refresh),
-                const SizedBox(height: 10),
-              ],
-              if (state.advance != null) ...[
-                ForeignAdvanceBanner(
-                  notice: state.advance!,
-                  onSeeChanged: _openStepsSheet,
-                ),
-                const SizedBox(height: 10),
-              ],
-              if (state.conflict != null) ...[
-                ConflictBanner(
-                  conflict: state.conflict!,
-                  onDismiss: _controller.dismissConflict,
-                ),
-                const SizedBox(height: 10),
-              ],
-              // Cuerpo del paso. H1 entrega el shell: cada paso concreto
-              // (CONFIRMING H2, pago H3, inspección H4, firma H5) reemplaza
-              // esto por el suyo. Mientras tanto se muestra lo único que el
-              // shell puede afirmar por sí mismo: los sellos que el servidor
-              // ya tiene, fechados.
-              _StampsCard(session: session, dataAge: age),
-            ],
-          ),
-        ),
+        Expanded(child: _stepBody(state, session, age)),
       ],
     );
+  }
+
+  /// ¿Este paso ya tiene cuerpo propio construido? Decide la variante del
+  /// header y a quién le toca dibujar el cuerpo.
+  bool _hasStepBody(CheckoutStep? step) =>
+      step == CheckoutStep.confirming || step == CheckoutStep.tcPending;
+
+  /// Banners del shell. Viven aquí —no en cada paso— para que la matriz de
+  /// errores (offline / avance ajeno / 409 reconciliado) sea una sola, y se
+  /// INYECTAN al cuerpo del paso, que decide dónde caen dentro de su scroll.
+  List<Widget> _banners(CheckoutWizardState state, Duration age) => [
+        if (state.offline) ...[
+          OfflineBanner(age: age, onRetry: _controller.refresh),
+          const SizedBox(height: 10),
+        ],
+        if (state.advance != null) ...[
+          ForeignAdvanceBanner(
+            notice: state.advance!,
+            onSeeChanged: _openStepsSheet,
+          ),
+          const SizedBox(height: 10),
+        ],
+        if (state.conflict != null) ...[
+          ConflictBanner(
+            conflict: state.conflict!,
+            onDismiss: _controller.dismissConflict,
+          ),
+          const SizedBox(height: 10),
+        ],
+      ];
+
+  /// Cuerpo del paso. H1 entregó el shell; H2 monta CONFIRMING y T&C. Los
+  /// pasos que aún no tienen historia (pago H3, inspección H4, firma H5)
+  /// siguen mostrando lo único que el shell puede afirmar por sí mismo: los
+  /// sellos que el servidor ya tiene, fechados.
+  Widget _stepBody(
+    CheckoutWizardState state,
+    CheckoutSessionDto session,
+    Duration age,
+  ) {
+    final banners = _banners(state, age);
+    return switch (state.step) {
+      CheckoutStep.confirming => ConfirmingStep(
+          reservationId: widget.reservationId,
+          banners: banners,
+        ),
+      CheckoutStep.tcPending => TermsStep(
+          reservationId: widget.reservationId,
+          banners: banners,
+        ),
+      _ => ListView(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
+          children: [
+            ...banners,
+            _StampsCard(session: session, dataAge: age),
+          ],
+        ),
+    };
   }
 
   void _leave() {
