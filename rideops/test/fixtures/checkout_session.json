@@ -1,0 +1,20 @@
+{
+  "id": "cmdcks001fixture0000000001",
+  "reservationId": "cmdres001fixture0000000001",
+  "agreementId": "cmdagr001fixture0000000001",
+  "tenantId": "cmdten001fixture0000000001",
+  "currentStep": "INSPECTION_HANDOFF",
+  "events": "[{\"kind\":\"SESSION_STARTED\",\"actorUserId\":\"cmdusr001fixture0000000001\",\"at\":\"2026-08-16T14:02:11.000Z\"},{\"from\":\"CONFIRMING\",\"to\":\"TC_PENDING\",\"actorUserId\":\"cmdusr001fixture0000000001\",\"at\":\"2026-08-16T14:03:40.000Z\"}]",
+  "tcCompletedAt": "2026-08-16T14:06:02.000Z",
+  "paymentCompletedAt": "2026-08-16T14:09:45.000Z",
+  "inspectionCompletedAt": null,
+  "customerSignedAt": null,
+  "startedAt": "2026-08-16T14:02:11.000Z",
+  "finishedAt": null,
+  "abandonedAt": null,
+  "abandonedReason": null,
+  "autoEmailedAt": null,
+  "startedByUserId": "cmdusr001fixture0000000001",
+  "createdAt": "2026-08-16T14:02:11.000Z",
+  "updatedAt": "2026-08-16T14:09:45.000Z"
+}

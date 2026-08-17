@@ -1,0 +1,22 @@
+{
+  "@@locale": "es",
+  "appTitle": "RideOps",
+  "loginTitle": "Iniciar sesión",
+  "loginEmailLabel": "Correo electrónico",
+  "loginPasswordLabel": "Contraseña",
+  "loginButton": "Entrar",
+  "loginInvalidCredentials": "Correo o contraseña incorrectos",
+  "forcedPasswordChangeTitle": "Cambia tu contraseña temporal",
+  "forcedPasswordChangeBody": "Antes de usar la app tienes que crear tu propia contraseña.",
+  "currentPasswordLabel": "Contraseña actual",
+  "newPasswordLabel": "Contraseña nueva",
+  "changePasswordButton": "Cambiar contraseña",
+  "sessionExpired": "Tu sesión venció. Vuelve a entrar.",
+  "locationDenied": "No tienes acceso a esa ubicación.",
+  "errorConflictReloaded": "Otra pantalla avanzó esta sesión. Se recargó el estado.",
+  "errorRateLimited": "Demasiadas solicitudes. Reintentando…",
+  "errorOffline": "Sin conexión. Se guardó para enviar después.",
+  "outboxDeadLetterTitle": "Pendientes con error",
+  "retryButton": "Reintentar",
+  "genericError": "Algo salió mal. Intenta de nuevo."
+}

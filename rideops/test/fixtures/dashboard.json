@@ -1,0 +1,73 @@
+{
+  "query": "",
+  "self": {
+    "profile": {
+      "id": "cmdusr001fixture0000000001",
+      "fullName": "Agente Patio Uno",
+      "email": "agente@ridefleet.example",
+      "role": "AGENT",
+      "isActive": true,
+      "commissionPlan": {
+        "id": "cmdcpl001fixture0000000001",
+        "name": "Plan Mostrador 2026",
+        "isActive": true
+      }
+    },
+    "commissions": {
+      "monthKey": "2026-08",
+      "commissionAmount": 182.4,
+      "agreements": 6,
+      "pending": 2,
+      "approved": 3,
+      "paid": 1,
+      "recent": [
+        {
+          "id": "cmdcom001fixture0000000001",
+          "status": "APPROVED",
+          "commissionAmount": 35.5,
+          "calculatedAt": "2026-08-14T18:22:00.000Z",
+          "agreementNumber": "RA-20260814102233-0031",
+          "reservationId": "cmdres009fixture0000000009"
+        }
+      ]
+    }
+  },
+  "metrics": {
+    "openReservations": 14,
+    "activeRentals": 22,
+    "precheckinQueue": 5,
+    "readyForPickup": 3,
+    "dueBackToday": 4,
+    "loanerOpen": 7,
+    "loanerReady": 2,
+    "loanerBillingAttention": 1,
+    "loanerOverdue": 0,
+    "issueOpen": 3,
+    "issueUnderReview": 1
+  },
+  "queues": {
+    "precheckin": [],
+    "checkout": [],
+    "returns": [],
+    "active": [],
+    "loanerReady": [],
+    "loanerAdvisorFollowup": [],
+    "loanerBillingReview": [],
+    "loanerReturns": [],
+    "issueEscalations": [
+      {
+        "id": "cmdinc001fixture0000000001",
+        "type": "DAMAGE",
+        "status": "OPEN",
+        "title": "Rayón en puerta trasera",
+        "description": "Reportado al devolver RF-118",
+        "amountClaimed": "250.00",
+        "amountResolved": null,
+        "createdAt": "2026-08-15T20:14:00.000Z",
+        "updatedAt": "2026-08-15T20:14:00.000Z",
+        "trip": null
+      }
+    ]
+  },
+  "searchResults": []
+}

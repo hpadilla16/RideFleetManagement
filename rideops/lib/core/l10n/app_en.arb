@@ -1,0 +1,22 @@
+{
+  "@@locale": "en",
+  "appTitle": "RideOps",
+  "loginTitle": "Sign in",
+  "loginEmailLabel": "Email",
+  "loginPasswordLabel": "Password",
+  "loginButton": "Sign in",
+  "loginInvalidCredentials": "Wrong email or password",
+  "forcedPasswordChangeTitle": "Change your temporary password",
+  "forcedPasswordChangeBody": "You need to create your own password before using the app.",
+  "currentPasswordLabel": "Current password",
+  "newPasswordLabel": "New password",
+  "changePasswordButton": "Change password",
+  "sessionExpired": "Your session expired. Please sign in again.",
+  "locationDenied": "You do not have access to that location.",
+  "errorConflictReloaded": "Another screen advanced this session. State was reloaded.",
+  "errorRateLimited": "Too many requests. Retrying…",
+  "errorOffline": "No connection. Saved to send later.",
+  "outboxDeadLetterTitle": "Pending items with errors",
+  "retryButton": "Retry",
+  "genericError": "Something went wrong. Try again."
+}
