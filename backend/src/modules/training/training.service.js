@@ -225,6 +225,29 @@ export const trainingService = {
   },
 
   /**
+   * Start a module over (Hector, 2026-08-17: "dale la habilidad de reiniciar
+   * lo de nuevo si necesitan").
+   *
+   * Deletes the row rather than rewinding it, so re-taking a module is
+   * genuinely a fresh start: a new armedAt, and no completion left behind to
+   * confuse the standing. The points go with it and come back when they
+   * finish again — a module you are redoing is one you have not finished.
+   */
+  async reset({ tenantId, userId, moduleKey }) {
+    if (!tenantId || !userId || !moduleKey) throw new Error('tenantId, userId and moduleKey are required');
+    const row = await prisma.trainingProgress.findUnique({
+      where: { userId_moduleKey: { userId, moduleKey } },
+    });
+    // Nothing to reset is a success, not an error — the module is already at
+    // the start, which is exactly what the caller asked for.
+    if (!row) return { ok: true, reset: false };
+    if (row.tenantId !== tenantId) { const e = new Error('Module not found'); e.status = 404; throw e; }
+    await prisma.trainingProgress.delete({ where: { id: row.id } });
+    logger.info('[training] module reset', { userId, moduleKey });
+    return { ok: true, reset: true };
+  },
+
+  /**
    * Practice mode (2026-08-16): a 4h session as the shared practice AGENT on
    * the DEMO tenant, so a trainee can rehearse the OPPORTUNISTIC modules —
    * create, check out, check in, take a payment — without touching real

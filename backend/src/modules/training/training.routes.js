@@ -107,6 +107,15 @@ trainingRouter.post('/progress/:moduleKey/walkthrough-complete', async (req, res
  * person's role and the tenant's enabled modules — that lives in the
  * curriculum, on the client. The response is percentages.
  */
+/** Start a module over — clears the record so it can be taken again. */
+trainingRouter.post('/progress/:moduleKey/reset', async (req, res, next) => {
+  try {
+    const who = actorOf(req);
+    if (!who.tenantId || !who.userId) return res.status(400).json({ error: 'A tenant and a user are required' });
+    res.json(await trainingService.reset({ ...who, moduleKey: String(req.params.moduleKey) }));
+  } catch (e) { next(e); }
+});
+
 /**
  * Practice mode: swap into the demo tenant to rehearse. Any authenticated
  * HUMAN may practice — but never a service account (a VozIA token has no

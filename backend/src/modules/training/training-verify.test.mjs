@@ -118,16 +118,26 @@ test('walking a guide completes a module with nothing to prove', () => {
   assert.equal(canCompleteByWalkthrough({ status: 'ARMED', provenBy: 'pending::5' }), true);
 });
 
-test('walking a guide can NEVER complete a module that needs real work', () => {
-  // The security boundary: otherwise anyone earns the 20 points for
-  // 'create a reservation' by clicking Next five times.
+test('finishing the guide completes a module even when it has a verify rule', () => {
+  // Reversed on 2026-08-17 (Hector). Holding a trainee's progress until a real
+  // customer happened to appear left three of the four hands-on modules armed
+  // indefinitely, which taught nothing. The verify rule is now the OTHER route
+  // in — whichever comes first wins — not a gate on the guide.
   for (const type of VERIFY_TYPES) {
     assert.equal(
       canCompleteByWalkthrough({ status: 'ARMED', provenBy: `pending:${type}:20` }),
-      false,
-      `${type} was completable by walking`
+      true,
+      `${type} should complete when the walkthrough is finished`
     );
   }
+});
+
+test('what the stamp still guarantees: armed first, and only once', () => {
+  // The boundary that survives — a module cannot be completed by a stray call
+  // on a row that was never armed, nor completed twice.
+  assert.equal(canCompleteByWalkthrough({ status: 'ARMED', provenBy: 'garbage' }), false);
+  assert.equal(canCompleteByWalkthrough({ status: 'ARMED', provenBy: '' }), false);
+  assert.equal(canCompleteByWalkthrough({ status: 'COMPLETED', provenBy: 'pending:RESERVATION_CREATED:20' }), false);
 });
 
 test('an already-completed or unstamped module is not completable again', () => {

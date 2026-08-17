@@ -1161,6 +1161,8 @@
     "close": "Cerrar",
     "waitingForRecord": "Abre cualquier reserva para empezar \"{{name}}\" — la guía sigue ahí.",
     "cancel": "Cancelar",
-    "waitingNextScreen": "Sigue — abre la siguiente pantalla y la guía continúa ahí."
+    "waitingNextScreen": "Sigue — abre la siguiente pantalla y la guía continúa ahí.",
+    "restart": "Empezar de nuevo",
+    "restartHint": "Borra este módulo y lo tomas desde el principio"
   }
 }

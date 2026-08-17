@@ -1161,6 +1161,8 @@
     "close": "Close",
     "waitingForRecord": "Open any reservation to start \"{{name}}\" — the guide continues there.",
     "cancel": "Cancel",
-    "waitingNextScreen": "Keep going — open the next screen and the guide picks up there."
+    "waitingNextScreen": "Keep going — open the next screen and the guide picks up there.",
+    "restart": "Start over",
+    "restartHint": "Clear this module and take it from the beginning"
   }
 }
