@@ -188,6 +188,28 @@ Arreglo: **un renglón** — agregar `declinedInsurance: true` al select de `get
 además el pedido P7, porque RideOps deja de deducir el estado leyendo `events[]`. Va en la
 rama `fix/insurance-flag-and-terms-url` junto con P6 y P5.
 
+### Backlog abierto por el SHIP de H7: el pie del 5xx (QA, re-gate d3f0c3b)
+
+H7 pasó con SHIP, pero QA dejó un pendiente que **no puede vivir solo como párrafo en el
+doc de observabilidad**. Un 5xx cae en `unknown`, cuyo pie afirma "no se creó ninguna
+sesión": cierto para el 500 de `ensureAgreementExists` (corre ANTES del create,
+`checkout-session.service.js:194-197`) y **falso** para el `update` de `DEALERSHIP_LOANER`
+(`:215-220`, después). QA agregó un caso que el desarrollador no vio: **un 502 de proxy
+durante un reinicio de despliegue** cae en el mismo bucket con la misma mentira.
+
+Por qué no bloqueó: M-1 era falso el 100% de las veces y sobre el modo de falla rutinario
+(WiFi de patio); esto es falso solo en un subconjunto estrecho de una clase ya rara, y
+para el 5xx **más probable** de esa ruta el copy actual es CIERTO — cambiarlo cambiaría un
+mensaje correcto por un sobre-aviso.
+
+**Pero QA corrigió al desarrollador en su razón**: él dijo que solo el re-fetch por reserva
+puede arreglarlo, y eso no es exacto — dejarlo así justificaría el hueco para siempre.
+`CheckoutEntryBlock.status` ya viaja, así que `_footOf` puede ramificar en
+`status != null && status >= 500` y reusar `coEntryConnectionLostFoot`: **tres líneas, cero
+llaves nuevas, una prueba** — más chico que el arreglo que acababa de shippear. Estado final
+honesto sigue siendo la reconciliación por re-fetch, que resuelve `connectionLost`,
+`scopeChanged` y el 5xx de una sola vez.
+
 ### Alcance de la rama del gap #11 (decisión del PM, review GD de la página de firma)
 
 GD encontró **siete MUST** en `fix/sign-page-tenant-identity`, pero solo tres son la fuga
