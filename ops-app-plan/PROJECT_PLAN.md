@@ -82,13 +82,30 @@ y números de línea en [00-REGROUND.md](00-REGROUND.md):
 2. **Handoff token TTL 15 min vs. bandeja offline.** Si el spike M0-1b no lo resuelve en
    cliente, pasa a bloqueante de MVP: pedir endpoint de fotos autenticado por JWT sin TTL
    corto (§9).
-3. **403 del selector de ubicación sin `code`.** Nice-to-have: que el backend agregue
-   `code: 'VIEW_LOCATION_DENIED'` para distinguirlo por máquina.
+3. **403 del selector de ubicación sin `code`.** ~~Nice-to-have~~ → **EN CURSO**: el
+   PR-tren P1-P3 (feat/checkout-multisurface-p123) agrega `code: 'VIEW_LOCATION_DENIED'`;
+   el cliente H4 ya acepta ambas variantes.
 4. **`idVerifiedAt` vive solo en `KioskSession`.** Si RideOps verifica ID en patio, la
    evidencia no es visible a otras superficies; decidir dónde persiste (probable pedido de
-   columna en `CheckoutSession`).
-5. **Sin versioning optimista en `CheckoutSession`** — la reconciliación multi-superficie
-   depende solo de la state machine (ver §9, pregunta 1).
+   columna en `CheckoutSession`). P4 del M2-PLAN — diferido a M3 por Hector.
+5. **Sin versioning optimista en `CheckoutSession`** — ~~depende solo de la state
+   machine~~ → **EN CURSO**: P2 (`stateVersion`) en el PR-tren; el CAS de `transition()`
+   queda como M2-H8 obligatoria.
+6. **El "hoy" del dashboard corta en TZ del servidor** (Innovation, review H4): el server
+   calcula `startOfToday` en su TZ y el cliente clasifica "hoy" en TZ del dispositivo —
+   divergen si difieren. Pedido de plataforma: cortar en TZ del tenant. No bloquea M1.
+7. **El scope efectivo de programa se espeja en cliente** (tenant-scope.js → tabla Dart
+   con test referenciado): a futuro, que `/me` o el dashboard expongan el scope EFECTIVO
+   calculado por el server y el espejo muera.
+
+### Enmiendas de mockup aceptadas por GD en builds (registro para training/M2)
+- **Tanda B nota de motion (dot de frescura)**: latido ≤0.5 Hz sustituido por tick
+  one-shot al refrescar (batería + testabilidad) — bendecido por GD para M1 (review H4).
+- **Buscar (H4)**: pantalla aprobada como extensión del lenguaje sin frame propio;
+  mini-frame a posteriori pendiente para la biblioteca de mockups (con filtros/detalle
+  llega en M3).
+- **Paso "¿Activar huella?" (H2)**: pantalla nueva sin frame propio, aceptada; mini-frame
+  a posteriori pendiente.
 
 ## 5. Milestones
 
