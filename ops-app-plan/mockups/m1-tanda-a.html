@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RideOps · Mockups M1 — Tanda A (Login · Contraseña forzada · PIN/Biometría · Shell + Ubicación)</title>
+<style>
+/* ============================================================
+   TOKENS — espejo del token layer de frontend/src/app/globals.css
+   (rampa neutra morada, rampa púrpura, semánticos, foco AZUL).
+   ============================================================ */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-200:#d9c9ff; --p-300:#c0a8ff;
+  --p-400:#9f79ff; --p-500:#7f4ff0; --p-600:#6a35e0; --p-700:#5a26c9;
+  --p-800:#45189e; --p-900:#2e1071;
+  --brand:#8752FE;
+  --brand-a08:rgba(135,82,254,.08); --brand-a20:rgba(135,82,254,.20);
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --focus:#0b63d6; --focus-halo:rgba(11,99,214,.22);
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+  --sh-2:0 1px 2px rgba(24,16,54,.05),0 6px 14px -4px rgba(38,20,90,.09),0 14px 28px -12px rgba(38,20,90,.10);
+  --sh-3:0 1px 3px rgba(24,16,54,.06),0 14px 30px -10px rgba(38,20,90,.14),0 44px 80px -28px rgba(38,20,90,.22);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+  background:var(--n-100);color:var(--n-900);font-size:14px;line-height:1.5}
+h1,h2,h3{margin:0;letter-spacing:.005em}
+a{text-decoration:none;color:inherit}
+
+/* ---------- chrome del documento ---------- */
+.doc-head{max-width:1720px;margin:0 auto;padding:26px 24px 10px}
+.doc-head h1{font-size:24px;font-weight:850}
+.doc-head p{margin:8px 0 0;color:var(--n-700);max-width:980px}
+.meta-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.mchip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 11px;
+  border-radius:6px;background:var(--p-50);border:1px solid var(--brand-a20);
+  color:var(--p-800);font-size:12.5px;font-weight:700}
+.mchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.jump{position:sticky;top:0;z-index:60;display:flex;gap:8px;flex-wrap:wrap;
+  padding:10px 24px;background:var(--n-0);border-bottom:1px solid var(--n-200);box-shadow:var(--sh-1)}
+.jump a{display:inline-flex;align-items:center;min-height:40px;padding:6px 14px;border-radius:8px;
+  border:1px solid var(--n-300);background:var(--n-0);font-weight:700;font-size:13px;color:var(--n-800)}
+.jump a:hover{background:var(--p-50);border-color:var(--brand-a20);color:var(--p-800)}
+.jump a:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+section.blk{max-width:1720px;margin:0 auto;padding:30px 24px 8px;scroll-margin-top:76px}
+.blk-head{margin-bottom:16px}
+.blk-head .eyebrow{color:var(--p-700);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.blk-head h2{font-size:20px;font-weight:800;margin-top:2px}
+.blk-head p{color:var(--n-700);margin:6px 0 0;max-width:900px}
+.state-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.schip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:6px;
+  font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--n-50);border:1px solid var(--n-200);color:var(--n-700)}
+.schip i{width:6px;height:6px;border-radius:50%;background:currentColor;font-style:normal}
+.frames{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;padding-bottom:26px}
+figure{margin:0}
+figcaption{font-size:13px;font-weight:800;color:var(--n-800);margin:0 0 8px 6px}
+figcaption small{display:block;font-weight:600;color:var(--n-600);font-size:12px}
+
+/* ---------- notas / anotaciones ---------- */
+.notes{flex:1 1 330px;max-width:400px;background:var(--n-0);border:1px solid var(--n-200);
+  border-radius:14px;padding:16px 18px;box-shadow:var(--sh-1)}
+.notes h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+.note{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--n-100);font-size:13px;color:var(--n-700)}
+.note:last-child{border-bottom:0}
+.note b{color:var(--n-900)}
+.m{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;
+  border-radius:50%;background:var(--p-600);color:#fff;font-size:12px;font-weight:800;line-height:1}
+.m.inframe{position:absolute;z-index:5;box-shadow:0 0 0 2px #fff}
+.decision{margin-top:14px;padding:14px 16px;border-radius:12px;background:var(--warn-bg);
+  border:1.5px dashed var(--warn-bd);color:var(--warn-tx);font-size:13px}
+.decision b{display:block;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.decision ul{margin:6px 0 0;padding-left:18px}
+.decision li{margin:3px 0}
+.mini-demo{margin-top:12px;padding:12px;border-radius:12px;background:var(--n-50);border:1px solid var(--n-200)}
+.mini-demo .cap{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:8px}
+
+/* ---------- frame de teléfono ---------- */
+.phone{position:relative;width:390px;border:9px solid var(--n-900);border-radius:36px;
+  overflow:hidden;background:var(--n-50);box-shadow:var(--sh-3)}
+.statusbar{display:flex;justify-content:space-between;align-items:center;height:32px;
+  padding:0 20px;font-size:11.5px;font-weight:700;color:var(--n-700);background:var(--n-50)}
+.statusbar.on-white{background:var(--n-0)}
+.statusbar .off{color:var(--danger-tx)}
+.scr{position:relative;display:flex;flex-direction:column;min-height:724px;padding:0}
+.pad{padding:18px 18px 22px;display:flex;flex-direction:column;flex:1}
+
+/* ---------- componentes de app ---------- */
+.applogo{display:flex;align-items:center;gap:10px;margin:26px 0 6px}
+.applogo .mark{width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--brand),var(--p-700));
+  color:#fff;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:850}
+.applogo .wname{font-size:21px;font-weight:850;color:var(--n-900)}
+.applogo .wsub{font-size:12.5px;font-weight:600;color:var(--n-600)}
+.flavor{position:absolute;top:42px;right:16px;display:inline-flex;min-height:24px;align-items:center;
+  padding:2px 9px;border-radius:6px;font-size:11px;font-weight:800;letter-spacing:.06em;
+  background:var(--warn-bg);border:1px dashed var(--warn-bd);color:var(--warn-tx)}
+.f-label{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--n-600);margin:14px 0 6px}
+.inp{position:relative;display:flex;align-items:center;min-height:52px;border:1.5px solid var(--n-300);
+  border-radius:12px;background:var(--n-0);padding:0 14px;font-size:15.5px;color:var(--n-900);font-weight:600}
+.inp .ph{color:var(--n-600);font-weight:500}
+.inp.focus{border-color:var(--focus);box-shadow:0 0 0 4px var(--focus-halo)}
+.inp.err{border-color:var(--danger);background:#fffbfb}
+.inp .trail{margin-left:auto;display:flex;align-items:center;justify-content:center;
+  width:44px;height:44px;margin-right:-8px;border-radius:10px;color:var(--n-600)}
+.f-help{font-size:12.5px;color:var(--n-600);margin-top:6px;line-height:1.45}
+.f-err{display:flex;gap:6px;align-items:flex-start;font-size:13px;font-weight:700;color:var(--danger-tx);margin-top:6px}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:54px;border-radius:14px;
+  font-size:16px;font-weight:800;letter-spacing:.01em}
+.btn-primary{background:var(--p-600);color:#fff;box-shadow:var(--sh-1)}
+.btn-ghost{background:var(--n-0);border:1.5px solid var(--n-300);color:var(--n-800)}
+.btn.is-disabled{opacity:.55}
+.btn-sm{min-height:46px;font-size:14.5px;border-radius:12px}
+.spin{width:18px;height:18px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;
+  border-radius:50%;animation:rot 1s linear infinite}
+@keyframes rot{to{transform:rotate(360deg)}}
+.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:12px;
+  font-size:13.5px;font-weight:600;line-height:1.45;border:1px solid}
+.banner svg{flex:0 0 auto;margin-top:1px}
+.b-danger{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.b-warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.b-info{background:var(--info-bg);border-color:var(--info-bd);color:var(--info)}
+.b-ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.linkline{display:flex;align-items:center;justify-content:center;min-height:48px;
+  font-size:13.5px;font-weight:700;color:var(--p-700)}
+.ver{margin-top:auto;text-align:center;font-size:11.5px;font-weight:600;color:var(--n-600);padding-top:14px}
+
+/* checklist de política */
+.policy{display:grid;gap:8px;margin-top:10px;padding:12px 14px;border-radius:12px;
+  background:var(--n-0);border:1px solid var(--n-200)}
+.rule{display:flex;gap:9px;align-items:center;font-size:13.5px;font-weight:600;color:var(--n-600)}
+.rule .ic{flex:0 0 auto;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  border:1.5px solid var(--n-400);color:transparent}
+.rule.met{color:var(--ok-tx)}
+.rule.met .ic{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.rule.fail{color:var(--danger-tx)}
+.rule.fail .ic{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+
+/* éxito centrado */
+.center-state{margin:auto 0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;padding:0 8px}
+.big-ic{width:76px;height:76px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.big-ic.ok{background:var(--ok-bg);border:1.5px solid var(--ok-bd);color:var(--ok-tx)}
+.big-ic.deny{background:var(--danger-bg);border:1.5px solid var(--danger-bd);color:var(--danger-tx)}
+.center-state h4{margin:0;font-size:20px;font-weight:850;color:var(--n-900)}
+.center-state p{margin:0;font-size:14px;color:var(--n-700);max-width:290px}
+
+/* PIN */
+.pinwrap{display:flex;flex-direction:column;align-items:center;gap:8px;margin-top:18px}
+.avatar{width:56px;height:56px;border-radius:50%;background:var(--p-100);color:var(--p-800);
+  display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:850}
+.pin-title{font-size:19px;font-weight:850;color:var(--n-900);text-align:center}
+.pin-sub{font-size:13.5px;color:var(--n-700);text-align:center;max-width:280px}
+.pdots{display:flex;gap:16px;justify-content:center;margin:16px 0 6px}
+.pd{width:16px;height:16px;border-radius:50%;border:2px solid var(--n-400)}
+.pd.f{background:var(--n-900);border-color:var(--n-900)}
+.pd.e{background:var(--danger);border-color:var(--danger)}
+.pin-err{font-size:13.5px;font-weight:700;color:var(--danger-tx);text-align:center}
+.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:auto;padding-top:16px}
+.key{display:flex;align-items:center;justify-content:center;height:62px;border-radius:16px;
+  background:var(--n-0);border:1px solid var(--n-200);box-shadow:var(--sh-1);
+  font-size:23px;font-weight:750;color:var(--n-900)}
+.key.util{background:var(--n-50);border-style:dashed;color:var(--n-700);font-size:15px}
+.key.bio{color:var(--p-700);border-color:var(--brand-a20);background:var(--p-50)}
+
+/* shell */
+.appbar{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--n-0);
+  border-bottom:1px solid var(--n-200)}
+.appbar .abrand{font-size:15px;font-weight:850;color:var(--n-900)}
+.locchip{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 13px;border-radius:10px;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800);font-size:13px;font-weight:800}
+.appbar .sp{flex:1}
+.avatar.sm{width:40px;height:40px;font-size:15px}
+.content{flex:1;padding:14px 14px 12px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+.hello{font-size:13px;font-weight:600;color:var(--n-600)}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.kpi{background:var(--n-0);border:1px solid var(--n-200);border-radius:12px;padding:10px 12px;box-shadow:var(--sh-1)}
+.kpi .kl{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600)}
+.kpi .kv{font-size:22px;font-weight:800;color:var(--n-900);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.qhead{display:flex;align-items:baseline;justify-content:space-between;margin-top:2px}
+.qhead .ql{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600)}
+.qhead a{font-size:13px;font-weight:800;color:var(--p-700);min-height:32px;display:inline-flex;align-items:center}
+.qcard{background:var(--n-0);border:1px solid var(--n-200);border-radius:14px;padding:12px 14px;
+  box-shadow:var(--sh-1);display:grid;gap:5px}
+.qtop{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.qname{font-size:15px;font-weight:800;color:var(--n-900)}
+.qmeta{font-size:12.5px;color:var(--n-600);font-weight:600}
+.tchip{display:inline-flex;align-items:center;min-height:24px;padding:3px 9px;border-radius:6px;
+  font-size:12.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800)}
+.tchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.tchip.danger{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.empty{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;
+  padding:18px 14px;border:1.5px dashed var(--n-300);border-radius:14px;background:var(--n-25);
+  color:var(--n-600);font-size:13px;font-weight:600}
+.tabbar{margin-top:auto;display:flex;background:var(--n-0);border-top:1px solid var(--n-200)}
+.tab{position:relative;flex:1;min-height:58px;display:flex;flex-direction:column;gap:2px;
+  align-items:center;justify-content:center;font-size:11.5px;font-weight:750;color:var(--n-700)}
+.tab .tico{display:flex;align-items:center;justify-content:center;width:46px;height:26px;border-radius:13px}
+.tab.on{color:var(--p-800)}
+.tab.on .tico{background:var(--p-100)}
+.tbadge{position:absolute;top:6px;right:50%;margin-right:-24px;min-width:17px;height:17px;padding:0 4px;
+  border-radius:9px;background:var(--danger);color:#fff;font-size:10.5px;font-weight:800;
+  display:flex;align-items:center;justify-content:center}
+/* sheet ubicación */
+.dim{opacity:.32;pointer-events:none;filter:saturate(.8)}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:6;background:var(--n-0);
+  border-radius:20px 20px 0 0;box-shadow:var(--sh-3);padding:10px 16px 20px;border-top:1px solid var(--n-200)}
+.grab{width:40px;height:4px;border-radius:2px;background:var(--n-300);margin:2px auto 10px}
+.sheet h5{margin:0;font-size:16px;font-weight:850;color:var(--n-900)}
+.sheet .ssub{font-size:12.5px;color:var(--n-600);font-weight:600;margin:2px 0 10px}
+.opt{display:flex;align-items:center;gap:12px;min-height:54px;padding:0 12px;border-radius:12px;
+  border:1.5px solid var(--n-200);background:var(--n-0);margin-bottom:8px;font-size:15px;font-weight:700;color:var(--n-800)}
+.opt .radio{width:22px;height:22px;border-radius:50%;border:2px solid var(--n-400);flex:0 0 auto}
+.opt.sel{border-color:var(--p-600);background:var(--p-50);color:var(--p-800)}
+.opt.sel .radio{border-color:var(--p-600);background:radial-gradient(circle,var(--p-600) 0 45%,transparent 50%)}
+.opt .osub{display:block;font-size:12px;font-weight:600;color:var(--n-600)}
+/* skeleton */
+.sk{background:linear-gradient(90deg,var(--n-100),var(--n-200),var(--n-100));
+  background-size:200% 100%;animation:shim 1.4s infinite;border-radius:8px}
+@keyframes shim{to{background-position:-200% 0}}
+/* firma / kiosco */
+.kioskbar{display:flex;align-items:center;gap:8px;background:var(--p-800);color:#fff;
+  padding:9px 14px;font-size:12.5px;font-weight:800;letter-spacing:.03em}
+.kioskbar .exit{margin-left:auto;font-weight:700;font-size:12px;opacity:.9}
+.tenantbar{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--n-0);border-bottom:1px solid var(--n-200)}
+.tlogo{width:38px;height:38px;border-radius:10px;background:var(--n-800);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:850}
+.tname{font-size:16px;font-weight:850;color:var(--n-900)}
+.tsub{font-size:12px;color:var(--n-600);font-weight:600}
+.sigzone{flex:1;margin:6px 0;border:2px dashed var(--n-300);border-radius:16px;background:var(--n-0);
+  display:flex;align-items:center;justify-content:center;position:relative;min-height:250px}
+.sigline{position:absolute;left:26px;right:26px;bottom:44px;border-bottom:1.5px solid var(--n-300)}
+.sighint{position:absolute;bottom:18px;left:0;right:0;text-align:center;font-size:12.5px;color:var(--n-600);font-weight:600}
+.risk-ghost{position:absolute;inset:auto 14px 40%;padding:10px 12px;border:2px dashed var(--danger);
+  border-radius:12px;background:rgba(192,38,38,.06);color:var(--danger-tx);font-size:12.5px;font-weight:750;text-align:center}
+.sigrow{display:flex;gap:10px}
+.sigrow .btn{flex:1}
+footer.dod{max-width:1720px;margin:0 auto;padding:10px 24px 50px;color:var(--n-700);font-size:13px}
+footer.dod .card{background:var(--n-0);border:1px solid var(--n-200);border-radius:14px;padding:16px 18px;box-shadow:var(--sh-1)}
+footer.dod b{color:var(--n-900)}
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <h1>RideOps · Mockups M1 — Tanda A</h1>
+  <p>Cuatro pantallas móviles para aprobación de Hector ANTES de construir. Lenguaje visual heredado del
+  token layer del frontend web (rampa neutra morada, marca #8752FE, botón primario #6a35e0 = 6.57:1 con blanco,
+  foco AZUL, chips con texto sobre tinte + borde). Contexto de uso: Android gama media, pleno sol, una mano,
+  a veces guantes.</p>
+  <div class="meta-chips">
+    <span class="mchip">Targets ≥ 48 pt (botones 54–56, teclas PIN 62)</span>
+    <span class="mchip">Contraste ≥ 4.5:1 en todo texto</span>
+    <span class="mchip">Todo string en l10n — app_es.arb / app_en.arb (ADR-8), aquí se muestra ES</span>
+    <span class="mchip">Loading / empty / error por pantalla (DoD-10)</span>
+    <span class="mchip warn">Superficies volteadas al cliente: branding del tenant, nunca "RideOps"</span>
+  </div>
+</div>
+
+<nav class="jump">
+  <a href="#s1">1 · Login</a>
+  <a href="#s2">2 · Cambio forzado de contraseña</a>
+  <a href="#s3">3 · PIN / biometría (+ decisión §9-6)</a>
+  <a href="#s4">4 · Shell + selector de ubicación</a>
+</nav>
+
+<!-- ============================================================ 1 · LOGIN -->
+<section class="blk" id="s1">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 1</span>
+    <h2>Login</h2>
+    <p>POST /api/auth/login. Superficie de personal (no volteada al cliente) — la marca RideOps sí aparece.
+    Sin auto-refresh en 401: JWT vencido = re-login (ADR-3a).</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Loading (botón)</span><span class="schip"><i></i>Error credenciales</span>
+      <span class="schip"><i></i>Sin red</span><span class="schip"><i></i>Empty: n/a (form)</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>1A — Reposo / foco <small>campo email con foco (anillo AZUL, nunca morado)</small></figcaption>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr"><div class="pad">
+          <span class="flavor">DEV</span><span class="m inframe" style="top:40px;left:16px">1</span>
+          <div class="applogo"><div class="mark">R</div>
+            <div><div class="wname">RideOps</div><div class="wsub">Operaciones de patio</div></div></div>
+          <div class="f-label">Correo</div>
+          <div class="inp focus">marco@autosdelvalle.com<span class="m" style="margin-left:auto">2</span></div>
+          <div class="f-label">Contraseña</div>
+          <div class="inp"><span class="ph">••••••••</span>
+            <span class="trail"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg></span></div>
+          <div style="height:20px"></div>
+          <div class="btn btn-primary">Entrar</div>
+          <div class="linkline">¿Problemas para entrar? Pide a tu admin restablecer tu contraseña <span class="m" style="margin-left:6px">3</span></div>
+          <div class="ver">v0.1.0 (dev) · es · Patio Centro no seleccionado aún</div>
+        </div></div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>1B — Error de credenciales <small>401 de /login (no confundir con 401 de sesión)</small></figcaption>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr"><div class="pad">
+          <span class="flavor">DEV</span>
+          <div class="applogo"><div class="mark">R</div>
+            <div><div class="wname">RideOps</div><div class="wsub">Operaciones de patio</div></div></div>
+          <div class="banner b-danger" style="margin-top:8px">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.5"/></svg>
+            Correo o contraseña incorrectos. Revisa e intenta de nuevo.<span class="m">4</span></div>
+          <div class="f-label">Correo</div>
+          <div class="inp err">marco@autosdelvalle.com</div>
+          <div class="f-label">Contraseña</div>
+          <div class="inp err"><span class="ph">••••••••</span></div>
+          <div style="height:20px"></div>
+          <div class="btn btn-primary">Entrar</div>
+          <div class="linkline">¿Problemas para entrar? Pide a tu admin restablecer tu contraseña</div>
+          <div class="ver">v0.1.0 (dev) · es</div>
+        </div></div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>1C — Sin red <small>el login exige conexión; nada de spinner eterno</small></figcaption>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span class="off">Sin red · 87 %</span></div>
+        <div class="scr"><div class="pad">
+          <span class="flavor">DEV</span>
+          <div class="applogo"><div class="mark">R</div>
+            <div><div class="wname">RideOps</div><div class="wsub">Operaciones de patio</div></div></div>
+          <div class="banner b-warn" style="margin-top:8px">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg>
+            No hay conexión a internet. Iniciar sesión necesita red — se reintentará al volver la señal.<span class="m">5</span></div>
+          <div class="f-label">Correo</div>
+          <div class="inp">marco@autosdelvalle.com</div>
+          <div class="f-label">Contraseña</div>
+          <div class="inp"><span class="ph">••••••••</span></div>
+          <div style="height:20px"></div>
+          <div class="btn btn-primary is-disabled">Entrar</div>
+          <div class="btn btn-ghost btn-sm" style="margin-top:10px">Reintentar ahora</div>
+          <div class="ver">v0.1.0 (dev) · es</div>
+        </div></div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Login</h3>
+      <div class="note"><span class="m">1</span><span><b>Chip de flavor</b> (DEV/STG) solo en builds no-prod — mismo patrón .badge-building del web (ámbar punteado). Invisible en prod.</span></div>
+      <div class="note"><span class="m">2</span><span><b>Foco AZUL</b> (--focus #0b63d6 + halo), nunca morado sobre morado — regla heredada del design system web. Inputs 52 px de alto.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Sin "olvidé mi contraseña" self-service:</b> el flujo staff es reset por admin + contraseña temporal (alimenta la pantalla 2). Confirmar contra auth.service.js antes de build.</span></div>
+      <div class="note"><span class="m">4</span><span><b>Error genérico deliberado</b> (no revela si el correo existe). Título siempre localizado; el mensaje del backend solo como detalle secundario (blueprint §6).</span></div>
+      <div class="note"><span class="m">5</span><span><b>Estado sin red honesto:</b> banner warn + botón deshabilitado + reintento manual. Detección por connectivity + mapeo de DioException. El botón se rehabilita solo al volver la red.</span></div>
+      <div class="mini-demo"><div class="cap">Estado loading del botón (al enviar)</div>
+        <div class="btn btn-primary is-disabled" style="max-width:220px"><span class="spin"></span>Entrando…</div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 2 · CAMBIO FORZADO -->
+<section class="blk" id="s2">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 2</span>
+    <h2>Cambio forzado de contraseña (gate PASSWORD_CHANGE_REQUIRED)</h2>
+    <p>Pantalla BLOQUEANTE (sin back, sin tabs): el backend deja pasar solo 3 endpoints en allowlist.
+    Al éxito, el backend devuelve {token, user} fresco — se intercambia el JWT sin re-login (blueprint §3).</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Validación en vivo</span><span class="schip"><i></i>Error contraseña actual</span>
+      <span class="schip"><i></i>Éxito</span><span class="schip"><i></i>Loading (botón)</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>2A — Formulario con política en vivo <small>empleado nuevo con contraseña temporal</small></figcaption>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr"><div class="pad">
+          <div style="margin-top:14px"><span class="tchip">Paso obligatorio</span><span class="m" style="margin-left:8px">1</span></div>
+          <h3 style="font-size:20px;font-weight:850;margin:10px 0 4px">Crea tu contraseña</h3>
+          <p style="font-size:13.5px;color:var(--n-700);margin:0 0 6px">Entraste con una contraseña temporal.
+          Por seguridad, crea la tuya antes de continuar.</p>
+          <div class="f-label">Contraseña temporal (actual)</div>
+          <div class="inp">••••••••••</div>
+          <div class="f-label">Nueva contraseña</div>
+          <div class="inp focus">Patio26<span class="trail"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg></span></div>
+          <div class="policy"><span class="m" style="position:absolute;margin:-22px 0 0 292px">2</span>
+            <div class="rule"><span class="ic">–</span>Mínimo 8 caracteres</div>
+            <div class="rule met"><span class="ic">✓</span>Al menos una mayúscula</div>
+            <div class="rule met"><span class="ic">✓</span>Al menos un número</div>
+            <div class="rule"><span class="ic">–</span>Distinta de la contraseña temporal</div>
+          </div>
+          <div style="height:16px"></div>
+          <div class="btn btn-primary is-disabled">Guardar y continuar<span class="m">3</span></div>
+          <div class="ver">La sesión temporal sigue viva durante este paso (allowlist del backend)</div>
+        </div></div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>2B — Error: contraseña actual incorrecta <small>error de servidor tras submit</small></figcaption>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr"><div class="pad">
+          <div style="margin-top:14px"><span class="tchip">Paso obligatorio</span></div>
+          <h3 style="font-size:20px;font-weight:850;margin:10px 0 4px">Crea tu contraseña</h3>
+          <div class="banner b-danger" style="margin:6px 0 4px">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.5"/></svg>
+            La contraseña temporal no es correcta. Revísala o pide a tu admin una nueva.<span class="m">4</span></div>
+          <div class="f-label">Contraseña temporal (actual)</div>
+          <div class="inp err">••••••••••</div>
+          <div class="f-label">Nueva contraseña</div>
+          <div class="inp">••••••••••</div>
+          <div class="policy">
+            <div class="rule met"><span class="ic">✓</span>Mínimo 8 caracteres</div>
+            <div class="rule met"><span class="ic">✓</span>Al menos una mayúscula</div>
+            <div class="rule met"><span class="ic">✓</span>Al menos un número</div>
+            <div class="rule met"><span class="ic">✓</span>Distinta de la contraseña temporal</div>
+          </div>
+          <div style="height:16px"></div>
+          <div class="btn btn-primary">Guardar y continuar</div>
+          <div class="ver">&nbsp;</div>
+        </div></div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>2C — Éxito <small>token intercambiado; siguiente paso: crear PIN</small></figcaption>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr"><div class="pad">
+          <div class="center-state">
+            <div class="big-ic ok"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></div>
+            <h4>Contraseña actualizada</h4>
+            <p>Tu sesión sigue activa — no necesitas volver a entrar.<span class="m">5</span></p>
+            <p style="font-size:13px;color:var(--n-600)">Siguiente: crea tu PIN para desbloquear rápido en el patio.</p>
+          </div>
+          <div class="btn btn-primary">Continuar</div>
+          <div class="ver">&nbsp;</div>
+        </div></div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Cambio forzado</h3>
+      <div class="note"><span class="m">1</span><span><b>Bloqueante de verdad:</b> sin AppBar con back, sin tabbar; el redirect de go_router manda aquí ante mustChangePassword o 403 PASSWORD_CHANGE_REQUIRED observado.</span></div>
+      <div class="note"><span class="m">2</span><span><b>Checklist viva:</b> gris neutro = pendiente, verde = cumplida; solo se pinta danger tras intento de submit. REGLAS A CONFIRMAR contra la validación real de POST /api/auth/change-password antes de build — no inventar política.</span></div>
+      <div class="note"><span class="m">3</span><span><b>CTA deshabilitado</b> hasta cumplir la política local (la del servidor manda igualmente). En submit: spinner + "Guardando…".</span></div>
+      <div class="note"><span class="m">4</span><span><b>Sin campo "confirmar contraseña":</b> lo sustituye el toggle de ver contraseña (menos fricción con guantes). Si Hector prefiere confirmación clásica, es un cambio menor.</span></div>
+      <div class="note"><span class="m">5</span><span><b>Éxito sin re-login:</b> el backend devuelve {token, user} fresco y la app intercambia el JWT en silencio. El "Continuar" encadena directo al setup de PIN (pantalla 3A).</span></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 3 · PIN / BIOMETRÍA -->
+<section class="blk" id="s3">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 3</span>
+    <h2>Bloqueo por PIN y biometría — y la decisión §9-6</h2>
+    <p>Setup al primer login, unlock por inactividad. El PIN es local al dispositivo (no viaja al backend);
+    N intentos fallidos ⇒ cerrar sesión y volver a login. Usuarios con screenLockExempt no ven este gate.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Setup</span><span class="schip"><i></i>Unlock + error</span>
+      <span class="schip"><i></i>Variante A: modo kiosco</span><span class="schip"><i></i>Variante B: sin modo kiosco</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>3A — Setup del PIN (primer login) <small>paso 1 de 2; luego repite para confirmar</small></figcaption>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr"><div class="pad">
+          <div class="pinwrap">
+            <div class="pin-title">Crea tu PIN</div>
+            <div class="pin-sub">Lo usarás para desbloquear RideOps en el patio. 4 dígitos.<span class="m">1</span></div>
+            <div class="pdots"><span class="pd f"></span><span class="pd f"></span><span class="pd"></span><span class="pd"></span></div>
+            <span style="font-size:12.5px;color:var(--n-600);font-weight:700">Paso 1 de 2</span>
+          </div>
+          <div class="keypad"><span class="m" style="position:absolute;margin-top:-10px;right:24px">2</span>
+            <div class="key">1</div><div class="key">2</div><div class="key">3</div>
+            <div class="key">4</div><div class="key">5</div><div class="key">6</div>
+            <div class="key">7</div><div class="key">8</div><div class="key">9</div>
+            <div class="key util" style="visibility:hidden"></div><div class="key">0</div><div class="key util">⌫</div>
+          </div>
+        </div></div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>3B — Unlock con error <small>PIN + huella; 2 intentos restantes</small></figcaption>
+      <div class="phone">
+        <div class="statusbar"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr"><div class="pad">
+          <div class="pinwrap">
+            <div class="avatar">MG</div>
+            <div class="pin-title">Hola, Marco</div>
+            <div class="pin-sub">Ingresa tu PIN para continuar</div>
+            <div class="pdots"><span class="pd e"></span><span class="pd e"></span><span class="pd e"></span><span class="pd e"></span></div>
+            <div class="pin-err">PIN incorrecto — te quedan 2 intentos<span class="m" style="margin-left:6px">3</span></div>
+          </div>
+          <div class="keypad">
+            <div class="key">1</div><div class="key">2</div><div class="key">3</div>
+            <div class="key">4</div><div class="key">5</div><div class="key">6</div>
+            <div class="key">7</div><div class="key">8</div><div class="key">9</div>
+            <div class="key bio"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 11a3 3 0 0 1 3 3c0 2-.4 4-1.3 5.8"/><path d="M9 13.5c0 2.6-.3 4.6-1 6.3"/><path d="M12 7.5a6.5 6.5 0 0 1 6.5 6.5c0 1.4-.15 2.8-.45 4.2"/><path d="M5.5 14a6.5 6.5 0 0 1 1.8-4.5"/><path d="M8.7 5.6A6.5 6.5 0 0 1 12 4.7c1.2 0 2.3.3 3.3.9"/></svg><span class="m" style="position:absolute;margin:-40px 0 0 40px">4</span></div>
+            <div class="key">0</div><div class="key util">⌫</div>
+          </div>
+          <div class="linkline" style="margin-top:6px">¿Olvidaste tu PIN? Cerrar sesión<span class="m" style="margin-left:6px">5</span></div>
+        </div></div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>3C — VARIANTE A · con modo kiosco <small>firma del cliente en el teléfono del empleado</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-0)">
+          <div class="kioskbar"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+            Modo firma · bloqueo en pausa<span class="exit">Salir: mantener 3 s + PIN</span><span class="m">6</span></div>
+          <div class="tenantbar"><div class="tlogo">AV</div>
+            <div><div class="tname">Autos del Valle</div><div class="tsub">Inspección del vehículo · Reserva R-2481</div></div>
+            <span class="m" style="margin-left:auto">7</span></div>
+          <div class="pad" style="padding-top:12px">
+            <p style="font-size:14.5px;color:var(--n-800);font-weight:600;margin:0 0 8px">Firme para confirmar que revisó
+            el estado del vehículo junto al agente.</p>
+            <div class="sigzone">
+              <svg width="200" height="70" viewBox="0 0 200 70" fill="none" stroke="var(--n-800)" stroke-width="2" stroke-linecap="round"><path d="M12 48c14-26 22-30 18-12s8 6 20-8 6 26 22 8 22-18 16-2 10 10 24 0 26-16 20-2 14 12 26 4"/></svg>
+              <div class="sigline"></div><div class="sighint">Firme aquí con el dedo</div>
+            </div>
+            <div class="sigrow">
+              <div class="btn btn-ghost">Borrar</div>
+              <div class="btn btn-primary">Confirmar firma</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>3D — VARIANTE B · sin modo kiosco <small>solo pausa heurística del timer</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-0)">
+          <div class="tenantbar"><div class="tlogo">AV</div>
+            <div><div class="tname">Autos del Valle</div><div class="tsub">Inspección del vehículo · Reserva R-2481</div></div></div>
+          <div class="pad" style="padding-top:12px">
+            <p style="font-size:14.5px;color:var(--n-800);font-weight:600;margin:0 0 8px">Firme para confirmar que revisó
+            el estado del vehículo junto al agente.</p>
+            <div class="sigzone">
+              <div class="risk-ghost">RIESGO §9-6: si el cliente se detiene más del timeout,
+              la pantalla de PIN puede saltar AQUÍ, a mitad de firma<span class="m" style="margin-left:6px">8</span></div>
+              <div class="sigline"></div><div class="sighint">Firme aquí con el dedo</div>
+            </div>
+            <div class="sigrow">
+              <div class="btn btn-ghost">Borrar</div>
+              <div class="btn btn-primary">Confirmar firma</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · PIN / biometría</h3>
+      <div class="note"><span class="m">1</span><span><b>4 dígitos:</b> velocidad con guantes gana a entropía — el PIN solo protege la sesión local, el token vive en Keystore. Tras el paso 2 se ofrece activar huella (local_auth).</span></div>
+      <div class="note"><span class="m">2</span><span><b>Teclas de 62 px</b>, tipografía 23 px: operable con guantes y legible a pleno sol. Teclado anclado abajo = zona del pulgar (una mano).</span></div>
+      <div class="note"><span class="m">3</span><span><b>Contador de intentos visible;</b> al agotarse ⇒ limpiar sesión y volver a login (re-auth con contraseña). Nunca lockout silencioso.</span></div>
+      <div class="note"><span class="m">4</span><span><b>Huella como tecla del keypad</b> (tinte morado --p-50 / texto --p-700), no como flujo aparte: un toque, cero modales.</span></div>
+      <div class="note"><span class="m">5</span><span><b>Escape honesto:</b> "olvidé mi PIN" = cerrar sesión, target de 48 px.</span></div>
+      <div class="note"><span class="m">6</span><span><b>Variante A:</b> barra persistente --p-800 con salida deliberada (mantener 3 s + PIN). Mientras está activo: lock por inactividad suspendido, notificaciones staff silenciadas, navegación fuera del flujo de firma bloqueada.</span></div>
+      <div class="note"><span class="m">7</span><span><b>Superficie volteada al cliente:</b> branding del TENANT (display-data), jamás "RideOps"/"Ride Fleet" hardcodeado. Idioma del cliente, no el del empleado.</span></div>
+      <div class="note"><span class="m">8</span><span><b>Variante B:</b> el canvas de firma resetea el timer con cada trazo; sin barra, sin salida con PIN. Más simple, pero el riesgo dibujado es real (cliente lee los términos y se pausa).</span></div>
+      <div class="decision"><b>Decisión pendiente de Hector — §9-6</b>
+        Cuando el cliente firma en el teléfono del empleado, el lock por inactividad no debe saltar a mitad de firma.
+        <ul>
+          <li><b>A · Modo kiosco:</b> + a prueba de pausas largas, + bloquea fisgoneo si el cliente navega; − más build (M4 lo lista como "si §9-6 dice que sí").</li>
+          <li><b>B · Sin modo kiosco:</b> + barato, listo en M1; − el lock puede disparar con el teléfono en manos del cliente y pedirle el PIN del EMPLEADO (mala imagen y bloqueo del flujo).</li>
+        </ul>
+        Recomendación de diseño: Variante A; si se pospone a M4, lanzar M1 con B + timeout extendido (p. ej. 5 min) SOLO durante CUSTOMER_SIGN_PENDING.</div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 4 · SHELL + UBICACIÓN -->
+<section class="blk" id="s4">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 4</span>
+    <h2>Shell con RBAC + selector de ubicación</h2>
+    <p>ShellRoute con bottom nav y ubicación activa en el header (header x-view-location en cada request).
+    La nav se esconde por moduleAccess, pero el 403 del backend se maneja igual (DoD-4). El 403 del selector
+    (sin code) se muestra SIEMPRE como negativa visible, nunca pantalla vacía.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Loading (skeleton)</span><span class="schip"><i></i>Empty (cola vacía)</span>
+      <span class="schip"><i></i>Error 403 ubicación</span><span class="schip"><i></i>Offline con datos viejos</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>4A — Home AGENT <small>4 tabs; cola con cards + cola vacía inline</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip">Patio Centro <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+            <span class="m">1</span><span class="sp"></span><div class="avatar sm">MG</div></div>
+          <div class="content">
+            <div class="hello">Martes 18 · Hola, Marco</div>
+            <div class="kpis">
+              <div class="kpi"><div class="kl">Salidas hoy</div><div class="kv">6</div></div>
+              <div class="kpi"><div class="kl">Retornos</div><div class="kv">0</div></div>
+              <div class="kpi"><div class="kl">Bandeja</div><div class="kv" style="color:var(--warn-tx)">2</div></div>
+            </div>
+            <div class="qhead"><span class="ql">Salidas (próx. 72 h)</span><a>Ver todo (6)</a></div>
+            <div class="qcard"><div class="qtop"><span class="qname">Laura Méndez</span><span class="tchip">Hoy 10:30</span></div>
+              <div class="qmeta">Corolla 2023 · U-112 · R-2481 · Pre-checkin listo</div></div>
+            <div class="qcard"><div class="qtop"><span class="qname">Jorge Salas</span><span class="tchip warn">Hoy 11:15</span></div>
+              <div class="qmeta">RAV4 2024 · U-087 · R-2483 · Falta pre-checkin</div></div>
+            <div class="qhead"><span class="ql">Retornos (próx. 72 h)</span></div>
+            <div class="empty"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="6" width="16" height="13" rx="2"/><path d="M4 11h16"/></svg>
+              No hay retornos en las próximas 72 h<span class="m">2</span></div>
+          </div>
+          <div class="tabbar"><span class="m" style="position:absolute;margin-top:-12px;left:180px">3</span>
+            <div class="tab on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tab"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tab"><span class="tbadge">2</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tab"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>4B — Home ADMIN, offline <small>5 tabs (+Incidentes); datos viejos declarados</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span class="off">Sin red · 87 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip">Todas <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+            <span class="sp"></span><div class="avatar sm">HP</div></div>
+          <div class="content">
+            <div class="banner b-warn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg>
+              Sin conexión — mostrando datos de hace 4 min. <b style="margin-left:4px">Reintentar</b><span class="m">4</span></div>
+            <div class="kpis">
+              <div class="kpi"><div class="kl">Abiertas</div><div class="kv">14</div></div>
+              <div class="kpi"><div class="kl">Activas</div><div class="kv">22</div></div>
+              <div class="kpi"><div class="kl">Incidentes</div><div class="kv" style="color:var(--danger-tx)">3</div></div>
+            </div>
+            <div class="qhead"><span class="ql">Incidentes abiertos</span><a>Ver todo (3)</a></div>
+            <div class="qcard"><div class="qtop"><span class="qname">U-087 · golpe en defensa</span><span class="tchip danger">Abierto</span></div>
+              <div class="qmeta">Reportado 9:02 · Sucursal Aeropuerto</div></div>
+            <div class="qhead"><span class="ql">Salidas (próx. 72 h)</span><a>Ver todo (9)</a></div>
+            <div class="qcard"><div class="qtop"><span class="qname">Laura Méndez</span><span class="tchip">Hoy 10:30</span></div>
+              <div class="qmeta">Corolla 2023 · U-112 · R-2481</div></div>
+          </div>
+          <div class="tabbar">
+            <div class="tab on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tab"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tab"><span class="tbadge">3</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg></span>Incidentes<span class="m" style="position:absolute;top:-10px;right:2px">5</span></div>
+            <div class="tab"><span class="tbadge">2</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tab"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>4C — Selector de ubicación <small>bottom sheet; opciones de 54 px</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr">
+          <div class="dim">
+            <div class="appbar"><span class="abrand">RideOps</span>
+              <div class="locchip">Patio Centro <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+              <span class="sp"></span><div class="avatar sm">MG</div></div>
+            <div class="content">
+              <div class="kpis"><div class="kpi"><div class="kl">Salidas</div><div class="kv">6</div></div>
+                <div class="kpi"><div class="kl">Retornos</div><div class="kv">0</div></div>
+                <div class="kpi"><div class="kl">Bandeja</div><div class="kv">2</div></div></div>
+              <div class="qcard"><div class="qtop"><span class="qname">Laura Méndez</span><span class="tchip">Hoy 10:30</span></div>
+                <div class="qmeta">Corolla 2023 · U-112</div></div>
+            </div>
+          </div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <h5>Ubicación activa</h5>
+            <div class="ssub">Filtra colas, búsqueda y capturas nuevas<span class="m" style="margin-left:8px">6</span></div>
+            <div class="opt"><span class="radio"></span>Todas mis ubicaciones</div>
+            <div class="opt sel"><span class="radio"></span><span>Patio Centro<span class="osub">Ubicación actual</span></span></div>
+            <div class="opt"><span class="radio"></span>Sucursal Aeropuerto</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:4px">Cancelar</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>4D — 403 de ubicación <small>negativa visible; NUNCA pantalla vacía</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip" style="background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)">Sucursal Aeropuerto</div>
+            <span class="sp"></span><div class="avatar sm">MG</div></div>
+          <div class="content">
+            <div class="center-state" style="margin:auto 0">
+              <div class="big-ic deny"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l7 3v5c0 5-3 8.2-7 10-4-1.8-7-5-7-10V6z"/><path d="M9 9l6 6M15 9l-6 6"/></svg></div>
+              <h4>Sin acceso a esta ubicación</h4>
+              <p>Tu cuenta ya no tiene acceso a Sucursal Aeropuerto. Elige otra ubicación para seguir trabajando.<span class="m">7</span></p>
+            </div>
+            <div class="btn btn-primary">Cambiar ubicación</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:10px">Reintentar</div>
+            <p style="text-align:center;font-size:12.5px;color:var(--n-600);font-weight:600;margin:10px 0 0">
+              Si crees que es un error, avisa a tu administrador.</p>
+          </div>
+          <div class="tabbar">
+            <div class="tab on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tab"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tab"><span class="tbadge">2</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tab"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>4E — Loading (skeleton) <small>solo primer load; después pull-to-refresh</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip">Patio Centro <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+            <span class="sp"></span><div class="avatar sm">MG</div></div>
+          <div class="content"><span class="m" style="position:absolute;margin:4px 0 0 300px">8</span>
+            <div class="sk" style="height:14px;width:150px"></div>
+            <div class="kpis">
+              <div class="sk" style="height:64px"></div><div class="sk" style="height:64px"></div><div class="sk" style="height:64px"></div></div>
+            <div class="sk" style="height:12px;width:120px;margin-top:6px"></div>
+            <div class="sk" style="height:70px"></div>
+            <div class="sk" style="height:70px"></div>
+            <div class="sk" style="height:12px;width:120px;margin-top:6px"></div>
+            <div class="sk" style="height:70px"></div>
+          </div>
+          <div class="tabbar">
+            <div class="tab on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tab"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tab"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tab"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Shell + ubicación</h3>
+      <div class="note"><span class="m">1</span><span><b>Ubicación SIEMPRE visible</b> en el header (chip morado --p-50, 44 px + hit-slop a 48). Es el estado que decide qué ve el usuario — no se esconde en un menú.</span></div>
+      <div class="note"><span class="m">2</span><span><b>Empty por cola, no por pantalla:</b> cada cola vacía lo declara inline (borde punteado, --n-25). La pantalla nunca queda en blanco.</span></div>
+      <div class="note"><span class="m">3</span><span><b>AGENT = 4 tabs</b> (Inicio, Buscar, Bandeja, Perfil). La Bandeja (outbox, ADR-7) SIEMPRE visible con badge — dead-letter jamás oculto. Checkout e inspección se entra desde las cards, no desde tabs.</span></div>
+      <div class="note"><span class="m">4</span><span><b>Offline honesto:</b> banner warn con edad del dato ("hace 4 min") + reintento. Los datos cacheados se muestran, no se borran.</span></div>
+      <div class="note"><span class="m">5</span><span><b>ADMIN/OPS suman Incidentes</b> (issueEscalations) por moduleAccess.issueCenter. La nav se deriva de moduleAccess + role, pero cada request maneja su 403 igualmente (DoD-4). Máximo 5 tabs.</span></div>
+      <div class="note"><span class="m">6</span><span><b>El sheet solo lista ubicaciones del set del usuario</b> (locationIds; null = todas). Persiste en sesión y alimenta x-view-location y cada fila nueva del outbox.</span></div>
+      <div class="note"><span class="m">7</span><span><b>403 sin code = negativa de ubicación</b> (REGROUND §1): chrome completo (appbar + tabs), copy claro y 2 salidas (cambiar / reintentar). Prohibido mostrarlo como "no hay datos". Si backend agrega code VIEW_LOCATION_DENIED (gap #3), el mapeo se endurece.</span></div>
+      <div class="note"><span class="m">8</span><span><b>Skeleton solo en el primer load;</b> los refrescos por polling son silenciosos y el pull-to-refresh muestra su propio indicador. Nada de spinner a pantalla completa.</span></div>
+    </aside>
+  </div>
+</section>
+
+<footer class="dod">
+  <div class="card">
+    <b>Trazabilidad DoD (§10):</b> #1 todos los strings mostrados van a app_es.arb/app_en.arb ·
+    #2 targets 54–62 px y texto sobre fondos con ratio ≥4.5:1 (rampa --n-600+ para texto, --p-600 para fills con blanco) ·
+    #5 estados 401/403/409/429 — el 403 de ubicación es el frame 4D, el gate de contraseña es la pantalla 2 ·
+    #10 loading/empty/error dibujados por pantalla. <b>Pendientes marcados para build:</b> política real de contraseña
+    (confirmar contra POST /api/auth/change-password), flujo de reset staff, y la decisión §9-6 (caja ámbar, pantalla 3).
+  </div>
+</footer>
+
+</body>
+</html>

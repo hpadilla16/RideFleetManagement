@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:dio/dio.dart';
 
 import 'api_error.dart';
@@ -75,37 +77,84 @@ class AuthInterceptor extends Interceptor {
   }
 }
 
-/// Backoff para 429 (DoD #5): reintenta la request idempotente con espera
-/// exponencial + jitter. Solo métodos seguros/idempotentes — un POST de
-/// dinero NUNCA se reintenta desde aquí (ADR-5: eso vive en el flujo de
+/// Backoff para throttling (DoD #5): reintenta la request idempotente con
+/// espera exponencial + jitter. Solo métodos seguros/idempotentes — un POST
+/// de dinero NUNCA se reintenta desde aquí (ADR-5: eso vive en el flujo de
 /// intento en vivo con su llave de idempotencia).
+///
+/// Qué cuenta como throttle:
+///  - 429, siempre.
+///  - 503 SOLO si trae `Retry-After` — así señala el backend la saturación
+///    real (backend/src/lib/errors.js: pool P2024 y ServiceUnavailableError
+///    responden 503 + Retry-After en segundos). Un 503 pelón es un outage
+///    genérico: reintentarlo a ciegas solo alimenta la estampida.
+///
+/// `Retry-After` (segundos) actúa como PISO de la espera: si el servidor
+/// pide 5 s, no se le pega antes de 5 s por mucho que el backoff local diga
+/// 500 ms.
 class RateLimitRetryInterceptor extends Interceptor {
-  RateLimitRetryInterceptor(this._dio, {this.maxRetries = 3});
+  RateLimitRetryInterceptor(
+    this._dio, {
+    this.maxRetries = 3,
+    this.baseDelayMs = 500,
+    Random? random,
+  }) : _random = random ?? Random();
 
   final Dio _dio;
   final int maxRetries;
 
+  /// Base del backoff exponencial. Inyectable solo para que los tests no
+  /// esperen medio segundo real.
+  final int baseDelayMs;
+
+  /// Jitter real (no `microsecondsSinceEpoch % 250`, que en ráfagas
+  /// sincronizadas produce valores casi idénticos y no des-sincroniza nada).
+  final Random _random;
+
   static const _attemptKey = 'rateLimitAttempt';
   static const _retriableMethods = {'GET', 'HEAD'};
+  static const _jitterMs = 250;
+
+  /// Espera antes del reintento [attempt] (base 0): backoff exponencial con
+  /// jitter, con `Retry-After` del servidor como piso. Público para tests.
+  Duration delayFor(int attempt, {int? retryAfterSeconds}) {
+    final backoffMs = baseDelayMs * (1 << attempt);
+    final floorMs = (retryAfterSeconds ?? 0) * 1000;
+    final waitMs = backoffMs > floorMs ? backoffMs : floorMs;
+    return Duration(milliseconds: waitMs + _random.nextInt(_jitterMs));
+  }
+
+  bool _isThrottle(Response<dynamic>? response) {
+    final status = response?.statusCode;
+    if (status == 429) return true;
+    return status == 503 && _retryAfterSeconds(response) != null;
+  }
+
+  /// El backend manda `Retry-After` en segundos enteros (nunca fecha HTTP);
+  /// cualquier otra forma se ignora y decide el backoff local.
+  int? _retryAfterSeconds(Response<dynamic>? response) {
+    final raw = response?.headers.value('retry-after');
+    if (raw == null) return null;
+    return int.tryParse(raw.trim());
+  }
 
   @override
   Future<void> onError(
     DioException err,
     ErrorInterceptorHandler handler,
   ) async {
-    final status = err.response?.statusCode;
     final method = err.requestOptions.method.toUpperCase();
     final attempt = (err.requestOptions.extra[_attemptKey] as int?) ?? 0;
 
-    if (status != 429 ||
+    if (!_isThrottle(err.response) ||
         !_retriableMethods.contains(method) ||
         attempt >= maxRetries) {
       return handler.next(err);
     }
 
-    final delayMs = (500 * (1 << attempt)) +
-        (DateTime.now().microsecondsSinceEpoch % 250);
-    await Future<void>.delayed(Duration(milliseconds: delayMs));
+    await Future<void>.delayed(
+      delayFor(attempt, retryAfterSeconds: _retryAfterSeconds(err.response)),
+    );
 
     try {
       final opts = err.requestOptions;

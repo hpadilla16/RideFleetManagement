@@ -91,9 +91,15 @@ class OutboxDb extends _$OutboxDb {
   /// Purga por cambio de cuenta (ADR-7): TODO lo que no sea del usuario
   /// entrante se borra — las filas están atadas a quien las creó y jamás se
   /// drenan con credenciales ajenas.
-  Future<int> purgeNotOwnedBy({required String userId}) {
+  ///
+  /// Devuelve las filas BORRADAS: el caller debe borrar también los archivos
+  /// de foto que referencian (`photoPath` en el payload) — si solo se borra
+  /// la fila, el binario (PII: fotos de daños) queda huérfano en disco. El
+  /// barrido de arranque para archivos huérfanos sin fila (crash entre borrar
+  /// fila y borrar archivo) es historia M1.
+  Future<List<OutboxEntry>> purgeNotOwnedBy({required String userId}) {
     return (delete(outboxEntries)..where((t) => t.userId.equals(userId).not()))
-        .go();
+        .goAndReturn();
   }
 
   Future<void> markInflight(String id) => _setStatus(id, 'inflight');
@@ -101,19 +107,46 @@ class OutboxDb extends _$OutboxDb {
   Future<void> markDrained(String id) =>
       (delete(outboxEntries)..where((t) => t.id.equals(id))).go();
 
+  /// Recuperación de filas huérfanas: si el proceso murió entre
+  /// [markInflight] y el outcome, la fila quedó en 'inflight' y [pendingFor]
+  /// (que solo selecciona 'pending') jamás la volvería a drenar. El drenador
+  /// llama esto AL INICIO de cada corrida. Re-enviar es inocuo: el backend
+  /// upserta fotos por angleKey y el complete re-verifica antes de mandar.
+  Future<int> resetInflightToPending({
+    required String userId,
+    required String tenantId,
+  }) {
+    return (update(outboxEntries)
+          ..where((t) =>
+              t.status.equals('inflight') &
+              t.userId.equals(userId) &
+              t.tenantId.equals(tenantId)))
+        .write(
+      OutboxEntriesCompanion(
+        status: const Value('pending'),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
   Future<void> markFailed(
     String id, {
     required String error,
     String? code,
     required bool dead,
   }) {
+    // Incremento ATÓMICO en SQL (`attempts = attempts + 1`), no
+    // leer-modificar-escribir: sin incrementar aquí, el tope del drenador
+    // (que compara contra `attempts`) nunca se alcanzaría y una fila con
+    // error de red permanente reintentaría para siempre sin llegar a
+    // dead-letter.
     return (update(outboxEntries)..where((t) => t.id.equals(id))).write(
-      OutboxEntriesCompanion(
-        status: Value(dead ? 'dead' : 'pending'),
-        lastError: Value(error),
-        lastErrorCode: Value(code),
-        attempts: Value.absent(),
-        updatedAt: Value(DateTime.now()),
+      OutboxEntriesCompanion.custom(
+        status: Constant(dead ? 'dead' : 'pending'),
+        lastError: Constant(error),
+        lastErrorCode: Constant(code),
+        attempts: outboxEntries.attempts + const Constant(1),
+        updatedAt: Constant(DateTime.now()),
       ),
     );
   }

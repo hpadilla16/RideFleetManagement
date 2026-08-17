@@ -63,6 +63,16 @@ class DrainTransient extends DrainOutcome {
   final String message;
 }
 
+/// Operaciones remotas + de disco que el drenador necesita.
+///
+/// Decisión sobre `x-view-location` en el drenado: el Dio del drenador NO
+/// manda el header de la ubicación activa ACTUAL. Los endpoints del drenado
+/// (mint del handoff token + rutas públicas /api/mobile-inspection/:token/*)
+/// son tenant-scoped y no dependen del selector; mandar una ubicación
+/// distinta a la de captura (la fila guarda su locationId solo como dato de
+/// propiedad) podría romper con endurecimientos futuros del backend. Si el
+/// backend algún día exige ubicación aquí, deberá salir del locationId de la
+/// FILA, nunca del selector vivo.
 abstract class OutboxOps {
   /// POST /api/checkout-sessions/:id/handoff-token con el staff JWT.
   /// Devuelve el token o null si la sesión ya no existe.
@@ -87,10 +97,21 @@ abstract class OutboxOps {
 
   /// Lee el dataURL de la foto cifrada en disco.
   Future<String?> readPhotoData(String path);
+
+  /// Borra el archivo de foto cifrado en disco. Best-effort e idempotente:
+  /// si el archivo ya no existe NO es error. El drenador lo llama cuando la
+  /// fila `inspection_photo` sale de la bandeja (DrainOk o dead-letter) —
+  /// la fila se va, el binario (PII) no puede quedarse huérfano en disco.
+  Future<void> deletePhotoFile(String path);
 }
 
 abstract class OutboxStore {
   Future<List<OutboxRow>> pending();
+
+  /// Regresa a 'pending' las filas que quedaron en 'inflight' (proceso
+  /// muerto entre markInflight y el outcome). Sin esto, [pending] jamás las
+  /// volvería a servir y se perderían en silencio.
+  Future<void> resetInflight();
   Future<void> markInflight(String id);
   Future<void> markDrained(String id);
   Future<void> markFailed(String id,
@@ -116,8 +137,23 @@ class OutboxDrainer {
   /// pide 8 tokens (y el mint del backend reusa el vivo de todos modos).
   final _tokens = <String, String>{};
 
-  Future<void> drain() async {
+  /// Corrida en vuelo (single-flight). Dos disparos concurrentes (p.ej.
+  /// connectivity_plus + timer periódico) comparten UNA corrida: el segundo
+  /// recibe el Future de la primera en vez de drenar en paralelo y pelearse
+  /// por las mismas filas.
+  Future<void>? _running;
+
+  Future<void> drain() {
+    return _running ??= _drain().whenComplete(() => _running = null);
+  }
+
+  Future<void> _drain() async {
     _tokens.clear();
+    // Filas huérfanas en 'inflight' (el proceso murió entre markInflight y
+    // el outcome) vuelven a 'pending' ANTES de leer la cola — re-enviar es
+    // inocuo: el backend upserta fotos por angleKey y el complete
+    // re-verifica contra el servidor antes de mandar.
+    await store.resetInflight();
     final rows = await store.pending();
     final drained = <String>{};
     final failedThisRun = <String>{};
@@ -139,17 +175,35 @@ class OutboxDrainer {
         case DrainOk():
           drained.add(row.id);
           await store.markDrained(row.id);
+          await _deletePhotoFileIfAny(row);
         case DrainReject(:final code, :final message):
           failedThisRun.add(row.id);
           await store.markFailed(row.id,
               error: message, code: code, dead: true);
+          // La fila muere pero es visible en dead-letter; el archivo de foto
+          // ya no se va a subir jamás → se borra (PII fuera de disco).
+          await _deletePhotoFileIfAny(row);
         case DrainTransient(:final message):
           failedThisRun.add(row.id);
+          final goesDead = row.attempts + 1 >= maxAttemptsBeforeDead;
           await store.markFailed(row.id,
-              error: message,
-              code: null,
-              dead: row.attempts + 1 >= maxAttemptsBeforeDead);
+              error: message, code: null, dead: goesDead);
+          if (goesDead) await _deletePhotoFileIfAny(row);
       }
+    }
+  }
+
+  /// Borra el binario de una fila `inspection_photo` que sale de la bandeja
+  /// (drenó OK o murió). Best-effort: un fallo al borrar no debe tirar el
+  /// drenado — el barrido de huérfanos de arranque (historia M1) lo recoge.
+  Future<void> _deletePhotoFileIfAny(OutboxRow row) async {
+    if (row.kind != 'inspection_photo') return;
+    final path = row.payloadMap['photoPath'] as String?;
+    if (path == null) return;
+    try {
+      await ops.deletePhotoFile(path);
+    } catch (_) {
+      // Inocuo: la fila ya salió de la bandeja; M1 barre huérfanos.
     }
   }
 
@@ -225,6 +279,13 @@ class OutboxDrainer {
     );
     if (outcome is DrainReject && (outcome.code?.startsWith('TOKEN_') ?? false)) {
       _tokens.remove(sessionId);
+      // TOKEN_CONSUMED casi siempre significa que OTRA superficie completó
+      // la inspección mientras esta fila esperaba. Re-verificar ANTES de
+      // re-mint: re-mandar el complete re-estamparía inspectionCompletedAt
+      // sobre una sesión posiblemente ya CLOSED.
+      if (await ops.inspectionAlreadyCompleted(reservationId)) {
+        return const DrainOk();
+      }
       final fresh = await _tokenFor(sessionId);
       if (fresh != null) {
         outcome = await ops.completeInspection(
