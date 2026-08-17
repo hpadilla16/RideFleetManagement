@@ -92,4 +92,14 @@ export const SCREENS = {
     ],
     caption: 'Your rate beside the market, refreshed every night.',
   },
+
+  'shuttle-tracker': {
+    kind: 'tracker',
+    badge: 'EN VIVO',
+    location: 'Miami International Airport',
+    headway: 'Pasa aproximadamente cada 8 minutos',
+    instructions: 'Espera en la columna 4, nivel de llegadas.',
+    distance: 'Estás a ~180 m del punto de espera',
+    cta: 'Solicitar el shuttle',
+  },
 };

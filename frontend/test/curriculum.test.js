@@ -120,10 +120,12 @@ describe('tracks', () => {
     const steps = stepsForTrack(TOUR_TRACKS.SHOWCASE, AGENT);
     const order = [];
     for (const s of steps) if (!order.includes(s.moduleKey)) order.push(s.moduleKey);
-    // 1 workspace, 2 incoming bookings, 3 create, 4 checkout, 5 checkin, 6 overdue, 7 market
+    // 1 workspace, 2 incoming bookings, 3 create, 4 checkout, 5 checkin, 6 overdue, 7 market, 8 shuttle
     expect(order[0]).toBe('the-workspace');
     expect(order[1]).toBe('incoming-bookings');
-    expect(order[order.length - 1]).toBe('market-pricing');
+    // The shuttle tracker closes the show (2026-08-16) — the customer-facing
+    // finale after the ops story.
+    expect(order[order.length - 1]).toBe('shuttle-tracker');
     // admin-only content is present even though the viewer is an agent
     expect(order).toContain('market-pricing');
   });

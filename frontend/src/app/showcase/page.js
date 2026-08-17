@@ -263,6 +263,28 @@ function Screen({ spec }) {
     );
   }
 
+  if (spec.kind === 'tracker') {
+    return (
+      <div style={S.trackerWrap}>
+        <div style={S.trackerMap}>
+          <span style={S.trackerBadge}>{spec.badge}</span>
+          {/* dashed walk line drawn as a rotated strip between dot and pin */}
+          <div style={S.trackerLine} />
+          <div style={{ ...S.trackerMark, left: '22%', top: '68%', background: '#1d6ef2', width: 14, height: 14, boxShadow: '0 0 0 5px rgba(29,110,242,.22)' }} />
+          <div style={{ ...S.trackerMark, left: '58%', top: '38%', background: BRAND, width: 26, height: 26, fontSize: 13 }}>🧍</div>
+          <div style={{ ...S.trackerMark, left: '80%', top: '62%', background: '#1f8a5f', width: 30, height: 30, fontSize: 15 }}>🚐</div>
+        </div>
+        <div style={S.trackerCard}>
+          <div style={{ fontWeight: 700, fontSize: 13 }}>{spec.location}</div>
+          <div style={S.muted}>{spec.headway}</div>
+          <div style={S.trackerWhere}>{spec.instructions}</div>
+          <div style={S.trackerDistance}>{spec.distance}</div>
+          <div style={S.trackerCta}>{spec.cta}</div>
+        </div>
+      </div>
+    );
+  }
+
   if (spec.kind === 'market') {
     return (
       <>
@@ -291,6 +313,15 @@ const BRAND = '#8752FE';
 const tone = (t) => (t === 'good' ? '#1f8a5f' : t === 'warn' ? '#b4342b' : '#1e1a2b');
 
 const S = {
+  trackerWrap: { display: 'flex', gap: 14, alignItems: 'stretch' },
+  trackerMap: { position: 'relative', flex: 1.2, minHeight: 190, borderRadius: 12, background: 'linear-gradient(135deg, #e8ecdf 0%, #dfe7ea 55%, #e6e2ee 100%)', overflow: 'hidden' },
+  trackerBadge: { position: 'absolute', top: 8, left: 8, background: '#1f8a5f', color: '#fff', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', padding: '3px 8px', borderRadius: 999 },
+  trackerLine: { position: 'absolute', left: '28%', top: '52%', width: '34%', borderTop: '3px dashed ' + '#8752FE', transform: 'rotate(-18deg)', opacity: 0.7 },
+  trackerMark: { position: 'absolute', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #fff', borderRadius: '50%', boxShadow: '0 2px 6px rgba(0,0,0,.25)', transform: 'translate(-50%, -50%)' },
+  trackerCard: { flex: 1, display: 'flex', flexDirection: 'column', gap: 6, background: '#fff', borderRadius: 12, padding: 12, border: '1px solid #eceaf2' },
+  trackerWhere: { fontSize: 11.5, background: '#F5F3F9', borderRadius: 8, padding: '6px 8px' },
+  trackerDistance: { fontSize: 11.5, background: '#eaf1fe', color: '#173e8a', borderRadius: 8, padding: '6px 8px' },
+  trackerCta: { marginTop: 'auto', textAlign: 'center', background: '#8752FE', color: '#fff', fontWeight: 700, fontSize: 12.5, borderRadius: 9, padding: '9px 10px' },
   page: { minHeight: '100vh', background: '#F5F3F9', color: '#1e1a2b', fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif', padding: '3vh 4vw', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 14 },
   frame: { display: 'grid', gridTemplateColumns: 'minmax(0, 5fr) minmax(0, 7fr)', gap: 'clamp(20px, 4vw, 48px)', alignItems: 'center', maxWidth: 1180, margin: '0 auto', width: '100%' },
   copy: { minWidth: 0 },
