@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/l10n/app_localizations.dart';
 import '../../core/theme/ride_tokens.dart';
+import '../../core/widgets/ride_buttons.dart';
 import 'location_sheet.dart';
 
 /// Pantalla 4D — negativa de ubicación (403 SIN code, REGROUND §1).
@@ -80,34 +81,18 @@ class LocationDeniedView extends StatelessWidget {
                 ],
               ),
             ),
-            SizedBox(
-              width: double.infinity,
-              height: 52, // target ≥ 48 (DoD #2)
-              child: FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: RideTokens.p600,
-                  foregroundColor: Colors.white,
-                  textStyle: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-                onPressed: () => showActiveLocationSheet(context),
-                child: Text(l10n.locationDeniedChangeButton),
-              ),
+            // GD MC-4: el .btn-primary REAL del design system (core/widgets)
+            // — no un segundo "primario" inventado por pantalla.
+            RidePrimaryButton(
+              label: l10n.locationDeniedChangeButton,
+              onPressed: () => showActiveLocationSheet(context),
             ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: TextButton(
-                style: TextButton.styleFrom(foregroundColor: RideTokens.n700),
-                onPressed: onRetry,
-                child: Text(l10n.retryButton),
-              ),
+            const SizedBox(height: 10),
+            // Ghost con borde (GD SHOULD H3): a pleno sol el texto pelado
+            // pierde affordance de botón.
+            RideGhostButton(
+              label: l10n.retryButton,
+              onPressed: onRetry,
             ),
             const SizedBox(height: 8),
             Text(

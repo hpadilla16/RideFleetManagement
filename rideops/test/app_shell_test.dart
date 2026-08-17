@@ -7,6 +7,7 @@ import 'package:rideops/app.dart';
 import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/api_providers.dart';
 import 'package:rideops/core/api/dto/session_user.dart';
+import 'package:rideops/core/db/outbox_providers.dart';
 import 'package:rideops/core/session/active_location.dart';
 import 'package:rideops/core/session/token_store.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
@@ -130,6 +131,31 @@ void main() {
     expect(meCalls, 2, reason: 'rehydrateUserIfMissing al reanudar');
     expect(find.byType(HomeSkeleton), findsNothing);
     expect(find.text('Signed in'), findsOneWidget);
+  });
+
+  testWidgets('badge de Bandeja con pendientes > 0 (rama real del contador)',
+      (tester) async {
+    api.onMe = () async => sessionUserFixture();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          tokenStoreProvider.overrideWithValue(tokenStore),
+          activeLocationStoreProvider.overrideWithValue(locationStore),
+          authApiProvider.overrideWithValue(api),
+          eventLoggerProvider.overrideWithValue(CapturingEventLogger()),
+          // H5 abrirá la DB real; aquí se simula una bandeja con 3 filas.
+          outboxPendingCountProvider.overrideWith((ref) async => 3),
+        ],
+        child: const RideOpsApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('3'), findsOneWidget, reason: 'badge visible');
+    expect(
+      find.bySemanticsLabel(RegExp(r'Outbox\. 3 pending to send')),
+      findsOneWidget,
+      reason: 'el lector de pantalla anuncia la cuenta, no solo el color',
+    );
   });
 
   testWidgets('chip pinta el nombre persistido sin red (offline honesto)',

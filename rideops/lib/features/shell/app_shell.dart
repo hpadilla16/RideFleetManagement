@@ -168,9 +168,13 @@ class _LocationChip extends ConsumerWidget {
     final l10n = AppLocalizations.of(context)!;
     final active = ref.watch(activeLocationProvider);
     final label = active.locationName ?? l10n.locationChipAll;
+    // GD MC-1 (review H3): la acción de tap TAMBIÉN va en el nodo Semantics —
+    // con ExcludeSemantics debajo, el InkWell pierde su acción y TalkBack
+    // anunciaría "botón" sin que el doble-tap hiciera nada.
     return Semantics(
       button: true,
       label: l10n.locationChipSemantics(label),
+      onTap: () => showActiveLocationSheet(context),
       child: ExcludeSemantics(
         // Área táctil 48 px (hit-slop): el InkWell cubre el SizedBox de 48;
         // el chip visual de 44 vive centrado adentro.
@@ -180,15 +184,17 @@ class _LocationChip extends ConsumerWidget {
             color: Colors.transparent,
             child: InkWell(
               onTap: () => showActiveLocationSheet(context),
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(14),
               child: Center(
                 child: Container(
                   height: 44,
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   decoration: BoxDecoration(
                     color: RideTokens.p50,
-                    border: Border.all(color: RideTokens.p100),
-                    borderRadius: BorderRadius.circular(22),
+                    // Silueta aprobada del mockup (GD SHOULD H3): radio 14,
+                    // no píldora, con borde de marca al 20 %.
+                    border: Border.all(color: RideTokens.brandA20),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -298,10 +304,12 @@ class _TabItem extends ConsumerWidget {
     final pending = tab == ShellTab.outbox
         ? (ref.watch(outboxPendingCountProvider).value ?? 0)
         : 0;
+    // GD MC-1: onTap en Semantics — ver _LocationChip.
     return Semantics(
       button: true,
       selected: active,
       label: pending > 0 ? '$label. ${l10n.outboxBadgeSemantics(pending)}' : label,
+      onTap: () => context.go(tab.route),
       child: ExcludeSemantics(
         child: Material(
           color: active ? RideTokens.p100 : Colors.transparent,
@@ -332,7 +340,10 @@ class _TabItem extends ConsumerWidget {
                             vertical: 1,
                           ),
                           decoration: BoxDecoration(
-                            color: RideTokens.p600,
+                            // GD MC-2: el badge es contador de trabajo
+                            // PENDIENTE — rojo danger (blanco ≈6.3:1), no
+                            // morado de marca.
+                            color: RideTokens.danger,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           constraints: const BoxConstraints(minWidth: 14),

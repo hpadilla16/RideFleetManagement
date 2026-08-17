@@ -203,13 +203,16 @@ class _LocationOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // GD MC-1 (review H3): onTap también en Semantics — con ExcludeSemantics
+    // debajo, el InkWell pierde la acción para TalkBack/VoiceOver.
     return Semantics(
       button: true,
       selected: selected,
       label: label,
+      onTap: onTap,
       child: ExcludeSemantics(
         child: Material(
-          color: selected ? RideTokens.tonal : Colors.transparent,
+          color: Colors.transparent,
           borderRadius: BorderRadius.circular(16),
           child: InkWell(
             onTap: onTap,
@@ -217,6 +220,13 @@ class _LocationOption extends StatelessWidget {
             child: Container(
               height: 56,
               padding: const EdgeInsets.symmetric(horizontal: 12),
+              // GD MC-3: regla del sistema — superficie tintada SIEMPRE con
+              // borde; el seleccionado no puede depender solo del radio.
+              decoration: BoxDecoration(
+                color: selected ? RideTokens.tonal : null,
+                border: selected ? Border.all(color: RideTokens.p600) : null,
+                borderRadius: BorderRadius.circular(16),
+              ),
               child: Row(
                 children: [
                   Container(
@@ -240,10 +250,13 @@ class _LocationOption extends StatelessWidget {
                           label,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 14.5,
                             fontWeight: FontWeight.w700,
-                            color: RideTokens.n800,
+                            // GD MC-3: label del seleccionado en tinta de
+                            // marca sobre el tonal bordeado.
+                            color:
+                                selected ? RideTokens.p800 : RideTokens.n800,
                           ),
                         ),
                         if (sublabel != null)
@@ -252,7 +265,9 @@ class _LocationOption extends StatelessWidget {
                             style: const TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w600,
-                              color: RideTokens.n600,
+                              // n700: el 4.5:1 justo de n600 sobre tintado no
+                              // tiene margen a pleno sol (GD OPT H3).
+                              color: RideTokens.n700,
                             ),
                           ),
                       ],

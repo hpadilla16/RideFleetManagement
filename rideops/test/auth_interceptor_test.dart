@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/core/api/api_error.dart';
+import 'package:rideops/core/api/auth_api.dart';
 import 'package:rideops/core/api/interceptors.dart';
 import 'package:rideops/core/api/token_refresher.dart';
 
@@ -199,6 +200,34 @@ void main() {
       h.adapter.last!.headers['Authorization'],
       isNotNull,
       reason: 'solo salta la ubicación, el bearer va igual',
+    );
+  });
+
+  test(
+      'AuthApi REAL: ni /me ni /change-password mandan x-view-location con '
+      'sede activa (MUST-1 review H3 — sede revocada + reset de contraseña '
+      'dejaría al usuario atrapado en el gate)', () async {
+    final h = build(
+      viewLocation: 'loc-revocada',
+      respond: () => jsonRes(200, readAuthFixture()),
+    );
+    final api = AuthApi(authedDio: h.dio, publicDio: Dio(), bareDio: Dio());
+
+    await api.me();
+    expect(h.adapter.last!.path, '/api/auth/me');
+    expect(
+      h.adapter.last!.headers.containsKey(AuthInterceptor.viewLocationHeader),
+      isFalse,
+      reason: '/me devuelve req.user YA reducido por el header',
+    );
+
+    await api.changePassword(currentPassword: 'Temp#1', newPassword: 'Nueva#2');
+    expect(h.adapter.last!.path, '/api/auth/change-password');
+    expect(
+      h.adapter.last!.headers.containsKey(AuthInterceptor.viewLocationHeader),
+      isFalse,
+      reason: 'el gate de contraseña debe poder levantarse aunque la sede '
+          'fijada ya no exista en el set del usuario',
     );
   });
 

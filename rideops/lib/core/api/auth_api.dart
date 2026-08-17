@@ -66,6 +66,16 @@ class AuthApi {
   /// camino que limpia mustChangePassword (auth.service.js:264-292). El
   /// caller intercambia el JWT y el gate se levanta sin re-login. Los errores
   /// de política y de contraseña actual llegan como 400 con mensaje.
+  ///
+  /// SALTA `x-view-location` igual que [me] (review Innovation MUST-1 H3):
+  /// applyViewLocation corre en requireAuth DESPUÉS del gate de contraseña
+  /// (auth.js:52-78) y su user viene de authService.changePassword, no de
+  /// req.user — el header no aporta nada y sí puede matar. Escenario real:
+  /// admin quita la sede fijada Y resetea la contraseña → sin el skip, este
+  /// POST saldría con el header de la sede revocada → 403 sin code → el
+  /// usuario queda ATRAPADO en /change-password para siempre (el logout no
+  /// purga la sede y el sheet no es alcanzable desde ahí). Identidad/auth
+  /// nunca es dato scoped.
   Future<AuthResponse> changePassword({
     required String currentPassword,
     required String newPassword,
@@ -76,6 +86,7 @@ class AuthApi {
             'currentPassword': currentPassword,
             'newPassword': newPassword,
           },
+          options: Options(extra: {AuthInterceptor.skipViewLocation: true}),
         ));
     return AuthResponse.fromJson(res.data!);
   }
