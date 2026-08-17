@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { checkoutSessionService, CheckoutSessionError } from './checkout-session.service.js';
+import { checkoutPresenceService } from './checkout-presence.service.js';
 import { vehicleSwapService } from './vehicle-swap.service.js';
 import { spinChargeService } from './spin-charge.service.js';
 import { spinClient } from '../payment-gateway/spin-client.js';
@@ -13,6 +14,10 @@ function handleError(res, err) {
     return res.status(err.status).json({
       error: err.message,
       code: err.code || undefined,
+      // M2 P2 (2026-08-17): STALE_VERSION carries the fresh row so the stale
+      // surface re-renders without a follow-up GET. Absent on every other
+      // error — additive, existing clients never see the field.
+      ...(err.session ? { session: err.session } : {}),
     });
   }
   logger.error('[checkout-session] unexpected error', { message: err.message, stack: err.stack });
@@ -53,7 +58,9 @@ checkoutSessionRouter.get('/:id', async (req, res) => {
     const tenantId = getTenantScope(req);
     const session = await checkoutSessionService.getById(req.params.id, { tenantId });
     if (!session) return res.status(404).json({ error: 'Not found' });
-    res.json(session);
+    // M2 P1: presence attached by the serializer — the row is untouched and
+    // the field is additive (older clients ignore it). Never blocks the read.
+    res.json(await checkoutPresenceService.withPresence(session));
   } catch (err) {
     handleError(res, err);
   }
@@ -71,7 +78,8 @@ checkoutSessionRouter.get('/by-reservation/:reservationId', async (req, res) => 
       { tenantId, actorUserId: req.user?.id || req.user?.sub || null },
     );
     if (!session) return res.status(404).json({ error: 'Not found' });
-    res.json(session);
+    // M2 P1: same additive presence serializer as GET /:id.
+    res.json(await checkoutPresenceService.withPresence(session));
   } catch (err) {
     handleError(res, err);
   }
@@ -83,14 +91,42 @@ checkoutSessionRouter.get('/by-reservation/:reservationId', async (req, res) => 
 // ---------------------------------------------------------------------
 checkoutSessionRouter.post('/:id/transition', async (req, res) => {
   try {
-    const { toStep, metadata } = req.body || {};
+    // expectedVersion (M2 P2, 2026-08-17): OPTIONAL optimistic guard — when
+    // present and stale the service throws 409 STALE_VERSION with the fresh
+    // row. Omitted (all pre-M2 clients) → behavior unchanged.
+    const { toStep, metadata, expectedVersion } = req.body || {};
     const session = await checkoutSessionService.transition({
       id: req.params.id,
       toStep,
       actorUserId: req.user?.id,
       metadata,
+      expectedVersion,
     });
     res.json(session);
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
+// ---------------------------------------------------------------------
+// POST /api/checkout-sessions/:id/presence
+//   M2 P1 (2026-08-17) — soft presence heartbeat. Body: { surface, label? }.
+//   Surfaces poll this alongside GET /:id; the GETs then expose
+//   presence: [{surface, displayName, lastSeenAt}] filtered by the 45 s
+//   logical TTL. Informative ONLY — never gates anything (M2-PLAN §1.2).
+// ---------------------------------------------------------------------
+checkoutSessionRouter.post('/:id/presence', async (req, res) => {
+  try {
+    const { surface, label } = req.body || {};
+    const tenantId = getTenantScope(req);
+    const out = await checkoutPresenceService.heartbeat({
+      sessionId: req.params.id,
+      surface,
+      label,
+      actorUserId: req.user?.id || null,
+      tenantId,
+    });
+    res.json(out);
   } catch (err) {
     handleError(res, err);
   }
@@ -105,11 +141,12 @@ checkoutSessionRouter.post('/:id/transition', async (req, res) => {
 // ---------------------------------------------------------------------
 checkoutSessionRouter.post('/:id/stamp', async (req, res) => {
   try {
-    const { field, value } = req.body || {};
+    const { field, value, expectedVersion } = req.body || {};
     const session = await checkoutSessionService.stampSideEffect({
       id: req.params.id,
       field,
       value: value ? new Date(value) : null,
+      expectedVersion, // M2 P2 — optional, see /transition
     });
     res.json(session);
   } catch (err) {
@@ -124,12 +161,13 @@ checkoutSessionRouter.post('/:id/stamp', async (req, res) => {
 // ---------------------------------------------------------------------
 checkoutSessionRouter.post('/:id/customer-signature', async (req, res) => {
   try {
-    const { signatureDataUrl, signerName } = req.body || {};
+    const { signatureDataUrl, signerName, expectedVersion } = req.body || {};
     const session = await checkoutSessionService.saveCustomerSignature({
       id: req.params.id,
       signatureDataUrl,
       signerName,
       customerIp: req.ip,
+      expectedVersion, // M2 P2 — optional, see /transition
     });
     res.json(session);
   } catch (err) {

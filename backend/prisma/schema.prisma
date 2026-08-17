@@ -5073,6 +5073,14 @@ model CheckoutSession {
   tenantId      String?
   currentStep   CheckoutStep     @default(CONFIRMING)
 
+  // M2 P2 (2026-08-17) — lightweight optimistic versioning. Bumped on every
+  // transition / side-effect stamp / customer signature. Clients MAY send
+  // `expectedVersion` on those POSTs to get a 409 STALE_VERSION (with the
+  // fresh row) instead of acting on a state another surface already moved.
+  // Opt-in on purpose: web wizard, kiosk and precheckin never send it, so
+  // their behavior is byte-for-byte identical to before this column existed.
+  stateVersion Int @default(0)
+
   // JSON array of { from, to, actorUserId, at, metadata } — full transition
   // log. Used by the stuck-checkouts dashboard tile.
   events String @db.Text
@@ -5108,6 +5116,46 @@ model CheckoutSession {
   @@index([currentStep])
   @@index([tenantId, currentStep])
   @@index([abandonedAt])
+}
+
+// M2 P1 (2026-08-17) — which of the four coexisting checkout surfaces is
+// touching a session. RIDEOPS = the staff yard app, COUNTER = the desktop web
+// wizard, KIOSK = the lobby tablet, CUSTOMER = the customer's own phone
+// (terms-signing / customer-inspection pages). Deliberately NOT mirrored in
+// rideops/lib/core/api/enums.dart yet — the Dart mirror lands with M2-H6.
+enum CheckoutSurface {
+  RIDEOPS
+  COUNTER
+  KIOSK
+  CUSTOMER
+}
+
+// M2 P1 (2026-08-17) — soft presence/claim on a checkout session. PURELY
+// INFORMATIVE: nothing anywhere may gate on these rows (Hector-approved plan,
+// ops-app-plan/M2-PLAN.md §1.2 — "informativa, nunca bloquea"). Each surface
+// heartbeats POST /api/checkout-sessions/:id/presence; readers get only the
+// rows fresh within the 45 s logical TTL (filtered at read time — no cron, no
+// deletes needed for correctness). `sessionId` is a LOOSE reference like
+// KioskSession.checkoutSessionId — no FK, so presence writes can never break
+// or block the money path, and stale rows are harmless noise.
+model CheckoutPresence {
+  id        String          @id @default(cuid())
+  sessionId String
+  surface   CheckoutSurface
+
+  // Staff surfaces send the authenticated user; the kiosk (device, no user)
+  // and the customer's phone (token, no user) leave it null. NOTE: Postgres
+  // treats NULLs as distinct in the compound unique below, so the migration
+  // adds a partial unique index on (sessionId, surface) WHERE actorUserId IS
+  // NULL to keep the null-actor rows singleton too.
+  actorUserId  String?
+  displayLabel String?
+  lastSeenAt   DateTime @default(now())
+
+  createdAt DateTime @default(now())
+
+  @@unique([sessionId, surface, actorUserId])
+  @@index([sessionId, lastSeenAt])
 }
 
 enum HandoffTokenKind {

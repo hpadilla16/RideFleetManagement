@@ -26,6 +26,44 @@ export class CheckoutSessionError extends Error {
 
 const HANDOFF_TOKEN_TTL_MIN = 15;
 
+/**
+ * M2 P2 (2026-08-17) — lightweight optimistic versioning, OPT-IN.
+ *
+ * With four surfaces on the same session (00-REGROUND.md §2) the remaining
+ * concurrency gap was read-then-write: a client acts on a snapshot another
+ * surface already moved past — most visibly stampSideEffect, which has no
+ * state-machine guard at all (gap #5). CheckoutSession.stateVersion is bumped
+ * on every transition / stamp / signature; a caller that sends
+ * `expectedVersion` and is stale gets 409 STALE_VERSION *with the fresh row
+ * attached* so it can re-render without a second round-trip.
+ *
+ * STRICTLY OPT-IN: when expectedVersion is absent (web wizard, kiosk,
+ * precheckin — every client that exists today) behavior is identical to
+ * before. That's the whole retrocompat contract; do NOT make this mandatory.
+ */
+function assertExpectedVersion(session, expectedVersion) {
+  if (expectedVersion === undefined || expectedVersion === null) return;
+  const expected = Number(expectedVersion);
+  if (!Number.isInteger(expected) || expected < 0) {
+    throw new CheckoutSessionError(
+      'expectedVersion must be a non-negative integer',
+      400,
+      'BAD_EXPECTED_VERSION',
+    );
+  }
+  if ((session.stateVersion ?? 0) !== expected) {
+    const err = new CheckoutSessionError(
+      `Session moved on: expected version ${expected}, is ${session.stateVersion ?? 0}`,
+      409,
+      'STALE_VERSION',
+    );
+    // Fresh row for the 409 body — the client re-renders from this instead of
+    // firing a follow-up GET (the router's handleError forwards it).
+    err.session = session;
+    throw err;
+  }
+}
+
 function tokenBytes() {
   return crypto.randomBytes(24).toString('base64url');
 }
@@ -368,7 +406,7 @@ async function getByReservationId(reservationId, { tenantId, actorUserId } = {})
  * (e.g. PAID stamps paymentCompletedAt if not already set). Appends a
  * TRANSITION event to the JSON log.
  */
-async function transition({ id, toStep, actorUserId, metadata }) {
+async function transition({ id, toStep, actorUserId, metadata, expectedVersion }) {
   if (!id) throw new CheckoutSessionError('session id required', 400);
   if (!CHECKOUT_STEPS.includes(toStep)) {
     throw new CheckoutSessionError(`Unknown step: ${toStep}`, 400);
@@ -376,6 +414,11 @@ async function transition({ id, toStep, actorUserId, metadata }) {
 
   const session = await prisma.checkoutSession.findUnique({ where: { id } });
   if (!session) throw new CheckoutSessionError('Session not found', 404);
+
+  // P2: version check FIRST, before the legality check — a stale caller
+  // should learn "your snapshot is old, here's the fresh row" rather than a
+  // coincidental ILLEGAL_TRANSITION computed against state it never saw.
+  assertExpectedVersion(session, expectedVersion);
 
   if (!canTransition(session.currentStep, toStep)) {
     // NOTE (2026-06-05): the wizard used to double-fire this transition on
@@ -402,6 +445,9 @@ async function transition({ id, toStep, actorUserId, metadata }) {
   // Auto-stamp finishedAt when entering a terminal state.
   const data = {
     currentStep: toStep,
+    // P2: atomic bump — every transition invalidates outstanding
+    // expectedVersion snapshots held by other surfaces.
+    stateVersion: { increment: 1 },
     events: appendEvent(session.events, {
       kind: 'TRANSITION',
       from: session.currentStep,
@@ -618,7 +664,7 @@ async function maybeSendFinalizeEmail(session, actorUserId) {
  * tcCompletedAt, by the Spin webhook to mark paymentCompletedAt, etc.
  * The transition itself is a separate call from the agent's screen.
  */
-async function stampSideEffect({ id, field, value }) {
+async function stampSideEffect({ id, field, value, expectedVersion }) {
   if (!id) throw new CheckoutSessionError('session id required', 400);
   const ALLOWED = ['tcCompletedAt', 'paymentCompletedAt', 'inspectionCompletedAt', 'customerSignedAt'];
   if (!ALLOWED.includes(field)) {
@@ -629,14 +675,19 @@ async function stampSideEffect({ id, field, value }) {
   // events log + side-effect timestamp move together. The previous
   // version passed an empty object for events and exploded with a
   // Prisma validation error.
-  const current = await prisma.checkoutSession.findUnique({
-    where: { id }, select: { events: true },
-  });
+  //
+  // P2 (2026-08-17): full-row read (was select:{events}) — the version check
+  // needs stateVersion and, on STALE_VERSION, the whole fresh row travels in
+  // the 409 body. This read-then-write is exactly the window gap #5 named;
+  // expectedVersion is the opt-in guard that narrows it for new clients.
+  const current = await prisma.checkoutSession.findUnique({ where: { id } });
   if (!current) throw new CheckoutSessionError('Session not found', 404);
+  assertExpectedVersion(current, expectedVersion);
   return prisma.checkoutSession.update({
     where: { id },
     data: {
       [field]: at,
+      stateVersion: { increment: 1 },
       events: appendEvent(current.events, {
         kind: 'SIDE_EFFECT', field, at: at.toISOString(),
       }),
@@ -652,16 +703,16 @@ async function stampSideEffect({ id, field, value }) {
  * customerSignedAt so the wizard can advance CUSTOMER_SIGN_PENDING ->
  * FINALIZING -> CLOSED. Replaces the old "Simulate signature" stub.
  */
-async function saveCustomerSignature({ id, signatureDataUrl, signerName, customerIp }) {
+async function saveCustomerSignature({ id, signatureDataUrl, signerName, customerIp, expectedVersion }) {
   if (!id) throw new CheckoutSessionError('session id required', 400);
   if (!signatureDataUrl || String(signatureDataUrl).length < 200) {
     throw new CheckoutSessionError('A signature is required before finalizing.', 400, 'SIGNATURE_REQUIRED');
   }
-  const session = await prisma.checkoutSession.findUnique({
-    where: { id },
-    select: { id: true, events: true, agreementId: true, reservationId: true },
-  });
+  // P2 (2026-08-17): full-row read (was a narrow select) so the version check
+  // sees stateVersion and a STALE_VERSION 409 can carry the fresh row.
+  const session = await prisma.checkoutSession.findUnique({ where: { id } });
   if (!session) throw new CheckoutSessionError('Session not found', 404);
+  assertExpectedVersion(session, expectedVersion);
   if (!session.agreementId) throw new CheckoutSessionError('No agreement linked to this session', 409);
 
   const now = new Date();
@@ -679,6 +730,7 @@ async function saveCustomerSignature({ id, signatureDataUrl, signerName, custome
       where: { id },
       data: {
         customerSignedAt: now,
+        stateVersion: { increment: 1 }, // P2: signature invalidates snapshots too
         events: appendEvent(session.events, {
           kind: 'CUSTOMER_SIGNED_ON_DESKTOP',
           at: now.toISOString(),
