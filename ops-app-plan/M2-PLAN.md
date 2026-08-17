@@ -90,6 +90,13 @@ Tanda A se encarga de inmediato al cerrar H6; B y C durante la construcción de 
    "Continuar a inspección" chocaría con ADR-4. La pantalla se dibuja desde el
    `currentStep` RE-CONSULTADO, y si el paso no está estampado la única salida verdadera
    es `record-manual-deposit` con su motivo.
+5. **`PAYMENT_PENDING` es puerta de un solo sentido** (GD, re-review Tanda B, verificado en
+   `state-machine.js`): `FORWARD` no tiene aristas hacia atrás, así que
+   `PAYMENT_PENDING → TC_SIGNED` devuelve 409 `ILLEGAL_TRANSITION`. Un rechazo de tarjeta,
+   un timeout o una consulta negativa **NO** devuelven la sesión al paso anterior: desde
+   ahí se re-cobra sin cambiar de paso. Importa porque el rechazo es el error más
+   frecuente del paso: un build que retroceda dispararía un 409 en el camino de error más
+   transitado, o pintaría el paso localmente — la copia de la máquina que ADR-4 prohíbe.
 
 ### Decisiones de Hector pendientes para el M2 (no bloquean H1/H2)
 
