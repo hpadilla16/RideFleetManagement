@@ -7,6 +7,7 @@ import 'package:rideops/core/api/checkout_api.dart';
 import 'package:rideops/core/api/dto/checkout_session.dart';
 import 'package:rideops/core/api/dto/reservation_display.dart';
 import 'package:rideops/core/api/enums.dart';
+// PrecheckinLinkResult vive junto a ReservationsApi.
 import 'package:rideops/core/api/reservations_api.dart';
 import 'package:rideops/core/session/active_location.dart';
 import 'package:rideops/core/session/session_controller.dart';
@@ -91,12 +92,18 @@ class FakeCheckoutApi extends CheckoutApi {
   int getCalls = 0;
   int transitionCalls = 0;
   int abandonCalls = 0;
+  int createCalls = 0;
   final transitions = <String>[];
+
+  /// reservationIds con los que se llamó al POST de creación (M2-H7): la
+  /// idempotencia se prueba contando llamadas, no adivinando.
+  final created = <String>[];
 
   Future<CheckoutSessionDto?> Function()? onByReservation;
   Future<CheckoutSessionDto> Function()? onGet;
   Future<CheckoutSessionDto> Function(String toStep)? onTransition;
   Future<CheckoutSessionDto> Function()? onAbandon;
+  Future<CheckoutSessionDto> Function(String reservationId)? onCreate;
 
   /// Cuando está puesto, TODA respuesta espera a que el test lo complete —
   /// así se prueban el skip con request en vuelo y el anti-doble-tap.
@@ -154,6 +161,31 @@ class FakeCheckoutApi extends CheckoutApi {
     abandonCalls++;
     if (onAbandon != null) return onAbandon!();
     return _maybeGate(current!);
+  }
+
+  @override
+  Future<CheckoutSessionDto> createForReservation(String reservationId) async {
+    createCalls++;
+    created.add(reservationId);
+    if (onCreate != null) return onCreate!(reservationId);
+    return _maybeGate(current!);
+  }
+}
+
+/// ReservationsApi con el envío del link de pre-checkin inyectable (frame
+/// 11B). El backend responde 200 CON `emailSent:false` cuando el SMTP falla —
+/// por eso el fake devuelve el record completo y no un bool suelto.
+class FakePrecheckinReservationsApi extends FakeReservationsApi {
+  FakePrecheckinReservationsApi({super.fail});
+
+  int linkCalls = 0;
+  Future<PrecheckinLinkResult> Function()? onSendLink;
+
+  @override
+  Future<PrecheckinLinkResult> sendPrecheckinLink(String reservationId) async {
+    linkCalls++;
+    if (onSendLink != null) return onSendLink!();
+    return (sent: true, warning: null);
   }
 }
 

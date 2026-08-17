@@ -592,8 +592,19 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
-  String cardOpenInspectionSemantics(String details) {
-    return '$details: abrir inspección de salida';
+  String cardOpenCheckoutSemantics(String details) {
+    return '$details: abrir el checkout';
+  }
+
+  @override
+  String get cardOpeningCheckoutChip => 'Abriendo…';
+
+  @override
+  String get cardOpeningCheckoutMeta => 'abriendo checkout…';
+
+  @override
+  String cardOpeningCheckoutSemantics(String details) {
+    return '$details: abriendo el checkout';
   }
 
   @override
@@ -1240,14 +1251,58 @@ class AppLocalizationsEs extends AppLocalizations {
       'No se pudo pausar. Revisa la conexión e intenta de nuevo.';
 
   @override
-  String get coTerminalClosedTitle => 'Checkout entregado';
+  String get coTerminalClosedTitle => 'Este checkout ya se cerró';
 
   @override
-  String get coTerminalCancelledTitle => 'Checkout cancelado';
+  String get coTerminalCancelledTitle => 'Este checkout se canceló';
 
   @override
   String get coTerminalBody =>
       'Esta sesión ya es terminal: no admite más pasos.';
+
+  @override
+  String coTerminalDoneKiosk(String time) {
+    return 'Se completó en el kiosco a las $time. No hay nada más que hacer aquí.';
+  }
+
+  @override
+  String coTerminalDoneByYou(String time) {
+    return 'Lo cerraste tú a las $time. No hay nada más que hacer aquí.';
+  }
+
+  @override
+  String coTerminalDoneOtherAgent(String time) {
+    return 'Lo cerró otro agente a las $time. No hay nada más que hacer aquí.';
+  }
+
+  @override
+  String coTerminalDoneAt(String time) {
+    return 'Se completó a las $time. No hay nada más que hacer aquí.';
+  }
+
+  @override
+  String coTerminalContractEmailed(String time) {
+    return 'El contrato salió por correo a las $time.';
+  }
+
+  @override
+  String get coTerminalByYou => 'Tú';
+
+  @override
+  String get coTerminalByKiosk => 'En el kiosco';
+
+  @override
+  String get coTerminalByOtherAgent => 'Otro agente';
+
+  @override
+  String get coTerminalByOtherSurface => 'Otra superficie';
+
+  @override
+  String get coTerminalBackToList => 'Volver a la lista';
+
+  @override
+  String get coTerminalWhy =>
+      'Si crees que se cerró por error, abre la reserva: desde aquí no se puede reabrir.';
 
   @override
   String get coTerminalLogTitle => 'Registro de la sesión';
@@ -1336,4 +1391,91 @@ class AppLocalizationsEs extends AppLocalizations {
   String coSessionAgeLabel(String age) {
     return 'Estado de hace $age';
   }
+
+  @override
+  String get coEntryNoVehicleTitle => 'Esta reserva no tiene vehículo asignado';
+
+  @override
+  String get coEntryNoVehicleBody =>
+      'Sin unidad no se puede entregar. Asigna el vehículo a la reserva y vuelve a intentarlo desde aquí.';
+
+  @override
+  String get coEntryVehicleConflictTitle => 'Esa unidad ya está en otra renta';
+
+  @override
+  String get coEntryVehicleConflictBody =>
+      'El servidor lo bloqueó para que la misma unidad no se entregue dos veces. Cambia el vehículo de la reserva o cierra la otra renta.';
+
+  @override
+  String coEntryConflictWith(String reservation) {
+    return 'Reserva en conflicto: $reservation';
+  }
+
+  @override
+  String coEntrySearchReservation(String reservation) {
+    return 'Buscar $reservation';
+  }
+
+  @override
+  String get coEntryPrecheckinTitle => 'Falta el pre-checkin del cliente';
+
+  @override
+  String get coEntryPrecheckinBody =>
+      'Esta sucursal exige el pre-checkin del cliente antes de abrir el checkout.';
+
+  @override
+  String get coEntrySendPrecheckinLink => 'Enviar pre-checkin al cliente';
+
+  @override
+  String get coEntrySendingPrecheckinLink => 'Enviando…';
+
+  @override
+  String get coEntryPrecheckinLinkSent =>
+      'Listo: el link de pre-checkin salió al correo del cliente. Cuando lo complete, vuelve a tocar la card.';
+
+  @override
+  String coEntryPrecheckinLinkFailed(String reason) {
+    return 'No se pudo enviar el link. $reason';
+  }
+
+  @override
+  String get coEntryPrecheckinDeskNote =>
+      'Capturar los datos en el mostrador todavía se hace desde el escritorio: esta app aún no tiene ese formulario.';
+
+  @override
+  String get coEntryReservationUntouched =>
+      'La reserva no se tocó. En cuanto el pre-checkin quede listo, la card se desbloquea sola.';
+
+  @override
+  String get coEntryAgeTitle => 'Las reglas de edad no permiten esta entrega';
+
+  @override
+  String get coEntryAgeBody =>
+      'La sucursal bloquea esta salida por su política de edad. Corrige la fecha de nacimiento en la reserva si está mal, o avisa a tu supervisor.';
+
+  @override
+  String get coEntryOfflineTitle => 'Sin conexión para abrir el checkout';
+
+  @override
+  String get coEntryOfflineBody =>
+      'Abrir un checkout necesita la confirmación del servidor una sola vez. No se encola en la Bandeja: cuando haya señal, vuelve a tocar la card.';
+
+  @override
+  String get coEntryNotReadyTitle => 'Un momento';
+
+  @override
+  String get coEntryNotReadyBody =>
+      'La app todavía está cargando tu ubicación activa. Intenta de nuevo en un segundo.';
+
+  @override
+  String get coEntryNoSessionCreated =>
+      'No se creó ninguna sesión de checkout.';
+
+  @override
+  String coEntryServerSaid(String message) {
+    return 'El servidor respondió: $message';
+  }
+
+  @override
+  String get coEntryClose => 'Cerrar';
 }

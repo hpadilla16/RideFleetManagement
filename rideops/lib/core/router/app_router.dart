@@ -46,8 +46,12 @@ abstract final class AppRoutes {
 
   // Flujo de inspección (H5): pantalla completa FUERA del shell — sin tabs
   // ni chip de sede (el header propio del flujo manda; el paso de firma es
-  // superficie del cliente). La entrada desde las cards del home es H6:
-  // la card de la cola de salidas gana su CTA hacia esta ruta.
+  // superficie del cliente).
+  //
+  // Desde M2-H7 la card de la cola de salidas apunta al CHECKOUT (que es su
+  // destino real: la inspección es un PASO del wizard, integrada en M2-H4).
+  // Esta ruta sigue viva y con entrada propia: la bandeja de salida ofrece
+  // "Abrir inspección" en sus filas muertas, y el drenado la necesita.
   static const inspectionPattern = '/inspection/:reservationId';
   static String inspection(String reservationId) =>
       '/inspection/$reservationId';
@@ -242,7 +246,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: AppRoutes.search,
-            builder: (context, state) => const SearchScreen(),
+            // `?q=` (M2-H7): destino del guard 11D — buscar la reserva en
+            // conflicto con el término ya puesto.
+            builder: (context, state) => SearchScreen(
+              initialQuery: state.uri.queryParameters['q'],
+            ),
           ),
           GoRoute(
             path: AppRoutes.incidents,

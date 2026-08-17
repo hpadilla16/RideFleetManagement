@@ -23,6 +23,7 @@ import 'package:rideops/features/checkout/presentation/checkout_wizard_screen.da
 import 'package:rideops/features/checkout/presentation/widgets/transition_button.dart';
 import 'package:rideops/features/checkout/presentation/widgets/pause_sheet.dart';
 import 'package:rideops/features/checkout/presentation/widgets/steps_sheet.dart';
+import 'package:rideops/features/checkout/presentation/widgets/terminal_view.dart';
 import 'package:rideops/features/checkout/presentation/widgets/wizard_banners.dart';
 import 'package:rideops/features/checkout/presentation/widgets/wizard_chrome.dart';
 import 'package:rideops/features/checkout/presentation/widgets/wizard_skeleton.dart';
@@ -601,8 +602,10 @@ void main() {
     f.api.current = sessionAt(CheckoutStep.closed);
     await pumpWizard(tester, api: f.api, network: f.network);
 
-    expect(find.text('Checkout delivered'), findsOneWidget);
-    expect(find.text('Session log'), findsOneWidget);
+    // Frame 11E (M2-H7): la pantalla terminal es la noticia de un trabajo
+    // hecho, no un error.
+    expect(find.byType(CheckoutTerminalView), findsOneWidget);
+    expect(find.text('This checkout is already closed'), findsOneWidget);
     expect(find.byType(PhaseRail), findsNothing);
     // Nada que pausar: el botón no se ofrece.
     expect(find.text('Pause'), findsNothing);

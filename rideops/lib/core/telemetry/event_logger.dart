@@ -92,6 +92,24 @@ abstract final class CheckoutEvents {
   /// CHECKOUT_TERMINAL | VEHICLE_CONFLICT | none (409 sin code del abandon).
   static const transition409 = 'checkout.transition_409';
 
+  /// Entrada desde la card de la cola (M2-H7): `POST /api/checkout-sessions`
+  /// devolvió la sesión y se abre el wizard. Sin tag `resumed`: el backend
+  /// responde 201 tanto al crear como al reanudar (routes:42) y la app no
+  /// tiene forma HONESTA de distinguirlo — inventar el tag sería peor que no
+  /// tenerlo. Su relación con `checkout.step_rendered` ya dice si entró en
+  /// CONFIRMING o a media sesión.
+  static const entryOpen = 'checkout.entry_open';
+
+  /// Un guard de creación negó la apertura (M2-H7). Tag `code`: el del
+  /// servidor (NO_VEHICLE_ASSIGNED | VEHICLE_CONFLICT | PRECHECKIN_REQUIRED |
+  /// AGE_RULES_* | SESSION_TERMINAL) o el motivo local con el que se cortó
+  /// (offline | locationNotReady | forbidden | unknown…).
+  static const entryBlocked = 'checkout.entry_blocked';
+
+  /// Salida del guard 11B: el link de pre-checkin salió por correo al cliente
+  /// (solo cuando el backend confirma `emailSent`, no por el 200 pelado).
+  static const entryPrecheckinLinkSent = 'checkout.entry_precheckin_link_sent';
+
   /// UI reconciliada contra el servidor. Tags: `steps_jumped` y `via`
   /// (`conflict` = tras un 409, `poll` = otra superficie avanzó y el poll lo
   /// vio). El tag `via` es dato NUEVO de H1 — documentado en la tabla de

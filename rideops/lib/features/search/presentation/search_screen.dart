@@ -28,7 +28,12 @@ final searchResultsProvider = FutureProvider.autoDispose
 /// de cola, estados vacío/cargando/error/403-ubicación. El detalle de reserva
 /// y los filtros llegan en M3 — esta pantalla es sobria a propósito.
 class SearchScreen extends ConsumerStatefulWidget {
-  const SearchScreen({super.key});
+  const SearchScreen({super.key, this.initialQuery});
+
+  /// Semilla `?q=` de la ruta (M2-H7): el guard 11D manda aquí con el número
+  /// de la reserva en conflicto ya escrito — el agente no tiene que
+  /// memorizarlo de un sheet que acaba de cerrarse.
+  final String? initialQuery;
 
   @override
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
@@ -38,6 +43,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   final _controller = TextEditingController();
   Timer? _debounce;
   String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    final seed = widget.initialQuery?.trim() ?? '';
+    if (seed.isNotEmpty) {
+      _controller.text = seed;
+      _query = seed;
+    }
+  }
 
   @override
   void dispose() {

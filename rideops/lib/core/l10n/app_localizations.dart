@@ -986,11 +986,29 @@ abstract class AppLocalizations {
   /// **'Sin resultados para “{query}”.'**
   String searchNoResults(String query);
 
-  /// Card tocable de la cola de salidas (H6). GD MC-2: {details} = nombre · hora del chip · meta — TalkBack no puede perder la hora ni el estado de pre-checkin
+  /// Card tocable de la cola de salidas (M2-H7). GD MC-2: {details} = nombre · hora del chip · meta — TalkBack no puede perder la hora ni el estado de pre-checkin
   ///
   /// In es, this message translates to:
-  /// **'{details}: abrir inspección de salida'**
-  String cardOpenInspectionSemantics(String details);
+  /// **'{details}: abrir el checkout'**
+  String cardOpenCheckoutSemantics(String details);
+
+  /// No description provided for @cardOpeningCheckoutChip.
+  ///
+  /// In es, this message translates to:
+  /// **'Abriendo…'**
+  String get cardOpeningCheckoutChip;
+
+  /// No description provided for @cardOpeningCheckoutMeta.
+  ///
+  /// In es, this message translates to:
+  /// **'abriendo checkout…'**
+  String get cardOpeningCheckoutMeta;
+
+  /// Frame 11A: la card en marcha. El estado se anuncia en la propia card, no en una pantalla nueva.
+  ///
+  /// In es, this message translates to:
+  /// **'{details}: abriendo el checkout'**
+  String cardOpeningCheckoutSemantics(String details);
 
   /// No description provided for @inspTitle.
   ///
@@ -2021,13 +2039,13 @@ abstract class AppLocalizations {
   /// No description provided for @coTerminalClosedTitle.
   ///
   /// In es, this message translates to:
-  /// **'Checkout entregado'**
+  /// **'Este checkout ya se cerró'**
   String get coTerminalClosedTitle;
 
   /// No description provided for @coTerminalCancelledTitle.
   ///
   /// In es, this message translates to:
-  /// **'Checkout cancelado'**
+  /// **'Este checkout se canceló'**
   String get coTerminalCancelledTitle;
 
   /// No description provided for @coTerminalBody.
@@ -2035,6 +2053,72 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Esta sesión ya es terminal: no admite más pasos.'**
   String get coTerminalBody;
+
+  /// Frame 11E: el 409 SESSION_TERMINAL no es un error, es una noticia — dice dónde y cuándo terminó
+  ///
+  /// In es, this message translates to:
+  /// **'Se completó en el kiosco a las {time}. No hay nada más que hacer aquí.'**
+  String coTerminalDoneKiosk(String time);
+
+  /// No description provided for @coTerminalDoneByYou.
+  ///
+  /// In es, this message translates to:
+  /// **'Lo cerraste tú a las {time}. No hay nada más que hacer aquí.'**
+  String coTerminalDoneByYou(String time);
+
+  /// No description provided for @coTerminalDoneOtherAgent.
+  ///
+  /// In es, this message translates to:
+  /// **'Lo cerró otro agente a las {time}. No hay nada más que hacer aquí.'**
+  String coTerminalDoneOtherAgent(String time);
+
+  /// No description provided for @coTerminalDoneAt.
+  ///
+  /// In es, this message translates to:
+  /// **'Se completó a las {time}. No hay nada más que hacer aquí.'**
+  String coTerminalDoneAt(String time);
+
+  /// Se muestra solo con autoEmailedAt sellado — es el dato real que responde «¿y el contrato?» sin ofrecer un botón que esta app todavía no puede cumplir
+  ///
+  /// In es, this message translates to:
+  /// **'El contrato salió por correo a las {time}.'**
+  String coTerminalContractEmailed(String time);
+
+  /// No description provided for @coTerminalByYou.
+  ///
+  /// In es, this message translates to:
+  /// **'Tú'**
+  String get coTerminalByYou;
+
+  /// No description provided for @coTerminalByKiosk.
+  ///
+  /// In es, this message translates to:
+  /// **'En el kiosco'**
+  String get coTerminalByKiosk;
+
+  /// No description provided for @coTerminalByOtherAgent.
+  ///
+  /// In es, this message translates to:
+  /// **'Otro agente'**
+  String get coTerminalByOtherAgent;
+
+  /// No description provided for @coTerminalByOtherSurface.
+  ///
+  /// In es, this message translates to:
+  /// **'Otra superficie'**
+  String get coTerminalByOtherSurface;
+
+  /// No description provided for @coTerminalBackToList.
+  ///
+  /// In es, this message translates to:
+  /// **'Volver a la lista'**
+  String get coTerminalBackToList;
+
+  /// No description provided for @coTerminalWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Si crees que se cerró por error, abre la reserva: desde aquí no se puede reabrir.'**
+  String get coTerminalWhy;
 
   /// No description provided for @coTerminalLogTitle.
   ///
@@ -2185,6 +2269,144 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Estado de hace {age}'**
   String coSessionAgeLabel(String age);
+
+  /// Frame 11C — 422 NO_VEHICLE_ASSIGNED: sin unidad no hay entrega
+  ///
+  /// In es, this message translates to:
+  /// **'Esta reserva no tiene vehículo asignado'**
+  String get coEntryNoVehicleTitle;
+
+  /// No description provided for @coEntryNoVehicleBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin unidad no se puede entregar. Asigna el vehículo a la reserva y vuelve a intentarlo desde aquí.'**
+  String get coEntryNoVehicleBody;
+
+  /// Frame 11D — 409 VEHICLE_CONFLICT al CREAR: aquí la sesión NO llegó a existir
+  ///
+  /// In es, this message translates to:
+  /// **'Esa unidad ya está en otra renta'**
+  String get coEntryVehicleConflictTitle;
+
+  /// No description provided for @coEntryVehicleConflictBody.
+  ///
+  /// In es, this message translates to:
+  /// **'El servidor lo bloqueó para que la misma unidad no se entregue dos veces. Cambia el vehículo de la reserva o cierra la otra renta.'**
+  String get coEntryVehicleConflictBody;
+
+  /// No description provided for @coEntryConflictWith.
+  ///
+  /// In es, this message translates to:
+  /// **'Reserva en conflicto: {reservation}'**
+  String coEntryConflictWith(String reservation);
+
+  /// Salida real del 11D con lo que la app SÍ puede hacer hoy: buscar la reserva en conflicto (el detalle de reserva llega en M3)
+  ///
+  /// In es, this message translates to:
+  /// **'Buscar {reservation}'**
+  String coEntrySearchReservation(String reservation);
+
+  /// Frame 11B — 422 PRECHECKIN_REQUIRED
+  ///
+  /// In es, this message translates to:
+  /// **'Falta el pre-checkin del cliente'**
+  String get coEntryPrecheckinTitle;
+
+  /// No description provided for @coEntryPrecheckinBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Esta sucursal exige el pre-checkin del cliente antes de abrir el checkout.'**
+  String get coEntryPrecheckinBody;
+
+  /// No description provided for @coEntrySendPrecheckinLink.
+  ///
+  /// In es, this message translates to:
+  /// **'Enviar pre-checkin al cliente'**
+  String get coEntrySendPrecheckinLink;
+
+  /// No description provided for @coEntrySendingPrecheckinLink.
+  ///
+  /// In es, this message translates to:
+  /// **'Enviando…'**
+  String get coEntrySendingPrecheckinLink;
+
+  /// No description provided for @coEntryPrecheckinLinkSent.
+  ///
+  /// In es, this message translates to:
+  /// **'Listo: el link de pre-checkin salió al correo del cliente. Cuando lo complete, vuelve a tocar la card.'**
+  String get coEntryPrecheckinLinkSent;
+
+  /// No description provided for @coEntryPrecheckinLinkFailed.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudo enviar el link. {reason}'**
+  String coEntryPrecheckinLinkFailed(String reason);
+
+  /// No description provided for @coEntryPrecheckinDeskNote.
+  ///
+  /// In es, this message translates to:
+  /// **'Capturar los datos en el mostrador todavía se hace desde el escritorio: esta app aún no tiene ese formulario.'**
+  String get coEntryPrecheckinDeskNote;
+
+  /// No description provided for @coEntryReservationUntouched.
+  ///
+  /// In es, this message translates to:
+  /// **'La reserva no se tocó. En cuanto el pre-checkin quede listo, la card se desbloquea sola.'**
+  String get coEntryReservationUntouched;
+
+  /// Frame 11B, variante AGE_RULES_*: la regla la fija la sucursal, así que la salida NO es una acción del agente
+  ///
+  /// In es, this message translates to:
+  /// **'Las reglas de edad no permiten esta entrega'**
+  String get coEntryAgeTitle;
+
+  /// No description provided for @coEntryAgeBody.
+  ///
+  /// In es, this message translates to:
+  /// **'La sucursal bloquea esta salida por su política de edad. Corrige la fecha de nacimiento en la reserva si está mal, o avisa a tu supervisor.'**
+  String get coEntryAgeBody;
+
+  /// No description provided for @coEntryOfflineTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin conexión para abrir el checkout'**
+  String get coEntryOfflineTitle;
+
+  /// No description provided for @coEntryOfflineBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Abrir un checkout necesita la confirmación del servidor una sola vez. No se encola en la Bandeja: cuando haya señal, vuelve a tocar la card.'**
+  String get coEntryOfflineBody;
+
+  /// No description provided for @coEntryNotReadyTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Un momento'**
+  String get coEntryNotReadyTitle;
+
+  /// No description provided for @coEntryNotReadyBody.
+  ///
+  /// In es, this message translates to:
+  /// **'La app todavía está cargando tu ubicación activa. Intenta de nuevo en un segundo.'**
+  String get coEntryNotReadyBody;
+
+  /// No description provided for @coEntryNoSessionCreated.
+  ///
+  /// In es, this message translates to:
+  /// **'No se creó ninguna sesión de checkout.'**
+  String get coEntryNoSessionCreated;
+
+  /// El texto del backend se muestra tal cual (DoD #5) junto al copy localizado: trae los datos concretos (la regla de edad exacta, el número de la otra reserva)
+  ///
+  /// In es, this message translates to:
+  /// **'El servidor respondió: {message}'**
+  String coEntryServerSaid(String message);
+
+  /// No description provided for @coEntryClose.
+  ///
+  /// In es, this message translates to:
+  /// **'Cerrar'**
+  String get coEntryClose;
 }
 
 class _AppLocalizationsDelegate

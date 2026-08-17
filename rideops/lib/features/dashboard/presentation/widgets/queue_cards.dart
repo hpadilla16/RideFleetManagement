@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
@@ -8,6 +11,9 @@ import '../../../../core/api/dto/reservation_card.dart';
 import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/ride_tokens.dart';
+import '../../../checkout/application/checkout_entry_controller.dart';
+import '../../../checkout/presentation/widgets/entry_guard_sheet.dart';
+import '../../../shell/location_sheet.dart';
 import '../../domain/dashboard_queues.dart';
 
 /// Cards de cola (mockup 5A) y sus piezas. Regla de motion VINCULANTE: los
@@ -127,6 +133,7 @@ class _QueueCardShell extends StatelessWidget {
     required this.meta,
     this.trailing,
     this.onTap,
+    this.busy = false,
   });
 
   final IconData icon;
@@ -135,6 +142,12 @@ class _QueueCardShell extends StatelessWidget {
   final String title;
   final Widget chip;
   final String meta;
+
+  /// `.qcard.busy` del frame 11A: la card se tiñe tonal y su icono se vuelve
+  /// spinner mientras el POST viaja. El arranque se siente EN la card — el
+  /// agente sigue viendo su cola y puede tocar otra cosa; jamás una pantalla
+  /// en blanco ni un overlay que secuestre la home.
+  final bool busy;
 
   /// Affordance de acción al final de la fila (hoy: solo la cola de salidas
   /// — H6). Las demás cards siguen sin CTA a propósito: el detalle general
@@ -156,10 +169,20 @@ class _QueueCardShell extends StatelessWidget {
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: iconBg,
+            color: busy ? RideTokens.p100 : iconBg,
             borderRadius: BorderRadius.circular(13),
           ),
-          child: Icon(icon, size: 22, color: iconColor),
+          child: busy
+              // `.spin.dk` — spinner de marca en el hueco del icono: el
+              // movimiento vive donde el dedo tocó.
+              ? const Padding(
+                  padding: EdgeInsets.all(11),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    color: RideTokens.p600,
+                  ),
+                )
+              : Icon(icon, size: 22, color: iconColor),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -240,10 +263,12 @@ class _QueueCardShell extends StatelessWidget {
           ],
         ),
         child: Material(
-          color: RideTokens.n0,
+          color: busy ? RideTokens.p50 : RideTokens.n0,
           clipBehavior: Clip.antiAlias,
           shape: RoundedRectangleBorder(
-            side: const BorderSide(color: RideTokens.n200),
+            side: BorderSide(
+              color: busy ? RideTokens.brandA20 : RideTokens.n200,
+            ),
             borderRadius: BorderRadius.circular(20),
           ),
           child: InkWell(
@@ -262,7 +287,7 @@ class _QueueCardShell extends StatelessWidget {
 /// Card de reserva para cualquiera de las 8 colas de reservas. El chip y el
 /// meta se derivan de la cola: la MISMA reserva se lee distinto en salidas
 /// (pickup + pre-checkin) que en retornos (return + vencido).
-class ReservationQueueCard extends StatelessWidget {
+class ReservationQueueCard extends ConsumerWidget {
   const ReservationQueueCard({
     super.key,
     required this.item,
@@ -275,7 +300,7 @@ class ReservationQueueCard extends StatelessWidget {
   final DateTime now;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     final locale = Localizations.localeOf(context).toString();
 
@@ -287,20 +312,24 @@ class ReservationQueueCard extends StatelessWidget {
         ? customer
         : (item.reservationNumber ?? item.id);
 
-    final chip = _chipFor(l10n, locale);
-    final meta = _metaFor(l10n);
-
-    // CTA de la cola de SALIDAS (H6, el cabo H4↔H5): la card gana entrada a
-    // la inspección de checkout (/inspection/:reservationId). SOLO esta cola
-    // — las demás cards siguen no-tocables a propósito (detalle general en
-    // M3). Affordance explícita: chevron tonal + toda la card tocable.
+    // CTA de la cola de SALIDAS (M2-H7): la card ES el punto de partida del
+    // checkout. SOLO esta cola — las demás cards siguen no-tocables a
+    // propósito (detalle general en M3). Affordance explícita: chevron tonal
+    // + toda la card tocable.
     final tappable = queue == DashboardQueue.checkout;
+    final busy =
+        tappable && ref.watch(checkoutEntryProvider(item.id)).starting;
+
+    final chip = busy
+        ? QueueStatusChip(label: l10n.cardOpeningCheckoutChip, live: true)
+        : _chipFor(l10n, locale);
+    final meta = busy ? _metaFor(l10n, opening: true) : _metaFor(l10n);
 
     void open() {
       // Confirmación táctil ligera (GD O-1): la card es la única superficie
       // tocable del grid — el dedo merece saber que mordió.
       HapticFeedback.selectionClick();
-      context.push(AppRoutes.inspection(item.id));
+      unawaited(_openCheckout(context, ref));
     }
 
     final shell = _QueueCardShell(
@@ -314,6 +343,7 @@ class ReservationQueueCard extends StatelessWidget {
       title: title,
       chip: chip,
       meta: meta,
+      busy: busy,
       onTap: tappable ? open : null,
       trailing: tappable
           ? Container(
@@ -346,10 +376,61 @@ class ReservationQueueCard extends StatelessWidget {
     ].join(' · ');
     return Semantics(
       button: true,
-      label: l10n.cardOpenInspectionSemantics(details),
+      // El estado en marcha TAMBIÉN se anuncia: con TalkBack, una card que
+      // cambió de color no comunica nada.
+      label: busy
+          ? l10n.cardOpeningCheckoutSemantics(details)
+          : l10n.cardOpenCheckoutSemantics(details),
       onTap: open,
       child: ExcludeSemantics(child: shell),
     );
+  }
+
+  /// Frame 11A → 11B–11E. `POST /api/checkout-sessions` (idempotente por
+  /// reserva: si ya hay sesión la REANUDA) y, según lo que conteste el
+  /// servidor, se navega o se explica.
+  ///
+  /// Nunca se navega optimistamente (nota 1): entrar al wizard para regresar
+  /// con un error es peor que esperar mirando la propia cola.
+  Future<void> _openCheckout(BuildContext context, WidgetRef ref) async {
+    final controller = ref.read(checkoutEntryProvider(item.id).notifier);
+    final outcome = await controller.start();
+    if (!context.mounted) return;
+    switch (outcome) {
+      case CheckoutEntryOutcome.opened:
+      case CheckoutEntryOutcome.terminal:
+        // La sesión terminal también entra al wizard: ahí vive el frame 11E
+        // con el events log REAL (el 409 no trae la fila).
+        await context.push(AppRoutes.checkout(item.id));
+      case CheckoutEntryOutcome.busy:
+        return; // anti-doble-tap: ya hay un POST en vuelo
+      case CheckoutEntryOutcome.blocked:
+        final block = ref.read(checkoutEntryProvider(item.id)).block;
+        if (block == null) return;
+        final action = await showCheckoutEntryGuardSheet(
+          context,
+          reservationId: item.id,
+          block: block,
+        );
+        if (!context.mounted) return;
+        switch (action) {
+          case CheckoutEntrySheetAction.retry:
+            await _openCheckout(context, ref);
+          case CheckoutEntrySheetAction.searchConflict:
+            // Lo que la app SÍ puede hacer hoy con la otra reserva: buscarla.
+            // El detalle de reserva llega en M3.
+            final number = block.conflictReservationNumber;
+            if (number != null) {
+              await context.push(
+                '${AppRoutes.search}?q=${Uri.encodeQueryComponent(number)}',
+              );
+            }
+          case CheckoutEntrySheetAction.changeLocation:
+            await showActiveLocationSheet(context);
+          case null:
+            return;
+        }
+    }
   }
 
   IconData _iconFor() => switch (queue) {
@@ -435,14 +516,19 @@ class ReservationQueueCard extends StatelessWidget {
     return l10n.loanerFollowupBilling;
   }
 
-  String _metaFor(AppLocalizations l10n) {
+  /// [opening]: frame 11A — mientras el POST viaja, la cola de la meta pasa de
+  /// "Pre-checkin listo" a "abriendo checkout…". Se sustituye, no se agrega:
+  /// la meta es una línea y el dato vivo manda.
+  String _metaFor(AppLocalizations l10n, {bool opening = false}) {
     final v = item.vehicle;
     final parts = <String>[
       if (v?.make != null) '${v!.make}${v.year != null ? ' ${v.year}' : ''}',
       if (v?.internalNumber != null && v!.internalNumber!.isNotEmpty)
         v.internalNumber!,
       if (item.reservationNumber != null) item.reservationNumber!,
-      if (queue == DashboardQueue.checkout)
+      if (opening)
+        l10n.cardOpeningCheckoutMeta
+      else if (queue == DashboardQueue.checkout)
         item.customerInfoCompletedAt != null
             ? l10n.precheckinReady
             : l10n.precheckinMissing,

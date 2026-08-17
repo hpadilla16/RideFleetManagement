@@ -38,11 +38,23 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 ### Checkout (M2)
 | Evento | Cuándo |
 |---|---|
+| `checkout.entry_open` | POST /api/checkout-sessions OK desde la card de la cola: se abre o se REANUDA (M2-H7) |
+| `checkout.entry_blocked` | un guard de creación negó la apertura (tag `code`) — M2-H7 |
+| `checkout.entry_precheckin_link_sent` | salida del guard 11B: el link de pre-checkin salió por correo (M2-H7) |
 | `checkout.step_rendered` | render desde `currentStep` (tag `step`) |
 | `checkout.transition_ok` / `checkout.transition_409` | POST /transition (tag `code`: ILLEGAL_TRANSITION/ENTRY_GUARD/…) |
 | `checkout.reconciled` | UI reconciliada con el servidor (tags `steps_jumped`, `via`) |
 | `checkout.money_attempt` / `checkout.money_ok` / `checkout.money_fail` | rutas de dinero (tag `kind`: charge_sale/hold_deposit/manual_*; NUNCA montos ni PAN) |
 | `checkout.preview_divergence` | cálculo local ≠ preview del servidor (compuerta ADR-6) |
+
+Detalle de `checkout.entry_blocked` (M2-H7). El tag `code` lleva el código del SERVIDOR
+cuando existe (`NO_VEHICLE_ASSIGNED`, `VEHICLE_CONFLICT`, `PRECHECKIN_REQUIRED`,
+`AGE_RULES_*`, `SESSION_TERMINAL`) y, cuando el arranque se cortó del lado del cliente, el
+motivo local (`offline`, `locationNotReady`, `forbidden`, `locationDenied`, `rateLimited`,
+`unknown`). Se separan a propósito: "el patio no tiene señal" y "el backend negó" son dos
+problemas distintos y colapsarlos en `none` haría inútil la métrica. `entry_open` NO lleva
+tag `resumed` — el backend responde 201 igual al crear que al reanudar, y la app no puede
+afirmar la diferencia sin inventarla.
 
 Detalle de `checkout.reconciled` (M2-H1). Tres valores de `via`, deliberadamente
 separados porque miden cosas distintas:

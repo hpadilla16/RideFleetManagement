@@ -281,9 +281,16 @@
   "@searchNoResults": {
     "placeholders": { "query": { "type": "String" } }
   },
-  "cardOpenInspectionSemantics": "{details}: abrir inspección de salida",
-  "@cardOpenInspectionSemantics": {
-    "description": "Card tocable de la cola de salidas (H6). GD MC-2: {details} = nombre · hora del chip · meta — TalkBack no puede perder la hora ni el estado de pre-checkin",
+  "cardOpenCheckoutSemantics": "{details}: abrir el checkout",
+  "@cardOpenCheckoutSemantics": {
+    "description": "Card tocable de la cola de salidas (M2-H7). GD MC-2: {details} = nombre · hora del chip · meta — TalkBack no puede perder la hora ni el estado de pre-checkin",
+    "placeholders": { "details": { "type": "String" } }
+  },
+  "cardOpeningCheckoutChip": "Abriendo…",
+  "cardOpeningCheckoutMeta": "abriendo checkout…",
+  "cardOpeningCheckoutSemantics": "{details}: abriendo el checkout",
+  "@cardOpeningCheckoutSemantics": {
+    "description": "Frame 11A: la card en marcha. El estado se anuncia en la propia card, no en una pantalla nueva.",
     "placeholders": { "details": { "type": "String" } }
   },
 
@@ -606,9 +613,37 @@
   "coPauseConfirm": "Guardar y pausar",
   "coPauseStay": "Seguir aquí",
   "coPauseFailed": "No se pudo pausar. Revisa la conexión e intenta de nuevo.",
-  "coTerminalClosedTitle": "Checkout entregado",
-  "coTerminalCancelledTitle": "Checkout cancelado",
+  "coTerminalClosedTitle": "Este checkout ya se cerró",
+  "coTerminalCancelledTitle": "Este checkout se canceló",
   "coTerminalBody": "Esta sesión ya es terminal: no admite más pasos.",
+  "coTerminalDoneKiosk": "Se completó en el kiosco a las {time}. No hay nada más que hacer aquí.",
+  "@coTerminalDoneKiosk": {
+    "description": "Frame 11E: el 409 SESSION_TERMINAL no es un error, es una noticia — dice dónde y cuándo terminó",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTerminalDoneByYou": "Lo cerraste tú a las {time}. No hay nada más que hacer aquí.",
+  "@coTerminalDoneByYou": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTerminalDoneOtherAgent": "Lo cerró otro agente a las {time}. No hay nada más que hacer aquí.",
+  "@coTerminalDoneOtherAgent": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTerminalDoneAt": "Se completó a las {time}. No hay nada más que hacer aquí.",
+  "@coTerminalDoneAt": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTerminalContractEmailed": "El contrato salió por correo a las {time}.",
+  "@coTerminalContractEmailed": {
+    "description": "Se muestra solo con autoEmailedAt sellado — es el dato real que responde «¿y el contrato?» sin ofrecer un botón que esta app todavía no puede cumplir",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTerminalByYou": "Tú",
+  "coTerminalByKiosk": "En el kiosco",
+  "coTerminalByOtherAgent": "Otro agente",
+  "coTerminalByOtherSurface": "Otra superficie",
+  "coTerminalBackToList": "Volver a la lista",
+  "coTerminalWhy": "Si crees que se cerró por error, abre la reserva: desde aquí no se puede reabrir.",
   "coTerminalLogTitle": "Registro de la sesión",
   "coExit": "Salir",
   "coNoSessionTitle": "Aún no hay sesión de checkout",
@@ -652,5 +687,55 @@
   "coSessionAgeLabel": "Estado de hace {age}",
   "@coSessionAgeLabel": {
     "placeholders": { "age": { "type": "String" } }
-  }
+  },
+
+  "coEntryNoVehicleTitle": "Esta reserva no tiene vehículo asignado",
+  "@coEntryNoVehicleTitle": {
+    "description": "Frame 11C — 422 NO_VEHICLE_ASSIGNED: sin unidad no hay entrega"
+  },
+  "coEntryNoVehicleBody": "Sin unidad no se puede entregar. Asigna el vehículo a la reserva y vuelve a intentarlo desde aquí.",
+  "coEntryVehicleConflictTitle": "Esa unidad ya está en otra renta",
+  "@coEntryVehicleConflictTitle": {
+    "description": "Frame 11D — 409 VEHICLE_CONFLICT al CREAR: aquí la sesión NO llegó a existir"
+  },
+  "coEntryVehicleConflictBody": "El servidor lo bloqueó para que la misma unidad no se entregue dos veces. Cambia el vehículo de la reserva o cierra la otra renta.",
+  "coEntryConflictWith": "Reserva en conflicto: {reservation}",
+  "@coEntryConflictWith": {
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "coEntrySearchReservation": "Buscar {reservation}",
+  "@coEntrySearchReservation": {
+    "description": "Salida real del 11D con lo que la app SÍ puede hacer hoy: buscar la reserva en conflicto (el detalle de reserva llega en M3)",
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "coEntryPrecheckinTitle": "Falta el pre-checkin del cliente",
+  "@coEntryPrecheckinTitle": {
+    "description": "Frame 11B — 422 PRECHECKIN_REQUIRED"
+  },
+  "coEntryPrecheckinBody": "Esta sucursal exige el pre-checkin del cliente antes de abrir el checkout.",
+  "coEntrySendPrecheckinLink": "Enviar pre-checkin al cliente",
+  "coEntrySendingPrecheckinLink": "Enviando…",
+  "coEntryPrecheckinLinkSent": "Listo: el link de pre-checkin salió al correo del cliente. Cuando lo complete, vuelve a tocar la card.",
+  "coEntryPrecheckinLinkFailed": "No se pudo enviar el link. {reason}",
+  "@coEntryPrecheckinLinkFailed": {
+    "placeholders": { "reason": { "type": "String" } }
+  },
+  "coEntryPrecheckinDeskNote": "Capturar los datos en el mostrador todavía se hace desde el escritorio: esta app aún no tiene ese formulario.",
+  "coEntryReservationUntouched": "La reserva no se tocó. En cuanto el pre-checkin quede listo, la card se desbloquea sola.",
+  "coEntryAgeTitle": "Las reglas de edad no permiten esta entrega",
+  "@coEntryAgeTitle": {
+    "description": "Frame 11B, variante AGE_RULES_*: la regla la fija la sucursal, así que la salida NO es una acción del agente"
+  },
+  "coEntryAgeBody": "La sucursal bloquea esta salida por su política de edad. Corrige la fecha de nacimiento en la reserva si está mal, o avisa a tu supervisor.",
+  "coEntryOfflineTitle": "Sin conexión para abrir el checkout",
+  "coEntryOfflineBody": "Abrir un checkout necesita la confirmación del servidor una sola vez. No se encola en la Bandeja: cuando haya señal, vuelve a tocar la card.",
+  "coEntryNotReadyTitle": "Un momento",
+  "coEntryNotReadyBody": "La app todavía está cargando tu ubicación activa. Intenta de nuevo en un segundo.",
+  "coEntryNoSessionCreated": "No se creó ninguna sesión de checkout.",
+  "coEntryServerSaid": "El servidor respondió: {message}",
+  "@coEntryServerSaid": {
+    "description": "El texto del backend se muestra tal cual (DoD #5) junto al copy localizado: trae los datos concretos (la regla de edad exacta, el número de la otra reserva)",
+    "placeholders": { "message": { "type": "String" } }
+  },
+  "coEntryClose": "Cerrar"
 }

@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/api/dto/checkout_session.dart';
-import '../../../core/api/enums.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/router/app_router.dart';
 import '../../../core/session/active_location.dart';
@@ -15,11 +14,11 @@ import '../../../core/widgets/ride_buttons.dart';
 import '../../shell/location_denied_view.dart';
 import '../application/checkout_wizard_controller.dart';
 import '../application/checkout_wizard_state.dart';
-import '../domain/checkout_event_log.dart';
 import '../domain/checkout_presence.dart';
 import 'checkout_labels.dart';
 import 'widgets/pause_sheet.dart';
 import 'widgets/steps_sheet.dart';
+import 'widgets/terminal_view.dart';
 import 'widgets/wizard_banners.dart';
 import 'widgets/wizard_chrome.dart';
 import 'widgets/wizard_skeleton.dart';
@@ -145,7 +144,10 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     }
 
     if (session.isTerminal) {
-      return _TerminalView(
+      // Frame 11E (M2-H7): la pantalla terminal vive en su propio widget
+      // porque es el destino de DOS caminos — la sesión que ya estaba cerrada
+      // al entrar, y el 409 SESSION_TERMINAL al crearla desde la card.
+      return CheckoutTerminalView(
         session: session,
         myUserId: ref.watch(sessionControllerProvider).user?.id,
         onExit: _leave,
@@ -414,113 +416,6 @@ class _StampsCard extends StatelessWidget {
             ),
         ],
       ),
-    );
-  }
-}
-
-/// Sesión terminal (CLOSED / CANCELLED, y el destino del 409
-/// SESSION_TERMINAL / CHECKOUT_TERMINAL): resumen del events log. No hay
-/// nada que avanzar aquí — se cuenta qué pasó y se ofrece la salida.
-class _TerminalView extends StatelessWidget {
-  const _TerminalView({
-    required this.session,
-    required this.myUserId,
-    required this.onExit,
-  });
-
-  final CheckoutSessionDto session;
-  final String? myUserId;
-  final VoidCallback onExit;
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    final format = DateFormat.Hm(Localizations.localeOf(context).toString());
-    final events = parseCheckoutEvents(session.events).reversed.toList();
-    final cancelled = session.currentStep == CheckoutStep.cancelled.wire;
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 18, 16, 20),
-      children: [
-        Icon(
-          cancelled ? Icons.cancel_outlined : Icons.verified_outlined,
-          size: 34,
-          color: cancelled ? RideTokens.dangerTx : RideTokens.okTx,
-        ),
-        const SizedBox(height: 10),
-        Text(
-          cancelled ? l10n.coTerminalCancelledTitle : l10n.coTerminalClosedTitle,
-          style: const TextStyle(
-            fontSize: 19,
-            fontWeight: FontWeight.w900,
-            color: RideTokens.n900,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          l10n.coTerminalBody,
-          style: const TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w700,
-            color: RideTokens.n700,
-          ),
-        ),
-        const SizedBox(height: 16),
-        Text(
-          l10n.coTerminalLogTitle,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w900,
-            color: RideTokens.n900,
-          ),
-        ),
-        const SizedBox(height: 8),
-        for (final event in events)
-          if (event.isTransition)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(Icons.circle, size: 7, color: RideTokens.n400),
-                  const SizedBox(width: 9),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          stepLabel(l10n, event.to!),
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                            color: RideTokens.n900,
-                          ),
-                        ),
-                        Text(
-                          doneLabel(
-                            l10n,
-                            event: event,
-                            myUserId: myUserId,
-                            time: event.at == null
-                                ? '—'
-                                : format.format(event.at!.toLocal()),
-                          ),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: RideTokens.n700,
-                            fontFeatures: [FontFeature.tabularFigures()],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-        const SizedBox(height: 18),
-        RidePrimaryButton(label: l10n.coExit, onPressed: onExit),
-      ],
     );
   }
 }
