@@ -44,7 +44,7 @@ ciclo Innovation→QA→CI verde→deploy ANTES de que M2-H6 los consuma).
 |---|---|---|
 | M2-H1 · Wizard shell + estado server-driven | Stepper desde `currentStep` (`by-reservation` fuente de verdad), poll base, matriz 409 mínima, abandon, telemetría. Blur de tab bar solo tras señal de capacidad (compromiso M1→M2). | H6 (M1) |
 | M2-H2 · CONFIRMING → TC | Verificación cliente/vehículo, declined-insurance, swap, QR terms-token (TTL 15 min, re-mint), poll de tcCompletedAt. | H1 |
-| M2-H3 · Pago | ADR-5: charge-sale + hold-deposit two-tap, record-manual-* failsafe con reason, poll terminal-status, preview del servidor (ADR-6) con re-confirm en divergencia. Botones gateados por `paymentActions` fail-closed contra la API (record-only no gateado, la UI lo refleja). | H1 |
+| M2-H3 · Pago | ADR-5: charge-sale + hold-deposit two-tap, record-manual-* failsafe con reason, poll terminal-status, preview del servidor (ADR-6) con re-confirm en divergencia. **CORREGIDO (2026-08-17):** `charge-sale` y `hold-deposit` **NO** se gatean por `paymentActions` — `money-route-gate.test.mjs:302-315` los fija como *card-present* abiertos a propósito y el test **falla si alguien los gatea** ("Gating them jams the counter", Hector 2026-07-25). La versión anterior de esta fila decía lo contrario y, construida tal cual, habría trabado todos los mostradores. Lo que sí está gateado es mover dinero **sin el cliente presente**. | H1 |
 | M2-H4 · Inspección como paso | Integra la captura de M1-H5 como paso INSPECTION_*. | H1 + M1-H5 |
 | M2-H5 · Firma y cierre | CUSTOMER_SIGN_PENDING con modo kiosco, customer-signature, cascada a CLOSED, branding vía display-data. | H4 |
 | M2-H6 · Reconciliación multi-superficie | UX de presencia, banner de avance ajeno con atribución, matriz 409 completa, adjuntarse a sesión en cualquier paso. Consume P1/P2; si no se aprueban → Plan B (§5). | H1 (+ deploy P1–P3) |
@@ -83,6 +83,27 @@ Tanda A se encarga de inmediato al cerrar H6; B y C durante la construcción de 
    → registrado como gap #12. Hoy llega en inglés y sin código: exactamente el mismo mal
    patrón que ya hubo que puentear con el 403 de ubicación (gap #3), y aquí decide si el
    agente ve "no tienes esta capacidad" o un error genérico sobre una pantalla de dinero.
+4. **El 409 `DEPOSIT_ALREADY_HELD` NO implica que el paso esté cerrado** (GD, review de la
+   Tanda B): el 409 se dispara por `agreement.depositHoldId`, pero lo que avanza el wizard
+   es `paymentCompletedAt` en la SESIÓN. Si la garantía la puso otra superficie por otra
+   ruta, hay hold y no hay stamp ⇒ la sesión sigue en `PAYMENT_PENDING` y ofrecer
+   "Continuar a inspección" chocaría con ADR-4. La pantalla se dibuja desde el
+   `currentStep` RE-CONSULTADO, y si el paso no está estampado la única salida verdadera
+   es `record-manual-deposit` con su motivo.
+
+### Decisiones de Hector pendientes para el M2 (no bloquean H1/H2)
+
+- **¿RideOps expone "cobrar a la tarjeta guardada" en el M2?** Hoy esa acción vive fuera
+  del wizard (`reservations POST /:id/agreement/spin/charge-card-on-file`, gateada por
+  `paymentActions`). GD recomienda **no** construirla en H3 y conservar el patrón del 403
+  en el sistema de diseño hasta que se consuma de verdad.
+- **Copy legal del guardado de tarjeta.** El paso de pago **guarda la tarjeta del cliente
+  para cargos posteriores** — verificado en `spin-charge.service.js`: las tres rutas
+  tokenizan y persisten `cardOnFileToken`/`cardOnFileLast4` (runSale:763,
+  runDepositHold:989, rama pre-pagada:378), y `money-route-gate` llama a ese guardado
+  "the ARMING step". Hoy la app lo menciona en una sola pantalla y calla en las otras dos
+  donde ocurre igual. El texto que ve el agente —y lo que se le dice al cliente— necesita
+  el visto bueno de Hector.
 
 **Corrección del encargo del PM, verificada en código:** `charge-sale` y `hold-deposit`
 **NO** están gateados por `paymentActions` (`money-route-gate.test.mjs` los fija como
