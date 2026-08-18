@@ -381,14 +381,14 @@ function CheckoutWizardV2({ token, me, logout }) {
   // — which is also how the post-F5 card, with no error object left, learns
   // why it failed.
   //
-  // MIND THE GAP (2026-08-18): the backend's self-heal allow-list grew a third
-  // member, CHECKED_OUT, so it can now repair the strand where the reservation
-  // was handed over and its contract stayed DRAFT. THIS CARD DOES NOT OFFER
-  // THE BUTTON FOR THAT STATE YET — `closedCardState` keeps `retryCanWork` at
-  // ['NEW','CONFIRMED'] and the render gates below additionally require
-  // `!halfFinalized`. Deliberate, not an oversight: showing it is a change to
-  // what the agent sees, and those need a mockup Hector has approved. Until
-  // that lands the repair is reachable only from RideOps or a direct POST.
+  // 2026-08-18: this now also covers the strand where the reservation was
+  // handed over and its contract stayed DRAFT. The backend grew a repair for
+  // that pair, and until it did, this card deliberately hid the button and
+  // told the agent to escalate — correctly, because nothing in the product
+  // could finalize it. Both halves moved together (mockup approved by Hector
+  // the same day): the button is offered, and `halfBody` stopped saying
+  // escalate. Moving one without the other is how the card starts lying in
+  // whichever direction was left behind.
   // The 'unknown' card's button. Bumping the key re-runs the check effect,
   // which only GETs — a control labelled "check again" must not POST, least of
   // all on a card telling the agent not to hand over the vehicle yet.
@@ -2128,12 +2128,9 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
   // change nothing under copy promising to explain the blocker — exactly the
   // kind of confident-but-false affordance that ticket removed.
   //
-  // What this card offers is currently NARROWER than what the backend accepts:
-  // the server list is ['NEW','CONFIRMED','CHECKED_OUT'] since 2026-08-18,
-  // `retryCanWork` is still the first two, and `halfFinalized` suppresses the
-  // button again on top. See the note on `retryFinalize` above — being narrow
-  // is safe (no false affordance), it just leaves the repair unreachable from
-  // here.
+  // What this card offers now tracks what the backend will actually do,
+  // including the CHECKED_OUT + DRAFT-agreement repair — see `closedCardState`,
+  // where the agreement status is part of the condition rather than decoration.
   const { voided, halfFinalized, showRetry } =
     closedCardState({ reservation, terminalReason: copy.terminal });
 
@@ -2211,6 +2208,12 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
             body IS the backend's raw message, which ends without punctuation,
             so an inline hint ran straight on out of the end of its sentence.
             Only shown when the button below can actually act on it. */}
+        {/* Still suppressed on the half-finalize card even though the button
+            is now offered there: `retryHint` is "fix that, THEN retry the
+            close", which reads as an instruction the agent has to act on
+            first. Here there is nothing for them to fix — the contract is
+            simply unfinished — and `halfBody` already says what the button
+            does. */}
         {showRetry && !halfFinalized && (
           <span style={{ display: 'block', fontWeight: 500, marginTop: 4 }}>
             {t('checkoutClosed.retryHint')}
@@ -2258,7 +2261,7 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
       </div>
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        {showRetry && !halfFinalized && (
+        {showRetry && (
           <button
             style={{ ...primaryBtn, opacity: retrying ? 0.6 : 1 }}
             onClick={onRetryFinalize}
@@ -2271,7 +2274,7 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
         )}
         <a
           href={`/reservations/${reservation.id}`}
-          style={(showRetry && !halfFinalized)
+          style={showRetry
             ? secondaryLinkBtn
             : { ...primaryBtn, textDecoration: 'none', display: 'inline-block' }}
         >

@@ -1192,7 +1192,7 @@
     "voidedTitle": "This reservation can no longer be closed",
     "voidedBody": "The reservation went to {{status}} while the checkout was still open, so the close cannot complete. Check the reservation to decide what to do with the vehicle.",
     "halfTitle": "The vehicle went out on a draft contract",
-    "halfBody": "The reservation and the vehicle were handed over, but the contract never left draft, so a car is out with no finalized agreement. Retrying the close will not fix this, and there is no control in the app to finalize it: escalate so the contract is closed out before the rental continues.",
+    "halfBody": "The reservation and the vehicle were handed over, but the contract never left draft, so a car is out with no finalized agreement. Retrying the close finalizes the contract and sends the customer their copy; if it fails again, this card will tell you why.",
     "retryHint": "Then retry the close.",
     "retry": "Retry close",
     "retrying": "Retrying…",

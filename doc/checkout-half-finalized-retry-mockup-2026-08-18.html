@@ -1,0 +1,158 @@
+<title>Tarjeta CLOSED · media finalización</title>
+<style>
+  :root {
+    --page: #f6f7f9; --ink: #111827; --muted: #4B5563; --faint: #6B7280;
+    --card: #FFFFFF; --line: #E5E7EB;
+    --warn-bg: #fdf3e2; --warn-bd: #f3dcb5; --warn-tx: #8a5606;
+    --btn: #1F2937; --btn-tx: #FFFFFF;
+    --bad: #b3261e; --good: #1b5e20;
+  }
+  :root:not([data-theme="light"]) {
+    color-scheme: light;
+  }
+  body {
+    margin: 0; padding: 32px 20px 64px;
+    background: var(--page); color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 21px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; max-width: 78ch; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 22px; }
+  .col > h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
+    margin: 0 0 10px; color: var(--faint); font-weight: 700;
+  }
+  .tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 7px;
+         border-radius: 999px; margin-left: 6px; vertical-align: 1px; }
+  .tag.now { background: #fde8e6; color: var(--bad); }
+  .tag.new { background: #e3f1e4; color: var(--good); }
+  .card {
+    background: var(--card); border: 0.5px solid var(--line); border-radius: 10px;
+    padding: 18px; box-shadow: 0 1px 2px rgba(0,0,0,.04);
+  }
+  .banner {
+    background: var(--warn-bg); border: 0.5px solid var(--warn-bd); color: var(--warn-tx);
+    border-radius: 8px; padding: 11px 13px; margin-bottom: 16px; font-size: 13.5px;
+  }
+  .banner b { display: block; font-weight: 800; margin-bottom: 3px; }
+  .banner .hint { display: block; margin-top: 5px; font-weight: 500; }
+  .facts { border: 0.5px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+  .fact { display: flex; align-items: flex-start; gap: 9px; padding: 8px 12px;
+          font-size: 13px; color: var(--muted); border-bottom: 0.5px solid var(--line); }
+  .fact:last-child { border-bottom: none; }
+  .gl { width: 15px; text-align: center; font-weight: 700; color: var(--faint); }
+  .gl.no { color: var(--warn-tx); }
+  .st { margin-left: auto; font-size: 11.5px; color: var(--faint);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .btn { padding: 10px 16px; background: var(--btn); color: var(--btn-tx); border: none;
+         border-radius: 6px; font-size: 14px; font-weight: 500; }
+  .link { padding: 8px 12px; background: #FFF; color: #374151;
+          border: 0.5px solid #D1D5DB; border-radius: 6px; font-size: 13px; }
+  .note { margin-top: 12px; font-size: 12.5px; color: var(--faint); border-top: 0.5px solid var(--line);
+          padding-top: 10px; }
+  .note b { color: var(--ink); }
+  .why { margin-top: 30px; background: var(--card); border: 0.5px solid var(--line);
+         border-radius: 10px; padding: 18px; }
+  .why h2 { font-size: 14px; margin: 0 0 10px; }
+  .why p { margin: 0 0 10px; font-size: 13.5px; color: var(--muted); max-width: 84ch; }
+  .why code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  .why ul { margin: 0 0 4px; padding-left: 20px; font-size: 13.5px; color: var(--muted); }
+  .why li { margin-bottom: 5px; }
+  .strike { text-decoration: line-through; opacity: .55; }
+</style>
+
+<div class="wrap">
+  <h1>Tarjeta CLOSED · la hebra «coche fuera, contrato en borrador»</h1>
+  <p class="sub">
+    Estado: reservación <code>CHECKED_OUT</code>, contrato <code>DRAFT</code>. Desde 2026-08-18 el
+    backend <b>sí</b> sabe repararlo, pero la tarjeta todavía dice lo contrario y no ofrece el botón.
+    Necesito tu OK antes de tocar la UI.
+  </p>
+
+  <div class="cols">
+
+    <div class="col">
+      <h2>Hoy <span class="tag now">se queda corto</span></h2>
+      <div class="card">
+        <div class="banner">
+          <b>El vehículo salió con el contrato en borrador</b>
+          <span>La reservación y el vehículo quedaron entregados, pero el contrato nunca salió de
+          borrador: hay un coche afuera sin contrato finalizado. <b style="display:inline">Reintentar
+          el cierre no lo arregla, y no hay control en la app para finalizarlo</b>: escala para que
+          cierren el contrato antes de que siga la renta.</span>
+        </div>
+        <div class="facts">
+          <div class="fact"><span class="gl">✓</span><span>La reservación quedó como entregada</span><span class="st">CHECKED_OUT</span></div>
+          <div class="fact"><span class="gl no">✗</span><span>El contrato no se finalizó</span><span class="st">DRAFT</span></div>
+          <div class="fact"><span class="gl">✓</span><span>El vehículo quedó marcado como rentado</span><span class="st">ON_RENT</span></div>
+          <div class="fact"><span class="gl no">✗</span><span>No se envió el contrato al cliente</span><span class="st">—</span></div>
+        </div>
+        <div class="actions">
+          <span class="btn">Ir a la reservación</span>
+        </div>
+        <div class="note">
+          Sin botón de reintento: <code>halfFinalized</code> lo apaga, y <code>retryCanWork</code>
+          tampoco incluye <code>CHECKED_OUT</code>. <b>El texto ya no es cierto</b> — el backend sí
+          puede finalizarlo ahora.
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <h2>Propuesta <span class="tag new">un cambio</span></h2>
+      <div class="card">
+        <div class="banner">
+          <b>El vehículo salió con el contrato en borrador</b>
+          <span>La reservación y el vehículo quedaron entregados, pero el contrato nunca salió de
+          borrador: hay un coche afuera sin contrato finalizado. Reintentar el cierre finaliza el
+          contrato y le manda su copia al cliente.</span>
+          <span class="hint">Si vuelve a fallar, te dirá por qué.</span>
+        </div>
+        <div class="facts">
+          <div class="fact"><span class="gl">✓</span><span>La reservación quedó como entregada</span><span class="st">CHECKED_OUT</span></div>
+          <div class="fact"><span class="gl no">✗</span><span>El contrato no se finalizó</span><span class="st">DRAFT</span></div>
+          <div class="fact"><span class="gl">✓</span><span>El vehículo quedó marcado como rentado</span><span class="st">ON_RENT</span></div>
+          <div class="fact"><span class="gl no">✗</span><span>No se envió el contrato al cliente</span><span class="st">—</span></div>
+        </div>
+        <div class="actions">
+          <span class="btn">Reintentar cierre</span>
+          <span class="link">Ir a la reservación</span>
+        </div>
+        <div class="note">
+          Mismo botón, misma posición, mismas palabras que en los otros fallos de esta tarjeta.
+          Lo único que cambia: <b>aparece</b> en este estado, y el párrafo deja de mandar a escalar.
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="why">
+    <h2>Qué cambia exactamente, y qué no</h2>
+    <p>
+      Cambia una condición y un párrafo. <code>retryCanWork</code> pasa a incluir
+      <code>CHECKED_OUT</code>, las rejillas de render dejan de exigir <code>!halfFinalized</code>,
+      y <code>halfBody</code> se reescribe en español e inglés porque hoy dice
+      <span class="strike">«reintentar no lo arregla … escala»</span>, que era verdad hasta ayer
+      y ya no lo es.
+    </p>
+    <p><b>Lo que no cambia:</b></p>
+    <ul>
+      <li>El botón sigue oculto en <code>CANCELLED</code>, <code>NO_SHOW</code> y
+          <code>PENDING_FRANCHISE_IMPORT</code>: ahí el backend sí declina y sería un control que no
+          hace nada.</li>
+      <li>Sigue oculto en los motivos terminales (topes de edad), que ningún reintento resuelve.</li>
+      <li>Si a la reservación le quitaron el coche, reintentar responde
+          «La reservación se quedó sin vehículo» — copia que ya existe y ya ofrece reintento.</li>
+      <li>El cliente recibe como máximo un correo, pase lo que pase.</li>
+    </ul>
+    <p>
+      <b>Si prefieres no tocar la UI ahora:</b> el backend ya está listo y probado, y los comentarios
+      del código ya dicen la verdad sobre este hueco. La reparación quedaría alcanzable solo desde
+      RideOps o un POST directo, y esta tarjeta seguiría mandando a escalar algo que el sistema sabe
+      arreglar solo.
+    </p>
+  </div>
+</div>

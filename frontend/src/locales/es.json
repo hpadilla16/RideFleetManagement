@@ -1192,7 +1192,7 @@
     "voidedTitle": "Esta reservación ya no puede cerrarse",
     "voidedBody": "La reservación quedó en {{status}} mientras el checkout seguía abierto, así que el cierre no puede completarse. Revisa la reservación para ver qué hacer con la unidad.",
     "halfTitle": "El vehículo salió con el contrato en borrador",
-    "halfBody": "La reservación y el vehículo quedaron entregados, pero el contrato nunca salió de borrador: hay un coche afuera sin contrato finalizado. Reintentar el cierre no lo arregla, y no hay control en la app para finalizarlo: escala para que cierren el contrato antes de que siga la renta.",
+    "halfBody": "La reservación y el vehículo quedaron entregados, pero el contrato nunca salió de borrador: hay un coche afuera sin contrato finalizado. Reintentar el cierre finaliza el contrato y le manda su copia al cliente; si vuelve a fallar, aquí te decimos por qué.",
     "retryHint": "Después, vuelve a intentar el cierre.",
     "retry": "Reintentar cierre",
     "retrying": "Reintentando…",

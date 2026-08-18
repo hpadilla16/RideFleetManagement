@@ -312,22 +312,54 @@ describe('isFinalizeComplete', () => {
 
 describe('closedCardState', () => {
   it('offers a retry only where the backend will actually re-run the finalize', () => {
-    // A SUBSET of selfHealOwns in checkout-session.service.js, not a mirror —
-    // see the note on closedCardState. Outside the backend's allow-list the
-    // re-run is declined with a server-side log and a plain 200, so the button
-    // would change nothing while the copy promised an answer.
+    // Tracks what the backend WILL DO, which since 2026-08-18 is not a plain
+    // status list. Outside it the re-run is declined with a server-side log
+    // and a plain 200, so the button would change nothing while the copy
+    // promised an answer.
     for (const status of ['NEW', 'CONFIRMED']) {
       expect(closedCardState({ reservation: resv(status, 'DRAFT') }).showRetry, status).toBe(true);
     }
     for (const status of ['CANCELLED', 'NO_SHOW', 'PENDING_FRANCHISE_IMPORT']) {
       expect(closedCardState({ reservation: resv(status, 'DRAFT') }).showRetry, status).toBe(false);
     }
-    // CHECKED_OUT is in its own bucket, and this line is a DECISION RECORD, not
-    // a property: since 2026-08-18 the backend WOULD repair this state, so the
-    // false here is the UI declining to offer it, pending an approved mockup —
-    // not the backend refusing. The day the button ships this expectation
-    // flips to true, and that is the intended edit, not a regression.
-    expect(closedCardState({ reservation: resv('CHECKED_OUT', 'DRAFT') }).showRetry).toBe(false);
+  });
+
+  // The strand the backend learned to repair on 2026-08-18, and the reason the
+  // button had to be offered somewhere new: the car went out and the contract
+  // stayed behind it. Until this shipped, `retryFinalize` had no way to be
+  // invoked for the failure the CLOSED card exists to report.
+  it('offers the retry for a car that went out on a DRAFT contract', () => {
+    const state = closedCardState({ reservation: resv('CHECKED_OUT', 'DRAFT') });
+    expect(state.halfFinalized).toBe(true);
+    expect(state.retryCanWork).toBe(true);
+    expect(state.showRetry).toBe(true);
+  });
+
+  // ...but the agreement status is part of the condition, not decoration. The
+  // backend repairs the CHECKED_OUT + DRAFT pair specifically; on anything else
+  // its repair branch logs and declines, so mirroring `selfHealOwns` alone
+  // would put the button back on states where it does nothing. `halfFinalized`
+  // is true for every one of these — which is exactly why showRetry must not
+  // be derived from it.
+  it('withholds it on a CHECKED_OUT reservation the backend will not repair', () => {
+    for (const agreement of ['CANCELLED', 'CLOSED']) {
+      const state = closedCardState({ reservation: resv('CHECKED_OUT', agreement) });
+      expect(state.halfFinalized, agreement).toBe(true);
+      expect(state.showRetry, agreement).toBe(false);
+    }
+    // No agreement at all: the cascade wraps its agreement work in
+    // `if (updated.agreementId)`, so there is no contract to finalize and the
+    // half-finalize copy would be describing a document nobody created.
+    const none = closedCardState({ reservation: resv('CHECKED_OUT', undefined) });
+    expect(none.halfFinalized).toBe(false);
+    expect(none.showRetry).toBe(false);
+  });
+
+  // A finalize that actually worked is the success card, not this one.
+  it('does not offer a retry over a finished checkout', () => {
+    const state = closedCardState({ reservation: resv('CHECKED_OUT', 'FINALIZED') });
+    expect(state.halfFinalized).toBe(false);
+    expect(state.showRetry).toBe(false);
   });
 
   it('withholds the retry for a reason no retry can clear', () => {

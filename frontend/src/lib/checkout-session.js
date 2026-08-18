@@ -276,20 +276,27 @@ export function isFinalizeComplete(reservation) {
 /**
  * What the CLOSED failure card may offer, given server truth + the reason.
  *
- * `retryCanWork` is a SUBSET of the backend's self-heal allow-list
- * (checkout-session.service.js — `selfHealOwns`). Outside that list the
- * backend declines the re-run with a server-side log and a plain 200, so a
- * retry button there would be a control that silently changes nothing under
- * copy promising to explain the blocker.
+ * `retryCanWork` tracks what the backend will actually DO, which since
+ * 2026-08-18 is no longer a plain status list. Outside it the backend declines
+ * the re-run with a server-side log and a plain 200, so a retry button there
+ * would be a control that silently changes nothing under copy promising to
+ * explain the blocker.
  *
- * It mirrored the list exactly until 2026-08-18, when the backend added
- * CHECKED_OUT so it could repair a reservation handed over with its contract
- * still DRAFT. This stayed at ['NEW','CONFIRMED'] on purpose: offering the
- * button in a new state changes what the agent sees, and that needs a mockup
- * approved first. Erring narrow is the safe direction — it withholds a real
- * capability rather than promising a fake one — but it does mean the strand
- * the backend can now repair has no in-app trigger. Widen both this and the
- * `!halfFinalized` render gates together, or neither.
+ * Two shapes, because the backend has two:
+ *
+ *   - NEW / CONFIRMED — the finalize never ran. `selfHealOwns` covers these
+ *     and the cascade runs end to end.
+ *   - CHECKED_OUT with the agreement still DRAFT — the car went out and the
+ *     contract stayed behind. The backend repairs exactly this pair, so the
+ *     agreement status is part of the condition, not decoration: on
+ *     CHECKED_OUT with a CANCELLED or CLOSED agreement the repair branch
+ *     declines, and with no agreement at all there is nothing to finalize.
+ *     Mirroring `selfHealOwns` alone would put the button back on those.
+ *
+ * Deliberately NOT keyed off `halfFinalized`, which is the COPY's question
+ * ("is a car out on a contract that never became one") and is true for
+ * CANCELLED agreements too. Same state, two questions, and conflating them is
+ * what would offer a button that does nothing.
  *
  * `halfFinalized` requires an agreement to EXIST. The cascade wraps its
  * agreement work in `if (updated.agreementId)`, so a session without one can
@@ -300,7 +307,8 @@ export function isFinalizeComplete(reservation) {
 export function closedCardState({ reservation, terminalReason = false } = {}) {
   const status = String(reservation?.status || '');
   const agreementStatus = reservation?.rentalAgreement?.status || null;
-  const retryCanWork = ['NEW', 'CONFIRMED'].includes(status);
+  const retryCanWork = ['NEW', 'CONFIRMED'].includes(status)
+    || (status === 'CHECKED_OUT' && agreementStatus === 'DRAFT');
   const voided = ['CANCELLED', 'NO_SHOW'].includes(status);
   const halfFinalized = status === 'CHECKED_OUT'
     && !!agreementStatus && agreementStatus !== 'FINALIZED';
