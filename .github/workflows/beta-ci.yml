@@ -135,9 +135,70 @@ jobs:
         #
         # This is the identical dummy value the "Resolve transitive imports" step
         # above already uses. Same reason: satisfy a constructor, never connect.
+        #
+        #   - test:precheckin-tax-rate: WHICH tax rate the OTA pre-check-in
+        #     charges. The rule is "a stored zero is a rate, not a missing
+        #     value", and the DB-backed suite CANNOT test it: Prisma returns a
+        #     Decimal OBJECT for the nullable column and `new Decimal(0)` is
+        #     truthy, so the embedded case passes identically under `||` and
+        #     under `== null`. Only a primitive 0 discriminates, which is why the
+        #     rule was lifted into a pure resolveTaxRate() and is fed that 0 by
+        #     hand here. Milliseconds, no database (2026-08-18). The embedded
+        #     half runs in the precheckin-charges-embedded job below.
         env:
           DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_unit_only?schema=public'
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:precheckin-tax-rate
+
+  precheckin-charges-embedded:
+    # THE PRE-CHECK-IN CHARGE SHEET, AGAINST A REAL TRANSACTION.
+    #
+    # WHY ITS OWN JOB. Every case in this suite is money a customer is charged:
+    # atomicity of the charge-sheet rewrite, the 409 on a double-tapped Submit,
+    # which tax rate an OTA booking pays, and what a PERCENTAGE insurance plan
+    # prices against. All 20 of them ran NOWHERE until 2026-08-18 — the script is
+    # deliberately out of the `npm test` chain (npm-test-chain.test.mjs KNOWN_OUT,
+    # "DB-backed (embedded-postgres)", so the chain stays runnable on a laptop
+    # with no Postgres), and nothing in this workflow invoked it. Two branches'
+    # worth of money evidence rested on a suite CI never executed.
+    #
+    # AND NOT HUNG OFF THE MONEY-GUARD STEP, which is where it would naturally be
+    # bolted on. That step runs with a DUMMY DATABASE_URL and no server behind it
+    # (see the long note above); these tests open real transactions, so they
+    # would fail there for a reason that has nothing to do with the code.
+    #
+    # AND NOT IN tenant-isolation-suite either, despite that job having Postgres:
+    # that one is the docker-compose stack, and scripts/embedded-pg-boot.mjs
+    # boots its OWN throwaway cluster on a free port and points DATABASE_URL at
+    # it. It needs no service container and no compose file — only the npm
+    # package, which `npm ci` does not install because it is not a dependency
+    # (deliberately: it is a ~100MB platform binary no runtime path uses).
+    #
+    # The version is PINNED. `--no-save` writes no lockfile entry, so there is no
+    # integrity hash and no reproducibility; and the dist-tag `latest` for this
+    # package is currently a prerelease, so an unpinned install is a moving
+    # target under a money suite.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      # embedded-pg-boot.mjs runs `prisma db push` and `prisma generate` against
+      # the cluster it starts, both through prisma's JS entry point. Generating
+      # once up front keeps a failure here readable as "the client is broken"
+      # rather than surfacing inside a test's before() hook.
+      - run: npm run prisma:generate
+      - run: npm install --no-save embedded-postgres@18.4.0-beta.17
+      # No DATABASE_URL is set on purpose: bootEmbeddedPg() assigns
+      # process.env.DATABASE_URL from the cluster it just started, before the
+      # module under test is imported. A dummy value here would be overwritten,
+      # and passing a real one would hide a regression in that ordering.
+      - run: npm run test:precheckin-charges
+
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:

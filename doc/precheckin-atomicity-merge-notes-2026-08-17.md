@@ -151,3 +151,80 @@ on `Invalid value undefined for datasource "db"`, i.e. `DATABASE_URL` unset in
 the shell, before reaching any assertion. That is an environment gap, not a
 merge conflict — but it does mean the ratchet above is un-run locally, so run it
 with `DATABASE_URL` set (or in CI) as part of the real merge.
+
+---
+
+# The OTHER merge: the two sibling pre-check-in branches (2026-08-18)
+
+Different pair, same file. `fix/precheckin-ota-tax-snapshot` and
+`fix/precheckin-insurance-base-rental-only` both branch from `db9352d2` and both
+edit `precheckin-charges.js` and its embedded suite. Merged into
+`fix/precheckin-charges-merged`, **tax first, insurance second**, and the order
+is not arbitrary:
+
+- The tax branch is the only one that touches `customer-portal.routes.js` — the
+  missing `include: { pricingSnapshot: true }` on the `'customer-info'` branch,
+  which is where the actual money bug lives. Landing it first means its
+  source-level guard is in place from the first commit of the integration.
+- The insurance branch rewrites the tail of the test file and rewrites base case
+  #10, so taking it second means its five new cases are read once, against the
+  final `makeReservation()`.
+
+**Git merged it clean** — no conflict markers, in either order. That is worth
+saying out loud because the review expected two: the imports and
+`makeReservation()`. Git resolved both because the two branches added their
+imports at different offsets and only the tax branch touched
+`makeReservation()`. The result was checked by hand and is what the recipe
+wanted: both imports present (`node:fs/promises` and `SERVICE_CHARGE_SOURCES`),
+`makeReservation({ charges, notes, snapshot })` with the tax branch's
+`include: { pricingSnapshot: true }`, and all five insurance cases compatible
+with that signature. A clean auto-merge on a money file is not evidence of a
+correct merge; the suite run below is.
+
+## What the merge then fixed (innovation review MUSTs)
+
+1. **The suite ran nowhere.** `test:precheckin-charges` is out of the `npm test`
+   chain by design (`npm-test-chain.test.mjs` KNOWN_OUT, DB-backed) and was in
+   no CI job. New job `precheckin-charges-embedded` in `beta-ci.yml`:
+   `npm ci` -> `prisma:generate` -> `npm install --no-save
+   embedded-postgres@18.4.0-beta.17` -> `npm run test:precheckin-charges`. Its
+   own job on purpose — the money-guard step runs with a dummy `DATABASE_URL`
+   and no server, and `embedded-pg-boot.mjs` boots its own cluster, so the
+   docker-compose job is not needed either.
+2. **The direction that costs the customer had no test.** The base change also
+   quotes MORE: `addManualCharge` rejects only `amount === 0`
+   (`reservation-pricing.service.js:964`) and stamps
+   `preSource='ADDITIONAL_SERVICE_PRECHECKIN'` regardless of the caller's source
+   (`:1037`), so an admin credit of -100 lands as an excluded row. Old base
+   `300 - 100 = 200` -> `$20.00`; new base `300` -> `$30.00`. Pinned.
+3. **A docblock that overclaimed.** "The pricing service stores NULL for unset"
+   was true of one writer out of four. Corrected in place, with the inventory.
+
+## The writers that store 0, and what was decided
+
+`reservationPricingSnapshot.taxRate` is `Decimal?` and every reader now honours
+a stored 0 as a real rate (`resolveTaxRate`, `buildReservationBreakdown`,
+`rental-agreements.service.js:2844/3241`). So a 0 written to mean "I do not
+know" suppresses sales tax permanently.
+
+- `reservations.routes.js:1251/1264` — `pickupLoc?.taxRate ?? 0`, and `pickupLoc`
+  is null when the id does not resolve in the caller's tenant scope, which
+  `validateLocationWindow()` does not refuse (it returns silently,
+  `reservations.service.js:873`). **CHANGED to `?? null`.** `Location.taxRate` is
+  non-null with default 0, so the resolved path is byte-identical; only the
+  "location not found" case moves, and that is the case that was lying.
+- `booking-engine.service.js:1769` — `Number(search.location?.taxRate || 0)`.
+  **LEFT ALONE.** The premise is already true here: `searchRental()` SELECTs
+  `taxRate` and throws when no location matches, and `Location.taxRate` is
+  non-null, so the operand is always a Decimal — truthy even at zero — and the
+  `|| 0` cannot fire. It stores the location's real rate. Editing a money path
+  whose defect is unreachable would only leave a future reader thinking a bug
+  had been found there.
+
+## Loose end, not fixed here
+
+`reservation-extend.service.js:312` resolves the same rate with `if (!taxRate)`,
+i.e. it treats a stored 0 as unset — the opposite of the other three readers. A
+car-sharing reservation (`car-sharing.service.js:253` writes a deliberate 0) that
+is extended will be taxed at the location's rate. Same class of bug, different
+route; raised rather than ridden along.
