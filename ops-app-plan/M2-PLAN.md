@@ -109,6 +109,25 @@ Tanda A se encarga de inmediato al cerrar H6; B y C durante la construcción de 
    frecuente del paso: un build que retroceda dispararía un 409 en el camino de error más
    transitado, o pintaría el paso localmente — la copia de la máquina que ADR-4 prohíbe.
 
+### RESUELTO por Hector (2026-08-17, tarde)
+
+- **Los TRES mockups quedan aprobados**: Tanda C (inspección, firma y cierre), la lámina
+  delta de H2 y la página de firma del cliente. Desbloquean H4, H5, los dos estados
+  diferidos de H2 (D1/D2) y los cuatro MUST diferidos de la página de firma.
+- **Barra del modo kiosco en tinta neutra**: aprobada. Se quita el morado de plataforma de
+  la única pantalla donde el cliente firma. Alcanza también a la firma de inspección del M1,
+  por consistencia.
+- **"Volver a pedir la firma"**: aprobado, con el aviso obligatorio de que **SUSTITUYE** la
+  firma guardada — porque eso es literalmente lo que hace `saveCustomerSignature`.
+- **Frames previos 17A y 18A**: aprobados. El agente sabe lo que viene antes de entrar a la
+  cámara y antes de soltar el teléfono.
+- **RideOps NO expone "cobrar a la tarjeta guardada" en el M2.** Se conserva el patrón del
+  403 en el sistema de diseño hasta que la acción se consuma de verdad. Queda para el M3.
+
+**Sigue pendiente y bloquea la construcción del paso de pago:** el copy legal del guardado
+de tarjeta (las tres rutas persisten un `cardOnFile` reutilizable y hoy la app solo lo
+menciona en una de las tres pantallas donde ocurre).
+
 ### Decisiones de Hector pendientes para el M2 (no bloquean H1/H2)
 
 - **¿RideOps expone "cobrar a la tarjeta guardada" en el M2?** Hoy esa acción vive fuera
