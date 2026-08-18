@@ -1272,12 +1272,20 @@ reservationsRouter.post('/', async (req, res, next) => {
       createdByUserId: req.user?.sub || req.user?.id || null
     }, scopeFor(req));
 
+    // taxRate WRITES NULL, NOT 0, WHEN THE LOCATION DID NOT RESOLVE.
+    // pickupLoc is a tenant-scoped findFirst above, so it is null whenever the
+    // id does not resolve inside the caller's tenant — and validateLocationWindow
+    // returns silently in that case instead of refusing the create. A 0 stored
+    // there means "I could not find the location", NOT "this rental is untaxed".
+    // Every reader now honours a stored 0 as a deliberate rate (lib/tax-rate.js),
+    // so that invented zero would suppress sales tax on the reservation forever.
+    // NULL is the column's own spelling of "unset" and lets the fallback work.
     await withTenantSchema(req.user.tenantId, (db) => db.reservationPricingSnapshot.upsert({
       where: { reservationId: row.id },
       create: {
         reservationId: row.id,
         dailyRate: quote.dailyRate,
-        taxRate: pickupLoc?.taxRate ?? 0,
+        taxRate: pickupLoc?.taxRate ?? null,
         depositRequired: requireDeposit,
         depositMode: requireDeposit ? depositMode : null,
         depositValue: requireDeposit ? depositValue : null,
@@ -1290,7 +1298,7 @@ reservationsRouter.post('/', async (req, res, next) => {
       },
       update: {
         dailyRate: quote.dailyRate,
-        taxRate: pickupLoc?.taxRate ?? 0,
+        taxRate: pickupLoc?.taxRate ?? null,
         depositRequired: requireDeposit,
         depositMode: requireDeposit ? depositMode : null,
         depositValue: requireDeposit ? depositValue : null,

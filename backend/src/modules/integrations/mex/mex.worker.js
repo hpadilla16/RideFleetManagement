@@ -60,6 +60,8 @@ import {
   quoteReconciliation,
   MEX_CHARGE_SOURCE,
 } from './mex-reservation-detail.js';
+import { resolveTaxRate } from '../../../lib/tax-rate.js';
+import { isBookedPriceRemainder } from '../../../lib/charge-identity.js';
 import {
   classifyMexRateCode,
   SOURCE_SYSTEM,
@@ -220,11 +222,31 @@ export async function syncImportedFeeCharges(db, reservationId, detail, { days =
   if (!reservationId || !detail) return { created: 0, updated: 0, removed: 0 };
 
   // The tax is ours to compute, so we need the rate that applies at pickup.
+  //
+  // WHY THE SNAPSHOT AND NOT JUST THE LOCATION. A fresh AUTO promotion writes no
+  // ReservationPricingSnapshot (promote.js promoteWithMappings), so on that path
+  // this resolves to the location exactly as before. The reachable case is the
+  // DUPLICATE-LINK path: findDuplicateReservation matches on tenant + customer
+  // name + pickup day with no channel filter, so a MEX row can link to a
+  // reservation some other flow already created — and be handed straight to this
+  // sync. That reservation CAN carry a snapshot, including the deliberate 0 that
+  // car-sharing.service.js:253 writes for a tax-exempt trip. Rebuilding the TAX
+  // row from the location there invents tax the customer never agreed to.
+  //
+  // A resolved 0 and the old `|| null` mean the same thing downstream:
+  // buildTaxRow() returns null for any pct <= 0, i.e. no TAX row is written.
   const reservation = await db.reservation.findUnique({
     where: { id: reservationId },
-    select: { dailyRate: true, pickupLocation: { select: { taxRate: true } } },
+    select: {
+      dailyRate: true,
+      pricingSnapshot: { select: { taxRate: true } },
+      pickupLocation: { select: { taxRate: true } },
+    },
   });
-  const taxRate = Number(reservation?.pickupLocation?.taxRate) || null;
+  const taxRate = resolveTaxRate({
+    snapshotRate: reservation?.pricingSnapshot?.taxRate,
+    locationRate: reservation?.pickupLocation?.taxRate,
+  });
 
   const wanted = buildImportedQuoteRows(detail, { days, taxRate });
   if (!wanted.length) return { created: 0, updated: 0, removed: 0 };
@@ -279,11 +301,25 @@ export async function syncImportedFeeCharges(db, reservationId, detail, { days =
   // Rows this sync owns that the current quote no longer wants — notably the
   // imported tax and the MEX-owned rental line it wrote before the engine took
   // the tax over (2026-08-05). Leaving them behind double-bills.
+  //
+  // isBookedPriceRemainder EXCLUDES the QUOTE_TAXES_FEES row: it is chargeType
+  // TAX, so quoteRowKey buckets it as 'TAX', but it carries fees rather than
+  // tax and sweeping it at a resolved rate of 0 loses real money. Only the
+  // REMOVAL path consults it — matching it for update-in-place is pre-existing
+  // behaviour and deliberately left alone. See lib/charge-identity.js.
+  //
+  // THE ENGINE'S TAX ROW COUNTS AS OURS. This sync already claims the TAX
+  // identity to UPDATE it in place (it is in the `existing` query above and
+  // buildTaxRow writes code/source TAX), so leaving it behind when the quote
+  // wants no tax row was an asymmetry, not a policy: a reservation over-taxed
+  // before the snapshot rate was honoured would keep its stale row through
+  // every later sync. Stopping the overcharge has to also undo it.
   const removeIds = [...new Set([
     ...superseded,
     ...existing
       .filter((row) => String(row.source || '').toUpperCase() === MEX_CHARGE_SOURCE
-        || String(row.code || '').toUpperCase() === 'IMPORTED_TAX')
+        || String(row.code || '').toUpperCase() === 'IMPORTED_TAX'
+        || (quoteRowKey(row) === 'TAX' && !isBookedPriceRemainder(row)))
       .filter((row) => !keep.has(quoteRowKey(row)))
       .map((row) => row.id),
   ])];

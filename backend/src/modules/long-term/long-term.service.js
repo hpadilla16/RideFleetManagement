@@ -1,5 +1,7 @@
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
+import { resolveTaxRate } from '../../lib/tax-rate.js';
+import { isTaxRow } from '../../lib/charge-identity.js';
 
 /**
  * Long-Term (Monthly) Reservations — P1 (2026-06-03).
@@ -62,10 +64,17 @@ async function resolveMonthlyRate({ tenantId, rateId, vehicleTypeId }) {
  * ($1,624.20) while the plan was $950. getPricing/syncAgreementCharges rebuild the agreement from
  * these ReservationCharge rows, so the unpaid balance follows automatically.
  */
-async function applyMonthlyPricing(reservationId, cycleRate, scope = {}) {
-  const reservation = await prisma.reservation.findUnique({
+export async function applyMonthlyPricing(reservationId, cycleRate, scope = {}, db = prisma) {
+  const reservation = await db.reservation.findUnique({
     where: { id: String(reservationId) },
-    select: { id: true, pickupLocation: { select: { taxRate: true } } },
+    select: {
+      id: true,
+      // The rate the customer was QUOTED wins over the location's current one.
+      // A stored 0 is a RATE (a tax-exempt car-sharing trip), which is why the
+      // location is still selected but only ever used as the fallback.
+      pricingSnapshot: { select: { taxRate: true } },
+      pickupLocation: { select: { taxRate: true } },
+    },
   });
   if (!reservation) return;
   const rate = round2(cycleRate);
@@ -75,13 +84,13 @@ async function applyMonthlyPricing(reservationId, cycleRate, scope = {}) {
   // Match the rental base line across all creation flows (public booking sets source
   // BASE_RATE/code DAILY; staff flows label it "Daily"). We do NOT match by chargeType
   // alone (a per-day SERVICE is chargeType DAILY) to avoid nuking add-ons.
-  await prisma.reservationCharge.deleteMany({
+  await db.reservationCharge.deleteMany({
     where: {
       reservationId,
       OR: [{ source: 'BASE_RATE' }, { source: 'MONTHLY_CYCLE' }, { code: 'DAILY' }, { name: 'Daily' }],
     },
   });
-  await prisma.reservationCharge.create({
+  await db.reservationCharge.create({
     data: {
       // chargeType MUST be a valid ChargeType enum (UNIT/DAILY/TAX/PERCENT/DEPOSIT) — there is
       // NO 'MONTHLY'. The monthly meaning is carried by source MONTHLY_CYCLE + the name.
@@ -92,42 +101,81 @@ async function applyMonthlyPricing(reservationId, cycleRate, scope = {}) {
   });
 
   // Recompute Sales Tax on the new taxable base (all selected, taxable, non-TAX charges).
-  const taxRate = Number(reservation.pickupLocation?.taxRate || 0);
-  const charges = await prisma.reservationCharge.findMany({ where: { reservationId, selected: true } });
+  // WAS: `Number(reservation.pickupLocation?.taxRate || 0)` — it rebuilt the TAX
+  // row from the location and never looked at the snapshot, so putting a
+  // tax-exempt car-sharing reservation (snapshot taxRate 0, car-sharing.service
+  // .js:253) on a monthly plan taxed it at the location's rate. attachPlan has
+  // no workflowMode guard, so any reservation can reach here.
+  const taxRate = resolveTaxRate({
+    snapshotRate: reservation.pricingSnapshot?.taxRate,
+    locationRate: reservation.pickupLocation?.taxRate,
+  });
+  const charges = await db.reservationCharge.findMany({ where: { reservationId, selected: true } });
+  // NB: this filter is inline and NOT isTaxRow, on purpose. It answers a
+  // different question — what is TAXABLE — and must keep excluding the
+  // QUOTE_TAXES_FEES remainder from the base (it is taxable:false, so the two
+  // agree today, but they are separate rules and may not always).
   const taxableBase = charges
     .filter((c) => c.taxable && String(c.chargeType || '').toUpperCase() !== 'TAX' && String(c.source || '').toUpperCase() !== 'TAX')
     .reduce((s, c) => s + Number(c.total || 0), 0);
   const taxTotal = round2(taxableBase * (taxRate / 100));
-  const existingTax = charges.find((c) => String(c.source || '').toUpperCase() === 'TAX' || String(c.code || '').toUpperCase() === 'TAX');
+  // WHICH ROWS ARE TAX, AND WHY IT IS NOT `chargeType === 'TAX'`. isTaxRow also
+  // matches source TAX_RECALC (recomputeTaxRow writes no `code`), which a
+  // source/code-only match missed: extend a rental, then attach a plan, and a
+  // SECOND tax row appeared — excluded from taxableBase but counted in
+  // estimatedTotal, so the customer was billed tax twice. It EXCLUDES the
+  // QUOTE_TAXES_FEES booked-price remainder, which is chargeType TAX but
+  // carries fees; see lib/charge-identity.js for what claiming it destroys.
+  //
+  // ALL of them, not the first. Reservations already carrying the duplicate
+  // above exist in production today, and `.find()` on an unordered findMany
+  // would fix a nondeterministic one and leave the other counted in
+  // estimatedTotal. Repricing is the moment to make the row set correct, the
+  // same reason the MEX sync sweeps its stale row rather than only stopping.
+  const taxRows = charges
+    .filter(isTaxRow)
+    .sort((a, b) => (Number(a.sortOrder || 0) - Number(b.sortOrder || 0)) || String(a.id).localeCompare(String(b.id)));
+  const [existingTax, ...duplicateTaxRows] = taxRows;
+  if (duplicateTaxRows.length) {
+    await db.reservationCharge.deleteMany({ where: { id: { in: duplicateTaxRows.map((c) => c.id) } } });
+  }
   if (existingTax) {
     if (taxTotal > 0) {
-      await prisma.reservationCharge.update({ where: { id: existingTax.id }, data: { rate: taxTotal, total: taxTotal, name: `Sales Tax (${taxRate.toFixed(2)}%)` } });
+      await db.reservationCharge.update({ where: { id: existingTax.id }, data: { rate: taxTotal, total: taxTotal, name: `Sales Tax (${taxRate.toFixed(2)}%)` } });
     } else {
-      await prisma.reservationCharge.delete({ where: { id: existingTax.id } });
+      await db.reservationCharge.delete({ where: { id: existingTax.id } });
     }
   } else if (taxTotal > 0) {
     const maxSort = charges.reduce((m, c) => Math.max(m, Number(c.sortOrder || 0)), 0);
-    await prisma.reservationCharge.create({
+    await db.reservationCharge.create({
       data: { reservationId, code: 'TAX', name: `Sales Tax (${taxRate.toFixed(2)}%)`, chargeType: 'TAX', quantity: 1, rate: taxTotal, total: taxTotal, taxable: false, selected: true, sortOrder: maxSort + 1, source: 'TAX' },
     });
   }
 
   // estimatedTotal = selected non-deposit charges (incl. tax). Deposits are held separately.
-  const refreshed = await prisma.reservationCharge.findMany({ where: { reservationId, selected: true } });
+  const refreshed = await db.reservationCharge.findMany({ where: { reservationId, selected: true } });
   const estimatedTotal = round2(
     refreshed
       .filter((c) => String(c.source || '').toUpperCase() !== 'DEPOSIT' && String(c.chargeType || '').toUpperCase() !== 'DEPOSIT')
       .reduce((s, c) => s + Number(c.total || 0), 0)
   );
-  await prisma.reservation.update({ where: { id: reservationId }, data: { estimatedTotal } });
+  await db.reservation.update({ where: { id: reservationId }, data: { estimatedTotal } });
 
   // Propagate to the agreement (if one exists) so the unpaid balance matches immediately.
   // Dynamic import avoids a load-time circular dependency with the pricing service.
-  try {
-    const { reservationPricingService } = await import('../reservations/reservation-pricing.service.js');
-    await reservationPricingService.getPricing(reservationId, scope, { allowClosed: true });
-  } catch (e) {
-    logger.warn(`applyMonthlyPricing: agreement recompute skipped: ${String(e?.message || e)}`);
+  //
+  // ONLY ON THE DEFAULT CLIENT. getPricing runs on the module-level prisma, so if a
+  // caller injected its own client — a transaction, say — this would read OUTSIDE
+  // that transaction and recompute the agreement from rows the tx has not committed.
+  // Injecting a client therefore means you own the follow-up. Both production
+  // callers use the default and are unaffected.
+  if (db === prisma) {
+    try {
+      const { reservationPricingService } = await import('../reservations/reservation-pricing.service.js');
+      await reservationPricingService.getPricing(reservationId, scope, { allowClosed: true });
+    } catch (e) {
+      logger.warn(`applyMonthlyPricing: agreement recompute skipped: ${String(e?.message || e)}`);
+    }
   }
 }
 

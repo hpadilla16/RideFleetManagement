@@ -159,10 +159,37 @@ jobs:
         #     and the 409-with-code mapping on the customer route. Being in the
         #     `npm test` chain is NOT enough — nothing in this workflow invokes
         #     `npm test`, which is the trap documented above.
+        #   test:tax-rate-writers — the two remaining places that REBUILD a
+        #     reservation's sales-tax row: applyMonthlyPricing (a monthly plan)
+        #     and the MEX sync. Both used to derive the rate from the pickup
+        #     LOCATION and never look at the reservation's pricing snapshot, so
+        #     putting a tax-exempt car-sharing rental on a monthly plan taxed it
+        #     at the location's rate — money the customer never agreed to.
+        #     DB-free by design: a `Decimal?` column comes back as a TRUTHY
+        #     Decimal object, so only a primitive 0 tells the rule from the bug,
+        #     and a database-backed case would pass either way.
+        #
+        #     IT IS ON BOTH `run:` LINES BELOW, DELIBERATELY. This step has TWO
+        #     `run:` keys — duplicate mapping keys, which is invalid YAML 1.2.
+        #     Generic parsers keep the LAST, but nobody here has confirmed that
+        #     for GitHub's parser, and the repo's own history disagrees with
+        #     itself: 73db8fc4 added test:declined-insurance to the FIRST line,
+        #     while 9512940b added test:terms-signing to the SECOND. One of those
+        #     has never run and nobody knows which. A money guard does not get to
+        #     depend on the answer, so this one is on both; if the lines are ever
+        #     unioned the duplicate invocation is harmless — delete the extra.
+        #
+        #     CI_GATED in src/lib/npm-test-chain.test.mjs is NOT a backstop here:
+        #     it regex-matches the whole file, so it cannot tell a live `run:`
+        #     line from a dead one. It only catches the string vanishing.
+        #
+        #     The duplicate key itself is NOT fixed here — a repair is in flight
+        #     on another branch and unioning the lines from here would collide
+        #     with it.
         env:
           DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_unit_only?schema=public'
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:terms-signing && npm run test:tenant-brand
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance && npm run test:tax-rate-writers
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:terms-signing && npm run test:tenant-brand && npm run test:tax-rate-writers
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:

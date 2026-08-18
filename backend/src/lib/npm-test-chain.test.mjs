@@ -103,6 +103,8 @@ const CI_GATED = {
     'the no-auth /api/sign payload: whose brand the renter sees while signing',
   'test:tenant-brand':
     'the shared cascade behind that brand, and the counter screen that shows the QR',
+  'test:tax-rate-writers':
+    'the two writers that rebuild a tax row: a snapshot rate of 0 is a rate, not a missing value',
 };
 
 function ciWorkflowRunLines() {
