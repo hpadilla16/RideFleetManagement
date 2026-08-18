@@ -1614,6 +1614,17 @@ export const reservationsService = {
             insurancePlanCode: true,
             insurancePlanName: true,
             insurancePlanRate: true,
+            // 2026-08-17 — MUST stay in this select. The checkout wizard seeds
+            // its "customer declined insurance" switch from
+            // reservation.rentalAgreement.declinedInsurance. Omitted, the field
+            // arrives `undefined`, `!!undefined` is false, and the switch shows
+            // OFF no matter what is stored — including for a customer who
+            // already declined at the kiosk (kiosk-checkout.service.js reads the
+            // column correctly, so the true value WAS persisted). Worse, an
+            // agent toggling the switch to inspect it POSTs `declined: false`
+            // and erases the addendum from a contract the customer expected.
+            // The list select carries it for the same reason (see above).
+            declinedInsurance: true,
             odometerOut: true,
             odometerIn: true,
             fuelOut: true,

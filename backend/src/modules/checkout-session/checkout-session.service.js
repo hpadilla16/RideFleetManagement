@@ -14,17 +14,53 @@ import {
   appendEvent,
   isTerminal,
 } from './state-machine.js';
+import { assertInsuranceSelectionEditable, messageFor, INSURANCE_LOCK } from './insurance-selection-gate.js';
+import { CheckoutSessionError } from './checkout-session.errors.js';
 
-export class CheckoutSessionError extends Error {
-  constructor(message, status = 400, code = null) {
-    super(message);
-    this.name = 'CheckoutSessionError';
-    this.status = status;
-    this.code = code;
-  }
-}
+// Re-exported so the 13 modules that import CheckoutSessionError from here keep
+// working. The class itself moved to a leaf module so helpers this service
+// depends on can throw it without forming an import cycle — see that file.
+export { CheckoutSessionError };
 
 const HANDOFF_TOKEN_TTL_MIN = 15;
+
+/**
+ * Absolute base for the customer-facing /sign/:token page.
+ *
+ * ORDER MATTERS, and it is deliberately NOT the CUSTOMER_PORTAL_BASE_URL-first
+ * chain used by the ~11 other link builders in this codebase. /sign/[token] is
+ * a route of the MAIN Next app — the same deployment that serves the agent's
+ * checkout wizard (frontend/src/app/sign/[token]/page.js sits beside
+ * frontend/src/app/reservations/...). CUSTOMER_PORTAL_BASE_URL names the
+ * customer portal, which today is just another route tree in that same app
+ * (frontend/src/app/customer) but is exactly the thing a tenant would peel off
+ * onto its own hostname. Reading it first would then hand customers a URL on a
+ * deployment that does not serve /sign at all.
+ *
+ * So: prefer the vars that name the app itself, and keep CUSTOMER_PORTAL_BASE_URL
+ * as the LAST fallback — it is the var most tenants actually set today, and
+ * while the two are the same origin it still yields a correct link.
+ */
+function signingBaseUrl() {
+  return (
+    process.env.APP_BASE_URL
+    || process.env.FRONTEND_BASE_URL
+    || process.env.CUSTOMER_PORTAL_BASE_URL
+    || 'http://localhost:3000'
+  ).replace(/\/+$/, '');
+}
+
+/**
+ * Absolute link for a minted token, or null for kinds with no verified public
+ * page. Only TERMS_SIGNING is mapped: MOBILE_INSPECTION has no frontend route
+ * that builds a URL from the token (it is exchanged through
+ * /api/public/checkout-handoff), and CUSTOMER_INSPECTION already gets its
+ * /inspect/:token link built by customer-inspection.service.js. Guessing a
+ * path for either would be worse than omitting the field.
+ */
+function publicUrlForToken(kind, token) {
+  return kind === 'TERMS_SIGNING' ? `${signingBaseUrl()}/sign/${token}` : null;
+}
 
 function tokenBytes() {
   return crypto.randomBytes(24).toString('base64url');
@@ -730,6 +766,12 @@ async function mintHandoffToken({ sessionId, kind, actorUserId }) {
       expiresAt: existing.expiresAt,
       kind: existing.kind,
       reused: true,
+      // Additive (2026-08-17). Every caller used to assemble this itself —
+      // the web wizard from window.location.origin, RideOps from a COMPILED
+      // dart-define, which forced a fresh app build per custom-domain tenant.
+      // The server knows its own public origin; hand it over. Existing fields
+      // are untouched, so old clients keep working.
+      signUrl: publicUrlForToken(existing.kind, existing.token),
     };
   }
 
@@ -767,6 +809,7 @@ async function mintHandoffToken({ sessionId, kind, actorUserId }) {
     token: row.token,
     expiresAt: row.expiresAt,
     kind: row.kind,
+    signUrl: publicUrlForToken(row.kind, row.token),
   };
 }
 
@@ -821,6 +864,13 @@ async function exchangeHandoffToken(token) {
  * AND record it in the session event log. Used by step 1 of the wizard.
  * Phase 3 (T&C signing) reads agreement.declinedInsurance to decide
  * whether to inject the addendum section into the customer's signing UI.
+ *
+ * STEP GUARD (2026-08-17). The rule about WHEN this flag may still be written
+ * lives in insurance-selection-gate.js, shared with the pre-check-in portal —
+ * the other surface that writes the column. It refuses with 409 and a code
+ * (TC_ALREADY_COMPLETED / TC_SIGNING_IN_PROGRESS) so the agent UI can tell
+ * "already signed" apart from "signing right now". See that module for the
+ * reasoning and the full writer inventory.
  */
 async function setDeclinedInsurance({ id, declined, actorUserId }) {
   if (!id) throw new CheckoutSessionError('sessionId required', 400);
@@ -829,11 +879,29 @@ async function setDeclinedInsurance({ id, declined, actorUserId }) {
   if (!session.agreementId) {
     throw new CheckoutSessionError('No agreement linked to this session', 409);
   }
+  await assertInsuranceSelectionEditable({
+    agreementId: session.agreementId,
+    reservationId: session.reservationId,
+    nextValue: !!declined,
+    audience: 'staff',
+  });
 
-  await prisma.rentalAgreement.update({
-    where: { id: session.agreementId },
+  // Optimistic concurrency on the read-then-write above. The gate's checks and
+  // this write are not in one transaction, so the customer can finish signing
+  // in between and the agent's edit would land on a sealed contract. Folding
+  // `tcSignedAt: null` into the WHERE makes the database settle it: if the
+  // signature landed first, count is 0 and nobody wrote. Cheaper than wrapping
+  // the whole thing in a transaction, and it closes the window rather than
+  // narrowing it.
+  const written = await prisma.rentalAgreement.updateMany({
+    where: { id: session.agreementId, tcSignedAt: null },
     data: { declinedInsurance: !!declined },
   });
+  if (written.count === 0) {
+    throw new CheckoutSessionError(
+      messageFor(INSURANCE_LOCK.SIGNED, 'staff'), 409, INSURANCE_LOCK.SIGNED,
+    );
+  }
 
   return prisma.checkoutSession.update({
     where: { id },

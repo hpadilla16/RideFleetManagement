@@ -33,6 +33,12 @@ const KNOWN_OUT = {
   'test:module-access-audit': 'DB-backed (.db.test.mjs)',
   'test:customer-inspection': 'DB-backed',
   'test:customer-docs-backfill': 'DB-backed (storage backfill script)',
+  // Boots its own throwaway Postgres, but only after `npm install --no-save
+  // embedded-postgres` — which `npm ci` does not provide. In the chain it
+  // would wedge `npm test` for everyone on a fresh checkout. Its DB-free half
+  // (the query shape, the step guard, the signUrl chain) IS chained, as
+  // test:declined-insurance.
+  'test:declined-insurance-embedded': 'embedded-postgres (npm install --no-save)',
   // Landed on main in the 194 commits between this branch and prod, already
   // orphaned when this guard arrived. Grandfathered UNAUDITED — wiring another
   // session's suite into CI sight-unseen is how the chain gets wedged. Each

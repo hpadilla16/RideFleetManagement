@@ -18,6 +18,7 @@ import { normalizeDob } from '../../lib/dob.js';
 import { getEffectiveTermsHtml } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 import { analyzeSignatureInk } from '../../lib/signature-ink.js';
+import { assertInsuranceSelectionEditable } from '../checkout-session/insurance-selection-gate.js';
 import {
   attachPublicRequestMeta,
   createPublicRateLimitGuard
@@ -1348,6 +1349,67 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
       return res.status(400).json({ error: `Complete the required pre-check-in items first: ${missing.join(', ')}` });
     }
 
+    // PREFLIGHT (2026-08-17) — the same gate the agent's wizard goes through,
+    // because RentalAgreement.declinedInsurance decides which sections the
+    // customer must initial and whether the contract carries the decline
+    // addendum. A lock on only the staff writer is not a control.
+    //
+    // It runs HERE, before the first mutation, and not down beside the update
+    // at the declinedCoverage branch: that branch is already past a
+    // deleteMany() of the reservation's INSURANCE charges and none of this
+    // handler is wrapped in a transaction, so a late refusal would reject the
+    // request only after destroying the charges it meant to protect.
+    //
+    // The gate no-ops unless the flag would actually flip, so a customer who
+    // declined earlier and is re-submitting pre-check-in for some other reason
+    // is not refused over a field they did not touch.
+    //
+    // It covers the two branches that WRITE, not `insuranceSelection` being
+    // present. The block below has THREE branches — plan, decline, and neither
+    // — and the third writes no insurance flag at all.
+    //
+    // That third branch is the one real customers hit. The pre-check-in page
+    // always sends insuranceSelection (customer/precheckin/page.js), its
+    // default is { selectedPlanCode: '', declinedCoverage: false, ... }, and on
+    // load it rehydrates ONLY selectedPlanCode from existing charges —
+    // declinedCoverage is never restored. So a customer who declined earlier
+    // and comes back to fix a phone number posts
+    // { selectedPlanCode: '', declinedCoverage: false }. Deriving a next value
+    // from that reads as a flip to `false` and refused their whole
+    // pre-check-in — name, licence, documents and services included — for a
+    // field they never touched and a write that was never going to happen.
+    //
+    // Gating on "will a write actually follow?" keeps the protection where it
+    // belongs: picking a plan is the mirror image of declining and is where the
+    // silent damage lives (declined + signed + later buys coverage yields a
+    // contract whose decline addendum contradicts its insurance charge), while
+    // plan-on-a-normal-agreement stays false-vs-false and no-ops.
+    let insuranceVerdict = { locked: false, signed: false };
+    const writesInsuranceFlag = !!(
+      insuranceSelection?.selectedPlanCode || insuranceSelection?.declinedCoverage
+    );
+    if (writesInsuranceFlag) {
+      // Mirrors the branch precedence below: selectedPlanCode wins over
+      // declinedCoverage.
+      const nextDeclined = insuranceSelection.selectedPlanCode
+        ? false
+        : !!insuranceSelection.declinedCoverage;
+      try {
+        insuranceVerdict = await assertInsuranceSelectionEditable({
+          reservationId: reservation.id,
+          nextValue: nextDeclined,
+          // Nobody is standing next to the customer to interpret a 409, so the
+          // sentence has to be self-contained and tell them what to do next.
+          audience: 'customer',
+        });
+      } catch (err) {
+        if (err?.status === 409 && err?.code) {
+          return res.status(409).json({ error: err.message, code: err.code });
+        }
+        throw err;
+      }
+    }
+
     // Blob -> Storage (Phase 1): when the flag is ON, route inline base64 doc
     // values to Storage and persist the returned PATH. Fail-safe -- on any
     // upload error the original base64 is kept (KYC docs are never lost). Flag
@@ -1552,15 +1614,43 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
         const declineSig = insuranceSelection.signatureDataUrl;
         const declAg = await prisma.rentalAgreement.findUnique({ where: { reservationId: reservation.id }, select: { id: true } });
         if (declAg) {
-          await prisma.rentalAgreement.update({
-            where: { id: declAg.id },
-            data: {
-              declinedInsurance: true,
-              ...(declineSig && String(declineSig).length > 200
-                ? { declinedInsuranceSignatureDataUrl: declineSig, declinedInsuranceSignedAt: new Date() }
-                : {}),
-            },
-          });
+          // The signature columns are NOT covered by the flag's no-flip rule.
+          // buildDeclinedInsuranceBlock prints declinedInsuranceSignatureDataUrl
+          // on the contract, so re-submitting pre-check-in after the agreement
+          // was signed would replace the addendum's signature and re-date it to
+          // after the signing — silently, since the flag itself did not move and
+          // the gate rightly let the request through. Once the contract is
+          // sealed the flag write is a no-op anyway; these two stay frozen.
+          const sealed = insuranceVerdict.signed;
+          const canWriteDeclineSignature =
+            !sealed && declineSig && String(declineSig).length > 200;
+          if (canWriteDeclineSignature) {
+            // Fenced like the agent's write. `insuranceVerdict` was computed
+            // back at the preflight, and everything between — the customer
+            // update, the deposit, every charge delete and create — runs before
+            // we get here, so the contract can be signed in the meantime. The
+            // WHERE makes the database decide: if the signature landed first,
+            // count is 0 and the columns the PDF prints are left alone.
+            const fenced = await prisma.rentalAgreement.updateMany({
+              where: { id: declAg.id, tcSignedAt: null },
+              data: {
+                declinedInsurance: true,
+                declinedInsuranceSignatureDataUrl: declineSig,
+                declinedInsuranceSignedAt: new Date(),
+              },
+            });
+            if (fenced.count === 0) {
+              await prisma.rentalAgreement.update({
+                where: { id: declAg.id },
+                data: { declinedInsurance: true },
+              });
+            }
+          } else {
+            await prisma.rentalAgreement.update({
+              where: { id: declAg.id },
+              data: { declinedInsurance: true },
+            });
+          }
         }
       }
     }

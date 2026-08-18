@@ -751,9 +751,12 @@ function Step1Confirm({ reservation, session, token, onNext }) {
     !!reservation.rentalAgreement?.declinedInsurance,
   );
   const [savingDecline, setSavingDecline] = useState(false);
+  const [declineError, setDeclineError] = useState(null);
 
   const persistDecline = async (next) => {
+    const previous = declinedInsurance;
     setDeclinedInsurance(next);
+    setDeclineError(null);
     if (!session?.id) return;
     setSavingDecline(true);
     try {
@@ -761,7 +764,19 @@ function Step1Confirm({ reservation, session, token, onNext }) {
         method: 'POST',
         body: JSON.stringify({ declined: next }),
       }, token);
-    } catch { /* non-fatal; re-toggle to retry */ } finally {
+    } catch (err) {
+      // The backend refuses this write once the customer has signed, or while
+      // they are signing (409 TC_ALREADY_COMPLETED / TC_SIGNING_IN_PROGRESS).
+      // Swallowing that left the switch showing the OPPOSITE of what is stored
+      // with no message — the agent believes they changed a legal flag they did
+      // not. Roll the optimistic set back and say why.
+      //
+      // The sentence comes from the server (messageFor() in
+      // insurance-selection-gate.js), so the wording lives next to the rule
+      // instead of being restated here and drifting from it.
+      setDeclinedInsurance(previous);
+      setDeclineError(err?.message || 'Could not save the insurance selection. Please try again.');
+    } finally {
       setSavingDecline(false);
     }
   };
@@ -858,6 +873,18 @@ function Step1Confirm({ reservation, session, token, onNext }) {
             <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
               Adds a Declined Insurance acknowledgement section to T&amp;C — customer initials it on their phone in step 2.
             </div>
+            {declineError && (
+              <div
+                role="alert"
+                style={{
+                  fontSize: 11, color: '#991B1B', background: '#FEF2F2',
+                  border: '0.5px solid #FCA5A5', borderRadius: 6,
+                  padding: '6px 8px', marginTop: 6,
+                }}
+              >
+                {declineError}
+              </div>
+            )}
           </div>
         </label>
       </div>
