@@ -141,6 +141,7 @@
     "test:scope": "node --test --test-force-exit src/lib/tenant-scope.test.mjs src/lib/program-category.test.mjs",
     "test:customer-docs": "node --test --test-force-exit src/modules/customers/customer-documents.test.mjs",
     "test:customer-docs-backfill": "node --test --test-force-exit scripts/backfill-customer-documents-to-storage.test.mjs",
+    "test:embedded": "node --test --test-force-exit --test-concurrency=1 src/modules/customer-portal/precheckin-charges.embedded.test.mjs src/modules/customers/customer-doc-endpoints.embedded.test.mjs src/modules/customers/customer-phone-normalize.embedded.test.mjs scripts/backfill-customer-documents-to-storage.test.mjs scripts/backfill-customer-documents-to-storage.embedded.test.mjs scripts/backfill-inspection-photos-to-storage.embedded.test.mjs scripts/clear-migrated-photos-json.embedded.test.mjs",
     "test:money-route-gate": "node --test src/lib/money-route-gate.test.mjs",
     "test:payment-actions": "node --test --test-force-exit src/lib/module-access-payment-actions.test.mjs",
     "test:module-access-audit": "node --test --test-force-exit src/lib/module-access-audit.db.test.mjs",

@@ -138,6 +138,53 @@ jobs:
         env:
           DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_unit_only?schema=public'
         run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location
+  embedded-postgres-suites:
+    # The repo's only tests that touch a real transaction, a real unique index
+    # and real concurrency. Seven suites, all of them excused from `npm test`
+    # for good reason — they need `npm install --no-save embedded-postgres`,
+    # which `npm ci` does not provide, and about four minutes — and therefore
+    # run by NOTHING until this job existed.
+    #
+    # The one that made this urgent is precheckin-charges.embedded: the only
+    # thing proving that POST /customer-info/:token, a money route an
+    # unsupervised customer drives from their phone, rewrites the reservation's
+    # charge sheet as ONE transaction and refuses a double-tapped Submit. Delete
+    # its transaction wrapper and four of its cases fail; delete the advisory
+    # lock and the double-tap case yields two insurance lines. That is only true
+    # of a suite something runs.
+    #
+    # These cannot join the money-path guard step in backend-check: that step is
+    # deliberately DB-free and finishes in seconds, and each suite here boots its
+    # own throwaway Postgres. Separate job so it runs in parallel with the other
+    # three and its cost is wall-clock, not added latency.
+    runs-on: ubuntu-latest
+    # Each suite initdb's a cluster and runs `prisma db push` + `prisma
+    # generate`; measured at ~26-58s each, ~5 min for the set. The cap is a
+    # backstop against a suite that hangs waiting on a cluster that never came
+    # up, not a target.
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Install embedded-postgres
+        # --no-save deliberately: it is a test-harness binary, not a dependency
+        # of the app, and adding it to package.json would put a ~100MB platform
+        # download in front of every `npm ci` in every other job and on every
+        # dev box. Same invocation the suites' own headers document.
+        run: npm install --no-save embedded-postgres
+      - name: Embedded-postgres suites
+        # --test-concurrency=1 (in the script) is load-bearing, not caution.
+        # node --test runs FILES in parallel by default, and every one of these
+        # calls `prisma generate` in its before(), which writes the shared
+        # node_modules/.prisma/client. Seven of those at once race on the same
+        # output directory. Sequential also keeps peak memory to one cluster.
+        run: npm run test:embedded
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:

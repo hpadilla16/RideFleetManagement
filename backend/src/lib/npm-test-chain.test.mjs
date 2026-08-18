@@ -30,14 +30,19 @@ const KNOWN_OUT = {
   'test:toll-void-credit': 'hangs: no --test-force-exit',
   'test:route-handlers': 'hangs: no --test-force-exit',
   // Need a reachable Postgres; the chain must stay runnable on a laptop.
-  'test:module-access-audit': 'DB-backed (.db.test.mjs)',
-  'test:customer-inspection': 'DB-backed',
-  'test:customer-docs-backfill': 'DB-backed (storage backfill script)',
-  // Boots embedded-postgres: the pre-check-in atomicity + double-tap cases can
-  // only be shown against a real transaction, and the chain must stay runnable
-  // on a laptop with no Postgres. Run it with `npm run test:precheckin-charges`
-  // after `npm install --no-save embedded-postgres`.
-  'test:precheckin-charges': 'DB-backed (embedded-postgres)',
+  // Out of `npm test` is NOT out of CI. Everything below that boots
+  // embedded-postgres is run by the `embedded-postgres-suites` job in
+  // beta-ci.yml via `npm run test:embedded`, and the last test in this file
+  // fails if that stops being true. The two that are not embedded-pg suites
+  // are called out individually.
+  'test:module-access-audit': 'DB-backed (.db.test.mjs); run by the tenant-isolation-suite job',
+  'test:customer-inspection': 'DB-backed via the shared prisma singleton; needs a live DATABASE_URL, run by nobody',
+  'test:customer-docs-backfill': 'embedded-postgres; also in test:embedded (CI)',
+  'test:precheckin-charges': 'embedded-postgres; also in test:embedded (CI)',
+  // The aggregate CI entry point. Installing embedded-postgres and booting
+  // seven throwaway clusters is ~4 minutes and a `npm install --no-save`, so it
+  // cannot sit in the chain a laptop runs; it gets its own CI job instead.
+  'test:embedded': 'boots embedded-postgres; run by the embedded-postgres-suites CI job',
   // Landed on main in the 194 commits between this branch and prod, already
   // orphaned when this guard arrived. Grandfathered UNAUDITED — wiring another
   // session's suite into CI sight-unseen is how the chain gets wedged. Each
@@ -110,8 +115,6 @@ const UNRUN_FILES_BASELINE = new Set([
   'src/modules/checkout-session/terms-signing.test.mjs',
   'src/modules/citations/citations-archive.test.mjs',
   'src/modules/customer-portal/customer-portal-rate-limit.test.mjs',
-  'src/modules/customers/customer-doc-endpoints.embedded.test.mjs',
-  'src/modules/customers/customer-phone-normalize.embedded.test.mjs',
   'src/modules/fees/fee-rate-audit.service.test.mjs',
   'src/modules/fees/fee-rates.routes.test.mjs',
   'src/modules/fees/fee-rates.service.test.mjs',
@@ -183,4 +186,66 @@ test('the baseline shrinks, never silently rots', () => {
   const all = new Set(testFiles('src'));
   const stale = [...UNRUN_FILES_BASELINE].filter((f) => !all.has(f) || named.has(f));
   assert.deepEqual(stale, [], `Baseline entries to delete (gone or now wired): ${stale.join(', ')}`);
+});
+
+/**
+ * The embedded-postgres suites: named by a script AND actually run by CI.
+ *
+ * These are the only tests in the repo that exercise real transactions,
+ * real constraints and real concurrency. Until now every one of them was
+ * excused from `npm test` (correctly — they need `npm install --no-save
+ * embedded-postgres` and about four minutes) and then run by nothing at all.
+ * The most expensive gap was precheckin-charges.embedded: the sole proof that a
+ * money route an unsupervised customer drives from their phone rewrites its
+ * charge sheet atomically and refuses a double tap. A guard that does not run
+ * is documentation — beta-ci.yml's own words, a few lines above the step that
+ * exists for the same reason.
+ *
+ * Two halves, because either one alone is a lie:
+ *   - every suite that boots embedded-postgres is named by `test:embedded`;
+ *   - beta-ci.yml actually invokes `npm run test:embedded`.
+ * Membership is derived from the IMPORT, not the filename. Six of the seven
+ * carry an `.embedded.test.mjs` infix and one — the customer-documents storage
+ * backfill — does not, so a filename glob would have quietly skipped it.
+ */
+function suitesBootingEmbeddedPg() {
+  // The IMPORT SPECIFIER, not a bare substring: this very file names
+  // embedded-pg-boot in the prose above, and a substring match duly reported
+  // the guard itself as an unrun suite the first time it ran.
+  const IMPORTS_BOOT = /from\s+['"][^'"]*embedded-pg-boot\.mjs['"]/;
+  return [...testFiles('src'), ...testFiles('scripts')].filter((f) =>
+    IMPORTS_BOOT.test(readFileSync(f, 'utf8')),
+  );
+}
+
+test('every embedded-postgres suite is named by `test:embedded`', () => {
+  const named = new Set(
+    [...String(pkg.scripts['test:embedded'] ?? '').matchAll(/[\w./-]+\.test\.mjs/g)].map((m) => m[0]),
+  );
+  const missing = suitesBootingEmbeddedPg().filter((f) => !named.has(f));
+  assert.deepEqual(
+    missing,
+    [],
+    `Suite(s) that boot embedded-postgres but no CI job runs — add to "test:embedded": ${missing.join(', ')}`,
+  );
+});
+
+test('`test:embedded` does not name a suite that has stopped booting embedded pg', () => {
+  // Same ratchet logic as the baseline: the script must describe reality, or
+  // the guard above passes by naming files that no longer need the job.
+  const listed = [...String(pkg.scripts['test:embedded'] ?? '').matchAll(/[\w./-]+\.test\.mjs/g)].map((m) => m[0]);
+  const actual = new Set(suitesBootingEmbeddedPg());
+  const stale = listed.filter((f) => !actual.has(f));
+  assert.deepEqual(stale, [], `"test:embedded" names suite(s) that no longer boot embedded pg: ${stale.join(', ')}`);
+});
+
+test('beta-ci.yml actually runs `npm run test:embedded`', () => {
+  // The point of the whole exercise. Naming the suites in a script they can be
+  // run BY is not coverage; a job that runs them is. If this file moves, fix
+  // the path — do not delete the assertion.
+  const ci = readFileSync(new URL('../../../.github/workflows/beta-ci.yml', import.meta.url), 'utf8');
+  assert.ok(
+    ci.includes('npm run test:embedded'),
+    'beta-ci.yml no longer runs `npm run test:embedded` — the embedded suites are unguarded again',
+  );
 });
