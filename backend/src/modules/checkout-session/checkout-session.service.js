@@ -125,6 +125,28 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
   // Block at session start with a clear 422 so step 1 can't be passed until a
   // vehicle is assigned. (Finalize has a matching guard as defense-in-depth.)
   if (!resv) throw new CheckoutSessionError('Reservation not found', 404);
+
+  // 2026-08-17 — TENANT GATE. This is the front door the `:id` guard in
+  // checkout-session.routes.js cannot cover, and without it that guard is
+  // decorative: the lookup above is deliberately unfiltered, and the create
+  // below used to stamp the CALLER's tenantId onto the new session. So a user
+  // in tenant A could POST another tenant's reservationId, mint a session
+  // stamped tenantId=A over tenant B's reservation, and from then on every
+  // `:id` route would see owner === caller and wave them through — finalize
+  // cascade, card sales, handoff tokens, the lot.
+  //
+  // Checked BEFORE the vehicle-conflict gate, ensureCheckoutGates and
+  // refreshPricingSafe, none of which may run (or write) against a foreign
+  // reservation. Soft on a null reservation tenantId for the same reason the
+  // `:id` guard is — legacy rows must not strand a live checkout.
+  if (tenantId && resv.tenantId && resv.tenantId !== tenantId) {
+    logger.warn('[checkout-session] cross-tenant session start refused', {
+      reservationId, reservationTenantId: resv.tenantId, callerTenantId: tenantId, actorUserId,
+    });
+    // 404, not 403: a 403 confirms the reservation id exists in another tenant.
+    throw new CheckoutSessionError('Reservation not found', 404);
+  }
+
   if (!resv.vehicleId) {
     throw new CheckoutSessionError(
       'Assign a vehicle to this reservation before starting checkout.',
@@ -152,6 +174,18 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
 
   const existing = await prisma.checkoutSession.findUnique({ where: { reservationId } });
   if (existing) {
+    // The gate above compares the RESERVATION's tenant. When a reservation
+    // carries tenantId=null (reachable: reservations.service.js writes null when
+    // a super admin creates one with no ?tenantId), that comparison passes for
+    // anyone — and this branch would then hand back the victim's live session
+    // verbatim: id, currentStep, agreementId and the whole events log. Same
+    // soft comparison, one level down (QA MINOR-1).
+    if (tenantId && existing.tenantId && existing.tenantId !== tenantId) {
+      logger.warn('[checkout-session] cross-tenant session adopt refused', {
+        reservationId, sessionTenantId: existing.tenantId, callerTenantId: tenantId, actorUserId,
+      });
+      throw new CheckoutSessionError('Reservation not found', 404);
+    }
     if (isTerminal(existing.currentStep)) {
       throw new CheckoutSessionError(
         `Reservation already has a ${existing.currentStep.toLowerCase()} checkout session`,
@@ -194,11 +228,27 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
   const agreementId = await ensureAgreementExists({ reservationId, tenantId, actorUserId });
   await refreshPricingSafe(reservationId, resv.tenantId || tenantId);
 
+  // QA MINOR-2: a reservation with no tenant of its own still gets the caller's.
+  // That is the ONE remaining way a session can be attributed to someone other
+  // than the row's owner, so make it measurable rather than silent — the guard's
+  // claim that the legacy null-tenant set "can only shrink" holds for
+  // reservations that HAVE a tenant, and this is the exception to that.
+  if (!resv.tenantId) {
+    logger.warn('[checkout-session] session stamped from caller: reservation has no tenant', {
+      reservationId, callerTenantId: tenantId || null, actorUserId,
+    });
+  }
+
   const session = await prisma.checkoutSession.create({
     data: {
       reservationId,
       agreementId: agreementId || null,
-      tenantId: tenantId || null,
+      // The RESERVATION is the source of truth for ownership, not the caller
+      // (see the tenant gate above). Preferring the caller's tenantId here is
+      // what let a session be stamped into the wrong tenant, and it is also the
+      // ongoing source of the legacy tenantId=null rows the `:id` guard has to
+      // tolerate — deriving it from the reservation makes that set converge.
+      tenantId: resv.tenantId || tenantId || null,
       currentStep: 'CONFIRMING',
       events: appendEvent('[]', {
         kind: 'SESSION_STARTED',

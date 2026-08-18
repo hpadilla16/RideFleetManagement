@@ -5,6 +5,7 @@ import { spinChargeService } from './spin-charge.service.js';
 import { spinClient } from '../payment-gateway/spin-client.js';
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
+import { isSuperAdmin } from '../../middleware/auth.js';
 
 export const checkoutSessionRouter = Router();
 
@@ -19,6 +20,36 @@ function handleError(res, err) {
   return res.status(500).json({ error: 'Internal error' });
 }
 
+// ---------------------------------------------------------------------
+// Fail-closed floor for the whole router (2026-08-17).
+//
+// `getTenantScope` below returns null for a non-super-admin with no
+// tenantId, and null does NOT mean "deny" downstream — it means "no
+// filter": getById does `tenantId ? { id, tenantId } : { id }`, and
+// getByReservationId skips its ownership check entirely. So a tenantless
+// account read across tenants on the two routes the `:id` guard cannot
+// cover (`POST /` and `GET /by-reservation/:reservationId`).
+//
+// lib/tenant-scope.js exists precisely because this state is considered
+// reachable — its DENY_ALL_SCOPE comment says it would "rather fail closed
+// than return all tenants' data". This is that posture, one layer up.
+//
+// Deliberately NOT `scopeFor(req)`: that returns the '__no_tenant__'
+// sentinel, and createForReservation would write that string straight into
+// CheckoutSession.tenantId.
+// ---------------------------------------------------------------------
+checkoutSessionRouter.use((req, res, next) => {
+  if (!isSuperAdmin(req.user) && !req.user?.tenantId) {
+    logger.warn('[checkout-session] refused a caller with no tenant', {
+      actorUserId: req.user?.id || req.user?.sub || null,
+      method: req.method,
+      path: req.originalUrl,
+    });
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  return next();
+});
+
 function getTenantScope(req) {
   // SUPER_ADMIN can pass ?tenantId=...; everyone else is scoped to
   // req.user.tenantId. Same pattern as other routers.
@@ -27,13 +58,168 @@ function getTenantScope(req) {
   return req.user?.tenantId || null;
 }
 
+/**
+ * Scope for STARTING a session (2026-08-17, QA MAJOR-1).
+ *
+ * `getTenantScope` falls back to `req.user.tenantId` for a SUPER_ADMIN, so a
+ * super admin who HAS a tenant of their own (the shape backend/scripts/seed-dev.mjs
+ * creates) resolves to that tenant rather than to "unrestricted". Feeding that
+ * into createForReservation's tenant gate would refuse them on every other
+ * tenant's reservation with a 404 saying the reservation does not exist — while
+ * the `:id` guard above waves the same account through every OTHER route
+ * cross-tenant. The router and the service would disagree about what
+ * SUPER_ADMIN means.
+ *
+ * Here null means "no tenant constraint", which is only safe because the new
+ * session is stamped from `resv.tenantId` (see createForReservation) rather
+ * than from the caller — so an unconstrained scope can no longer mis-stamp a
+ * session into the wrong tenant, which was the original bug.
+ */
+function getCreateTenantScope(req) {
+  if (isSuperAdmin(req.user)) return req.query?.tenantId ? String(req.query.tenantId) : null;
+  return req.user?.tenantId || null;
+}
+
+// ---------------------------------------------------------------------
+// TENANT GUARD for every `:id`-addressed route on this router.
+//
+// 2026-08-17 — QA raised this on fix/checkout-finalize-truth. Only three
+// handlers here (POST /, GET /:id, GET /by-reservation/:reservationId)
+// resolved a tenant scope; the other fourteen took `req.params.id` and
+// acted on it with no tenant check at all. The router is mounted behind
+// `requireModuleAccess('reservations')` (main.js), so ANY authenticated
+// user with the reservations module could drive another tenant's checkout
+// session by id: finalize it (→ CHECKED_OUT + FINALIZED agreement +
+// vehicle ON_RENT + contract emailed to their customer), run a card sale
+// or deposit pre-auth on it, mint a handoff token granting access to their
+// customer's data, or sign their rental agreement.
+//
+// Enforced HERE rather than threaded through each service call on purpose:
+//
+//   • One place, and it covers handlers added later by default. Fourteen
+//     per-handler scope lookups is fourteen chances to forget the next one
+//     — which is precisely how this happened.
+//   • `transition()` / `stampSideEffect()` / `saveCustomerSignature()` are
+//     also called SERVICE-TO-SERVICE by kiosk-checkout.service.js and
+//     customer-inspection.service.js, which legitimately have no
+//     `req.user`. Guarding the router leaves those paths untouched by
+//     construction instead of relying on an opt-out flag that a future
+//     caller could pass by accident.
+//
+// Legacy sessions: Phase 1 ran with `CheckoutSession.tenantId = null` (see
+// the back-fill in `getByReservationId`). Hard-scoping on the column alone
+// would 404 those mid-checkout, so a null-tenant session is attributed via
+// its reservation and back-filled — same soft-check semantics the read path
+// already uses, never looser.
+//
+// Denials are 404, not 403: a 403 confirms the id exists in another tenant.
+// ---------------------------------------------------------------------
+checkoutSessionRouter.param('id', async (req, res, next, id) => {
+  try {
+    if (!id) return res.status(404).json({ error: 'Not found' });
+
+    const session = await prisma.checkoutSession.findUnique({
+      where: { id: String(id) },
+      select: { id: true, tenantId: true, reservationId: true },
+    });
+    if (!session) return res.status(404).json({ error: 'Not found' });
+
+    // SUPER_ADMIN is cross-tenant, same as `getTenantScope` above.
+    if (isSuperAdmin(req.user)) {
+      req.checkoutSession = session;
+      return next();
+    }
+
+    const callerTenantId = req.user?.tenantId || null;
+    // Fail closed, mirroring lib/tenant-scope.js's DENY_ALL_SCOPE: a
+    // non-super-admin with no tenant of their own addresses nothing.
+    if (!callerTenantId) return denyCrossTenant(req, res, session, null);
+
+    let ownerTenantId = session.tenantId;
+
+    if (!ownerTenantId && session.reservationId) {
+      // Legacy null-tenant session — the reservation is the source of truth.
+      const resv = await prisma.reservation
+        .findUnique({ where: { id: session.reservationId }, select: { tenantId: true } })
+        .catch(() => null);
+      ownerTenantId = resv?.tenantId || null;
+
+      if (ownerTenantId) {
+        // Self-heal so this session only pays the extra lookup once, and so
+        // the strict branch above covers it from here on.
+        //
+        // DELIBERATE DIVERGENCE from getByReservationId's back-fill, which
+        // gates on `!isTerminal(currentStep)`: this one heals terminal
+        // sessions too. Healing a CLOSED session changes nothing about it and
+        // makes every future read strict, which is what we want on a write
+        // path. The .catch below is equally deliberate — the ownership
+        // comparison has already happened against the in-memory
+        // ownerTenantId, so a failed back-fill is a missed optimisation, not
+        // a security hole, and must NOT become a hard failure that 500s a
+        // live checkout.
+        await prisma.checkoutSession
+          .update({ where: { id: session.id }, data: { tenantId: ownerTenantId } })
+          .then(() => {
+            logger.info('[checkout-session] self-healed missing tenantId in guard', {
+              sessionId: session.id, tenantId: ownerTenantId,
+            });
+          })
+          .catch((err) => {
+            logger.warn('[checkout-session] tenantId back-fill failed in guard', {
+              sessionId: session.id, error: err?.message || String(err),
+            });
+          });
+      }
+    }
+
+    // An unattributable session (no tenant on the session AND none on its
+    // reservation) stays reachable — the read path is equally lenient there,
+    // and refusing would strand a live checkout on a payment path. This is the
+    // one residual gap in the guard, so it is LOUD rather than silent: the
+    // stamp fix in createForReservation stops new ones being minted, so this
+    // set can only shrink. When this line stops appearing in the logs, the
+    // branch can become a hard deny (and CheckoutSession.tenantId a NOT NULL
+    // column). Log first, tighten once the log is silent.
+    if (!ownerTenantId) {
+      logger.warn('[checkout-session] unattributable session allowed through guard', {
+        sessionId: session.id,
+        reservationId: session.reservationId,
+        callerTenantId,
+        path: req.originalUrl,
+      });
+    }
+
+    if (ownerTenantId && ownerTenantId !== callerTenantId) {
+      return denyCrossTenant(req, res, session, ownerTenantId);
+    }
+
+    req.checkoutSession = { ...session, tenantId: ownerTenantId };
+    return next();
+  } catch (err) {
+    return handleError(res, err);
+  }
+});
+
+/** 404 + a loud log line: a cross-tenant attempt is a security event. */
+function denyCrossTenant(req, res, session, ownerTenantId) {
+  logger.warn('[checkout-session] cross-tenant access refused', {
+    sessionId: session.id,
+    ownerTenantId,
+    callerTenantId: req.user?.tenantId || null,
+    actorUserId: req.user?.id || req.user?.sub || null,
+    method: req.method,
+    path: req.originalUrl,
+  });
+  return res.status(404).json({ error: 'Not found' });
+}
+
 // ---------------------------------------------------------------------
 // POST /api/checkout-sessions — start a session for a reservation
 // ---------------------------------------------------------------------
 checkoutSessionRouter.post('/', async (req, res) => {
   try {
     const { reservationId } = req.body || {};
-    const tenantId = getTenantScope(req);
+    const tenantId = getCreateTenantScope(req);
     const session = await checkoutSessionService.createForReservation({
       reservationId,
       tenantId,
@@ -338,11 +524,10 @@ checkoutSessionRouter.post('/:id/record-manual-deposit', async (req, res) => {
 // ---------------------------------------------------------------------
 checkoutSessionRouter.get('/:id/terminal-status', async (req, res) => {
   try {
-    const session = await prisma.checkoutSession.findUnique({
-      where: { id: req.params.id },
-      include: { reservation: { select: { tenantId: true } } },
-    });
-    if (!session) return res.status(404).json({ error: 'Session not found' });
+    // Existence + tenant ownership are both settled by the `:id` guard above.
+    // (This used to `select` reservation.tenantId and never compare it, which
+    // read like a tenant check but wasn't one.)
+    if (!req.checkoutSession) return res.status(404).json({ error: 'Session not found' });
     const raw = await spinClient.terminalStatus({}).catch((err) => ({ error: err.message }));
     res.json({
       online: !raw?.error && (raw?.StatusCode === '0' || raw?.StatusCode === '0000'),

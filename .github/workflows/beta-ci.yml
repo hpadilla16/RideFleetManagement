@@ -115,6 +115,15 @@ jobs:
         #     datetime-local read on a UTC container shifted every typed time
         #     back by the tenant offset, and it is invisible on a dev box in
         #     Puerto Rico — only CI and prod can catch it.
+        #   - test:checkout-tenant-scope: who may drive a checkout session.
+        #     Fourteen of the checkout router's handlers took `:id` with no
+        #     tenant check, so any authenticated user with the reservations
+        #     module could finalize another tenant's checkout (contract emailed
+        #     to THEIR customer), charge a card against it, or mint a handoff
+        #     token to their customer's data. The `tenant-isolation-suite` job
+        #     has no checkout coverage at all, and this suite sits behind
+        #     test:checkout-session in the npm chain, which needs Postgres — so
+        #     the chain alone would never reach it (2026-08-17).
         #   - test:cash-flow: the forecast model. Committed money and projected
         #     money must never blend, and money already collected must never be
         #     forecast again — both are pure arithmetic, and both are the kind
@@ -137,7 +146,7 @@ jobs:
         # above already uses. Same reason: satisfy a constructor, never connect.
         env:
           DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_unit_only?schema=public'
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:checkout-tenant-scope && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:
