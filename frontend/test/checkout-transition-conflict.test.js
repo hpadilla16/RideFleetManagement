@@ -28,6 +28,7 @@ import { describe, it, expect } from 'vitest';
 import {
   shouldSwallowTransitionConflict, STEP_ORDER,
   resolveFinalizeFailureCopy, FINALIZE_FAILURE_REASONS, finalizeReasonKeys,
+  isFinalizeComplete, closedCardState,
 } from '@/lib/checkout-session';
 import en from '../src/locales/en.json';
 import es from '../src/locales/es.json';
@@ -264,5 +265,83 @@ describe('resolveFinalizeFailureCopy', () => {
     expect(copy.titleKey).toBe('checkoutClosed.genericTitle');
     expect(copy.bodyText).toBeNull();
     expect(copy.detail).toBeNull();
+  });
+});
+
+/**
+ * The verdict, and what the card is allowed to offer once it has one.
+ *
+ * These two rules are the reason the CLOSED screen can stop lying, so they get
+ * tests rather than living inline in the page component — the same call
+ * shouldSwallowTransitionConflict's own comment makes.
+ */
+const resv = (status, agreement, vehicle) => ({
+  status,
+  rentalAgreement: agreement === undefined ? null : { status: agreement },
+  vehicle: { status: vehicle || 'AVAILABLE' },
+});
+
+describe('isFinalizeComplete', () => {
+  it('needs the contract too, not just the reservation', () => {
+    // The write that finalizes the contract is best-effort and does not abort
+    // the cascade, so this tuple is live: reservation CHECKED_OUT, contract
+    // still DRAFT, email withheld, and transition() answering 200 with no
+    // error. Reading only the reservation calls it a success and prints
+    // "contract finalized" over a draft — this ticket's own defect.
+    expect(isFinalizeComplete(resv('CHECKED_OUT', 'DRAFT', 'ON_RENT'))).toBe(false);
+    expect(isFinalizeComplete(resv('CHECKED_OUT', 'FINALIZED', 'ON_RENT'))).toBe(true);
+  });
+
+  it('is false while the reservation has not moved', () => {
+    expect(isFinalizeComplete(resv('CONFIRMED', 'DRAFT'))).toBe(false);
+    expect(isFinalizeComplete(resv('CANCELLED', 'DRAFT'))).toBe(false);
+  });
+
+  it('ignores vehicle status, which can legitimately lag a GOOD finalize', () => {
+    // syncVehicleStatusForReservation SKIPS rather than fails for a locked
+    // status like IN_MAINTENANCE, so a third clause here would invent
+    // failures on healthy checkouts.
+    expect(isFinalizeComplete(resv('CHECKED_OUT', 'FINALIZED', 'IN_MAINTENANCE'))).toBe(true);
+  });
+
+  it('does not throw on a half-loaded reservation', () => {
+    expect(isFinalizeComplete(null)).toBe(false);
+    expect(isFinalizeComplete({})).toBe(false);
+  });
+});
+
+describe('closedCardState', () => {
+  it('offers a retry only where the backend will actually re-run the finalize', () => {
+    // Mirrors selfHealOwns in checkout-session.service.js. Outside the
+    // allow-list the backend declines with a server-side log and a plain 200,
+    // so the button would change nothing while the copy promised an answer.
+    for (const status of ['NEW', 'CONFIRMED']) {
+      expect(closedCardState({ reservation: resv(status, 'DRAFT') }).showRetry, status).toBe(true);
+    }
+    for (const status of ['CANCELLED', 'NO_SHOW', 'PENDING_FRANCHISE_IMPORT', 'CHECKED_OUT']) {
+      expect(closedCardState({ reservation: resv(status, 'DRAFT') }).showRetry, status).toBe(false);
+    }
+  });
+
+  it('withholds the retry for a reason no retry can clear', () => {
+    const state = closedCardState({ reservation: resv('CONFIRMED', 'DRAFT'), terminalReason: true });
+    expect(state.retryCanWork).toBe(true);
+    expect(state.showRetry).toBe(false);
+  });
+
+  it('flags the voided statuses so the card can say the close is over', () => {
+    expect(closedCardState({ reservation: resv('CANCELLED', 'DRAFT') }).voided).toBe(true);
+    expect(closedCardState({ reservation: resv('NO_SHOW', 'DRAFT') }).voided).toBe(true);
+    expect(closedCardState({ reservation: resv('CONFIRMED', 'DRAFT') }).voided).toBe(false);
+  });
+
+  it('calls the half-finalize only when a contract really exists to be stuck', () => {
+    // The cascade wraps its agreement work in `if (updated.agreementId)`, so a
+    // session with no agreement can reach CHECKED_OUT with none — and the
+    // half-finalize copy describes a draft that was never created.
+    expect(closedCardState({ reservation: resv('CHECKED_OUT', 'DRAFT') }).halfFinalized).toBe(true);
+    expect(closedCardState({ reservation: resv('CHECKED_OUT', undefined) }).halfFinalized).toBe(false);
+    expect(closedCardState({ reservation: resv('CHECKED_OUT', 'FINALIZED') }).halfFinalized).toBe(false);
+    expect(closedCardState({ reservation: resv('CONFIRMED', 'DRAFT') }).halfFinalized).toBe(false);
   });
 });

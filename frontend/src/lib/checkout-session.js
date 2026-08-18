@@ -249,3 +249,58 @@ export function resolveFinalizeFailureCopy({ reason, message } = {}) {
     detail: null,
   };
 }
+
+/**
+ * Did the finalize actually finish?
+ *
+ * Extracted here, like shouldSwallowTransitionConflict above, because it is a
+ * rule that decides what an agent is told — and it needs a test.
+ *
+ * BOTH clauses, and the second one is not decoration. The write that turns the
+ * DRAFT into the legal document is deliberately best-effort in the service: it
+ * catches, clears its flag, and lets the cascade finish so the vehicle sync is
+ * not stranded. So a reservation can reach CHECKED_OUT with the contract still
+ * DRAFT and the email withheld, while transition() answers 200 with no error.
+ * Reading only reservation.status calls that a success.
+ *
+ * Vehicle status is deliberately NOT a third clause. syncVehicleStatusForReservation
+ * SKIPS (rather than fails) a car in a locked status like IN_MAINTENANCE, so a
+ * perfectly good finalize can legitimately end not-ON_RENT. A third clause
+ * would manufacture false failures on healthy checkouts.
+ */
+export function isFinalizeComplete(reservation) {
+  return String(reservation?.status) === 'CHECKED_OUT'
+    && String(reservation?.rentalAgreement?.status) === 'FINALIZED';
+}
+
+/**
+ * What the CLOSED failure card may offer, given server truth + the reason.
+ *
+ * `retryCanWork` mirrors the backend's self-heal allow-list exactly
+ * (checkout-session.service.js — `selfHealOwns`). Outside it the backend
+ * declines the re-run with a server-side log and a plain 200, so a retry
+ * button there would be a control that silently changes nothing under copy
+ * promising to explain the blocker.
+ *
+ * `halfFinalized` requires an agreement to EXIST. The cascade wraps its
+ * agreement work in `if (updated.agreementId)`, so a session without one can
+ * reach CHECKED_OUT with no contract at all — and the half-finalize copy
+ * ("the contract never left draft") would be describing a document that was
+ * never created.
+ */
+export function closedCardState({ reservation, terminalReason = false } = {}) {
+  const status = String(reservation?.status || '');
+  const agreementStatus = reservation?.rentalAgreement?.status || null;
+  const retryCanWork = ['NEW', 'CONFIRMED'].includes(status);
+  const voided = ['CANCELLED', 'NO_SHOW'].includes(status);
+  const halfFinalized = status === 'CHECKED_OUT'
+    && !!agreementStatus && agreementStatus !== 'FINALIZED';
+  return {
+    status,
+    agreementStatus,
+    retryCanWork,
+    voided,
+    halfFinalized,
+    showRetry: retryCanWork && !terminalReason,
+  };
+}

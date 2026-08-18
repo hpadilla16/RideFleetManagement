@@ -32,6 +32,7 @@ import {
   mintTermsToken, mintHandoffToken, abandon,
   stepNumber, isTerminal, STEP_INFO,
   shouldSwallowTransitionConflict, resolveFinalizeFailureCopy,
+  isFinalizeComplete, closedCardState,
 } from '../../../../lib/checkout-session';
 import QRCode from 'qrcode';
 
@@ -280,9 +281,7 @@ function CheckoutWizardV2({ token, me, logout }) {
         // skips (rather than fails) a car in a locked status like
         // IN_MAINTENANCE, so a perfectly good finalize can legitimately end
         // not-ON_RENT. A third clause here would manufacture false failures.
-        const finished = String(r?.status) === 'CHECKED_OUT'
-          && String(r?.rentalAgreement?.status) === 'FINALIZED';
-        setClosedCheck(finished ? 'ok' : 'failed');
+        setClosedCheck(isFinalizeComplete(r) ? 'ok' : 'failed');
       } catch {
         // Can't reach the server, so we don't know — and 'unknown' is a state
         // with a way out, unlike 'pending', which would park the agent on a
@@ -2121,17 +2120,8 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
   // 200. Offering a retry there would be a button that silently changes
   // nothing, under copy promising it would explain the blocker — exactly the
   // kind of confident-but-false affordance this ticket removes.
-  const retryCanWork = ['NEW', 'CONFIRMED'].includes(resvStatus);
-  const voided = ['CANCELLED', 'NO_SHOW'].includes(resvStatus);
-  // The half-finalize: the car went out and the contract never left draft.
-  // Reachable because the agreement write is best-effort and does not abort
-  // the cascade. A retry cannot fix it either — the cascade short-circuits on
-  // an already-CHECKED_OUT reservation — so this state needs to say so rather
-  // than leave the agent on a generic shrug with no action.
-  const halfFinalized = resvStatus === 'CHECKED_OUT'
-    && !!agreementStatus && agreementStatus !== 'FINALIZED';
-  // An age bound is not something a retry clears either.
-  const showRetry = retryCanWork && !copy.terminal;
+  const { retryCanWork, voided, halfFinalized, showRetry } =
+    closedCardState({ reservation, terminalReason: copy.terminal });
 
   let title;
   let body;
