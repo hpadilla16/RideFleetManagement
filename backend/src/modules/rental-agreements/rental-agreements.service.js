@@ -23,6 +23,7 @@ import {
 import { downloadObject as inspectionDownloadObject } from '../../lib/storage/supabase-storage.js';
 import { normalizeInspectionPhotos, canonicalPhotoKey, fuelLevelToFraction } from './inspection-photos-normalize.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { ConflictError } from '../../lib/errors.js';
 import { getEffectiveTermsHtml } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 import { refundCharge as payarcRefundCharge } from '../public-booking/payarc-hosted-fields.js';
@@ -2280,6 +2281,71 @@ async function inspectionReportFromAgreement(agreement) {
   };
 }
 
+// The only agreement statuses a check-out may be finalized FROM. Anything else
+// (FINALIZED, CLOSED, CANCELLED) is either already done or past the point of
+// no return, and must never re-run the finalize writes. Exported because both
+// the compare-and-set claim below and finalize()'s pre-flight guard key off it.
+export const FINALIZABLE_AGREEMENT_STATUSES = ['DRAFT', 'READY_FOR_CHECKOUT'];
+
+// Thrown by applyFinalizeWritesTx when its compare-and-set claim loses — i.e.
+// a concurrent caller finalized this agreement first. finalize() catches it by
+// `code` and answers with the winner's agreement; extending ConflictError means
+// appErrorHandler maps it to a clean 409 if it ever escapes, instead of leaning
+// on the catch-all's 4xx passthrough.
+export class AgreementNotFinalizableError extends ConflictError {
+  constructor(message) {
+    super(message);
+    this.code = 'AGREEMENT_NOT_FINALIZABLE';
+  }
+}
+
+// Shared by finalize()'s two double-submit guards (the cheap pre-flight read and
+// the CAS-loser path). Returns true when the request is already satisfied — the
+// agreement is FINALIZED, so the caller should return the existing contract
+// untouched instead of rewriting it. Throws for statuses that can never be
+// finalized. Returns false when the agreement is genuinely finalizable.
+// Exported as a test surface, same as applyFinalizeWritesTx below.
+export function isFinalizeAlreadyDone(status) {
+  if (FINALIZABLE_AGREEMENT_STATUSES.includes(status)) return false;
+  if (status === 'FINALIZED') return true;
+  throw new ConflictError(`This agreement is ${String(status || 'unknown').toLowerCase()} and can no longer be checked out.`);
+}
+
+// The payload fields a finalize writes onto the agreement. A replay that sends
+// the SAME values as the finalized contract is a retry, and gets the contract
+// back. One that sends DIFFERENT values is a different request wearing a
+// retry's clothes: the old code silently rewrote the finalized contract with
+// them, and answering 200 without applying them would be just as dishonest —
+// so it gets a 409 naming the fields, and staff use the audited post-checkout
+// correction path (updateRentalDetails / correctInspectionValues) instead.
+// Both numeric comparisons are done at the COLUMN's precision, not the
+// payload's: fuelOut and paidAmount are Decimal(_, 2), so the 7/8 tank a client
+// sends as 0.875 is stored as 0.88. Comparing raw floats would flag the very
+// double-click this guard exists to serve as a divergent payload.
+const FINALIZE_REPLAY_FIELDS = [
+  { key: 'odometerOut', same: (sent, stored) => Number(sent) === Number(stored) },
+  { key: 'fuelOut', same: (sent, stored) => Math.round(Number(sent) * 100) === Math.round(Number(stored) * 100) },
+  { key: 'paidAmount', same: (sent, stored) => Math.round(Number(sent) * 100) === Math.round(Number(stored) * 100) },
+  { key: 'paymentMethod', same: (sent, stored) => String(sent).trim() === String(stored ?? '').trim() },
+  { key: 'paymentReference', same: (sent, stored) => String(sent).trim() === String(stored ?? '').trim() }
+];
+
+// Returns the names of the fields a replayed finalize would have CHANGED on the
+// already-finalized contract. Empty = a true retry (same body, or a body that
+// says nothing new). "Not sent" is never a divergence: finalize() falls back to
+// the stored value for every one of these, so an omitted field agrees with
+// whatever is on file. Exported as a test surface, like isFinalizeAlreadyDone.
+export function finalizeReplayDivergence(agreement, payload = {}) {
+  const diverged = [];
+  for (const { key, same } of FINALIZE_REPLAY_FIELDS) {
+    const sent = payload?.[key];
+    if (sent === undefined || sent === null || String(sent).trim() === '') continue;
+    const stored = agreement?.[key];
+    if (stored === undefined || stored === null || !same(sent, stored)) diverged.push(key);
+  }
+  return diverged;
+}
+
 // Test-surface helper: the body of the finalize() $transaction callback,
 // extracted so we can verify with a fake `tx` that all writes go through the
 // transaction client (never through the global prisma) and that the steps
@@ -2290,18 +2356,29 @@ async function inspectionReportFromAgreement(agreement) {
 // yourself wanting to read something here, do it BEFORE calling this helper
 // and pass the value through `ctx`.
 export async function applyFinalizeWritesTx(tx, ctx) {
-  if (ctx.creditApplied > 0 && ctx.customerIdForCredit) {
-    await tx.customer.update({
-      where: { id: ctx.customerIdForCredit },
-      data: {
-        creditBalance: ctx.nextCustomerCredit,
-        notes: ctx.creditNoteForCustomer
-      }
-    });
-  }
-
-  const updated = await tx.rentalAgreement.update({
-    where: { id: ctx.id },
+  // Compare-and-set CLAIM (2026-08-18). This used to be a bare
+  // `update({ where: { id } })`, which ran just as happily on an agreement that
+  // was ALREADY FINALIZED. So a double POST to /:id/finalize rewrote
+  // `finalizedAt` — the contract then claimed the car left on the day of the
+  // retry, not the day it actually left — and appended a SECOND CHECKOUT row to
+  // the vehicle's mileage timeline (recordMileageEntry is a bare create, and it
+  // must stay that way: MANUAL corrections are meant to repeat, and a vehicle
+  // swap can legitimately produce a second CHECKOUT reading for the same
+  // reservation on a different car).
+  //
+  // Moving the status predicate into the WHERE makes this first write the claim:
+  // exactly one caller can match a not-yet-finalized agreement and flip it to
+  // FINALIZED. The loser gets count === 0 and throws here, before any of the
+  // writes below run, so its transaction aborts having written nothing. Same
+  // shape as the addendum-signature CAS (addendum-signature-public.service.js)
+  // and the checkout-session cascade claim.
+  //
+  // Deliberately NOT scoped by tenantId: legacy agreements carry a null tenant
+  // (finalize itself defaults it — see the txCtx below), so a tenant predicate
+  // would silently stop finalizing exactly those. `id` already bounds this to
+  // one row, and the route's ensureEditable has already scoped the request.
+  const claim = await tx.rentalAgreement.updateMany({
+    where: { id: ctx.id, status: { in: FINALIZABLE_AGREEMENT_STATUSES } },
     data: {
       status: 'FINALIZED',
       paymentMethod: ctx.paymentMethod || null,
@@ -2317,6 +2394,29 @@ export async function applyFinalizeWritesTx(tx, ctx) {
       finalizedAt: new Date()
     }
   });
+  if (claim.count === 0) {
+    throw new AgreementNotFinalizableError(
+      'This check-out was already finalized by another request.'
+    );
+  }
+
+  // updateMany returns a count, not the row — re-read inside the same tx for the
+  // reservationId / vehicleId the writes below need.
+  const updated = await tx.rentalAgreement.findUnique({ where: { id: ctx.id } });
+
+  // The credit debit runs AFTER the claim (Innovation 2026-08-18): a caller that
+  // was always going to lose the claim must not first take a row lock on
+  // Customer and hold it until the winner's transaction commits. Nothing here
+  // depends on the ordering — the claim reads nothing the debit writes.
+  if (ctx.creditApplied > 0 && ctx.customerIdForCredit) {
+    await tx.customer.update({
+      where: { id: ctx.customerIdForCredit },
+      data: {
+        creditBalance: ctx.nextCustomerCredit,
+        notes: ctx.creditNoteForCustomer
+      }
+    });
+  }
 
   await tx.reservation.update({
     where: { id: updated.reservationId },
@@ -5821,6 +5921,29 @@ export const rentalAgreementsService = {
     };
   },
 
+  // The answer both double-submit guards in finalize() give once the agreement
+  // is already FINALIZED. A retry that sends the same values (or says nothing
+  // new) gets the contract the winning call produced, with no writes. A body
+  // that would have CHANGED the finalized contract is not a retry: it gets a 409
+  // naming the fields, because silently discarding a corrected odometer or paid
+  // amount under a 200 is no better than the audit-trail rewrite this replaced.
+  async replayFinalize(agreement, payload = {}) {
+    const diverged = finalizeReplayDivergence(agreement, payload);
+    if (diverged.length) {
+      logger.warn('[rental-agreements] finalize replay REJECTED — payload differs from the finalized contract', {
+        agreementId: agreement.id,
+        diverged
+      });
+      throw new ConflictError(
+        `This check-out was already finalized. The values sent (${diverged.join(', ')}) differ from the finalized contract and were NOT applied. Correct an odometer or fuel reading through the inspection-correction flow, and money through the payment endpoints.`
+      );
+    }
+    logger.info('[rental-agreements] finalize replayed — agreement is already FINALIZED, nothing rewritten', {
+      agreementId: agreement.id
+    });
+    return this.getById(agreement.id);
+  },
+
   async finalize(id, payload = {}) {
     const agreement = await prisma.rentalAgreement.findUnique({
       where: { id },
@@ -5835,6 +5958,18 @@ export const rentalAgreementsService = {
       }
     });
     if (!agreement) throw new Error('Rental agreement not found');
+
+    // Double-submit guard (2026-08-18), paired with the compare-and-set claim
+    // inside applyFinalizeWritesTx. This is the cheap sequential case: staff
+    // double-clicks "Finalize", or a client retries a request whose response was
+    // lost. The check-out already happened, so re-running the writes would move
+    // finalizedAt to today and append a second CHECKOUT mileage entry. Return the
+    // contract the first call produced — the caller sees exactly what it would
+    // have seen if its first request hadn't gone missing. A CLOSED or CANCELLED
+    // agreement is not "already done", it's a mistake, and throws a 409.
+    if (isFinalizeAlreadyDone(agreement.status)) {
+      return this.replayFinalize(agreement, payload);
+    }
 
     const odometerOut = payload.odometerOut ?? agreement.odometerOut;
     const fuelOut = payload.fuelOut ?? agreement.fuelOut;
@@ -5951,9 +6086,39 @@ export const rentalAgreementsService = {
       actorUserId: payload.actorUserId || null
     };
     let updated;
-    await prisma.$transaction(async (tx) => {
-      updated = await applyFinalizeWritesTx(tx, txCtx);
-    }, { timeout: 10000 });
+    try {
+      await prisma.$transaction(async (tx) => {
+        updated = await applyFinalizeWritesTx(tx, txCtx);
+      }, { timeout: 10000 });
+    } catch (e) {
+      if (e?.code !== 'AGREEMENT_NOT_FINALIZABLE') throw e;
+      // We lost the claim: a concurrent finalize took the agreement between our
+      // pre-flight read and the CAS. Our transaction aborted having written
+      // nothing, so answer exactly as the pre-flight guard would have.
+      const fresh = await prisma.rentalAgreement.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          status: true,
+          odometerOut: true,
+          fuelOut: true,
+          paidAmount: true,
+          paymentMethod: true,
+          paymentReference: true
+        }
+      });
+      if (!fresh) throw new Error('Rental agreement not found');
+      if (!isFinalizeAlreadyDone(fresh.status)) {
+        // Still finalizable, yet our claim missed it — the row moved under us in
+        // a way we can't explain. Say so instead of reporting a success we
+        // didn't perform.
+        throw new ConflictError('Check-out could not be completed — the agreement changed while it was being finalized. Please try again.');
+      }
+      logger.info('[rental-agreements] finalize lost the claim race to a concurrent request', {
+        agreementId: id
+      });
+      return this.replayFinalize(fresh, payload);
+    }
 
     return this.getById(id);
   },

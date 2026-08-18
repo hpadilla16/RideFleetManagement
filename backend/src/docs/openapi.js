@@ -2160,12 +2160,18 @@ export function buildOpenApiSpec(serverUrl) {
         post: {
           tags: ['Rental Agreements'],
           summary: 'Finalize agreement totals',
+          description:
+            'Safe to retry: re-posting the same body for an agreement that is already FINALIZED '
+            + 'returns the existing contract unchanged (it does NOT rewrite finalizedAt or add a '
+            + 'second CHECKOUT mileage entry). Re-posting a body whose values differ from the '
+            + 'finalized contract is a 409 — use the post-checkout correction endpoints instead.',
           security: bearerSecurity(),
           parameters: [pathId()],
           requestBody: body(false, '#/components/schemas/AgreementFinalizePayload'),
           responses: {
-            200: ok('Agreement finalized'),
-            404: ok('Agreement not found', '#/components/schemas/ErrorResponse')
+            200: ok('Agreement finalized (or replayed unchanged)'),
+            404: ok('Agreement not found', '#/components/schemas/ErrorResponse'),
+            409: ok('Already finalized with different values, closed, cancelled, or claimed by a concurrent finalize', '#/components/schemas/ErrorResponse')
           }
         }
       },

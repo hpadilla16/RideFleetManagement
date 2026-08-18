@@ -182,6 +182,13 @@ jobs:
         # catch — is invisible to a mocked prisma. A green mock is exactly how
         # it shipped the first time.
         run: docker exec fleet-backend sh -lc "cd /app && npm run test:module-access-audit"
+      - name: Double-finalize guard (DB-backed)
+        # Same reason as the audit-trail test above: this one proves that a
+        # SECOND POST /rental-agreements/:id/finalize rewrites nothing — the
+        # real finalizedAt survives, and the vehicle timeline keeps exactly one
+        # CHECKOUT entry instead of growing a duplicate. Both facts only exist
+        # against real Postgres; a fake tx can only show the query shape.
+        run: docker exec fleet-backend sh -lc "cd /app && npm run test:finalize-double-submit"
       - name: Dump logs on failure
         if: failure()
         run: docker compose -f docker-compose.yml logs --tail=200

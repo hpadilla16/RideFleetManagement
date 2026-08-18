@@ -1,6 +1,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyFinalizeWritesTx, applyChargesSyncTx } from './rental-agreements.service.js';
+import {
+  applyFinalizeWritesTx,
+  applyChargesSyncTx,
+  isFinalizeAlreadyDone,
+  finalizeReplayDivergence,
+  FINALIZABLE_AGREEMENT_STATUSES
+} from './rental-agreements.service.js';
+import { $Enums } from '@prisma/client';
 
 // Build a fake `tx` that records every method called and lets us inject
 // failures on specific operations. Mirrors the subset of the Prisma client
@@ -8,7 +15,7 @@ import { applyFinalizeWritesTx, applyChargesSyncTx } from './rental-agreements.s
 // reaches for a model not listed here, the test breaks loudly (which is
 // what we want — every model used inside the tx must be on `tx`, never on
 // the global prisma).
-function fakeTx({ failOn } = {}) {
+function fakeTx({ failOn, claimCount = 1 } = {}) {
   const calls = [];
   const make = (model) => ({
     findUnique: async (args) => {
@@ -18,6 +25,9 @@ function fakeTx({ failOn } = {}) {
       // finalize tx. The vehicle starts AVAILABLE so checkout flips it ON_RENT.
       if (model === 'vehicle') return { id: args.where?.id, status: 'AVAILABLE', internalNumber: 'UNIT-1', plate: 'AAA111' };
       if (model === 'reservation') return { vehicleId: 'veh-1' };
+      // The finalize claim is an updateMany (which returns a count, not a row),
+      // so the helper re-reads the agreement inside the tx.
+      if (model === 'rentalAgreement') return { id: args.where?.id, reservationId: 'res-from-update', vehicleId: 'veh-1' };
       return null;
     },
     update: async (args) => {
@@ -37,6 +47,14 @@ function fakeTx({ failOn } = {}) {
       calls.push({ model, op: 'deleteMany', args });
       if (failOn === `${model}.deleteMany`) throw new Error(`forced failure on ${model}.deleteMany`);
       return { count: 0 };
+    },
+    updateMany: async (args) => {
+      calls.push({ model, op: 'updateMany', args });
+      if (failOn === `${model}.updateMany`) throw new Error(`forced failure on ${model}.updateMany`);
+      // rentalAgreement.updateMany is the finalize CLAIM. claimCount: 0 simulates
+      // losing the race to a concurrent finalize.
+      if (model === 'rentalAgreement') return { count: claimCount };
+      return { count: 1 };
     },
     createMany: async (args) => {
       calls.push({ model, op: 'createMany', args });
@@ -88,7 +106,8 @@ describe('applyFinalizeWritesTx', () => {
     const result = await applyFinalizeWritesTx(tx, baseFinalizeCtx);
     const order = tx.__calls.map((c) => `${c.model}.${c.op}`);
     assert.deepEqual(order, [
-      'rentalAgreement.update',
+      'rentalAgreement.updateMany',   // compare-and-set CLAIM (only one finalize wins)
+      'rentalAgreement.findUnique',   // re-read: updateMany returns a count, not the row
       'reservation.update',
       'reservation.findUnique',        // bug #44 vehicle-status sync (reads reservation)
       'vehicle.findUnique',           // bug #44 vehicle-status sync (read)
@@ -100,7 +119,7 @@ describe('applyFinalizeWritesTx', () => {
     assert.equal(result.id, 'agr-1');
   });
 
-  it('applies the customer credit deduction BEFORE updating the agreement', async () => {
+  it('applies the customer credit deduction inside the claimed transaction', async () => {
     const tx = fakeTx();
     await applyFinalizeWritesTx(tx, {
       ...baseFinalizeCtx,
@@ -111,8 +130,9 @@ describe('applyFinalizeWritesTx', () => {
     });
     const order = tx.__calls.map((c) => `${c.model}.${c.op}`);
     assert.deepEqual(order, [
-      'customer.update',
-      'rentalAgreement.update',
+      'rentalAgreement.updateMany',   // compare-and-set CLAIM (only one finalize wins)
+      'rentalAgreement.findUnique',   // re-read: updateMany returns a count, not the row
+      'customer.update',              // credit debit AFTER the claim — a loser takes no Customer lock
       'reservation.update',
       'reservation.findUnique',        // bug #44 vehicle-status sync (reads reservation)
       'vehicle.findUnique',            // bug #44 vehicle-status sync (read)
@@ -133,7 +153,7 @@ describe('applyFinalizeWritesTx', () => {
       paymentMethod: null
     });
     const ops = tx.__calls.map((c) => `${c.model}.${c.op}`);
-    assert.deepEqual(ops, ['rentalAgreement.update', 'reservation.update', 'reservation.findUnique', 'vehicle.findUnique', 'vehicle.update', 'vehicleMileageEntry.create', 'vehicle.update']);
+    assert.deepEqual(ops, ['rentalAgreement.updateMany', 'rentalAgreement.findUnique', 'reservation.update', 'reservation.findUnique', 'vehicle.findUnique', 'vehicle.update', 'vehicleMileageEntry.create', 'vehicle.update']);
   });
 
   it('rolls back contract: throws if reservation.update fails (caller is prisma.$transaction which then aborts)', async () => {
@@ -146,11 +166,11 @@ describe('applyFinalizeWritesTx', () => {
       () => applyFinalizeWritesTx(tx, baseFinalizeCtx),
       /forced failure on reservation\.update/
     );
-    // The agreement update DID happen against the tx (which is correct —
+    // The agreement claim DID happen against the tx (which is correct —
     // the rollback is Prisma's job, not ours). The point is no payment.create
     // ever ran, because we threw mid-flight.
     const ops = tx.__calls.map((c) => `${c.model}.${c.op}`);
-    assert.deepEqual(ops, ['rentalAgreement.update', 'reservation.update']);
+    assert.deepEqual(ops, ['rentalAgreement.updateMany', 'rentalAgreement.findUnique', 'reservation.update']);
   });
 
   it('rolls back contract: throws if the credit-paired payment.create fails', async () => {
@@ -190,8 +210,9 @@ describe('applyFinalizeWritesTx', () => {
     });
     const ops = tx.__calls.map((c) => `${c.model}.${c.op}`);
     assert.deepEqual(ops, [
-      'customer.update',
-      'rentalAgreement.update',
+      'rentalAgreement.updateMany',   // compare-and-set CLAIM (only one finalize wins)
+      'rentalAgreement.findUnique',   // re-read: updateMany returns a count, not the row
+      'customer.update',              // credit debit AFTER the claim — a loser takes no Customer lock
       'reservation.update',
       'reservation.findUnique',        // bug #44 vehicle-status sync (reads reservation)
       'vehicle.findUnique',            // bug #44 vehicle-status sync (read)
@@ -212,7 +233,7 @@ describe('applyFinalizeWritesTx', () => {
       payload: {}, // no paymentReference in payload
       priorPaymentReference: 'PRIOR-REF-77'
     });
-    const agreementUpdate = tx.__calls.find((c) => c.model === 'rentalAgreement' && c.op === 'update');
+    const agreementUpdate = tx.__calls.find((c) => c.model === 'rentalAgreement' && c.op === 'updateMany');
     assert.equal(agreementUpdate.args.data.paymentReference, 'PRIOR-REF-77',
       'must fall back to priorPaymentReference when payload omits it');
     const paymentCreate = tx.__calls.find((c) => c.model === 'rentalAgreementPayment' && c.op === 'create');
@@ -256,6 +277,182 @@ describe('applyFinalizeWritesTx', () => {
     );
     const paymentOps = tx.__calls.filter((c) => c.model === 'rentalAgreementPayment');
     assert.equal(paymentOps.length, 0, 'no payment.create may run after a mid-tx throw');
+  });
+});
+
+// 2026-08-17 — double-finalize. The legacy POST /:id/finalize had no
+// already-FINALIZED precondition, so a retry (double-click, lost response) re-ran
+// the whole write body: it rewrote finalizedAt to the day of the RETRY, losing the
+// real check-out date, and appended a second CHECKOUT row to the vehicle's mileage
+// timeline. The fix makes the agreement write a compare-and-set claim.
+describe('applyFinalizeWritesTx — double-finalize claim', () => {
+  it('claims the agreement with a status predicate, not a bare id update', async () => {
+    const tx = fakeTx();
+    await applyFinalizeWritesTx(tx, baseFinalizeCtx);
+    const claim = tx.__calls.find((c) => c.model === 'rentalAgreement' && c.op === 'updateMany');
+    assert.ok(claim, 'the agreement write must be an updateMany (compare-and-set), never a bare update');
+    assert.equal(claim.args.where.id, 'agr-1');
+    assert.deepEqual(claim.args.where.status, { in: FINALIZABLE_AGREEMENT_STATUSES },
+      'the WHERE must carry the status predicate — that is what makes it a claim');
+    assert.ok(!FINALIZABLE_AGREEMENT_STATUSES.includes('FINALIZED'),
+      'FINALIZED must never be a finalizable-from status, or the claim matches itself');
+    assert.equal(claim.args.data.status, 'FINALIZED');
+    // No bare update may sneak back in alongside the claim.
+    const bareUpdate = tx.__calls.find((c) => c.model === 'rentalAgreement' && c.op === 'update');
+    assert.equal(bareUpdate, undefined);
+  });
+
+  it('losing the claim throws AGREEMENT_NOT_FINALIZABLE before ANY other write', async () => {
+    // count === 0 = the agreement was no longer DRAFT/READY_FOR_CHECKOUT, i.e. a
+    // concurrent finalize already claimed it. Everything after the claim must be
+    // skipped so the transaction aborts with nothing written.
+    const tx = fakeTx({ claimCount: 0 });
+    await assert.rejects(
+      () => applyFinalizeWritesTx(tx, baseFinalizeCtx),
+      (err) => {
+        assert.equal(err.code, 'AGREEMENT_NOT_FINALIZABLE');
+        assert.equal(err.status, 409, 'must reach the client as a 409 via appErrorHandler');
+        return true;
+      }
+    );
+    const ops = tx.__calls.map((c) => `${c.model}.${c.op}`);
+    assert.deepEqual(ops, ['rentalAgreement.updateMany'],
+      'the claim is the only write attempted when it loses');
+    // The two writes the ticket is about, spelled out: no second CHECKOUT mileage
+    // row, and no reservation re-advance.
+    assert.equal(tx.__calls.filter((c) => c.model === 'vehicleMileageEntry').length, 0);
+    assert.equal(tx.__calls.filter((c) => c.model === 'reservation').length, 0);
+  });
+
+  it('a lost claim never debits the customer credit at all', async () => {
+    // The debit runs AFTER the claim (Innovation 2026-08-18), so a caller that was
+    // always going to lose neither writes the debit nor holds a row lock on
+    // Customer while the winner's transaction runs.
+    const tx = fakeTx({ claimCount: 0 });
+    await assert.rejects(
+      () => applyFinalizeWritesTx(tx, {
+        ...baseFinalizeCtx,
+        creditApplied: 40,
+        customerIdForCredit: 'cust-race',
+        nextCustomerCredit: 0,
+        creditNoteForCustomer: 'auto credit'
+      }),
+      /already finalized/i
+    );
+    assert.equal(tx.__calls.filter((c) => c.model === 'customer').length, 0,
+      'a lost claim must not touch Customer — no debit, no lock');
+    assert.equal(tx.__calls.filter((c) => c.model === 'rentalAgreementPayment').length, 0,
+      'no payment row may be written when the claim is lost');
+  });
+});
+
+describe('isFinalizeAlreadyDone (finalize double-submit guard)', () => {
+  it('a finalizable agreement is not already done', () => {
+    for (const status of FINALIZABLE_AGREEMENT_STATUSES) {
+      assert.equal(isFinalizeAlreadyDone(status), false, `${status} must still be finalizable`);
+    }
+  });
+
+  it('FINALIZED reports already-done so finalize() returns the existing contract untouched', () => {
+    assert.equal(isFinalizeAlreadyDone('FINALIZED'), true);
+  });
+
+  it('CLOSED / CANCELLED are mistakes, not retries — they throw a 409', () => {
+    for (const status of ['CLOSED', 'CANCELLED']) {
+      assert.throws(
+        () => isFinalizeAlreadyDone(status),
+        (err) => {
+          assert.equal(err.status, 409, 'must map to 409, not an opaque 500');
+          assert.match(err.message, /can no longer be checked out/);
+          return true;
+        }
+      );
+    }
+  });
+});
+
+// The finalized contract a replayed POST /:id/finalize is compared against.
+// Prisma returns paidAmount as a Decimal; Number() is what the comparison does.
+const FINALIZED_CONTRACT = {
+  id: 'agr-1',
+  status: 'FINALIZED',
+  odometerOut: 12345,
+  fuelOut: 0.88,
+  paidAmount: 100,
+  paymentMethod: 'CARD',
+  paymentReference: 'TXN-99'
+};
+
+describe('finalizeReplayDivergence (which fields a replay would have changed)', () => {
+  it('an identical retry — the double-click — diverges on nothing', () => {
+    assert.deepEqual(finalizeReplayDivergence(FINALIZED_CONTRACT, {
+      odometerOut: 12345,
+      fuelOut: 0.875, // 7/8 as the client sends it; 0.88 as the column stores it
+      paidAmount: 100,
+      paymentMethod: 'CARD',
+      paymentReference: 'TXN-99'
+    }), []);
+  });
+
+  it('an empty body diverges on nothing (finalize falls back to the stored values)', () => {
+    assert.deepEqual(finalizeReplayDivergence(FINALIZED_CONTRACT, {}), []);
+    assert.deepEqual(finalizeReplayDivergence(FINALIZED_CONTRACT), []);
+  });
+
+  it('fields the payload omits, blanks or nulls are never a divergence', () => {
+    assert.deepEqual(finalizeReplayDivergence(FINALIZED_CONTRACT, {
+      odometerOut: null,
+      paymentMethod: '   ',
+      paidAmount: undefined,
+      actorUserId: 'user-7' // not a finalize field at all
+    }), []);
+  });
+
+  it('a corrected odometer is a divergence — it must NOT be answered with a silent 200', () => {
+    assert.deepEqual(finalizeReplayDivergence(FINALIZED_CONTRACT, { odometerOut: 12999 }), ['odometerOut']);
+  });
+
+  it('a different paid amount is a divergence (money never gets silently dropped)', () => {
+    assert.deepEqual(finalizeReplayDivergence(FINALIZED_CONTRACT, { paidAmount: 250 }), ['paidAmount']);
+    // ...but the same money in another shape is not: '100.00' and Decimal(100) agree.
+    assert.deepEqual(finalizeReplayDivergence(FINALIZED_CONTRACT, { paidAmount: '100.00' }), []);
+  });
+
+  it('reports every diverging field, not just the first', () => {
+    assert.deepEqual(
+      finalizeReplayDivergence(FINALIZED_CONTRACT, {
+        odometerOut: 999, fuelOut: 0.25, paidAmount: 1, paymentMethod: 'CASH', paymentReference: 'OTHER'
+      }),
+      ['odometerOut', 'fuelOut', 'paidAmount', 'paymentMethod', 'paymentReference']
+    );
+  });
+
+  it('a value sent against a column that is empty on the contract is a divergence', () => {
+    assert.deepEqual(
+      finalizeReplayDivergence({ ...FINALIZED_CONTRACT, paymentReference: null }, { paymentReference: 'TXN-99' }),
+      ['paymentReference']
+    );
+  });
+
+  it('fuel compares at the column precision — 0.875 sent vs 0.88 stored is the SAME tank', () => {
+    // fuelOut is Decimal(4,2): a client sending 7/8 as 0.875 reads back as 0.88.
+    // If this ever regresses, the plain double-click starts 409-ing.
+    assert.deepEqual(finalizeReplayDivergence({ ...FINALIZED_CONTRACT, fuelOut: 0.88 }, { fuelOut: 0.875 }), []);
+    assert.deepEqual(finalizeReplayDivergence({ ...FINALIZED_CONTRACT, fuelOut: 0.1 + 0.2 }, { fuelOut: 0.3 }), []);
+    assert.deepEqual(finalizeReplayDivergence(FINALIZED_CONTRACT, { fuelOut: 0.5 }), ['fuelOut']);
+  });
+});
+
+describe('RentalAgreementStatus coverage', () => {
+  it('every status is either finalizable, already-done, or an explicit 409', () => {
+    // If a 6th status is added to the enum, this trips instead of the new status
+    // silently taking the throw branch in production.
+    const accounted = new Set([...FINALIZABLE_AGREEMENT_STATUSES, 'FINALIZED', 'CLOSED', 'CANCELLED']);
+    assert.deepEqual(
+      Object.keys($Enums.RentalAgreementStatus).filter((v) => !accounted.has(v)),
+      [],
+      'a new RentalAgreementStatus must be classified in FINALIZABLE_AGREEMENT_STATUSES / isFinalizeAlreadyDone'
+    );
   });
 });
 
