@@ -103,6 +103,13 @@ enum AuditAction {
 
 enum RentalAgreementStatus {
   DRAFT
+  // DEAD as of 2026-08-18: nothing under backend/src ever writes this value,
+  // no migration defaults to it and no seed sets it. Said out loud because the
+  // checkout finalize flips the contract with a compare-and-set guarded on
+  // DRAFT (checkout-session.service.js — finalizeAgreementForCheckout), so the
+  // day something starts writing READY_FOR_CHECKOUT, that flip stops matching
+  // and the contract silently stays un-finalized three files away from here.
+  // Widen the guard in the same change, or don't start writing it.
   READY_FOR_CHECKOUT
   FINALIZED
   CLOSED

@@ -564,12 +564,12 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // This is a PARTIAL close of the events lost-update, and the honest
       // count is FOURTEEN other writers of this TEXT column, all still doing
       // an unguarded read-modify-write (read → write, this file):
-      //   stampSideEffect       :1275 → :1283
-      //   saveCustomerSignature :1305 → :1326  (read is OUTSIDE the
-      //                                         $transaction that starts :1311)
-      //   mintHandoffToken      :1349 → :1400
-      //   setDeclinedInsurance  :1471 → :1485
-      //   markAbandoned         :1495 → :1509
+      //   stampSideEffect       :1320 → :1328
+      //   saveCustomerSignature :1350 → :1371  (read is OUTSIDE the
+      //                                         $transaction that starts :1356)
+      //   mintHandoffToken      :1394 → :1445
+      //   setDeclinedInsurance  :1516 → :1530
+      //   markAbandoned         :1540 → :1554
       //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
       //   spin-charge.service.js:574, :606, :884, :1038, :1229 (five)
       //   mobile-inspection.service.js:276
@@ -905,6 +905,41 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
             // established rather than assumed.
             finalizeCascadeOk = true;
           } else if (agStatus === 'DRAFT' && String(resv.status) === 'CHECKED_OUT') {
+            // The one guard above that is NOT an admission gate, so the repair
+            // keeps it (Innovation MUST-CHANGE, 2026-08-18).
+            //
+            // ensureCheckoutGates and the double-booking re-check are both
+            // asking "may this car leave", and the car left — re-running them
+            // here would refuse the repair over somebody else's overlapping
+            // booking and guarantee a DRAFT contract for a rental already in
+            // progress. NO-CAR-NO-CHECKOUT asks something else: whether there
+            // is a vehicle to put ON the contract. beta.116 exists because
+            // finalizing without one produced FINALIZED agreements with no car,
+            // and this branch would otherwise be the only path in the service
+            // that can still do it — reachable, because
+            // reservations.service.js:2008 disconnects the vehicle on any
+            // `vehicleId: null` patch with no status guard, CHECKED_OUT rows
+            // included.
+            //
+            // Failing SILENTLY here would be its own version of the bug: the
+            // flip and the finalizedAt stamp would land while the mileage row
+            // (guarded on resv.vehicleId) and the vehicle sync (null vehicle →
+            // no-op) both skipped, and finalizeCascadeOk would then release the
+            // customer email over that. So it throws, like the winner does —
+            // the catch below re-labels it FINALIZE_INCOMPLETE with
+            // `reason: 'NO_VEHICLE_ASSIGNED'`, which the CLOSED failure card
+            // already translates and already offers a retry for
+            // (FINALIZE_FAILURE_REASONS in frontend/src/lib/checkout-session.js).
+            // Not a permanent strand: assign a car, press the button, the
+            // repair runs — the same "fix the data, then retry" loop the age
+            // and pre-checkin gates rely on.
+            if (!resv.vehicleId) {
+              throw new CheckoutSessionError(
+                'Cannot finalize checkout: no vehicle is assigned to this reservation.',
+                422,
+                'NO_VEHICLE_ASSIGNED',
+              );
+            }
             logger.warn('[checkout-session] repairing a CHECKED_OUT reservation whose contract is still DRAFT', {
               sessionId: id, reservationId: resv.id, agreementId: updated.agreementId,
               alreadyApplied,
@@ -1135,6 +1170,16 @@ async function finalizeAgreementForCheckout({ sessionId, agreementId, resv, acto
       logger.info('[checkout-session] agreement was already finalized — flip skipped', {
         sessionId, agreementId, reservationId: resv.id, agreementStatus: agStatus,
       });
+      // NOT backfilled here, and the gap is older than this change. The
+      // odometer/fuel patch rides inside the CAS above, so a lost flip drops
+      // it — but whoever WON that flip read the same inspection row and
+      // applied the same patch a moment earlier, so there is nothing left to
+      // write. The case that would matter is a contract finalized before its
+      // CHECKOUT inspection row landed, which prints "-" forever; that one has
+      // never been reachable from here, because the caller short-circuits on a
+      // FINALIZED agreement without ever entering this function. Repairing it
+      // needs a sweep that goes looking, not a retry button someone has to
+      // press — see the follow-up on reconciling these strands.
     } else {
       logger.error('[checkout-session] agreement did NOT reach FINALIZED on finalize', {
         sessionId, agreementId, reservationId: resv.id,

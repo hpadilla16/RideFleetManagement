@@ -483,6 +483,41 @@ test('§5 a contract that is CANCELLED, not DRAFT, is neither repaired nor maile
   assert.deepEqual(calls, [], 'and not mailed either');
 });
 
+test('§5 the repair keeps NO-CAR-NO-CHECKOUT: a stranded reservation with no vehicle is not finalized', async () => {
+  // Innovation MUST-CHANGE, 2026-08-18. The repair skips the two ADMISSION
+  // gates on purpose — the car already left, and refusing over somebody else's
+  // overlapping booking would just guarantee a DRAFT contract for a rental in
+  // progress. NO-CAR-NO-CHECKOUT is not one of those: beta.116 exists because
+  // finalizing without a vehicle produced FINALIZED agreements with no car on
+  // them, and this branch would otherwise be the only path left in the service
+  // that can still do it.
+  //
+  // Reachable, not theoretical — reservations.service.js disconnects the
+  // vehicle on any `vehicleId: null` patch with no status guard, CHECKED_OUT
+  // rows included.
+  seedStrandedStrand();
+  db.reservations[0].vehicleId = null; // the car was unassigned after checkout
+  const calls = spyOnFinalizeEmail();
+
+  const err = await rejection(() => viaWebWizard({ id: 'cs1', toStep: 'CLOSED' }));
+  await settle();
+
+  // Reported the way the CLOSED failure card can act on: the reason is already
+  // in FINALIZE_FAILURE_REASONS and already offers a retry, so the agent is
+  // told to assign a car rather than left with a silent log.
+  assert.equal(err.code, 'FINALIZE_INCOMPLETE');
+  assert.equal(err.reason, 'NO_VEHICLE_ASSIGNED');
+
+  // And the half-repair that silence would have produced did NOT happen: the
+  // flip and its finalizedAt would have landed while the mileage row (guarded
+  // on vehicleId) and the vehicle sync (no-op on a null vehicle) both skipped,
+  // and the email would have gone out over exactly that.
+  assert.equal(db.agreements[0].status, 'DRAFT', 'the contract was not finalized');
+  assert.equal(db.agreements[0].finalizedAt, undefined, 'and not stamped');
+  assert.equal(db.mileageEntries.length, 0);
+  assert.deepEqual(calls, [], 'nothing was mailed over it');
+});
+
 // ── §4. the probe QA ran, as one assertion ─────────────────────────────────
 
 test('§4 QA probe: WINNER + vehicle conflict, the whole tuple', async () => {

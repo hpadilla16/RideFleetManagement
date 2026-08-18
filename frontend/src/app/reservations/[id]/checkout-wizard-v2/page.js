@@ -376,8 +376,11 @@ function CheckoutWizardV2({ token, me, logout }) {
 
   // "Reintentar cierre" — re-POSTs CLOSED → CLOSED. Not a refresh button: the
   // backend answers that pair through the idempotent branch and RE-RUNS the
-  // finalize cascade, whose self-heal allow-list (['NEW','CONFIRMED']) covers
-  // exactly the state a failed finalize strands the reservation in. So if the
+  // finalize cascade, whose self-heal allow-list
+  // (['NEW','CONFIRMED','CHECKED_OUT']) covers exactly the states a failed
+  // finalize strands the reservation in — CHECKED_OUT joined it on 2026-08-18,
+  // and until it did this button was a no-op on the commonest of them: the
+  // reservation handed over, its contract still DRAFT behind it. So if the
   // agent has since cleared the blocker, this genuinely completes the
   // checkout; if not, it brings back a fresh `reason` — which is also how the
   // post-F5 card, with no error object left, learns why it failed.
@@ -2115,8 +2118,8 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
   const vehicleStatus = reservation.vehicle?.status || null;
 
   // The backend only re-runs the finalize for a reservation it still owns: its
-  // self-heal allow-list is ['NEW','CONFIRMED'], and CANCELLED / NO_SHOW /
-  // PENDING_FRANCHISE_IMPORT are declined with a server-side log and a plain
+  // self-heal allow-list is ['NEW','CONFIRMED','CHECKED_OUT'], and CANCELLED /
+  // NO_SHOW / PENDING_FRANCHISE_IMPORT are declined with a server-side log and a plain
   // 200. Offering a retry there would be a button that silently changes
   // nothing, under copy promising it would explain the blocker — exactly the
   // kind of confident-but-false affordance this ticket removes.
