@@ -19,7 +19,9 @@
  *   6. a cancel that loses the race still cancels
  *   7. the idempotent answer still runs the CLOSED cascade, so a winner whose
  *      finalize died half-way gets self-healed instead of papered over
- *   8. what H8 does NOT close: the `events` lost-update against the FOURTEEN
+ *   8. the self-heal CLAIMS the reservation, so two concurrent re-runs of the
+ *      cascade cannot both rewrite finalizedAt and both append a mileage row
+ *   9. what H8 does NOT close: the `events` lost-update against the FOURTEEN
  *      other writers of that TEXT column. Written as a `todo` asserting the
  *      DESIRED result, not as a passing test asserting the defect — a todo
  *      that starts passing is the signal that the hole closed.
@@ -32,7 +34,7 @@ import { readFileSync } from 'node:fs';
 import { readEvents } from './state-machine.js';
 import {
   installWorld, restoreWorld, onRestore as restorePush,
-  seedSession, seedFinalizeWorld, armRace, viaWebWizard, viaKiosk,
+  seedSession, seedFinalizeWorld, armRace, armReservationRace, viaWebWizard, viaKiosk,
 } from './checkout-session.test-harness.mjs';
 
 // The in-memory prisma world lives in checkout-session.test-harness.mjs so the
@@ -186,13 +188,17 @@ test('SELF-HEAL: a winner whose cascade died half-way is completed by the idempo
   // transition() swallows anything that is not a CheckoutSessionError with a
   // logger.warn, so the winner returns 200 over a half-finalized checkout and
   // NOTHING ever retries it. That is the state the loser walks into.
+  // Injected on updateMany, not update: the cascade's reservation write is the
+  // CLAIM now (2026-08-18), and a patch left on the old method would break
+  // nothing at all — the assertions below would then be describing a cascade
+  // that simply succeeded.
   let breakCascade = true;
-  const origResvUpdate = prisma.reservation.update;
-  prisma.reservation.update = async (args) => {
+  const origResvUpdateMany = prisma.reservation.updateMany;
+  prisma.reservation.updateMany = async (args) => {
     if (breakCascade) throw new Error('injected half-way cascade failure');
-    return origResvUpdate(args);
+    return origResvUpdateMany(args);
   };
-  restore.push(() => { prisma.reservation.update = origResvUpdate; });
+  restore.push(() => { prisma.reservation.updateMany = origResvUpdateMany; });
 
   armRace('FINALIZING', () => viaKiosk({ id: 'cs1', toStep: 'CLOSED' }));
 
@@ -213,6 +219,102 @@ test('SELF-HEAL: a winner whose cascade died half-way is completed by the idempo
   // Still no second hop in the log — healing is not a transition.
   assert.equal(readEvents(row.events).filter((e) => e.kind === 'TRANSITION').length, 1);
   assert.equal(row.stateVersion, 1);
+});
+
+// The self-heal is the one path into the cascade that breaks out of the CAS
+// loop WITHOUT a commit, so until the claim it held nothing: two callers on it
+// both ran the whole arm. The allow-list and the status short-circuit were
+// containing that, which is an unenforced invariant three files from the writes
+// it protects. "Reintentar cierre" — a button on the CLOSED failure card whose
+// entire job is to re-POST CLOSED → CLOSED and re-run this cascade — is what
+// made the second caller ordinary rather than theoretical:
+// `transitionInFlightRef` guards one tab, and a second tab is not that tab.
+test('two concurrent self-heals: the claim lets exactly ONE run the cascade', async () => {
+  const row = seedFinalizeWorld({ reservationStatus: 'CONFIRMED', autoEmailedAt: new Date() });
+  // The exact state the failure card offers the button on: the step committed,
+  // the cascade behind it did not.
+  row.currentStep = 'CLOSED';
+  row.finishedAt = new Date('2026-08-17T12:00:00Z');
+
+  // Two tabs press it together. The second commits the entire cascade while
+  // the first is still holding the reservation row it read a moment ago.
+  let winnerFinalizedAt = null;
+  const raced = armReservationRace('CONFIRMED', async () => {
+    await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+    winnerFinalizedAt = db.agreements[0].finalizedAt;
+  });
+
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  assert.equal(raced(), true, 'the race actually fired');
+
+  // Both tabs are still answered honestly, and the work really happened.
+  assert.equal(out.currentStep, 'CLOSED');
+  assert.equal(db.reservations[0].status, 'CHECKED_OUT', 'the cascade ran');
+  assert.equal(db.agreements[0].status, 'FINALIZED');
+  assert.equal(db.vehicles[0].status, 'ON_RENT');
+  assert.ok(winnerFinalizedAt, 'the winner really finalized inside the race');
+
+  // ...but exactly once. These are the two writes that do not survive a second
+  // run: compared by REFERENCE, so a rewrite with an identical millisecond
+  // still fails.
+  assert.equal(db.agreements[0].finalizedAt, winnerFinalizedAt,
+    'finalizedAt still says when the car left, not when the retry landed');
+  assert.equal(db.mileageEntries.length, 1, 'exactly one CHECKOUT mileage row');
+  assert.equal(db.auditLogs.length, 1, 'exactly one STATUS_CHANGE audit line');
+  // And healing is still not a transition, on either tab.
+  assert.equal(readEvents(row.events).filter((e) => e.kind === 'TRANSITION').length, 0);
+});
+
+// The WINNER can lose the claim too, and it is the more alarming direction:
+// this is the request the agent is actually staring at. transition() commits
+// CLOSED before the cascade runs, which is exactly what makes a second tab
+// eligible to self-heal — so the winner can be overtaken between its own
+// ownership read and its own write.
+test('the WINNER losing the claim writes nothing either', async () => {
+  const row = seedFinalizeWorld({ reservationStatus: 'CONFIRMED', autoEmailedAt: new Date() });
+
+  let winnerFinalizedAt = null;
+  const raced = armReservationRace('CONFIRMED', async () => {
+    // The session is already CLOSED by now — the step commit happens before
+    // the cascade — so this second surface takes the self-heal path and wins.
+    await viaKiosk({ id: 'cs1', toStep: 'CLOSED' });
+    winnerFinalizedAt = db.agreements[0].finalizedAt;
+  });
+
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  assert.equal(raced(), true, 'the race actually fired');
+
+  assert.equal(out.currentStep, 'CLOSED', 'the finalize still answers 200');
+  assert.equal(db.reservations[0].status, 'CHECKED_OUT');
+  assert.equal(db.agreements[0].finalizedAt, winnerFinalizedAt, 'not rewritten');
+  assert.equal(db.mileageEntries.length, 1, 'exactly one CHECKOUT mileage row');
+  assert.equal(db.auditLogs.length, 1, 'exactly one STATUS_CHANGE audit line');
+  // One hop, committed by the wizard — the kiosk self-healed, it did not move.
+  assert.equal(readEvents(row.events).filter((e) => e.kind === 'TRANSITION').length, 1);
+});
+
+// A property the claim added on the way past, worth pinning because nothing
+// else asserts it: `finalizeOwnsReservation` is decided at the ownership read,
+// so a cancel landing AFTER it used to sail straight into the cascade. The
+// claim re-asserts the status at write time, which is the only place it can be
+// checked and acted on atomically.
+test('staff cancels inside the window: the claim refuses, the cascade writes nothing', async () => {
+  seedFinalizeWorld({ reservationStatus: 'CONFIRMED', autoEmailedAt: new Date() });
+
+  const raced = armReservationRace('CONFIRMED', async () => {
+    // reservations.routes.js allows this while the agent is at the counter.
+    db.reservations[0].status = 'CANCELLED';
+  });
+
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  assert.equal(raced(), true, 'the race actually fired');
+
+  assert.equal(out.currentStep, 'CLOSED', 'the session still closes');
+  assert.equal(db.reservations[0].status, 'CANCELLED', 'NOT resurrected');
+  assert.equal(db.agreements[0].status, 'DRAFT', 'and no contract was finalized');
+  assert.equal(db.vehicles[0].status, 'AVAILABLE', 'car stays in the available fleet');
+  assert.equal(db.mileageEntries.length, 0);
+  assert.equal(db.auditLogs.length, 0);
 });
 
 // ── 3. idempotency stays narrow ────────────────────────────────────────────
@@ -360,6 +462,14 @@ test('every line number in the 14-writer inventory still points at what it claim
   }
   assert.equal(externalRefs, 9, 'expected 9 external references (5 + 1 + 1 + 1 + 1)');
   assert.equal(local.length + externalRefs, 14, 'fourteen writers, all resolving');
+
+  // The parenthetical on saveCustomerSignature is part of the same list and
+  // rots the same way, but the two regexes above cannot see it. It went stale
+  // in the change that added the reservation claim and was caught by hand,
+  // which is the failure mode this whole test exists to remove. Checked now.
+  const txRef = comment.match(/\$transaction that starts :(\d+)/);
+  assert.ok(txRef, 'the saveCustomerSignature parenthetical is still there');
+  assert.match(svc[Number(txRef[1]) - 1], /prisma\.\$transaction\(\[/, `$transaction line ${txRef[1]}`);
 });
 
 // ── CONCURRENT_MODIFICATION — documented client contract, so it gets a test ─
