@@ -16,7 +16,7 @@ import logger from '../../lib/logger.js';
 import { CheckoutSessionError } from './checkout-session.service.js';
 import { sectionsForAgreement } from './terms-content.js';
 import { appendEvent } from './state-machine.js';
-import { analyzeSignatureInk } from '../../lib/signature-ink.js';
+import { analyzeSignatureInk, MAX_MARK_BYTES, MAX_INGEST_RAW_BYTES } from '../../lib/signature-ink.js';
 
 async function loadToken(token) {
   if (!token) throw new CheckoutSessionError('token required', 400);
@@ -85,6 +85,9 @@ async function saveInitial({ token, sectionKey, initialDataUrl, customerIp }) {
     throw new CheckoutSessionError('initialDataUrl missing or too small', 400);
   }
   const row = await loadToken(token);
+  if (initialDataUrl.length > MAX_MARK_BYTES) {
+    throw new CheckoutSessionError('Initial image is too large', 413);
+  }
   const ag = row.reservation.rentalAgreement;
   const allowed = new Set(sectionsForAgreement({ declinedInsurance: !!ag.declinedInsurance, sectionOverrides: ag.pickupLocation?.termsSectionsJson }).map((s) => s.key));
   if (!allowed.has(sectionKey)) {
@@ -118,16 +121,21 @@ async function complete({ token, signatureDataUrl, signerName, customerIp }) {
   if (!signatureDataUrl || signatureDataUrl.length < 200) {
     throw new CheckoutSessionError('signature missing or too small', 400);
   }
+  // Resolve the token BEFORE decoding. Until it checks out the caller is an
+  // anonymous stranger, and the PNG decode is the costly part of this call.
+  const row = await loadToken(token);
+  if (signatureDataUrl.length > MAX_MARK_BYTES) {
+    throw new CheckoutSessionError('Signature image is too large', 413);
+  }
   // A blank canvas passes the length check — it is a valid PNG (see
   // signature-ink.js and RA-20260701152550, where a blank interactive
   // signature printed a white box over a real T&C stroke). Reject it here,
   // where the customer can simply sign again; fail-open on formats the
   // analyzer cannot read.
-  const ink = analyzeSignatureInk(signatureDataUrl);
+  const ink = analyzeSignatureInk(signatureDataUrl, { maxRawBytes: MAX_INGEST_RAW_BYTES });
   if (ink.analyzable && !ink.hasInk) {
     throw new CheckoutSessionError('The signature is blank — please sign before submitting', 400);
   }
-  const row = await loadToken(token);
   const ag = row.reservation.rentalAgreement;
   const expected = sectionsForAgreement({ declinedInsurance: !!ag.declinedInsurance, sectionOverrides: ag.pickupLocation?.termsSectionsJson });
 

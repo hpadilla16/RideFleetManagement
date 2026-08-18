@@ -148,6 +148,17 @@ app.use(requestLogger());
 // req.user (if any). Sample rate via ENDPOINT_LOAD_SAMPLE_RATE (default 1%).
 app.use(endpointLoadSampler());
 app.use(cors({ origin: corsOriginFn, credentials: true }));
+// Public, token-authenticated signing surfaces take a pen stroke, not a photo
+// batch. Cap them BEFORE the 50mb parser below: body-parser marks req._body on
+// the first parse and every later express.json() is a no-op, so the FIRST
+// matching parser is the one that decides the limit. Without this, an
+// anonymous caller with an invalid token still costs us a 50MB buffer plus the
+// two copies the verify hook makes, all before the handler's first line.
+// Scoped to the signing paths so the Authorize.Net webhook under /api/public
+// keeps the rawBody the verify hook below gives it.
+app.use('/api/sign', express.json({ limit: '1mb' }));
+app.use('/api/public/signature', express.json({ limit: '1mb' }));
+
 app.use(express.json({
   limit: '50mb',
   verify: (req, _res, buf) => {
@@ -369,11 +380,17 @@ app.use('/api/rental-agreements', requireAuth, tenantRateLimit, requireModuleAcc
 app.use('/api/checkout-sessions', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), checkoutSessionRouter);
 app.use('/api/public/checkout-handoff', checkoutSessionPublicRouter);
 // Token-scoped T&C signing — no auth, token in URL is the auth.
-// JSON body limit raised on the parent app already; signature images
-// are ~50KB each so default Express limit (100KB) is fine for now.
+// Body limit is the 1mb parser mounted near the top of this file, NOT the
+// 100KB Express default an earlier comment here claimed: routers inherit the
+// app-level parser, so a mount-order fix was the only thing that could cap it.
+// The service also caps each data URL at MAX_MARK_BYTES and resolves the token
+// before decoding anything.
 app.use('/api/sign', termsSigningPublicRouter);
-// Token-scoped mobile inspection — same trust model as /api/sign. Photos
-// can run 1-2MB each, so the router applies its own express.json({limit: '15mb'}).
+// Token-scoped mobile inspection — same trust model as /api/sign. Photos can
+// run 1-2MB each. NOTE: the express.json({limit:'15mb'}) inside that router is
+// dead code — body-parser sets req._body on the first parse, so the 50mb
+// parser above has already run by the time the router's own parser is reached.
+// The effective limit here is 50mb.
 app.use('/api/mobile-inspection', mobileInspectionPublicRouter);
 // 2026-06-11 — customer-led inspection (token = auth, 24h TTL). Same trust
 // model and body-limit strategy as /api/mobile-inspection.

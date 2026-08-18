@@ -17,7 +17,7 @@ import logger from '../../lib/logger.js';
 import { normalizeDob } from '../../lib/dob.js';
 import { getEffectiveTermsHtml } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
-import { analyzeSignatureInk } from '../../lib/signature-ink.js';
+import { analyzeSignatureInk, MAX_MARK_BYTES, MAX_INGEST_RAW_BYTES } from '../../lib/signature-ink.js';
 import {
   attachPublicRequestMeta,
   createPublicRateLimitGuard
@@ -1746,18 +1746,28 @@ customerPortalRouter.post('/signature/:token', portalWrite, async (req, res, nex
     const signatureDataUrl = String(req.body?.signatureDataUrl || '').trim();
     if (!signerName) return res.status(400).json({ error: 'signerName is required' });
     if (!signatureDataUrl) return res.status(400).json({ error: 'signatureDataUrl is required' });
+    // Resolve the token BEFORE touching the image. Decoding a PNG is the most
+    // expensive thing this handler does, and until the token checks out the
+    // caller is an anonymous stranger — doing that work first let anyone with
+    // the URL spend our event loop with no valid token at all.
+    const reservation = await findReservationByToken('signature', token);
+    if (!reservation) return res.status(404).json({ error: 'Invalid or expired signature link' });
+
+    // The app-wide JSON limit is 50mb (sized for inspection photos). A pen
+    // stroke is tens of KB; anything past MAX_MARK_BYTES is not a signature.
+    if (signatureDataUrl.length > MAX_MARK_BYTES) {
+      return res.status(413).json({ error: 'Signature image is too large' });
+    }
+
     // An untouched signature pad is still a valid PNG (RA-20260701152550: the
     // customer submitted a blank canvas and a WHITE BOX printed in the
     // agreement's Customer Signature block while her real T&C stroke sat on
     // the appendix page). Reject the blank HERE, where the customer can simply
     // sign again. Fail-open on formats the analyzer cannot read.
-    const ink = analyzeSignatureInk(signatureDataUrl);
+    const ink = analyzeSignatureInk(signatureDataUrl, { maxRawBytes: MAX_INGEST_RAW_BYTES });
     if (ink.analyzable && !ink.hasInk) {
       return res.status(400).json({ error: 'The signature is blank — please sign before submitting' });
     }
-
-    const reservation = await findReservationByToken('signature', token);
-    if (!reservation) return res.status(404).json({ error: 'Invalid or expired signature link' });
 
     const note = `[SIGNATURE ${new Date().toISOString()}] signed by ${signerName}`;
     await prisma.reservation.update({

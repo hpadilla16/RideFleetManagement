@@ -102,7 +102,6 @@ const UNRUN_FILES_BASELINE = new Set([
   'src/modules/checkout-session/checkout-session.scheduler.test.mjs',
   'src/modules/checkout-session/spin-charge.test.mjs',
   'src/modules/checkout-session/state-machine.test.mjs',
-  'src/modules/checkout-session/terms-signing.test.mjs',
   'src/modules/citations/citations-archive.test.mjs',
   'src/modules/customer-portal/customer-portal-rate-limit.test.mjs',
   'src/modules/customers/customer-doc-endpoints.embedded.test.mjs',

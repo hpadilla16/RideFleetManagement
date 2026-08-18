@@ -60,13 +60,42 @@ function parsePng(buf) {
 const CHANNELS = { 0: 1, 2: 3, 4: 2, 6: 4 };
 
 /**
+ * Largest raw pixel buffer an IHDR may ask us to allocate, by caller.
+ *
+ * PRINT (default, 16MB): renderAgreementHtml re-reads signatures captured by
+ * every pad in the app, including the check-in wizard's full-width pad, which
+ * on a 5K panel at 300% scaling reaches ~10MB of raw pixels. Going lower would
+ * make a legitimate STORED signature unanalyzable at print time and silently
+ * switch off the blank-detection that RA-20260701152550 exists for.
+ *
+ * INGEST (8MB): the two public token-authenticated endpoints only ever receive
+ * their own pads, which top out at 4.09MB (/sign at devicePixelRatio 4) and
+ * 0.72MB (customer portal). Halving the bound there halves the worst-case
+ * decode an attacker with a valid token can force, and cannot reject anything
+ * those pads produce.
+ */
+const MAX_RAW_BYTES = 16 * 1024 * 1024;
+export const MAX_INGEST_RAW_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Ceiling on an incoming signature/initial data URL, for the public
+ * token-authenticated endpoints. This is the second of two limits: main.js
+ * caps the signing paths at a 1mb body, and this bounds what we accept as a
+ * mark once parsed. Real pads are nowhere near it: the customer-portal pad is a
+ * fixed 860x220 and the /sign pad is devicePixelRatio-scaled, and both
+ * emit mostly-white PNGs that compress to tens of KB. Callers should
+ * check this AFTER the token lookup, so an invalid token costs nothing.
+ */
+export const MAX_MARK_BYTES = 512 * 1024;
+
+/**
  * Analyze a data URL. Returns { analyzable, hasInk, inkPixels }.
  * "Ink" = a pixel that is OPAQUE enough to see (alpha > 32) and DARK enough to
  * read (luma < 200 of 255). A couple of stray anti-aliased pixels do not count
  * as a signature: the threshold is 25 inked pixels, roughly the shortest
  * possible pen tick, far below any real initial.
  */
-export function analyzeSignatureInk(dataUrl) {
+export function analyzeSignatureInk(dataUrl, { maxRawBytes = MAX_RAW_BYTES } = {}) {
   const none = { analyzable: false, hasInk: false, inkPixels: 0 };
   const m = /^data:image\/png;base64,([A-Za-z0-9+/=\s]+)$/.exec(String(dataUrl || '').trim());
   if (!m) return none;
@@ -78,16 +107,32 @@ export function analyzeSignatureInk(dataUrl) {
   }
   if (!png || png.interlace !== 0 || png.bitDepth !== 8 || !(png.colorType in CHANNELS)) return none;
 
+  const bpp = CHANNELS[png.colorType];
+  const stride = png.width * bpp;
+  // A PNG of W x H at this colour type inflates to EXACTLY (stride + 1) * H
+  // bytes, and IHDR told us W and H before we spent anything. Bounding the
+  // inflate by that figure removes the amplification entirely: a 1x1 header
+  // shipping megabytes of IDAT (a zip bomb — 400KB in, ~300MB out, ~286ms of
+  // blocked event loop) is refused after a few bytes instead of being
+  // decompressed in full. A fixed ceiling would either be too low for a
+  // high-DPI pad or too high to stop the bomb; this is neither.
+  const expected = (stride + 1) * png.height;
+  // The header itself is attacker-controlled, so cap what it may ASK for.
+  // Callers that only ever see their own signature pad should pass the tighter
+  // MAX_INGEST_RAW_BYTES; the default keeps the print path's headroom.
+  if (!expected || expected > maxRawBytes) return none;
+
   let raw;
   try {
-    raw = zlib.inflateSync(png.idat);
+    // Trailing bytes past the pixel data are not part of any signature we
+    // print, but tolerate a little slack so an odd-but-valid encoder is not
+    // failed shut. Overshooting the limit THROWS, and the catch fails open.
+    raw = zlib.inflateSync(png.idat, { maxOutputLength: expected + 1024 });
   } catch {
     return none;
   }
 
-  const bpp = CHANNELS[png.colorType];
-  const stride = png.width * bpp;
-  if (raw.length < (stride + 1) * png.height) return none;
+  if (raw.length < expected) return none;
 
   let inkPixels = 0;
   const prev = Buffer.alloc(stride);
