@@ -439,19 +439,30 @@ export async function applyPrecheckinCharges({
         });
       }
 
-      // Store voucher URL on the customer record.
+      // Flag the voucher on the customer record.
       //
-      // BEHAVIOR PRESERVED, AND IT IS WRONG: this OVERWRITES Customer.notes
-      // rather than appending, so an OTA pre-check-in erases whatever an agent
-      // had written on that customer. Not changed here — it is a data-loss bug
-      // with its own blast radius, not an atomicity one, and quietly rewriting
-      // it under cover of this change is how a fix ships unreviewed. Raised
-      // separately.
+      // APPENDS. This used to assign `notes` outright, so a customer completing
+      // an OTA pre-check-in erased whatever an agent had written about them —
+      // do-not-rent history, a damage dispute, a phone number that actually
+      // works. Nothing reads the marker (it has no other mention in the repo)
+      // and `Customer.notes` is a free-text field an agent types into, so the
+      // only thing the old assignment bought was the deletion. Same shape as
+      // the [OTA PREPAID] guard above and as the other three writers of this
+      // column (customers.service.js, rental-agreements.service.js): read
+      // fresh INSIDE the transaction, append behind a marker check so a
+      // re-submission does not stack the line.
       if (thirdPartyBooking.voucherUrl) {
-        await tx.customer.update({
-          where: { id: reservation.customerId },
-          data: { notes: `[VOUCHER] Third-party voucher uploaded during pre-check-in` }
+        const freshCustomer = await tx.customer.findUnique({
+          where: { id: reservation.customerId }, select: { notes: true }
         });
+        const customerNotes = freshCustomer?.notes || '';
+        const voucherNote = '[VOUCHER] Third-party voucher uploaded during pre-check-in';
+        if (!customerNotes.includes('[VOUCHER]')) {
+          await tx.customer.update({
+            where: { id: reservation.customerId },
+            data: { notes: customerNotes ? `${customerNotes}\n${voucherNote}` : voucherNote }
+          });
+        }
       }
     }
 

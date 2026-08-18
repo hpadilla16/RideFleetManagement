@@ -134,13 +134,15 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let resSeq = 0;
 /** A reservation with a charge sheet, fresh for each case. */
-async function makeReservation({ charges = [], notes = null } = {}) {
+async function makeReservation({ charges = [], notes = null, customerId = null } = {}) {
   resSeq += 1;
   const reservation = await prisma.reservation.create({
     data: {
       reservationNumber: `${TAG}-${resSeq}`,
       tenantId: ids.tenant,
-      customerId: ids.customer,
+      // `ids.customer` is shared by every case in this file, so anything that
+      // writes to the customer row takes its own.
+      customerId: customerId || ids.customer,
       pickupLocationId: ids.location,
       returnLocationId: ids.location,
       pickupAt: new Date('2026-09-01T15:00:00Z'),
@@ -153,6 +155,22 @@ async function makeReservation({ charges = [], notes = null } = {}) {
   }
   // Shaped like findReservationByToken('customer-info') hands it over.
   return prisma.reservation.findUnique({ where: { id: reservation.id } });
+}
+
+let custSeq = 0;
+/** A customer of this tenant, optionally with a note an agent already wrote. */
+async function makeCustomer(notes = null) {
+  custSeq += 1;
+  const row = await prisma.customer.create({
+    data: {
+      tenantId: ids.tenant,
+      firstName: 'Otto',
+      lastName: `OTA-${custSeq}-${TAG}`,
+      phone: `7871${String(Date.now()).slice(-4)}${custSeq}`,
+      notes,
+    },
+  });
+  return row;
 }
 
 function chargeSheet(reservationId) {
@@ -552,6 +570,92 @@ describe('a double-tapped Submit', () => {
     assert.equal(sheet.filter((c) => c.source === 'INSURANCE').length, 1);
     assert.equal(sheet.filter((c) => c.source === 'ADDITIONAL_SERVICE_PRECHECKIN').length, 1);
     assert.equal(Number(sheet.find((c) => c.source === 'INSURANCE').total), 45);
+  });
+
+  it('does not erase an agent note from the customer when a voucher is uploaded', async () => {
+    // THE BUG THIS PINS: the voucher branch used to ASSIGN Customer.notes,
+    // not append. A customer finishing an OTA pre-check-in from their phone
+    // silently deleted whatever the counter had written about them, and the
+    // route answered 200 — nobody had any reason to look.
+    const agentNote = 'DO NOT RENT convertibles — returned the last one on a flatbed. Call before pickup: 787-555-0134.';
+    const customer = await makeCustomer(agentNote);
+    const reservation = await makeReservation({
+      customerId: customer.id,
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'BASIC' },
+      insurancePlans: PLANS,
+      thirdPartyBooking: { isThirdParty: true, voucherUrl: 'https://example.test/voucher.pdf' },
+    });
+
+    const row = await prisma.customer.findUnique({
+      where: { id: customer.id }, select: { notes: true },
+    });
+    assert.ok(
+      row.notes.includes(agentNote),
+      "the agent's note must survive the customer's pre-check-in — it is the only copy",
+    );
+    assert.ok(row.notes.includes('[VOUCHER]'), 'and the voucher still gets flagged');
+    assert.equal(
+      row.notes, `${agentNote}\n[VOUCHER] Third-party voucher uploaded during pre-check-in`,
+      'appended on its own line, behind the existing text',
+    );
+  });
+
+  it('stamps the voucher marker once when the customer submits again', async () => {
+    // Re-submission is normal (see the case above this block). The old
+    // assignment was accidentally idempotent because it overwrote; appending
+    // is only safe with the marker guard, so the guard gets its own case.
+    const customer = await makeCustomer('Prefers the airport counter.');
+    const reservation = await makeReservation({
+      customerId: customer.id,
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+
+    const submission = () => applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'BASIC' },
+      insurancePlans: PLANS,
+      thirdPartyBooking: { isThirdParty: true, voucherUrl: 'https://example.test/voucher.pdf' },
+    });
+
+    await submission();
+    await submission();
+
+    const row = await prisma.customer.findUnique({
+      where: { id: customer.id }, select: { notes: true },
+    });
+    assert.equal(
+      (row.notes.match(/\[VOUCHER\]/g) || []).length, 1,
+      'the marker is read by eye at the counter — it must not stack up one line per submission',
+    );
+    assert.ok(row.notes.startsWith('Prefers the airport counter.'));
+  });
+
+  it('leaves the customer row alone when no voucher was uploaded', async () => {
+    const customer = await makeCustomer('Corporate account — bill to Ride LLC.');
+    const reservation = await makeReservation({
+      customerId: customer.id,
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'BASIC' },
+      insurancePlans: PLANS,
+      thirdPartyBooking: { isThirdParty: true, voucherUrl: null },
+    });
+
+    const row = await prisma.customer.findUnique({
+      where: { id: customer.id }, select: { notes: true },
+    });
+    assert.equal(row.notes, 'Corporate account — bill to Ride LLC.');
   });
 
   it('PINS a known non-idempotency: a PERCENTAGE plan re-prices on re-submission', async () => {
