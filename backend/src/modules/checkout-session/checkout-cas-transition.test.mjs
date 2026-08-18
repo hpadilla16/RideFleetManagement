@@ -34,7 +34,7 @@ import { readFileSync } from 'node:fs';
 import { readEvents } from './state-machine.js';
 import {
   installWorld, restoreWorld, onRestore as restorePush,
-  seedSession, seedFinalizeWorld, armRace, viaWebWizard, viaKiosk,
+  seedSession, seedFinalizeWorld, armRace, armReservationRace, viaWebWizard, viaKiosk,
 } from './checkout-session.test-harness.mjs';
 
 // The in-memory prisma world lives in checkout-session.test-harness.mjs so the
@@ -221,33 +221,6 @@ test('SELF-HEAL: a winner whose cascade died half-way is completed by the idempo
   assert.equal(row.stateVersion, 1);
 });
 
-/**
- * armRace's sibling for the reservation row. The finalize cascade reads the
- * reservation, runs its guards against that snapshot and only then writes, so
- * the window the claim closes is on THIS row rather than on the session. The
- * next read of a reservation sitting on `triggerStatus` returns the snapshot
- * that read would have seen, and `foreign` commits in between. Only the FIRST
- * matching read fires: the cascade reads the reservation twice (once for the
- * status/vehicle guards, once for the double-booking re-check) and it is the
- * first one the claim is compared against.
- */
-function armReservationRace(triggerStatus, foreign) {
-  const orig = prisma.reservation.findUnique;
-  let fired = false;
-  prisma.reservation.findUnique = async (args) => {
-    const row = await orig(args);
-    if (!fired && row && row.status === triggerStatus) {
-      fired = true;
-      const snapshot = { ...row }; // detached, like a real read
-      await foreign();
-      return snapshot;
-    }
-    return row;
-  };
-  restore.push(() => { prisma.reservation.findUnique = orig; });
-  return () => fired;
-}
-
 // The self-heal is the one path into the cascade that breaks out of the CAS
 // loop WITHOUT a commit, so until the claim it held nothing: two callers on it
 // both ran the whole arm. The allow-list and the status short-circuit were
@@ -290,6 +263,58 @@ test('two concurrent self-heals: the claim lets exactly ONE run the cascade', as
   assert.equal(db.auditLogs.length, 1, 'exactly one STATUS_CHANGE audit line');
   // And healing is still not a transition, on either tab.
   assert.equal(readEvents(row.events).filter((e) => e.kind === 'TRANSITION').length, 0);
+});
+
+// The WINNER can lose the claim too, and it is the more alarming direction:
+// this is the request the agent is actually staring at. transition() commits
+// CLOSED before the cascade runs, which is exactly what makes a second tab
+// eligible to self-heal — so the winner can be overtaken between its own
+// ownership read and its own write.
+test('the WINNER losing the claim writes nothing either', async () => {
+  const row = seedFinalizeWorld({ reservationStatus: 'CONFIRMED', autoEmailedAt: new Date() });
+
+  let winnerFinalizedAt = null;
+  const raced = armReservationRace('CONFIRMED', async () => {
+    // The session is already CLOSED by now — the step commit happens before
+    // the cascade — so this second surface takes the self-heal path and wins.
+    await viaKiosk({ id: 'cs1', toStep: 'CLOSED' });
+    winnerFinalizedAt = db.agreements[0].finalizedAt;
+  });
+
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  assert.equal(raced(), true, 'the race actually fired');
+
+  assert.equal(out.currentStep, 'CLOSED', 'the finalize still answers 200');
+  assert.equal(db.reservations[0].status, 'CHECKED_OUT');
+  assert.equal(db.agreements[0].finalizedAt, winnerFinalizedAt, 'not rewritten');
+  assert.equal(db.mileageEntries.length, 1, 'exactly one CHECKOUT mileage row');
+  assert.equal(db.auditLogs.length, 1, 'exactly one STATUS_CHANGE audit line');
+  // One hop, committed by the wizard — the kiosk self-healed, it did not move.
+  assert.equal(readEvents(row.events).filter((e) => e.kind === 'TRANSITION').length, 1);
+});
+
+// A property the claim added on the way past, worth pinning because nothing
+// else asserts it: `finalizeOwnsReservation` is decided at the ownership read,
+// so a cancel landing AFTER it used to sail straight into the cascade. The
+// claim re-asserts the status at write time, which is the only place it can be
+// checked and acted on atomically.
+test('staff cancels inside the window: the claim refuses, the cascade writes nothing', async () => {
+  seedFinalizeWorld({ reservationStatus: 'CONFIRMED', autoEmailedAt: new Date() });
+
+  const raced = armReservationRace('CONFIRMED', async () => {
+    // reservations.routes.js allows this while the agent is at the counter.
+    db.reservations[0].status = 'CANCELLED';
+  });
+
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  assert.equal(raced(), true, 'the race actually fired');
+
+  assert.equal(out.currentStep, 'CLOSED', 'the session still closes');
+  assert.equal(db.reservations[0].status, 'CANCELLED', 'NOT resurrected');
+  assert.equal(db.agreements[0].status, 'DRAFT', 'and no contract was finalized');
+  assert.equal(db.vehicles[0].status, 'AVAILABLE', 'car stays in the available fleet');
+  assert.equal(db.mileageEntries.length, 0);
+  assert.equal(db.auditLogs.length, 0);
 });
 
 // ── 3. idempotency stays narrow ────────────────────────────────────────────

@@ -513,10 +513,14 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
         // rentalAgreement.update rewrites `finalizedAt` with today's date on
         // an already-FINALIZED contract (audit-trail loss), and
         // recordMileageEntry is a bare create with no dedup, so repeats pile
-        // up duplicate mileage rows. What actually contains them is the
-        // status short-circuit — which is why SELF_HEAL_OWNS below has to be
-        // an allow-list and not a wish. The loaner bump (updateMany guarded
-        // by DRAFT) and the email (CAS on autoEmailedAt) are genuinely
+        // up duplicate mileage rows. What contains them is the CLAIM on the
+        // reservation (2026-08-18) — the cascade's own first write, guarded by
+        // the status it read, so only one caller gets past it. The status
+        // short-circuit below and `selfHealOwns`'s allow-list are still there
+        // and still matter, but they are defence in depth now, not the
+        // mechanism: both decide against a row that was read BEFORE the write,
+        // which is the window the claim closes. The loaner bump (updateMany
+        // guarded by DRAFT) and the email (CAS on autoEmailedAt) are genuinely
         // idempotent on their own.
         alreadyApplied = true;
         updated = session;
@@ -552,12 +556,12 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // This is a PARTIAL close of the events lost-update, and the honest
       // count is FOURTEEN other writers of this TEXT column, all still doing
       // an unguarded read-modify-write (read → write, this file):
-      //   stampSideEffect       :1085 → :1093
-      //   saveCustomerSignature :1115 → :1136  (read is OUTSIDE the
-      //                                         $transaction that starts :1121)
-      //   mintHandoffToken      :1159 → :1210
-      //   setDeclinedInsurance  :1281 → :1295
-      //   markAbandoned         :1305 → :1319
+      //   stampSideEffect       :1097 → :1105
+      //   saveCustomerSignature :1127 → :1148  (read is OUTSIDE the
+      //                                         $transaction that starts :1133)
+      //   mintHandoffToken      :1171 → :1222
+      //   setDeclinedInsurance  :1293 → :1307
+      //   markAbandoned         :1317 → :1331
       //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
       //   spin-charge.service.js:574, :606, :884, :1038, :1229 (five)
       //   mobile-inspection.service.js:276
@@ -782,6 +786,14 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
         // reservation, which this cascade is deliberately still allowed to do.
         // Whoever wins the claim owns every write under it; the loser has done
         // nothing, so there is nothing to undo.
+        //
+        // Correct for the same reason the step commit is, and with the same
+        // caveat: under READ COMMITTED the loser blocks on the winner's row
+        // lock, RE-EVALUATES this WHERE against the committed row and gets
+        // count: 0. It also assumes `resv` is still the row the guards above
+        // were decided against — which is why the double-booking re-check
+        // reads into `resvFull` rather than reassigning `resv`. Reassign it and
+        // this compare-and-set quietly becomes a no-op.
         const claimed = await prisma.reservation.updateMany({
           where: { id: resv.id, status: resv.status },
           data: { status: 'CHECKED_OUT' },

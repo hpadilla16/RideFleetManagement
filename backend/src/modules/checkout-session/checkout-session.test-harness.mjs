@@ -214,6 +214,34 @@ export function armRace(triggerStep, foreign) {
   return () => fired;
 }
 
+/**
+ * armRace's sibling for the reservation row. The finalize cascade reads the
+ * reservation, runs its guards against that snapshot and only then writes, so
+ * the window the CLAIM closes is on THIS row rather than on the session. The
+ * next read of a reservation sitting on `triggerStatus` returns the snapshot
+ * that read would have seen, and `foreign` commits in between.
+ *
+ * Only the FIRST matching read fires: the cascade reads the reservation twice
+ * (once for the ownership/status guards, once for the double-booking re-check)
+ * and it is the first one the claim is compared against.
+ */
+export function armReservationRace(triggerStatus, foreign) {
+  const orig = prisma.reservation.findUnique;
+  let fired = false;
+  prisma.reservation.findUnique = async (args) => {
+    const row = await orig(args);
+    if (!fired && row && row.status === triggerStatus) {
+      fired = true;
+      const snapshot = { ...row }; // detached, like a real read
+      await foreign();
+      return snapshot;
+    }
+    return row;
+  };
+  restore.push(() => { prisma.reservation.findUnique = orig; });
+  return () => fired;
+}
+
 // ── the REAL payloads, not invented ones ───────────────────────────────────
 //
 // frontend/src/lib/checkout-session.js#transition puts exactly

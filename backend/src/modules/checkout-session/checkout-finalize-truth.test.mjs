@@ -41,6 +41,7 @@ import { CheckoutSessionError } from './checkout-session.service.js';
 import { rentalAgreementsService } from '../rental-agreements/rental-agreements.service.js';
 import {
   installWorld, restoreWorld, onRestore, seedFinalizeWorld, viaWebWizard,
+  armReservationRace, viaKiosk,
 } from './checkout-session.test-harness.mjs';
 
 let db;
@@ -261,6 +262,39 @@ test('§2 the happy path still mails — and mails a FINALIZED contract', async 
 });
 
 // ── §3. the send's rejection has an owner ──────────────────────────────────
+
+test('§2 the loser of the reservation claim does not mail a second contract', async () => {
+  // The claim (2026-08-18) gave the cascade a second exit, and this one leaves
+  // `finalizeCascadeOk` false on purpose: at the instant the claim is lost the
+  // winner has claimed the row, not finished with it, so the loser cannot
+  // assert the contract reached FINALIZED. The email arm is LIVE here
+  // (autoEmailedAt null) — with a stamp seeded, maybeSendFinalizeEmail returns
+  // at its first line and this would assert nothing.
+  //
+  // Honest about what it pins: this does NOT isolate `finalizeCascadeOk`.
+  // Defeat the claim and the count stays 1, because the autoEmailedAt CAS
+  // inside maybeSendFinalizeEmail independently refuses the second send — the
+  // two guards overlap here by design. What it does pin is the end-to-end
+  // property under a claim race, which nothing else covered: exactly one
+  // contract leaves, and it is FINALIZED when it does.
+  seedFinalizeWorld();
+  const calls = spyOnFinalizeEmail();
+
+  const raced = armReservationRace('CONFIRMED', async () => {
+    await viaKiosk({ id: 'cs1', toStep: 'CLOSED' });
+  });
+
+  await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  assert.equal(raced(), true, 'the race actually fired');
+  await settle();
+
+  // The winner mailed. The loser reached the email arm with finalizeCascadeOk
+  // false and stopped — and the autoEmailedAt CAS is not what saved it here.
+  assert.equal(calls.length, 1, 'exactly one contract, sent by the winner');
+  assert.equal(calls[0].agreementStatus, 'FINALIZED', 'and it was FINALIZED when it went');
+  assert.equal(db.reservations[0].status, 'CHECKED_OUT');
+  assert.ok(db.checkoutSessions[0].autoEmailedAt instanceof Date);
+});
 
 test('§3 a send that rejects is caught, not left unhandled', async () => {
   // "Customer email is required" is an ordinary state — a walk-up customer
