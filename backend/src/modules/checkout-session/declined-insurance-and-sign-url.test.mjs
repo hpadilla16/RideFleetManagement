@@ -428,6 +428,9 @@ test('the set of files naming declinedInsurance is a ratchet', () => {
     'src/modules/rental-agreements/rental-agreements.service.js',
     'src/modules/reservations/reservations.service.js',
     // Tests.
+    // Never touches the column: passes the name to the pure sectionsForAgreement()
+    // to derive MAX_SECTIONS. Listed because the ratchet matches on the NAME.
+    'src/modules/checkout-session/terms-signing.routes.test.mjs',
     'src/modules/checkout-session/declined-insurance-and-sign-url.test.mjs',
     'src/modules/checkout-session/terms-section-overrides.test.mjs',
     'src/modules/checkout-session/terms-signing.test.mjs',
