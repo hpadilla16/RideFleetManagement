@@ -495,6 +495,12 @@ class CheckoutCloseController extends Notifier<CheckoutCloseState> {
     if (state.handover != HandoverVerdict.unverified) return;
     state = state.copyWith(handover: HandoverVerdict.verifying);
     final verdict = await _verify(logOutcome: false);
+    // El provider es autoDispose y ESTA pantalla invita a irse mientras la
+    // consulta viaja: durante `verifying` el secundario dice "Volver al
+    // inicio" y el pie promete que nada bloquea. Si el agente lo toma, el
+    // controller ya murió cuando vuelve el await y `ref.read` lanza
+    // UnmountedRefException. La telemetría no vale una excepción.
+    if (!ref.mounted) return;
     _logger.log(
       CheckoutEvents.handoverRecheck,
       data: {'result': _handoverTag(verdict)},

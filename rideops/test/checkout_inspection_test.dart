@@ -365,6 +365,34 @@ void main() {
     expect(find.text('outbox-screen'), findsOneWidget);
   });
 
+  testWidgets(
+      'GD-MC-7: la firma del paso 4 DENTRO del wizard también dice qué se '
+      'firma — es la copia que el cliente ve primero', (tester) async {
+    // La otra prueba de GD-MC-7 ejercita la pantalla suelta
+    // (inspection_screen). Esta fija la OTRA copia, la del wizard
+    // (inspection_step.dart), que es la que corre en el camino normal: el
+    // cliente firma aquí y cinco minutos después vuelve a firmar la entrega
+    // en el mismo teléfono.
+    api.current = sessionAt(CheckoutStep.inspectionInProgress);
+    await pumpWizard(tester);
+
+    container(tester)
+        .read(inspectionControllerProvider(kReservationId).notifier)
+        .goToStep(InspectionStep.signature);
+    await tester.pumpAndSettle();
+
+    // Pie de identidad: la unidad viaja desde display-data por
+    // inspection_state:134. Sin placa el widget arma el pie igual; sin unidad
+    // lo omitiría entero (kiosk_signature_step:_footLine) — cero riesgo.
+    expect(
+      find.textContaining('Toyota Corolla 2023'),
+      findsOneWidget,
+      reason: 'sin esto el cliente firma sin saber QUÉ está firmando',
+    );
+    // Y cero cromo de staff frente al cliente, que es la otra mitad del trato.
+    expect(find.text('Pause'), findsNothing);
+  });
+
   // ── 17E · una foto obligatoria muerta ─────────────────────────────────────
 
   testWidgets(

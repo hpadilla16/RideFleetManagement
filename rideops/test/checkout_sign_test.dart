@@ -146,6 +146,27 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// Espera a que el export a PNG del lienzo REALMENTE haya salido, sondeando
+  /// en vez de dormir un plazo fijo.
+  ///
+  /// El export pasa por el engine y sus futures no resuelven bajo fake-async,
+  /// así que hay que estar en `runAsync` con el reloj de verdad. Un
+  /// `delayed` fijo obliga a elegir entre lento (siempre paga el peor caso) y
+  /// frágil (se cae cuando la suite satura la CPU); el sondeo sale en cuanto
+  /// la condición se cumple y solo agota el tope cuando de verdad falló.
+  Future<void> waitFor(
+    bool Function() done, {
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    while (!done()) {
+      if (DateTime.now().isAfter(deadline)) {
+        fail('el export de la firma no salió en ${timeout.inSeconds} s');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+  }
+
   /// Trazo REAL sobre el lienzo + confirmación. El export a PNG pasa por el
   /// engine, cuyos futures no resuelven bajo el fake-async del test.
   Future<void> signOnPad(WidgetTester tester) async {
@@ -161,13 +182,11 @@ void main() {
     await tester.runAsync(() async {
       await tester.tap(find.text('Confirm signature'));
       await tester.pump();
-      // Reloj REAL: el export a PNG pasa por el engine y sus futures no
-      // resuelven bajo fake-async. 120 ms alcanzaban al correr este archivo
-      // solo, pero con la suite completa en paralelo el export a veces no
-      // había terminado y el `signerNames` quedaba vacío — una prueba de
-      // contrato cayéndose por carga de CPU. El margen es barato; el falso
-      // rojo en la compuerta, no.
-      await Future<void>.delayed(const Duration(milliseconds: 600));
+      // Sondeo acotado sobre el efecto REAL (la firma salió a la API), no un
+      // plazo fijo: con la suite en paralelo 120 ms no bastaban y el
+      // `signerNames` quedaba vacío — un rojo falso en una prueba de
+      // contrato. Esto sale en cuanto ocurre.
+      await waitFor(() => api.signatureCalls > 0);
     });
     await tester.pumpAndSettle();
   }
@@ -469,13 +488,11 @@ void main() {
     await tester.runAsync(() async {
       await tester.tap(find.text('Confirm signature'));
       await tester.pump();
-      // Reloj REAL: el export a PNG pasa por el engine y sus futures no
-      // resuelven bajo fake-async. 120 ms alcanzaban al correr este archivo
-      // solo, pero con la suite completa en paralelo el export a veces no
-      // había terminado y el `signerNames` quedaba vacío — una prueba de
-      // contrato cayéndose por carga de CPU. El margen es barato; el falso
-      // rojo en la compuerta, no.
-      await Future<void>.delayed(const Duration(milliseconds: 600));
+      // Sondeo acotado sobre el efecto REAL (la firma salió a la API), no un
+      // plazo fijo: con la suite en paralelo 120 ms no bastaban y el
+      // `signerNames` quedaba vacío — un rojo falso en una prueba de
+      // contrato. Esto sale en cuanto ocurre.
+      await waitFor(() => api.signatureCalls > 0);
     });
     await tester.pump();
     await tester.pump();
@@ -633,6 +650,13 @@ void main() {
         return api.current!;
       }
       api.current = closedSession();
+      // El estado de la reserva CAMBIA con el rechazo: sin esto, la lectura
+      // rancia y la fresca son idénticas y borrar la verificación de 19B no
+      // rompería nada (la prueba prometía más de lo que comprobaba).
+      reservations.patchDisplayData = (raw) {
+        (raw['reservation'] as Map<String, dynamic>)['status'] = 'CHECKED_OUT';
+        return raw;
+      };
       // 422, no 409: `NO_VEHICLE_ASSIGNED` sale de service:464-468 y la ruta
       // preserva su status (routes:12-16). El par 409+NO_VEHICLE_ASSIGNED que
       // esta prueba usaba antes no lo emite el backend en ningún camino.
@@ -653,8 +677,12 @@ void main() {
     expect(copied, contains(kSessionId));
     expect(copied, contains('NO_VEHICLE_ASSIGNED'));
     expect(copied, contains('no vehicle is assigned'));
-    expect(copied, contains('CONFIRMED'),
-        reason: 'el estado verificado de la reserva viaja con el reporte');
+    // 19B se resuelve EN EL MOMENTO: el estado que viaja al mostrador es el
+    // que se leyó DESPUÉS del rechazo, no el que la pantalla traía de antes.
+    expect(copied, contains('CHECKED_OUT'),
+        reason: 'sin la verificación de 19B el reporte llevaría el CONFIRMED '
+            'rancio, que es justo el dato que el mostrador va a usar');
+    expect(copied, isNot(contains('CONFIRMED')));
   });
 
   // ── 19A · entrega cerrada ─────────────────────────────────────────────────
@@ -804,6 +832,71 @@ void main() {
     expect(api.transitions.length, transitionsBefore,
         reason: 'ADR-5 aplicado al cierre: se consulta, no se reproduce');
     expect(api.getCalls, greaterThan(getsBefore));
+  });
+
+  testWidgets(
+      '19C → 19A: la consulta descubre el cierre y AUN ASÍ pasa por '
+      '"comprobando" — la regla vale en las DOS puertas, no solo en close()',
+      (tester) async {
+    api.current = signedSession();
+    await pumpSign(tester);
+    api.onTransition = (_) async =>
+        throw apiError(ApiErrorKind.network, message: '');
+    await tester.tap(find.text('Close the handover'));
+    await tester.pumpAndSettle();
+    expect(find.text('Check the status'), findsOneWidget);
+
+    // El servidor sí había cerrado, y la reserva confirma la entrega. La
+    // sesión trae `finishedAt` porque el backend lo sella al entrar en
+    // terminal (checkout-session.service.js:412-414): una sesión cerrada de
+    // verdad siempre lo tiene.
+    api.current = CheckoutSessionDto.fromJson({
+      ...rawCheckoutSession(),
+      'currentStep': 'CLOSED',
+      'inspectionCompletedAt': inspectionDone.toIso8601String(),
+      'customerSignedAt': inspectionDone.toIso8601String(),
+      'finishedAt': DateTime.utc(2026, 8, 17, 17, 4).toIso8601String(),
+    });
+    api.onGet = () async => api.current!;
+    reservations.patchDisplayData = (raw) {
+      (raw['reservation'] as Map<String, dynamic>)['status'] = 'CHECKED_OUT';
+      return raw;
+    };
+    // La comprobación se retiene en vuelo: este es el frame que se está
+    // fijando. Sin él, este camino podía saltar directo a "Registrada" —
+    // afirmar un resultado antes de que vuelva la llamada que lo produce, que
+    // es exactamente el pecado que esta historia existe para impedir.
+    final gate = Completer<void>();
+    reservations.displayGate = gate;
+
+    await tester.tap(find.text('Check the status'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Checkout closed'), findsOneWidget);
+    expect(find.text('Handover closed'), findsNothing,
+        reason: 'todavía no se ha preguntado nada');
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -260));
+    await tester.pump();
+    expect(find.text('Checking on the reservation…'), findsOneWidget);
+    expect(find.text('Not confirmed'), findsNothing);
+    expect(
+      find.textContaining('Recorded on the reservation'),
+      findsNothing,
+      reason: 'el renglón no se adelanta al 200 tampoco por esta puerta',
+    );
+
+    gate.complete();
+    reservations.displayGate = null;
+    await tester.pumpAndSettle();
+    // De vuelta arriba: el arrastre anterior dejó el héroe fuera de la
+    // ventana y el ListView ya no lo construye.
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, 400));
+    await tester.pumpAndSettle();
+    expect(find.text('Handover closed'), findsOneWidget);
+    await scrollBody(tester, find.text('Record'));
+    expect(find.textContaining('Recorded on the reservation'), findsOneWidget);
+    expect(find.text('Checking on the reservation…'), findsNothing);
   });
 
   testWidgets(
@@ -1032,6 +1125,11 @@ void main() {
 
     final transitionsBefore = api.transitions.length;
     final displayBefore = reservations.displayDataCalls;
+    // `transitions` solo prueba que no salió el POST — y eso ya lo impide el
+    // guard de terminal del wizard, que es OTRA clase. Lo que fija la
+    // inocencia de `recheck()` es que no tocó la API del checkout EN ABSOLUTO:
+    // ni un GET de sesión, ni un refresh encubierto.
+    final getsBefore = api.getCalls;
     // Esta vez la reserva sí confirma.
     reservations.patchDisplayData = (raw) {
       (raw['reservation'] as Map<String, dynamic>)['status'] = 'CHECKED_OUT';
@@ -1043,7 +1141,11 @@ void main() {
     expect(api.transitions.length, transitionsBefore,
         reason: 'desde terminal canTransition es false: reintentar el cierre '
             'daría 409 ILLEGAL_TRANSITION para siempre');
-    expect(reservations.displayDataCalls, greaterThan(displayBefore));
+    expect(api.getCalls, getsBefore,
+        reason: 'recheck no re-lee la sesión: la sesión ya es terminal y lo '
+            'que se consulta es la RESERVA');
+    expect(reservations.displayDataCalls, displayBefore + 1,
+        reason: 'exactamente una consulta, no un barrido');
     // unverified → verifying → recorded, cerrado aquí mismo.
     expect(find.text('Handover closed'), findsOneWidget);
     expect(
@@ -1097,6 +1199,40 @@ void main() {
     );
     expect(find.textContaining('must come back the same'), findsNothing);
     expect(find.textContaining('on the agreement'), findsNothing);
+  });
+
+  testWidgets(
+      'MUST-1: salir mientras "Volver a comprobar" está en vuelo NO lanza — '
+      'la pantalla invita a irse y el provider es autoDispose', (tester) async {
+    api.current = signedSession();
+    closeSucceeds();
+    reservations.patchDisplayData = (raw) {
+      (raw['reservation'] as Map<String, dynamic>)['status'] = 'QUE_ES_ESTO';
+      return raw;
+    };
+    await pumpSign(tester);
+    await tester.tap(find.text('Close the handover'));
+    await tester.pumpAndSettle();
+    await scrollBody(tester, find.text('Check again'));
+
+    // La consulta se queda en vuelo y el agente hace lo que la propia
+    // pantalla le ofrece: irse. El secundario dice "Volver al inicio" y el
+    // pie promete que nada bloquea.
+    final gate = Completer<void>();
+    reservations.displayGate = gate;
+    await tester.tap(find.text('Check again'));
+    await tester.pump();
+    await tester.tap(find.text('Back to home'));
+    await tester.pumpAndSettle();
+    expect(find.text('home'), findsOneWidget);
+
+    // Al aterrizar la respuesta, el controller ya murió: sin la guarda de
+    // `ref.mounted`, el `ref.read(eventLoggerProvider)` de la telemetría
+    // lanza UnmountedRefException. La telemetría no vale una excepción.
+    gate.complete();
+    reservations.displayGate = null;
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
   });
 
   // ── INN-MC-1 · el gemelo de 422 del rechazo post-commit ──────────────────
