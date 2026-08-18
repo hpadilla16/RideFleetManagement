@@ -189,6 +189,30 @@ class FakeCheckoutApi extends CheckoutApi {
     return _maybeGate(current!);
   }
 
+  /// `POST /:id/customer-signature` (M2-H5). Se guardan el dataURL y el
+  /// `signerName` PORQUE son la prueba de dos reglas: que la firma llega
+  /// completa al contrato y que no viaja anónima.
+  int signatureCalls = 0;
+  final signatureDataUrls = <String>[];
+  final signerNames = <String?>[];
+  Future<CheckoutSessionDto> Function(String dataUrl, String? signerName)?
+      onSaveCustomerSignature;
+
+  @override
+  Future<CheckoutSessionDto> saveCustomerSignature({
+    required String id,
+    required String signatureDataUrl,
+    String? signerName,
+  }) async {
+    signatureCalls++;
+    signatureDataUrls.add(signatureDataUrl);
+    signerNames.add(signerName);
+    if (onSaveCustomerSignature != null) {
+      return onSaveCustomerSignature!(signatureDataUrl, signerName);
+    }
+    return _maybeGate(current!);
+  }
+
   @override
   Future<CheckoutSessionDto> abandon({
     required String id,

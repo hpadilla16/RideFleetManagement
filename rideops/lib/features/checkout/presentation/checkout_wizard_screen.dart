@@ -16,13 +16,16 @@ import '../../inspection/application/inspection_controller.dart';
 import '../../inspection/application/inspection_outbox_view.dart';
 import '../../inspection/presentation/widgets/inspection_bodies.dart';
 import '../../shell/location_denied_view.dart';
+import '../application/checkout_close_controller.dart';
 import '../application/checkout_wizard_controller.dart';
 import '../application/checkout_wizard_state.dart';
 import '../domain/checkout_presence.dart';
 import 'checkout_labels.dart';
 import 'steps/confirming_step.dart';
 import 'steps/inspection_step.dart';
+import 'steps/sign_step.dart';
 import 'steps/terms_step.dart';
+import 'widgets/close_outcome_view.dart';
 import 'widgets/pause_sheet.dart';
 import 'widgets/steps_sheet.dart';
 import 'widgets/terminal_view.dart';
@@ -70,7 +73,12 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     if (chrome.fullBleed) {
       return Scaffold(
         backgroundColor: RideTokens.n0,
-        body: InspectionSignatureSurface(reservationId: widget.reservationId),
+        // DOS trámites, el MISMO kiosco: la revisión del vehículo (paso 7) y
+        // la entrega (paso 8). Lo que cambia es el subtítulo, el prompt y el
+        // pie de identidad — no la mecánica del candado.
+        body: state.step == CheckoutStep.customerSignPending
+            ? CheckoutSignatureSurface(reservationId: widget.reservationId)
+            : InspectionSignatureSurface(reservationId: widget.reservationId),
       );
     }
 
@@ -128,6 +136,15 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     AppLocalizations l10n,
     CheckoutWizardState state,
   ) {
+    // Paso 8 con el teléfono en manos del cliente (18B): mismo trato que la
+    // firma de inspección — el cromo de staff se SUSPENDE del todo. Ningún
+    // rastro de la app de empleados frente a quien está firmando un contrato.
+    if (state.step == CheckoutStep.customerSignPending) {
+      final close = ref.watch(checkoutCloseProvider(widget.reservationId));
+      if (close.kioskOpen) return const InspectionChrome(fullBleed: true);
+      // La stepline dice el SUB-estado del cierre; el contador nunca cambia.
+      return InspectionChrome(label: _closeLabel(l10n, close));
+    }
     if (state.step != CheckoutStep.inspectionInProgress) {
       return const InspectionChrome();
     }
@@ -144,6 +161,17 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
           ? const InspectionOutboxView()
           : ref.watch(inspectionOutboxProvider(flow.sessionId!)),
     );
+  }
+
+  /// "Cierre con problema" / "Cierre sin confirmar" — el paso sigue siendo el
+  /// 8 y el contador lo dice; lo que cambia es el NOMBRE, porque "Firma del
+  /// cliente" ya no describe lo que hay en pantalla.
+  String? _closeLabel(AppLocalizations l10n, CheckoutCloseState close) {
+    if (close.isUnknown) return l10n.coCloseUnknownStepline;
+    if (close.failureKind == CloseFailureKind.retryable) {
+      return l10n.coCloseFailedStepline;
+    }
+    return null;
   }
 
   Widget _body(
@@ -193,6 +221,19 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     }
 
     if (session.isTerminal) {
+      // Frames 19A/19B (M2-H5): SOLO cuando esta pantalla participó del
+      // cierre. "Entrega las llaves" tiene sentido con el cliente enfrente;
+      // en una sesión que ya estaba cerrada al entrar sería ruido — y ese
+      // caso sigue siendo 11E.
+      final close = ref.watch(checkoutCloseProvider(widget.reservationId));
+      if (close.hasOutcome && !close.showDetail) {
+        return CheckoutCloseOutcomeView(
+          reservationId: widget.reservationId,
+          session: session,
+          close: close,
+          onExit: _leave,
+        );
+      }
       // Frame 11E (M2-H7): la pantalla terminal vive en su propio widget
       // porque es el destino de DOS caminos — la sesión que ya estaba cerrada
       // al entrar, y el 409 SESSION_TERMINAL al crearla desde la card.
@@ -262,7 +303,9 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
       step == CheckoutStep.confirming ||
       step == CheckoutStep.tcPending ||
       step == CheckoutStep.inspectionHandoff ||
-      step == CheckoutStep.inspectionInProgress;
+      step == CheckoutStep.inspectionInProgress ||
+      step == CheckoutStep.customerSignPending ||
+      step == CheckoutStep.finalizing;
 
   /// Banners del shell. Viven aquí —no en cada paso— para que la matriz de
   /// errores (offline / avance ajeno / 409 reconciliado) sea una sola, y se
@@ -315,6 +358,14 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
         CheckoutInspectionStep(
           reservationId: widget.reservationId,
           banners: banners,
+        ),
+      // Los DOS pasos del cierre comparten pantalla. En `FINALIZING` el sello
+      // de firma ya existe por fuerza (es el entry guard del paso), así que el
+      // paso ofrece continuar el ÚLTIMO tramo en vez de volver a pedir nada.
+      CheckoutStep.customerSignPending || CheckoutStep.finalizing => SignStep(
+          reservationId: widget.reservationId,
+          banners: banners,
+          onPause: _openPauseSheet,
         ),
       _ => ListView(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),

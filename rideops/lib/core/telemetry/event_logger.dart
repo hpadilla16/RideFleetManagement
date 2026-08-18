@@ -168,6 +168,38 @@ abstract final class CheckoutEvents {
   /// iOS — en Android el override es de la VENTANA y muere con ella).
   static const presentModeScreenDegraded =
       'checkout.present_mode_screen_degraded';
+
+  // ── M2-H5 (firma del cliente + cierre) ───────────────────────────────────
+
+  /// `POST /:id/customer-signature` aceptado. Tag `replaced` (bool): la firma
+  /// SUSTITUYÓ a una que el contrato ya tenía (el endpoint pisa
+  /// `tcSignature*` sin condición, checkout-session.service.js:668-690).
+  /// Es el tag que importa vigilar: una tasa alta significa que el paso está
+  /// pidiendo firmar dos veces la misma entrega.
+  static const signatureSaved = 'checkout.signature_saved';
+
+  /// El agente arrancó el cierre. Tag `legs` (2 | 3): 3 cuando además hay que
+  /// recoger la firma, 2 cuando ya venía sellada desde la inspección — o sea,
+  /// la medida directa de cuál de los dos caminos de la pantalla 18 es el
+  /// normal en el patio.
+  static const closeStarted = 'checkout.close_started';
+
+  /// El cierre llegó a `CLOSED`. Tag `handover`: `recorded` |
+  /// `not_recorded` | `unverified`, según lo que diga `Reservation.status`
+  /// DESPUÉS del cierre. `not_recorded` con un 200 es el bug de la cascada
+  /// silenciosa (:526, :533, :557, :571) medido de frente.
+  static const closeOk = 'checkout.close_ok';
+
+  /// Un tramo del cierre fue RECHAZADO por el servidor. Tags: `leg`
+  /// (signature | finalizing | closing), `code` (el del servidor o `none`) y
+  /// `terminal` (bool: la sesión quedó cerrada igual ⇒ frame 19B, sin
+  /// reintento posible).
+  static const closeFailed = 'checkout.close_failed';
+
+  /// Un tramo del cierre murió SIN respuesta (19C). Tag `leg`. No es lo
+  /// mismo que [closeFailed]: aquí no se sabe si entró, y la app consulta en
+  /// vez de reintentar.
+  static const closeUnknown = 'checkout.close_unknown';
 }
 
 /// Eventos de la bandeja de salida (03-observability.md §Inspección y

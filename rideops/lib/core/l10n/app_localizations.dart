@@ -3259,6 +3259,486 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'El servidor ya tiene la inspección y la firma. Este botón avanza al cierre; el contrato se genera cuando la entrega quede cerrada.'**
   String get coInspCloseWhy;
+
+  /// No description provided for @coHandoffTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Voltea el teléfono al cliente'**
+  String get coHandoffTitle;
+
+  /// No description provided for @coHandoffBody.
+  ///
+  /// In es, this message translates to:
+  /// **'{name} va a firmar la entrega del {vehicle}.'**
+  String coHandoffBody(String name, String vehicle);
+
+  /// Sin nombre o sin unidad no se rellena un hueco: se dice la frase que sí es cierta.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente va a firmar la entrega del vehículo.'**
+  String get coHandoffBodyGeneric;
+
+  /// No description provided for @coHandoffRuleLock.
+  ///
+  /// In es, this message translates to:
+  /// **'La app queda bloqueada en la firma: no se puede salir ni ver otra pantalla.'**
+  String get coHandoffRuleLock;
+
+  /// No description provided for @coHandoffRuleExit.
+  ///
+  /// In es, this message translates to:
+  /// **'Para salir sin firma: mantén 3 s la barra de arriba y escribe tu PIN.'**
+  String get coHandoffRuleExit;
+
+  /// Nota 2 del 18A: el límite ya está construido (kiosk_exit_exhausted) y el agente merece saberlo ANTES de soltar el teléfono, no descubrirlo con el aparato en la mano.
+  ///
+  /// In es, this message translates to:
+  /// **'Si fallas el PIN 3 veces, la app se bloquea y hay que volver a entrar.'**
+  String get coHandoffRulePin;
+
+  /// No description provided for @coHandoffRuleBrand.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente ve la pantalla en español o inglés, con la marca de {tenant}.'**
+  String coHandoffRuleBrand(String tenant);
+
+  /// Sin branding del tenant la fila del nombre se oculta (clientSafeCompanyName): nunca un fallback con marca nuestra frente al cliente.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente ve la pantalla en español o inglés, sin la marca de la plataforma.'**
+  String get coHandoffRuleBrandNoTenant;
+
+  /// No description provided for @coHandoffCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Entregar al cliente'**
+  String get coHandoffCta;
+
+  /// No description provided for @coHandoffWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'La firma se guarda en el contrato al confirmarla. Si el cliente se arrepiente, sales con tu PIN y el paso queda igual.'**
+  String get coHandoffWhy;
+
+  /// La firma NO tiene camino offline y no debe tenerlo: se bloquea la entrega del teléfono con causa en lugar de encolar una firma.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin conexión no se puede recoger la firma: se guarda en el contrato en el momento, no después.'**
+  String get coHandoffOfflineBlocked;
+
+  /// No description provided for @kioskSignSubtitleCheckout.
+  ///
+  /// In es, this message translates to:
+  /// **'Entrega del vehículo · Reserva {reservation}'**
+  String kioskSignSubtitleCheckout(String reservation);
+
+  /// No description provided for @kioskSignPromptCheckout.
+  ///
+  /// In es, this message translates to:
+  /// **'Firme para confirmar que recibe el vehículo y acepta el contrato de renta.'**
+  String get kioskSignPromptCheckout;
+
+  /// Pie del 18B: qué está firmando, al pie y sin jerga. Se arma uniendo lo que existe; lo que falte se omite.
+  ///
+  /// In es, this message translates to:
+  /// **'Placa {plate}'**
+  String kioskSignPlate(String plate);
+
+  /// Nota 7 del 18C: es verdad en el instante en que se dice — customer-signature ya respondió 200. Lo que sigue no se afirma todavía.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma recibida. Ya puedes tomar el teléfono.'**
+  String get coSignReceived;
+
+  /// No description provided for @coCloseStep1.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma guardada en el contrato'**
+  String get coCloseStep1;
+
+  /// No description provided for @coCloseStep2.
+  ///
+  /// In es, this message translates to:
+  /// **'Generando el contrato'**
+  String get coCloseStep2;
+
+  /// No description provided for @coCloseStep3.
+  ///
+  /// In es, this message translates to:
+  /// **'Registrar la entrega'**
+  String get coCloseStep3;
+
+  /// No description provided for @coCloseLegWaiting.
+  ///
+  /// In es, this message translates to:
+  /// **'Paso {index} de {total} · falta'**
+  String coCloseLegWaiting(int index, int total);
+
+  /// No description provided for @coClosingCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Cerrando…'**
+  String get coClosingCta;
+
+  /// Nota 8: el backend NO tiene cascada aquí. saveCustomerSignature solo sella y las dos transiciones son dos POST más desde el cliente.
+  ///
+  /// In es, this message translates to:
+  /// **'No cierres la app: el cierre son tres confirmaciones del servidor y aquí vas por la segunda.'**
+  String get coClosingWhy;
+
+  /// No description provided for @coCloseRetry.
+  ///
+  /// In es, this message translates to:
+  /// **'Reintentar el cierre'**
+  String get coCloseRetry;
+
+  /// No description provided for @coCloseRetryWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Este tramo se puede volver a intentar: la sesión sigue abierta y nada de lo capturado se perdió.'**
+  String get coCloseRetryWhy;
+
+  /// No description provided for @coAlreadySignedTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente ya firmó'**
+  String get coAlreadySignedTitle;
+
+  /// No description provided for @coAlreadySignedBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Firmó al terminar la inspección, a las {time}. No hace falta pedirle el teléfono otra vez.'**
+  String coAlreadySignedBody(String time);
+
+  /// Solo se atribuye a la inspección cuando customerSignedAt e inspectionCompletedAt son el MISMO instante (un único write, mobile-inspection.service.js:265-281). Si no, la firma vino de otra superficie y no se inventa dónde.
+  ///
+  /// In es, this message translates to:
+  /// **'La firma quedó registrada a las {time}. No hace falta pedirle el teléfono otra vez.'**
+  String coAlreadySignedBodyOther(String time);
+
+  /// No description provided for @coAlreadySignedChip.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma en el contrato · {time}'**
+  String coAlreadySignedChip(String time);
+
+  /// No description provided for @coSignedDocTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Lo que se firmó'**
+  String get coSignedDocTitle;
+
+  /// No description provided for @coSignedSigner.
+  ///
+  /// In es, this message translates to:
+  /// **'Firmante'**
+  String get coSignedSigner;
+
+  /// No description provided for @coSignedSignerUnknown.
+  ///
+  /// In es, this message translates to:
+  /// **'No se registró el nombre'**
+  String get coSignedSignerUnknown;
+
+  /// No description provided for @coSignedDocument.
+  ///
+  /// In es, this message translates to:
+  /// **'Documento'**
+  String get coSignedDocument;
+
+  /// No description provided for @coSignedDocumentValue.
+  ///
+  /// In es, this message translates to:
+  /// **'Contrato de renta {number}'**
+  String coSignedDocumentValue(String number);
+
+  /// No description provided for @coSignedDocumentValueNoNumber.
+  ///
+  /// In es, this message translates to:
+  /// **'Contrato de renta'**
+  String get coSignedDocumentValueNoNumber;
+
+  /// No description provided for @coResignLink.
+  ///
+  /// In es, this message translates to:
+  /// **'Volver a pedir la firma'**
+  String get coResignLink;
+
+  /// Verificado: saveCustomerSignature pisa tcSignatureDataUrl/tcSignedAt/tcSignerName sin comprobar si ya había firma (checkout-session.service.js:668-690).
+  ///
+  /// In es, this message translates to:
+  /// **'La firma nueva SUSTITUYE a la que ya está en el contrato. Úsalo solo si la anterior no es válida.'**
+  String get coResignWarning;
+
+  /// No description provided for @coResignTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'¿Sustituir la firma guardada?'**
+  String get coResignTitle;
+
+  /// No description provided for @coResignConfirm.
+  ///
+  /// In es, this message translates to:
+  /// **'Sí, pedirla otra vez'**
+  String get coResignConfirm;
+
+  /// No description provided for @coCloseCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Cerrar la entrega'**
+  String get coCloseCta;
+
+  /// No description provided for @coCloseCtaWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Se registra la entrega en la reserva y se genera el contrato.'**
+  String get coCloseCtaWhy;
+
+  /// No description provided for @coClosedTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Entrega cerrada'**
+  String get coClosedTitle;
+
+  /// No description provided for @coBeforeTheyGoTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Antes de que se vaya'**
+  String get coBeforeTheyGoTitle;
+
+  /// No description provided for @coBeforeKeysLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Llaves'**
+  String get coBeforeKeysLabel;
+
+  /// No description provided for @coBeforeKeys.
+  ///
+  /// In es, this message translates to:
+  /// **'Entrega las llaves y la tarjeta de circulación'**
+  String get coBeforeKeys;
+
+  /// No description provided for @coBeforeReturnLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Regreso'**
+  String get coBeforeReturnLabel;
+
+  /// No description provided for @coRecordTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Registro'**
+  String get coRecordTitle;
+
+  /// No description provided for @coRecordSessionClosed.
+  ///
+  /// In es, this message translates to:
+  /// **'Sesión cerrada'**
+  String get coRecordSessionClosed;
+
+  /// No description provided for @coRecordSignatureLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma'**
+  String get coRecordSignatureLabel;
+
+  /// No description provided for @coRecordContractLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Contrato'**
+  String get coRecordContractLabel;
+
+  /// autoEmailedAt se estampa ANTES de disparar el envío, que es fire-and-forget (checkout-session.service.js:597-612): el sello prueba que se PIDIÓ, no que salió.
+  ///
+  /// In es, this message translates to:
+  /// **'Se pidió enviarlo por correo a las {time}'**
+  String coRecordEmailRequested(String time);
+
+  /// No description provided for @coRecordEmailNotRequested.
+  ///
+  /// In es, this message translates to:
+  /// **'No hay registro de envío por correo'**
+  String get coRecordEmailNotRequested;
+
+  /// No description provided for @coRecordHandoverLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Entrega'**
+  String get coRecordHandoverLabel;
+
+  /// No description provided for @coRecordHandoverRecorded.
+  ///
+  /// In es, this message translates to:
+  /// **'La reserva quedó marcada como entregada'**
+  String get coRecordHandoverRecorded;
+
+  /// display-data no respondió o mandó un estado desconocido. Es 'no lo sé', jamás 'no quedó registrada'.
+  ///
+  /// In es, this message translates to:
+  /// **'No se pudo confirmar en la reserva'**
+  String get coRecordHandoverUnverified;
+
+  /// No description provided for @coBackHome.
+  ///
+  /// In es, this message translates to:
+  /// **'Volver al inicio'**
+  String get coBackHome;
+
+  /// No description provided for @coSessionDetail.
+  ///
+  /// In es, this message translates to:
+  /// **'Ver el detalle de la sesión'**
+  String get coSessionDetail;
+
+  /// No description provided for @coCloseFailedStepline.
+  ///
+  /// In es, this message translates to:
+  /// **'Cierre con problema'**
+  String get coCloseFailedStepline;
+
+  /// No description provided for @coCloseFailedTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'El checkout se cerró, pero el servidor no registró la entrega. La reserva necesita que alguien la revise en el mostrador.'**
+  String get coCloseFailedTitle;
+
+  /// El caso silencioso: 200 en el cierre y la cascada se tragó su error (:526, :533, :557, :571). Se detecta leyendo Reservation.status DESPUÉS de cerrar.
+  ///
+  /// In es, this message translates to:
+  /// **'El checkout se cerró, pero la reserva no quedó marcada como entregada. Necesita que alguien la revise en el mostrador.'**
+  String get coCloseNotRecordedTitle;
+
+  /// No description provided for @coCloseFailedStep.
+  ///
+  /// In es, this message translates to:
+  /// **'Rechazado a las {time}'**
+  String coCloseFailedStep(String time);
+
+  /// No description provided for @coCloseReasonTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Motivo'**
+  String get coCloseReasonTitle;
+
+  /// No description provided for @coServerReasonLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Respuesta del servidor'**
+  String get coServerReasonLabel;
+
+  /// No description provided for @coCloseReasonPill.
+  ///
+  /// In es, this message translates to:
+  /// **'Del servidor'**
+  String get coCloseReasonPill;
+
+  /// No description provided for @coCloseVerifiedPill.
+  ///
+  /// In es, this message translates to:
+  /// **'Verificado en la reserva'**
+  String get coCloseVerifiedPill;
+
+  /// No description provided for @coCloseNotRecordedReason.
+  ///
+  /// In es, this message translates to:
+  /// **'Se consultó la reserva después de cerrar y sigue sin registrar la entrega. El servidor no dio un motivo.'**
+  String get coCloseNotRecordedReason;
+
+  /// canTransition es false desde un estado terminal (state-machine.js:94): un botón de reintento daría 409 ILLEGAL_TRANSITION para siempre.
+  ///
+  /// In es, this message translates to:
+  /// **'Esta sesión ya está cerrada, así que no se puede reintentar desde aquí. Nada de lo capturado se perdió.'**
+  String get coCloseNoRetry;
+
+  /// No description provided for @coCopyProblem.
+  ///
+  /// In es, this message translates to:
+  /// **'Copiar el detalle del problema'**
+  String get coCopyProblem;
+
+  /// No description provided for @coCopiedProblem.
+  ///
+  /// In es, this message translates to:
+  /// **'Detalle copiado al portapapeles'**
+  String get coCopiedProblem;
+
+  /// No description provided for @coHoldKeys.
+  ///
+  /// In es, this message translates to:
+  /// **'No entregues las llaves hasta que el mostrador confirme.'**
+  String get coHoldKeys;
+
+  /// No description provided for @coCloseUnknownStepline.
+  ///
+  /// In es, this message translates to:
+  /// **'Cierre sin confirmar'**
+  String get coCloseUnknownStepline;
+
+  /// No description provided for @coCloseUnknownTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Se cortó la conexión mientras se cerraba. No sabemos si el cierre entró o no — hay que preguntárselo al servidor.'**
+  String get coCloseUnknownTitle;
+
+  /// No description provided for @coCloseUnknownStep.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin respuesta'**
+  String get coCloseUnknownStep;
+
+  /// No description provided for @coCloseConfirmedAt.
+  ///
+  /// In es, this message translates to:
+  /// **'{time} · confirmado'**
+  String coCloseConfirmedAt(String time);
+
+  /// No description provided for @coWontHappenTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Qué NO va a pasar'**
+  String get coWontHappenTitle;
+
+  /// No description provided for @coWontHappenPill.
+  ///
+  /// In es, this message translates to:
+  /// **'Regla'**
+  String get coWontHappenPill;
+
+  /// No description provided for @coWontRetryLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Reintento'**
+  String get coWontRetryLabel;
+
+  /// No description provided for @coWontRetry.
+  ///
+  /// In es, this message translates to:
+  /// **'La app no reintenta el cierre sola.'**
+  String get coWontRetry;
+
+  /// No description provided for @coWontQueueLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Bandeja'**
+  String get coWontQueueLabel;
+
+  /// No description provided for @coWontQueue.
+  ///
+  /// In es, this message translates to:
+  /// **'El cierre no entra a la bandeja de salida.'**
+  String get coWontQueue;
+
+  /// No description provided for @coCheckStatus.
+  ///
+  /// In es, this message translates to:
+  /// **'Consultar el estado'**
+  String get coCheckStatus;
+
+  /// No description provided for @coCheckStatusWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Con señal, una consulta dice en qué paso quedó y desde ahí se continúa.'**
+  String get coCheckStatusWhy;
 }
 
 class _AppLocalizationsDelegate

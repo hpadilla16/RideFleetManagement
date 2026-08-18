@@ -2027,4 +2027,288 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get coInspCloseWhy =>
       'El servidor ya tiene la inspección y la firma. Este botón avanza al cierre; el contrato se genera cuando la entrega quede cerrada.';
+
+  @override
+  String get coHandoffTitle => 'Voltea el teléfono al cliente';
+
+  @override
+  String coHandoffBody(String name, String vehicle) {
+    return '$name va a firmar la entrega del $vehicle.';
+  }
+
+  @override
+  String get coHandoffBodyGeneric =>
+      'El cliente va a firmar la entrega del vehículo.';
+
+  @override
+  String get coHandoffRuleLock =>
+      'La app queda bloqueada en la firma: no se puede salir ni ver otra pantalla.';
+
+  @override
+  String get coHandoffRuleExit =>
+      'Para salir sin firma: mantén 3 s la barra de arriba y escribe tu PIN.';
+
+  @override
+  String get coHandoffRulePin =>
+      'Si fallas el PIN 3 veces, la app se bloquea y hay que volver a entrar.';
+
+  @override
+  String coHandoffRuleBrand(String tenant) {
+    return 'El cliente ve la pantalla en español o inglés, con la marca de $tenant.';
+  }
+
+  @override
+  String get coHandoffRuleBrandNoTenant =>
+      'El cliente ve la pantalla en español o inglés, sin la marca de la plataforma.';
+
+  @override
+  String get coHandoffCta => 'Entregar al cliente';
+
+  @override
+  String get coHandoffWhy =>
+      'La firma se guarda en el contrato al confirmarla. Si el cliente se arrepiente, sales con tu PIN y el paso queda igual.';
+
+  @override
+  String get coHandoffOfflineBlocked =>
+      'Sin conexión no se puede recoger la firma: se guarda en el contrato en el momento, no después.';
+
+  @override
+  String kioskSignSubtitleCheckout(String reservation) {
+    return 'Entrega del vehículo · Reserva $reservation';
+  }
+
+  @override
+  String get kioskSignPromptCheckout =>
+      'Firme para confirmar que recibe el vehículo y acepta el contrato de renta.';
+
+  @override
+  String kioskSignPlate(String plate) {
+    return 'Placa $plate';
+  }
+
+  @override
+  String get coSignReceived => 'Firma recibida. Ya puedes tomar el teléfono.';
+
+  @override
+  String get coCloseStep1 => 'Firma guardada en el contrato';
+
+  @override
+  String get coCloseStep2 => 'Generando el contrato';
+
+  @override
+  String get coCloseStep3 => 'Registrar la entrega';
+
+  @override
+  String coCloseLegWaiting(int index, int total) {
+    return 'Paso $index de $total · falta';
+  }
+
+  @override
+  String get coClosingCta => 'Cerrando…';
+
+  @override
+  String get coClosingWhy =>
+      'No cierres la app: el cierre son tres confirmaciones del servidor y aquí vas por la segunda.';
+
+  @override
+  String get coCloseRetry => 'Reintentar el cierre';
+
+  @override
+  String get coCloseRetryWhy =>
+      'Este tramo se puede volver a intentar: la sesión sigue abierta y nada de lo capturado se perdió.';
+
+  @override
+  String get coAlreadySignedTitle => 'El cliente ya firmó';
+
+  @override
+  String coAlreadySignedBody(String time) {
+    return 'Firmó al terminar la inspección, a las $time. No hace falta pedirle el teléfono otra vez.';
+  }
+
+  @override
+  String coAlreadySignedBodyOther(String time) {
+    return 'La firma quedó registrada a las $time. No hace falta pedirle el teléfono otra vez.';
+  }
+
+  @override
+  String coAlreadySignedChip(String time) {
+    return 'Firma en el contrato · $time';
+  }
+
+  @override
+  String get coSignedDocTitle => 'Lo que se firmó';
+
+  @override
+  String get coSignedSigner => 'Firmante';
+
+  @override
+  String get coSignedSignerUnknown => 'No se registró el nombre';
+
+  @override
+  String get coSignedDocument => 'Documento';
+
+  @override
+  String coSignedDocumentValue(String number) {
+    return 'Contrato de renta $number';
+  }
+
+  @override
+  String get coSignedDocumentValueNoNumber => 'Contrato de renta';
+
+  @override
+  String get coResignLink => 'Volver a pedir la firma';
+
+  @override
+  String get coResignWarning =>
+      'La firma nueva SUSTITUYE a la que ya está en el contrato. Úsalo solo si la anterior no es válida.';
+
+  @override
+  String get coResignTitle => '¿Sustituir la firma guardada?';
+
+  @override
+  String get coResignConfirm => 'Sí, pedirla otra vez';
+
+  @override
+  String get coCloseCta => 'Cerrar la entrega';
+
+  @override
+  String get coCloseCtaWhy =>
+      'Se registra la entrega en la reserva y se genera el contrato.';
+
+  @override
+  String get coClosedTitle => 'Entrega cerrada';
+
+  @override
+  String get coBeforeTheyGoTitle => 'Antes de que se vaya';
+
+  @override
+  String get coBeforeKeysLabel => 'Llaves';
+
+  @override
+  String get coBeforeKeys => 'Entrega las llaves y la tarjeta de circulación';
+
+  @override
+  String get coBeforeReturnLabel => 'Regreso';
+
+  @override
+  String get coRecordTitle => 'Registro';
+
+  @override
+  String get coRecordSessionClosed => 'Sesión cerrada';
+
+  @override
+  String get coRecordSignatureLabel => 'Firma';
+
+  @override
+  String get coRecordContractLabel => 'Contrato';
+
+  @override
+  String coRecordEmailRequested(String time) {
+    return 'Se pidió enviarlo por correo a las $time';
+  }
+
+  @override
+  String get coRecordEmailNotRequested => 'No hay registro de envío por correo';
+
+  @override
+  String get coRecordHandoverLabel => 'Entrega';
+
+  @override
+  String get coRecordHandoverRecorded =>
+      'La reserva quedó marcada como entregada';
+
+  @override
+  String get coRecordHandoverUnverified => 'No se pudo confirmar en la reserva';
+
+  @override
+  String get coBackHome => 'Volver al inicio';
+
+  @override
+  String get coSessionDetail => 'Ver el detalle de la sesión';
+
+  @override
+  String get coCloseFailedStepline => 'Cierre con problema';
+
+  @override
+  String get coCloseFailedTitle =>
+      'El checkout se cerró, pero el servidor no registró la entrega. La reserva necesita que alguien la revise en el mostrador.';
+
+  @override
+  String get coCloseNotRecordedTitle =>
+      'El checkout se cerró, pero la reserva no quedó marcada como entregada. Necesita que alguien la revise en el mostrador.';
+
+  @override
+  String coCloseFailedStep(String time) {
+    return 'Rechazado a las $time';
+  }
+
+  @override
+  String get coCloseReasonTitle => 'Motivo';
+
+  @override
+  String get coServerReasonLabel => 'Respuesta del servidor';
+
+  @override
+  String get coCloseReasonPill => 'Del servidor';
+
+  @override
+  String get coCloseVerifiedPill => 'Verificado en la reserva';
+
+  @override
+  String get coCloseNotRecordedReason =>
+      'Se consultó la reserva después de cerrar y sigue sin registrar la entrega. El servidor no dio un motivo.';
+
+  @override
+  String get coCloseNoRetry =>
+      'Esta sesión ya está cerrada, así que no se puede reintentar desde aquí. Nada de lo capturado se perdió.';
+
+  @override
+  String get coCopyProblem => 'Copiar el detalle del problema';
+
+  @override
+  String get coCopiedProblem => 'Detalle copiado al portapapeles';
+
+  @override
+  String get coHoldKeys =>
+      'No entregues las llaves hasta que el mostrador confirme.';
+
+  @override
+  String get coCloseUnknownStepline => 'Cierre sin confirmar';
+
+  @override
+  String get coCloseUnknownTitle =>
+      'Se cortó la conexión mientras se cerraba. No sabemos si el cierre entró o no — hay que preguntárselo al servidor.';
+
+  @override
+  String get coCloseUnknownStep => 'Sin respuesta';
+
+  @override
+  String coCloseConfirmedAt(String time) {
+    return '$time · confirmado';
+  }
+
+  @override
+  String get coWontHappenTitle => 'Qué NO va a pasar';
+
+  @override
+  String get coWontHappenPill => 'Regla';
+
+  @override
+  String get coWontRetryLabel => 'Reintento';
+
+  @override
+  String get coWontRetry => 'La app no reintenta el cierre sola.';
+
+  @override
+  String get coWontQueueLabel => 'Bandeja';
+
+  @override
+  String get coWontQueue => 'El cierre no entra a la bandeja de salida.';
+
+  @override
+  String get coCheckStatus => 'Consultar el estado';
+
+  @override
+  String get coCheckStatusWhy =>
+      'Con señal, una consulta dice en qué paso quedó y desde ahí se continúa.';
 }

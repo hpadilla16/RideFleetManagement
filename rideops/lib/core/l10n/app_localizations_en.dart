@@ -2022,4 +2022,290 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get coInspCloseWhy =>
       'The server already has the inspection and the signature. This button moves on to closing; the contract is generated once the hand-over is closed.';
+
+  @override
+  String get coHandoffTitle => 'Turn the phone to the customer';
+
+  @override
+  String coHandoffBody(String name, String vehicle) {
+    return '$name is about to sign for the handover of the $vehicle.';
+  }
+
+  @override
+  String get coHandoffBodyGeneric =>
+      'The customer is about to sign for the handover of the vehicle.';
+
+  @override
+  String get coHandoffRuleLock =>
+      'The app locks onto the signature: no exit, no other screen.';
+
+  @override
+  String get coHandoffRuleExit =>
+      'To exit without signing: hold the top bar for 3 s and enter your PIN.';
+
+  @override
+  String get coHandoffRulePin =>
+      'Three wrong PINs and the app locks; you\'ll have to sign back in.';
+
+  @override
+  String coHandoffRuleBrand(String tenant) {
+    return 'The customer sees the screen in Spanish or English, branded as $tenant.';
+  }
+
+  @override
+  String get coHandoffRuleBrandNoTenant =>
+      'The customer sees the screen in Spanish or English, with no platform branding.';
+
+  @override
+  String get coHandoffCta => 'Hand to the customer';
+
+  @override
+  String get coHandoffWhy =>
+      'The signature is written to the agreement when confirmed. If the customer backs out, exit with your PIN and the step stays as it is.';
+
+  @override
+  String get coHandoffOfflineBlocked =>
+      'The signature can\'t be collected offline: it\'s written to the agreement at that moment, not later.';
+
+  @override
+  String kioskSignSubtitleCheckout(String reservation) {
+    return 'Vehicle handover · Reservation $reservation';
+  }
+
+  @override
+  String get kioskSignPromptCheckout =>
+      'Sign to confirm you are receiving the vehicle and accept the rental agreement.';
+
+  @override
+  String kioskSignPlate(String plate) {
+    return 'Plate $plate';
+  }
+
+  @override
+  String get coSignReceived =>
+      'Signature received. You can take the phone back.';
+
+  @override
+  String get coCloseStep1 => 'Signature saved to the agreement';
+
+  @override
+  String get coCloseStep2 => 'Generating the agreement';
+
+  @override
+  String get coCloseStep3 => 'Recording the handover';
+
+  @override
+  String coCloseLegWaiting(int index, int total) {
+    return 'Step $index of $total · pending';
+  }
+
+  @override
+  String get coClosingCta => 'Closing…';
+
+  @override
+  String get coClosingWhy =>
+      'Don\'t close the app: closing takes three server confirmations and you\'re on the second.';
+
+  @override
+  String get coCloseRetry => 'Retry closing';
+
+  @override
+  String get coCloseRetryWhy =>
+      'This leg can be retried: the session is still open and nothing you captured was lost.';
+
+  @override
+  String get coAlreadySignedTitle => 'The customer already signed';
+
+  @override
+  String coAlreadySignedBody(String time) {
+    return 'They signed at the end of the inspection, at $time. No need to hand them the phone again.';
+  }
+
+  @override
+  String coAlreadySignedBodyOther(String time) {
+    return 'The signature was recorded at $time. No need to hand them the phone again.';
+  }
+
+  @override
+  String coAlreadySignedChip(String time) {
+    return 'Signature on the agreement · $time';
+  }
+
+  @override
+  String get coSignedDocTitle => 'What was signed';
+
+  @override
+  String get coSignedSigner => 'Signer';
+
+  @override
+  String get coSignedSignerUnknown => 'No name was recorded';
+
+  @override
+  String get coSignedDocument => 'Document';
+
+  @override
+  String coSignedDocumentValue(String number) {
+    return 'Rental agreement $number';
+  }
+
+  @override
+  String get coSignedDocumentValueNoNumber => 'Rental agreement';
+
+  @override
+  String get coResignLink => 'Ask for the signature again';
+
+  @override
+  String get coResignWarning =>
+      'The new signature REPLACES the one already on the agreement. Only use this if the previous one isn\'t valid.';
+
+  @override
+  String get coResignTitle => 'Replace the saved signature?';
+
+  @override
+  String get coResignConfirm => 'Yes, ask again';
+
+  @override
+  String get coCloseCta => 'Close the handover';
+
+  @override
+  String get coCloseCtaWhy =>
+      'The handover is recorded on the reservation and the agreement is generated.';
+
+  @override
+  String get coClosedTitle => 'Handover closed';
+
+  @override
+  String get coBeforeTheyGoTitle => 'Before they leave';
+
+  @override
+  String get coBeforeKeysLabel => 'Keys';
+
+  @override
+  String get coBeforeKeys => 'Hand over the keys and the registration card';
+
+  @override
+  String get coBeforeReturnLabel => 'Return';
+
+  @override
+  String get coRecordTitle => 'Record';
+
+  @override
+  String get coRecordSessionClosed => 'Session closed';
+
+  @override
+  String get coRecordSignatureLabel => 'Signature';
+
+  @override
+  String get coRecordContractLabel => 'Agreement';
+
+  @override
+  String coRecordEmailRequested(String time) {
+    return 'Email delivery was requested at $time';
+  }
+
+  @override
+  String get coRecordEmailNotRequested => 'No email delivery on record';
+
+  @override
+  String get coRecordHandoverLabel => 'Handover';
+
+  @override
+  String get coRecordHandoverRecorded =>
+      'The reservation is marked as handed over';
+
+  @override
+  String get coRecordHandoverUnverified =>
+      'Couldn\'t confirm it on the reservation';
+
+  @override
+  String get coBackHome => 'Back to home';
+
+  @override
+  String get coSessionDetail => 'See session detail';
+
+  @override
+  String get coCloseFailedStepline => 'Closing hit a problem';
+
+  @override
+  String get coCloseFailedTitle =>
+      'The checkout closed, but the server did not record the handover. Someone at the counter needs to review this reservation.';
+
+  @override
+  String get coCloseNotRecordedTitle =>
+      'The checkout closed, but the reservation was not marked as handed over. Someone at the counter needs to review it.';
+
+  @override
+  String coCloseFailedStep(String time) {
+    return 'Rejected at $time';
+  }
+
+  @override
+  String get coCloseReasonTitle => 'Reason';
+
+  @override
+  String get coServerReasonLabel => 'Server response';
+
+  @override
+  String get coCloseReasonPill => 'From the server';
+
+  @override
+  String get coCloseVerifiedPill => 'Checked on the reservation';
+
+  @override
+  String get coCloseNotRecordedReason =>
+      'We checked the reservation after closing and it still doesn\'t record the handover. The server gave no reason.';
+
+  @override
+  String get coCloseNoRetry =>
+      'This session is already closed, so it can\'t be retried from here. Nothing you captured was lost.';
+
+  @override
+  String get coCopyProblem => 'Copy the problem details';
+
+  @override
+  String get coCopiedProblem => 'Details copied to the clipboard';
+
+  @override
+  String get coHoldKeys =>
+      'Don\'t hand over the keys until the counter confirms.';
+
+  @override
+  String get coCloseUnknownStepline => 'Closing unconfirmed';
+
+  @override
+  String get coCloseUnknownTitle =>
+      'The connection dropped mid-close. We don\'t know whether it went through — we have to ask the server.';
+
+  @override
+  String get coCloseUnknownStep => 'No response';
+
+  @override
+  String coCloseConfirmedAt(String time) {
+    return '$time · confirmed';
+  }
+
+  @override
+  String get coWontHappenTitle => 'What will NOT happen';
+
+  @override
+  String get coWontHappenPill => 'Rule';
+
+  @override
+  String get coWontRetryLabel => 'Retry';
+
+  @override
+  String get coWontRetry => 'The app won\'t retry the close on its own.';
+
+  @override
+  String get coWontQueueLabel => 'Outbox';
+
+  @override
+  String get coWontQueue => 'Closing never goes into the outbox.';
+
+  @override
+  String get coCheckStatus => 'Check the status';
+
+  @override
+  String get coCheckStatusWhy =>
+      'With signal, one lookup tells you which step it stopped at, and you continue from there.';
 }

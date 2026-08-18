@@ -8,6 +8,7 @@ import '../../../core/api/api_error.dart';
 import '../../../core/api/api_providers.dart';
 import '../../../core/api/checkout_api.dart';
 import '../../../core/api/dto/checkout_session.dart';
+import '../../../core/api/dto/reservation_display.dart';
 import '../../../core/api/enums.dart';
 import '../../../core/lifecycle/app_visibility.dart';
 import '../../../core/outbox/network_status.dart';
@@ -347,15 +348,29 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
 
   /// Re-lee display-data. Lo llama el swap: cambió la unidad de la reserva, y
   /// el header + la tarjeta de vehículo tienen que dejar de mostrar la vieja.
-  Future<void> reloadContext() => _loadContext(_generation);
+  Future<void> reloadContext() async => _loadContext(_generation);
+
+  /// Re-lee display-data para VERIFICAR si la entrega quedó registrada (19A/
+  /// 19B). No se usa `state.context` cacheado a propósito: la pregunta es qué
+  /// dice el servidor AHORA, después del cierre.
+  ///
+  /// Devuelve `null` cuando no hay veredicto — display-data no respondió, o
+  /// mandó un estado que esta versión no conoce. **Null no es "no quedó
+  /// registrada"**: es "no lo sé", y la UI lo dice así en vez de acusar a la
+  /// cascada de algo que no vio.
+  Future<bool?> verifyHandover() async {
+    final display = await _loadContext(_generation);
+    return ReservationStatus.tryParse(display?.reservation.status)
+        ?.handoverRecorded;
+  }
 
   /// Contexto de la reserva para el header de sesión y las tarjetas de
   /// verificación (9A/9B) — best-effort, no bloquea el wizard.
-  Future<void> _loadContext(int gen) async {
+  Future<ReservationDisplayData?> _loadContext(int gen) async {
     try {
       final display =
           await ref.read(reservationsApiProvider).getDisplayData(reservationId);
-      if (gen != _generation || !ref.mounted) return;
+      if (gen != _generation || !ref.mounted) return null;
       final reservation = display.reservation;
       state = state.copyWith(
         context: CheckoutReservationContext(
@@ -378,10 +393,15 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
           vehicleStatus: reservation.vehicle?.status,
           vehicleTypeId: reservation.vehicleTypeId,
           branding: display.branding,
+          returnAt: reservation.returnAt,
+          returnLocationName: reservation.returnLocation?.name,
+          reservationStatus: reservation.status,
         ),
       );
+      return display;
     } catch (_) {
       // Sin display-data el wizard sigue: el header muestra menos, nada más.
+      return null;
     }
   }
 
@@ -548,27 +568,34 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
   ///
   /// Guards, en orden: doble-tap → terminal → sin red → re-fetch previo si la
   /// lectura tiene >3 s → POST → matriz 409.
-  Future<CheckoutTransitionOutcome> transitionTo(CheckoutStep toStep) async {
+  Future<CheckoutTransitionOutcome> transitionTo(CheckoutStep toStep) async =>
+      (await attemptTransition(toStep)).outcome;
+
+  /// Igual que [transitionTo] pero devolviendo además el CUERPO del servidor.
+  /// Lo usa el cierre (M2-H5): 19B cita la negativa y necesita distinguir
+  /// "el servidor dijo que no" de "no hubo respuesta".
+  Future<CheckoutTransitionAttempt> attemptTransition(
+    CheckoutStep toStep,
+  ) async {
+    const blocked = CheckoutTransitionAttempt(CheckoutTransitionOutcome.blocked);
     final session = state.session;
-    if (session == null) return CheckoutTransitionOutcome.blocked;
+    if (session == null) return blocked;
     // Anti-doble-tap: el segundo tap NO manda un segundo POST (el backend
     // responde 409 a propósito, pero cobrar dos veces esa carrera en el patio
     // es exactamente lo que no queremos, service:380-391).
-    if (state.transitionInFlight) return CheckoutTransitionOutcome.blocked;
-    if (state.isTerminal) return CheckoutTransitionOutcome.blocked;
-    if (state.offline) return CheckoutTransitionOutcome.blocked;
+    if (state.transitionInFlight) return blocked;
+    if (state.isTerminal) return blocked;
+    if (state.offline) return blocked;
 
     final gen = _generation;
     final renderedStep = session.currentStep;
     state = state.copyWith(transitionInFlight: true, clearConflict: true);
     try {
       final preflight = await _preflight(gen, session, toStep, renderedStep);
-      if (preflight != null) return preflight;
+      if (preflight != null) return CheckoutTransitionAttempt(preflight);
 
       final updated = await _api.transition(id: session.id, toStep: toStep.wire);
-      if (gen != _generation || !ref.mounted) {
-        return CheckoutTransitionOutcome.blocked;
-      }
+      if (gen != _generation || !ref.mounted) return blocked;
       // Nuestro propio avance: se aplica sin detección de avance ajeno y el
       // banner previo se retira (el agente ya interactuó con el paso nuevo).
       _apply(updated, detectForeign: false, isWrite: true);
@@ -577,20 +604,28 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       _unchangedCycles = 0;
       _slowLane = false;
       _backoff = null;
-      return CheckoutTransitionOutcome.ok;
+      return const CheckoutTransitionAttempt(CheckoutTransitionOutcome.ok);
     } on ApiError catch (e) {
-      if (gen != _generation || !ref.mounted) {
-        return CheckoutTransitionOutcome.blocked;
-      }
+      if (gen != _generation || !ref.mounted) return blocked;
       if (e.kind == ApiErrorKind.conflict) {
-        return _resolveConflict(gen, e, toStep);
+        final outcome = await _resolveConflict(gen, e, toStep);
+        return CheckoutTransitionAttempt(
+          outcome,
+          message: e.message.isEmpty ? null : e.message,
+          code: e.code,
+        );
       }
       state = state.copyWith(
         error: e,
         networkAvailable:
             e.kind == ApiErrorKind.network ? false : state.networkAvailable,
       );
-      return CheckoutTransitionOutcome.failed;
+      return CheckoutTransitionAttempt(
+        CheckoutTransitionOutcome.failed,
+        message: e.message.isEmpty ? null : e.message,
+        code: e.code,
+        network: e.kind == ApiErrorKind.network,
+      );
     } finally {
       if (gen == _generation && ref.mounted) {
         state = state.copyWith(transitionInFlight: false);
@@ -883,6 +918,76 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
         CheckoutSwapOutcome.vehicleRejected,
         message: e.message,
         code: e.code,
+      );
+    } finally {
+      if (gen == _generation && ref.mounted) {
+        state = state.copyWith(clearMutating: true);
+      }
+      _scheduleNext(gen);
+    }
+  }
+
+  // ── escritura del paso CUSTOMER_SIGN_PENDING (M2-H5) ─────────────────────
+
+  /// Guarda la firma que el cliente acaba de dejar en el lienzo del kiosco
+  /// (18B) — `POST /:id/customer-signature`.
+  ///
+  /// NO mueve el paso: estampa `customerSignedAt` y escribe la firma en el
+  /// contrato. Por eso viaja como [CheckoutMutation.customerSignature] y no
+  /// como transición.
+  ///
+  /// **Nunca se encola** (ADR-5 aplicado al cierre): la firma es una escritura
+  /// al contrato que solo el servidor puede confirmar, y una firma guardada
+  /// "para después" es una firma que el cliente creyó dar y el contrato no
+  /// tiene. Sin red se bloquea aquí — y la pantalla lo bloquea antes todavía,
+  /// para no pedirle el trazo al cliente en balde (18A).
+  ///
+  /// [signerName] se sella desde display-data, igual que el complete de la
+  /// inspección: el endpoint acepta la firma sin nombre y la dejaría anónima
+  /// en el contrato.
+  Future<CheckoutTransitionAttempt> saveCustomerSignature({
+    required String signatureDataUrl,
+    String? signerName,
+  }) async {
+    const blocked = CheckoutTransitionAttempt(CheckoutTransitionOutcome.blocked);
+    final session = state.session;
+    if (session == null || state.isMutating || state.transitionInFlight) {
+      return blocked;
+    }
+    if (state.isTerminal || state.offline) return blocked;
+    final gen = _generation;
+    // `replaced` ANTES del POST: lo que se mide es la decisión del agente de
+    // pisar una firma existente, no si el servidor la aceptó.
+    final replacing = session.customerSignedAt != null;
+    state = state.copyWith(
+      mutating: CheckoutMutation.customerSignature,
+      clearConflict: true,
+    );
+    try {
+      final updated = await _api.saveCustomerSignature(
+        id: session.id,
+        signatureDataUrl: signatureDataUrl,
+        signerName: signerName,
+      );
+      if (gen != _generation || !ref.mounted) return blocked;
+      _apply(updated, detectForeign: false, isWrite: true);
+      _logger.log(
+        CheckoutEvents.signatureSaved,
+        data: {'replaced': replacing},
+      );
+      return const CheckoutTransitionAttempt(CheckoutTransitionOutcome.ok);
+    } on ApiError catch (e) {
+      if (gen != _generation || !ref.mounted) return blocked;
+      state = state.copyWith(
+        error: e,
+        networkAvailable:
+            e.kind == ApiErrorKind.network ? false : state.networkAvailable,
+      );
+      return CheckoutTransitionAttempt(
+        CheckoutTransitionOutcome.failed,
+        message: e.message.isEmpty ? null : e.message,
+        code: e.code,
+        network: e.kind == ApiErrorKind.network,
       );
     } finally {
       if (gen == _generation && ref.mounted) {

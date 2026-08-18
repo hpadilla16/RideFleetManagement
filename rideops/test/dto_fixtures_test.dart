@@ -217,6 +217,40 @@ void main() {
     expect(d.reservation.vehicle, isNull);
   });
 
+  test('display-data trae lo que el CIERRE necesita para verificar (M2-H5)',
+      () {
+    final d = ReservationDisplayData.fromJson(
+      readFixture('reservation_display_data.json'),
+    );
+    // `getById` usa un `include` de nivel superior, así que TODO escalar de
+    // Reservation llega — incluido `status`, que es lo único con lo que 19B
+    // puede distinguir "cerrado" de "entregado".
+    expect(d.reservation.status, 'CONFIRMED');
+    expect(
+      ReservationStatus.tryParse(d.reservation.status)?.handoverRecorded,
+      isFalse,
+      reason: 'CONFIRMED = la cascada del finalize no avanzó la reserva',
+    );
+    // La lista de "ya entregada" espeja EXACTO el guard anti-downgrade del
+    // backend (checkout-session.service.js:453) — ni uno más, ni uno menos.
+    expect(ReservationStatus.checkedOut.handoverRecorded, isTrue);
+    expect(ReservationStatus.checkedIn.handoverRecorded, isTrue);
+    expect(ReservationStatus.checkedInUnpaid.handoverRecorded, isTrue);
+    expect(ReservationStatus.cancelled.handoverRecorded, isFalse);
+    expect(ReservationStatus.noShow.handoverRecorded, isFalse);
+    // `NEW` es palabra reservada de Dart: el wire va explícito para que no se
+    // parta en `N_E_W`.
+    expect(ReservationStatus.tryParse('NEW'), ReservationStatus.newReservation);
+    // Un estado que esta versión no conozca sale null ⇒ "no lo sé", jamás
+    // "no quedó registrada".
+    expect(ReservationStatus.tryParse('TELEPORTED'), isNull);
+
+    // Las dos filas de "Antes de que se vaya" (19A). La sede es la de
+    // DEVOLUCIÓN de la reserva, no la del selector del agente.
+    expect(d.reservation.returnAt, DateTime.utc(2026, 8, 19, 17, 30));
+    expect(d.reservation.returnLocation?.name, 'Patio Centro');
+  });
+
   test('display-data trae lo que verifica el paso CONFIRMING (M2-H2)', () {
     final d = ReservationDisplayData.fromJson(
       readFixture('reservation_display_data.json'),

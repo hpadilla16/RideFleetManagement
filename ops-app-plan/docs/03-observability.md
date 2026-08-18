@@ -53,6 +53,11 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 | `checkout.terms_signed_seen` | el poll vio caer `tcCompletedAt` |
 | `checkout.present_mode_shown` | se abrió la pantalla volteada al cliente (10B) |
 | `checkout.present_mode_screen_degraded` | brillo/wakelock no se pudo aplicar o restaurar (tags `what`: brightness/wakelock, `phase`: enter/exit) |
+| `checkout.signature_saved` | `POST /:id/customer-signature` aceptado (tag `replaced`: pisó una firma ya guardada) — M2-H5 |
+| `checkout.close_started` | el agente arrancó el cierre (tag `legs`: 3 con firma por recoger, 2 si ya venía sellada) — M2-H5 |
+| `checkout.close_ok` | el cierre llegó a CLOSED (tag `handover`: recorded/not_recorded/unverified, leído de `Reservation.status`) — M2-H5 |
+| `checkout.close_failed` | un tramo del cierre fue rechazado (tags `leg`, `code`, `terminal`) — M2-H5 |
+| `checkout.close_unknown` | un tramo del cierre murió sin respuesta (tag `leg`) — M2-H5 |
 
 Notas de los eventos de M2-H2:
 
