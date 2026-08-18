@@ -40,6 +40,7 @@
  */
 
 import { ConflictError } from '../../lib/errors.js';
+import { SERVICE_CHARGE_SOURCES } from '../../lib/sold-items.js';
 
 /**
  * Advisory-lock class id for "a customer pre-check-in submission". Arbitrary
@@ -72,34 +73,59 @@ export function discountApplier(discount) {
 }
 
 /**
- * Base for PERCENTAGE insurance plans: the non-tax, non-deposit, non-insurance
- * charges standing on the reservation when the customer submits. UNCHANGED from
- * what the route computed inline — this is a lift, not a re-decision.
+ * Base for PERCENTAGE insurance plans: THE RENTAL AND ITS FEES, and nothing
+ * that was sold on top. Taxes, deposits, insurance itself and every add-on are
+ * out; the daily rate, the mandatory/underage/website fees and the rest stay in.
  *
- * A KNOWN NON-IDEMPOTENCY LIVES HERE, and it is deliberately left alone.
- * The handler writes ADDITIONAL_SERVICE_PRECHECKIN rows AFTER this base is
- * computed, so a customer who submits, then comes back to fix their address and
- * submits again, has the first run's service rows sitting in the base the
- * second time — and a PERCENTAGE policy re-prices UPWARD for it.
+ * THIS IS A DELIBERATE PRICING CHANGE (Hector, 2026-08-17). It is not what the
+ * route computed inline before, and the difference is money.
  *
- * Excluding that source would fix it, and the first draft of this module did.
- * It is not a safe rider: this handler is NOT the only writer of that source —
- * reservation-pricing.service.js:1037 writes it when an agent adds an extra to
- * an already-priced reservation, and the reservation editor sends the same
- * value. So an agent-created row can be on the sheet at the FIRST submission,
- * and dropping it lowers what live tenants are quoted today. That is a pricing
- * decision with Hector's name on it, not a side effect of an atomicity fix.
+ * What it fixes. The handler writes its ADDITIONAL_SERVICE_PRECHECKIN rows
+ * AFTER this base is computed, so while add-ons counted, a customer who
+ * submitted, then came back to fix their address and submitted again, had the
+ * first run's own service rows sitting in the base the second time — and the
+ * policy re-priced UPWARD for them. MEASURED: 300 daily + a 12.00 service gave
+ * 30.00, then 31.20. Excluding add-ons closes that BY CONSTRUCTION rather than
+ * by argument: the base no longer contains anything this handler writes, so
+ * running it twice cannot move the number. That is the property to preserve if
+ * this filter is ever edited again.
  *
- * The concurrent case — the double-tap this module was hardened against — is
- * closed a different way: the second submission is refused with a 409 and never
- * re-derives anything. What is left is the sequential re-submission, which
- * behaves exactly as it did before this change. Raised separately.
+ * What it costs, and why it needed Hector rather than a quiet fix. This handler
+ * is NOT the only writer of that source — reservation-pricing.service.js:1037
+ * writes it when an agent adds an extra to an already-priced reservation, and
+ * the reservation editor sends the same value. Those rows can be on the sheet
+ * at the FIRST submission, so dropping them LOWERS what live tenants are quoted.
+ * doc/fixes/2026-08-17-precheckin-insurance-base-measurement.sql sizes exactly
+ * that, splitting agent-written rows from portal-written ones.
+ *
+ * Why the whole SERVICE_CHARGE_SOURCES list and not just the portal's source.
+ * The decision was "the rental and fees only, not add-ons". An add-on is spelled
+ * four ways in this codebase and sold-items.js is the one authoritative list —
+ * its header asks callers to use it instead of re-listing a subset inline.
+ * Excluding only the portal's spelling would price a child seat sold at
+ * pre-check-in differently from the identical seat sold on the website, which is
+ * not a rule anyone could explain to a customer. Taking the list also means a
+ * NEW sale path registered in sold-items.js is out of the base automatically,
+ * instead of silently re-inflating it.
+ *
+ * Exclusion, not inclusion, on purpose — the mirror of the rule isSoldItemCharge
+ * states for commissions. There the risk is a fee leaking INTO a commission
+ * base, so it lists what counts. Here the base is "everything that is not sold
+ * on top", and a fee source added tomorrow belongs in it; listing what counts
+ * would silently drop that fee out of every percentage quote.
  */
+const NON_BASE_SOURCES = new Set(SERVICE_CHARGE_SOURCES.map((s) => s.toUpperCase()));
+
 export function insuranceBaseFrom(charges) {
   return charges
-    .filter((c) => String(c.source || '').toUpperCase() !== 'INSURANCE'
-      && String(c.chargeType || '').toUpperCase() !== 'TAX'
-      && String(c.chargeType || '').toUpperCase() !== 'DEPOSIT')
+    .filter((c) => {
+      const source = String(c.source || '').toUpperCase();
+      const chargeType = String(c.chargeType || '').toUpperCase();
+      return source !== 'INSURANCE'
+        && !NON_BASE_SOURCES.has(source)
+        && chargeType !== 'TAX'
+        && chargeType !== 'DEPOSIT';
+    })
     .reduce((sum, c) => sum + Number(c.total || 0), 0);
 }
 
