@@ -278,11 +278,13 @@ test('beta-ci.yml actually runs `npm run test:embedded`, unguarded, in a live jo
   // matched whole-line with nothing appended.
   //
   // NOT COVERED, deliberately, so this comment does not become the next
-  // over-claim: an empty `strategy.matrix` (the job never materializes), and
-  // narrowing the workflow's `on:` triggers or adding paths-ignore. The first
-  // is exotic; the second disables all four jobs at once and is therefore
-  // loud. A `runs-on` label that does not exist also passes here, but it
-  // reports as a pending check rather than a green one.
+  // over-claim, five ways past this that are NOT caught: an empty
+  // `strategy.matrix` (the job never materializes); narrowing the workflow's
+  // `on:` triggers or adding paths-ignore; a `needs:` on a job that is itself
+  // skipped; and a hand-crafted decoy `embedded-postgres-suites:` line inside a
+  // block scalar under `jobs:`. Each is exotic, loud (the `on:` one disables
+  // all four jobs), or requires intent to deceive. A nonexistent `runs-on`
+  // label also passes, but it reports as a PENDING check, never a green one.
   const CI_PATH = '../../../.github/workflows/beta-ci.yml';
   let ci;
   try {
@@ -301,7 +303,12 @@ test('beta-ci.yml actually runs `npm run test:embedded`, unguarded, in a live jo
   // Terminator accepts end-of-input: the job being LAST in the file is a
   // legitimate reorder, and reporting it as 'the job is gone' sends the reader
   // hunting for a deletion that never happened.
-  const body = /^  embedded-postgres-suites:$([\s\S]*?)(?:^  \S|$(?![\s\S]))/m.exec(live)?.[1];
+  // Sliced from `jobs:` first: `^  embedded-postgres-suites:` is a legal line
+  // inside a top-level block scalar, and .exec takes the FIRST match, so an
+  // unanchored search can be pointed at a decoy header. Needs intent to
+  // deceive, but 'extracted from the job' should mean that.
+  const jobs = live.slice(live.search(/^jobs:$/m));
+  const body = /^  embedded-postgres-suites:$([\s\S]*?)(?:^  \S|$(?![\s\S]))/m.exec(jobs)?.[1];
   assert.ok(body, 'the embedded-postgres-suites job is gone from beta-ci.yml');
   // Whole-line and exact. `.*` after the command was the hole: `|| true`,
   // `; exit 0` and a shell-variable gate all satisfied it. Matched against the
@@ -310,23 +317,37 @@ test('beta-ci.yml actually runs `npm run test:embedded`, unguarded, in a live jo
   assert.match(
     body,
     /^\s+run:\s*npm run test:embedded\s*$/m,
-    'beta-ci.yml no longer runs `npm run test:embedded` as a bare, unguarded step inside ' +
-      'the embedded-postgres-suites job — the embedded suites are unguarded again',
+    'beta-ci.yml no longer runs `npm run test:embedded` inside the embedded-postgres-suites ' +
+      'job as a SINGLE-LINE `run:` with nothing appended (no `|` block, no quoting, no ' +
+      '`|| true`) — the embedded suites are unguarded again',
   );
-  // Kill switches. Job-level `if:` is anchored at EXACTLY four spaces: a step
-  // may legitimately carry `if: failure()` (the tenant-isolation-suite job does,
-  // to dump logs), and failing that edit with an accusation about kill switches
-  // would block a good change and misdirect whoever tries to fix it.
-  const KILL_SWITCHES = [
+  // Kill switches, scoped so that each one catches the disabling edit without
+  // catching the legitimate one next to it.
+  for (const [label, re] of [
+    // EXACTLY four spaces = job level. A step may legitimately carry `if:`.
     ['a job-level `if:`', /^ {4}if:/m],
-    ['a step-level `if: false`', /^\s+if:\s*(?:false|\$\{\{\s*false\s*\}\})\s*$/m],
     ['`continue-on-error: true`', /^\s*continue-on-error:\s*true/m],
-  ];
-  for (const [label, re] of KILL_SWITCHES) {
+  ]) {
     assert.ok(
       !re.test(body),
       `embedded-postgres-suites carries ${label} — a job that can skip itself, or pass while ` +
         'failing, is not a gate',
     );
   }
+  // ANY `if:` on the step that carries the command, not just a literal `false`.
+  // Matching only `if: false` was a REGRESSION: the previous version's blunter
+  // `/^\s{4,}if:/` caught `if: github.event_name == 'push'`, and narrowing it to
+  // fix a false failure on sibling steps let that back through. It is also the
+  // likeliest disabling edit on this whole list — gating an expensive job to
+  // save five minutes per PR is normal, well-intentioned and cost-motivated,
+  // far more likely than `|| true`. Scoping to the ONE step keeps
+  // `if: failure()` on a log-dump step legal, which is what m1 was about.
+  const RUN_LINE = /^\s*run:\s*npm run test:embedded\s*$/m;
+  const step = body.split(/^ {6}- /m).find((chunk) => RUN_LINE.test(chunk));
+  assert.ok(step, 'the `npm run test:embedded` invocation is not a step of embedded-postgres-suites');
+  assert.ok(
+    !/^[ 	]*if:/m.test(step),
+    'the step running `npm run test:embedded` carries an `if:` — a conditional step is not a gate. ' +
+      'Put the condition on a step that is not the one doing the work.',
+  );
 });
