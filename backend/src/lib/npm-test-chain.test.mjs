@@ -33,6 +33,11 @@ const KNOWN_OUT = {
   'test:module-access-audit': 'DB-backed (.db.test.mjs)',
   'test:customer-inspection': 'DB-backed',
   'test:customer-docs-backfill': 'DB-backed (storage backfill script)',
+  // Boots embedded-postgres: the pre-check-in atomicity + double-tap cases can
+  // only be shown against a real transaction, and the chain must stay runnable
+  // on a laptop with no Postgres. Run it with `npm run test:precheckin-charges`
+  // after `npm install --no-save embedded-postgres`.
+  'test:precheckin-charges': 'DB-backed (embedded-postgres)',
   // Landed on main in the 194 commits between this branch and prod, already
   // orphaned when this guard arrived. Grandfathered UNAUDITED — wiring another
   // session's suite into CI sight-unseen is how the chain gets wedged. Each

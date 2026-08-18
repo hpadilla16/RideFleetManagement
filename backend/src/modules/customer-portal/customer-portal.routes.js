@@ -11,6 +11,7 @@ import { reservationPricingService } from '../reservations/reservation-pricing.s
 import { settingsService } from '../settings/settings.service.js';
 import { enrichPrecheckinCatalog } from '../../lib/precheckin-catalog.js';
 import { buildSelfServiceSnapshot } from './customer-portal-self-service.js';
+import { applyPrecheckinCharges } from './precheckin-charges.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { parseDepositRules, evaluateDepositRule, parseDepositRuleDecision } from '../../lib/deposit-rules.js';
 import logger from '../../lib/logger.js';
@@ -1458,273 +1459,45 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
       });
     }
 
-    // Load pre-checkin discount for this tenant
+    // Load the pre-checkin discount + insurance catalog for this tenant.
+    //
+    // Both are settings I/O and both are read HERE, before the transaction
+    // opens. Holding a Postgres transaction open across a settings lookup ties
+    // up a pool connection for nothing — and the insurance catalog read used to
+    // sit BETWEEN the deleteMany that removed the customer's insurance line and
+    // the create that put it back, so a settings failure was itself one of the
+    // ways the line went missing.
     const discount = reservation.tenantId
       ? await settingsService.getPrecheckinDiscount({ tenantId: reservation.tenantId })
       : null;
-    const applyDiscount = (amount) => {
-      if (!discount?.enabled || !amount) return amount;
-      if (discount.type === 'PERCENTAGE') return Number((amount * (1 - discount.value / 100)).toFixed(2));
-      return Number(Math.max(0, amount - discount.value).toFixed(2));
-    };
-    const money = (value) => Number(Number(value || 0).toFixed(2));
+    const insurancePlans = reservation.tenantId && insuranceSelection?.selectedPlanCode
+      ? await settingsService.getInsurancePlans({ tenantId: reservation.tenantId })
+      : [];
 
-    // Rental length in days (mirrors backend/src/modules/reservations/reservation-pricing.service.js#rentalDays)
-    // Used to scale PER_DAY insurance plans and daily-rated additional services correctly.
-    const rentalDays = (() => {
-      const start = new Date(reservation.pickupAt || Date.now());
-      const end = new Date(reservation.returnAt || Date.now());
-      const diffMs = end.getTime() - start.getTime();
-      return Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)) || 1);
-    })();
-
-    // Base amount for PERCENTAGE insurance plans: sum of existing taxable non-tax, non-insurance charges
-    // (daily rate + selected services + mandatory fees) at the time the customer submits the pre-checkin.
-    const chargesForBase = await prisma.reservationCharge.findMany({
-      where: { reservationId: reservation.id, selected: true }
-    });
-    const insuranceBaseAmount = chargesForBase
-      .filter(c => String(c.source || '').toUpperCase() !== 'INSURANCE'
-        && String(c.chargeType || '').toUpperCase() !== 'TAX'
-        && String(c.chargeType || '').toUpperCase() !== 'DEPOSIT')
-      .reduce((sum, c) => sum + Number(c.total || 0), 0);
-
-    // Process insurance selection
-    if (insuranceSelection) {
-      await prisma.reservationCharge.deleteMany({
-        where: { reservationId: reservation.id, source: 'INSURANCE' }
-      });
-
-      if (insuranceSelection.selectedPlanCode) {
-        const plans = reservation.tenantId ? await settingsService.getInsurancePlans({ tenantId: reservation.tenantId }) : [];
-        const plan = plans.find(p => String(p.code).toUpperCase() === String(insuranceSelection.selectedPlanCode).toUpperCase());
-        if (plan) {
-          // Respect the plan's pricing mode. Mirrors computeInsuranceLine() in booking-engine.service.js
-          // so a PER_DAY plan is charged days×rate instead of being collapsed to a single unit.
-          const mode = String(plan.chargeBy || plan.mode || 'FIXED').toUpperCase();
-          const amount = Number(plan.amount || plan.rate || plan.total || 0);
-          const discountedAmount = applyDiscount(amount);
-
-          let chargeQuantity = 1;
-          let chargeRate = money(discountedAmount);
-          let chargeTotal = money(discountedAmount);
-          let counterTotal = money(amount);
-          let counterNote = null;
-
-          if (mode === 'PER_DAY') {
-            chargeQuantity = rentalDays;
-            chargeRate = money(discountedAmount);
-            chargeTotal = money(discountedAmount * rentalDays);
-            counterTotal = money(amount * rentalDays);
-            counterNote = `Counter price: $${amount.toFixed(2)}/day × ${rentalDays} day(s)`;
-          } else if (mode === 'PERCENTAGE') {
-            // Percentage plans are always a single line whose value is the pct of the base.
-            chargeQuantity = 1;
-            chargeRate = money(insuranceBaseAmount * (discountedAmount / 100));
-            chargeTotal = chargeRate;
-            counterTotal = money(insuranceBaseAmount * (amount / 100));
-            counterNote = `Counter price: ${amount.toFixed(2)}% of $${insuranceBaseAmount.toFixed(2)}`;
-          } else {
-            // FIXED
-            counterNote = `Counter price: $${amount.toFixed(2)}`;
-          }
-
-          const discounted = chargeTotal < counterTotal;
-          await prisma.reservationCharge.create({
-            data: {
-              reservationId: reservation.id,
-              source: 'INSURANCE',
-              sourceRefId: plan.code,
-              name: discounted ? `${plan.name} (Pre-checkin rate)` : plan.name,
-              rate: chargeRate,
-              total: chargeTotal,
-              quantity: chargeQuantity,
-              selected: true,
-              sortOrder: 0,
-              notes: discounted ? `${counterNote}, pre-checkin discount applied` : null
-            }
-          });
-        }
-      } else if (insuranceSelection.declinedCoverage) {
-        // Persist the decline signature (captured on the pre-check-in page) onto
-        // the agreement if one exists; initials + signature also live in the
-        // AuditLog insuranceSelection blob the admin slot reads.
-        const declineSig = insuranceSelection.signatureDataUrl;
-        const declAg = await prisma.rentalAgreement.findUnique({ where: { reservationId: reservation.id }, select: { id: true } });
-        if (declAg) {
-          await prisma.rentalAgreement.update({
-            where: { id: declAg.id },
-            data: {
-              declinedInsurance: true,
-              ...(declineSig && String(declineSig).length > 200
-                ? { declinedInsuranceSignatureDataUrl: declineSig, declinedInsuranceSignedAt: new Date() }
-                : {}),
-            },
-          });
-        }
-      }
-    }
-
-    // Process additional services selection
     const selectedServices = body.selectedServices || null;
-    if (selectedServices && Array.isArray(selectedServices)) {
-      await prisma.reservationCharge.deleteMany({
-        where: { reservationId: reservation.id, source: 'ADDITIONAL_SERVICE_PRECHECKIN' }
-      });
-
-      for (const svc of selectedServices) {
-        if (!svc.serviceId || !svc.selected) continue;
-        const service = await prisma.additionalService.findFirst({
-          where: { id: svc.serviceId, tenantId: reservation.tenantId, isActive: true }
-        });
-        if (!service) continue;
-        const qty = Math.max(1, Number(svc.quantity || service.defaultQty || 1));
-
-        // Respect the service's pricing mode. Mirrors computeAdditionalServiceLine() in
-        // booking-engine.service.js: dailyRate (when >0) is the per-day price and total
-        // scales with rental days; otherwise the flat rate applies.
-        const perDay = Number(service.dailyRate || 0);
-        const isPerDay = perDay > 0 || String(service.chargeType || '').toUpperCase() === 'DAILY';
-        const counterRate = isPerDay && perDay > 0 ? perDay : Number(service.rate || 0);
-        const discountedRate = applyDiscount(counterRate);
-
-        const chargeTotal = isPerDay
-          ? money(discountedRate * rentalDays * qty)
-          : money(discountedRate * qty);
-        const counterTotal = isPerDay
-          ? money(counterRate * rentalDays * qty)
-          : money(counterRate * qty);
-        const discounted = discountedRate < counterRate;
-        const counterNote = isPerDay
-          ? `Counter price: $${counterRate.toFixed(2)}/day × ${rentalDays} day(s) × ${qty} unit(s)`
-          : `Counter price: $${counterRate.toFixed(2)}/unit × ${qty} unit(s)`;
-
-        await prisma.reservationCharge.create({
-          data: {
-            reservationId: reservation.id,
-            source: 'ADDITIONAL_SERVICE_PRECHECKIN',
-            sourceRefId: service.id,
-            name: discounted ? `${service.name} (Pre-checkin rate)` : service.name,
-            rate: money(discountedRate),
-            total: chargeTotal,
-            quantity: isPerDay ? rentalDays * qty : qty,
-            selected: true,
-            sortOrder: 10,
-            notes: discounted ? `${counterNote}, pre-checkin discount applied` : null
-          }
-        });
-      }
-    }
-
-    // Process third-party / OTA prepaid voucher
     const thirdPartyBooking = body.thirdPartyBooking || null;
-    if (thirdPartyBooking?.isThirdParty) {
-      // Remove daily-rate related charges only — keep insurance, services, and their taxes
-      await prisma.reservationCharge.deleteMany({
-        where: { reservationId: reservation.id, source: { in: ['DAILY', 'FEE', 'SERVICE_LINKED_FEE'] } }
-      });
-
-      // Recalculate tax on remaining taxable charges (insurance + services)
-      const remainingCharges = await prisma.reservationCharge.findMany({
-        where: { reservationId: reservation.id, selected: true }
-      });
-      // Delete old tax rows (chargeType TAX) so we can recalculate
-      await prisma.reservationCharge.deleteMany({
-        where: { reservationId: reservation.id, chargeType: 'TAX' }
-      });
-      const taxableTotal = remainingCharges
-        .filter(c => c.taxable && String(c.chargeType || '').toUpperCase() !== 'TAX')
-        .reduce((sum, c) => sum + Number(c.total || 0), 0);
-      if (taxableTotal > 0) {
-        // Get tax rate from pricing snapshot or pickup location
-        const loc = reservation.pickupLocationId
-          ? await prisma.location.findUnique({ where: { id: reservation.pickupLocationId }, select: { taxRate: true } })
-          : null;
-        const taxRate = Number(reservation.pricingSnapshot?.taxRate ?? loc?.taxRate ?? 0);
-        if (taxRate > 0) {
-          const taxAmount = Number((taxableTotal * taxRate / 100).toFixed(2));
-          await prisma.reservationCharge.create({
-            data: {
-              reservationId: reservation.id,
-              source: 'TAX_RECALC',
-              name: `Sales Tax (${taxRate.toFixed(2)}%)`,
-              chargeType: 'TAX',
-              quantity: 1,
-              rate: taxAmount,
-              total: taxAmount,
-              taxable: false,
-              selected: true,
-              sortOrder: 999
-            }
-          });
-        }
-      }
-
-      // Store a voucher charge marker so the agreement knows this is prepaid
-      const existingVoucher = await prisma.reservationCharge.findFirst({
-        where: { reservationId: reservation.id, source: 'OTA_PREPAID_VOUCHER' }
-      });
-      if (!existingVoucher) {
-        await prisma.reservationCharge.create({
-          data: {
-            reservationId: reservation.id,
-            source: 'OTA_PREPAID_VOUCHER',
-            sourceRefId: 'third-party-voucher',
-            name: 'Prepaid Third-Party Voucher',
-            chargeType: 'UNIT',
-            quantity: 1,
-            rate: 0,
-            total: 0,
-            taxable: false,
-            selected: true,
-            sortOrder: -1,
-            notes: thirdPartyBooking.voucherUrl ? 'Voucher document attached' : 'No voucher document uploaded'
-          }
-        });
-      }
-
-      // Update reservation notes/pricing snapshot to flag prepaid status
-      const currentNotes = reservation.notes || '';
-      const prepaidNote = '[OTA PREPAID] Customer indicated third-party prepaid booking during pre-check-in.';
-      if (!currentNotes.includes('[OTA PREPAID]')) {
-        await prisma.reservation.update({
-          where: { id: reservation.id },
-          data: { notes: currentNotes ? `${currentNotes}\n${prepaidNote}` : prepaidNote }
-        });
-      }
-
-      // Store voucher URL on the customer record
-      if (thirdPartyBooking.voucherUrl) {
-        await prisma.customer.update({
-          where: { id: reservation.customerId },
-          data: { notes: `[VOUCHER] Third-party voucher uploaded during pre-check-in` }
-        });
-      }
-    }
-
     const completedAt = new Date();
-    await prisma.reservation.update({
-      where: { id: reservation.id },
-      data: {
-        customerInfoCompletedAt: completedAt
-      }
-    });
 
-    await prisma.auditLog.create({
-      data: {
-        tenantId: reservation.tenantId || null,
-        reservationId: reservation.id,
-        action: 'UPDATE',
-        metadata: JSON.stringify({
-          customerInfoCompleted: true,
-          completedAt: completedAt.toISOString(),
-          source: 'PUBLIC_PRECHECKIN',
-          ip: req.ip || null,
-          insuranceSelection: insuranceSelection || null,
-          selectedServices: selectedServices || null,
-          thirdPartyBooking: thirdPartyBooking || null
-        })
-      }
+    // THE MONEY, IN ONE TRANSACTION (2026-08-17).
+    //
+    // What used to live inline here was a run of unwrapped statements that
+    // deleted the reservation's INSURANCE charges and only later re-created
+    // them — four such delete-then-recreate windows in all. A failure in any of
+    // them left the customer with a charge sheet missing a line and a 500 on
+    // their phone. It now commits as one unit, serialized per reservation, in
+    // precheckin-charges.js — which also documents what is deliberately left
+    // OUTSIDE the transaction (the KYC uploads, the PII update, and the
+    // fail-soft deposit re-evaluation above).
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection,
+      selectedServices,
+      thirdPartyBooking,
+      insurancePlans,
+      discount,
+      completedAt,
+      auditMetadata: { ip: req.ip || null }
     });
 
     const refreshed = await findReservationByToken('customer-info', token);

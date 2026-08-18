@@ -121,6 +121,7 @@
     "test:startup-migrate": "node --test src/lib/startup-migrate.test.mjs",
     "test:email": "node --test --test-force-exit src/lib/email-template.test.mjs",
     "test:precheckin": "node --test src/lib/precheckin-catalog.test.mjs",
+    "test:precheckin-charges": "node --test --test-force-exit src/modules/customer-portal/precheckin-charges.embedded.test.mjs",
     "test:precheckin-invite": "node --test --test-force-exit src/modules/reservations/precheckin-invite.scheduler.test.mjs",
     "test:correct-readings": "node --test --test-force-exit src/modules/reservations/correct-readings.test.mjs",
     "test:void-payment": "node --test --test-force-exit src/modules/reservations/void-payment-no-refund.test.mjs",
