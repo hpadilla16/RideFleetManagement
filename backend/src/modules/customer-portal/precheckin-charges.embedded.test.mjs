@@ -357,6 +357,85 @@ describe('the submission it is meant to apply still applies', () => {
     assert.notEqual(row.customerInfoCompletedAt, null);
     assert.equal(await prisma.auditLog.count({ where: { reservationId: reservation.id } }), 1);
   });
+
+  it('records a decline WITH its signature on the agreement', async () => {
+    // The counterpart to the rollback case above, and the reason this exists at
+    // all: an earlier revision of the module carried a `tcSignedAt` fence from
+    // another branch, guarded by a parameter no caller passed. Its only live
+    // effect was to DROP this signature whenever staff had signed the T&C at the
+    // counter first — which is legal, since requirePrecheckinBeforeCheckout is
+    // off by default. buildDeclinedInsuranceBlock prints this column on the
+    // contract's decline addendum; without it the PDF says "(no signature on
+    // file)". This case pins that the signature is written.
+    const reservation = await makeReservation({
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+    await prisma.rentalAgreement.create({
+      data: {
+        agreementNumber: `AG-SIG-${TAG}-${resSeq}`,
+        reservationId: reservation.id,
+        tenantId: ids.tenant,
+        pickupLocationId: ids.location,
+        returnLocationId: ids.location,
+        pickupAt: reservation.pickupAt,
+        returnAt: reservation.returnAt,
+        customerFirstName: 'Ana',
+        customerLastName: 'P',
+        // Signed at the counter BEFORE the customer finished pre-check-in.
+        tcSignedAt: new Date(),
+      },
+    });
+    const signature = `data:image/png;base64,${'A'.repeat(400)}`;
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { declinedCoverage: true, signatureDataUrl: signature },
+      insurancePlans: PLANS,
+    });
+
+    const ag = await prisma.rentalAgreement.findUnique({
+      where: { reservationId: reservation.id },
+      select: { declinedInsurance: true, declinedInsuranceSignatureDataUrl: true, declinedInsuranceSignedAt: true },
+    });
+    assert.equal(ag.declinedInsurance, true);
+    assert.equal(ag.declinedInsuranceSignatureDataUrl, signature);
+    assert.notEqual(ag.declinedInsuranceSignedAt, null);
+  });
+
+  it('does not write the signature columns for a blank-ish signature', async () => {
+    // The length > 200 guard, unchanged. A stub value is not a signature.
+    const reservation = await makeReservation({
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+    await prisma.rentalAgreement.create({
+      data: {
+        agreementNumber: `AG-NOSIG-${TAG}-${resSeq}`,
+        reservationId: reservation.id,
+        tenantId: ids.tenant,
+        pickupLocationId: ids.location,
+        returnLocationId: ids.location,
+        pickupAt: reservation.pickupAt,
+        returnAt: reservation.returnAt,
+        customerFirstName: 'Ana',
+        customerLastName: 'P',
+      },
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { declinedCoverage: true, signatureDataUrl: 'data:image/png;base64,AAAA' },
+      insurancePlans: PLANS,
+    });
+
+    const ag = await prisma.rentalAgreement.findUnique({
+      where: { reservationId: reservation.id },
+      select: { declinedInsurance: true, declinedInsuranceSignatureDataUrl: true },
+    });
+    assert.equal(ag.declinedInsurance, true);
+    assert.equal(ag.declinedInsuranceSignatureDataUrl, null);
+  });
 });
 
 
