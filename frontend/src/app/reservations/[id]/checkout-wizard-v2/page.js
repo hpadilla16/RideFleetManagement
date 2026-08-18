@@ -2131,7 +2131,7 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
   // What this card offers now tracks what the backend will actually do,
   // including the CHECKED_OUT + DRAFT-agreement repair — see `closedCardState`,
   // where the agreement status is part of the condition rather than decoration.
-  const { voided, halfFinalized, showRetry, variant } =
+  const { halfFinalized, showRetry, variant } =
     closedCardState({ reservation, terminalReason: copy.terminal });
 
   // Switched on `variant` rather than re-deriving the branch here — see
@@ -2223,7 +2223,7 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
             act on something first — so it stays off the half-finalize card,
             where there is nothing for the agent to fix and the contract is
             simply unfinished. */}
-        {showRetry && !halfFinalized && (
+        {variant === 'reason' && showRetry && (
           <span style={{ display: 'block', fontWeight: 500, marginTop: 4 }}>
             {t('checkoutClosed.retryHint')}
           </span>
@@ -2244,7 +2244,7 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
             the agent can act on — so it is full-strength body text, not a
             faint footnote. We do not parse the number out of it: the backend
             hands clients a `reason` precisely so nobody has to read its prose. */}
-        {!voided && !halfFinalized && copy.detail && (
+        {variant === 'reason' && copy.detail && (
           <span style={{ display: 'block', fontWeight: 500, fontSize: 13, marginTop: 6 }}>
             {copy.detail}
           </span>
