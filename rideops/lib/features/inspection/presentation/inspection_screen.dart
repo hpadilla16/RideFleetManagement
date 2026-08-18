@@ -143,6 +143,12 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
         tenantName: state.branding?.clientSafeCompanyName ?? '',
         tenantLogoUrl: state.branding?.companyLogoUrl ?? '',
         reservationLabel: state.reservationNumber ?? '—',
+        // Pie de identidad (GD-MC-7): en un mismo checkout el cliente firma DOS
+        // veces en este teléfono con cinco minutos de diferencia —la revisión y
+        // la entrega—, y sin este renglón la primera no dice QUÉ se está
+        // firmando. Sin placa el widget arma "…· Corolla 2023"; sin unidad omite
+        // el pie entero (kiosk_signature_step.dart:_footLine).
+        vehicleLabel: state.vehicleLabel,
         onConfirmed: controller.confirmSignature,
         onExitToStaff: () => controller.goToStep(InspectionStep.metrics),
       );

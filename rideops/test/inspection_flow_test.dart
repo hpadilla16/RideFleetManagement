@@ -326,6 +326,31 @@ void main() {
   });
 
   testWidgets(
+      'GD-MC-7: la firma de la INSPECCIÓN también dice QUÉ se firma — el '
+      'cliente firma dos veces en el mismo teléfono con cinco minutos de '
+      'diferencia', (tester) async {
+    routeHappyPath();
+    await tester.pumpWidget(app(const InspectionScreen(reservationId: 'r1')));
+    await tester.pumpAndSettle();
+
+    container
+        .read(inspectionControllerProvider('r1').notifier)
+        .goToStep(InspectionStep.signature);
+    await tester.pumpAndSettle();
+
+    // Pie de identidad: tenant · unidad. Sin `plate` en el flujo de
+    // inspección el widget arma el pie igual (kiosk_signature_step:_footLine),
+    // y sin unidad lo omitiría entero — cero riesgo de separador huérfano.
+    expect(
+      find.textContaining('Toyota Corolla 2023'),
+      findsOneWidget,
+      reason: 'la unidad viaja desde display-data por inspection_state',
+    );
+    expect(find.textContaining('Plate'), findsNothing,
+        reason: 'la placa no vive en el estado de la inspección');
+  });
+
+  testWidgets(
       'el cierre encolado restaura el resumen CON su firma y sus métricas: la '
       'pantalla suelta no aterriza en un CTA muerto', (tester) async {
     routeHappyPath();

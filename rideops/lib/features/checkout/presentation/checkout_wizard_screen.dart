@@ -59,6 +59,9 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
 
   CheckoutWizardController get _controller => ref.read(_provider.notifier);
 
+  CheckoutCloseController get _closeController =>
+      ref.read(checkoutCloseProvider(widget.reservationId).notifier);
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
@@ -88,10 +91,25 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     // es directo: pedir confirmación de algo inexistente sería teatro.
     final needsPauseDecision = state.session != null && !state.isTerminal;
 
+    // "Ver el detalle de la sesión" NO puede ser una puerta de un solo sentido
+    // (GD-MC-3): el motivo del rechazo no sobrevive al re-fetch (el 409 no
+    // queda en `events[]` — pedido P10) y "Copiar el detalle" solo existe en
+    // el resumen. Mientras el detalle está abierto, el back —el del sistema y
+    // la flecha— vuelve al resumen en vez de salir del checkout.
+    final showingDetail = state.session != null &&
+        state.isTerminal &&
+        ref.watch(checkoutCloseProvider(widget.reservationId)
+            .select((c) => c.hasOutcome && c.showDetail));
+
     return PopScope(
-      canPop: !needsPauseDecision,
+      canPop: !needsPauseDecision && !showingDetail,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _openPauseSheet();
+        if (didPop) return;
+        if (showingDetail) {
+          _closeController.hideSessionDetail();
+          return;
+        }
+        _openPauseSheet();
       },
       child: Scaffold(
         backgroundColor: RideTokens.n50,
@@ -104,7 +122,9 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
                     : l10n.coTitle(state.context!.reservationNumber!),
                 subtitle: _scopeLine(),
                 onBack: () {
-                  if (needsPauseDecision) {
+                  if (showingDetail) {
+                    _closeController.hideSessionDetail();
+                  } else if (needsPauseDecision) {
                     _openPauseSheet();
                   } else {
                     _leave();
@@ -241,6 +261,9 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
         session: session,
         myUserId: ref.watch(sessionControllerProvider).user?.id,
         onExit: _leave,
+        // Solo cuando se LLEGÓ desde el resumen: en una sesión que ya estaba
+        // cerrada al entrar no hay resumen al que volver.
+        onBack: close.hasOutcome ? _closeController.hideSessionDetail : null,
       );
     }
 

@@ -1055,6 +1055,12 @@
   "@coHandoffRuleBrandNoTenant": {
     "description": "Sin branding del tenant la fila del nombre se oculta (clientSafeCompanyName): nunca un fallback con marca nuestra frente al cliente."
   },
+  "coRetainedNote": "El cliente ya firmó en este teléfono, pero el servidor todavía no lo confirmó. El trazo sigue aquí: no hace falta pedírselo otra vez.",
+  "@coRetainedNote": {
+    "description": "INN S-1. La tinta retenida vive solo en memoria y solo hasta el 200; volver a pedirle la firma al cliente sería cobrarle el error de la app."
+  },
+  "coRetryWithSignature": "Reintentar con la firma que ya dio",
+  "coRetryWithSignatureWhy": "Se manda el MISMO trazo que el cliente dejó hace un momento. Vive solo en la memoria de este teléfono y nunca entra a la bandeja de salida.",
   "coHandoffCta": "Entregar al cliente",
   "coHandoffWhy": "La firma se guarda en el contrato al confirmarla. Si el cliente se arrepiente, sales con tu PIN y el paso queda igual.",
   "coHandoffOfflineBlocked": "Sin conexión no se puede recoger la firma: se guarda en el contrato en el momento, no después.",
@@ -1126,12 +1132,32 @@
   "coCloseCtaWhy": "Se registra la entrega en la reserva y se genera el contrato.",
 
   "coClosedTitle": "Entrega cerrada",
+  "coClosedTitleUnverified": "Checkout cerrado",
+  "@coClosedTitleUnverified": {
+    "description": "19A-bis, variantes verifying/unverified: el 200 prueba el CHECKOUT, no la entrega. Mismo verde, misma posición — una palabra que no sobreafirma (vocabulario ya aprobado en coCloseFailedTitle)."
+  },
+  "coRecordHandoverUnverifiedNotice": "El cierre entró, pero no pudimos confirmarlo en la reserva. Compruébalo antes de dar por terminada la entrega.",
+  "@coRecordHandoverUnverifiedNotice": {
+    "description": "Banner ámbar SOLO en unverified. A propósito NO dice \"no entregues las llaves\": esa línea es de 19B, donde hay un rechazo real — aquí solo hay ignorancia (decisión aprobada, nota 10)."
+  },
   "coBeforeTheyGoTitle": "Antes de que se vaya",
   "coBeforeKeysLabel": "Llaves",
   "coBeforeKeys": "Entrega las llaves y la tarjeta de circulación",
   "coBeforeReturnLabel": "Regreso",
+  "coBeforeScopeNote": "El combustible y el kilometraje de salida quedaron en el registro de la inspección, no en esta pantalla.",
+  "@coBeforeScopeNote": {
+    "description": "SC-1 camino B (aprobado por Hector). Dice \"registro de la inspección\" y NO \"contrato\": la copia al contrato es best-effort dentro de un catch que se traga el error (checkout-session.service.js:551-557, :562). Incondicional: la tarjeta nunca baja de dos renglones."
+  },
   "coRecordTitle": "Registro",
-  "coRecordSessionClosed": "Sesión cerrada",
+  "coRecordPillRecorded": "Registrada",
+  "coRecordPillChecking": "Comprobando",
+  "coRecordPillUnverified": "Sin confirmar",
+  "coRecordRowSession": "Sesión",
+  "coRecordSessionClosedAt": "Cerrada {time}",
+  "@coRecordSessionClosedAt": {
+    "description": "Fila ancla del 19A-bis: el hecho que el 200 SÍ prueba, con la hora del SERVIDOR (finishedAt). Era la pastilla coRecordSessionClosed; se muda a fila y gana la hora, como 17F-bis hizo con la hora de la inspección.",
+    "placeholders": { "time": { "type": "String" } }
+  },
   "coRecordSignatureLabel": "Firma",
   "coRecordContractLabel": "Contrato",
   "coRecordEmailRequested": "Se pidió enviarlo por correo a las {time}",
@@ -1141,13 +1167,28 @@
   },
   "coRecordEmailNotRequested": "No hay registro de envío por correo",
   "coRecordHandoverLabel": "Entrega",
-  "coRecordHandoverRecorded": "La reserva quedó marcada como entregada",
-  "coRecordHandoverUnverified": "No se pudo confirmar en la reserva",
-  "@coRecordHandoverUnverified": {
-    "description": "display-data no respondió o mandó un estado desconocido. Es 'no lo sé', jamás 'no quedó registrada'."
+  "coRecordHandoverRecorded": "Registrada en la reserva · {time}",
+  "@coRecordHandoverRecorded": {
+    "description": "La única formulación que la app puede firmar: se preguntó y la reserva lo confirma. No dice 'avanzó a CHECKED_OUT' ni 'el vehículo quedó rentado'.",
+    "placeholders": { "time": { "type": "String" } }
   },
+  "coRecordHandoverChecking": "Comprobando en la reserva…",
+  "@coRecordHandoverChecking": {
+    "description": "Fila Entrega mientras la consulta viaja (19A-bis). Ningún renglón afirma un resultado antes de que vuelva la llamada que lo produce."
+  },
+  "coRecordHandoverUnconfirmed": "Sin confirmar",
+  "@coRecordHandoverUnconfirmed": {
+    "description": "display-data no respondió o mandó un estado desconocido. Es 'no lo sé', jamás 'no quedó registrada' — el negativo definitivo enruta a 19B."
+  },
+  "coRecordHandoverCheckingWhy": "Nada bloquea: el agente puede salir. La comprobación no se pierde, queda en la sesión.",
+  "coRecordHandoverRecheck": "Volver a comprobar",
+  "coRecordHandoverRecheckWhy": "Es una consulta al servidor, no un reintento del cierre: la sesión ya está cerrada y no puede cerrarse dos veces.",
   "coBackHome": "Volver al inicio",
   "coSessionDetail": "Ver el detalle de la sesión",
+  "coBackToOutcome": "Volver al resumen del cierre",
+  "@coBackToOutcome": {
+    "description": "GD-MC-3: el detalle NO puede ser una puerta de un solo sentido — el motivo del rechazo no sobrevive al re-fetch y 'Copiar el detalle' solo existe en el resumen."
+  },
 
   "coCloseFailedStepline": "Cierre con problema",
   "coCloseFailedTitle": "El checkout se cerró, pero el servidor no registró la entrega. La reserva necesita que alguien la revise en el mostrador.",
@@ -1162,13 +1203,18 @@
   "coCloseReasonTitle": "Motivo",
   "coServerReasonLabel": "Respuesta del servidor",
   "coCloseReasonPill": "Del servidor",
-  "coCloseVerifiedPill": "Verificado en la reserva",
+  "coCloseVerifiedPill": "Comprobado en la reserva",
+  "coCloseVerifiedTitle": "Lo que comprobamos",
+  "@coCloseVerifiedTitle": {
+    "description": "Rama SIN motivo del servidor (19B silencioso): la tarjeta no cita a nadie, cuenta lo que la app verificó por su cuenta. Titularla 'Motivo' prometía una cita que no existe."
+  },
+  "coCloseVerifiedLabel": "Estado de la reserva",
   "coCloseNotRecordedReason": "Se consultó la reserva después de cerrar y sigue sin registrar la entrega. El servidor no dio un motivo.",
   "coCloseNoRetry": "Esta sesión ya está cerrada, así que no se puede reintentar desde aquí. Nada de lo capturado se perdió.",
   "@coCloseNoRetry": {
     "description": "canTransition es false desde un estado terminal (state-machine.js:94): un botón de reintento daría 409 ILLEGAL_TRANSITION para siempre."
   },
-  "coCopyProblem": "Copiar el detalle del problema",
+  "coCopyProblem": "Copiar el detalle para el mostrador",
   "coCopiedProblem": "Detalle copiado al portapapeles",
   "coHoldKeys": "No entregues las llaves hasta que el mostrador confirme.",
 

@@ -136,6 +136,14 @@ class _HandoffView extends ConsumerWidget {
     final name = wizard.context?.customerName;
     final vehicle = wizard.context?.vehicleLabel;
     final tenant = wizard.context?.tenantName;
+    // TINTA RETENIDA (INN S-1). El trazo se guarda en memoria justo para este
+    // caso —la pata 1 murió por red— pero el único camino de vuelta desde 19C
+    // es `checkStatus()`, que limpia el fallo y aterriza AQUÍ. Sin esto, la
+    // pantalla que conserva la firma le pedía al cliente que firmara otra vez
+    // y descartaba la que ya había dado: cobrarle nuestro bug, que es
+    // exactamente lo que la retención existe para evitar.
+    final retained = ref.watch(checkoutCloseProvider(reservationId)
+        .select((s) => s.capturedSignature != null));
     // Sin red la firma NO se pide: se escribe en el contrato en el momento y
     // no existe camino offline (jamás se encola una firma). Se bloquea la
     // entrega del teléfono CON CAUSA, que es lo contrario de esconder el CTA.
@@ -148,6 +156,24 @@ class _HandoffView extends ConsumerWidget {
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
             children: [
               ...banners,
+              if (retained) ...[
+                WizardBanner(
+                  icon: Icons.draw_outlined,
+                  iconColor: RideTokens.warnTx,
+                  background: RideTokens.warnBg,
+                  border: RideTokens.warnBd,
+                  child: Text(
+                    l10n.coRetainedNote,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: RideTokens.n800,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               Container(
                 padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
                 decoration: BoxDecoration(
@@ -219,23 +245,48 @@ class _HandoffView extends ConsumerWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
           child: WizardDock(
-            why: offline ? l10n.coHandoffOfflineBlocked : l10n.coHandoffWhy,
+            why: offline
+                ? l10n.coHandoffOfflineBlocked
+                : (retained
+                    ? l10n.coRetryWithSignatureWhy
+                    : l10n.coHandoffWhy),
+            // Con tinta en mano el principal es REUSARLA; volver a pedirla
+            // sigue existiendo (la firma pudo ser de la persona equivocada),
+            // pero baja a secundario.
             primary: Semantics(
               button: true,
               enabled: !offline,
-              label: l10n.coHandoffCta,
+              label: retained ? l10n.coRetryWithSignature : l10n.coHandoffCta,
               hint: offline ? l10n.coHandoffOfflineBlocked : null,
               child: ExcludeSemantics(
                 child: RidePrimaryButton(
-                  label: l10n.coHandoffCta,
+                  label:
+                      retained ? l10n.coRetryWithSignature : l10n.coHandoffCta,
                   onPressed: offline
                       ? null
-                      : () => ref
-                          .read(checkoutCloseProvider(reservationId).notifier)
-                          .openKiosk(),
+                      : () {
+                          final close = ref.read(
+                            checkoutCloseProvider(reservationId).notifier,
+                          );
+                          if (retained) {
+                            close.close();
+                          } else {
+                            close.openKiosk();
+                          }
+                        },
                 ),
               ),
             ),
+            secondary: retained
+                ? RideGhostButton(
+                    label: l10n.coHandoffCta,
+                    onPressed: offline
+                        ? null
+                        : () => ref
+                            .read(checkoutCloseProvider(reservationId).notifier)
+                            .openKiosk(),
+                  )
+                : null,
           ),
         ),
       ],
@@ -476,6 +527,8 @@ class _ClosingView extends ConsumerWidget {
     final l10n = AppLocalizations.of(context)!;
     final wizard = ref.watch(checkoutWizardProvider(reservationId));
     final failed = close.failureKind == CloseFailureKind.retryable;
+    final retryable = failed && !wizard.offline;
+    final label = failed ? l10n.coCloseRetry : l10n.coClosingCta;
 
     return Column(
       children: [
@@ -520,17 +573,37 @@ class _ClosingView extends ConsumerWidget {
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
           child: WizardDock(
-            why: failed ? l10n.coCloseRetryWhy : l10n.coClosingWhy,
-            primary: RidePrimaryButton(
-              label: failed ? l10n.coCloseRetry : l10n.coClosingCta,
-              loading: close.running,
-              // Nunca un error sin botón: el tramo reintentable se reintenta,
-              // y mientras corre el CTA está en carga (anti-doble-tap).
-              onPressed: failed && !wizard.offline
-                  ? () => ref
-                      .read(checkoutCloseProvider(reservationId).notifier)
-                      .retry()
+            // Un CTA inerte con un pie que promete "este tramo se puede volver
+            // a intentar" es una puerta falsa (GD-MC-5): sin red el reintento
+            // NO puede salir, y el pie tiene que decir eso mismo — igual que
+            // 18A y 18D en esta misma pantalla.
+            why: failed
+                ? (wizard.offline
+                    ? l10n.coBlockedOfflineWhy
+                    : l10n.coCloseRetryWhy)
+                : l10n.coClosingWhy,
+            primary: Semantics(
+              button: true,
+              enabled: retryable,
+              label: label,
+              // Deshabilitado CON CAUSA también para quien no ve el gris.
+              hint: failed && wizard.offline
+                  ? l10n.coBlockedOfflineShort
                   : null,
+              child: ExcludeSemantics(
+                child: RidePrimaryButton(
+                  label: label,
+                  loading: close.running,
+                  // Nunca un error sin botón: el tramo reintentable se
+                  // reintenta, y mientras corre el CTA está en carga
+                  // (anti-doble-tap).
+                  onPressed: retryable
+                      ? () => ref
+                          .read(checkoutCloseProvider(reservationId).notifier)
+                          .retry()
+                      : null,
+                ),
+              ),
             ),
           ),
         ),

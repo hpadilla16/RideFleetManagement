@@ -42,6 +42,7 @@ class CheckoutTerminalView extends StatelessWidget {
     required this.session,
     required this.myUserId,
     required this.onExit,
+    this.onBack,
   });
 
   final CheckoutSessionDto session;
@@ -50,6 +51,13 @@ class CheckoutTerminalView extends StatelessWidget {
   final String? myUserId;
 
   final VoidCallback onExit;
+
+  /// Vuelta al RESUMEN del cierre (19A/19B), cuando esta pantalla se abrió
+  /// desde ahí. Sin esto el detalle era una puerta de un solo sentido
+  /// (GD-MC-3): el resumen es el único sitio donde vive "Copiar el detalle
+  /// para el mostrador", y el motivo del rechazo no sobrevive al re-fetch.
+  /// null = se entró directo a una sesión ya cerrada (11E puro).
+  final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
@@ -118,6 +126,10 @@ class CheckoutTerminalView extends StatelessWidget {
                 label: l10n.coTerminalBackToList,
                 onPressed: onExit,
               ),
+              if (onBack case final back?) ...[
+                const SizedBox(height: 9),
+                RideGhostButton(label: l10n.coBackToOutcome, onPressed: back),
+              ],
               const SizedBox(height: 9),
               Text(
                 l10n.coTerminalWhy,

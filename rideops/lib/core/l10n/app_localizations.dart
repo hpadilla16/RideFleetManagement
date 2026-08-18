@@ -3308,6 +3308,24 @@ abstract class AppLocalizations {
   /// **'El cliente ve la pantalla en español o inglés, sin la marca de la plataforma.'**
   String get coHandoffRuleBrandNoTenant;
 
+  /// INN S-1. La tinta retenida vive solo en memoria y solo hasta el 200; volver a pedirle la firma al cliente sería cobrarle el error de la app.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente ya firmó en este teléfono, pero el servidor todavía no lo confirmó. El trazo sigue aquí: no hace falta pedírselo otra vez.'**
+  String get coRetainedNote;
+
+  /// No description provided for @coRetryWithSignature.
+  ///
+  /// In es, this message translates to:
+  /// **'Reintentar con la firma que ya dio'**
+  String get coRetryWithSignature;
+
+  /// No description provided for @coRetryWithSignatureWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Se manda el MISMO trazo que el cliente dejó hace un momento. Vive solo en la memoria de este teléfono y nunca entra a la bandeja de salida.'**
+  String get coRetryWithSignatureWhy;
+
   /// No description provided for @coHandoffCta.
   ///
   /// In es, this message translates to:
@@ -3500,6 +3518,18 @@ abstract class AppLocalizations {
   /// **'Entrega cerrada'**
   String get coClosedTitle;
 
+  /// 19A-bis, variantes verifying/unverified: el 200 prueba el CHECKOUT, no la entrega. Mismo verde, misma posición — una palabra que no sobreafirma (vocabulario ya aprobado en coCloseFailedTitle).
+  ///
+  /// In es, this message translates to:
+  /// **'Checkout cerrado'**
+  String get coClosedTitleUnverified;
+
+  /// Banner ámbar SOLO en unverified. A propósito NO dice "no entregues las llaves": esa línea es de 19B, donde hay un rechazo real — aquí solo hay ignorancia (decisión aprobada, nota 10).
+  ///
+  /// In es, this message translates to:
+  /// **'El cierre entró, pero no pudimos confirmarlo en la reserva. Compruébalo antes de dar por terminada la entrega.'**
+  String get coRecordHandoverUnverifiedNotice;
+
   /// No description provided for @coBeforeTheyGoTitle.
   ///
   /// In es, this message translates to:
@@ -3524,17 +3554,47 @@ abstract class AppLocalizations {
   /// **'Regreso'**
   String get coBeforeReturnLabel;
 
+  /// SC-1 camino B (aprobado por Hector). Dice "registro de la inspección" y NO "contrato": la copia al contrato es best-effort dentro de un catch que se traga el error (checkout-session.service.js:551-557, :562). Incondicional: la tarjeta nunca baja de dos renglones.
+  ///
+  /// In es, this message translates to:
+  /// **'El combustible y el kilometraje de salida quedaron en el registro de la inspección, no en esta pantalla.'**
+  String get coBeforeScopeNote;
+
   /// No description provided for @coRecordTitle.
   ///
   /// In es, this message translates to:
   /// **'Registro'**
   String get coRecordTitle;
 
-  /// No description provided for @coRecordSessionClosed.
+  /// No description provided for @coRecordPillRecorded.
   ///
   /// In es, this message translates to:
-  /// **'Sesión cerrada'**
-  String get coRecordSessionClosed;
+  /// **'Registrada'**
+  String get coRecordPillRecorded;
+
+  /// No description provided for @coRecordPillChecking.
+  ///
+  /// In es, this message translates to:
+  /// **'Comprobando'**
+  String get coRecordPillChecking;
+
+  /// No description provided for @coRecordPillUnverified.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin confirmar'**
+  String get coRecordPillUnverified;
+
+  /// No description provided for @coRecordRowSession.
+  ///
+  /// In es, this message translates to:
+  /// **'Sesión'**
+  String get coRecordRowSession;
+
+  /// Fila ancla del 19A-bis: el hecho que el 200 SÍ prueba, con la hora del SERVIDOR (finishedAt). Era la pastilla coRecordSessionClosed; se muda a fila y gana la hora, como 17F-bis hizo con la hora de la inspección.
+  ///
+  /// In es, this message translates to:
+  /// **'Cerrada {time}'**
+  String coRecordSessionClosedAt(String time);
 
   /// No description provided for @coRecordSignatureLabel.
   ///
@@ -3566,17 +3626,41 @@ abstract class AppLocalizations {
   /// **'Entrega'**
   String get coRecordHandoverLabel;
 
-  /// No description provided for @coRecordHandoverRecorded.
+  /// La única formulación que la app puede firmar: se preguntó y la reserva lo confirma. No dice 'avanzó a CHECKED_OUT' ni 'el vehículo quedó rentado'.
   ///
   /// In es, this message translates to:
-  /// **'La reserva quedó marcada como entregada'**
-  String get coRecordHandoverRecorded;
+  /// **'Registrada en la reserva · {time}'**
+  String coRecordHandoverRecorded(String time);
 
-  /// display-data no respondió o mandó un estado desconocido. Es 'no lo sé', jamás 'no quedó registrada'.
+  /// Fila Entrega mientras la consulta viaja (19A-bis). Ningún renglón afirma un resultado antes de que vuelva la llamada que lo produce.
   ///
   /// In es, this message translates to:
-  /// **'No se pudo confirmar en la reserva'**
-  String get coRecordHandoverUnverified;
+  /// **'Comprobando en la reserva…'**
+  String get coRecordHandoverChecking;
+
+  /// display-data no respondió o mandó un estado desconocido. Es 'no lo sé', jamás 'no quedó registrada' — el negativo definitivo enruta a 19B.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin confirmar'**
+  String get coRecordHandoverUnconfirmed;
+
+  /// No description provided for @coRecordHandoverCheckingWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Nada bloquea: el agente puede salir. La comprobación no se pierde, queda en la sesión.'**
+  String get coRecordHandoverCheckingWhy;
+
+  /// No description provided for @coRecordHandoverRecheck.
+  ///
+  /// In es, this message translates to:
+  /// **'Volver a comprobar'**
+  String get coRecordHandoverRecheck;
+
+  /// No description provided for @coRecordHandoverRecheckWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Es una consulta al servidor, no un reintento del cierre: la sesión ya está cerrada y no puede cerrarse dos veces.'**
+  String get coRecordHandoverRecheckWhy;
 
   /// No description provided for @coBackHome.
   ///
@@ -3589,6 +3673,12 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Ver el detalle de la sesión'**
   String get coSessionDetail;
+
+  /// GD-MC-3: el detalle NO puede ser una puerta de un solo sentido — el motivo del rechazo no sobrevive al re-fetch y 'Copiar el detalle' solo existe en el resumen.
+  ///
+  /// In es, this message translates to:
+  /// **'Volver al resumen del cierre'**
+  String get coBackToOutcome;
 
   /// No description provided for @coCloseFailedStepline.
   ///
@@ -3635,8 +3725,20 @@ abstract class AppLocalizations {
   /// No description provided for @coCloseVerifiedPill.
   ///
   /// In es, this message translates to:
-  /// **'Verificado en la reserva'**
+  /// **'Comprobado en la reserva'**
   String get coCloseVerifiedPill;
+
+  /// Rama SIN motivo del servidor (19B silencioso): la tarjeta no cita a nadie, cuenta lo que la app verificó por su cuenta. Titularla 'Motivo' prometía una cita que no existe.
+  ///
+  /// In es, this message translates to:
+  /// **'Lo que comprobamos'**
+  String get coCloseVerifiedTitle;
+
+  /// No description provided for @coCloseVerifiedLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Estado de la reserva'**
+  String get coCloseVerifiedLabel;
 
   /// No description provided for @coCloseNotRecordedReason.
   ///
@@ -3653,7 +3755,7 @@ abstract class AppLocalizations {
   /// No description provided for @coCopyProblem.
   ///
   /// In es, this message translates to:
-  /// **'Copiar el detalle del problema'**
+  /// **'Copiar el detalle para el mostrador'**
   String get coCopyProblem;
 
   /// No description provided for @coCopiedProblem.

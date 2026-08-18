@@ -25,6 +25,7 @@ import 'package:rideops/features/checkout/presentation/steps/sign_step.dart';
 import 'package:rideops/features/checkout/presentation/widgets/close_outcome_view.dart';
 import 'package:rideops/features/checkout/application/checkout_close_controller.dart';
 import 'package:rideops/features/checkout/presentation/widgets/close_progress.dart';
+import 'package:rideops/features/checkout/presentation/widgets/verify_cards.dart';
 import 'package:rideops/features/checkout/presentation/widgets/terminal_view.dart';
 import 'package:rideops/features/inspection/presentation/widgets/kiosk_signature_step.dart';
 import 'package:rideops/features/inspection/presentation/widgets/signature_pad.dart';
@@ -160,9 +161,21 @@ void main() {
     await tester.runAsync(() async {
       await tester.tap(find.text('Confirm signature'));
       await tester.pump();
-      await Future<void>.delayed(const Duration(milliseconds: 120));
+      // Reloj REAL: el export a PNG pasa por el engine y sus futures no
+      // resuelven bajo fake-async. 120 ms alcanzaban al correr este archivo
+      // solo, pero con la suite completa en paralelo el export a veces no
+      // había terminado y el `signerNames` quedaba vacío — una prueba de
+      // contrato cayéndose por carga de CPU. El margen es barato; el falso
+      // rojo en la compuerta, no.
+      await Future<void>.delayed(const Duration(milliseconds: 600));
     });
     await tester.pumpAndSettle();
+  }
+
+  /// Back del SISTEMA (el gesto/botón de Android), que es el que pasa por
+  /// `PopScope` — no el de la barra del wizard.
+  Future<void> systemBack(WidgetTester tester) async {
+    await tester.binding.handlePopRoute();
   }
 
   Future<void> scrollBody(WidgetTester tester, Finder target) async {
@@ -281,11 +294,47 @@ void main() {
     final close =
         container.read(checkoutCloseProvider(kReservationId).notifier);
     expect(close.openKiosk(), isFalse);
-    await close.close();
     await tester.pumpAndSettle();
     expect(find.byType(KioskSignatureStep), findsNothing);
     expect(api.signatureCalls, 0,
         reason: 'la firma no se encola ni se manda a ciegas: se espera');
+  });
+
+  testWidgets(
+      '18D sin red: `close()` no sale a la red ni finge un fallo — la guarda '
+      'del cierre se prueba CON sello, que es el único fixture que llega a '
+      'ella', (tester) async {
+    // Con `unsignedSession()` esta prueba estaba enmascarada: `close()` retorna
+    // tres líneas antes ("sin tinta fresca y sin sello"), así que pasaba con
+    // guarda y sin ella. Con el sello puesto, revertir la guarda deja correr
+    // `_runTransition` → `attemptTransition` → `blocked` → `_noteFailure`, y
+    // la pantalla salta a un fallo reintentable SIN motivo del servidor, sin
+    // red y sin una sola petición.
+    api.current = signedSession();
+    await pumpSign(tester);
+    network.online = false;
+    api.onGet = () async => throw apiError(ApiErrorKind.network, message: '');
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(CheckoutWizardScreen)),
+    );
+    final close =
+        container.read(checkoutCloseProvider(kReservationId).notifier);
+    await close.close();
+    await tester.pumpAndSettle();
+
+    expect(api.transitions, isEmpty,
+        reason: 'sin red no sale ningún POST del cierre');
+    // Y la pantalla NO salta al estado de fallo: sigue siendo 18D con su CTA.
+    expect(find.text('Retry closing'), findsNothing);
+    expect(find.byType(CloseProgressCard), findsNothing);
+    expect(find.text('Close the handover'), findsOneWidget);
+    final cta = tester.widget<RidePrimaryButton>(
+      find.widgetWithText(RidePrimaryButton, 'Close the handover'),
+    );
+    expect(cta.onPressed, isNull, reason: 'deshabilitado CON causa');
   });
 
   testWidgets(
@@ -420,7 +469,13 @@ void main() {
     await tester.runAsync(() async {
       await tester.tap(find.text('Confirm signature'));
       await tester.pump();
-      await Future<void>.delayed(const Duration(milliseconds: 120));
+      // Reloj REAL: el export a PNG pasa por el engine y sus futures no
+      // resuelven bajo fake-async. 120 ms alcanzaban al correr este archivo
+      // solo, pero con la suite completa en paralelo el export a veces no
+      // había terminado y el `signerNames` quedaba vacío — una prueba de
+      // contrato cayéndose por carga de CPU. El margen es barato; el falso
+      // rojo en la compuerta, no.
+      await Future<void>.delayed(const Duration(milliseconds: 600));
     });
     await tester.pump();
     await tester.pump();
@@ -495,7 +550,7 @@ void main() {
     // Sin canal al mostrador no se dibuja el botón que no puede cumplir; la
     // acción real sube a principal y la pantalla NUNCA se queda sin botón.
     expect(find.text('Notify the counter'), findsNothing);
-    expect(find.text('Copy the problem details'), findsOneWidget);
+    expect(find.text('Copy the details for the counter'), findsOneWidget);
     expect(
       find.textContaining("Don't hand over the keys"),
       findsOneWidget,
@@ -532,7 +587,17 @@ void main() {
       find.textContaining('was not marked as handed over'),
       findsOneWidget,
     );
-    expect(find.text('Checked on the reservation'), findsOneWidget);
+    // GD-SC-3: sin motivo del servidor la tarjeta NO se titula "Motivo" ni
+    // usa la etiqueta de fila "Entrega" como rúbrica — no hay a quién citar,
+    // así que cuenta lo que la app comprobó por su cuenta.
+    expect(find.text('Checked on the reservation'), findsOneWidget,
+        reason: 'pastilla');
+    expect(find.text('What we checked'), findsOneWidget, reason: 'título');
+    expect(find.text('Reservation status'), findsOneWidget, reason: 'rúbrica');
+    expect(find.text('Reason'), findsNothing,
+        reason: 'titular "Motivo" un texto que dice que no hubo motivo se '
+            'contradice solo');
+    expect(find.text('Server response'), findsNothing);
     expect(find.text('Handover closed'), findsNothing);
     expect(
       logger.events.where((e) => e.$1 == 'checkout.close_ok').single.$2,
@@ -568,8 +633,12 @@ void main() {
         return api.current!;
       }
       api.current = closedSession();
+      // 422, no 409: `NO_VEHICLE_ASSIGNED` sale de service:464-468 y la ruta
+      // preserva su status (routes:12-16). El par 409+NO_VEHICLE_ASSIGNED que
+      // esta prueba usaba antes no lo emite el backend en ningún camino.
       throw apiError(
-        ApiErrorKind.conflict,
+        ApiErrorKind.badRequest,
+        status: 422,
         message: 'Cannot finalize checkout: no vehicle is assigned.',
         code: 'NO_VEHICLE_ASSIGNED',
       );
@@ -577,7 +646,7 @@ void main() {
     await tester.tap(find.text('Close the handover'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Copy the problem details'));
+    await tester.tap(find.text('Copy the details for the counter'));
     await tester.pumpAndSettle();
 
     expect(copied, isNotNull);
@@ -623,10 +692,21 @@ void main() {
     // La sede de la fila es la de DEVOLUCIÓN de la reserva.
     expect(find.textContaining('Patio Centro'), findsWidgets);
     await scrollBody(tester, find.text('Record'));
+    // Sin hora literal: `toLocal()` depende de la zona de la máquina y esta
+    // suite no puede afirmar el reloj del CI.
     expect(
-      find.text('The reservation is marked as handed over'),
+      find.textContaining('Recorded on the reservation · '),
       findsOneWidget,
-      reason: 'solo porque Reservation.status lo dice',
+      reason: 'solo porque Reservation.status lo dice, y con la hora del '
+          'servidor (finishedAt)',
+    );
+    // La fila ancla: el hecho que el 200 SÍ prueba, con su hora.
+    expect(find.text('Session'), findsOneWidget);
+    expect(find.textContaining('Closed '), findsOneWidget);
+    // El pie de alcance es incondicional y NO promete el contrato.
+    expect(
+      find.textContaining('stored in the inspection record'),
+      findsOneWidget,
     );
     expect(
       find.textContaining('Email delivery was requested at'),
@@ -804,6 +884,451 @@ void main() {
           .single
           .$2,
       {'replaced': true},
+    );
+  });
+
+
+  // ── 19A-bis · las tres variantes de la comprobación ──────────────────────
+
+  /// Cierra la entrega dejando la sesión en CLOSED con su `finishedAt`, que es
+  /// el fixture con el que 19A/19A-bis se alcanzan de verdad.
+  void closeSucceeds() {
+    api.onTransition = (toStep) async {
+      api.current = CheckoutSessionDto.fromJson({
+        ...rawCheckoutSession(),
+        'currentStep': toStep,
+        'inspectionCompletedAt': inspectionDone.toIso8601String(),
+        'customerSignedAt': inspectionDone.toIso8601String(),
+        'finishedAt': DateTime.utc(2026, 8, 17, 17, 4).toIso8601String(),
+        'autoEmailedAt': DateTime.utc(2026, 8, 17, 17, 4).toIso8601String(),
+      });
+      return api.current!;
+    };
+  }
+
+  testWidgets(
+      '19A-bis (a): con la comprobación EN VUELO la fila dice "comprobando" — '
+      'ningún renglón afirma un resultado antes de que vuelva la llamada que '
+      'lo produce', (tester) async {
+    api.current = signedSession();
+    closeSucceeds();
+    await pumpSign(tester);
+    // La consulta a display-data se queda retenida: este es el frame que el
+    // build no podía ni expresar (fijaba el veredicto ANTES del await).
+    final gate = Completer<void>();
+    reservations.displayGate = gate;
+
+    await tester.tap(find.text('Close the handover'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Checkout closed'), findsOneWidget,
+        reason: 'el título no afirma la ENTREGA mientras se pregunta');
+    expect(find.text('Handover closed'), findsNothing);
+    // Con el spinner en línea vivo, `pumpAndSettle` no termina nunca: el
+    // scroll se hace a mano, que además es el instante exacto del frame.
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -260));
+    await tester.pump();
+    expect(find.text('Checking'), findsOneWidget, reason: 'pastilla');
+    expect(find.text('Checking on the reservation…'), findsOneWidget);
+    // Lo que NO se dice: el fallo que todavía no ocurrió.
+    expect(find.text('Not confirmed'), findsNothing);
+    expect(
+      find.textContaining("couldn't confirm it on the reservation"),
+      findsNothing,
+      reason: 'una falsa alarma en el camino feliz enseña a ignorar la real',
+    );
+    // Nada bloquea: el agente puede salir y el pie lo dice.
+    expect(find.textContaining('Nothing is blocked'), findsOneWidget);
+
+    gate.complete();
+    reservations.displayGate = null;
+    await tester.pumpAndSettle();
+    expect(find.text('Checking on the reservation…'), findsNothing);
+  });
+
+  testWidgets(
+      '19A-bis (b): la comprobación no responde ⇒ la escalada ocurre en los '
+      'CUATRO sitios a la vez, y ninguno es solo color', (tester) async {
+    api.current = signedSession();
+    closeSucceeds();
+    // display-data caído: "no lo sé", que NO es "no quedó registrada".
+    reservations.patchDisplayData = (raw) {
+      (raw['reservation'] as Map<String, dynamic>)['status'] = 'QUE_ES_ESTO';
+      return raw;
+    };
+    await pumpSign(tester);
+    await tester.tap(find.text('Close the handover'));
+    await tester.pumpAndSettle();
+
+    // (1) el título pierde la palabra "Entrega".
+    expect(find.text('Checkout closed'), findsOneWidget);
+    expect(find.text('Handover closed'), findsNothing);
+    // (2) el banner ámbar, que no existe en las otras dos variantes.
+    expect(
+      find.textContaining("couldn't confirm it on the reservation"),
+      findsOneWidget,
+    );
+    // Y lo que el banner NO dice: la línea de llaves es de 19B, donde hay un
+    // rechazo real. Aquí solo hay ignorancia.
+    expect(find.textContaining("Don't hand over the keys"), findsNothing);
+    // (3) la tarjeta Registro en tono warn, con su pastilla y su fila — la
+    // palabra porta el estado, no el color (se afirma sobre el objeto real).
+    await scrollBody(tester, find.text('Record'));
+    final card = tester.widget<VerifyCard>(
+      find.ancestor(of: find.text('Record'), matching: find.byType(VerifyCard)),
+    );
+    expect(card.tone, VerifyTone.warn);
+    expect(card.pillLabel, 'Not confirmed');
+    expect(find.text('Not confirmed'), findsNWidgets(2),
+        reason: 'la pastilla y la fila lo dicen las dos con palabras');
+    // (4) el dock cambia de acción principal.
+    await scrollBody(tester, find.text('Check again'));
+    expect(find.text('Check again'), findsOneWidget);
+    expect(find.textContaining('not a retry of the close'), findsOneWidget);
+    expect(
+      logger.events.where((e) => e.$1 == 'checkout.close_ok').single.$2,
+      {'handover': 'unverified'},
+    );
+  });
+
+  testWidgets(
+      '19A-bis (c): la reserva RESPONDE y sigue en CONFIRMED ⇒ se pinta 19B, '
+      'no el ámbar — un negativo conocido no se suaviza', (tester) async {
+    api.current = signedSession();
+    closeSucceeds();
+    // El fixture ya trae CONFIRMED: la cascada se tragó su error.
+    await pumpSign(tester);
+    await tester.tap(find.text('Close the handover'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('was not marked as handed over'),
+      findsOneWidget,
+      reason: '19B, que ya tiene botones y la instrucción de las llaves',
+    );
+    expect(find.text('Check again'), findsNothing);
+    expect(
+      find.textContaining("couldn't confirm it on the reservation"),
+      findsNothing,
+    );
+    expect(find.text('Copy the details for the counter'), findsOneWidget);
+    expect(find.textContaining("Don't hand over the keys"), findsOneWidget);
+  });
+
+  testWidgets(
+      '19A-bis (d): "Volver a comprobar" es una CONSULTA — cero transiciones, '
+      'y el bucle se cierra en esta pantalla', (tester) async {
+    api.current = signedSession();
+    closeSucceeds();
+    reservations.patchDisplayData = (raw) {
+      (raw['reservation'] as Map<String, dynamic>)['status'] = 'QUE_ES_ESTO';
+      return raw;
+    };
+    await pumpSign(tester);
+    await tester.tap(find.text('Close the handover'));
+    await tester.pumpAndSettle();
+    await scrollBody(tester, find.text('Check again'));
+
+    final transitionsBefore = api.transitions.length;
+    final displayBefore = reservations.displayDataCalls;
+    // Esta vez la reserva sí confirma.
+    reservations.patchDisplayData = (raw) {
+      (raw['reservation'] as Map<String, dynamic>)['status'] = 'CHECKED_OUT';
+      return raw;
+    };
+    await tester.tap(find.text('Check again'));
+    await tester.pumpAndSettle();
+
+    expect(api.transitions.length, transitionsBefore,
+        reason: 'desde terminal canTransition es false: reintentar el cierre '
+            'daría 409 ILLEGAL_TRANSITION para siempre');
+    expect(reservations.displayDataCalls, greaterThan(displayBefore));
+    // unverified → verifying → recorded, cerrado aquí mismo.
+    expect(find.text('Handover closed'), findsOneWidget);
+    expect(
+      find.textContaining("couldn't confirm it on the reservation"),
+      findsNothing,
+    );
+    expect(
+      logger.events
+          .where((e) => e.$1 == 'checkout.handover_recheck')
+          .single
+          .$2,
+      {'result': 'recorded'},
+    );
+    expect(
+      logger.events.where((e) => e.$1 == 'checkout.close_ok').length,
+      1,
+      reason: 'el re-chequeo no es un cierre nuevo: no vuelve a contarse',
+    );
+  });
+
+  testWidgets(
+      '19A-bis (e): sin fecha de regreso, "Antes de que se vaya" conserva DOS '
+      'renglones — el pie de alcance es incondicional', (tester) async {
+    api.current = signedSession();
+    closeSucceeds();
+    reservations.patchDisplayData = (raw) {
+      final reservation = raw['reservation'] as Map<String, dynamic>;
+      reservation['status'] = 'CHECKED_OUT';
+      reservation['returnAt'] = null;
+      return raw;
+    };
+    await pumpSign(tester);
+    await tester.tap(find.text('Close the handover'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Before they leave'), findsOneWidget);
+    expect(find.text('Return'), findsNothing, reason: 'sin fecha no hay fila');
+    expect(
+      find.text('Hand over the keys and the registration card'),
+      findsOneWidget,
+    );
+    // El segundo renglón, que además dice algo que el agente no sabía. Y NO
+    // afirma el contrato: la copia es best-effort dentro de un catch
+    // (checkout-session.service.js:551-557, :562).
+    expect(
+      find.text(
+        'The departure fuel level and odometer are stored in the inspection '
+        'record, not on this screen.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('must come back the same'), findsNothing);
+    expect(find.textContaining('on the agreement'), findsNothing);
+  });
+
+  // ── INN-MC-1 · el gemelo de 422 del rechazo post-commit ──────────────────
+
+  testWidgets(
+      'INN-MC-1: el finalize rechazado con 422 DESPUÉS de comprometer CLOSED '
+      'se reconcilia — sin puerta falsa de reintento y con el motivo intacto',
+      (tester) async {
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String?;
+        }
+        return null;
+      },
+    );
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+
+    api.current = signedSession();
+    await pumpSign(tester);
+    api.onTransition = (toStep) async {
+      if (toStep == 'FINALIZING') {
+        api.current = sessionAt(
+          CheckoutStep.finalizing,
+          inspection: inspectionDone,
+          signature: inspectionDone,
+        );
+        return api.current!;
+      }
+      // La fila ya quedó CLOSED (service:417) y el gate del finalize revienta
+      // DESPUÉS, con 422 (service:473 → :81-98). NO es un 409: el camino de
+      // `_resolveConflict` no lo toca, y sin re-lectura la app se queda
+      // creyendo que sigue en FINALIZING.
+      api.current = closedSession();
+      throw apiError(
+        ApiErrorKind.badRequest,
+        status: 422,
+        message: 'Pre-check-in must be completed before check-out can start '
+            'at this location.',
+        code: 'PRECHECKIN_REQUIRED',
+      );
+    };
+
+    final getsBefore = api.getCalls;
+    await tester.tap(find.text('Close the handover'));
+    await tester.pumpAndSettle();
+
+    // 19B, no la vista terminal genérica ni el CTA reintentable.
+    expect(find.byType(CheckoutCloseOutcomeView), findsOneWidget);
+    expect(find.text('Retry closing'), findsNothing,
+        reason: 'desde terminal ese botón sería un 409 eterno');
+    expect(find.byType(CheckoutTerminalView), findsNothing);
+    // El motivo del servidor SOBREVIVE a la re-lectura y se puede citar.
+    expect(
+      find.text('Pre-check-in must be completed before check-out can start '
+          'at this location.'),
+      findsOneWidget,
+    );
+    expect(
+      logger.events.where((e) => e.$1 == 'checkout.close_failed').single.$2,
+      {'leg': 'closing', 'code': 'PRECHECKIN_REQUIRED', 'terminal': true},
+      reason: 'terminal:true solo es cierto porque se volvió a leer',
+    );
+    // La prueba dura de que SE VOLVIÓ A LEER: el 422 disparó un GET extra.
+    // (No se afirma `checkout.reconciled`: el events log atribuye el CLOSED a
+    // ESTE usuario, y un movimiento propio no es una reconciliación — el tag
+    // `via: rejected` existe para el re-fetch que sí descubre un avance ajeno.)
+    expect(api.getCalls, greaterThan(getsBefore),
+        reason: 'sin la re-lectura, `terminal` se calcula sobre un estado '
+            'obsoleto y la app ofrece un reintento imposible');
+
+    await tester.tap(find.text('Copy the details for the counter'));
+    await tester.pumpAndSettle();
+    expect(copied, contains('PRECHECKIN_REQUIRED'));
+    expect(copied, contains('Pre-check-in must be completed'));
+  });
+
+  // ── GD-MC-3 · el detalle no es una puerta de un solo sentido ─────────────
+
+  testWidgets(
+      'GD-MC-3: desde el detalle se VUELVE al resumen — el motivo no sobrevive '
+      'al re-fetch y "Copiar el detalle" solo vive ahí', (tester) async {
+    api.current = signedSession();
+    await pumpSign(tester);
+    api.onTransition = (toStep) async {
+      if (toStep == 'FINALIZING') {
+        api.current = sessionAt(
+          CheckoutStep.finalizing,
+          inspection: inspectionDone,
+          signature: inspectionDone,
+        );
+        return api.current!;
+      }
+      api.current = closedSession();
+      throw apiError(
+        ApiErrorKind.conflict,
+        message: 'Vehicle U-112 is taken by another open rental (R-2466).',
+        code: 'VEHICLE_CONFLICT',
+      );
+    };
+    await tester.tap(find.text('Close the handover'));
+    await tester.pumpAndSettle();
+
+    await scrollBody(tester, find.text('See session detail'));
+    await tester.tap(find.text('See session detail'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CheckoutTerminalView), findsOneWidget);
+    expect(find.text('Copy the details for the counter'), findsNothing);
+
+    // La salida explícita del propio detalle.
+    await scrollBody(tester, find.text('Back to the closing summary'));
+    await tester.tap(find.text('Back to the closing summary'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CheckoutCloseOutcomeView), findsOneWidget);
+    expect(find.text('Copy the details for the counter'), findsOneWidget);
+    expect(
+      find.text('Vehicle U-112 is taken by another open rental (R-2466).'),
+      findsOneWidget,
+      reason: 'el motivo sigue en pantalla: nunca se re-consultó por él',
+    );
+
+    // Y el back del SISTEMA hace lo mismo, no saca del checkout.
+    await tester.tap(find.text('See session detail'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CheckoutTerminalView), findsOneWidget);
+    await systemBack(tester);
+    await tester.pumpAndSettle();
+    expect(find.byType(CheckoutCloseOutcomeView), findsOneWidget);
+    expect(find.text('home'), findsNothing, reason: 'no se salió del checkout');
+  });
+
+  testWidgets(
+      '11E intacto: la sesión que ya estaba cerrada al entrar NO ofrece volver '
+      'a un resumen que nunca existió', (tester) async {
+    api.current = closedSession();
+    await pumpSign(tester);
+
+    expect(find.byType(CheckoutTerminalView), findsOneWidget);
+    expect(find.text('Back to the closing summary'), findsNothing);
+  });
+
+  // ── INN-S-1 · la tinta retenida ──────────────────────────────────────────
+
+  testWidgets(
+      'INN-S-1: si la firma murió por red, la vuelta ofrece REINTENTAR con el '
+      'trazo que el cliente ya dio — no volver a pedírselo', (tester) async {
+    api.current = unsignedSession();
+    await pumpSign(tester);
+    await tester.tap(find.text('Hand to the customer'));
+    await tester.pumpAndSettle();
+
+    // La pata 1 muere sin respuesta: el trazo se retiene en memoria.
+    api.onSaveCustomerSignature =
+        (_, _) async => throw apiError(ApiErrorKind.network, message: '');
+    await signOnPad(tester);
+    expect(find.text('Check the status'), findsOneWidget, reason: '19C');
+
+    // La consulta encuentra la sesión igual: sigue sin firmar.
+    api.onGet = () async => api.current!;
+    await tester.tap(find.text('Check the status'));
+    await tester.pumpAndSettle();
+
+    // Antes de esto, el único CTA era "Entregar al cliente": se le pedía la
+    // firma otra vez y el trazo guardado se descartaba en silencio.
+    expect(find.text('Retry with the signature they gave'), findsOneWidget);
+    expect(
+      find.textContaining('The customer already signed on this phone'),
+      findsOneWidget,
+    );
+    // Volver a pedirla sigue existiendo, en secundario.
+    expect(find.text('Hand to the customer'), findsOneWidget);
+
+    // Y el reintento manda el MISMO trazo, sin abrir el kiosco.
+    final calls = <String>[];
+    api.onSaveCustomerSignature = (dataUrl, _) async {
+      calls.add(dataUrl);
+      api.current = signedSession();
+      return api.current!;
+    };
+    api.onTransition = (toStep) async {
+      api.current = sessionAt(
+        CheckoutStep.tryParse(toStep)!,
+        inspection: inspectionDone,
+        signature: inspectionDone,
+      );
+      return api.current!;
+    };
+    await tester.tap(find.text('Retry with the signature they gave'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(KioskSignatureStep), findsNothing,
+        reason: 'no se le vuelve a pedir el teléfono al cliente');
+    expect(calls.single, startsWith('data:image/png;base64,'));
+    expect(api.transitions, ['FINALIZING', 'CLOSED']);
+  });
+
+  // ── GD-MC-5 · el CTA muerto con el why que lo contradecía ────────────────
+
+  testWidgets(
+      'GD-MC-5: en el tramo reintentable SIN red el pie dice la causa real, no '
+      '"se puede volver a intentar"', (tester) async {
+    api.current = signedSession();
+    await pumpSign(tester);
+    api.onTransition = (_) async => throw apiError(
+          ApiErrorKind.badRequest,
+          status: 400,
+          message: 'Nope.',
+          code: 'SOMETHING',
+        );
+    await tester.tap(find.text('Close the handover'));
+    await tester.pumpAndSettle();
+    expect(find.text('Retry closing'), findsOneWidget);
+    expect(find.textContaining('This leg can be retried'), findsOneWidget);
+
+    // Se cae la red con el fallo reintentable en pantalla.
+    network.online = false;
+    api.onGet = () async => throw apiError(ApiErrorKind.network, message: '');
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+
+    final cta = tester.widget<RidePrimaryButton>(
+      find.widgetWithText(RidePrimaryButton, 'Retry closing'),
+    );
+    expect(cta.onPressed, isNull);
+    expect(find.textContaining('This leg can be retried'), findsNothing,
+        reason: 'el pie no puede prometer lo que el botón no puede cumplir');
+    expect(
+      find.textContaining("needs the server's confirmation"),
+      findsOneWidget,
     );
   });
 

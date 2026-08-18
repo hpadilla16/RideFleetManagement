@@ -196,6 +196,13 @@ abstract final class CheckoutEvents {
   /// reintento posible).
   static const closeFailed = 'checkout.close_failed';
 
+  /// "Volver a comprobar" (19A-bis): el agente re-consultó la entrega desde
+  /// el estado sin confirmar. Tag `result` (recorded | not_recorded |
+  /// unverified). Su frecuencia mide cuántas veces la verificación automática
+  /// llega sin respuesta en el patio — y `not_recorded` aquí es la cascada
+  /// silenciosa descubierta a mano.
+  static const handoverRecheck = 'checkout.handover_recheck';
+
   /// Un tramo del cierre murió SIN respuesta (19C). Tag `leg`. No es lo
   /// mismo que [closeFailed]: aquí no se sabe si entró, y la app consulta en
   /// vez de reintentar.

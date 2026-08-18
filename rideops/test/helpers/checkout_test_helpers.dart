@@ -334,9 +334,16 @@ class FakeReservationsApi extends ReservationsApi {
   int availableVehiclesCalls = 0;
   Future<List<AvailableVehicle>> Function()? onAvailableVehicles;
 
+  /// Retiene `display-data` en vuelo. Es lo que permite mirar el FRAME de
+  /// "comprobando" del 19A-bis: sin esta compuerta la consulta resuelve en el
+  /// mismo microtask y la prueba nunca ve el estado intermedio que la lámina
+  /// existe para hacer expresable.
+  Completer<void>? displayGate;
+
   @override
   Future<ReservationDisplayData> getDisplayData(String reservationId) async {
     displayDataCalls++;
+    if (displayGate != null) await displayGate!.future;
     if (fail) throw StateError('display-data caído');
     final raw = readJsonFixture('reservation_display_data.json');
     return ReservationDisplayData.fromJson(

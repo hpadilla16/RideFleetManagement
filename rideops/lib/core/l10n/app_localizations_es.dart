@@ -2062,6 +2062,17 @@ class AppLocalizationsEs extends AppLocalizations {
       'El cliente ve la pantalla en español o inglés, sin la marca de la plataforma.';
 
   @override
+  String get coRetainedNote =>
+      'El cliente ya firmó en este teléfono, pero el servidor todavía no lo confirmó. El trazo sigue aquí: no hace falta pedírselo otra vez.';
+
+  @override
+  String get coRetryWithSignature => 'Reintentar con la firma que ya dio';
+
+  @override
+  String get coRetryWithSignatureWhy =>
+      'Se manda el MISMO trazo que el cliente dejó hace un momento. Vive solo en la memoria de este teléfono y nunca entra a la bandeja de salida.';
+
+  @override
   String get coHandoffCta => 'Entregar al cliente';
 
   @override
@@ -2179,6 +2190,13 @@ class AppLocalizationsEs extends AppLocalizations {
   String get coClosedTitle => 'Entrega cerrada';
 
   @override
+  String get coClosedTitleUnverified => 'Checkout cerrado';
+
+  @override
+  String get coRecordHandoverUnverifiedNotice =>
+      'El cierre entró, pero no pudimos confirmarlo en la reserva. Compruébalo antes de dar por terminada la entrega.';
+
+  @override
   String get coBeforeTheyGoTitle => 'Antes de que se vaya';
 
   @override
@@ -2191,10 +2209,28 @@ class AppLocalizationsEs extends AppLocalizations {
   String get coBeforeReturnLabel => 'Regreso';
 
   @override
+  String get coBeforeScopeNote =>
+      'El combustible y el kilometraje de salida quedaron en el registro de la inspección, no en esta pantalla.';
+
+  @override
   String get coRecordTitle => 'Registro';
 
   @override
-  String get coRecordSessionClosed => 'Sesión cerrada';
+  String get coRecordPillRecorded => 'Registrada';
+
+  @override
+  String get coRecordPillChecking => 'Comprobando';
+
+  @override
+  String get coRecordPillUnverified => 'Sin confirmar';
+
+  @override
+  String get coRecordRowSession => 'Sesión';
+
+  @override
+  String coRecordSessionClosedAt(String time) {
+    return 'Cerrada $time';
+  }
 
   @override
   String get coRecordSignatureLabel => 'Firma';
@@ -2214,17 +2250,35 @@ class AppLocalizationsEs extends AppLocalizations {
   String get coRecordHandoverLabel => 'Entrega';
 
   @override
-  String get coRecordHandoverRecorded =>
-      'La reserva quedó marcada como entregada';
+  String coRecordHandoverRecorded(String time) {
+    return 'Registrada en la reserva · $time';
+  }
 
   @override
-  String get coRecordHandoverUnverified => 'No se pudo confirmar en la reserva';
+  String get coRecordHandoverChecking => 'Comprobando en la reserva…';
+
+  @override
+  String get coRecordHandoverUnconfirmed => 'Sin confirmar';
+
+  @override
+  String get coRecordHandoverCheckingWhy =>
+      'Nada bloquea: el agente puede salir. La comprobación no se pierde, queda en la sesión.';
+
+  @override
+  String get coRecordHandoverRecheck => 'Volver a comprobar';
+
+  @override
+  String get coRecordHandoverRecheckWhy =>
+      'Es una consulta al servidor, no un reintento del cierre: la sesión ya está cerrada y no puede cerrarse dos veces.';
 
   @override
   String get coBackHome => 'Volver al inicio';
 
   @override
   String get coSessionDetail => 'Ver el detalle de la sesión';
+
+  @override
+  String get coBackToOutcome => 'Volver al resumen del cierre';
 
   @override
   String get coCloseFailedStepline => 'Cierre con problema';
@@ -2252,7 +2306,13 @@ class AppLocalizationsEs extends AppLocalizations {
   String get coCloseReasonPill => 'Del servidor';
 
   @override
-  String get coCloseVerifiedPill => 'Verificado en la reserva';
+  String get coCloseVerifiedPill => 'Comprobado en la reserva';
+
+  @override
+  String get coCloseVerifiedTitle => 'Lo que comprobamos';
+
+  @override
+  String get coCloseVerifiedLabel => 'Estado de la reserva';
 
   @override
   String get coCloseNotRecordedReason =>
@@ -2263,7 +2323,7 @@ class AppLocalizationsEs extends AppLocalizations {
       'Esta sesión ya está cerrada, así que no se puede reintentar desde aquí. Nada de lo capturado se perdió.';
 
   @override
-  String get coCopyProblem => 'Copiar el detalle del problema';
+  String get coCopyProblem => 'Copiar el detalle para el mostrador';
 
   @override
   String get coCopiedProblem => 'Detalle copiado al portapapeles';

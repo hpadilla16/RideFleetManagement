@@ -2057,6 +2057,17 @@ class AppLocalizationsEn extends AppLocalizations {
       'The customer sees the screen in Spanish or English, with no platform branding.';
 
   @override
+  String get coRetainedNote =>
+      'The customer already signed on this phone, but the server hasn\'t confirmed it yet. The stroke is still here: you don\'t have to ask them again.';
+
+  @override
+  String get coRetryWithSignature => 'Retry with the signature they gave';
+
+  @override
+  String get coRetryWithSignatureWhy =>
+      'We send the SAME stroke the customer left a moment ago. It lives only in this phone\'s memory and never goes into the outbox.';
+
+  @override
   String get coHandoffCta => 'Hand to the customer';
 
   @override
@@ -2175,6 +2186,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get coClosedTitle => 'Handover closed';
 
   @override
+  String get coClosedTitleUnverified => 'Checkout closed';
+
+  @override
+  String get coRecordHandoverUnverifiedNotice =>
+      'The close went through, but we couldn\'t confirm it on the reservation. Check it before you call the handover done.';
+
+  @override
   String get coBeforeTheyGoTitle => 'Before they leave';
 
   @override
@@ -2187,10 +2205,28 @@ class AppLocalizationsEn extends AppLocalizations {
   String get coBeforeReturnLabel => 'Return';
 
   @override
+  String get coBeforeScopeNote =>
+      'The departure fuel level and odometer are stored in the inspection record, not on this screen.';
+
+  @override
   String get coRecordTitle => 'Record';
 
   @override
-  String get coRecordSessionClosed => 'Session closed';
+  String get coRecordPillRecorded => 'Recorded';
+
+  @override
+  String get coRecordPillChecking => 'Checking';
+
+  @override
+  String get coRecordPillUnverified => 'Not confirmed';
+
+  @override
+  String get coRecordRowSession => 'Session';
+
+  @override
+  String coRecordSessionClosedAt(String time) {
+    return 'Closed $time';
+  }
 
   @override
   String get coRecordSignatureLabel => 'Signature';
@@ -2210,18 +2246,35 @@ class AppLocalizationsEn extends AppLocalizations {
   String get coRecordHandoverLabel => 'Handover';
 
   @override
-  String get coRecordHandoverRecorded =>
-      'The reservation is marked as handed over';
+  String coRecordHandoverRecorded(String time) {
+    return 'Recorded on the reservation · $time';
+  }
 
   @override
-  String get coRecordHandoverUnverified =>
-      'Couldn\'t confirm it on the reservation';
+  String get coRecordHandoverChecking => 'Checking on the reservation…';
+
+  @override
+  String get coRecordHandoverUnconfirmed => 'Not confirmed';
+
+  @override
+  String get coRecordHandoverCheckingWhy =>
+      'Nothing is blocked: you can leave. The check isn\'t lost — it stays on the session.';
+
+  @override
+  String get coRecordHandoverRecheck => 'Check again';
+
+  @override
+  String get coRecordHandoverRecheckWhy =>
+      'This is a lookup, not a retry of the close: the session is already closed and can\'t be closed twice.';
 
   @override
   String get coBackHome => 'Back to home';
 
   @override
   String get coSessionDetail => 'See session detail';
+
+  @override
+  String get coBackToOutcome => 'Back to the closing summary';
 
   @override
   String get coCloseFailedStepline => 'Closing hit a problem';
@@ -2252,6 +2305,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get coCloseVerifiedPill => 'Checked on the reservation';
 
   @override
+  String get coCloseVerifiedTitle => 'What we checked';
+
+  @override
+  String get coCloseVerifiedLabel => 'Reservation status';
+
+  @override
   String get coCloseNotRecordedReason =>
       'We checked the reservation after closing and it still doesn\'t record the handover. The server gave no reason.';
 
@@ -2260,7 +2319,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'This session is already closed, so it can\'t be retried from here. Nothing you captured was lost.';
 
   @override
-  String get coCopyProblem => 'Copy the problem details';
+  String get coCopyProblem => 'Copy the details for the counter';
 
   @override
   String get coCopiedProblem => 'Details copied to the clipboard';

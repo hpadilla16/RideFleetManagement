@@ -51,17 +51,29 @@ enum CloseFailureKind {
 /// varios de sus errores (checkout-session.service.js:526, :533, :557, :571),
 /// así que un 200 puede convivir con una reserva que sigue en `CONFIRMED`.
 enum HandoverVerdict {
-  /// Todavía no se preguntó.
+  /// Todavía no se preguntó y NADIE está preguntando: esta pantalla no
+  /// participó de ningún cierre (11E).
   unchecked,
+
+  /// La consulta está EN VUELO (19A-bis). Existe porque la regla del progreso
+  /// de cierre aplica también aquí: **ningún renglón afirma un resultado antes
+  /// de que vuelva la llamada que lo produce**. Antes, el veredicto quedaba en
+  /// "no confirmado" durante todo el viaje y saltaba a verde al aterrizar: una
+  /// falsa alarma en el camino feliz, que es lo que entrena al agente a
+  /// ignorar la alarma de verdad.
+  verifying,
 
   /// La reserva avanzó (CHECKED_OUT / CHECKED_IN / CHECKED_IN_UNPAID).
   recorded,
 
-  /// La reserva NO avanzó: entrega a medio cerrar, aunque el HTTP dijera 200.
+  /// La reserva RESPONDIÓ y NO avanzó: no es duda, es la entrega no
+  /// registrada con un 200 en la mano — se pinta como 19B, jamás como el
+  /// ámbar de "no sé" (nota 13 del 19A-bis).
   notRecorded,
 
   /// display-data no respondió, o mandó un estado que esta versión no conoce.
-  /// **No es "no quedó registrada"**: es "no lo sé", y así se dice.
+  /// **No es "no quedó registrada"**: es "no lo sé", y así se dice — en ámbar,
+  /// con la escalada de cuatro señales del 19A-bis.
   unverified,
 }
 
@@ -81,7 +93,6 @@ class CheckoutCloseState {
     this.failureCode,
     this.failedAt,
     this.handover = HandoverVerdict.unchecked,
-    this.closedByUs = false,
     this.showDetail = false,
     this.checking = false,
   });
@@ -120,18 +131,19 @@ class CheckoutCloseState {
 
   final HandoverVerdict handover;
 
-  /// El `CLOSED` lo consiguió ESTA pantalla. Distingue 19A (acabo de cerrar,
-  /// el cliente sigue enfrente) de 11E (entré a una sesión que ya estaba
-  /// cerrada, quizá ayer): "entrega las llaves" solo tiene sentido en el
-  /// primero.
-  final bool closedByUs;
-
   /// El agente pidió "Ver el detalle de la sesión" (19A → el log de 11E).
   final bool showDetail;
 
   /// ¿Hay algo que 19A/19B tengan que contar sobre esta sesión terminal?
+  ///
+  /// `handover != unchecked` sustituye al viejo booleano `closedByUs`
+  /// (19A-bis): el veredicto solo sale de [unchecked] cuando ESTA pantalla
+  /// cerró (o descubrió el cierre) y disparó la comprobación — que es
+  /// exactamente lo que "participé del cierre" significaba. Una sesión que ya
+  /// estaba cerrada al entrar nunca corre `close()` y sigue siendo 11E.
   bool get hasOutcome =>
-      closedByUs || failureKind == CloseFailureKind.rejectedTerminal;
+      handover != HandoverVerdict.unchecked ||
+      failureKind == CloseFailureKind.rejectedTerminal;
 
   /// 19C: se perdió la respuesta a media secuencia.
   bool get isUnknown => failureKind == CloseFailureKind.unknownNetwork;
@@ -153,7 +165,6 @@ class CheckoutCloseState {
     DateTime? failedAt,
     bool clearFailure = false,
     HandoverVerdict? handover,
-    bool? closedByUs,
     bool? showDetail,
   }) {
     return CheckoutCloseState(
@@ -173,7 +184,6 @@ class CheckoutCloseState {
       failureCode: clearFailure ? null : (failureCode ?? this.failureCode),
       failedAt: clearFailure ? null : (failedAt ?? this.failedAt),
       handover: handover ?? this.handover,
-      closedByUs: closedByUs ?? this.closedByUs,
       showDetail: showDetail ?? this.showDetail,
     );
   }
@@ -277,9 +287,14 @@ class CheckoutCloseController extends Notifier<CheckoutCloseState> {
       if (!await _runTransition(CloseLeg.closing, CheckoutStep.closed)) return;
 
       // Llegó a CLOSED. Antes de decir nada en 19A se le PREGUNTA al servidor
-      // si la entrega quedó registrada: el 200 no lo prueba.
-      state = state.copyWith(closedByUs: true, closing: CloseLegState.done);
-      await _verify();
+      // si la entrega quedó registrada: el 200 no lo prueba. Mientras la
+      // consulta viaja, el veredicto es [verifying] — jamás una afirmación
+      // que la llamada todavía no produjo (regla del 19A-bis).
+      state = state.copyWith(
+        closing: CloseLegState.done,
+        handover: HandoverVerdict.verifying,
+      );
+      await _verify(logOutcome: true);
     } finally {
       if (ref.mounted) state = state.copyWith(running: false);
     }
@@ -385,30 +400,42 @@ class CheckoutCloseController extends Notifier<CheckoutCloseState> {
     });
     // 19B tiene que resolverse EN EL MOMENTO (el 409 no queda en `events[]`:
     // pedido P10 al backend), así que lo poco que se puede verificar se
-    // verifica ahora mismo y no cuando el agente vuelva.
-    if (kind == CloseFailureKind.rejectedTerminal) await _verify();
+    // verifica ahora mismo y no cuando el agente vuelva. El `close_failed`
+    // de arriba ya contó este desenlace: la verificación no loguea otro.
+    if (kind == CloseFailureKind.rejectedTerminal) {
+      state = state.copyWith(handover: HandoverVerdict.verifying);
+      await _verify(logOutcome: false);
+    }
   }
 
   /// Le pregunta a `Reservation.status` si la entrega quedó registrada.
-  Future<void> _verify() async {
+  ///
+  /// [logOutcome] separa el `close_ok` del camino que CERRÓ (una vez por
+  /// cierre) de las verificaciones que no son un cierre: la de 19B (el
+  /// `close_failed` ya contó ese desenlace) y el re-chequeo manual, que tiene
+  /// su propio evento.
+  Future<HandoverVerdict> _verify({required bool logOutcome}) async {
     final recorded = await _wizard.verifyHandover();
-    if (!ref.mounted) return;
     final verdict = switch (recorded) {
       true => HandoverVerdict.recorded,
       false => HandoverVerdict.notRecorded,
       null => HandoverVerdict.unverified,
     };
+    if (!ref.mounted) return verdict;
     state = state.copyWith(handover: verdict);
-    if (state.closedByUs) {
+    if (logOutcome) {
       _logger.log(CheckoutEvents.closeOk, data: {
-        'handover': switch (verdict) {
-          HandoverVerdict.recorded => 'recorded',
-          HandoverVerdict.notRecorded => 'not_recorded',
-          _ => 'unverified',
-        },
+        'handover': _handoverTag(verdict),
       });
     }
+    return verdict;
   }
+
+  static String _handoverTag(HandoverVerdict verdict) => switch (verdict) {
+        HandoverVerdict.recorded => 'recorded',
+        HandoverVerdict.notRecorded => 'not_recorded',
+        _ => 'unverified',
+      };
 
   // ── recuperación ─────────────────────────────────────────────────────────
 
@@ -441,9 +468,11 @@ class CheckoutCloseController extends Notifier<CheckoutCloseState> {
         clearFailure: true,
       );
       if (closed) {
-        // Cerró de verdad, aunque no lo hayamos visto: se dice como 19A.
-        state = state.copyWith(closedByUs: true);
-        await _verify();
+        // Cerró de verdad, aunque no lo hayamos visto: se dice como 19A —
+        // pero primero se COMPRUEBA, y mientras tanto se dice que se está
+        // comprobando.
+        state = state.copyWith(handover: HandoverVerdict.verifying);
+        await _verify(logOutcome: true);
       }
     } finally {
       if (ref.mounted) state = state.copyWith(checking: false);
@@ -454,6 +483,22 @@ class CheckoutCloseController extends Notifier<CheckoutCloseState> {
   Future<void> retry() async {
     if (state.failureKind != CloseFailureKind.retryable) return;
     await close();
+  }
+
+  /// "Volver a comprobar" (19A-bis, solo en `unverified`). Es una CONSULTA a
+  /// display-data —la misma llamada que la app ya hace sola al cerrar— jamás
+  /// un reintento del cierre: desde terminal `canTransition` es false
+  /// (state-machine.js:94) y ese botón daría 409 para siempre. Un negativo
+  /// definitivo que descubra esta consulta enruta a 19B por `notRecorded`,
+  /// nunca se suaviza en ámbar (nota 13 del 19A-bis).
+  Future<void> recheck() async {
+    if (state.handover != HandoverVerdict.unverified) return;
+    state = state.copyWith(handover: HandoverVerdict.verifying);
+    final verdict = await _verify(logOutcome: false);
+    _logger.log(
+      CheckoutEvents.handoverRecheck,
+      data: {'result': _handoverTag(verdict)},
+    );
   }
 
   void showSessionDetail() => state = state.copyWith(showDetail: true);

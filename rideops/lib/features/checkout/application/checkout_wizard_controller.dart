@@ -615,6 +615,33 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
           code: e.code,
         );
       }
+      // ADR-4 llevado a donde siempre pertenecía (INN MC-1): la regla no es
+      // "todo 409 se reconcilia", es **si el servidor nos rechazó, se vuelve a
+      // leer**. El 409 era el único status que se había visto rechazar una
+      // transición; no es el único que puede.
+      //
+      // El caso que lo obliga no es teórico: `transition` COMMITEA el paso
+      // (checkout-session.service.js:417) y la cascada del finalize corre
+      // DESPUÉS, así que `NO_VEHICLE_ASSIGNED` (:464-468) y los gates
+      // re-evaluados (:473 → PRECHECKIN_REQUIRED / AGE_RULES_*, lanzados con
+      // 422 en :81-98) escapan con la sesión YA cerrada, y la ruta preserva su
+      // status (routes:12-16). Sin esta re-lectura el cliente se queda
+      // creyendo que sigue en FINALIZING y ofrece un "Reintentar el cierre"
+      // que el servidor no puede cumplir nunca (`canTransition` es false desde
+      // terminal, state-machine.js:94): una puerta falsa.
+      //
+      // Se re-lee SOLO en [ApiErrorKind.badRequest] — el 4xx que el SERVICIO
+      // produjo después de mirar la fila (400/404/422). No en 401/403/429/410:
+      // esos ni siquiera llegaron al servicio, un 401 solo puede responder
+      // otro 401, y re-consultar un 429 sería empujar a un backend que ya está
+      // pidiendo aire.
+      if (e.kind == ApiErrorKind.badRequest) {
+        await _refetchQuiet(gen, via: 'rejected');
+        if (gen != _generation || !ref.mounted) return blocked;
+      }
+      // El error se publica DESPUÉS del re-fetch a propósito: `_apply` limpia
+      // `error`, y la negativa del servidor es justo lo que la pantalla tiene
+      // que seguir mostrando.
       state = state.copyWith(
         error: e,
         networkAvailable:
@@ -745,15 +772,23 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
     );
   }
 
-  /// Re-fetch de reconciliación. Su fallo NO puede tapar el 409 que se está
-  /// resolviendo: devuelve null y la UI se queda con lo que ya tenía.
-  Future<CheckoutSessionDto?> _refetchQuiet(int gen) async {
+  /// Re-fetch de reconciliación. Su fallo NO puede tapar el rechazo que se
+  /// está resolviendo: devuelve null y la UI se queda con lo que ya tenía.
+  ///
+  /// [via] separa las dos reconciliaciones que llegan aquí: `conflict` (409) y
+  /// `rejected` (el 4xx del servicio, p. ej. el 422 post-commit del finalize).
+  /// Mezclarlas mentiría sobre cuántas colisiones reales produce el patio, que
+  /// es la métrica con la que el épico mide su SHIP.
+  Future<CheckoutSessionDto?> _refetchQuiet(
+    int gen, {
+    String via = 'conflict',
+  }) async {
     final id = state.session?.id;
     if (id == null) return null;
     try {
       final fresh = await _api.getSession(id);
       if (gen != _generation || !ref.mounted) return null;
-      _apply(fresh, detectForeign: true, via: 'conflict');
+      _apply(fresh, detectForeign: true, via: via);
       return fresh;
     } on ApiError catch (_) {
       return null;
