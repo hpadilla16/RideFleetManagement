@@ -1243,12 +1243,30 @@ reservationsRouter.post('/', async (req, res, next) => {
       createdByUserId: req.user?.sub || req.user?.id || null
     }, scopeFor(req));
 
+    // 2026-08-18 (MONEY): `?? null`, not `?? 0`.
+    //
+    // Location.taxRate is non-null with default 0, so whenever pickupLoc
+    // RESOLVED this is byte-for-byte what it always was. The only case that
+    // changes is the one this line used to lie about: pickupLoc is null when
+    // req.body.pickupLocationId does not resolve inside the caller's tenant
+    // scope, and validateLocationWindow() returns silently in that case
+    // (reservations.service.js:873) rather than refusing the create — so the
+    // reservation lands and this writes a snapshot rate of 0 meaning "I never
+    // found the location".
+    //
+    // Under the convention every reader now shares, a stored 0 is a RATE:
+    // precheckin-charges.js#resolveTaxRate, buildReservationBreakdown and
+    // rental-agreements.service.js:2844/3241 all read it with `??`, so that
+    // invented 0 permanently suppresses sales tax on the reservation instead of
+    // falling back to the pickup location. NULL is what "unset" is spelled as
+    // here — the column is nullable and reservations.service.js:2340 already
+    // leaves it that way for imports.
     await withTenantSchema(req.user.tenantId, (db) => db.reservationPricingSnapshot.upsert({
       where: { reservationId: row.id },
       create: {
         reservationId: row.id,
         dailyRate: quote.dailyRate,
-        taxRate: pickupLoc?.taxRate ?? 0,
+        taxRate: pickupLoc?.taxRate ?? null,
         depositRequired: requireDeposit,
         depositMode: requireDeposit ? depositMode : null,
         depositValue: requireDeposit ? depositValue : null,
@@ -1261,7 +1279,8 @@ reservationsRouter.post('/', async (req, res, next) => {
       },
       update: {
         dailyRate: quote.dailyRate,
-        taxRate: pickupLoc?.taxRate ?? 0,
+        // Same reason as the create branch above.
+        taxRate: pickupLoc?.taxRate ?? null,
         depositRequired: requireDeposit,
         depositMode: requireDeposit ? depositMode : null,
         depositValue: requireDeposit ? depositValue : null,

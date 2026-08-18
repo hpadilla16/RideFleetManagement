@@ -185,6 +185,42 @@ export function insuranceBaseFrom(charges) {
 }
 
 /**
+ * Which tax rate applies to the OTA recalculation: the rate the customer was
+ * QUOTED (the pricing snapshot), else the pickup location's. Pure, and pure on
+ * purpose — see the note about the zero below.
+ *
+ * A STORED ZERO IS A RATE, NOT A MISSING VALUE. The snapshot column is nullable
+ * (schema.prisma:2823), so "unset" already has its own representation, and
+ * car-sharing.service.js:253 stores a literal 0 for a trip it does not tax — on
+ * a reservation whose pickup location DOES have a rate. Falling back on falsy
+ * would quietly start taxing those trips, and would let the location beat the
+ * snapshot on the one path where the snapshot is meant to win. `??`-semantics
+ * here match buildReservationBreakdown (customer-portal.routes.js) and
+ * rental-agreements.service.js:2844/3241, which is the majority convention.
+ * (reservation-extend.service.js:312 is the odd one out — it tests `!taxRate`
+ * and so treats a stored 0 as unset. Flagged, not changed here.)
+ *
+ * WHY THIS IS A FUNCTION AND NOT THREE LINES INLINE. The zero case cannot be
+ * tested through the database: Prisma hands a `Decimal?` column back as a
+ * Decimal OBJECT, and `new Decimal(0)` is truthy, so a DB-backed case passes
+ * identically whether this reads `||` or `== null`. Only a PRIMITIVE 0 tells
+ * the two apart, and that is what precheckin-tax-rate.test.mjs feeds it.
+ *
+ * @param {object} args
+ * @param {number|string|object|null} [args.snapshotRate] pricingSnapshot.taxRate, verbatim.
+ * @param {number|string|object|null} [args.locationRate] pickup Location.taxRate, or null if
+ *   the location was not read (which the caller only does when the snapshot has a rate).
+ * @returns {number} a percentage; 0 means "write no tax row".
+ */
+export function resolveTaxRate({ snapshotRate = null, locationRate = null } = {}) {
+  // `!= null` on purpose: it accepts null AND undefined (no snapshot row at all
+  // hands us undefined), and rejects nothing else — 0 included.
+  const raw = snapshotRate != null ? snapshotRate : locationRate;
+  const rate = Number(raw ?? 0);
+  return Number.isFinite(rate) ? rate : 0;
+}
+
+/**
  * The charge row for a chosen insurance plan. Pure — the pricing is worth
  * reading without a database in the way. Respects the plan's mode exactly as
  * computeInsuranceLine() does in booking-engine.service.js, so a PER_DAY plan
@@ -459,26 +495,40 @@ export async function applyPrecheckinCharges({
         // now present, so the snapshot rate actually applies here, which is what
         // every other tax site in the system already does.
         //
-        // A STORED ZERO IS A RATE, NOT A MISSING VALUE, and the fallback below is
-        // reached only when there is genuinely nothing to read. The column is
-        // nullable (schema.prisma:2823) and the writers use that: the pricing
-        // service stores NULL for "unset", while car-sharing.service.js:253
-        // stores a literal 0 for a trip it does not tax — on a reservation that
-        // has a pickup location with a nonzero rate. Falling back on falsy would
-        // silently start taxing those, and would let the location override a
-        // snapshot on the one path where the snapshot is supposed to win.
-        // `?? `-equivalent semantics here match buildReservationBreakdown and
-        // rental-agreements.service.js; a zero ends in no tax row via the
-        // `taxRate > 0` guard below, which is the intended outcome.
+        // A STORED ZERO IS A RATE, NOT A MISSING VALUE — the rule, its reasons
+        // and the majority convention it follows live on resolveTaxRate(). A
+        // zero ends in no tax row via the `taxRate > 0` guard below, which is
+        // the intended outcome.
+        //
+        // WHO ACTUALLY WRITES THIS COLUMN, corrected 2026-08-18. An earlier
+        // draft of this comment said "the pricing service stores NULL for
+        // 'unset'" and left it there. That is true of ONE writer and was read as
+        // if it were true of all of them:
+        //
+        //   reservation-pricing.service.js:116  toNullableNumber() -> NULL. True.
+        //   reservations.service.js:2340        omits taxRate entirely -> NULL.
+        //   car-sharing.service.js:253          literal 0, and MEANS it (untaxed trip).
+        //   booking-engine.service.js:1769      `Number(search.location?.taxRate || 0)`.
+        //     Reads as a falsy-coalesce, but searchRental() SELECTs taxRate and
+        //     throws when no location matches, and Location.taxRate is non-null
+        //     with default 0 — so the operand is always a Decimal (truthy even
+        //     at zero) and the `|| 0` cannot fire. This writer stores the
+        //     location's real rate; it never guesses.
+        //   reservations.routes.js:1251/1264    was `pickupLoc?.taxRate ?? 0`,
+        //     and pickupLoc is null when the id does not resolve inside the
+        //     caller's tenant scope. THAT one really did store 0 for "I do not
+        //     know", and under the rule above a 0 suppresses tax on this route
+        //     forever. Changed to `?? null` on 2026-08-18 so the fallback below
+        //     can do its job; see the comment there.
         const snapshotRate = reservation.pricingSnapshot?.taxRate;
-        let taxRate = Number(snapshotRate ?? 0);
-        if (snapshotRate == null && reservation.pickupLocationId) {
-          const loc = await tx.location.findUnique({
-            where: { id: reservation.pickupLocationId },
-            select: { taxRate: true }
-          });
-          taxRate = Number(loc?.taxRate ?? 0);
-        }
+        // Only pay for the location read when the snapshot has nothing to say.
+        const locationRate = (snapshotRate == null && reservation.pickupLocationId)
+          ? (await tx.location.findUnique({
+              where: { id: reservation.pickupLocationId },
+              select: { taxRate: true }
+            }))?.taxRate ?? null
+          : null;
+        const taxRate = resolveTaxRate({ snapshotRate, locationRate });
         if (taxRate > 0) {
           const taxAmount = Number((taxableTotal * taxRate / 100).toFixed(2));
           await tx.reservationCharge.create({
