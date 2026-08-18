@@ -19,7 +19,9 @@ import {
   MAX_ID_EXTRACTS_PER_SESSION,
   MAX_ID_EXTRACTS_PER_DEVICE_PER_HOUR,
   resetExtractRateTracking,
+  resetKioskPresenceThrottle,
 } from './kiosk-checkout.service.js';
+import { readEvents } from '../checkout-session/state-machine.js';
 import { MAX_SESSION_EVENTS } from './kiosk-session.service.js';
 import { kioskSessionService, ESCALATE_REASONS } from './kiosk-session.service.js';
 import { sectionsForAgreement } from '../checkout-session/terms-content.js';
@@ -125,7 +127,7 @@ function installStubs() {
     devices: [], sessions: [], reservations: [], vehicles: [], checkoutSessions: [],
     agreements: [], initials: [], inspections: [], fuelReadings: [], mileageEntries: [],
     auditLogs: [], loanerAgreements: [], settings: [], customerInspections: [],
-    handoffTokens: [], customers: [],
+    handoffTokens: [], customers: [], presences: [],
   };
   Object.assign(prisma.kioskDevice, delegateStub(() => db.devices));
   Object.assign(prisma.kioskSession, delegateStub(() => db.sessions));
@@ -146,6 +148,7 @@ function installStubs() {
     db.settings.push(row);
     return row;
   };
+  Object.assign(prisma.checkoutPresence, delegateStub(() => db.presences));
   Object.assign(prisma.customerInspection, delegateStub(() => db.customerInspections));
   Object.assign(prisma.handoffToken, delegateStub(() => db.handoffTokens));
   Object.assign(prisma.customer, delegateStub(() => db.customers));
@@ -249,6 +252,7 @@ async function rejects(promise, { status, code } = {}) {
 beforeEach(() => {
   installStubs();
   resetExtractRateTracking();
+  resetKioskPresenceThrottle();
   delete process.env.KIOSK_PAYMENT_SANDBOX;
   delete process.env.INSPECTION_PHOTOS_STORAGE_ENABLED;
 });
@@ -537,6 +541,120 @@ test('sign: staff-staged agreement metrics are never overwritten', async () => {
   assert.equal(agreement.fuelOut, 0.5, 'staged fuel wins over latest reading');
   // mileage entry uses the agreement's (staged) checkout odometer
   assert.equal(db.mileageEntries[0].mileage, 45000);
+});
+
+// ---------------------------------------------------------------------------
+// sign — M2 P3 (2026-08-17): race-hardened walk. Another surface (counter /
+// RideOps) transitioning the SAME CheckoutSession mid-loop used to strand the
+// sign half-applied. The injection point: the walk's first transition reads
+// the session AFTER customerSignedAt is stamped — we mutate the row there,
+// exactly like a concurrent write landing between the kiosk's snapshot and
+// its transition.
+// ---------------------------------------------------------------------------
+
+/**
+ * Arms a one-shot concurrent write: the first checkoutSession.findUnique that
+ * observes customerSignedAt set (= the walk's first internal read) applies
+ * `foreignPatch` to the row first — simulating another surface's transition
+ * committing just before the kiosk's.
+ */
+function armConcurrentWrite(foreignPatch) {
+  const orig = prisma.checkoutSession.findUnique;
+  let fired = false;
+  prisma.checkoutSession.findUnique = async (args) => {
+    const row = await orig(args);
+    if (!fired && row && row.customerSignedAt && row.currentStep === 'CONFIRMING') {
+      fired = true;
+      Object.assign(row, foreignPatch(row));
+    }
+    return row;
+  };
+}
+
+test('sign: concurrent transition mid-walk → re-fetch + resume to CLOSED (no dupes, full cascade)', async () => {
+  seedKioskSession({ idVerifiedAt: new Date() });
+  seedWorld({ checkout: { paymentCompletedAt: new Date() } });
+
+  armConcurrentWrite((row) => ({
+    currentStep: 'TC_PENDING',
+    stateVersion: (row.stateVersion || 0) + 1,
+    events: JSON.stringify([...readEvents(row.events), {
+      kind: 'TRANSITION', from: 'CONFIRMING', to: 'TC_PENDING',
+      actorUserId: 'counter-agent', at: new Date().toISOString(),
+    }]),
+  }));
+
+  const result = await kioskCheckoutService.sign('ks1', DEVICE, {
+    sectionInitials: allInitials(), signature: SIGNATURE, signerName: 'Maria Gonzalez',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.checkoutSession.currentStep, 'CLOSED');
+
+  const cs = db.checkoutSessions[0];
+  assert.equal(cs.currentStep, 'CLOSED', 'walk resumed from the server state and finished');
+
+  // Idempotent resume: the step the OTHER surface took is not re-taken — one
+  // TRANSITION per from-step, strictly forward, ending in CLOSED.
+  const transitions = readEvents(cs.events).filter((e) => e.kind === 'TRANSITION');
+  const froms = transitions.map((t) => t.from);
+  assert.equal(new Set(froms).size, froms.length, `no duplicated transition: ${froms.join('→')}`);
+  assert.equal(transitions.at(-1).to, 'CLOSED');
+  assert.equal(transitions[0].actorUserId, 'counter-agent', 'foreign hop kept its own attribution');
+
+  // The CLOSED cascade still ran exactly once (anti-beta.152 invariants hold).
+  assert.equal(db.reservations[0].status, 'CHECKED_OUT');
+  assert.equal(db.agreements[0].status, 'FINALIZED');
+  assert.equal(db.vehicles[0].status, 'ON_RENT');
+  assert.equal(db.mileageEntries.length, 1);
+});
+
+test('sign: another surface CLOSED the session mid-walk → exit OK, no extra transitions', async () => {
+  seedKioskSession({ idVerifiedAt: new Date() });
+  seedWorld({ checkout: { paymentCompletedAt: new Date() } });
+
+  armConcurrentWrite(() => ({ currentStep: 'CLOSED', finishedAt: new Date() }));
+
+  const result = await kioskCheckoutService.sign('ks1', DEVICE, {
+    sectionInitials: allInitials(), signature: SIGNATURE,
+  });
+
+  assert.equal(result.ok, true, 'kiosk complete must not blow up because another surface finished');
+  assert.equal(result.checkoutSession.currentStep, 'CLOSED');
+  const transitions = readEvents(db.checkoutSessions[0].events).filter((e) => e.kind === 'TRANSITION');
+  assert.equal(transitions.length, 0, 'kiosk appended no transition of its own — the other surface owns the close');
+});
+
+test('sign: another surface CANCELLED mid-walk → 409 CHECKOUT_TERMINAL (never a fake success)', async () => {
+  seedKioskSession({ idVerifiedAt: new Date() });
+  seedWorld({ checkout: { paymentCompletedAt: new Date() } });
+
+  armConcurrentWrite(() => ({ currentStep: 'CANCELLED', finishedAt: new Date() }));
+
+  await rejects(
+    kioskCheckoutService.sign('ks1', DEVICE, { sectionInitials: allInitials(), signature: SIGNATURE }),
+    { status: 409, code: 'CHECKOUT_TERMINAL' },
+  );
+  assert.notEqual(db.reservations[0].status, 'CHECKED_OUT', 'no cascade on a cancelled checkout');
+});
+
+// ---------------------------------------------------------------------------
+// presence hook (M2 P1) — loadCheckoutSessionFor reports KIOSK presence
+// ---------------------------------------------------------------------------
+
+test('kiosk touching a checkout session reports throttled KIOSK presence with the device name', async () => {
+  seedKioskSession({ idVerifiedAt: new Date() });
+  seedWorld({ checkout: { paymentCompletedAt: new Date() } });
+
+  await kioskCheckoutService.sign('ks1', DEVICE, { sectionInitials: allInitials(), signature: SIGNATURE });
+  // fire-and-forget write — let the microtask settle
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(db.presences.length, 1, 'one presence row (throttle collapses repeat touches)');
+  assert.equal(db.presences[0].surface, 'KIOSK');
+  assert.equal(db.presences[0].sessionId, 'cs1');
+  assert.equal(db.presences[0].actorUserId, null, 'device has no user identity');
+  assert.equal(db.presences[0].displayLabel, 'Lobby 1', 'chip shows the device name');
 });
 
 // ---------------------------------------------------------------------------

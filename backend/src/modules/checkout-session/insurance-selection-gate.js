@@ -17,11 +17,14 @@
  * Everything else that names the column only READS it: kiosk-checkout.service.js
  * (2 selects + 2 response mappings), rental-agreements.service.js (select, PDF
  * addendum, buildDeclinedInsuranceBlock), reservations.service.js (list + detail
- * selects), terms-signing.service.js and terms-content.js. Also terms-signing
- * .routes.test.mjs, which never touches the column at all: it passes the name as
- * an argument to the pure sectionsForAgreement() to derive MAX_SECTIONS. Kept in
- * the list because the ratchet matches on the NAME, and an unexplained hit is
- * what makes the next person distrust the whole inventory. No backfill script,
+ * selects), terms-signing.service.js and terms-content.js. Also two tests that
+ * never touch the column at all — terms-signing.routes.test.mjs passes the name
+ * as an argument to the pure sectionsForAgreement() to derive MAX_SECTIONS, and
+ * checkout-stale-version.test.mjs (arrived with M2 P1-P3 on 2026-08-18) does the
+ * same plus seeds it into an in-memory stub of the agreement relation. Both are
+ * kept in the list because the ratchet matches on the NAME, and an unexplained
+ * hit is what makes the next person distrust the whole inventory. No backfill
+ * script,
  * no raw-SQL UPDATE, and no RideOps/Flutter writer touched it at that date.
  *
  * That list is a SNAPSHOT, not a guarantee, and a comment cannot keep itself

@@ -26,8 +26,9 @@ import logger from '../../lib/logger.js';
 import { KioskError } from './kiosk-device.service.js';
 import { getSessionForDevice, requireInProgress, recordSessionTelemetry, maskCustomerName, MAX_SESSION_EVENTS } from './kiosk-session.service.js';
 import { checkoutSessionService, CheckoutSessionError } from '../checkout-session/checkout-session.service.js';
+import { checkoutPresenceService } from '../checkout-session/checkout-presence.service.js';
 import { sectionsForAgreement } from '../checkout-session/terms-content.js';
-import { CHECKOUT_STEPS, isTerminal } from '../checkout-session/state-machine.js';
+import { CHECKOUT_STEPS, isTerminal, legalForwardTransitions } from '../checkout-session/state-machine.js';
 import { looksLikeImage, MAX_PHOTO_BYTES, isStorageEnabled } from '../rental-agreements/inspection-photos.js';
 import { uploadObject, safePath } from '../../lib/storage/supabase-storage.js';
 import { customerInspectionService } from '../customer-inspection/customer-inspection.service.js';
@@ -528,6 +529,45 @@ async function idPhotoExtract(sessionId, device, { photo } = {}) {
 
 // ── T&C + sign ───────────────────────────────────────────────────────────────
 
+// ── Kiosk presence hook (M2 P1, 2026-08-17) ─────────────────────────────────
+//
+// WHERE: piggybacked on loadCheckoutSessionFor, NOT on requireKioskDevice.
+// The middleware authenticates the DEVICE and has no idea which (if any)
+// CheckoutSession the request touches — pairing, lookup and OCR requests have
+// none. loadCheckoutSessionFor is the single choke point every kiosk endpoint
+// that operates a real CheckoutSession already passes through, and by the time
+// it returns the reference is verified tenant-safe. Fire-and-forget +
+// throttled (same 30 s shape as the middleware's lastSeenAt heartbeat) so the
+// hook costs at most one small write per session per 30 s and can never fail
+// the business call. displayLabel = device name → the counter/RideOps chip
+// reads "Lobby 1", which is what staff actually need to know.
+export const KIOSK_PRESENCE_THROTTLE_MS = 30 * 1000;
+const kioskPresenceStamps = new Map(); // checkoutSessionId → last report (ms)
+
+/** Test hook — clears the in-memory kiosk presence throttle. */
+export function resetKioskPresenceThrottle() {
+  kioskPresenceStamps.clear();
+}
+
+function reportKioskPresenceSafe(cs, device) {
+  const now = Date.now();
+  const last = kioskPresenceStamps.get(cs.id) || 0;
+  if (now - last < KIOSK_PRESENCE_THROTTLE_MS) return;
+  kioskPresenceStamps.set(cs.id, now);
+  // Bounded memory: prune entries idle > 10 min once the map grows.
+  if (kioskPresenceStamps.size > 500) {
+    for (const [key, at] of kioskPresenceStamps) {
+      if (now - at > 10 * 60_000) kioskPresenceStamps.delete(key);
+    }
+  }
+  checkoutPresenceService.recordPresenceSafe({
+    sessionId: cs.id,
+    surface: 'KIOSK',
+    actorUserId: null,
+    displayLabel: device?.name || 'Kiosk',
+  });
+}
+
 async function loadCheckoutSessionFor(session, device) {
   if (!session.checkoutSessionId) {
     throw new KioskError('Assign a vehicle first — checkout has not started', 422, 'CHECKOUT_NOT_STARTED');
@@ -536,6 +576,7 @@ async function loadCheckoutSessionFor(session, device) {
   if (!cs || (cs.tenantId && cs.tenantId !== device.tenantId)) {
     throw new KioskError('Checkout session not found', 404, 'CHECKOUT_NOT_FOUND');
   }
+  reportKioskPresenceSafe(cs, device);
   return cs;
 }
 
@@ -758,20 +799,67 @@ async function sign(sessionId, device, { sectionInitials, signature, signerName,
       customerIp: ip,
     });
 
-    // 3) Walk the REAL state machine forward to CLOSED (same loop shape as
-    // the customer-inspection delegation path). The CLOSED cascade handles
-    // FINALIZED + CHECKED_OUT + vehicle sync + mileage entry + auto-email.
-    const startIdx = CHECKOUT_STEPS.indexOf(cs.currentStep);
-    const remaining = CHECKOUT_STEPS
-      .slice(startIdx + 1, CHECKOUT_STEPS.indexOf('CLOSED') + 1)
-      .filter((step) => step !== 'CANCELLED');
-    for (const toStep of remaining) {
-      await checkoutSessionService.transition({
-        id: cs.id,
-        toStep,
-        actorUserId: null,
-        metadata: { kiosk: true, kioskSessionId: session.id, deviceId: device.id },
-      });
+    // 3) Walk the REAL state machine forward to CLOSED. The CLOSED cascade
+    // handles FINALIZED + CHECKED_OUT + vehicle sync + mileage entry +
+    // auto-email.
+    //
+    // M2 P3 (2026-08-17) — race-hardened walk. The old version precomputed
+    // the remaining steps from a single snapshot and fired them blind; with
+    // four surfaces coexisting (00-REGROUND.md §2) another surface
+    // transitioning mid-loop turned the kiosk's next hop into a 409
+    // ILLEGAL_TRANSITION and the whole sign failed HALF-APPLIED (initials +
+    // signature persisted, session stranded pre-CLOSED). Now each hop is
+    // derived from the CURRENT step and an ILLEGAL_TRANSITION is treated as
+    // "someone moved the session" → re-fetch → resume from the server's
+    // truth. The walk is idempotent by construction: transitions only move
+    // forward, so re-deriving the next hop can never repeat or skip work.
+    //
+    //   • Concurrent surface reached CLOSED first → exit OK (M2-PLAN §1.2:
+    //     the kiosk's completion must not blow up because the counter/RideOps
+    //     finished the same checkout — the customer IS done).
+    //   • Concurrent surface CANCELLED the session → 409 CHECKOUT_TERMINAL.
+    //     Deliberate deviation from a literal "terminal → exit OK": telling
+    //     the lobby customer they're done when staff just aborted the
+    //     checkout would hand them keys to a cancelled rental. complete()
+    //     gates on CHECKOUT_NOT_CLOSED for the same reason.
+    //   • Re-fetch shows the step did NOT move → the 409 was a genuine
+    //     illegal walk, not a race — rethrow (hop cap as backstop).
+    let current = cs.currentStep;
+    let hops = 0;
+    while (current !== 'CLOSED') {
+      if (isTerminal(current)) {
+        throw new KioskError(`Checkout is already ${current.toLowerCase()}`, 409, 'CHECKOUT_TERMINAL');
+      }
+      if (++hops > CHECKOUT_STEPS.length + 2) {
+        // Defensive only: forward-only graph + the same-step rethrow above
+        // make livelock impossible; this converts "impossible" into a clean
+        // 500 instead of an infinite loop if the graph ever changes shape.
+        throw new KioskError('Checkout walk did not converge', 500, 'CHECKOUT_WALK_STUCK');
+      }
+      const [next] = legalForwardTransitions(current);
+      try {
+        const updated = await checkoutSessionService.transition({
+          id: cs.id,
+          toStep: next,
+          actorUserId: null,
+          metadata: { kiosk: true, kioskSessionId: session.id, deviceId: device.id },
+        });
+        current = updated.currentStep;
+      } catch (err) {
+        if (err instanceof CheckoutSessionError && err.code === 'ILLEGAL_TRANSITION') {
+          const fresh = await prisma.checkoutSession.findUnique({
+            where: { id: cs.id }, select: { currentStep: true },
+          });
+          if (fresh && fresh.currentStep !== current) {
+            logger.info('[kiosk-checkout] sign walk raced another surface — resuming from server state', {
+              checkoutSessionId: cs.id, was: current, now: fresh.currentStep, kioskSessionId: session.id,
+            });
+            current = fresh.currentStep; // CLOSED exits the loop; CANCELLED throws above
+            continue;
+          }
+        }
+        throw err;
+      }
     }
   } catch (err) {
     throw mapCheckoutError(err);

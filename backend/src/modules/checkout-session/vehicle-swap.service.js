@@ -122,6 +122,11 @@ async function swapVehicle({ sessionId, newVehicleId, actorUserId }) {
     prisma.checkoutSession.update({
       where: { id: sessionId },
       data: {
+        // M2 P2 review, PM decision (2026-08-17): version = MATERIAL change
+        // of the session. The contract's vehicle just changed — a surface
+        // holding an expectedVersion snapshot is rendering the WRONG car, so
+        // the swap bumps even though no versioned stamp moved.
+        stateVersion: { increment: 1 },
         events: appendEvent(session.events, {
           kind: 'VEHICLE_SWAP',
           fromVehicleId: oldVehicleId,

@@ -431,6 +431,9 @@ test('the set of files naming declinedInsurance is a ratchet', () => {
     // Never touches the column: passes the name to the pure sectionsForAgreement()
     // to derive MAX_SECTIONS. Listed because the ratchet matches on the NAME.
     'src/modules/checkout-session/terms-signing.routes.test.mjs',
+    // Same: derives sections from the pure helper and seeds the name into an
+    // in-memory stub of the agreement relation. Arrived with M2 P1-P3.
+    'src/modules/checkout-session/checkout-stale-version.test.mjs',
     'src/modules/checkout-session/declined-insurance-and-sign-url.test.mjs',
     'src/modules/checkout-session/terms-section-overrides.test.mjs',
     'src/modules/checkout-session/terms-signing.test.mjs',
