@@ -177,16 +177,6 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
-      - name: Generate the Prisma client
-        # Every other backend job does this (see backend-check) and this one
-        # needs it for a reason of its own: backfill-inspection-photos-to-storage
-        # statically imports { Prisma } from '@prisma/client'. Without this step
-        # the job survives only on @prisma/client's postinstall plus the fact
-        # that `node --test` runs files ALPHABETICALLY, so two suites happen to
-        # call `prisma generate` in their before() before that import is
-        # reached. Renaming a file would silently change that. One line removes
-        # the coupling (QA, 2026-08-17).
-        run: npm run prisma:generate
       - name: Install embedded-postgres
         # --no-save deliberately: it is a test-harness binary, not a dependency
         # of the app, and adding it to package.json would put a ~100MB platform
@@ -201,6 +191,17 @@ jobs:
         # the exact version every measurement in this job's commit was taken
         # against. Bump it deliberately, never implicitly.
         run: npm install --no-save embedded-postgres@18.4.0-beta.17
+      - name: Generate the Prisma client
+        # Every other backend job does this (see backend-check) and this one
+        # needs it for a reason of its own: backfill-inspection-photos-to-storage
+        # statically imports { Prisma } from '@prisma/client'. Without this step
+        # the job survives only on @prisma/client's postinstall plus the fact
+        # that `node --test` runs files ALPHABETICALLY, so two suites happen to
+        # call `prisma generate` in their before() before that import is
+        # reached. Renaming a file would silently change that. One line removes
+        # the coupling. Runs AFTER the install above so it cannot itself depend
+        # on install-time behaviour — the whole point of the step (QA, 2026-08-17).
+        run: npm run prisma:generate
       - name: Embedded-postgres suites
         # --test-concurrency=1 (in the script) is load-bearing, not caution.
         # node --test runs FILES in parallel by default, and every one of these

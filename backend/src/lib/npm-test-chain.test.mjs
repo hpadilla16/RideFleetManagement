@@ -34,7 +34,9 @@ const KNOWN_OUT = {
   // three tests in this file: everything below that boots embedded-postgres is
   // run by the `embedded-postgres-suites` job in beta-ci.yml via
   // `npm run test:embedded`, and this suite fails if that stops being true —
-  // including if the job is merely commented out or switched off with `if:`.
+  // including if the job is commented out, switched off with `if:`, or has its
+  // command neutered with `|| true`. The cases it does NOT catch are listed at
+  // that assertion rather than left to be discovered.
   // The two entries that are NOT embedded-pg suites say so individually.
   'test:module-access-audit': 'DB-backed (.db.test.mjs); run by the tenant-isolation-suite job',
   'test:customer-inspection': 'DB-backed via the shared prisma singleton; needs a live DATABASE_URL, run by no automation',
@@ -259,18 +261,28 @@ test('`test:embedded` does not name a suite that has stopped booting embedded pg
   assert.deepEqual(stale, [], `"test:embedded" names suite(s) that no longer boot embedded pg: ${stale.join(', ')}`);
 });
 
-test('beta-ci.yml actually runs `npm run test:embedded`, and the job is live', () => {
+test('beta-ci.yml actually runs `npm run test:embedded`, unguarded, in a live job', () => {
   // The point of the whole exercise. Naming the suites in a script they COULD
   // be run by is not coverage; a job that runs them is.
   //
-  // A whole-file `includes()` was the first version and it was not good enough:
-  // BOTH ways someone actually disables a job — commenting the step out, and
-  // adding `if: false` to a job they think is flaky — left it green, while only
-  // deleting the job outright was caught. That is the same blind spot this file
-  // fixed twice before (the substring `chain.includes` at the top, and the bare
-  // `embedded-pg-boot` match below), so it does not get to be introduced a
-  // third time. Comment lines are stripped, the invocation must survive on a
-  // real `run:` line, and the job must carry no kill switch.
+  // This assertion has now been defeated twice by QA and rewritten twice, which
+  // is the honest summary of how hard it is to assert 'CI really does this':
+  //   1. A whole-file `includes()` was green with the step COMMENTED OUT and
+  //      green with `if: false` on the job.
+  //   2. Requiring `run:` + `.*` was green with `npm run test:embedded || true`
+  //      — semantically identical to continue-on-error, and the first thing
+  //      somebody reaches for at 11pm because they are already editing that
+  //      line — and green when the real invocation was moved into a SIBLING
+  //      job that was itself switched off.
+  // Hence: comments stripped, the job body extracted FIRST, and the command
+  // matched whole-line with nothing appended.
+  //
+  // NOT COVERED, deliberately, so this comment does not become the next
+  // over-claim: an empty `strategy.matrix` (the job never materializes), and
+  // narrowing the workflow's `on:` triggers or adding paths-ignore. The first
+  // is exotic; the second disables all four jobs at once and is therefore
+  // loud. A `runs-on` label that does not exist also passes here, but it
+  // reports as a pending check rather than a green one.
   const CI_PATH = '../../../.github/workflows/beta-ci.yml';
   let ci;
   try {
@@ -285,21 +297,36 @@ test('beta-ci.yml actually runs `npm run test:embedded`, and the job is live', (
         'the embedded suites and therefore needs a FULL repo checkout, not a standalone backend/ tree.',
     );
   }
-  // Comment lines removed first. Everything below reasons about the LIVE file.
   const live = ci.replace(/^[ 	]*#.*$/gm, '');
-  assert.match(
-    live,
-    /^\s*run:\s*.*npm run test:embedded/m,
-    'beta-ci.yml no longer runs `npm run test:embedded` on an active step — the embedded suites are unguarded again',
-  );
-  // ...and the job holding it must carry no kill switch. `if: false` on the job
-  // leaves the run: line intact while running nothing.
-  const body = /^  embedded-postgres-suites:$([\s\S]*?)^  \S/m.exec(live)?.[1];
+  // Terminator accepts end-of-input: the job being LAST in the file is a
+  // legitimate reorder, and reporting it as 'the job is gone' sends the reader
+  // hunting for a deletion that never happened.
+  const body = /^  embedded-postgres-suites:$([\s\S]*?)(?:^  \S|$(?![\s\S]))/m.exec(live)?.[1];
   assert.ok(body, 'the embedded-postgres-suites job is gone from beta-ci.yml');
-  for (const [label, killSwitch] of [['if:', /^\s{4,}if:/m], ['continue-on-error: true', /^\s*continue-on-error:\s*true/m]]) {
+  // Whole-line and exact. `.*` after the command was the hole: `|| true`,
+  // `; exit 0` and a shell-variable gate all satisfied it. Matched against the
+  // JOB BODY, not the file, so the invocation cannot be relocated into some
+  // other job that is itself disabled.
+  assert.match(
+    body,
+    /^\s+run:\s*npm run test:embedded\s*$/m,
+    'beta-ci.yml no longer runs `npm run test:embedded` as a bare, unguarded step inside ' +
+      'the embedded-postgres-suites job — the embedded suites are unguarded again',
+  );
+  // Kill switches. Job-level `if:` is anchored at EXACTLY four spaces: a step
+  // may legitimately carry `if: failure()` (the tenant-isolation-suite job does,
+  // to dump logs), and failing that edit with an accusation about kill switches
+  // would block a good change and misdirect whoever tries to fix it.
+  const KILL_SWITCHES = [
+    ['a job-level `if:`', /^ {4}if:/m],
+    ['a step-level `if: false`', /^\s+if:\s*(?:false|\$\{\{\s*false\s*\}\})\s*$/m],
+    ['`continue-on-error: true`', /^\s*continue-on-error:\s*true/m],
+  ];
+  for (const [label, re] of KILL_SWITCHES) {
     assert.ok(
-      !killSwitch.test(body),
-      `embedded-postgres-suites carries \`${label}\` — a job that can skip itself, or pass while failing, is not a gate`,
+      !re.test(body),
+      `embedded-postgres-suites carries ${label} — a job that can skip itself, or pass while ` +
+        'failing, is not a gate',
     );
   }
 });
