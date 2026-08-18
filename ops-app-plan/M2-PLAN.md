@@ -255,6 +255,44 @@ pantalla 11E de H7 ("salió por correo"). **Ya estaba arreglado** — H7 lo corr
 propio ciclo y hoy dice "se pidió el envío del contrato". Verificado en `app_es.arb:652`.
 Es el segundo hallazgo cruzado que llega tarde porque cada agente mira su propio árbol.
 
+### Tren de fusión: qué choca con qué (medido 2026-08-18, no supuesto)
+
+Las siete ramas listas fusionan **limpio contra main por separado**. El choque es **entre
+ellas**, y siempre en los mismos archivos:
+
+| Par | Archivos en conflicto |
+|---|---|
+| p123 × insurance-flag | `beta-ci.yml`, `backend/package.json`, `checkout-session.service.js` |
+| p123 × sign-page | `beta-ci.yml`, `backend/package.json` |
+| insurance-flag × sign-page | `beta-ci.yml`, `backend/package.json` |
+| cas-transition × insurance-flag | los tres |
+| cas-transition × sign-page | `beta-ci.yml`, `backend/package.json` |
+
+**Dos de los tres son el mismo choque inofensivo**, ya resuelto una vez hoy: cada rama
+**añadió su suite al final del mismo renglón** —la cadena `test` de `package.json` y la lista
+explícita de `beta-ci.yml`—. Git no puede saber que ambos lados solo APENDAN, así que lo
+marca como conflicto de contenido. **La resolución correcta es conservar los dos lados**, y
+después verificar ejecutando: que el JSON parsee, que los scripts nuevos existan, y que el
+comando extraído del YAML corra con exit 0.
+
+El tercero (`checkout-session.service.js`) **sí es contenido real** y toca la ruta del dinero:
+no se resuelve a ojo.
+
+**Orden que reduce el dolor**, porque `cas-transition` DESCIENDE de `p123` y las dos ramas
+de checkout de Hector descienden a su vez de `cas-transition`:
+
+1. **p123** (base de todo el linaje de checkout)
+2. **cas-transition** (H8) — avance casi directo
+3. las dos ramas de checkout de los worktrees, en su propia fila
+4. **insurance-flag** — aquí aparece el choque real de `service.js`
+5. **sign-page** — solo los dos apéndices
+6. **rideops-m1** y el **tronco del M2** — no tocan backend, van cuando sea
+
+**Y la restricción que manda sobre todo esto**: la rama de la página de firma es la que añade
+al trinquete la comprobación de que una suite esté en la lista **que CI de verdad ejecuta**.
+Hasta que entre, quitar cualquier suite de esa lista no lo caza nadie. Si entra tarde, todo
+lo anterior habrá pasado por un gate que no lo corría.
+
 ### Orden de fusión: el trinquete de CI vive en UNA sola rama
 
 Dos gates de QA dieron veredictos aparentemente contradictorios sobre el mismo trinquete.
