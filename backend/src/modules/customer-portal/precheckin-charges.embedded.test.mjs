@@ -637,6 +637,33 @@ describe('a double-tapped Submit', () => {
     assert.ok(row.notes.startsWith('Prefers the airport counter.'));
   });
 
+  it('writes the marker alone, with no leading blank line, on a customer with no notes', async () => {
+    // The COMMON production case: most customers carry no note at all, so this
+    // is the branch of the append that actually runs most of the time. The
+    // three cases around it all seed a note, which leaves it untested.
+    const customer = await makeCustomer(null);
+    const reservation = await makeReservation({
+      customerId: customer.id,
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'BASIC' },
+      insurancePlans: PLANS,
+      thirdPartyBooking: { isThirdParty: true, voucherUrl: 'https://example.test/voucher.pdf' },
+    });
+
+    const row = await prisma.customer.findUnique({
+      where: { id: customer.id }, select: { notes: true },
+    });
+    assert.equal(
+      row.notes, '[VOUCHER] Third-party voucher uploaded during pre-check-in',
+      'exact equality on purpose — an empty note must not become a leading newline',
+    );
+  });
+
   it('leaves the customer row alone when no voucher was uploaded', async () => {
     const customer = await makeCustomer('Corporate account — bill to Ride LLC.');
     const reservation = await makeReservation({
