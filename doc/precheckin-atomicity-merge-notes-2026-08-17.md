@@ -3,8 +3,8 @@
 Written 2026-08-17, while both branches are open. Delete this file once the
 merge has landed.
 
-The atomicity work (`claude/eloquent-shtern-fc90fb`, commits `e17d60e5` and
-`f6315a67`) moved the money half of `POST /customer-info/:token` out of
+The atomicity work (`claude/eloquent-shtern-fc90fb`, commits `e17d60e5`,
+`f6315a67` and `db9352d2`) moved the money half of `POST /customer-info/:token` out of
 `customer-portal.routes.js` and into `customer-portal/precheckin-charges.js`.
 `fix/insurance-flag-and-terms-url` edits the same handler. **The merge is not
 mechanical, and resolving the conflict "ours" silently drops a control.** This
@@ -104,7 +104,23 @@ agreementSealed: insuranceVerdict.signed,
 ```
 
 Without that last line `insuranceVerdict` becomes a dead local — assigned by the
-preflight and read by nobody, which is the tell that the fence was lost.
+preflight and read by nobody, which is the tell that the fence was lost. An
+earlier revision of `precheckin-charges.js` carried the fence with exactly that
+parameter unpassed; it was always `false`, so the fence was unconditional and it
+silently dropped a legitimate decline signature whenever staff signed at the
+counter first. Wire the caller in the same commit as the fence, not after.
+
+**Porting it turns a green test red, on purpose.** The case
+`records a decline WITH its signature on the agreement`
+(`precheckin-charges.embedded.test.mjs`) creates the agreement with `tcSignedAt`
+SET, because on THIS branch that is a reachable order and the signature must be
+written. Under the merged world it is not reachable through the route: the
+preflight refuses that submission with a 409 before `applyPrecheckinCharges` is
+ever called, and the test reaches the function directly. So the fixture stops
+describing anything a customer can do. Rewrite the case deliberately as part of
+the merge — split it into an unsigned-agreement case that still asserts the
+signature IS written, and a signed-agreement case that asserts the fence holds —
+rather than deleting it because it went red.
 
 The `tcSignedAt: null` fence stays necessary even inside the transaction: the
 verdict is computed at the preflight, which by construction runs before `BEGIN`,
@@ -119,9 +135,14 @@ point.
 classify `precheckin-charges.js` as a WRITER, and demote
 `customer-portal.routes.js` to whatever it has become.
 
-## Verified after resolving
+## What the trial merge actually verified
 
-- `npm run test:precheckin-charges` 8/8
+The resolution above was carried out and the suites run, then the merge was
+aborted — this branch does not carry it. What was green in that state:
+
+- `npm run test:precheckin-charges` 8/8 — the suite had 8 cases then; it has 10
+  now, and the two added cases are exactly the ones the section above says to
+  rewrite. Re-run and re-read them during the real merge.
 - `npm run test:declined-insurance-embedded` 7/7
 - `npm run test:portal` 3/3, `node --test src/lib/npm-test-chain.test.mjs` 4/4
 
