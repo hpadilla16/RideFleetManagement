@@ -2128,7 +2128,8 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
   // the cascade. A retry cannot fix it either — the cascade short-circuits on
   // an already-CHECKED_OUT reservation — so this state needs to say so rather
   // than leave the agent on a generic shrug with no action.
-  const halfFinalized = resvStatus === 'CHECKED_OUT' && agreementStatus !== 'FINALIZED';
+  const halfFinalized = resvStatus === 'CHECKED_OUT'
+    && !!agreementStatus && agreementStatus !== 'FINALIZED';
   // An age bound is not something a retry clears either.
   const showRetry = retryCanWork && !copy.terminal;
 
@@ -2178,6 +2179,13 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
     },
     { id: 'email', done: false, label: 'factEmailNo', state: '—' },
   ];
+  // Only in the half-finalize view: the car is already gone, so the one row
+  // that still needs action belongs directly under the alert rather than
+  // third in a mostly-✓ list. Stable sort keeps the original order within
+  // each group.
+  const orderedFacts = halfFinalized
+    ? [...facts.filter((f) => !f.done), ...facts.filter((f) => f.done)]
+    : facts;
 
   return (
     <div style={{ ...cardStyle, borderColor: WARN.bd, borderLeft: `3px solid ${WARN.tx}` }}>
@@ -2201,7 +2209,7 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
             Only shown when the button below can actually act on it. */}
         {showRetry && !halfFinalized && (
           <span style={{ display: 'block', fontWeight: 500, marginTop: 4 }}>
-            {t('checkoutClosed.retryHint').trim()}
+            {t('checkoutClosed.retryHint')}
           </span>
         )}
         {/* The raw backend message is the ONLY place the blocking reservation
@@ -2220,11 +2228,11 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
         border: '0.5px solid #E5E7EB', borderRadius: 8, overflow: 'hidden',
         marginBottom: 16, maxWidth: '70ch',
       }}>
-        {facts.map((f, i) => (
+        {orderedFacts.map((f, i) => (
           <div key={f.id} style={{
             display: 'flex', alignItems: 'flex-start', gap: 9, padding: '8px 12px', fontSize: 13,
             color: '#4B5563',
-            borderBottom: i === facts.length - 1 ? 'none' : '0.5px solid #E5E7EB',
+            borderBottom: i === orderedFacts.length - 1 ? 'none' : '0.5px solid #E5E7EB',
           }}>
             {/* The ✓ rows stay NEUTRAL grey, not success green: inside a
                 failure card the app's success colour competes with the alert

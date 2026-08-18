@@ -208,14 +208,27 @@ describe('resolveFinalizeFailureCopy', () => {
     expect(copy.bodyText).toBe('Checkout is closed but its finalize did not complete: brand new guard');
   });
 
-  it('never names the vehicle swap, in either language', () => {
-    // ensureNoVehicleConflict's message ends "(or swap vehicles)", but
-    // swapLocked includes CLOSED and swapVehicle demands CHECKED_OUT, so an
-    // agent who follows that sentence lands on a greyed-out button. The
-    // backend message is RideOps' contract and stays untouched; our copy must
-    // not repeat its dead recovery.
+  it('never names a recovery the app does not actually offer', () => {
+    // Two dead recoveries have already reached this screen's copy, so the rule
+    // gets a test rather than a comment:
+    //
+    //   "swap vehicles"  — ensureNoVehicleConflict's message ends with it, but
+    //                      swapLocked includes CLOSED and swapVehicle demands
+    //                      CHECKED_OUT, so the button is greyed out. The
+    //                      backend message is RideOps' contract and stays as
+    //                      it is; OUR copy must not repeat its dead advice.
+    //   "finalize it from the reservation"
+    //                    — POST /rental-agreements/:id/finalize exists, but no
+    //                      frontend calls it and the reservation page has no
+    //                      such control. Sending an agent to look for it, in
+    //                      the one state where a car is already out on a draft
+    //                      contract, is the same defect wearing new words.
+    //
+    // Anything added here has to be reachable from the UI the agent is on.
     for (const bundle of [en, es]) {
-      expect(JSON.stringify(bundle.checkoutClosed).toLowerCase()).not.toContain('swap');
+      const copy = JSON.stringify(bundle.checkoutClosed).toLowerCase();
+      expect(copy).not.toContain('swap');
+      expect(copy).not.toMatch(/final(ize|iza|ízalo|izalo)\s+(it\s+)?(from|desde)/);
     }
   });
 
