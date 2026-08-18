@@ -2120,7 +2120,7 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
   // 200. Offering a retry there would be a button that silently changes
   // nothing, under copy promising it would explain the blocker — exactly the
   // kind of confident-but-false affordance this ticket removes.
-  const { retryCanWork, voided, halfFinalized, showRetry } =
+  const { voided, halfFinalized, showRetry } =
     closedCardState({ reservation, terminalReason: copy.terminal });
 
   let title;
