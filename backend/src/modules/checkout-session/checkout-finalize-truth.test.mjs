@@ -36,6 +36,9 @@
  */
 import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { prisma } from '../../lib/prisma.js';
 import { CheckoutSessionError } from './checkout-session.service.js';
 import { rentalAgreementsService } from '../rental-agreements/rental-agreements.service.js';
@@ -289,15 +292,20 @@ test('§3 a send that rejects is caught, not left unhandled', async () => {
   assert.equal(db.reservations[0].status, 'CHECKED_OUT');
   assert.equal(db.agreements[0].status, 'FINALIZED');
   assert.equal(db.vehicles[0].status, 'ON_RENT');
-  // KNOWN GAP, not a desired property: autoEmailedAt is stamped BEFORE the send
-  // and is not rolled back when the send rejects, so this row now claims a
-  // contract was mailed that never was — and the kiosk DONE screen shows that
-  // claim to the customer (kiosk-checkout.service.js:1076 `contractEmail.sent`).
-  // Left out of this ticket deliberately: the compensating un-stamp is safe but
-  // it is a different defect with a different customer-facing surface. Asserted
-  // here so the behaviour is DOCUMENTED rather than discovered, and so the day
-  // someone fixes it, this line points at what else to check.
-  assert.ok(row.autoEmailedAt instanceof Date, 'KNOWN GAP: the stamp is not rolled back');
+  // STILL not rolled back — and that is now a documented property, not a gap
+  // waiting on someone (2026-08-17). autoEmailedAt is stamped BEFORE the send,
+  // by a compare-and-set that is the only thing keeping two simultaneous CLOSED
+  // transitions from mailing two contracts, so it cannot move after the send;
+  // and nothing clears it when the background job dies. The follow-up ticket
+  // resolved that by fixing the MEANING instead of compensating: the column now
+  // documents itself as "a send was HANDED OFF" (schema.prisma), and the claim the
+  // customer used to read off it is gone — kiosk /complete returns
+  // `contractEmail.pending`, and K10 promises a send in flight, not an arrival.
+  // A real un-stamp buys nothing K10 can show (it renders seconds after CLOSED,
+  // before the job has run either way) and would still miss the SIGTERM case;
+  // durable delivery is SCALING_ROADMAP.md §2b. Asserted so the stamp-ahead
+  // ordering stays deliberate, and so anyone who changes it must come here.
+  assert.ok(row.autoEmailedAt instanceof Date, 'the stamp is intentionally not rolled back');
 });
 
 // ── §4. the probe QA ran, as one assertion ─────────────────────────────────
@@ -330,4 +338,58 @@ test('§4 QA probe: WINNER + vehicle conflict, the whole tuple', async () => {
     agreement: 'DRAFT',
     vehicle: 'AVAILABLE',
   });
+});
+
+// ── §5. the CAS invariant, checked instead of promised ─────────────────────
+//
+// The column comment in prisma/schema.prisma says nothing un-stamps
+// autoEmailedAt and nothing may. That second half is not documentation, it is
+// the compare-and-set: the stamp is the whole reason two simultaneous CLOSED
+// transitions mail one contract instead of two, and it only works while it is
+// written once and never cleared.
+//
+// The likeliest future edit to this code is someone reading "the background
+// job failed and nothing rolls this back" as a bug and helpfully adding
+// `autoEmailedAt: null` to that job's catch — the compensation this ticket
+// rejected — which silently reopens the double-contract race. A comment cannot
+// stop that. This can, and it points the author at the comment.
+//
+// Same instrument as the 14-writer inventory in checkout-cas-transition.test.mjs:
+// the claim is checked, not promised.
+
+test('§5 exactly one place touches autoEmailedAt, and it never clears it', () => {
+  const srcRoot = fileURLToPath(new URL('../../', import.meta.url));
+  const hits = [];
+  for (const rel of fs.readdirSync(srcRoot, { recursive: true })) {
+    // .js only. The exclusion that actually matters is checkout-session.test-harness.mjs,
+    // the one non-test .mjs under src/ — it seeds this column in its fixtures and always
+    // will. Real .test.mjs files are excluded by the same filter, for the same reason.
+    if (!String(rel).endsWith('.js')) continue;
+    const lines = fs.readFileSync(path.join(srcRoot, String(rel)), 'utf8').split('\n');
+    for (const [i, line] of lines.entries()) {
+      if (line.includes('autoEmailedAt:')) {
+        hits.push({ dir: path.dirname(String(rel)), file: path.basename(String(rel)), n: i + 1, line: line.trim() });
+      }
+    }
+  }
+  const show = hits.map((h) => `  ${h.dir}/${h.file}:${h.n}  ${h.line}`).join('\n');
+
+  // Deliberately NOT pinned to line numbers, unlike the 14-writer inventory.
+  // That list cites lines because being spot-checkable is its entire job, and
+  // it pays for that by going stale on every edit above it. Here the line is
+  // not the claim — the SHAPE is: two occurrences, one file, one guard and one
+  // stamp.
+  assert.equal(hits.length, 2, `expected exactly two — the CAS guard and the stamp\n${show}`);
+  for (const h of hits) {
+    assert.equal(path.join(h.dir, h.file), path.join('modules', 'checkout-session', 'checkout-session.service.js'),
+      `autoEmailedAt written outside maybeSendFinalizeEmail — read the column comment in prisma/schema.prisma before changing this\n${show}`);
+  }
+  assert.match(hits[0].line, /where.*autoEmailedAt: null/, 'the first is the null guard that decides the race');
+  assert.match(hits[1].line, /data.*autoEmailedAt: new Date\(\)/, 'the second is the stamp the winner writes');
+
+  // Two things this scan does NOT see, named so nobody mistakes it for total:
+  // it reads backend/src only, so backend/scripts (bulk backfills) is outside
+  // it; and a raw `$executeRaw ... SET "autoEmailedAt" = NULL` has no
+  // `autoEmailedAt:` in it and would slip through. Both were empty across all
+  // of backend/ when this was written — the pin is accurate, not exhaustive.
 });

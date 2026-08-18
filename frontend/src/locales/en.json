@@ -458,7 +458,7 @@
     "doneKeysLockbox": "Pick up your keys at the lockbox by the exit.",
     "doneCar": "Your car",
     "doneContract": "Contract & receipt",
-    "doneContractSent": "Sent to your email",
+    "doneContractPending": "We're sending them to your email",
     "doneContractAskStaff": "Ask a team member for a printed copy",
     "doneInspection": "Before you drive off",
     "doneInspectionSent": "We emailed you a link to photo-document the car's condition (2 min, protects you)",

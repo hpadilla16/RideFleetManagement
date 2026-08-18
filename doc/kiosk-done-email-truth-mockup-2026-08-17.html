@@ -1,0 +1,214 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>K10 — la línea del contrato deja de prometer entrega</title>
+<style>
+  :root {
+    --kio-purple: #8752FE; --kio-violet: #6d3df2; --kio-mint: #1fc7aa;
+    --kio-title: #29223f; --kio-muted: #6f668f; --kio-border: #e6dfff;
+    --kio-shadow: 0 14px 32px rgba(35, 21, 80, .08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 34px 26px 60px;
+    background: linear-gradient(180deg, #fdfcff 0%, #f6f2ff 100%);
+    color: #1f1f28; min-height: 100vh;
+    font-family: Aptos, 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+    font-size: 15px; line-height: 1.5;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 25px; font-weight: 850; color: var(--kio-title); letter-spacing: -.01em; margin: 0 0 6px; }
+  .lede { color: var(--kio-muted); max-width: 78ch; margin: 0 0 6px; }
+  .lede b { color: var(--kio-title); }
+  .meta { color: var(--kio-muted); font-size: 13px; margin: 0 0 30px; }
+
+  .row { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; margin-bottom: 34px; }
+  .col { flex: 1 1 330px; min-width: 320px; }
+  .tag {
+    display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 800;
+    letter-spacing: .04em; text-transform: uppercase; padding: 5px 11px; border-radius: 999px;
+    margin-bottom: 11px;
+  }
+  .tag.now { background: #fdecec; color: #a52222; border: 1px solid #f6cfcf; }
+  .tag.opt { background: #ecfaf6; color: #0d7a67; border: 1px solid #c7efe6; }
+  .tag.alt { background: #f4f0ff; color: #4c1d95; border: 1px solid #ddd0ff; }
+  .note { color: var(--kio-muted); font-size: 13.5px; margin: 11px 2px 0; }
+  .note b { color: var(--kio-title); }
+
+  /* ── faithful to frontend/src/app/kiosk/kiosk.css ── */
+  .kio-frame {
+    background: linear-gradient(180deg, #fdfcff 0%, #f6f2ff 100%);
+    border: 1px solid var(--kio-border); border-radius: 22px;
+    padding: 26px 22px 30px; text-align: center; box-shadow: var(--kio-shadow);
+  }
+  .kio-h1 { font-size: 30px; font-weight: 850; color: var(--kio-title); margin: 0 0 14px; letter-spacing: -.01em; line-height: 1.15; }
+  .kio-panel {
+    background: rgba(255, 255, 255, .94); border: 1px solid var(--kio-border);
+    border-radius: 20px; box-shadow: var(--kio-shadow); padding: 20px 24px;
+    width: 100%; max-width: 640px; text-align: left; margin: 0 auto;
+  }
+  .kio-kv { display: flex; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px solid #f3efff; font-size: 15px; align-items: baseline; }
+  .kio-kv:last-child { border-bottom: none; }
+  .kio-kv .kio-l { color: var(--kio-muted); }
+  .kio-kv b { color: var(--kio-title); font-weight: 800; text-align: right; }
+  .kio-sub { color: var(--kio-muted); font-size: 13px; margin: 14px 0 0; }
+
+  .hl-bad b { color: #a52222; }
+  .hl-good b { color: #0d7a67; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; background: #fff;
+          border: 1px solid var(--kio-border); border-radius: 14px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #f3efff; vertical-align: top; }
+  th { background: #faf7ff; color: var(--kio-muted); font-weight: 800; font-size: 12.5px;
+       letter-spacing: .03em; text-transform: uppercase; }
+  tr:last-child td { border-bottom: none; }
+  code { font-family: 'Cascadia Code', Consolas, monospace; font-size: 12.8px;
+         background: #f4f0ff; color: #4c1d95; padding: 1.5px 6px; border-radius: 6px; }
+  h2 { font-size: 17px; font-weight: 850; color: var(--kio-title); margin: 0 0 12px; }
+  .why { background: #fff; border: 1px solid var(--kio-border); border-radius: 16px;
+         padding: 18px 22px; box-shadow: var(--kio-shadow); margin-bottom: 30px; }
+  .why p, .why li { margin: 0 0 9px; color: var(--kio-muted); max-width: 92ch; }
+  .why p:last-child, .why li:last-child { margin-bottom: 0; }
+  .why b { color: var(--kio-title); }
+  .why ul { margin: 0; padding-left: 20px; }
+  .rej { border-left: 4px solid #f6cfcf; }
+</style>
+
+<div class="wrap">
+
+  <h1>K10 — la línea del contrato deja de prometer entrega</h1>
+  <p class="lede">
+    Un solo string de la pantalla DONE del kiosco. <b>Ningún cambio de layout,
+    de jerarquía ni de flujo</b>: la fila «Contrato y recibo» se queda donde está,
+    solo deja de afirmar algo que el backend no puede saber.
+  </p>
+  <p class="meta">Rev 3 — Graphic Design + Innovation incorporados. A1 aprobada por Hector · 2026-08-17</p>
+
+  <div class="why">
+    <h2>Por qué</h2>
+    <p>
+      El valor detrás de esa línea es <code>autoEmailedAt</code>, que se sella cuando el
+      envío se <b>encola</b> en la transición a CLOSED — antes de que corran Puppeteer y SMTP.
+      Nadie lo des-sella si el trabajo de fondo falla después.
+    </p>
+    <p>
+      Y aunque nadie fallara: K10 pide este dato <b>segundos</b> después de CLOSED, cuando el
+      PDF todavía se está renderizando. O sea que <b>«Enviados a tu email» es falso incluso
+      en el camino feliz</b> — no hay instante en que el backend pueda responderlo con verdad.
+    </p>
+    <p>
+      La API pasa de <code>contractEmail.sent</code> a <code>contractEmail.pending</code> por
+      la misma razón; la copia solo tiene que dejar de ir más lejos que el dato.
+    </p>
+  </div>
+
+  <div class="row">
+
+    <div class="col">
+      <span class="tag now">Hoy — afirma entrega</span>
+      <div class="kio-frame">
+        <div class="kio-h1">¡Listo, María G.! 🎉</div>
+        <div class="kio-panel">
+          <div class="kio-kv"><span class="kio-l">🔑 Llaves</span><b>Pasa por el counter — un miembro del equipo te entrega las llaves.</b></div>
+          <div class="kio-kv"><span class="kio-l">🚙 Tu carro</span><b>Blanco Toyota Corolla · ABC-1234</b></div>
+          <div class="kio-kv hl-bad"><span class="kio-l">📄 Contrato y recibo</span><b>Enviados a tu email</b></div>
+        </div>
+        <p class="kio-sub">Tiempo total: 4m 12s · ¡Buen viaje!</p>
+      </div>
+      <p class="note">
+        Pasado perfecto y en plural: para el cliente esto cierra el tema. Si el correo
+        nunca llega, se entera cuando ya no está en el lobby.
+      </p>
+    </div>
+
+    <div class="col">
+      <span class="tag opt">A1 — APROBADA (construida)</span>
+      <div class="kio-frame">
+        <div class="kio-h1">¡Listo, María G.! 🎉</div>
+        <div class="kio-panel">
+          <div class="kio-kv"><span class="kio-l">🔑 Llaves</span><b>Pasa por el counter — un miembro del equipo te entrega las llaves.</b></div>
+          <div class="kio-kv"><span class="kio-l">🚙 Tu carro</span><b>Blanco Toyota Corolla · ABC-1234</b></div>
+          <div class="kio-kv hl-good"><span class="kio-l">📄 Contrato y recibo</span><b>Te los estamos enviando por email</b></div>
+        </div>
+        <p class="kio-sub">Tiempo total: 4m 12s · ¡Buen viaje!</p>
+      </div>
+      <p class="note">
+        Copia la construcción exacta de <code>doneInspectionSent</code> («Te … por email»),
+        que ya vive dos filas más abajo. Inequívocamente en curso, sin metáfora, y el
+        sujeto no hay que ir a buscarlo a la etiqueta de la izquierda.
+      </p>
+    </div>
+
+    <div class="col">
+      <span class="tag alt">A2 — descartada (la corta)</span>
+      <div class="kio-frame">
+        <div class="kio-h1">¡Listo, María G.! 🎉</div>
+        <div class="kio-panel">
+          <div class="kio-kv"><span class="kio-l">🔑 Llaves</span><b>Pasa por el counter — un miembro del equipo te entrega las llaves.</b></div>
+          <div class="kio-kv"><span class="kio-l">🚙 Tu carro</span><b>Blanco Toyota Corolla · ABC-1234</b></div>
+          <div class="kio-kv hl-good"><span class="kio-l">📄 Contrato y recibo</span><b>En camino a tu email</b></div>
+        </div>
+        <p class="kio-sub">Tiempo total: 4m 12s · ¡Buen viaje!</p>
+      </div>
+      <p class="note">
+        Mismo largo que la línea de hoy, diff mínimo. Es un fragmento sin sujeto — se apoya
+        en la etiqueta «Contrato y recibo» para resolverse, igual que la versión en inglés.
+      </p>
+    </div>
+
+  </div>
+
+  <div class="why rej">
+    <h2>La sub-línea de ayuda («si no llegan, pídeselos al equipo») queda descartada</h2>
+    <p>Era mi propuesta B. Graphic Design la rechaza con tres razones que compro:</p>
+    <ul>
+      <li><b>La pantalla dura 30 segundos</b> (<code>DONE_RESET_S = 30</code>). Sería el
+        4.º elemento en prioridad de una pantalla que ya tiene título, 3-4 filas, un QR de
+        160px con su propio CTA morado, el tiempo total y el contador de reinicio. En esos
+        30 segundos lo único que queremos que pase es que escaneen el QR.</li>
+      <li><b>Se contradice a sí misma en jerarquía.</b> Si «pídeselo al equipo» importa lo
+        bastante para añadirlo, no puede ser lo más pequeño y más gris de la pantalla. Y si
+        está bien que lo sea, no está haciendo trabajo.</li>
+      <li><b>La otra rama de esa misma fila ya lo dice</b>
+        (<code>doneContractAskStaff</code> = «Pídele una copia impresa a un miembro del
+        equipo»). Añadir el matiz a la rama de éxito deja la fila diciendo «ya va — pero a
+        lo mejor no» en los dos estados.</li>
+    </ul>
+    <p>
+      Además solo servía en modo STAFF: en <code>LOCKBOX</code> puede no haber nadie en el
+      lobby, y le estaríamos pidiendo al cliente algo imposible. La mitigación real del
+      envío que falla no cabe en una pantalla de 30 segundos — es una señal del lado del
+      personal, y va en su propio ticket.
+    </p>
+  </div>
+
+  <h2>Los strings, exactos</h2>
+  <table>
+    <tr><th>Clave</th><th>Hoy</th><th>A1 (recomendada)</th><th>A2 (corta)</th></tr>
+    <tr>
+      <td><code>es.kiosk.doneContractPending</code><br><span style="color:#6f668f;font-size:12.5px">renombrada desde <code>doneContractSent</code></span></td>
+      <td>Enviados a tu email</td>
+      <td>Te los estamos enviando por email</td>
+      <td>En camino a tu email</td>
+    </tr>
+    <tr>
+      <td><code>en.kiosk.doneContractPending</code><br><span style="color:#6f668f;font-size:12.5px">renombrada desde <code>doneContractSent</code></span></td>
+      <td>Sent to your email</td>
+      <td>We're sending them to your email</td>
+      <td>On the way to your email</td>
+    </tr>
+    <tr>
+      <td><code>kiosk.doneContractAskStaff</code></td>
+      <td colspan="3">Sin cambios — «Pídele una copia impresa a un miembro del equipo» ya era honesto.</td>
+    </tr>
+    <tr>
+      <td><code>kiosk.doneInspectionSent</code></td>
+      <td colspan="3">
+        Sin cambios, y verificado: <b>no es la misma mentira</b>. Ese envío se
+        <code>await</code>ea en línea contra el proveedor antes de responder, así que
+        «Te enviamos por email un enlace» sí está respaldado. Descartada explícitamente
+        por Graphic Design, no por omisión.
+      </td>
+    </tr>
+  </table>
+
+</div>

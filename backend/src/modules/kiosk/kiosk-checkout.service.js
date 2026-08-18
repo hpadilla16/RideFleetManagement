@@ -1043,6 +1043,7 @@ async function maybeSendKioskCustomerInspection({ session, device, cs }) {
  * per reservation — a retried /complete never re-creates rows or re-emails.
  * The contract email already fired on the CLOSED transition
  * (maybeSendFinalizeEmail, autoEmailedAt-guarded) — nothing is re-sent here.
+ * What comes back about it is `contractEmail.pending`, not `.sent`: see below.
  */
 async function complete(sessionId, device) {
   const session = await getSessionForDevice(sessionId, device);
@@ -1073,7 +1074,22 @@ async function complete(sessionId, device) {
     ok: true,
     outcome: updated.outcome,
     keyHandoff,
-    contractEmail: { sent: !!cs.autoEmailedAt },
+    // PENDING, not sent (2026-08-17). This reads autoEmailedAt, which records a
+    // hand-off and not a delivery — the full argument is on the column in
+    // schema.prisma. The fact that belongs HERE is the one you only see from
+    // this call site: even on the happy path K10 asks for this a few seconds
+    // after CLOSED, while the background job is still rendering the PDF, so
+    // there is no instant at which this endpoint could answer "sent" truthfully.
+    // The old key was `sent` and the screen printed "Sent to your email" for it.
+    //
+    // `customerInspection.sent` below IS allowed to say sent: that send is
+    // awaited inline (maybeSendKioskCustomerInspection) and a throw becomes
+    // sent: false. The two keys differ because the mechanisms differ.
+    //
+    // Only the kiosk screen reads this (no RideOps/Dart consumer); a tablet on
+    // a pre-deploy bundle falls to the "ask a team member" line — wrong, but
+    // not a lie. Frontend and backend must therefore ship together.
+    contractEmail: { pending: !!cs.autoEmailedAt },
     customerInspection: {
       sent: !!customerInspection.sent,
       ...(customerInspection.sent && customerInspection.link ? { link: customerInspection.link } : {}),

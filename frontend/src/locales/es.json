@@ -458,7 +458,7 @@
     "doneKeysLockbox": "Recoge tus llaves en el lockbox junto a la salida.",
     "doneCar": "Tu carro",
     "doneContract": "Contrato y recibo",
-    "doneContractSent": "Enviados a tu email",
+    "doneContractPending": "Te los estamos enviando por email",
     "doneContractAskStaff": "Pídele una copia impresa a un miembro del equipo",
     "doneInspection": "Antes de salir",
     "doneInspectionSent": "Te enviamos por email un enlace para foto-documentar la condición del carro (2 min, te protege)",

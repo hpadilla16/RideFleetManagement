@@ -686,13 +686,36 @@ test('complete: CLOSED → lockbox config for the device location + COMPLETED li
   assert.equal(result.ok, true);
   assert.equal(result.outcome, 'COMPLETED');
   assert.deepEqual(result.keyHandoff, { mode: 'LOCKBOX', lockboxNote: 'Box 4 — code 2468' });
-  assert.equal(result.contractEmail.sent, true); // fired on the CLOSED transition
+  // pending, not sent — the CLOSED transition handed it off; nobody here knows
+  // whether SMTP ever delivered it (see contractEmail in kiosk-checkout.service.js)
+  assert.equal(result.contractEmail.pending, true);
+  assert.equal(result.contractEmail.sent, undefined, 'the delivery-claiming key is gone');
   assert.equal(result.customerInspection.sent, false); // tenant setting off
 
   const session = db.sessions[0];
   assert.equal(session.outcome, 'COMPLETED');
   assert.equal(session.step, 'DONE');
   assert.ok(session.endedAt instanceof Date);
+});
+
+// The OTHER branch of that line, which is the one the customer sees when the
+// finalize was half-broken. maybeSendFinalizeEmail is skipped entirely on a
+// CLOSED that failed its cascade (checkout-session.service.js gates the call on
+// finalizeOwnsReservation + finalizeCascadeOk), so the session reaches /complete
+// still CLOSED but never stamped. Previously untested: every other complete()
+// case seeds autoEmailedAt, so only the truthy branch was ever exercised.
+test('complete: a CLOSED session that was never stamped reports pending:false, not a send', async () => {
+  seedKioskSession();
+  seedWorld({ checkout: { currentStep: 'CLOSED', autoEmailedAt: null } });
+
+  const result = await kioskCheckoutService.complete('ks1', DEVICE);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.outcome, 'COMPLETED');
+  // false → K10 renders doneContractAskStaff ("ask a team member for a printed
+  // copy"), which is the honest answer: no send was ever handed off.
+  assert.equal(result.contractEmail.pending, false);
+  assert.equal(result.contractEmail.sent, undefined, 'the delivery-claiming key is gone');
 });
 
 test('complete: defaults to STAFF handoff when no config exists', async () => {

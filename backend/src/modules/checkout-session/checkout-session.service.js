@@ -552,12 +552,12 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // This is a PARTIAL close of the events lost-update, and the honest
       // count is FOURTEEN other writers of this TEXT column, all still doing
       // an unguarded read-modify-write (read → write, this file):
-      //   stampSideEffect       :1036 → :1044
-      //   saveCustomerSignature :1066 → :1087  (read is OUTSIDE the
-      //                                         $transaction that starts :1072)
-      //   mintHandoffToken      :1110 → :1161
-      //   setDeclinedInsurance  :1232 → :1246
-      //   markAbandoned         :1256 → :1270
+      //   stampSideEffect       :1048 → :1056
+      //   saveCustomerSignature :1078 → :1099  (read is OUTSIDE the
+      //                                         $transaction that starts :1084)
+      //   mintHandoffToken      :1122 → :1173
+      //   setDeclinedInsurance  :1244 → :1258
+      //   markAbandoned         :1268 → :1282
       //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
       //   spin-charge.service.js:574, :606, :884, :1038, :1229 (five)
       //   mobile-inspection.service.js:276
@@ -952,6 +952,18 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
  * Marks autoEmailedAt on the session so we know not to fire twice if
  * a future code path re-runs the transition path. The session column
  * is added in the same Phase 3.5 migration that ships this code.
+ *
+ * autoEmailedAt RECORDS A HAND-OFF, NOT A DELIVERY (2026-08-17). The stamp
+ * lands before the scheduler is even called, and nothing clears it afterwards
+ * on any path, so a stamped session is an intent marker — never proof the
+ * customer holds the contract. The four things it can mean, and why the stamp
+ * must stay ahead of the send, are on the column in schema.prisma.
+ *
+ * Note especially the case below where scheduleEmailDelivery rejects during
+ * its synchronous recipient check: the stamp is already written, but the
+ * background job never starts, so the audit line it would have written on
+ * failure does not exist either. That case leaves nothing but the caller's
+ * logger.warn — do not send a reader to the audit log for it.
  */
 async function maybeSendFinalizeEmail(session, actorUserId) {
   if (!session?.agreementId) return;

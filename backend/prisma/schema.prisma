@@ -5116,10 +5116,72 @@ model CheckoutSession {
   abandonedAt     DateTime?
   abandonedReason String?
 
-  // Phase 3.5 — stamped the first (and only) time the auto-email fires
-  // after the session reaches CLOSED. Guards against double-fires on
-  // accidental re-transitions and lets the UI show "Sent {when}" /
-  // "Resend signed copy" instead of just "Email Agreement".
+  // Phase 3.5 — set the first (and only) time the finalize auto-email is
+  // HANDED OFF, after the session reaches CLOSED. Its job is to stop a second
+  // hand-off; it is not a record of what became of the first one.
+  //
+  // MEANS "A SEND WAS HANDED OFF", NOT "THE CUSTOMER RECEIVED IT" (2026-08-17).
+  // Read it as delivery and it is wrong in both directions:
+  //
+  //   - It is stamped BEFORE the send, on purpose. maybeSendFinalizeEmail
+  //     writes it with a compare-and-set (updateMany guarded on
+  //     `autoEmailedAt: null`) and only proceeds if it won. That CAS is the
+  //     ONLY thing stopping two simultaneous CLOSED transitions from mailing
+  //     the customer two contracts, so the stamp cannot be moved after the
+  //     send without reopening that race.
+  //   - Nothing un-stamps it, on ANY path. Past scheduleEmailDelivery's
+  //     synchronous validation the real work (Puppeteer + SMTP) runs inside a
+  //     `setImmediate` whose catch writes an audit line and reports to
+  //     Sentry — it does not clear this column.
+  //
+  // So a stamped session means any of FOUR things:
+  //
+  //   1. the mail was delivered — audit line, "Agreement emailed to {to}"
+  //      (rental-agreements.service.js). This is the one that makes an EMPTY
+  //      audit log meaningful below;
+  //   2. the job was scheduled and then failed — audit line + Sentry event;
+  //   3. a SIGTERM dropped the job mid-flight — nothing anywhere, by
+  //      definition: no catch ran, so no audit line and no Sentry event;
+  //   4. scheduleEmailDelivery REJECTED before scheduling anything, because it
+  //      could not resolve a recipient ("Customer email is required"). This is
+  //      the ordinary case of a customer with no email on file, and it is the
+  //      one that leaves the least behind: `startJob` never ran, so the catch
+  //      that writes the audit line never ran either. All that exists is one
+  //      `logger.warn('[checkout-session] auto-email-on-finalize failed')`
+  //      from the caller in checkout-session.service.js.
+  //
+  // Case 4 is also the one case where `contractEmail.pending` in
+  // kiosk-checkout.service.js is still not true: the stamp is set, so K10 tells
+  // a customer with no email address that we are sending them one. That is
+  // strictly better than the "Sent to your email" it replaced, and closing it
+  // properly is §2b's job — but do not read the copy as covering it.
+  //
+  // So the timestamp is an INTENT marker, and what actually happened is
+  // recorded elsewhere — differently per case: an audit line for 1, an audit
+  // line plus Sentry for 2, nothing at all for 3, a lone logger.warn for 4.
+  // Which means: if a customer says the contract never arrived and the audit
+  // log has nothing for it, that is NOT evidence the mail went out — it rules
+  // case 1 OUT and leaves 3 and 4. Check 4 first; it is the deterministic one.
+  // Durable delivery is the background-job
+  // queue in docs/architecture/SCALING_ROADMAP.md §2b, blocked behind the
+  // Redis rollout (§1) — until it lands, no column in this schema can promise
+  // delivery. Anything customer-facing built on this must say "on its way",
+  // never "delivered": see `contractEmail.pending` in kiosk-checkout.service.js.
+  // That key is `pending` and not `queued` on purpose — in this codebase a
+  // queue is the durable BullMQ layer in lib/queue, and this send has none of
+  // its retry semantics, the same call booking-engine.service.js:600 makes for
+  // the same reason. (scheduleEmailDelivery itself still returns `queued: true`
+  // for this very path — an older, incidental usage that predates that rule.
+  // Follow the rule, not that return value.)
+  //
+  // When §2b lands, this column should not survive as it is: a nullable
+  // timestamp doing double duty as a lock AND a status is why the meaning was
+  // ambiguous enough to need this comment. The shape to copy is
+  // CustomerInspection below — a status enum beside `sentAt`/`openedAt`/
+  // `submittedAt`, so that queued, sent and failed can be three different
+  // values instead of one nullable date pretending to cover all four cases
+  // above. (Its enum today is SENT/SUBMITTED/REVIEWED — copy the shape, not
+  // the members.)
   autoEmailedAt DateTime?
 
   startedByUserId String?

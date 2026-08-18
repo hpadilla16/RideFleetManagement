@@ -2595,9 +2595,18 @@ function DoneScreen({ t, doneData, vehicle, maskedName, startedAtMs, countdown }
           </b>
         </div>
         <div className="kio-kv"><span className="kio-l">🚙 {t('kiosk.doneCar')}</span><b>{carLabel}</b></div>
+        {/* PENDING, not sent (2026-08-17). The backend key was `sent` and this
+            line said "Sent to your email" for it — but it is only ever
+            autoEmailedAt, which records that the send was handed off on the
+            CLOSED transition. We are asking a few seconds later, while the PDF
+            is still rendering, so there is no reading of it that means the
+            customer has the contract. Copy now promises the send, not the
+            arrival. Renamed together with kiosk-checkout.service.js — this file
+            and the backend must deploy together or every happy path falls to
+            the "ask a team member" line. */}
         <div className="kio-kv">
           <span className="kio-l">📄 {t('kiosk.doneContract')}</span>
-          <b>{doneData?.contractEmail?.sent ? t('kiosk.doneContractSent') : t('kiosk.doneContractAskStaff')}</b>
+          <b>{doneData?.contractEmail?.pending ? t('kiosk.doneContractPending') : t('kiosk.doneContractAskStaff')}</b>
         </div>
         {doneData?.customerInspection?.sent ? (
           <div className="kio-kv">
