@@ -298,11 +298,11 @@ test('`test:embedded` cannot be neutered into a no-op', () => {
   const embedded = String(pkg.scripts['test:embedded'] ?? '');
   // A leading run of ENV ASSIGNMENTS is allowed: `test:reports` already uses
   // `TZ=UTC node --test ...`, and NODE_OPTIONS=--max-old-space-size is a
-  // plausible, well-intentioned edit for a job booting seven clusters. Redding
+  // plausible, well-intentioned edit for a job booting seven clusters. Failing on
   // that would accuse the author of the one thing they did not do.
   assert.match(
     embedded,
-    /^(?:[A-Za-z_][A-Za-z0-9_]*=\S+ +)*node --test(?: |$)/,
+    /^(?:[A-Za-z_][A-Za-z0-9_]*=\S* +)*node --test(?: |$)/,
     'test:embedded no longer starts with `node --test` (optionally after env assignments) — ' +
       'whatever it runs now, it is not the suites',
   );
@@ -318,12 +318,30 @@ test('`test:embedded` cannot be neutered into a no-op', () => {
   // `only: true`, whereas --test-name-pattern is simply how you iterate on one
   // failing case. Leaving it behind is a slip, not sabotage — the only entry on
   // any of these lists with no intent barrier whatsoever.
-  const ZERO_TEST_FLAGS = /(?:^| )--test-(only|name-pattern|skip-pattern|shard)(?:[= ]|$)/.exec(embedded);
+  //
+  // NO LEADING ANCHOR, deliberately. The first version required start-of-string
+  // or a literal SPACE before `--test-`, and the env-assignment allowance added
+  // directly above then supplied an `=` instead:
+  //     NODE_OPTIONS=--test-name-pattern=zzz node --test <7 files>
+  // measured at `1..0`, exit 0, with the failing assertion never running. So did
+  // the quoted argument form, `node --test "--test-name-pattern=zzz"`. Worse, it
+  // made coverage depend on TYPING ORDER inside a quoted value: with
+  // --max-old-space-size first it was caught, with the pattern flag first it was
+  // not. Same edit, same effect, opposite verdicts.
+  // The trailing (?![-\w]) is what keeps this from over-matching; it was checked
+  // against all 135 test:* scripts and every other script in package.json, and
+  // matches none of them, so there is no false failure to trade for it.
+  const ZERO_TEST_FLAGS = /--test-(only|name-pattern|skip-pattern|shard)(?![-\w])/.exec(embedded);
   assert.ok(
     !ZERO_TEST_FLAGS,
     `test:embedded passes --test-${ZERO_TEST_FLAGS?.[1]}, which can leave node running ZERO tests ` +
       'and still exiting 0 — the CI job would be green having proved nothing',
   );
+  // NOT COVERED here, and structurally not visible to a check on this string:
+  // a stub `node` earlier on PATH, an `--import`/`--require` hook module, and
+  // npm lifecycle hooks (pretest/prepare). All three require COMMITTING a file
+  // to do it, which is loud in a diff in a way a flag is not, and anyone able
+  // to add a lifecycle hook has easier options than any of this.
 });
 test('beta-ci.yml actually runs `npm run test:embedded`, unguarded, in a live job', () => {
   // The point of the whole exercise. Naming the suites in a script they COULD
