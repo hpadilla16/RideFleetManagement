@@ -288,9 +288,31 @@ Auth: `POST /api/auth/login` · `POST /api/auth/refresh` · `GET /api/auth/me` �
 Dashboard: `GET /api/employee-app/dashboard[?q=]`.
 Checkout: `POST /api/checkout-sessions` · `GET /:id` · `GET /by-reservation/:rid` ·
 `POST /:id/transition` · `/stamp` · `/customer-signature` · `/terms-token` ·
-`/handoff-token` · `/send-customer-inspection` · `/vehicle` · `/charge` · `/charge-sale` ·
+`/handoff-token` · `/send-customer-inspection` · `/vehicle` · `/charge-sale` ·
 `/hold-deposit` · `/record-manual-payment` · `/record-manual-deposit` ·
 `GET /:id/terminal-status` · `POST /:id/declined-insurance` · `/abandon`
+
+> **`/charge` sale de la superficie de RideOps (aviso entre sesiones, 2026-08-17).** Otra
+> sesión le puso `requireCapability('paymentActions')`, y **AGENT la tiene apagada por
+> defecto** — verificado en `module-access.js:208-211`, donde el default del agente es
+> explícito y no heredado. Construir contra `/charge` daría 403 a todo el mostrador. Se pudo
+> cerrar precisamente porque **no tiene ni un llamador** (verificado: 0 en `frontend/src` y
+> en `rideops/lib`). El flujo vivo y soportado sigue siendo el par de dos toques
+> —`/charge-sale` + `/hold-deposit`— que sigue ABIERTO para AGENT, más los failsafes
+> manuales. Referencia de cliente existente: `checkout-wizard-v2/page.js:1003` y `:1020`.
+>
+> **CORRIGE UNA SUPOSICIÓN NUESTRA SOBRE H3:** veníamos tratando `hold-deposit` como
+> *card-present*. **No lo es por defecto.** Si el contrato ya tiene `cardOnFileToken` —o sea,
+> después de `/charge-sale`— toma la vía CNP tokenizada de iPOSpays Transact: **sin tap y sin
+> terminal**. Solo cae a card-present si no hay token o si `IPOS_FORCE_CARD_PRESENT_DEPOSIT=true`
+> (verificado: `spin-charge.service.js:915-918`). El comentario del código decía lo contrario y
+> estaba mal; ya se corrigió allá. El diseño del paso de pago tiene que reflejar esto: en el
+> camino normal el segundo toque **no** pide la tarjeta física.
+>
+> Y suma un tercer caso al ticket de aislamiento: **ni `/charge-sale` ni `/hold-deposit` están
+> acotados por inquilino** — `loadSessionAndAgreement` hace un `findUnique` pelado por
+> `sessionId`. Es brecha conocida y rastreada allá (`doc/SESSION-HANDOFF.md`, "batch 2"), y es
+> la misma familia que las dos rutas que ya tenemos en ticket propio.
 (`checkout-session.routes.js:33-380`).
 Branding para pantallas volteadas al cliente: `GET /api/reservations/:id/display-data`.
 
