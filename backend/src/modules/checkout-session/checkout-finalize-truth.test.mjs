@@ -26,6 +26,13 @@
  *
  * §4 then re-runs the probe end to end and pins the whole tuple.
  *
+ * §5 (2026-08-18) is the same tuple through a third door, reported by QA as
+ *     MINOR 3: the cascade's benign short-circuit INFERRED "the contract is
+ *     FINALIZED" from reservation.status alone, so a CHECKED_OUT reservation
+ *     whose agreement was still DRAFT released the email anyway. It now reads
+ *     the contract, and repairs that strand instead of reporting success over
+ *     it — see checkout-cas-transition.test.mjs §8b for the repair itself.
+ *
  * Every "no email was sent" assertion here is made with a SPY on
  * scheduleEmailDelivery, not by reading the autoEmailedAt stamp. QA's finding
  * on the H8 suite is why: a fixture that pre-stamped autoEmailedAt made
@@ -40,8 +47,8 @@ import { prisma } from '../../lib/prisma.js';
 import { CheckoutSessionError } from './checkout-session.service.js';
 import { rentalAgreementsService } from '../rental-agreements/rental-agreements.service.js';
 import {
-  installWorld, restoreWorld, onRestore, seedFinalizeWorld, viaWebWizard,
-  armReservationRace, viaKiosk,
+  installWorld, restoreWorld, onRestore, seedFinalizeWorld, seedStrandedStrand,
+  viaWebWizard, armReservationRace, viaKiosk,
 } from './checkout-session.test-harness.mjs';
 
 let db;
@@ -215,9 +222,14 @@ test('§2 a FINALIZED write that fails silently still stops the email', async ()
   const row = seedFinalizeWorld();
   const calls = spyOnFinalizeEmail();
 
-  const origUpdate = prisma.rentalAgreement.update;
-  prisma.rentalAgreement.update = async () => { throw new Error('injected agreement write failure'); };
-  onRestore(() => { prisma.rentalAgreement.update = origUpdate; });
+  // Injected on updateMany, not update: since 2026-08-18 the flip that turns
+  // the DRAFT into the legal document is an updateMany CAS'd on DRAFT, so a
+  // patch left on the old method breaks nothing and every assertion below
+  // would quietly be describing an agreement write that succeeded. Same trap
+  // the reservation claim left on this file's sibling above.
+  const origUpdateMany = prisma.rentalAgreement.updateMany;
+  prisma.rentalAgreement.updateMany = async () => { throw new Error('injected agreement write failure'); };
+  onRestore(() => { prisma.rentalAgreement.updateMany = origUpdateMany; });
 
   const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
   await settle();
@@ -336,6 +348,139 @@ test('§3 a send that rejects is caught, not left unhandled', async () => {
   // here so the behaviour is DOCUMENTED rather than discovered, and so the day
   // someone fixes it, this line points at what else to check.
   assert.ok(row.autoEmailedAt instanceof Date, 'KNOWN GAP: the stamp is not rolled back');
+});
+
+// ── §5. the short-circuit stops inferring the contract (QA MINOR 3) ────────
+//
+// The cascade has a benign-looking exit for a finalize that lands on a
+// reservation already CHECKED_OUT — "no work to do, the world already
+// matches" — and it used to be one line: `finalizeCascadeOk = true`. That is
+// the email gate, and it was being set from `reservation.status` alone. The
+// reservation status is evidence about the RESERVATION. The only evidence
+// about the contract is the contract, and the two come apart in exactly the
+// state a broken finalize leaves behind: CHECKED_OUT, agreement still DRAFT.
+//
+// So the winner path could release the customer email over a contract that
+// never reached FINALIZED — the ticket's own tuple, through a third door.
+// Pre-existing at base, and reported by QA as MINOR 3 rather than a blocker
+// because reaching it needs a session whose autoEmailedAt is still null.
+
+test('§5 WINNER: a DRAFT contract behind a CHECKED_OUT reservation is not mailed as if it were finalized', async () => {
+  // The WINNER path specifically, which is where MINOR 3 was reachable at
+  // base. Note what is NOT set here: the session is still FINALIZING, so this
+  // request commits the step itself and `alreadyApplied` is false — which
+  // makes `finalizeOwnsReservation` true without consulting the self-heal
+  // allow-list at all. The reservation is already CHECKED_OUT (another surface
+  // put it there), so the cascade takes the short-circuit, and at base that
+  // one line set the email gate to true over a contract still in DRAFT.
+  //
+  // Drive it through the self-heal instead and this proves nothing: at base
+  // the ownership allow-list excluded CHECKED_OUT and stopped the email one
+  // guard earlier, for an unrelated reason.
+  seedFinalizeWorld({ reservationStatus: 'CHECKED_OUT' });
+  const calls = spyOnFinalizeEmail();
+
+  // The repair is what this path does now, so to isolate the GATE the repair
+  // has to fail. Without the verification, `finalizeCascadeOk` would be true
+  // on the reservation status alone and the DRAFT would go out regardless.
+  const origFlip = prisma.rentalAgreement.updateMany;
+  prisma.rentalAgreement.updateMany = async () => { throw new Error('injected agreement write failure'); };
+  onRestore(() => { prisma.rentalAgreement.updateMany = origFlip; });
+
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  await settle();
+
+  assert.equal(out.currentStep, 'CLOSED', 'the step still commits');
+  assert.equal(db.reservations[0].status, 'CHECKED_OUT', 'the reservation says the car went out...');
+  assert.equal(db.agreements[0].status, 'DRAFT', '...and the contract says it never became one');
+  assert.deepEqual(calls, [], 'the second fact wins — nothing was mailed');
+  assert.equal(db.checkoutSessions[0].autoEmailedAt, null, 'and the row does not claim otherwise');
+});
+
+test('§5 SELF-HEAL: the widened allow-list did not hand that email back through the other door', async () => {
+  // Same end state, reached by a repeat POST on an already-CLOSED session.
+  // At base this was stopped by the ownership allow-list, which excluded
+  // CHECKED_OUT — an accident of a guard aimed at something else. Widening
+  // that list to make the repair reachable removed the accident, so the
+  // verification above is now the only thing standing here. Pinned separately
+  // for exactly that reason.
+  seedStrandedStrand();
+  const calls = spyOnFinalizeEmail();
+
+  const origFlip = prisma.rentalAgreement.updateMany;
+  prisma.rentalAgreement.updateMany = async () => { throw new Error('injected agreement write failure'); };
+  onRestore(() => { prisma.rentalAgreement.updateMany = origFlip; });
+
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  await settle();
+
+  assert.equal(out.currentStep, 'CLOSED', 'the caller is still answered idempotently');
+  assert.equal(db.agreements[0].status, 'DRAFT');
+  assert.deepEqual(calls, [], 'nothing was mailed');
+  assert.equal(db.checkoutSessions[0].autoEmailedAt, null);
+});
+
+test('§5 the repaired strand DOES mail — once, and a FINALIZED contract', async () => {
+  // The anti-vacuity partner. If the repair could not mail, the assertion
+  // above would pass for the wrong reason, and the failure card's "Reintentar
+  // cierre" would still be leaving the customer without their copy.
+  const row = seedStrandedStrand();
+  const calls = spyOnFinalizeEmail();
+
+  await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  await settle();
+
+  assert.equal(db.agreements[0].status, 'FINALIZED');
+  assert.equal(calls.length, 1, 'the customer finally gets their copy');
+  assert.equal(calls[0].agreementStatus, 'FINALIZED', 'and it was FINALIZED when it went');
+  assert.equal(calls[0].vehicleStatus, 'ON_RENT');
+  assert.ok(row.autoEmailedAt instanceof Date);
+
+  // Pressing the button again does not mail a second one.
+  await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  await settle();
+  assert.equal(calls.length, 1);
+});
+
+test('§5 an already-finalized CHECKED_OUT reservation still takes the benign exit', async () => {
+  // The case the old one-liner was actually written for. It has to keep
+  // working — the verification replaced an assumption with a read, it did not
+  // replace "no work to do" with "fail closed".
+  const row = seedStrandedStrand();
+  const finalizedAt = new Date('2026-08-17T12:30:00Z');
+  db.agreements[0].status = 'FINALIZED';
+  db.agreements[0].finalizedAt = finalizedAt;
+  const calls = spyOnFinalizeEmail();
+
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  await settle();
+
+  assert.equal(out.currentStep, 'CLOSED');
+  assert.equal(db.agreements[0].finalizedAt, finalizedAt, 'finalizedAt was not rewritten');
+  assert.equal(db.mileageEntries.length, 0, 'and no mileage row was appended');
+  // autoEmailedAt was null on this fixture, so the send is a genuine outcome
+  // of the gate rather than the CAS declining underneath it.
+  assert.equal(calls.length, 1, 'a finalized contract that was never mailed still gets mailed');
+  assert.equal(calls[0].agreementStatus, 'FINALIZED');
+  assert.ok(row.autoEmailedAt instanceof Date);
+});
+
+test('§5 a contract that is CANCELLED, not DRAFT, is neither repaired nor mailed', async () => {
+  // `where: { status: 'DRAFT' }` and the FINALIZED/CLOSED allow-list on the
+  // re-read are doing the work here. A `{ not: 'FINALIZED' }` guard, or an
+  // "anything that is not DRAFT counts as done" read, would each get this
+  // wrong in a different direction — one resurrects the contract, the other
+  // mails over it.
+  seedStrandedStrand();
+  db.agreements[0].status = 'CANCELLED';
+  const calls = spyOnFinalizeEmail();
+
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  await settle();
+
+  assert.equal(out.currentStep, 'CLOSED');
+  assert.equal(db.agreements[0].status, 'CANCELLED', 'not resurrected into FINALIZED');
+  assert.deepEqual(calls, [], 'and not mailed either');
 });
 
 // ── §4. the probe QA ran, as one assertion ─────────────────────────────────

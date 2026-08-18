@@ -509,19 +509,27 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
         // same species of lie the "already past toStep" cut refuses to tell.
         //
         // The re-run is NOT unconditionally safe, and the first version of
-        // this said it was. Two steps inside the cascade are not idempotent:
-        // rentalAgreement.update rewrites `finalizedAt` with today's date on
-        // an already-FINALIZED contract (audit-trail loss), and
-        // recordMileageEntry is a bare create with no dedup, so repeats pile
-        // up duplicate mileage rows. What contains them is the CLAIM on the
-        // reservation (2026-08-18) — the cascade's own first write, guarded by
-        // the status it read, so only one caller gets past it. The status
-        // short-circuit below and `selfHealOwns`'s allow-list are still there
-        // and still matter, but they are defence in depth now, not the
-        // mechanism: both decide against a row that was read BEFORE the write,
-        // which is the window the claim closes. The loaner bump (updateMany
-        // guarded by DRAFT) and the email (CAS on autoEmailedAt) are genuinely
-        // idempotent on their own.
+        // this said it was. Two steps inside the cascade were not idempotent:
+        // rentalAgreement.update rewrote `finalizedAt` with today's date on an
+        // already-FINALIZED contract (audit-trail loss), and recordMileageEntry
+        // is a bare create with no dedup, so repeats piled up duplicate mileage
+        // rows. Both are now guarded at the write itself (2026-08-18): the
+        // agreement flip is an updateMany CAS'd on DRAFT, and the mileage row
+        // is written only by the caller that won that flip. The CLAIM on the
+        // reservation — the cascade's own first write, guarded by the status it
+        // read — remains the thing that keeps two callers from both running the
+        // arm at all. The status short-circuit below and `selfHealOwns`'s
+        // allow-list are still there and still matter, but they are defence in
+        // depth, not the mechanism: both decide against a row that was read
+        // BEFORE the write, which is the window the claim closes. The loaner
+        // bump (updateMany guarded by DRAFT) and the email (CAS on
+        // autoEmailedAt) are genuinely idempotent on their own.
+        //
+        // Which is what let the short-circuit stop being a dead end. It now
+        // VERIFIES the contract instead of inferring it from the reservation,
+        // and repairs the CHECKED_OUT + DRAFT-agreement strand rather than
+        // reporting success over it — safe to re-enter precisely because every
+        // write it can reach carries its own guard.
         alreadyApplied = true;
         updated = session;
         fromStep = session.currentStep;
@@ -556,12 +564,12 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // This is a PARTIAL close of the events lost-update, and the honest
       // count is FOURTEEN other writers of this TEXT column, all still doing
       // an unguarded read-modify-write (read → write, this file):
-      //   stampSideEffect       :1097 → :1105
-      //   saveCustomerSignature :1127 → :1148  (read is OUTSIDE the
-      //                                         $transaction that starts :1133)
-      //   mintHandoffToken      :1171 → :1222
-      //   setDeclinedInsurance  :1293 → :1307
-      //   markAbandoned         :1317 → :1331
+      //   stampSideEffect       :1275 → :1283
+      //   saveCustomerSignature :1305 → :1326  (read is OUTSIDE the
+      //                                         $transaction that starts :1311)
+      //   mintHandoffToken      :1349 → :1400
+      //   setDeclinedInsurance  :1471 → :1485
+      //   markAbandoned         :1495 → :1509
       //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
       //   spin-charge.service.js:574, :606, :884, :1038, :1229 (five)
       //   mobile-inspection.service.js:276
@@ -695,7 +703,19 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
     // non-idempotent steps live inside. PENDING_FRANCHISE_IMPORT is excluded
     // from self-heal for that reason while the winner path is left untouched
     // for it: refusing to guess is free, guessing is not.
-    const selfHealOwns = ['NEW', 'CONFIRMED'].includes(resvStatus);
+    //
+    // CHECKED_OUT joined the list on 2026-08-18. It is the one status where
+    // the self-heal has real work left: a reservation that reached CHECKED_OUT
+    // with its agreement still DRAFT is a half-finished finalize, and while
+    // CHECKED_OUT was excluded here NOTHING could ever complete it — the
+    // cascade's own status short-circuit declines an already-CHECKED_OUT
+    // reservation, so both doors were shut. The two non-idempotent steps that
+    // motivated the allow-list are no longer a reason to keep it out: the
+    // agreement flip is CAS'd on DRAFT and the mileage row now rides that flip,
+    // so a second self-heal writes nothing. And the cascade branch this opens
+    // makes no reservation write at all, so widening it cannot resurrect a row
+    // — CANCELLED and NO_SHOW are still refused above, by `cancelledLate`.
+    const selfHealOwns = ['NEW', 'CONFIRMED', 'CHECKED_OUT'].includes(resvStatus);
     finalizeOwnsReservation = !!resvRow && !cancelledLate && (!alreadyApplied || selfHealOwns);
     if (!finalizeOwnsReservation) {
       logger.info('[checkout-session] finalize declined — does not own this reservation', {
@@ -717,8 +737,12 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       const resv = resvRow;
       // Ownership above, plus the cascade's own "already done" short-circuit:
       // don't downgrade a reservation that is already checked in/out.
-      // Did the contract actually become FINALIZED? Flipped only by the
-      // rentalAgreement.update below, whose failure is swallowed on purpose.
+      // Did the contract actually become FINALIZED? Answered by
+      // finalizeAgreementForCheckout, on whichever of the two arms below runs
+      // — and it is ANSWERED now rather than assumed: the short-circuit arm
+      // used to conclude it from reservation.status without ever reading the
+      // agreement. Stays true when there is no agreement to finalize at all,
+      // which is the one case where nothing downstream consults it.
       let agreementFinalized = true;
       if (finalizeOwnsReservation
         && !['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(String(resv.status))) {
@@ -811,78 +835,9 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
           });
         } else {
           if (updated.agreementId) {
-            // 2026-06-10 (beta.152) — this cascade finalize never copied the
-            // mobile-captured odometer/fuel from the CHECKOUT inspection row
-            // onto the agreement columns, so contracts printed "-" and the
-            // beta.143 mileage-history CHECKOUT entry was silently skipped.
-            // Copy them here (agreement column wins if already set) and record
-            // the mileage entry. All best-effort: metric/mileage failures must
-            // never break the finalize itself.
-            let metricsPatch = {};
-            let checkoutOdometer = null;
-            try {
-              const [agRow, inspRow] = await Promise.all([
-                prisma.rentalAgreement.findUnique({
-                  where: { id: updated.agreementId },
-                  select: { odometerOut: true, fuelOut: true, agreementNumber: true },
-                }),
-                prisma.rentalAgreementInspection.findFirst({
-                  where: { rentalAgreementId: updated.agreementId, phase: 'CHECKOUT' },
-                  select: { odometer: true, fuelLevel: true },
-                }),
-              ]);
-              if (agRow && inspRow) {
-                if (agRow.odometerOut == null && inspRow.odometer != null) {
-                  metricsPatch.odometerOut = inspRow.odometer;
-                }
-                const fuelFraction = fuelLevelToFraction(inspRow.fuelLevel);
-                if (agRow.fuelOut == null && fuelFraction != null) {
-                  metricsPatch.fuelOut = fuelFraction;
-                }
-              }
-              checkoutOdometer = agRow?.odometerOut ?? inspRow?.odometer ?? null;
-            } catch { metricsPatch = {}; }
-
-            // 2026-08-17 (Innovation MUST-CHANGE): this is the write that turns a
-            // DRAFT into the legal document, and it used to fail into
-            // `.catch(() => {})` — silently, with the cascade carrying on to mark
-            // the car ON_RENT and mail the customer their "contract". That is the
-            // exact tuple this ticket exists to kill, reached through a different
-            // door. It stays best-effort in the sense that a blip here must not
-            // abort the rest of the cascade (aborting would strand the vehicle
-            // sync, and the self-heal cannot repair it: its short-circuit sees an
-            // already-CHECKED_OUT reservation and declines). But it is no longer
-            // silent, and it no longer lets the email out — see finalizeCascadeOk.
-            await prisma.rentalAgreement.update({
-              where: { id: updated.agreementId },
-              data: { status: 'FINALIZED', finalizedAt: new Date(), ...metricsPatch },
-            }).catch((agErr) => {
-              agreementFinalized = false;
-              logger.error('[checkout-session] agreement did NOT reach FINALIZED on finalize', {
-                sessionId: id, agreementId: updated.agreementId, reservationId: resv.id,
-                error: agErr?.message || String(agErr),
-              });
+            agreementFinalized = await finalizeAgreementForCheckout({
+              sessionId: id, agreementId: updated.agreementId, resv, actorUserId,
             });
-            // Loaner companion: advance the borrower's LoanerAgreement to ACTIVE so the portal,
-            // due-soon/overdue reminders (status:ACTIVE), and the dashboard badge reflect the
-            // checked-out loaner. Harmless for rentals (no LoanerAgreement). (best-effort)
-            await prisma.loanerAgreement.updateMany({
-              where: { reservationId: resv.id, status: 'DRAFT' },
-              data: { status: 'ACTIVE' },
-            }).catch(() => {});
-
-            // Mileage history ("last entry wins" — same as the legacy finalize).
-            if (checkoutOdometer != null && resv.vehicleId) {
-              await recordMileageEntrySafe(prisma, {
-                vehicleId: resv.vehicleId,
-                tenantId: resv.tenantId || undefined,
-                mileage: checkoutOdometer,
-                source: 'CHECKOUT',
-                reservationId: resv.id,
-                rentalAgreementId: updated.agreementId,
-                actorUserId: actorUserId || null,
-              });
-            }
           }
           await syncVehicleStatusForReservation(prisma, {
             reservationId: resv.id, vehicleId: resv.vehicleId, toStatus: 'CHECKED_OUT',
@@ -902,9 +857,84 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
           finalizeCascadeOk = agreementFinalized;
         }
       } else if (finalizeOwnsReservation) {
-        // The benign short-circuit: a finalize landing on a reservation already
-        // CHECKED_OUT. No work to do, and the world already matches.
-        finalizeCascadeOk = true;
+        // ── the short-circuit VERIFIES, and repairs what it can (2026-08-18) ─
+        //
+        // This used to be one line — `finalizeCascadeOk = true` — and it was
+        // inferring "the contract is FINALIZED" from `reservation.status`
+        // alone. That inference is exactly the unenforced invariant the
+        // reservation claim was added to stop relying on, and here it decides
+        // whether the customer email goes out: a reservation sitting on
+        // CHECKED_OUT with its agreement still DRAFT released the contract
+        // over a finalize that never finished (QA MINOR 3). The reservation
+        // status is evidence about the RESERVATION; the only evidence about
+        // the contract is the contract.
+        //
+        // That state is also the one strand of the CLOSED failure that used to
+        // be permanently un-self-healable, which is what makes reading the row
+        // worth the extra query rather than just failing closed. The cascade's
+        // status short-circuit declines an already-CHECKED_OUT reservation and
+        // `selfHealOwns` excluded CHECKED_OUT, so nothing could ever finish the
+        // job — the wizard's "Reintentar cierre" button was a no-op on
+        // precisely the failure mode the CLOSED failure card exists to report.
+        // Before the claim shipped, a concurrent caller would blunder through
+        // and accidentally complete the abandoned cascade, at the cost of the
+        // duplicate finalizedAt/mileage rows that ticket killed. So the repair
+        // is not new behaviour so much as the honest version of an accident we
+        // just removed.
+        //
+        // What the repair may touch is deliberately narrow, and every write in
+        // it is idempotent on its own: the agreement flip is CAS'd on DRAFT,
+        // the mileage row rides that flip, and the vehicle sync is a
+        // state-write that no-ops when the car is already ON_RENT and skips
+        // locked statuses outright. There is no reservation write at all —
+        // the row is already CHECKED_OUT, which is what leaves nothing to
+        // claim — and no audit line, because nothing changed status and a
+        // CHECKED_OUT → CHECKED_OUT STATUS_CHANGE row would be a false entry
+        // in the trail.
+        if (!updated.agreementId) {
+          // No contract to verify, and the email arm is gated on
+          // `updated.agreementId` anyway, so this flag feeds nothing.
+          finalizeCascadeOk = true;
+        } else {
+          const agNow = await prisma.rentalAgreement.findUnique({
+            where: { id: updated.agreementId }, select: { status: true },
+          });
+          const agStatus = String(agNow?.status ?? '');
+          if (['FINALIZED', 'CLOSED'].includes(agStatus)) {
+            // The benign case the old one-liner was written for, now actually
+            // established rather than assumed.
+            finalizeCascadeOk = true;
+          } else if (agStatus === 'DRAFT' && String(resv.status) === 'CHECKED_OUT') {
+            logger.warn('[checkout-session] repairing a CHECKED_OUT reservation whose contract is still DRAFT', {
+              sessionId: id, reservationId: resv.id, agreementId: updated.agreementId,
+              alreadyApplied,
+            });
+            agreementFinalized = await finalizeAgreementForCheckout({
+              sessionId: id, agreementId: updated.agreementId, resv, actorUserId,
+            });
+            // The same strand can have left the car behind: the old cascade
+            // ran the vehicle sync AFTER the agreement write, so a failure at
+            // the agreement could be followed by a crash before the car was
+            // marked ON_RENT. Idempotent, so it costs a no-op when it was fine.
+            await syncVehicleStatusForReservation(prisma, {
+              reservationId: resv.id, vehicleId: resv.vehicleId, toStatus: 'CHECKED_OUT',
+            });
+            finalizeCascadeOk = agreementFinalized;
+          } else {
+            // CHECKED_IN / CHECKED_IN_UNPAID with a DRAFT contract, or an
+            // agreement that is CANCELLED or gone. Left alone ON PURPOSE:
+            // stamping `finalizedAt: now` onto a rental that has already come
+            // back would date the handover after the return, and resurrecting
+            // a CANCELLED contract is not a repair. `finalizeCascadeOk` stays
+            // false, so the one thing that must not happen — mailing a DRAFT —
+            // still does not.
+            logger.error('[checkout-session] contract is not FINALIZED and this path cannot repair it', {
+              sessionId: id, reservationId: resv.id, agreementId: updated.agreementId,
+              reservationStatus: String(resv.status),
+              agreementStatus: agNow ? agStatus : null,
+            });
+          }
+        }
       }
       // Deliberately NOT set when finalizeOwnsReservation is false. Set once at
       // the end of the try — as the first version of this did — the flag was
@@ -1003,6 +1033,154 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
   }
 
   return updated;
+}
+
+/**
+ * Turn the checkout's DRAFT agreement into the legal document, plus the
+ * companions that hang off that flip: the mobile-captured odometer/fuel, the
+ * borrower's LoanerAgreement, and the CHECKOUT mileage row.
+ *
+ * Extracted from the CLOSED cascade on 2026-08-18 because there are now TWO
+ * ways in — the claim path, which arrives having just moved the reservation to
+ * CHECKED_OUT, and the repair path, which arrives at a reservation that got
+ * there without its contract. They must not drift into two different ideas of
+ * what "finalized" means, since the customer email is gated on the answer.
+ *
+ * Returns whether the contract is FINALIZED when we leave. Never throws: a
+ * blip here must not abort the rest of the cascade (aborting would strand the
+ * vehicle sync). But it is not SILENT either — the return value is what stops
+ * the email, and the failure is logged at error.
+ */
+async function finalizeAgreementForCheckout({ sessionId, agreementId, resv, actorUserId }) {
+  // 2026-06-10 (beta.152) — this cascade finalize never copied the
+  // mobile-captured odometer/fuel from the CHECKOUT inspection row onto the
+  // agreement columns, so contracts printed "-" and the beta.143
+  // mileage-history CHECKOUT entry was silently skipped. Copy them here
+  // (agreement column wins if already set) and record the mileage entry. All
+  // best-effort: metric/mileage failures must never break the finalize itself.
+  let metricsPatch = {};
+  let checkoutOdometer = null;
+  try {
+    const [agRow, inspRow] = await Promise.all([
+      prisma.rentalAgreement.findUnique({
+        where: { id: agreementId },
+        select: { odometerOut: true, fuelOut: true, agreementNumber: true },
+      }),
+      prisma.rentalAgreementInspection.findFirst({
+        where: { rentalAgreementId: agreementId, phase: 'CHECKOUT' },
+        select: { odometer: true, fuelLevel: true },
+      }),
+    ]);
+    if (agRow && inspRow) {
+      if (agRow.odometerOut == null && inspRow.odometer != null) {
+        metricsPatch.odometerOut = inspRow.odometer;
+      }
+      const fuelFraction = fuelLevelToFraction(inspRow.fuelLevel);
+      if (agRow.fuelOut == null && fuelFraction != null) {
+        metricsPatch.fuelOut = fuelFraction;
+      }
+    }
+    checkoutOdometer = agRow?.odometerOut ?? inspRow?.odometer ?? null;
+  } catch { metricsPatch = {}; }
+
+  // ── the flip is a compare-and-set too (2026-08-18) ────────────────────────
+  //
+  // 2026-08-17 (Innovation MUST-CHANGE) made this write's failure VISIBLE
+  // instead of silent. What it did not do was make it IDEMPOTENT: it was a
+  // bare `update`, so a second run rewrote `finalizedAt` with today's date on
+  // a contract that was already FINALIZED, and the audit trail then said the
+  // day the retry landed instead of the day the car left. The reservation
+  // claim contains that for the path it guards — but this function now also
+  // runs on the REPAIR path, which by construction is not behind that claim
+  // (the reservation is already CHECKED_OUT; there is nothing left to claim).
+  // So the flip carries its own guard, on the one status that means "not yet
+  // the legal document".
+  //
+  // `DRAFT` and not `{ not: 'FINALIZED' }`: RentalAgreementStatus also has
+  // CANCELLED and CLOSED, and neither is a contract we may quietly resurrect
+  // into FINALIZED. READY_FOR_CHECKOUT is in the enum but nothing in
+  // backend/src ever writes it, so DRAFT really is the whole pre-finalize
+  // surface.
+  let flippedByUs = false;
+  let agreementFinalized = true;
+  const flip = await prisma.rentalAgreement.updateMany({
+    where: { id: agreementId, status: 'DRAFT' },
+    data: { status: 'FINALIZED', finalizedAt: new Date(), ...metricsPatch },
+  }).catch((agErr) => {
+    agreementFinalized = false;
+    logger.error('[checkout-session] agreement did NOT reach FINALIZED on finalize', {
+      sessionId, agreementId, reservationId: resv.id,
+      error: agErr?.message || String(agErr),
+    });
+    return null;
+  });
+
+  if (flip && flip.count > 0) {
+    flippedByUs = true;
+  } else if (flip) {
+    // count === 0 is TWO different worlds, and telling them apart is the whole
+    // point of adding the guard: somebody already finalized it (fine — that is
+    // idempotence working, and the email may go), or the row is gone, or it is
+    // CANCELLED/CLOSED (not fine — there is no FINALIZED contract to mail).
+    // Only a re-read can distinguish them.
+    const agNow = await prisma.rentalAgreement.findUnique({
+      where: { id: agreementId }, select: { status: true },
+    }).catch(() => null);
+    const agStatus = String(agNow?.status ?? '');
+    // Allow-list, like `selfHealOwns` and for the same reason. CLOSED is
+    // strictly downstream of FINALIZED — the contract WAS the legal document
+    // and the rental has since come back — so it satisfies "not a DRAFT".
+    agreementFinalized = ['FINALIZED', 'CLOSED'].includes(agStatus);
+    if (agreementFinalized) {
+      logger.info('[checkout-session] agreement was already finalized — flip skipped', {
+        sessionId, agreementId, reservationId: resv.id, agreementStatus: agStatus,
+      });
+    } else {
+      logger.error('[checkout-session] agreement did NOT reach FINALIZED on finalize', {
+        sessionId, agreementId, reservationId: resv.id,
+        agreementStatus: agNow ? agStatus : null,
+        reason: agNow ? 'not a DRAFT and not finalized' : 'agreement row not found',
+      });
+    }
+  }
+
+  // Loaner companion: advance the borrower's LoanerAgreement to ACTIVE so the portal,
+  // due-soon/overdue reminders (status:ACTIVE), and the dashboard badge reflect the
+  // checked-out loaner. Harmless for rentals (no LoanerAgreement). (best-effort)
+  // Exactly-once on its own already — an updateMany guarded by DRAFT — so it is
+  // deliberately NOT gated on flippedByUs: a repair whose first run bumped the
+  // agreement but died before the loaner still gets to finish that job.
+  await prisma.loanerAgreement.updateMany({
+    where: { reservationId: resv.id, status: 'DRAFT' },
+    data: { status: 'ACTIVE' },
+  }).catch(() => {});
+
+  // Mileage history — written by, and ONLY by, the caller that flipped the
+  // contract. `recordMileageEntrySafe` is a bare create with no dedup, so it
+  // needs an exactly-once key from somewhere, and the flip is one: at most one
+  // caller ever turns this DRAFT into FINALIZED. That also closes an ordering
+  // hazard the old code had, where the mileage row was written even when the
+  // agreement write had just FAILED — which handed the repair path a
+  // reservation whose odometer timeline already carried a CHECKOUT row, and
+  // the repair would then append a second one.
+  //
+  // The residual window is a crash between the flip and this line: no mileage
+  // row, and no later repair (the contract is FINALIZED, so nothing re-enters
+  // here). Narrower than what it replaces, and it fails toward a missing
+  // best-effort row rather than a duplicated one.
+  if (flippedByUs && checkoutOdometer != null && resv.vehicleId) {
+    await recordMileageEntrySafe(prisma, {
+      vehicleId: resv.vehicleId,
+      tenantId: resv.tenantId || undefined,
+      mileage: checkoutOdometer,
+      source: 'CHECKOUT',
+      reservationId: resv.id,
+      rentalAgreementId: agreementId,
+      actorUserId: actorUserId || null,
+    });
+  }
+
+  return agreementFinalized;
 }
 
 /**

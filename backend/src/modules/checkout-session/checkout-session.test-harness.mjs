@@ -242,6 +242,56 @@ export function armReservationRace(triggerStatus, foreign) {
   return () => fired;
 }
 
+/**
+ * armReservationRace's sibling for the AGREEMENT row, added 2026-08-18 with
+ * the guard on the FINALIZED flip.
+ *
+ * The other two races are not substitutes for it. The repair path — a
+ * reservation that reached CHECKED_OUT with its contract still DRAFT — has no
+ * reservation claim to lose, because the row it would claim is already
+ * CHECKED_OUT. Race it on the session or the reservation and the second caller
+ * simply re-reads an agreement the first has already finalized and declines
+ * before reaching the flip, which pins nothing about the flip. Firing on THIS
+ * row is what puts two callers on the write itself: ours is left holding a
+ * DRAFT snapshot the database has already moved past.
+ *
+ * Only the FIRST matching read fires — the repair reads the agreement twice
+ * (the branch's own status check, then the metrics read inside the finalize
+ * helper) and it is the first one the flip is compared against.
+ */
+export function armAgreementRace(triggerStatus, foreign) {
+  const orig = prisma.rentalAgreement.findUnique;
+  let fired = false;
+  prisma.rentalAgreement.findUnique = async (args) => {
+    const row = await orig(args);
+    if (!fired && row && row.status === triggerStatus) {
+      fired = true;
+      const snapshot = { ...row }; // detached, like a real read
+      await foreign();
+      return snapshot;
+    }
+    return row;
+  };
+  restore.push(() => { prisma.rentalAgreement.findUnique = orig; });
+  return () => fired;
+}
+
+/**
+ * The half-finished finalize this ticket exists to repair, as a fixture:
+ * a session that committed CLOSED, a reservation that reached CHECKED_OUT, and
+ * a contract still sitting in DRAFT behind it.
+ *
+ * Seeded rather than driven, so the email arm is LIVE (autoEmailedAt null)
+ * without a winner call having fired a real send first. The reachability of
+ * this state from a real broken finalize is proved separately, by driving one.
+ */
+export function seedStrandedStrand() {
+  const row = seedFinalizeWorld({ reservationStatus: 'CHECKED_OUT' });
+  row.currentStep = 'CLOSED';
+  row.finishedAt = new Date('2026-08-17T12:00:00Z');
+  return row;
+}
+
 // ── the REAL payloads, not invented ones ───────────────────────────────────
 //
 // frontend/src/lib/checkout-session.js#transition puts exactly

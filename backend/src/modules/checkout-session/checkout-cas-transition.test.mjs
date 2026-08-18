@@ -21,6 +21,10 @@
  *      finalize died half-way gets self-healed instead of papered over
  *   8. the self-heal CLAIMS the reservation, so two concurrent re-runs of the
  *      cascade cannot both rewrite finalizedAt and both append a mileage row
+ *  8b. the CHECKED_OUT + DRAFT-agreement strand — the half-finished finalize
+ *      that used to be un-self-healable, because the ownership allow-list and
+ *      the cascade's status short-circuit BOTH declined it — is repaired, and
+ *      the flip that repairs it carries its own compare-and-set
  *   9. what H8 does NOT close: the `events` lost-update against the FOURTEEN
  *      other writers of that TEXT column. Written as a `todo` asserting the
  *      DESIRED result, not as a passing test asserting the defect — a todo
@@ -34,7 +38,8 @@ import { readFileSync } from 'node:fs';
 import { readEvents } from './state-machine.js';
 import {
   installWorld, restoreWorld, onRestore as restorePush,
-  seedSession, seedFinalizeWorld, armRace, armReservationRace, viaWebWizard, viaKiosk,
+  seedSession, seedFinalizeWorld, seedStrandedStrand,
+  armRace, armReservationRace, armAgreementRace, viaWebWizard, viaKiosk,
 } from './checkout-session.test-harness.mjs';
 
 // The in-memory prisma world lives in checkout-session.test-harness.mjs so the
@@ -315,6 +320,173 @@ test('staff cancels inside the window: the claim refuses, the cascade writes not
   assert.equal(db.vehicles[0].status, 'AVAILABLE', 'car stays in the available fleet');
   assert.equal(db.mileageEntries.length, 0);
   assert.equal(db.auditLogs.length, 0);
+});
+
+// ── 8b. the strand the self-heal could not reach (2026-08-18) ──────────────
+//
+// A reservation on CHECKED_OUT with its agreement still DRAFT was PERMANENTLY
+// un-self-healable, and it is the state a broken finalize most often leaves:
+// the claim succeeds, the agreement write behind it does not. Both doors were
+// shut. `selfHealOwns` excluded CHECKED_OUT, so a repeat POST declined at the
+// ownership guard; and even granted ownership, the cascade's status
+// short-circuit declines an already-CHECKED_OUT reservation and reported
+// SUCCESS — it inferred "the contract is FINALIZED" from `reservation.status`
+// alone. So "Reintentar cierre", the button on the CLOSED failure card whose
+// entire job is to re-POST CLOSED → CLOSED, was a no-op on precisely the
+// failure mode that card exists to report.
+//
+// Before the reservation claim shipped, a CONCURRENT caller would blunder
+// through and accidentally finish the abandoned cascade — at the cost of the
+// duplicate finalizedAt/mileage rows that ticket killed. Removing the accident
+// is what made the repair worth writing on purpose.
+
+test('the strand is REACHABLE: a finalize whose agreement write fails leaves CHECKED_OUT + DRAFT', async () => {
+  // Driven, not seeded. Everything below is about repairing this state, so it
+  // has to be a state a real finalize can actually produce.
+  const row = seedFinalizeWorld({ reservationStatus: 'CONFIRMED', autoEmailedAt: new Date() });
+
+  const origFlip = prisma.rentalAgreement.updateMany;
+  prisma.rentalAgreement.updateMany = async () => { throw new Error('injected agreement write failure'); };
+  restore.push(() => { prisma.rentalAgreement.updateMany = origFlip; });
+
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+
+  // Nothing throws — the agreement write is best-effort by design — so the
+  // agent is answered 200 and the session shows a finished checkout.
+  assert.equal(out.currentStep, 'CLOSED');
+  assert.equal(row.currentStep, 'CLOSED');
+  assert.equal(db.reservations[0].status, 'CHECKED_OUT', 'the claim went through...');
+  assert.equal(db.agreements[0].status, 'DRAFT', '...and the contract was left behind it');
+  // The mileage row rides the flip now, so a failed flip writes none — which
+  // is what stops the repair below from appending a second one.
+  assert.equal(db.mileageEntries.length, 0, 'no mileage row for a contract that never finalized');
+});
+
+test('SELF-HEAL: the CHECKED_OUT + DRAFT-agreement strand is repaired, not reported as success', async () => {
+  const row = seedStrandedStrand();
+  const versionBefore = row.stateVersion;
+
+  const healed = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+
+  assert.equal(healed.currentStep, 'CLOSED', 'still answers idempotently');
+  assert.equal(db.agreements[0].status, 'FINALIZED', 'the contract is the legal document now');
+  assert.ok(db.agreements[0].finalizedAt instanceof Date);
+  // The companions that hang off the flip come with it.
+  assert.equal(db.agreements[0].odometerOut, 45000, 'the CHECKOUT odometer was copied over');
+  assert.equal(db.mileageEntries.length, 1, 'exactly one CHECKOUT mileage row');
+  // The same strand can have left the car behind, since the old cascade ran
+  // the vehicle sync AFTER the agreement write.
+  assert.equal(db.vehicles[0].status, 'ON_RENT', 'and the car is marked rented');
+
+  // Healing is still not a transition, and the repair touches neither the
+  // reservation row nor the audit trail: nothing changed status, so a
+  // CHECKED_OUT → CHECKED_OUT line would be a false entry.
+  assert.equal(db.reservations[0].status, 'CHECKED_OUT');
+  assert.equal(db.auditLogs.length, 0, 'no STATUS_CHANGE line for a status that did not change');
+  assert.equal(readEvents(row.events).filter((e) => e.kind === 'TRANSITION').length, 0);
+  assert.equal(row.stateVersion, versionBefore, 'and no version bump');
+});
+
+test('the repair is idempotent: pressing "Reintentar cierre" twice more changes nothing', async () => {
+  seedStrandedStrand();
+
+  await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  const finalizedAt = db.agreements[0].finalizedAt;
+  assert.ok(finalizedAt, 'the first press repaired it');
+
+  await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+
+  // Compared by REFERENCE, so a rewrite with an identical millisecond fails.
+  assert.equal(db.agreements[0].finalizedAt, finalizedAt,
+    'finalizedAt still says when the repair ran, not when the last retry landed');
+  assert.equal(db.mileageEntries.length, 1, 'still exactly one CHECKOUT mileage row');
+  assert.equal(db.auditLogs.length, 0);
+});
+
+// The flip's OWN guard, isolated. This is the one path where the reservation
+// claim cannot help: the row it would claim is already CHECKED_OUT, so there
+// is nothing left to claim and the agreement write is on its own. Race it here
+// and a bare `update` — what this was until 2026-08-18 — rewrites finalizedAt
+// and appends a second mileage row.
+test('two concurrent repairs: the flip lets exactly ONE finalize the contract', async () => {
+  seedStrandedStrand();
+
+  let winnerFinalizedAt = null;
+  const raced = armAgreementRace('DRAFT', async () => {
+    await viaKiosk({ id: 'cs1', toStep: 'CLOSED' });
+    winnerFinalizedAt = db.agreements[0].finalizedAt;
+  });
+
+  // Our caller is now holding a DRAFT snapshot of a row the other surface has
+  // already finalized, and walks straight into the flip with it.
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  assert.equal(raced(), true, 'the race actually fired');
+
+  assert.equal(out.currentStep, 'CLOSED', 'both surfaces are still answered honestly');
+  assert.ok(winnerFinalizedAt, 'the winner really finalized inside the race');
+  assert.equal(db.agreements[0].status, 'FINALIZED');
+  assert.equal(db.agreements[0].finalizedAt, winnerFinalizedAt, 'not rewritten by the loser');
+  assert.equal(db.mileageEntries.length, 1, 'exactly one CHECKOUT mileage row');
+});
+
+test('a repair whose flip FAILS reports failure instead of claiming the contract is finalized', async () => {
+  seedStrandedStrand();
+
+  // Counted, not just patched: every other assertion here is about what did
+  // NOT happen, and they all pass just as well against a build where the
+  // repair never ran at all — which is exactly the defect being fixed.
+  let flipAttempts = 0;
+  const origFlip = prisma.rentalAgreement.updateMany;
+  prisma.rentalAgreement.updateMany = async () => {
+    flipAttempts += 1;
+    throw new Error('injected agreement write failure');
+  };
+  restore.push(() => { prisma.rentalAgreement.updateMany = origFlip; });
+
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+
+  assert.equal(flipAttempts, 1, 'the repair was actually attempted');
+  assert.equal(out.currentStep, 'CLOSED', 'the caller still gets its 200');
+  assert.equal(db.agreements[0].status, 'DRAFT', 'and the contract is still not the legal document');
+  assert.equal(db.mileageEntries.length, 0);
+  // What must NOT happen is the old one-liner's answer — see the email gate in
+  // checkout-finalize-truth.test.mjs, which is where this becomes observable.
+  assert.equal(db.checkoutSessions[0].autoEmailedAt, null, 'and no contract was mailed over it');
+});
+
+test('CHECKED_IN + a DRAFT contract is NOT repaired — the car already came back', async () => {
+  // Deliberately out of scope: stamping `finalizedAt: now` onto a rental that
+  // has already been returned would date the handover after the return. The
+  // repair is for the strand where the checkout itself is unfinished.
+  const row = seedFinalizeWorld({ reservationStatus: 'CHECKED_IN' });
+  row.currentStep = 'CLOSED';
+  row.finishedAt = new Date('2026-08-17T12:00:00Z');
+
+  const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+
+  assert.equal(out.currentStep, 'CLOSED');
+  assert.equal(db.agreements[0].status, 'DRAFT', 'left exactly as it was found');
+  assert.equal(db.mileageEntries.length, 0);
+  assert.equal(db.auditLogs.length, 0);
+  assert.equal(row.autoEmailedAt, null, 'and no contract went out for it');
+});
+
+test('widening selfHealOwns did not reopen the CANCELLED door', async () => {
+  // CHECKED_OUT joined the allow-list; CANCELLED and NO_SHOW are still refused
+  // one guard earlier, by `cancelledLate`. Pinned because the widening is the
+  // kind of edit that invites the QA blocker of 2026-08-17 back in.
+  const row = seedFinalizeWorld({ reservationStatus: 'CANCELLED' });
+  row.currentStep = 'CLOSED';
+  row.finishedAt = new Date('2026-08-10T12:00:00Z');
+
+  await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+
+  assert.equal(db.reservations[0].status, 'CANCELLED', 'NOT resurrected');
+  assert.equal(db.agreements[0].status, 'DRAFT', 'and its contract was not finalized either');
+  assert.equal(db.vehicles[0].status, 'AVAILABLE');
+  assert.equal(db.auditLogs.length, 0);
+  assert.equal(row.autoEmailedAt, null);
 });
 
 // ── 3. idempotency stays narrow ────────────────────────────────────────────
