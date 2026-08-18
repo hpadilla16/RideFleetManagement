@@ -2,6 +2,18 @@ import 'package:flutter/foundation.dart';
 
 import '../api/dto/session_user.dart';
 
+/// Por qué una sesión terminó SIN que el usuario lo pidiera (GD MC-3, H6):
+/// el login lo pinta como aviso — aterrizar en /login sin explicación parece
+/// crash. Un logout EXPLÍCITO no lleva razón (el usuario ya sabe).
+enum SignOutReason {
+  /// 401 / token vencido: "Tu sesión venció."
+  sessionExpired,
+
+  /// Recuperación de kiosco sin PIN (política H6): "Por seguridad, vuelve a
+  /// entrar con tu contraseña."
+  kioskRecovery,
+}
+
 /// Fase de la sesión — gobierna el redirect top-level del router.
 enum SessionStatus {
   /// Arranque: leyendo el token del Keystore y rehidratando /me. El router
@@ -26,12 +38,16 @@ class SessionState {
     this.token,
     this.user,
     this.passwordChangeRequired = false,
+    this.signOutReason,
   });
 
   const SessionState.restoring() : this._(status: SessionStatus.restoring);
 
-  const SessionState.unauthenticated()
-      : this._(status: SessionStatus.unauthenticated);
+  const SessionState.unauthenticated({SignOutReason? signOutReason})
+      : this._(
+          status: SessionStatus.unauthenticated,
+          signOutReason: signOutReason,
+        );
 
   const SessionState.authenticated({required String token, SessionUser? user})
       : this._(status: SessionStatus.authenticated, token: token, user: user);
@@ -46,6 +62,11 @@ class SessionState {
   /// señal → 403). Fix del review de Innovation H1: si dependiera del user,
   /// ese escenario dejaba al usuario atrapado viendo errores sueltos.
   final bool passwordChangeRequired;
+
+  /// Solo con [SessionStatus.unauthenticated] y solo para salidas
+  /// INVOLUNTARIAS (GD MC-3). El login lo muestra como banner; un login
+  /// exitoso lo entierra con el estado nuevo.
+  final SignOutReason? signOutReason;
 
   bool get isAuthenticated => status == SessionStatus.authenticated;
 

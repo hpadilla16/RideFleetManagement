@@ -6,6 +6,7 @@ import '../api/api_error.dart';
 import '../api/api_providers.dart';
 import '../api/dto/session_user.dart';
 import '../api/token_refresher.dart';
+import '../db/outbox_providers.dart';
 import '../telemetry/event_logger.dart';
 import 'session_state.dart';
 import 'token_store.dart';
@@ -14,6 +15,15 @@ import 'token_store.dart';
 /// hidratación al arrancar y logout limpio. El router observa este provider
 /// vía refreshListenable y re-evalúa sus gates en cada cambio.
 class SessionController extends Notifier<SessionState> {
+  /// Generación de IDENTIDAD (herencia QA-H3, mismo patrón que
+  /// ActiveLocationController): se bumpea en cada transición que cambia de
+  /// quién es la sesión (restore, login, change-password, logout, expiración).
+  /// Un /me en vuelo de la identidad ANTERIOR — logout + login de otro
+  /// usuario mientras la respuesta viajaba — se descarta al llegar: el guard
+  /// `state.isAuthenticated` solo no alcanza, porque la sesión NUEVA también
+  /// está autenticada y el user viejo la pisaría.
+  int _identityGen = 0;
+
   @override
   SessionState build() {
     // La restauración es async (Keystore + /me); build debe ser síncrono.
@@ -34,6 +44,7 @@ class SessionController extends Notifier<SessionState> {
   /// sin señal que expulsar a re-login — cualquier 401/403 real posterior
   /// corrige el rumbo vía los observadores del Dio autenticado.
   Future<void> restore() async {
+    _identityGen++;
     final token = await _store.read();
     if (!ref.mounted) return; // container muerto mientras leíamos el Keystore
     if (token == null || token.isEmpty) {
@@ -48,9 +59,19 @@ class SessionController extends Notifier<SessionState> {
       return;
     }
     state = SessionState.authenticated(token: token);
+    await _hydrateUser();
+  }
+
+  /// GET /api/auth/me → user al estado, con los guardas de siempre. Lo
+  /// comparten [restore] y [rehydrateUserIfMissing].
+  Future<void> _hydrateUser() async {
+    final gen = _identityGen;
     try {
       final user = await ref.read(authApiProvider).me();
       if (!ref.mounted) return;
+      // La identidad cambió mientras /me volaba (logout + login de OTRO
+      // usuario en la misma ventana): este user ya no es de esta sesión.
+      if (gen != _identityGen) return;
       // onSessionExpired pudo dispararse mientras /me volaba (401): no
       // resucitar una sesión ya limpiada.
       if (state.isAuthenticated) state = state.withUser(user);
@@ -66,6 +87,17 @@ class SessionController extends Notifier<SessionState> {
     }
   }
 
+  /// Sesión DEGRADADA (token vivo, `user == null` porque /me falló por red al
+  /// restaurar): re-intento de /me al REANUDAR la app (lifecycle resume — lo
+  /// cablea el AppShell, H3). El shell mientras tanto renderiza con tabs
+  /// mínimas y skeleton (mockup 4E); cada /me exitoso restituye role y
+  /// moduleAccess sin pedirle nada al usuario. No-op si la sesión ya está
+  /// completa o no existe.
+  Future<void> rehydrateUserIfMissing() async {
+    if (!state.isAuthenticated || state.user != null) return;
+    await _hydrateUser();
+  }
+
   /// POST /api/auth/login. Lanza [ApiError] para que la pantalla decida
   /// (401 genérico, sin red, 429). Aquí solo: persistir, publicar, medir.
   Future<void> login({required String email, required String password}) async {
@@ -73,9 +105,17 @@ class SessionController extends Notifier<SessionState> {
       final res = await ref
           .read(authApiProvider)
           .login(email: email, password: password);
+      _identityGen++;
       await _store.write(res.token);
       state = SessionState.authenticated(token: res.token, user: res.user);
       _logger.log(AuthEvents.loginOk);
+      // Purga por cambio de cuenta AL ENTRAR (ADR-7): filas de OTRO usuario
+      // que sobrevivieron a un 401/crash (el logout explícito ya purga) se
+      // van con sus archivos de foto. Best-effort: un Keystore/disco raro no
+      // puede tirar el login.
+      try {
+        await ref.read(outboxServiceProvider).purgeForeign(res.user.id);
+      } catch (_) {}
     } on ApiError catch (e) {
       _logger.log(
         AuthEvents.loginFail,
@@ -103,6 +143,7 @@ class SessionController extends Notifier<SessionState> {
           currentPassword: currentPassword,
           newPassword: newPassword,
         );
+    _identityGen++; // un /me viejo no debe pisar el user fresco del gate
     await _store.write(res.token);
     // Estado reconstruido desde cero: passwordChangeRequired vuelve a false
     // (el constructor no lo arrastra) y el user fresco trae el claim limpio.
@@ -110,20 +151,33 @@ class SessionController extends Notifier<SessionState> {
     _logger.log(AuthEvents.passwordChanged);
   }
 
-  /// Logout explícito del usuario. El purge de la bandeja de salida por
-  /// cambio de cuenta (ADR-7) se conecta aquí cuando el outbox tenga filas
-  /// reales (M1-H5): hoy no hay escrituras encoladas en H1.
+  /// Logout explícito del usuario. La bandeja pertenece a la cuenta (ADR-7,
+  /// mockup 7C nota 6): filas Y archivos de foto se purgan — la UI del
+  /// logout advierte ANTES si hay envíos sin mandar. Un 401 involuntario NO
+  /// purga (onSessionExpired): el mismo usuario re-entra y su cola sigue;
+  /// si entra OTRO, la purga del login lo cubre.
   Future<void> logout() async {
+    _identityGen++; // un /me en vuelo no debe resucitar la sesión saliente
+    try {
+      await ref.read(outboxServiceProvider).purgeAllForLogout();
+    } catch (_) {
+      // Best-effort: sin DB abierta no hay nada que purgar.
+    }
     await _store.clear();
     state = const SessionState.unauthenticated();
   }
 
   /// 401 en cualquier ruta autenticada, o token vencido al despachar: la
   /// sesión murió. Limpieza + re-login (nunca refresh — ADR-3a).
-  void onSessionExpired() {
+  ///
+  /// [reason] viaja al estado para que el login EXPLIQUE la expulsión
+  /// (GD MC-3): default = sesión vencida; la recuperación de kiosco sin PIN
+  /// (H6) manda su propia razón.
+  void onSessionExpired({SignOutReason reason = SignOutReason.sessionExpired}) {
     if (!state.isAuthenticated) return; // 401s en ráfaga: loguear uno solo
+    _identityGen++;
     _logger.log(AuthEvents.sessionExpiredRelogin);
-    state = const SessionState.unauthenticated();
+    state = SessionState.unauthenticated(signOutReason: reason);
     unawaited(_store.clear());
   }
 

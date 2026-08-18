@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/l10n/app_localizations.dart';
 import 'core/router/app_router.dart';
+import 'core/session/lock_observer.dart';
 
 /// MaterialApp.router + tema Ride (#8752FE). La navegación completa (gates de
 /// auth/password, ShellRoute) vive en core/router/app_router.dart.
@@ -29,6 +30,9 @@ class RideOpsApp extends ConsumerWidget {
         useMaterial3: true,
       ),
       routerConfig: ref.watch(appRouterProvider),
+      // Sensor del candado (H2): actividad + ciclo de vida para TODAS las
+      // rutas — ver core/session/lock_observer.dart.
+      builder: (context, child) => LockObserver(child: child!),
     );
   }
 }

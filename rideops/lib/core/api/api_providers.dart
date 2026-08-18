@@ -2,11 +2,16 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/app_config.dart';
+import '../session/active_location.dart';
 import '../session/session_controller.dart';
 import '../session/token_store.dart';
 import '../telemetry/event_logger.dart';
 import 'auth_api.dart';
+import 'checkout_api.dart';
+import 'dashboard_api.dart';
 import 'dio_factory.dart';
+import 'locations_api.dart';
+import 'reservations_api.dart';
 import 'token_refresher.dart';
 
 /// Cableado Riverpod de la capa API (M0-5 → M1-H1).
@@ -73,16 +78,45 @@ final Provider<Dio> authedDioProvider = Provider<Dio>((ref) {
   final factory = ref.watch(dioFactoryProvider);
   return factory.buildAuthedDio(
     refresher: ref.watch(tokenRefresherProvider),
-    // TODO(M1-H3): conectar el selector de ubicación activa cuando exista;
-    // hoy no hay override y el usuario ve su set completo.
-    readViewLocation: () => null,
+    // Selector de ubicación (H3): lectura PEREZOSA por request — el header
+    // refleja la selección del momento del despacho, no la de cuando se
+    // construyó el Dio. El drenador del outbox NO pasa por aquí y NO manda
+    // este header (decisión documentada en outbox/drainer.dart).
+    readViewLocation: () => ref.read(activeLocationProvider).locationId,
     onSessionExpired: () =>
         ref.read(sessionControllerProvider.notifier).onSessionExpired(),
     onPasswordChangeRequired: () => ref
         .read(sessionControllerProvider.notifier)
         .notePasswordChangeRequired(),
+    // Solo telemetría (03-observability.md): la negativa la RENDERIZA cada
+    // pantalla desde su propio ApiError (DoD-4, pantalla 4D).
+    onViewLocationDenied: () =>
+        ref.read(eventLoggerProvider).log(SessionEvents.viewLocationDenied),
   );
 });
+
+final Provider<LocationsApi> locationsApiProvider = Provider<LocationsApi>(
+  (ref) => LocationsApi(authedDio: ref.watch(authedDioProvider)),
+);
+
+final Provider<DashboardApi> dashboardApiProvider = Provider<DashboardApi>(
+  (ref) => DashboardApi(authedDio: ref.watch(authedDioProvider)),
+);
+
+/// Checkout + inspección móvil (H5). El Dio público va SIN interceptores:
+/// las rutas /api/mobile-inspection/:token/* se autentican con el token de
+/// handoff, jamás con el bearer de staff (M0-5).
+final Provider<CheckoutApi> checkoutApiProvider = Provider<CheckoutApi>(
+  (ref) => CheckoutApi(
+    authedDio: ref.watch(authedDioProvider),
+    publicDio: ref.watch(publicDioProvider),
+  ),
+);
+
+final Provider<ReservationsApi> reservationsApiProvider =
+    Provider<ReservationsApi>(
+  (ref) => ReservationsApi(authedDio: ref.watch(authedDioProvider)),
+);
 
 final Provider<AuthApi> authApiProvider = Provider<AuthApi>((ref) {
   final factory = ref.watch(dioFactoryProvider);

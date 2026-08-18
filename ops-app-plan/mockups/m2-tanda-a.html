@@ -1,0 +1,1485 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RideOps · Mockups M2 — Tanda A (Shell del wizard · CONFIRMING · T&C con QR · Entrada desde la cola)</title>
+<style>
+/* ============================================================
+   TOKENS — idénticos a m1-tanda-a-v2.html y m1-tanda-b.html
+   (lenguaje visual aprobado por Hector). Nada nuevo salvo lo
+   que se declara como token propio y medido.
+   ============================================================ */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-200:#d9c9ff; --p-300:#c0a8ff;
+  --p-400:#9f79ff; --p-500:#7f4ff0; --p-600:#6a35e0; --p-700:#5a26c9;
+  --p-800:#45189e; --p-900:#2e1071;
+  --brand:#8752FE;
+  --brand-a08:rgba(135,82,254,.08); --brand-a12:rgba(135,82,254,.12);
+  --brand-a16:rgba(135,82,254,.16); --brand-a20:rgba(135,82,254,.20);
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --badge-warn:#8a5606; /* Tanda B: blanco encima = 6.15:1 medido (--warn puro daba 3.73:1) */
+  --focus:#0b63d6; --focus-halo:rgba(11,99,214,.22);
+  --tonal:#f6f2ff;
+  --sh-b1:0 1px 0 rgba(255,255,255,.85) inset,0 2px 6px -2px rgba(69,24,158,.14),0 10px 24px -10px rgba(135,82,254,.22);
+  --sh-float:0 6px 16px -6px rgba(23,18,43,.18),0 24px 48px -18px rgba(69,24,158,.30);
+  --r-xl:24px; --r-2xl:28px;
+  --bd-lite:1px solid rgba(135,82,254,.14);
+  --sh-3:0 1px 3px rgba(24,16,54,.06),0 14px 30px -10px rgba(38,20,90,.14),0 44px 80px -28px rgba(38,20,90,.22);
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+  background:var(--n-100);color:var(--n-900);font-size:14px;line-height:1.5}
+h1,h2,h3{margin:0;letter-spacing:.005em}
+a{text-decoration:none;color:inherit}
+.tnum{font-variant-numeric:tabular-nums}
+
+/* ---------- chrome del documento (idéntico a las tandas aprobadas) ---------- */
+.doc-head{max-width:1720px;margin:0 auto;padding:26px 24px 10px}
+.doc-head h1{font-size:24px;font-weight:850}
+.doc-head h1 .v2{display:inline-flex;align-items:center;margin-left:10px;padding:3px 12px;border-radius:999px;
+  background:linear-gradient(135deg,var(--p-600),var(--p-800));color:#fff;font-size:13px;font-weight:800;vertical-align:middle}
+.doc-head p{margin:8px 0 0;color:var(--n-700);max-width:1020px}
+.meta-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.mchip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 11px;
+  border-radius:8px;background:var(--p-50);border:1px solid var(--brand-a20);
+  color:var(--p-800);font-size:12.5px;font-weight:700}
+.mchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.mchip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.jump{position:sticky;top:0;z-index:60;display:flex;gap:8px;flex-wrap:wrap;
+  padding:10px 24px;background:rgba(255,255,255,.88);backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--n-200);box-shadow:var(--sh-1)}
+.jump a{display:inline-flex;align-items:center;min-height:40px;padding:6px 14px;border-radius:12px;
+  border:1px solid var(--n-300);background:var(--n-0);font-weight:700;font-size:13px;color:var(--n-800)}
+.jump a:hover{background:var(--p-50);border-color:var(--brand-a20);color:var(--p-800)}
+.jump a:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+section.blk{max-width:1720px;margin:0 auto;padding:30px 24px 8px;scroll-margin-top:76px}
+.blk-head{margin-bottom:16px}
+.blk-head .eyebrow{color:var(--p-700);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.blk-head h2{font-size:20px;font-weight:800;margin-top:2px}
+.blk-head p{color:var(--n-700);margin:6px 0 0;max-width:920px}
+.state-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.schip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:6px;
+  font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--n-50);border:1px solid var(--n-200);color:var(--n-700)}
+.schip i{width:6px;height:6px;border-radius:50%;background:currentColor;font-style:normal}
+.frames{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;padding-bottom:26px}
+figure{margin:0}
+figcaption{font-size:13px;font-weight:800;color:var(--n-800);margin:0 0 8px 6px}
+figcaption small{display:block;font-weight:600;color:var(--n-600);font-size:12px}
+
+/* ---------- notas / anotaciones ---------- */
+.notes{flex:1 1 330px;max-width:410px;background:var(--n-0);border:var(--bd-lite);
+  border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1)}
+.notes h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+.note{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--n-100);font-size:13px;color:var(--n-700)}
+.note:last-child{border-bottom:0}
+.note b{color:var(--n-900)}
+.m{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;
+  border-radius:50%;background:var(--p-600);color:#fff;font-size:12px;font-weight:800;line-height:1}
+.m.inframe{position:absolute;z-index:9;box-shadow:0 0 0 2px #fff}
+.motion{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--info-bg);
+  border:1px solid var(--info-bd);font-size:12.5px;color:var(--n-800)}
+.motion b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--info);margin-bottom:6px}
+.motion ul{margin:0;padding-left:16px}
+.motion li{margin:3px 0}
+.contrast{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--n-50);
+  border:1px solid var(--n-200);font-size:12.5px;color:var(--n-700)}
+.contrast b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:6px}
+.contrast li{margin:3px 0}
+.contrast ul{margin:0;padding-left:16px}
+.decision{margin-top:14px;padding:14px 16px;border-radius:16px;background:var(--warn-bg);
+  border:1.5px dashed var(--warn-bd);color:var(--warn-tx);font-size:13px}
+.decision b{display:block;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.decision ul{margin:6px 0 0;padding-left:18px}
+.decision li{margin:3px 0}
+.mini-demo{margin-top:12px;padding:12px;border-radius:14px;background:var(--n-50);border:1px solid var(--n-200)}
+.mini-demo .cap{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:8px}
+
+/* ---------- frame de teléfono ---------- */
+.phone{position:relative;width:390px;border:9px solid var(--n-900);border-radius:40px;
+  overflow:hidden;background:var(--n-50);box-shadow:var(--sh-3)}
+.statusbar{position:relative;z-index:4;display:flex;justify-content:space-between;align-items:center;height:32px;
+  padding:0 20px;font-size:11.5px;font-weight:700;color:var(--n-700);background:var(--n-50)}
+.statusbar.on-white{background:var(--n-0)}
+.statusbar.on-tonal{background:var(--tonal)}
+.statusbar .off{color:var(--danger-tx)}
+.scr{position:relative;display:flex;flex-direction:column;min-height:724px;padding:0}
+.pad{padding:18px 18px 22px;display:flex;flex-direction:column;flex:1;position:relative;z-index:2}
+
+/* ---------- shell M1 (para la pantalla 11: entrada desde la card) ---------- */
+.appbar{position:relative;z-index:4;display:flex;align-items:center;gap:10px;padding:10px 14px;
+  background:rgba(255,255,255,.96);border-bottom:1px solid var(--n-200)} /* plate opaco, SIN blur */
+.appbar .abrand{font-size:15px;font-weight:850;color:var(--n-900)}
+.locchip{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 13px;border-radius:14px;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800);font-size:13px;font-weight:800;
+  box-shadow:0 1px 0 rgba(255,255,255,.7) inset}
+.appbar .sp{flex:1}
+.avatar{width:60px;height:60px;border-radius:50%;background:linear-gradient(150deg,var(--p-100),var(--p-200));
+  color:var(--p-800);display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:850;
+  box-shadow:0 1px 0 rgba(255,255,255,.8) inset,0 6px 14px -6px rgba(69,24,158,.30)}
+.avatar.sm{width:40px;height:40px;font-size:15px}
+.content{flex:1;padding:14px 14px 96px;display:flex;flex-direction:column;gap:12px;overflow:hidden;position:relative}
+.refreshline{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:650;color:var(--n-700)}
+.refreshline .livedot{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:led 2.4s ease-in-out infinite}
+@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
+.qhead{display:flex;align-items:baseline;justify-content:space-between;margin-top:2px}
+.qhead .ql{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600)}
+.qhead .qct{font-size:12px;font-weight:800;color:var(--p-800);background:var(--p-50);border:1px solid var(--brand-a20);
+  border-radius:7px;padding:1px 7px;margin-left:6px}
+.qhead a{font-size:13px;font-weight:800;color:var(--p-700);min-height:48px;display:inline-flex;align-items:center}
+.qcard{display:flex;align-items:center;gap:12px;background:linear-gradient(180deg,#fff,#fdfcff);
+  border:var(--bd-lite);border-radius:20px;padding:12px 14px;box-shadow:var(--sh-b1)}
+.qcard.busy{border-color:var(--brand-a20);background:var(--p-50)}
+.qcard.blocked{border:1.5px solid var(--warn-bd);background:#fffdf7}
+.qico{flex:0 0 auto;width:42px;height:42px;border-radius:14px;background:var(--brand-a08);
+  display:flex;align-items:center;justify-content:center;color:var(--p-700)}
+.qico.warn{background:var(--warn-bg);color:var(--warn-tx)}
+.qico.err{background:var(--danger-bg);color:var(--danger-tx)}
+.qbody{flex:1;min-width:0;display:grid;gap:3px}
+.qtop{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.qname{font-size:15px;font-weight:800;color:var(--n-900)}
+.qmeta{font-size:12.5px;color:var(--n-600);font-weight:600}
+/* GD-1: sobre --p-50 el --n-600 mide 4.48:1 y NO pasa AA. La card ocupada sube a --n-700 = 8.18:1
+   (misma regla ya aplicada al .sesshead). .qcard.busy es componente nuevo del M2, no herencia del M1. */
+.qcard.busy .qmeta{color:var(--n-700)}
+.tchip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:8px;
+  font-size:12.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800)}
+.tchip .dot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:led 2s ease-in-out infinite}
+.tchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.tchip.danger{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.tchip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.tchip.mut{background:var(--n-50);border-color:var(--n-200);color:var(--n-700)}
+.tabfloat{position:absolute;left:14px;right:14px;bottom:12px;z-index:8;display:flex;padding:6px;
+  background:rgba(255,255,255,.85);backdrop-filter:blur(18px);
+  border:1px solid rgba(255,255,255,.9);outline:1px solid rgba(23,18,43,.07);
+  border-radius:30px;box-shadow:var(--sh-float)}
+.tabfloat.plate{background:rgba(255,255,255,.96);backdrop-filter:none} /* sheet arriba ⇒ el blur se apaga */
+.tabf{position:relative;flex:1;min-height:56px;display:flex;flex-direction:column;gap:2px;
+  align-items:center;justify-content:center;font-size:11px;font-weight:750;color:var(--n-700);border-radius:24px}
+.tabf .tico{display:flex;align-items:center;justify-content:center;width:46px;height:26px;border-radius:13px}
+.tabf.on{color:var(--p-800);background:var(--p-100);box-shadow:0 1px 0 rgba(255,255,255,.8) inset}
+.tbadge{position:absolute;top:5px;right:50%;margin-right:-25px;min-width:17px;height:17px;padding:0 4px;
+  border-radius:9px;background:var(--danger);color:#fff;font-size:10.5px;font-weight:800;
+  display:flex;align-items:center;justify-content:center}
+
+/* ---------- WIZARD: barra, header de sesión, presencia ---------- */
+.wizbar{position:relative;z-index:4;display:flex;align-items:center;gap:8px;padding:7px 8px;
+  background:rgba(255,255,255,.98);border-bottom:1px solid var(--n-200)} /* plate opaco, CERO blur en todo el wizard */
+.icobtn{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+  color:var(--n-800);flex:0 0 auto}
+.wizbar .tt{flex:1;min-width:0}
+.wizbar .tt b{display:block;font-size:15.5px;font-weight:850;color:var(--n-900);line-height:1.15}
+.wizbar .tt span{font-size:12px;font-weight:650;color:var(--n-700)}
+.pausebtn{min-height:48px;display:inline-flex;align-items:center;gap:6px;padding:0 12px;border-radius:14px;
+  border:1.5px solid var(--n-300);background:var(--n-0);font-size:13px;font-weight:800;color:var(--n-800);flex:0 0 auto}
+.sesshead{background:var(--tonal);border-bottom:1px solid var(--n-200);padding:11px 14px;display:grid;gap:9px}
+.sesrow{display:flex;align-items:center;gap:10px}
+.sesrow .sic{width:38px;height:38px;border-radius:13px;background:var(--brand-a12);color:var(--p-800);
+  display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.sesrow .sb{min-width:0;flex:1}
+.sesrow .sb b{display:block;font-size:15px;font-weight:850;color:var(--n-900);line-height:1.2}
+.sesrow .sb span{font-size:12.5px;font-weight:700;color:var(--n-700)} /* n-700 sobre tonal = 8.37:1 (n-600 daba 4.58) */
+.presence{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:3px 11px;border-radius:12px;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800);font-size:12.5px;font-weight:750}
+.presence .pv{width:22px;height:22px;border-radius:50%;background:var(--p-200);color:var(--p-900);
+  font-size:10px;font-weight:850;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.presence .lv{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:led 2.4s ease-in-out infinite;flex:0 0 auto}
+.presence .lv.stale{background:var(--n-500);animation:none} /* heartbeat 20–45 s: sigue ahí, pero no "ahora mismo" */
+/* GD-5: el header de sesión es CROMO PERSISTENTE del wizard. Variante completa al entrar / con el scroll arriba;
+   variante mini al hacer scroll. El chip de presencia se muestra en ambas variantes SALVO sin red (8D): estando
+   offline no se puede afirmar presencia viva, y un chip verde con datos de hace minutos sería una mentira. */
+.sesshead.mini{display:flex;align-items:center;gap:9px;padding:7px 12px}
+.sesshead.mini .who{display:flex;align-items:center;gap:8px;min-width:0;flex:1;font-size:13.5px;font-weight:800;color:var(--n-900)}
+.sesshead.mini .who svg{flex:0 0 auto;color:var(--p-800)}
+.sesshead.mini .presence{min-height:32px;padding:2px 9px;font-size:11.5px;gap:6px}
+.sesshead.mini .presence .pv{width:19px;height:19px;font-size:9px}
+
+/* ---------- STEPPER server-driven ---------- */
+.srail{display:flex;align-items:flex-start;padding:12px 8px 6px;background:var(--n-0)}
+.sr{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:5px;position:relative;min-height:48px}
+.sr .d{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  border:2px solid var(--n-300);background:var(--n-0);color:var(--n-600);font-size:11px;font-weight:850;
+  position:relative;z-index:2}
+.sr .lb{font-size:11.5px;font-weight:800;color:var(--n-600);text-align:center;line-height:1.15}
+.sr::before{content:"";position:absolute;top:11px;right:50%;width:100%;height:3px;background:var(--n-200);z-index:1}
+.sr:first-child::before{display:none}
+.sr.done .d{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.sr.done .lb{color:var(--ok-tx)}
+.sr.done::before,.sr.on::before{background:var(--ok-bd)}
+.sr.on .d{background:var(--p-600);border-color:var(--p-600);color:#fff;box-shadow:0 0 0 4px var(--brand-a16)}
+.sr.on .lb{color:var(--p-800);font-weight:850}
+.stepline{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 14px;background:var(--n-0);
+  border-bottom:1px solid var(--n-200);font-size:13.5px;font-weight:750;color:var(--n-800)}
+.stepline .ix{font-variant-numeric:tabular-nums;font-weight:850;color:var(--p-800);background:var(--p-50);
+  border:1px solid var(--brand-a20);border-radius:8px;padding:2px 8px;font-size:12px;flex:0 0 auto}
+.stepline .more{margin-left:auto;font-size:12.5px;font-weight:800;color:var(--p-700);
+  display:inline-flex;align-items:center;gap:4px;min-height:48px;flex:0 0 auto}
+.stepline.stale{background:var(--n-50);color:var(--n-700)}
+
+/* lista completa: los 10 pasos lineales + la salida alterna */
+.slist{display:grid;gap:2px;overflow-y:auto;flex:1;min-height:0;padding-right:2px} /* scrollea; "Cerrar" queda fijo */
+.sitem{display:flex;align-items:center;gap:11px;min-height:52px;padding:5px 8px;border-radius:14px;
+  border:1px solid transparent}
+.sitem .n{width:26px;height:26px;border-radius:50%;border:2px solid var(--n-300);color:var(--n-600);
+  font-size:11.5px;font-weight:850;display:flex;align-items:center;justify-content:center;flex:0 0 auto;background:var(--n-0)}
+.sitem .sb{flex:1;min-width:0}
+.sitem .sb b{display:block;font-size:14px;font-weight:800;color:var(--n-900);line-height:1.25}
+.sitem .sb span{font-size:11.5px;font-weight:650;color:var(--n-700)}
+.sitem.done .n{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.sitem.on{background:var(--p-50);border-color:var(--brand-a20)}
+.sitem.on .n{background:var(--p-600);border-color:var(--p-600);color:#fff}
+.sitem.todo .sb b{color:var(--n-700);font-weight:750}
+.sitem.term .n{border-style:dashed}
+.gicon{flex:0 0 auto;color:var(--n-600)}
+
+/* ---------- tarjetas de verificación ---------- */
+.vcard{background:linear-gradient(180deg,#fff,#fdfcff);border:var(--bd-lite);border-radius:20px;
+  padding:12px 14px;box-shadow:var(--sh-b1)}
+.vcard.bad{border:1.5px solid var(--danger-bd);background:#fffbfb}
+.vcard.warn{border:1.5px solid var(--warn-bd);background:#fffdf7}
+.vhead{display:flex;align-items:center;gap:9px}
+.vhead b{font-size:14.5px;font-weight:850;color:var(--n-900);flex:1}
+.vpill{display:inline-flex;align-items:center;gap:5px;min-height:26px;padding:2px 9px;border-radius:8px;
+  font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.vpill.ok{background:var(--ok-bg);border:1px solid var(--ok-bd);color:var(--ok-tx)}
+.vpill.warn{background:var(--warn-bg);border:1px solid var(--warn-bd);color:var(--warn-tx)}
+.vpill.bad{background:var(--danger-bg);border:1px solid var(--danger-bd);color:var(--danger-tx)}
+.kv{display:flex;align-items:flex-start;gap:8px;padding:7px 0 6px;border-top:1px solid var(--n-100);font-size:13.5px}
+.kv:first-of-type{border-top:0}
+.kv .k{color:var(--n-700);font-weight:650;flex:0 0 92px}
+.kv .v{color:var(--n-900);font-weight:750;flex:1;min-width:0}
+.kv .v.miss{color:var(--danger-tx);font-weight:800}
+.linkbtn{min-height:48px;display:inline-flex;align-items:center;gap:6px;font-size:13.5px;font-weight:800;color:var(--p-700)}
+.switchrow{display:flex;align-items:center;gap:12px;min-height:56px;padding:9px 14px;border-radius:18px;
+  border:1.5px solid var(--n-300);background:var(--n-0);box-shadow:var(--sh-1)}
+.switchrow .sw{width:52px;height:31px;border-radius:16px;background:var(--n-400);position:relative;flex:0 0 auto}
+.switchrow .sw::after{content:"";position:absolute;top:3px;left:3px;width:25px;height:25px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 3px rgba(24,16,54,.3)}
+.switchrow.on{border-color:var(--warn-bd);background:var(--warn-bg)}
+.switchrow.on .sw{background:var(--warn-tx)}
+.switchrow.on .sw::after{left:24px}
+.switchrow .st{flex:1;min-width:0}
+.switchrow .st b{display:block;font-size:14.5px;font-weight:800;color:var(--n-900)}
+.switchrow .st span{font-size:12.5px;font-weight:650;color:var(--n-700)}
+
+/* ---------- QR / T&C ---------- */
+.qrwrap{display:flex;flex-direction:column;align-items:center;gap:11px;padding:16px 14px;
+  border-radius:var(--r-2xl);background:var(--n-0);border:var(--bd-lite);box-shadow:var(--sh-b1)}
+.qrbox{position:relative;padding:14px;background:#fff;border-radius:18px;border:1.5px solid var(--n-200)}
+.qrbox svg{display:block}
+.qrbox.dead svg{opacity:.13}
+.qrbox .over{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px}
+.cnt{display:inline-flex;align-items:center;gap:8px;min-height:38px;padding:4px 14px;border-radius:12px;
+  background:var(--n-50);border:1px solid var(--n-200);color:var(--n-900);font-size:16px;font-weight:850;
+  font-variant-numeric:tabular-nums}
+.cnt.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.cnt.dead{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.cnt .cl{font-size:11.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;opacity:.9}
+.tenantbar{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--n-0);border-bottom:1px solid var(--n-200)}
+.tlogo{width:38px;height:38px;border-radius:12px;background:var(--n-800);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:850;flex:0 0 auto}
+.tname{font-size:16px;font-weight:850;color:var(--n-900)}
+.tsub{font-size:12px;color:var(--n-700);font-weight:600}
+.nobrand{display:flex;gap:8px;align-items:flex-start;margin-top:auto;padding:10px 12px;border-radius:14px;
+  border:1.5px dashed var(--n-300);background:var(--n-25);color:var(--n-700);font-size:12px;font-weight:700}
+
+/* ---------- events log / terminal ---------- */
+.evlog{background:var(--n-0);border:var(--bd-lite);border-radius:20px;padding:4px 14px;box-shadow:var(--sh-b1)}
+.ev{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--n-100);font-size:13px}
+.ev:last-child{border-bottom:0}
+.ev .t{flex:0 0 50px;font-size:12px;font-weight:800;color:var(--n-700);font-variant-numeric:tabular-nums}
+.ev .b{flex:1;color:var(--n-900);font-weight:700}
+.ev .b i{display:block;font-style:normal;font-size:11.5px;color:var(--n-700);font-weight:650;margin-top:1px}
+
+/* ---------- comunes ---------- */
+.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;
+  font-size:13.5px;font-weight:600;line-height:1.45;border:1px solid}
+.banner svg{flex:0 0 auto;margin-top:1px}
+.banner .ba{display:inline-flex;align-items:center;min-height:44px;font-weight:850;text-decoration:underline}
+.b-danger{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.b-warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.b-ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.b-info{background:var(--info-bg);border-color:var(--info-bd);color:var(--n-800)}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:56px;border-radius:18px;
+  font-size:16px;font-weight:800;letter-spacing:.01em}
+.btn-primary{background:linear-gradient(180deg,#7442e8,var(--p-600));color:#fff;
+  box-shadow:0 1px 0 rgba(255,255,255,.28) inset,0 4px 10px -4px rgba(69,24,158,.35),0 14px 28px -12px rgba(135,82,254,.45)}
+.btn-ghost{background:var(--n-0);border:1.5px solid var(--n-300);color:var(--n-800);box-shadow:var(--sh-1)}
+.btn-danger{background:var(--danger);color:#fff;box-shadow:0 1px 0 rgba(255,255,255,.2) inset,0 10px 22px -10px rgba(192,38,38,.5)}
+.btn.is-disabled{opacity:.55}
+.btn-sm{min-height:48px;font-size:14.5px;border-radius:14px}
+.btn-md{min-height:54px;font-size:15.5px;border-radius:16px}
+.spin{width:18px;height:18px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;
+  border-radius:50%;animation:rot 1s linear infinite}
+.spin.dk{border-color:rgba(106,53,224,.25);border-top-color:var(--p-600)}
+@keyframes rot{to{transform:rotate(360deg)}}
+.wpad{padding:14px 14px 18px;display:flex;flex-direction:column;flex:1;gap:11px;position:relative;z-index:2}
+/* dock pegado: el contenido del paso scrollea, el CTA no se va de la pantalla */
+.dock{margin-top:auto;display:grid;gap:9px;padding:12px 0 0;position:relative}
+.dock::before{content:"";position:absolute;top:0;left:-14px;right:-14px;height:1px;background:var(--n-200)}
+.dock .why{font-size:12.5px;font-weight:750;color:var(--n-700);text-align:center;line-height:1.4}
+.center-state{margin:auto 0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;padding:0 8px}
+.big-ic{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.big-ic.ok{background:var(--ok-bg);color:var(--ok-tx)}
+.big-ic.info{background:var(--info-bg);border:1.5px solid var(--info-bd);color:var(--info)}
+.big-ic.warn{background:var(--warn-bg);border:1.5px solid var(--warn-bd);color:var(--warn-tx);width:76px;height:76px}
+.big-ic.deny{background:var(--danger-bg);border:1.5px solid var(--danger-bd);color:var(--danger-tx);width:76px;height:76px}
+.center-state h4{margin:0;font-size:22px;font-weight:850;color:var(--n-900)}
+.center-state p{margin:0;font-size:14px;color:var(--n-700);max-width:300px}
+.sk{background:linear-gradient(90deg,var(--n-100),var(--n-200),var(--n-100));
+  background-size:200% 100%;animation:shim 1.4s infinite;border-radius:14px}
+.sk.r20{border-radius:20px}
+@keyframes shim{to{background-position:-200% 0}}
+.scrim{position:absolute;inset:0;z-index:5;background:rgba(23,18,43,.42)}
+.sheet{position:absolute;left:8px;right:8px;bottom:8px;z-index:6;
+  background:rgba(255,255,255,.96); /* plate opaco — el wizard NO usa BackdropFilter */
+  border-radius:var(--r-2xl);border:1px solid rgba(255,255,255,.95);outline:1px solid rgba(23,18,43,.06);
+  box-shadow:var(--sh-float);padding:10px 16px 16px}
+.sheet.tall{top:78px;overflow:hidden;display:flex;flex-direction:column}
+.grab{width:44px;height:5px;border-radius:3px;background:var(--n-300);margin:4px auto 12px}
+.sheet h5{margin:0;font-size:18px;font-weight:850;color:var(--n-900)}
+.sheet .ssub{font-size:13px;color:var(--n-700);font-weight:600;margin:4px 0 12px}
+.opt{display:flex;align-items:center;gap:12px;min-height:56px;padding:0 14px;border-radius:16px;
+  border:1.5px solid var(--n-200);background:var(--n-0);margin-bottom:8px;font-size:15px;font-weight:700;color:var(--n-800)}
+.opt .radio{width:22px;height:22px;border-radius:50%;border:2px solid var(--n-400);flex:0 0 auto}
+.opt.sel{border-color:var(--p-600);background:var(--p-50);color:var(--p-800)}
+.opt.sel .radio{border-color:var(--p-600);background:radial-gradient(circle,var(--p-600) 0 45%,transparent 50%)}
+.opt .osub{display:block;font-size:12px;font-weight:650;color:var(--n-700)}
+/* GD-2: la fila inerte NO usa opacidad — el texto crítico ES el motivo. Superficie hundida + texto pleno. */
+.opt.off{background:var(--n-25);border-color:var(--n-200);color:var(--n-700)}
+.opt.off .radio{border-color:var(--n-400);background:var(--n-100)} /* no-texto */
+.opt.off .osub{color:var(--n-700)}
+.dim{opacity:.9;pointer-events:none}
+
+footer.dod{max-width:1720px;margin:0 auto;padding:10px 24px 50px;color:var(--n-700);font-size:13px}
+footer.dod .card{background:var(--n-0);border:var(--bd-lite);border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1);margin-bottom:14px}
+footer.dod b{color:var(--n-900)}
+.changelog li{margin:5px 0}
+</style>
+</head>
+<body>
+
+<!-- QR simbólico definido una sola vez y reusado con <use> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><g id="qrsym" fill="#000"><rect x="0" y="0" width="56" height="8"/><rect x="96" y="0" width="24" height="8"/><rect x="144" y="0" width="56" height="8"/><rect x="0" y="8" width="8" height="8"/><rect x="48" y="8" width="8" height="8"/><rect x="72" y="8" width="8" height="8"/><rect x="88" y="8" width="24" height="8"/><rect x="120" y="8" width="16" height="8"/><rect x="144" y="8" width="8" height="8"/><rect x="192" y="8" width="8" height="8"/><rect x="0" y="16" width="8" height="8"/><rect x="16" y="16" width="24" height="8"/><rect x="48" y="16" width="8" height="8"/><rect x="88" y="16" width="8" height="8"/><rect x="104" y="16" width="16" height="8"/><rect x="128" y="16" width="8" height="8"/><rect x="144" y="16" width="8" height="8"/><rect x="160" y="16" width="24" height="8"/><rect x="192" y="16" width="8" height="8"/><rect x="0" y="24" width="8" height="8"/><rect x="16" y="24" width="24" height="8"/><rect x="48" y="24" width="8" height="8"/><rect x="64" y="24" width="8" height="8"/><rect x="80" y="24" width="8" height="8"/><rect x="96" y="24" width="8" height="8"/><rect x="128" y="24" width="8" height="8"/><rect x="144" y="24" width="8" height="8"/><rect x="160" y="24" width="24" height="8"/><rect x="192" y="24" width="8" height="8"/><rect x="0" y="32" width="8" height="8"/><rect x="16" y="32" width="24" height="8"/><rect x="48" y="32" width="8" height="8"/><rect x="72" y="32" width="8" height="8"/><rect x="112" y="32" width="16" height="8"/><rect x="144" y="32" width="8" height="8"/><rect x="160" y="32" width="24" height="8"/><rect x="192" y="32" width="8" height="8"/><rect x="0" y="40" width="8" height="8"/><rect x="48" y="40" width="8" height="8"/><rect x="72" y="40" width="40" height="8"/><rect x="120" y="40" width="16" height="8"/><rect x="144" y="40" width="8" height="8"/><rect x="192" y="40" width="8" height="8"/><rect x="0" y="48" width="56" height="8"/><rect x="64" y="48" width="8" height="8"/><rect x="80" y="48" width="8" height="8"/><rect x="96" y="48" width="8" height="8"/><rect x="112" y="48" width="8" height="8"/><rect x="128" y="48" width="8" height="8"/><rect x="144" y="48" width="56" height="8"/><rect x="64" y="56" width="8" height="8"/><rect x="80" y="56" width="8" height="8"/><rect x="96" y="56" width="40" height="8"/><rect x="8" y="64" width="16" height="8"/><rect x="32" y="64" width="24" height="8"/><rect x="72" y="64" width="16" height="8"/><rect x="128" y="64" width="8" height="8"/><rect x="144" y="64" width="32" height="8"/><rect x="0" y="72" width="32" height="8"/><rect x="56" y="72" width="48" height="8"/><rect x="112" y="72" width="8" height="8"/><rect x="128" y="72" width="8" height="8"/><rect x="144" y="72" width="16" height="8"/><rect x="192" y="72" width="8" height="8"/><rect x="16" y="80" width="16" height="8"/><rect x="48" y="80" width="88" height="8"/><rect x="152" y="80" width="8" height="8"/><rect x="176" y="80" width="16" height="8"/><rect x="16" y="88" width="16" height="8"/><rect x="56" y="88" width="8" height="8"/><rect x="104" y="88" width="8" height="8"/><rect x="120" y="88" width="24" height="8"/><rect x="152" y="88" width="16" height="8"/><rect x="192" y="88" width="8" height="8"/><rect x="8" y="96" width="56" height="8"/><rect x="72" y="96" width="40" height="8"/><rect x="144" y="96" width="8" height="8"/><rect x="168" y="96" width="8" height="8"/><rect x="184" y="96" width="16" height="8"/><rect x="8" y="104" width="8" height="8"/><rect x="24" y="104" width="16" height="8"/><rect x="56" y="104" width="16" height="8"/><rect x="80" y="104" width="8" height="8"/><rect x="96" y="104" width="8" height="8"/><rect x="120" y="104" width="16" height="8"/><rect x="160" y="104" width="16" height="8"/><rect x="24" y="112" width="8" height="8"/><rect x="48" y="112" width="8" height="8"/><rect x="64" y="112" width="8" height="8"/><rect x="96" y="112" width="16" height="8"/><rect x="152" y="112" width="8" height="8"/><rect x="168" y="112" width="8" height="8"/><rect x="184" y="112" width="16" height="8"/><rect x="0" y="120" width="8" height="8"/><rect x="24" y="120" width="8" height="8"/><rect x="56" y="120" width="8" height="8"/><rect x="80" y="120" width="8" height="8"/><rect x="112" y="120" width="8" height="8"/><rect x="128" y="120" width="8" height="8"/><rect x="152" y="120" width="8" height="8"/><rect x="168" y="120" width="8" height="8"/><rect x="192" y="120" width="8" height="8"/><rect x="8" y="128" width="32" height="8"/><rect x="48" y="128" width="24" height="8"/><rect x="96" y="128" width="8" height="8"/><rect x="128" y="128" width="48" height="8"/><rect x="72" y="136" width="8" height="8"/><rect x="88" y="136" width="24" height="8"/><rect x="128" y="136" width="8" height="8"/><rect x="160" y="136" width="24" height="8"/><rect x="0" y="144" width="56" height="8"/><rect x="64" y="144" width="8" height="8"/><rect x="80" y="144" width="8" height="8"/><rect x="128" y="144" width="8" height="8"/><rect x="144" y="144" width="8" height="8"/><rect x="160" y="144" width="8" height="8"/><rect x="0" y="152" width="8" height="8"/><rect x="48" y="152" width="8" height="8"/><rect x="80" y="152" width="8" height="8"/><rect x="120" y="152" width="16" height="8"/><rect x="160" y="152" width="16" height="8"/><rect x="184" y="152" width="16" height="8"/><rect x="0" y="160" width="8" height="8"/><rect x="16" y="160" width="24" height="8"/><rect x="48" y="160" width="8" height="8"/><rect x="72" y="160" width="16" height="8"/><rect x="96" y="160" width="16" height="8"/><rect x="120" y="160" width="48" height="8"/><rect x="176" y="160" width="8" height="8"/><rect x="0" y="168" width="8" height="8"/><rect x="16" y="168" width="24" height="8"/><rect x="48" y="168" width="8" height="8"/><rect x="64" y="168" width="8" height="8"/><rect x="80" y="168" width="8" height="8"/><rect x="96" y="168" width="24" height="8"/><rect x="152" y="168" width="16" height="8"/><rect x="192" y="168" width="8" height="8"/><rect x="0" y="176" width="8" height="8"/><rect x="16" y="176" width="24" height="8"/><rect x="48" y="176" width="8" height="8"/><rect x="64" y="176" width="8" height="8"/><rect x="88" y="176" width="24" height="8"/><rect x="128" y="176" width="8" height="8"/><rect x="152" y="176" width="16" height="8"/><rect x="184" y="176" width="16" height="8"/><rect x="0" y="184" width="8" height="8"/><rect x="48" y="184" width="8" height="8"/><rect x="80" y="184" width="16" height="8"/><rect x="120" y="184" width="8" height="8"/><rect x="136" y="184" width="8" height="8"/><rect x="152" y="184" width="24" height="8"/><rect x="192" y="184" width="8" height="8"/><rect x="0" y="192" width="56" height="8"/><rect x="64" y="192" width="32" height="8"/><rect x="104" y="192" width="16" height="8"/><rect x="160" y="192" width="8" height="8"/><rect x="176" y="192" width="8" height="8"/></g></defs></svg>
+
+<div class="doc-head">
+  <h1>RideOps · Mockups M2 — Tanda A <span class="v2">mismo lenguaje v2 · PREMIUM</span></h1>
+  <p>Cuatro pantallas del <b>wizard de checkout server-driven</b>, en el lenguaje visual aprobado en las Tandas A v2
+  y B del M1 (M3 Expressive, superficies tonales de #8752FE, bento, tab bar flotante pill, duotone, política de blur
+  vinculante). El eje del M2 es <b>ADR-4: el servidor manda</b> — el stepper de los 11 estados se dibuja desde
+  <code>currentStep</code> y <code>events[]</code>, jamás desde una copia de la máquina en Dart; un 409 se resuelve
+  re-consultando y re-renderizando. Y §9-1 quedó resuelta por Hector: <b>conviven 4 superficies</b>, así que el avance
+  ajeno es normalidad (banner informativo), no error.</p>
+  <div class="meta-chips">
+    <span class="mchip">Targets ≥ 48 pt · CTAs 54–56 · filas de paso 52</span>
+    <span class="mchip">Texto ≥ 4.5:1 sobre el fondo REAL — todos los pares MEDIDOS y listados por sección</span>
+    <span class="mchip">Todo string en l10n — app_es.arb / app_en.arb (ADR-8), aquí se muestra ES</span>
+    <span class="mchip">Loading / empty / error por pantalla (DoD-10)</span>
+    <span class="mchip">Foco AZUL #0b63d6 — nunca morado sobre morado</span>
+    <span class="mchip ok">Blur: el wizard entero va con <b>CERO BackdropFilter</b> (plates opacos ≥ .96); en la home (pantalla 11) el único blur sigue siendo el tab bar, y cae a plate cuando sube un sheet</span>
+    <span class="mchip ok">Motion ≤ 1 Hz + prefers-reduced-motion; el countdown del QR actualiza 1 vez/s solo el numeral (es información, no decoración)</span>
+    <span class="mchip warn">Superficie volteada al cliente (QR de T&amp;C): branding del TENANT vía display-data — CERO marca de plataforma, ni "RideOps" ni "Ride Fleet"</span>
+    <span class="mchip warn">ADR-4: prohibido reproducir un paso sellado o adivinar el siguiente; el cliente solo pinta lo que el servidor reporta</span>
+  </div>
+</div>
+
+<nav class="jump">
+  <a href="#s8">8 · Shell del wizard (11 estados)</a>
+  <a href="#s9">9 · Paso CONFIRMING</a>
+  <a href="#s10">10 · Paso T&amp;C (QR + countdown)</a>
+  <a href="#s11">11 · Entrada desde la card de la cola</a>
+  <a href="#dod">DoD + decisiones</a>
+</nav>
+
+<!-- ============================================================ 8 · SHELL DEL WIZARD -->
+<section class="blk" id="s8">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 8 · M2-H1</span>
+    <h2>Shell del wizard — stepper de la máquina de 11 estados, dibujado DESDE el servidor</h2>
+    <p>Fuente de verdad: <code>GET /api/checkout-sessions/by-reservation/:reservationId</code> (y luego
+    <code>GET /:id</code> en poll cada 5 s, backoff a 15 s tras 3 sin cambio, pausado en background).
+    El shell no decide nada: dibuja <code>currentStep</code>, marca como hechos los pasos que aparecen en
+    <code>events[]</code> y deja el resto en gris inerte. Con 4 superficies conviviendo, el avance ajeno es
+    <b>normalidad</b>: banner informativo + auto-avance del stepper, nunca un modal que bloquee al agente.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Normal (paso 1 de 10)</span><span class="schip"><i></i>Lista completa de pasos</span>
+      <span class="schip"><i></i>Avance ajeno (no bloqueante)</span><span class="schip"><i></i>Sin red</span>
+      <span class="schip"><i></i>Guardar y pausar</span><span class="schip"><i></i>Loading</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>8A — Wizard en marcha <small>header de sesión + rail de fases + chip de presencia (P1)</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></svg>Pausar<span class="m" style="margin-left:5px">1</span></div>
+          </div>
+          <div class="sesshead">
+            <div class="sesrow">
+              <div class="sic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8" r="3.6" fill="rgba(135,82,254,.16)"/><path d="M5 20c1.5-3.6 4-5.2 7-5.2s5.5 1.6 7 5.2"/></svg></div>
+              <div class="sb"><b>Laura Méndez</b><span>Salida hoy 10:30 · Pre-checkin listo</span></div>
+              <span class="m">2</span>
+            </div>
+            <div class="sesrow">
+              <div class="sic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 10l2.2-4.2A2 2 0 0 1 8 4.7h8a2 2 0 0 1 1.8 1.1L20 10"/><rect x="3" y="10" width="18" height="7" rx="2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/></svg></div>
+              <div class="sb"><b>Toyota Corolla 2023 · U-112</b><span>Placa MXA-4471 · Odómetro 24 108 km</span></div>
+            </div>
+            <div class="presence"><span class="lv"></span><span class="pv">MG</span>María G. está en esta sesión · kiosco · hace 8 s<span class="m" style="margin-left:2px">3</span></div>
+          </div>
+          <div class="srail"><span class="m inframe" style="margin:2px 0 0 4px">4</span>
+            <div class="sr on"><span class="d">1</span><span class="lb">Confirmar</span></div>
+            <div class="sr"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+            <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 1 de 10</span>Confirmar cliente y vehículo
+            <span class="more">Ver todos los pasos <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span><span class="m" style="position:absolute;margin:-30px 0 0 300px">5</span></div>
+          <div class="wpad">
+            <div class="vcard">
+              <div class="vhead"><b>Cliente</b><span class="vpill ok">Verificado</span></div>
+              <div class="kv"><span class="k">Licencia</span><span class="v">B-4482913 · vence 2029</span></div>
+              <div class="kv"><span class="k">Teléfono</span><span class="v">+52 55 1234 5678</span></div>
+            </div>
+            <div class="vcard">
+              <div class="vhead"><b>Vehículo</b><span class="vpill ok">Disponible</span></div>
+              <div class="kv"><span class="k">Unidad</span><span class="v">U-112 · Corolla 2023</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Continuar a T&amp;C</div>
+              <div class="why">El servidor confirma el avance; si otra superficie ya lo hizo, esta pantalla se actualiza sola.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>8B — Los 11 pasos, tal como los reporta el servidor <small>hechos · actual · pendientes · guards</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:44</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="dim">
+            <div class="wizbar">
+              <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+              <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+              <div class="pausebtn">Pausar</div>
+            </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span><span class="presence"><span class="lv"></span><span class="pv">MG</span>María G. está en esta sesión · kiosco · hace 6 s</span></div>
+            <div class="srail">
+              <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+              <div class="sr on"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+              <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+              <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+              <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+            </div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet tall">
+            <div class="grab"></div>
+            <h5>10 pasos + salida alterna</h5>
+            <div class="ssub">Estado reportado por el servidor · actualizado hace 3 s<span class="m" style="margin-left:6px">6</span></div>
+            <div class="slist">
+              <div class="sitem done"><span class="n">✓</span><div class="sb"><b>Confirmar cliente y vehículo</b><span>Completado por ti · 9:41</span></div></div>
+              <div class="sitem on"><span class="n">2</span><div class="sb"><b>Términos y condiciones</b><span>En curso · el cliente firma en su teléfono</span></div></div>
+              <div class="sitem todo"><span class="n">3</span><div class="sb"><b>Términos firmados</b><span>Espera: firma de T&amp;C del cliente</span></div>
+                <span class="gicon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span></div>
+              <div class="sitem todo"><span class="n">4</span><div class="sb"><b>Cobro en terminal</b><span>Pendiente</span></div></div>
+              <div class="sitem todo"><span class="n">5</span><div class="sb"><b>Pago completo</b><span>Espera: cobro registrado</span></div>
+                <span class="gicon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span></div>
+              <div class="sitem todo"><span class="n">6</span><div class="sb"><b>Pasar a inspección</b><span>Pendiente</span></div></div>
+              <div class="sitem todo"><span class="n">7</span><div class="sb"><b>Inspección en curso</b><span>Pendiente</span></div></div>
+              <div class="sitem todo"><span class="n">8</span><div class="sb"><b>Firma del cliente</b><span>Espera: inspección completa</span></div>
+                <span class="gicon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span></div>
+              <div class="sitem todo"><span class="n">9</span><div class="sb"><b>Generando contrato</b><span>Pendiente</span></div></div>
+              <div class="sitem todo"><span class="n">10</span><div class="sb"><b>Entregado</b><span>Espera: firma del cliente</span></div>
+                <span class="gicon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span></div>
+              <div class="sitem todo term"><span class="n">✕</span><div class="sb"><b>Cancelado</b><span>Salida alterna desde cualquier paso no terminal</span></div><span class="m">7</span></div>
+            </div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:10px">Cerrar</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>8C — Otra superficie avanzó este paso <small>banner NO bloqueante + auto-avance del stepper</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:46</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead">
+            <div class="sesrow">
+              <div class="sic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="8" r="3.6" fill="rgba(135,82,254,.16)"/><path d="M5 20c1.5-3.6 4-5.2 7-5.2s5.5 1.6 7 5.2"/></svg></div>
+              <div class="sb"><b>Laura Méndez</b><span>Corolla 2023 · U-112 · R-2481</span></div>
+            </div>
+            <div class="presence"><span class="lv"></span><span class="pv">MG</span>María G. está en esta sesión · kiosco · hace 4 s</div>
+          </div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr on"><span class="d">3</span><span class="lb">Pago</span><span class="m inframe" style="margin:-8px 0 0 22px">8</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Cobro en terminal
+            <span class="more">Ver todos los pasos <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+          <div class="wpad">
+            <div class="banner b-info">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8v.5"/></svg>
+              <span>Los términos se firmaron <b>en el kiosco</b> hace 40 s. Ya vas en el paso de cobro.
+              <span class="ba">Ver qué cambió</span></span><span class="m">9</span></div>
+            <div class="vcard">
+              <div class="vhead"><b>Cobro</b><span class="vpill warn">Requiere red</span></div>
+              <div class="kv"><span class="k">Renta</span><span class="v tnum">$1 840.00</span></div>
+              <div class="kv"><span class="k">Depósito</span><span class="v tnum">$3 000.00 (retención)</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Ir al cobro</div>
+              <div class="why">El dinero nunca se encola (ADR-5): el cobro solo se abre con conexión.<span class="m" style="margin-left:4px">10</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>8D — Sin red, honesto <small>lectura con edad del dato; transiciones bloqueadas con causa</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:47</span><span class="off">Sin red · 84 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr on"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+            <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline stale"><span class="ix">Paso 2 de 10</span>Términos y condiciones · vista de hace 1 min<span class="m" style="position:absolute;margin:-30px 0 0 300px">11</span></div>
+          <div class="wpad">
+            <div class="banner b-warn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg>
+              <span>Sin conexión. Esto es lo último que vio el servidor <b>hace 1 min</b> — puede haber cambiado en otra
+              superficie. <span class="ba">Reintentar</span></span><span class="m">12</span></div>
+            <div class="vcard warn">
+              <div class="vhead"><b>Términos y condiciones</b><span class="vpill warn">En espera</span></div>
+              <div class="kv"><span class="k">Enviado a</span><span class="v">Teléfono del cliente · 9:43</span></div>
+              <div class="kv"><span class="k">Código QR</span><span class="v miss">No se puede emitir sin red</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary is-disabled">Continuar a T&amp;C</div>
+              <div class="why">Avanzar un paso requiere confirmación del servidor. Sin red no se adivina: se espera.<br>
+              Nada de este paso entra a la Bandeja de salida.<span class="m" style="margin-left:4px">13</span></div>
+              <div class="btn btn-ghost btn-sm">Reintentar ahora</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>8E — Guardar y pausar (abandon) <small>consecuencias explícitas; sheet en plate opaco</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:48</span><span>LTE · 84 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="dim">
+            <div class="wizbar">
+              <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+              <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+              <div class="pausebtn">Pausar</div>
+            </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span><span class="presence"><span class="lv"></span><span class="pv">MG</span>María G. está en esta sesión · kiosco · hace 11 s</span></div>
+            <div class="srail">
+              <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+              <div class="sr on"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+              <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+              <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+              <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+            </div>
+            <div class="wpad"><div class="vcard"><div class="vhead"><b>Términos y condiciones</b></div></div></div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <h5>¿Guardar y pausar este checkout?</h5>
+            <div class="ssub">La sesión queda guardada en el paso 2 de 10. Nada se pierde.</div>
+            <div class="banner b-ok" style="margin-bottom:10px">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg>
+              <span>Se conserva: cliente y vehículo verificados, el código de T&amp;C vigente y el registro de quién hizo qué.</span></div>
+            <div class="banner b-warn" style="margin-bottom:12px">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+              <span>Otro compañero (o el kiosco) puede retomarla desde donde va. Al volver, entras al paso que reporte
+              el servidor, no al que dejaste.<span class="m">14</span></span></div>
+            <div class="btn btn-primary btn-md">Guardar y pausar</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:9px">Seguir aquí</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>8F — Loading del shell <small>primer fetch de by-reservation; geometría real, no spinner centrado</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Abriendo sesión…</span></div>
+          </div>
+          <div class="sesshead">
+            <div class="sesrow"><div class="sk" style="width:38px;height:38px;border-radius:13px"></div>
+              <div class="sb" style="display:grid;gap:6px"><div class="sk" style="height:15px;width:150px"></div><div class="sk" style="height:11px;width:190px"></div></div></div>
+            <div class="sesrow"><div class="sk" style="width:38px;height:38px;border-radius:13px"></div>
+              <div class="sb" style="display:grid;gap:6px"><div class="sk" style="height:15px;width:180px"></div><div class="sk" style="height:11px;width:140px"></div></div></div>
+          </div>
+          <div class="srail">
+            <div class="sr"><span class="sk" style="width:24px;height:24px;border-radius:50%"></span><span class="sk" style="height:9px;width:44px;margin-top:4px"></span></div>
+            <div class="sr"><span class="sk" style="width:24px;height:24px;border-radius:50%"></span><span class="sk" style="height:9px;width:30px;margin-top:4px"></span></div>
+            <div class="sr"><span class="sk" style="width:24px;height:24px;border-radius:50%"></span><span class="sk" style="height:9px;width:34px;margin-top:4px"></span></div>
+            <div class="sr"><span class="sk" style="width:24px;height:24px;border-radius:50%"></span><span class="sk" style="height:9px;width:48px;margin-top:4px"></span></div>
+            <div class="sr"><span class="sk" style="width:24px;height:24px;border-radius:50%"></span><span class="sk" style="height:9px;width:36px;margin-top:4px"></span></div>
+          </div>
+          <div class="wpad">
+            <div class="sk" style="height:13px;width:150px"></div>
+            <div class="sk r20" style="height:104px"></div>
+            <div class="sk r20" style="height:78px"></div>
+            <div class="dock"><div class="sk" style="height:56px;border-radius:18px"></div></div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Shell del wizard</h3>
+      <div class="note"><span class="m">1</span><span><b>"Pausar" siempre visible, 48 px</b> (POST <code>/:id/abandon</code>) — en el patio la interrupción es la norma, no la excepción. La flecha de atrás hace lo mismo con confirmación: nunca se sale de un checkout sin decidir explícitamente.</span></div>
+      <div class="note"><span class="m">2</span><span><b>Header de sesión = las 3 respuestas del patio:</b> a quién atiendo, qué unidad entrego, para cuándo. Superficie tonal --tonal (marca sin gradiente detrás de datos). El secundario usa --n-700, NO --n-600: sobre tonal, --n-600 mide 4.58:1 — pasa AA raspando y se lava al sol.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Chip de presencia (P1, ya construido):</b> <code>presence:[{surface, displayName, lastSeenAt}]</code> del <code>GET /:id</code>. Es <b>informativo y jamás bloquea</b> — no es un lock. Se pinta con nombre + superficie ("en el kiosco" / "en el mostrador" / "en otro teléfono") y desaparece solo cuando el heartbeat pasa el TTL de 45 s, sin aviso ni funeral. Si vienen varias presencias, se muestra la más reciente y "+2" tappable.</span></div>
+      <div class="note"><span class="m">4</span><span><b>Rail de 5 fases + contador honesto "Paso N de 10".</b> El agrupamiento (Confirmar · T&amp;C · Pago · Inspección · Cierre) es <b>solo presentación</b> y vive en l10n: 10 nodos de 24 px no caben legibles en 390 px con guantes. <b>Por qué 10 y no 11:</b> la máquina tiene 11 estados, pero la cadena lineal <code>CONFIRMING → CLOSED</code> son <b>10</b>; <code>CANCELLED</code> es salida alterna desde cualquier paso no terminal, no el paso siguiente. Con denominador 11, "Paso 4 de 11" haría que el agente calcule 7 pasos restantes cuando faltan 6 — el contador tiene que poder restarse en la cabeza. La lista completa (8B) muestra los 10 en línea y la salida alterna aparte. <b>Regla ADR-4 para build:</b> el rail se pinta con <code>currentStep</code> (actual) + <code>events[]</code> (hechos); lo que viene se dibuja gris inerte y NO se calcula: si el servidor reporta un paso desconocido, el rail cae a un nodo genérico con el nombre crudo del servidor y la app sigue viva (forward-compat), nunca crashea ni "corrige".</span></div>
+      <div class="note"><span class="m">5</span><span><b>La stepline es tappable (48 px)</b> y también es donde vive la honestidad del dato: en offline se tiñe --n-50 y añade "vista de hace X" (8D).</span></div>
+      <div class="note"><span class="m">6</span><span><b>Los 11 pasos, sin traducción creativa:</b> etiquetas humanas en l10n, una por enum del servidor. Los pasos con entry guard muestran candado + <b>qué falta</b> ("Espera: firma de T&amp;C del cliente"), que es exactamente el 409 <code>ENTRY_GUARD</code> explicado ANTES de que ocurra: <code>TC_SIGNED←tcCompletedAt</code>, <code>PAID←paymentCompletedAt</code>, <code>CUSTOMER_SIGN_PENDING←inspectionCompletedAt</code>, <code>CLOSED←customerSignedAt</code>.</span></div>
+      <div class="note"><span class="m">7</span><span><b>CANCELLED se dibuja aparte, con borde punteado:</b> es terminal alterno alcanzable desde cualquier paso no terminal, no el paso 11 de una fila. Pintarlo en línea recta mentiría sobre el grafo.</span></div>
+      <div class="note"><span class="m">8</span><span><b>Auto-avance sin pedir permiso:</b> el poll detecta el cambio de <code>currentStep</code> y el rail se mueve. No hay diálogo "¿aceptas el cambio?" — el servidor ya mandó; preguntar sería teatro. La atribución sale de <code>events[]</code> (<code>TRANSITION {actorUserId, metadata:{kiosk:true}}</code>), sin backend nuevo.</span></div>
+      <div class="note"><span class="m">9</span><span><b>Banner informativo, no modal</b> (b-info, texto --n-800 = 12.48:1). Persiste hasta que el agente interactúa con el paso nuevo; "Ver qué cambió" abre 8B con el evento resaltado. Diseño deliberado: con 4 superficies conviviendo (§9-1), un modal por avance ajeno sería un bloqueo cada pocos minutos.</span></div>
+      <div class="note"><span class="m">10</span><span><b>ADR-5 recordado en el punto de decisión,</b> no en un aviso general: el subtexto del CTA de dinero dice por qué puede desaparecer sin red. El detalle del cobro es la Tanda B del M2.</span></div>
+      <div class="note"><span class="m">11</span><span><b>Offline no congela el trabajo, congela las afirmaciones:</b> se sigue leyendo la sesión cacheada, con edad visible en la stepline y en el banner. El stepper se marca "vista de hace X" en lugar de fingir que está vivo.</span></div>
+      <div class="note"><span class="m">12</span><span><b>Advertencia específica del M2:</b> "puede haber cambiado en otra superficie". Es la diferencia con el offline del M1 — aquí el riesgo real no es dato viejo, es dato viejo <b>mientras el kiosco avanza</b>.</span></div>
+      <div class="note"><span class="m">13</span><span><b>Deshabilitado con causa, no escondido</b> (patrón de la Bandeja, Tanda B). Y el subtexto declara la regla que el patio necesita interiorizar: los pasos del checkout NO entran a la bandeja offline; se esperan.</span></div>
+      <div class="note"><span class="m">14</span><span><b>Abandon con consecuencias en dos bloques</b> (qué se conserva / qué puede pasar). La frase clave —"al volver entras al paso que reporte el servidor"— es ADR-4 dicho en lenguaje de patio: evita la queja "lo dejé en pago y volvió a inspección".</span></div>
+      <div class="contrast"><b>Contraste MEDIDO (8A–8F)</b>
+        <ul>
+          <li>Header de sesión sobre --tonal #f6f2ff: título --n-900 <b>16.46:1</b> · secundario --n-700 <b>8.37:1</b> (se rechazó --n-600 = 4.58:1).</li>
+          <li>Chip de presencia --p-800 sobre --p-50: <b>9.93:1</b> · chip "Paso N de 10" mismo par <b>9.93:1</b>.</li>
+          <li>Rail: fase actual --p-800 sobre --p-50 <b>9.93:1</b> · fase hecha --ok-tx sobre --ok-bg <b>6.19:1</b> · pendiente --n-600 sobre blanco <b>5.04:1</b>. El "✓" blanco sobre --ok #0f8a68 mide <b>4.32:1</b> y se declara como <b>no-texto</b> (icono ≥ 3:1); el estado legible es la etiqueta, no el glifo.</li>
+          <li>Banner de avance ajeno: --n-800 sobre --info-bg <b>12.48:1</b> (el azul --info se reserva al icono; como texto sobre su propio fondo mide 4.94:1 y no da margen al sol).</li>
+          <li>Banner offline --warn-tx sobre --warn-bg <b>5.59:1</b> · stepline stale --n-700 sobre --n-50 <b>8.53:1</b>.</li>
+          <li>CTA primario: blanco sobre el gradiente — peor parada #7442e8 <b>5.70:1</b>, base #6a35e0 <b>6.57:1</b> · CTA fantasma --n-800 sobre blanco <b>14.07:1</b> · subtexto "why" --n-700 sobre --n-50 <b>8.53:1</b>.</li>
+          <li>Lista de pasos: título --n-900 sobre blanco <b>18.14:1</b>, sobre --p-50 (paso actual) <b>16.10:1</b> · subtítulo --n-700 <b>9.22:1</b> · pendientes --n-700 (no --n-600).</li>
+        </ul></div>
+      <div class="motion"><b>Motion (build, no simulado aquí)</b>
+        <ul>
+          <li>Auto-avance: el nodo activo se desliza a la fase nueva con spring 250 ms + haptic selection; el banner entra con fade + 8 px. Reduced-motion ⇒ cambio de estado directo, sin desplazamiento.</li>
+          <li>Presencia: el punto vivo late a 0.4 Hz; al expirar el TTL el chip se va con fade 200 ms. Nunca parpadea ni cambia de color.</li>
+          <li>El poll NO gira spinners globales: el refresco es silencioso. Solo el pull-to-refresh manual tiene indicador propio.</li>
+          <li>Sheets: spring 380 ms. Skeleton shimmer 1.4 s solo en el primer fetch.</li>
+        </ul></div>
+      <div class="decision"><b>Pedido opcional al backend (NO bloquea la Tanda A)</b>
+        Hoy el cliente conoce el <i>orden</i> de los 10 pasos lineales solo por su catálogo de etiquetas en l10n; el <i>estado</i> siempre
+        viene del servidor. Si <code>GET /:id</code> devolviera <code>steps:[{key,index,done,current}]</code>, el rail sería 100 %
+        server-driven y desaparecería la última suposición del cliente sobre el grafo. Es un nice-to-have barato (lectura, sin
+        migración) que encaja en el PR-tren P1–P3 si Hector quiere cerrarlo del todo; sin él, el mockup ya es compatible con ADR-4
+        porque nada se marca como hecho sin evidencia del servidor.</div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 9 · PASO CONFIRMING -->
+<section class="blk" id="s9">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 9 · M2-H2</span>
+    <h2>Paso CONFIRMING — verificar, declinar seguro, cambiar vehículo</h2>
+    <p>Primer paso de los 11. El agente confirma cliente y vehículo, marca si el cliente declina el seguro
+    (<code>POST /:id/declined-insurance</code> — bandera que agrega addendum al T&amp;C y al PDF) y, si la unidad no
+    sirve, hace swap (<code>POST /:id/vehicle</code>, atómico, rechazado a partir de <code>INSPECTION_IN_PROGRESS</code>).
+    El CTA a T&amp;C es una transición: si el servidor la rechaza, se re-consulta y se re-renderiza (ADR-4).</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Listo para avanzar</span><span class="schip"><i></i>Datos incompletos</span>
+      <span class="schip"><i></i>Seguro declinado</span><span class="schip"><i></i>409 VEHICLE_CONFLICT</span>
+      <span class="schip"><i></i>Swap de vehículo</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>9A — Todo verificado <small>dos tarjetas + seguro + CTA; una mano, pulgar abajo</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span><span class="presence"><span class="lv"></span><span class="pv">MG</span>María G. está en esta sesión · kiosco · hace 8 s</span></div>
+          <div class="srail">
+            <div class="sr on"><span class="d">1</span><span class="lb">Confirmar</span></div>
+            <div class="sr"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+            <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 1 de 10</span>Confirmar cliente y vehículo
+            <span class="more">Ver todos los pasos <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+          <div class="wpad">
+            <div class="vcard"><span class="m inframe" style="margin:-8px 0 0 328px">1</span>
+              <div class="vhead"><b>Cliente</b><span class="vpill ok"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg>Verificado</span></div>
+              <div class="kv"><span class="k">Nombre</span><span class="v">Laura Méndez Ortiz</span></div>
+              <div class="kv"><span class="k">Licencia</span><span class="v">B-4482913 · vence 03/2029</span></div>
+              <div class="kv"><span class="k">Teléfono</span><span class="v tnum">+52 55 1234 5678</span></div>
+              <div class="kv"><span class="k">Pre-checkin</span><span class="v">Completado 8:52</span></div>
+            </div>
+            <div class="vcard">
+              <div class="vhead"><b>Vehículo</b><span class="vpill ok">Disponible</span></div>
+              <div class="kv"><span class="k">Unidad</span><span class="v">U-112 · Corolla 2023 · MXA-4471</span></div>
+              <div class="kv"><span class="k">Odómetro</span><span class="v tnum">24 108 km</span></div>
+              <div class="linkbtn">Cambiar vehículo <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg><span class="m" style="margin-left:4px">2</span></div>
+            </div>
+            <div class="switchrow"><span class="sw"></span>
+              <div class="st"><b>Cliente declina el seguro</b><span>Apagado · se cobra la cobertura estándar</span></div>
+              <span class="m">3</span></div>
+            <div class="dock">
+              <div class="btn btn-primary">Continuar a T&amp;C</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>9B — Datos incompletos <small>el CTA no se esconde: se bloquea diciendo qué falta y dónde</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>11:10</span><span>LTE · 84 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2483</b><span>Jorge Salas · U-087</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Jorge Salas · U-087</span></div>
+          <div class="srail">
+            <div class="sr on"><span class="d">1</span><span class="lb">Confirmar</span></div>
+            <div class="sr"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+            <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 1 de 10</span>Confirmar cliente y vehículo</div>
+          <div class="wpad">
+            <div class="vcard bad">
+              <div class="vhead"><b>Cliente</b><span class="vpill bad">Faltan datos</span></div>
+              <div class="kv"><span class="k">Nombre</span><span class="v">Jorge Salas Rivera</span></div>
+              <div class="kv"><span class="k">Licencia</span><span class="v miss">Sin capturar</span></div>
+              <div class="kv"><span class="k">Teléfono</span><span class="v miss">Sin capturar</span></div>
+              <div class="linkbtn" style="color:var(--danger-tx)">Capturar datos del cliente
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg><span class="m" style="margin-left:4px">4</span></div>
+            </div>
+            <div class="vcard">
+              <div class="vhead"><b>Vehículo</b><span class="vpill ok">Disponible</span></div>
+              <div class="kv"><span class="k">Unidad</span><span class="v">U-087 · RAV4 2024</span></div>
+            </div>
+            <div class="switchrow"><span class="sw"></span>
+              <div class="st"><b>Cliente declina el seguro</b><span>Apagado</span></div></div>
+            <div class="dock">
+              <div class="btn btn-primary is-disabled">Continuar a T&amp;C</div>
+              <div class="why">Faltan <b>licencia</b> y <b>teléfono</b> del cliente. Captúralos arriba para continuar.<span class="m" style="margin-left:4px">5</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>9C — Seguro declinado <small>consecuencia declarada en el momento de encenderlo</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:43</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span><span class="presence"><span class="lv"></span><span class="pv">MG</span>María G. está en esta sesión · kiosco · hace 12 s</span></div>
+          <div class="srail">
+            <div class="sr on"><span class="d">1</span><span class="lb">Confirmar</span></div>
+            <div class="sr"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+            <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 1 de 10</span>Confirmar cliente y vehículo</div>
+          <div class="wpad">
+            <div class="vcard">
+              <div class="vhead"><b>Cliente</b><span class="vpill ok">Verificado</span></div>
+              <div class="kv"><span class="k">Licencia</span><span class="v">B-4482913 · vence 03/2029</span></div>
+            </div>
+            <div class="switchrow on"><span class="sw"></span>
+              <div class="st"><b>Cliente declina el seguro</b><span>Encendido · registrado 9:43</span></div></div>
+            <div class="banner b-warn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg>
+              <span>Se agregará el <b>anexo de rechazo de cobertura</b> a los términos que firma el cliente y al contrato PDF.
+              Puedes apagarlo mientras no se firmen los términos.<span class="m">6</span></span></div>
+            <div class="vcard">
+              <div class="vhead"><b>Vehículo</b><span class="vpill ok">Disponible</span></div>
+              <div class="kv"><span class="k">Unidad</span><span class="v">U-112 · Corolla 2023</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Continuar a T&amp;C</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>9D — 409 VEHICLE_CONFLICT <small>negativa visible con UNA salida obvia</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:42</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span><span class="presence"><span class="lv stale"></span><span class="pv">MG</span>María G. está en esta sesión · kiosco · hace 32 s</span></div>
+          <div class="srail">
+            <div class="sr on"><span class="d">1</span><span class="lb">Confirmar</span></div>
+            <div class="sr"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+            <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 1 de 10</span>Confirmar cliente y vehículo</div>
+          <div class="wpad">
+            <div class="banner b-danger">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.5"/></svg>
+              <span><b>La unidad U-112 ya está en otra renta abierta</b> (R-2466, salió ayer 18:20). No se puede entregar
+              dos veces.<span class="m">7</span></span></div>
+            <div class="vcard bad">
+              <div class="vhead"><b>Vehículo</b><span class="vpill bad">En conflicto</span></div>
+              <div class="kv"><span class="k">Unidad</span><span class="v">U-112 · Corolla 2023</span></div>
+              <div class="kv"><span class="k">Ocupada por</span><span class="v">R-2466 · Andrés Lira</span></div>
+              <div class="kv"><span class="k">Desde</span><span class="v">Ayer 18:20</span></div>
+            </div>
+            <div class="vcard">
+              <div class="vhead"><b>Cliente</b><span class="vpill ok">Verificado</span></div>
+              <div class="kv"><span class="k">Nombre</span><span class="v">Laura Méndez Ortiz</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Elegir otro vehículo<span class="m" style="margin-left:4px">8</span></div>
+              <div class="btn btn-ghost btn-sm">Abrir R-2466 para revisar</div>
+              <div class="why">Nada se perdió: al cambiar la unidad sigues en el paso 1 con el cliente ya verificado.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>9E — Swap de vehículo <small>sheet opaco; solo unidades que el servidor da por libres</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:42</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="dim">
+            <div class="wizbar">
+              <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+              <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+              <div class="pausebtn">Pausar</div>
+            </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span><span class="presence"><span class="lv"></span><span class="pv">MG</span>María G. está en esta sesión · kiosco · hace 12 s</span></div>
+            <div class="srail">
+              <div class="sr on"><span class="d">1</span><span class="lb">Confirmar</span></div>
+              <div class="sr"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+              <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+              <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+              <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+            </div>
+            <div class="wpad"><div class="vcard bad"><div class="vhead"><b>Vehículo</b><span class="vpill bad">En conflicto</span></div></div></div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <h5>Cambiar vehículo</h5>
+            <div class="ssub">Disponibles ahora en Patio Centro · según el servidor, hace 4 s<span class="m" style="margin-left:6px">9</span></div>
+            <div class="opt sel"><span class="radio"></span><span>U-118 · Corolla 2023<span class="osub">Mismo grupo · 19 402 km · listo</span></span></div>
+            <div class="opt"><span class="radio"></span><span>U-121 · Sentra 2023<span class="osub">Mismo grupo · 31 980 km · listo</span></span></div>
+            <div class="opt"><span class="radio"></span><span>U-140 · RAV4 2024<span class="osub">Grupo superior · puede cambiar la tarifa</span></span></div>
+            <div class="opt off"><span class="radio"></span><span>U-112 · Corolla 2023<span class="osub">No disponible · en renta R-2466</span></span><span class="tchip mut">No disponible</span></div>
+            <div class="btn btn-primary btn-md" style="margin-top:4px">Cambiar a U-118</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:9px">Cancelar</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · CONFIRMING</h3>
+      <div class="note"><span class="m">1</span><span><b>Verificar es leer, no teclear.</b> El agente compara la pantalla con la licencia física; por eso los datos van en filas clave-valor de 13.5 px con la clave en --n-700 y el valor en --n-900 negrita — legible de un vistazo con el sol de frente. No hay checkbox "confirmo": el acto de avanzar ES la confirmación, y queda en <code>events[]</code> con <code>actorUserId</code>.</span></div>
+      <div class="note"><span class="m">2</span><span><b>El swap vive donde duele,</b> dentro de la tarjeta del vehículo, no en un menú de tres puntos. <b>Regla de build:</b> el enlace desaparece a partir de <code>INSPECTION_IN_PROGRESS</code> porque <code>vehicle-swap.service.js</code> lo rechaza — esconderlo cuando el servidor ya no lo acepta evita un 409 evitable (el 409 se maneja igual, DoD-4).</span></div>
+      <div class="note"><span class="m">3</span><span><b>Seguro declinado = switch, no checkbox perdido:</b> fila de 56 px con estado en palabras ("Apagado · se cobra la cobertura estándar"), porque el color solo no puede ser el portador del estado. Llama a <code>POST /:id/declined-insurance</code>.</span></div>
+      <div class="note"><span class="m">4</span><span><b>Cada dato faltante es un enlace,</b> no un regaño. El destino depende de la política de la ubicación: si <code>requirePrecheckinBeforeCheckout</code> está activo, este mismo caso ni siquiera llega aquí — lo bloquea el guard 422 <code>PRECHECKIN_REQUIRED</code> al crear la sesión (pantalla 11B).</span></div>
+      <div class="note"><span class="m">5</span><span><b>Bloqueo local con causa nombrada</b> — y el servidor sigue mandando: si aun así respondiera 409, se re-consulta y se re-renderiza. El cliente valida para ahorrar viajes, nunca para sustituir al servidor.</span></div>
+      <div class="note"><span class="m">6</span><span><b>Consecuencia + ventana de arrepentimiento</b> en el mismo bloque. Deliberadamente NO hay diálogo de confirmación: el switch es reversible hasta que se firman los términos, y el aviso dice exactamente eso.</span></div>
+      <div class="note"><span class="m">7</span><span><b>409 VEHICLE_CONFLICT en lenguaje de patio:</b> qué unidad, en qué renta, desde cuándo. El código de máquina nunca se muestra (va a telemetría). Los datos del conflicto salen del re-fetch posterior al 409, no de una suposición del cliente.</span></div>
+      <div class="note"><span class="m">8</span><span><b>Una salida primaria, siempre.</b> "Elegir otro vehículo" es la acción que desatasca en el 95 % de los casos; "Abrir R-2466" es para el caso raro (el otro checkout quedó abierto por error). Prohibido dejar al agente con un error y ningún botón.</span></div>
+      <div class="note"><span class="m">9</span><span><b>El sheet declara la frescura de su lista</b> ("hace 4 s") y muestra la unidad en conflicto <b>en estado inerte con su motivo legible</b> (sin opacidad: el motivo es información crítica) en vez de omitirla: el agente ya la tenía en la mano y necesita entender por qué no puede. Tras el swap, re-fetch y re-render — el paso no cambia, cambian los datos.</span></div>
+      <div class="contrast"><b>Contraste MEDIDO (9A–9E)</b>
+        <ul>
+          <li>Valor de fila --n-900 sobre card #fdfcff <b>17.74:1</b> · clave --n-700 <b>9.02:1</b> sobre la misma card (9.22:1 sobre blanco puro).</li>
+          <li>Pill "Verificado" --ok-tx sobre --ok-bg <b>6.19:1</b> · "Faltan datos" --danger-tx sobre --danger-bg <b>7.04:1</b> · "En espera/Requiere red" --warn-tx sobre --warn-bg <b>5.59:1</b>.</li>
+          <li>Dato faltante --danger-tx sobre card blanca <b>8.06:1</b> · enlace de captura mismo color <b>8.06:1</b>.</li>
+          <li>Switch encendido: texto --n-900 sobre --warn-bg <b>16.49:1</b>; el riel ámbar usa --warn-tx #8a5606 como <b>superficie</b> (no-texto, ≥ 3:1 contra el fondo de la fila) — misma decisión que el badge --badge-warn de la Tanda B, no se inventa token nuevo.</li>
+          <li>Banner de conflicto --danger-tx sobre --danger-bg <b>7.04:1</b> · CTA primario blanco sobre gradiente <b>5.70:1</b> peor parada.</li>
+          <li>Sheet: opción seleccionada --p-800 sobre --p-50 <b>9.93:1</b> · subtítulo --n-700 sobre blanco <b>9.22:1</b> · <b>opción deshabilitada SIN opacidad</b> (regla del sistema): fondo --n-25, texto y motivo --n-700 <b>8.88:1</b> — el motivo "No disponible · en renta R-2466" es información crítica y se lee al 100 %; el radio inerte es el único elemento no-texto.</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>Switch: el pulgar viaja 180 ms ease-out + haptic light; el banner de consecuencia entra con fade 200 ms debajo de la fila, sin empujar el CTA fuera de pantalla.</li>
+          <li>409: la tarjeta del vehículo se tiñe danger con fade 300 ms + haptic error una sola vez. Sin shake — el error no es del agente.</li>
+          <li>Swap confirmado: la tarjeta hace cross-fade a la unidad nueva (250 ms) y el header de sesión se actualiza en el mismo frame.</li>
+          <li>Reduced-motion ⇒ todos los cambios son de estado, sin desplazamientos.</li>
+        </ul></div>
+      <div class="decision"><b>A confirmar en build (no bloquea el mockup)</b>
+        <ul>
+          <li>La lista de unidades disponibles del sheet 9E no tiene endpoint dedicado en el contrato revisado: se arma con el listado de vehículos filtrado por ubicación + estado. Verificar contra la API real antes de H2 y, si no existe filtro server-side, pedirlo (evita listar unidades que el swap va a rechazar).</li>
+          <li>Si el cliente declina el seguro <b>después</b> de firmar T&amp;C, el anexo ya está firmado: la UI debe apagar el switch en ese punto. Confirmar el comportamiento real del backend antes de decidir si se esconde o se deshabilita con causa.</li>
+        </ul></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 10 · PASO T&C -->
+<section class="blk" id="s10">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 10 · M2-H2</span>
+    <h2>Paso T&amp;C — QR al teléfono del cliente, countdown visible y re-emisión de un toque</h2>
+    <p><code>POST /:id/terms-token</code> mintea un token <code>TERMS_SIGNING</code> con <b>TTL de 15 min</b>, idempotente:
+    si al vigente le quedan más de 2 min, el backend reusa el mismo. El cliente firma en su teléfono y el flujo público
+    estampa <code>tcCompletedAt</code>; RideOps se entera <b>por poll</b>, no por push. La transición a
+    <code>TC_SIGNED</code> la dispara el agente — el guard exige el stamp, así que el CTA solo aparece cuando el
+    servidor ya lo tiene.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>QR vivo + countdown</span><span class="schip"><i></i>Modo presentación (cliente)</span>
+      <span class="schip"><i></i>Firmado (llega por poll)</span><span class="schip"><i></i>Expirado + re-emisión</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>10A — QR vivo <small>countdown de 15 min en tabular; el agente sostiene el teléfono</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:44</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span><span class="presence"><span class="lv"></span><span class="pv">MG</span>María G. está en esta sesión · kiosco · hace 6 s</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr on"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+            <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 2 de 10</span>Términos y condiciones
+            <span class="more">Ver todos los pasos <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+          <div class="wpad">
+            <p style="margin:0;font-size:14.5px;font-weight:700;color:var(--n-800)">Que el cliente lo escanee con la cámara
+            de su teléfono para firmar.</p>
+            <div class="qrwrap" style="padding:14px">
+              <div class="qrbox"><svg width="152" height="152" viewBox="0 0 200 200"><use href="#qrsym"/></svg></div>
+              <div class="cnt"><span class="cl">Vence en</span><span class="tnum">14:32</span><span class="m" style="margin-left:2px">1</span></div>
+            </div>
+            <div class="btn btn-ghost btn-md">Mostrar al cliente (pantalla completa)<span class="m" style="margin-left:4px">2</span></div>
+            <div class="banner b-info">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8v.5"/></svg>
+              <span>Esperando la firma del cliente. Esta pantalla se actualiza sola.<span class="m">3</span></span></div>
+            <div class="dock">
+              <div class="btn btn-ghost btn-sm">Generar código nuevo</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>10B — Modo presentación · volteado al cliente <small>marca del TENANT, cero marca de plataforma</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:45</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-0)">
+          <div class="tenantbar">
+            <div class="tlogo">AV</div>
+            <div><div class="tname">Autos del Valle</div><div class="tsub">Términos de renta · Reserva R-2481</div></div>
+            <span class="m" style="margin-left:auto">4</span></div>
+          <div class="pad" style="padding-top:16px;align-items:center;text-align:center">
+            <p style="margin:0 0 14px;font-size:16px;font-weight:750;color:var(--n-900);max-width:300px">
+              Escanee este código con la cámara de su teléfono para leer y firmar los términos.</p>
+            <div class="qrbox" style="border-color:var(--n-300)"><svg width="230" height="230" viewBox="0 0 200 200"><use href="#qrsym"/></svg></div>
+            <p style="margin:16px 0 0;font-size:13.5px;font-weight:650;color:var(--n-700);max-width:290px">
+              ¿Problemas para escanear? El agente puede ayudarle.<span class="m" style="margin-left:4px">10</span></p>
+            <div class="btn btn-ghost btn-sm" style="margin-top:auto;width:100%;color:var(--n-700)">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg>
+              Salir de presentación<span class="m" style="margin-left:4px">11</span></div>
+            <div class="nobrand" style="margin-top:12px">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3l7 3v5c0 5-3 8.2-7 10-4-1.8-7-5-7-10V6z"/><path d="M9.5 12l1.8 1.8 3.4-3.6"/></svg>
+              <span>ANOTACIÓN (no se muestra): en esta pantalla NO aparece "RideOps", "Ride Fleet" ni ningún logo de la
+              plataforma. Nombre, logo y colores salen de display-data del tenant. Tampoco hay countdown: al cliente
+              solo se le muestra bajo 2 min (nota 12).<span class="m" style="margin-left:4px">5</span></span></div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>10C — Firmado en el teléfono del cliente <small>llegó por poll; el CTA aparece porque el stamp existe</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:48</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span><span class="presence"><span class="lv"></span><span class="pv">MG</span>María G. está en esta sesión · kiosco · hace 9 s</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr on"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+            <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 2 de 10</span>Términos y condiciones</div>
+          <div class="wpad">
+            <div class="center-state" style="margin:18px 0 0">
+              <div class="big-ic ok"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></div>
+              <h4>Términos firmados</h4>
+              <p>Laura firmó en su teléfono a las 9:47. Ya puedes seguir con el cobro.<span class="m">6</span></p>
+            </div>
+            <div class="vcard" style="margin-top:16px">
+              <div class="vhead"><b>Registro</b><span class="vpill ok">Confirmado por el servidor</span></div>
+              <div class="kv"><span class="k">Firmado</span><span class="v">9:47 · teléfono del cliente</span></div>
+              <div class="kv"><span class="k">Anexos</span><span class="v">Ninguno (seguro aceptado)</span></div>
+              <div class="linkbtn">Ver documento firmado <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Continuar al cobro</div>
+              <div class="why">Este botón solo existe porque el servidor ya tiene la firma registrada.<span class="m" style="margin-left:4px">7</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>10D — Código expirado <small>estado terminal del token, re-emisión de un toque</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:00</span><span>LTE · 86 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span><span class="presence"><span class="lv"></span><span class="pv">MG</span>María G. está en esta sesión · kiosco · hace 14 s</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr on"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+            <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 2 de 10</span>Términos y condiciones</div>
+          <div class="wpad">
+            <div class="banner b-warn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+              <span>El código venció a las 9:59. <b>Nada se perdió</b> — genera uno nuevo y el cliente firma igual.<span class="m">8</span></span></div>
+            <div class="qrwrap">
+              <div class="qrbox dead">
+                <svg width="184" height="184" viewBox="0 0 200 200"><use href="#qrsym"/></svg>
+                <div class="over">
+                  <div class="big-ic warn" style="width:60px;height:60px"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div>
+                  <span style="font-size:13.5px;font-weight:850;color:var(--warn-tx)">Código vencido</span>
+                </div>
+              </div>
+              <div class="cnt dead"><span class="cl">Vencido</span><span class="tnum">00:00</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Generar código nuevo<span class="m" style="margin-left:4px">9</span></div>
+              <div class="btn btn-ghost btn-sm">Enviar por mensaje al cliente</div>
+              <div class="why">El código nuevo dura otros 15 minutos. Si el cliente ya había abierto el anterior,
+              tendrá que abrir el nuevo.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · T&amp;C con QR</h3>
+      <div class="note"><span class="m">1</span><span><b>Countdown visible, no oculto en un tooltip.</b> Formato mm:ss tabular (no salta el ancho), 16 px/850 dentro de un pill de 38 px. Estados: neutro (&gt; 2 min) → <b>ámbar &lt; 2 min</b> → rojo vencido. El umbral de 2 min no es estético: es exactamente la ventana en la que el backend deja de reusar el token vigente y mintea uno nuevo (<code>mintHandoffToken</code>), así que el ámbar significa "si lo re-emites ahora, sí cambia el código".</span></div>
+      <div class="note"><span class="m">2</span><span><b>Modo presentación explícito</b> en vez de "voltear el teléfono y esperar": QR a 230 px (escanea de lejos, con guantes y sol) y sin controles del staff a la vista. Ver nota 11 para la salida y para por qué NO es modo kiosco.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Espera honesta:</b> "se actualiza sola" en lugar de un spinner infinito. El poll de 5 s ya corre para toda la sesión; este paso no añade uno propio.</span></div>
+      <div class="note"><span class="m">4</span><span><b>Superficie volteada al cliente = superficie del tenant.</b> Barra con logo, nombre y número de reserva desde display-data; tipografía y contraste iguales, pero <b>sin morado Ride</b> — el morado es lenguaje del staff (misma regla que la firma en Tanda A 3C).</span></div>
+      <div class="note"><span class="m">5</span><span><b>Cero marca de plataforma aquí — pero el destino del QR SÍ la filtra hoy. Criterio de aceptación BLOQUEANTE de M2-H2.</b>
+      Verificado en código, no es sospecha: <code>frontend/src/app/sign/[token]/page.js</code> renderiza el Shell con
+      <b>"Terms &amp; Conditions" hardcodeado en inglés y cero identidad del tenant</b>, y
+      <code>frontend/src/app/layout.js:8-16</code> fija <code>metadata.title = 'Ride Fleet'</code> sin override en <code>/sign</code>.
+      El viaje real del cliente hoy: ve <b>"Autos del Valle"</b> en el teléfono del agente → escanea → le abre una pestaña
+      <b>"Ride Fleet · Terms &amp; Conditions"</b> en inglés. Es exactamente la fuga que el QA del M1 ya cazó una vez.
+      <b>H2 no pasa QA</b> hasta que esa página resuelva título, encabezado e idioma desde display-data del tenant, con
+      fallback al <b>nombre del tenant en texto</b> cuando no hay logo — nunca al de la plataforma. El PM ya lo registró
+      como pedido de frontend/backend aparte; el mockup lo deja escrito para que no se pierda entre tandas.</span></div>
+      <div class="note"><span class="m">6</span><span><b>El éxito nombra a quién y cuándo,</b> no un "listo" genérico: en el patio esa frase es la que el agente le repite al cliente. Llega por poll — puede aparecer con la pantalla ya abierta, así que entra con fade, sin robar el toque del pulgar (no hay CTA debajo del punto de entrada).</span></div>
+      <div class="note"><span class="m">7</span><span><b>ADR-4 hecho visible:</b> el CTA de avanzar aparece porque <code>tcCompletedAt</code> ya está estampado (entry guard de <code>TC_SIGNED</code>). Si la firma llegó por el kiosco, esta misma pantalla se pinta igual: la fuente del stamp no cambia la UI. <b>Regla de build:</b> re-fetch previo a la transición si el último poll tiene &gt; 3 s, y guard anti-doble-tap in-flight.</span></div>
+      <div class="note"><span class="m">8</span><span><b>"Nada se perdió" primero, causa después.</b> El vencimiento del token es rutina (15 min es poco para un cliente leyendo términos), y la copy tiene que evitar que el agente crea que rompió algo.</span></div>
+      <div class="note"><span class="m">9</span><span><b>Re-emisión de un toque, con la verdad del TTL:</b> el aviso explica que el código anterior deja de servir. El botón hace <code>POST /:id/terms-token</code>; si el backend reusa el vigente (&gt; 2 min restantes) el QR no cambia y la copy lo dice ("sigue siendo el mismo código"), en vez de fingir que se emitió otro.</span></div>
+      <div class="note"><span class="m">10</span><span><b>Nada que la app no pueda cumplir.</b> La versión anterior prometía al cliente "el agente puede enviárselo por mensaje", pero ese envío <b>no está confirmado en el contrato</b> (lo de 24 h por email es <code>send-customer-inspection</code>, otro flujo) y el dock de 10A no lo dibuja. La promesa se sustituye por "el agente puede ayudarle", que siempre es verdad. Si el envío existe, se agrega como acción real en 10A y ahí sí vuelve la frase.</span></div>
+      <div class="note"><span class="m">11</span><span><b>Modo presentación ≠ modo kiosco — declarado, no implícito.</b> En kiosco (Tanda A del M1, 3C, §9-6 Variante A) el <b>teléfono cambia de manos</b>: por eso lleva barra persistente, lock suspendido, navegación bloqueada y salida con PIN. Aquí el teléfono <b>no sale de la mano del agente</b> —el cliente solo apunta su cámara—, así que no hace falta esa fortificación y sería fricción pura. Lo que sí hace falta es la salida que la nota 2 prometía: "Salir de presentación", 48 px, al pie, en neutro del tenant y sin marca de plataforma. Con esto quedan <b>dos</b> modos declarados en el sistema, no un tercero sin nombre.</span></div>
+      <div class="note"><span class="m">12</span><span><b>Al cliente no se le pone un reloj en la cara.</b> El countdown es herramienta del agente: en 10A está siempre visible; en la pantalla volteada al cliente <b>solo aparece bajo 2 min</b> y con copy tranquilizadora ("Quedan 2 min — si se vence, el agente le genera otro al instante"), nunca como cuenta regresiva agresiva sobre un documento legal que la persona está leyendo. Presionar a alguien para que firme rápido es exactamente lo que no queremos diseñar.</span></div>
+      <div class="contrast"><b>Contraste MEDIDO (10A–10D)</b>
+        <ul>
+          <li>Módulos del QR: negro sobre blanco puro <b>21:1</b>, con quiet zone de 4 módulos y el brillo de pantalla forzado al máximo mientras el QR está visible (requisito de build para sol directo).</li>
+          <li>Countdown neutro --n-900 sobre --n-50 <b>16.78:1</b> · ámbar --warn-tx sobre --warn-bg <b>5.59:1</b> · vencido --danger-tx sobre --danger-bg <b>7.04:1</b>.</li>
+          <li>Instrucción al cliente (10B) --n-900 sobre blanco <b>18.14:1</b> · secundaria --n-700 <b>9.22:1</b> · barra del tenant: blanco sobre placa --n-800 <b>14.07:1</b>.</li>
+          <li>Éxito: "Términos firmados" --n-900 sobre --n-50 <b>16.78:1</b> · cuerpo --n-700 <b>8.53:1</b> · el círculo verde es icono (no-texto).</li>
+          <li>Banner informativo de espera: --n-800 sobre --info-bg <b>12.48:1</b>.</li>
+          <li>QR atenuado (10D) al 13 %: <b>no es portador de información</b> — el estado lo dicen el pill "Vencido" y el banner. Nunca se pide leer un código a bajo contraste.</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>El countdown actualiza <b>1 vez por segundo, solo el numeral</b> — no es animación decorativa sino información, así que sigue corriendo con reduced-motion. No hay barra que se vacíe ni pulso: eso sí sería decoración por encima de 1 Hz.</li>
+          <li>Paso a ámbar (&lt; 2 min): cambio de color con fade 200 ms, una sola vez, sin parpadeo.</li>
+          <li>Llegada de la firma por poll: check con scale-in 250 ms + haptic success; el QR sale con fade, no con colapso brusco.</li>
+          <li>Modo presentación: transición cross-fade 200 ms y brillo al máximo; al salir se restaura el brillo del sistema.</li>
+        </ul></div>
+      <div class="decision"><b>Riesgo asumido y su mitigación (§5 del plan · TTL del terms-token)</b>
+        15 minutos es corto para un cliente que de verdad lee. La mitigación de diseño es triple y ya está dibujada:
+        countdown visible desde el primer segundo, aviso ámbar a los 2 min restantes (que coincide con la ventana de
+        re-minteo del backend) y re-emisión de un toque con copy que promete que no se pierde nada. <b>Pendiente para el
+        PM:</b> confirmar si "Enviar por mensaje al cliente" existe hoy para T&amp;C — en el contrato revisado el envío por
+        email de 24 h es <code>send-customer-inspection</code>, de otro flujo. Si no existe, el botón sale del build de H2
+        y se queda solo el QR.</div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ 11 · ENTRADA DESDE LA CARD -->
+<section class="blk" id="s11">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 11 · M2-H7</span>
+    <h2>Entrada desde la card de la cola checkout — y los guards del backend al crear sesión</h2>
+    <p>La home del M1 (Tanda B, pantalla 5) ya existe: la cola <code>checkout</code> son las reservas NEW/CONFIRMED con
+    <code>pickupAt</code> dentro de 72 h. Tocar la card llama a <code>POST /api/checkout-sessions {reservationId}</code>,
+    que es <b>idempotente por reserva</b>: si ya hay sesión, la reanuda. Sus guards, en el orden real del servicio:
+    422 <code>NO_VEHICLE_ASSIGNED</code> → 409 <code>VEHICLE_CONFLICT</code> → 422 <code>PRECHECKIN_REQUIRED</code> /
+    <code>AGE_RULES_*</code> → 409 <code>SESSION_TERMINAL</code>. Cada uno se dibuja con salida, nunca como "algo salió mal".</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Card lista + creando sesión</span><span class="schip"><i></i>Reanudar (idempotente)</span>
+      <span class="schip"><i></i>422 PRECHECKIN_REQUIRED</span><span class="schip"><i></i>422 sin vehículo</span>
+      <span class="schip"><i></i>409 conflicto de vehículo (al crear)</span><span class="schip"><i></i>409 sesión terminal</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>11A — La card y su estado de arranque <small>el feedback vive EN la card, no en pantalla en blanco</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:41</span><span>LTE · 87 %</span></div>
+        <div class="scr">
+          <div class="appbar"><span class="abrand">RideOps</span>
+            <div class="locchip">Patio Centro <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></div>
+            <span class="sp"></span><div class="avatar sm">MG</div></div>
+          <div class="content">
+            <div class="refreshline"><span class="livedot"></span>Actualizado hace 1 min · se actualiza solo</div>
+            <div class="qhead"><span class="ql">Salidas (72 h)<span class="qct">6</span></span><a>Ver todo</a></div>
+
+            <div class="qcard busy">
+              <div class="qico"><span class="spin dk"></span></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Laura Méndez</span><span class="tchip"><span class="dot"></span>Abriendo…</span></div>
+                <div class="qmeta">Corolla 2023 · U-112 · R-2481 · abriendo checkout…</div></div>
+              <span class="m inframe" style="margin:-8px 0 0 320px">1</span>
+            </div>
+
+            <div class="qcard">
+              <div class="qico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 10l2.2-4.2A2 2 0 0 1 8 4.7h8a2 2 0 0 1 1.8 1.1L20 10"/><rect x="3" y="10" width="18" height="7" rx="2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Diego Fuentes</span><span class="tchip">Hoy 12:00</span></div>
+                <div class="qmeta">Versa 2022 · U-093 · R-2490 · Pre-checkin listo</div></div></div>
+
+            <div class="qcard">
+              <div class="qico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 10l2.2-4.2A2 2 0 0 1 8 4.7h8a2 2 0 0 1 1.8 1.1L20 10"/><rect x="3" y="10" width="18" height="7" rx="2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Ana Robles</span><span class="tchip ok"><span class="dot"></span>En curso · paso 4 de 10</span></div>
+                <div class="qmeta">Kia Rio 2023 · U-076 · R-2488 · María G. está en la sesión</div></div>
+              <span class="m inframe" style="margin:-8px 0 0 320px">2</span></div>
+
+            <div class="qcard blocked">
+              <div class="qico warn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 4L2.5 20h19z" fill="rgba(184,118,10,.12)"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Jorge Salas</span><span class="tchip warn">Hoy 11:15</span></div>
+                <div class="qmeta">RAV4 2024 · U-087 · R-2483 · <b>Falta pre-checkin</b></div></div>
+              <span class="m inframe" style="margin:-8px 0 0 320px">3</span></div>
+
+            <div class="qcard">
+              <div class="qico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 10l2.2-4.2A2 2 0 0 1 8 4.7h8a2 2 0 0 1 1.8 1.1L20 10"/><rect x="3" y="10" width="18" height="7" rx="2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/></svg></div>
+              <div class="qbody"><div class="qtop"><span class="qname">Paula Vidal</span><span class="tchip mut">Cortesía</span></div>
+                <div class="qmeta">Loaner · L-0041 · R-2495 · sin paso de pago</div></div>
+              <span class="m inframe" style="margin:-8px 0 0 320px">9</span></div>
+          </div>
+          <div class="tabfloat">
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 10v10h12V10" fill="rgba(135,82,254,.16)" stroke="none"/><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6" fill="rgba(135,82,254,.10)"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf"><span class="tbadge">2</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2" fill="rgba(135,82,254,.10)"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5" fill="rgba(135,82,254,.12)"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>11B — 422 PRECHECKIN_REQUIRED <small>negativa con dos salidas reales; el tab bar cede el blur</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>11:12</span><span>LTE · 84 %</span></div>
+        <div class="scr">
+          <div class="dim">
+            <div class="appbar"><span class="abrand">RideOps</span>
+              <div class="locchip">Patio Centro</div><span class="sp"></span><div class="avatar sm">MG</div></div>
+            <div class="content">
+              <div class="qhead"><span class="ql">Salidas (72 h)<span class="qct">6</span></span></div>
+              <div class="qcard"><div class="qico"></div><div class="qbody"><div class="qtop"><span class="qname">Jorge Salas</span><span class="tchip warn">Hoy 11:15</span></div>
+                <div class="qmeta">RAV4 2024 · U-087 · R-2483</div></div></div>
+            </div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div style="display:flex;gap:12px;align-items:flex-start">
+              <div class="big-ic warn" style="width:52px;height:52px;flex:0 0 auto"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 12h6M12 9v6"/><circle cx="12" cy="12" r="9"/></svg></div>
+              <div><h5>Falta el pre-checkin de Jorge</h5>
+                <div class="ssub">Esta sucursal exige el pre-checkin del cliente antes de abrir el checkout.<span class="m" style="margin-left:6px">4</span></div></div>
+            </div>
+            <div class="btn btn-primary btn-md">Enviar pre-checkin al cliente</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:9px">Capturar sus datos aquí</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:9px">Cancelar</div>
+            <p style="margin:12px 0 2px;font-size:12.5px;font-weight:700;color:var(--n-700);text-align:center">
+              La reserva no se tocó. En cuanto el pre-checkin quede listo, la card se desbloquea sola.</p>
+          </div>
+          <div class="tabfloat plate">
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf"><span class="tbadge">2</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>11C — 422 NO_VEHICLE_ASSIGNED <small>sin unidad no hay checkout; la salida es asignar</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>11:20</span><span>LTE · 84 %</span></div>
+        <div class="scr">
+          <div class="dim">
+            <div class="appbar"><span class="abrand">RideOps</span>
+              <div class="locchip">Patio Centro</div><span class="sp"></span><div class="avatar sm">MG</div></div>
+            <div class="content">
+              <div class="qhead"><span class="ql">Salidas (72 h)<span class="qct">6</span></span></div>
+              <div class="qcard"><div class="qico"></div><div class="qbody"><div class="qtop"><span class="qname">Paula Vidal</span><span class="tchip">Mañana 8:00</span></div>
+                <div class="qmeta">Grupo intermedio · R-2495</div></div></div>
+            </div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div style="display:flex;gap:12px;align-items:flex-start">
+              <div class="big-ic warn" style="width:52px;height:52px;flex:0 0 auto"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2"/><path d="M4 10l2.2-4.2A2 2 0 0 1 8 4.7h8a2 2 0 0 1 1.8 1.1L20 10"/><path d="M12 13.5v.5"/></svg></div>
+              <div><h5>Esta reserva no tiene vehículo asignado</h5>
+                <div class="ssub">R-2495 pide grupo intermedio. Asigna una unidad para poder entregar.<span class="m" style="margin-left:6px">5</span></div></div>
+            </div>
+            <div class="btn btn-primary btn-md">Asignar vehículo</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:9px">Abrir la reserva</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:9px">Cancelar</div>
+            <p style="margin:12px 0 2px;font-size:12.5px;font-weight:700;color:var(--n-700);text-align:center">
+              No se creó ninguna sesión de checkout.</p>
+          </div>
+          <div class="tabfloat plate">
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf"><span class="tbadge">2</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>11D — 409 VEHICLE_CONFLICT al CREAR <small>aquí la sesión no llegó a existir; hermano de 11B/11C</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>11:22</span><span>LTE · 84 %</span></div>
+        <div class="scr">
+          <div class="dim">
+            <div class="appbar"><span class="abrand">RideOps</span>
+              <div class="locchip">Patio Centro</div><span class="sp"></span><div class="avatar sm">MG</div></div>
+            <div class="content">
+              <div class="qhead"><span class="ql">Salidas (72 h)<span class="qct">6</span></span></div>
+              <div class="qcard"><div class="qico"></div><div class="qbody"><div class="qtop"><span class="qname">Laura Méndez</span><span class="tchip">Hoy 10:30</span></div>
+                <div class="qmeta">Corolla 2023 · U-112 · R-2481</div></div></div>
+            </div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <div style="display:flex;gap:12px;align-items:flex-start">
+              <div class="big-ic deny" style="width:52px;height:52px;flex:0 0 auto"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="10" width="18" height="7" rx="2"/><path d="M4 10l2.2-4.2A2 2 0 0 1 8 4.7h8a2 2 0 0 1 1.8 1.1L20 10"/><path d="M9 13.5l6 0"/></svg></div>
+              <div><h5>La unidad U-112 ya está en otra renta</h5>
+                <div class="ssub">R-2466 (Andrés Lira) salió ayer 18:20 con esa unidad. No se puede entregar dos veces.<span class="m" style="margin-left:6px">10</span></div></div>
+            </div>
+            <div class="btn btn-primary btn-md">Cambiar el vehículo de la reserva</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:9px">Abrir R-2466 para revisar</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:9px">Cancelar</div>
+            <p style="margin:12px 0 2px;font-size:12.5px;font-weight:700;color:var(--n-700);text-align:center">
+              No se creó ninguna sesión de checkout.</p>
+          </div>
+          <div class="tabfloat plate">
+            <div class="tabf on"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v10h12V10"/></svg></span>Inicio</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/></svg></span>Buscar</div>
+            <div class="tabf"><span class="tbadge">2</span><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 13h4l2 3h4l2-3h4"/></svg></span>Bandeja</div>
+            <div class="tabf"><span class="tico"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/></svg></span>Perfil</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>11E — 409 SESSION_TERMINAL <small>pantalla terminal con el resumen del events log</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>11:26</span><span>LTE · 83 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2477</b><span>Sofía Rangel · U-093</span></div>
+          </div>
+          <div class="wpad">
+            <div class="center-state" style="margin:10px 0 0">
+              <div class="big-ic ok"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></div>
+              <h4>Este checkout ya se cerró</h4>
+              <p>Se completó en el kiosco a las 11:04. No hay nada más que hacer aquí.<span class="m">6</span></p>
+            </div>
+            <div class="evlog" style="margin-top:16px"><span class="m inframe" style="margin:-8px 0 0 320px">7</span>
+              <div class="ev"><span class="t tnum">10:41</span><span class="b">Cliente y vehículo confirmados<i>Marco G. · app de patio</i></span></div>
+              <div class="ev"><span class="t tnum">10:49</span><span class="b">Términos firmados<i>Teléfono del cliente</i></span></div>
+              <div class="ev"><span class="t tnum">10:56</span><span class="b">Pago y depósito completos<i>Terminal · mostrador</i></span></div>
+              <div class="ev"><span class="t tnum">11:01</span><span class="b">Inspección y firma del cliente<i>María G. · kiosco</i></span></div>
+              <div class="ev"><span class="t tnum">11:04</span><span class="b">Entregado · contrato enviado<i>Cerrado automáticamente</i></span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Ver el contrato</div>
+              <div class="btn btn-ghost btn-sm">Volver a la lista</div>
+              <div class="why">Si crees que se cerró por error, abre la reserva: desde aquí no se puede reabrir.<span class="m" style="margin-left:4px">8</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · Entrada desde la cola</h3>
+      <div class="note"><span class="m">1</span><span><b>El arranque se siente en la card,</b> no en una pantalla en blanco: la card se tiñe tonal y su CTA se convierte en "Abriendo checkout…". Si el <code>POST</code> tarda, el agente sigue viendo su cola y puede tocar otra cosa. Guard anti-doble-tap: el CTA queda in-flight hasta la respuesta. Solo cuando el servidor devuelve la sesión se navega al wizard — nunca se navega optimistamente para luego regresar con un error.</span></div>
+      <div class="note"><span class="m">2</span><span><b>Reanudar es el caso normal, no la excepción</b> (idempotencia por <code>reservationId @unique</code>). La card de una sesión viva declara el paso del servidor ("paso 4 de 10") y, si P1 reporta presencia, quién la atiende — así el agente decide <b>antes</b> de tocar si vale la pena entrar. El CTA baja a secundario: entrar donde ya trabaja otro no debería ser el botón más llamativo de la pantalla.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Los bloqueos previsibles se anuncian en la card,</b> pero el CTA <b>no</b> se deshabilita: el guard real lo aplica el servidor (la política puede haber cambiado, o el pre-checkin puede haberse completado hace 10 s). La card avisa; el servidor decide; el sheet explica. Deshabilitar aquí sería el cliente jugando a ser máquina de estados.</span></div>
+      <div class="note"><span class="m">4</span><span><b>422 PRECHECKIN_REQUIRED con dos salidas reales</b> (enviar el link / capturar en el mostrador) + la promesa de que la reserva quedó intacta. Sheet en plate opaco .96 y el tab bar cae a <code>.plate</code>: la regla de la Tanda B (jamás 2 BackdropFilter) se sostiene. Mismo patrón para <code>AGE_RULES_*</code>, cambiando copy y salidas (ahí la salida suele ser "avisar al supervisor", no una acción del agente).</span></div>
+      <div class="note"><span class="m">5</span><span><b>422 NO_VEHICLE_ASSIGNED</b> incluye el grupo pedido por la reserva — el agente necesita ese dato para asignar sin abrir otra pantalla. Y la línea final ("no se creó ninguna sesión") importa: sin ella el agente no sabe si dejó basura a medias.</span></div>
+      <div class="note"><span class="m">6</span><span><b>409 SESSION_TERMINAL no es un error, es una noticia.</b> Icono verde si terminó en CLOSED (trabajo hecho por otro), ámbar/danger si terminó en CANCELLED. El copy dice dónde y cuándo terminó — con 4 superficies conviviendo, esta pantalla la va a ver mucha gente y no puede sonar a fallo.</span></div>
+      <div class="note"><span class="m">7</span><span><b>Resumen desde <code>events[]</code>, en lenguaje humano y con atribución</b> (<code>actorUserId</code> + <code>metadata.kiosk</code>). Es la respuesta a "¿y entonces quién lo entregó?" sin ir al escritorio. Los eventos crudos quedan para soporte, no para el patio.</span></div>
+      <div class="note"><span class="m">8</span><span><b>Terminal significa terminal:</b> no se ofrece "reintentar" ni "reabrir" — ofrecerlo sería mentir sobre la máquina de estados. La única puerta es la reserva, donde sí hay herramientas.</span></div>
+      <div class="contrast"><b>Contraste MEDIDO (11A–11E)</b>
+        <ul>
+          <li>Nombre de la card --n-900 sobre #fdfcff <b>17.74:1</b> · meta --n-600 <b>4.93:1</b> (sobre blanco puro 5.04:1) · la meta crítica ("Falta pre-checkin") se sube a --n-900 en negrita, <b>17.74:1</b>.</li>
+          <li><b>Card en arranque (<code>.qcard.busy</code>, componente NUEVO del M2):</b> su fondo es --p-50, así que la meta NO puede quedarse en --n-600 (daría 4.48:1, bajo AA) — se sube a <b>--n-700 sobre --p-50 = 8.18:1</b>, la misma regla que ya se aplicó al header de sesión. Chip y texto --p-800 sobre --p-50 <b>9.93:1</b> · spinner blanco sobre CTA gradiente (no-texto).</li>
+          <li>Chip "En curso" --ok-tx sobre --ok-bg <b>6.19:1</b> · chip ámbar --warn-tx sobre --warn-bg <b>5.59:1</b>.</li>
+          <li>Sheets de negativa: el plate .96 sobre la home compone a blanco puro, así que título --n-900 <b>18.14:1</b> · subtítulo y nota de cierre --n-700 <b>9.22:1</b>. Ningún texto vive sobre el scrim.</li>
+          <li>Events log: hora --n-700 <b>9.22:1</b> · evento --n-900 <b>18.14:1</b> · atribución --n-700 <b>9.22:1</b> (no --n-600: es el dato que se lee al sol para responder una reclamación).</li>
+          <li>Scrim rgba(23,18,43,.42) sobre la home: solo separa capas; no hay texto encima.</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>Card → wizard: shared-axis X de M3, 300 ms; el header de sesión hereda el nombre del cliente de la card (continuidad visual).</li>
+          <li>CTA in-flight: colapsa a spinner sin cambiar de tamaño (nada salta bajo el pulgar). Timeout honesto a 12 s con "el patio anda lento, reintenta".</li>
+          <li>Sheets de negativa: spring 380 ms + haptic warning una sola vez; el tab bar apaga su blur en el mismo frame.</li>
+          <li>Reduced-motion ⇒ cross-fade en vez de shared-axis; sin spring.</li>
+        </ul></div>
+      <div class="decision"><b>Decisión de diseño que conviene que el PM valide</b>
+        El CTA <b>no</b> se deshabilita en las cards con bloqueo previsible (nota 3): se deja tocar y el servidor responde.
+        Cuesta un viaje de red en el caso malo, pero evita el fallo peor —que la app bloquee un checkout legítimo con
+        información vieja de la cola (el dashboard se refresca cada 45–60 s). Si Hector prefiere el bloqueo local, es un
+        cambio de una línea, pero entonces la card <b>debe</b> refrescarse antes de pintar el bloqueo.</div>
+    </aside>
+  </div>
+</section>
+
+<footer class="dod" id="dod">
+  <div class="card">
+    <b>Decisiones clave de la Tanda A del M2 (mismo sistema visual que M1 A v2 + B)</b>
+    <ul class="changelog">
+      <li><b>Stepper honesto de la máquina de 11 estados en 390 px:</b> rail de 5 fases (agrupamiento de presentación, en l10n) + contador exacto "Paso N de 10" en texto tabular + lista completa a un toque. Lo hecho sale de <code>events[]</code>, lo actual de <code>currentStep</code>, y lo que viene se dibuja gris inerte sin calcularse. Un paso desconocido degrada a nodo genérico en vez de romper (forward-compat).</li>
+      <li><b>Los entry guards se explican antes del 409:</b> cada paso guardado muestra candado y qué falta ("Espera: firma de T&amp;C del cliente"), que es el 409 <code>ENTRY_GUARD</code> traducido a lenguaje de patio y anticipado.</li>
+      <li><b>Avance ajeno = banner informativo + auto-avance, nunca modal.</b> Con las 4 superficies conviviendo (§9-1), un diálogo por cada cambio ajeno sería un bloqueo cada pocos minutos. La atribución sale de <code>events[]</code>, sin backend nuevo; el chip de presencia (P1) es informativo y expira solo al pasar el TTL de 45 s.</li>
+      <li><b>Offline que congela afirmaciones, no el trabajo:</b> se lee la sesión cacheada con edad visible en la propia stepline, las transiciones se deshabilitan <b>con causa nombrada</b>, y se declara explícitamente que los pasos del checkout no entran a la Bandeja (ADR-5 recordado en el punto de decisión, no en un aviso genérico).</li>
+      <li><b>Countdown del QR como información, no decoración:</b> mm:ss tabular, ámbar a los 2 min restantes —umbral que coincide con la ventana de re-minteo del backend, así que el color significa algo verificable— y re-emisión de un toque cuya copy admite cuándo el backend reusa el mismo token.</li>
+      <li><b>Superficie del cliente sin marca de plataforma — y el destino del QR hoy SÍ la filtra.</b> Verificado en código, no es sospecha: <code>frontend/src/app/sign/[token]/page.js</code> pinta "Terms &amp; Conditions" en inglés y sin identidad del tenant, y <code>frontend/src/app/layout.js</code> fija <code>metadata.title = 'Ride Fleet'</code> sin override en <code>/sign</code>. Es <b>criterio de aceptación BLOQUEANTE de M2-H2</b> (nota 5 de la sección 10) y está registrado como gap #11 del PROJECT_PLAN por afectar a clientes hoy.</li>
+      <li><b>Cada guard de creación tiene salida:</b> 422 pre-checkin (enviar link / capturar aquí), 422 sin vehículo (asignar / abrir reserva), <b>409 conflicto de vehículo en sus dos caminos</b> (11D al crear, sin sesión que exista todavía; 9D+9E con sesión viva, donde el swap sí es posible), 409 terminal (resumen del events log, sin falsas puertas de reintento).</li>
+      <li><b>Política de blur sostenida y endurecida:</b> el wizard completo va con CERO BackdropFilter (plates opacos ≥ .96) porque es donde viven los datos que se firman y se cobran; en la home el único blur sigue siendo el tab bar, que cae a plate cuando sube un sheet.</li>
+      <li><b>Contraste medido, no estimado:</b> todos los pares de estas 4 pantallas se calcularon con la fórmula WCAG sobre el fondo compuesto real y se reportan con su número. Dos rechazos concretos que cambiaron el diseño: --n-600 sobre --tonal (4.58:1) sustituido por --n-700 (8.37:1) en todo el header de sesión, y el azul --info descartado como texto sobre --info-bg (4.94:1) en favor de --n-800 (12.48:1), quedando el azul solo en el icono.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <b>Trazabilidad DoD (PROJECT_PLAN §10):</b>
+    <b>#1</b> todos los strings mostrados van a app_es.arb / app_en.arb (aquí ES) — incluidas las 11 etiquetas de estado (10 lineales + CANCELLED), una por enum del servidor, con fallback para enums desconocidos ·
+    <b>#2</b> targets: CTAs 54–56, filas de paso y opciones 52–56, chips e iconos con hit-slop a 48, QR de presentación 230 px; contraste ≥ 4.5:1 de texto contra el fondo REAL con los pares medidos listados en cada bloque de notas (los ≥ 3:1 declarados explícitamente como no-texto: check blanco sobre --ok 4.32:1, riel del switch, QR atenuado) ·
+    <b>#3</b> ruta offline dibujada (8D): lectura con edad del dato, transiciones bloqueadas con causa, y la regla explícita de que ni los pasos del checkout ni el dinero entran a la Bandeja (ADR-5) ·
+    <b>#4</b> RBAC/scoping contra la API: el wizard vive bajo <code>requireModuleAccess('reservations')</code> y el 403 se maneja aunque la nav esconda entradas; el CTA de la cola no se auto-deshabilita — el guard lo aplica el servidor ·
+    <b>#5</b> estados de error: <b>409 <code>VEHICLE_CONFLICT</code></b> en sus DOS caminos — <b>11D</b> al CREAR (la sesión todavía no existe: no hay <code>:id</code> al que hacerle swap) y <b>9D + 9E</b> con sesión viva (swap real) · <b>409 <code>SESSION_TERMINAL</code></b> (<b>11E</b>) · <b>409 <code>ENTRY_GUARD</code></b> anticipado en la lista de pasos (8B) · <b>409 <code>ILLEGAL_TRANSITION</code></b> resuelto como no-op + re-render (8C: si el paso ya lo hizo otra superficie, el banner sustituye al error) · <b>422 <code>PRECHECKIN_REQUIRED</code></b> (11B) y <b>422 <code>NO_VEHICLE_ASSIGNED</code></b> (11C) · 401 → re-login (Tanda A del M1) · 403 de ubicación → negativa visible (M1 4D) · 429 absorbido por el backoff del poll ·
+    <b>#10</b> loading (8F skeleton con la geometría real del shell, 11A arranque en la card), estado de espera (10A) y error (8D, 9B, 9D, 10D, 11B–11E) por pantalla.
+    <br><br>
+    <b>Pendientes marcados para build (ninguno bloquea la aprobación de esta tanda):</b>
+    (a) pedido opcional al backend de <code>steps[]</code> en <code>GET /:id</code> para que el rail sea 100 % server-driven;
+    (b) confirmar la fuente de la lista de vehículos disponibles del swap (9E) y pedir filtro server-side si no existe;
+    (c) confirmar si existe envío del link de T&amp;C por mensaje (10D) — si no, el botón sale del build de H2;
+    (d) comportamiento del switch de seguro declinado después de firmados los términos (9C);
+    (e) requisito de QA heredado del M1: verificar que la página pública de términos no filtra marca de plataforma y que cae al nombre del tenant en texto cuando no hay logo.
+  </div>
+</footer>
+
+</body>
+</html>

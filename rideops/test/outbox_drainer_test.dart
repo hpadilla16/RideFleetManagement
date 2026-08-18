@@ -72,6 +72,10 @@ class FakeOps implements OutboxOps {
   bool failCompleteWithTokenConsumedOnce;
   DrainOutcome photoOutcome;
 
+  /// Ángulos que fallan transitorio (los demás siguen [photoOutcome]) —
+  /// para el escenario S2: un ángulo intermedio atorado.
+  Set<String> transientAngles = {};
+
   /// Compuerta opcional para colgar subidas y probar concurrencia.
   Future<void>? uploadGate;
 
@@ -98,6 +102,9 @@ class FakeOps implements OutboxOps {
     final gate = uploadGate;
     if (gate != null) await gate;
     usedTokens.add(token);
+    if (transientAngles.contains(angleKey)) {
+      return const DrainTransient('red caída en este ángulo');
+    }
     if (failPhotoWithTokenConsumedOnce) {
       failPhotoWithTokenConsumedOnce = false;
       return const DrainReject('TOKEN_CONSUMED', 'Token already used');
@@ -201,6 +208,52 @@ void main() {
     final store = FakeStore([photoRow('a')]);
     await OutboxDrainer(store: store, ops: ops).drain();
     expect(store.dead, {'a': 'REQUIRED_ANGLES_MISSING'});
+  });
+
+  test(
+      'S2: el complete espera a TODAS las fotos de su sesión, no solo al '
+      'dependsOn', () async {
+    // La foto 'b' NO está en la cadena de dependsOn del complete (ángulo
+    // re-capturado después) y falla transitorio: sin el guard por sesión,
+    // el complete pasaría y la inspección quedaría "completa" con evidencia
+    // faltante.
+    final ops = FakeOps()..transientAngles = {'angle-b'};
+    final store = FakeStore([
+      photoRow('a'),
+      photoRow('b'),
+      completeRow('c', dependsOn: 'a'),
+    ]);
+    await OutboxDrainer(store: store, ops: ops).drain();
+    expect(store.drained, ['a']);
+    expect(ops.completes, 0,
+        reason: 'una foto de la MISMA sesión sigue en cola: el complete espera');
+    // La foto atorada sube en otra corrida y entonces sí cierra.
+    ops.transientAngles = {};
+    await OutboxDrainer(store: store, ops: ops).drain();
+    expect(store.drained, ['a', 'b', 'c']);
+    expect(ops.completes, 1);
+  });
+
+  test('S2: una foto de OTRA sesión no bloquea el complete', () async {
+    final ops = FakeOps()..transientAngles = {'angle-x'};
+    final otherSessionPhoto = OutboxRow(
+      id: 'x',
+      kind: 'inspection_photo',
+      payload: json.encode({
+        'checkoutSessionId': 'cs-OTRA',
+        'angleKey': 'angle-x',
+        'photoPath': 'x.bin',
+      }),
+    );
+    final store = FakeStore([
+      photoRow('a'),
+      otherSessionPhoto,
+      completeRow('c', dependsOn: 'a'),
+    ]);
+    await OutboxDrainer(store: store, ops: ops).drain();
+    expect(ops.completes, 1,
+        reason: 'las cadenas son POR sesión — otra sesión no estorba');
+    expect(store.drained, ['a', 'c']);
   });
 
   test('si la foto falla, su complete dependiente NO corre este drenado',

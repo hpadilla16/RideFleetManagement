@@ -1,12 +1,15 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
+
+import '../config/app_config.dart';
 
 /// Telemetría (M0-4 / docs/03-observability.md).
 ///
-/// Por ahora la app NO tiene DSN de Sentry (lo da Hector); esta interfaz es el
-/// punto de enchufe: cuando llegue, se agrega un `SentryEventLogger` que
-/// traduce cada evento a breadcrumb/transaction y se cambia UNA línea en
-/// [eventLoggerProvider]. Nada más de la app se entera.
+/// Con DSN configurado los eventos viajan como breadcrumbs de Sentry (el
+/// contexto que acompaña a un crash: qué hizo el empleado antes de que
+/// tronara); sin DSN la app no reporta a nadie. La decisión es una sola
+/// función pura, [pickEventLogger] — el resto de la app solo ve la interfaz.
 ///
 /// Reglas de PII del doc: jamás pasar tokens, contraseñas, nombres de
 /// clientes ni bodies de request en [data]. Identidad = userId del EMPLEADO y
@@ -46,9 +49,86 @@ abstract final class AuthEvents {
   static const sessionExpiredRelogin = 'auth.session_expired_relogin';
 }
 
-/// Punto de enchufe de Sentry: cuando haya DSN, aquí se decide
-/// `SentryEventLogger` en prod y debug en dev. Hoy: debug print en debug,
-/// silencio en release.
+/// Eventos de sesión fuera de auth (03-observability.md §Sesión): el candado
+/// por PIN/biometría (H2, `method` en el unlock: pin | biometric) y el
+/// selector de ubicación activa (H3).
+abstract final class SessionEvents {
+  static const pinLock = 'session.pin_lock';
+  static const pinUnlock = 'session.pin_unlock';
+  static const viewLocationSet = 'session.view_location_set';
+  static const viewLocationDenied = 'session.view_location_denied';
+}
+
+/// Eventos del dashboard (03-observability.md §Salud). `poll_tick` es SOLO
+/// métrica de frecuencia — el callsite lo samplea al 1% antes de loguear.
+abstract final class DashboardEvents {
+  static const pollTick = 'dashboard.poll_tick';
+}
+
+/// Salud de red (03-observability.md §Salud): el poller del dashboard entró
+/// en backoff por 429/503 (tag `route`).
+abstract final class NetEvents {
+  static const request429Backoff = 'net.request_429_backoff';
+}
+
+/// Eventos de inspección (03-observability.md §Inspección y bandeja) y de
+/// salud de cámara (§Salud) — historia H5.
+abstract final class InspectionEvents {
+  static const photoCaptured = 'inspection.photo_captured';
+  static const completedLocal = 'inspection.completed_local';
+}
+
+/// Eventos de la bandeja de salida (03-observability.md §Inspección y
+/// bandeja). `entry_dead` con un `code` desconocido es compuerta de release
+/// (bug de manejo de errores, no ruido).
+abstract final class OutboxEvents {
+  static const enqueued = 'outbox.enqueued';
+  static const drainedOk = 'outbox.drained_ok';
+  static const remintToken = 'outbox.remint_token';
+  static const entryDead = 'outbox.entry_dead';
+  static const purgedAccountSwitch = 'outbox.purged_account_switch';
+}
+
+/// Salud de cámara (03-observability.md §Salud): presión de memoria durante
+/// la captura — el guard del OOM de gama media (DoD #8).
+abstract final class CameraEvents {
+  static const oomGuard = 'camera.oom_guard';
+}
+
+/// Con DSN: cada evento de la taxonomía entra como breadcrumb, de modo que un
+/// crash llegue con el rastro de lo que el empleado venía haciendo.
+///
+/// [data] ya viene saneado por contrato (la taxonomía prohíbe tokens, fotos y
+/// nombres de clientes); esto NO vuelve a filtrarlo — el filtro real vive en
+/// los callsites y en el `beforeSend` de sentry_setup.dart.
+class SentryEventLogger implements EventLogger {
+  const SentryEventLogger();
+
+  @override
+  void log(String event, {Map<String, Object?> data = const {}}) {
+    Sentry.addBreadcrumb(
+      Breadcrumb(
+        message: event,
+        category: 'rideops',
+        data: data.isEmpty ? null : Map<String, Object?>.from(data),
+      ),
+    );
+  }
+}
+
+/// Qué logger corresponde. Pura y sin Riverpod para poder probar la matriz
+/// completa (con/sin DSN × debug/release) sin levantar la app.
+EventLogger pickEventLogger({
+  required bool sentryEnabled,
+  required bool debugMode,
+}) {
+  if (sentryEnabled) return const SentryEventLogger();
+  return debugMode ? const DebugEventLogger() : const NoopEventLogger();
+}
+
 final eventLoggerProvider = Provider<EventLogger>((ref) {
-  return kDebugMode ? const DebugEventLogger() : const NoopEventLogger();
+  return pickEventLogger(
+    sentryEnabled: AppConfig.current.sentryEnabled,
+    debugMode: kDebugMode,
+  );
 });

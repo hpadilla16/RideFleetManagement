@@ -10,7 +10,7 @@
   "loginInvalidCredentials": "Correo o contraseña incorrectos. Revisa e intenta de nuevo.",
   "loginOffline": "No hay conexión a internet. Revisa la señal y toca Reintentar ahora.",
   "@loginOffline": {
-    "description": "TODO H4: al integrar connectivity_plus y el auto-reintento, volver al copy del mockup 1C ('se reintentará al volver la señal'). Hoy el reintento es manual — no prometerlo."
+    "description": "Backlog (ya NO depende de H4: connectivity_plus entró con H5): cuando el login gane auto-reintento al volver la señal, volver al copy del mockup 1C ('se reintentará al volver la señal'). Hoy el reintento es manual — no prometerlo."
   },
   "loginRetryNow": "Reintentar ahora",
   "loginHelpLine": "¿Problemas para entrar? Pide a tu admin restablecer tu contraseña",
@@ -46,10 +46,77 @@
   "changePasswordSuccessBody": "Tu sesión sigue activa — no necesitas volver a entrar.",
   "changePasswordFootnote": "La sesión temporal sigue viva durante este paso",
   "continueButton": "Continuar",
-  "homePlaceholderTitle": "Sesión iniciada",
-  "homePlaceholderBody": "El tablero de patio llega en la siguiente historia.",
+  "changePasswordNextPin": "Siguiente: crea tu PIN para desbloquear rápido en el patio.",
+  "pinSetupTitle": "Crea tu PIN",
+  "pinSetupSubtitle": "Lo usarás para desbloquear RideOps en el patio. 4 dígitos.",
+  "pinSetupConfirmTitle": "Confirma tu PIN",
+  "pinSetupConfirmSubtitle": "Escríbelo otra vez para confirmarlo.",
+  "pinSetupStep": "Paso {step} de 2",
+  "@pinSetupStep": {
+    "placeholders": { "step": { "type": "int" } }
+  },
+  "pinSetupMismatch": "Los PIN no coinciden. Empieza de nuevo.",
+  "pinBioOfferTitle": "¿Activar huella?",
+  "pinBioOfferBody": "Desbloquea con tu huella, sin escribir el PIN. Tu PIN sigue funcionando siempre.",
+  "pinBioEnable": "Activar huella",
+  "pinBioSkip": "Ahora no",
+  "pinBioEnrollFailed": "No se pudo activar la huella. Puedes seguir con tu PIN.",
+  "pinBioPrompt": "Confirma tu identidad para desbloquear RideOps",
+  "pinBioKeyLabel": "Desbloquear con huella",
+  "keypadDeleteLabel": "Borrar dígito",
+  "pinDigitsProgress": "{count} de 4 dígitos",
+  "@pinDigitsProgress": {
+    "description": "Semántica de los dots del PIN para lector de pantalla",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "lockGreeting": "Hola, {name}",
+  "@lockGreeting": {
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "lockTitleGeneric": "Desbloquea RideOps",
+  "lockSubtitle": "Ingresa tu PIN para continuar",
+  "lockWrongPin": "{count, plural, one{PIN incorrecto — te queda 1 intento} other{PIN incorrecto — te quedan {count} intentos}}",
+  "@lockWrongPin": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "lockForgotPin": "¿Olvidaste tu PIN? Cerrar sesión",
   "logoutButton": "Cerrar sesión",
+  "tabHome": "Inicio",
+  "tabSearch": "Buscar",
+  "tabIncidents": "Incidentes",
+  "tabOutbox": "Bandeja",
+  "tabProfile": "Perfil",
+  "outboxBadgeSemantics": "{count} pendientes de envío",
+  "@outboxBadgeSemantics": {
+    "description": "Etiqueta de accesibilidad del badge de la tab Bandeja",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "shellPlaceholderBody": "Esta sección llega en una historia siguiente.",
+  "locationChipAll": "Todas",
+  "locationChipSemantics": "Ubicación activa: {location}. Toca para cambiar.",
+  "@locationChipSemantics": {
+    "placeholders": { "location": { "type": "String" } }
+  },
+  "locationSheetTitle": "Ubicación activa",
+  "locationSheetSubtitle": "Filtra colas, búsqueda y capturas nuevas",
+  "locationAllMine": "Todas mis ubicaciones",
+  "locationCurrentLabel": "Ubicación actual",
+  "locationSheetError": "No se pudieron cargar tus ubicaciones. Revisa la señal e intenta de nuevo.",
+  "cancelButton": "Cancelar",
+  "locationDeniedTitle": "Sin acceso a esta ubicación",
+  "locationDeniedBody": "Tu cuenta ya no tiene acceso a {location}. Elige otra ubicación para seguir trabajando.",
+  "@locationDeniedBody": {
+    "placeholders": { "location": { "type": "String" } }
+  },
+  "locationDeniedBodyGeneric": "Tu cuenta ya no tiene acceso a esta ubicación. Elige otra ubicación para seguir trabajando.",
+  "locationDeniedChangeButton": "Cambiar ubicación",
+  "locationDeniedAdminNote": "Si crees que es un error, avisa a tu administrador.",
+  "loadingLabel": "Cargando…",
   "sessionExpired": "Tu sesión venció. Vuelve a entrar.",
+  "loginKioskRelogin": "Por seguridad, vuelve a entrar con tu contraseña.",
+  "@loginKioskRelogin": {
+    "description": "Aviso en login tras la recuperación de kiosco sin PIN (política H6): la expulsión fue deliberada, no un crash"
+  },
   "locationDenied": "No tienes acceso a esa ubicación.",
   "errorConflictReloaded": "Otra pantalla avanzó esta sesión. Se recargó el estado.",
   "errorRateLimited": "Demasiadas solicitudes. Espera un momento e intenta de nuevo.",
@@ -57,5 +124,342 @@
   "errorOffline": "Sin conexión. Se guardó para enviar después.",
   "outboxDeadLetterTitle": "Pendientes con error",
   "retryButton": "Reintentar",
-  "genericError": "Algo salió mal. Intenta de nuevo."
+  "genericError": "Algo salió mal. Intenta de nuevo.",
+  "locationChipDeniedSemantics": "Ubicación activa: {location}. Acceso denegado. Toca para cambiar.",
+  "@locationChipDeniedSemantics": {
+    "description": "Chip del shell en danger mientras el 403 de view-location esté activo",
+    "placeholders": { "location": { "type": "String" } }
+  },
+  "ageMoment": "un momento",
+  "ageMinutes": "{count} min",
+  "@ageMinutes": {
+    "description": "Edad corta del dato (fila de frescura y banners)",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "ageHours": "{count} h",
+  "@ageHours": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "homeFreshnessLine": "Actualizado hace {age} · se actualiza solo",
+  "@homeFreshnessLine": {
+    "placeholders": { "age": { "type": "String" } }
+  },
+  "homeOfflineBanner": "Sin conexión — mostrando datos de hace {age}. Se actualizará solo al volver la señal.",
+  "@homeOfflineBanner": {
+    "placeholders": { "age": { "type": "String" } }
+  },
+  "homeStaleBanner": "No se pudo actualizar — mostrando datos de hace {age}.",
+  "@homeStaleBanner": {
+    "placeholders": { "age": { "type": "String" } }
+  },
+  "homeErrorTitle": "No se pudo cargar el tablero",
+  "forbiddenTitle": "Sin acceso",
+  "heroTitle": "Para ahora",
+  "heroPartDepartures": "{count, plural, one{1 salida} other{{count} salidas}}",
+  "@heroPartDepartures": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "heroPartDeparturesCapped": "{count}+ salidas",
+  "@heroPartDeparturesCapped": {
+    "description": "La cola de salidas tocó el take:8 con puros items de hoy — el total real puede ser mayor",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "heroPartReturns": "{count, plural, one{1 retorno} other{{count} retornos}}",
+  "@heroPartReturns": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "heroPartIncidents": "{count, plural, one{1 incidente} other{{count} incidentes}}",
+  "@heroPartIncidents": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "heroCalmFoot": "Sin pendientes inmediatos",
+  "heroCutoffFoot": "al corte de las {time}",
+  "@heroCutoffFoot": {
+    "description": "Pie del hero en offline: hora del último dato bueno (mockup 5E)",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "tileActiveTitle": "En renta",
+  "tileActiveFoot": "{count, plural, =0{Ver lista ›} one{1 vence hoy · ver lista ›} other{{count} vencen hoy · ver lista ›}}",
+  "@tileActiveFoot": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "tileActiveSemantics": "En renta: {count}. Toca para ver la lista completa.",
+  "@tileActiveSemantics": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "tileLoanerTitle": "Loaner",
+  "tileLoanerFoot": "{count, plural, =0{Sin seguimientos} one{1 pide seguimiento} other{{count} piden seguimiento}}",
+  "@tileLoanerFoot": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "tileLoanerFootCapped": "{count}+ piden seguimiento",
+  "@tileLoanerFootCapped": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "tilePrecheckinTitle": "Pre-checkin",
+  "tilePrecheckinFoot": "Enviado, sin completar",
+  "queueIssueEscalations": "Incidentes",
+  "queueCheckout": "Salidas (72 h)",
+  "queueReturns": "Retornos (72 h)",
+  "queuePrecheckin": "Pre-checkin",
+  "queueLoanerAdvisorFollowup": "Seguimiento loaner",
+  "queueLoanerReady": "Loaner listos",
+  "queueLoanerBillingReview": "Facturación loaner",
+  "queueLoanerReturns": "Retornos loaner",
+  "queueActive": "En renta",
+  "seeAllButton": "Ver todo",
+  "queueCountCapped": "{count}+",
+  "@queueCountCapped": {
+    "description": "Contador honesto al tocar el take:8 del server — nunca un total inventado",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "calmRowTitle": "Sin actividad ahora",
+  "calmChipSemantics": "{queue}: sin pendientes. Toca para abrir la cola.",
+  "@calmChipSemantics": {
+    "placeholders": { "queue": { "type": "String" } }
+  },
+  "emptyAllTitle": "Patio en calma",
+  "emptyAllBody": "No hay nada pendiente en ninguna cola ahora mismo. Desliza hacia abajo para actualizar cuando quieras.",
+  "emptyAllQueuesLabel": "Las {count} colas, en cero",
+  "@emptyAllQueuesLabel": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "cardToday": "Hoy {time}",
+  "@cardToday": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "cardTomorrow": "Mañana {time}",
+  "@cardTomorrow": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "cardOverdueHours": "{count, plural, one{Vencido 1 h} other{Vencido {count} h}}",
+  "@cardOverdueHours": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "cardOverdueMinutes": "Vencido {count} min",
+  "@cardOverdueMinutes": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "precheckinReady": "Pre-checkin listo",
+  "precheckinMissing": "Falta pre-checkin",
+  "incidentOpen": "Abierto",
+  "incidentUnderReview": "En revisión",
+  "incidentReported": "Reportado {time}",
+  "@incidentReported": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "loanerFollowupPacket": "Expediente sin completar",
+  "loanerFollowupService": "Servicio vencido",
+  "loanerFollowupBilling": "Facturación rechazada",
+  "loanerReadyChip": "Listo para entrega",
+  "advisorLabel": "Asesor: {name}",
+  "@advisorLabel": {
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "queueListShowingFirst": "Mostrando los primeros {count} — puede haber más",
+  "@queueListShowingFirst": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "queueListShowingOf": "Mostrando {shown} de {total}",
+  "@queueListShowingOf": {
+    "placeholders": {
+      "shown": { "type": "int" },
+      "total": { "type": "int" }
+    }
+  },
+  "queueEmptyBody": "Nada en esta cola ahora mismo.",
+  "searchFieldHint": "Cliente, reserva, placa o unidad",
+  "searchFieldLabel": "Buscar",
+  "searchClearLabel": "Borrar búsqueda",
+  "searchPrompt": "Busca en las reservas de tu sede activa.",
+  "searchNoResults": "Sin resultados para “{query}”.",
+  "@searchNoResults": {
+    "placeholders": { "query": { "type": "String" } }
+  },
+  "cardOpenInspectionSemantics": "{details}: abrir inspección de salida",
+  "@cardOpenInspectionSemantics": {
+    "description": "Card tocable de la cola de salidas (H6). GD MC-2: {details} = nombre · hora del chip · meta — TalkBack no puede perder la hora ni el estado de pre-checkin",
+    "placeholders": { "details": { "type": "String" } }
+  },
+
+  "inspTitle": "Inspección de salida",
+  "inspProgressChip": "{count} de 8",
+  "@inspProgressChip": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "inspProgressDone": "8 de 8 ✓",
+  "angleFront": "Frente",
+  "angleRear": "Atrás",
+  "angleLeft": "Lado izquierdo",
+  "angleRight": "Lado derecho",
+  "angleFrontSeat": "Asiento del.",
+  "angleRearSeat": "Asiento tras.",
+  "angleDash": "Tablero",
+  "angleTrunk": "Cajuela",
+  "angleRequiredChip": "Obligatorio",
+  "anglePending": "Pendiente",
+  "angleCompressing": "Comprimiendo…",
+  "angleFailedRetry": "Falló — toca para reintentar",
+  "angleQueued": "En bandeja",
+  "angleOnServer": "Ya en el servidor",
+  "inspContinueMetrics": "Continuar a métricas",
+  "inspRequiredFootnote": "Frente y Atrás son obligatorios; el resto suma evidencia.",
+  "inspOfflineBanner": "Sin conexión. Puedes terminar la inspección completa: todo queda en la bandeja y se enviará al reconectar.",
+  "inspOfflineChip": "Sin red",
+  "inspLinkExpires": "El enlace de esta sesión vence a las {time}.",
+  "@inspLinkExpires": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "inspLoadOffline": "Sin conexión. Para iniciar la inspección se necesita señal una vez; después todo funciona sin red.",
+  "inspOutboxFull": "La bandeja está llena. Conéctate a una red para que se vacíe antes de capturar más fotos.",
+  "camAnglePill": "{angle} · {n} de 8",
+  "@camAnglePill": {
+    "placeholders": { "angle": { "type": "String" }, "n": { "type": "int" } }
+  },
+  "camHintExterior": "Encuadra el vehículo completo dentro de las esquinas",
+  "camHintInterior": "Encuadra el área completa dentro de las esquinas",
+  "camFlash": "Flash",
+  "camClose": "Cerrar",
+  "camShutter": "Tomar foto",
+  "camErrorTitle": "No se pudo abrir la cámara",
+  "camErrorPermissionHint": "El permiso de cámara está denegado. Actívalo en los Ajustes del sistema y vuelve a intentar.",
+  "langSpanish": "Español",
+  "langEnglish": "English",
+  "metricsTitle": "Métricas del vehículo",
+  "metricsOdometer": "Odómetro",
+  "metricsOdometerUnit": "mi",
+  "metricsPrevReading": "Última lectura registrada: {value} mi",
+  "@metricsPrevReading": {
+    "placeholders": { "value": { "type": "String" } }
+  },
+  "metricsOdometerLower": "La lectura es menor que la última registrada. Revísala — se enviará tal cual.",
+  "metricsFuel": "Combustible",
+  "fuelEmpty": "Vacío",
+  "fuelFull": "Lleno",
+  "metricsCleanliness": "Limpieza",
+  "cleanDirty": "Sucio",
+  "cleanSpotless": "Impecable",
+  "metricsNotes": "Notas (opcional)",
+  "inspContinueSignature": "Continuar a firma",
+  "kioskBarLabel": "Modo firma · bloqueo en pausa",
+  "kioskBarExit": "Salir: mantener 3 s + PIN",
+  "kioskExitPinTitle": "Salir del modo firma",
+  "kioskExitPinBody": "Escribe tu PIN para volver al modo staff.",
+  "kioskExitWrongPin": "{count, plural, one{PIN incorrecto — te queda 1 intento} other{PIN incorrecto — te quedan {count} intentos}}",
+  "@kioskExitWrongPin": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "kioskExitExhausted": "Demasiados intentos. Volviendo al paso anterior.",
+  "kioskSignSubtitle": "Inspección del vehículo · Reserva {reservation}",
+  "@kioskSignSubtitle": {
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "kioskSignPrompt": "Firme para confirmar que revisó el estado del vehículo junto al agente.",
+  "kioskSignHint": "Firme aquí con el dedo",
+  "kioskSignClear": "Borrar",
+  "kioskSignConfirm": "Confirmar firma",
+  "summaryQueueTitle": "{photos} fotos · métricas · firma",
+  "@summaryQueueTitle": {
+    "placeholders": { "photos": { "type": "int" } }
+  },
+  "summaryQueueBadgeOffline": "Se enviará al reconectar",
+  "summaryQueueBadgeOnline": "Listo para enviar",
+  "summaryQueueMeta": "Guardado local cifrado · orden de envío garantizado",
+  "inspFinishOffline": "Terminar — se enviará al reconectar",
+  "inspFinishOnline": "Terminar y enviar",
+  "inspFinishQueued": "Inspección en la bandeja de salida",
+  "alreadyCompletedTitle": "Esta inspección ya se completó",
+  "alreadyCompletedBody": "Otra pantalla la cerró mientras trabajabas. Tus envíos pendientes de esta sesión se retiraron de la bandeja — no se enviará nada duplicado.",
+  "alreadyCompletedBodyAt": "Otra pantalla la cerró a las {time} mientras trabajabas. Tus envíos pendientes de esta sesión se retiraron de la bandeja — no se enviará nada duplicado.",
+  "@alreadyCompletedBodyAt": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "alreadyCompletedChip": "Reserva {reservation}",
+  "@alreadyCompletedChip": {
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "backToHome": "Volver al inicio",
+
+  "outboxTitle": "Bandeja de salida",
+  "outboxDraining": "Enviando…",
+  "outboxDrainProgress": "{done} de {total} enviados",
+  "@outboxDrainProgress": {
+    "placeholders": { "done": { "type": "int" }, "total": { "type": "int" } }
+  },
+  "outboxDrainRemaining": "quedan ~{size}",
+  "@outboxDrainRemaining": {
+    "placeholders": { "size": { "type": "String" } }
+  },
+  "outboxItemPhoto": "Foto · {angle}",
+  "@outboxItemPhoto": {
+    "placeholders": { "angle": { "type": "String" } }
+  },
+  "outboxItemComplete": "Cierre de inspección",
+  "outboxItemMetaPhoto": "{reservation} · inspección de salida · {size}",
+  "@outboxItemMetaPhoto": {
+    "placeholders": { "reservation": { "type": "String" }, "size": { "type": "String" } }
+  },
+  "outboxItemMetaComplete": "{reservation} · métricas + firma · va al final de su cadena",
+  "@outboxItemMetaComplete": {
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "outboxStatusQueued": "En cola",
+  "outboxStatusUploading": "Subiendo",
+  "outboxStatusWaitsPhotos": "Espera sus fotos",
+  "outboxStatusRejected": "Rechazado",
+  "outboxAttempts": "intentado {count} veces · último {time}",
+  "@outboxAttempts": {
+    "placeholders": { "count": { "type": "int" }, "time": { "type": "String" } }
+  },
+  "outboxReasonAnglesMissing": "El servidor lo rechazó: faltan los ángulos frontal y trasero. Captúralos y reintenta.",
+  "outboxReasonToken": "El permiso para subir venció o se consumió. Reintentar pedirá uno nuevo con tu sesión.",
+  "outboxReasonPhotoLost": "La foto ya no está en este teléfono. Solo puedes descartar este envío.",
+  "outboxReasonSessionGone": "La sesión de checkout ya no existe en el servidor.",
+  "outboxReasonNetwork": "No se pudo enviar tras varios intentos. Reintenta cuando haya señal.",
+  "outboxReasonGeneric": "El servidor rechazó este envío.",
+  "outboxTechnicalDetail": "Detalle técnico: {code} · {message}",
+  "@outboxTechnicalDetail": {
+    "placeholders": { "code": { "type": "String" }, "message": { "type": "String" } }
+  },
+  "outboxActionOpenInspection": "Abrir inspección",
+  "outboxActionDiscard": "Descartar",
+  "outboxDeadBanner": "{count, plural, one{1 envío necesita tu decisión. El resto seguirá enviándose normal.} other{{count} envíos necesitan tu decisión. El resto seguirá enviándose normal.}}",
+  "@outboxDeadBanner": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "outboxDiscardTitle": "¿Descartar este envío?",
+  "outboxDiscardBodyPhoto": "Se borrará la foto ({angle}) de {reservation} de este teléfono. Habrá que capturarla de nuevo. Lo ya enviado al servidor no se toca.",
+  "@outboxDiscardBodyPhoto": {
+    "placeholders": { "angle": { "type": "String" }, "reservation": { "type": "String" } }
+  },
+  "outboxDiscardBodyComplete": "Se borrará el cierre de inspección de {reservation} de este teléfono. Las métricas y la firma capturadas se perderán y habrá que repetirlas. Las fotos ya enviadas al servidor no se tocan.",
+  "@outboxDiscardBodyComplete": {
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "outboxDiscardConfirm": "Sí, descartar",
+  "outboxDiscardKeep": "Conservar en la bandeja",
+  "outboxEmptyTitle": "Todo enviado",
+  "outboxEmptyBody": "No hay nada esperando. Lo que captures sin señal aparecerá aquí y se enviará solo.",
+  "outboxLastDrain": "Último envío: {time}",
+  "@outboxLastDrain": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "outboxFullTitle": "La bandeja está llena",
+  "outboxFullBody": "{count} envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.",
+  "@outboxFullBody": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "outboxFullChip": "{count} de {max} · ~{size} en espera",
+  "@outboxFullChip": {
+    "placeholders": { "count": { "type": "int" }, "max": { "type": "int" }, "size": { "type": "String" } }
+  },
+  "outboxFullCapturesPaused": "Las capturas nuevas están pausadas hasta liberar espacio.",
+  "outboxSendNow": "Enviar ahora",
+  "outboxSendNowNoNetwork": "Enviar ahora (sin red)",
+  "logoutPendingTitle": "¿Cerrar sesión?",
+  "logoutPendingBody": "{count, plural, one{Tienes 1 envío sin mandar; si cierras sesión se borra de este teléfono.} other{Tienes {count} envíos sin mandar; si cierras sesión se borran de este teléfono.}}",
+  "@logoutPendingBody": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "logoutAnyway": "Cerrar sesión de todos modos"
 }

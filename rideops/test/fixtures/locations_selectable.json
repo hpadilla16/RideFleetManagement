@@ -1,0 +1,16 @@
+[
+  {
+    "id": "cmdloc001fixture0000000001",
+    "code": "CEN",
+    "name": "Patio Centro",
+    "city": "Guadalajara",
+    "state": "JAL"
+  },
+  {
+    "id": "cmdloc002fixture0000000002",
+    "code": "AER",
+    "name": "Sucursal Aeropuerto",
+    "city": null,
+    "state": null
+  }
+]

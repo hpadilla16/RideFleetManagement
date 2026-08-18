@@ -25,6 +25,8 @@ abstract final class RideTokens {
   // Rampa púrpura de marca
   static const p50 = Color(0xFFF4EFFF);
   static const p100 = Color(0xFFEBE2FF);
+  static const p200 = Color(0xFFD9C9FF);
+  static const p300 = Color(0xFFC0A8FF);
   static const p600 = Color(0xFF6A35E0);
   static const p700 = Color(0xFF5A26C9);
   static const p800 = Color(0xFF45189E);
@@ -40,6 +42,13 @@ abstract final class RideTokens {
   static const warnBd = Color(0xFFF3DCB5);
   static const warnTx = Color(0xFF8A5606);
   static const danger = Color(0xFFC02626);
+
+  /// Fondo del badge ámbar (decisión PM del mockup 7): token de SUPERFICIE
+  /// propio — comparte hex con [warnTx] pero NO es reutilizar un token de
+  /// texto como fondo. Blanco encima = 6.15:1 medido (el --warn #b8760a de
+  /// fondo daba 3.73:1 y se descartó). Semántica: ámbar = esperando red,
+  /// rojo = necesita decisión.
+  static const badgeWarn = Color(0xFF8A5606);
   static const dangerBg = Color(0xFFFDECEA);
   static const dangerBd = Color(0xFFF6CDC9);
   static const dangerTx = Color(0xFF9C1D1D);
