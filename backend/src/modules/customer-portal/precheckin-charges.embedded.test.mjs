@@ -359,26 +359,9 @@ describe('the submission it is meant to apply still applies', () => {
   });
 });
 
-describe('a double-tapped Submit', () => {
-  it('leaves ONE voucher, ONE tax line and ONE prepaid note, not two', async () => {
-    const reservation = await makeReservation({
-      // ONE row, and deliberately of a source nothing here deletes.
-      //
-      // The fixture matters as much as the assertion. With a DAILY or FEE row on
-      // the sheet, the two runs both reach `deleteMany({source:{in:[DAILY,FEE…]}})`
-      // over the SAME rows, Postgres takes row locks, and the second run blocks
-      // there until the first commits — the race is serialized by accident and
-      // the case passes with the advisory lock deleted, proving nothing.
-      // MEASURED: with DAILY+FEE present this test stayed green with the lock
-      // removed; with this fixture it fails, 2 vouchers and 2 tax rows.
-      //
-      // EQUIPMENT survives the OTA sweep untouched, and being taxable it gives
-      // the recalculation something to tax — the rows this handler writes itself
-      // never set `taxable`, so insurance and services alone total zero and
-      // there would be no tax line to duplicate.
-      charges: [{ source: 'EQUIPMENT', name: 'Child seat', quantity: 1, rate: 50, total: 50, taxable: true }],
-    });
 
+describe('a double-tapped Submit', () => {
+  it('refuses the second submission with a 409 and leaves one of everything', async () => {
     // THE INTERLEAVE IS PINNED, NOT RACED.
     //
     // Firing both with a bare Promise.all is not a test, it is a coin flip:
@@ -387,14 +370,25 @@ describe('a double-tapped Submit', () => {
     // holds serializes them by accident. So the damaging order is pinned here.
     //
     //   A creates its insurance line and then STOPS, transaction still open.
-    //   B starts. It cannot see A's uncommitted row, so its own
+    //   B starts. Without the lock it cannot see A's uncommitted row, so its own
     //   deleteMany(source:'INSURANCE') matches nothing and it inserts a SECOND
-    //   line — which is exactly what a customer's second tap does.
-    //   B's create releases A, and both commit.
+    //   line — which is exactly what a customer's second tap did.
     //
-    // With the advisory lock in place B never gets that far: it parks on the
-    // lock, A's wait falls through to the timeout and commits, and B then runs
-    // against A's committed state, deleting the line before writing its own.
+    // With the lock, B never reaches that: pg_try_advisory_xact_lock returns
+    // false on its first statement and it is refused outright. A's wait for B
+    // then falls through to its timeout and commits.
+    const reservation = await makeReservation({
+      // One row, and deliberately of a source nothing here deletes. With a DAILY
+      // or FEE row on the sheet both runs reach the same
+      // deleteMany({source:{in:[DAILY,FEE…]}}), Postgres takes row locks, and the
+      // second blocks there until the first commits — serialized by accident, so
+      // the case would pass with the lock deleted and prove nothing. EQUIPMENT
+      // survives the OTA sweep untouched, and being taxable it gives the
+      // recalculation something to tax; the rows this handler writes itself never
+      // set `taxable`, so insurance and services alone total zero.
+      charges: [{ source: 'EQUIPMENT', name: 'Child seat', quantity: 1, rate: 50, total: 50, taxable: true }],
+    });
+
     const aPaused = deferred();
     const bInserted = deferred();
     let aHeld = false;
@@ -404,7 +398,7 @@ describe('a double-tapped Submit', () => {
       if (aHeld) return;
       aHeld = true;
       aPaused.resolve();
-      // Falls through on the timeout when B is (correctly) blocked on the lock.
+      // Falls through on the timeout when B is (correctly) refused the lock.
       await Promise.race([bInserted.promise, delay(500)]);
     });
     const clientB = clientWithCreateHook(async () => {
@@ -425,7 +419,20 @@ describe('a double-tapped Submit', () => {
     const first = submission(clientA);
     await aPaused.promise;
     const second = submission(clientB);
-    await Promise.all([first, second]);
+    const [firstResult, secondResult] = await Promise.allSettled([first, second]);
+
+    assert.equal(firstResult.status, 'fulfilled', 'the customer who got there first is served');
+    assert.equal(secondResult.status, 'rejected');
+    assert.equal(
+      secondResult.reason?.status, 409,
+      'the duplicate is refused, not queued — waiting would park a pool connection on an unauthenticated route',
+    );
+    // The copy reaches a customer with nobody beside them to interpret it.
+    assert.match(secondResult.reason.message, /already being submitted/i);
+    assert.ok(
+      !/lock|advisory|transaction|409/i.test(secondResult.reason.message),
+      'no internal vocabulary in customer-facing copy',
+    );
 
     const sheet = await chargeSheet(reservation.id);
     const count = (source) => sheet.filter((c) => c.source === source).length;
@@ -443,11 +450,40 @@ describe('a double-tapped Submit', () => {
     );
   });
 
-  it('prices the second submission the same as the first', async () => {
-    // A PERCENTAGE plan is priced off the other charges on the sheet. The
-    // service rows this very handler writes must not be part of that base, or
-    // pressing Submit twice sells the customer a more expensive policy than
-    // pressing it once.
+  it('does NOT refuse a customer who comes back later and submits again', async () => {
+    // The lock only refuses submissions that OVERLAP. Re-submitting to fix an
+    // address is a normal thing customers do and must keep working, or this
+    // hardening would have broken the route it was protecting.
+    const reservation = await makeReservation({
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+
+    const submission = () => applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'BASIC' },
+      insurancePlans: PLANS,
+      selectedServices: [{ serviceId: ids.service, selected: true, quantity: 1 }],
+    });
+
+    await submission();
+    await submission();
+
+    const sheet = await chargeSheet(reservation.id);
+    assert.equal(sheet.filter((c) => c.source === 'INSURANCE').length, 1);
+    assert.equal(sheet.filter((c) => c.source === 'ADDITIONAL_SERVICE_PRECHECKIN').length, 1);
+    assert.equal(Number(sheet.find((c) => c.source === 'INSURANCE').total), 45);
+  });
+
+  it('PINS a known non-idempotency: a PERCENTAGE plan re-prices on re-submission', async () => {
+    // NOT a passing grade — a pin. The base for a PERCENTAGE policy is read
+    // BEFORE this handler writes its service rows, so the second submission
+    // sees the first run's rows and quotes more. Unchanged by this commit,
+    // which is the point of writing it down: excluding that source would fix it
+    // but is a live pricing change (reservation-pricing.service.js also writes
+    // ADDITIONAL_SERVICE_PRECHECKIN, so agent-created rows are in the base on a
+    // FIRST submission too). Raised for Hector as its own decision. Whoever
+    // makes it will have to edit this case, deliberately.
     const reservation = await makeReservation({
       charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
     });
@@ -466,6 +502,6 @@ describe('a double-tapped Submit', () => {
 
     await submission();
     const second = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
-    assert.equal(Number(second.total), Number(first.total));
+    assert.equal(Number(second.total), 31.2, '10% of 300 + the 12.00 service row the first run added');
   });
 });

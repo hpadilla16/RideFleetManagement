@@ -39,6 +39,15 @@
  * @see customer-portal.routes.js — the only caller.
  */
 
+import { ConflictError } from '../../lib/errors.js';
+
+/**
+ * Advisory-lock class id for "a customer pre-check-in submission". Arbitrary
+ * but reserved: any future advisory lock in this codebase takes a different
+ * one, so the (class, object) pairs cannot collide across features.
+ */
+const PRECHECKIN_LOCK_CLASS = 7301;
+
 /** Rounds to cents the way the route always has. */
 const money = (value) => Number(Number(value || 0).toFixed(2));
 
@@ -64,28 +73,33 @@ export function discountApplier(discount) {
 
 /**
  * Base for PERCENTAGE insurance plans: the non-tax, non-deposit, non-insurance
- * charges standing on the reservation when the customer submits.
+ * charges standing on the reservation when the customer submits. UNCHANGED from
+ * what the route computed inline — this is a lift, not a re-decision.
  *
- * ADDITIONAL_SERVICE_PRECHECKIN rows are excluded, which is NOT a pricing
- * change — it is what makes a re-submission price the same as the first one.
- * Only this handler ever writes that source, and it writes it AFTER the
- * insurance line is computed, so on a genuine first submission there are none
- * and the exclusion is a no-op. On a second submission (a double-tap, or a
- * customer coming back to fix their address) the first run's service rows WOULD
- * be sitting here, inflating the base, and the customer's insurance would be
- * re-priced upward for having pressed the button twice. Same reason `source`
- * INSURANCE is excluded, which the original already did.
+ * A KNOWN NON-IDEMPOTENCY LIVES HERE, and it is deliberately left alone.
+ * The handler writes ADDITIONAL_SERVICE_PRECHECKIN rows AFTER this base is
+ * computed, so a customer who submits, then comes back to fix their address and
+ * submits again, has the first run's service rows sitting in the base the
+ * second time — and a PERCENTAGE policy re-prices UPWARD for it.
+ *
+ * Excluding that source would fix it, and the first draft of this module did.
+ * It is not a safe rider: this handler is NOT the only writer of that source —
+ * reservation-pricing.service.js:1037 writes it when an agent adds an extra to
+ * an already-priced reservation, and the reservation editor sends the same
+ * value. So an agent-created row can be on the sheet at the FIRST submission,
+ * and dropping it lowers what live tenants are quoted today. That is a pricing
+ * decision with Hector's name on it, not a side effect of an atomicity fix.
+ *
+ * The concurrent case — the double-tap this module was hardened against — is
+ * closed a different way: the second submission is refused with a 409 and never
+ * re-derives anything. What is left is the sequential re-submission, which
+ * behaves exactly as it did before this change. Raised separately.
  */
 export function insuranceBaseFrom(charges) {
   return charges
-    .filter((c) => {
-      const source = String(c.source || '').toUpperCase();
-      const type = String(c.chargeType || '').toUpperCase();
-      return source !== 'INSURANCE'
-        && source !== 'ADDITIONAL_SERVICE_PRECHECKIN'
-        && type !== 'TAX'
-        && type !== 'DEPOSIT';
-    })
+    .filter((c) => String(c.source || '').toUpperCase() !== 'INSURANCE'
+      && String(c.chargeType || '').toUpperCase() !== 'TAX'
+      && String(c.chargeType || '').toUpperCase() !== 'DEPOSIT')
     .reduce((sum, c) => sum + Number(c.total || 0), 0);
 }
 
@@ -178,10 +192,17 @@ export function serviceChargeFor({ service, quantity, applyDiscount, rentalDays 
 /**
  * A whole pre-check-in submission's effect on the books, in one transaction.
  *
+ * Throws ConflictError (409) when another submission for the same reservation
+ * is already in flight; every other failure rolls the whole unit back.
+ *
  * 20s is not a guess at how long this takes — it takes milliseconds. It is
- * headroom over Prisma's 5s default so that a slow-but-alive database rolls
- * nothing back on a timeout; the work inside is pure Postgres, with every
- * network call hoisted out by the caller.
+ * headroom over Prisma's 5s default so a slow-but-alive database does not have
+ * the whole unit rolled back from under it; the work inside is pure Postgres,
+ * with every network call hoisted out by the caller. It is not the only ceiling:
+ * lib/prisma-url.js sets statement_timeout=15s and
+ * idle_in_transaction_session_timeout=30s, which cap any single statement and
+ * any stall between them. Nothing here waits on a lock, so none of the three is
+ * expected to be reached.
  *
  * @param {object} args
  * @param {object} args.client             Prisma client (the shared singleton).
@@ -191,6 +212,8 @@ export function serviceChargeFor({ service, quantity, applyDiscount, rentalDays 
  * @param {object|null} args.thirdPartyBooking
  * @param {Array}  args.insurancePlans     Pre-fetched catalog (settings I/O stays outside).
  * @param {object|null} args.discount      Tenant pre-check-in discount.
+ * @param {boolean} args.agreementSealed  Caller preflight said the T&C are signed;
+ *                                        the decline SIGNATURE columns stay frozen.
  * @param {Date}   args.completedAt
  * @param {object} args.auditMetadata      Extra keys merged into the AuditLog blob.
  * @returns {Promise<void>}
@@ -203,6 +226,7 @@ export async function applyPrecheckinCharges({
   thirdPartyBooking = null,
   insurancePlans = [],
   discount = null,
+  agreementSealed = false,
   completedAt = new Date(),
   auditMetadata = {}
 }) {
@@ -210,27 +234,43 @@ export async function applyPrecheckinCharges({
   const rentalDays = rentalDaysFor(reservation);
 
   await client.$transaction(async (tx) => {
-    // ONE SUBMISSION PER RESERVATION AT A TIME.
+    // ONE SUBMISSION PER RESERVATION AT A TIME — AND THE SECOND ONE IS TOLD SO,
+    // NOT MADE TO QUEUE.
     //
     // portalWrite is a per-IP rate limit and nothing else, so a customer who
     // double-taps Submit — or whose phone retries on a flaky connection — gets
     // two of these running at once. A transaction alone does NOT fix that:
-    // under READ COMMITTED both runs read "no voucher yet" and both INSERT one,
-    // and the second run's `deleteMany({chargeType:'TAX'})` can be evaluated
-    // before the first run's replacement tax row is visible, leaving TWO tax
-    // lines on the reservation. Duplicated money rows on a customer-driven
-    // route are worse than the 500 this change set out to remove.
+    // under READ COMMITTED neither run can see the other's uncommitted INSERT,
+    // so each one's deleteMany matches nothing and each inserts its own row.
+    // MEASURED against a real Postgres: two concurrent submissions leave TWO
+    // insurance lines, and on the OTA path two vouchers and two tax rows.
+    // Duplicated money rows on a customer-driven route are worse than the 500
+    // this change set out to remove.
     //
-    // A transaction-scoped advisory lock serializes them with no schema change
-    // and no client-supplied idempotency key: the second run waits, then
-    // re-executes against the first run's committed state, and every block here
-    // is delete-then-recreate, so it lands on the same end state. The lock is
-    // released by COMMIT or ROLLBACK — there is no path that leaks it.
+    // TRY, DO NOT WAIT. The blocking form would park the second request's
+    // connection for the duration of the first, and this pool is 6 per worker
+    // (lib/prisma-url.js) shared by every route in the process — six taps on one
+    // valid token, no auth required, and the worker is out of connections while
+    // five of them sit idle. `pg_try_advisory_xact_lock` bounds the cost at one
+    // connection per in-flight request and answers the duplicate with a 409,
+    // which is also better for the customer than making tap #2 wait to redo
+    // work tap #1 is already doing. The lock is released by COMMIT or ROLLBACK,
+    // so there is no path that leaks it.
     //
-    // Namespaced because pg_advisory_xact_lock's keyspace is database-wide; a
-    // bare hash of the reservation id would collide with any other feature that
-    // later decides to lock "a reservation".
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`customer-portal:precheckin:${reservation.id}`})::bigint)`;
+    // Two-argument form. The single-argument keyspace is one flat bigint space
+    // shared by every advisory lock in the database, so hashing a prefixed
+    // string into it lowers collision odds without partitioning anything. The
+    // (classId, objectId) form gives a real namespace. This is the repo's first
+    // advisory lock; the next one picks a DIFFERENT class id and both belong in
+    // a shared registry once there are two.
+    const gotLock = await tx.$queryRaw`
+      SELECT pg_try_advisory_xact_lock(${PRECHECKIN_LOCK_CLASS}::int, hashtext(${reservation.id})::int) AS locked
+    `;
+    if (!gotLock?.[0]?.locked) {
+      throw new ConflictError(
+        'Your pre-check-in is already being submitted. Give it a moment, then reload the page to see the result.'
+      );
+    }
 
     const chargesForBase = await tx.reservationCharge.findMany({
       where: { reservationId: reservation.id, selected: true }
@@ -264,15 +304,41 @@ export async function applyPrecheckinCharges({
           where: { reservationId: reservation.id }, select: { id: true }
         });
         if (declAg) {
-          await tx.rentalAgreement.update({
-            where: { id: declAg.id },
-            data: {
-              declinedInsurance: true,
-              ...(declineSig && String(declineSig).length > 200
-                ? { declinedInsuranceSignatureDataUrl: declineSig, declinedInsuranceSignedAt: new Date() }
-                : {}),
-            },
-          });
+          // The signature columns are NOT covered by the gate's no-flip rule.
+          // buildDeclinedInsuranceBlock prints declinedInsuranceSignatureDataUrl
+          // on the contract, so re-submitting pre-check-in after the agreement
+          // was signed would replace the addendum's signature and re-date it to
+          // after the signing — silently, since the flag itself did not move and
+          // the gate rightly let the request through. Once the contract is
+          // sealed the flag write is a no-op anyway; these two stay frozen.
+          const canWriteDeclineSignature =
+            !agreementSealed && declineSig && String(declineSig).length > 200;
+          if (canWriteDeclineSignature) {
+            // Fenced in the database, not in this process. `agreementSealed`
+            // comes from the caller's preflight, which necessarily ran before
+            // this transaction opened, so the contract can be signed in the gap.
+            // The WHERE lets Postgres decide: if the signature landed first,
+            // count is 0 and the columns the PDF prints are left alone.
+            const fenced = await tx.rentalAgreement.updateMany({
+              where: { id: declAg.id, tcSignedAt: null },
+              data: {
+                declinedInsurance: true,
+                declinedInsuranceSignatureDataUrl: declineSig,
+                declinedInsuranceSignedAt: new Date(),
+              },
+            });
+            if (fenced.count === 0) {
+              await tx.rentalAgreement.update({
+                where: { id: declAg.id },
+                data: { declinedInsurance: true },
+              });
+            }
+          } else {
+            await tx.rentalAgreement.update({
+              where: { id: declAg.id },
+              data: { declinedInsurance: true },
+            });
+          }
         }
       }
     }
