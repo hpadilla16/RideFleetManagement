@@ -1988,6 +1988,17 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String coInspAnglesFailedChip(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count failed',
+      one: '1 failed',
+    );
+    return '$_temp0';
+  }
+
+  @override
   String get coInspDoneTitle => 'Check-out inspection';
 
   @override

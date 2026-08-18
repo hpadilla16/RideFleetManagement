@@ -3212,6 +3212,12 @@ abstract class AppLocalizations {
   /// **'{count, plural, one{Falta 1} other{Faltan {count}}}'**
   String coInspRequiredMissingPill(int count);
 
+  /// Chip de la stepline cuando un angulo OBLIGATORIO murio en la bandeja: el contador de progreso deja de tener sentido y se cuentan fallas (17E).
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{1 falla} other{{count} fallas}}'**
+  String coInspAnglesFailedChip(int count);
+
   /// No description provided for @coInspDoneTitle.
   ///
   /// In es, this message translates to:

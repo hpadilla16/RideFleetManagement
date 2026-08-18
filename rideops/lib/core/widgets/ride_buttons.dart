@@ -52,6 +52,9 @@ class RidePrimaryButton extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
             child: Container(
               constraints: const BoxConstraints(minHeight: 56),
+              // Respiro lateral: sin él la etiqueta llegaba al borde del
+              // gradiente y, con `Flexible`, envolvería pegada al filo.
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               alignment: Alignment.center,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -67,12 +70,21 @@ class RidePrimaryButton extends StatelessWidget {
                     ),
                     const SizedBox(width: 10),
                   ],
-                  Text(
-                    loading ? (loadingLabel ?? label) : label,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
+                  // `Flexible` como en [RideGhostButton] (review GD-MC-4): un
+                  // hijo NO flexible de un Row se mide con ancho ilimitado, así
+                  // que el texto no envolvía nunca y desbordaba con franjas.
+                  // Con las etiquetas largas de H4 ("Tomar Lado izquierdo otra
+                  // vez") a escala 1.5 eso reventaba el ÚNICO CTA de una
+                  // pantalla sin salida alternativa.
+                  Flexible(
+                    child: Text(
+                      loading ? (loadingLabel ?? label) : label,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                 ],

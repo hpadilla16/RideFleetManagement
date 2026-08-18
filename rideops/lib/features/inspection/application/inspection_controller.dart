@@ -157,6 +157,7 @@ class InspectionController extends Notifier<InspectionFlowState> {
             .byGroupKey(session.id);
         final angles = Map<String, AngleUi>.of(next.angles);
         var completeQueued = next.completeQueued;
+        Map<String, dynamic>? completeBody;
         for (final row in rows) {
           final payload = json.decode(row.payload) as Map<String, dynamic>;
           if (row.kind == OutboxKinds.inspectionPhoto) {
@@ -169,6 +170,7 @@ class InspectionController extends Notifier<InspectionFlowState> {
             }
           } else if (row.kind == OutboxKinds.inspectionComplete) {
             completeQueued = true;
+            completeBody = payload['body'] as Map<String, dynamic>?;
           }
         }
         next = next.copyWith(
@@ -181,6 +183,32 @@ class InspectionController extends Notifier<InspectionFlowState> {
           // avanza (frame 17D).
           step: completeQueued ? InspectionStep.summary : next.step,
         );
+        // …y con el sub-paso restaurado hay que restaurar TAMBIÉN lo que ese
+        // sub-paso exige (review INN-MC-2). El resumen suelto del M1
+        // (`/inspection/:id`, adonde manda "Abrir inspección" de la bandeja)
+        // deshabilita "Terminar" cuando `signatureDataUrl` es null y NO explica
+        // por qué: sin esto, restaurar el paso dejaba al agente en un resumen
+        // con el CTA muerto y el grid dos toques atrás — el callejón sin salida
+        // que el 17E existe para abolir, en la superficie ya desplegada.
+        //
+        // Reencolar es seguro por construcción: `enqueueComplete` es idempotente
+        // por `sessionId:complete` y REEMPLAZA el body (outbox_service.dart
+        // :139-196), así que volver a tocar "Terminar" reescribe la misma fila.
+        if (completeBody != null) {
+          final fuel = (completeBody['fuelLevel'] as num?)?.toDouble();
+          next = next.copyWith(
+            odometer: (completeBody['odometer'] as num?)?.toInt(),
+            // El contrato viaja en fracción 0..1; la UI mide en octavos.
+            fuelEighths: fuel == null ? null : (fuel * 8).round().clamp(0, 8),
+            cleanliness: (completeBody['cleanliness'] as num?)?.toInt(),
+            notes: completeBody['notes'] as String?,
+            signatureDataUrl: completeBody['signatureDataUrl'] as String?,
+            // El firmante SELLADO solo rellena el hueco: si display-data
+            // respondió en esta corrida, manda el nombre fresco.
+            customerName:
+                next.customerName ?? completeBody['signerName'] as String?,
+          );
+        }
       } catch (_) {}
 
       if (!ref.mounted) return;

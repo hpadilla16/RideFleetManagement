@@ -1014,6 +1014,12 @@
     "placeholders": { "count": { "type": "int" } }
   },
 
+  "coInspAnglesFailedChip": "{count, plural, one{1 falla} other{{count} fallas}}",
+  "@coInspAnglesFailedChip": {
+    "description": "Chip de la stepline cuando un angulo OBLIGATORIO murio en la bandeja: el contador de progreso deja de tener sentido y se cuentan fallas (17E).",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
   "coInspDoneTitle": "Inspección de salida",
   "coInspSignatureTitle": "Firma del cliente",
   "coInspSignedRow": "Firmó",

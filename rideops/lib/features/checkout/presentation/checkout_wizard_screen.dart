@@ -13,6 +13,7 @@ import '../../../core/session/session_controller.dart';
 import '../../../core/theme/ride_tokens.dart';
 import '../../../core/widgets/ride_buttons.dart';
 import '../../inspection/application/inspection_controller.dart';
+import '../../inspection/application/inspection_outbox_view.dart';
 import '../../inspection/presentation/widgets/inspection_bodies.dart';
 import '../../shell/location_denied_view.dart';
 import '../application/checkout_wizard_controller.dart';
@@ -130,11 +131,18 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     if (state.step != CheckoutStep.inspectionInProgress) {
       return const InspectionChrome();
     }
+    final flow = ref.watch(inspectionControllerProvider(widget.reservationId));
     return inspectionChromeOf(
       l10n: l10n,
       step: state.step,
       inspectionCompletedAt: state.session?.inspectionCompletedAt,
-      flow: ref.watch(inspectionControllerProvider(widget.reservationId)),
+      flow: flow,
+      // El chip de ángulos necesita la BANDEJA, no solo el flujo: "capturada"
+      // incluye la fila que murió, y el cromo no puede decir "listo" en la
+      // pantalla que avisa de que el cierre será rechazado (17E).
+      view: flow.sessionId == null
+          ? const InspectionOutboxView()
+          : ref.watch(inspectionOutboxProvider(flow.sessionId!)),
     );
   }
 
@@ -235,7 +243,10 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
           // sigue siendo el paso real del servidor (nunca "paso 6.5").
           label: chrome.label,
           trailing: chrome.compact
-              ? _AngleChip(captured: chrome.captured)
+              ? _AngleChip(
+                  captured: chrome.captured,
+                  deadRequired: chrome.deadRequired,
+                )
               : null,
           onTap: _openStepsSheet,
         ),
@@ -430,26 +441,47 @@ enum _PauseOutcome { paused, stay, leave }
 ///
 /// --p-800 sobre --p-50 (9.93:1) y cifras tabulares — el número cambia cada
 /// foto y sin esto el chip salta de ancho.
+///
+/// Con un ángulo OBLIGATORIO muerto en la bandeja el chip cambia de tema: deja
+/// de contar progreso y cuenta fallas, en --danger-tx sobre --danger-bg
+/// (7.04:1). El progreso ahí es irrelevante y, peor, mentiría: "8 de 8 ✓" en
+/// verde justo encima del banner que dice que el servidor va a rechazar el
+/// cierre (17E). El estado va con PALABRA, nunca solo con color (DoD #2).
 class _AngleChip extends StatelessWidget {
-  const _AngleChip({required this.captured});
+  const _AngleChip({required this.captured, this.deadRequired = 0});
 
   final int captured;
+  final int deadRequired;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final failed = deadRequired > 0;
+    final done = captured >= 8;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: captured >= 8 ? RideTokens.okBg : RideTokens.p50,
+        color: failed
+            ? RideTokens.dangerBg
+            : done
+                ? RideTokens.okBg
+                : RideTokens.p50,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
-        captured >= 8 ? l10n.inspProgressDone : l10n.inspProgressChip(captured),
+        failed
+            ? l10n.coInspAnglesFailedChip(deadRequired)
+            : done
+                ? l10n.inspProgressDone
+                : l10n.inspProgressChip(captured),
         style: TextStyle(
           fontSize: 11.5,
           fontWeight: FontWeight.w900,
-          color: captured >= 8 ? RideTokens.okTx : RideTokens.p800,
+          color: failed
+              ? RideTokens.dangerTx
+              : done
+                  ? RideTokens.okTx
+                  : RideTokens.p800,
           fontFeatures: const [FontFeature.tabularFigures()],
         ),
       ),

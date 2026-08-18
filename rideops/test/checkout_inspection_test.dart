@@ -118,7 +118,21 @@ void main() {
   Future<OutboxEntry> rowFor(String idempotencyKey) async =>
       (await db.byIdempotencyKey(idempotencyKey))!;
 
-  Future<void> pumpWizard(WidgetTester tester) async {
+  /// El contenedor VIVO de la app montada — para empujar el flujo por donde lo
+  /// empuja la app (el controller) sin inventar estado.
+  ProviderContainer container(WidgetTester tester) =>
+      ProviderScope.containerOf(
+        tester.element(find.byType(CheckoutWizardScreen)),
+      );
+
+  /// [rows] permite sustituir el stream de la bandeja por uno de emisión
+  /// ÚNICA — la forma de reproducir "la bandeja ya había emitido antes de que
+  /// la red devolviera el id de sesión", que es el orden normal (leer la DB es
+  /// más rápido que un GET).
+  Future<void> pumpWizard(
+    WidgetTester tester, {
+    Stream<List<OutboxEntry>>? rows,
+  }) async {
     final router = GoRouter(
       initialLocation: AppRoutes.checkout(kReservationId),
       routes: [
@@ -149,7 +163,7 @@ void main() {
           networkStatusProvider.overrideWithValue(network),
           outboxDbProvider.overrideWithValue(db),
           photoVaultProvider.overrideWithValue(vault),
-          outboxRowsProvider.overrideWith((ref) => rowStream.stream),
+          outboxRowsProvider.overrideWith((ref) => rows ?? rowStream.stream),
           cameraServiceProvider.overrideWithValue(camera),
           photoPipelineProvider.overrideWithValue(
             PhotoPipeline(
@@ -187,8 +201,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await publishRows();
-    await tester.pumpAndSettle();
+    if (rows == null) {
+      await publishRows();
+      await tester.pumpAndSettle();
+    }
   }
 
   // ── 17A · el paso 6, antes de empezar ─────────────────────────────────────
@@ -226,6 +242,20 @@ void main() {
     expect(api.transitions, ['INSPECTION_IN_PROGRESS']);
   });
 
+  testWidgets(
+      '17A: pintar el handoff NO monta el flujo de captura — ningún token '
+      'público de inspección minteado por mirar el paso 6', (tester) async {
+    api.current = sessionAt(CheckoutStep.inspectionHandoff);
+    await pumpWizard(tester);
+
+    expect(find.text('Start inspection'), findsOneWidget);
+    // `mintHandoffToken` crea un enlace MOBILE_INSPECTION sin autenticación y
+    // de 15 minutos (checkout-session.service.js:700-751). Este frame no lee
+    // nada de eso: emitirlo al pintar sería regalar acceso por adelantado.
+    expect(api.handoffTokenCalls, 0);
+    expect(api.inspectionStateCalls, 0);
+  });
+
   // ── 17B · captura con el cromo comprimido y UN solo CTA ───────────────────
 
   testWidgets(
@@ -233,6 +263,7 @@ void main() {
       'tocar el contador, y el pie del wizard hospeda el ÚNICO CTA',
       (tester) async {
     api.current = sessionAt(CheckoutStep.inspectionInProgress);
+    final semantics = tester.ensureSemantics();
     await pumpWizard(tester);
 
     // Cromo COMPRIMIDO (decisión aprobada): fuera el rail, dentro el
@@ -247,6 +278,17 @@ void main() {
     // La stepline cambia su trailing: el mapa de 10 pasos cede al contador.
     expect(find.text('See every step'), findsNothing);
     expect(find.text('0 of 8'), findsOneWidget);
+    // Pero la fila SIGUE abriéndolo: si el trailing deja de decirlo con
+    // palabras, lo dice la semántica — un lector de pantalla no puede anunciar
+    // "botón" a secas.
+    final stepLineNode = tester.getSemantics(find.descendant(
+      of: find.byType(StepLine),
+      matching: find.byType(InkWell),
+    ));
+    expect(stepLineNode.hint, 'See every step');
+    // Y se anuncia como UNA fila: número de paso, nombre y contador fundidos
+    // en el mismo nodo, no tres nodos sueltos alrededor de un botón mudo.
+    expect(stepLineNode.label, contains('Inspection · photos'));
 
     // UN solo CTA: el de la captura, montado en el pie del wizard.
     expect(find.byType(RidePrimaryButton), findsOneWidget);
@@ -260,6 +302,7 @@ void main() {
       tester.widget<RidePrimaryButton>(find.byType(RidePrimaryButton)).onPressed,
       isNull,
     );
+    semantics.dispose();
   });
 
   testWidgets('17B: tocar un ángulo abre la cámara a pantalla completa — el '
@@ -297,6 +340,10 @@ void main() {
     expect(find.text('What the server already has'), findsOneWidget);
     expect(find.text('Inspection'), findsOneWidget);
     expect(find.text('Pending'), findsNWidgets(2));
+
+    // De cuándo es esa lectura del servidor: sin la edad, "Pendiente" no
+    // distingue una lectura viva de una congelada.
+    expect(find.textContaining('State from'), findsOneWidget);
 
     expect(find.text('Continue to signature and close'), findsOneWidget);
     expect(
@@ -365,6 +412,122 @@ void main() {
     await tester.tap(find.text('Retake Front'));
     await tester.pumpAndSettle();
     expect(find.byType(CameraCaptureScreen), findsOneWidget);
+  });
+
+  testWidgets(
+      '17E: con los 8 ángulos tomados y uno OBLIGATORIO muerto, el chip del '
+      'cromo cuenta fallas — jamás "8 de 8 ✓" sobre el banner que avisa del '
+      'rechazo', (tester) async {
+    api.current = sessionAt(CheckoutStep.inspectionInProgress);
+    for (final key in kInspectionAngleKeys) {
+      await enqueuePhoto(key);
+    }
+    await enqueueComplete();
+    await db.markFailed(
+      (await rowFor('$kSessionId:front')).id,
+      error: 'The server rejected it: this inspection link is no longer valid.',
+      code: 'TOKEN_INVALID',
+      dead: true,
+    );
+    await pumpWizard(tester);
+
+    // El chip es lo más escaneado del cromo: aquí NO puede afirmar "listo".
+    // `captured` cuenta queued|onServer y no sabe de filas muertas — las 8
+    // están tomadas y aun así el cierre está condenado.
+    expect(
+      container(tester)
+          .read(inspectionControllerProvider(kReservationId))
+          .capturedCount,
+      8,
+    );
+    expect(find.text('8 of 8 ✓'), findsNothing);
+    expect(find.text('1 failed'), findsOneWidget);
+    // Y el banner que explica el rechazo sigue debajo, no en su lugar.
+    expect(
+      find.textContaining("The Front photo couldn't be sent"),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+      '17E: la foto muerta que YA estaba en la bandeja cuando el paso se '
+      'montó cuenta igual — la bandeja emite antes que la red', (tester) async {
+    api.current = sessionAt(CheckoutStep.inspectionInProgress);
+    await enqueuePhoto('front');
+    await db.markFailed(
+      (await rowFor('$kSessionId:front')).id,
+      error: 'The server rejected it: this inspection link is no longer valid.',
+      code: 'TOKEN_INVALID',
+      dead: true,
+    );
+
+    // Emisión ÚNICA y anterior a que el paso conozca el id de sesión: después
+    // de esto la bandeja no vuelve a cambiar. Un `listen` a secas no se
+    // enteraría jamás —el de riverpod 3 no admite fireImmediately dentro de
+    // build— y el paso se quedaría esperando un cierre que el servidor ya
+    // decidió rechazar, sin banner y sin evento.
+    await pumpWizard(tester, rows: Stream.value(await allRows()));
+
+    expect(
+      find.textContaining("The Front photo couldn't be sent"),
+      findsOneWidget,
+    );
+    expect(
+      logger.events.where((e) => e.$1 == 'inspection.required_angle_dead'),
+      hasLength(1),
+    );
+  });
+
+  // ── el CTA que no hacía nada ni decía nada ────────────────────────────────
+
+  testWidgets(
+      'con la bandeja LLENA, "Terminar" deja de ser un no-op mudo: el aviso '
+      'vive en el cuerpo del resumen y lo heredan las dos superficies',
+      (tester) async {
+    api.current = sessionAt(CheckoutStep.inspectionInProgress);
+    await enqueuePhoto('front');
+    await enqueuePhoto('rear');
+    await pumpWizard(tester);
+
+    // Se llega al resumen por donde se llega de verdad: métricas + firma.
+    final controller = container(tester)
+        .read(inspectionControllerProvider(kReservationId).notifier);
+    controller
+      ..setOdometer(24131)
+      ..setFuelEighths(6)
+      ..setCleanliness(4)
+      ..confirmSignature('data:image/png;base64,${'x' * 300}');
+    await tester.pumpAndSettle();
+    expect(find.text('Finish and send'), findsOneWidget);
+    expect(find.textContaining('The outbox is full'), findsNothing);
+
+    // El tope se alcanza entre medias (otro checkout llenó el teléfono).
+    final now = DateTime.now();
+    for (var i = await db.totalRows(); i < OutboxDb.maxRows; i++) {
+      await db.into(db.outboxEntries).insert(OutboxEntriesCompanion.insert(
+            id: 'fill-$i',
+            userId: kMyUserId,
+            tenantId: tenantId,
+            kind: OutboxKinds.inspectionPhoto,
+            payload: '{}',
+            idempotencyKey: 'fill-$i',
+            createdAt: now,
+            updatedAt: now,
+          ));
+    }
+
+    await tester.tap(find.text('Finish and send'));
+    await tester.pumpAndSettle();
+
+    // El paso 4 descarta el EnqueueResult a propósito (el estado ya lo dice):
+    // por eso el aviso tiene que estar en el CUERPO, no en un snackbar de una
+    // sola superficie.
+    expect(find.textContaining('The outbox is full'), findsOneWidget);
+    expect(
+      (await allRows()).where((r) => r.kind == OutboxKinds.inspectionComplete),
+      isEmpty,
+      reason: 'nada se encoló: el CTA no mintió',
+    );
   });
 
   // ── 17F · sellada por el servidor ─────────────────────────────────────────

@@ -21,6 +21,7 @@ import '../../../inspection/presentation/widgets/angle_labels.dart';
 import '../../../inspection/presentation/widgets/inspection_bodies.dart';
 import '../../../inspection/presentation/widgets/kiosk_signature_step.dart';
 import '../../application/checkout_wizard_controller.dart';
+import '../checkout_labels.dart';
 import '../widgets/transition_button.dart';
 import '../widgets/verify_cards.dart';
 import '../widgets/wizard_banners.dart';
@@ -76,6 +77,10 @@ class _CheckoutInspectionStepState
   /// no uno por repintado.
   final _deadAnglesLogged = <String>{};
 
+  /// Sesión cuyo estado de bandeja ya se barrió una vez (ver
+  /// [_scheduleFirstOutboxSync]).
+  String? _syncedSessionId;
+
   InspectionController get _controller =>
       ref.read(inspectionControllerProvider(widget.reservationId).notifier);
 
@@ -85,11 +90,6 @@ class _CheckoutInspectionStepState
     final wizard = ref.watch(checkoutWizardProvider(widget.reservationId));
     final session = wizard.session;
     if (session == null) return const SizedBox.shrink();
-
-    final flow = ref.watch(inspectionControllerProvider(widget.reservationId));
-    final view = flow.sessionId == null
-        ? const InspectionOutboxView()
-        : ref.watch(inspectionOutboxProvider(flow.sessionId!));
 
     // El servidor selló la inspección mientras el paso estaba abierto: se
     // retiran los envíos de ESTA sesión (purga selectiva con rastro) y se
@@ -105,17 +105,18 @@ class _CheckoutInspectionStepState
       },
     );
 
-    _noteDeadRequiredAngles(view);
-    if (view.completeQueued) {
-      _completeQueuedSince ??= clock.now();
-    } else if (view.completeDelivery == null) {
-      _completeQueuedSince = null;
-    }
-
     // 17F — el SELLO manda sobre el sub-paso local: si el servidor ya tiene la
     // inspección, no hay nada que capturar aunque esta pantalla creyera que
-    // seguía en fotos (otra superficie pudo cerrarla).
+    // seguía en fotos (otra superficie pudo cerrarla). Y manda también sobre el
+    // paso: el complete móvil estampa `inspectionCompletedAt` SIN mirar
+    // `currentStep` (mobile-inspection.service.js:263-270), así que una sesión
+    // sellada puede seguir en el paso 6.
+    //
+    // Aquí el `watch` —y el montaje del controller que trae— es DELIBERADO: con
+    // la sesión sellada, `load()` corta antes del mint (inspection_controller
+    // :74-97) y lo que hace es la purga selectiva de la bandeja.
     if (session.inspectionCompletedAt != null) {
+      final flow = ref.watch(inspectionControllerProvider(widget.reservationId));
       return _CompletedView(
         reservationId: widget.reservationId,
         session: session,
@@ -125,12 +126,36 @@ class _CheckoutInspectionStepState
     }
 
     // 17A — paso 6: todavía no se ha empezado.
+    //
+    // Va ANTES de mirar el flujo de captura a propósito (review INN-MC-1): leer
+    // `inspectionControllerProvider` lo MONTA, y montarlo corre `load()`, que
+    // mintea un `MOBILE_INSPECTION` — un token de enlace público, sin
+    // autenticación y de 15 minutos (checkout-session.service.js:700-751) —
+    // para un frame que no lee nada de eso. Es la misma regla que ya declara el
+    // shell en checkout_wizard_screen.dart:124-133.
     if (session.currentStep == CheckoutStep.inspectionHandoff.wire) {
       return _HandoffView(
         reservationId: widget.reservationId,
         session: session,
         banners: widget.banners,
       );
+    }
+
+    final flow = ref.watch(inspectionControllerProvider(widget.reservationId));
+    final view = flow.sessionId == null
+        ? const InspectionOutboxView()
+        : ref.watch(inspectionOutboxProvider(flow.sessionId!));
+
+    // Los efectos que dispara la BANDEJA (telemetría del ángulo muerto y el
+    // cronómetro de la espera) viven en un listen, no en build: build corre en
+    // cada repintado.
+    final sessionId = flow.sessionId;
+    if (sessionId != null) {
+      ref.listen(
+        inspectionOutboxProvider(sessionId),
+        (_, next) => _applyOutboxEffects(next),
+      );
+      _scheduleFirstOutboxSync(sessionId);
     }
 
     return switch (flow.phase) {
@@ -164,6 +189,12 @@ class _CheckoutInspectionStepState
           flow: flow,
           view: view,
           online: !wizard.offline,
+          // De cuándo es la lectura del SERVIDOR que pinta el 17D: la tarjeta
+          // de sellos afirma "2 de 8 recibidas · Pendiente" y sin edad no se
+          // distingue una lectura viva de una congelada.
+          dataAge: wizard.fetchedAt == null
+              ? Duration.zero
+              : clock.now().difference(wizard.fetchedAt!),
           onTapAngle: _openCamera,
           onRetakeDead: _retakeDead,
         ),
@@ -187,13 +218,41 @@ class _CheckoutInspectionStepState
     );
   }
 
-  void _noteDeadRequiredAngles(InspectionOutboxView view) {
+  /// Efectos de una emisión de la bandeja: un evento por ángulo obligatorio
+  /// muerto (no uno por repintado) y el arranque/paro del cronómetro de la
+  /// espera del 17D. Idempotente — se llama desde el listen y desde el primer
+  /// barrido.
+  void _applyOutboxEffects(InspectionOutboxView view) {
     for (final key in kRequiredAngleKeys) {
       if (!view.isDeadAngle(key) || !_deadAnglesLogged.add(key)) continue;
       ref
           .read(eventLoggerProvider)
           .log(InspectionEvents.requiredAngleDead, data: {'angle': key});
     }
+    if (view.completeQueued) {
+      _completeQueuedSince ??= clock.now();
+    } else if (view.completeDelivery == null) {
+      _completeQueuedSince = null;
+    }
+  }
+
+  /// Primer barrido de la bandeja para esta sesión.
+  ///
+  /// El `ref.listen` de un widget en riverpod 3 NO admite `fireImmediately`
+  /// (consumer.dart:543-545 lo dice con todas sus letras) y solo avisa de
+  /// cambios POSTERIORES a la suscripción. El caso normal es justo el otro: la
+  /// bandeja —una lectura local— ya emitió cuando la red devuelve el id de
+  /// sesión y engancha este listen, así que un cierre encolado o una foto
+  /// muerta que ya estaban ahí no dispararían nada. Se barre una vez por
+  /// sesión, y después del frame: dentro de build no, que corre en cada
+  /// repintado.
+  void _scheduleFirstOutboxSync(String sessionId) {
+    if (_syncedSessionId == sessionId) return;
+    _syncedSessionId = sessionId;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _applyOutboxEffects(ref.read(inspectionOutboxProvider(sessionId)));
+    });
   }
 
   /// Cámara a pantalla completa (17C): el cromo del wizard se SUSPENDE por
@@ -351,6 +410,7 @@ class _CaptureView extends ConsumerWidget {
     required this.flow,
     required this.view,
     required this.online,
+    required this.dataAge,
     required this.onTapAngle,
     required this.onRetakeDead,
   });
@@ -360,6 +420,9 @@ class _CaptureView extends ConsumerWidget {
   final InspectionFlowState flow;
   final InspectionOutboxView view;
   final bool online;
+
+  /// Antigüedad de la última lectura de la sesión — la pill del 17D.
+  final Duration dataAge;
   final void Function(String angleKey) onTapAngle;
   final Future<void> Function(String angleKey) onRetakeDead;
 
@@ -410,8 +473,13 @@ class _CaptureView extends ConsumerWidget {
           controller: controller,
           leading: leading,
         ),
-      // La firma la dibuja el shell a pantalla completa (kiosco): si llega
-      // aquí es un repintado suelto y no debe pintar cromo de staff.
+      // La firma la dibuja el SHELL a pantalla completa (kiosco): en cuanto
+      // `flow.step` es la firma, `inspectionChromeOf` devuelve `fullBleed` y
+      // `CheckoutWizardScreen` sustituye el árbol entero por
+      // [InspectionSignatureSurface] — este cuerpo ya no está montado. La rama
+      // existe porque el switch es exhaustivo, y queda vacía porque pintar
+      // cromo de staff en el frame que el cliente tiene enfrente sería el
+      // error que 6D/18B existen para impedir.
       InspectionStep.signature => const SizedBox.shrink(),
       InspectionStep.summary => _SummaryBody(
           flow: flow,
@@ -419,6 +487,7 @@ class _CaptureView extends ConsumerWidget {
           online: online,
           leading: leading,
           deadRequired: deadRequired,
+          dataAge: dataAge,
         ),
     };
 
@@ -497,6 +566,9 @@ class _CaptureDock extends ConsumerWidget {
         );
 
       case InspectionStep.signature:
+        // Sin pie: el shell ya tomó la pantalla completa por `fullBleed` y la
+        // superficie del cliente pone su propia salida (PIN). Un dock del
+        // wizard aquí sería cromo de staff frente al cliente.
         return const SizedBox.shrink();
 
       case InspectionStep.summary:
@@ -569,6 +641,7 @@ class _SummaryBody extends StatelessWidget {
     required this.online,
     required this.leading,
     required this.deadRequired,
+    required this.dataAge,
   });
 
   final InspectionFlowState flow;
@@ -576,6 +649,7 @@ class _SummaryBody extends StatelessWidget {
   final bool online;
   final List<Widget> leading;
   final List<String> deadRequired;
+  final Duration dataAge;
 
   @override
   Widget build(BuildContext context) {
@@ -639,6 +713,11 @@ class _SummaryBody extends StatelessWidget {
         const SizedBox(height: 12),
         VerifyCard(
           title: l10n.coStampsTitle,
+          // Esta es LA pantalla donde el agente se queda mirando "Pendiente"
+          // esperando que cambie: sin la edad del dato no puede distinguir una
+          // lectura viva de una congelada. Tono neutro — la edad informa, no
+          // acusa (mismo trato que `_StampsCard` del shell).
+          pillLabel: l10n.coSessionAgeLabel(checkoutAgeLabel(l10n, dataAge)),
           children: [
             // El contador sale del estado de ángulos del SERVIDOR (fila que
             // salió de la bandeja = 2xx), no de lo que hay encolado.
@@ -691,16 +770,21 @@ class _DeadBanner extends StatelessWidget {
               color: RideTokens.dangerTx,
             ),
           ),
-          if (reason != null && reason!.isNotEmpty)
+          if (reason != null && reason!.isNotEmpty) ...[
+            // Aire entre la afirmación y su prueba: pegadas y casi del mismo
+            // tamaño se leían como un párrafo de dos renglones.
+            const SizedBox(height: 4),
             Text(
-              // Mensaje del backend sin reescribir (DoD #5).
+              // Mensaje del backend sin reescribir (DoD #5), un escalón por
+              // debajo del título: es la cita, no el titular.
               reason!,
               style: const TextStyle(
-                fontSize: 12.5,
+                fontSize: 12,
                 fontWeight: FontWeight.w700,
                 color: RideTokens.n800,
               ),
             ),
+          ],
         ],
       ),
     );
@@ -710,10 +794,18 @@ class _DeadBanner extends StatelessWidget {
 /// 17F — la inspección SELLADA por el servidor.
 ///
 /// Todo lo que afirma sale de la sesión: `inspectionCompletedAt` y
-/// `customerSignedAt` con hora del servidor. Lo que el servidor no expone
-/// —odómetro, combustible, notas de la inspección: display-data no los
-/// devuelve— se OMITE en vez de rellenarse con lo que este teléfono mandó
-/// (nota 14: si un dato no llega, se omite la fila).
+/// `customerSignedAt` con hora del servidor.
+///
+/// Odómetro, combustible y limpieza NO se pintan aquí, y no es porque el
+/// endpoint no los tenga: display-data → `getById` SÍ selecciona
+/// `odometerOut` / `fuelOut` / `cleanlinessOut` del agreement
+/// (reservations.service.js:1585-1622). Es que en el paso 7 siguen NULOS. El
+/// complete móvil los escribe en `RentalAgreementInspection`
+/// (mobile-inspection.service.js:253-262) y a las columnas del contrato solo
+/// se copian AL FINALIZAR (checkout-session.service.js:490-521). Pintar la
+/// fila leyendo esos campos daría un "—" permanente; se OMITE en vez de
+/// rellenarse con lo que este teléfono mandó (nota 14: si un dato no llega, se
+/// omite la fila).
 class _CompletedView extends ConsumerWidget {
   const _CompletedView({
     required this.reservationId,
@@ -875,6 +967,7 @@ class InspectionChrome {
     this.label,
     this.subStep,
     this.captured = 0,
+    this.deadRequired = 0,
     this.fullBleed = false,
   });
 
@@ -887,6 +980,15 @@ class InspectionChrome {
 
   /// Ángulos ya capturados, para el chip "{n} de 8".
   final int captured;
+
+  /// Ángulos OBLIGATORIOS con la fila muerta en la bandeja (17E).
+  ///
+  /// `captured` no sabe de filas muertas —cuenta `queued || onServer`
+  /// (inspection_state.dart:84-85)—, así que con las 8 tomadas y Frente muerta
+  /// el chip leería "8 de 8 ✓" en verde justo encima del banner que avisa de
+  /// que el cierre será rechazado. Con esto el chip cambia de fallo, no de
+  /// progreso.
+  final int deadRequired;
 
   /// La superficie está volteada al cliente: el shell no dibuja NADA.
   final bool fullBleed;
@@ -905,6 +1007,7 @@ InspectionChrome inspectionChromeOf({
   required CheckoutStep? step,
   required DateTime? inspectionCompletedAt,
   required InspectionFlowState flow,
+  required InspectionOutboxView view,
 }) {
   if (step != CheckoutStep.inspectionInProgress) {
     return const InspectionChrome();
@@ -926,6 +1029,7 @@ InspectionChrome inspectionChromeOf({
     },
     subStep: flow.step,
     captured: flow.capturedCount,
+    deadRequired: kRequiredAngleKeys.where(view.isDeadAngle).length,
     fullBleed: flow.step == InspectionStep.signature,
   );
 }

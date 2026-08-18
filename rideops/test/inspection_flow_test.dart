@@ -19,6 +19,7 @@ import 'package:rideops/core/session/kiosk_guard.dart';
 import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/session_controller.dart';
 import 'package:rideops/core/session/session_state.dart';
+import 'package:rideops/core/widgets/ride_buttons.dart';
 import 'package:rideops/features/inspection/application/camera_service.dart';
 import 'package:rideops/features/inspection/application/inspection_controller.dart';
 import 'package:rideops/features/inspection/application/inspection_state.dart';
@@ -322,6 +323,70 @@ void main() {
         container.read(inspectionControllerProvider('r1')).angles['front']!;
     expect(angle.status, AngleStatus.queued);
     expect(angle.bytes, FakeCameraSession.sensorBytes.length);
+  });
+
+  testWidgets(
+      'el cierre encolado restaura el resumen CON su firma y sus métricas: la '
+      'pantalla suelta no aterriza en un CTA muerto', (tester) async {
+    routeHappyPath();
+    // Corrida anterior: se tocó "Terminar" sin red. La fila del cierre lleva
+    // TODO el cuerpo (spike 2) y es la ÚNICA copia de la firma que existe en
+    // este teléfono — el estado del controller no sobrevive al proceso.
+    //
+    // Este es el escenario al que manda "Abrir inspección" de la bandeja
+    // (outbox_screen.dart) cuando la fila murió: restaurar el sub-paso sin
+    // restaurar la firma dejaba al agente en el resumen con "Terminar"
+    // deshabilitado, sin explicación y con el grid dos toques atrás.
+    await container.read(outboxServiceProvider).enqueueComplete(
+          checkoutSessionId: 'cs1',
+          reservationId: 'r1',
+          reservationNumber: 'R-20260816-0042',
+          body: {
+            'odometer': 48212,
+            'fuelLevel': 0.75,
+            'cleanliness': 4,
+            'notes': 'Rayon en la defensa',
+            'signatureDataUrl': 'data:image/png;base64,${'x' * 300}',
+            'signerName': 'María González',
+          },
+        );
+
+    await tester.pumpWidget(app(const InspectionScreen(reservationId: 'r1')));
+    await tester.pumpAndSettle();
+
+    // Aterriza en el resumen (no en el grid) y el CTA está VIVO.
+    final cta = find.widgetWithText(
+      RidePrimaryButton,
+      'Finish — will send on reconnect',
+    );
+    expect(cta, findsOneWidget);
+    expect(tester.widget<RidePrimaryButton>(cta).onPressed, isNotNull);
+
+    final state = container.read(inspectionControllerProvider('r1'));
+    expect(state.step, InspectionStep.summary);
+    expect(state.signatureDataUrl, isNotNull);
+    // Y no solo la firma: sin las métricas, re-terminar reescribiría la fila
+    // con un cuerpo vacío (el enqueue REEMPLAZA el body).
+    expect(state.odometer, 48212);
+    expect(state.fuelEighths, 6);
+    expect(state.cleanliness, 4);
+    expect(state.notes, 'Rayon en la defensa');
+    expect(state.metricsComplete, isTrue);
+
+    // Volver a terminar es seguro por construcción: idempotente por
+    // `sessionId:complete`, misma fila, cuerpo intacto.
+    await container
+        .read(inspectionControllerProvider('r1').notifier)
+        .finish();
+    final rows = await db.allFor(userId: kFixtureUserId, tenantId: tenantId);
+    final complete =
+        rows.singleWhere((r) => r.kind == OutboxKinds.inspectionComplete);
+    final body = (json.decode(complete.payload)
+        as Map<String, dynamic>)['body'] as Map<String, dynamic>;
+    expect(body['signatureDataUrl'], isNotNull);
+    expect(body['odometer'], 48212);
+    expect(body['fuelLevel'], 0.75);
+    expect(body['signerName'], 'María González');
   });
 
   testWidgets('con la bandeja LLENA la captura se bloquea antes de la cámara',

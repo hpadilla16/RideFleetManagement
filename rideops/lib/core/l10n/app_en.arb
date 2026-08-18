@@ -531,6 +531,7 @@
   "coInspCompleteDeadTitle": "The inspection close couldn't be sent. The reason and the decision you need are in the outbox.",
   "coInspRequiredAnglesTitle": "Required angles",
   "coInspRequiredMissingPill": "{count, plural, one{1 missing} other{{count} missing}}",
+  "coInspAnglesFailedChip": "{count, plural, one{1 failed} other{{count} failed}}",
 
   "coInspDoneTitle": "Check-out inspection",
   "coInspSignatureTitle": "Customer signature",

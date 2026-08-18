@@ -271,6 +271,16 @@ class InspectionSummaryBody extends StatelessWidget {
           InspectionWarnBanner(text: l10n.inspOfflineBanner),
           const SizedBox(height: 10),
         ],
+        // La bandeja llena mata el "Terminar": `finish()` devuelve
+        // `EnqueueResult.full` y deja `outboxFull` puesto
+        // (inspection_controller.dart:342-348). Sin este aviso el CTA primario
+        // no hace nada y no dice nada. Vive en el cuerpo COMPARTIDO para que lo
+        // hereden las dos superficies —el paso 4 del wizard descarta el
+        // resultado del enqueue— igual que en [InspectionPhotosBody].
+        if (state.outboxFull) ...[
+          InspectionWarnBanner(text: l10n.inspOutboxFull),
+          const SizedBox(height: 10),
+        ],
         InspectionQueueCard(photos: state.capturedCount, online: online),
       ],
     );
