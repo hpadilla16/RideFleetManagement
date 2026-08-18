@@ -552,12 +552,12 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // This is a PARTIAL close of the events lost-update, and the honest
       // count is FOURTEEN other writers of this TEXT column, all still doing
       // an unguarded read-modify-write (read → write, this file):
-      //   stampSideEffect       :1036 → :1044
-      //   saveCustomerSignature :1066 → :1087  (read is OUTSIDE the
-      //                                         $transaction that starts :1072)
-      //   mintHandoffToken      :1110 → :1161
-      //   setDeclinedInsurance  :1232 → :1246
-      //   markAbandoned         :1256 → :1270
+      //   stampSideEffect       :1085 → :1093
+      //   saveCustomerSignature :1115 → :1136  (read is OUTSIDE the
+      //                                         $transaction that starts :1121)
+      //   mintHandoffToken      :1159 → :1210
+      //   setDeclinedInsurance  :1281 → :1295
+      //   markAbandoned         :1305 → :1319
       //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
       //   spin-charge.service.js:574, :606, :884, :1038, :1229 (five)
       //   mobile-inspection.service.js:276
@@ -749,97 +749,146 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
             ignoreReservationId: resv.id,
           }, { tenantId: resv.tenantId || undefined });
         }
-        await prisma.reservation.update({ where: { id: resv.id }, data: { status: 'CHECKED_OUT' } });
-        if (updated.agreementId) {
-          // 2026-06-10 (beta.152) — this cascade finalize never copied the
-          // mobile-captured odometer/fuel from the CHECKOUT inspection row
-          // onto the agreement columns, so contracts printed "-" and the
-          // beta.143 mileage-history CHECKOUT entry was silently skipped.
-          // Copy them here (agreement column wins if already set) and record
-          // the mileage entry. All best-effort: metric/mileage failures must
-          // never break the finalize itself.
-          let metricsPatch = {};
-          let checkoutOdometer = null;
-          try {
-            const [agRow, inspRow] = await Promise.all([
-              prisma.rentalAgreement.findUnique({
-                where: { id: updated.agreementId },
-                select: { odometerOut: true, fuelOut: true, agreementNumber: true },
-              }),
-              prisma.rentalAgreementInspection.findFirst({
-                where: { rentalAgreementId: updated.agreementId, phase: 'CHECKOUT' },
-                select: { odometer: true, fuelLevel: true },
-              }),
-            ]);
-            if (agRow && inspRow) {
-              if (agRow.odometerOut == null && inspRow.odometer != null) {
-                metricsPatch.odometerOut = inspRow.odometer;
-              }
-              const fuelFraction = fuelLevelToFraction(inspRow.fuelLevel);
-              if (agRow.fuelOut == null && fuelFraction != null) {
-                metricsPatch.fuelOut = fuelFraction;
-              }
-            }
-            checkoutOdometer = agRow?.odometerOut ?? inspRow?.odometer ?? null;
-          } catch { metricsPatch = {}; }
-
-          // 2026-08-17 (Innovation MUST-CHANGE): this is the write that turns a
-          // DRAFT into the legal document, and it used to fail into
-          // `.catch(() => {})` — silently, with the cascade carrying on to mark
-          // the car ON_RENT and mail the customer their "contract". That is the
-          // exact tuple this ticket exists to kill, reached through a different
-          // door. It stays best-effort in the sense that a blip here must not
-          // abort the rest of the cascade (aborting would strand the vehicle
-          // sync, and the self-heal cannot repair it: its short-circuit sees an
-          // already-CHECKED_OUT reservation and declines). But it is no longer
-          // silent, and it no longer lets the email out — see finalizeCascadeOk.
-          await prisma.rentalAgreement.update({
-            where: { id: updated.agreementId },
-            data: { status: 'FINALIZED', finalizedAt: new Date(), ...metricsPatch },
-          }).catch((agErr) => {
-            agreementFinalized = false;
-            logger.error('[checkout-session] agreement did NOT reach FINALIZED on finalize', {
-              sessionId: id, agreementId: updated.agreementId, reservationId: resv.id,
-              error: agErr?.message || String(agErr),
-            });
+        // ── the finalize CLAIMS the reservation (2026-08-18) ──────────────
+        //
+        // This was a plain `update`, and it was the one write in the cascade
+        // that decided nothing. Every other entrance to this arm is behind a
+        // compare-and-set — transition() commits the step with one, the loaner
+        // bump is an updateMany guarded by DRAFT, the email CASes on
+        // autoEmailedAt — but the `alreadyApplied` self-heal breaks out of the
+        // CAS loop WITHOUT a commit, so it is the single path into here holding
+        // nothing. Two callers on it both ran this whole arm, and two of the
+        // writes below do not survive being run twice: rentalAgreement.update
+        // rewrites `finalizedAt` on a contract that is already FINALIZED (the
+        // audit trail then says today instead of the day the car left), and
+        // recordMileageEntry is a bare create with no dedup, so the vehicle's
+        // odometer timeline grows a duplicate CHECKOUT row per repeat.
+        //
+        // What contained them until now was the self-heal allow-list above plus
+        // the status short-circuit below — i.e. an unenforced invariant ("a
+        // reservation in {NEW, CONFIRMED} implies its agreement is not
+        // FINALIZED"), living three files from the writes it protects and true
+        // only while nothing else moves those rows. The wizard shipping
+        // "Reintentar cierre", a button whose entire purpose is to re-POST
+        // CLOSED → CLOSED and re-run this cascade, is what made a second caller
+        // ordinary: `transitionInFlightRef` guards one tab, and a second tab —
+        // or RideOps growing the same affordance — is not that tab.
+        //
+        // So the claim becomes the guard, and it guards on the status we
+        // actually READ, not on the allow-list. Same shape as the step commit
+        // (`casWhere = { id, currentStep: session.currentStep }`), and the
+        // difference is load-bearing: `status: { in: ['NEW','CONFIRMED'] }`
+        // would also refuse the WINNER finalize of a PENDING_FRANCHISE_IMPORT
+        // reservation, which this cascade is deliberately still allowed to do.
+        // Whoever wins the claim owns every write under it; the loser has done
+        // nothing, so there is nothing to undo.
+        const claimed = await prisma.reservation.updateMany({
+          where: { id: resv.id, status: resv.status },
+          data: { status: 'CHECKED_OUT' },
+        });
+        if (claimed.count === 0) {
+          // Somebody claimed it between our guards and our write, and they own
+          // the cascade now. finalizeCascadeOk stays false ON PURPOSE: at this
+          // instant the winner has claimed the row, not finished with it, so we
+          // cannot assert the contract reached FINALIZED — and deciding that is
+          // the flag's only job. The winner's own email arm sends it, and the
+          // autoEmailedAt CAS keeps that at exactly one send.
+          logger.info('[checkout-session] finalize lost the reservation claim', {
+            sessionId: id, reservationId: resv.id,
+            sawStatus: String(resv.status), alreadyApplied,
           });
-          // Loaner companion: advance the borrower's LoanerAgreement to ACTIVE so the portal,
-          // due-soon/overdue reminders (status:ACTIVE), and the dashboard badge reflect the
-          // checked-out loaner. Harmless for rentals (no LoanerAgreement). (best-effort)
-          await prisma.loanerAgreement.updateMany({
-            where: { reservationId: resv.id, status: 'DRAFT' },
-            data: { status: 'ACTIVE' },
-          }).catch(() => {});
+        } else {
+          if (updated.agreementId) {
+            // 2026-06-10 (beta.152) — this cascade finalize never copied the
+            // mobile-captured odometer/fuel from the CHECKOUT inspection row
+            // onto the agreement columns, so contracts printed "-" and the
+            // beta.143 mileage-history CHECKOUT entry was silently skipped.
+            // Copy them here (agreement column wins if already set) and record
+            // the mileage entry. All best-effort: metric/mileage failures must
+            // never break the finalize itself.
+            let metricsPatch = {};
+            let checkoutOdometer = null;
+            try {
+              const [agRow, inspRow] = await Promise.all([
+                prisma.rentalAgreement.findUnique({
+                  where: { id: updated.agreementId },
+                  select: { odometerOut: true, fuelOut: true, agreementNumber: true },
+                }),
+                prisma.rentalAgreementInspection.findFirst({
+                  where: { rentalAgreementId: updated.agreementId, phase: 'CHECKOUT' },
+                  select: { odometer: true, fuelLevel: true },
+                }),
+              ]);
+              if (agRow && inspRow) {
+                if (agRow.odometerOut == null && inspRow.odometer != null) {
+                  metricsPatch.odometerOut = inspRow.odometer;
+                }
+                const fuelFraction = fuelLevelToFraction(inspRow.fuelLevel);
+                if (agRow.fuelOut == null && fuelFraction != null) {
+                  metricsPatch.fuelOut = fuelFraction;
+                }
+              }
+              checkoutOdometer = agRow?.odometerOut ?? inspRow?.odometer ?? null;
+            } catch { metricsPatch = {}; }
 
-          // Mileage history ("last entry wins" — same as the legacy finalize).
-          if (checkoutOdometer != null && resv.vehicleId) {
-            await recordMileageEntrySafe(prisma, {
-              vehicleId: resv.vehicleId,
-              tenantId: resv.tenantId || undefined,
-              mileage: checkoutOdometer,
-              source: 'CHECKOUT',
-              reservationId: resv.id,
-              rentalAgreementId: updated.agreementId,
-              actorUserId: actorUserId || null,
+            // 2026-08-17 (Innovation MUST-CHANGE): this is the write that turns a
+            // DRAFT into the legal document, and it used to fail into
+            // `.catch(() => {})` — silently, with the cascade carrying on to mark
+            // the car ON_RENT and mail the customer their "contract". That is the
+            // exact tuple this ticket exists to kill, reached through a different
+            // door. It stays best-effort in the sense that a blip here must not
+            // abort the rest of the cascade (aborting would strand the vehicle
+            // sync, and the self-heal cannot repair it: its short-circuit sees an
+            // already-CHECKED_OUT reservation and declines). But it is no longer
+            // silent, and it no longer lets the email out — see finalizeCascadeOk.
+            await prisma.rentalAgreement.update({
+              where: { id: updated.agreementId },
+              data: { status: 'FINALIZED', finalizedAt: new Date(), ...metricsPatch },
+            }).catch((agErr) => {
+              agreementFinalized = false;
+              logger.error('[checkout-session] agreement did NOT reach FINALIZED on finalize', {
+                sessionId: id, agreementId: updated.agreementId, reservationId: resv.id,
+                error: agErr?.message || String(agErr),
+              });
             });
+            // Loaner companion: advance the borrower's LoanerAgreement to ACTIVE so the portal,
+            // due-soon/overdue reminders (status:ACTIVE), and the dashboard badge reflect the
+            // checked-out loaner. Harmless for rentals (no LoanerAgreement). (best-effort)
+            await prisma.loanerAgreement.updateMany({
+              where: { reservationId: resv.id, status: 'DRAFT' },
+              data: { status: 'ACTIVE' },
+            }).catch(() => {});
+
+            // Mileage history ("last entry wins" — same as the legacy finalize).
+            if (checkoutOdometer != null && resv.vehicleId) {
+              await recordMileageEntrySafe(prisma, {
+                vehicleId: resv.vehicleId,
+                tenantId: resv.tenantId || undefined,
+                mileage: checkoutOdometer,
+                source: 'CHECKOUT',
+                reservationId: resv.id,
+                rentalAgreementId: updated.agreementId,
+                actorUserId: actorUserId || null,
+              });
+            }
           }
+          await syncVehicleStatusForReservation(prisma, {
+            reservationId: resv.id, vehicleId: resv.vehicleId, toStatus: 'CHECKED_OUT',
+          });
+          await prisma.auditLog.create({
+            data: {
+              tenantId: resv.tenantId, reservationId: resv.id, actorUserId: actorUserId || null,
+              action: 'STATUS_CHANGE', fromStatus: resv.status, toStatus: 'CHECKED_OUT',
+              reason: 'Checkout wizard finalized',
+            },
+          }).catch(() => {});
+          logger.info('[checkout-session] reservation advanced to CHECKED_OUT on finalize', {
+            sessionId: id, reservationId: resv.id,
+          });
+          // The cascade ran. It counts as OK only if the contract is really
+          // FINALIZED — mailing a DRAFT is the whole ticket.
+          finalizeCascadeOk = agreementFinalized;
         }
-        await syncVehicleStatusForReservation(prisma, {
-          reservationId: resv.id, vehicleId: resv.vehicleId, toStatus: 'CHECKED_OUT',
-        });
-        await prisma.auditLog.create({
-          data: {
-            tenantId: resv.tenantId, reservationId: resv.id, actorUserId: actorUserId || null,
-            action: 'STATUS_CHANGE', fromStatus: resv.status, toStatus: 'CHECKED_OUT',
-            reason: 'Checkout wizard finalized',
-          },
-        }).catch(() => {});
-        logger.info('[checkout-session] reservation advanced to CHECKED_OUT on finalize', {
-          sessionId: id, reservationId: resv.id,
-        });
-        // The cascade ran. It counts as OK only if the contract is really
-        // FINALIZED — mailing a DRAFT is the whole ticket.
-        finalizeCascadeOk = agreementFinalized;
       } else if (finalizeOwnsReservation) {
         // The benign short-circuit: a finalize landing on a reservation already
         // CHECKED_OUT. No work to do, and the world already matches.

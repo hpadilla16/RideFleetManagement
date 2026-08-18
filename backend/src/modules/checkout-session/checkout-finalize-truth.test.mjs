@@ -172,13 +172,17 @@ test('§2 a cascade failure the service DOWNGRADES to a warning still stops the 
   const row = seedFinalizeWorld();
   const calls = spyOnFinalizeEmail();
 
+  // Injected on updateMany, not update: since 2026-08-18 the cascade CLAIMS
+  // the reservation (updateMany guarded by the status it read) instead of
+  // updating it blind, so a patch left on the old method breaks nothing and
+  // every assertion below would quietly be describing a cascade that worked.
   let breakCascade = true;
-  const origUpdate = prisma.reservation.update;
-  prisma.reservation.update = async (args) => {
+  const origUpdateMany = prisma.reservation.updateMany;
+  prisma.reservation.updateMany = async (args) => {
     if (breakCascade) throw new Error('injected half-way cascade failure');
-    return origUpdate(args);
+    return origUpdateMany(args);
   };
-  onRestore(() => { prisma.reservation.update = origUpdate; });
+  onRestore(() => { prisma.reservation.updateMany = origUpdateMany; });
 
   const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
   await settle();
