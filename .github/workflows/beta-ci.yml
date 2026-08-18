@@ -130,6 +130,18 @@ jobs:
         #     race, so they can only ever be caught here — and one test pins
         #     the OPPOSITE: a concurrent stamp must NOT start failing
         #     transitions for clients that never opted into expectedVersion.
+        #   - test:checkout-finalize-truth (2026-08-17): the finalize either
+        #     happened or it did not, and both the agent and the customer's
+        #     inbox have to agree with the database about which. Three defects
+        #     made them disagree — a 409 the web wizard swallowed because the
+        #     step had already committed, an email arm sitting UPSTREAM of the
+        #     guards that decide whether the finalize is allowed, and a
+        #     detached send promise whose rejection took the process down.
+        #     Belongs here for the same reason as its siblings: every case
+        #     needs the CLOSED cascade driven to a specific failure, which no
+        #     integration run reaches on its own, and what it protects is a
+        #     legal document going to a customer for a rental that never
+        #     happened.
         # A DUMMY DATABASE_URL IS REQUIRED HERE, AND NOTHING CONNECTS WITH IT.
         # test:kiosk builds a PrismaClient at import time, and the Prisma
         # constructor THROWS on an undefined datasource url — before any
@@ -148,7 +160,7 @@ jobs:
         # above already uses. Same reason: satisfy a constructor, never connect.
         env:
           DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_unit_only?schema=public'
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:checkout-multisurface && npm run test:checkout-cas && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:checkout-multisurface && npm run test:checkout-cas && npm run test:checkout-finalize-truth && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:

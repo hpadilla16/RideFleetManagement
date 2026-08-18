@@ -18,6 +18,14 @@ function handleError(res, err) {
       // surface re-renders without a follow-up GET. Absent on every other
       // error — additive, existing clients never see the field.
       ...(err.session ? { session: err.session } : {}),
+      // 2026-08-17: FINALIZE_INCOMPLETE folds several distinct guard failures
+      // (VEHICLE_CONFLICT, NO_VEHICLE_ASSIGNED, PRECHECKIN_REQUIRED,
+      // AGE_RULES_*) into one code, because they leave one indistinguishable
+      // state: closed session, unfinalized rental. `reason` hands the caller
+      // the guard that actually fired, so RideOps can route the agent to the
+      // right fix without parsing the message. Same additive contract as
+      // `session` above.
+      ...(err.reason ? { reason: err.reason } : {}),
     });
   }
   logger.error('[checkout-session] unexpected error', { message: err.message, stack: err.stack });

@@ -246,10 +246,12 @@ function CheckoutWizardV2({ token, me, logout }) {
       setSession(next);
     } catch (err) {
       // 409 = state conflict. If the session is already in (or past) the
-      // requested step — the classic double-fire — refetch and treat as a
-      // success-noop instead of toasting an error at the agent. The decision
-      // lives in shouldSwallowTransitionConflict (lib/checkout-session.js) so
-      // it can be tested; FINALIZE_INCOMPLETE is exempt there on purpose.
+      // requested step AND the code is one of the benign ones — the classic
+      // double-fire — refetch and treat as a success-noop instead of toasting
+      // an error at the agent. The decision lives in
+      // shouldSwallowTransitionConflict (lib/checkout-session.js) so it can be
+      // tested; it swallows an ALLOW-list, so a finalize that failed after the
+      // step committed (FINALIZE_INCOMPLETE, and anything new) is toasted.
       let freshSession = null;
       if (err?.status === 409) {
         try {

@@ -101,30 +101,62 @@ export const STEP_ORDER = [
 ];
 
 /**
+ * The 409 codes `POST /transition` can answer with that mean "your request was
+ * redundant, nothing is wrong". Exhaustive against the thrown sites in
+ * checkout-session.service.js#transition:
+ *
+ *   ILLEGAL_TRANSITION     the classic double-fire, and the "already past"
+ *                          case — the step comparison below tells them apart
+ *   CONCURRENT_MODIFICATION lost the CAS race three times; if the fresh row is
+ *                          already at/past the step, the work did land
+ *
+ * Deliberately absent, and each for its own reason:
+ *
+ *   FINALIZE_INCOMPLETE    the session closed but the finalize did not finish
+ *   STALE_VERSION          the wizard sends no expectedVersion, so reaching
+ *                          this means an assumption broke — show it
+ *   ENTRY_GUARD            unreachable with at >= want (the service answers
+ *                          "already there" before it checks entry
+ *                          requirements), so if it ever arrives here, the
+ *                          service changed and the agent should hear about it
+ */
+const BENIGN_CONFLICT_CODES = ['ILLEGAL_TRANSITION', 'CONCURRENT_MODIFICATION'];
+
+/**
  * Should the wizard swallow this failed transition as a benign no-op?
  *
  * Lives here, not inline in the page, because it is the rule that decides
  * whether an agent ever SEES a failure — and it needs a test.
  *
- * The rule is "the session is already at or past the step I asked for, so my
- * POST was redundant". That is right for the double-fire it was written for
- * (M2-H8 now answers most of those with a 200 anyway).
+ * The step half of the rule is "the session is already at or past the step I
+ * asked for, so my POST was redundant". That is right for the double-fire it
+ * was written for (M2-H8 now answers most of those with a 200 anyway).
  *
- * It is WRONG for FINALIZE_INCOMPLETE, and invisibly so. That code is raised
- * only when the session is already AT toStep, so `at >= want` is satisfied by
- * construction — every one of them would be swallowed silently, on the one
- * error that means "this checkout is closed but its finalize did not finish:
- * the reservation is still CONFIRMED, the contract still DRAFT, the car
- * unmarked". The agent would see the finished-checkout screen over exactly the
- * broken state somebody has to fix at the counter. It was also a visibility
- * REGRESSION: the underlying failures (NO_VEHICLE_ASSIGNED, PRECHECKIN_REQUIRED,
- * AGE_RULES_*) used to surface as 422s, which fell straight through to the
- * toast — confusing, but visible. Re-labelling them 409 to give RideOps a
- * usable code must not cost the wizard the toast.
+ * On its own it is WRONG at the finalize, and invisibly so. Every error the
+ * CLOSED cascade raises arrives AFTER the step has committed, so `at >= want`
+ * is satisfied by construction and the whole class would vanish without a
+ * toast — on the one error that means "this checkout is closed but its
+ * finalize did not finish: the reservation is still CONFIRMED, the contract
+ * still DRAFT, the car unmarked". The agent would see the finished-checkout
+ * screen over exactly the broken state somebody has to fix at the counter.
+ * It was also a visibility REGRESSION: those failures used to surface as 422s,
+ * which fell straight through to the toast — confusing, but visible.
+ * Re-labelling them 409 to give RideOps a usable code must not cost the
+ * wizard the toast.
+ *
+ * 2026-08-17: naming the codes to swallow, instead of the one code not to,
+ * is the part that makes this hold. The exemption list was a DENY-list of one
+ * (FINALIZE_INCOMPLETE), which covered the self-heal path and silently missed
+ * the winner path's bare VEHICLE_CONFLICT — the same broken state, a different
+ * code, no toast. The backend now labels both FINALIZE_INCOMPLETE, so that
+ * specific hole is closed at the source; this list is what keeps the NEXT
+ * unforeseen 409 loud instead of silent. On a step that moves money, a legal
+ * document and a car, an unrecognised failure is worth a toast the agent can
+ * dismiss far more than it is worth a silence nobody can.
  */
 export function shouldSwallowTransitionConflict({ err, fresh, toStep }) {
   if (err?.status !== 409) return false;
-  if (err?.code === 'FINALIZE_INCOMPLETE') return false;
+  if (!BENIGN_CONFLICT_CODES.includes(err?.code)) return false;
   const at = STEP_ORDER.indexOf(fresh?.currentStep);
   const want = STEP_ORDER.indexOf(toStep);
   return at !== -1 && want !== -1 && at >= want;
