@@ -76,6 +76,24 @@ abstract final class NetEvents {
 abstract final class InspectionEvents {
   static const photoCaptured = 'inspection.photo_captured';
   static const completedLocal = 'inspection.completed_local';
+
+  // ── M2-H4 (la inspección como paso 4 del wizard) ─────────────────────────
+
+  /// El SERVIDOR selló `inspectionCompletedAt` y el paso lo vio caer. Es la
+  /// otra mitad de `completed_local`: la distancia entre los dos mide lo que
+  /// el agente espera de pie junto al coche con el paso sin avanzar.
+  ///
+  /// Tag `waited_s`: segundos desde que ESTA pantalla vio el complete
+  /// encolado. Viaja sin el tag cuando no hubo espera que medir (se entró con
+  /// la inspección ya cerrada por otra superficie).
+  static const completedServer = 'inspection.completed_server';
+
+  /// Una foto OBLIGATORIA (front/rear) murió en la bandeja. Tag `angle`.
+  ///
+  /// Es el callejón sin salida de la cadena offline: el dead-letter no
+  /// bloquea al resto, el `complete` sale igual y el servidor lo rechaza con
+  /// `REQUIRED_ANGLES_MISSING`. Su frecuencia mide cuánto pesa el frame 17E.
+  static const requiredAngleDead = 'inspection.required_angle_dead';
 }
 
 /// Eventos del checkout (03-observability.md §Checkout (M2)) — historia H1

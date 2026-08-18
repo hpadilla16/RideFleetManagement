@@ -12,6 +12,7 @@ import 'package:rideops/core/api/dto/reservation_display.dart';
 import 'package:rideops/core/api/enums.dart';
 // PrecheckinLinkResult vive junto a ReservationsApi.
 import 'package:rideops/core/api/reservations_api.dart';
+import 'package:rideops/features/inspection/application/inspection_state.dart';
 import 'package:rideops/core/session/active_location.dart';
 import 'package:rideops/core/session/lock_controller.dart';
 import 'package:rideops/core/session/lock_state.dart';
@@ -207,6 +208,36 @@ class FakeCheckoutApi extends CheckoutApi {
     termsTokenCalls++;
     if (onMintTermsToken != null) return onMintTermsToken!();
     return _maybeGate(termsToken());
+  }
+
+  /// Mint del handoff de inspección + estado de ángulos del servidor. El
+  /// flujo de captura (M2-H4) los pide al cargar, como contexto best-effort:
+  /// sin estos overrides saldrían por el Dio real de `super` y el test
+  /// dependería de que ese fallo caiga en el catch correcto.
+  int handoffTokenCalls = 0;
+  int inspectionStateCalls = 0;
+  Future<HandoffToken> Function()? onMintHandoffToken;
+  Future<MobileInspectionState> Function()? onInspectionState;
+
+  @override
+  Future<HandoffToken> mintHandoffToken(String checkoutSessionId) async {
+    handoffTokenCalls++;
+    if (onMintHandoffToken != null) return onMintHandoffToken!();
+    return _maybeGate(termsToken(token: 'tok_handoff_fixture_0001'));
+  }
+
+  @override
+  Future<MobileInspectionState> getInspectionState(String token) async {
+    inspectionStateCalls++;
+    if (onInspectionState != null) return onInspectionState!();
+    return _maybeGate(
+      MobileInspectionState(
+        angles: [
+          for (final key in kInspectionAngleKeys)
+            InspectionAngle(key: key, label: key),
+        ],
+      ),
+    );
   }
 
   @override

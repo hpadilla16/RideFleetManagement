@@ -5,11 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/api_error.dart';
 import '../../../core/api/api_providers.dart';
+import '../../../core/db/outbox_db.dart';
 import '../../../core/db/outbox_providers.dart';
 import '../../../core/outbox/drain_coordinator.dart';
 import '../../../core/outbox/outbox_service.dart';
 import '../../../core/session/active_location.dart';
 import '../../../core/telemetry/event_logger.dart';
+import 'inspection_outbox_view.dart';
 import 'inspection_state.dart';
 
 /// Orquestador del flujo de inspección nativa (H5, mockup 6A-6F).
@@ -29,8 +31,25 @@ class InspectionController extends Notifier<InspectionFlowState> {
 
   final String reservationId;
 
+  /// Ángulos que la ÚLTIMA emisión de la bandeja mostró todavía encolados.
+  ///
+  /// Es la memoria mínima que permite afirmar "el servidor la tiene" sin
+  /// mentir: un ángulo que estaba en la bandeja y ya no tiene fila salió por
+  /// `markDrained`, y el drenador solo borra con `DrainOk` (2xx). Sin este
+  /// "estaba antes", la primera emisión —o la ventana entre encolar y que el
+  /// stream de drift emita— pintaría "enviada" una foto que sigue en el
+  /// teléfono.
+  Set<String> _queuedAnglesSeen = const {};
+
   @override
   InspectionFlowState build() {
+    _queuedAnglesSeen = const {};
+    // La bandeja es la mitad LOCAL de la verdad del paso: se escucha para
+    // convertir "encolada" en "el servidor la tiene" (M2-H4, frames 17B/17D).
+    ref.listen<AsyncValue<List<OutboxEntry>>>(outboxRowsProvider, (_, next) {
+      final rows = next.value;
+      if (rows != null) _reconcileWithOutbox(rows);
+    });
     Future.microtask(load);
     return const InspectionFlowState();
   }
@@ -152,7 +171,16 @@ class InspectionController extends Notifier<InspectionFlowState> {
             completeQueued = true;
           }
         }
-        next = next.copyWith(angles: angles, completeQueued: completeQueued);
+        next = next.copyWith(
+          angles: angles,
+          completeQueued: completeQueued,
+          // Con el cierre YA encolado no hay nada que capturar: el flujo se
+          // restaura donde de verdad quedó (esperando al servidor), no en
+          // fotos. Sin esto, volver al checkout tras un "Terminar" sin red
+          // aterrizaba en el grid y el paso 4 no podía contar por qué no
+          // avanza (frame 17D).
+          step: completeQueued ? InspectionStep.summary : next.step,
+        );
       } catch (_) {}
 
       if (!ref.mounted) return;
@@ -318,6 +346,88 @@ class InspectionController extends Notifier<InspectionFlowState> {
       state = state.copyWith(outboxFull: true);
     }
     return result;
+  }
+
+  // ── reconciliación con la bandeja y con el servidor (M2-H4) ──────────────
+
+  /// Una emisión de la bandeja: promueve a `onServer` los ángulos cuya fila
+  /// DESAPARECIÓ después de haber estado encolada.
+  ///
+  /// Con la sesión ya sellada por el servidor NO se promueve nada: ahí las
+  /// filas desaparecen por la purga selectiva ([noteCompletedByServer] →
+  /// `discardSession`), y decir "enviada" de una foto que se descartó sería
+  /// exactamente la mentira que este paso existe para evitar.
+  void _reconcileWithOutbox(List<OutboxEntry> rows) {
+    final sessionId = state.sessionId;
+    if (sessionId == null) return;
+    final view = inspectionOutboxViewOf(rows, checkoutSessionId: sessionId);
+    final stillQueued = {
+      for (final entry in view.photos.entries)
+        if (entry.value == OutboxDelivery.queued) entry.key,
+    };
+    final gone = _queuedAnglesSeen
+        .difference(stillQueued)
+        // Con fila todavía presente (muerta) no salió a ningún lado.
+        .where((key) => !view.photos.containsKey(key))
+        .toList();
+    _queuedAnglesSeen = stillQueued;
+    if (gone.isEmpty || state.completedAt != null) return;
+
+    final angles = Map<String, AngleUi>.of(state.angles);
+    var changed = false;
+    for (final key in gone) {
+      final angle = angles[key];
+      if (angle == null || angle.status != AngleStatus.queued) continue;
+      angles[key] = angle.copyWith(status: AngleStatus.onServer);
+      changed = true;
+    }
+    if (changed && ref.mounted) state = state.copyWith(angles: angles);
+  }
+
+  /// El wizard vio caer `inspectionCompletedAt` con el paso abierto (frame
+  /// 17F). El servidor ya tiene la inspección, así que los envíos de ESTA
+  /// sesión se retiran con rastro — la misma purga selectiva del 6F: reenviar
+  /// re-estamparía sellos sobre una sesión que puede estar cerrándose
+  /// (mobile-inspection.service.js:265-281 escribe sin guard de re-estampado).
+  ///
+  /// Idempotente: el poll trae el sello en CADA lectura posterior.
+  Future<void> noteCompletedByServer(DateTime completedAt) async {
+    final sessionId = state.sessionId;
+    if (sessionId == null || state.completedAt != null) return;
+    state = state.copyWith(completedAt: completedAt);
+    try {
+      await _outbox.discardSession(sessionId);
+    } catch (_) {
+      // La purga es higiene, no corrección: si falla, el drenado se topará
+      // con `inspectionAlreadyCompleted` y descartará la fila igual.
+    }
+  }
+
+  /// Reintento del 17E: resucita TODAS las filas muertas de esta sesión y
+  /// dispara el drenado.
+  ///
+  /// Nota 13 del mockup: volver a tomar la foto obligatoria son DOS
+  /// operaciones (encolar la foto de nuevo + revivir el `inspection_complete`
+  /// que el servidor rechazó con `REQUIRED_ANGLES_MISSING`) y UN botón — el
+  /// agente no tiene por qué saber que su cierre quedó en una lista aparte.
+  /// Devuelve cuántas filas revivió.
+  Future<int> retryDeadRows() async {
+    final sessionId = state.sessionId;
+    if (sessionId == null) return 0;
+    final List<OutboxEntry> rows;
+    try {
+      rows = await ref.read(outboxDbProvider).byGroupKey(sessionId);
+    } catch (_) {
+      return 0;
+    }
+    final dead = rows.where((r) => r.status == 'dead').toList();
+    for (final row in dead) {
+      await _outbox.retryDead(row.id);
+    }
+    if (dead.isNotEmpty) {
+      await ref.read(drainCoordinatorProvider.notifier).kick('inspection_retry');
+    }
+    return dead.length;
   }
 
   void _updateAngle(String key, AngleUi Function(AngleUi) fn) {

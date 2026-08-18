@@ -661,6 +661,8 @@ class StepLine extends StatelessWidget {
     required this.position,
     required this.onTap,
     this.staleAge,
+    this.label,
+    this.trailing,
   });
 
   final String rawStep;
@@ -673,11 +675,23 @@ class StepLine extends StatelessWidget {
   /// Edad del dato cuando la lectura ya no está viva (offline / error).
   final Duration? staleAge;
 
+  /// Nombre del SUB-estado cuando el paso tiene vida interna: "Inspección ·
+  /// fotos" (17B) o "Inspección completa" (17F, con el sello del servidor
+  /// puesto). El CONTADOR nunca se toca — sigue diciendo el número real del
+  /// paso del servidor, jamás un "paso 6.5" (nota 1 del mockup 17).
+  final String? label;
+
+  /// Pieza de la derecha. Durante la captura, el mapa de 10 pasos cede su
+  /// lugar al contador de ángulos: lo que el agente necesita mientras
+  /// fotografía no es el mapa, es cuántos le faltan (nota 5). La fila sigue
+  /// siendo tocable — el sheet no desaparece, solo deja de anunciarse.
+  final Widget? trailing;
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final stale = staleAge != null;
-    final label = stepLabel(l10n, rawStep);
+    final label = this.label ?? stepLabel(l10n, rawStep);
     return Material(
       color: stale ? RideTokens.n50 : RideTokens.n0,
       child: InkWell(
@@ -730,16 +744,20 @@ class StepLine extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                l10n.coSeeAllSteps,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: RideTokens.p700,
+              if (trailing != null)
+                trailing!
+              else ...[
+                Text(
+                  l10n.coSeeAllSteps,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: RideTokens.p700,
+                  ),
                 ),
-              ),
-              const Icon(Icons.chevron_right_rounded,
-                  size: 18, color: RideTokens.p700),
+                const Icon(Icons.chevron_right_rounded,
+                    size: 18, color: RideTokens.p700),
+              ],
             ],
           ),
         ),

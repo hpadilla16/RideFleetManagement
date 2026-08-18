@@ -133,6 +133,8 @@ inventado.
 |---|---|
 | `inspection.photo_captured` | tag `angle`, `bytes_after_compress`, `ms_compress` |
 | `inspection.completed_local` | complete encolado/enviado |
+| `inspection.completed_server` | el poll vio caer `inspectionCompletedAt` (tag `waited_s`: segundos desde que la pantalla vio el complete encolado; sin tag si no hubo espera que medir). Con `completed_local` mide lo que el agente espera de pie junto al coche con el paso sin avanzar — M2-H4 |
+| `inspection.required_angle_dead` | una foto OBLIGATORIA (front/rear) murió en la bandeja (tag `angle`). El dead-letter no bloquea al resto, así que el `complete` sale igual y el servidor lo rechaza con `REQUIRED_ANGLES_MISSING`: su frecuencia mide el callejón sin salida del frame 17E — M2-H4 |
 | `outbox.enqueued` / `outbox.drained_ok` | tag `kind`, `queue_depth` |
 | `outbox.remint_token` | re-emisión del handoff al drenar (tag `reused`) |
 | `outbox.entry_dead` | dead-letter (tag `code` — TOKEN_*, REQUIRED_ANGLES_MISSING…) |

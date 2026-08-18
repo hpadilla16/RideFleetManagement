@@ -1831,4 +1831,184 @@ class AppLocalizationsEn extends AppLocalizations {
   String coPresentClosingSoon(String mmss) {
     return '$mmss left — if it expires, the agent issues another one right away.';
   }
+
+  @override
+  String get coInspWhatTitle => 'What gets captured here';
+
+  @override
+  String get coInspWhatParts => '3 parts';
+
+  @override
+  String get coInspRowPhotos => 'Photos';
+
+  @override
+  String get coInspWhatPhotos => '8 angles · Front and Rear required';
+
+  @override
+  String get coInspRowCondition => 'Condition';
+
+  @override
+  String get coInspWhatMetrics => 'Odometer, fuel, cleanliness and notes';
+
+  @override
+  String get coInspRowSignature => 'Signature';
+
+  @override
+  String get coInspWhatSignature =>
+      'The customer signs the walk-around on this phone';
+
+  @override
+  String get coInspOfflineNote =>
+      'Photos can be taken with no signal: they stay in the outbox and send themselves once you reconnect. The step moves on when the server receives them.';
+
+  @override
+  String get coInspLastReading => 'Last reading';
+
+  @override
+  String coInspPaidPill(String time) {
+    return 'Paid $time';
+  }
+
+  @override
+  String get coInspStartCta => 'Start inspection';
+
+  @override
+  String get coInspStartWhy =>
+      'Starting marks the inspection as in progress on the server. You can pause the checkout at any time without losing photos.';
+
+  @override
+  String get coInspPhotosStep => 'Inspection · photos';
+
+  @override
+  String get coInspMetricsStep => 'Inspection · details';
+
+  @override
+  String get coInspSummaryStep => 'Inspection · review and send';
+
+  @override
+  String get coInspRequiredWhy =>
+      'Front and Rear are done. The rest adds evidence and can be captured after the details.';
+
+  @override
+  String inspPhotoQueued(String time) {
+    return '$time · in outbox';
+  }
+
+  @override
+  String get inspPhotoSent => 'Sent to the server';
+
+  @override
+  String get inspPhotoDead => 'Didn\'t reach the server';
+
+  @override
+  String coInspLocalDoneTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'The inspection is complete on this phone. $count photos and the closing record are still queued; they send themselves once you reconnect.',
+      one:
+          'The inspection is complete on this phone. 1 photo and the closing record are still queued; they send themselves once you reconnect.',
+      zero:
+          'The inspection is complete on this phone. The closing record is still queued; it sends itself once you reconnect.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get coInspLocalDoneSending =>
+      'The inspection is complete on this phone. It is sending now; the step moves on when the server receives it.';
+
+  @override
+  String coInspServerPhotos(int count) {
+    return '$count of 8 received';
+  }
+
+  @override
+  String get coInspRowInspection => 'Inspection';
+
+  @override
+  String coInspReceivedAt(String time) {
+    return 'Received $time';
+  }
+
+  @override
+  String get coInspContinueSign => 'Continue to signature and close';
+
+  @override
+  String get coInspBlockedWhy =>
+      'The server closes this step when it receives the inspection — this screen can\'t. Nothing is lost: you can pause the checkout and come back.';
+
+  @override
+  String coOpenOutbox(int count) {
+    return 'Open outbox ($count)';
+  }
+
+  @override
+  String coOpenOutboxDead(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Open outbox ($count failures)',
+      one: 'Open outbox (1 failure)',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String coInspRequiredDeadTitle(String angle) {
+    return 'The $angle photo couldn\'t be sent and it\'s required. Without it the server will reject the inspection close.';
+  }
+
+  @override
+  String coInspRetakeCta(String angle) {
+    return 'Retake $angle';
+  }
+
+  @override
+  String get coInspRetakeWhy =>
+      'Retaking it automatically retries the inspection close.';
+
+  @override
+  String get coInspCompleteDeadTitle =>
+      'The inspection close couldn\'t be sent. The reason and the decision you need are in the outbox.';
+
+  @override
+  String get coInspRequiredAnglesTitle => 'Required angles';
+
+  @override
+  String coInspRequiredMissingPill(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count missing',
+      one: '1 missing',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get coInspDoneTitle => 'Check-out inspection';
+
+  @override
+  String get coInspSignatureTitle => 'Customer signature';
+
+  @override
+  String get coInspSignedRow => 'Signed by';
+
+  @override
+  String coSignFromInspection(String name) {
+    return '$name · at the end of the inspection';
+  }
+
+  @override
+  String get coSignAlreadyBanner =>
+      'The customer already signed, so there\'s no need to ask again. All that\'s left is closing the handover.';
+
+  @override
+  String get coInspCloseCta => 'Continue to closing';
+
+  @override
+  String get coInspCloseWhy =>
+      'The server already has the inspection and the signature. This button moves on to closing; the contract is generated once the hand-over is closed.';
 }

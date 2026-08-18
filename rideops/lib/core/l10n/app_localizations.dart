@@ -3001,6 +3001,258 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Quedan {mmss} — si se vence, el agente le genera otro al instante.'**
   String coPresentClosingSoon(String mmss);
+
+  /// No description provided for @coInspWhatTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Qué se captura aquí'**
+  String get coInspWhatTitle;
+
+  /// No description provided for @coInspWhatParts.
+  ///
+  /// In es, this message translates to:
+  /// **'3 partes'**
+  String get coInspWhatParts;
+
+  /// No description provided for @coInspRowPhotos.
+  ///
+  /// In es, this message translates to:
+  /// **'Fotos'**
+  String get coInspRowPhotos;
+
+  /// No description provided for @coInspWhatPhotos.
+  ///
+  /// In es, this message translates to:
+  /// **'8 ángulos · Frente y Atrás obligatorios'**
+  String get coInspWhatPhotos;
+
+  /// No description provided for @coInspRowCondition.
+  ///
+  /// In es, this message translates to:
+  /// **'Estado'**
+  String get coInspRowCondition;
+
+  /// No description provided for @coInspWhatMetrics.
+  ///
+  /// In es, this message translates to:
+  /// **'Odómetro, combustible, limpieza y notas'**
+  String get coInspWhatMetrics;
+
+  /// No description provided for @coInspRowSignature.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma'**
+  String get coInspRowSignature;
+
+  /// No description provided for @coInspWhatSignature.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente firma la revisión en este teléfono'**
+  String get coInspWhatSignature;
+
+  /// Nota 3 del 17A: la promesa offline y su LÍMITE van en la misma frase; separadas, la primera se lee como 'ya quedó'.
+  ///
+  /// In es, this message translates to:
+  /// **'Las fotos se pueden tomar sin señal: quedan en la bandeja y se envían solas al reconectar. El paso avanza cuando el servidor las recibe.'**
+  String get coInspOfflineNote;
+
+  /// No description provided for @coInspLastReading.
+  ///
+  /// In es, this message translates to:
+  /// **'Última lectura'**
+  String get coInspLastReading;
+
+  /// Sello paymentCompletedAt del servidor, no una suposición de la app.
+  ///
+  /// In es, this message translates to:
+  /// **'Pagado {time}'**
+  String coInspPaidPill(String time);
+
+  /// No description provided for @coInspStartCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Comenzar inspección'**
+  String get coInspStartCta;
+
+  /// No description provided for @coInspStartWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Al comenzar, el servidor marca la inspección en curso. Puedes pausar el checkout en cualquier momento sin perder las fotos.'**
+  String get coInspStartWhy;
+
+  /// No description provided for @coInspPhotosStep.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección · fotos'**
+  String get coInspPhotosStep;
+
+  /// No description provided for @coInspMetricsStep.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección · estado'**
+  String get coInspMetricsStep;
+
+  /// No description provided for @coInspSummaryStep.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección · revisar y enviar'**
+  String get coInspSummaryStep;
+
+  /// No description provided for @coInspRequiredWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Frente y Atrás listos. El resto suma evidencia y se puede capturar después de las métricas.'**
+  String get coInspRequiredWhy;
+
+  /// No description provided for @inspPhotoQueued.
+  ///
+  /// In es, this message translates to:
+  /// **'{time} · en bandeja'**
+  String inspPhotoQueued(String time);
+
+  /// Solo se dice cuando la fila SALIÓ de la bandeja tras un 2xx del servidor (el drenado borra la fila únicamente con DrainOk).
+  ///
+  /// In es, this message translates to:
+  /// **'Enviada al servidor'**
+  String get inspPhotoSent;
+
+  /// No description provided for @inspPhotoDead.
+  ///
+  /// In es, this message translates to:
+  /// **'No llegó al servidor'**
+  String get inspPhotoDead;
+
+  /// Nota 9 del 17D: 'completa en este teléfono' ≠ completa. El sello inspectionCompletedAt lo escribe el servidor al drenar el complete (mobile-inspection.service.js:268); finish() solo ENCOLA.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, =0{La inspección está completa en este teléfono. Falta el cierre por enviar; sale solo al reconectar.} one{La inspección está completa en este teléfono. Falta 1 foto y el cierre por enviar; salen solos al reconectar.} other{La inspección está completa en este teléfono. Faltan {count} fotos y el cierre por enviar; salen solos al reconectar.}}'**
+  String coInspLocalDoneTitle(int count);
+
+  /// No description provided for @coInspLocalDoneSending.
+  ///
+  /// In es, this message translates to:
+  /// **'La inspección está completa en este teléfono. El envío está en curso; el paso avanza cuando el servidor lo reciba.'**
+  String get coInspLocalDoneSending;
+
+  /// No description provided for @coInspServerPhotos.
+  ///
+  /// In es, this message translates to:
+  /// **'{count} de 8 recibidas'**
+  String coInspServerPhotos(int count);
+
+  /// No description provided for @coInspRowInspection.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección'**
+  String get coInspRowInspection;
+
+  /// No description provided for @coInspReceivedAt.
+  ///
+  /// In es, this message translates to:
+  /// **'Recibida {time}'**
+  String coInspReceivedAt(String time);
+
+  /// No description provided for @coInspContinueSign.
+  ///
+  /// In es, this message translates to:
+  /// **'Continuar a firma y cierre'**
+  String get coInspContinueSign;
+
+  /// No description provided for @coInspBlockedWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Este paso lo cierra el servidor cuando reciba la inspección, no esta pantalla. Nada se pierde: puedes pausar el checkout y volver.'**
+  String get coInspBlockedWhy;
+
+  /// No description provided for @coOpenOutbox.
+  ///
+  /// In es, this message translates to:
+  /// **'Ver la bandeja ({count})'**
+  String coOpenOutbox(int count);
+
+  /// No description provided for @coOpenOutboxDead.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{Ver la bandeja (1 falla)} other{Ver la bandeja ({count} fallas)}}'**
+  String coOpenOutboxDead(int count);
+
+  /// Nota 12 del 17E: un dead-letter NO bloquea al resto de la bandeja (drainer.dart), así que el complete sale igual y el servidor lo rechaza con REQUIRED_ANGLES_MISSING (mobile-inspection.service.js:200-205).
+  ///
+  /// In es, this message translates to:
+  /// **'La foto de {angle} no se pudo enviar y es obligatoria. Sin ella el servidor rechazará el cierre de la inspección.'**
+  String coInspRequiredDeadTitle(String angle);
+
+  /// No description provided for @coInspRetakeCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Tomar {angle} otra vez'**
+  String coInspRetakeCta(String angle);
+
+  /// No description provided for @coInspRetakeWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Al volver a tomarla se reintenta el cierre de la inspección automáticamente.'**
+  String get coInspRetakeWhy;
+
+  /// No description provided for @coInspCompleteDeadTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'El cierre de la inspección no se pudo enviar. El motivo y la decisión que falta están en la bandeja.'**
+  String get coInspCompleteDeadTitle;
+
+  /// No description provided for @coInspRequiredAnglesTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Ángulos obligatorios'**
+  String get coInspRequiredAnglesTitle;
+
+  /// No description provided for @coInspRequiredMissingPill.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{Falta 1} other{Faltan {count}}}'**
+  String coInspRequiredMissingPill(int count);
+
+  /// No description provided for @coInspDoneTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección de salida'**
+  String get coInspDoneTitle;
+
+  /// No description provided for @coInspSignatureTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma del cliente'**
+  String get coInspSignatureTitle;
+
+  /// No description provided for @coInspSignedRow.
+  ///
+  /// In es, this message translates to:
+  /// **'Firmó'**
+  String get coInspSignedRow;
+
+  /// Solo se afirma cuando customerSignedAt e inspectionCompletedAt son el MISMO instante: el complete de la inspección estampa los dos en un solo write (mobile-inspection.service.js:265-281). Sellos distintos ⇒ la firma vino de otra superficie y no se atribuye.
+  ///
+  /// In es, this message translates to:
+  /// **'{name} · al terminar la inspección'**
+  String coSignFromInspection(String name);
+
+  /// No description provided for @coSignAlreadyBanner.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente ya firmó, así que no hay que pedirle firma otra vez. Solo falta cerrar la entrega.'**
+  String get coSignAlreadyBanner;
+
+  /// No description provided for @coInspCloseCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Continuar al cierre'**
+  String get coInspCloseCta;
+
+  /// No description provided for @coInspCloseWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'El servidor ya tiene la inspección y la firma. Este botón avanza al cierre; el contrato se genera cuando la entrega quede cerrada.'**
+  String get coInspCloseWhy;
 }
 
 class _AppLocalizationsDelegate

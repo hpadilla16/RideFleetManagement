@@ -12,12 +12,15 @@ import '../../../core/session/active_location.dart';
 import '../../../core/session/session_controller.dart';
 import '../../../core/theme/ride_tokens.dart';
 import '../../../core/widgets/ride_buttons.dart';
+import '../../inspection/application/inspection_controller.dart';
+import '../../inspection/presentation/widgets/inspection_bodies.dart';
 import '../../shell/location_denied_view.dart';
 import '../application/checkout_wizard_controller.dart';
 import '../application/checkout_wizard_state.dart';
 import '../domain/checkout_presence.dart';
 import 'checkout_labels.dart';
 import 'steps/confirming_step.dart';
+import 'steps/inspection_step.dart';
 import 'steps/terms_step.dart';
 import 'widgets/pause_sheet.dart';
 import 'widgets/steps_sheet.dart';
@@ -56,6 +59,19 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final state = ref.watch(_provider);
+    final chrome = _inspectionChrome(l10n, state);
+
+    // Superficie VOLTEADA al cliente (firma de la inspección en modo kiosco):
+    // el cromo del wizard se SUSPENDE del todo — ni wizbar, ni header, ni
+    // rail. Ningún cromo de staff frente al cliente (decisión de cromo
+    // aprobada). El propio paso de firma bloquea el back del sistema y pone
+    // su salida deliberada, así que aquí tampoco va el sheet de pausa.
+    if (chrome.fullBleed) {
+      return Scaffold(
+        backgroundColor: RideTokens.n0,
+        body: InspectionSignatureSurface(reservationId: widget.reservationId),
+      );
+    }
 
     // Nunca se sale de un checkout sin decidir explícitamente (nota 1): la
     // flecha —y el back del sistema— abren el mismo sheet de pausa. Cuando no
@@ -87,7 +103,7 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
                 },
                 onPause: needsPauseDecision ? _openPauseSheet : null,
               ),
-              Expanded(child: _body(l10n, state)),
+              Expanded(child: _body(l10n, state, chrome)),
             ],
           ),
         ),
@@ -104,7 +120,29 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     return parts.isEmpty ? null : parts.join(' · ');
   }
 
-  Widget _body(AppLocalizations l10n, CheckoutWizardState state) {
+  /// Cromo que pide el paso de inspección. Se consulta el flujo de captura
+  /// SOLO cuando el servidor dice que estamos en inspección: fuera de ahí, ni
+  /// se monta el controller (que hace su propia lectura de red).
+  InspectionChrome _inspectionChrome(
+    AppLocalizations l10n,
+    CheckoutWizardState state,
+  ) {
+    if (state.step != CheckoutStep.inspectionInProgress) {
+      return const InspectionChrome();
+    }
+    return inspectionChromeOf(
+      l10n: l10n,
+      step: state.step,
+      inspectionCompletedAt: state.session?.inspectionCompletedAt,
+      flow: ref.watch(inspectionControllerProvider(widget.reservationId)),
+    );
+  }
+
+  Widget _body(
+    AppLocalizations l10n,
+    CheckoutWizardState state,
+    InspectionChrome chrome,
+  ) {
     // 8F: skeleton con la geometría real, solo en el primer fetch.
     if (state.firstLoad) return const WizardSkeleton();
 
@@ -184,13 +222,24 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
           // ahora mismo no podemos leer.
           offline: state.offline,
         ),
-        PhaseRail(currentPosition: state.position),
+        // Cromo COMPRIMIDO durante la captura: el rail de 5 fases se guarda y
+        // su lugar lo toma la barra de sub-progreso, que es la que de verdad
+        // avanza mientras el agente fotografía. Lo que NO se sacrifica es
+        // "Pausar" ni la unidad en pantalla (decisión de cromo aprobada).
+        if (!chrome.compact) PhaseRail(currentPosition: state.position),
         StepLine(
           rawStep: session.currentStep,
           position: state.position,
           staleAge: state.offline ? age : null,
+          // El nombre puede decir el SUB-estado; el contador jamás cambia:
+          // sigue siendo el paso real del servidor (nunca "paso 6.5").
+          label: chrome.label,
+          trailing: chrome.compact
+              ? _AngleChip(captured: chrome.captured)
+              : null,
           onTap: _openStepsSheet,
         ),
+        if (chrome.compact) InspectionSubStepBar(step: chrome.subStep!),
         Expanded(child: _stepBody(state, session, age)),
       ],
     );
@@ -199,7 +248,10 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
   /// ¿Este paso ya tiene cuerpo propio construido? Decide la variante del
   /// header y a quién le toca dibujar el cuerpo.
   bool _hasStepBody(CheckoutStep? step) =>
-      step == CheckoutStep.confirming || step == CheckoutStep.tcPending;
+      step == CheckoutStep.confirming ||
+      step == CheckoutStep.tcPending ||
+      step == CheckoutStep.inspectionHandoff ||
+      step == CheckoutStep.inspectionInProgress;
 
   /// Banners del shell. Viven aquí —no en cada paso— para que la matriz de
   /// errores (offline / avance ajeno / 409 reconciliado) sea una sola, y se
@@ -241,6 +293,15 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
           banners: banners,
         ),
       CheckoutStep.tcPending => TermsStep(
+          reservationId: widget.reservationId,
+          banners: banners,
+        ),
+      // Los DOS pasos de inspección comparten pantalla: la diferencia (17A
+      // "antes de empezar" vs. la captura viva) la decide el paso mirando
+      // `currentStep`, no el shell.
+      CheckoutStep.inspectionHandoff ||
+      CheckoutStep.inspectionInProgress =>
+        CheckoutInspectionStep(
           reservationId: widget.reservationId,
           banners: banners,
         ),
@@ -362,6 +423,39 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
 /// Qué hizo el agente en el sheet de pausa. `leave` es la salida honesta sin
 /// POST (INN MC-4): no se pausó nada y se dice así.
 enum _PauseOutcome { paused, stay, leave }
+
+/// Contador de ángulos en la stepline durante la captura (17B). Ocupa el lugar
+/// que deja "Ver todos los pasos": mientras fotografía, lo que el agente
+/// necesita no es el mapa de 10 pasos sino cuántos ángulos le faltan.
+///
+/// --p-800 sobre --p-50 (9.93:1) y cifras tabulares — el número cambia cada
+/// foto y sin esto el chip salta de ancho.
+class _AngleChip extends StatelessWidget {
+  const _AngleChip({required this.captured});
+
+  final int captured;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: captured >= 8 ? RideTokens.okBg : RideTokens.p50,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        captured >= 8 ? l10n.inspProgressDone : l10n.inspProgressChip(captured),
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w900,
+          color: captured >= 8 ? RideTokens.okTx : RideTokens.p800,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ),
+      ),
+    );
+  }
+}
 
 /// Los 4 sellos de side-effect tal como el servidor los reporta. Es la única
 /// afirmación que el shell puede hacer sin el cuerpo del paso — y es la que
