@@ -189,6 +189,21 @@ describe('resolveFinalizeFailureCopy', () => {
     }
   });
 
+  it('flags the two age bounds as terminal, so the card can drop a retry that cannot work', () => {
+    // "Reintentar cierre" re-runs the finalize cascade, which is the right
+    // affordance for a car that got taken or a gate that can still be filled
+    // in. An age bound is not that: no retry clears it, so offering one as the
+    // loud primary action would be a button promising something it cannot do.
+    expect(FINALIZE_FAILURE_COPY.AGE_RULES_UNDER_MIN.terminal).toBe(true);
+    expect(FINALIZE_FAILURE_COPY.AGE_RULES_ABOVE_MAX.terminal).toBe(true);
+    expect(resolveFinalizeFailureCopy({ reason: 'AGE_RULES_UNDER_MIN' }).terminal).toBe(true);
+    // Everything else IS retryable, including the unknown-reason fallback —
+    // defaulting an unrecognised guard to "give up" would strand the agent.
+    expect(resolveFinalizeFailureCopy({ reason: 'VEHICLE_CONFLICT' }).terminal).toBe(false);
+    expect(resolveFinalizeFailureCopy({ reason: 'WAT', message: 'x' }).terminal).toBe(false);
+    expect(resolveFinalizeFailureCopy({}).terminal).toBe(false);
+  });
+
   it('says only that the close did not finish when the reason is gone (the F5 case)', () => {
     // After a refresh there is no error object left. Server truth still says
     // the finalize failed, so the card must say that much and no more —

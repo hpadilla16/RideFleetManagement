@@ -186,34 +186,37 @@ export const FINALIZE_FAILURE_COPY = {
   VEHICLE_CONFLICT: {
     title: 'El vehículo sigue rentado en otra reservación',
     body: 'La unidad asignada no se pudo entregar porque sigue fuera en otra renta. '
-      + 'Completa el check-in de esa renta y vuelve a intentar el cierre.',
+      + 'Completa el check-in de esa renta.',
   },
   NO_VEHICLE_ASSIGNED: {
     title: 'La reservación se quedó sin vehículo',
     body: 'No se puede cerrar un checkout sin unidad asignada. Asigna un vehículo desde la '
-      + 'reservación y vuelve a intentar el cierre.',
+      + 'reservación.',
   },
   PRECHECKIN_REQUIRED: {
     title: 'Falta el pre-check-in del cliente',
     body: 'Esta sede exige el pre-check-in completo. Complétalo desde la reservación '
-      + '("llenar por el cliente") o reenvíale el enlace, y vuelve a intentar el cierre.',
+      + '("llenar por el cliente") o reenvíale el enlace.',
   },
   AGE_RULES_DOB_REQUIRED: {
     title: 'Falta la fecha de nacimiento del conductor',
     body: 'Esta sede exige verificar la edad antes de entregar. Captura la fecha de nacimiento '
-      + 'del ID o licencia en la reservación y vuelve a intentar el cierre.',
+      + 'del ID o licencia en la reservación.',
   },
   AGE_RULES_DOB_IMPLAUSIBLE: {
     title: 'La fecha de nacimiento es inválida',
-    body: 'La fecha registrada es imposible. Corrígela con el ID o licencia del cliente y vuelve '
-      + 'a intentar el cierre.',
+    body: 'La fecha registrada es imposible. Corrígela con el ID o licencia del cliente.',
   },
   AGE_RULES_UNDER_MIN: {
+    // terminal: no amount of retrying clears an age bound, so the card must
+    // not offer "Reintentar cierre" as its loud primary action.
+    terminal: true,
     title: 'El conductor no llega a la edad mínima',
     body: 'Esta sede no permite entregar a este conductor. El cierre no se puede completar: '
       + 'escala con tu supervisor antes de entregar la unidad.',
   },
   AGE_RULES_ABOVE_MAX: {
+    terminal: true,
     title: 'El conductor excede la edad máxima',
     body: 'Esta sede no permite entregar a este conductor. El cierre no se puede completar: '
       + 'escala con tu supervisor antes de entregar la unidad.',
@@ -222,6 +225,15 @@ export const FINALIZE_FAILURE_COPY = {
 
 /**
  * Copy for the CLOSED-but-not-finalized card.
+ *
+ * `body` is the DIAGNOSIS and the fix that lives outside this screen. It never
+ * says "y vuelve a intentar el cierre", because whether a retry is even
+ * possible is not knowable from the reason alone — it also depends on the
+ * reservation's status, which only the card can see (the backend re-runs the
+ * finalize for NEW/CONFIRMED and silently declines the rest). Printing that
+ * instruction beside no button, or beside a button that cannot work, is the
+ * same confident-but-false affordance this ticket exists to remove. The card
+ * appends the retry sentence itself, only when it is actually offering one.
  *
  * The fallback is the point, not an afterthought. An unrecognised `reason`
  * falls through to the backend's OWN message, untranslated — the same bet
@@ -240,13 +252,18 @@ export function resolveFinalizeFailureCopy({ reason, message } = {}) {
     // The raw message carries specifics the map cannot — which reservation
     // holds the car, which age bound was crossed — so it rides along as a
     // detail line instead of being dropped.
-    return { ...known, detail: message || null, reason: reason || null, translated: true };
+    return {
+      terminal: false,
+      ...known,
+      detail: message || null,
+      reason: reason || null,
+      translated: true,
+    };
   }
   return {
+    terminal: false,
     title: 'El cierre no se completó',
-    body: message
-      || 'El checkout quedó cerrado, pero el finalize no terminó. Reintenta el cierre para ver '
-        + 'qué lo está bloqueando.',
+    body: message || 'El checkout quedó cerrado, pero el finalize no terminó.',
     detail: null,
     reason: reason || null,
     translated: false,
