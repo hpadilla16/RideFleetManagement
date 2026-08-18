@@ -564,12 +564,12 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // This is a PARTIAL close of the events lost-update, and the honest
       // count is FOURTEEN other writers of this TEXT column, all still doing
       // an unguarded read-modify-write (read → write, this file):
-      //   stampSideEffect       :1320 → :1328
-      //   saveCustomerSignature :1350 → :1371  (read is OUTSIDE the
-      //                                         $transaction that starts :1356)
-      //   mintHandoffToken      :1394 → :1445
-      //   setDeclinedInsurance  :1516 → :1530
-      //   markAbandoned         :1540 → :1554
+      //   stampSideEffect       :1342 → :1350
+      //   saveCustomerSignature :1372 → :1393  (read is OUTSIDE the
+      //                                         $transaction that starts :1378)
+      //   mintHandoffToken      :1416 → :1467
+      //   setDeclinedInsurance  :1538 → :1552
+      //   markAbandoned         :1562 → :1576
       //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
       //   spin-charge.service.js:574, :606, :884, :1038, :1229 (five)
       //   mobile-inspection.service.js:276
@@ -963,6 +963,11 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
             // a CANCELLED contract is not a repair. `finalizeCascadeOk` stays
             // false, so the one thing that must not happen — mailing a DRAFT —
             // still does not.
+            // Kept honest rather than left at its initial `true`: nothing
+            // reads it after this point, but a variable named
+            // "agreementFinalized" sitting true on the branch that just
+            // established the opposite is a trap for the next reader (QA N1).
+            agreementFinalized = false;
             logger.error('[checkout-session] contract is not FINALIZED and this path cannot repair it', {
               sessionId: id, reservationId: resv.id, agreementId: updated.agreementId,
               reservationStatus: String(resv.status),
@@ -1170,16 +1175,33 @@ async function finalizeAgreementForCheckout({ sessionId, agreementId, resv, acto
       logger.info('[checkout-session] agreement was already finalized — flip skipped', {
         sessionId, agreementId, reservationId: resv.id, agreementStatus: agStatus,
       });
-      // NOT backfilled here, and the gap is older than this change. The
-      // odometer/fuel patch rides inside the CAS above, so a lost flip drops
-      // it — but whoever WON that flip read the same inspection row and
-      // applied the same patch a moment earlier, so there is nothing left to
-      // write. The case that would matter is a contract finalized before its
-      // CHECKOUT inspection row landed, which prints "-" forever; that one has
-      // never been reachable from here, because the caller short-circuits on a
-      // FINALIZED agreement without ever entering this function. Repairing it
-      // needs a sweep that goes looking, not a retry button someone has to
-      // press — see the follow-up on reconciling these strands.
+      // NOT backfilled here, and the decision is deliberate (Innovation
+      // SHOULD-CONSIDER 1, declined; QA M1 corrected the reasoning).
+      //
+      // The odometer/fuel patch rides inside the CAS above, so a lost flip
+      // drops it, where the unguarded `update` this replaced applied it every
+      // time. Two ways to arrive here, and they are not the same:
+      //
+      //   - the REPAIR path never gets this far. Its caller short-circuits on a
+      //     FINALIZED agreement without entering this function at all, so the
+      //     "contract finalized before its CHECKOUT inspection row landed, and
+      //     now prints '-' forever" case was never reachable from here — not
+      //     before this change either.
+      //   - the WINNER path DOES get here: it calls in without reading the
+      //     agreement status. So a winner landing on an already-FINALIZED
+      //     agreement now drops the patch where base applied it. That state
+      //     needs the agreement FINALIZED/CLOSED while its reservation is still
+      //     NEW/CONFIRMED/PENDING_FRANCHISE_IMPORT, and no writer in the tree
+      //     produces it — applyFinalizeWritesTx, REACTIVATE and START_CHECK_IN
+      //     all move the reservation in the same breath as the flip. Base's
+      //     behaviour there was also worse: it re-stamped finalizedAt with
+      //     today.
+      //
+      // So the patch a guarded backfill would write is one somebody else wrote
+      // a moment ago, from the same inspection row. Repairing the case that
+      // DOES matter needs a sweep that goes looking, not a retry button
+      // somebody has to press — see the follow-up on reconciling these
+      // strands.
     } else {
       logger.error('[checkout-session] agreement did NOT reach FINALIZED on finalize', {
         sessionId, agreementId, reservationId: resv.id,

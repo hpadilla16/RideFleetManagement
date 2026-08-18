@@ -312,15 +312,22 @@ describe('isFinalizeComplete', () => {
 
 describe('closedCardState', () => {
   it('offers a retry only where the backend will actually re-run the finalize', () => {
-    // Mirrors selfHealOwns in checkout-session.service.js. Outside the
-    // allow-list the backend declines with a server-side log and a plain 200,
-    // so the button would change nothing while the copy promised an answer.
+    // A SUBSET of selfHealOwns in checkout-session.service.js, not a mirror —
+    // see the note on closedCardState. Outside the backend's allow-list the
+    // re-run is declined with a server-side log and a plain 200, so the button
+    // would change nothing while the copy promised an answer.
     for (const status of ['NEW', 'CONFIRMED']) {
       expect(closedCardState({ reservation: resv(status, 'DRAFT') }).showRetry, status).toBe(true);
     }
-    for (const status of ['CANCELLED', 'NO_SHOW', 'PENDING_FRANCHISE_IMPORT', 'CHECKED_OUT']) {
+    for (const status of ['CANCELLED', 'NO_SHOW', 'PENDING_FRANCHISE_IMPORT']) {
       expect(closedCardState({ reservation: resv(status, 'DRAFT') }).showRetry, status).toBe(false);
     }
+    // CHECKED_OUT is in its own bucket, and this line is a DECISION RECORD, not
+    // a property: since 2026-08-18 the backend WOULD repair this state, so the
+    // false here is the UI declining to offer it, pending an approved mockup —
+    // not the backend refusing. The day the button ships this expectation
+    // flips to true, and that is the intended edit, not a regression.
+    expect(closedCardState({ reservation: resv('CHECKED_OUT', 'DRAFT') }).showRetry).toBe(false);
   });
 
   it('withholds the retry for a reason no retry can clear', () => {

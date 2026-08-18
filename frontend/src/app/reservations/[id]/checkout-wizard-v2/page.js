@@ -376,14 +376,19 @@ function CheckoutWizardV2({ token, me, logout }) {
 
   // "Reintentar cierre" — re-POSTs CLOSED → CLOSED. Not a refresh button: the
   // backend answers that pair through the idempotent branch and RE-RUNS the
-  // finalize cascade, whose self-heal allow-list
-  // (['NEW','CONFIRMED','CHECKED_OUT']) covers exactly the states a failed
-  // finalize strands the reservation in — CHECKED_OUT joined it on 2026-08-18,
-  // and until it did this button was a no-op on the commonest of them: the
-  // reservation handed over, its contract still DRAFT behind it. So if the
-  // agent has since cleared the blocker, this genuinely completes the
-  // checkout; if not, it brings back a fresh `reason` — which is also how the
-  // post-F5 card, with no error object left, learns why it failed.
+  // finalize cascade. So if the agent has since cleared the blocker, this
+  // genuinely completes the checkout; if not, it brings back a fresh `reason`
+  // — which is also how the post-F5 card, with no error object left, learns
+  // why it failed.
+  //
+  // MIND THE GAP (2026-08-18): the backend's self-heal allow-list grew a third
+  // member, CHECKED_OUT, so it can now repair the strand where the reservation
+  // was handed over and its contract stayed DRAFT. THIS CARD DOES NOT OFFER
+  // THE BUTTON FOR THAT STATE YET — `closedCardState` keeps `retryCanWork` at
+  // ['NEW','CONFIRMED'] and the render gates below additionally require
+  // `!halfFinalized`. Deliberate, not an oversight: showing it is a change to
+  // what the agent sees, and those need a mockup Hector has approved. Until
+  // that lands the repair is reachable only from RideOps or a direct POST.
   // The 'unknown' card's button. Bumping the key re-runs the check effect,
   // which only GETs — a control labelled "check again" must not POST, least of
   // all on a card telling the agent not to hand over the vehicle yet.
@@ -2117,12 +2122,18 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
   const agreementStatus = reservation.rentalAgreement?.status || null;
   const vehicleStatus = reservation.vehicle?.status || null;
 
-  // The backend only re-runs the finalize for a reservation it still owns: its
-  // self-heal allow-list is ['NEW','CONFIRMED','CHECKED_OUT'], and CANCELLED /
-  // NO_SHOW / PENDING_FRANCHISE_IMPORT are declined with a server-side log and a plain
-  // 200. Offering a retry there would be a button that silently changes
-  // nothing, under copy promising it would explain the blocker — exactly the
-  // kind of confident-but-false affordance this ticket removes.
+  // The backend only re-runs the finalize for a reservation it still owns.
+  // CANCELLED / NO_SHOW / PENDING_FRANCHISE_IMPORT are declined with a
+  // server-side log and a plain 200, so a retry button there would silently
+  // change nothing under copy promising to explain the blocker — exactly the
+  // kind of confident-but-false affordance that ticket removed.
+  //
+  // What this card offers is currently NARROWER than what the backend accepts:
+  // the server list is ['NEW','CONFIRMED','CHECKED_OUT'] since 2026-08-18,
+  // `retryCanWork` is still the first two, and `halfFinalized` suppresses the
+  // button again on top. See the note on `retryFinalize` above — being narrow
+  // is safe (no false affordance), it just leaves the repair unreachable from
+  // here.
   const { voided, halfFinalized, showRetry } =
     closedCardState({ reservation, terminalReason: copy.terminal });
 
