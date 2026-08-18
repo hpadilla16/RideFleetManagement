@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pre-check-in — insurance plan price (mockup for approval)</title>
+<style>
+  :root{
+    /* Tokens copied verbatim from frontend/src/app/customer/_components/PortalFrame.js */
+    --portal-purple:#6e49ff;
+    --portal-ink:#201536;
+    --portal-title:#241b41;
+    --portal-body:#55456f;
+    --portal-muted:#6b7a9a;      /* existing, fails AA — see contrast table */
+    --portal-price:#1e2847;
+    --portal-green:#166534;
+    --portal-amber-ink:#92400e;
+    --portal-strike:#6e6188;     /* NEW — replaces #94a3b8 */
+    --portal-card:rgba(255,255,255,0.86);
+    --portal-card-border:rgba(106,76,189,0.14);
+    --row-border:rgba(110,73,255,.15);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;padding:32px 18px 56px;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    color:var(--portal-ink);
+    background:
+      radial-gradient(circle at top left, rgba(125,92,255,0.18), transparent 28%),
+      radial-gradient(circle at top right, rgba(0,194,168,0.16), transparent 22%),
+      linear-gradient(180deg,#f7f4ff 0%,#f2f7fb 100%);
+  }
+  .shell{max-width:1120px;margin:0 auto;display:grid;gap:18px}
+  .hero{
+    background:linear-gradient(135deg,#22153f 0%,#5f38d8 58%,#38b7c6 100%);
+    color:#fff;border-radius:28px;padding:26px 28px;
+    box-shadow:0 20px 60px rgba(66,41,150,.22);
+  }
+  .eyebrow{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.78);margin-bottom:8px}
+  .hero h1{margin:0;font-size:34px;line-height:1.05}
+  .hero p{margin-top:10px;max-width:760px;font-size:15px;line-height:1.6;opacity:.92}
+  .card{
+    background:var(--portal-card);border:1px solid var(--portal-card-border);
+    border-radius:24px;padding:18px;box-shadow:0 10px 34px rgba(65,45,133,.08);
+    backdrop-filter:blur(14px);
+  }
+  .card h2{margin:0 0 12px;font-size:20px;color:var(--portal-title)}
+  .card h3{margin:18px 0 10px;font-size:15px;color:var(--portal-title);letter-spacing:.02em}
+  .lede{color:var(--portal-body);line-height:1.6;margin:0 0 16px}
+  .tag{
+    display:inline-block;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:#746294;margin-bottom:8px;font-weight:700;
+  }
+
+  /* ---------- THE PLAN ROW ---------- */
+  .plan{
+    display:grid;gap:8px;padding:16px 18px;border-radius:14px;cursor:pointer;
+    border:2px solid var(--row-border);background:rgba(255,255,255,.8);
+    min-height:56px;                /* hit target >= 44px, whole row is the target */
+    transition:all .18s;
+  }
+  .plan.sel{border-color:var(--portal-purple);background:rgba(110,73,255,.05)}
+  .plan-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+  .plan-id{display:flex;align-items:center;gap:10px;min-width:0}
+  .plan-id input{accent-color:var(--portal-purple);width:18px;height:18px;flex:none}
+  .plan-name{color:var(--portal-price);font-weight:700}
+  .price-col{text-align:right;flex:none}
+  .price{font-weight:800;color:var(--portal-price);font-size:1.05rem;white-space:nowrap}
+  .price-unit{font-weight:800;color:var(--portal-price);font-size:1.05rem;white-space:nowrap}
+  .price-was{font-size:.78rem;color:var(--portal-strike);text-decoration:line-through;margin-right:6px}
+  .price-now{font-weight:900;color:var(--portal-green);font-size:1.05rem}
+  .price-cap{font-size:.72rem;color:var(--portal-body);margin-top:2px;white-space:nowrap}
+
+  /* the breakdown: its own full-width row, never squeezed by the price column */
+  .breakdown{
+    padding-left:28px;font-size:.82rem;color:var(--portal-body);line-height:1.5;
+  }
+  .breakdown b{font-weight:700;color:var(--portal-price)}
+  .desc{font-size:.88rem;color:var(--portal-body);padding-left:28px;line-height:1.5}
+  .save{font-size:.78rem;color:var(--portal-green);font-weight:700;padding-left:28px}
+  .pending{
+    margin-left:28px;margin-top:2px;padding:8px 12px;border-radius:10px;
+    background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);
+    color:var(--portal-amber-ink);font-size:.8rem;line-height:1.5;
+  }
+  .basenote{
+    margin-top:12px;padding:10px 14px;border-radius:12px;
+    background:rgba(255,255,255,.7);border:1px solid var(--row-border);
+    color:var(--portal-body);font-size:.8rem;line-height:1.55;
+  }
+  .stack{display:grid;gap:12px}
+
+  /* ---------- annotation / spec chrome (NOT part of the shipped UI) ---------- */
+  .note{
+    margin:8px 0 20px;padding:10px 14px;border-left:3px solid var(--portal-purple);
+    background:rgba(110,73,255,.05);border-radius:0 10px 10px 0;
+    font-size:.84rem;line-height:1.6;color:var(--portal-body);
+  }
+  .note b{color:var(--portal-title)}
+  .bad{border-left-color:#dc2626;background:rgba(220,38,38,.05);color:#7f1d1d}
+  .bad b{color:#991b1b}
+  table{width:100%;border-collapse:collapse;font-size:.84rem;margin-top:6px}
+  th,td{padding:9px 10px;text-align:left;border-bottom:1px solid rgba(105,85,171,.14);vertical-align:top;color:var(--portal-body)}
+  th{color:var(--portal-title);font-size:.76rem;text-transform:uppercase;letter-spacing:.1em}
+  td code{background:rgba(110,73,255,.08);padding:1px 5px;border-radius:5px;font-size:.86em;color:#4a2fa8}
+  .pass{color:#166534;font-weight:800}
+  .fail{color:#991b1b;font-weight:800}
+  .phone{
+    width:360px;max-width:100%;border:10px solid #241b41;border-radius:28px;padding:14px 12px;
+    background:linear-gradient(180deg,#f7f4ff 0%,#f2f7fb 100%);
+  }
+  .reject{
+    margin-top:6px;padding:12px 16px;border-radius:12px;
+    background:rgba(255,255,255,.75);border:1px solid var(--row-border);
+    font-size:.85rem;line-height:1.6;color:var(--portal-body);
+  }
+  .reject b{color:var(--portal-title)}
+  @media (max-width:700px){
+    body{padding:18px 12px 40px}
+    .hero{border-radius:22px;padding:22px 18px}
+    .hero h1{font-size:28px}
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <section class="hero">
+    <div class="eyebrow">Mockup for approval — not shipped</div>
+    <h1>Pre-check-in: how the customer sees an insurance plan price</h1>
+    <p>Drawn in the customer portal's own tokens (<b>#6e49ff</b>, PortalFrame card/row styles) — not the RideOps/RFM staff theme. Every number below is one the server can compute today; nothing is invented in the browser.</p>
+  </section>
+
+  <!-- ============ 0. TODAY ============ -->
+  <section class="card">
+    <h2>0. What the screen does today (the defect)</h2>
+    <p class="lede">Reservation: 5 days, rental before taxes <b>$300.00</b>. Plan "Full Protection" is a <b>PERCENTAGE</b> plan at 10%.</p>
+
+    <div class="plan">
+      <div class="plan-top">
+        <div class="plan-id"><input type="radio" disabled><span class="plan-name">Full Protection</span></div>
+        <div class="price-col"><span class="price">$10.00</span></div>
+      </div>
+      <div class="desc">Covers collision damage to the rental vehicle.</div>
+    </div>
+
+    <div class="note bad">
+      <b>The customer reads "$10.00" and is charged $30.00.</b>
+      <code>page.js:655</code> does <code>Number(plan.total || plan.amount || plan.rate || 0)</code> and prints it as money.
+      For a PERCENTAGE plan <code>plan.amount</code> is the <i>percent</i>. The percentage, the base and the real total appear nowhere.
+      A <b>PER_DAY</b> plan has the same shape of bug: it shows the daily rate as if it were the trip total.
+      Root cause is upstream — <code>precheckin-catalog.js:39</code> never reads the plan's mode, while the charge path
+      (<code>customer-portal.routes.js:1566</code>) reads <code>plan.chargeBy || plan.mode</code> and prices all three modes correctly.
+    </div>
+  </section>
+
+  <!-- ============ 1. PROPOSED ============ -->
+  <section class="card">
+    <h2>1. Proposed — the three modes</h2>
+    <p class="lede">One rule governs the whole row: <b>the money slot only ever contains money the server computed.</b> A rate is never rendered with a dollar sign in the money slot. Under the name, one line of breakdown — the rate, and the base it applies to.</p>
+
+    <div class="stack">
+
+      <span class="tag">Mode: PERCENTAGE — selected</span>
+      <label class="plan sel">
+        <div class="plan-top">
+          <div class="plan-id"><input type="radio" name="p1" checked><span class="plan-name">Full Protection</span></div>
+          <div class="price-col">
+            <span class="price">$30.00</span>
+            <div class="price-cap">Total added to your rental</div>
+          </div>
+        </div>
+        <div class="breakdown"><b>10%</b> of your rental before taxes (<b>$300.00</b>)</div>
+        <div class="desc">Covers collision damage to the rental vehicle.</div>
+      </label>
+
+      <span class="tag">Mode: PER_DAY</span>
+      <label class="plan">
+        <div class="plan-top">
+          <div class="plan-id"><input type="radio" name="p1"><span class="plan-name">Roadside Plus</span></div>
+          <div class="price-col">
+            <span class="price">$60.00</span>
+            <div class="price-cap">Total added to your rental</div>
+          </div>
+        </div>
+        <div class="breakdown"><b>$12.00</b> per day &times; <b>5 days</b></div>
+        <div class="desc">24/7 roadside assistance and tyre change.</div>
+      </label>
+
+      <span class="tag">Mode: FIXED</span>
+      <label class="plan">
+        <div class="plan-top">
+          <div class="plan-id"><input type="radio" name="p1"><span class="plan-name">Basic Waiver</span></div>
+          <div class="price-col">
+            <span class="price">$45.00</span>
+            <div class="price-cap">Total added to your rental</div>
+          </div>
+        </div>
+        <div class="breakdown">One-time charge</div>
+        <div class="desc">Reduces your damage responsibility to a fixed deductible.</div>
+      </label>
+
+      <div class="basenote">
+        <b>Your rental before taxes</b> = the car, extras and fees already on your reservation. It does not include taxes or the security deposit.
+      </div>
+    </div>
+
+    <div class="note">
+      <b>Why only one line of breakdown.</b> This is someone on a phone accepting a charge, not reconciling an invoice.
+      The three questions a customer actually has are "how much", "why that much", and "on top of what" — rate, base, total answers all three in one line.
+      An itemised sub-table of the base (car + extras + fees) is the fourth question and it belongs in the reservation summary the page already renders, not inside a radio row.
+      <b>FIXED keeps a breakdown line</b> ("One-time charge") because the most common question on a fixed plan is "is that per day?" — two words kill it, and the three rows stay visually parallel.
+    </div>
+    <div class="note">
+      <b>Why the base is named "your rental before taxes".</b> "Total" is a lie (it is not the final total), "subtotal" is accounting jargon,
+      and bare "your rental" leaves the customer unsure whether tax is in it. "Before taxes" is the one qualifier that changes a decision,
+      and it is literally what the server computes: selected charges minus INSURANCE, minus TAX, minus DEPOSIT (<code>customer-portal.routes.js:1548-1552</code>).
+      The card note spells out the composition once, for the row that wants it, without repeating it per plan.
+    </div>
+  </section>
+
+  <!-- ============ 2. DISCOUNT ============ -->
+  <section class="card">
+    <h2>2. With the pre-check-in discount</h2>
+    <div class="stack">
+      <label class="plan sel">
+        <div class="plan-top">
+          <div class="plan-id"><input type="radio" name="p2" checked><span class="plan-name">Basic Waiver</span></div>
+          <div class="price-col">
+            <span class="price-was">$45.00</span><span class="price-now">$40.50</span>
+            <div class="price-cap">Total added to your rental</div>
+          </div>
+        </div>
+        <div class="breakdown">One-time charge &middot; pre-check-in price</div>
+        <div class="save">You save $4.50 by choosing it now</div>
+      </label>
+
+      <label class="plan">
+        <div class="plan-top">
+          <div class="plan-id"><input type="radio" name="p2"><span class="plan-name">Full Protection</span></div>
+          <div class="price-col">
+            <span class="price-was">$30.00</span><span class="price-now">$27.00</span>
+            <div class="price-cap">Total added to your rental</div>
+          </div>
+        </div>
+        <div class="breakdown"><b>10%</b> of your rental before taxes (<b>$300.00</b>) &middot; pre-check-in price</div>
+        <div class="save">You save $3.00 by choosing it now</div>
+      </label>
+    </div>
+
+    <div class="note bad">
+      <b>Blocking finding — the savings figure is not trustworthy today.</b>
+      <code>makeDiscountFn</code> (<code>precheckin-catalog.js:21</code>) subtracts a FIXED discount from <code>amount</code>.
+      On a PERCENTAGE plan that turns <b>10% into 5%</b> for a "$5 off" promo — on a $300 base that is <b>$15 off, not $5</b>.
+      The charge path repeats it (<code>customer-portal.routes.js:1585</code> computes <code>base &times; discountedAmount/100</code>).
+      So the banner promises $5, the row would claim "You save $5.00", and the ledger moves $15.
+      The strike-through and the "You save" line must both be rendered from server money
+      (<code>computedAmount</code> &minus; <code>discountedComputedAmount</code>), never recomputed in the page — and the FIXED-on-PERCENTAGE
+      semantics has to be decided before this row can claim anything at all.
+    </div>
+    <div class="note">
+      <b>Struck price recoloured.</b> The current <code>#94a3b8</code> strike measures <b>2.33:1</b> — it is price information, not decoration, and it fails badly.
+      Replaced with <code>#6e6188</code> at <b>5.11:1</b>, which keeps the de-emphasis without dropping below AA.
+    </div>
+  </section>
+
+  <!-- ============ 3. FALLBACK ============ -->
+  <section class="card">
+    <h2>3. When the server does not send the base (today's reality)</h2>
+    <p class="lede">This is the state that must never regress into "$10.00".</p>
+
+    <div class="stack">
+      <span class="tag">PERCENTAGE, base unknown</span>
+      <label class="plan">
+        <div class="plan-top">
+          <div class="plan-id"><input type="radio" name="p3"><span class="plan-name">Full Protection</span></div>
+          <div class="price-col">
+            <span class="price-unit">10%</span>
+            <div class="price-cap">of your rental before taxes</div>
+          </div>
+        </div>
+        <div class="pending">We'll show the exact amount before you confirm.</div>
+      </label>
+
+      <span class="tag">PER_DAY, trip length unknown</span>
+      <label class="plan">
+        <div class="plan-top">
+          <div class="plan-id"><input type="radio" name="p3"><span class="plan-name">Roadside Plus</span></div>
+          <div class="price-col">
+            <span class="price-unit">$12.00</span>
+            <div class="price-cap">per day</div>
+          </div>
+        </div>
+        <div class="pending">We'll show the exact amount before you confirm.</div>
+      </label>
+    </div>
+
+    <div class="note">
+      <b>The decision: show the rate as a rate, never the total as a guess.</b> Three options were on the table.
+      <i>Omit the breakdown and show only a total</i> is impossible — there is no honest total without the base; that is exactly today's bug.
+      <i>Show the percentage alone with no explanation</i> leaves "10%" floating with no referent and invites the customer to read it as $10 anyway.
+      The chosen option keeps the number in its own unit (<b>10%</b>, <b>$12.00 per day</b> — with the unit as the caption, not a dollar sign in the money slot)
+      and states plainly that the amount is still coming. It is the only variant that cannot be misread as money.
+      <b>The amber note is not decoration:</b> a customer must not accept a charge believing the figure shown is the charge — this is the same
+      "subject to approval" disclosure pattern already canon on this page (<code>page.js:722</code>), reused rather than reinvented.
+    </div>
+    <div class="note bad">
+      <b>This state should be temporary, not permanent.</b> Everything needed already exists at the GET endpoint —
+      <code>existingCharges</code> and the reservation dates are both in scope at <code>customer-portal.routes.js:1294</code>.
+      Shipping the fallback alone is honest but weak: the customer still cannot compare plans by price. The backend fields in section 6 are the real fix;
+      the fallback is the safety net for plans whose base genuinely cannot be resolved.
+    </div>
+  </section>
+
+  <!-- ============ 4. MOBILE ============ -->
+  <section class="card">
+    <h2>4. Mobile (360px) — the surface that matters</h2>
+    <div class="phone">
+      <div class="stack">
+        <label class="plan sel">
+          <div class="plan-top">
+            <div class="plan-id"><input type="radio" checked><span class="plan-name">Full Protection</span></div>
+            <div class="price-col">
+              <span class="price">$30.00</span>
+              <div class="price-cap">Total added</div>
+            </div>
+          </div>
+          <div class="breakdown"><b>10%</b> of your rental before taxes (<b>$300.00</b>)</div>
+          <div class="desc">Covers collision damage to the rental vehicle.</div>
+        </label>
+        <label class="plan">
+          <div class="plan-top">
+            <div class="plan-id"><input type="radio"><span class="plan-name">Roadside Plus</span></div>
+            <div class="price-col">
+              <span class="price">$60.00</span>
+              <div class="price-cap">Total added</div>
+            </div>
+          </div>
+          <div class="breakdown"><b>$12.00</b> per day &times; <b>5 days</b></div>
+        </label>
+      </div>
+    </div>
+    <div class="note">
+      <b>Breakdown is its own full-width row, not part of the price column.</b> At 360px a right-aligned price column that also carried the
+      breakdown would squeeze the plan name to two or three words. Keeping name+price on row 1 and breakdown on row 2 means neither ever truncates.
+      The caption shortens to "Total added" under 400px. Whole row stays the tap target at <b>&ge;56px</b> tall (target &ge;44px);
+      the 18px radio is never the only thing you can hit.
+    </div>
+  </section>
+
+  <!-- ============ 5. COPY ============ -->
+  <section class="card">
+    <h2>5. Exact copy — en / es</h2>
+    <table>
+      <tr><th>Key</th><th>English</th><th>Español</th></tr>
+      <tr><td><code>plan.total.caption</code></td><td>Total added to your rental</td><td>Total que se suma a tu renta</td></tr>
+      <tr><td><code>plan.total.caption.short</code><br><span style="font-size:.9em">(&lt;400px)</span></td><td>Total added</td><td>Total añadido</td></tr>
+      <tr><td><code>plan.breakdown.percentage</code></td><td>{pct}% of your rental before taxes (${base})</td><td>{pct}% de tu renta antes de impuestos (${base})</td></tr>
+      <tr><td><code>plan.breakdown.perDay</code></td><td>${rate} per day &times; {days} days</td><td>${rate} por día &times; {days} días</td></tr>
+      <tr><td><code>plan.breakdown.perDay.one</code></td><td>${rate} per day &times; 1 day</td><td>${rate} por día &times; 1 día</td></tr>
+      <tr><td><code>plan.breakdown.fixed</code></td><td>One-time charge</td><td>Cargo único</td></tr>
+      <tr><td><code>plan.breakdown.discountSuffix</code></td><td> &middot; pre-check-in price</td><td> &middot; precio de pre-check-in</td></tr>
+      <tr><td><code>plan.base.explainer</code></td><td>Your rental before taxes = the car, extras and fees already on your reservation. It does not include taxes or the security deposit.</td><td>Tu renta antes de impuestos = el auto, los extras y los cargos que ya tiene tu reserva. No incluye impuestos ni el depósito de garantía.</td></tr>
+      <tr><td><code>plan.rate.percentCaption</code></td><td>of your rental before taxes</td><td>de tu renta antes de impuestos</td></tr>
+      <tr><td><code>plan.rate.perDayCaption</code></td><td>per day</td><td>por día</td></tr>
+      <tr><td><code>plan.amountPending</code></td><td>We'll show the exact amount before you confirm.</td><td>Te mostraremos el monto exacto antes de que confirmes.</td></tr>
+      <tr><td><code>plan.savings</code></td><td>You save ${amt} by choosing it now</td><td>Ahorras ${amt} al elegirlo ahora</td></tr>
+      <tr><td><code>plan.wasPrice.a11y</code></td><td>Counter price ${amt}</td><td>Precio en mostrador ${amt}</td></tr>
+    </table>
+    <div class="note bad">
+      <b>The customer portal has no i18n wiring at all.</b> Every string in <code>customer/precheckin/page.js</code> is hard-coded English —
+      no <code>useI18n</code>, no locale in the payload, and the sibling portal pages are the same. The Spanish column above is the specified copy,
+      but it <b>cannot ship</b> until a locale mechanism exists for this portal. Do not let this change be the one that smuggles in a half-i18n:
+      either both columns land behind a real locale source, or EN ships and the ES column is filed for the portal-i18n task. This is a scope call for Hector,
+      not something to decide inside a pricing fix.
+    </div>
+  </section>
+
+  <!-- ============ 6. BACKEND ============ -->
+  <section class="card">
+    <h2>6. What the backend must send for this to be honest</h2>
+    <p class="lede">All of it is already in scope at <code>customer-portal.routes.js:1265-1299</code>. Nothing new needs loading.</p>
+    <table>
+      <tr><th>Field (per plan)</th><th>Source</th><th>Why the UI needs it</th></tr>
+      <tr><td><code>mode</code></td><td><code>plan.chargeBy || plan.mode</code>, default <code>FIXED</code> — same expression the charge path uses at <code>:1566</code></td><td>Chooses the breakdown line. Its absence is the root cause of the defect.</td></tr>
+      <tr><td><code>unitAmount</code></td><td>existing <code>amount</code>, renamed in intent</td><td>The <b>10</b> or the <b>12.00</b>. Named so no one prefixes it with "$" again.</td></tr>
+      <tr><td><code>baseAmount</code><br>nullable</td><td>the <code>insuranceBaseAmount</code> reduce at <code>:1548-1552</code>, lifted out of the POST</td><td>The "$300.00" in the breakdown. Null &rarr; fallback state.</td></tr>
+      <tr><td><code>days</code></td><td>the <code>rentalDays</code> block at <code>:1536-1541</code></td><td>The "&times; 5 days" on PER_DAY.</td></tr>
+      <tr><td><code>computedAmount</code><br>nullable</td><td>the mode switch at <code>:1576-1592</code></td><td>The only value allowed in the money slot.</td></tr>
+      <tr><td><code>discountedComputedAmount</code><br>nullable</td><td>same switch, discounted branch</td><td>The green price and the savings line, as money.</td></tr>
+    </table>
+    <div class="note bad">
+      <b>Must be one shared helper, not a second copy of the math.</b> Extract the base reduce + mode switch into a function called by
+      <b>both</b> the GET (display) and the POST (charge). Two implementations of "what will we charge" is how the quote and the charge drift apart —
+      which is the bug we are fixing, one layer up.
+    </div>
+    <div class="note bad">
+      <b>Prerequisite — the GET payload cannot compute the base correctly today.</b>
+      The POST filters the base by <code>chargeType !== 'TAX'</code> and <code>!== 'DEPOSIT'</code> (<code>:1550-1551</code>),
+      but the GET's <code>existingCharges</code> select (<code>:1296</code>) does <b>not include <code>chargeType</code></b>.
+      Compute the base from today's payload and you quote a base that includes taxes and the deposit, then charge a different one.
+      <code>chargeType: true</code> must be added to that select in the same change.
+    </div>
+    <div class="note">
+      <b>Frontend, correspondingly:</b> delete the <code>plan.total || plan.amount || plan.rate</code> fallback (<code>page.js:655</code>) —
+      a fallback chain across three fields with different units is what let this through — and delete the client-side discount recomputation
+      (<code>page.js:656-660</code>), which is a third copy of the pricing rules living in the browser.
+    </div>
+    <div class="note">
+      <b>On the branch that changes the base by no longer netting credits.</b> That branch makes the same plan quote <i>higher</i>.
+      With <code>baseAmount</code> on screen the change is visible to the customer and reviewable by Hector; without it, the number silently moves
+      and nobody outside the diff can see it. These two changes should land together, base-display first.
+    </div>
+  </section>
+
+  <!-- ============ 7. CONTRAST ============ -->
+  <section class="card">
+    <h2>7. Measured contrast — every new pair</h2>
+    <p class="lede">Measured against <code>#F6F2FF</code>, the selected row's effective background (<code>rgba(110,73,255,.05)</code> over the portal gradient) — the darkest realistic backdrop, so unselected rows measure better.</p>
+    <table>
+      <tr><th>Element</th><th>Pair</th><th>Ratio</th><th>WCAG</th></tr>
+      <tr><td>Total price</td><td><code>#1e2847</code> on <code>#F6F2FF</code></td><td>13.15:1</td><td class="pass">AAA</td></tr>
+      <tr><td>Breakdown line (new)</td><td><code>#55456f</code> on <code>#F6F2FF</code></td><td>7.73:1</td><td class="pass">AAA</td></tr>
+      <tr><td>Caption "Total added…" (new)</td><td><code>#55456f</code> on <code>#F6F2FF</code></td><td>7.73:1</td><td class="pass">AAA</td></tr>
+      <tr><td>Discounted price</td><td><code>#166534</code> on <code>#F6F2FF</code></td><td>6.47:1</td><td class="pass">AA</td></tr>
+      <tr><td>Amount-pending note (new)</td><td><code>#92400e</code> on amber tint</td><td>6.35:1</td><td class="pass">AA</td></tr>
+      <tr><td>Struck counter price <b>(changed)</b></td><td><code>#6e6188</code> on <code>#F6F2FF</code></td><td>5.11:1</td><td class="pass">AA</td></tr>
+      <tr><td>Selected row border</td><td><code>#6e49ff</code> on <code>#F6F2FF</code></td><td>4.70:1</td><td class="pass">AA</td></tr>
+      <tr><td style="color:#991b1b">Struck price <i>as-is today</i></td><td><code>#94a3b8</code> on <code>#F6F2FF</code></td><td>2.33:1</td><td class="fail">FAIL</td></tr>
+      <tr><td style="color:#991b1b">Plan description <i>as-is today</i></td><td><code>#6b7a9a</code> on <code>#F6F2FF</code></td><td>3.91:1</td><td class="fail">FAIL</td></tr>
+    </table>
+    <div class="note">
+      The last two are pre-existing, not introduced here. The struck price is inside the blast radius of this change and is fixed above.
+      The plan description at <code>#6b7a9a</code> is adjacent — a one-token swap to <code>#55456f</code> fixes it, and that token is
+      already used elsewhere on this page, so it is not a new colour. Flagged, not smuggled in.
+    </div>
+  </section>
+
+  <!-- ============ 8. REJECTION ============ -->
+  <section class="card">
+    <h2>8. If Hector rejects a change — what happens</h2>
+
+    <div class="reject"><b>Reject: showing the base ("$300.00") in the row.</b> &rarr; The percentage plan can only show "10% of your rental before taxes" with no figure. The bug of printing a percent as money is still fixed, but the customer cannot know the amount before accepting, and the branch that changes the base moves the price invisibly. Weakest acceptable outcome.</div>
+
+    <div class="reject"><b>Reject: the "Total added to your rental" caption.</b> &rarr; The bare number returns to being ambiguous — customers read a plan price as the new total of the whole rental. Breakdown line survives and carries most of the meaning; ambiguity moves from "how much" to "on top of what".</div>
+
+    <div class="reject"><b>Reject: the fallback rate-as-a-rate state (section 3).</b> &rarr; There is no honest alternative. The only remaining options are printing the percent as money — today's defect — or hiding percentage plans entirely, which removes coverage the customer may need. If this is rejected, the backend fields in section 6 become mandatory, not recommended, because the fallback can no longer exist.</div>
+
+    <div class="reject"><b>Reject: the backend fields (<code>computedAmount</code>, <code>baseAmount</code>, <code>mode</code>, <code>days</code>).</b> &rarr; Every plan renders in the section-3 fallback forever. Honest, but the customer cannot compare plans on price and the pre-check-in upsell loses most of its purpose. Not a shippable end state, only a safe intermediate.</div>
+
+    <div class="reject"><b>Reject: fixing the FIXED-discount-on-PERCENTAGE-plan bug now.</b> &rarr; The strike-through and the "You save" line must be removed from PERCENTAGE plans entirely, because the amount the banner promises is not the amount the ledger moves. We cannot print a savings claim we know to be wrong. Percentage plans would show a single price with no discount treatment until it is fixed.</div>
+
+    <div class="reject"><b>Reject: recolouring the struck price to <code>#6e6188</code>.</b> &rarr; Price information ships at 2.33:1, unreadable in sunlight on a phone — the exact context this screen lives in. The customer sees only the discounted price and cannot verify the saving.</div>
+
+    <div class="reject"><b>Reject: the Spanish column / defer portal i18n.</b> &rarr; EN ships, ES is filed. No regression — the portal is English-only today — but a Spanish-speaking customer keeps accepting a charge in a second language. Should be a deliberate deferral, not a silent one.</div>
+  </section>
+
+</div>
+</body>
+</html>
