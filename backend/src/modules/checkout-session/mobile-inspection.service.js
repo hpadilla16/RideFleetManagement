@@ -270,6 +270,9 @@ async function complete({ token, signatureDataUrl, signerName, odometer, fuelLev
         // auto-advance cascade can hop through CUSTOMER_SIGN_PENDING
         // without waiting on the agent to re-sign anywhere else.
         ...(hasSignature ? { customerSignedAt: now } : {}),
+        // M2 P2 review MUST-1 (2026-08-17): direct writer of versioned
+        // fields → bump stateVersion (see schema.prisma invariant).
+        stateVersion: { increment: 1 },
         events: appendEvent(session.events, {
           kind: 'INSPECTION_COMPLETED_VIA_MOBILE',
           photoCount: photos.length,

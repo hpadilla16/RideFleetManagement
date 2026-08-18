@@ -72,7 +72,15 @@ export async function requireAuth(req, res, next) {
       user: req.user,
       requested: req.headers[VIEW_LOCATION_HEADER],
     });
-    if (!viewResult.ok) return res.status(403).json({ error: viewResult.error });
+    // RideOps gap #3 (2026-08-17): machine-readable code, like the password
+    // gate's PASSWORD_CHANGE_REQUIRED. Without it, a mobile client seeing a
+    // bare 403 on a request that carried x-view-location cannot distinguish
+    // "your picked location was revoked → offer the switcher" from any other
+    // Forbidden. Additive — the web frontend keys off the message/status and
+    // ignores unknown fields.
+    if (!viewResult.ok) {
+      return res.status(403).json({ error: viewResult.error, code: 'VIEW_LOCATION_DENIED' });
+    }
     if (viewResult.locationIds !== undefined) {
       req.user = { ...req.user, locationIds: viewResult.locationIds, viewLocationId: viewResult.locationIds[0] };
     }
