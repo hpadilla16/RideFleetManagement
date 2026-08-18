@@ -552,12 +552,12 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // This is a PARTIAL close of the events lost-update, and the honest
       // count is FOURTEEN other writers of this TEXT column, all still doing
       // an unguarded read-modify-write (read → write, this file):
-      //   stampSideEffect        :918 → :926
-      //   saveCustomerSignature  :948 → :969   (read is OUTSIDE the
-      //                                         $transaction that starts :954)
-      //   mintHandoffToken       :992 → :1043
-      //   setDeclinedInsurance  :1114 → :1128
-      //   markAbandoned         :1138 → :1152
+      //   stampSideEffect        :953 → :961
+      //   saveCustomerSignature  :983 → :1004  (read is OUTSIDE the
+      //                                         $transaction that starts :989)
+      //   mintHandoffToken      :1027 → :1078
+      //   setDeclinedInsurance  :1149 → :1163
+      //   markAbandoned         :1173 → :1187
       //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
       //   spin-charge.service.js:574, :606, :884, :1038, :1229 (five)
       //   mobile-inspection.service.js:276
@@ -568,8 +568,11 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // its $transaction makes the two WRITES atomic but leaves the READ
       // outside it, and what it writes is customerSignedAt — an
       // ENTRY_REQUIRES field for CLOSED. See the note on stampSideEffect.
-      // (The only other appendEvent calls in the tree write KioskSession.events,
-      // a different column, and :241 here builds a fresh row on create.)
+      // (Those are ALL the appendEvent callers in the tree; :241 here is the
+      // fourteenth-plus-one and does not count — it builds a fresh row on
+      // create, with nothing to lose. The kiosk's similarly-named
+      // appendEvents(sessionId, device, rawEvents) is a different function
+      // writing a different column, KioskSession.events.)
       events: appendEvent(session.events, {
         kind: 'TRANSITION',
         from: session.currentStep,
@@ -655,9 +658,67 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
   // Guarded by:
   //   - toStep === 'CLOSED' (only fire once on the actual finalize)
   //   - session.agreementId present (no agreement, nothing to email)
+  //   - finalizeOwnsReservation (M2-H8, see below)
   //   - any throw is swallowed — never let an email hiccup break the
   //     transition response that the UI is waiting on
-  if (toStep === 'CLOSED' && updated.agreementId) {
+  //
+  // ── ONE ownership decision, computed BEFORE the email and reused by the
+  // cascade (2026-08-17, QA MAJOR on the blocker fix) ───────────────────────
+  //
+  // The first version of the blocker fix put the guard only on the cascade.
+  // But the email fires FIRST and was gated on nothing but `agreementId`, so
+  // the same request that logged "self-heal declined — finalize does not own
+  // this reservation (CANCELLED)" went straight on to stamp autoEmailedAt and
+  // hand the signed rental contract to scheduleEmailDelivery, for a customer
+  // whose reservation staff had cancelled. A write to the world, and the one
+  // kind that cannot be taken back.
+  //
+  // Reachable only with autoEmailedAt === null on a CLOSED session (closed
+  // before that column existed, or an agreementId attached later) — narrow,
+  // but H8 is what made it reachable at all: before, the repeat POST threw
+  // ILLEGAL_TRANSITION and never got here.
+  let finalizeOwnsReservation = false;
+  let resvRow = null;
+  if (toStep === 'CLOSED' && updated.reservationId) {
+    try {
+      resvRow = await prisma.reservation.findUnique({
+        where: { id: updated.reservationId },
+        select: { id: true, status: true, vehicleId: true, tenantId: true },
+      });
+    } catch (err) {
+      logger.warn('[checkout-session] could not read reservation for finalize', {
+        sessionId: id, reservationId: updated.reservationId, error: err?.message || String(err),
+      });
+    }
+    const resvStatus = String(resvRow?.status ?? '');
+    // Never finalize onto a reservation staff has since CANCELLED or marked
+    // NO_SHOW. New 2026-08-17 (QA blocker): the old list was a DENY-list
+    // naming 3 of the 8 ReservationStatus values, so NEW, CONFIRMED,
+    // CANCELLED, NO_SHOW and PENDING_FRANCHISE_IMPORT all fell through it. A
+    // session parked in FINALIZING while staff cancels could already finalize
+    // onto the cancelled row — pre-existing; H8's self-heal turned it from
+    // "needs a parked session" into "any repeat POST". Marking the car ON_RENT
+    // for a cancelled rental also collides the NEXT real reservation with
+    // "still out on open rental", so the damage does not stay on this row.
+    const cancelledLate = ['CANCELLED', 'NO_SHOW'].includes(resvStatus);
+    // Self-heal is OPPORTUNISTIC work nobody asked for, so it gets an
+    // ALLOW-list instead: only run it on a reservation the finalize
+    // legitimately still owns. A deny-list is what failed above, and the bar
+    // is higher here — the caller does not know this is happening, and the two
+    // non-idempotent steps live inside. PENDING_FRANCHISE_IMPORT is excluded
+    // from self-heal for that reason while the winner path is left untouched
+    // for it: refusing to guess is free, guessing is not.
+    const selfHealOwns = ['NEW', 'CONFIRMED'].includes(resvStatus);
+    finalizeOwnsReservation = !!resvRow && !cancelledLate && (!alreadyApplied || selfHealOwns);
+    if (!finalizeOwnsReservation) {
+      logger.info('[checkout-session] finalize declined — does not own this reservation', {
+        sessionId: id, reservationId: updated.reservationId,
+        reservationStatus: resvRow?.status ?? null, alreadyApplied,
+      });
+    }
+  }
+
+  if (toStep === 'CLOSED' && updated.agreementId && finalizeOwnsReservation) {
     Promise.resolve()
       .then(() => maybeSendFinalizeEmail(updated, actorUserId))
       .catch((err) => {
@@ -672,36 +733,10 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
   // this, so reservations stayed CONFIRMED and cars weren't marked rented.
   if (toStep === 'CLOSED' && updated.reservationId) {
     try {
-      const resv = await prisma.reservation.findUnique({
-        where: { id: updated.reservationId },
-        select: { id: true, status: true, vehicleId: true, tenantId: true },
-      });
-      // Don't downgrade an already checked-in/out reservation, and never
-      // finalize onto one staff has since CANCELLED or marked NO_SHOW.
-      //
-      // Those last two are new (2026-08-17, QA blocker on H8). The list was a
-      // DENY-list naming 3 of the 8 ReservationStatus values, so NEW,
-      // CONFIRMED, CANCELLED, NO_SHOW and PENDING_FRANCHISE_IMPORT all fell
-      // through it. A session parked in FINALIZING while staff cancels the
-      // reservation would finalize onto the cancelled row — pre-existing, and
-      // H8's self-heal turned it from "needs a parked session" into "any
-      // repeat POST". Marking the car ON_RENT for a cancelled rental also
-      // makes the NEXT real reservation collide with "still out on open
-      // rental", so the damage does not stay on this row.
-      const cancelledLate = ['CANCELLED', 'NO_SHOW'].includes(String(resv?.status));
-      // Self-heal is OPPORTUNISTIC work nobody asked for, so it gets an
-      // ALLOW-list instead: only run it on a reservation the finalize
-      // legitimately still owns. A deny-list is what failed above, and the
-      // bar is higher here — the caller does not know this is happening, and
-      // the two non-idempotent steps live inside. PENDING_FRANCHISE_IMPORT is
-      // excluded from self-heal for that reason while the winner path is left
-      // untouched for it: refusing to guess is free, guessing is not.
-      const selfHealOwns = ['NEW', 'CONFIRMED'].includes(String(resv?.status));
-      if (alreadyApplied && !selfHealOwns) {
-        logger.info('[checkout-session] self-heal declined — finalize does not own this reservation', {
-          sessionId: id, reservationId: updated.reservationId, reservationStatus: resv?.status ?? null,
-        });
-      } else if (resv && !cancelledLate
+      const resv = resvRow;
+      // Ownership above, plus the cascade's own "already done" short-circuit:
+      // don't downgrade a reservation that is already checked in/out.
+      if (finalizeOwnsReservation
         && !['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(String(resv.status))) {
         // beta.116 — NO-CAR-NO-CHECKOUT guard (defense-in-depth). Never finalize
         // a checkout onto a reservation with no vehicle: that produced FINALIZED

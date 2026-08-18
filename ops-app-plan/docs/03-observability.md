@@ -67,8 +67,13 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 >   La regla correcta es la de atribución, la misma que ya usa
 >   `02-flutter-blueprint.md` §2.2: **es noop cuando el último evento `TRANSITION` de la
 >   respuesta no nombra a esta superficie** (comparar su `actorUserId`/`metadata` con los
->   propios), o equivalentemente cuando `stateVersion !== localVersion + 1` (si subió más
->   de uno, o no subió, no fuiste tú el único que escribió).
+>   propios). **Es la única regla.** No hay atajo por `stateVersion`: una versión anterior
+>   de esta nota ofrecía "`stateVersion !== localVersion + 1`" como equivalente y **no lo
+>   es**, precisamente en el caso que la métrica existe para vigilar — el wizard tiene v0
+>   en `FINALIZING`, el kiosco commitea `CLOSED` → v1, y la respuesta idempotente no sube
+>   nada, así que lee v1: `1 !== 0 + 1` es **falso** y no se marca. Subió exactamente uno,
+>   pero lo subió otro, y la versión sola no sabe distinguirlo. Es tentador porque evita
+>   decodificar el JSON; es exactamente el sub-reporte que esta sección vino a arreglar.
 >
 >   Nota de parseo: `events` viaja como **string JSON**, no como arreglo — hay que
 >   `jsonDecode` antes de leer el último `TRANSITION`. Llega así por los dos caminos

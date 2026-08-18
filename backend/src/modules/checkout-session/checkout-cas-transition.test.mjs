@@ -28,6 +28,7 @@ import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '../../lib/prisma.js';
 import { checkoutSessionService, CheckoutSessionError } from './checkout-session.service.js';
+import { readFileSync } from 'node:fs';
 import { readEvents } from './state-machine.js';
 
 // ── minimal in-memory stubs (checkout-stale-version.test.mjs style) ─────────
@@ -223,15 +224,26 @@ test('two surfaces on the same step: exactly ONE commit, and the loser gets the 
 
 /**
  * Seeds a session one hop from CLOSED plus the world its finalize cascade
- * touches. autoEmailedAt is PRE-STAMPED so maybeSendFinalizeEmail returns at
- * its first line: it dynamic-imports the rental-agreements service (Puppeteer
- * underneath) and is fire-and-forget anyway, so it is not what these two
- * tests are about. The reservation/agreement/vehicle triple is.
+ * touches.
+ *
+ * `autoEmailedAt` used to default to a stamped date, which QA correctly called
+ * out: maybeSendFinalizeEmail returns at its first line when it is set, so the
+ * whole email arm was invisible to every test here — including the one titled
+ * "ZERO writes to the world", which therefore asserted less than its name
+ * claimed. Default is now null, so the arm is LIVE.
+ *
+ * Tests that drive a legitimate WINNER finalize still pass a stamp explicitly,
+ * for a reason worth writing down: past the autoEmailedAt CAS the code reaches
+ * `scheduleEmailDelivery(...)` which is called with no await and no .catch, so
+ * its rejection ("Customer email is required" for a customer-less fixture) is
+ * an unhandled rejection that kills the whole test process. That is a real
+ * pre-existing defect (own ticket), not something to paper over — but it is
+ * not what these tests are about, so they stay out of its way and say so.
  */
-function seedFinalizeWorld({ reservationStatus = 'CONFIRMED' } = {}) {
+function seedFinalizeWorld({ reservationStatus = 'CONFIRMED', autoEmailedAt = null } = {}) {
   const row = seedSession({
     currentStep: 'FINALIZING', customerSignedAt: new Date(),
-    agreementId: 'ra1', autoEmailedAt: new Date(),
+    agreementId: 'ra1', autoEmailedAt,
   });
   db.agreements.push({
     id: 'ra1', reservationId: 'res1', status: 'DRAFT',
@@ -254,7 +266,7 @@ function seedFinalizeWorld({ reservationStatus = 'CONFIRMED' } = {}) {
 }
 
 test('idempotent answer appends no event and does not bump the version', async () => {
-  const row = seedFinalizeWorld({ reservationStatus: 'CONFIRMED' });
+  const row = seedFinalizeWorld({ reservationStatus: 'CONFIRMED', autoEmailedAt: new Date() });
 
   armRace('FINALIZING', () => viaKiosk({ id: 'cs1', toStep: 'CLOSED' }));
   const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
@@ -265,7 +277,7 @@ test('idempotent answer appends no event and does not bump the version', async (
 });
 
 test('winner already finalized: the re-run cascade short-circuits, no double side-effects', async () => {
-  seedFinalizeWorld({ reservationStatus: 'CONFIRMED' });
+  seedFinalizeWorld({ reservationStatus: 'CONFIRMED', autoEmailedAt: new Date() });
 
   // The winner runs the whole cascade; the reservation ends CHECKED_OUT.
   armRace('FINALIZING', () => viaKiosk({ id: 'cs1', toStep: 'CLOSED' }));
@@ -291,30 +303,33 @@ test('winner already finalized: the re-run cascade short-circuits, no double sid
 // tell every client that re-sending a transition is safe, so this was an
 // invitation to retry.
 test('BLOCKER: session already CLOSED + reservation CANCELLED → 200 and ZERO writes to the world', async () => {
-  const row = seedFinalizeWorld({ reservationStatus: 'CONFIRMED' });
+  // The end state directly: a checkout closed days ago, whose reservation
+  // staff has since cancelled (reservations.routes.js allows CHECKED_OUT →
+  // CANCELLED). Seeded rather than driven so the email arm below is LIVE —
+  // autoEmailedAt null — without any winner call firing a real send first.
+  const row = seedFinalizeWorld({ reservationStatus: 'CANCELLED' });
+  row.currentStep = 'CLOSED';
+  row.finishedAt = new Date('2026-08-10T12:00:00Z');
+  const finalizedAt = new Date('2026-08-10T12:00:00Z');
+  db.agreements[0].status = 'FINALIZED';
+  db.agreements[0].finalizedAt = finalizedAt;
+  const versionBefore = row.stateVersion;
 
-  // A real, completed checkout...
-  await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
-  assert.equal(db.reservations[0].status, 'CHECKED_OUT');
-  const finalizedAt = db.agreements[0].finalizedAt;
-
-  // ...that staff cancels afterwards (reservations.routes.js allows
-  // CHECKED_OUT → CANCELLED).
-  db.reservations[0].status = 'CANCELLED';
-  db.vehicles[0].status = 'AVAILABLE';
-  const auditsBefore = db.auditLogs.length;
-  const mileageBefore = db.mileageEntries.length;
-
-  // Now an old wizard tab, a retry, anything — fires the transition again.
+  // An old wizard tab, a retry, anything — fires the transition again.
   const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  await new Promise((r) => setTimeout(r, 0)); // let the fire-and-forget email arm settle
 
   assert.equal(out.currentStep, 'CLOSED', 'still answers idempotently');
   assert.equal(db.reservations[0].status, 'CANCELLED', 'NOT resurrected');
   assert.equal(db.vehicles[0].status, 'AVAILABLE', 'car stays in the available fleet');
   assert.equal(db.agreements[0].finalizedAt, finalizedAt, 'finalizedAt not overwritten with today');
-  assert.equal(db.auditLogs.length, auditsBefore, 'no spurious "Checkout wizard finalized" line');
-  assert.equal(db.mileageEntries.length, mileageBefore, 'no duplicate mileage row');
-  assert.equal(row.stateVersion, 1, 'and no version bump');
+  assert.equal(db.auditLogs.length, 0, 'no spurious "Checkout wizard finalized" line');
+  assert.equal(db.mileageEntries.length, 0, 'no duplicate mileage row');
+  assert.equal(row.stateVersion, versionBefore, 'and no version bump');
+  // The one QA caught: the guard declined the cascade and the SAME request
+  // then stamped the row and handed the signed contract to the mailer, for a
+  // customer whose rental was cancelled. An email cannot be un-sent.
+  assert.equal(row.autoEmailedAt, null, 'and NO finalize email was queued');
 });
 
 test('a NO_SHOW reservation is not finalized onto either', async () => {
@@ -323,11 +338,15 @@ test('a NO_SHOW reservation is not finalized onto either', async () => {
   // Winner path this time (a session parked in FINALIZING while staff marked
   // the customer a no-show) — the deny-list has to stop this one too.
   const out = await viaWebWizard({ id: 'cs1', toStep: 'CLOSED' });
+  await new Promise((r) => setTimeout(r, 0));
 
   assert.equal(out.currentStep, 'CLOSED', 'the session still closes');
   assert.equal(db.reservations[0].status, 'NO_SHOW', 'but the reservation is left alone');
   assert.equal(db.vehicles[0].status, 'AVAILABLE');
   assert.equal(db.auditLogs.length, 0);
+  // Ownership gates the email too, on the WINNER path — not just the
+  // self-heal. No contract goes out for a no-show.
+  assert.equal(db.checkoutSessions[0].autoEmailedAt, null, 'no finalize email queued');
 });
 
 // The two guards are deliberately different shapes, so each needs a case only
@@ -336,7 +355,7 @@ test('a NO_SHOW reservation is not finalized onto either', async () => {
 // self-heal allow-list, because the winner path is intentionally left
 // unchanged for that status.
 test('self-heal declines a status it does not understand (PENDING_FRANCHISE_IMPORT)', async () => {
-  seedFinalizeWorld({ reservationStatus: 'PENDING_FRANCHISE_IMPORT' });
+  seedFinalizeWorld({ reservationStatus: 'PENDING_FRANCHISE_IMPORT', autoEmailedAt: new Date() });
 
   // Winner path first: unchanged: this status is NOT in the deny-list, so the
   // legitimate finalize still advances it exactly as before H8.
@@ -355,7 +374,7 @@ test('self-heal declines a status it does not understand (PENDING_FRANCHISE_IMPO
 });
 
 test('SELF-HEAL: a winner whose cascade died half-way is completed by the idempotent caller', async () => {
-  const row = seedFinalizeWorld({ reservationStatus: 'CONFIRMED' });
+  const row = seedFinalizeWorld({ reservationStatus: 'CONFIRMED', autoEmailedAt: new Date() });
 
   // The winner reaches CLOSED, then its cascade dies. The catch at the end of
   // transition() swallows anything that is not a CheckoutSessionError with a
@@ -499,6 +518,42 @@ test('CANCELLED stays legal from wherever the winner left us — the retry commi
     ['CONFIRMING→TC_PENDING', 'TC_PENDING→CANCELLED'],
     'the cancel is recorded from the step it really left',
   );
+});
+
+// ── the inventory of 14 writers must not rot ────────────────────────────────
+//
+// The line numbers in transition()'s events comment have gone stale three
+// times in three edits — twice because correcting the comment changed its own
+// length and shifted the very lines it cites. A reviewer who spot-checks one
+// and finds a blank line stops trusting the whole list, which is the point of
+// having it. So the list is checked, not promised.
+
+test('every line number in the 14-writer inventory still points at what it claims', () => {
+  const here = new URL('.', import.meta.url);
+  const svc = readFileSync(new URL('checkout-session.service.js', here), 'utf8').split('\n');
+  const comment = svc.join('\n');
+
+  // Local entries: "name :READ → :WRITE" inside this file.
+  const local = [...comment.matchAll(/^\s*\/\/\s{3}(\w+)\s+:(\d+) → :(\d+)/gm)];
+  assert.equal(local.length, 5, 'expected the 5 in-file writers');
+  for (const [, name, readLine, writeLine] of local) {
+    assert.match(svc[Number(readLine) - 1], /prisma\.checkoutSession\.findUnique/, `${name} read line ${readLine}`);
+    assert.match(svc[Number(writeLine) - 1], /events: appendEvent/, `${name} write line ${writeLine}`);
+  }
+
+  // External entries: "some/file.js:12, :34" style.
+  const external = [...comment.matchAll(/^\s*\/\/\s{3}([\w-]+\.service\.js|[\w-]+\.scheduler\.js):([\d, :]+)/gm)];
+  assert.ok(external.length >= 4, 'expected the external files to be listed');
+  let externalRefs = 0;
+  for (const [, file, nums] of external) {
+    const lines = readFileSync(new URL(file, here), 'utf8').split('\n');
+    for (const n of nums.match(/\d+/g) || []) {
+      assert.match(lines[Number(n) - 1], /appendEvent/, `${file}:${n}`);
+      externalRefs += 1;
+    }
+  }
+  assert.equal(externalRefs, 9, 'expected 9 external references (5 + 1 + 1 + 1 + 1)');
+  assert.equal(local.length + externalRefs, 14, 'fourteen writers, all resolving');
 });
 
 // ── CONCURRENT_MODIFICATION — documented client contract, so it gets a test ─
