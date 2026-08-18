@@ -1,6 +1,20 @@
 -- ════════════════════════════════════════════════════════════════════
 -- PERCENTAGE insurance base — sizing the change · 2026-08-17
--- READ-ONLY diagnostic. Run in the Supabase SQL editor. No writes, no DDL.
+-- READ-ONLY diagnostic. Run in the Supabase SQL editor. It reads user tables and
+-- writes nothing: no INSERT/UPDATE/DELETE, no DDL on anything real, and no locks
+-- beyond the ACCESS SHARE a SELECT takes, which blocks nobody. It DOES create
+-- three views in pg_temp (dropped at the end, and gone with the session either
+-- way) — technically DDL, in your own private schema only.
+--
+-- BEFORE TRUSTING THE TOTALS, two sanity checks:
+--   * Query 1: if a row comes back as "(global/unscoped key)", a legacy bare
+--     `insurancePlans` key exists and matches EVERY tenant, which duplicates
+--     rows in queries 2/3/5. Say so and these need a tenant filter.
+--   * Query 3 classifies an add-on as agent-written from its AuditLog row. If
+--     AuditLog has ever been pruned, older agent extras look handler-written and
+--     `pre_existing_dollars` — the number that matters most — is UNDERSTATED.
+--     `SELECT min("createdAt") FROM "AuditLog";` tells you how far back it goes.
+-- Expect the two metadata LIKE '%...%' scans to be slow; they are unindexed.
 --
 -- WHY THIS EXISTS
 -- insuranceBaseFrom() in backend/src/modules/customer-portal/
@@ -168,12 +182,23 @@ ORDER BY pre_existing_dollars DESC NULLS LAST;
 -- ── 3b · SAME, broken out by which sale path wrote the row ──────────
 -- Shows whether the cost is concentrated in agent extras or in website sales —
 -- the two behave differently and are worth seeing apart before signing off.
+-- `negative_rows` is not a curiosity. addManualCharge() rejects only amount = 0,
+-- and its PRE-CHECKOUT branch stamps this source regardless of the caller's
+-- `source`, so an admin CREDIT lands here as a negative add-on. Those are the
+-- rows where the change quotes the customer MORE, not less: the old base netted
+-- the credit off, the new one does not. They net away inside `premium_change`,
+-- so read them separately or the cost looks smaller and more one-directional
+-- than it is.
 SELECT
   a.source,
   a.is_agent_written,
-  count(*)                                  AS rows,
-  round(sum(a.total), 2)                    AS addon_dollars,
-  round(sum(a.total * a.pct / 100), 2)      AS premium_change
+  count(*)                                                    AS rows,
+  count(*) FILTER (WHERE a.total < 0)                         AS negative_rows,
+  round(sum(a.total), 2)                                      AS addon_dollars,
+  round(sum(a.total) FILTER (WHERE a.total < 0), 2)           AS credit_dollars,
+  round(sum(a.total * a.pct / 100), 2)                        AS premium_change,
+  round(sum(a.total * a.pct / 100) FILTER (WHERE a.total > 0), 2) AS premium_given_up,
+  round(-sum(a.total * a.pct / 100) FILTER (WHERE a.total < 0), 2) AS premium_gained
 FROM addon_rows a
 GROUP BY 1, 2
 ORDER BY premium_change DESC NULLS LAST;
@@ -275,7 +300,9 @@ SELECT
                                                                AS dollars_of_drift_removed;
 
 
--- Cleanup. Order matters: the views depend on each other.
-DROP VIEW IF EXISTS addon_rows;
-DROP VIEW IF EXISTS pct_reservations;
-DROP VIEW IF EXISTS plan_catalog;
+-- Cleanup. Order matters: the views depend on each other. Schema-qualified to
+-- pg_temp so that running JUST THIS TAIL in an editor cannot resolve to a real
+-- view of the same name in public.
+DROP VIEW IF EXISTS pg_temp.addon_rows;
+DROP VIEW IF EXISTS pg_temp.pct_reservations;
+DROP VIEW IF EXISTS pg_temp.plan_catalog;

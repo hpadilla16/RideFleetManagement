@@ -73,9 +73,14 @@ export function discountApplier(discount) {
 }
 
 /**
- * Base for PERCENTAGE insurance plans: THE RENTAL AND ITS FEES, and nothing
- * that was sold on top. Taxes, deposits, insurance itself and every add-on are
- * out; the daily rate, the mandatory/underage/website fees and the rest stay in.
+ * Base for PERCENTAGE insurance plans: THE CHARGE SHEET MINUS WHAT WAS SOLD ON
+ * TOP OF THE RENTAL. Taxes, deposits, insurance itself and every add-on are out.
+ * Everything else stays in — the daily rate and the fees, but also
+ * ADMIN_CORRECTION, DAMAGE_CHARGE, TOLL_MODULE and any source added tomorrow.
+ * "The rental and its fees" is the shorthand Hector and this file use for it and
+ * is what it amounts to in practice, but the rule is the exclusion list below,
+ * not that phrase; an editor who implements the phrase instead will write an
+ * allow-list and silently drop live charges out of the base.
  *
  * THIS IS A DELIBERATE PRICING CHANGE (Hector, 2026-08-17). It is not what the
  * route computed inline before, and the difference is money.
@@ -112,9 +117,19 @@ export function discountApplier(discount) {
  * is NOT the only writer of that source — reservation-pricing.service.js:1037
  * writes it when an agent adds an extra to an already-priced reservation, and
  * the reservation editor sends the same value. Those rows can be on the sheet
- * at the FIRST submission, so dropping them LOWERS what live tenants are quoted.
- * doc/fixes/2026-08-17-precheckin-insurance-base-measurement.sql sizes exactly
- * that, splitting agent-written rows from portal-written ones.
+ * at the FIRST submission, so dropping them usually LOWERS what live tenants are
+ * quoted. doc/fixes/2026-08-17-precheckin-insurance-base-measurement.sql sizes
+ * exactly that, splitting agent-written rows from portal-written ones.
+ *
+ * "Usually" is doing work there, and the exception moves the other way.
+ * addManualCharge() rejects only amount === 0, and on its PRE-CHECKOUT branch it
+ * stamps preSource regardless of the caller's `source` — so an admin credit of
+ * -100 before check-out lands as an ADDITIONAL_SERVICE_PRECHECKIN row of -100.
+ * The old base netted that off (300 - 100 = 200 -> 20.00); this one does not
+ * (300 -> 30.00), and the customer is quoted MORE. That is the defensible
+ * number — a credit against the rental is not a reason to charge less for the
+ * coverage on it — but "this only ever lowers quotes" would be false, and the
+ * commit above this one exists to stop this file making claims like that.
  *
  * Why the whole SERVICE_CHARGE_SOURCES list and not just the portal's source.
  * The decision was "the rental and fees only, not add-ons". An add-on is spelled

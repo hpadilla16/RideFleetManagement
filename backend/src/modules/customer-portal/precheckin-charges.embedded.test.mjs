@@ -34,6 +34,9 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { bootEmbeddedPg } from '../../../scripts/embedded-pg-boot.mjs';
+// The list the base excludes. Imported rather than re-typed so an edit to the
+// shared taxonomy is caught here instead of silently re-pricing insurance.
+import { SERVICE_CHARGE_SOURCES } from '../../lib/sold-items.js';
 // Imported dynamically in before(), after bootEmbeddedPg has set DATABASE_URL.
 let applyPrecheckinCharges;
 
@@ -623,12 +626,19 @@ describe('a double-tapped Submit', () => {
     // limit of what excluding add-ons bought us.
     //
     // insuranceBaseFrom() controls what this handler ADDS to the base. On the
-    // OTA branch the handler also REMOVES from it: after the base is read
-    // (line ~298) the third-party sweep deletes DAILY / FEE /
-    // SERVICE_LINKED_FEE (line ~380). So a SECOND submission on an OTA
-    // reservation reads a sheet whose rental rows the FIRST run already
-    // deleted, and the base collapses to whatever is left — which the
-    // exclusions now empty almost completely.
+    // OTA branch the handler also REMOVES from it: the third-party sweep
+    // deletes DAILY / FEE / SERVICE_LINKED_FEE, and it runs AFTER the base has
+    // been read. So a SECOND submission on an OTA reservation reads a sheet
+    // whose rental rows the FIRST run already deleted, and the base collapses
+    // to whatever is left — which the exclusions now empty almost completely.
+    //
+    // NOTE this case does NOT go red if the base change is reverted: the old
+    // filter reaches 0.00 here too. It is a pin on a standing gap, not a guard
+    // on this commit — the three cases around it are the guards.
+    //
+    // The collapse is also not universal: the sweep deletes by source, so a
+    // BASE_RATE rental row (the VozIA converted-quote shape) survives it. This
+    // fixture uses DAILY, which does not.
     //
     // This predates the base change and is not caused by it: under the old
     // "everything on the sheet" rule the same re-submission quoted 10% of the
@@ -655,6 +665,44 @@ describe('a double-tapped Submit', () => {
     await submission();
     const second = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
     assert.equal(Number(second.total), 0, 'the OTA sweep already deleted the rental rows the base is made of');
+  });
+
+  it('excludes EVERY spelling of an add-on, and nothing else', async () => {
+    // Table-driven over the shared list rather than over the two spellings the
+    // cases above happen to use. This is the guard on sold-items.js: if someone
+    // edits SERVICE_CHARGE_SOURCES, a base that no longer matches it fails here.
+    // Also covers the shapes the filter has to normalise — a lower-cased source,
+    // a null source (legacy DAILY rows, which must stay IN), and a DEPOSIT row.
+    const addonRows = SERVICE_CHARGE_SOURCES.map((source, i) => ({
+      source: i % 2 === 0 ? source : source.toLowerCase(), // case must not matter
+      name: `Add-on ${source}`,
+      quantity: 1,
+      rate: 10,
+      total: 10,
+      taxable: true,
+    }));
+
+    const reservation = await makeReservation({
+      charges: [
+        { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+        // Legacy row: no source at all. Stays IN the base.
+        { source: null, code: 'DAILY', name: 'Daily', quantity: 1, rate: 20, total: 20, taxable: true },
+        { source: 'SECURITY_DEPOSIT', chargeType: 'DEPOSIT', name: 'Deposit', quantity: 1, rate: 500, total: 500 },
+        ...addonRows,
+      ],
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'PCT' },
+      insurancePlans: PLANS,
+    });
+
+    const insurance = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    // 10% of (300 + 20). Every add-on row is out whatever its spelling or case;
+    // the deposit is out; the source-less legacy rental row is in.
+    assert.equal(Number(insurance.total), 32);
   });
 
   it('keeps FEES in the base — "not add-ons" is not "rental only"', async () => {
