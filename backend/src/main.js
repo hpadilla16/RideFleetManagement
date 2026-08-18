@@ -371,6 +371,9 @@ app.use('/api/public/checkout-handoff', checkoutSessionPublicRouter);
 // Token-scoped T&C signing — no auth, token in URL is the auth.
 // JSON body limit raised on the parent app already; signature images
 // are ~50KB each so default Express limit (100KB) is fine for now.
+// Public-endpoint meta + per-IP rate limits live INSIDE the router, per
+// route, the way addendum-signature-public.routes.js does it — reads and
+// writes need different ceilings, which a single app.use() cannot express.
 app.use('/api/sign', termsSigningPublicRouter);
 // Token-scoped mobile inspection — same trust model as /api/sign. Photos
 // can run 1-2MB each, so the router applies its own express.json({limit: '15mb'}).
