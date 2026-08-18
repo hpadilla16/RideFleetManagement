@@ -103,6 +103,8 @@ const CI_GATED = {
     'the no-auth /api/sign payload: whose brand the renter sees while signing',
   'test:tenant-brand':
     'the shared cascade behind that brand, and the counter screen that shows the QR',
+  'test:finalize-email':
+    'the claim/release on the finalize auto-email: never mailed twice, never marked sent without being sent, never failing in silence',
 };
 
 function ciWorkflowRunLines() {

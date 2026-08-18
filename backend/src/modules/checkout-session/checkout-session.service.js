@@ -462,8 +462,9 @@ async function transition({ id, toStep, actorUserId, metadata }) {
   // so they get a PDF copy in their inbox without anyone having to
   // remember to click "Email Agreement". The send goes through the
   // existing scheduleEmailDelivery path which handles Puppeteer +
-  // SMTP off the request thread and writes its own audit-log line on
-  // failure.
+  // SMTP off the request thread and writes its own audit-log line when
+  // an ACCEPTED send later fails. A send that is never accepted at all
+  // is traced by maybeSendFinalizeEmail instead — see its header.
   //
   // Guarded by:
   //   - toStep === 'CLOSED' (only fire once on the actual finalize)
@@ -614,13 +615,112 @@ async function transition({ id, toStep, actorUserId, metadata }) {
 }
 
 /**
+ * Release a finalize-email claim that never became a real send, and leave
+ * a trace where someone can find it.
+ *
+ * Two writes, both best-effort but for different reasons:
+ *
+ *   1. Un-stamp autoEmailedAt, so the row stops asserting a send that was
+ *      never accepted. This is what the kiosk summary reads for
+ *      `contractEmail.sent`, so clearing it also un-lies the UI. The write
+ *      is conditioned on the exact timestamp WE claimed with, so it can
+ *      only ever retract our own claim, never a later legitimate one. If
+ *      that condition somehow fails to match we log loudly rather than
+ *      leave it silent — a release that quietly does nothing is the
+ *      original bug wearing a new hat.
+ *
+ *   2. Write the AuditLog row. Deliberately the SAME shape and the same
+ *      `Agreement email FAILED` prefix that scheduleEmailDelivery's own
+ *      background catch uses, so one search over AuditLog.reason finds
+ *      both kinds of failure instead of two. AuditLog.reservationId is
+ *      NOT nullable in the schema, and CheckoutSession.reservationId is
+ *      required, so the row always has one — but guard anyway rather than
+ *      throw inside an error handler.
+ */
+async function releaseFinalizeEmailClaim(session, claimedAt, err, actorUserId) {
+  const reason = `Agreement email FAILED for finalized checkout ${session.id} `
+    + `(never queued): ${err?.message || 'unknown error'}`;
+
+  try {
+    const released = await prisma.checkoutSession.updateMany({
+      where: { id: session.id, autoEmailedAt: claimedAt },
+      data: { autoEmailedAt: null },
+    });
+    if (released.count === 0) {
+      logger.error('[checkout-session] auto-email claim could not be released', {
+        sessionId: session.id, agreementId: session.agreementId,
+      });
+    }
+  } catch (releaseErr) {
+    logger.error('[checkout-session] auto-email claim release threw', {
+      sessionId: session.id, error: releaseErr?.message || String(releaseErr),
+    });
+  }
+
+  if (!session.reservationId) {
+    logger.error('[checkout-session] auto-email failure has no reservation to audit', {
+      sessionId: session.id, reason,
+    });
+    return;
+  }
+  await prisma.auditLog.create({
+    data: {
+      tenantId: session.tenantId || null,
+      reservationId: session.reservationId,
+      actorUserId: actorUserId || null,
+      action: 'UPDATE',
+      reason,
+    },
+  }).catch((auditErr) => {
+    // Last line of defense: if even the audit write fails, the log line is
+    // the only trace left, so it must carry the original reason with it.
+    logger.error('[checkout-session] auto-email failure audit write failed', {
+      sessionId: session.id, reason, error: auditErr?.message || String(auditErr),
+    });
+  });
+}
+
+/**
  * Best-effort customer email on CheckoutSession finalize. Dynamically
  * imports the rental-agreements service so the checkout module doesn't
  * pull in Puppeteer at boot (it stays a heavy lazy dependency).
  *
- * Marks autoEmailedAt on the session so we know not to fire twice if
- * a future code path re-runs the transition path. The session column
- * is added in the same Phase 3.5 migration that ships this code.
+ * CLAIM AND RELEASE (2026-08-18)
+ * -----------------------------
+ * autoEmailedAt used to be stamped and then abandoned: the scheduler was
+ * called without `await` and without `.catch()`, so the row asserted
+ * "emailed" before anybody had tried to email, and a rejection vanished
+ * into an unhandled promise. 33 closed checkouts across two tenants sat
+ * like that for two months — the marker said sent, no mail existed, and
+ * the only way to find them was hand-joining against AuditLog.
+ *
+ * The stamp cannot simply move to after the send: it is the mutual
+ * exclusion. Two near-simultaneous transitions that both got past it
+ * would mail the customer his contract twice, which is worse than the
+ * silence. So the CAS still CLAIMS first and is unchanged in purpose —
+ * only the winner proceeds — and the claim is RELEASED if the send is
+ * never accepted.
+ *
+ * "Accepted" is the boundary scheduleEmailDelivery itself draws: the
+ * promise it returns settles once the recipient is resolved and the job
+ * is handed to the scheduler; the Puppeteer + SMTP work then runs off
+ * this promise entirely. So awaiting it costs the counter nothing — no
+ * mail-provider latency rides on this await, and the whole function is
+ * already detached from the transition response by its caller.
+ *
+ * That boundary matters because the two failure modes are traced by
+ * different code:
+ *
+ *   - REJECTED BEFORE ACCEPTANCE (no customer email on the agreement, or
+ *     the lookup itself throws). scheduleEmailDelivery rejects before
+ *     startJob, so its background catch never runs and it writes NO audit
+ *     row. This was the invisible case, and it is the one handled here.
+ *
+ *   - FAILED AFTER ACCEPTANCE (PDF render, SMTP). scheduleEmailDelivery's
+ *     own catch already writes an `Agreement email FAILED for <to>` audit
+ *     row. The claim stays stamped in that case: the send WAS accepted,
+ *     which is exactly what the marker now means, and the failure is
+ *     already on the record.
  */
 async function maybeSendFinalizeEmail(session, actorUserId) {
   if (!session?.agreementId) return;
@@ -630,22 +730,31 @@ async function maybeSendFinalizeEmail(session, actorUserId) {
 
   const { rentalAgreementsService } = await import('../rental-agreements/rental-agreements.service.js');
 
-  // Stamp the marker BEFORE firing the scheduler so two near-simultaneous
-  // transitions (race condition) can't both fire. We use updateMany with
-  // a null guard so only the first one wins.
+  // CLAIM. Stamp the marker BEFORE firing the scheduler so two
+  // near-simultaneous transitions (race condition) can't both fire. We use
+  // updateMany with a null guard so only the first one wins.
+  const claimedAt = new Date();
   const stamped = await prisma.checkoutSession.updateMany({
     where: { id: session.id, autoEmailedAt: null },
-    data: { autoEmailedAt: new Date() },
+    data: { autoEmailedAt: claimedAt },
   });
   if (stamped.count === 0) return; // someone else already stamped — skip
 
-  rentalAgreementsService.scheduleEmailDelivery(
-    session.agreementId,
-    {}, // empty payload → default recipient = live customer email
-    actorUserId || null,
-    session.tenantId || null,
-    { logger },
-  );
+  try {
+    await rentalAgreementsService.scheduleEmailDelivery(
+      session.agreementId,
+      {}, // empty payload → default recipient = live customer email
+      actorUserId || null,
+      session.tenantId || null,
+      { logger },
+    );
+  } catch (err) {
+    // RELEASE. Nothing was queued, so nothing may claim to have been sent.
+    await releaseFinalizeEmailClaim(session, claimedAt, err, actorUserId);
+    // Rethrow so the caller's existing warn logs it too. The caller catches;
+    // this can never break the transition.
+    throw err;
+  }
 }
 
 /**
@@ -934,6 +1043,13 @@ async function markAbandoned({ id, reason, actorUserId }) {
     },
   });
 }
+
+// Exported for the finalize-email trace suite. It is reached in production
+// only from transition()'s CLOSED branch, which needs a live Postgres and a
+// full reservation/agreement/session fixture to get to; exporting it lets the
+// claim/release behavior be tested directly and DB-free, which is the only
+// way it runs in CI at all. Not part of the service's public surface.
+export { maybeSendFinalizeEmail };
 
 export const checkoutSessionService = {
   createForReservation,

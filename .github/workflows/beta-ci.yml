@@ -132,6 +132,18 @@ jobs:
         #     customer sees. Shared by the counter display and the renter's
         #     phone, and its whole job is that neither of them ever falls
         #     through to this platform's name (2026-08-17).
+        #   - test:finalize-email: the claim/release around the auto-email on
+        #     checkout finalize. It holds three things at once — the customer
+        #     is never mailed the contract twice, a stamped autoEmailedAt
+        #     really means the send was accepted, and a send that was never
+        #     accepted lands in AuditLog. 33 closed checkouts across two
+        #     tenants sat marked "emailed" with no mail behind them for two
+        #     months because nothing watched any of the three (2026-08-18).
+        #     DB-free (prisma is mocked) and needs the dummy DATABASE_URL
+        #     below like test:kiosk does. It is appended to BOTH `run:` lines
+        #     of this step on purpose: the duplicate key is a live bug being
+        #     fixed on another branch, and naming the suite on both lines
+        #     means it survives whichever line that fix keeps.
         # A DUMMY DATABASE_URL IS REQUIRED HERE, AND NOTHING CONNECTS WITH IT.
         # test:kiosk builds a PrismaClient at import time, and the Prisma
         # constructor THROWS on an undefined datasource url — before any
@@ -161,8 +173,8 @@ jobs:
         #     `npm test`, which is the trap documented above.
         env:
           DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_unit_only?schema=public'
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:terms-signing && npm run test:tenant-brand
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance && npm run test:finalize-email
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:terms-signing && npm run test:tenant-brand && npm run test:finalize-email
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:
