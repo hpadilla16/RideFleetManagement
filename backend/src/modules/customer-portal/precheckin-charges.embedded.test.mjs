@@ -299,6 +299,40 @@ describe('a failure mid-submission leaves the charge sheet exactly as it was', (
     assert.equal(await prisma.auditLog.count({ where: { reservationId: reservation.id } }), 0);
   });
 
+  it('does not leave the voucher marker on the customer when the submission rolls back', async () => {
+    // PINS THE APPEND INSIDE THE TRANSACTION. Without this, swapping the
+    // customer read/write from `tx` to `client` in precheckin-charges.js keeps
+    // all the other cases green — none of them rolls back a run that reached
+    // the note. Injected on the audit row for the same reason as the case
+    // above: it is the LAST write in the unit, so the note has definitely been
+    // written by the time the failure lands. MEASURED on `client`: red.
+    const agentNote = 'Deaf — text, do not call.';
+    const customer = await makeCustomer(agentNote);
+    const reservation = await makeReservation({
+      customerId: customer.id,
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+
+    await assert.rejects(
+      applyPrecheckinCharges({
+        client: clientFailingOnCreate({ model: 'auditLog', nth: 1 }),
+        reservation,
+        insuranceSelection: { selectedPlanCode: 'BASIC' },
+        insurancePlans: PLANS,
+        thirdPartyBooking: { isThirdParty: true, voucherUrl: 'https://example.test/voucher.pdf' },
+      }),
+      /INJECTED/,
+    );
+
+    const row = await prisma.customer.findUnique({
+      where: { id: customer.id }, select: { notes: true },
+    });
+    assert.equal(
+      row.notes, agentNote,
+      'a submission that failed must leave the customer row exactly as it found it',
+    );
+  });
+
   it('does not flip declinedInsurance when the submission fails later on', async () => {
     const reservation = await makeReservation({
       charges: [
