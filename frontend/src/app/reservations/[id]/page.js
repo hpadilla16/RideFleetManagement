@@ -845,6 +845,14 @@ function ReservationDetailInner({ token, me, logout }) {
   const [feePick, setFeePick] = useState('');
   const [msg, setMsg] = useState('');
   const [preArrivalBusy, setPreArrivalBusy] = useState(false);
+  // Which agreement-email send is in flight: '' | 'email' | 'resend'. Both
+  // buttons hit the same fire-and-forget endpoint, and the 60s cooldown in
+  // rental-agreements.routes.js only guards service accounts ("Human path is
+  // UNCHANGED"), so a double-tap really does mail the customer two contracts.
+  // The copy now says "Sending…", which reads as in-progress and never
+  // resolves on screen — so the guard has to live here. One flag disables both
+  // buttons; the value names which one to relabel.
+  const [agreementEmailBusy, setAgreementEmailBusy] = useState('');
   const [activePanel, setActivePanel] = useState('overview');
   const [auditLogs, setAuditLogs] = useState([]);
   // LAX #12: who last touched the notes — from the audit trail (human PATCHes
@@ -1336,9 +1344,11 @@ function ReservationDetailInner({ token, me, logout }) {
     } catch (e) { setMsg(e.message); }
   };
   const emailAgreementToCustomer = async () => {
+    if (agreementEmailBusy) return;
     try {
       const s = String(row?.status || '').toUpperCase();
       if (!(s === 'CHECKED_OUT' || s === 'CHECKED_IN' || s === 'CHECKED_IN_UNPAID')) return setMsg('Agreement email is enabled after check-out is complete.');
+      setAgreementEmailBusy('email');
       const agreement = await api(`/api/reservations/${id}/start-rental`, { method: 'POST', body: JSON.stringify({}) }, token);
       const agreementId = agreement?.id;
       if (!agreementId) return setMsg('No agreement available to email.');
@@ -1353,9 +1363,19 @@ function ReservationDetailInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify({ to, cc: extraEmails.filter((x) => x !== to).join(',') || undefined })
       }, token);
-      setMsg('Agreement emailed successfully');
+      // Promises the send, not the arrival (2026-08-17). This endpoint answers
+      // 202 as soon as scheduleEmailDelivery finishes validating; the Puppeteer
+      // render and the SMTP send run after it, in a setImmediate whose catch
+      // only writes an audit line and reports to Sentry. The outcome is not
+      // knowable at this line, so the old copy ("Agreement emailed
+      // successfully") claimed something this component cannot know.
+      // Same reasoning, and the same vocabulary, as pendingConfirmationEmail in
+      // backend/src/modules/booking-engine/booking-engine.service.js:600 —
+      // including why a hand-off like this is never called "queued".
+      setMsg(`Sending the agreement to ${to}…`);
       await refresh();
     } catch (e) { setMsg(e.message); }
+    finally { setAgreementEmailBusy(''); }
   };
 
   // Phase 3.5 — one-click resend of the signed agreement to the customer's
@@ -1366,11 +1386,13 @@ function ReservationDetailInner({ token, me, logout }) {
   // window.prompt / window.confirm pair so it's a single tap from the
   // ops console.
   const resendSignedCopy = async () => {
+    if (agreementEmailBusy) return;
     try {
       const s = String(row?.status || '').toUpperCase();
       if (!(s === 'CHECKED_OUT' || s === 'CHECKED_IN' || s === 'CHECKED_IN_UNPAID')) {
         return setMsg('Resend is enabled after check-out is complete.');
       }
+      setAgreementEmailBusy('resend');
       const to = String(row?.customer?.email || '').trim();
       if (!to) return setMsg('No customer email on file — set one on the customer profile first.');
 
@@ -1381,13 +1403,16 @@ function ReservationDetailInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify({ to }),
       }, token);
-      setMsg(`Signed copy resent to ${to}`);
+      // "Sending", not "resent" — this is the same fire-and-forget endpoint as
+      // emailAgreementToCustomer above, so it can only make the same promise.
+      setMsg(`Sending the signed copy to ${to}…`);
       await refresh();
     } catch (e) {
       // Toast-style failure surfacing — keeps the agent on the page
       // instead of losing context to a dialog.
       setMsg(`Resend failed: ${e?.message || 'unknown error'}`);
     }
+    finally { setAgreementEmailBusy(''); }
   };
 
   const waitForImages = (win) => {
@@ -2810,7 +2835,27 @@ token
 	}
   return (
     <AppShell me={me} logout={logout}>
-      {msg ? <p className="label">{msg}</p> : null}
+      {/* Live region (polite): this line is injected ~570 lines above the buttons
+          that cause it, with no focus change, so without it a screen-reader user
+          gets no feedback at all. Polite, not alert, because the same element
+          also carries failures and validation messages.
+
+          The role lives on a PERSISTENT wrapper, not on the <p>. A live region
+          has to be in the DOM and idle before its contents change, or the screen
+          reader never registered it as a region to watch: injecting a node that
+          already has role="status" and text is a no-op on NVDA and JAWS (it does
+          announce on VoiceOver, which is how this passes a spot check on a Mac
+          and fails for ops on Windows). The empty div adds no height or margin,
+          and the first message of a session is exactly the one that was silent.
+
+          textTransform/letterSpacing override (same as line 737 and 623): .label
+          is uppercase + .05em tracking, which collapses l/I and destroys
+          word-shape. These messages are sentences, and several now carry the
+          customer email the agent is meant to read back — the one token that
+          must survive verbatim. */}
+      <div role="status">
+        {msg ? <p className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>{msg}</p> : null}
+      </div>
       {/* Lifecycle rail (Innovation #1): stage strip + Balance/Deposit always
           visible. agreementFull is the bypassCache agreement fetch this page
           already does — the server-side source of truth for balance. */}
@@ -3386,8 +3431,8 @@ token
                   <button className="ios-action-btn" onClick={() => issueLinkAction('signature')}>Request Signature</button>
                   <button className="ios-action-btn" onClick={() => issueLinkAction('payment')}>Request Payment</button>
                   <button className="ios-action-btn" onClick={emailReservationDetail}>Email Reservation Detail</button>
-                  <button className="ios-action-btn" onClick={emailAgreementToCustomer} disabled={!['CHECKED_OUT','CHECKED_IN','CHECKED_IN_UNPAID'].includes(String(row?.status || '').toUpperCase())}>Email Agreement</button>
-                  <button className="ios-action-btn" onClick={resendSignedCopy} disabled={!['CHECKED_OUT','CHECKED_IN','CHECKED_IN_UNPAID'].includes(String(row?.status || '').toUpperCase())} title="One-click resend to customer email on file (no prompt)">Resend Signed Copy</button>
+                  <button className="ios-action-btn" onClick={emailAgreementToCustomer} disabled={!!agreementEmailBusy || !['CHECKED_OUT','CHECKED_IN','CHECKED_IN_UNPAID'].includes(String(row?.status || '').toUpperCase())}>{agreementEmailBusy === 'email' ? 'Sending…' : 'Email Agreement'}</button>
+                  <button className="ios-action-btn" onClick={resendSignedCopy} disabled={!!agreementEmailBusy || !['CHECKED_OUT','CHECKED_IN','CHECKED_IN_UNPAID'].includes(String(row?.status || '').toUpperCase())} title="One-click resend to customer email on file (no prompt)">{agreementEmailBusy === 'resend' ? 'Sending…' : 'Resend Signed Copy'}</button>
                 </div>
               </section>
 

@@ -1,0 +1,273 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Consola de reservas — el aviso del email deja de prometer entrega</title>
+<style>
+  :root {
+    --p: #8752FE; --p-700: #6d3df2; --p-800: #5b31c9;
+    --title: #29223f; --muted: #6f668f; --border: #e6dfff;
+    --text-3: #8b849f;
+    --shadow: 0 14px 32px rgba(35, 21, 80, .08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 34px 26px 60px;
+    background: linear-gradient(180deg, #fdfcff 0%, #f6f2ff 100%);
+    color: #1f1f28; min-height: 100vh;
+    font-family: Aptos, 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+    font-size: 15px; line-height: 1.5;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 25px; font-weight: 850; color: var(--title); letter-spacing: -.01em; margin: 0 0 6px; }
+  h2 { font-size: 16px; font-weight: 850; color: var(--title); margin: 34px 0 12px; }
+  .lede { color: var(--muted); max-width: 80ch; margin: 0 0 6px; }
+  .lede b { color: var(--title); }
+  .meta { color: var(--muted); font-size: 13px; margin: 0 0 30px; }
+
+  .row { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; margin-bottom: 10px; }
+  .col { flex: 1 1 400px; min-width: 340px; }
+  .tag {
+    display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 800;
+    letter-spacing: .04em; text-transform: uppercase; padding: 5px 11px; border-radius: 999px;
+    margin-bottom: 11px;
+  }
+  .tag.now { background: #fdecec; color: #a52222; border: 1px solid #f6cfcf; }
+  .tag.opt { background: #ecfaf6; color: #0d7a67; border: 1px solid #c7efe6; }
+  .note { color: var(--muted); font-size: 13.5px; margin: 11px 2px 0; }
+  .note b { color: var(--title); }
+
+  /* ── fiel a frontend/src/app/globals.css + reservations/[id]/page.js ── */
+  .frame {
+    background: #fff; border: 1px solid var(--border); border-radius: 18px;
+    padding: 18px 20px 22px; box-shadow: var(--shadow);
+  }
+  .topbar {
+    display: flex; align-items: center; gap: 10px; padding-bottom: 12px;
+    border-bottom: 1px solid #f3efff; margin-bottom: 14px;
+  }
+  .crumb { color: var(--muted); font-size: 12.5px; }
+  .crumb b { color: var(--title); }
+  /* .label — 11px, 600, var(--text-3). uppercase/.05em SOLO en el estado "hoy":
+     el MUST de Graphic Design quita ambos en la linea de mensaje (igual que
+     page.js:737), asi que los paneles de la propuesta van en caja normal. */
+  .label {
+    color: var(--text-3); font-size: 11px; font-weight: 600;
+    letter-spacing: .05em; text-transform: uppercase; margin: 0 0 14px;
+  }
+  /* Solo se quitan uppercase y tracking — el tamano SIGUE siendo 11px, igual que
+     el build. El font-size no se toca en este ticket (ver seccion 6). */
+  .label.good { text-transform: none; letter-spacing: 0; }
+  .label.bad { color: #a52222; }
+  .label.good { color: #0d7a67; }
+  .btnrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .btn {
+    font-size: 12.5px; font-weight: 700; padding: 7px 12px; border-radius: 10px;
+    border: 1px solid var(--border); background: #faf8ff; color: var(--p-800);
+  }
+  .btn.primary { background: var(--p); border-color: var(--p); color: #fff; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; background: #fff;
+          border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #f3efff; vertical-align: top; }
+  th { background: #faf8ff; font-weight: 800; color: var(--title); font-size: 13px; }
+  tr:last-child td { border-bottom: none; }
+  code { font-family: 'Cascadia Code', Consolas, monospace; font-size: 12.5px;
+         background: #f4f0ff; padding: 1px 5px; border-radius: 5px; color: var(--p-800); }
+</style>
+<div class="wrap">
+  <h1>La consola deja de decir "successfully" sobre un email que todavía no salió</h1>
+  <p class="lede">
+    <b>Hallazgo de Innovation</b> sobre el ticket de <code>autoEmailedAt</code>. En
+    <code>reservations/[id]/page.js</code> los dos botones que mandan el contrato escriben
+    su mensaje en cuanto el backend contesta <b>202</b>. Pero
+    <code>POST /api/rental-agreements/:id/email-agreement</code> solo valida de forma
+    sincrona y le pasa el trabajo real (Puppeteer + SMTP) a un <code>setImmediate</code>
+    con su propio <code>catch</code>. En el instante en que se pinta el mensaje
+    <b>no se sabe nada de la entrega</b> — es el mismo defecto que acabamos de quitar de
+    la pantalla DONE del kiosko.
+  </p>
+  <p class="meta">2026-08-17 · rama <code>claude/quirky-saha-bec5f5</code> · consola de staff (solo ingles, sin i18n)</p>
+
+  <h2>1 · Boton "Email Agreement" — <code>emailAgreementToCustomer</code></h2>
+  <div class="row">
+    <div class="col">
+      <span class="tag now">● Hoy — afirma lo que no sabe</span>
+      <div class="frame">
+        <div class="topbar"><span class="crumb">Reservations / <b>#RES-4821</b> · Maria Gonzalez</span></div>
+        <p class="label bad">Agreement emailed successfully</p>
+        <div class="btnrow">
+          <span class="btn primary">Email Agreement</span>
+          <span class="btn">Resend signed copy</span>
+        </div>
+      </div>
+      <p class="note">
+        <b>"successfully"</b> es un reclamo que el frontend no puede hacer. Si Puppeteer
+        revienta o el SMTP rechaza, el agente ya leyo "successfully" y el fallo solo
+        existe en el audit log y en Sentry.
+      </p>
+    </div>
+    <div class="col">
+      <span class="tag opt">● Opcion A — recomendada</span>
+      <div class="frame">
+        <div class="topbar"><span class="crumb">Reservations / <b>#RES-4821</b> · Maria Gonzalez</span></div>
+        <p class="label good">Sending the agreement to maria.g@gmail.com…</p>
+        <div class="btnrow">
+          <span class="btn primary">Email Agreement</span>
+          <span class="btn">Resend signed copy</span>
+        </div>
+      </div>
+      <p class="note">
+        Promete <b>el envio</b>, no la llegada — el analogo directo del kiosko
+        ("We're sending them to your email"). Nombrar al destinatario le da al agente
+        lo unico accionable: verificar la direccion.
+      </p>
+    </div>
+  </div>
+
+  <h2>2 · Boton "Resend signed copy" — <code>resendSignedCopy</code></h2>
+  <div class="row">
+    <div class="col">
+      <span class="tag now">● Hoy — mismo defecto</span>
+      <div class="frame">
+        <div class="topbar"><span class="crumb">Reservations / <b>#RES-4821</b> · Maria Gonzalez</span></div>
+        <p class="label bad">Signed copy resent to maria.g@gmail.com</p>
+      </div>
+      <p class="note">
+        <b>"resent"</b> en pasado afirma que el reenvio ya ocurrio. Es el mismo endpoint
+        fire-and-forget, 30 lineas mas abajo. Arreglar uno y dejar el otro deja la
+        inconsistencia dentro del mismo par de handlers.
+      </p>
+    </div>
+    <div class="col">
+      <span class="tag opt">● Opcion A — recomendada</span>
+      <div class="frame">
+        <div class="topbar"><span class="crumb">Reservations / <b>#RES-4821</b> · Maria Gonzalez</span></div>
+        <p class="label good">Sending the signed copy to maria.g@gmail.com…</p>
+      </div>
+      <p class="note">
+        Mismo tiempo verbal que el boton de arriba: los dos usan el mismo endpoint, asi
+        que dicen lo mismo.
+      </p>
+    </div>
+  </div>
+
+  <h2>3 · Las dos redacciones sobre la mesa</h2>
+  <table>
+    <tr><th style="width:110px">Opcion</th><th>Email Agreement</th><th>Resend signed copy</th><th style="width:290px">Caracter</th></tr>
+    <tr>
+      <td><b>A</b> — recom.</td>
+      <td><code>Sending the agreement to {to}…</code></td>
+      <td><code>Sending the signed copy to {to}…</code></td>
+      <td>Presente progresivo — calca el kiosko. La elipsis dice "en curso" sin gastar
+          palabras; importa porque <code>.label</code> se pinta en 11px.</td>
+    </tr>
+    <tr>
+      <td><b>B</b></td>
+      <td><code>Agreement is on its way to {to}</code></td>
+      <td><code>Signed copy is on its way to {to}</code></td>
+      <td>Mas calido y mas largo. Igual de honesto, pero ocupa bastante mas linea.</td>
+    </tr>
+  </table>
+
+  <h2>4 · Lo que agregaron las revisiones (aprobado por Hector)</h2>
+  <table>
+    <tr><th style="width:230px">Cambio</th><th>Por que</th></tr>
+    <tr>
+      <td><b>Se quitan las mayusculas</b> de la linea de mensaje
+          (<code>textTransform: 'none'</code>, <code>letterSpacing: 0</code>)</td>
+      <td>MUST de Graphic Design. En mayusculas la <code>l</code> minuscula y la
+          <code>I</code> mayuscula se ven identicas — justo en el token que el agente
+          tiene que leerle al cliente. El override ya existia en
+          <code>page.js:737</code>. Afecta los 93 mensajes de la pagina; todos son
+          frases o texto de error, asi que mejoran todos.</td>
+    </tr>
+    <tr>
+      <td><b>Estado en vuelo</b> en los dos botones
+          (<code>agreementEmailBusy</code>)</td>
+      <td>MUST de Innovation, confirmado por Graphic Design. El cooldown de 60s del
+          backend solo cubre service accounts ("Human path is UNCHANGED"), y la copia
+          nueva se lee como "en curso" y nunca resuelve en pantalla — invita al segundo
+          tap, que manda un segundo contrato. Se reusa el idiom de
+          <code>preArrivalBusy</code> (<code>page.js:2870</code>): boton deshabilitado
+          y etiqueta "Sending…".</td>
+    </tr>
+    <tr>
+      <td><b><code>role="status"</code></b> en la linea de mensaje</td>
+      <td>El mensaje se inyecta ~570 lineas arriba del boton, sin cambio de foco: sin
+          live region un usuario de lector de pantalla no recibe nada. Cero cambio
+          visual.</td>
+    </tr>
+    <tr>
+      <td><b>Tercera cadena</b>:
+          <code>checkout-wizard-v2/page.js:1869</code></td>
+      <td>Decia "Agreement built. <b>Email queued</b>." — exactamente la palabra que el
+          precedente reserva para BullMQ. Ahora: "Agreement built. Sending it to the
+          customer…".</td>
+    </tr>
+  </table>
+
+  <h2>5 · Lo que <u>no</u> se toca</h2>
+  <table>
+    <tr><th style="width:330px">Cadena</th><th>Por que se queda</th></tr>
+    <tr>
+      <td><code>Reservation Detail email sent to {…}</code></td>
+      <td><b>Es verdad.</b> <code>POST /:id/send-detail-email</code> hace
+          <code>await sendEmail(...)</code> antes de contestar 200. El pasado esta
+          ganado — y el contraste ("sent" donde se espero, "sending" donde no) es
+          justamente la senal que le queda al agente.</td>
+    </tr>
+    <tr>
+      <td><code>{ ok: true, queued: true, to }</code></td>
+      <td>Campo de wire preexistente en <code>scheduleEmailDelivery</code>. Renombrarlo
+          a <code>pending</code> alinearia con el kiosko, pero es contrato con otros
+          consumidores y queda fuera de este ticket. <b>Se reporta, no se cambia.</b></td>
+    </tr>
+    <tr>
+      <td>El estilo de <code>&lt;p className="label"&gt;</code></td>
+      <td>Exito y fallo se pintan identicos (mismo gris, 11px). Es real, pero redisenar
+          el toast excede "una cadena". Ver seccion 6.</td>
+    </tr>
+  </table>
+
+  <h2>6 · Follow-ups que salieron de las revisiones (NO se hacen aqui)</h2>
+  <table>
+    <tr><th style="width:300px">Follow-up</th><th>Nota</th></tr>
+    <tr>
+      <td><b>La linea de mensaje no tiene casa</b>: nunca se auto-limpia, exito y fallo se
+          ven igual, el tamano sigue en 11px, y el destinatario queda fuera de pantalla
+          una vez que el boton deja de decir "Sending…"</td>
+      <td>Los cuatro son el mismo problema y Graphic Design pide resolverlos JUNTOS, con
+          mockup, usando <code>.surface-note</code> y los tokens
+          <code>--danger-*</code>/<code>--ok-*</code> que ya existen — no un toast nuevo.
+          Ahi tambien se corrige el hex fuera de token <code>#a32d2d</code> de
+          <code>page.js:737</code> (deliberadamente NO lo copie al reusar el override) y
+          se decide el font-size.</td>
+    </tr>
+    <tr>
+      <td><b>El cooldown de 60s no cubre humanos</b>
+          (<code>rental-agreements.routes.js:239</code>)</td>
+      <td>El guard nuevo cierra la ventana del doble-tap, pero el boton se re-habilita
+          apenas llega el 202: un segundo clic deliberado 5s despues manda otro contrato.
+          El arreglo durable es sacar <code>checkAgreementEmailCooldown</code> del branch
+          <code>isServiceAccount</code> — cambia comportamiento backend para humanos
+          (empezarian a ver 429) y necesita su propio QA.</td>
+    </tr>
+    <tr>
+      <td><b>Apuntar al staff donde sale el fallo</b></td>
+      <td><b>Ojo con el motivo.</b> La pagina SI reporta el fallo: el catch escribe una
+          fila de audit (<code>rental-agreements.service.js:4030</code>) y la pagina
+          renderiza <code>auditLogs</code>. El problema real es que
+          <code>refresh()</code> no re-consulta los audit logs, asi que un agente al que
+          le dijeramos "revisa el log" veria una lista vieja y concluiria que si se
+          envio — peor que el silencio. El ticket es "conectar el refetch de audit logs
+          a refresh(), y ENTONCES apuntar al staff", no "la pagina no puede reportar
+          fallos".</td>
+    </tr>
+    <tr>
+      <td><b>El wizard v2 esta fuera del tema</b></td>
+      <td>Esa tarjeta usa hexes ambar hard-coded (<code>#FEF3C7</code>/<code>#FCD34D</code>/
+          <code>#92400E</code>) en vez de <code>--warn-*</code>, y sale por un
+          <code>&lt;a&gt;</code> pelado en vez de <code>.button-subtle</code>: no invierte
+          en dark mode. Ticket aparte.</td>
+    </tr>
+  </table>
+</div>

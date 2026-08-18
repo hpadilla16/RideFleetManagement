@@ -1866,7 +1866,13 @@ function StepClosed({ reservation }) {
   return (
     <div style={cardStyle}>
       <h3 style={h3Style}>Checkout complete ✓</h3>
-      <p>Agreement built. Email queued.</p>
+      {/* Not "queued" (2026-08-17): this screen reports the same
+          fire-and-forget send the reservation console does — CLOSED hands it to
+          a setImmediate, nothing awaits it. In this codebase a queue is the
+          durable BullMQ layer in lib/queue, so "queued" promises retry
+          semantics this send has none of; see pendingConfirmationEmail in
+          backend/src/modules/booking-engine/booking-engine.service.js:600. */}
+      <p>Agreement built. Sending it to the customer…</p>
       <a href={`/reservations/${reservation.id}`}>Back to reservation</a>
     </div>
   );
