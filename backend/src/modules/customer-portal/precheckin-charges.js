@@ -85,10 +85,28 @@ export function discountApplier(discount) {
  * submitted, then came back to fix their address and submitted again, had the
  * first run's own service rows sitting in the base the second time — and the
  * policy re-priced UPWARD for them. MEASURED: 300 daily + a 12.00 service gave
- * 30.00, then 31.20. Excluding add-ons closes that BY CONSTRUCTION rather than
- * by argument: the base no longer contains anything this handler writes, so
- * running it twice cannot move the number. That is the property to preserve if
- * this filter is ever edited again.
+ * 30.00, then 31.20. Excluding add-ons closes that ON THE NORMAL PATH: nothing
+ * this handler ADDS to the sheet lands in the base with a nonzero total, so a
+ * plain re-submission cannot move the number.
+ *
+ * THAT GUARANTEE STOPS AT THE OTA BRANCH, and the limit is worth stating
+ * because it is easy to read this filter as covering more than it does. This
+ * filter governs what the handler ADDS. The third-party branch below also
+ * REMOVES: it deletes DAILY / FEE / SERVICE_LINKED_FEE after the base has been
+ * read. A second submission on an OTA reservation therefore reads a sheet whose
+ * rental rows the first run already deleted, and the base collapses. MEASURED
+ * and pinned by "PINS a REMAINING non-idempotency on the OTA path": 30.00, then
+ * 0.00. That is not caused by this change — the old rule quoted 10% of the
+ * surviving service row instead, equally wrong — but it is not fixed by it
+ * either. Closing it means deriving the base from the RENTAL (pricingSnapshot,
+ * or isBaseRentalRow() in reservation-extend.service.js) rather than summing a
+ * sheet this transaction is in the middle of rewriting. That is a second
+ * pricing decision; raised for Hector rather than taken as a rider.
+ *
+ * (One row this handler writes IS in the base: OTA_PREPAID_VOUCHER, whose
+ * source is not an add-on and whose chargeType is UNIT. Its total is always 0,
+ * so it is harmless arithmetically — but "nothing this handler writes" would be
+ * literally untrue, and this file is read by people looking for exactly that.)
  *
  * What it costs, and why it needed Hector rather than a quiet fix. This handler
  * is NOT the only writer of that source — reservation-pricing.service.js:1037
@@ -113,6 +131,28 @@ export function discountApplier(discount) {
  * base, so it lists what counts. Here the base is "everything that is not sold
  * on top", and a fee source added tomorrow belongs in it; listing what counts
  * would silently drop that fee out of every percentage quote.
+ *
+ * SERVICE_LINKED_FEE is KNOWINGLY LEFT IN, and it is the one row the rule above
+ * does not explain cleanly. booking-engine.service.js writes it as the fee
+ * attached to a SOLD SERVICE, so it is an add-on's fee rather than the rental's:
+ * a website-sold child seat now drops out of the base while the fee the website
+ * stapled to it stays. It is left in because "not add-ons" was the decision and
+ * "not add-ons, and not fees that trace back to one" is a further one. Flagged
+ * with the cross-surface question below rather than settled quietly.
+ *
+ * THIS BASE IS NOT THE SAME AS THE ONE THE OTHER SURFACES USE — do not read the
+ * change as having unified them. Booking prices a PERCENTAGE plan off
+ * quote.baseTotal, which rates.service.js:885 builds from the daily-rate rows
+ * alone, and the reservation pricing editor uses dailyRate × days
+ * (frontend/src/app/reservations/[id]/page.js). Both are RENTAL ONLY: add-on
+ * free, and fee free. This base is rental PLUS fees, so pre-check-in went from
+ * disagreeing with them one way to disagreeing the other way. Two live
+ * consequences: a customer can be quoted one premium here and a different one
+ * for the same reservation at booking, and — because insuranceChargeFor() does
+ * not set priceOverridden — an agent who opens the reservation and hits Save
+ * has the editor rebuild this row off the rental alone, silently replacing the
+ * premium the customer accepted. Raised for Hector with the OTA gap above; the
+ * single-decision fix for both is to make the base the rental everywhere.
  */
 const NON_BASE_SOURCES = new Set(SERVICE_CHARGE_SOURCES.map((s) => s.toUpperCase()));
 

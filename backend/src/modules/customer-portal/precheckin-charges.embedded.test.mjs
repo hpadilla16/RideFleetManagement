@@ -618,6 +618,45 @@ describe('a double-tapped Submit', () => {
     assert.equal(Number(insurance.total), 30, '10% of the 300 rental only — the 50.00 agent extra is out of the base');
   });
 
+  it('PINS a REMAINING non-idempotency on the OTA path', async () => {
+    // A pin, not a passing grade — the counterpart to the case above, and the
+    // limit of what excluding add-ons bought us.
+    //
+    // insuranceBaseFrom() controls what this handler ADDS to the base. On the
+    // OTA branch the handler also REMOVES from it: after the base is read
+    // (line ~298) the third-party sweep deletes DAILY / FEE /
+    // SERVICE_LINKED_FEE (line ~380). So a SECOND submission on an OTA
+    // reservation reads a sheet whose rental rows the FIRST run already
+    // deleted, and the base collapses to whatever is left — which the
+    // exclusions now empty almost completely.
+    //
+    // This predates the base change and is not caused by it: under the old
+    // "everything on the sheet" rule the same re-submission quoted 10% of the
+    // surviving service row instead. Both numbers are wrong; this one is just
+    // wrong differently. Fixing it means deriving the base from the RENTAL
+    // (pricingSnapshot / isBaseRentalRow) instead of summing the sheet, which
+    // is a second pricing decision — raised for Hector, not taken here.
+    const reservation = await makeReservation({
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+
+    const submission = () => applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'PCT' },
+      insurancePlans: PLANS,
+      thirdPartyBooking: { isThirdParty: true, voucherUrl: null },
+    });
+
+    await submission();
+    const first = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    assert.equal(Number(first.total), 30, 'first submission still prices off the rental');
+
+    await submission();
+    const second = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    assert.equal(Number(second.total), 0, 'the OTA sweep already deleted the rental rows the base is made of');
+  });
+
   it('keeps FEES in the base — "not add-ons" is not "rental only"', async () => {
     // The other half of the decision, and the easy thing to get wrong when
     // editing insuranceBaseFrom: it is an EXCLUSION list. Fees are part of what

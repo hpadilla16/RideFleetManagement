@@ -179,7 +179,54 @@ GROUP BY 1, 2
 ORDER BY premium_change DESC NULLS LAST;
 
 
+-- ── 3c · RENTAL vs FEES: the follow-up decision, priced ─────────────
+-- The base chosen on 2026-08-17 is "the rental AND its fees". Booking and the
+-- reservation editor both price a PERCENTAGE plan off the RENTAL ALONE
+-- (rates.service.js:885 builds baseTotal from daily-rate rows;
+-- frontend/src/app/reservations/[id]/page.js uses dailyRate × days). So
+-- pre-check-in still disagrees with them, and an agent hitting Save in the
+-- editor rebuilds the row off the rental — silently re-pricing what the
+-- customer accepted.
+--
+-- `fee_premium` below is what going rental-only EVERYWHERE would additionally
+-- give up, on top of the add-on premium in query 3. Rental rows are identified
+-- the way isBaseRentalRow() does it (reservation-extend.service.js:381):
+-- BASE_RATE, DAILY, or an old source-less row whose code/name is DAILY.
+WITH base_rows AS (
+  SELECT
+    pr."tenantId",
+    pr.reservation_id,
+    pr.pct,
+    c.total,
+    (upper(coalesce(c.source,'')) IN ('BASE_RATE','DAILY')
+      OR (coalesce(trim(c.source),'') = ''
+          AND (upper(coalesce(c.code,'')) = 'DAILY' OR upper(trim(c.name)) = 'DAILY'))) AS is_rental
+  FROM pct_reservations pr
+  JOIN "ReservationCharge" c
+    ON c."reservationId" = pr.reservation_id
+   AND c.selected
+   AND upper(coalesce(c.source,'')) <> 'INSURANCE'
+   AND upper(coalesce(c."chargeType"::text,'')) NOT IN ('TAX','DEPOSIT')
+   AND upper(coalesce(c.source,'')) NOT IN ('ADDITIONAL_SERVICE','SERVICE','ADDITIONAL_SERVICE_PRECHECKIN','KIOSK_UPSELL')
+)
+SELECT
+  coalesce(t.name, b."tenantId")                                        AS tenant,
+  round(sum(b.total) FILTER (WHERE b.is_rental), 2)                     AS rental_dollars,
+  round(sum(b.total) FILTER (WHERE NOT b.is_rental), 2)                 AS fee_dollars,
+  round(sum(b.total * b.pct / 100) FILTER (WHERE NOT b.is_rental), 2)   AS fee_premium,
+  count(*) FILTER (WHERE NOT b.is_rental)                               AS fee_rows
+FROM base_rows b
+LEFT JOIN "Tenant" t ON t.id = b."tenantId"
+GROUP BY 1
+ORDER BY fee_premium DESC NULLS LAST;
+
+
 -- ── 4 · DRIFT THAT HAD ALREADY HAPPENED ─────────────────────────────
+-- CAVEAT: `insurance_new_basis` models the NORMAL path. On an OTA/third-party
+-- reservation the third-party sweep deletes the rental rows before a second
+-- submission reads the base, so the real new basis there is ~0, not
+-- charged − add-ons × pct. Those rows are UNDERSTATED here. See the OTA
+-- paragraph in insuranceBaseFrom(); the pin is in the embedded test.
 -- Reservations pre-checked-in MORE THAN ONCE carrying a PERCENTAGE line: the
 -- ones where a customer was actually re-priced upward. `insurance_new_basis` is
 -- what the same reservation would quote under the new rule.
