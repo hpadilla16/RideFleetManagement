@@ -746,6 +746,50 @@ describe('a double-tapped Submit', () => {
     assert.equal(Number(insurance.total), 30, '10% of the 300 rental only — the 50.00 agent extra is out of the base');
   });
 
+  it('QUOTES MORE when the excluded row is a CREDIT — the direction that costs the customer', async () => {
+    // THE ONLY CASE THAT GOES THE OTHER WAY, and the only assertion standing
+    // between a customer and a "cleanup" that nets credits back into the base.
+    // The docblock on insuranceBaseFrom describes this; until 2026-08-18 nothing
+    // exercised it, so the file's most expensive claim was untested.
+    //
+    // The shape is real, not hypothetical. addManualCharge() rejects amount === 0
+    // and NOT negatives (reservation-pricing.service.js:964 —
+    // `!Number.isFinite(amount) || amount === 0`), and on the PRE-CHECKOUT branch
+    // it stamps preSource itself, ignoring the `source` the caller asked for and
+    // the one line 960 computed (`:1037` — kind !== 'insurance' means
+    // ADDITIONAL_SERVICE_PRECHECKIN, full stop). So an admin goodwill credit
+    // entered before check-out lands on the sheet AS a pre-check-in add-on row
+    // with a negative total, and the exclusion list drops it.
+    //
+    // RECOMPUTED BY HAND, not read off a green run:
+    //   old base = 300 + (-100)      = 200  ->  10% = $20.00
+    //   new base = 300 (credit is out) = 300  ->  10% = $30.00
+    // The customer is quoted $10.00 MORE. Defensible — a credit against the
+    // rental is not a reason to charge less for the coverage on it — but it is
+    // the reason "this change only ever lowers quotes" would be a lie.
+    const reservation = await makeReservation({
+      charges: [
+        { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+        // Exactly what addManualCharge's pre-checkout branch writes for a -100
+        // goodwill credit: the caller's ADMIN_CORRECTION is discarded for this.
+        { source: 'ADDITIONAL_SERVICE_PRECHECKIN', name: 'Goodwill credit', quantity: 1, rate: -100, total: -100, sortOrder: 10, taxable: true },
+      ],
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'PCT' },
+      insurancePlans: PLANS,
+    });
+
+    const insurance = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    assert.equal(
+      Number(insurance.total), 30,
+      '10% of the 300 rental — 20.00 was the OLD number, when the credit netted off the base',
+    );
+  });
+
   it('PINS a REMAINING non-idempotency on the OTA path', async () => {
     // A pin, not a passing grade — the counterpart to the case above, and the
     // limit of what excluding add-ons bought us.
