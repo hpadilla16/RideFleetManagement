@@ -29,18 +29,19 @@ const KNOWN_OUT = {
   // whole chain. Fix the script, then delete this line.
   'test:toll-void-credit': 'hangs: no --test-force-exit',
   'test:route-handlers': 'hangs: no --test-force-exit',
-  // Need a reachable Postgres; the chain must stay runnable on a laptop.
-  // Out of `npm test` is NOT out of CI. Everything below that boots
-  // embedded-postgres is run by the `embedded-postgres-suites` job in
-  // beta-ci.yml via `npm run test:embedded`, and the last test in this file
-  // fails if that stops being true. The two that are not embedded-pg suites
-  // are called out individually.
+  // Need a reachable Postgres; the chain must stay runnable on a laptop. But
+  // out of `npm test` is NOT out of CI, which is the whole point of the last
+  // three tests in this file: everything below that boots embedded-postgres is
+  // run by the `embedded-postgres-suites` job in beta-ci.yml via
+  // `npm run test:embedded`, and this suite fails if that stops being true —
+  // including if the job is merely commented out or switched off with `if:`.
+  // The two entries that are NOT embedded-pg suites say so individually.
   'test:module-access-audit': 'DB-backed (.db.test.mjs); run by the tenant-isolation-suite job',
-  'test:customer-inspection': 'DB-backed via the shared prisma singleton; needs a live DATABASE_URL, run by nobody',
+  'test:customer-inspection': 'DB-backed via the shared prisma singleton; needs a live DATABASE_URL, run by no automation',
   'test:customer-docs-backfill': 'embedded-postgres; also in test:embedded (CI)',
   'test:precheckin-charges': 'embedded-postgres; also in test:embedded (CI)',
   // The aggregate CI entry point. Installing embedded-postgres and booting
-  // seven throwaway clusters is ~4 minutes and a `npm install --no-save`, so it
+  // seven throwaway clusters is ~5 minutes and a `npm install --no-save`, so it
   // cannot sit in the chain a laptop runs; it gets its own CI job instead.
   'test:embedded': 'boots embedded-postgres; run by the embedded-postgres-suites CI job',
   // Landed on main in the 194 commits between this branch and prod, already
@@ -92,12 +93,24 @@ test('KNOWN_OUT does not outlive the scripts it excuses', () => {
 });
 
 /**
- * Test files named by no script, as of 2026-08-06. NOT an approval — a
- * high-water mark. Deleting an entry (by wiring the file into a script) is
- * always welcome; adding one requires a deliberate edit here, which is the
- * whole point.
+ * Test files named by no script, as of 2026-08-06 for src/ and 2026-08-17 for
+ * scripts/. NOT an approval — a high-water mark. Deleting an entry (by wiring
+ * the file into a script) is always welcome; adding one requires a deliberate
+ * edit here, which is the whole point.
+ *
+ * The walk covers src/ AND scripts/. It was src/ only until the embedded-suite
+ * guard needed scripts/, at which point a ratchet that ignored half the tree
+ * the detector reads was just a place for a suite to hide.
  */
 const UNRUN_FILES_BASELINE = new Set([
+  // scripts/ joined this ratchet when the embedded-suite guard below started
+  // scanning it. Widening the walk without grandfathering these three would
+  // have failed the suite for files this commit never touched; they are real
+  // suites nobody runs, same deal as the src/ entries — audit and wire them,
+  // then delete the lines.
+  'scripts/backfill-inspection-photos-to-storage.test.mjs',
+  'scripts/tl-rematch-existing.test.mjs',
+  'scripts/unblock-pre-terms-reservations.test.mjs',
   'src/lib/integration-crypto.test.mjs',
   'src/lib/prisma.test.mjs',
   'src/lib/queue/priorities.test.mjs',
@@ -167,7 +180,7 @@ test('no NEW test file is left unrun by every script', () => {
   for (const cmd of Object.values(pkg.scripts)) {
     for (const m of String(cmd).matchAll(/[\w./-]+\.test\.mjs/g)) named.add(m[0]);
   }
-  const unrun = testFiles('src').filter((f) => !named.has(f));
+  const unrun = [...testFiles('src'), ...testFiles('scripts')].filter((f) => !named.has(f));
   const added = unrun.filter((f) => !UNRUN_FILES_BASELINE.has(f));
   assert.deepEqual(
     added,
@@ -183,7 +196,7 @@ test('the baseline shrinks, never silently rots', () => {
   for (const cmd of Object.values(pkg.scripts)) {
     for (const m of String(cmd).matchAll(/[\w./-]+\.test\.mjs/g)) named.add(m[0]);
   }
-  const all = new Set(testFiles('src'));
+  const all = new Set([...testFiles('src'), ...testFiles('scripts')]);
   const stale = [...UNRUN_FILES_BASELINE].filter((f) => !all.has(f) || named.has(f));
   assert.deepEqual(stale, [], `Baseline entries to delete (gone or now wired): ${stale.join(', ')}`);
 });
@@ -212,7 +225,14 @@ function suitesBootingEmbeddedPg() {
   // The IMPORT SPECIFIER, not a bare substring: this very file names
   // embedded-pg-boot in the prose above, and a substring match duly reported
   // the guard itself as an unrun suite the first time it ran.
-  const IMPORTS_BOOT = /from\s+['"][^'"]*embedded-pg-boot\.mjs['"]/;
+  //
+  // `import(` as well as `from`, so a suite that boots the helper lazily is not
+  // invisible. Two blind spots remain and are deliberate: a suite that drives
+  // the `embedded-postgres` package directly instead of through this helper,
+  // and one that reaches it via a shared fixture module (testFiles only reads
+  // *.test.mjs and does not follow into helpers). The helper is the repo
+  // convention; if that stops being true, this needs to walk imports.
+  const IMPORTS_BOOT = /(?:from|import\()\s*['"][^'"]*embedded-pg-boot\.mjs['"]/;
   return [...testFiles('src'), ...testFiles('scripts')].filter((f) =>
     IMPORTS_BOOT.test(readFileSync(f, 'utf8')),
   );
@@ -239,13 +259,47 @@ test('`test:embedded` does not name a suite that has stopped booting embedded pg
   assert.deepEqual(stale, [], `"test:embedded" names suite(s) that no longer boot embedded pg: ${stale.join(', ')}`);
 });
 
-test('beta-ci.yml actually runs `npm run test:embedded`', () => {
-  // The point of the whole exercise. Naming the suites in a script they can be
-  // run BY is not coverage; a job that runs them is. If this file moves, fix
-  // the path — do not delete the assertion.
-  const ci = readFileSync(new URL('../../../.github/workflows/beta-ci.yml', import.meta.url), 'utf8');
-  assert.ok(
-    ci.includes('npm run test:embedded'),
-    'beta-ci.yml no longer runs `npm run test:embedded` — the embedded suites are unguarded again',
+test('beta-ci.yml actually runs `npm run test:embedded`, and the job is live', () => {
+  // The point of the whole exercise. Naming the suites in a script they COULD
+  // be run by is not coverage; a job that runs them is.
+  //
+  // A whole-file `includes()` was the first version and it was not good enough:
+  // BOTH ways someone actually disables a job — commenting the step out, and
+  // adding `if: false` to a job they think is flaky — left it green, while only
+  // deleting the job outright was caught. That is the same blind spot this file
+  // fixed twice before (the substring `chain.includes` at the top, and the bare
+  // `embedded-pg-boot` match below), so it does not get to be introduced a
+  // third time. Comment lines are stripped, the invocation must survive on a
+  // real `run:` line, and the job must carry no kill switch.
+  const CI_PATH = '../../../.github/workflows/beta-ci.yml';
+  let ci;
+  try {
+    ci = readFileSync(new URL(CI_PATH, import.meta.url), 'utf8');
+  } catch (err) {
+    // Not an fs stack trace: this assertion needs the repo root, so a backend
+    // tree checked out on its own (or COPY'd into the fleet-backend image,
+    // which is built from backend/ and has no .github) fails here for a reason
+    // that has nothing to do with the guard. Say so.
+    assert.fail(
+      `Cannot read ${CI_PATH} (${err.code ?? err.message}). This guard asserts CI still runs ` +
+        'the embedded suites and therefore needs a FULL repo checkout, not a standalone backend/ tree.',
+    );
+  }
+  // Comment lines removed first. Everything below reasons about the LIVE file.
+  const live = ci.replace(/^[ 	]*#.*$/gm, '');
+  assert.match(
+    live,
+    /^\s*run:\s*.*npm run test:embedded/m,
+    'beta-ci.yml no longer runs `npm run test:embedded` on an active step — the embedded suites are unguarded again',
   );
+  // ...and the job holding it must carry no kill switch. `if: false` on the job
+  // leaves the run: line intact while running nothing.
+  const body = /^  embedded-postgres-suites:$([\s\S]*?)^  \S/m.exec(live)?.[1];
+  assert.ok(body, 'the embedded-postgres-suites job is gone from beta-ci.yml');
+  for (const [label, killSwitch] of [['if:', /^\s{4,}if:/m], ['continue-on-error: true', /^\s*continue-on-error:\s*true/m]]) {
+    assert.ok(
+      !killSwitch.test(body),
+      `embedded-postgres-suites carries \`${label}\` — a job that can skip itself, or pass while failing, is not a gate`,
+    );
+  }
 });

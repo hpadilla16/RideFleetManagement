@@ -138,11 +138,12 @@ jobs:
         env:
           DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_unit_only?schema=public'
         run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location
+
   embedded-postgres-suites:
     # The repo's only tests that touch a real transaction, a real unique index
     # and real concurrency. Seven suites, all of them excused from `npm test`
     # for good reason — they need `npm install --no-save embedded-postgres`,
-    # which `npm ci` does not provide, and about four minutes — and therefore
+    # which `npm ci` does not provide, and about five minutes — and therefore
     # run by NOTHING until this job existed.
     #
     # The one that made this urgent is precheckin-charges.embedded: the only
@@ -161,8 +162,10 @@ jobs:
     # Each suite initdb's a cluster and runs `prisma db push` + `prisma
     # generate`; measured at ~26-58s each, ~5 min for the set. The cap is a
     # backstop against a suite that hangs waiting on a cluster that never came
-    # up, not a target.
-    timeout-minutes: 25
+    # up, not a target. The only measurements are from a fast local box; hosted
+    # runners commonly land 2-3x slower, and a timeout-red is indistinguishable
+    # from a defect-red, so the cap is generous on purpose.
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: backend
@@ -171,20 +174,46 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
       - run: npm ci
+      - name: Generate the Prisma client
+        # Every other backend job does this (see backend-check) and this one
+        # needs it for a reason of its own: backfill-inspection-photos-to-storage
+        # statically imports { Prisma } from '@prisma/client'. Without this step
+        # the job survives only on @prisma/client's postinstall plus the fact
+        # that `node --test` runs files ALPHABETICALLY, so two suites happen to
+        # call `prisma generate` in their before() before that import is
+        # reached. Renaming a file would silently change that. One line removes
+        # the coupling (QA, 2026-08-17).
+        run: npm run prisma:generate
       - name: Install embedded-postgres
         # --no-save deliberately: it is a test-harness binary, not a dependency
         # of the app, and adding it to package.json would put a ~100MB platform
         # download in front of every `npm ci` in every other job and on every
         # dev box. Same invocation the suites' own headers document.
-        run: npm install --no-save embedded-postgres
+        #
+        # PINNED, and it matters more than usual: the `latest` dist-tag for this
+        # package is currently a PRERELEASE (18.4.0-beta.17). --no-save means no
+        # lockfile entry, so there is no integrity hash and no reproducibility
+        # from anywhere else — an unpinned floating beta on the job that gates
+        # main goes red on its own schedule, with no commit to blame. This is
+        # the exact version every measurement in this job's commit was taken
+        # against. Bump it deliberately, never implicitly.
+        run: npm install --no-save embedded-postgres@18.4.0-beta.17
       - name: Embedded-postgres suites
         # --test-concurrency=1 (in the script) is load-bearing, not caution.
         # node --test runs FILES in parallel by default, and every one of these
         # calls `prisma generate` in its before(), which writes the shared
         # node_modules/.prisma/client. Seven of those at once race on the same
         # output directory. Sequential also keeps peak memory to one cluster.
+        #
+        # `node --test` sorts the files ALPHABETICALLY: the order they appear
+        # in the script is not the order they run in. Nothing here depends on
+        # order — the Prisma-client step above exists so it never does — but do
+        # not read the list as a sequence.
         run: npm run test:embedded
+
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:
