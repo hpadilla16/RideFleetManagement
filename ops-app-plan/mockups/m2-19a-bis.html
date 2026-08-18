@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RideOps · M2 — Frame 19A-bis (las tres variantes del cierre en fila: recorded · verifying · unverified)</title>
+<style>
+/* ============================================================
+   TOKENS — copiados VERBATIM de m2-tanda-c.html / m2-17f-bis.html.
+   Este frame NO introduce ningún token nuevo. Introduce TRES
+   modificadores (.v.warnv, .v.chk, .spin.xs) y reusa .kv.note
+   (aprobado en 17F-bis). El andamio .detail y .fold NO son UI.
+   ============================================================ */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-200:#d9c9ff; --p-300:#c0a8ff;
+  --p-400:#9f79ff; --p-500:#7f4ff0; --p-600:#6a35e0; --p-700:#5a26c9;
+  --p-800:#45189e; --p-900:#2e1071;
+  --brand:#8752FE;
+  --brand-a08:rgba(135,82,254,.08); --brand-a12:rgba(135,82,254,.12);
+  --brand-a16:rgba(135,82,254,.16); --brand-a20:rgba(135,82,254,.20);
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --focus:#0b63d6; --focus-halo:rgba(11,99,214,.22);
+  --tonal:#f6f2ff;
+  --sh-b1:0 1px 0 rgba(255,255,255,.85) inset,0 2px 6px -2px rgba(69,24,158,.14),0 10px 24px -10px rgba(135,82,254,.22);
+  --r-xl:24px; --r-2xl:28px;
+  --bd-lite:1px solid rgba(135,82,254,.14);
+  --sh-3:0 1px 3px rgba(24,16,54,.06),0 14px 30px -10px rgba(38,20,90,.14),0 44px 80px -28px rgba(38,20,90,.22);
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+  background:var(--n-100);color:var(--n-900);font-size:14px;line-height:1.5}
+h1,h2,h3{margin:0;letter-spacing:.005em}
+.tnum{font-variant-numeric:tabular-nums}
+code{background:var(--n-100);border-radius:5px;padding:0 4px;font-size:.92em}
+
+/* ---------- chrome del documento ---------- */
+.doc-head{max-width:1780px;margin:0 auto;padding:26px 24px 10px}
+.doc-head h1{font-size:24px;font-weight:850}
+.doc-head h1 .v2{display:inline-flex;align-items:center;margin-left:10px;padding:3px 12px;border-radius:999px;
+  background:linear-gradient(135deg,var(--p-600),var(--p-800));color:#fff;font-size:13px;font-weight:800;vertical-align:middle}
+.doc-head p{margin:8px 0 0;color:var(--n-700);max-width:1080px}
+.meta-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.mchip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 11px;
+  border-radius:8px;background:var(--p-50);border:1px solid var(--brand-a20);
+  color:var(--p-800);font-size:12.5px;font-weight:700}
+.mchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.mchip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.mchip.dang{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+section.blk{max-width:1780px;margin:0 auto;padding:24px 24px 8px}
+.blk-head{margin-bottom:16px}
+.blk-head .eyebrow{color:var(--p-700);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.blk-head h2{font-size:20px;font-weight:800;margin-top:2px}
+.blk-head p{color:var(--n-700);margin:6px 0 0;max-width:1060px}
+.state-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.schip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:6px;
+  font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--n-50);border:1px solid var(--n-200);color:var(--n-700)}
+.schip i{width:6px;height:6px;border-radius:50%;background:currentColor;font-style:normal}
+.schip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.schip.mut{background:var(--n-50);border-color:var(--n-300);color:var(--n-700)}
+.schip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.frames{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;padding-bottom:26px}
+figure{margin:0}
+figcaption{font-size:13px;font-weight:800;color:var(--n-800);margin:0 0 8px 6px;max-width:400px}
+figcaption small{display:block;font-weight:600;color:var(--n-600);font-size:12px}
+.tag{display:inline-flex;align-items:center;min-height:20px;padding:1px 8px;border-radius:6px;
+  font-size:10.5px;font-weight:850;letter-spacing:.06em;text-transform:uppercase;margin-right:7px;vertical-align:2px}
+.tag.cont{background:var(--ok-bg);border:1px solid var(--ok-bd);color:var(--ok-tx)}
+.tag.prop{background:var(--info-bg);border:1px solid var(--info-bd);color:#0a4c9e}
+.tag.corr{background:var(--warn-bg);border:1px solid var(--warn-bd);color:var(--warn-tx)}
+
+/* ---------- notas / anotaciones ---------- */
+.notes{flex:1 1 340px;max-width:440px;background:var(--n-0);border:var(--bd-lite);
+  border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1)}
+.notes h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+.note{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--n-100);font-size:13px;color:var(--n-700)}
+.note:last-child{border-bottom:0}
+.note b{color:var(--n-900)}
+.m{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;
+  border-radius:50%;background:var(--p-600);color:#fff;font-size:12px;font-weight:800;line-height:1}
+.m.inframe{position:absolute;z-index:9;box-shadow:0 0 0 2px #fff}
+.motion{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--info-bg);
+  border:1px solid var(--info-bd);font-size:12.5px;color:var(--n-800)}
+.motion b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--info);margin-bottom:6px}
+.motion ul,.contrast ul{margin:0;padding-left:16px}
+.motion li,.contrast li{margin:3px 0}
+.contrast{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--n-50);
+  border:1px solid var(--n-200);font-size:12.5px;color:var(--n-700)}
+.contrast b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:6px}
+.decision{margin-top:14px;padding:14px 16px;border-radius:16px;background:var(--warn-bg);
+  border:1.5px dashed var(--warn-bd);color:var(--warn-tx);font-size:13px}
+.decision b{display:block;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.decision ul{margin:6px 0 0;padding-left:18px}
+.decision li{margin:4px 0}
+.gap{margin-top:14px;padding:14px 16px;border-radius:16px;background:var(--danger-bg);
+  border:1.5px solid var(--danger-bd);color:var(--danger-tx);font-size:13px}
+.gap b{display:block;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.gap ul{margin:6px 0 0;padding-left:18px}
+.gap li{margin:4px 0}
+
+/* ---------- tabla de copy es/en ---------- */
+.copy{flex:1 1 460px;max-width:700px;background:var(--n-0);border:var(--bd-lite);border-radius:20px;
+  padding:16px 18px;box-shadow:var(--sh-b1)}
+.copy h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+table.ct{width:100%;border-collapse:collapse;font-size:12.5px}
+table.ct th{text-align:left;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--n-600);
+  border-bottom:1.5px solid var(--n-200);padding:6px 8px 6px 0}
+table.ct td{border-bottom:1px solid var(--n-100);padding:7px 8px 7px 0;vertical-align:top;color:var(--n-800)}
+table.ct td.k{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--p-800);white-space:nowrap}
+table.ct td.fr{font-weight:850;color:var(--n-900);white-space:nowrap}
+table.ct td.st{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+table.ct td.st.new{color:var(--p-800)}
+table.ct td.st.reuse{color:var(--ok-tx)}
+table.ct td.st.old{color:var(--n-600)}
+table.ct tr.sep td{background:var(--n-50);font-weight:850;color:var(--n-800);font-size:11px;
+  letter-spacing:.05em;text-transform:uppercase;padding:6px 8px 6px 8px}
+
+/* ---------- frame de teléfono ---------- */
+.phone{position:relative;width:390px;border:9px solid var(--n-900);border-radius:40px;
+  overflow:hidden;background:var(--n-50);box-shadow:var(--sh-3)}
+.statusbar{position:relative;z-index:4;display:flex;justify-content:space-between;align-items:center;height:32px;
+  padding:0 20px;font-size:11.5px;font-weight:700;color:var(--n-700);background:var(--n-50)}
+.statusbar.on-white{background:var(--n-0)}
+.scr{position:relative;display:flex;flex-direction:column;min-height:724px;padding:0}
+.wizbar{position:relative;z-index:4;display:flex;align-items:center;gap:8px;padding:7px 8px;
+  background:rgba(255,255,255,.98);border-bottom:1px solid var(--n-200)}
+.icobtn{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+  color:var(--n-800);flex:0 0 auto;border:1.5px solid var(--n-300);background:var(--n-0)}
+.wizbar .tt{flex:1;min-width:0}
+.wizbar .tt b{display:block;font-size:15.5px;font-weight:850;color:var(--n-900);line-height:1.15}
+.wizbar .tt span{font-size:12px;font-weight:650;color:var(--n-700)}
+.srail{display:flex;align-items:flex-start;padding:12px 8px 6px;background:var(--n-0)}
+.sr{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:5px;position:relative;min-height:48px}
+.sr .d{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  border:2px solid var(--n-300);background:var(--n-0);color:var(--n-600);font-size:11px;font-weight:850;
+  position:relative;z-index:2}
+.sr .lb{font-size:11.5px;font-weight:800;color:var(--n-600);text-align:center;line-height:1.15}
+.sr::before{content:"";position:absolute;top:11px;right:50%;width:100%;height:3px;background:var(--n-200);z-index:1}
+.sr:first-child::before{display:none}
+.sr.done .d{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.sr.done .lb{color:var(--ok-tx)}
+.sr.done::before,.sr.on::before{background:var(--ok-bd)}
+
+/* ---------- tarjetas ---------- */
+.vcard{background:linear-gradient(180deg,#fff,#fdfcff);border:var(--bd-lite);border-radius:20px;
+  padding:12px 14px;box-shadow:var(--sh-b1)}
+.vcard.warn{border:1.5px solid var(--warn-bd);background:#fffdf7}
+.vcard.okc{border:1.5px solid var(--ok-bd);background:#fbfffd}
+.vhead{display:flex;align-items:center;gap:9px}
+.vhead b{font-size:14.5px;font-weight:850;color:var(--n-900);flex:1}
+.vpill{display:inline-flex;align-items:center;gap:5px;min-height:26px;padding:2px 9px;border-radius:8px;
+  font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.vpill.ok{background:var(--ok-bg);border:1px solid var(--ok-bd);color:var(--ok-tx)}
+.vpill.warn{background:var(--warn-bg);border:1px solid var(--warn-bd);color:var(--warn-tx)}
+.vpill.mut{background:var(--n-50);border:1px solid var(--n-200);color:var(--n-700)}
+.kv{display:flex;align-items:flex-start;gap:8px;padding:7px 0 6px;border-top:1px solid var(--n-100);font-size:13.5px}
+.kv:first-of-type{border-top:0}
+.kv .k{color:var(--n-700);font-weight:650;flex:0 0 96px}
+.kv .v{color:var(--n-900);font-weight:750;flex:1;min-width:0}
+.kv .v.okv{color:var(--ok-tx);font-weight:800}
+.kv .v.pend{color:var(--n-700);font-weight:700}
+/* MODIFICADOR reusado de 17F-bis — .kv sin columna de clave */
+.kv.note{display:block;color:var(--n-700);font-weight:600;font-size:12.5px;line-height:1.42;padding-top:8px}
+/* MODIFICADORES NUEVOS DE ESTE FRAME — 3, cero tokens nuevos.
+   .warnv es el hermano ámbar que faltaba de .okv/.miss (que ya existen). */
+.kv .v.warnv{color:var(--warn-tx);font-weight:800}
+.kv .v.chk{display:flex;align-items:center;gap:8px;color:var(--n-700);font-weight:700}
+.spin.xs{width:14px;height:14px;border-width:2.5px}
+
+/* ---------- comunes ---------- */
+.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;
+  font-size:13.5px;font-weight:600;line-height:1.45;border:1px solid}
+.banner svg{flex:0 0 auto;margin-top:1px}
+.b-warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.b-info{background:var(--info-bg);border-color:var(--info-bd);color:var(--n-800)}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:56px;border-radius:18px;
+  font-size:16px;font-weight:800;letter-spacing:.01em}
+.btn-primary{background:linear-gradient(180deg,#7442e8,var(--p-600));color:#fff;
+  box-shadow:0 1px 0 rgba(255,255,255,.28) inset,0 4px 10px -4px rgba(69,24,158,.35),0 14px 28px -12px rgba(135,82,254,.45)}
+.btn-ghost{background:var(--n-0);border:1.5px solid var(--n-300);color:var(--n-800);box-shadow:var(--sh-1)}
+.btn-sm{min-height:48px;font-size:14.5px;border-radius:14px}
+.spin{width:18px;height:18px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;
+  border-radius:50%;animation:rot 1s linear infinite}
+.spin.dk{border-color:rgba(106,53,224,.25);border-top-color:var(--p-600)}
+@keyframes rot{to{transform:rotate(360deg)}}
+.wpad{padding:14px 14px 18px;display:flex;flex-direction:column;flex:1;gap:11px;position:relative;z-index:2}
+.dock{margin-top:auto;display:grid;gap:9px;padding:12px 0 0;position:relative}
+.dock::before{content:"";position:absolute;top:0;left:-14px;right:-14px;height:1px;background:var(--n-200)}
+.dock .why{font-size:12.5px;font-weight:750;color:var(--n-700);text-align:center;line-height:1.4}
+.center-state{display:flex;flex-direction:column;align-items:center;text-align:center;gap:9px;padding:0 8px}
+.big-ic{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.big-ic.ok{background:var(--ok-bg);color:var(--ok-tx)}
+.center-state h4{margin:0;font-size:22px;font-weight:850;color:var(--n-900)}
+.center-state p{margin:0;font-size:14px;color:var(--n-700);max-width:300px}
+
+/* ---------- andamio de documento (NO es UI) ---------- */
+.fold{position:absolute;left:0;right:0;top:724px;z-index:8;border-top:2px dashed var(--danger-bd);
+  display:flex;justify-content:flex-end;pointer-events:none}
+.fold span{transform:translateY(-50%);background:var(--danger-bg);border:1px solid var(--danger-bd);
+  color:var(--danger-tx);font-size:10px;font-weight:850;letter-spacing:.05em;text-transform:uppercase;
+  padding:2px 8px;border-radius:6px;margin-right:10px}
+.detail{width:408px;border-radius:22px;border:1.5px dashed var(--n-300);background:var(--n-25);padding:16px 18px}
+.detail + .detail{margin-top:16px}
+.detail .dl{font-size:11px;font-weight:850;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:9px}
+.detail .dw{width:344px}
+.detail .dn{margin-top:10px;font-size:12.5px;color:var(--n-700);font-weight:650;line-height:1.45;max-width:344px}
+
+footer.dod{max-width:1780px;margin:0 auto;padding:10px 24px 50px;color:var(--n-700);font-size:13px}
+footer.dod .card{background:var(--n-0);border:var(--bd-lite);border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1);margin-bottom:14px}
+footer.dod b{color:var(--n-900)}
+footer.dod h3{font-size:15px;font-weight:850;margin-bottom:8px;color:var(--n-900)}
+footer.dod li{margin:5px 0}
+.rejtbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.rejtbl th{text-align:left;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--n-600);
+  border-bottom:1.5px solid var(--n-200);padding:6px 10px 6px 0}
+.rejtbl td{border-bottom:1px solid var(--n-100);padding:8px 10px 8px 0;vertical-align:top;color:var(--n-800)}
+.rejtbl td.fr{font-weight:850;color:var(--n-900);max-width:220px}
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <h1>RideOps · Frame 19A-bis <span class="v2">un solo frame · 3 variantes en fila</span></h1>
+  <p><b>De dónde sale.</b> De la revisión de Graphic Design al build de <b>M2-H5</b>. El frame aprobado <b>19A</b> vive
+  en <code>m2-tanda-c.html</code> (sección 19); esta lámina <b>lo sustituye</b> y no toca <b>19B</b> ni <b>19C</b>, que
+  siguen como se aprobaron. Se puede leer sola.</p>
+  <p style="margin-top:8px"><b>Qué corrige.</b> (1) Hoy el estado <code>unverified</code> <b>cae en 19A y es
+  indistinguible del éxito</b>: mismo héroe verde <i>Entrega cerrada</i>, misma tarjeta <i>Registro</i> en tono ok con
+  pastilla verde, y la única diferencia es el texto de <b>una fila de 13.5 px</b> con el mismo peso visual que
+  <i>Firma</i> y <i>Contrato</i>. El agente que mira dos segundos y guarda el teléfono se lleva un éxito. Es el mismo
+  defecto que <b>19B existe para impedir</b>, sólo que en silencio: la copy es correcta, el problema es que va sola y en
+  un contexto que la contradice. (2) <code>closedByUs: true</code> se fija <b>antes</b> del <code>await</code> que
+  verifica, así que durante todo el viaje de ida y vuelta la fila afirma que no se pudo confirmar y <b>luego salta a
+  verde</b>: la app declara un fallo antes de haber preguntado. Rompe la regla del progreso de cierre —
+  <b>ningún renglón se adelanta al 200</b>.</p>
+  <div class="meta-chips">
+    <span class="mchip dang">Prohibido que un estado sin confirmar se lea como un éxito</span>
+    <span class="mchip dang">Prohibido que un renglón afirme un resultado antes de que vuelva la llamada que lo produce</span>
+    <span class="mchip">Mismos tokens, mismo cromo, mismos componentes que la Tanda C · <b>cero color nuevo</b></span>
+    <span class="mchip">Targets ≥ 48 · CTA 56 · una mano · legible al sol</span>
+    <span class="mchip">Copy es/en completa · contraste medido de todo par nuevo</span>
+    <span class="mchip warn">La app sólo afirma lo que el servidor confirma: el 200 prueba la sesión, no la entrega</span>
+    <span class="mchip ok">Verificado en <code>checkout-session.service.js:417</code>, <code>:437-575</code>,
+      <code>:551-562</code> y en la ausencia de <code>fuelPolicy</code> en todo <code>backend/src</code></span>
+  </div>
+  <div class="meta-chips" style="margin-top:6px">
+    <span class="tag corr">Corrección</span><span style="font-size:12.5px;color:var(--n-700);margin-right:14px">arregla algo verificado en código; rechazarlo deja un hueco real</span>
+    <span class="tag prop">Propuesta</span><span style="font-size:12.5px;color:var(--n-700)">Hector puede rechazarlo sin que se caiga nada</span>
+  </div>
+</div>
+
+<section class="blk">
+  <div class="blk-head">
+    <span class="eyebrow">Frame 19A-bis · M2-H5 · sustituye a 19A</span>
+    <h2>Las tres variantes del cierre, en fila — para ver de un vistazo qué distingue a cada una</h2>
+    <p>Las tres pintan <b>el mismo hecho probado</b>: el <code>transition</code> devolvió 200 y la sesión quedó
+    <code>CLOSED</code>. Lo que las separa es <b>lo que la app sabe de la reserva</b> después de preguntar. Arriba de la
+    zona de contenido <b>no cambia un píxel</b> en las tres: mismo wizbar (incluido el subtítulo <i>Cerrado 11:04</i>,
+    que también está probado), mismo rail de 5 fases completas. La escalada ocurre <b>debajo del héroe</b>, y ocurre en
+    <b>cuatro sitios a la vez</b> — título, aviso, tono de la tarjeta y dock — nunca en un solo renglón.</p>
+    <div class="state-chips">
+      <span class="schip ok"><i></i>recorded — la reserva lo confirma</span>
+      <span class="schip mut"><i></i>verifying — se está preguntando</span>
+      <span class="schip warn"><i></i>unverified — no se pudo preguntar</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <!-- ============================ VARIANTE 1 · recorded ============================ -->
+    <figure>
+      <figcaption><span class="tag cont">Continuidad</span>19A-bis · <b>recorded</b>
+        <small>el camino normal: el 200 cerró la sesión y la reserva confirma la entrega</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>11:05</span><span>LTE · 68 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Cerrado 11:04</span></div>
+          </div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">Pago</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">Inspección</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="wpad">
+            <div class="center-state" style="margin:10px 0 0">
+              <div class="big-ic ok"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></div>
+              <h4>Entrega cerrada<span class="m" style="margin-left:6px;vertical-align:5px">1</span></h4>
+              <p>Laura Méndez · Corolla 2023 · U-112 · 11:04</p>
+            </div>
+            <div class="vcard" style="margin-top:12px">
+              <div class="vhead"><b>Antes de que se vaya</b><span class="m">2</span></div>
+              <div class="kv"><span class="k">Llaves</span><span class="v">Entrega las llaves y la tarjeta de circulación</span></div>
+              <div class="kv"><span class="k">Regreso</span><span class="v">20 ago · 10:30 · Patio Centro</span></div>
+              <div class="kv note">El combustible y el kilometraje de salida quedaron en el registro de la inspección,
+                no en esta pantalla.<span class="m" style="margin-left:6px">3</span></div>
+            </div>
+            <div class="vcard">
+              <div class="vhead"><b>Registro</b><span class="vpill ok">Registrada</span><span class="m">4</span></div>
+              <div class="kv"><span class="k">Sesión</span><span class="v okv">Cerrada 11:04<span class="m" style="margin-left:6px">5</span></span></div>
+              <div class="kv"><span class="k">Entrega</span><span class="v okv">Registrada en la reserva · 11:04<span class="m" style="margin-left:6px">6</span></span></div>
+              <div class="kv"><span class="k">Inspección</span><span class="v">8 fotos · 24 131 km</span></div>
+              <div class="kv"><span class="k">Firma</span><span class="v">Laura Méndez · 10:54</span></div>
+              <div class="kv"><span class="k">Contrato</span><span class="v">Se pidió enviarlo por correo a las 11:04</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Volver al inicio</div>
+              <div class="btn btn-ghost btn-sm">Ver el detalle de la sesión</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- ============================ VARIANTE 2 · verifying ============================ -->
+    <figure>
+      <figcaption><span class="tag corr">Corrección</span>19A-bis · <b>verifying</b>
+        <small>el estado que hoy NO existe — y por eso la app afirma el fallo antes de preguntar</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>11:04</span><span>LTE · 68 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Cerrado 11:04</span></div>
+          </div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">Pago</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">Inspección</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="wpad">
+            <div class="center-state" style="margin:10px 0 0">
+              <div class="big-ic ok"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></div>
+              <h4>Checkout cerrado<span class="m" style="margin-left:6px;vertical-align:5px">7</span></h4>
+              <p>Laura Méndez · Corolla 2023 · U-112 · 11:04</p>
+            </div>
+            <div class="vcard" style="margin-top:12px">
+              <div class="vhead"><b>Antes de que se vaya</b></div>
+              <div class="kv"><span class="k">Llaves</span><span class="v">Entrega las llaves y la tarjeta de circulación</span></div>
+              <div class="kv"><span class="k">Regreso</span><span class="v">20 ago · 10:30 · Patio Centro</span></div>
+              <div class="kv note">El combustible y el kilometraje de salida quedaron en el registro de la inspección,
+                no en esta pantalla.</div>
+            </div>
+            <div class="vcard">
+              <div class="vhead"><b>Registro</b><span class="vpill mut">Comprobando</span></div>
+              <div class="kv"><span class="k">Sesión</span><span class="v okv">Cerrada 11:04</span></div>
+              <div class="kv"><span class="k">Entrega</span><span class="v chk"><span class="spin dk xs"></span>Comprobando en la reserva…<span class="m" style="margin-left:2px">8</span></span></div>
+              <div class="kv"><span class="k">Inspección</span><span class="v">8 fotos · 24 131 km</span></div>
+              <div class="kv"><span class="k">Firma</span><span class="v">Laura Méndez · 10:54</span></div>
+              <div class="kv"><span class="k">Contrato</span><span class="v">Se pidió enviarlo por correo a las 11:04</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Volver al inicio</div>
+              <div class="btn btn-ghost btn-sm">Ver el detalle de la sesión</div>
+              <div class="why">Nada bloquea: el agente puede salir. La comprobación no se pierde, queda en la
+                sesión.<span class="m" style="margin-left:4px">9</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- ============================ VARIANTE 3 · unverified ============================ -->
+    <figure>
+      <figcaption><span class="tag corr">Corrección</span>19A-bis · <b>unverified</b>
+        <small>el estado que hoy se lee como éxito — cuatro señales a la vez, ninguna dependiente del color</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>11:05</span><span>LTE · 68 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Cerrado 11:04</span></div>
+          </div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">Pago</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">Inspección</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="wpad">
+            <div class="center-state" style="margin:10px 0 0">
+              <div class="big-ic ok"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></div>
+              <h4>Checkout cerrado</h4>
+              <p>Laura Méndez · Corolla 2023 · U-112 · 11:04</p>
+            </div>
+            <div class="banner b-warn" style="margin-top:12px">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4L2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17v.5"/></svg>
+              <span>El cierre entró, pero <b>no pudimos confirmarlo en la reserva</b>. Compruébalo antes de dar por
+                terminada la entrega.<span class="m" style="margin-left:4px">10</span></span></div>
+            <div class="vcard">
+              <div class="vhead"><b>Antes de que se vaya</b></div>
+              <div class="kv"><span class="k">Llaves</span><span class="v">Entrega las llaves y la tarjeta de circulación</span></div>
+              <div class="kv"><span class="k">Regreso</span><span class="v">20 ago · 10:30 · Patio Centro</span></div>
+              <div class="kv note">El combustible y el kilometraje de salida quedaron en el registro de la inspección,
+                no en esta pantalla.</div>
+            </div>
+            <div class="vcard warn">
+              <div class="vhead"><b>Registro</b><span class="vpill warn">Sin confirmar</span><span class="m">11</span></div>
+              <div class="kv"><span class="k">Sesión</span><span class="v okv">Cerrada 11:04</span></div>
+              <div class="kv"><span class="k">Entrega</span><span class="v warnv">Sin confirmar</span></div>
+              <div class="kv"><span class="k">Inspección</span><span class="v">8 fotos · 24 131 km</span></div>
+              <div class="kv"><span class="k">Firma</span><span class="v">Laura Méndez · 10:54</span></div>
+              <div class="kv"><span class="k">Contrato</span><span class="v">Se pidió enviarlo por correo a las 11:04</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Volver a comprobar</div>
+              <div class="btn btn-ghost btn-sm">Volver al inicio</div>
+              <div class="why">Es una consulta al servidor, no un reintento del cierre: la sesión ya está cerrada y no
+                puede cerrarse dos veces.<span class="m" style="margin-left:4px">12</span></div>
+            </div>
+          </div>
+          <div class="fold"><span>borde inferior de la pantalla · 6.1″</span></div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- ============================ DETALLES ============================ -->
+    <figure>
+      <figcaption>Detalles — <b>no son pantallas nuevas</b>
+        <small>el defecto tal como se pinta hoy, y las variantes de una tarjeta</small></figcaption>
+
+      <div class="detail">
+        <div class="dl">Lo que HOY pinta el build en <code>unverified</code> (el defecto)</div>
+        <div class="dw">
+          <div class="center-state" style="opacity:.94">
+            <div class="big-ic ok"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></div>
+            <h4>Entrega cerrada</h4>
+            <p>Laura Méndez · Corolla 2023 · U-112 · 11:04</p>
+          </div>
+          <div class="vcard" style="margin-top:10px;opacity:.94">
+            <div class="vhead"><b>Registro</b><span class="vpill ok">Sesión cerrada</span></div>
+            <div class="kv"><span class="k">Inspección</span><span class="v okv">8 fotos · 24 131 km</span></div>
+            <div class="kv"><span class="k">Firma</span><span class="v okv">Laura Méndez · 10:54</span></div>
+            <div class="kv"><span class="k">Entrega</span><span class="v">El cierre entró, pero no pudimos confirmarlo en la reserva.</span></div>
+          </div>
+        </div>
+        <div class="dn"><b>La frase correcta, en el sitio que la desmiente.</b> Va a 13.5 px, con el mismo peso que
+          <i>Firma</i> y <i>Contrato</i>, dentro de una tarjeta cuya pastilla dice <i>Sesión cerrada</i> en verde, bajo
+          un héroe verde que afirma <b>exactamente lo que la frase niega</b>. Tres señales de éxito contra una de
+          duda, y la de duda es la más pequeña. En dos segundos de lectura gana el verde.</div>
+      </div>
+
+      <div class="detail">
+        <div class="dl">Variante · reserva <b>sin</b> fecha de regreso</div>
+        <div class="dw">
+          <div class="vcard">
+            <div class="vhead"><b>Antes de que se vaya</b></div>
+            <div class="kv"><span class="k">Llaves</span><span class="v">Entrega las llaves y la tarjeta de circulación</span></div>
+            <div class="kv note">El combustible y el kilometraje de salida quedaron en el registro de la inspección,
+              no en esta pantalla.</div>
+          </div>
+        </div>
+        <div class="dn"><b>Este es el caso que obligaba a resolver SC-1.</b> Sin fecha de regreso se cae la fila
+          <i>Regreso</i>; si además se retira la fila de combustible sin poner nada en su lugar, la tarjeta queda con
+          <b>una sola frase que nunca cambia</b> — un encabezado y una constante. Con el pie de alcance la tarjeta
+          conserva siempre dos renglones, y el segundo dice algo que el agente no sabía. Es la misma regla de 17F-bis:
+          <i>toda tarjeta declara un renglón que existe por el mismo motivo por el que existe la tarjeta</i>.</div>
+      </div>
+
+      <div class="detail">
+        <div class="dl">SC-1 · la fila que se retira</div>
+        <div class="dw">
+          <div class="vcard" style="opacity:.94">
+            <div class="vhead"><b>Antes de que se vaya</b></div>
+            <div class="kv"><span class="k">Combustible</span><span class="v">Se entregó a 7/8 · debe volver igual</span></div>
+          </div>
+        </div>
+        <div class="dn"><b>"Debe volver igual" es una política, y RFM no la modela.</b> Verificado: no existe
+          <code>fuelPolicy</code> ni equivalente en <b>ningún archivo</b> de <code>backend/src</code>. La frase está
+          cableada en el cliente y se le dice <b>en voz alta al cliente</b>, delante del mostrador. Un inquilino de
+          lleno-a-lleno o de combustible prepagado recibe del teléfono una instrucción contraria a su contrato. Ver la
+          decisión pedida abajo.</div>
+      </div>
+    </figure>
+
+    <!-- ============================ NOTAS ============================ -->
+    <aside class="notes">
+      <h3>Anotaciones · 19A-bis</h3>
+
+      <div class="note"><span class="m">1</span><span><b>Respuesta a la pregunta de Hector: el héroe verde SE QUEDA en
+        las tres — y el título NO.</b> El verde es correcto porque nombra un hecho probado: el 200 cerró la sesión, y
+        eso es cierto en las tres variantes. Cambiarlo a ámbar en <code>unverified</code> sería <b>mentir por el otro
+        lado</b> (el cierre sí entró) y además dejaría a 19B sin escala: si el "no se pudo confirmar" ya se pinta como
+        alarma, el rechazo real no tiene dónde subir. Lo que <b>no</b> puede quedarse igual es la palabra:
+        <i>"Entrega cerrada"</i> afirma justamente lo que no se pudo confirmar. En <code>verifying</code> y
+        <code>unverified</code> el título es <b>"Checkout cerrado"</b> — vocabulario que <b>ya está aprobado</b> en la
+        copy de 19B (<i>"El checkout se cerró, pero el servidor no registró la entrega"</i>), donde esta casa ya
+        distinguió las dos cosas. Misma jerarquía, mismo verde, mismo tick, misma posición; una palabra que no
+        sobreafirma.</span></div>
+
+      <div class="note"><span class="m">2</span><span><b>El orden de las tarjetas NO cambia entre variantes.</b>
+        Primero lo que se hace en los siguientes 30 segundos, después el registro administrativo — la jerarquía
+        aprobada en 19A se respeta tal cual. Lo que cambia es que en <code>unverified</code> el aviso se cuela
+        <b>entre el héroe y esta tarjeta</b>: la advertencia tiene que leerse <b>antes</b> de la instrucción de
+        entregar las llaves, no después. Se consideró reordenar las tarjetas en <code>unverified</code> y se
+        <b>descartó</b>: mover bloques entre dos estados de la misma pantalla la vuelve inestable justo cuando el
+        agente necesita orientarse.</span></div>
+
+      <div class="note"><span class="m">3</span><span><b>El pie de alcance (SC-1, camino recomendado).</b> Mismo
+        modificador <code>.kv.note</code> aprobado en 17F-bis: misma separación, mismo ritmo, texto en --n-700 a
+        12.5 px. Va como <b>fila de la tarjeta</b>, no como banner: es alcance, no aviso. Sustituye a
+        <code>coBeforeFuel</code> y es <b>incondicional</b>, así que resuelve a la vez el problema de la política y el
+        de la tarjeta que se queda con una sola frase.</span></div>
+
+      <div class="note"><span class="m">4</span><span><b>La pastilla deja de describir la sesión y pasa a describir la
+        comprobación</b>, que es lo único que varía en esta pantalla. <i>Registrada</i> / <i>Comprobando</i> /
+        <i>Sin confirmar</i>. Y como el mismo estado se repite <b>en palabra</b> en la fila <i>Entrega</i>, la pastilla
+        <b>nunca es el único portador</b> del estado (WCAG 1.4.1): un agente con daltonismo, con el teléfono al sol o
+        con el brillo al mínimo lee lo mismo.</span></div>
+
+      <div class="note"><span class="m">5</span><span><b>La fila ancla: el hecho que el 200 sí prueba.</b> Al mudar la
+        pastilla, <i>Sesión cerrada</i> necesitaba casa propia — si no, la única prueba dura de la pantalla se perdía
+        precisamente en la variante donde más falta hace. Mismo movimiento que 17F-bis hizo con la hora de la
+        inspección: la palabra de estado se queda en la pastilla, el <b>hecho con su hora</b> baja a una fila de
+        13.5 px alineada a la izquierda. La hora es del servidor (<code>finishedAt</code>), nunca del reloj del
+        teléfono.</span></div>
+
+      <div class="note"><span class="m">6</span><span><b>"Registrada en la reserva" es la única formulación que la app
+        puede firmar.</b> No dice "el vehículo quedó marcado como rentado" ni "la reserva avanzó a CHECKED_OUT": dice
+        que se preguntó y que la reserva lo confirma. La cascada de <code>:437-575</code> se traga errores en varios
+        tramos (<code>:526</code>, <code>:557</code>, <code>:571</code>), así que un 200 <b>puede convivir</b> con una
+        reserva que sigue en CONFIRMED — esa es exactamente la razón por la que esta comprobación existe y por la que
+        su resultado no se puede dar por hecho.</span></div>
+
+      <div class="note"><span class="m">7</span><span><b>Por qué el título ya no baila.</b> Si <code>verifying</code>
+        se pinta con "Entrega cerrada" y luego se corrige, el texto más grande de la pantalla cambia bajo los ojos del
+        que lee — el peor sitio posible para un cambio de contenido. La solución no es elegir el título optimista: es
+        <b>no pintar 19A hasta que la comprobación resuelva</b>, reteniendo el primer chequeo en el progreso de cierre
+        de <b>18C</b>, que ya tiene el componente exacto (<code>.steps3</code>, un renglón por tramo, y la regla de que
+        ningún renglón se adelanta). Con eso, 19A pinta ya terminal: <b>el título no cambia nunca después del primer
+        frame</b>. Ver la nota 9 sobre por qué la variante <code>verifying</code> hace falta igualmente.</span></div>
+
+      <div class="note"><span class="m">8</span><span><b>Este es el estado que HOY no existe, y su ausencia es el
+        defecto 2.</b> <code>closedByUs: true</code> se fija <b>antes</b> del <code>await</code> que verifica: durante
+        todo el viaje de ida y vuelta la fila afirma <i>"no pudimos confirmarlo"</i> y luego salta a verde. La app
+        declara un fallo <b>antes de haber preguntado</b>. Eso no es un parpadeo cosmético: es una <b>falsa alarma en
+        el camino feliz</b>, y las falsas alarmas son exactamente lo que enseña al agente a ignorar la de verdad. La
+        corrección estructural es sustituir los dos booleanos por <b>un estado de tres valores</b>
+        (<code>recorded</code> / <code>verifying</code> / <code>unverified</code>): mientras no vuelva la llamada, el
+        renglón no afirma nada — dice que está preguntando. Dibujar <code>verifying</code> no es decorar: es hacer
+        <b>expresable</b> la regla que el build hoy no puede cumplir.</span></div>
+
+      <div class="note"><span class="m">9</span><span><b>Y por eso <code>verifying</code> vive en 19A aunque el primer
+        chequeo se retenga en 18C:</b> cuando el agente pulsa <i>Volver a comprobar</i> desde <code>unverified</code>,
+        la comprobación corre <b>estando ya en esta pantalla</b>. El bucle
+        <code>unverified → verifying → recorded</code> se cierra aquí; sin este frame, el botón no tendría estado
+        intermedio que pintar y volveríamos a un spinner que tapa lo que se está leyendo. Durante
+        <code>verifying</code> <b>nada se bloquea</b>: el agente puede irse. Bloquear una pantalla terminal por una
+        consulta de un segundo, con el cliente delante, sería peor que el problema.</span></div>
+
+      <div class="note"><span class="m">10</span><span><b>El aviso ámbar, y lo que a propósito NO dice.</b> Se
+        consideró añadir <i>"No entregues las llaves"</i> (la línea de 19B) y se <b>descartó</b>: en 19B el servidor
+        <b>rechazó</b> la entrega — hay un hecho negativo. Aquí no sabemos nada, y frenar cada entrega que la app no
+        pudo verificar convertiría un problema de red en un cliente parado en el patio. La copy aprobada
+        (<i>"Compruébalo antes de dar por terminada la entrega"</i>) está bien calibrada: pide una comprobación, no un
+        bloqueo. <b>Si Hector quiere la línea de llaves aquí, cabe</b> — es su decisión de negocio, no mía.</span></div>
+
+      <div class="note"><span class="m">11</span><span><b>La escalada ocurre en cuatro sitios a la vez, y ninguno es
+        sólo color.</b> (a) el título del héroe pierde la palabra <i>Entrega</i>; (b) aparece un banner ámbar que
+        <b>no existe</b> en las otras dos; (c) la tarjeta <i>Registro</i> pasa a <code>.vcard.warn</code> y su pastilla
+        a <code>.vpill.warn</code> con otra palabra; (d) el dock cambia de acción principal. Cualquiera de las cuatro
+        sola es un renglón de 13.5 px, que es justamente el defecto que esta lámina viene a matar. Las cuatro juntas
+        son un estado <b>distinto</b>, no un éxito con nota al pie.</span></div>
+
+      <div class="note"><span class="m">12</span><span><b>"Volver a comprobar" es consulta, no reintento — y lo dice
+        en voz alta.</b> Misma regla que 19C (ADR-5) y que la nota 6 de 19B: desde un estado terminal
+        <code>canTransition</code> devuelve false (<code>state-machine.js:94</code>), así que un botón que reintentara
+        el cierre daría 409 <code>ILLEGAL_TRANSITION</code> para siempre — la puerta falsa que esta casa prohíbe. Este
+        botón hace <b>la misma llamada que la app ya hace sola</b> al cerrar; no es código nuevo, es el mismo
+        <code>await</code>, disparado a mano. Además <b>arregla la contradicción de jerarquía</b>: si la copy dice
+        "compruébalo" y el botón morado dice "Volver al inicio", el color contradice a la frase y gana el
+        color.</span></div>
+
+      <div class="note"><span class="m">13</span><span><b>Un negativo definitivo NO es <code>unverified</code>: es
+        19B.</b> La comprobación tiene tres desenlaces, no dos. Si la reserva responde y <b>confirma</b> → 
+        <code>recorded</code>. Si <b>no se puede preguntar</b> (red, timeout, campo ausente) → <code>unverified</code>,
+        ámbar, "no pudimos confirmarlo". Pero si la reserva responde y <b>sigue en CONFIRMED</b>, eso no es una duda:
+        es la entrega no registrada con un 200 en la mano — el caso de 19B, que ya está aprobado y ya tiene botones.
+        Usar el ámbar para suavizar un negativo conocido sería reintroducir el defecto de esta lámina un piso más
+        abajo. <b>Requisito de build</b>, y depende del parseo de <code>status</code> en
+        <code>DisplayReservation</code> que la Tanda C ya pidió.</span></div>
+
+      <div class="note"><span class="m">14</span><span><b>Estados de carga / vacío / error (DoD-10).</b> <b>Cargando:</b>
+        es <code>verifying</code>, y es un estado <b>dibujado</b> dentro de la pantalla, no un overlay ni un spinner de
+        pantalla completa. <b>Vacío:</b> no existe — la pantalla sólo se alcanza con un 200. <b>Error:</b> es
+        <code>unverified</code>; no hay un cuarto estado de error porque "falló la consulta" y "no hubo respuesta" son
+        <b>lo mismo</b> desde el punto de vista de lo que la app sabe, y fingir que se distinguen sería afirmar de
+        más. <b>Lectores de pantalla:</b> al resolver la comprobación, la fila <i>Entrega</i> anuncia su nuevo valor
+        (región viva / <code>SemanticsService.announce</code>): quien no ve el cambio de color tiene que enterarse
+        igual.</span></div>
+
+      <div class="contrast"><b>Contraste medido</b>
+        <ul>
+          <li><b>PAR NUEVO</b> — banner del aviso: --warn-tx <code>#8a5606</code> sobre --warn-bg
+            <code>#fdf3e2</code>: <b>5.59:1</b>. AA para texto normal (13.5 px / 600). No llega a AAA, igual que el
+            banner ámbar ya aprobado en 19C; el icono va en <code>currentColor</code>, nunca en --warn puro sobre su
+            propio fondo.</li>
+          <li><b>PAR NUEVO</b> — valor <i>Sin confirmar</i> (<code>.kv .v.warnv</code>) --warn-tx
+            <code>#8a5606</code> sobre la tarjeta ámbar <code>#fffdf7</code>: <b>6.05:1</b>. AA para texto normal a
+            13.5 px / 800. El color <b>no</b> es el portador del estado: la palabra lo dice.</li>
+          <li><b>PAR NUEVO</b> — pastilla <i>Comprobando</i> (<code>.vpill.mut</code>) --n-700
+            <code>#4b4362</code> sobre --n-50 <code>#f7f5fd</code>: <b>8.53:1</b> (AAA).</li>
+          <li>Pastilla <i>Sin confirmar</i> (<code>.vpill.warn</code>): mismo par que el banner, <b>5.59:1</b> — ya en
+            uso en la pastilla <i>Regla</i> de 19C; cambia la palabra, no el color.</li>
+          <li>Fila <i>Comprobando en la reserva…</i> (<code>.v.chk</code>) --n-700 sobre la tarjeta neutra
+            <code>#fff→#fdfcff</code>: <b>9.22:1</b>. Pie de alcance (<code>.kv.note</code>), mismo par: <b>9.22:1</b>.
+            Ambos medidos ya en 17F-bis.</li>
+          <li>Spinner <code>.spin.dk.xs</code> — componente no textual (WCAG 1.4.11, umbral 3:1): --p-600
+            <code>#6a35e0</code> sobre blanco <b>6.57:1</b>. Pasa con holgura.</li>
+          <li>Sin cambio: héroe --n-900 sobre --n-50 <b>18.14:1</b>; <code>.v.okv</code> --ok-tx sobre blanco
+            <b>6.85:1</b>; pastilla verde --ok-tx sobre --ok-bg <b>6.19:1</b>; tarjeta ámbar --n-900 sobre
+            <code>#fffdf7</code> <b>17.8:1</b>; <code>why</code> del dock --n-700 sobre --n-50 <b>8.53:1</b>; CTA
+            primario blanco sobre el gradiente <b>5.70:1</b> en su parada peor.</li>
+          <li><b>Cero color nuevo.</b> Verde de estado, ámbar de aviso y morado de marca son los tokens existentes; el
+            rojo se reserva para 19B, que es donde hay un hecho negativo.</li>
+        </ul></div>
+
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>19A-bis entra con fade + 8 px, sin escala, en las tres variantes — la regla aprobada en 19A no cambia. El
+            tick se dibuja en 300 ms una sola vez. Nada de confeti.</li>
+          <li>Con la comprobación retenida en 18C, <b>el título no cambia después de pintar</b>. Si Hector rechaza
+            retenerla, el cambio <code>verifying → recorded</code> es un <b>cross-fade de 200 ms</b> de una sola línea
+            en la misma caja: nunca un desplazamiento de layout.</li>
+          <li><i>Volver a comprobar</i>: spinner <b>en el botón</b>, nunca un overlay que tape lo que el agente está
+            leyendo (regla ya aprobada en 19C).</li>
+          <li>Al pasar de <code>unverified</code> a <code>recorded</code>: haptic de confirmación <b>una vez</b>, nunca
+            de éxito ni en bucle. Es una corrección administrativa, no un logro.</li>
+          <li><code>prefers-reduced-motion</code>: el spinner de la fila se sustituye por el texto solo. La
+            información no vive en el giro.</li>
+        </ul></div>
+
+      <div class="decision"><b>Decisión pedida a Hector: SC-1 — la fila de combustible</b>
+        <b style="text-transform:none;font-size:13px;margin-top:2px">Recomendación: <u>camino B</u> — fuera la fila,
+        dentro el pie de alcance. La política de combustible no la decide el diseño.</b>
+        <ul>
+          <li><b>Por qué B.</b> <i>"debe volver igual"</i> es una <b>afirmación de política</b>, y está cableada en el
+            cliente: verificado que <b>no existe</b> <code>fuelPolicy</code> ni equivalente en ningún archivo de
+            <code>backend/src</code>. En un inquilino de lleno-a-lleno o de combustible prepagado, el teléfono le da al
+            cliente, en voz alta y con el agente delante, una instrucción <b>contraria a su contrato</b>. Eso no es un
+            detalle de copy: es la app hablando por el inquilino sobre algo que el inquilino no configuró.</li>
+          <li><b>Y el pie resuelve además el hueco estructural.</b> Sin él, <i>Antes de que se vaya</i> queda con una
+            frase constante (llaves) y una condicional (regreso); en una reserva sin fecha de regreso, con <b>una sola
+            frase que nunca cambia</b>. El pie es incondicional y aporta un dato: la tarjeta nunca baja de dos
+            renglones útiles.</li>
+          <li><b>Corrección de mi propia propuesta SC-1.</b> El texto que yo había escrito decía "quedan <b>en el
+            contrato</b>". Verificado que eso <b>no se puede afirmar</b>: la copia de odómetro y combustible al contrato
+            es best-effort dentro de un <code>catch</code> que se traga el error
+            (<code>checkout-session.service.js:551-557</code>) y el <code>update</code> lleva
+            <code>.catch(() =&gt; {})</code> (<code>:562</code>). Lo que sí está probado es que quedaron en el registro
+            de la inspección — el servidor la selló. El pie dice eso y nada más.</li>
+          <li><b>Camino A, declarado por si Hector lo prefiere.</b> Vuelve la fila, <b>partida en dos</b>: el hecho
+            (<i>Combustible · Se entregó a 7/8</i>, que la app sí capturó) y la política como frase aparte, y esa frase
+            <b>sólo se pinta si el inquilino la tiene configurada</b>. Eso exige un campo nuevo en el inquilino: no es
+            gratis y no es de esta historia. Mientras no exista el campo, A significa seguir afirmando una política
+            cableada.</li>
+          <li><b>Camino C (mínimo, si A y B no convencen).</b> Fila sólo con el hecho —<i>Se entregó a 7/8</i>— sin
+            política, y sin pie. Es honesto, pero deja el hueco de la reserva sin fecha de regreso sin resolver.</li>
+        </ul>
+      </div>
+
+      <div class="gap"><b>Lo que este frame necesita y hoy no existe</b>
+        <ul>
+          <li><b><code>DisplayReservation</code> no parsea <code>status</code>.</b> El JSON de
+            <code>display-data</code> sí lo trae. Sin ese parseo, la comprobación no puede distinguir
+            <code>recorded</code> de un negativo definitivo, y <i>Volver a comprobar</i> no tiene qué leer. Es una
+            línea de cliente, sin backend, y ya venía pedida en la Tanda C. <b>Es la única dependencia dura de esta
+            lámina.</b></li>
+          <li><b>El resultado de la cascada sigue sin viajar</b> (pedido P9 de la Tanda C:
+            <code>finalize:{reservationAdvanced, agreementFinalized, emailQueued}</code>). Con P9, la fila
+            <i>Entrega</i> se resuelve <b>en la propia respuesta del cierre</b> y <code>verifying</code> casi
+            desaparece del camino feliz. Sin P9, el frame funciona igual con la consulta — sólo cuesta un
+            viaje.</li>
+          <li><b>La copy dice "compruébalo" y hoy no hay dónde.</b> Sin el botón de re-comprobar, la instrucción
+            manda al agente fuera de la app, con el cliente delante. Es el defecto de "decir sin dar la salida" que
+            17F-bis corrigió en la rama B del CTA.</li>
+        </ul></div>
+    </aside>
+
+    <!-- ============================ COPY ============================ -->
+    <div class="copy">
+      <h3>Copy exacta · 19A-bis (es / en)</h3>
+      <table class="ct">
+        <tr><th>Ubicación</th><th>Clave l10n</th><th>ES</th><th>EN</th><th>Estado</th></tr>
+
+        <tr class="sep"><td colspan="5">Héroe</td></tr>
+        <tr><td class="fr">Título · <code>recorded</code></td><td class="k">coClosedTitle</td><td>Entrega cerrada</td><td>Handover closed</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Título · <code>verifying</code> y <code>unverified</code></td><td class="k">coClosedTitleUnverified</td><td>Checkout cerrado</td><td>Checkout closed</td><td class="st new">nueva</td></tr>
+        <tr><td class="fr">Subtítulo · las tres</td><td class="k">coClosedSubtitle</td><td>{nombre} · {vehículo} · {hora}</td><td>{name} · {vehicle} · {time}</td><td class="st old">sin cambio</td></tr>
+
+        <tr class="sep"><td colspan="5">Aviso — sólo en <code>unverified</code></td></tr>
+        <tr><td class="fr">Banner ámbar</td><td class="k">coRecordHandoverUnverifiedNotice</td><td>El cierre entró, pero no pudimos confirmarlo en la reserva. Compruébalo antes de dar por terminada la entrega.</td><td>The close went through, but we couldn't confirm it on the reservation. Check it before you call the handover done.</td><td class="st new">nueva (ya redactada)</td></tr>
+
+        <tr class="sep"><td colspan="5">Tarjeta · Antes de que se vaya</td></tr>
+        <tr><td class="fr">Título</td><td class="k">coBeforeTheyGoTitle</td><td>Antes de que se vaya</td><td>Before they leave</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Llaves</td><td class="k">coBeforeKeys</td><td>Entrega las llaves y la tarjeta de circulación</td><td>Hand over the keys and the registration card</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Regreso (condicional)</td><td class="k">coBeforeReturn</td><td>{fecha} · {hora} · {sede}</td><td>{date} · {time} · {location}</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Pie de alcance (SC-1 · B)</td><td class="k">coBeforeScopeNote</td><td>El combustible y el kilometraje de salida quedaron en el registro de la inspección, no en esta pantalla.</td><td>The departure fuel level and odometer are stored in the inspection record, not on this screen.</td><td class="st new">nueva (sustituye a coBeforeFuel)</td></tr>
+
+        <tr class="sep"><td colspan="5">Tarjeta · Registro</td></tr>
+        <tr><td class="fr">Título</td><td class="k">coRecordTitle</td><td>Registro</td><td>Record</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Pastilla · <code>recorded</code></td><td class="k">coRecordPillRecorded</td><td>Registrada</td><td>Recorded</td><td class="st new">nueva</td></tr>
+        <tr><td class="fr">Pastilla · <code>verifying</code></td><td class="k">coRecordPillChecking</td><td>Comprobando</td><td>Checking</td><td class="st new">nueva</td></tr>
+        <tr><td class="fr">Pastilla · <code>unverified</code></td><td class="k">coRecordPillUnverified</td><td>Sin confirmar</td><td>Not confirmed</td><td class="st new">nueva</td></tr>
+        <tr><td class="fr">Fila ancla · etiqueta</td><td class="k">coRecordRowSession</td><td>Sesión</td><td>Session</td><td class="st new">nueva (etiqueta)</td></tr>
+        <tr><td class="fr">Fila ancla · valor</td><td class="k">coRecordSessionClosedAt</td><td>Cerrada {hora}</td><td>Closed {time}</td><td class="st reuse">reusada (era la pastilla)</td></tr>
+        <tr><td class="fr">Fila entrega · etiqueta</td><td class="k">coRecordRowHandover</td><td>Entrega</td><td>Handover</td><td class="st new">nueva (etiqueta)</td></tr>
+        <tr><td class="fr">Fila entrega · <code>recorded</code></td><td class="k">coRecordHandoverRecorded</td><td>Registrada en la reserva · {hora}</td><td>Recorded on the reservation · {time}</td><td class="st new">nueva</td></tr>
+        <tr><td class="fr">Fila entrega · <code>verifying</code></td><td class="k">coRecordHandoverChecking</td><td>Comprobando en la reserva…</td><td>Checking on the reservation…</td><td class="st new">nueva (ya redactada)</td></tr>
+        <tr><td class="fr">Fila entrega · <code>unverified</code></td><td class="k">coRecordHandoverUnconfirmed</td><td>Sin confirmar</td><td>Not confirmed</td><td class="st new">nueva</td></tr>
+        <tr><td class="fr">Inspección</td><td class="k">coRecordRowInspection</td><td>Inspección</td><td>Inspection</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Firma</td><td class="k">coRecordRowSignature</td><td>Firma</td><td>Signature</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Contrato</td><td class="k">coRecordEmailRequested</td><td>Se pidió enviarlo por correo a las {hora}</td><td>Email delivery was requested at {time}</td><td class="st old">sin cambio</td></tr>
+
+        <tr class="sep"><td colspan="5">Dock</td></tr>
+        <tr><td class="fr">Principal · <code>recorded</code> y <code>verifying</code></td><td class="k">coBackHome</td><td>Volver al inicio</td><td>Back to home</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Secundario · <code>recorded</code> y <code>verifying</code></td><td class="k">coSessionDetail</td><td>Ver el detalle de la sesión</td><td>See session detail</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Pie · <code>verifying</code></td><td class="k">coRecordHandoverCheckingWhy</td><td>Nada bloquea: el agente puede salir. La comprobación no se pierde, queda en la sesión.</td><td>Nothing is blocked: you can leave. The check isn't lost — it stays on the session.</td><td class="st new">nueva</td></tr>
+        <tr><td class="fr">Principal · <code>unverified</code></td><td class="k">coRecordHandoverRecheck</td><td>Volver a comprobar</td><td>Check again</td><td class="st new">nueva</td></tr>
+        <tr><td class="fr">Secundario · <code>unverified</code></td><td class="k">coBackHome</td><td>Volver al inicio</td><td>Back to home</td><td class="st old">sin cambio (baja a fantasma)</td></tr>
+        <tr><td class="fr">Pie · <code>unverified</code></td><td class="k">coRecordHandoverRecheckWhy</td><td>Es una consulta al servidor, no un reintento del cierre: la sesión ya está cerrada y no puede cerrarse dos veces.</td><td>This is a lookup, not a retry of the close: the session is already closed and can't be closed twice.</td><td class="st new">nueva</td></tr>
+      </table>
+      <p style="margin:12px 0 0;font-size:12.5px;color:var(--n-700)"><b>Retiradas:</b>
+        <code>coBeforeFuel</code> (<i>Se entregó a {n}/8 · debe volver igual</i>) — afirma una política que RFM no
+        modela; ver la decisión SC-1. Y <code>coRecordSessionClosed</code> (<i>Sesión cerrada</i>) <b>no se retira</b>:
+        se muda de pastilla a fila y gana la hora, igual que hizo 17F-bis con <code>coInspReceivedAt</code>.</p>
+      <p style="margin:8px 0 0;font-size:12.5px;color:var(--n-700)"><b>Nota de traducción:</b> <i>Checkout cerrado</i>
+        usa deliberadamente la misma palabra que <code>coCloseFailedTitle</code> de 19B, que ya está aprobada en las
+        dos lenguas. No se inventa vocabulario: se reusa el que ya separa <i>checkout</i> de <i>entrega</i>.</p>
+    </div>
+  </div>
+</section>
+
+<footer class="dod">
+
+  <div class="card">
+    <h3>La pregunta que Hector hizo: ¿el héroe verde se queda en las tres?</h3>
+    <ul>
+      <li><b>Sí, se queda — y la jerarquía funciona, con un ajuste de una palabra.</b> El verde nombra un hecho que el
+        200 sí prueba: la sesión de checkout quedó cerrada. Eso es cierto en <code>recorded</code>, en
+        <code>verifying</code> y en <code>unverified</code>. Pintarlo ámbar en la tercera sería mentir por el lado
+        contrario (el cierre <b>sí</b> entró, y decir lo contrario manda al agente a buscar un problema que no
+        existe).</li>
+      <li><b>Y hay un motivo de escala:</b> si "no pude confirmar" ya se pinta como alarma, <b>19B se queda sin
+        registro superior</b>. 19B es un rechazo del servidor con motivo citado y con la instrucción de no soltar las
+        llaves. Entre "no sé" y "el servidor dijo que no" tiene que haber distancia visual, o las dos se leen
+        igual.</li>
+      <li><b>Lo que no funciona es la palabra.</b> El héroe dice <i>"Entrega cerrada"</i> — afirma la <b>entrega</b>,
+        que es exactamente lo que no se pudo confirmar, y lo afirma a 22 px en negrita justo encima de un aviso que lo
+        niega. Cuando el elemento más grande contradice al más pequeño, gana el más grande. Por eso en
+        <code>verifying</code> y <code>unverified</code> el título es <b>"Checkout cerrado"</b>: mismo verde, mismo
+        tick, misma posición, misma jerarquía — una palabra que sólo afirma lo probado. Y no es vocabulario nuevo: es
+        el que 19B ya tiene aprobado.</li>
+      <li><b>Conclusión operativa.</b> El verde deja de ser "todo salió bien" y pasa a ser "esto está probado". Es la
+        misma disciplina que la Tanda C aplicó al correo (<i>"se pidió enviarlo"</i>, no <i>"se envió"</i>): el verbo
+        se ajusta a lo que el servidor garantiza, y el color al hecho, no al ánimo.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Qué es corrección de un defecto verificado y qué es propuesta rechazable</h3>
+    <table class="rejtbl">
+      <tr><th>Cambio</th><th>Tipo</th><th>Si Hector lo rechaza</th></tr>
+
+      <tr><td class="fr">Escalada de <code>unverified</code>: banner ámbar + <code>.vcard.warn</code> + pastilla
+        <i>Sin confirmar</i> + fila <code>.warnv</code></td><td><span class="tag corr">Corrección</span></td>
+        <td><b>El más caro de rechazar.</b> El estado sigue siendo indistinguible del éxito: mismo héroe verde, misma
+        pastilla verde, y la única diferencia en un renglón de 13.5 px con el peso de <i>Firma</i>. El agente que mira
+        dos segundos entrega las llaves de una entrega que la reserva nunca registró — el mismo daño que 19B existe
+        para impedir, en silencio. <b>Recomiendo no rechazarlo.</b></td></tr>
+
+      <tr><td class="fr">Estado <code>verifying</code> (tres valores en vez de dos booleanos)</td>
+        <td><span class="tag corr">Corrección</span></td>
+        <td>Se queda el defecto 2 tal cual: <code>closedByUs</code> puesto antes del <code>await</code> hace que la
+        fila afirme el fallo durante todo el viaje y luego salte a verde. En el <b>camino feliz</b>, lo primero que el
+        agente lee es una falsa alarma. Las falsas alarmas son lo que entrena a ignorar las verdaderas. Coste de
+        construirlo: un enum de tres valores en vez de dos flags.</td></tr>
+
+      <tr><td class="fr">Título <i>Checkout cerrado</i> en <code>verifying</code> y <code>unverified</code></td>
+        <td><span class="tag corr">Corrección</span></td>
+        <td>El texto más grande de la pantalla sigue afirmando <i>Entrega cerrada</i> mientras el banner debajo dice
+        que no se pudo confirmar. Contradicción en el mismo golpe de vista, y gana el grande. Es una clave de copy que
+        reusa vocabulario ya aprobado en 19B.</td></tr>
+
+      <tr><td class="fr">Un negativo definitivo (reserva aún en CONFIRMED) enruta a <b>19B</b>, no a
+        <code>unverified</code></td><td><span class="tag corr">Corrección</span></td>
+        <td>El ámbar se usaría para suavizar un fallo <b>conocido</b>, que es el defecto de esta lámina reintroducido
+        un piso más abajo — y el agente perdería los botones de 19B (avisar al mostrador, copiar el detalle) y la
+        instrucción de no soltar las llaves, que ahí sí corresponde.</td></tr>
+
+      <tr><td class="fr">Fila ancla <i>Sesión · Cerrada 11:04</i> (la pastilla pasa a describir la comprobación)</td>
+        <td><span class="tag corr">Corrección</span></td>
+        <td>Si la pastilla sigue diciendo <i>Sesión cerrada</i>, no queda dónde poner el estado que varía, y en
+        <code>unverified</code> se pierde además la única prueba dura de la pantalla. Alternativa si Hector quiere
+        cero churn de copy aprobada: <b>dos pastillas</b> en la cabecera de la tarjeta — fea en 390 px, pero
+        posible.</td></tr>
+
+      <tr><td class="fr">Botón <i>Volver a comprobar</i> como principal en <code>unverified</code></td>
+        <td><span class="tag prop">Propuesta</span></td>
+        <td>Nada se rompe, pero la copy dice "compruébalo" y no da forma de hacerlo: el agente sale de la app con el
+        cliente delante. <b>Alternativa declarada:</b> promover <i>Ver el detalle de la sesión</i> a principal y dejar
+        <i>Volver al inicio</i> en fantasma — resuelve la contradicción de jerarquía, aunque lleva a una pantalla que
+        no responde la pregunta. <b>Depende</b> de que <code>DisplayReservation</code> parsee
+        <code>status</code>.</td></tr>
+
+      <tr><td class="fr">Retener la primera comprobación en <b>18C</b> para que 19A pinte ya terminal</td>
+        <td><span class="tag prop">Propuesta</span></td>
+        <td>Nada se rompe. 19A pinta en <code>verifying</code> y el título hace un cross-fade una sola vez: aceptable,
+        pero es contenido cambiando bajo los ojos del que lee. La variante <code>verifying</code> hace falta igual
+        para el re-chequeo, así que rechazar esto no elimina ningún frame.</td></tr>
+
+      <tr><td class="fr">SC-1 · fuera la fila de combustible, dentro el pie de alcance</td>
+        <td><span class="tag prop">Propuesta</span></td>
+        <td>La app sigue diciéndole al cliente, en voz alta, una política de devolución que RFM <b>no modela</b> (no
+        hay <code>fuelPolicy</code> en <code>backend/src</code>) y que puede ser falsa para un inquilino de
+        lleno-a-lleno o de prepago. Además <i>Antes de que se vaya</i> se queda, en una reserva sin fecha de regreso,
+        con una sola frase constante. <b>Es decisión de Hector, no mía</b> — caminos A y C escritos en la caja de
+        decisión.</td></tr>
+
+      <tr><td class="fr">El pie dice "en el registro de la inspección", no "en el contrato"</td>
+        <td><span class="tag corr">Corrección</span></td>
+        <td>Es corrección de <b>mi propia</b> redacción de SC-1. La copia al contrato es best-effort y se traga sus
+        errores (<code>checkout-session.service.js:551-557</code>, <code>:562</code>): afirmarla sería prometer un
+        efecto que el código no garantiza — la misma regla por la que el correo dice "se pidió enviarlo".</td></tr>
+
+      <tr><td class="fr">No añadir <i>"No entregues las llaves"</i> en <code>unverified</code></td>
+        <td><span class="tag prop">Propuesta</span></td>
+        <td>Si Hector la quiere, cabe tal cual (<code>coHoldKeys</code> ya existe, aprobada en 19B). Mi lectura: en
+        19B hay un rechazo del servidor; aquí sólo hay ignorancia, y frenar cada entrega que la app no pudo verificar
+        convierte un corte de red en un cliente parado en el patio. Es decisión de negocio.</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Para el PM — lo que hay que mandar construir con esto</h3>
+    <ul>
+      <li><b>El estado de tres valores.</b> Sustituir los booleanos (<code>closedByUs</code> + "entrega confirmada")
+        por un enum <code>recorded | verifying | unverified</code>, y <b>no fijarlo antes del <code>await</code></b>.
+        Regla escrita: <i>ningún renglón afirma un resultado antes de que vuelva la llamada que lo produce</i> — es la
+        misma que ya gobierna el progreso de cierre.</li>
+      <li><b>El enrutado del negativo definitivo.</b> Reserva confirmada → <code>recorded</code>; no se pudo preguntar
+        → <code>unverified</code>; reserva aún en CONFIRMED → <b>19B</b> (frame ya aprobado), con la línea de motivo
+        "La reserva sigue en CONFIRMED" en lugar de la cita del servidor.</li>
+      <li><b>Dependencia dura:</b> <code>DisplayReservation</code> tiene que parsear <code>status</code> (el JSON de
+        <code>display-data</code> ya lo trae). Una línea de cliente, sin backend. Sin ella, ni el re-chequeo ni el
+        enrutado a 19B son posibles.</li>
+      <li><b>Copy:</b> 12 claves nuevas y 1 retirada, todas en la tabla es/en. <code>coBeforeFuel</code> se retira sólo
+        si Hector aprueba el camino B de SC-1.</li>
+      <li><b>Tests que este frame pide:</b> (a) con el <code>await</code> en vuelo, la fila <i>Entrega</i> <b>no</b>
+        dice "sin confirmar" — dice "comprobando"; (b) 200 + comprobación fallida ⇒ banner presente, tarjeta
+        <code>warn</code>, título sin la palabra "Entrega", dock con <i>Volver a comprobar</i>; (c) 200 + reserva aún
+        en CONFIRMED ⇒ se pinta <b>19B</b>, no <code>unverified</code>; (d) <i>Volver a comprobar</i> no dispara
+        ninguna transición de estado, sólo una consulta; (e) reserva sin fecha de regreso ⇒ <i>Antes de que se vaya</i>
+        conserva al menos dos renglones.</li>
+      <li><b>Fuera de alcance:</b> 19B y 19C no se tocan. El pedido P9 (<code>finalize:{…}</code>) sigue vivo y haría
+        el camino feliz más barato, pero este frame <b>no depende</b> de él.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Lenguaje visual — qué introduce este frame</h3>
+    <ul>
+      <li><b>Cero tokens nuevos.</b> Todo sale de la paleta de la Tanda C.</li>
+      <li><b>Tres modificadores nuevos:</b> <code>.kv .v.warnv</code> (el hermano ámbar que le faltaba a
+        <code>.okv</code> y <code>.miss</code>, que ya existen), <code>.kv .v.chk</code> (fila con spinner en línea) y
+        <code>.spin.xs</code> (tamaño de spinner para dentro de una fila). Ningún componente nuevo.</li>
+      <li><b>Un modificador reusado:</b> <code>.kv.note</code>, aprobado en 17F-bis para el pie de alcance de la
+        inspección. Mismo patrón, misma función, otra tarjeta.</li>
+      <li><b>El morado de marca <code>#8752FE</code> sigue reservado</b> a la acción principal, al chip de paso y a la
+        presencia. En este frame el morado sólo aparece en el CTA — y en <code>unverified</code> ese CTA es
+        <i>Volver a comprobar</i>, que es exactamente donde queremos el pulgar.</li>
+      <li><b>La línea punteada roja del tercer teléfono y las cajas grises punteadas NO son UI:</b> son andamio de
+        este documento. La roja marca el borde inferior de una pantalla de 6.1″ — en <code>unverified</code> el dock
+        queda debajo y hace falta un scroll. Es deliberado: el mensaje que decide la conducta (el banner) está arriba
+        del pliegue, y el camino hacia el botón pasa por la tarjeta que explica por qué.</li>
+    </ul>
+  </div>
+
+</footer>
+
+</body>
+</html>
