@@ -85,6 +85,13 @@ Anything whose commit isn't an actual deploy SHA or current `origin/main` is a l
 - Confirm tag exists on `origin` and dereferences to the right commit:
   `git rev-parse <tag>^{commit}` should match `git rev-parse main`.
 - CI on the merge commit is green (especially `tenant-isolation-suite`, since `backend-check` alone misses transitive import bugs — see BUG-003 closure note in `doc/known-bugs-2026-04-23.md`).
+- **`embedded-postgres-suites` is green too, and you have to look for it deliberately.** It is the
+  only job running the seven embedded-postgres suites — the repo's only tests that exercise a real
+  transaction, a real unique index and real concurrency, including the sole proof that a customer's
+  pre-check-in rewrites its charge sheet atomically and refuses a double tap. It is a NEW check, so
+  it is not in any branch-protection required-checks list: a PR merges cleanly while it is red or
+  still pending, and it finishes ~5 minutes after the jobs you are used to watching. Until it is
+  added to required checks in GitHub settings, this line is the only thing standing in for that.
 
 **Deploy steps (on droplet):**
 
