@@ -35,6 +35,9 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 import { bootEmbeddedPg } from '../../../scripts/embedded-pg-boot.mjs';
+// The list the base excludes. Imported rather than re-typed so an edit to the
+// shared taxonomy is caught here instead of silently re-pricing insurance.
+import { SERVICE_CHARGE_SOURCES } from '../../lib/sold-items.js';
 // Imported dynamically in before(), after bootEmbeddedPg has set DATABASE_URL.
 let applyPrecheckinCharges;
 
@@ -679,15 +682,15 @@ describe('a double-tapped Submit', () => {
     assert.equal(Number(sheet.find((c) => c.source === 'INSURANCE').total), 45);
   });
 
-  it('PINS a known non-idempotency: a PERCENTAGE plan re-prices on re-submission', async () => {
-    // NOT a passing grade — a pin. The base for a PERCENTAGE policy is read
-    // BEFORE this handler writes its service rows, so the second submission
-    // sees the first run's rows and quotes more. Unchanged by this commit,
-    // which is the point of writing it down: excluding that source would fix it
-    // but is a live pricing change (reservation-pricing.service.js also writes
-    // ADDITIONAL_SERVICE_PRECHECKIN, so agent-created rows are in the base on a
-    // FIRST submission too). Raised for Hector as its own decision. Whoever
-    // makes it will have to edit this case, deliberately.
+  it('a PERCENTAGE plan quotes the SAME on re-submission', async () => {
+    // This case used to pin the opposite. Until 2026-08-17 the base for a
+    // PERCENTAGE policy was every non-tax/deposit/insurance row on the sheet,
+    // add-ons included, and it was read BEFORE this handler wrote its service
+    // rows — so a customer who came back to fix their address was re-priced
+    // upward off the first run's own rows: 30.00, then 31.20. Hector's call was
+    // that the base means the rental and its fees, not what was sold on top
+    // (see insuranceBaseFrom). Rewritten deliberately, and the 31.20 below is
+    // the number that must NOT come back.
     const reservation = await makeReservation({
       charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
     });
@@ -706,6 +709,152 @@ describe('a double-tapped Submit', () => {
 
     await submission();
     const second = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
-    assert.equal(Number(second.total), 31.2, '10% of 300 + the 12.00 service row the first run added');
+    assert.equal(Number(second.total), 30, 'the 12.00 service row must not be in the base — 31.20 is the old bug');
+
+    // The add-on is still SOLD, and still exactly once. Idempotent pricing must
+    // not be bought by dropping the row the customer actually bought.
+    const services = (await chargeSheet(reservation.id))
+      .filter((c) => c.source === 'ADDITIONAL_SERVICE_PRECHECKIN');
+    assert.equal(services.length, 1);
+    assert.equal(Number(services[0].total), 12);
+  });
+
+  it('leaves an AGENT-added extra out of the base too — the deliberate cost', async () => {
+    // The reason this needed Hector and not a quiet fix. reservation-pricing
+    // .service.js:1037 writes ADDITIONAL_SERVICE_PRECHECKIN when an agent adds
+    // an extra to an already-priced reservation, so such a row can be on the
+    // sheet at the FIRST submission — and this change means it no longer lifts
+    // the premium. Under the old base this reservation quoted 35.00 (10% of
+    // 300 + 50); it now quotes 30.00. That 5.00 is real revenue, given up on
+    // purpose so a percentage plan prices off the rental alone.
+    const reservation = await makeReservation({
+      charges: [
+        { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+        // Shaped exactly as the agent path writes it: same source, sortOrder 10.
+        { source: 'ADDITIONAL_SERVICE_PRECHECKIN', name: 'Roof rack (agent)', quantity: 1, rate: 50, total: 50, sortOrder: 10, taxable: true },
+      ],
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'PCT' },
+      insurancePlans: PLANS,
+    });
+
+    const insurance = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    assert.equal(Number(insurance.total), 30, '10% of the 300 rental only — the 50.00 agent extra is out of the base');
+  });
+
+  it('PINS a REMAINING non-idempotency on the OTA path', async () => {
+    // A pin, not a passing grade — the counterpart to the case above, and the
+    // limit of what excluding add-ons bought us.
+    //
+    // insuranceBaseFrom() controls what this handler ADDS to the base. On the
+    // OTA branch the handler also REMOVES from it: the third-party sweep
+    // deletes DAILY / FEE / SERVICE_LINKED_FEE, and it runs AFTER the base has
+    // been read. So a SECOND submission on an OTA reservation reads a sheet
+    // whose rental rows the FIRST run already deleted, and the base collapses
+    // to whatever is left — which the exclusions now empty almost completely.
+    //
+    // NOTE this case does NOT go red if the base change is reverted: the old
+    // filter reaches 0.00 here too. It is a pin on a standing gap, not a guard
+    // on this commit — the three cases around it are the guards.
+    //
+    // The collapse is also not universal: the sweep deletes by source, so a
+    // BASE_RATE rental row (the VozIA converted-quote shape) survives it. This
+    // fixture uses DAILY, which does not.
+    //
+    // This predates the base change and is not caused by it: under the old
+    // "everything on the sheet" rule the same re-submission quoted 10% of the
+    // surviving service row instead. Both numbers are wrong; this one is just
+    // wrong differently. Fixing it means deriving the base from the RENTAL
+    // (pricingSnapshot / isBaseRentalRow) instead of summing the sheet, which
+    // is a second pricing decision — raised for Hector, not taken here.
+    const reservation = await makeReservation({
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+
+    const submission = () => applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'PCT' },
+      insurancePlans: PLANS,
+      thirdPartyBooking: { isThirdParty: true, voucherUrl: null },
+    });
+
+    await submission();
+    const first = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    assert.equal(Number(first.total), 30, 'first submission still prices off the rental');
+
+    await submission();
+    const second = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    assert.equal(Number(second.total), 0, 'the OTA sweep already deleted the rental rows the base is made of');
+  });
+
+  it('excludes EVERY spelling of an add-on, and nothing else', async () => {
+    // Table-driven over the shared list rather than over the two spellings the
+    // cases above happen to use. This is the guard on sold-items.js: if someone
+    // edits SERVICE_CHARGE_SOURCES, a base that no longer matches it fails here.
+    // Also covers the shapes the filter has to normalise — a lower-cased source,
+    // a null source (legacy DAILY rows, which must stay IN), and a DEPOSIT row.
+    const addonRows = SERVICE_CHARGE_SOURCES.map((source, i) => ({
+      source: i % 2 === 0 ? source : source.toLowerCase(), // case must not matter
+      name: `Add-on ${source}`,
+      quantity: 1,
+      rate: 10,
+      total: 10,
+      taxable: true,
+    }));
+
+    const reservation = await makeReservation({
+      charges: [
+        { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+        // Legacy row: no source at all. Stays IN the base.
+        { source: null, code: 'DAILY', name: 'Daily', quantity: 1, rate: 20, total: 20, taxable: true },
+        { source: 'SECURITY_DEPOSIT', chargeType: 'DEPOSIT', name: 'Deposit', quantity: 1, rate: 500, total: 500 },
+        ...addonRows,
+      ],
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'PCT' },
+      insurancePlans: PLANS,
+    });
+
+    const insurance = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    // 10% of (300 + 20). Every add-on row is out whatever its spelling or case;
+    // the deposit is out; the source-less legacy rental row is in.
+    assert.equal(Number(insurance.total), 32);
+  });
+
+  it('keeps FEES in the base — "not add-ons" is not "rental only"', async () => {
+    // The other half of the decision, and the easy thing to get wrong when
+    // editing insuranceBaseFrom: it is an EXCLUSION list. Fees are part of what
+    // a percentage plan prices against, and a fee source added tomorrow must
+    // stay in the base rather than silently dropping out of every quote.
+    const reservation = await makeReservation({
+      charges: [
+        { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+        { source: 'MANDATORY_FEE', name: 'Airport fee', quantity: 1, rate: 25, total: 25, taxable: true },
+        { source: 'SERVICE', name: 'Child seat (website)', quantity: 1, rate: 40, total: 40, taxable: true },
+        { chargeType: 'TAX', source: 'TAX', name: 'Sales tax', quantity: 1, rate: 11, total: 11 },
+      ],
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'PCT' },
+      insurancePlans: PLANS,
+    });
+
+    const insurance = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    // 10% of (300 rental + 25 fee). The website-sold SERVICE add-on and the tax
+    // are both out — the add-on because sold-items.js calls it one, whichever
+    // of the four spellings it arrived under.
+    assert.equal(Number(insurance.total), 32.5);
   });
 });

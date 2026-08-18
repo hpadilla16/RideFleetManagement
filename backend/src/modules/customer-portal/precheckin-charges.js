@@ -40,6 +40,7 @@
  */
 
 import { ConflictError } from '../../lib/errors.js';
+import { SERVICE_CHARGE_SOURCES } from '../../lib/sold-items.js';
 
 /**
  * Advisory-lock class id for "a customer pre-check-in submission". Arbitrary
@@ -72,34 +73,114 @@ export function discountApplier(discount) {
 }
 
 /**
- * Base for PERCENTAGE insurance plans: the non-tax, non-deposit, non-insurance
- * charges standing on the reservation when the customer submits. UNCHANGED from
- * what the route computed inline — this is a lift, not a re-decision.
+ * Base for PERCENTAGE insurance plans: THE CHARGE SHEET MINUS WHAT WAS SOLD ON
+ * TOP OF THE RENTAL. Taxes, deposits, insurance itself and every add-on are out.
+ * Everything else stays in — the daily rate and the fees, but also
+ * ADMIN_CORRECTION, DAMAGE_CHARGE, TOLL_MODULE and any source added tomorrow.
+ * "The rental and its fees" is the shorthand Hector and this file use for it and
+ * is what it amounts to in practice, but the rule is the exclusion list below,
+ * not that phrase; an editor who implements the phrase instead will write an
+ * allow-list and silently drop live charges out of the base.
  *
- * A KNOWN NON-IDEMPOTENCY LIVES HERE, and it is deliberately left alone.
- * The handler writes ADDITIONAL_SERVICE_PRECHECKIN rows AFTER this base is
- * computed, so a customer who submits, then comes back to fix their address and
- * submits again, has the first run's service rows sitting in the base the
- * second time — and a PERCENTAGE policy re-prices UPWARD for it.
+ * THIS IS A DELIBERATE PRICING CHANGE (Hector, 2026-08-17). It is not what the
+ * route computed inline before, and the difference is money.
  *
- * Excluding that source would fix it, and the first draft of this module did.
- * It is not a safe rider: this handler is NOT the only writer of that source —
- * reservation-pricing.service.js:1037 writes it when an agent adds an extra to
- * an already-priced reservation, and the reservation editor sends the same
- * value. So an agent-created row can be on the sheet at the FIRST submission,
- * and dropping it lowers what live tenants are quoted today. That is a pricing
- * decision with Hector's name on it, not a side effect of an atomicity fix.
+ * What it fixes. The handler writes its ADDITIONAL_SERVICE_PRECHECKIN rows
+ * AFTER this base is computed, so while add-ons counted, a customer who
+ * submitted, then came back to fix their address and submitted again, had the
+ * first run's own service rows sitting in the base the second time — and the
+ * policy re-priced UPWARD for them. MEASURED: 300 daily + a 12.00 service gave
+ * 30.00, then 31.20. Excluding add-ons closes that ON THE NORMAL PATH: nothing
+ * this handler ADDS to the sheet lands in the base with a nonzero total, so a
+ * plain re-submission cannot move the number.
  *
- * The concurrent case — the double-tap this module was hardened against — is
- * closed a different way: the second submission is refused with a 409 and never
- * re-derives anything. What is left is the sequential re-submission, which
- * behaves exactly as it did before this change. Raised separately.
+ * THAT GUARANTEE STOPS AT THE OTA BRANCH, and the limit is worth stating
+ * because it is easy to read this filter as covering more than it does. This
+ * filter governs what the handler ADDS. The third-party branch below also
+ * REMOVES: it deletes DAILY / FEE / SERVICE_LINKED_FEE after the base has been
+ * read. A second submission on an OTA reservation therefore reads a sheet whose
+ * rental rows the first run already deleted, and the base collapses. MEASURED
+ * and pinned by "PINS a REMAINING non-idempotency on the OTA path": 30.00, then
+ * 0.00. That is not caused by this change — the old rule quoted 10% of the
+ * surviving service row instead, equally wrong — but it is not fixed by it
+ * either. Closing it means deriving the base from the RENTAL (pricingSnapshot,
+ * or isBaseRentalRow() in reservation-extend.service.js) rather than summing a
+ * sheet this transaction is in the middle of rewriting. That is a second
+ * pricing decision; raised for Hector rather than taken as a rider.
+ *
+ * (One row this handler writes IS in the base: OTA_PREPAID_VOUCHER, whose
+ * source is not an add-on and whose chargeType is UNIT. Its total is always 0,
+ * so it is harmless arithmetically — but "nothing this handler writes" would be
+ * literally untrue, and this file is read by people looking for exactly that.)
+ *
+ * What it costs, and why it needed Hector rather than a quiet fix. This handler
+ * is NOT the only writer of that source — reservation-pricing.service.js:1037
+ * writes it when an agent adds an extra to an already-priced reservation, and
+ * the reservation editor sends the same value. Those rows can be on the sheet
+ * at the FIRST submission, so dropping them usually LOWERS what live tenants are
+ * quoted. doc/fixes/2026-08-17-precheckin-insurance-base-measurement.sql sizes
+ * exactly that, splitting agent-written rows from portal-written ones.
+ *
+ * "Usually" is doing work there, and the exception moves the other way.
+ * addManualCharge() rejects only amount === 0, and on its PRE-CHECKOUT branch it
+ * stamps preSource regardless of the caller's `source` — so an admin credit of
+ * -100 before check-out lands as an ADDITIONAL_SERVICE_PRECHECKIN row of -100.
+ * The old base netted that off (300 - 100 = 200 -> 20.00); this one does not
+ * (300 -> 30.00), and the customer is quoted MORE. That is the defensible
+ * number — a credit against the rental is not a reason to charge less for the
+ * coverage on it — but "this only ever lowers quotes" would be false, and the
+ * commit above this one exists to stop this file making claims like that.
+ *
+ * Why the whole SERVICE_CHARGE_SOURCES list and not just the portal's source.
+ * The decision was "the rental and fees only, not add-ons". An add-on is spelled
+ * four ways in this codebase and sold-items.js is the one authoritative list —
+ * its header asks callers to use it instead of re-listing a subset inline.
+ * Excluding only the portal's spelling would price a child seat sold at
+ * pre-check-in differently from the identical seat sold on the website, which is
+ * not a rule anyone could explain to a customer. Taking the list also means a
+ * NEW sale path registered in sold-items.js is out of the base automatically,
+ * instead of silently re-inflating it.
+ *
+ * Exclusion, not inclusion, on purpose — the mirror of the rule isSoldItemCharge
+ * states for commissions. There the risk is a fee leaking INTO a commission
+ * base, so it lists what counts. Here the base is "everything that is not sold
+ * on top", and a fee source added tomorrow belongs in it; listing what counts
+ * would silently drop that fee out of every percentage quote.
+ *
+ * SERVICE_LINKED_FEE is KNOWINGLY LEFT IN, and it is the one row the rule above
+ * does not explain cleanly. booking-engine.service.js writes it as the fee
+ * attached to a SOLD SERVICE, so it is an add-on's fee rather than the rental's:
+ * a website-sold child seat now drops out of the base while the fee the website
+ * stapled to it stays. It is left in because "not add-ons" was the decision and
+ * "not add-ons, and not fees that trace back to one" is a further one. Flagged
+ * with the cross-surface question below rather than settled quietly.
+ *
+ * THIS BASE IS NOT THE SAME AS THE ONE THE OTHER SURFACES USE — do not read the
+ * change as having unified them. Booking prices a PERCENTAGE plan off
+ * quote.baseTotal, which rates.service.js:885 builds from the daily-rate rows
+ * alone, and the reservation pricing editor uses dailyRate × days
+ * (frontend/src/app/reservations/[id]/page.js). Both are RENTAL ONLY: add-on
+ * free, and fee free. This base is rental PLUS fees, so pre-check-in went from
+ * disagreeing with them one way to disagreeing the other way. Two live
+ * consequences: a customer can be quoted one premium here and a different one
+ * for the same reservation at booking, and — because insuranceChargeFor() does
+ * not set priceOverridden — an agent who opens the reservation and hits Save
+ * has the editor rebuild this row off the rental alone, silently replacing the
+ * premium the customer accepted. Raised for Hector with the OTA gap above; the
+ * single-decision fix for both is to make the base the rental everywhere.
  */
+const NON_BASE_SOURCES = new Set(SERVICE_CHARGE_SOURCES.map((s) => s.toUpperCase()));
+
 export function insuranceBaseFrom(charges) {
   return charges
-    .filter((c) => String(c.source || '').toUpperCase() !== 'INSURANCE'
-      && String(c.chargeType || '').toUpperCase() !== 'TAX'
-      && String(c.chargeType || '').toUpperCase() !== 'DEPOSIT')
+    .filter((c) => {
+      const source = String(c.source || '').toUpperCase();
+      const chargeType = String(c.chargeType || '').toUpperCase();
+      return source !== 'INSURANCE'
+        && !NON_BASE_SOURCES.has(source)
+        && chargeType !== 'TAX'
+        && chargeType !== 'DEPOSIT';
+    })
     .reduce((sum, c) => sum + Number(c.total || 0), 0);
 }
 
