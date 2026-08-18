@@ -78,6 +78,80 @@ abstract final class InspectionEvents {
   static const completedLocal = 'inspection.completed_local';
 }
 
+/// Eventos del checkout (03-observability.md §Checkout (M2)) — historia H1
+/// del épico. Los de dinero (`checkout.money_*`, `checkout.preview_divergence`)
+/// llegan con M2-H3: se declaran cuando existe el callsite, no antes.
+abstract final class CheckoutEvents {
+  /// Render desde `currentStep` (tag `step`). Se emite cuando el paso
+  /// RENDERIZADO cambia, no por frame ni por tick del poll.
+  static const stepRendered = 'checkout.step_rendered';
+
+  static const transitionOk = 'checkout.transition_ok';
+
+  /// Tag `code`: ILLEGAL_TRANSITION | ENTRY_GUARD | SESSION_TERMINAL |
+  /// CHECKOUT_TERMINAL | VEHICLE_CONFLICT | none (409 sin code del abandon).
+  static const transition409 = 'checkout.transition_409';
+
+  /// Entrada desde la card de la cola (M2-H7): `POST /api/checkout-sessions`
+  /// devolvió la sesión y se abre el wizard. Sin tag `resumed`: el backend
+  /// responde 201 tanto al crear como al reanudar (routes:42) y la app no
+  /// tiene forma HONESTA de distinguirlo — inventar el tag sería peor que no
+  /// tenerlo. Su relación con `checkout.step_rendered` ya dice si entró en
+  /// CONFIRMING o a media sesión.
+  static const entryOpen = 'checkout.entry_open';
+
+  /// Un guard de creación negó la apertura (M2-H7). Tag `code`: el del
+  /// servidor (NO_VEHICLE_ASSIGNED | VEHICLE_CONFLICT | PRECHECKIN_REQUIRED |
+  /// AGE_RULES_* | SESSION_TERMINAL) o el motivo local con el que se cortó
+  /// (offline | locationNotReady | forbidden | unknown…).
+  static const entryBlocked = 'checkout.entry_blocked';
+
+  /// Salida del guard 11B: el link de pre-checkin salió por correo al cliente
+  /// (solo cuando el backend confirma `emailSent`, no por el 200 pelado).
+  static const entryPrecheckinLinkSent = 'checkout.entry_precheckin_link_sent';
+
+  /// UI reconciliada contra el servidor. Tags: `steps_jumped` y `via`
+  /// (`conflict` = tras un 409, `poll` = otra superficie avanzó y el poll lo
+  /// vio). El tag `via` es dato NUEVO de H1 — documentado en la tabla de
+  /// 03-observability.md en el mismo cambio.
+  static const reconciled = 'checkout.reconciled';
+
+  // ── M2-H2 (CONFIRMING + T&C) ──────────────────────────────────────────────
+
+  /// `POST /:id/declined-insurance` aceptado. Tag `declined` (bool).
+  static const declinedInsuranceSet = 'checkout.declined_insurance_set';
+
+  /// `POST /:id/vehicle` aceptado. Sin tags: el id de la unidad es dato de
+  /// operación, no de telemetría, y el volumen ya dice lo que interesa
+  /// (cuántas entregas empiezan con la unidad equivocada).
+  static const vehicleSwapped = 'checkout.vehicle_swapped';
+
+  /// `POST /:id/terms-token` aceptado. Tag `reused` (bool) — mide cuántas
+  /// re-emisiones caen dentro de la ventana de re-uso del backend, que es lo
+  /// que decide si la copy dice "sigue siendo el mismo código".
+  static const termsTokenMinted = 'checkout.terms_token_minted';
+
+  /// El countdown llegó a cero con el paso abierto. Es la medida directa del
+  /// riesgo §5 del plan (TTL de 15 min corto para un cliente que lee).
+  static const termsTokenExpired = 'checkout.terms_token_expired';
+
+  /// El poll vio caer `tcCompletedAt` (el cliente firmó en su teléfono, o
+  /// firmó otra superficie). Una vez por sesión de pantalla.
+  static const termsSignedSeen = 'checkout.terms_signed_seen';
+
+  /// Se abrió el modo presentación (10B), la pantalla volteada al cliente.
+  static const presentModeShown = 'checkout.present_mode_shown';
+
+  /// El modo presentación no pudo ajustar (o restaurar) brillo o wakelock.
+  /// Tags: `what` (brightness | wakelock) y `phase` (enter | exit).
+  ///
+  /// `phase:exit` es el que importa vigilar: es la señal de que el teléfono
+  /// pudo quedarse con el brillo forzado después de salir (riesgo real solo en
+  /// iOS — en Android el override es de la VENTANA y muere con ella).
+  static const presentModeScreenDegraded =
+      'checkout.present_mode_screen_degraded';
+}
+
 /// Eventos de la bandeja de salida (03-observability.md §Inspección y
 /// bandeja). `entry_dead` con un `code` desconocido es compuerta de release
 /// (bug de manejo de errores, no ruido).

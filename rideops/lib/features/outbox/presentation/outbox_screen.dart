@@ -10,6 +10,7 @@ import '../../../core/l10n/app_localizations.dart';
 import '../../../core/outbox/drain_coordinator.dart';
 import '../../../core/outbox/network_status.dart';
 import '../../../core/outbox/outbox_service.dart';
+import '../../../core/router/app_router.dart';
 import '../../../core/theme/ride_tokens.dart';
 import '../../../core/widgets/ride_buttons.dart';
 
@@ -410,7 +411,8 @@ class _DeadRow extends ConsumerWidget {
                 Expanded(
                   child: RideGhostButton(
                     label: l10n.outboxActionOpenInspection,
-                    onPressed: () => context.go('/inspection/$reservationId'),
+                    onPressed: () =>
+                        context.go(AppRoutes.inspection(reservationId)),
                   ),
                 ),
                 const SizedBox(width: 8),

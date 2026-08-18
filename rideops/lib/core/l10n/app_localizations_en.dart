@@ -324,6 +324,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String ageSeconds(int count) {
+    return '$count s';
+  }
+
+  @override
   String homeFreshnessLine(String age) {
     return 'Updated $age ago · refreshes itself';
   }
@@ -585,8 +590,19 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String cardOpenInspectionSemantics(String details) {
-    return '$details: open checkout inspection';
+  String cardOpenCheckoutSemantics(String details) {
+    return '$details: open checkout';
+  }
+
+  @override
+  String get cardOpeningCheckoutChip => 'Opening…';
+
+  @override
+  String get cardOpeningCheckoutMeta => 'opening checkout…';
+
+  @override
+  String cardOpeningCheckoutSemantics(String details) {
+    return '$details: opening checkout';
   }
 
   @override
@@ -1002,4 +1018,817 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get logoutAnyway => 'Sign out anyway';
+
+  @override
+  String coTitle(String reservation) {
+    return 'Checkout · $reservation';
+  }
+
+  @override
+  String get coTitleNoNumber => 'Checkout';
+
+  @override
+  String get coPause => 'Pause';
+
+  @override
+  String coStepOf(int index, int total) {
+    return 'Step $index of $total';
+  }
+
+  @override
+  String get coSeeAllSteps => 'See every step';
+
+  @override
+  String coStepsSheetTitle(int total) {
+    return '$total steps + alternate exit';
+  }
+
+  @override
+  String coStepsSheetSub(String age) {
+    return 'State reported by the server · updated $age ago';
+  }
+
+  @override
+  String get coSheetClose => 'Close';
+
+  @override
+  String get coPhaseConfirm => 'Confirm';
+
+  @override
+  String get coPhaseTerms => 'T&C';
+
+  @override
+  String get coPhasePayment => 'Payment';
+
+  @override
+  String get coPhaseInspection => 'Inspection';
+
+  @override
+  String get coPhaseClosing => 'Closing';
+
+  @override
+  String get coStepConfirming => 'Confirm customer and vehicle';
+
+  @override
+  String get coStepTcPending => 'Terms and conditions';
+
+  @override
+  String get coStepTcSigned => 'Terms signed';
+
+  @override
+  String get coStepPaymentPending => 'Charge on terminal';
+
+  @override
+  String get coStepPaid => 'Payment complete';
+
+  @override
+  String get coStepInspectionHandoff => 'Hand off to inspection';
+
+  @override
+  String get coStepInspectionInProgress => 'Inspection in progress';
+
+  @override
+  String get coStepCustomerSignPending => 'Customer signature';
+
+  @override
+  String get coStepFinalizing => 'Generating contract';
+
+  @override
+  String get coStepClosed => 'Delivered';
+
+  @override
+  String get coStepCancelled => 'Cancelled';
+
+  @override
+  String get coStepCancelledHint => 'Alternate exit from any non-terminal step';
+
+  @override
+  String coStepUnknown(String step) {
+    return 'Step reported by the server: $step';
+  }
+
+  @override
+  String get coStepPending => 'Pending';
+
+  @override
+  String get coStepInProgress => 'In progress';
+
+  @override
+  String coStepDoneByYou(String time) {
+    return 'Completed by you · $time';
+  }
+
+  @override
+  String coStepDoneKiosk(String time) {
+    return 'Completed on the kiosk · $time';
+  }
+
+  @override
+  String coStepDoneOtherAgent(String time) {
+    return 'Completed by another agent · $time';
+  }
+
+  @override
+  String coStepDone(String time) {
+    return 'Completed · $time';
+  }
+
+  @override
+  String get coGuardTcCompleted => 'Waiting on: customer\'s T&C signature';
+
+  @override
+  String get coGuardPayment => 'Waiting on: recorded payment';
+
+  @override
+  String get coGuardInspection => 'Waiting on: completed inspection';
+
+  @override
+  String get coGuardSignature => 'Waiting on: customer\'s signature';
+
+  @override
+  String get coSurfaceKiosk => 'kiosk';
+
+  @override
+  String get coSurfaceCounter => 'counter';
+
+  @override
+  String get coSurfaceRideops => 'another phone';
+
+  @override
+  String get coSurfaceCustomer => 'customer\'s phone';
+
+  @override
+  String get coSurfaceOther => 'another surface';
+
+  @override
+  String coPresenceLine(String name, String surface, String age) {
+    return '$name is in this session · $surface · $age ago';
+  }
+
+  @override
+  String coPresenceMore(int count) {
+    return '+$count';
+  }
+
+  @override
+  String coAdvancedKiosk(String step, String age) {
+    return '“$step” was completed on the kiosk $age ago.';
+  }
+
+  @override
+  String coAdvancedOtherAgent(String step, String age) {
+    return '“$step” was completed by another agent $age ago.';
+  }
+
+  @override
+  String coAdvancedOtherSurface(String step, String age) {
+    return '“$step” was completed on another surface $age ago.';
+  }
+
+  @override
+  String coAdvancedNow(String step) {
+    return 'You are now on: $step.';
+  }
+
+  @override
+  String get coAdvancedSeeChanged => 'See what changed';
+
+  @override
+  String coStaleView(String age) {
+    return 'seen $age ago';
+  }
+
+  @override
+  String coOfflineBanner(String age) {
+    return 'No connection. This is the last thing the server reported $age ago — it may have changed on another surface.';
+  }
+
+  @override
+  String get coBlockedOfflineWhy =>
+      'Moving a step forward needs the server\'s confirmation. With no signal nothing is guessed: we wait.\nNothing from this step goes to the Outbox.';
+
+  @override
+  String get coBlockedOfflineShort =>
+      'No connection: the server confirms the advance.';
+
+  @override
+  String get coTransitionWhy =>
+      'The server confirms the advance; if another surface already did it, this screen updates on its own.';
+
+  @override
+  String get coPauseTitle => 'Save and pause this checkout?';
+
+  @override
+  String coPauseSub(int index, int total) {
+    return 'The session stays saved on step $index of $total. Nothing is lost.';
+  }
+
+  @override
+  String get coPauseSubUnknownStep =>
+      'The session stays saved on the step the server reports. Nothing is lost.';
+
+  @override
+  String get coPauseKeeps =>
+      'Kept: verified customer and vehicle, the live T&C code, and the record of who did what.';
+
+  @override
+  String get coPauseWarn =>
+      'A teammate (or the kiosk) can pick it up from where it stands. When you come back, you enter the step the server reports, not the one you left.';
+
+  @override
+  String get coPauseConfirm => 'Save and pause';
+
+  @override
+  String get coPauseStay => 'Stay here';
+
+  @override
+  String get coPauseFailed =>
+      'Could not pause. Check the connection and try again.';
+
+  @override
+  String get coTerminalClosedTitle => 'This checkout is already closed';
+
+  @override
+  String get coTerminalCancelledTitle => 'This checkout was cancelled';
+
+  @override
+  String get coTerminalBody =>
+      'This session is already terminal: it takes no more steps.';
+
+  @override
+  String coTerminalDoneKiosk(String time) {
+    return 'It was completed at the kiosk at $time. There is nothing left to do here.';
+  }
+
+  @override
+  String coTerminalDoneByYou(String time) {
+    return 'You closed it at $time. There is nothing left to do here.';
+  }
+
+  @override
+  String coTerminalDoneOtherAgent(String time) {
+    return 'Another agent closed it at $time. There is nothing left to do here.';
+  }
+
+  @override
+  String coTerminalDoneAt(String time) {
+    return 'It was completed at $time. There is nothing left to do here.';
+  }
+
+  @override
+  String coTerminalCancelledByYou(String time) {
+    return 'You cancelled it at $time. This session takes no more steps.';
+  }
+
+  @override
+  String coTerminalCancelledKiosk(String time) {
+    return 'It was cancelled at the kiosk at $time. This session takes no more steps.';
+  }
+
+  @override
+  String coTerminalCancelledOtherAgent(String time) {
+    return 'Another agent cancelled it at $time. This session takes no more steps.';
+  }
+
+  @override
+  String coTerminalCancelledAt(String time) {
+    return 'It was cancelled at $time. This session takes no more steps.';
+  }
+
+  @override
+  String coTerminalContractRequested(String time) {
+    return 'The contract email was requested at $time.';
+  }
+
+  @override
+  String get coTerminalByYou => 'You';
+
+  @override
+  String get coTerminalByKiosk => 'At the kiosk';
+
+  @override
+  String get coTerminalByOtherAgent => 'Another agent';
+
+  @override
+  String get coTerminalByOtherSurface => 'Another surface';
+
+  @override
+  String get coTerminalBackToList => 'Back to the list';
+
+  @override
+  String get coTerminalWhy =>
+      'If you think it closed by mistake, open the reservation: it cannot be reopened from here.';
+
+  @override
+  String get coTerminalLogTitle => 'Session log';
+
+  @override
+  String get coExit => 'Exit';
+
+  @override
+  String get coNoSessionTitle => 'No checkout session yet';
+
+  @override
+  String get coNoSessionBody =>
+      'This reservation has no open session yet. It starts from the departures queue on Home.';
+
+  @override
+  String get coLoadFailedTitle => 'Could not open the checkout';
+
+  @override
+  String get coConflictEntryGuardTitle => 'A previous step is missing';
+
+  @override
+  String get coConflictVehicleTitle => 'The vehicle is no longer free';
+
+  @override
+  String get coConflictGenericTitle => 'The server refused the advance';
+
+  @override
+  String get coConflictSwapTitle => 'The server refused the vehicle change';
+
+  @override
+  String get coConflictDismiss => 'Got it';
+
+  @override
+  String coPickupToday(String time) {
+    return 'Departs today $time';
+  }
+
+  @override
+  String coPickupOn(String date, String time) {
+    return 'Departs $date $time';
+  }
+
+  @override
+  String get coPrecheckinReady => 'Pre-check-in done';
+
+  @override
+  String get coPrecheckinPending => 'Pre-check-in pending';
+
+  @override
+  String coOdometer(String km) {
+    return 'Odometer $km km';
+  }
+
+  @override
+  String get coExitWithoutPausing => 'Leave without pausing';
+
+  @override
+  String get coExitWithoutPausingWhy =>
+      'Nothing gets locked: the session stays as it is and the yard can pick it up from another surface.';
+
+  @override
+  String get coPauseNeedsNetwork =>
+      'Pausing needs a connection: it is a note saved on the server. With no signal you can still leave.';
+
+  @override
+  String get coStampsTitle => 'What the server already has';
+
+  @override
+  String get coStampTc => 'T&C signature';
+
+  @override
+  String get coStampPayment => 'Payment recorded';
+
+  @override
+  String get coStampInspection => 'Inspection completed';
+
+  @override
+  String get coStampSignature => 'Customer signature';
+
+  @override
+  String coStampDone(String time) {
+    return 'Done · $time';
+  }
+
+  @override
+  String get coStampPending => 'Pending';
+
+  @override
+  String coSessionAgeLabel(String age) {
+    return 'State from $age ago';
+  }
+
+  @override
+  String get coEntryNoVehicleTitle =>
+      'This reservation has no vehicle assigned';
+
+  @override
+  String get coEntryNoVehicleBody =>
+      'You cannot hand over without a unit. Assigning the vehicle to the reservation is still done from the desk; once it is assigned, tap the card again.';
+
+  @override
+  String get coEntryVehicleConflictTitle =>
+      'That unit is already on another rental';
+
+  @override
+  String get coEntryVehicleConflictBody =>
+      'The server blocked it so the same unit is not handed over twice. Changing the vehicle on the reservation — or closing the other rental — is still done from the desk.';
+
+  @override
+  String coEntryConflictWith(String reservation) {
+    return 'Conflicting reservation: $reservation';
+  }
+
+  @override
+  String coEntrySearchReservation(String reservation) {
+    return 'Search $reservation';
+  }
+
+  @override
+  String get coEntryPrecheckinTitle => 'The customer pre-check-in is missing';
+
+  @override
+  String get coEntryPrecheckinBody =>
+      'This branch requires the customer pre-check-in before the checkout can start.';
+
+  @override
+  String get coEntrySendPrecheckinLink => 'Send pre-check-in to the customer';
+
+  @override
+  String get coEntrySendingPrecheckinLink => 'Sending…';
+
+  @override
+  String get coEntryPrecheckinLinkSent =>
+      'Done: the pre-check-in link went to the customer\'s email. Tap the card again once they complete it.';
+
+  @override
+  String coEntryPrecheckinLinkFailed(String reason) {
+    return 'Could not send the link. $reason';
+  }
+
+  @override
+  String get coEntryPrecheckinLinkCooldown =>
+      'That link was just sent: the server will not send another so soon. Ask the customer to check their email (and spam) before retrying.';
+
+  @override
+  String get coEntryPrecheckinNoEmail =>
+      'The reservation has no customer email, so there is nowhere to send it. Add it from the desk, or take the pre-check-in over the phone.';
+
+  @override
+  String get coEntryPrecheckinDeskNote =>
+      'Capturing the details at the counter is still done from the desk: this app does not have that form yet.';
+
+  @override
+  String get coEntryReservationUntouched =>
+      'The reservation was not touched. As soon as the pre-check-in is done, the card unblocks by itself.';
+
+  @override
+  String get coEntryAgeTitle => 'Age rules do not allow this hand-over';
+
+  @override
+  String get coEntryAgeBody =>
+      'The branch blocks this departure under its age policy.';
+
+  @override
+  String get coEntryAgeDeskNote =>
+      'The date of birth is fixed on the reservation, from the desk. If the rule itself is wrong, your supervisor changes it in the branch settings.';
+
+  @override
+  String get coEntryScopeChangedTitle => 'Opening was interrupted';
+
+  @override
+  String get coEntryScopeChangedBody =>
+      'Your location or your session changed while the checkout was opening, so the server\'s answer no longer matches what you see.';
+
+  @override
+  String get coEntryScopeChangedFoot =>
+      'The session may have been created. Tap the card again: if it exists, it resumes.';
+
+  @override
+  String get coEntryOfflineTitle => 'No connection to open the checkout';
+
+  @override
+  String get coEntryOfflineBody =>
+      'Opening a checkout needs the server to confirm it once. It is not queued in the Outbox: tap the card again when there is signal.';
+
+  @override
+  String get coEntryConnectionLostTitle =>
+      'The connection dropped while opening';
+
+  @override
+  String get coEntryConnectionLostBody =>
+      'The request left the phone but the server did not answer in time, so the app cannot tell whether the checkout was opened.';
+
+  @override
+  String get coEntryConnectionLostFoot =>
+      'The session may have been created. Tap the card again when you have signal: if it exists, it resumes.';
+
+  @override
+  String get coEntryNotReadyTitle => 'One moment';
+
+  @override
+  String get coEntryNotReadyBody =>
+      'The app is still loading your active location. Try again in a second.';
+
+  @override
+  String get coEntryNoSessionCreated => 'No checkout session was created.';
+
+  @override
+  String coEntryServerSaid(String message) {
+    return 'The server said: $message';
+  }
+
+  @override
+  String get coEntryClose => 'Close';
+
+  @override
+  String get coConfirmCustomer => 'Customer';
+
+  @override
+  String get coConfirmVehicle => 'Vehicle';
+
+  @override
+  String get coConfirmVerified => 'Verified';
+
+  @override
+  String get coConfirmMissingPill => 'Missing data';
+
+  @override
+  String get coConfirmConflictPill => 'In conflict';
+
+  @override
+  String get coConfirmName => 'Name';
+
+  @override
+  String get coConfirmLicense => 'License';
+
+  @override
+  String coConfirmLicenseWithExpiry(String number, String date) {
+    return '$number · expires $date';
+  }
+
+  @override
+  String get coConfirmPhone => 'Phone';
+
+  @override
+  String get coConfirmPrecheckin => 'Pre-check-in';
+
+  @override
+  String get coConfirmPrecheckinDone => 'Completed';
+
+  @override
+  String coConfirmPrecheckinDoneAt(String time) {
+    return 'Completed $time';
+  }
+
+  @override
+  String get coConfirmPrecheckinPending => 'Pending';
+
+  @override
+  String get coConfirmMissingValue => 'Not captured';
+
+  @override
+  String get coConfirmUnit => 'Unit';
+
+  @override
+  String get coConfirmOdometerLabel => 'Odometer';
+
+  @override
+  String coOdometerValue(String km) {
+    return '$km km';
+  }
+
+  @override
+  String get coConfirmVehicleAvailable => 'Available';
+
+  @override
+  String get coConfirmChangeVehicle => 'Change vehicle';
+
+  @override
+  String get coConfirmCta => 'Continue to T&C';
+
+  @override
+  String get coConfirmFieldName => 'the name';
+
+  @override
+  String get coConfirmFieldLicense => 'the license';
+
+  @override
+  String get coConfirmFieldPhone => 'the phone';
+
+  @override
+  String get coConfirmFieldJoin => 'and';
+
+  @override
+  String coConfirmBlockedWhy(String fields) {
+    return 'The customer\'s $fields are missing. They are captured at the counter or through the customer\'s pre-check-in; this screen updates itself.';
+  }
+
+  @override
+  String get coConfirmRecheck => 'Refresh customer data';
+
+  @override
+  String get coConfirmRecheckPending => 'Asking the server…';
+
+  @override
+  String coConfirmRecheckedStill(String fields) {
+    return 'Checked just now: the server still doesn\'t have $fields.';
+  }
+
+  @override
+  String get coDeclineTitle => 'Customer declines insurance';
+
+  @override
+  String get coDeclineOff => 'Off · standard coverage is charged';
+
+  @override
+  String get coDeclineOn => 'On · the addendum is added';
+
+  @override
+  String get coDeclineLocked =>
+      'Terms are already signed: the insurance addendum can no longer change here';
+
+  @override
+  String get coDeclineNeedsNetwork =>
+      'No connection: this flag is recorded by the server';
+
+  @override
+  String get coDeclineConsequence =>
+      'The coverage-decline addendum will be added to the terms the customer signs and to the contract PDF. You can turn it off while the terms are unsigned.';
+
+  @override
+  String get coDeclineSignedNote =>
+      'The customer already signed the terms with this addendum. To change it, the contract is adjusted at the counter.';
+
+  @override
+  String get coConflictSwapCta => 'Pick another vehicle';
+
+  @override
+  String get coConflictSwapWhy =>
+      'Nothing was lost: after changing the unit you are still on step 1 with the customer already verified.';
+
+  @override
+  String get coSwapTitle => 'Change vehicle';
+
+  @override
+  String coSwapSub(String age) {
+    return 'Available per the server · $age ago';
+  }
+
+  @override
+  String get coSwapSubLoading => 'Asking the server which units are free…';
+
+  @override
+  String get coSwapSameGroup => 'Same class';
+
+  @override
+  String get coSwapOtherGroup => 'Different class · the rate may change';
+
+  @override
+  String get coSwapCurrentReason =>
+      'Current unit · a unit cannot be swapped for itself';
+
+  @override
+  String get coSwapCurrentCommitted =>
+      'Current unit · the server reports it committed to another rental';
+
+  @override
+  String get coSwapLockedCause =>
+      'This session\'s inspection already started: from there on the unit cannot be changed.';
+
+  @override
+  String get coSwapDoubleBookedCause =>
+      'That unit is already reserved for this same window.';
+
+  @override
+  String get coSwapTerminalCause => 'That unit can no longer be rented.';
+
+  @override
+  String coSwapConfirm(String unit) {
+    return 'Switch to $unit';
+  }
+
+  @override
+  String get coSwapConfirmNone => 'Pick a unit';
+
+  @override
+  String get coSwapCancel => 'Cancel';
+
+  @override
+  String get coSwapEmpty =>
+      'The server reports no other free units for this window.';
+
+  @override
+  String get coSwapNeedsNetwork =>
+      'Changing the unit needs a connection: the server makes the change on the reservation and the contract.';
+
+  @override
+  String get coQrSemanticLabel => 'QR code to sign the terms';
+
+  @override
+  String get coTermsInstruction =>
+      'Have the customer scan it with their phone camera to sign.';
+
+  @override
+  String get coTermsExpiresIn => 'Expires in';
+
+  @override
+  String get coTermsExpired => 'Expired';
+
+  @override
+  String get coTermsPresent => 'Show to customer (full screen)';
+
+  @override
+  String get coTermsWaiting =>
+      'Waiting for the customer\'s signature. This screen updates itself.';
+
+  @override
+  String get coTermsReissue => 'Generate a new code';
+
+  @override
+  String get coTermsReissueWhy =>
+      'If the live code has more than 2 minutes left, the server returns the same one: the customer can keep using the QR they already have.';
+
+  @override
+  String get coTermsReused =>
+      'It is still the same code: the live one has more than 2 minutes left and the server reuses it. If the customer already scanned it, they do not have to scan again.';
+
+  @override
+  String get coTermsReissued =>
+      'New code ready. The previous one stopped working.';
+
+  @override
+  String coTermsExpiredBanner(String time) {
+    return 'The code expired at $time. Nothing was lost — generate a new one and the customer signs just the same.';
+  }
+
+  @override
+  String get coTermsExpiredOverlay => 'Code expired';
+
+  @override
+  String get coTermsExpiredWhy =>
+      'The new code lasts another 15 minutes. If the customer had already opened the previous one, they will have to open the new one.';
+
+  @override
+  String get coTermsMinting => 'Asking the server for the code…';
+
+  @override
+  String get coTermsMintFailed => 'The code could not be issued.';
+
+  @override
+  String get coTermsOfflineWhy =>
+      'The server issues the code: with no connection there is no QR to show.';
+
+  @override
+  String get coTermsSignedTitle => 'Terms signed';
+
+  @override
+  String coTermsSignedBody(String name, String time) {
+    return '$name signed at $time. You can move on to payment.';
+  }
+
+  @override
+  String coTermsSignedBodyNoName(String time) {
+    return 'The terms were signed at $time. You can move on to payment.';
+  }
+
+  @override
+  String get coTermsRecord => 'Record';
+
+  @override
+  String get coTermsRecordConfirmed => 'Confirmed by the server';
+
+  @override
+  String get coTermsRecordSigned => 'Signed';
+
+  @override
+  String get coTermsRecordAddenda => 'Addenda';
+
+  @override
+  String get coTermsAddendaNone => 'None (insurance accepted)';
+
+  @override
+  String get coTermsAddendaDecline => 'Coverage-decline addendum';
+
+  @override
+  String get coTermsCta => 'Continue to payment';
+
+  @override
+  String get coTermsCtaWhy =>
+      'This button only exists because the server already has the signature on record.';
+
+  @override
+  String get coPresentInstruction =>
+      'Scan this code with your phone camera to read and sign the terms.';
+
+  @override
+  String get coPresentHelp => 'Trouble scanning? The agent can help you.';
+
+  @override
+  String get coPresentExit => 'Exit presentation';
+
+  @override
+  String coPresentSubtitle(String number) {
+    return 'Rental terms · Reservation $number';
+  }
+
+  @override
+  String get coPresentSubtitleNoNumber => 'Rental terms';
+
+  @override
+  String coPresentClosingSoon(String mmss) {
+    return '$mmss left — if it expires, the agent issues another one right away.';
+  }
 }

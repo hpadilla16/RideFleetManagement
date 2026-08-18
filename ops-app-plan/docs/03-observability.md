@@ -38,11 +38,95 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 ### Checkout (M2)
 | Evento | Cuándo |
 |---|---|
+| `checkout.entry_open` | POST /api/checkout-sessions OK desde la card de la cola: se abre o se REANUDA (M2-H7) |
+| `checkout.entry_blocked` | un guard de creación negó la apertura (tag `code`) — M2-H7 |
+| `checkout.entry_precheckin_link_sent` | salida del guard 11B: el link de pre-checkin salió por correo (M2-H7) |
 | `checkout.step_rendered` | render desde `currentStep` (tag `step`) |
 | `checkout.transition_ok` / `checkout.transition_409` | POST /transition (tag `code`: ILLEGAL_TRANSITION/ENTRY_GUARD/…) |
-| `checkout.reconciled` | 409 → re-fetch → UI reconciliada (tag `steps_jumped`) |
+| `checkout.reconciled` | UI reconciliada con el servidor (tags `steps_jumped`, `via`) |
 | `checkout.money_attempt` / `checkout.money_ok` / `checkout.money_fail` | rutas de dinero (tag `kind`: charge_sale/hold_deposit/manual_*; NUNCA montos ni PAN) |
 | `checkout.preview_divergence` | cálculo local ≠ preview del servidor (compuerta ADR-6) |
+| `checkout.declined_insurance_set` | `POST /:id/declined-insurance` aceptado (tag `declined`) |
+| `checkout.vehicle_swapped` | `POST /:id/vehicle` aceptado — sin tags: el id de la unidad es dato de operación, no de telemetría |
+| `checkout.terms_token_minted` | `POST /:id/terms-token` aceptado (tag `reused`) |
+| `checkout.terms_token_expired` | el countdown llegó a 0 con el paso abierto |
+| `checkout.terms_signed_seen` | el poll vio caer `tcCompletedAt` |
+| `checkout.present_mode_shown` | se abrió la pantalla volteada al cliente (10B) |
+| `checkout.present_mode_screen_degraded` | brillo/wakelock no se pudo aplicar o restaurar (tags `what`: brightness/wakelock, `phase`: enter/exit) |
+
+Notas de los eventos de M2-H2:
+
+- **`terms_token_minted.reused`** mide cuántas re-emisiones caen dentro de la ventana de
+  re-uso del backend (>2 min restantes ⇒ devuelve el MISMO token). Es la métrica que
+  respalda la copy honesta de la re-emisión: si `reused` domina, el agente está tocando el
+  botón sin necesidad y el copy tiene que enseñarlo mejor.
+- **`terms_token_expired`** es la medida directa del riesgo §5 del plan (TTL de 15 min
+  corto para un cliente que de verdad lee los términos). Se emite **una vez por token**,
+  no una por tick del countdown.
+- **`terms_signed_seen`** se emite solo cuando el sello CAE mientras la app mira (null →
+  fechado). Encontrarlo ya puesto al entrar no es un evento: es el estado de la sesión.
+- **`present_mode_screen_degraded`** con `phase:exit` es la única señal de que el teléfono
+  del agente pudo quedarse con el brillo forzado tras salir del modo presentación. En
+  Android no debería aparecer nunca con consecuencia real (el override es de la VENTANA de
+  la actividad y muere con ella); en iOS sí sería un teléfono al 100% hasta que alguien lo
+  baje a mano. Volumen sostenido = plugin roto en esa versión de OS.
+- Ninguno de estos lleva nombre de cliente, número de reserva ni el token: el token es
+  credencial (regla de PII de este mismo documento).
+
+Detalle de `checkout.entry_blocked` (M2-H7). El tag `code` lleva el código del SERVIDOR
+cuando existe (`NO_VEHICLE_ASSIGNED`, `VEHICLE_CONFLICT`, `PRECHECKIN_REQUIRED`,
+`AGE_RULES_*`, `SESSION_TERMINAL`) y, cuando el arranque se cortó del lado del cliente, el
+motivo local (`offline`, `connectionLost`, `locationNotReady`, `forbidden`,
+`locationDenied`, `rateLimited`, `scopeChanged`, `unknown`). Se separan a propósito: "el
+patio no tiene señal" y "el backend negó" son dos problemas distintos y colapsarlos en
+`none` haría inútil la métrica.
+
+**Sin veredicto del servidor = la sesión pudo quedar CREADA.** Son DOS los códigos con esa
+propiedad, no uno:
+
+- `connectionLost` — el POST salió y no volvió respuesta (timeout de recepción/envío,
+  socket caído). El servidor pudo correr `createForReservation` entero y dejar
+  `CheckoutSession` + `RentalAgreement` con renglones de precio
+  (`checkout-session.service.js:194-209`).
+- `scopeChanged` — el POST salió y su respuesta llegó tras un cambio de sede/cuenta.
+
+Los dos imprimen el pie "la sesión pudo haberse creado; vuelve a tocar la card: si existe,
+se reanuda" en vez de "no se creó ninguna sesión", que es una afirmación que el backend no
+garantiza. `offline` (el corte previo, con la petición sin salir del aparato) y los códigos
+del servidor SÍ pueden afirmarla. Si `connectionLost` sube, es salud de red del patio; si
+sube `scopeChanged`, hay un patrón de uso —cambiar de sede con el checkout abriéndose— que
+merece diseño, no un bug que ocultar.
+
+Nota de honestidad pendiente: un 5xx del servidor cae en `unknown` y el pie ahí sí afirma
+"no se creó ninguna sesión". Es cierto para el 500 de `ensureAgreementExists` (corre ANTES
+del `create`, service:194-197) y falso para el caso raro del `update` de
+`DEALERSHIP_LOANER` (service:215-220, después del create). Queda registrado, no corregido:
+la superficie que lo resolvería es el re-fetch por reserva, no un cambio de copy.
+`entry_open` NO lleva tag `resumed` — el backend responde 201 igual al crear que al
+reanudar, y la app no puede afirmar la diferencia sin inventarla.
+
+Detalle de `checkout.reconciled` (M2-H1). Tres valores de `via`, deliberadamente
+separados porque miden cosas distintas:
+
+- `poll` — el poll de 5 s detectó que OTRA superficie movió el paso. Su frecuencia ES la
+  métrica de cuánto se pisan las superficies en el patio, y con ella se mide la prueba de
+  concurrencia del SHIP del épico.
+- `conflict` — el servidor rechazó una transición con 409 y el re-fetch reconcilió.
+- `preflight` — el re-fetch previo a escribir (>3 s de antigüedad) encontró la sesión ya
+  movida y ABORTÓ el POST. No hubo 409: contarlo como tal inflaría las colisiones reales.
+
+**Un movimiento = un evento.** El emisor deduplica por movimiento (`FROM>TO`): un 409 que
+re-consulta y reconcilia produce UNA línea, no una por cada capa que la detectó. Contarlo
+dos veces duplicaría exactamente la señal con la que se mide la concurrencia. Y una
+reconciliación que no movió nada (el 409 que encuentra la sesión donde ya estaba) no se
+emite.
+
+Nunca se emite con `steps_jumped` negativo: una lectura que aterriza después de una
+escritura se descarta por fencing (`stateVersion` de P2 + epoch local) en vez de publicar
+el pasado.
+`steps_jumped` puede venir ausente: si alguno de los dos pasos no está en el catálogo de
+la app (paso nuevo del backend), el evento viaja sin el tag antes que con un número
+inventado.
 
 ### Inspección y bandeja
 | Evento | Cuándo |

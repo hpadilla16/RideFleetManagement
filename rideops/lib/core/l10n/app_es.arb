@@ -140,6 +140,11 @@
   "@ageHours": {
     "placeholders": { "count": { "type": "int" } }
   },
+  "ageSeconds": "{count} s",
+  "@ageSeconds": {
+    "description": "Edad en SEGUNDOS — la necesita el wizard de checkout (M2-H1): el chip de presencia y el banner de avance ajeno miden en segundos, donde 'un momento' mentiría sobre la frescura del heartbeat (TTL 45 s).",
+    "placeholders": { "count": { "type": "int" } }
+  },
   "homeFreshnessLine": "Actualizado hace {age} · se actualiza solo",
   "@homeFreshnessLine": {
     "placeholders": { "age": { "type": "String" } }
@@ -276,9 +281,16 @@
   "@searchNoResults": {
     "placeholders": { "query": { "type": "String" } }
   },
-  "cardOpenInspectionSemantics": "{details}: abrir inspección de salida",
-  "@cardOpenInspectionSemantics": {
-    "description": "Card tocable de la cola de salidas (H6). GD MC-2: {details} = nombre · hora del chip · meta — TalkBack no puede perder la hora ni el estado de pre-checkin",
+  "cardOpenCheckoutSemantics": "{details}: abrir el checkout",
+  "@cardOpenCheckoutSemantics": {
+    "description": "Card tocable de la cola de salidas (M2-H7). GD MC-2: {details} = nombre · hora del chip · meta — TalkBack no puede perder la hora ni el estado de pre-checkin",
+    "placeholders": { "details": { "type": "String" } }
+  },
+  "cardOpeningCheckoutChip": "Abriendo…",
+  "cardOpeningCheckoutMeta": "abriendo checkout…",
+  "cardOpeningCheckoutSemantics": "{details}: abriendo el checkout",
+  "@cardOpeningCheckoutSemantics": {
+    "description": "Frame 11A: la card en marcha. El estado se anuncia en la propia card, no en una pantalla nueva.",
     "placeholders": { "details": { "type": "String" } }
   },
 
@@ -461,5 +473,466 @@
   "@logoutPendingBody": {
     "placeholders": { "count": { "type": "int" } }
   },
-  "logoutAnyway": "Cerrar sesión de todos modos"
+  "logoutAnyway": "Cerrar sesión de todos modos",
+
+  "coTitle": "Checkout · {reservation}",
+  "@coTitle": {
+    "description": "Título del wizbar del wizard de checkout (mockup 8A)",
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "coTitleNoNumber": "Checkout",
+  "coPause": "Pausar",
+  "coStepOf": "Paso {index} de {total}",
+  "@coStepOf": {
+    "description": "Contador honesto del mockup (nota 4): la cadena lineal CONFIRMING→CLOSED son 10 pasos; CANCELLED es salida alterna, no el paso 11.",
+    "placeholders": {
+      "index": { "type": "int" },
+      "total": { "type": "int" }
+    }
+  },
+  "coSeeAllSteps": "Ver todos los pasos",
+  "coStepsSheetTitle": "{total} pasos + salida alterna",
+  "@coStepsSheetTitle": {
+    "placeholders": { "total": { "type": "int" } }
+  },
+  "coStepsSheetSub": "Estado reportado por el servidor · actualizado hace {age}",
+  "@coStepsSheetSub": {
+    "placeholders": { "age": { "type": "String" } }
+  },
+  "coSheetClose": "Cerrar",
+  "coPhaseConfirm": "Confirmar",
+  "coPhaseTerms": "T&C",
+  "coPhasePayment": "Pago",
+  "coPhaseInspection": "Inspección",
+  "coPhaseClosing": "Cierre",
+  "coStepConfirming": "Confirmar cliente y vehículo",
+  "coStepTcPending": "Términos y condiciones",
+  "coStepTcSigned": "Términos firmados",
+  "coStepPaymentPending": "Cobro en terminal",
+  "coStepPaid": "Pago completo",
+  "coStepInspectionHandoff": "Pasar a inspección",
+  "coStepInspectionInProgress": "Inspección en curso",
+  "coStepCustomerSignPending": "Firma del cliente",
+  "coStepFinalizing": "Generando contrato",
+  "coStepClosed": "Entregado",
+  "coStepCancelled": "Cancelado",
+  "coStepCancelledHint": "Salida alterna desde cualquier paso no terminal",
+  "coStepUnknown": "Paso reportado por el servidor: {step}",
+  "@coStepUnknown": {
+    "description": "Forward-compat (ADR-4): un currentStep que esta versión de la app no conoce se muestra CRUDO, sin corregirlo ni adivinar el siguiente.",
+    "placeholders": { "step": { "type": "String" } }
+  },
+  "coStepPending": "Pendiente",
+  "coStepInProgress": "En curso",
+  "coStepDoneByYou": "Completado por ti · {time}",
+  "@coStepDoneByYou": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coStepDoneKiosk": "Completado en el kiosco · {time}",
+  "@coStepDoneKiosk": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coStepDoneOtherAgent": "Completado por otro agente · {time}",
+  "@coStepDoneOtherAgent": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coStepDone": "Completado · {time}",
+  "@coStepDone": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coGuardTcCompleted": "Espera: firma de T&C del cliente",
+  "coGuardPayment": "Espera: cobro registrado",
+  "coGuardInspection": "Espera: inspección completa",
+  "coGuardSignature": "Espera: firma del cliente",
+  "coSurfaceKiosk": "kiosco",
+  "coSurfaceCounter": "mostrador",
+  "coSurfaceRideops": "otro teléfono",
+  "coSurfaceCustomer": "teléfono del cliente",
+  "coSurfaceOther": "otra superficie",
+  "coPresenceLine": "{name} está en esta sesión · {surface} · hace {age}",
+  "@coPresenceLine": {
+    "description": "Chip de presencia (P1). Informativo, jamás un candado.",
+    "placeholders": {
+      "name": { "type": "String" },
+      "surface": { "type": "String" },
+      "age": { "type": "String" }
+    }
+  },
+  "coPresenceMore": "+{count}",
+  "@coPresenceMore": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "coAdvancedKiosk": "«{step}» se completó en el kiosco hace {age}.",
+  "@coAdvancedKiosk": {
+    "placeholders": {
+      "step": { "type": "String" },
+      "age": { "type": "String" }
+    }
+  },
+  "coAdvancedOtherAgent": "«{step}» lo completó otro agente hace {age}.",
+  "@coAdvancedOtherAgent": {
+    "placeholders": {
+      "step": { "type": "String" },
+      "age": { "type": "String" }
+    }
+  },
+  "coAdvancedOtherSurface": "«{step}» se completó en otra superficie hace {age}.",
+  "@coAdvancedOtherSurface": {
+    "placeholders": {
+      "step": { "type": "String" },
+      "age": { "type": "String" }
+    }
+  },
+  "coAdvancedNow": "Ya vas en: {step}.",
+  "@coAdvancedNow": {
+    "placeholders": { "step": { "type": "String" } }
+  },
+  "coAdvancedSeeChanged": "Ver qué cambió",
+  "coStaleView": "vista de hace {age}",
+  "@coStaleView": {
+    "placeholders": { "age": { "type": "String" } }
+  },
+  "coOfflineBanner": "Sin conexión. Esto es lo último que vio el servidor hace {age} — puede haber cambiado en otra superficie.",
+  "@coOfflineBanner": {
+    "placeholders": { "age": { "type": "String" } }
+  },
+  "coBlockedOfflineWhy": "Avanzar un paso requiere confirmación del servidor. Sin red no se adivina: se espera.\nNada de este paso entra a la Bandeja de salida.",
+  "coBlockedOfflineShort": "Sin conexión: el avance lo confirma el servidor.",
+  "coTransitionWhy": "El servidor confirma el avance; si otra superficie ya lo hizo, esta pantalla se actualiza sola.",
+  "coPauseTitle": "¿Guardar y pausar este checkout?",
+  "coPauseSub": "La sesión queda guardada en el paso {index} de {total}. Nada se pierde.",
+  "@coPauseSub": {
+    "placeholders": {
+      "index": { "type": "int" },
+      "total": { "type": "int" }
+    }
+  },
+  "coPauseSubUnknownStep": "La sesión queda guardada en el paso que reporta el servidor. Nada se pierde.",
+  "coPauseKeeps": "Se conserva: cliente y vehículo verificados, el código de T&C vigente y el registro de quién hizo qué.",
+  "coPauseWarn": "Otro compañero (o el kiosco) puede retomarla desde donde va. Al volver, entras al paso que reporte el servidor, no al que dejaste.",
+  "coPauseConfirm": "Guardar y pausar",
+  "coPauseStay": "Seguir aquí",
+  "coPauseFailed": "No se pudo pausar. Revisa la conexión e intenta de nuevo.",
+  "coTerminalClosedTitle": "Este checkout ya se cerró",
+  "coTerminalCancelledTitle": "Este checkout se canceló",
+  "coTerminalBody": "Esta sesión ya es terminal: no admite más pasos.",
+  "coTerminalDoneKiosk": "Se completó en el kiosco a las {time}. No hay nada más que hacer aquí.",
+  "@coTerminalDoneKiosk": {
+    "description": "Frame 11E: el 409 SESSION_TERMINAL no es un error, es una noticia — dice dónde y cuándo terminó",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTerminalDoneByYou": "Lo cerraste tú a las {time}. No hay nada más que hacer aquí.",
+  "@coTerminalDoneByYou": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTerminalDoneOtherAgent": "Lo cerró otro agente a las {time}. No hay nada más que hacer aquí.",
+  "@coTerminalDoneOtherAgent": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTerminalDoneAt": "Se completó a las {time}. No hay nada más que hacer aquí.",
+  "@coTerminalDoneAt": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTerminalCancelledByYou": "Lo cancelaste tú a las {time}. Esta sesión ya no admite pasos.",
+  "@coTerminalCancelledByYou": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTerminalCancelledKiosk": "Se canceló en el kiosco a las {time}. Esta sesión ya no admite pasos.",
+  "@coTerminalCancelledKiosk": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTerminalCancelledOtherAgent": "Lo canceló otro agente a las {time}. Esta sesión ya no admite pasos.",
+  "@coTerminalCancelledOtherAgent": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTerminalCancelledAt": "Se canceló a las {time}. Esta sesión ya no admite pasos.",
+  "@coTerminalCancelledAt": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTerminalContractRequested": "Se pidió el envío del contrato al correo del cliente a las {time}.",
+  "@coTerminalContractRequested": {
+    "description": "Solo con autoEmailedAt sellado. Dice «se pidió», NUNCA «salió»: el backend estampa el sello ANTES de disparar el envío (checkout-session.service.js:597-612) y el envío es fire-and-forget — un SMTP caído deja el sello puesto igual. Afirmar la entrega sería mentirle al agente que se lo va a decir al cliente.",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTerminalByYou": "Tú",
+  "coTerminalByKiosk": "En el kiosco",
+  "coTerminalByOtherAgent": "Otro agente",
+  "coTerminalByOtherSurface": "Otra superficie",
+  "coTerminalBackToList": "Volver a la lista",
+  "coTerminalWhy": "Si crees que se cerró por error, abre la reserva: desde aquí no se puede reabrir.",
+  "coTerminalLogTitle": "Registro de la sesión",
+  "coExit": "Salir",
+  "coNoSessionTitle": "Aún no hay sesión de checkout",
+  "coNoSessionBody": "Esta reserva todavía no tiene una sesión abierta. Se inicia desde la cola de salidas del inicio.",
+  "coLoadFailedTitle": "No se pudo abrir el checkout",
+  "coConflictEntryGuardTitle": "Falta un paso previo",
+  "coConflictVehicleTitle": "El vehículo ya no está libre",
+  "coConflictGenericTitle": "El servidor no aceptó el avance",
+  "coConflictSwapTitle": "El servidor no aceptó el cambio de unidad",
+  "coConflictDismiss": "Entendido",
+  "coPickupToday": "Salida hoy {time}",
+  "@coPickupToday": {
+    "description": "Tercera respuesta del patio en el header de sesión (8A): para cuándo",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coPickupOn": "Salida {date} {time}",
+  "@coPickupOn": {
+    "placeholders": {
+      "date": { "type": "String" },
+      "time": { "type": "String" }
+    }
+  },
+  "coPrecheckinReady": "Pre-checkin listo",
+  "coPrecheckinPending": "Pre-checkin pendiente",
+  "coOdometer": "Odómetro {km} km",
+  "@coOdometer": {
+    "placeholders": { "km": { "type": "String" } }
+  },
+  "coExitWithoutPausing": "Salir sin pausar",
+  "coExitWithoutPausingWhy": "Nada se bloquea: la sesión queda como está y el patio puede seguirla desde otra superficie.",
+  "coPauseNeedsNetwork": "Pausar necesita conexión: es un aviso que se guarda en el servidor. Sin red puedes salir igual.",
+  "coStampsTitle": "Lo que el servidor ya tiene",
+  "coStampTc": "Firma de T&C",
+  "coStampPayment": "Cobro registrado",
+  "coStampInspection": "Inspección completa",
+  "coStampSignature": "Firma del cliente",
+  "coStampDone": "Listo · {time}",
+  "@coStampDone": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coStampPending": "Pendiente",
+  "coSessionAgeLabel": "Estado de hace {age}",
+  "@coSessionAgeLabel": {
+    "placeholders": { "age": { "type": "String" } }
+  },
+
+  "coEntryNoVehicleTitle": "Esta reserva no tiene vehículo asignado",
+  "@coEntryNoVehicleTitle": {
+    "description": "Frame 11C — 422 NO_VEHICLE_ASSIGNED: sin unidad no hay entrega"
+  },
+  "coEntryNoVehicleBody": "Sin unidad no se puede entregar. Asignar el vehículo a la reserva se hace hoy desde el escritorio; en cuanto quede asignado, vuelve a tocar la card.",
+  "coEntryVehicleConflictTitle": "Esa unidad ya está en otra renta",
+  "@coEntryVehicleConflictTitle": {
+    "description": "Frame 11D — 409 VEHICLE_CONFLICT al CREAR: aquí la sesión NO llegó a existir"
+  },
+  "coEntryVehicleConflictBody": "El servidor lo bloqueó para que la misma unidad no se entregue dos veces. Cambiar el vehículo de la reserva —o cerrar la otra renta— se hace hoy desde el escritorio.",
+  "coEntryConflictWith": "Reserva en conflicto: {reservation}",
+  "@coEntryConflictWith": {
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "coEntrySearchReservation": "Buscar {reservation}",
+  "@coEntrySearchReservation": {
+    "description": "Salida real del 11D con lo que la app SÍ puede hacer hoy: buscar la reserva en conflicto (el detalle de reserva llega en M3)",
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "coEntryPrecheckinTitle": "Falta el pre-checkin del cliente",
+  "@coEntryPrecheckinTitle": {
+    "description": "Frame 11B — 422 PRECHECKIN_REQUIRED"
+  },
+  "coEntryPrecheckinBody": "Esta sucursal exige el pre-checkin del cliente antes de abrir el checkout.",
+  "coEntrySendPrecheckinLink": "Enviar pre-checkin al cliente",
+  "coEntrySendingPrecheckinLink": "Enviando…",
+  "coEntryPrecheckinLinkSent": "Listo: el link de pre-checkin salió al correo del cliente. Cuando lo complete, vuelve a tocar la card.",
+  "coEntryPrecheckinLinkFailed": "No se pudo enviar el link. {reason}",
+  "@coEntryPrecheckinLinkFailed": {
+    "placeholders": { "reason": { "type": "String" } }
+  },
+  "coEntryPrecheckinLinkCooldown": "Ese link ya se envió hace un momento: el servidor no manda otro tan seguido. Pídele al cliente que revise su correo (y el spam) antes de reintentar.",
+  "@coEntryPrecheckinLinkCooldown": {
+    "description": "429 de send-request-email = cooldown POR RESERVA (routes:1621), no saturación. El hecho accionable es «ya salió», no «espera a que baje la carga»."
+  },
+  "coEntryPrecheckinNoEmail": "La reserva no tiene correo del cliente, así que no hay a dónde mandarlo. Agrégalo desde el escritorio o pide el pre-checkin por teléfono.",
+  "@coEntryPrecheckinNoEmail": {
+    "description": "400 «No recipient email found» (routes:1634) — el fallo más probable de esta acción"
+  },
+  "coEntryPrecheckinDeskNote": "Capturar los datos en el mostrador todavía se hace desde el escritorio: esta app aún no tiene ese formulario.",
+  "coEntryReservationUntouched": "La reserva no se tocó. En cuanto el pre-checkin quede listo, la card se desbloquea sola.",
+  "coEntryAgeTitle": "Las reglas de edad no permiten esta entrega",
+  "@coEntryAgeTitle": {
+    "description": "Frame 11B, variante AGE_RULES_*: la regla la fija la sucursal, así que la salida NO es una acción del agente"
+  },
+  "coEntryAgeBody": "La sucursal bloquea esta salida por su política de edad.",
+  "coEntryAgeDeskNote": "La fecha de nacimiento se corrige en la reserva, desde el escritorio. Si la regla está mal, eso lo cambia tu supervisor en la configuración de la sucursal.",
+  "coEntryScopeChangedTitle": "Se interrumpió la apertura",
+  "coEntryScopeChangedBody": "Cambió tu sede o tu sesión mientras se abría el checkout, así que la respuesta del servidor ya no corresponde a lo que ves.",
+  "coEntryScopeChangedFoot": "La sesión pudo haberse creado. Vuelve a tocar la card: si existe, se reanuda.",
+  "coEntryOfflineTitle": "Sin conexión para abrir el checkout",
+  "coEntryOfflineBody": "Abrir un checkout necesita la confirmación del servidor una sola vez. No se encola en la Bandeja: cuando haya señal, vuelve a tocar la card.",
+  "coEntryConnectionLostTitle": "Se cortó la conexión al abrir",
+  "@coEntryConnectionLostTitle": {
+    "description": "La petición SALIÓ del aparato y no volvió respuesta (timeout / socket caído). Distinto del corte sin señal: aquí el servidor pudo procesarla entera"
+  },
+  "coEntryConnectionLostBody": "La solicitud salió del teléfono pero el servidor no alcanzó a responder, así que la app no puede saber si el checkout quedó abierto.",
+  "coEntryConnectionLostFoot": "La sesión pudo haberse creado. Cuando haya señal, vuelve a tocar la card: si existe, se reanuda.",
+  "coEntryNotReadyTitle": "Un momento",
+  "coEntryNotReadyBody": "La app todavía está cargando tu ubicación activa. Intenta de nuevo en un segundo.",
+  "coEntryNoSessionCreated": "No se creó ninguna sesión de checkout.",
+  "coEntryServerSaid": "El servidor respondió: {message}",
+  "@coEntryServerSaid": {
+    "description": "El texto del backend se muestra tal cual (DoD #5) junto al copy localizado: trae los datos concretos (la regla de edad exacta, el número de la otra reserva)",
+    "placeholders": { "message": { "type": "String" } }
+  },
+  "coEntryClose": "Cerrar",
+
+  "coConfirmCustomer": "Cliente",
+  "coConfirmVehicle": "Vehículo",
+  "coConfirmVerified": "Verificado",
+  "coConfirmMissingPill": "Faltan datos",
+  "coConfirmConflictPill": "En conflicto",
+  "coConfirmName": "Nombre",
+  "coConfirmLicense": "Licencia",
+  "coConfirmLicenseWithExpiry": "{number} · vence {date}",
+  "@coConfirmLicenseWithExpiry": {
+    "description": "El vencimiento sale del snapshot del contrato: el modelo Customer no tiene esa columna.",
+    "placeholders": {
+      "number": { "type": "String" },
+      "date": { "type": "String" }
+    }
+  },
+  "coConfirmPhone": "Teléfono",
+  "coConfirmPrecheckin": "Pre-checkin",
+  "coConfirmPrecheckinDone": "Completado",
+  "@coConfirmPrecheckinDone": {
+    "description": "VALOR de la fila cuya clave ya dice 'Pre-checkin' (review GD-MC-6): con coPrecheckinReady se leía 'Pre-checkin | Pre-checkin listo'. Se usa cuando el servidor sella el pre-checkin pero no llega la hora."
+  },
+  "coConfirmPrecheckinDoneAt": "Completado {time}",
+  "@coConfirmPrecheckinDoneAt": {
+    "description": "Caso normal: display-data trae customerInfoCompletedAt, así que la fila dice CUÁNDO, como el mockup 9A.",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coConfirmPrecheckinPending": "Pendiente",
+  "coConfirmMissingValue": "Sin capturar",
+  "coConfirmUnit": "Unidad",
+  "coConfirmOdometerLabel": "Odómetro",
+  "coOdometerValue": "{km} km",
+  "@coOdometerValue": {
+    "placeholders": { "km": { "type": "String" } }
+  },
+  "coConfirmVehicleAvailable": "Disponible",
+  "coConfirmChangeVehicle": "Cambiar vehículo",
+  "coConfirmCta": "Continuar a T&C",
+  "coConfirmFieldName": "el nombre",
+  "coConfirmFieldLicense": "la licencia",
+  "coConfirmFieldPhone": "el teléfono",
+  "coConfirmFieldJoin": "y",
+  "coConfirmBlockedWhy": "Faltan {fields} del cliente. Se capturan en el mostrador o con el pre-checkin del cliente; esta pantalla se actualiza sola.",
+  "@coConfirmBlockedWhy": {
+    "description": "Bloqueo LOCAL con causa nombrada (9B). El CTA no se esconde: se bloquea diciendo qué falta y dónde se resuelve. RideOps no captura datos del cliente (ADR-1: eso vive en el mostrador web).",
+    "placeholders": { "fields": { "type": "String" } }
+  },
+  "coConfirmRecheck": "Actualizar datos del cliente",
+  "@coConfirmRecheck": {
+    "description": "Review GD-MC-5: la etiqueta NOMBRA el objeto. 'Volver a consultar' no decía qué se consulta y chocaba con el why de al lado, que ya promete que la pantalla se actualiza sola."
+  },
+  "coConfirmRecheckPending": "Consultando al servidor…",
+  "coConfirmRecheckedStill": "Consultado ahora: el servidor sigue sin {fields}.",
+  "@coConfirmRecheckedStill": {
+    "description": "Acuse del re-consultado (GD-MC-5b): el botón disparaba dos peticiones y NO mostraba nada. Reusa la misma lista legible de campos que el bloqueo.",
+    "placeholders": { "fields": { "type": "String" } }
+  },
+  "coDeclineTitle": "El cliente declina el seguro",
+  "coDeclineOff": "Apagado · se cobra la cobertura estándar",
+  "coDeclineOn": "Encendido · se agrega el anexo",
+  "coDeclineLocked": "Los términos ya se firmaron: el anexo del seguro ya no cambia aquí",
+  "coDeclineNeedsNetwork": "Sin conexión: esta bandera la registra el servidor",
+  "coDeclineConsequence": "Se agregará el anexo de rechazo de cobertura a los términos que firma el cliente y al contrato PDF. Puedes apagarlo mientras no se firmen los términos.",
+  "coDeclineSignedNote": "El cliente ya firmó los términos con este anexo. Para cambiarlo, el contrato se ajusta desde el mostrador.",
+  "coConflictSwapCta": "Elegir otro vehículo",
+  "coConflictSwapWhy": "Nada se perdió: al cambiar la unidad sigues en el paso 1 con el cliente ya verificado.",
+
+  "coSwapTitle": "Cambiar vehículo",
+  "coSwapSub": "Disponibles según el servidor · hace {age}",
+  "@coSwapSub": {
+    "description": "El endpoint filtra por tenant y ventana de la reserva, NO por la sede activa: la copy no promete una sede que el servidor no filtró; cada opción muestra la suya.",
+    "placeholders": { "age": { "type": "String" } }
+  },
+  "coSwapSubLoading": "Preguntando al servidor qué unidades están libres…",
+  "coSwapSameGroup": "Mismo grupo",
+  "coSwapOtherGroup": "Otro grupo · puede cambiar la tarifa",
+  "coSwapCurrentReason": "Unidad actual · una unidad no se cambia por sí misma",
+  "coSwapCurrentCommitted": "Unidad actual · el servidor la reporta comprometida en otra renta",
+  "@coSwapCurrentCommitted": {
+    "description": "Parte de MC-4 que no depende de la lámina: el 'motivo legible' de la unidad inerte era el string EN INGLÉS del servidor metido en un renglón de 12.5 px donde no cabe una cita. La cita del servidor vive en el banner del paso; aquí va copy propia."
+  },
+  "coSwapLockedCause": "La inspección de esta sesión ya empezó: a partir de ahí la unidad ya no se cambia.",
+  "@coSwapLockedCause": {
+    "description": "409 SWAP_LOCKED (vehicle-swap.service.js:46-51). Línea de causa TRADUCIDA arriba del cuerpo del servidor — mismo tratamiento que ENTRY_GUARD. Importa especialmente aquí: el mensaje del backend filtra un enum crudo de base de datos (currentStep=INSPECTION_IN_PROGRESS), y el agente no tiene por qué descifrarlo."
+  },
+  "coSwapDoubleBookedCause": "Esa unidad ya está reservada en esta misma ventana.",
+  "@coSwapDoubleBookedCause": {
+    "description": "409 VEHICLE_DOUBLE_BOOKED (vehicle-swap.service.js:86-91). El cuerpo del servidor sigue visible debajo: trae el número de la reserva que la aparta."
+  },
+  "coSwapTerminalCause": "Esa unidad ya no se puede rentar.",
+  "@coSwapTerminalCause": {
+    "description": "409 VEHICLE_TERMINAL (vehicle-swap.service.js:67-72): vendida o fuera de servicio. Cuál de las dos lo dice el cuerpo del servidor, debajo."
+  },
+  "coSwapConfirm": "Cambiar a {unit}",
+  "@coSwapConfirm": {
+    "placeholders": { "unit": { "type": "String" } }
+  },
+  "coSwapConfirmNone": "Elige una unidad",
+  "coSwapCancel": "Cancelar",
+  "coSwapEmpty": "El servidor no reporta otras unidades libres para esta ventana.",
+  "coSwapNeedsNetwork": "Cambiar de unidad necesita conexión: el cambio lo hace el servidor sobre la reserva y el contrato.",
+
+  "coQrSemanticLabel": "Código QR para firmar los términos",
+  "@coQrSemanticLabel": {
+    "description": "Etiqueta para lectores de pantalla del QR. Antes era la URL FIRMADA completa: TalkBack dictaba el token en voz alta y ese token es una credencial al portador (review GD-SC-8 / INN-S-4)."
+  },
+  "coTermsInstruction": "Que el cliente lo escanee con la cámara de su teléfono para firmar.",
+  "coTermsExpiresIn": "Vence en",
+  "coTermsExpired": "Vencido",
+  "coTermsPresent": "Mostrar al cliente (pantalla completa)",
+  "coTermsWaiting": "Esperando la firma del cliente. Esta pantalla se actualiza sola.",
+  "coTermsReissue": "Generar código nuevo",
+  "coTermsReissueWhy": "Si al código vigente le quedan más de 2 minutos, el servidor devuelve el mismo: el cliente puede seguir con el QR que ya tiene.",
+  "coTermsReused": "Sigue siendo el mismo código: al vigente le quedan más de 2 minutos y el servidor lo reusa. Si el cliente ya lo escaneó, no tiene que volver a hacerlo.",
+  "@coTermsReused": {
+    "description": "Nota 9 del mockup: la re-emisión admite cuándo el backend reusó el token en vez de fingir que emitió otro."
+  },
+  "coTermsReissued": "Código nuevo listo. El anterior dejó de servir.",
+  "coTermsExpiredBanner": "El código venció a las {time}. Nada se perdió: genera uno nuevo y el cliente firma igual.",
+  "@coTermsExpiredBanner": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTermsExpiredOverlay": "Código vencido",
+  "coTermsExpiredWhy": "El código nuevo dura otros 15 minutos. Si el cliente ya había abierto el anterior, tendrá que abrir el nuevo.",
+  "coTermsMinting": "Pidiendo el código al servidor…",
+  "coTermsMintFailed": "No se pudo emitir el código.",
+  "coTermsOfflineWhy": "El código lo emite el servidor: sin conexión no hay QR que mostrar.",
+  "coTermsSignedTitle": "Términos firmados",
+  "coTermsSignedBody": "{name} firmó a las {time}. Ya puedes seguir con el cobro.",
+  "@coTermsSignedBody": {
+    "description": "No se afirma DÓNDE firmó: el sello puede venir del teléfono del cliente o del kiosco, y la sesión no lo distingue.",
+    "placeholders": {
+      "name": { "type": "String" },
+      "time": { "type": "String" }
+    }
+  },
+  "coTermsSignedBodyNoName": "Los términos se firmaron a las {time}. Ya puedes seguir con el cobro.",
+  "@coTermsSignedBodyNoName": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coTermsRecord": "Registro",
+  "coTermsRecordConfirmed": "Confirmado por el servidor",
+  "coTermsRecordSigned": "Firmado",
+  "coTermsRecordAddenda": "Anexos",
+  "coTermsAddendaNone": "Ninguno (seguro aceptado)",
+  "coTermsAddendaDecline": "Anexo de rechazo de cobertura",
+  "coTermsCta": "Continuar al cobro",
+  "coTermsCtaWhy": "Este botón solo existe porque el servidor ya tiene la firma registrada.",
+
+  "coPresentInstruction": "Escanee este código con la cámara de su teléfono para leer y firmar los términos.",
+  "coPresentHelp": "¿Problemas para escanear? El agente puede ayudarle.",
+  "coPresentExit": "Salir de presentación",
+  "coPresentSubtitle": "Términos de renta · Reserva {number}",
+  "@coPresentSubtitle": {
+    "placeholders": { "number": { "type": "String" } }
+  },
+  "coPresentSubtitleNoNumber": "Términos de renta",
+  "coPresentClosingSoon": "Quedan {mmss} — si se vence, el agente le genera otro al instante.",
+  "@coPresentClosingSoon": {
+    "description": "Nota 12: al cliente NO se le pone un reloj en la cara; el countdown solo aparece bajo 2 min y con copy tranquilizadora.",
+    "placeholders": { "mmss": { "type": "String" } }
+  }
 }

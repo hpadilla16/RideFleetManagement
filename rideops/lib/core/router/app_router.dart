@@ -7,6 +7,7 @@ import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/pin_lock_screen.dart';
 import '../../features/auth/presentation/pin_setup_screen.dart';
 import '../../features/auth/presentation/splash_screen.dart';
+import '../../features/checkout/presentation/checkout_wizard_screen.dart';
 import '../../features/dashboard/presentation/home_screen.dart';
 import '../../features/dashboard/presentation/queue_list_screen.dart';
 import '../../features/inspection/presentation/inspection_screen.dart';
@@ -45,11 +46,23 @@ abstract final class AppRoutes {
 
   // Flujo de inspección (H5): pantalla completa FUERA del shell — sin tabs
   // ni chip de sede (el header propio del flujo manda; el paso de firma es
-  // superficie del cliente). La entrada desde las cards del home es H6:
-  // la card de la cola de salidas gana su CTA hacia esta ruta.
+  // superficie del cliente).
+  //
+  // Desde M2-H7 la card de la cola de salidas apunta al CHECKOUT (que es su
+  // destino real: la inspección es un PASO del wizard, integrada en M2-H4).
+  // Esta ruta sigue viva y con entrada propia: la bandeja de salida ofrece
+  // "Abrir inspección" en sus filas muertas, y el drenado la necesita.
   static const inspectionPattern = '/inspection/:reservationId';
   static String inspection(String reservationId) =>
       '/inspection/$reservationId';
+
+  // Wizard de checkout (M2-H1): pantalla completa FUERA del shell, por la
+  // misma razón que la inspección — el header del flujo manda y el agente no
+  // debe poder saltar a otra tab a media entrega sin decidir qué hace con la
+  // sesión. La entrada desde la card de la cola de salidas es M2-H7; la ruta
+  // ya queda lista para que esa historia solo tenga que navegar.
+  static const checkoutPattern = '/checkout/:reservationId';
+  static String checkout(String reservationId) => '/checkout/$reservationId';
 }
 
 /// Superficies del flujo de auth: NUNCA se preservan como destino de retorno
@@ -204,6 +217,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           reservationId: state.pathParameters['reservationId']!,
         ),
       ),
+      GoRoute(
+        path: AppRoutes.checkoutPattern,
+        builder: (context, state) => CheckoutWizardScreen(
+          reservationId: state.pathParameters['reservationId']!,
+        ),
+      ),
       // Shell de la app (blueprint §3, H3): appbar con chip de ubicación +
       // tab bar flotante RBAC. Los destinos sin historia todavía montan
       // ShellPlaceholderScreen — cada historia reemplaza el suyo.
@@ -227,7 +246,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: AppRoutes.search,
-            builder: (context, state) => const SearchScreen(),
+            // `?q=` (M2-H7): destino del guard 11D — buscar la reserva en
+            // conflicto con el término ya puesto.
+            builder: (context, state) => SearchScreen(
+              initialQuery: state.uri.queryParameters['q'],
+            ),
           ),
           GoRoute(
             path: AppRoutes.incidents,

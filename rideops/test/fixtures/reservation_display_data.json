@@ -4,18 +4,27 @@
     "tenantId": "cme8xk3l40000tenantcancun",
     "reservationNumber": "R-20260816-0042",
     "status": "CONFIRMED",
+    "workflowMode": "RENTAL",
     "pickupAt": "2026-08-16T17:30:00.000Z",
+    "customerInfoCompletedAt": "2026-08-15T22:10:00.000Z",
     "returnAt": "2026-08-19T17:30:00.000Z",
     "pickupLocationId": "cme9q0l0c0001locctr",
     "returnLocationId": "cme9q0l0c0001locctr",
     "vehicleId": "cmea77xh20003vehu112",
+    "vehicleTypeId": "cme9r1t2b0002vtcompact",
     "customer": {
       "id": "cmecu5tqz0009custmaria",
       "tenantId": "cme8xk3l40000tenantcancun",
       "firstName": "María",
       "lastName": "González",
       "email": "maria.gonzalez@example.com",
-      "phone": "+52 998 123 4567"
+      "phone": "+52 998 123 4567",
+      "licenseNumber": "B-4482913",
+      "licenseState": "QR",
+      "dateOfBirth": "1991-04-02T00:00:00.000Z",
+      "hasIdPhoto": true,
+      "hasInsuranceDoc": false,
+      "hasLicenseBack": true
     },
     "vehicle": {
       "id": "cmea77xh20003vehu112",
@@ -40,6 +49,27 @@
         "sortOrder": 1
       }
     ],
+    "rentalAgreement": {
+      "id": "cmed9ag001agr42",
+      "tenantId": "cme8xk3l40000tenantcancun",
+      "agreementNumber": "RA-20260816-0042",
+      "status": "DRAFT",
+      "reservationId": "cmed1xr2b0001resv42display",
+      "vehicleId": "cmea77xh20003vehu112",
+      "customerFirstName": "María",
+      "customerLastName": "González",
+      "customerEmail": "maria.gonzalez@example.com",
+      "customerPhone": "+52 998 123 4567",
+      "licenseNumber": "B-4482913",
+      "licenseState": "QR",
+      "licenseExpiry": "2029-03-31T00:00:00.000Z",
+      "total": "412.75",
+      "paidAmount": "0",
+      "balance": "412.75",
+      "securityDepositAmount": "250.00",
+      "charges": [],
+      "payments": []
+    },
     "notes": null,
     "createdAt": "2026-08-10T15:04:11.000Z",
     "updatedAt": "2026-08-16T14:02:53.000Z"

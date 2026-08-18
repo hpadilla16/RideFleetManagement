@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rideops/core/api/dto/available_vehicle.dart';
 import 'package:rideops/core/api/dto/checkout_session.dart';
 import 'package:rideops/core/api/dto/dashboard.dart';
 import 'package:rideops/core/api/dto/inspection.dart';
@@ -10,6 +11,7 @@ import 'package:rideops/core/api/dto/reservation_display.dart';
 import 'package:rideops/core/api/dto/session_user.dart';
 import 'package:rideops/core/api/dto/staff_location.dart';
 import 'package:rideops/core/api/enums.dart';
+import 'package:rideops/features/checkout/domain/checkout_presence.dart';
 
 /// Los 6 DTOs calientes contra fixtures de JSON real (M0-5). Cada fixture
 /// está derivado del serializer del backend — ver test/fixtures/README.md.
@@ -61,6 +63,51 @@ void main() {
     expect(cs.isTerminal, isFalse);
     expect(cs.paymentCompletedAt, isNotNull);
     expect(cs.inspectionCompletedAt, isNull);
+  });
+
+  test(
+      'checkout_session.json (API de HOY, sin P1) → presence es NULL, no lista '
+      'vacía: la app no puede afirmar quién más está en la sesión', () {
+    final cs = CheckoutSessionDto.fromJson(readFixture('checkout_session.json'));
+    expect(cs.presence, isNull);
+    expect(cs.stateVersion, isNull, reason: 'columna de P2 aún no desplegada');
+    expect(pickPresenceChip(cs.presence, DateTime.now()), isNull);
+  });
+
+  test('presence: [] NO afirma soledad — withPresence() degrada a lista vacía '
+      'ante un fallo de lectura, así que "vacío" y "no hay nadie" son '
+      'indistinguibles desde el cliente', () {
+    final raw = readFixture('checkout_session_presence.json');
+    raw['presence'] = <dynamic>[];
+    final cs = CheckoutSessionDto.fromJson(raw);
+    expect(cs.presence, isEmpty);
+    // Se pinta IGUAL que null (sin chip): la UI nunca dice "estás solo".
+    expect(pickPresenceChip(cs.presence, DateTime.now()), isNull);
+  });
+
+  test('checkout_session_presence.json (P1 desplegado) → presence tipada', () {
+    final cs =
+        CheckoutSessionDto.fromJson(readFixture('checkout_session_presence.json'));
+    expect(cs.presence, hasLength(2));
+    expect(cs.presence!.first.surface, 'KIOSK');
+    expect(cs.presence!.first.displayName, 'María G.');
+    expect(cs.presence!.first.lastSeenAt, isNotNull);
+    expect(cs.step, CheckoutStep.tcPending);
+    // `stateVersion` (columna de P2) se lee para el FENCING de respuestas
+    // tardías; NO se envía como `expectedVersion` todavía (eso es H6).
+    expect(cs.stateVersion, 3);
+  });
+
+  test('presence con una superficie DESCONOCIDA no rompe el parseo', () {
+    final raw = readFixture('checkout_session_presence.json');
+    (raw['presence'] as List<dynamic>).add({
+      'surface': 'SUPERFICIE_DEL_FUTURO',
+      'displayName': 'Alguien',
+      'lastSeenAt': '2026-08-16T14:03:55.000Z',
+    });
+    final cs = CheckoutSessionDto.fromJson(raw);
+    expect(cs.presence, hasLength(3));
+    expect(cs.presence!.last.surface, 'SUPERFICIE_DEL_FUTURO');
   });
 
   test('un currentStep desconocido no crashea (resiliencia de enum)', () {
@@ -168,6 +215,47 @@ void main() {
     // Fleet' (ni "RF") durante la firma legal.
     expect(d.branding.clientSafeCompanyName, '');
     expect(d.reservation.vehicle, isNull);
+  });
+
+  test('display-data trae lo que verifica el paso CONFIRMING (M2-H2)', () {
+    final d = ReservationDisplayData.fromJson(
+      readFixture('reservation_display_data.json'),
+    );
+    // Licencia y teléfono: las dos filas que el agente confronta con la
+    // licencia física y las dos que 9B nombra cuando faltan.
+    expect(d.reservation.customer?.licenseNumber, 'B-4482913');
+    expect(d.reservation.customer?.phone, '+52 998 123 4567');
+    // El VENCIMIENTO no está en Customer (no existe la columna): viaja en el
+    // snapshot del contrato.
+    expect(d.reservation.rentalAgreement?.licenseExpiry?.year, 2029);
+    expect(d.reservation.rentalAgreement?.customerPhone, isNotNull);
+    expect(d.reservation.vehicleTypeId, 'cme9r1t2b0002vtcompact');
+    expect(d.reservation.vehicle?.status, 'AVAILABLE');
+    // CONTRATO VERIFICADO: el select de getById NO incluye declinedInsurance
+    // (solo el select de LISTA la trae). Null ⇒ "el servidor no lo dice", y
+    // por eso el switch se deriva del events[] de la sesión.
+    expect(d.reservation.rentalAgreement?.declinedInsurance, isNull);
+  });
+
+  test('reservation_available_vehicles.json → AvailableVehicle (array plano)',
+      () {
+    final rows = [
+      for (final row in json.decode(
+        File('test/fixtures/reservation_available_vehicles.json')
+            .readAsStringSync(),
+      ) as List<dynamic>)
+        AvailableVehicle.fromJson(row as Map<String, dynamic>),
+    ];
+    expect(rows, hasLength(3));
+    // La unidad YA asignada viaja siempre y de primera (routes:1064-1067).
+    expect(rows.first.id, 'cmea77xh20003vehu112');
+    expect(rows[1].label, 'U-118 · Toyota Corolla 2023');
+    expect(rows[1].isAvailableNow, isTrue);
+    // Un candidato que el servidor devuelve sin estar AVAILABLE existe: la UI
+    // muestra su estado crudo en vez de afirmar "disponible".
+    expect(rows[2].isAvailableNow, isFalse);
+    expect(rows[2].status, 'RESERVED');
+    expect(rows[2].homeLocation?.name, 'Aeropuerto');
   });
 
   test('mobile_inspection_state.json → MobileInspectionState', () {

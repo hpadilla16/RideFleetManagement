@@ -40,6 +40,10 @@ _CheckoutSessionDto _$CheckoutSessionDtoFromJson(Map<String, dynamic> json) =>
         json['autoEmailedAt'] as String?,
       ),
       startedByUserId: json['startedByUserId'] as String?,
+      stateVersion: (json['stateVersion'] as num?)?.toInt(),
+      presence: (json['presence'] as List<dynamic>?)
+          ?.map((e) => CheckoutPresenceDto.fromJson(e as Map<String, dynamic>))
+          .toList(),
     );
 
 Map<String, dynamic> _$CheckoutSessionDtoToJson(
@@ -67,4 +71,43 @@ Map<String, dynamic> _$CheckoutSessionDtoToJson(
   'abandonedReason': instance.abandonedReason,
   'autoEmailedAt': const IsoDateTimeConverter().toJson(instance.autoEmailedAt),
   'startedByUserId': instance.startedByUserId,
+  'stateVersion': instance.stateVersion,
+  'presence': instance.presence,
+};
+
+_VehicleSwapResult _$VehicleSwapResultFromJson(Map<String, dynamic> json) =>
+    _VehicleSwapResult(
+      sessionId: json['sessionId'] as String,
+      fromVehicleId: json['fromVehicleId'] as String?,
+      toVehicleId: json['toVehicleId'] as String?,
+      session: CheckoutSessionDto.fromJson(
+        json['session'] as Map<String, dynamic>,
+      ),
+    );
+
+Map<String, dynamic> _$VehicleSwapResultToJson(_VehicleSwapResult instance) =>
+    <String, dynamic>{
+      'sessionId': instance.sessionId,
+      'fromVehicleId': instance.fromVehicleId,
+      'toVehicleId': instance.toVehicleId,
+      'session': instance.session,
+    };
+
+_CheckoutPresenceDto _$CheckoutPresenceDtoFromJson(Map<String, dynamic> json) =>
+    _CheckoutPresenceDto(
+      surface: json['surface'] as String? ?? '',
+      displayName: json['displayName'] as String? ?? '',
+      lastSeenAt: const IsoDateTimeConverter().fromJson(
+        json['lastSeenAt'] as String?,
+      ),
+      actorUserId: json['actorUserId'] as String?,
+    );
+
+Map<String, dynamic> _$CheckoutPresenceDtoToJson(
+  _CheckoutPresenceDto instance,
+) => <String, dynamic>{
+  'surface': instance.surface,
+  'displayName': instance.displayName,
+  'lastSeenAt': const IsoDateTimeConverter().toJson(instance.lastSeenAt),
+  'actorUserId': instance.actorUserId,
 };

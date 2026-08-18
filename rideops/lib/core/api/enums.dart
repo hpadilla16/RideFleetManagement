@@ -84,6 +84,33 @@ enum UserRole {
   }
 }
 
+/// Modo de flujo de la reserva. RideOps lo necesita porque **cambia reglas de
+/// producto, no solo etiquetas**: en `DEALERSHIP_LOANER` el backend prepara un
+/// contrato compañero de $0 (checkout-session.service.js:245-255), así que el
+/// `POST /:id/declined-insurance` responde 200 y estampa un anexo de rechazo de
+/// cobertura sobre un contrato de CORTESÍA. El wizard web esconde ese switch
+/// (`checkout-wizard-v2/page.js:839`) y RideOps no lo hacía (review INN-MC-3).
+///
+/// Está aquí, y no como string suelto, justamente para que el chequeo de
+/// paridad avise si el backend agrega un modo nuevo: cada modo nuevo obliga a
+/// decidir si el switch del seguro aplica o no.
+// mirrors: ReservationWorkflowMode
+enum ReservationWorkflowMode {
+  rental,
+  carSharing,
+  dealershipLoaner;
+
+  String get wire => _wire(name);
+
+  static ReservationWorkflowMode? tryParse(String? raw) {
+    if (raw == null) return null;
+    for (final v in ReservationWorkflowMode.values) {
+      if (v.wire == raw) return v;
+    }
+    return null;
+  }
+}
+
 // mirrors: InspectionPhase
 enum InspectionPhase {
   checkout,

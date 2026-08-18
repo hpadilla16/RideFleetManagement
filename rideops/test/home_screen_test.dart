@@ -17,11 +17,12 @@ import 'package:rideops/core/telemetry/event_logger.dart';
 import 'package:rideops/features/dashboard/application/dashboard_controller.dart';
 import 'package:rideops/features/dashboard/presentation/home_screen.dart';
 import 'package:rideops/features/dashboard/presentation/home_skeleton.dart';
+import 'package:rideops/features/checkout/presentation/checkout_wizard_screen.dart';
 import 'package:rideops/features/dashboard/presentation/queue_list_screen.dart';
-import 'package:rideops/features/inspection/presentation/inspection_screen.dart';
 import 'package:rideops/features/shell/location_denied_view.dart';
 
 import 'helpers/auth_test_helpers.dart';
+import 'helpers/checkout_test_helpers.dart';
 import 'helpers/outbox_test_helpers.dart';
 import 'helpers/shell_test_helpers.dart';
 
@@ -35,6 +36,9 @@ void main() {
   late InMemoryActiveLocationStore locationStore;
   late FakeAuthApi api;
   late FakeDashboardApi dashboardApi;
+  late FakeCheckoutApi checkoutApi;
+  late FakeNetworkStatus network;
+  late CapturingEventLogger logger;
 
   setUp(() {
     tokenStore = InMemoryTokenStore()
@@ -46,6 +50,11 @@ void main() {
     api = FakeAuthApi();
     api.onMe = () async => sessionUserFixture();
     dashboardApi = FakeDashboardApi();
+    checkoutApi = FakeCheckoutApi();
+    logger = CapturingEventLogger();
+    // Con red: la entrada al checkout (M2-H7) exige UNA confirmación del
+    // servidor y su camino sin red tiene su propio test.
+    network = FakeNetworkStatus(online: true);
   });
 
   Widget app() => ProviderScope(
@@ -57,10 +66,11 @@ void main() {
           biometricAuthProvider.overrideWithValue(FakeBiometricAuth()),
           authApiProvider.overrideWithValue(api),
           dashboardApiProvider.overrideWithValue(dashboardApi),
-          eventLoggerProvider.overrideWithValue(CapturingEventLogger()),
-          // Dio sin rutas (offline simulado): la navegación a la inspección
-          // (CTA H6) debe ser determinista — la pantalla cae en su estado
-          // offline, jamás una request real desde el test.
+          checkoutApiProvider.overrideWithValue(checkoutApi),
+          eventLoggerProvider.overrideWithValue(logger),
+          // Dio sin rutas (offline simulado): la navegación al checkout
+          // (CTA M2-H7) debe ser determinista — la pantalla destino cae en su
+          // estado offline, jamás una request real desde el test.
           authedDioProvider.overrideWithValue(
             Dio(BaseOptions(baseUrl: 'https://rideops.test'))
               ..httpClientAdapter = RouteAdapter(),
@@ -72,7 +82,7 @@ void main() {
           // H5: bandeja silenciada — ver helpers/outbox_test_helpers.dart.
           outboxDbProvider.overrideWith(buildMemoryOutboxDb),
           photoVaultProvider.overrideWith(buildQuietVault),
-          networkStatusProvider.overrideWithValue(FakeNetworkStatus()),
+          networkStatusProvider.overrideWithValue(network),
           outboxRowsProvider.overrideWith((ref) => Stream.value(const [])),
         ],
         child: const RideOpsApp(),
@@ -208,8 +218,8 @@ void main() {
   });
 
   testWidgets(
-      'CTA de la cola de salidas (H6): SOLO la card de checkout es tocable y '
-      'navega a /inspection/:reservationId', (tester) async {
+      'CTA de la cola de salidas (M2-H7): SOLO la card de checkout es tocable, '
+      'crea la sesión y navega a /checkout/:reservationId', (tester) async {
     final now = DateTime.now();
     dashboardApi.onFetch = (_) async => payload(
           queues: {
@@ -232,13 +242,17 @@ void main() {
     // Affordance explícita SOLO en la cola de salidas: entre 2 cards de
     // reserva hay exactamente UNA con CTA (la de retornos sigue no-tocable
     // a propósito — el detalle general es M3).
-    final cta = find.bySemanticsLabel(RegExp('open checkout inspection'));
+    final cta = find.bySemanticsLabel(RegExp('open checkout'));
     expect(cta, findsOneWidget);
 
     await tester.tap(cta);
     await tester.pumpAndSettle();
-    expect(find.byType(InspectionScreen), findsOneWidget,
-        reason: 'la card gana su entrada al flujo de inspección de H5');
+
+    // El POST salió con el reservationId de ESA card y solo una vez.
+    expect(checkoutApi.created, ['chk-nav']);
+    expect(find.byType(CheckoutWizardScreen), findsOneWidget,
+        reason: 'la card es el punto de partida del wizard (frame 11A)');
+    expect(logger.has(CheckoutEvents.entryOpen), isTrue);
   });
 
   testWidgets(

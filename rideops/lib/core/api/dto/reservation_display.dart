@@ -1,5 +1,7 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import 'json_converters.dart';
+
 part 'reservation_display.freezed.dart';
 part 'reservation_display.g.dart';
 
@@ -35,14 +37,52 @@ abstract class DisplayReservation with _$DisplayReservation {
     String? reservationNumber,
     DisplayVehicle? vehicle,
     DisplayCustomer? customer,
+
+    /// Grupo (clase) reservado. El sheet de swap (9E) lo compara con el
+    /// `vehicleTypeId` de cada candidata para decir "mismo grupo" sin
+    /// inventarse una jerarquía de tarifas que el endpoint no manda.
+    String? vehicleTypeId,
+
+    /// Snapshot del contrato (`getById` :1585-1668). Es la verdad LEGAL de la
+    /// entrega: el PDF imprime estos campos, no los de la ficha viva del
+    /// cliente — por eso la tarjeta 9A los prefiere y cae a `customer` solo
+    /// cuando el snapshot está vacío.
+    DisplayAgreement? rentalAgreement,
+
+    /// Cuándo sale el coche. Es la TERCERA respuesta que el patio necesita en
+    /// el header del wizard (mockup 8A: "Salida hoy 10:30"): a quién atiendo,
+    /// qué unidad entrego, **para cuándo**.
+    @IsoDateTimeConverter() DateTime? pickupAt,
+
+    /// Sello del pre-checkin (`Reservation.customerInfoCompletedAt`,
+    /// schema.prisma:1526). Es además el gate del 422 PRECHECKIN_REQUIRED en
+    /// las sedes que lo exigen: verlo ANTES ahorra el viaje a la negativa.
+    @IsoDateTimeConverter() DateTime? customerInfoCompletedAt,
+
+    /// `Reservation.workflowMode` crudo (RENTAL | CAR_SHARING |
+    /// DEALERSHIP_LOANER, schema.prisma:1362). Viaja SIEMPRE en display-data:
+    /// `getById` usa un `include` de nivel superior, así que todo escalar de
+    /// `Reservation` llega (reservations.service.js:1521-1539).
+    ///
+    /// Se guarda como String (no como enum) por la misma regla de resiliencia
+    /// del resto de los DTO: un modo nuevo del backend no puede tumbar el
+    /// parseo. La comparación tipada la hace
+    /// [ReservationWorkflowMode.tryParse], cuya paridad vigila CI.
+    String? workflowMode,
   }) = _DisplayReservation;
 
   factory DisplayReservation.fromJson(Map<String, dynamic> json) =>
       _$DisplayReservationFromJson(json);
 }
 
-/// Cliente de la reserva — solo el nombre: se sella como `signerName` del
-/// complete de inspección (la firma legal lleva firmante, review INN S-3).
+/// Cliente de la reserva. El nombre se sella como `signerName` del complete
+/// de inspección (la firma legal lleva firmante, review INN S-3); licencia y
+/// teléfono son las dos filas que el agente CONFRONTA contra la licencia
+/// física en el paso CONFIRMING (9A) y las dos que 9B nombra cuando faltan.
+///
+/// OJO con el modelo: `Customer` **no tiene** vencimiento de licencia
+/// (schema.prisma, modelo Customer) — ese dato vive solo en el snapshot del
+/// contrato ([DisplayAgreement.licenseExpiry]).
 @freezed
 abstract class DisplayCustomer with _$DisplayCustomer {
   const DisplayCustomer._();
@@ -50,6 +90,9 @@ abstract class DisplayCustomer with _$DisplayCustomer {
   const factory DisplayCustomer({
     String? firstName,
     String? lastName,
+    String? phone,
+    String? licenseNumber,
+    String? licenseState,
   }) = _DisplayCustomer;
 
   factory DisplayCustomer.fromJson(Map<String, dynamic> json) =>
@@ -61,6 +104,42 @@ abstract class DisplayCustomer with _$DisplayCustomer {
         [firstName, lastName].nonNulls.where((p) => p.isNotEmpty).join(' ');
     return name.isEmpty ? null : name;
   }
+}
+
+/// Snapshot del `RentalAgreement` que viaja dentro de display-data
+/// (`reservations.service.js` `getById` :1585-1668).
+@freezed
+abstract class DisplayAgreement with _$DisplayAgreement {
+  const DisplayAgreement._();
+
+  const factory DisplayAgreement({
+    required String id,
+    String? customerPhone,
+    String? licenseNumber,
+    String? licenseState,
+    @IsoDateTimeConverter() DateTime? licenseExpiry,
+
+    /// Bandera del anexo de rechazo de cobertura (`RentalAgreement
+    /// .declinedInsurance`, schema.prisma:2231) — lo que el switch de 9C
+    /// escribe vía `POST /:id/declined-insurance`.
+    ///
+    /// **Hoy llega SIEMPRE null y no es un descuido del DTO**: el `select` de
+    /// `getById` (:1585-1668) NO incluye la columna — solo el select de LISTA
+    /// la trae (`reservations.service.js:285`). Consecuencia verificada: el
+    /// wizard web lee `reservation.rentalAgreement?.declinedInsurance` de este
+    /// mismo payload (`checkout-wizard-v2/page.js:750`) y por eso su switch
+    /// arranca APAGADO aunque el seguro ya esté declinado — bug preexistente
+    /// del web, registrado por H2.
+    ///
+    /// Por eso RideOps deriva el estado del `events[]` de la sesión (el
+    /// `DECLINED_INSURANCE` que escribe `setDeclinedInsurance`) y trata este
+    /// campo como la fuente PREFERENTE en cuanto el backend lo mande: null =
+    /// "el servidor no lo dice", nunca "false".
+    bool? declinedInsurance,
+  }) = _DisplayAgreement;
+
+  factory DisplayAgreement.fromJson(Map<String, dynamic> json) =>
+      _$DisplayAgreementFromJson(json);
 }
 
 /// Campos del modelo `Vehicle` (schema.prisma:776+) que la inspección usa.
@@ -79,6 +158,12 @@ abstract class DisplayVehicle with _$DisplayVehicle {
     /// Espejo vivo del historial de millas (Vehicle.mileage, default 0) —
     /// la "última lectura registrada" bajo el campo de odómetro.
     int? mileage,
+
+    /// `Vehicle.status` crudo (AVAILABLE | RENTED | IN_MAINTENANCE | …). La
+    /// tarjeta de vehículo (9A) SOLO afirma "Disponible" cuando el servidor
+    /// dice AVAILABLE; cualquier otro valor se muestra como estado neutro con
+    /// su palabra, nunca traducido a una promesa que el dato no sostiene.
+    String? status,
   }) = _DisplayVehicle;
 
   factory DisplayVehicle.fromJson(Map<String, dynamic> json) =>

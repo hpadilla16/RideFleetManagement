@@ -195,6 +195,36 @@ class ActiveLocationController extends Notifier<ActiveLocation> {
   }
 }
 
+/// Espera ACOTADA a que la preferencia de sede termine de hidratar.
+///
+/// UN solo helper (Innovation, review H7): había tres esperas incompatibles
+/// —125×40 ms en la entrada al checkout, 50×`Duration.zero` en la inspección y
+/// el gate declarativo del dashboard/wizard—, o sea tres respuestas distintas a
+/// la MISMA pregunta ("¿ya sé qué `x-view-location` mandar?"). Los controllers
+/// imperativos (los que disparan una escritura desde un toque) usan esto; los
+/// que solo leen siguen con el gate declarativo de `build()`, que es más simple
+/// y no necesita reloj.
+///
+/// Devuelve false si se agotó la espera o el provider murió mientras tanto: la
+/// pantalla decide qué decir. Jamás un spin infinito.
+///
+/// La hidratación real es una lectura de Keystore lanzada en un microtask del
+/// arranque, así que el camino normal sale en la primera vuelta; el bucle es el
+/// cinturón para el teléfono lento con el Keystore frío.
+Future<bool> awaitActiveLocationHydrated(
+  Ref ref, {
+  Duration step = const Duration(milliseconds: 20),
+  int maxTries = 100,
+}) async {
+  if (ref.read(activeLocationProvider).hydrated) return true;
+  for (var i = 0; i < maxTries; i++) {
+    await Future<void>.delayed(step);
+    if (!ref.mounted) return false;
+    if (ref.read(activeLocationProvider).hydrated) return true;
+  }
+  return false;
+}
+
 final activeLocationStoreProvider = Provider<ActiveLocationStore>(
   (ref) => const SecureActiveLocationStore(),
 );
