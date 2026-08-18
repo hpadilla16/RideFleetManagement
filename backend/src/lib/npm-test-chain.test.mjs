@@ -35,7 +35,8 @@ const KNOWN_OUT = {
   // run by the `embedded-postgres-suites` job in beta-ci.yml via
   // `npm run test:embedded`, and this suite fails if that stops being true —
   // including if the job is commented out, switched off with `if:`, or has its
-  // command neutered with `|| true`. The cases it does NOT catch are listed at
+  // command neutered with `|| true` — in the workflow OR in the test:embedded
+  // script itself. The cases it does NOT catch are listed at
   // that assertion rather than left to be discovered.
   // The two entries that are NOT embedded-pg suites say so individually.
   'test:module-access-audit': 'DB-backed (.db.test.mjs); run by the tenant-isolation-suite job',
@@ -261,6 +262,44 @@ test('`test:embedded` does not name a suite that has stopped booting embedded pg
   assert.deepEqual(stale, [], `"test:embedded" names suite(s) that no longer boot embedded pg: ${stale.join(', ')}`);
 });
 
+/**
+ * The script the CI job invokes must still BE the thing it claims to be.
+ *
+ * Every other assertion here hardens the workflow line. None of them looked at
+ * `test:embedded` itself as anything but a bag of filenames — tests 5 and 6 read
+ * it only through /[\w./-]+\.test\.mjs/g, so everything outside those filenames
+ * was invisible. QA neutered the script five ways and the whole suite stayed
+ * green while the CI job would have run nothing:
+ *     ... <7 files> || true
+ *     ... <7 files> ; exit 0
+ *     echo would run: ...
+ *     node --test --test-only ...        (runs zero tests)
+ *     true # <the entire original script>
+ *
+ * This is the same `|| true` the workflow-side check was hardened against,
+ * moved one file to the left — into package.json, where a script edit gets a
+ * fraction of the scrutiny a .github/workflows/ diff gets, and which is the
+ * file somebody is already in when they are tuning --test-concurrency or the
+ * file list. The first red run on a platform this has never executed on is
+ * exactly when they would reach for it.
+ */
+test('`test:embedded` cannot be neutered into a no-op', () => {
+  const embedded = String(pkg.scripts['test:embedded'] ?? '');
+  assert.match(
+    embedded,
+    /^node --test(?: |$)/,
+    'test:embedded no longer STARTS with `node --test` — whatever it runs now, it is not the suites',
+  );
+  assert.ok(
+    !/[|;&]/.test(embedded),
+    'test:embedded chains a shell operator — `|| true` or `; exit 0` here makes the CI job ' +
+      'green while every suite fails, and the workflow-side guards cannot see it',
+  );
+  assert.ok(
+    !/(?:^|\s)--test-only(?:\s|=|$)/.test(embedded),
+    'test:embedded passes --test-only, which runs ZERO tests unless a suite opts in',
+  );
+});
 test('beta-ci.yml actually runs `npm run test:embedded`, unguarded, in a live job', () => {
   // The point of the whole exercise. Naming the suites in a script they COULD
   // be run by is not coverage; a job that runs them is.
@@ -278,13 +317,20 @@ test('beta-ci.yml actually runs `npm run test:embedded`, unguarded, in a live jo
   // matched whole-line with nothing appended.
   //
   // NOT COVERED, deliberately, so this comment does not become the next
-  // over-claim, five ways past this that are NOT caught: an empty
-  // `strategy.matrix` (the job never materializes); narrowing the workflow's
-  // `on:` triggers or adding paths-ignore; a `needs:` on a job that is itself
-  // skipped; and a hand-crafted decoy `embedded-postgres-suites:` line inside a
-  // block scalar under `jobs:`. Each is exotic, loud (the `on:` one disables
-  // all four jobs), or requires intent to deceive. A nonexistent `runs-on`
-  // label also passes, but it reports as a PENDING check, never a green one.
+  // over-claim, ways past this that are NOT caught — INCLUDING, not an
+  // exhaustive inventory, because the list grew every time QA looked:
+  //   - an empty `strategy.matrix`, so the job never materializes;
+  //   - narrowing the workflow's `on:` triggers, or paths-ignore;
+  //   - a `needs:` on a job that is itself skipped;
+  //   - a decoy `embedded-postgres-suites:` line inside a block scalar under
+  //     `jobs:`, or a decoy `run:` line in an EARLIER step, which makes the
+  //     step search below pick the wrong chunk;
+  //   - `shell: cat {0}`, which prints the script and exits 0;
+  //   - `"if": false` with a quoted key, or `if : false` with a space before
+  //     the colon.
+  // Each is exotic, loud (the `on:` one disables all four jobs at once), or
+  // requires intent to deceive. A nonexistent `runs-on` label also passes, but
+  // it reports as a PENDING check, never a green one, so it cannot forge a pass.
   const CI_PATH = '../../../.github/workflows/beta-ci.yml';
   let ci;
   try {
@@ -307,7 +353,12 @@ test('beta-ci.yml actually runs `npm run test:embedded`, unguarded, in a live jo
   // inside a top-level block scalar, and .exec takes the FIRST match, so an
   // unanchored search can be pointed at a decoy header. Needs intent to
   // deceive, but 'extracted from the job' should mean that.
-  const jobs = live.slice(live.search(/^jobs:$/m));
+  const jobsAt = live.search(/^jobs:$/m);
+  // search() returns -1 and slice(-1) then yields the LAST CHARACTER of the
+  // file rather than throwing, so a stray space after `jobs:` reported the job
+  // as deleted. Same 'sends the reader hunting' failure as the terminator above.
+  assert.ok(jobsAt >= 0, 'beta-ci.yml has no top-level `jobs:` line');
+  const jobs = live.slice(jobsAt);
   const body = /^  embedded-postgres-suites:$([\s\S]*?)(?:^  \S|$(?![\s\S]))/m.exec(jobs)?.[1];
   assert.ok(body, 'the embedded-postgres-suites job is gone from beta-ci.yml');
   // Whole-line and exact. `.*` after the command was the hole: `|| true`,
@@ -326,7 +377,10 @@ test('beta-ci.yml actually runs `npm run test:embedded`, unguarded, in a live jo
   for (const [label, re] of [
     // EXACTLY four spaces = job level. A step may legitimately carry `if:`.
     ['a job-level `if:`', /^ {4}if:/m],
-    ['`continue-on-error: true`', /^\s*continue-on-error:\s*true/m],
+    // Any value that is not `false`, case-insensitively: YAML 1.2 resolves
+    // True/TRUE as well as true, and `${{ true }}` is another spelling. Matching
+    // one spelling of a value is how the `if: false` hole got opened.
+    ['a `continue-on-error` that is not false', /^\s*continue-on-error:\s*(?!false(?:$|[^-\w]))\S/im],
   ]) {
     assert.ok(
       !re.test(body),
@@ -343,6 +397,12 @@ test('beta-ci.yml actually runs `npm run test:embedded`, unguarded, in a live jo
   // far more likely than `|| true`. Scoping to the ONE step keeps
   // `if: failure()` on a log-dump step legal, which is what m1 was about.
   const RUN_LINE = /^\s*run:\s*npm run test:embedded\s*$/m;
+  // The split below assumes the 6-space step indent both workflows in this repo
+  // use. 4- and 8-space are also valid YAML and Actions accepts them; without
+  // this assertion a reindent yields ONE chunk (the whole body), and then any
+  // sibling step's `if: failure()` trips the check with a message accusing the
+  // command step — m1 resurrected, silently.
+  assert.match(body, /^ {6}- /m, 'the steps of embedded-postgres-suites are not at the 6-space indent this guard assumes');
   const step = body.split(/^ {6}- /m).find((chunk) => RUN_LINE.test(chunk));
   assert.ok(step, 'the `npm run test:embedded` invocation is not a step of embedded-postgres-suites');
   assert.ok(
