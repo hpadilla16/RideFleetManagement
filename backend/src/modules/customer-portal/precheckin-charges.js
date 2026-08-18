@@ -367,17 +367,34 @@ export async function applyPrecheckinCharges({
         .filter((c) => c.taxable && String(c.chargeType || '').toUpperCase() !== 'TAX')
         .reduce((sum, c) => sum + Number(c.total || 0), 0);
       if (taxableTotal > 0) {
-        // Tax rate from the pricing snapshot, else the pickup location.
+        // Tax rate from the pricing snapshot, else the pickup location — the
+        // snapshot is the rate the customer was quoted at booking, so it wins.
         //
-        // NOTE, not a fix: findReservationByToken('customer-info') does NOT
-        // include pricingSnapshot, so on this path the first operand is always
-        // undefined and the location's rate is what actually applies. Left
-        // exactly as it was — changing which rate a customer is taxed at is its
-        // own decision with its own review, not a rider on an atomicity fix.
-        const loc = reservation.pickupLocationId
-          ? await tx.location.findUnique({ where: { id: reservation.pickupLocationId }, select: { taxRate: true } })
-          : null;
-        const taxRate = Number(reservation.pricingSnapshot?.taxRate ?? loc?.taxRate ?? 0);
+        // 2026-08-17 (MONEY, Hector's call): this used to be unreachable. The
+        // atomicity refactor inherited it with a note that
+        // findReservationByToken('customer-info') did not include
+        // pricingSnapshot, making the first operand undefined on every OTA
+        // pre-check-in and quietly applying the location's rate. That include is
+        // now present, so the snapshot rate actually applies here — matching
+        // every other tax site in the codebase and, crucially, matching
+        // buildReservationBreakdown, which computes the amount the customer is
+        // SHOWN from the snapshot and so used to disagree with the TAX row this
+        // block wrote for the same reservation.
+        //
+        // The fallback tests FALSY, not nullish, deliberately. With `??`, a
+        // snapshot carrying taxRate = 0 would win, fail the `taxRate > 0` guard
+        // below, and write no tax row at all rather than falling through to the
+        // location — a revenue hole in place of the old bug. This mirrors
+        // recomputeTaxRow() in reservation-extend.service.js, the canonical
+        // version of this same recalculation.
+        let taxRate = Number(reservation.pricingSnapshot?.taxRate ?? 0);
+        if (!taxRate && reservation.pickupLocationId) {
+          const loc = await tx.location.findUnique({
+            where: { id: reservation.pickupLocationId },
+            select: { taxRate: true }
+          });
+          taxRate = Number(loc?.taxRate ?? 0);
+        }
         if (taxRate > 0) {
           const taxAmount = Number((taxableTotal * taxRate / 100).toFixed(2));
           await tx.reservationCharge.create({

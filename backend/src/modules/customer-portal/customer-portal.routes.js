@@ -333,6 +333,12 @@ async function findReservationByToken(kind, token) {
         pickupLocation: true,
         returnLocation: true,
         vehicle: true,
+        // 2026-08-17 (MONEY): the 'signature' and 'payment' branches below have
+        // always loaded this; omitting it here meant the OTA tax recalculation in
+        // precheckin-charges.js read `reservation.pricingSnapshot?.taxRate` as
+        // undefined every single time and silently taxed at the pickup location's
+        // rate instead of the rate the customer was quoted at booking.
+        pricingSnapshot: true,
         payments: { orderBy: { paidAt: 'desc' } }
       }
     });

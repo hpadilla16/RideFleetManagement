@@ -32,6 +32,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import { bootEmbeddedPg } from '../../../scripts/embedded-pg-boot.mjs';
 // Imported dynamically in before(), after bootEmbeddedPg has set DATABASE_URL.
@@ -134,7 +135,7 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
 let resSeq = 0;
 /** A reservation with a charge sheet, fresh for each case. */
-async function makeReservation({ charges = [], notes = null } = {}) {
+async function makeReservation({ charges = [], notes = null, snapshot = null } = {}) {
   resSeq += 1;
   const reservation = await prisma.reservation.create({
     data: {
@@ -151,8 +152,18 @@ async function makeReservation({ charges = [], notes = null } = {}) {
   for (const c of charges) {
     await prisma.reservationCharge.create({ data: { reservationId: reservation.id, ...c } });
   }
-  // Shaped like findReservationByToken('customer-info') hands it over.
-  return prisma.reservation.findUnique({ where: { id: reservation.id } });
+  if (snapshot) {
+    await prisma.reservationPricingSnapshot.create({
+      data: { reservationId: reservation.id, ...snapshot },
+    });
+  }
+  // Shaped like findReservationByToken('customer-info') hands it over — which
+  // since 2026-08-17 includes pricingSnapshot. Loading it here is not decoration:
+  // the OTA tax bug was invisible for exactly as long as this shape lacked it.
+  return prisma.reservation.findUnique({
+    where: { id: reservation.id },
+    include: { pricingSnapshot: true },
+  });
 }
 
 function chargeSheet(reservationId) {
@@ -438,6 +449,115 @@ describe('the submission it is meant to apply still applies', () => {
   });
 });
 
+
+describe('the OTA tax recalculation charges the rate the customer was quoted', () => {
+  // MONEY. The pickup location in this suite is taxRate = 10. Every case below
+  // puts a single taxable EQUIPMENT row of 50 on the sheet — it survives the OTA
+  // daily/fee sweep, and the rows this handler writes itself never set `taxable`,
+  // so 50 is the whole taxable base and the tax row is readable by eye:
+  // 10% = 5.00 (location), 7.5% = 3.75 (snapshot).
+  const taxable50 = [
+    { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+    { source: 'EQUIPMENT', name: 'Child seat', quantity: 1, rate: 50, total: 50, taxable: true },
+  ];
+
+  const otaSubmission = (reservation) => applyPrecheckinCharges({
+    client: prisma,
+    reservation,
+    thirdPartyBooking: { isThirdParty: true, voucherUrl: null },
+  });
+
+  const taxRowOf = async (reservationId) => {
+    const sheet = await chargeSheet(reservationId);
+    const rows = sheet.filter((c) => c.source === 'TAX_RECALC');
+    assert.ok(rows.length <= 1, 'the recalculation writes at most one tax row');
+    return rows[0] || null;
+  };
+
+  it('uses the snapshot rate, not the pickup location, when the two disagree', async () => {
+    // THE REGRESSION THIS SUITE EXISTS FOR. Until 2026-08-17 the reservation on
+    // this path arrived without pricingSnapshot, so this case would have billed
+    // 5.00 at the location's 10% while the breakdown the customer is SHOWN
+    // computed 3.75 from the snapshot.
+    const reservation = await makeReservation({
+      charges: taxable50,
+      snapshot: { taxRate: 7.5 },
+    });
+
+    await otaSubmission(reservation);
+
+    const tax = await taxRowOf(reservation.id);
+    assert.ok(tax, 'a taxable sheet must still produce a tax row');
+    assert.equal(Number(tax.total), 3.75, 'taxed at the snapshot’s 7.5%, not the location’s 10%');
+    assert.match(tax.name, /7\.50%/, 'the customer reads the rate off this label — it must name the rate actually applied');
+  });
+
+  it('falls back to the location when the snapshot carries no rate at all', async () => {
+    // A snapshot exists but never had a rate written to it. Unchanged behaviour,
+    // pinned so the fallback is not lost in a later tidy-up.
+    const reservation = await makeReservation({
+      charges: taxable50,
+      snapshot: { dailyRate: 100 },
+    });
+
+    await otaSubmission(reservation);
+
+    const tax = await taxRowOf(reservation.id);
+    assert.ok(tax, 'a null snapshot rate must not leave the rental untaxed');
+    assert.equal(Number(tax.total), 5, "the location's 10% applies when the snapshot has nothing to say");
+  });
+
+  it('falls back to the location when the snapshot rate is zero, rather than dropping the tax', async () => {
+    // THE TRAP IN THE OBVIOUS FIX. Adding the include while keeping the original
+    // `snapshot?.taxRate ?? loc?.taxRate` makes a stored 0 WIN the nullish
+    // coalesce, fail the `taxRate > 0` guard, and write no tax row — turning a
+    // mis-rated rental into an untaxed one. The fallback tests falsy for this
+    // reason, matching recomputeTaxRow() in reservation-extend.service.js.
+    const reservation = await makeReservation({
+      charges: taxable50,
+      snapshot: { taxRate: 0 },
+    });
+
+    await otaSubmission(reservation);
+
+    const tax = await taxRowOf(reservation.id);
+    assert.ok(tax, 'a zero snapshot rate must fall through to the location, not silently untax the rental');
+    assert.equal(Number(tax.total), 5, "the location's 10% applies");
+  });
+
+  it('still taxes at the location rate when the reservation has no snapshot', async () => {
+    // The pre-2026-08-17 production shape, and still the common one. Behaviour
+    // here is unchanged by the fix and must stay that way.
+    const reservation = await makeReservation({ charges: taxable50 });
+    assert.equal(reservation.pricingSnapshot, null, 'fixture sanity: this case really has no snapshot');
+
+    await otaSubmission(reservation);
+
+    const tax = await taxRowOf(reservation.id);
+    assert.ok(tax);
+    assert.equal(Number(tax.total), 5);
+  });
+});
+
+describe("the 'customer-info' token load carries the pricing snapshot", () => {
+  it('includes pricingSnapshot, or the tax cases above silently stop testing anything', async () => {
+    // Source-level on purpose. Every behavioural case above builds its own
+    // reservation shape, so all four would keep passing if someone dropped the
+    // include from findReservationByToken() — and the OTA tax bug would be back,
+    // green suite and all. This is the one assertion that watches the real query.
+    const src = await readFile(new URL('./customer-portal.routes.js', import.meta.url), 'utf8');
+    const branch = src.slice(
+      src.indexOf("if (kind === 'customer-info')"),
+      src.indexOf("if (kind === 'signature')"),
+    );
+    assert.ok(branch.length > 0, 'findReservationByToken() no longer has the shape this guard reads');
+    assert.match(
+      branch, /pricingSnapshot:\s*true/,
+      "the 'customer-info' include must load pricingSnapshot — without it the OTA tax "
+      + 'recalculation reads an undefined rate and taxes at the pickup location instead',
+    );
+  });
+});
 
 describe('a double-tapped Submit', () => {
   it('refuses the second submission with a 409 and leaves one of everything', async () => {
