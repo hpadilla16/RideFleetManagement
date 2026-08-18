@@ -36,8 +36,19 @@ const KNOWN_OUT = {
   // `npm run test:embedded`, and this suite fails if that stops being true —
   // including if the job is commented out, switched off with `if:`, or has its
   // command neutered with `|| true` — in the workflow OR in the test:embedded
-  // script itself. The cases it does NOT catch are listed at
-  // that assertion rather than left to be discovered.
+  // script itself. The cases it does NOT catch are listed at that assertion
+  // rather than left to be discovered.
+  //
+  // WHAT IS NOT SELF-PROTECTING, said plainly so nobody reads more into the
+  // above than it delivers: the script SHAPE check covers `test:embedded` and
+  // nothing else. There are 135 test:* scripts and one of them is guarded. In
+  // particular `test:smart-match` — the script that runs THIS FILE in CI — is
+  // itself unhardened, so appending `|| true` to it makes every assertion here
+  // non-blocking, and nothing in here notices. That is a real infinite regress
+  // and hardening 135 scripts is not the answer to it; knowing where the floor
+  // actually is, is. The floor is: this guard trusts that the two lines
+  // invoking it (test:smart-match here, and the money-path step in beta-ci.yml)
+  // are not themselves edited to lie.
   // The two entries that are NOT embedded-pg suites say so individually.
   'test:module-access-audit': 'DB-backed (.db.test.mjs); run by the tenant-isolation-suite job',
   'test:customer-inspection': 'DB-backed via the shared prisma singleton; needs a live DATABASE_URL, run by no automation',
@@ -285,19 +296,33 @@ test('`test:embedded` does not name a suite that has stopped booting embedded pg
  */
 test('`test:embedded` cannot be neutered into a no-op', () => {
   const embedded = String(pkg.scripts['test:embedded'] ?? '');
+  // A leading run of ENV ASSIGNMENTS is allowed: `test:reports` already uses
+  // `TZ=UTC node --test ...`, and NODE_OPTIONS=--max-old-space-size is a
+  // plausible, well-intentioned edit for a job booting seven clusters. Redding
+  // that would accuse the author of the one thing they did not do.
   assert.match(
     embedded,
-    /^node --test(?: |$)/,
-    'test:embedded no longer STARTS with `node --test` — whatever it runs now, it is not the suites',
+    /^(?:[A-Za-z_][A-Za-z0-9_]*=\S+ +)*node --test(?: |$)/,
+    'test:embedded no longer starts with `node --test` (optionally after env assignments) — ' +
+      'whatever it runs now, it is not the suites',
   );
   assert.ok(
     !/[|;&]/.test(embedded),
     'test:embedded chains a shell operator — `|| true` or `; exit 0` here makes the CI job ' +
       'green while every suite fails, and the workflow-side guards cannot see it',
   );
+  // The ZERO-TEST FLAG SET, not just --test-only. Each of these leaves node
+  // reporting `# fail 0` and exiting 0 while running nothing, measured on
+  // v22.22.0. --test-name-pattern is the dangerous one and the reason this is a
+  // set rather than a single flag: --test-only at least requires knowing about
+  // `only: true`, whereas --test-name-pattern is simply how you iterate on one
+  // failing case. Leaving it behind is a slip, not sabotage — the only entry on
+  // any of these lists with no intent barrier whatsoever.
+  const ZERO_TEST_FLAGS = /(?:^| )--test-(only|name-pattern|skip-pattern|shard)(?:[= ]|$)/.exec(embedded);
   assert.ok(
-    !/(?:^|\s)--test-only(?:\s|=|$)/.test(embedded),
-    'test:embedded passes --test-only, which runs ZERO tests unless a suite opts in',
+    !ZERO_TEST_FLAGS,
+    `test:embedded passes --test-${ZERO_TEST_FLAGS?.[1]}, which can leave node running ZERO tests ` +
+      'and still exiting 0 — the CI job would be green having proved nothing',
   );
 });
 test('beta-ci.yml actually runs `npm run test:embedded`, unguarded, in a live job', () => {
