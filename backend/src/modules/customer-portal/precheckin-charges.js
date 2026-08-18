@@ -375,20 +375,23 @@ export async function applyPrecheckinCharges({
         // findReservationByToken('customer-info') did not include
         // pricingSnapshot, making the first operand undefined on every OTA
         // pre-check-in and quietly applying the location's rate. That include is
-        // now present, so the snapshot rate actually applies here — matching
-        // every other tax site in the codebase and, crucially, matching
-        // buildReservationBreakdown, which computes the amount the customer is
-        // SHOWN from the snapshot and so used to disagree with the TAX row this
-        // block wrote for the same reservation.
+        // now present, so the snapshot rate actually applies here, which is what
+        // every other tax site in the system already does.
         //
-        // The fallback tests FALSY, not nullish, deliberately. With `??`, a
-        // snapshot carrying taxRate = 0 would win, fail the `taxRate > 0` guard
-        // below, and write no tax row at all rather than falling through to the
-        // location — a revenue hole in place of the old bug. This mirrors
-        // recomputeTaxRow() in reservation-extend.service.js, the canonical
-        // version of this same recalculation.
-        let taxRate = Number(reservation.pricingSnapshot?.taxRate ?? 0);
-        if (!taxRate && reservation.pickupLocationId) {
+        // A STORED ZERO IS A RATE, NOT A MISSING VALUE, and the fallback below is
+        // reached only when there is genuinely nothing to read. The column is
+        // nullable (schema.prisma:2823) and the writers use that: the pricing
+        // service stores NULL for "unset", while car-sharing.service.js:253
+        // stores a literal 0 for a trip it does not tax — on a reservation that
+        // has a pickup location with a nonzero rate. Falling back on falsy would
+        // silently start taxing those, and would let the location override a
+        // snapshot on the one path where the snapshot is supposed to win.
+        // `?? `-equivalent semantics here match buildReservationBreakdown and
+        // rental-agreements.service.js; a zero ends in no tax row via the
+        // `taxRate > 0` guard below, which is the intended outcome.
+        const snapshotRate = reservation.pricingSnapshot?.taxRate;
+        let taxRate = Number(snapshotRate ?? 0);
+        if (snapshotRate == null && reservation.pickupLocationId) {
           const loc = await tx.location.findUnique({
             where: { id: reservation.pickupLocationId },
             select: { taxRate: true }

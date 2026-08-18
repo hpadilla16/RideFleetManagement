@@ -507,12 +507,15 @@ describe('the OTA tax recalculation charges the rate the customer was quoted', (
     assert.equal(Number(tax.total), 5, "the location's 10% applies when the snapshot has nothing to say");
   });
 
-  it('falls back to the location when the snapshot rate is zero, rather than dropping the tax', async () => {
-    // THE TRAP IN THE OBVIOUS FIX. Adding the include while keeping the original
-    // `snapshot?.taxRate ?? loc?.taxRate` makes a stored 0 WIN the nullish
-    // coalesce, fail the `taxRate > 0` guard, and write no tax row — turning a
-    // mis-rated rental into an untaxed one. The fallback tests falsy for this
-    // reason, matching recomputeTaxRow() in reservation-extend.service.js.
+  it('writes no tax row when the snapshot rate is a deliberate zero', async () => {
+    // A STORED ZERO IS A RATE, NOT A MISSING VALUE — and this case is the reason
+    // the fallback tests for null rather than for falsy. The column is nullable,
+    // so "unset" already has its own representation; car-sharing.service.js:253
+    // stores a literal 0 for a trip it does not tax, on a reservation whose
+    // pickup location DOES have a rate (10 here). Falling back on falsy would
+    // quietly start charging that customer the location's 10%, and would let the
+    // location beat the snapshot on the one path where the snapshot is meant to
+    // win.
     const reservation = await makeReservation({
       charges: taxable50,
       snapshot: { taxRate: 0 },
@@ -521,8 +524,10 @@ describe('the OTA tax recalculation charges the rate the customer was quoted', (
     await otaSubmission(reservation);
 
     const tax = await taxRowOf(reservation.id);
-    assert.ok(tax, 'a zero snapshot rate must fall through to the location, not silently untax the rental');
-    assert.equal(Number(tax.total), 5, "the location's 10% applies");
+    assert.equal(
+      tax, null,
+      'a snapshot that says zero means zero — the location rate must not override it',
+    );
   });
 
   it('still taxes at the location rate when the reservation has no snapshot', async () => {
