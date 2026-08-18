@@ -161,3 +161,94 @@ export function shouldSwallowTransitionConflict({ err, fresh, toStep }) {
   const want = STEP_ORDER.indexOf(toStep);
   return at !== -1 && want !== -1 && at >= want;
 }
+
+// ---------------------------------------------------------------------------
+// The CLOSED screen's failure copy.
+//
+// Lives here, beside shouldSwallowTransitionConflict, for the same reason it
+// does: this is the other half of "does the agent learn the truth?". The rule
+// above decides whether the failure is SHOWN; the map below decides whether it
+// is UNDERSTOOD. Both need a test, and neither belongs inline in a 2000-line
+// page component.
+//
+// Spanish and frontend-owned on purpose. The backend message is the RideOps
+// contract (ops-app-plan/docs/00-domain-workflows.md §1.4-bis) and is not ours
+// to reword — it is also English, and it names a recovery the wizard does not
+// have: "(or swap vehicles)" is dead at CLOSED, where `swapLocked` blocks the
+// button and reservations.service.js#swapVehicle demands CHECKED_OUT anyway.
+// So we translate INTENT here and keep the raw message as a technical detail
+// line, rather than editing prose four other surfaces depend on.
+//
+// Keys are the `reason` member the backend hangs off FINALIZE_INCOMPLETE
+// (checkout-session.service.js — `incomplete.reason = fail.code`).
+// ---------------------------------------------------------------------------
+export const FINALIZE_FAILURE_COPY = {
+  VEHICLE_CONFLICT: {
+    title: 'El vehículo sigue rentado en otra reservación',
+    body: 'La unidad asignada no se pudo entregar porque sigue fuera en otra renta. '
+      + 'Completa el check-in de esa renta y vuelve a intentar el cierre.',
+  },
+  NO_VEHICLE_ASSIGNED: {
+    title: 'La reservación se quedó sin vehículo',
+    body: 'No se puede cerrar un checkout sin unidad asignada. Asigna un vehículo desde la '
+      + 'reservación y vuelve a intentar el cierre.',
+  },
+  PRECHECKIN_REQUIRED: {
+    title: 'Falta el pre-check-in del cliente',
+    body: 'Esta sede exige el pre-check-in completo. Complétalo desde la reservación '
+      + '("llenar por el cliente") o reenvíale el enlace, y vuelve a intentar el cierre.',
+  },
+  AGE_RULES_DOB_REQUIRED: {
+    title: 'Falta la fecha de nacimiento del conductor',
+    body: 'Esta sede exige verificar la edad antes de entregar. Captura la fecha de nacimiento '
+      + 'del ID o licencia en la reservación y vuelve a intentar el cierre.',
+  },
+  AGE_RULES_DOB_IMPLAUSIBLE: {
+    title: 'La fecha de nacimiento es inválida',
+    body: 'La fecha registrada es imposible. Corrígela con el ID o licencia del cliente y vuelve '
+      + 'a intentar el cierre.',
+  },
+  AGE_RULES_UNDER_MIN: {
+    title: 'El conductor no llega a la edad mínima',
+    body: 'Esta sede no permite entregar a este conductor. El cierre no se puede completar: '
+      + 'escala con tu supervisor antes de entregar la unidad.',
+  },
+  AGE_RULES_ABOVE_MAX: {
+    title: 'El conductor excede la edad máxima',
+    body: 'Esta sede no permite entregar a este conductor. El cierre no se puede completar: '
+      + 'escala con tu supervisor antes de entregar la unidad.',
+  },
+};
+
+/**
+ * Copy for the CLOSED-but-not-finalized card.
+ *
+ * The fallback is the point, not an afterthought. An unrecognised `reason`
+ * falls through to the backend's OWN message, untranslated — the same bet
+ * BENIGN_CONFLICT_CODES makes one screen over. A `default` that swallowed an
+ * unknown guard into friendly Spanish would be the exact failure this whole
+ * ticket exists to undo: a confident screen over a state nobody described.
+ * Ugly-but-true beats pretty-but-silent on a step that moves a car.
+ *
+ * `message` alone (no reason) is the F5 case: the agent reloaded, the error
+ * object is gone, and server truth still says the finalize did not finish. We
+ * say exactly that and let "Reintentar cierre" go fetch the reason again.
+ */
+export function resolveFinalizeFailureCopy({ reason, message } = {}) {
+  const known = reason ? FINALIZE_FAILURE_COPY[reason] : null;
+  if (known) {
+    // The raw message carries specifics the map cannot — which reservation
+    // holds the car, which age bound was crossed — so it rides along as a
+    // detail line instead of being dropped.
+    return { ...known, detail: message || null, reason: reason || null, translated: true };
+  }
+  return {
+    title: 'El cierre no se completó',
+    body: message
+      || 'El checkout quedó cerrado, pero el finalize no terminó. Reintenta el cierre para ver '
+        + 'qué lo está bloqueando.',
+    detail: null,
+    reason: reason || null,
+    translated: false,
+  };
+}

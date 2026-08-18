@@ -25,7 +25,10 @@
  * swallows an ALLOW-list, so an unforeseen 409 is loud by default.
  */
 import { describe, it, expect } from 'vitest';
-import { shouldSwallowTransitionConflict, STEP_ORDER } from '@/lib/checkout-session';
+import {
+  shouldSwallowTransitionConflict, STEP_ORDER,
+  resolveFinalizeFailureCopy, FINALIZE_FAILURE_COPY,
+} from '@/lib/checkout-session';
 
 const conflict = (code) => ({ status: 409, code, message: 'boom' });
 
@@ -132,5 +135,67 @@ describe('shouldSwallowTransitionConflict', () => {
     expect(shouldSwallowTransitionConflict({
       err: conflict('ILLEGAL_TRANSITION'), fresh: { currentStep: 'CANCELLED' }, toStep: 'CLOSED',
     })).toBe(false);
+  });
+});
+
+/**
+ * The other half of "does the agent learn the truth?".
+ *
+ * shouldSwallowTransitionConflict decides whether a failed finalize is SHOWN.
+ * resolveFinalizeFailureCopy decides whether it is UNDERSTOOD — and it is the
+ * copy the CLOSED card puts where "Checkout complete ✓ / Agreement built.
+ * Email queued." used to sit, over a reservation that was never handed over.
+ */
+describe('resolveFinalizeFailureCopy', () => {
+  it('translates each reason the backend can hang off FINALIZE_INCOMPLETE', () => {
+    // Exhaustive against the guards that raise inside the CLOSED cascade:
+    // the vehicle pair, the pre-check-in gate, and all four age-rule statuses.
+    const reasons = [
+      'VEHICLE_CONFLICT', 'NO_VEHICLE_ASSIGNED', 'PRECHECKIN_REQUIRED',
+      'AGE_RULES_DOB_REQUIRED', 'AGE_RULES_DOB_IMPLAUSIBLE',
+      'AGE_RULES_UNDER_MIN', 'AGE_RULES_ABOVE_MAX',
+    ];
+    for (const reason of reasons) {
+      const copy = resolveFinalizeFailureCopy({ reason, message: 'raw backend prose' });
+      expect(copy.translated, reason).toBe(true);
+      expect(copy.title, reason).toBeTruthy();
+      expect(copy.body, reason).toBeTruthy();
+      // The raw message survives as a detail line — it carries the specifics
+      // the map cannot (which reservation holds the car, which bound broke).
+      expect(copy.detail, reason).toBe('raw backend prose');
+    }
+  });
+
+  it('falls back to the raw backend message for a reason it does not know', () => {
+    // The whole point of the fallback: a guard added to the backend later must
+    // reach the agent as-is rather than disappear into friendly Spanish. Same
+    // bet BENIGN_CONFLICT_CODES makes about unforeseen 409s.
+    const copy = resolveFinalizeFailureCopy({
+      reason: 'SOME_GUARD_ADDED_NEXT_QUARTER',
+      message: 'Checkout is closed but its finalize did not complete: brand new guard',
+    });
+    expect(copy.translated).toBe(false);
+    expect(copy.body).toBe('Checkout is closed but its finalize did not complete: brand new guard');
+  });
+
+  it('never names the vehicle swap, which is locked at CLOSED', () => {
+    // ensureNoVehicleConflict's message ends "(or swap vehicles)", but
+    // swapLocked includes CLOSED and swapVehicle demands CHECKED_OUT, so an
+    // agent who follows that sentence lands on a greyed-out button. The
+    // backend message is RideOps' contract and stays untouched; our copy must
+    // not repeat its dead recovery.
+    for (const copy of Object.values(FINALIZE_FAILURE_COPY)) {
+      expect(`${copy.title} ${copy.body}`.toLowerCase()).not.toContain('swap');
+    }
+  });
+
+  it('says only that the close did not finish when the reason is gone (the F5 case)', () => {
+    // After a refresh there is no error object left. Server truth still says
+    // the finalize failed, so the card must say that much and no more —
+    // guessing a reason here would re-introduce the confident-but-wrong screen.
+    const copy = resolveFinalizeFailureCopy({});
+    expect(copy.translated).toBe(false);
+    expect(copy.title).toBe('El cierre no se completó');
+    expect(copy.detail).toBeNull();
   });
 });

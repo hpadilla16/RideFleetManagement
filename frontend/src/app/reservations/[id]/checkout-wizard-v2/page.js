@@ -30,7 +30,7 @@ import {
   createSession, getSessionByReservation, transition,
   mintTermsToken, mintHandoffToken, abandon,
   stepNumber, isTerminal, STEP_INFO,
-  shouldSwallowTransitionConflict,
+  shouldSwallowTransitionConflict, resolveFinalizeFailureCopy,
 } from '../../../../lib/checkout-session';
 import QRCode from 'qrcode';
 
@@ -93,6 +93,16 @@ function CheckoutWizardV2({ token, me, logout }) {
   // Bumped by the age-gate blocker after the agent captures/corrects the DOB —
   // re-runs the mount effect (fresh reservation + ageRules, then find-or-create).
   const [reloadKey, setReloadKey] = useState(0);
+  // The last finalize failure, kept so the CLOSED card can NAME the blocker
+  // instead of just reporting that one exists. Ephemeral by nature — it dies
+  // on F5, which is exactly why it is never what decides the card's variant
+  // (see closedCheck below). Refilled on demand by "Reintentar cierre".
+  const [finalizeError, setFinalizeError] = useState(null);
+  // Server truth about the finalize: 'pending' | 'ok' | 'failed'.
+  const [closedCheck, setClosedCheck] = useState('pending');
+  // Bumped to re-run that check after a retry (currentStep stays CLOSED, so
+  // the effect's own deps never change on their own).
+  const [closedCheckKey, setClosedCheckKey] = useState(0);
   const pollTimer = useRef(null);
 
   // Innovation #5 (2026-07-27): drive the live customer display. The second
@@ -206,6 +216,46 @@ function CheckoutWizardV2({ token, me, logout }) {
     return () => { cancelled = true; };
   }, [reservationId, session?.currentStep, token]);
 
+  // Same refetch, same reason, at the other end of the wizard: by CLOSED the
+  // mount-time reservation is several steps stale, and here the stale copy is
+  // not a wrong number on a screen — it is the difference between telling the
+  // agent the checkout finished and telling them it did not.
+  //
+  // Reaching CLOSED does NOT mean the finalize completed. Every guard in the
+  // cascade (no vehicle / pre-check-in / age rules / vehicle conflict) raises
+  // AFTER transition() has committed the step, so a failed finalize leaves the
+  // session visibly CLOSED with the reservation still CONFIRMED. That gap is
+  // the whole defect, and `reservation.status` is the only thing in this
+  // payload that can close it — rentalAgreement.status is not selected
+  // (reservations.service.js#getById), so the contract's state is inferred,
+  // never asserted.
+  //
+  // The verdict is deliberately three-valued. A boolean would read the stale
+  // in-memory copy as CONFIRMED for the one render before the refetch lands
+  // and flash "el cierre no se completó" across every SUCCESSFUL checkout —
+  // crying wolf on the happy path is how a truthful screen gets ignored.
+  useEffect(() => {
+    if (session?.currentStep !== 'CLOSED') return;
+    if (!reservationId) return;
+    let cancelled = false;
+    setClosedCheck('pending');
+    (async () => {
+      try {
+        const r = await api(`/api/reservations/${reservationId}`, { bypassCache: true }, token);
+        if (cancelled) return;
+        setReservation(r);
+        setClosedCheck(String(r?.status) === 'CHECKED_OUT' ? 'ok' : 'failed');
+      } catch {
+        // Can't reach the server, so we don't know. Staying 'pending' says
+        // "still checking" — the one honest answer. Claiming either outcome
+        // from a failed fetch would be the same species of lie as the screen
+        // this replaces.
+        if (!cancelled) setClosedCheck('pending');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [reservationId, session?.currentStep, closedCheckKey, token]);
+
   // Auto-advance when a side-effect stamp arrives out-of-band. The
   // customer signing on their phone stamps tcCompletedAt; the Spin
   // webhook stamps paymentCompletedAt; the mobile inspection page
@@ -244,6 +294,9 @@ function CheckoutWizardV2({ token, me, logout }) {
     try {
       const next = await transition({ id: session.id, toStep, metadata, token });
       setSession(next);
+      // A finalize that succeeds clears whatever the last one left behind, so
+      // a successful retry does not keep showing the blocker it just cleared.
+      if (toStep === 'CLOSED') setFinalizeError(null);
     } catch (err) {
       // 409 = state conflict. If the session is already in (or past) the
       // requested step AND the code is one of the benign ones — the classic
@@ -267,10 +320,34 @@ function CheckoutWizardV2({ token, me, logout }) {
       // FINALIZE_INCOMPLETE the session really is closed, and the agent needs
       // to see that AND the reason the finalize did not finish.
       if (freshSession) setSession(freshSession);
+      // Keep the blocker for the CLOSED card. Deliberately not narrowed to
+      // code === 'FINALIZE_INCOMPLETE': the card's variant is decided by
+      // server truth, so anything that fails a run at CLOSED belongs in the
+      // card, and resolveFinalizeFailureCopy falls back to the raw message for
+      // a `reason` it does not recognise. Narrowing here would send the next
+      // unforeseen failure to the dismissible toast alone — the same silence
+      // BENIGN_CONFLICT_CODES was widened to stop.
+      if (toStep === 'CLOSED') {
+        setFinalizeError({ reason: err?.reason || null, message: err?.message || null });
+      }
       setToast({ kind: 'error', message: err?.message || 'Cannot advance' });
     } finally {
       transitionInFlightRef.current = false;
     }
+  };
+
+  // "Reintentar cierre" — re-POSTs CLOSED → CLOSED. Not a refresh button: the
+  // backend answers that pair through the idempotent branch and RE-RUNS the
+  // finalize cascade, whose self-heal allow-list (['NEW','CONFIRMED']) covers
+  // exactly the state a failed finalize strands the reservation in. So if the
+  // agent has since cleared the blocker, this genuinely completes the
+  // checkout; if not, it brings back a fresh `reason` — which is also how the
+  // post-F5 card, with no error object left, learns why it failed.
+  const retryFinalize = async () => {
+    setToast(null);
+    setClosedCheck('pending');
+    await advance('CLOSED');
+    setClosedCheckKey((k) => k + 1);
   };
 
   const pauseAndExit = async () => {
@@ -328,12 +405,16 @@ function CheckoutWizardV2({ token, me, logout }) {
           onPause={pauseAndExit}
           onSwapClick={() => setSwapOpen(true)}
           swapLocked={swapLocked}
+          finalizeIssue={closedCheck === 'failed'}
         />
         <StepRenderer
           session={session}
           reservation={reservation}
           token={token}
           onAdvance={advance}
+          closedCheck={closedCheck}
+          finalizeError={finalizeError}
+          onRetryFinalize={retryFinalize}
         />
         {toast && (
           <Toast kind={toast.kind} message={toast.message} onClose={() => setToast(null)} />
@@ -463,7 +544,7 @@ function SwapVehicleModal({ session, reservation, token, onClose, onSwapped, onE
 // Header — step tracker + pause button
 // ---------------------------------------------------------------------------
 
-function WizardHeader({ reservation, session, onPause, onSwapClick, swapLocked }) {
+function WizardHeader({ reservation, session, onPause, onSwapClick, swapLocked, finalizeIssue }) {
   const currentNumber = stepNumber(session.currentStep);
   return (
     <div style={{ marginBottom: 24 }}>
@@ -488,12 +569,16 @@ function WizardHeader({ reservation, session, onPause, onSwapClick, swapLocked }
           <button onClick={onPause} style={pauseBtnStyle}>Save &amp; pause</button>
         </div>
       </div>
-      <StepTracker currentStep={session.currentStep} currentNumber={currentNumber} />
+      <StepTracker
+        currentStep={session.currentStep}
+        currentNumber={currentNumber}
+        finalizeIssue={finalizeIssue}
+      />
     </div>
   );
 }
 
-function StepTracker({ currentStep, currentNumber }) {
+function StepTracker({ currentStep, currentNumber, finalizeIssue }) {
   const steps = [
     { number: 1, label: 'Confirm' },
     { number: 2, label: 'Terms', tour: 'checkout-terms' },
@@ -509,24 +594,36 @@ function StepTracker({ currentStep, currentNumber }) {
     <div style={{ display: 'flex', gap: 8 }}>
       {steps.map((s) => {
         const isCurrent = s.number === currentNumber;
-        const isDone = s.number < currentNumber || currentStep === 'CLOSED';
+        // Only the LAST step goes amber. Steps 1-5 really did happen — the
+        // customer signed, the card was charged, the car was photographed —
+        // and repainting them as problems would be its own lie, just in the
+        // other direction. What failed is the close, and step 6 is the close.
+        const isWarn = !!finalizeIssue && s.number === steps.length;
+        const isDone = (s.number < currentNumber || currentStep === 'CLOSED') && !isWarn;
         return (
+          // isWarn is tested FIRST everywhere below, and that ordering is the
+          // whole point rather than a style choice. stepNumber('CLOSED') is 6,
+          // so at the terminal step the closing chip is ALSO `isCurrent` — put
+          // isCurrent first and the amber loses to the dark "you are here"
+          // fill on the one chip that has something to report. There is no
+          // "here" to mark on a terminal step anyway; there is only whether
+          // the close landed.
           <div key={s.number} data-tour={s.tour} style={{
             flex: 1, padding: '8px 12px', borderRadius: 6,
-            border: '0.5px solid #E5E7EB',
-            background: isCurrent ? '#1F2937' : (isDone ? '#D1FAE5' : '#FFFFFF'),
-            color: isCurrent ? '#FFFFFF' : (isDone ? '#065F46' : '#6B7280'),
-            fontSize: 12, fontWeight: isCurrent ? 600 : 500,
+            border: `0.5px solid ${isWarn ? 'var(--warn-bd)' : '#E5E7EB'}`,
+            background: isWarn ? 'var(--warn-bg)' : (isCurrent ? '#1F2937' : (isDone ? '#D1FAE5' : '#FFFFFF')),
+            color: isWarn ? 'var(--warn-tx)' : (isCurrent ? '#FFFFFF' : (isDone ? '#065F46' : '#6B7280')),
+            fontSize: 12, fontWeight: (isCurrent || isWarn) ? 600 : 500,
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
             <span style={{
               width: 18, height: 18, borderRadius: '50%',
-              background: isCurrent ? 'rgba(255,255,255,0.2)' : (isDone ? '#10B981' : '#F3F4F6'),
-              color: isCurrent ? '#FFFFFF' : (isDone ? '#FFFFFF' : '#9CA3AF'),
+              background: isWarn ? 'var(--warn)' : (isCurrent ? 'rgba(255,255,255,0.2)' : (isDone ? '#10B981' : '#F3F4F6')),
+              color: (isWarn || isCurrent || isDone) ? '#FFFFFF' : '#9CA3AF',
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               fontSize: 10, fontWeight: 600,
             }}>
-              {isDone ? '✓' : s.number}
+              {isWarn ? '!' : (isDone ? '✓' : s.number)}
             </span>
             {s.label}
           </div>
@@ -540,7 +637,7 @@ function StepTracker({ currentStep, currentNumber }) {
 // Step dispatch
 // ---------------------------------------------------------------------------
 
-function StepRenderer({ session, reservation, token, onAdvance }) {
+function StepRenderer({ session, reservation, token, onAdvance, closedCheck, finalizeError, onRetryFinalize }) {
   switch (session.currentStep) {
     case 'CONFIRMING':
       return <Step1Confirm reservation={reservation} session={session} token={token} onNext={() => onAdvance('TC_PENDING')} />;
@@ -574,7 +671,12 @@ function StepRenderer({ session, reservation, token, onAdvance }) {
     case 'FINALIZING':
       return <StepBridge label="Building agreement…" onNext={() => onAdvance('CLOSED')} />;
     case 'CLOSED':
-      return <StepClosed reservation={reservation} />;
+      return <StepClosed
+        reservation={reservation}
+        closedCheck={closedCheck}
+        finalizeError={finalizeError}
+        onRetryFinalize={onRetryFinalize}
+      />;
     case 'CANCELLED':
       return <div style={cardStyle}>This checkout was cancelled. <a href={`/reservations/${reservation.id}`}>Back to reservation</a>.</div>;
     default:
@@ -1863,12 +1965,105 @@ function LoanerPaymentBridge({ reservation, onNext }) {
   );
 }
 
-function StepClosed({ reservation }) {
+// ---------------------------------------------------------------------------
+// StepClosed — CLOSED is where the session ENDS, not proof the finalize
+// SUCCEEDED. Every guard in the cascade raises after transition() commits the
+// step, so a checkout blocked by a missing car, an unmet gate or a
+// double-booked vehicle lands here with the reservation still CONFIRMED, the
+// contract still DRAFT, the vehicle still AVAILABLE and the customer email
+// deliberately withheld by finalizeCascadeOk.
+//
+// The old copy asserted the opposite of all three, and louder than the 409
+// toast that told the truth — the toast is dismissible and dies on refresh,
+// the claim did not. So the variant is chosen by `closedCheck`, which the
+// wizard computes from a fresh reservation fetch, never from whether an error
+// object happens to still be in memory.
+// ---------------------------------------------------------------------------
+function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize }) {
+  const backLink = (
+    <a href={`/reservations/${reservation.id}`}>Volver a la reservación</a>
+  );
+
+  // Verdict still in flight (or unreachable). Claim nothing either way.
+  if (closedCheck !== 'ok' && closedCheck !== 'failed') {
+    return (
+      <div style={cardStyle}>
+        <h3 style={h3Style}>Cerrando checkout…</h3>
+        <p style={{ color: '#6B7280' }}>Confirmando con el servidor que el cierre se completó.</p>
+      </div>
+    );
+  }
+
+  if (closedCheck === 'ok') {
+    return (
+      <div style={cardStyle}>
+        <h3 style={h3Style}>Checkout completo ✓</h3>
+        <p>Contrato finalizado y vehículo entregado. El contrato va en camino al correo del cliente.</p>
+        {backLink}
+      </div>
+    );
+  }
+
+  const copy = resolveFinalizeFailureCopy(finalizeError || {});
+  // Everything below reservation.status in the cascade is downstream of it —
+  // the agreement update, the vehicle sync and the email all run after the
+  // reservation flips to CHECKED_OUT. So "not CHECKED_OUT" means none of them
+  // ran. The vehicle line still prints the REAL status (vehicle comes back on
+  // the payload); the contract and the email have no field here to read, so
+  // they are stated as what did not happen, never dressed up as a DB value
+  // this screen cannot see.
+  const facts = [
+    { label: 'La reservación no quedó como entregada', state: reservation.status || null },
+    { label: 'El contrato no se finalizó', state: null },
+    { label: 'El vehículo no quedó marcado como rentado', state: reservation.vehicle?.status || null },
+    { label: 'No se envió el contrato al cliente', state: null },
+  ];
+
   return (
-    <div style={cardStyle}>
-      <h3 style={h3Style}>Checkout complete ✓</h3>
-      <p>Agreement built. Email queued.</p>
-      <a href={`/reservations/${reservation.id}`}>Back to reservation</a>
+    <div style={{ ...cardStyle, borderColor: 'var(--warn-bd)', borderLeft: '3px solid var(--warn)' }}>
+      <h3 style={h3Style}>Checkout cerrado · el cierre no se completó</h3>
+
+      {/* .swap-alert is the app's shared alert anatomy and carries its own
+          WCAG-AA-audited palette plus a dark-mode rule (globals.css:284, :299,
+          :346) — used as-is rather than overridden with --danger-*, which
+          would undo that audit. */}
+      <div className="swap-alert" role="alert" style={{ marginBottom: 14, maxWidth: '70ch' }}>
+        <span style={{ display: 'block', fontWeight: 800, marginBottom: 3 }}>{copy.title}</span>
+        <span style={{ display: 'block', fontWeight: 500 }}>{copy.body}</span>
+        {copy.detail && (
+          <span style={{ display: 'block', fontWeight: 400, fontSize: 12, marginTop: 6, opacity: 0.85 }}>
+            {copy.detail}
+          </span>
+        )}
+      </div>
+
+      <div style={{
+        border: '0.5px solid #E5E7EB', borderRadius: 8, overflow: 'hidden',
+        marginBottom: 16, maxWidth: '70ch',
+      }}>
+        {facts.map((f, i) => (
+          <div key={f.label} style={{
+            display: 'flex', alignItems: 'flex-start', gap: 9, padding: '8px 12px', fontSize: 13,
+            color: '#4B5563',
+            borderBottom: i === facts.length - 1 ? 'none' : '0.5px solid #E5E7EB',
+          }}>
+            <span aria-hidden="true" style={{ width: 15, textAlign: 'center', fontWeight: 700, color: 'var(--warn-tx)' }}>✗</span>
+            <span>{f.label}</span>
+            {f.state && (
+              <span style={{ marginLeft: 'auto', fontSize: 11.5, color: '#9CA3AF', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+                {f.state}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <button style={primaryBtn} onClick={onRetryFinalize} type="button">Reintentar cierre</button>
+        <a href={`/reservations/${reservation.id}`} style={{ ...ghostBtn, textDecoration: 'none', display: 'inline-block' }}>
+          Ir a la reservación
+        </a>
+      </div>
     </div>
   );
 }
@@ -1895,16 +2090,40 @@ function Field({ label, children }) {
   );
 }
 
+// The toast carries the backend's raw message — long, English, and on the
+// finalize path the only place a reservation number or an age bound appears.
+// It used to be an unwrapped <span> in a space-between flex, so a full
+// sentence squeezed the × off the edge and screen readers were never told it
+// arrived. It stays dismissible; what it must NOT be is the only record of a
+// failure — the CLOSED card holds that, from server truth.
 function Toast({ kind, message, onClose }) {
+  const isError = kind === 'error';
   return (
-    <div style={{
-      position: 'sticky', bottom: 16, marginTop: 16,
-      background: kind === 'error' ? '#FEE2E2' : '#D1FAE5',
-      color: kind === 'error' ? '#991B1B' : '#065F46',
-      padding: '10px 14px', borderRadius: 6, display: 'flex', justifyContent: 'space-between',
-    }}>
-      <span>{message}</span>
-      <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>×</button>
+    <div
+      role={isError ? 'alert' : 'status'}
+      style={{
+        position: 'sticky', bottom: 16, marginTop: 16,
+        background: isError ? '#FEE2E2' : '#D1FAE5',
+        color: isError ? '#991B1B' : '#065F46',
+        padding: '10px 14px', borderRadius: 6,
+        display: 'flex', justifyContent: 'space-between',
+        gap: 12, alignItems: 'flex-start',
+      }}
+    >
+      <span style={{ lineHeight: 1.45, maxWidth: '64ch' }}>{message}</span>
+      <button
+        onClick={onClose}
+        type="button"
+        aria-label="Cerrar aviso"
+        style={{
+          flex: 'none', width: 44, height: 44, margin: '-10px -10px -10px 0',
+          background: 'none', border: 'none', color: 'inherit', cursor: 'pointer',
+          fontSize: 18, lineHeight: 1,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+      >
+        ×
+      </button>
     </div>
   );
 }
