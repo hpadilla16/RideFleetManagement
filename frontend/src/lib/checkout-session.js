@@ -162,6 +162,7 @@ export function shouldSwallowTransitionConflict({ err, fresh, toStep }) {
   return at !== -1 && want !== -1 && at >= want;
 }
 
+
 // ---------------------------------------------------------------------------
 // The CLOSED screen's failure copy.
 //
@@ -171,101 +172,80 @@ export function shouldSwallowTransitionConflict({ err, fresh, toStep }) {
 // is UNDERSTOOD. Both need a test, and neither belongs inline in a 2000-line
 // page component.
 //
-// Spanish and frontend-owned on purpose. The backend message is the RideOps
-// contract (ops-app-plan/docs/00-domain-workflows.md §1.4-bis) and is not ours
-// to reword — it is also English, and it names a recovery the wizard does not
-// have: "(or swap vehicles)" is dead at CLOSED, where `swapLocked` blocks the
-// button and reservations.service.js#swapVehicle demands CHECKED_OUT anyway.
-// So we translate INTENT here and keep the raw message as a technical detail
-// line, rather than editing prose four other surfaces depend on.
+// The map holds no prose — only the reasons this screen can TRANSLATE, and
+// whether each one is worth offering a retry for. The strings live in
+// locales/{en,es}.json under `checkoutClosed.reasons.*`, because the app boots
+// in English (lib/i18n.js) and a Spanish-only failure card would be
+// unreadable to half the counter. Hector's call, 2026-08-17.
 //
 // Keys are the `reason` member the backend hangs off FINALIZE_INCOMPLETE
 // (checkout-session.service.js — `incomplete.reason = fail.code`).
 // ---------------------------------------------------------------------------
-export const FINALIZE_FAILURE_COPY = {
-  VEHICLE_CONFLICT: {
-    title: 'El vehículo sigue rentado en otra reservación',
-    body: 'La unidad asignada no se pudo entregar porque sigue fuera en otra renta. '
-      + 'Completa el check-in de esa renta.',
-  },
-  NO_VEHICLE_ASSIGNED: {
-    title: 'La reservación se quedó sin vehículo',
-    body: 'No se puede cerrar un checkout sin unidad asignada. Asigna un vehículo desde la '
-      + 'reservación.',
-  },
-  PRECHECKIN_REQUIRED: {
-    title: 'Falta el pre-check-in del cliente',
-    body: 'Esta sede exige el pre-check-in completo. Complétalo desde la reservación '
-      + '("llenar por el cliente") o reenvíale el enlace.',
-  },
-  AGE_RULES_DOB_REQUIRED: {
-    title: 'Falta la fecha de nacimiento del conductor',
-    body: 'Esta sede exige verificar la edad antes de entregar. Captura la fecha de nacimiento '
-      + 'del ID o licencia en la reservación.',
-  },
-  AGE_RULES_DOB_IMPLAUSIBLE: {
-    title: 'La fecha de nacimiento es inválida',
-    body: 'La fecha registrada es imposible. Corrígela con el ID o licencia del cliente.',
-  },
-  AGE_RULES_UNDER_MIN: {
-    // terminal: no amount of retrying clears an age bound, so the card must
-    // not offer "Reintentar cierre" as its loud primary action.
-    terminal: true,
-    title: 'El conductor no llega a la edad mínima',
-    body: 'Esta sede no permite entregar a este conductor. El cierre no se puede completar: '
-      + 'escala con tu supervisor antes de entregar la unidad.',
-  },
-  AGE_RULES_ABOVE_MAX: {
-    terminal: true,
-    title: 'El conductor excede la edad máxima',
-    body: 'Esta sede no permite entregar a este conductor. El cierre no se puede completar: '
-      + 'escala con tu supervisor antes de entregar la unidad.',
-  },
+export const FINALIZE_FAILURE_REASONS = {
+  VEHICLE_CONFLICT: {},
+  NO_VEHICLE_ASSIGNED: {},
+  PRECHECKIN_REQUIRED: {},
+  AGE_RULES_DOB_REQUIRED: {},
+  AGE_RULES_DOB_IMPLAUSIBLE: {},
+  // terminal: no amount of retrying clears an age bound, so the card must not
+  // offer "Reintentar cierre" as its loud primary action.
+  AGE_RULES_UNDER_MIN: { terminal: true },
+  AGE_RULES_ABOVE_MAX: { terminal: true },
 };
 
+/** i18n keys for a reason the card can translate. */
+export function finalizeReasonKeys(reason) {
+  return {
+    titleKey: `checkoutClosed.reasons.${reason}.title`,
+    bodyKey: `checkoutClosed.reasons.${reason}.body`,
+  };
+}
+
 /**
- * Copy for the CLOSED-but-not-finalized card.
+ * Which copy the CLOSED-but-not-finalized card should show.
  *
- * `body` is the DIAGNOSIS and the fix that lives outside this screen. It never
- * says "y vuelve a intentar el cierre", because whether a retry is even
- * possible is not knowable from the reason alone — it also depends on the
- * reservation's status, which only the card can see (the backend re-runs the
- * finalize for NEW/CONFIRMED and silently declines the rest). Printing that
- * instruction beside no button, or beside a button that cannot work, is the
- * same confident-but-false affordance this ticket exists to remove. The card
- * appends the retry sentence itself, only when it is actually offering one.
- *
- * The fallback is the point, not an afterthought. An unrecognised `reason`
- * falls through to the backend's OWN message, untranslated — the same bet
+ * Returns KEYS, not sentences — except for the one case that must not be
+ * translated at all. An unrecognised `reason` falls through to the backend's
+ * OWN message, verbatim, in whatever language it wrote it: the same bet
  * BENIGN_CONFLICT_CODES makes one screen over. A `default` that swallowed an
- * unknown guard into friendly Spanish would be the exact failure this whole
- * ticket exists to undo: a confident screen over a state nobody described.
+ * unknown guard into friendly copy would be the exact failure this whole
+ * ticket exists to undo — a confident screen over a state nobody described.
  * Ugly-but-true beats pretty-but-silent on a step that moves a car.
  *
- * `message` alone (no reason) is the F5 case: the agent reloaded, the error
- * object is gone, and server truth still says the finalize did not finish. We
- * say exactly that and let "Reintentar cierre" go fetch the reason again.
+ * Neither body ever says "and then retry the close". Whether a retry can even
+ * work is not knowable from the reason alone — it also depends on the
+ * reservation's status, which only the card can see (the backend re-runs the
+ * finalize for NEW/CONFIRMED and silently declines the rest). Printing that
+ * instruction beside no button, or beside one that cannot work, is the same
+ * confident-but-false affordance this ticket removes. The card appends it
+ * itself, only when it is actually offering one.
+ *
+ * No `reason` at all is the F5 case: the agent reloaded, the error object is
+ * gone, and server truth still says the finalize did not finish. We say
+ * exactly that and let "retry" go fetch the reason again.
  */
 export function resolveFinalizeFailureCopy({ reason, message } = {}) {
-  const known = reason ? FINALIZE_FAILURE_COPY[reason] : null;
+  const known = reason ? FINALIZE_FAILURE_REASONS[reason] : null;
   if (known) {
-    // The raw message carries specifics the map cannot — which reservation
-    // holds the car, which age bound was crossed — so it rides along as a
-    // detail line instead of being dropped.
     return {
-      terminal: false,
-      ...known,
-      detail: message || null,
-      reason: reason || null,
+      reason,
+      terminal: !!known.terminal,
       translated: true,
+      ...finalizeReasonKeys(reason),
+      // The raw message carries specifics the map cannot — which reservation
+      // holds the car, which age bound broke — so it rides along verbatim.
+      detail: message || null,
+      bodyText: null,
     };
   }
   return {
-    terminal: false,
-    title: 'El cierre no se completó',
-    body: message || 'El checkout quedó cerrado, pero el finalize no terminó.',
-    detail: null,
     reason: reason || null,
+    terminal: false,
     translated: false,
+    titleKey: 'checkoutClosed.genericTitle',
+    // bodyText wins when present; the key is only the no-message fallback.
+    bodyKey: 'checkoutClosed.genericBody',
+    bodyText: message || null,
+    detail: null,
   };
 }

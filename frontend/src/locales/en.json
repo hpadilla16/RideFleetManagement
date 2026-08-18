@@ -1176,5 +1176,64 @@
     "waitingNextScreen": "Keep going — open the next screen and the guide picks up there.",
     "restart": "Start over",
     "restartHint": "Clear this module and take it from the beginning"
+  },
+  "checkoutClosed": {
+    "pendingTitle": "Closing checkout…",
+    "pendingBody": "Confirming with the server that the close completed.",
+    "unknownTitle": "Could not confirm the close",
+    "unknownBody": "The server did not answer, so we do not know whether the checkout finished. Do not hand over the vehicle until you have confirmed it.",
+    "verify": "Check again",
+    "verifying": "Checking…",
+    "okTitle": "Checkout complete ✓",
+    "okBody": "Contract finalized and vehicle handed over. The contract was queued for delivery to the customer's email.",
+    "back": "Back to reservation",
+    "failedTitle": "Checkout closed · the close did not complete",
+    "genericTitle": "The close did not complete",
+    "genericBody": "The checkout was closed, but the finalize did not finish.",
+    "voidedTitle": "This reservation can no longer be closed",
+    "voidedBody": "The reservation went to {{status}} while the checkout was still open, so the close cannot complete. Check the reservation to decide what to do with the vehicle.",
+    "halfTitle": "The vehicle went out on a draft contract",
+    "halfBody": "The reservation and the vehicle were handed over, but the contract never left draft, so there is no finalized agreement for a car that is already out. Finalize it from the reservation — retrying the close will not fix this.",
+    "retryHint": " Then retry the close.",
+    "retry": "Retry close",
+    "retrying": "Retrying…",
+    "goToReservation": "Go to reservation",
+    "factReservationYes": "The reservation was marked as handed over",
+    "factReservationNo": "The reservation was not marked as handed over",
+    "factAgreementYes": "The contract was finalized",
+    "factAgreementNo": "The contract was not finalized",
+    "factVehicleYes": "The vehicle was marked as rented",
+    "factVehicleNo": "The vehicle was not marked as rented",
+    "factEmailNo": "The contract was not emailed to the customer",
+    "reasons": {
+      "VEHICLE_CONFLICT": {
+        "title": "The vehicle is still rented on another reservation",
+        "body": "The assigned unit could not be handed over because it is still out on another rental. Complete that rental's check-in."
+      },
+      "NO_VEHICLE_ASSIGNED": {
+        "title": "The reservation has no vehicle",
+        "body": "A checkout cannot close without an assigned unit. Assign a vehicle from the reservation."
+      },
+      "PRECHECKIN_REQUIRED": {
+        "title": "The customer's pre-check-in is missing",
+        "body": "This location requires a completed pre-check-in. Fill it in from the reservation (\"complete for the customer\") or resend them the link."
+      },
+      "AGE_RULES_DOB_REQUIRED": {
+        "title": "The driver's date of birth is missing",
+        "body": "This location requires an age check before handover. Capture the date of birth from the ID or licence on the reservation."
+      },
+      "AGE_RULES_DOB_IMPLAUSIBLE": {
+        "title": "The date of birth is invalid",
+        "body": "The recorded date is impossible. Correct it using the customer's ID or licence."
+      },
+      "AGE_RULES_UNDER_MIN": {
+        "title": "The driver is under the minimum age",
+        "body": "This location does not allow handing over to this driver. The close cannot be completed: escalate to your supervisor before releasing the unit."
+      },
+      "AGE_RULES_ABOVE_MAX": {
+        "title": "The driver is over the maximum age",
+        "body": "This location does not allow handing over to this driver. The close cannot be completed: escalate to your supervisor before releasing the unit."
+      }
+    }
   }
 }

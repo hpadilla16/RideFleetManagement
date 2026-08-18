@@ -1176,5 +1176,64 @@
     "waitingNextScreen": "Sigue — abre la siguiente pantalla y la guía continúa ahí.",
     "restart": "Empezar de nuevo",
     "restartHint": "Borra este módulo y lo tomas desde el principio"
+  },
+  "checkoutClosed": {
+    "pendingTitle": "Cerrando checkout…",
+    "pendingBody": "Confirmando con el servidor que el cierre se completó.",
+    "unknownTitle": "No se pudo confirmar el cierre",
+    "unknownBody": "No hubo respuesta del servidor, así que no sabemos si el checkout terminó. No entregues la unidad hasta confirmarlo.",
+    "verify": "Verificar de nuevo",
+    "verifying": "Verificando…",
+    "okTitle": "Checkout completo ✓",
+    "okBody": "Contrato finalizado y vehículo entregado. El contrato se puso en cola para enviarse al correo del cliente.",
+    "back": "Volver a la reservación",
+    "failedTitle": "Checkout cerrado · el cierre no se completó",
+    "genericTitle": "El cierre no se completó",
+    "genericBody": "El checkout quedó cerrado, pero el finalize no terminó.",
+    "voidedTitle": "Esta reservación ya no puede cerrarse",
+    "voidedBody": "La reservación quedó en {{status}} mientras el checkout seguía abierto, así que el cierre no puede completarse. Revisa la reservación para ver qué hacer con la unidad.",
+    "halfTitle": "El vehículo salió con el contrato en borrador",
+    "halfBody": "La reservación y el vehículo quedaron entregados, pero el contrato nunca salió de borrador: hay un coche afuera sin contrato finalizado. Finalízalo desde la reservación — reintentar el cierre no lo arregla.",
+    "retryHint": " Después, vuelve a intentar el cierre.",
+    "retry": "Reintentar cierre",
+    "retrying": "Reintentando…",
+    "goToReservation": "Ir a la reservación",
+    "factReservationYes": "La reservación quedó como entregada",
+    "factReservationNo": "La reservación no quedó como entregada",
+    "factAgreementYes": "El contrato se finalizó",
+    "factAgreementNo": "El contrato no se finalizó",
+    "factVehicleYes": "El vehículo quedó marcado como rentado",
+    "factVehicleNo": "El vehículo no quedó marcado como rentado",
+    "factEmailNo": "No se envió el contrato al cliente",
+    "reasons": {
+      "VEHICLE_CONFLICT": {
+        "title": "El vehículo sigue rentado en otra reservación",
+        "body": "La unidad asignada no se pudo entregar porque sigue fuera en otra renta. Completa el check-in de esa renta."
+      },
+      "NO_VEHICLE_ASSIGNED": {
+        "title": "La reservación se quedó sin vehículo",
+        "body": "No se puede cerrar un checkout sin unidad asignada. Asigna un vehículo desde la reservación."
+      },
+      "PRECHECKIN_REQUIRED": {
+        "title": "Falta el pre-check-in del cliente",
+        "body": "Esta sede exige el pre-check-in completo. Complétalo desde la reservación (\"llenar por el cliente\") o reenvíale el enlace."
+      },
+      "AGE_RULES_DOB_REQUIRED": {
+        "title": "Falta la fecha de nacimiento del conductor",
+        "body": "Esta sede exige verificar la edad antes de entregar. Captura la fecha de nacimiento del ID o licencia en la reservación."
+      },
+      "AGE_RULES_DOB_IMPLAUSIBLE": {
+        "title": "La fecha de nacimiento es inválida",
+        "body": "La fecha registrada es imposible. Corrígela con el ID o licencia del cliente."
+      },
+      "AGE_RULES_UNDER_MIN": {
+        "title": "El conductor no llega a la edad mínima",
+        "body": "Esta sede no permite entregar a este conductor. El cierre no se puede completar: escala con tu supervisor antes de entregar la unidad."
+      },
+      "AGE_RULES_ABOVE_MAX": {
+        "title": "El conductor excede la edad máxima",
+        "body": "Esta sede no permite entregar a este conductor. El cierre no se puede completar: escala con tu supervisor antes de entregar la unidad."
+      }
+    }
   }
 }
