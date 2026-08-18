@@ -362,6 +362,62 @@ describe('closedCardState', () => {
     expect(state.showRetry).toBe(false);
   });
 
+  // `variant` exists so the button and the paragraph cannot disagree. They did
+  // for one commit: the button moved to `showRetry` while the copy stayed on
+  // `halfFinalized`, which had just stopped being the same set — so a car out
+  // on a CANCELLED contract was told to press a button that was not rendered,
+  // and the escalation sentence it used to get was gone. These pin the pairing
+  // itself, not either half.
+  it('pairs the retryable half-finalize with the copy that offers a retry', () => {
+    const state = closedCardState({ reservation: resv('CHECKED_OUT', 'DRAFT') });
+    expect(state.variant).toBe('halfRepairable');
+    expect(state.showRetry).toBe(true);
+  });
+
+  it('pairs a half-finalize the backend cannot repair with the ESCALATE copy', () => {
+    for (const agreement of ['CANCELLED', 'CLOSED']) {
+      const state = closedCardState({ reservation: resv('CHECKED_OUT', agreement) });
+      expect(state.variant, agreement).toBe('halfStuck');
+      expect(state.showRetry, agreement).toBe(false);
+    }
+  });
+
+  it('never shows retry copy without a retry button, in any state', () => {
+    // The invariant the split exists to hold, swept rather than asserted case
+    // by case: 'halfRepairable' is the ONLY variant whose copy mentions the
+    // button, so it must be the only one that can appear without one.
+    const statuses = ['NEW', 'CONFIRMED', 'CHECKED_OUT', 'CHECKED_IN', 'CANCELLED',
+      'NO_SHOW', 'PENDING_FRANCHISE_IMPORT'];
+    const agreements = ['DRAFT', 'FINALIZED', 'CANCELLED', 'CLOSED', undefined];
+    for (const status of statuses) {
+      for (const agreement of agreements) {
+        for (const terminalReason of [false, true]) {
+          const s = closedCardState({ reservation: resv(status, agreement), terminalReason });
+          if (s.variant === 'halfRepairable') {
+            expect(s.showRetry, `${status}/${agreement}/${terminalReason}`).toBe(true);
+          }
+        }
+      }
+    }
+  });
+
+  it('a terminal reason downgrades the repairable half-finalize to the stuck copy', () => {
+    // No button, so it must not be the variant that talks about one — even
+    // though the backend would happily repair this contract.
+    const state = closedCardState({
+      reservation: resv('CHECKED_OUT', 'DRAFT'), terminalReason: true,
+    });
+    expect(state.retryCanWork).toBe(true);
+    expect(state.showRetry).toBe(false);
+    expect(state.variant).toBe('halfStuck');
+  });
+
+  it('voided outranks half-finalized', () => {
+    // A CANCELLED reservation is not a half-finalize story, whatever its
+    // contract says, and its own copy already explains what to do.
+    expect(closedCardState({ reservation: resv('CANCELLED', 'DRAFT') }).variant).toBe('voided');
+  });
+
   it('withholds the retry for a reason no retry can clear', () => {
     const state = closedCardState({ reservation: resv('CONFIRMED', 'DRAFT'), terminalReason: true });
     expect(state.retryCanWork).toBe(true);

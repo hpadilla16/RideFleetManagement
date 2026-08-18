@@ -1,128 +1,144 @@
 <title>Tarjeta CLOSED · media finalización</title>
 <style>
-  :root {
-    --page: #f6f7f9; --ink: #111827; --muted: #4B5563; --faint: #6B7280;
-    --card: #FFFFFF; --line: #E5E7EB;
-    --warn-bg: #fdf3e2; --warn-bd: #f3dcb5; --warn-tx: #8a5606;
-    --btn: #1F2937; --btn-tx: #FFFFFF;
-    --bad: #b3261e; --good: #1b5e20;
-  }
-  :root:not([data-theme="light"]) {
-    color-scheme: light;
-  }
+  :root { color-scheme: light; }
   body {
-    margin: 0; padding: 32px 20px 64px;
-    background: var(--page); color: var(--ink);
+    margin: 0; padding: 30px 20px 60px; background: #f6f7f9; color: #111827;
     font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
-  .wrap { max-width: 1080px; margin: 0 auto; }
+  .wrap { max-width: 1180px; margin: 0 auto; }
   h1 { font-size: 21px; margin: 0 0 6px; letter-spacing: -0.01em; }
-  .sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; max-width: 78ch; }
-  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 22px; }
-  .col > h2 {
-    font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
-    margin: 0 0 10px; color: var(--faint); font-weight: 700;
-  }
-  .tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 7px;
+  .sub { color: #4B5563; margin: 0 0 10px; font-size: 14px; max-width: 86ch; }
+  .fid { font-size: 12.5px; color: #6B7280; margin: 0 0 26px; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 20px; }
+  .col > h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
+              margin: 0 0 4px; color: #6B7280; font-weight: 700; }
+  .col > .st { font-size: 12px; color: #6B7280; margin: 0 0 10px;
+               font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .tag { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 2px 7px;
          border-radius: 999px; margin-left: 6px; vertical-align: 1px; }
-  .tag.now { background: #fde8e6; color: var(--bad); }
-  .tag.new { background: #e3f1e4; color: var(--good); }
-  .card {
-    background: var(--card); border: 0.5px solid var(--line); border-radius: 10px;
-    padding: 18px; box-shadow: 0 1px 2px rgba(0,0,0,.04);
-  }
-  .banner {
-    background: var(--warn-bg); border: 0.5px solid var(--warn-bd); color: var(--warn-tx);
-    border-radius: 8px; padding: 11px 13px; margin-bottom: 16px; font-size: 13.5px;
-  }
-  .banner b { display: block; font-weight: 800; margin-bottom: 3px; }
-  .banner .hint { display: block; margin-top: 5px; font-weight: 500; }
-  .facts { border: 0.5px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
-  .fact { display: flex; align-items: flex-start; gap: 9px; padding: 8px 12px;
-          font-size: 13px; color: var(--muted); border-bottom: 0.5px solid var(--line); }
-  .fact:last-child { border-bottom: none; }
-  .gl { width: 15px; text-align: center; font-weight: 700; color: var(--faint); }
-  .gl.no { color: var(--warn-tx); }
-  .st { margin-left: auto; font-size: 11.5px; color: var(--faint);
+  .now { background: #fde8e6; color: #b3261e; }
+  .new { background: #e3f1e4; color: #1b5e20; }
+  /* cardStyle + WARN.bd border + 3px WARN.tx left border, as rendered */
+  .card { background: #FFFFFF; border: 0.5px solid #f3dcb5; border-left: 3px solid #8a5606;
+          border-radius: 10px; padding: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .card h3 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+  /* the inner alert is .swap-alert's ALERT palette — red, not amber */
+  .alert { padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.45;
+           background: rgba(229,72,77,.08); border: 1px solid rgba(229,72,77,.28);
+           color: #b91c1c; margin-bottom: 14px; max-width: 70ch; }
+  .alert .t { display: block; font-weight: 800; margin-bottom: 3px; }
+  .alert .b { display: block; font-weight: 500; }
+  .alert .h { display: block; font-weight: 500; margin-top: 4px; }
+  .facts { border: 0.5px solid #E5E7EB; border-radius: 8px; overflow: hidden;
+           margin-bottom: 16px; max-width: 70ch; }
+  .f { display: flex; align-items: flex-start; gap: 9px; padding: 8px 12px; font-size: 13px;
+       color: #4B5563; border-bottom: 0.5px solid #E5E7EB; }
+  .f:last-child { border-bottom: none; }
+  .gl { width: 15px; text-align: center; font-weight: 700; color: #6B7280; }
+  .gl.no { color: #8a5606; }
+  .sv { margin-left: auto; font-size: 11.5px; color: #6B7280;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .btn { padding: 10px 16px; background: var(--btn); color: var(--btn-tx); border: none;
-         border-radius: 6px; font-size: 14px; font-weight: 500; }
-  .link { padding: 8px 12px; background: #FFF; color: #374151;
-          border: 0.5px solid #D1D5DB; border-radius: 6px; font-size: 13px; }
-  .note { margin-top: 12px; font-size: 12.5px; color: var(--faint); border-top: 0.5px solid var(--line);
-          padding-top: 10px; }
-  .note b { color: var(--ink); }
-  .why { margin-top: 30px; background: var(--card); border: 0.5px solid var(--line);
+  .acts { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .btn { padding: 10px 16px; background: #1F2937; color: #FFF; border-radius: 6px;
+         font-size: 14px; font-weight: 500; }
+  .lnk { padding: 8px 12px; background: #FFF; color: #374151; border: 0.5px solid #D1D5DB;
+         border-radius: 6px; font-size: 13px; }
+  .note { margin-top: 12px; font-size: 12.5px; color: #6B7280;
+          border-top: 0.5px solid #E5E7EB; padding-top: 10px; }
+  .note b { color: #111827; }
+  .why { margin-top: 28px; background: #FFF; border: 0.5px solid #E5E7EB;
          border-radius: 10px; padding: 18px; }
   .why h2 { font-size: 14px; margin: 0 0 10px; }
-  .why p { margin: 0 0 10px; font-size: 13.5px; color: var(--muted); max-width: 84ch; }
-  .why code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
-  .why ul { margin: 0 0 4px; padding-left: 20px; font-size: 13.5px; color: var(--muted); }
+  .why p, .why li { font-size: 13.5px; color: #4B5563; }
+  .why p { margin: 0 0 10px; max-width: 88ch; }
+  .why ul { margin: 0 0 10px; padding-left: 20px; }
   .why li { margin-bottom: 5px; }
+  code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
   .strike { text-decoration: line-through; opacity: .55; }
+  .en { margin-top: 7px; padding-top: 7px; border-top: 1px dashed rgba(185,28,28,.3);
+        font-size: 12.5px; opacity: .9; }
 </style>
 
 <div class="wrap">
-  <h1>Tarjeta CLOSED · la hebra «coche fuera, contrato en borrador»</h1>
+  <h1>Tarjeta CLOSED · media finalización <span class="tag new">v2 · corregido</span></h1>
   <p class="sub">
-    Estado: reservación <code>CHECKED_OUT</code>, contrato <code>DRAFT</code>. Desde 2026-08-18 el
-    backend <b>sí</b> sabe repararlo, pero la tarjeta todavía dice lo contrario y no ofrece el botón.
-    Necesito tu OK antes de tocar la UI.
+    Reemplaza el mockup que aprobaste esta mañana. Dos motivos: Graphic Design encontró que la
+    copia nueva prometía un botón que en un caso no se dibuja, y que el mockup v1 no se parecía a
+    lo que la app pinta de verdad. Necesito tu OK otra vez antes de tocar la copia.
+  </p>
+  <p class="fid">
+    Fidelidad v2: alerta interna en rojo <code>ALERT</code> (no ámbar), borde izquierdo 3px
+    <code>#8a5606</code>, título «Checkout cerrado · el cierre no se completó», y las filas ✗
+    subidas arriba como hace <code>orderedFacts</code> en esta vista.
   </p>
 
   <div class="cols">
 
     <div class="col">
-      <h2>Hoy <span class="tag now">se queda corto</span></h2>
+      <h2>A · reparable <span class="tag new">ya aprobado</span></h2>
+      <p class="st">CHECKED_OUT + contrato DRAFT</p>
       <div class="card">
-        <div class="banner">
-          <b>El vehículo salió con el contrato en borrador</b>
-          <span>La reservación y el vehículo quedaron entregados, pero el contrato nunca salió de
-          borrador: hay un coche afuera sin contrato finalizado. <b style="display:inline">Reintentar
-          el cierre no lo arregla, y no hay control en la app para finalizarlo</b>: escala para que
-          cierren el contrato antes de que siga la renta.</span>
+        <h3>Checkout cerrado · el cierre no se completó</h3>
+        <div class="alert">
+          <span class="t">El vehículo salió con el contrato en borrador</span>
+          <span class="b">La reservación quedó entregada, pero el contrato nunca salió de borrador:
+            hay un vehículo afuera sin contrato finalizado. Reintentar el cierre finaliza el
+            contrato y pone su copia en cola para el cliente.</span>
+          <span class="h">No se vuelve a cobrar ni se manda el correo dos veces.</span>
+          <span class="en">EN · <b>The vehicle went out on a draft contract</b> — The reservation
+            was handed over, but the contract never left draft, so a vehicle is out with no
+            finalized agreement. Retrying the close finalizes the contract and queues the
+            customer's copy. <i>It will not charge again or send a second email.</i></span>
         </div>
         <div class="facts">
-          <div class="fact"><span class="gl">✓</span><span>La reservación quedó como entregada</span><span class="st">CHECKED_OUT</span></div>
-          <div class="fact"><span class="gl no">✗</span><span>El contrato no se finalizó</span><span class="st">DRAFT</span></div>
-          <div class="fact"><span class="gl">✓</span><span>El vehículo quedó marcado como rentado</span><span class="st">ON_RENT</span></div>
-          <div class="fact"><span class="gl no">✗</span><span>No se envió el contrato al cliente</span><span class="st">—</span></div>
+          <div class="f"><span class="gl no">✗</span><span>El contrato no se finalizó</span><span class="sv">DRAFT</span></div>
+          <div class="f"><span class="gl no">✗</span><span>No se envió el contrato al cliente</span><span class="sv">—</span></div>
+          <div class="f"><span class="gl no">✗</span><span>El vehículo no quedó marcado como rentado</span><span class="sv">AVAILABLE</span></div>
+          <div class="f"><span class="gl">✓</span><span>La reservación quedó como entregada</span><span class="sv">CHECKED_OUT</span></div>
         </div>
-        <div class="actions">
-          <span class="btn">Ir a la reservación</span>
+        <div class="acts">
+          <span class="btn">Reintentar cierre</span>
+          <span class="lnk">Ir a la reservación</span>
         </div>
         <div class="note">
-          Sin botón de reintento: <code>halfFinalized</code> lo apaga, y <code>retryCanWork</code>
-          tampoco incluye <code>CHECKED_OUT</code>. <b>El texto ya no es cierto</b> — el backend sí
-          puede finalizarlo ahora.
+          Ya no dice «y el vehículo quedaron entregados»: la fila de arriba puede decir
+          <code>AVAILABLE</code>, y el texto se contradecía con ella. Ya no dice «le manda su
+          copia»: si el correo ya salió una vez, no vuelve a salir. Y ya no promete explicar el
+          fallo, porque <b>hoy no puede</b> — un flip fallido responde 200 sin error y redibuja
+          esta misma tarjeta.
         </div>
       </div>
     </div>
 
     <div class="col">
-      <h2>Propuesta <span class="tag new">un cambio</span></h2>
+      <h2>B · NO reparable <span class="tag now">esto es el bug</span></h2>
+      <p class="st">CHECKED_OUT + contrato CANCELLED o CLOSED</p>
       <div class="card">
-        <div class="banner">
-          <b>El vehículo salió con el contrato en borrador</b>
-          <span>La reservación y el vehículo quedaron entregados, pero el contrato nunca salió de
-          borrador: hay un coche afuera sin contrato finalizado. Reintentar el cierre finaliza el
-          contrato y le manda su copia al cliente.</span>
-          <span class="hint">Si vuelve a fallar, te dirá por qué.</span>
+        <h3>Checkout cerrado · el cierre no se completó</h3>
+        <div class="alert">
+          <span class="t">El vehículo salió sin contrato finalizado</span>
+          <span class="b">La reservación quedó entregada, pero el contrato nunca se finalizó: hay
+            un vehículo afuera sin contrato finalizado. Reintentar el cierre no lo arregla, y no
+            hay control en la app para finalizarlo: escala para que cierren el contrato antes de
+            que siga la renta.</span>
+          <span class="en">EN · <b>The vehicle went out without a finalized contract</b> —
+            …Retrying the close will not fix this, and there is no control in the app to finalize
+            it: escalate so the contract is closed out before the rental continues.</span>
         </div>
         <div class="facts">
-          <div class="fact"><span class="gl">✓</span><span>La reservación quedó como entregada</span><span class="st">CHECKED_OUT</span></div>
-          <div class="fact"><span class="gl no">✗</span><span>El contrato no se finalizó</span><span class="st">DRAFT</span></div>
-          <div class="fact"><span class="gl">✓</span><span>El vehículo quedó marcado como rentado</span><span class="st">ON_RENT</span></div>
-          <div class="fact"><span class="gl no">✗</span><span>No se envió el contrato al cliente</span><span class="st">—</span></div>
+          <div class="f"><span class="gl no">✗</span><span>El contrato no se finalizó</span><span class="sv">CANCELLED</span></div>
+          <div class="f"><span class="gl no">✗</span><span>No se envió el contrato al cliente</span><span class="sv">—</span></div>
+          <div class="f"><span class="gl">✓</span><span>La reservación quedó como entregada</span><span class="sv">CHECKED_OUT</span></div>
+          <div class="f"><span class="gl">✓</span><span>El vehículo quedó marcado como rentado</span><span class="sv">ON_RENT</span></div>
         </div>
-        <div class="actions">
-          <span class="btn">Reintentar cierre</span>
-          <span class="link">Ir a la reservación</span>
+        <div class="acts">
+          <span class="btn">Ir a la reservación</span>
         </div>
         <div class="note">
-          Mismo botón, misma posición, mismas palabras que en los otros fallos de esta tarjeta.
-          Lo único que cambia: <b>aparece</b> en este estado, y el párrafo deja de mandar a escalar.
+          <b>Hoy esta columna está rota</b> y es culpa del cambio de esta mañana: enseña el texto de
+          la columna A —«reintentar finaliza el contrato»— sin botón que apretar, y sin la frase de
+          escalar. Vuelve a su texto de siempre, y el título deja de decir «borrador» cuando la fila
+          de abajo dice <code>CANCELLED</code>.
         </div>
       </div>
     </div>
@@ -130,29 +146,31 @@
   </div>
 
   <div class="why">
-    <h2>Qué cambia exactamente, y qué no</h2>
+    <h2>Por qué se partió en dos</h2>
     <p>
-      Cambia una condición y un párrafo. <code>retryCanWork</code> pasa a incluir
-      <code>CHECKED_OUT</code>, las rejillas de render dejan de exigir <code>!halfFinalized</code>,
-      y <code>halfBody</code> se reescribe en español e inglés porque hoy dice
-      <span class="strike">«reintentar no lo arregla … escala»</span>, que era verdad hasta ayer
-      y ya no lo es.
+      El botón se decide por <code>showRetry</code> y el texto por <code>halfFinalized</code>. Eran
+      lo mismo hasta hoy. Ya no: <code>halfFinalized</code> es «hay un vehículo fuera con un
+      contrato que nunca lo fue» y también es cierto con contrato <code>CANCELLED</code> o
+      <code>CLOSED</code>, donde el backend declina y el botón se esconde. El texto se queda en la
+      columna equivocada.
     </p>
-    <p><b>Lo que no cambia:</b></p>
+    <p><b>Cambios de copia que necesito que apruebes:</b></p>
     <ul>
-      <li>El botón sigue oculto en <code>CANCELLED</code>, <code>NO_SHOW</code> y
-          <code>PENDING_FRANCHISE_IMPORT</code>: ahí el backend sí declina y sería un control que no
-          hace nada.</li>
-      <li>Sigue oculto en los motivos terminales (topes de edad), que ningún reintento resuelve.</li>
-      <li>Si a la reservación le quitaron el coche, reintentar responde
-          «La reservación se quedó sin vehículo» — copia que ya existe y ya ofrece reintento.</li>
-      <li>El cliente recibe como máximo un correo, pase lo que pase.</li>
+      <li><code>halfBody</code> (A) — «vehículo» en vez de «coche», sin afirmar que el vehículo
+          quedó entregado (puede no estarlo), y «pone su copia en cola» en vez de «le manda su
+          copia», igual que ya hedgea <code>okBody</code>.</li>
+      <li><code>halfRetryHint</code> (A) — nueva, en su propio renglón: «No se vuelve a cobrar ni
+          se manda el correo dos veces.» Sustituye a «si vuelve a fallar, aquí verás por qué», que
+          aprobaste esta mañana pero que <b>es falsa</b>: el fallo del reintento responde 200 sin
+          error y no hay nada que enseñar. Lo apunto como seguimiento.</li>
+      <li><code>halfStuckTitle</code> + <code>halfStuckBody</code> (B) — nuevas. El cuerpo es
+          literalmente el texto que ya existía; el título deja de afirmar «borrador».</li>
     </ul>
     <p>
-      <b>Si prefieres no tocar la UI ahora:</b> el backend ya está listo y probado, y los comentarios
-      del código ya dicen la verdad sobre este hueco. La reparación quedaría alcanzable solo desde
-      RideOps o un POST directo, y esta tarjeta seguiría mandando a escalar algo que el sistema sabe
-      arreglar solo.
+      <b>Lo que no cambia:</b> el botón sigue oculto en <code>CANCELLED</code>,
+      <code>NO_SHOW</code>, <code>PENDING_FRANCHISE_IMPORT</code> y en los motivos terminales de
+      edad; las filas de hechos siguen con ✓ gris y no verde; y el cliente recibe como máximo un
+      correo pase lo que pase.
     </p>
   </div>
 </div>

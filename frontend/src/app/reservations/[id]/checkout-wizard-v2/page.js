@@ -2131,17 +2131,28 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
   // What this card offers now tracks what the backend will actually do,
   // including the CHECKED_OUT + DRAFT-agreement repair — see `closedCardState`,
   // where the agreement status is part of the condition rather than decoration.
-  const { voided, halfFinalized, showRetry } =
+  const { voided, halfFinalized, showRetry, variant } =
     closedCardState({ reservation, terminalReason: copy.terminal });
 
+  // Switched on `variant` rather than re-deriving the branch here — see
+  // closedCardState. The half-finalize state has TWO readings and they are not
+  // interchangeable: 'halfRepairable' is a car out on a DRAFT contract the
+  // backend can still finalize, and 'halfStuck' is the same car out on a
+  // contract it cannot (CANCELLED/CLOSED). Only the first gets a button, so
+  // only the first may be told to press one.
   let title;
   let body;
-  if (voided) {
+  if (variant === 'voided') {
     title = t('checkoutClosed.voidedTitle');
     body = t('checkoutClosed.voidedBody', { status: resvStatus });
-  } else if (halfFinalized) {
+  } else if (variant === 'halfRepairable') {
     title = t('checkoutClosed.halfTitle');
     body = t('checkoutClosed.halfBody');
+  } else if (variant === 'halfStuck') {
+    // Its own title too: "salió con el contrato en borrador" would be printed
+    // directly above a fact row reading CANCELLED.
+    title = t('checkoutClosed.halfStuckTitle');
+    body = t('checkoutClosed.halfStuckBody');
   } else {
     title = t(copy.titleKey);
     body = copy.bodyText || t(copy.bodyKey);
@@ -2208,15 +2219,24 @@ function StepClosed({ reservation, closedCheck, finalizeError, onRetryFinalize, 
             body IS the backend's raw message, which ends without punctuation,
             so an inline hint ran straight on out of the end of its sentence.
             Only shown when the button below can actually act on it. */}
-        {/* Still suppressed on the half-finalize card even though the button
-            is now offered there: `retryHint` is "fix that, THEN retry the
-            close", which reads as an instruction the agent has to act on
-            first. Here there is nothing for them to fix — the contract is
-            simply unfinished — and `halfBody` already says what the button
-            does. */}
+        {/* `retryHint` is "fix that, THEN retry the close" — an instruction to
+            act on something first — so it stays off the half-finalize card,
+            where there is nothing for the agent to fix and the contract is
+            simply unfinished. */}
         {showRetry && !halfFinalized && (
           <span style={{ display: 'block', fontWeight: 500, marginTop: 4 }}>
             {t('checkoutClosed.retryHint')}
+          </span>
+        )}
+        {/* Its own line for the same reason retryHint is: this is the sentence
+            that decides whether an agent presses the button at all. They are
+            being asked for a write on a rental already out on the road, after
+            payment and signature have run, and a counter agent who is unsure
+            escalates — which is the behaviour this whole change exists to
+            stop. Graphic Design's call, and it is the right one. */}
+        {variant === 'halfRepairable' && (
+          <span style={{ display: 'block', fontWeight: 500, marginTop: 4 }}>
+            {t('checkoutClosed.halfRetryHint')}
           </span>
         )}
         {/* The raw backend message is the ONLY place the blocking reservation

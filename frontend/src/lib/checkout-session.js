@@ -307,17 +307,31 @@ export function isFinalizeComplete(reservation) {
 export function closedCardState({ reservation, terminalReason = false } = {}) {
   const status = String(reservation?.status || '');
   const agreementStatus = reservation?.rentalAgreement?.status || null;
-  const retryCanWork = ['NEW', 'CONFIRMED'].includes(status)
-    || (status === 'CHECKED_OUT' && agreementStatus === 'DRAFT');
+  // Named, because the two clauses are two different backend branches and the
+  // boolean alone hides that (Innovation).
+  const neverRan = ['NEW', 'CONFIRMED'].includes(status);            // the winner path
+  const repairable = status === 'CHECKED_OUT' && agreementStatus === 'DRAFT'; // the repair branch
+  const retryCanWork = neverRan || repairable;
   const voided = ['CANCELLED', 'NO_SHOW'].includes(status);
   const halfFinalized = status === 'CHECKED_OUT'
     && !!agreementStatus && agreementStatus !== 'FINALIZED';
+  const showRetry = retryCanWork && !terminalReason;
   return {
     status,
     agreementStatus,
     retryCanWork,
     voided,
     halfFinalized,
-    showRetry: retryCanWork && !terminalReason,
+    showRetry,
+    // WHICH copy the card shows, decided here rather than in the component
+    // (2026-08-18). It used to be the component's business, and that is how
+    // this shipped broken for a day: the button was gated on `showRetry` and
+    // the paragraph on `halfFinalized`, which were the same set until the
+    // repair landed and stopped being one. The card then told the agent to
+    // press a button that was not on screen. Deriving both from one value
+    // makes that particular lie unrepresentable.
+    variant: voided
+      ? 'voided'
+      : (halfFinalized ? (showRetry ? 'halfRepairable' : 'halfStuck') : 'reason'),
   };
 }
