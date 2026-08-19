@@ -35,8 +35,15 @@ function money(n) {
 }
 const money0 = (n) => Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-export default function DailyBusinessReportPage() {
-  const [token, setToken] = useState('');
+export default function Page() {
+  // AuthGate hands its children a FUNCTION, not JSX — it calls
+  // children({ token, me, logout }). Passing plain children threw
+  // "children is not a function" and the error boundary showed
+  // "Something went wrong" before a single request went out (2026-08-19).
+  return <AuthGate>{({ token, me, logout }) => <DailyBusinessReport token={token} me={me} logout={logout} />}</AuthGate>;
+}
+
+function DailyBusinessReport({ token, me, logout }) {
   const [range, setRange] = useState(defaultRange());
   const [cutoff, setCutoff] = useState('');
   const [locationId, setLocationId] = useState('');
@@ -44,10 +51,6 @@ export default function DailyBusinessReportPage() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    try { setToken(localStorage.getItem('fleet_jwt') || ''); } catch { setToken(''); }
-  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -99,8 +102,7 @@ export default function DailyBusinessReportPage() {
   );
 
   return (
-    <AuthGate>
-      <AppShell>
+    <AppShell me={me} logout={logout}>
         <ReportPageLayout
           slug="daily-business"
           title="Daily Business Report with Posting"
@@ -137,6 +139,15 @@ export default function DailyBusinessReportPage() {
                   {journal.balanced ? 'Balanced' : 'Out of balance — not postable'}
                 </span>
               </div>
+
+              {Number(journal.deferral) !== 0 && (
+                <div className="surface-note" style={{ marginTop: 8 }}>
+                  <strong>{money0(Math.abs(journal.deferral))}</strong>{' '}
+                  {Number(journal.deferral) > 0
+                    ? 'of the cash collected belongs to rentals that had not closed yet — posted to unearned rental, not revenue.'
+                    : 'of revenue was earned against deposits collected earlier — drawn down from unearned rental.'}
+                </div>
+              )}
 
               {!journal.balanced && (journal.unbalancedLocations || []).map((u) => (
                 <div key={u.locationCode} className="surface-note" style={{ marginTop: 8, color: '#b3261e' }}>
@@ -256,8 +267,7 @@ export default function DailyBusinessReportPage() {
           {!loading && data && (data.days || []).length === 0 && (
             <div className="ui-muted">No activity in this range.</div>
           )}
-        </ReportPageLayout>
-      </AppShell>
-    </AuthGate>
+      </ReportPageLayout>
+    </AppShell>
   );
 }

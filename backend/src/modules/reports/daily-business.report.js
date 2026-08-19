@@ -26,7 +26,7 @@ import { prisma } from '../../lib/prisma.js';
 import { DEFAULT_TENANT_TIMEZONE, isoDayInTz } from '../../lib/date-utils.js';
 import { settingsService } from '../settings/settings.service.js';
 import {
-  groupOf, summarizeDay, buildJournal, assignPlaceholderAccounts, sumMoney,
+  groupOf, summarizeDay, buildJournal, assignPlaceholderAccounts, sumMoney, DEFERRAL_KEY,
 } from './daily-business.math.js';
 
 const MAX_DAYS = 92;
@@ -236,6 +236,9 @@ async function computeData({ tenantId, from, to, query = {} }) {
   const accounts = assignPlaceholderAccounts([
     ...[...groupTotals.values()].map((g) => g.key),
     ...[...receiptTotals.values()].map((r) => `RECEIPT:${r.method}`),
+    // Always mapped, even in a period where cash and revenue happen to match:
+    // an account number that appears only on busy months is a trap.
+    DEFERRAL_KEY,
   ]);
 
   // Journals are built per location so each branch's entry can be posted on
@@ -260,6 +263,9 @@ async function computeData({ tenantId, from, to, query = {} }) {
     lines: journals.flatMap((j) => j.lines),
     totalDebit: sumMoney(journals.map((j) => j.totalDebit)),
     totalCredit: sumMoney(journals.map((j) => j.totalCredit)),
+    // Cash taken on rentals that had not closed yet — the figure accounting
+    // needs to know is still owed as service, not earned.
+    deferral: sumMoney(journals.map((j) => j.deferral)),
     balanced: journals.every((j) => j.balanced),
     unbalancedLocations: journals.filter((j) => !j.balanced).map((j) => ({
       locationCode: j.locationCode, difference: j.difference, note: j.balanceNote,
