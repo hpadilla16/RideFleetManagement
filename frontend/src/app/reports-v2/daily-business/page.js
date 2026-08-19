@@ -47,6 +47,7 @@ function DailyBusinessReport({ token, me, logout }) {
   const [range, setRange] = useState(defaultRange());
   const [cutoff, setCutoff] = useState('');
   const [locationId, setLocationId] = useState('');
+  const [scope, setScope] = useState('all');
   const [locations, setLocations] = useState([]);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -67,20 +68,25 @@ function DailyBusinessReport({ token, me, logout }) {
       const q = new URLSearchParams({ from: range.from, to: range.to });
       if (cutoff) q.set('cutoff', cutoff);
       if (locationId) q.set('locationId', locationId);
+      if (scope !== 'all') q.set('scope', scope);
       setData(await api(`/api/reports/daily-business?${q.toString()}`, {}, token));
     } catch (e) {
       setError(e?.message || 'Could not load the report');
       setData(null);
     }
     setLoading(false);
-  }, [token, range.from, range.to, cutoff, locationId]);
+  }, [token, range.from, range.to, cutoff, locationId, scope]);
 
   useEffect(() => { load(); }, [load]);
 
   const journal = data?.journal;
   const exportParams = useMemo(
-    () => ({ ...(cutoff ? { cutoff } : {}), ...(locationId ? { locationId } : {}) }),
-    [cutoff, locationId],
+    () => ({
+      ...(cutoff ? { cutoff } : {}),
+      ...(locationId ? { locationId } : {}),
+      ...(scope !== 'all' ? { scope } : {}),
+    }),
+    [cutoff, locationId, scope],
   );
 
   const filters = (
@@ -94,6 +100,14 @@ function DailyBusinessReport({ token, me, logout }) {
           title="Only transactions recorded on or before this date are counted. Leave blank to use the end of the range."
         />
       </label>
+      <select
+        value={scope}
+        onChange={(e) => setScope(e.target.value)}
+        title="All activity includes money taken on rentals that are still running. Closed contracts only shows completed business."
+      >
+        <option value="all">All activity</option>
+        <option value="closed">Closed contracts only</option>
+      </select>
       <select value={locationId} onChange={(e) => setLocationId(e.target.value)}>
         <option value="">All locations</option>
         {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -116,6 +130,13 @@ function DailyBusinessReport({ token, me, logout }) {
         >
           {error && <div className="surface-note" role="alert" style={{ color: '#b3261e' }}>{error}</div>}
           {loading && <div className="ui-muted">Loading…</div>}
+
+          {data?.filters?.scope === 'closed' && (
+            <div className="surface-note">
+              Showing <strong>closed contracts only</strong> — payments taken on rentals that are
+              still running are excluded, so this is completed business.
+            </div>
+          )}
 
           {data?.accountsArePlaceholders && (
             <div className="surface-note" style={{ background: '#fbf1e8', borderLeft: '4px solid #9a4a1a' }}>
