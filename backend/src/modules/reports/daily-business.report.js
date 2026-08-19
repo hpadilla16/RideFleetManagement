@@ -71,6 +71,16 @@ async function computeData({ tenantId, from, to, query = {} }) {
   // has always meant. An explicit cutoff is how a closed period stays closed.
   const cutoff = String(query.cutoff || range.to).slice(0, 10);
   const locationId = String(query.locationId || '').trim() || null;
+  /**
+   * scope=all (default) — every transaction in the window, including money
+   *   taken on rentals still running. That cash is real and accounting has to
+   *   see it, but it is not revenue yet, which is what puts an amount on the
+   *   unearned-rental line.
+   * scope=closed — only what belongs to contracts that CLOSED in the window.
+   *   The completed-business view: cash and revenue come from the same
+   *   contracts, so the timing line normally disappears (Hector, 2026-08-19).
+   */
+  const scope = String(query.scope || 'all').toLowerCase() === 'closed' ? 'closed' : 'all';
 
   const days = Math.round((dayStart(range.to) - dayStart(range.from)) / 86400000) + 1;
   if (!Number.isFinite(days) || days < 1) throw Object.assign(new Error('Invalid date range'), { status: 400 });
@@ -91,7 +101,7 @@ async function computeData({ tenantId, from, to, query = {} }) {
   const locById = new Map(locations.map((l) => [l.id, l]));
   const locationIds = locations.map((l) => l.id);
   if (!locationIds.length) {
-    return { range, cutoff, tz, days: [], journal: buildJournal({}), accounts: {}, filters: { locationId }, truncated: false };
+    return { range, cutoff, tz, days: [], journal: buildJournal({}), accounts: {}, filters: { locationId, scope }, truncated: false };
   }
 
   // Agreements CLOSED in the window — the accounting event is the close, the
@@ -117,11 +127,15 @@ async function computeData({ tenantId, from, to, query = {} }) {
     orderBy: { closedAt: 'asc' },
   });
 
+  // Closed-only narrows payments to the very agreements listed above, so the
+  // two halves of the report describe the same contracts.
+  const closedIds = agreements.map((a) => a.id);
   const payments = await prisma.rentalAgreementPayment.findMany({
     where: {
       status: 'PAID',
       paidAt: { gte: windowStart, lte: windowEnd },
       createdAt: { lte: cutoffAt },
+      ...(scope === 'closed' ? { rentalAgreementId: { in: closedIds } } : {}),
       rentalAgreement: {
         tenantId,
         ...(locationId ? { reservation: { pickupLocationId: locationId } } : {}),
@@ -278,7 +292,7 @@ async function computeData({ tenantId, from, to, query = {} }) {
     journal,
     accounts,
     accountsArePlaceholders: true,
-    filters: { locationId },
+    filters: { locationId, scope },
     truncated,
   };
 }
@@ -311,7 +325,7 @@ function renderHtml(data) {
   const journalRows = (j.lines || []).map((l) => `<tr><td>${esc(l.account)}</td><td>${esc(l.description)}</td><td class="n">${l.debit ? fmt(l.debit) : ''}</td><td class="n">${l.credit ? fmt(l.credit) : ''}</td></tr>`).join('');
 
   return `
-    <p class="muted">Cutoff ${esc(data.cutoff)} · includes transactions recorded through that date.</p>
+    <p class="muted">Cutoff ${esc(data.cutoff)} · includes transactions recorded through that date${data.filters?.scope === 'closed' ? ' · closed contracts only' : ''}.</p>
     ${data.accountsArePlaceholders ? '<p class="muted"><strong>Account numbers are placeholders</strong> (0001, 0002…) pending the chart of accounts.</p>' : ''}
     ${dayBlocks || '<p class="muted">No activity in this range.</p>'}
     <h3>General Ledger Posting</h3>
