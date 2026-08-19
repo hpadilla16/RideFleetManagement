@@ -171,6 +171,23 @@ export function assignPlaceholderAccounts(groupKeys = []) {
  * @param {string} [args.locationCode] appended to each description, as the
  *                 old report did — one journal can cover several branches.
  */
+/**
+ * The account that absorbs TIMING, and why it has to exist.
+ *
+ * Cash and revenue do not land on the same day. Run this against Rent & Go's
+ * real books (2026-08-17) and Kennedy is out by 3,782.55 — every cent of it
+ * payments taken on rentals that had not closed yet. Mayaguez and Ponce, where
+ * every payment belonged to a contract that closed inside the window, balanced
+ * to the cent on the first try.
+ *
+ * That money is not revenue and it is not an error: it is cash received for
+ * a rental not yet earned, which is a liability. So it gets a NAMED line
+ * rather than a plug, and the report states the amount out loud — an
+ * accountant needs to see how much of today's cash is still owed as service.
+ */
+export const DEFERRAL_KEY = 'UNEARNED';
+export const DEFERRAL_LABEL = 'Unearned rental / open contracts';
+
 export function buildJournal({ groups = [], receipts = [], accounts = {}, locationCode = '' } = {}) {
   const suffix = locationCode ? ` (Loc ${locationCode})` : '';
   const lines = [];
@@ -201,6 +218,19 @@ export function buildJournal({ groups = [], receipts = [], accounts = {}, locati
     ? a.description.localeCompare(b.description)
     : a.account.localeCompare(b.account)));
 
+  // Timing goes to its own account, on whichever side balances the entry:
+  // more cash than revenue means the liability GREW (credit); more revenue
+  // than cash means an earlier deposit was earned out (debit).
+  const rawDebit = sumMoney(lines.map((l) => l.debit));
+  const rawCredit = sumMoney(lines.map((l) => l.credit));
+  const deferral = money(rawDebit - rawCredit);
+  if (deferral !== 0) {
+    push(DEFERRAL_KEY, DEFERRAL_LABEL, Math.abs(deferral), deferral > 0 ? CREDIT : DEBIT);
+    lines.sort((a, b) => (a.account === b.account
+      ? a.description.localeCompare(b.description)
+      : a.account.localeCompare(b.account)));
+  }
+
   const totalDebit = sumMoney(lines.map((l) => l.debit));
   const totalCredit = sumMoney(lines.map((l) => l.credit));
   const difference = money(totalDebit - totalCredit);
@@ -210,9 +240,13 @@ export function buildJournal({ groups = [], receipts = [], accounts = {}, locati
     totalDebit,
     totalCredit,
     difference,
+    // What went to timing, surfaced rather than buried: positive means cash
+    // collected on rentals still running.
+    deferral,
     balanced: difference === 0,
     // Said plainly, because this is the sentence an accountant needs to see
-    // when it goes wrong — not a stack trace.
+    // when it goes wrong — not a stack trace. With the timing account in
+    // place this should never fire; if it does, the arithmetic is wrong.
     balanceNote: difference === 0
       ? null
       : `Debits and credits differ by ${difference.toFixed(2)}. The entry is not postable until this is resolved.`,

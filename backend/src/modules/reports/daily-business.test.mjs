@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   groupOf, groupKeysFor, summarizeDay, buildJournal, assignPlaceholderAccounts, sumMoney,
+  DEFERRAL_KEY,
 } from './daily-business.math.js';
 
 /** Charge names taken verbatim from Rent & Go's own books (2026-08-17). */
@@ -117,6 +118,7 @@ function journalFor(charges, payments) {
   const accounts = assignPlaceholderAccounts([
     ...groups.map((g) => g.key),
     ...s.receipts.map((r) => `RECEIPT:${r.method}`),
+    DEFERRAL_KEY,
   ]);
   return buildJournal({ groups, receipts: s.receipts, accounts, locationCode: 'SJU' });
 }
@@ -129,11 +131,16 @@ test('the journal balances when receipts cover the charges and deposits', () => 
   assert.equal(j.balanceNote, null);
 });
 
-test('an out-of-balance journal REFUSES to look fine', () => {
+test('a gap between cash and revenue is NAMED, never swallowed', () => {
+  // Before the timing account existed this simply reported "out of balance".
+  // It still must not disappear quietly: the entry balances, and the amount
+  // that got there by timing is stated.
   const j = journalFor(REAL_CHARGES, [{ method: 'CARD', amount: 1 }]);
-  assert.equal(j.balanced, false);
-  assert.ok(j.difference !== 0);
-  assert.match(j.balanceNote, /not postable/);
+  assert.equal(j.balanced, true, 'the timing account closes the entry');
+  assert.ok(Math.abs(j.deferral) > 0, 'and reports how much went to timing');
+  const line = j.lines.find((l) => l.accountKey === DEFERRAL_KEY);
+  assert.ok(line, 'as a line an accountant can see and map');
+  assert.equal(j.totalDebit, j.totalCredit);
 });
 
 test('receipts are debits; revenue, taxes AND deposits are credits', () => {
@@ -171,4 +178,48 @@ test('placeholder numbers are stable across runs, not run-order dependent', () =
 test('cents add up exactly — a close cannot drift on float error', () => {
   const many = Array.from({ length: 300 }, () => 0.1);
   assert.equal(sumMoney(many), 30);
+});
+
+// ── timing: cash and revenue do not land on the same day ────────────────────
+
+test('cash taken on a still-open rental lands in unearned, and the entry balances', () => {
+  // Rent & Go, Kennedy, 2026-08-10..18: payments on contracts that had not
+  // closed yet left the journal short by 3,782.55. That is a liability, not
+  // an error, and it must have a named line.
+  const j = buildJournal({
+    groups: [{ key: 'TIME', label: 'Time charges', section: 'TIME', total: 100 }],
+    receipts: [{ method: 'CARD', total: 400 }],
+    accounts: { TIME: '0001', 'RECEIPT:CARD': '0002', UNEARNED: '0003' },
+    locationCode: 'KEN',
+  });
+  assert.equal(j.balanced, true, j.balanceNote || '');
+  assert.equal(j.deferral, 300, 'the 300 not yet earned goes to unearned');
+  const line = j.lines.find((l) => l.accountKey === DEFERRAL_KEY);
+  assert.ok(line, 'the timing must be a NAMED line, never a silent plug');
+  assert.equal(line.credit, 300, 'more cash than revenue grows the liability — a credit');
+  assert.match(line.description, /Unearned rental/);
+});
+
+test('revenue earned against an earlier deposit draws the liability DOWN', () => {
+  const j = buildJournal({
+    groups: [{ key: 'TIME', label: 'Time charges', section: 'TIME', total: 500 }],
+    receipts: [{ method: 'CARD', total: 120 }],
+    accounts: { TIME: '0001', 'RECEIPT:CARD': '0002', UNEARNED: '0003' },
+  });
+  assert.equal(j.balanced, true);
+  assert.equal(j.deferral, -380);
+  const line = j.lines.find((l) => l.accountKey === DEFERRAL_KEY);
+  assert.equal(line.debit, 380, 'earning out a deposit is a debit to the liability');
+});
+
+test('a day where cash and revenue match needs no timing line at all', () => {
+  // Mayaguez and Ponce did exactly this on the first real run.
+  const j = buildJournal({
+    groups: [{ key: 'TIME', label: 'Time charges', section: 'TIME', total: 64.66 }],
+    receipts: [{ method: 'CARD', total: 64.66 }],
+    accounts: { TIME: '0001', 'RECEIPT:CARD': '0002' },
+  });
+  assert.equal(j.deferral, 0);
+  assert.equal(j.lines.some((l) => l.accountKey === DEFERRAL_KEY), false);
+  assert.equal(j.balanced, true);
 });
