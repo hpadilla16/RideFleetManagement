@@ -198,6 +198,16 @@ const REPORT_REGISTRY = [
     status: 'AVAILABLE',
   },
   {
+    // 2026-08-17 — the report Rent & Go's accounting department consumed from
+    // their previous software. The GL journal at the end is the half they post.
+    slug: 'daily-business',
+    title: 'Daily Business Report with Posting',
+    category: 'REVENUE',
+    icon: 'book',
+    description: 'Daily detail, summary and the general-ledger journal',
+    status: 'AVAILABLE',
+  },
+  {
     slug: 'taxes',
     title: 'Taxes',
     category: 'REVENUE',
