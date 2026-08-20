@@ -188,7 +188,23 @@ export function assignPlaceholderAccounts(groupKeys = []) {
 export const DEFERRAL_KEY = 'UNEARNED';
 export const DEFERRAL_LABEL = 'Unearned rental / open contracts';
 
-export function buildJournal({ groups = [], receipts = [], accounts = {}, locationCode = '' } = {}) {
+/**
+ * The same account, but the two views mean different things and the label
+ * must not lie (Hector, 2026-08-19: "de que son esos 220.21").
+ *
+ * In the ALL view the gap is timing — cash taken on rentals still running.
+ * In CLOSED-ONLY the open contracts are excluded by definition, so whatever
+ * remains is a mismatch between what was collected and what was billed on
+ * contracts that already closed: an over-collection with no charge line
+ * behind it, or an unpaid balance. Calling that "open contracts" sent
+ * somebody looking for rentals that were not in the report.
+ */
+export const DEFERRAL_LABEL_CLOSED = 'Collected vs billed on closed contracts';
+export const deferralLabelFor = (scope) => (
+  scope === 'closed' ? DEFERRAL_LABEL_CLOSED : DEFERRAL_LABEL
+);
+
+export function buildJournal({ groups = [], receipts = [], accounts = {}, locationCode = '', scope = 'all' } = {}) {
   const suffix = locationCode ? ` (Loc ${locationCode})` : '';
   const lines = [];
 
@@ -225,7 +241,7 @@ export function buildJournal({ groups = [], receipts = [], accounts = {}, locati
   const rawCredit = sumMoney(lines.map((l) => l.credit));
   const deferral = money(rawDebit - rawCredit);
   if (deferral !== 0) {
-    push(DEFERRAL_KEY, DEFERRAL_LABEL, Math.abs(deferral), deferral > 0 ? CREDIT : DEBIT);
+    push(DEFERRAL_KEY, deferralLabelFor(scope), Math.abs(deferral), deferral > 0 ? CREDIT : DEBIT);
     lines.sort((a, b) => (a.account === b.account
       ? a.description.localeCompare(b.description)
       : a.account.localeCompare(b.account)));

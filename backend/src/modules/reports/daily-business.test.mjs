@@ -223,3 +223,29 @@ test('a day where cash and revenue match needs no timing line at all', () => {
   assert.equal(j.lines.some((l) => l.accountKey === DEFERRAL_KEY), false);
   assert.equal(j.balanced, true);
 });
+
+test('the timing account is named for the view it appears in', () => {
+  // Hector asked what a 220.21 line meant in the closed-only view. It was
+  // labelled "open contracts" — in a report whose filter EXCLUDES open
+  // contracts. The number was right; the word sent him looking for rentals
+  // that were not there.
+  const args = {
+    groups: [{ key: 'TIME', label: 'Time charges', section: 'TIME', total: 100 }],
+    receipts: [{ method: 'CARD', total: 320 }],
+    accounts: { TIME: '0001', 'RECEIPT:CARD': '0002', UNEARNED: '0013' },
+    locationCode: 'KEN',
+  };
+  const all = buildJournal({ ...args, scope: 'all' });
+  const closed = buildJournal({ ...args, scope: 'closed' });
+
+  const lineOf = (j) => j.lines.find((l) => l.accountKey === DEFERRAL_KEY);
+  assert.match(lineOf(all).description, /open contracts/);
+  assert.match(lineOf(closed).description, /Collected vs billed/);
+  assert.doesNotMatch(
+    lineOf(closed).description, /open contracts/,
+    'the closed-only view must not name contracts it excluded',
+  );
+  // Same account either way — only the wording changes.
+  assert.equal(lineOf(all).account, lineOf(closed).account);
+  assert.equal(all.deferral, closed.deferral);
+});
