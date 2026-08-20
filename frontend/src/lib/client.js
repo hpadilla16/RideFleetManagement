@@ -156,6 +156,30 @@ export function readStoredToken() {
   );
 }
 
+/**
+ * Serialise a request body the way every caller already assumes it is.
+ *
+ * `fetch` turns a plain object into the literal string "[object Object]", so
+ * `api(path, { body: { addOns } })` reached the server as garbage and the
+ * screen showed `"[object Object]" is not valid JSON` — which reads like a
+ * server fault and is not (Rent & Go, quotes add-ons, 2026-08-20). Two call
+ * sites had it; the next one would have had it too, because the correct
+ * spelling (JSON.stringify) is the one you have to remember.
+ *
+ * So the wrapper does it. Strings pass through untouched, and the browser's
+ * own body types (FormData, Blob, files, URLSearchParams) are left alone —
+ * stringifying those would break uploads.
+ */
+export function encodeBody(body) {
+  if (body === undefined || body === null) return body;
+  if (typeof body === 'string') return body;
+  if (typeof FormData !== 'undefined' && body instanceof FormData) return body;
+  if (typeof Blob !== 'undefined' && body instanceof Blob) return body;
+  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(body)) return body;
+  if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) return body;
+  return JSON.stringify(body);
+}
+
 export async function api(path, opts = {}, token) {
   const { cacheTtlMs, bypassCache, skipViewLocation, ...fetchOpts } = opts || {};
   const method = String(fetchOpts.method || 'GET').toUpperCase();
@@ -173,7 +197,7 @@ export async function api(path, opts = {}, token) {
 
   if (!useGetCache) {
     if (method !== 'GET') clearGetCache();
-    const res = await fetch(url, { ...fetchOpts, method, headers });
+    const res = await fetch(url, { ...fetchOpts, method, headers, body: encodeBody(fetchOpts.body) });
     return parseApiResponse(res, path);
   }
 
@@ -191,7 +215,7 @@ export async function api(path, opts = {}, token) {
   if (inflight) return cloneCachedValue(await inflight);
 
   const requestPromise = (async () => {
-    const res = await fetch(url, { ...fetchOpts, method, headers });
+    const res = await fetch(url, { ...fetchOpts, method, headers, body: encodeBody(fetchOpts.body) });
     const data = await parseApiResponse(res, path);
     getResponseCache.set(cacheKey, { expiresAt: Date.now() + ttlMs, data: cloneCachedValue(data) });
     return data;
