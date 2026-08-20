@@ -269,7 +269,7 @@ async function computeData({ tenantId, from, to, query = {} }) {
 
   const journals = [...byLocation.entries()].map(([code, v]) => ({
     locationCode: code,
-    ...buildJournal({ groups: v.groups, receipts: v.receipts, accounts, locationCode: code }),
+    ...buildJournal({ groups: v.groups, receipts: v.receipts, accounts, locationCode: code, scope }),
   }));
 
   const journal = {

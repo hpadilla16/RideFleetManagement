@@ -164,9 +164,13 @@ function DailyBusinessReport({ token, me, logout }) {
               {Number(journal.deferral) !== 0 && (
                 <div className="surface-note" style={{ marginTop: 8 }}>
                   <strong>{money0(Math.abs(journal.deferral))}</strong>{' '}
-                  {Number(journal.deferral) > 0
-                    ? 'of the cash collected belongs to rentals that had not closed yet — posted to unearned rental, not revenue.'
-                    : 'of revenue was earned against deposits collected earlier — drawn down from unearned rental.'}
+                  {data?.filters?.scope === 'closed'
+                    ? (Number(journal.deferral) > 0
+                      ? 'was collected beyond what these closed contracts were billed — check for a rental charged to a card without a matching charge line.'
+                      : 'is still owed on these closed contracts — balances that were never collected.')
+                    : (Number(journal.deferral) > 0
+                      ? 'of the cash collected belongs to rentals that had not closed yet — posted to unearned rental, not revenue.'
+                      : 'of revenue was earned against deposits collected earlier — drawn down from unearned rental.')}
                 </div>
               )}
 
