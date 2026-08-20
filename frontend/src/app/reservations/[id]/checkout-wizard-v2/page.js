@@ -556,7 +556,7 @@ function StepRenderer({ session, reservation, token, onAdvance }) {
     case 'PAID':
       return <StepBridge label="Payment captured" onNext={() => onAdvance('INSPECTION_HANDOFF')} />;
     case 'INSPECTION_HANDOFF':
-      return <Step4Handoff session={session} token={token} onContinue={() => onAdvance('INSPECTION_IN_PROGRESS')} />;
+      return <Step4Handoff session={session} token={token} reservationId={reservation?.id} onContinue={() => onAdvance('INSPECTION_IN_PROGRESS')} />;
     case 'INSPECTION_IN_PROGRESS':
       return <Step5Metrics
         session={session}
@@ -1560,7 +1560,7 @@ function ManualDepositModal({ suggestedAmount, onClose, onSubmit }) {
   );
 }
 
-function Step4Handoff({ session, token, onContinue }) {
+function Step4Handoff({ session, token, onContinue, reservationId }) {
   const [tokenInfo, setTokenInfo] = useState(null);
   // 2026-06-11 — customer-led inspection (plan: doc/customer-inspection-plan).
   // When the tenant setting is ON, step 4 offers TWO exits: delegate the
@@ -1669,6 +1669,25 @@ function Step4Handoff({ session, token, onContinue }) {
           <div style={{ color: '#6B7280' }}>Minting handoff token…</div>
         )}
       </div>
+      {/* Doing the whole checkout on the tablet means there is no second
+          device left to scan with (Hector, 2026-08-19) — the QR is unusable
+          precisely when the agent is working alone. Same destination, opened
+          directly, with a return path so the wizard is one tap away after. */}
+      <button
+        style={{ ...primaryBtn, width: '100%', marginTop: 16 }}
+        onClick={() => {
+          const back = reservationId ? `/reservations/${reservationId}/checkout-wizard-v2` : '';
+          const qs = back ? `?return=${encodeURIComponent(back)}` : '';
+          window.location.href = `/checkout/mobile/${tokenInfo.token}${qs}`;
+        }}
+        disabled={!tokenInfo}
+      >
+        Do the inspection on this device →
+      </button>
+      <div style={{ fontSize: 12, color: '#6B7280', textAlign: 'center', marginTop: 8 }}>
+        Use this when the tablet in your hand is the only device.
+      </div>
+
       <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
         {customerLed ? (
           <button style={ghostBtn} onClick={() => setMode('choose')}>← Back to options</button>
