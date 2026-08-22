@@ -10,6 +10,7 @@ import {
 } from '../../lib/module-access.js';
 import { getTenantPlanCatalog, resolveTenantPlanConfig } from '../../lib/tenant-plan-limits.js';
 import { encrypt, decrypt, isEncryptionConfigured } from '../../lib/integration-crypto.js';
+import { normalizePolicy as normalizeTwoFactorPolicy, VALID_TWO_FACTOR_ROLES } from '../../lib/two-factor-policy.js';
 
 const DEFAULTS = {
   companyName: 'Ride Fleet',
@@ -913,6 +914,44 @@ export const settingsService = {
       confidenceMin: Number.isFinite(Number(cfg?.confidenceMin)) ? Number(cfg.confidenceMin) : null,
       apiKey,
     };
+  },
+
+  // Staff 2FA policy (2026-08-22). Stored as AppSetting JSON under
+  // scopedKey('twoFactorPolicy', scope): unscoped = the global default a
+  // SUPER_ADMIN sets, `tenant:<id>:twoFactorPolicy` = a tenant override. There
+  // is NO secret here, so read is unmasked. resolveTwoFactorPolicy (in
+  // lib/two-factor-policy) merges global+tenant at login time.
+  async getTwoFactorPolicy(scope = {}) {
+    const cfg = await readJsonSetting(scopedKey('twoFactorPolicy', scope), null);
+    return {
+      ...normalizeTwoFactorPolicy(cfg),
+      isSet: cfg !== null,
+      availableRoles: VALID_TWO_FACTOR_ROLES
+    };
+  },
+
+  async updateTwoFactorPolicy(payload = {}, scope = {}) {
+    const enabled = !!payload?.enabled;
+    const requiredRoles = Array.isArray(payload?.requiredRoles)
+      ? Array.from(new Set(payload.requiredRoles.map((r) => String(r || '').toUpperCase())))
+      : [];
+    for (const role of requiredRoles) {
+      if (!VALID_TWO_FACTOR_ROLES.includes(role)) {
+        throw new Error(`Invalid role in requiredRoles: ${role}`);
+      }
+    }
+    let graceUntil = null;
+    if (payload?.graceUntil) {
+      const d = new Date(payload.graceUntil);
+      if (Number.isNaN(d.getTime())) throw new Error('graceUntil must be a valid date');
+      graceUntil = d.toISOString();
+    }
+    if (enabled && !requiredRoles.length) {
+      throw new Error('Enable at least one required role, or leave the policy disabled');
+    }
+    const value = { enabled, requiredRoles, graceUntil };
+    await writeJsonSetting(scopedKey('twoFactorPolicy', scope), value);
+    return { ...value, isSet: true, availableRoles: VALID_TWO_FACTOR_ROLES };
   },
 
   async getPaymentGatewayConfig(scope = {}) {

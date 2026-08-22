@@ -1899,6 +1899,16 @@ model User {
   lockPinHash        String?
   lockPinUpdatedAt   DateTime?
   screenLockExempt   Boolean              @default(false)
+  // Staff 2FA (TOTP) — 2026-08-22. All columns nullable/defaulted so the
+  // migration is additive and existing rows stay valid (zero behavior change
+  // until a policy exists or a user enrolls). twoFactorSecret is the ACTIVE
+  // TOTP secret (AES-256-GCM via integration-crypto); twoFactorPendingSecret
+  // holds an unverified secret mid-enrollment and is promoted on first valid
+  // code. Independent of lockPin* (screen lock) — do not conflate.
+  twoFactorEnabled       Boolean          @default(false)
+  twoFactorSecret        String?
+  twoFactorPendingSecret String?
+  twoFactorEnrolledAt    DateTime?
   fullName           String
   role               UserRole             @default(AGENT)
   isActive           Boolean              @default(true)
@@ -1941,10 +1951,25 @@ model User {
   createdHostProfiles              HostProfile[]           @relation("HostProfileCreatedBy")
   approvedHostVehicleSubmissions   HostVehicleSubmission[]
   ownedTripIncidents               TripIncident[]          @relation("TripIncidentOwner")
+  twoFactorBackupCodes             TwoFactorBackupCode[]
 
   @@index([tenantId, role, isActive])
   @@index([commissionPlanId])
   @@index([createdByUserId])
+}
+
+// Staff 2FA (TOTP) recovery codes — 2026-08-22. bcrypt-hashed (cost 10),
+// single-use: consuming a code stamps usedAt. Regenerating replaces the whole
+// set. onDelete: Cascade so removing a user cleans up their codes.
+model TwoFactorBackupCode {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 model HostProfile {

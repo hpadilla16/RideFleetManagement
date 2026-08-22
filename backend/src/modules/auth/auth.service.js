@@ -5,6 +5,12 @@ import { getJwtExpiresIn, getJwtSecret } from './auth.config.js';
 import { getEffectiveModuleAccessForUser } from '../../lib/module-access.js';
 import { cache } from '../../lib/cache.js';
 import { globalKey } from '../../lib/cache/tenantKey.js';
+import {
+  resolveTwoFactorPolicy,
+  requiresTwoFactor,
+  isEnforcementKilled
+} from '../../lib/two-factor-policy.js';
+import { twoFactorService } from './two-factor.service.js';
 
 // 30s TTL bounds cross-worker staleness: role/module-access invalidations only
 // clear the current worker's cache, so siblings keep stale permissions until TTL expires.
@@ -25,6 +31,44 @@ function signToken(user, options = {}) {
     claims.tv = user.tokenVersion ?? 0;
   }
   return jwt.sign(claims, getJwtSecret(), { expiresIn: options.expiresIn || getJwtExpiresIn() });
+}
+
+// Staff 2FA (2026-08-22): a SHORT-LIVED challenge token issued between the
+// password step and the TOTP step. It carries `mfa: 'VERIFY' | 'ENROLL'` — the
+// SAME conditional-claim pattern as svc/prac above, so human non-2FA JWTs stay
+// byte-compatible. requireAuth's TWO_FACTOR_PENDING_ALLOWLIST restricts a token
+// bearing this claim to only the verify-login + enroll endpoints + /me;
+// /refresh refuses it (like prac) so it can't be stretched past its 5m life.
+function signPendingToken(user, mode) {
+  const claims = {
+    sub: user.id,
+    email: user.email,
+    role: user.role,
+    tenantId: user.tenantId || null,
+    mfa: mode === 'ENROLL' ? 'ENROLL' : 'VERIFY'
+  };
+  return jwt.sign(claims, getJwtSecret(), { expiresIn: '5m' });
+}
+
+/**
+ * Pure 2FA login decision — SINGLE source of truth for which of the three
+ * outcomes a password-verified login takes. Exported so the login-branch tests
+ * can exercise every path without a database.
+ *
+ *   'FULL'   → issue the full session token exactly as before (no challenge).
+ *   'VERIFY' → already-enrolled user must present a live TOTP/backup code.
+ *   'ENROLL' → policy compels this role but the user isn't enrolled yet.
+ *
+ * Order is load-bearing:
+ *   1. kill-switch wins over everything (instant prod recovery, even enrolled).
+ *   2. an enrolled user always verifies (independent of policy).
+ *   3. otherwise the policy decides; a disabled/absent policy ⇒ 'FULL'.
+ */
+export function loginTwoFactorOutcome({ user, policy, killed }) {
+  if (killed) return 'FULL';
+  if (user?.twoFactorEnabled) return 'VERIFY';
+  if (requiresTwoFactor(user, policy)) return 'ENROLL';
+  return 'FULL';
 }
 
 /**
@@ -132,6 +176,10 @@ async function buildSessionUser(user) {
     // First-login onboarding (2026-07-25): requireAuth gates on this and the
     // frontend AuthGate renders the forced-change screen while it is true.
     mustChangePassword: !!user.mustChangePassword,
+    // Staff 2FA (2026-08-22): non-secret status for the UI (Security settings +
+    // /me). The secret itself is never loaded here.
+    twoFactorEnabled: !!user.twoFactorEnabled,
+    twoFactorEnrolledAt: user.twoFactorEnrolledAt || null,
     moduleAccess: moduleAccess.effective,
     tenantModuleAccess: moduleAccess.tenantConfig,
     userModuleAccess: moduleAccess.userConfig
@@ -171,6 +219,10 @@ export const authService = {
           isServiceAccount: true,
           tokenVersion: true,
           mustChangePassword: true,
+          // Staff 2FA (2026-08-22): non-secret status only — NEVER select
+          // twoFactorSecret / twoFactorPendingSecret into a session.
+          twoFactorEnabled: true,
+          twoFactorEnrolledAt: true,
           hostProfile: { select: { id: true } }
         }
       });
@@ -274,8 +326,83 @@ export const authService = {
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) throw new Error('Invalid credentials');
 
+    // ── Staff 2FA (2026-08-22) — SURGICAL, order matters. ──────────────────
+    // The decision is a pure function (loginTwoFactorOutcome, exported + unit-
+    // tested for every branch). We resolve the tenant policy ONLY when it can
+    // actually change the outcome — i.e. not killed and not already enrolled —
+    // so the enrolled/killed short-circuits cost no settings read.
+    const killed = isEnforcementKilled();
+    const policy = (!killed && !user.twoFactorEnabled)
+      ? await resolveTwoFactorPolicy(user.tenantId || null)
+      : null;
+    const outcome = loginTwoFactorOutcome({ user, policy, killed });
+    if (outcome === 'VERIFY') {
+      return { mfaRequired: true, mode: 'VERIFY', challengeToken: signPendingToken(user, 'VERIFY') };
+    }
+    if (outcome === 'ENROLL') {
+      return { mfaRequired: true, mode: 'ENROLL', challengeToken: signPendingToken(user, 'ENROLL') };
+    }
+    // outcome === 'FULL' — the zero-behavior-change path: no policy + kill-switch
+    // off ⇒ byte-identical login to before this feature.
+    // ───────────────────────────────────────────────────────────────────────
+
     const token = signToken(user);
     return { token, user: await buildSessionUser(user) };
+  },
+
+  // Staff 2FA (2026-08-22) — second leg of login. The client presents the
+  // short-lived challenge token (VERIFY mode) plus a TOTP code OR a single-use
+  // backup code. On success we mint the FULL token via the existing signToken,
+  // so downstream is identical to a password-only login. The session cache is
+  // busted so the fresh session hydrates immediately on this worker.
+  async verifyLogin({ userId, code }) {
+    const user = await prisma.user.findUnique({
+      where: { id: String(userId || '') },
+      include: { hostProfile: { select: { id: true } } }
+    });
+    if (!user || !user.isActive) throw new Error('Invalid credentials');
+    if (!user.twoFactorEnabled) throw new Error('Two-factor authentication is not enabled for this account');
+    const cleaned = String(code || '').trim();
+    if (!cleaned) throw new Error('Authentication code is required');
+
+    let ok = await twoFactorService.verifyCode(user.id, cleaned);
+    if (!ok) ok = await twoFactorService.consumeBackupCode(user.id, cleaned);
+    if (!ok) {
+      const err = new Error('Invalid authentication code');
+      err.code = 'INVALID_2FA_CODE';
+      throw err;
+    }
+
+    cache.del(globalKey('session', user.id));
+    const token = signToken(user);
+    return { token, user: await buildSessionUser(user) };
+  },
+
+  // Staff 2FA (2026-08-22): confirm the caller's own password (self-service
+  // disable requires it). Returns boolean; the caller has already passed
+  // requireAuth, so this only gates the sensitive disable action.
+  async verifyPassword({ userId, password }) {
+    const user = await prisma.user.findUnique({
+      where: { id: String(userId || '') },
+      select: { passwordHash: true, isActive: true }
+    });
+    if (!user || !user.isActive || !user.passwordHash) return false;
+    return bcrypt.compare(String(password || ''), user.passwordHash);
+  },
+
+  // Staff 2FA (2026-08-22): admin reset — wipe a user's 2FA secret + backup
+  // codes + flags (via twoFactorService.disableFor) within the caller's tenant
+  // scope, then bust the session cache so the cleared status hydrates. If the
+  // tenant policy still requires the role, their next login re-enters ENROLL.
+  async resetTwoFactorForUser(targetUserId, scope = {}) {
+    const target = await prisma.user.findFirst({
+      where: { id: String(targetUserId || ''), ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+      select: { id: true }
+    });
+    if (!target) throw new Error('User not found');
+    const out = await twoFactorService.disableFor(target.id);
+    cache.del(globalKey('session', target.id));
+    return out;
   },
 
   // First-login onboarding (2026-07-25). Self-service password change — the

@@ -26,6 +26,16 @@ export function AuthGate({ children }) {
   const [guestSignInEmail, setGuestSignInEmail] = useState('');
   const [guestSignUp, setGuestSignUp] = useState({ firstName: '', lastName: '', email: '', phone: '' });
 
+  // Staff 2FA (2026-08-22). The challenge token lives ONLY in component state
+  // (never localStorage) — it is a 5-minute credential that grants access to
+  // just the verify/enroll endpoints, and must vanish on reload.
+  const [mfa, setMfa] = useState(null);            // { mode: 'VERIFY'|'ENROLL', challengeToken }
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaBusy, setMfaBusy] = useState(false);
+  const [enroll, setEnroll] = useState(null);      // { qrDataUrl, secret, otpauthUri }
+  const [backupCodes, setBackupCodes] = useState(null);
+  const [pendingSession, setPendingSession] = useState(null); // {token,user} held until codes saved
+
   useEffect(() => {
     const handleAuthExpired = (event) => {
       clearStoredAuth();
@@ -107,18 +117,98 @@ export function AuthGate({ children }) {
     };
   }, []);
 
+  // Apply a full session ({token,user}) returned by login or the 2FA second
+  // leg, and clear all challenge state.
+  const finishAuth = (out) => {
+    if (!out?.token) return;
+    localStorage.setItem(TOKEN_KEY, out.token);
+    localStorage.setItem(USER_KEY, JSON.stringify(out.user || {}));
+    setToken(out.token);
+    setMe(out.user);
+    setMfa(null);
+    setEnroll(null);
+    setBackupCodes(null);
+    setPendingSession(null);
+    setMfaCode('');
+    setError('');
+  };
+
+  const startEnroll = async (challengeToken) => {
+    try {
+      const out = await api('/api/auth/2fa/enroll/start', { method: 'POST' }, challengeToken);
+      setEnroll({ qrDataUrl: out.qrDataUrl, secret: out.secret, otpauthUri: out.otpauthUri });
+    } catch (e2) {
+      setError(e2.message);
+    }
+  };
+
   const login = async (e) => {
     e.preventDefault();
     try {
       const out = await api('/api/auth/login', { method: 'POST', body: JSON.stringify(form) });
-      localStorage.setItem(TOKEN_KEY, out.token);
-      localStorage.setItem(USER_KEY, JSON.stringify(out.user || {}));
-      setToken(out.token);
-      setMe(out.user);
-      setError('');
+      // Staff 2FA: a challenge is required before a full session is issued.
+      if (out?.mfaRequired) {
+        setMfa({ mode: out.mode, challengeToken: out.challengeToken });
+        setMfaCode('');
+        setError('');
+        if (out.mode === 'ENROLL') await startEnroll(out.challengeToken);
+        return;
+      }
+      finishAuth(out);
     } catch (e2) {
       setError(e2.message);
     }
+  };
+
+  const submitVerifyLogin = async (e) => {
+    e.preventDefault();
+    if (!mfa?.challengeToken) return;
+    try {
+      setMfaBusy(true);
+      const out = await api('/api/auth/2fa/verify-login', {
+        method: 'POST',
+        body: JSON.stringify({ code: mfaCode.trim() })
+      }, mfa.challengeToken);
+      finishAuth(out);
+    } catch (e2) {
+      setError(e2.message);
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const submitEnrollVerify = async (e) => {
+    e.preventDefault();
+    if (!mfa?.challengeToken) return;
+    try {
+      setMfaBusy(true);
+      const out = await api('/api/auth/2fa/enroll/verify', {
+        method: 'POST',
+        body: JSON.stringify({ code: mfaCode.trim() })
+      }, mfa.challengeToken);
+      // Show the one-time backup codes; hold the session until the user confirms
+      // they saved them, then lift the gate.
+      setBackupCodes(out.backupCodes || []);
+      setPendingSession({ token: out.token, user: out.user });
+      setError('');
+    } catch (e2) {
+      setError(e2.message);
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const confirmBackupSaved = () => {
+    if (pendingSession) finishAuth(pendingSession);
+  };
+
+  const cancelMfa = () => {
+    setMfa(null);
+    setEnroll(null);
+    setBackupCodes(null);
+    setPendingSession(null);
+    setMfaCode('');
+    setError('');
   };
 
   const logout = () => {
@@ -194,6 +284,106 @@ export function AuthGate({ children }) {
       setGuestLoading(false);
     }
   };
+
+  // Staff 2FA challenge (2026-08-22): password verified, full session withheld
+  // until the second factor is satisfied. Rendered before the login form so the
+  // user cannot fall back to it mid-challenge.
+  if (mfa) {
+    // One-time backup codes after a successful enrollment.
+    if (backupCodes) {
+      return (
+        <main className="auth-wrap auth-animated-split">
+          <div className="auth-purple-half" aria-hidden />
+          <img src="/ride-logo.png" alt="Ride logo" className="intro-logo" />
+          <div className="glass card-lg login-card centered-login login-float-in">
+            <h1>Save your backup codes</h1>
+            <p className="label">
+              Each code works once if you lose your authenticator. Store them somewhere safe —
+              they will not be shown again.
+            </p>
+            <div className="stack" style={{ marginTop: 12, fontFamily: 'monospace', fontSize: 16 }}>
+              {backupCodes.map((c) => (<div key={c}>{c}</div>))}
+            </div>
+            <button type="button" style={{ marginTop: 16 }} onClick={confirmBackupSaved}>
+              I saved these — continue
+            </button>
+          </div>
+        </main>
+      );
+    }
+    // ENROLL: show the QR + manual secret, then take a code to finish enrollment.
+    if (mfa.mode === 'ENROLL') {
+      return (
+        <main className="auth-wrap auth-animated-split">
+          <div className="auth-purple-half" aria-hidden />
+          <img src="/ride-logo.png" alt="Ride logo" className="intro-logo" />
+          <div className="glass card-lg login-card centered-login login-float-in">
+            <h1>Set up two-factor authentication</h1>
+            <p className="label">
+              Your organization requires 2FA. Scan this QR code with an authenticator app
+              (Google Authenticator, Authy, 1Password), then enter the 6-digit code.
+            </p>
+            {error ? <p className="error">{error}</p> : null}
+            {enroll?.qrDataUrl ? (
+              <img src={enroll.qrDataUrl} alt="2FA QR code" style={{ width: 200, height: 200, margin: '12px auto' }} />
+            ) : (
+              <p className="label">Preparing your enrollment…</p>
+            )}
+            {enroll?.secret ? (
+              <p className="label">Can't scan? Enter this key manually: <code>{enroll.secret}</code></p>
+            ) : null}
+            <form onSubmit={submitEnrollVerify} className="stack" style={{ marginTop: 12 }}>
+              <input
+                placeholder="6-digit code"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value)}
+                required
+              />
+              <button type="submit" disabled={mfaBusy || !enroll?.qrDataUrl}>
+                {mfaBusy ? 'Verifying…' : 'Verify and enable'}
+              </button>
+            </form>
+            <div className="auth-legal-row">
+              <button type="button" className="legal-link-inline" onClick={cancelMfa} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </main>
+      );
+    }
+    // VERIFY: already enrolled — take a live TOTP or backup code.
+    return (
+      <main className="auth-wrap auth-animated-split">
+        <div className="auth-purple-half" aria-hidden />
+        <img src="/ride-logo.png" alt="Ride logo" className="intro-logo" />
+        <div className="glass card-lg login-card centered-login login-float-in">
+          <h1>Two-factor authentication</h1>
+          <p className="label">Enter the 6-digit code from your authenticator app, or a backup code.</p>
+          {error ? <p className="error">{error}</p> : null}
+          <form onSubmit={submitVerifyLogin} className="stack" style={{ marginTop: 12 }}>
+            <input
+              placeholder="Authentication code"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={mfaCode}
+              onChange={(e) => setMfaCode(e.target.value)}
+              required
+              autoFocus
+            />
+            <button type="submit" disabled={mfaBusy}>{mfaBusy ? 'Verifying…' : 'Verify'}</button>
+          </form>
+          <div className="auth-legal-row">
+            <button type="button" className="legal-link-inline" onClick={cancelMfa} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+              Back to sign in
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   if (!token) {
     return (

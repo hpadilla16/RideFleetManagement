@@ -35,6 +35,7 @@ import { AdvantageIntegrationPanel } from '../../components/settings/AdvantageIn
 import { MexIntegrationPanel } from '../../components/settings/MexIntegrationPanel';
 import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettings';
 import { ShuttleTrackerSettings } from '../../components/settings/ShuttleTrackerSettings';
+import { TwoFactorPolicySettings } from '../../components/settings/TwoFactorPolicySettings';
 import { LoanerRatesTab } from './LoanerRatesTab';
 import { API_BASE, api } from '../../lib/client';
 import { MODULE_DEFINITIONS } from '../../lib/moduleAccess';
@@ -3418,6 +3419,8 @@ function SettingsInner({ token, me, logout }) {
                 Save Tenant Module Access
               </button>
             </div>
+            <hr style={{ opacity: 0.15, width: '100%' }} />
+            <TwoFactorPolicySettings token={token} scopedPath={scopedSettingsPath} />
           </div>
         )}
 
