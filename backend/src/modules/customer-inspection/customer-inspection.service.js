@@ -299,7 +299,17 @@ async function sendCheckinInspection({ reservationId, actorUserId = null, force 
 // only resolves when the vehicle has a CHECKED_OUT reservation.
 // ---------------------------------------------------------------------------
 function vehicleSigSecret() {
-  return process.env.JWT_SECRET || process.env.BACKEND_INTERNAL_TOKEN || 'ride-fleet-qr';
+  // FAIL CLOSED (2026-08-22). This used to fall back to the literal
+  // 'ride-fleet-qr' when no secret was configured — which would make every
+  // vehicle QR signature forgeable and every vehicle id enumerable. There is no
+  // safe default for a signing secret: if neither env var is set, refuse rather
+  // than sign with a public constant. In production JWT_SECRET is always set
+  // (the app hard-fails at boot without it), so this never triggers there.
+  const secret = process.env.JWT_SECRET || process.env.BACKEND_INTERNAL_TOKEN;
+  if (!secret) {
+    throw new CheckoutSessionError('QR signing is not configured', 503, 'QR_NOT_CONFIGURED');
+  }
+  return secret;
 }
 function signVehicle(vehicleId) {
   return createHmac('sha256', vehicleSigSecret()).update(`checkin-qr:${vehicleId}`).digest('hex').slice(0, 24);
@@ -409,8 +419,16 @@ async function loadByToken(token) {
   }
   const v = row.reservation?.vehicle || {};
   const reportCount = await prisma.vehicleDamageReport.count({ where: { customerInspectionId: inspection.id } });
+  // Only reveal the renter's name on the EMAILED flow, where the link went to
+  // the customer's own inbox (inspection.emailTo is set). The printed-QR flow
+  // creates the inspection with emailTo:null and is reachable by anyone who
+  // photographed the sticker — so it must not disclose who currently has the
+  // car (2026-08-22). The customer confirms the vehicle by plate/colour instead.
+  const nameVisible = Boolean(inspection.emailTo);
   return {
-    customerName: [row.reservation?.customer?.firstName, row.reservation?.customer?.lastName].filter(Boolean).join(' ') || null,
+    customerName: nameVisible
+      ? ([row.reservation?.customer?.firstName, row.reservation?.customer?.lastName].filter(Boolean).join(' ') || null)
+      : null,
     vehicle: {
       label: [v.year, v.make, v.model].filter(Boolean).join(' ') || null,
       plate: v.plate || null,
