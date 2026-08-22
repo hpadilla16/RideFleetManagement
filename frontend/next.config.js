@@ -11,7 +11,19 @@
  */
 const NOAI = { key: 'X-Robots-Tag', value: 'noai, noimageai' };
 
+const fs = require('fs');
+
+/**
+ * The identity of THIS bundle, frozen at build time. public/build-id.txt
+ * carries the same value but is served by whichever deployment is live now,
+ * so a tab whose JavaScript predates the current deploy can tell.
+ */
+function currentBuildId() {
+  try { return fs.readFileSync('public/build-id.txt', 'utf8').trim(); } catch { return 'dev'; }
+}
+
 module.exports = {
+  env: { NEXT_PUBLIC_APP_BUILD: currentBuildId() },
   /**
    * DEV ONLY: `NEXT_DEV_API_PROXY=https://host npx next dev` makes the dev
    * server proxy /api/* server-side, so a local frontend can talk to a remote
@@ -26,6 +38,28 @@ module.exports = {
   },
   async headers() {
     return [
+      /**
+       * THE APP SHELL MUST ALWAYS BE REVALIDATED (outage, 2026-08-22).
+       *
+       * Next serves prerendered pages with `s-maxage=31536000,
+       * stale-while-revalidate` and NO max-age, so browsers fall back to
+       * heuristic caching and keep the old HTML — which references JS chunk
+       * filenames that no longer exist after a deploy. The app then fails to
+       * load data and the agent sees empty screens. On a PC a hard refresh
+       * escapes it; on a phone, and especially on the home-screen install
+       * where there is no reload button, there is no way out.
+       *
+       * `no-cache` does not mean "do not cache" — it means revalidate before
+       * use. With the ETag already in place that is a cheap 304 and the shell
+       * is always current.
+       *
+       * /_next/static and /_next/image keep their immutable long cache: those
+       * filenames carry a content hash, so they can never go stale.
+       */
+      {
+        source: '/:path((?!_next/static|_next/image).*)',
+        headers: [{ key: 'Cache-Control', value: 'no-cache, must-revalidate' }],
+      },
       {
         // The showcase may be framed ONLY by us and the marketing site.
         // Without this, anyone could iframe our demo into their own page and
