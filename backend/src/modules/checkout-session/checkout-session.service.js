@@ -828,9 +828,12 @@ async function mintHandoffToken({ sessionId, kind, actorUserId }) {
   }
 
   // CUSTOMER_INSPECTION links travel by email and the customer may inspect
-  // hours later (decision 2026-06-11: 24h TTL, re-sendable). QR handoffs
-  // stay short-lived.
-  const ttlMin = kind === 'CUSTOMER_INSPECTION' ? 24 * 60 : HANDOFF_TOKEN_TTL_MIN;
+  // hours later. TTL is configurable (2026-08-22 security redesign): default 72h
+  // for the checkout link, env CUSTOMER_INSPECTION_CHECKOUT_TTL_HOURS. QR handoffs
+  // (TERMS_SIGNING / MOBILE_INSPECTION) stay short-lived.
+  const checkoutTtlH = Number(process.env.CUSTOMER_INSPECTION_CHECKOUT_TTL_HOURS);
+  const ciTtlMin = (Number.isFinite(checkoutTtlH) && checkoutTtlH > 0 ? checkoutTtlH : 72) * 60;
+  const ttlMin = kind === 'CUSTOMER_INSPECTION' ? ciTtlMin : HANDOFF_TOKEN_TTL_MIN;
   const expiresAt = new Date(Date.now() + ttlMin * 60_000);
   const token = tokenBytes();
 

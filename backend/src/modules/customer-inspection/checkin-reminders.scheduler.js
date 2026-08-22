@@ -1,10 +1,14 @@
 /**
- * Customer CHECK-IN inspection D-1 reminder scheduler (Fase D, 2026-06-18).
+ * Customer CHECK-IN inspection reminder scheduler (Fase D, 2026-06-18; moved to a
+ * rolling 48h-before-return window in the 2026-08-22 security redesign).
  *
- * Periodic sweep that, the DAY BEFORE a rental's return, emails the customer a
- * self-inspection link (phase=CHECKIN) so check-in is fast and the agent doesn't
- * have to walk the car. Mirrors the interval-timer + overlap-guard + startup-delay
- * pattern of dealership-loaner/loaner-reminders.scheduler.js.
+ * Periodic sweep that emails the customer a self-inspection link (phase=CHECKIN)
+ * as soon as their rental is within CUSTOMER_INSPECTION_CHECKIN_LEAD_HOURS (default
+ * 48) of its return, so check-in is fast and the agent doesn't have to walk the
+ * car. The window is ROLLING hours, not a calendar day, so short rentals (checked
+ * out less than the lead time before return) are caught instead of skipped.
+ * Mirrors the interval-timer + overlap-guard + startup-delay pattern of
+ * dealership-loaner/loaner-reminders.scheduler.js.
  *
  * Dedupe is at the DB level: customerInspectionService.sendCheckinInspection()
  * skips a reservation that already has a CHECKIN inspection, so re-running the
@@ -67,17 +71,27 @@ function startupDelayMs() {
   return (Number.isFinite(s) && s >= 0 ? s : DEFAULT_STARTUP_DELAY_SECONDS) * 1000;
 }
 
-// [start, end) UTC for TOMORROW's calendar date in Florida (America/New_York).
-function tomorrowFLWindowUtc(now = new Date()) {
-  const tmr = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-  const ymd = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(tmr); // YYYY-MM-DD of "tomorrow" in FL
-  const tzShort = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' })
-    .formatToParts(now).find((p) => p.type === 'timeZoneName')?.value;
-  const off = tzShort === 'EST' ? '-05:00' : '-04:00';
-  const start = new Date(`${ymd}T00:00:00${off}`);
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+// Send lead time (2026-08-22 redesign): the reminder goes out when the rental is
+// within CUSTOMER_INSPECTION_CHECKIN_LEAD_HOURS (default 48) of its return — a
+// ROLLING window, NOT a fixed calendar day. A whole-day window (D-2) missed short
+// rentals: a 1-day rental checked out the day before return isn't yet CHECKED_OUT
+// on the "return minus 2 days" date, so it was never swept. Rolling hours catch
+// every rental the moment it enters the lead window (possibly right at checkout),
+// which is literally "48h before return". Dedupe in sendCheckinInspection keeps
+// it single-send.
+const DEFAULT_LEAD_HOURS = 48;
+function leadHours() {
+  const h = Number(process.env.CUSTOMER_INSPECTION_CHECKIN_LEAD_HOURS || DEFAULT_LEAD_HOURS);
+  return Number.isFinite(h) && h > 0 ? h : DEFAULT_LEAD_HOURS;
+}
+
+// [start, end) UTC rolling window: rentals whose return is still in the future but
+// no more than `hours` away. start = now (exclusive of already-returned rentals),
+// end = now + lead. Returns the raw bounds so the Prisma filter reads returnAt in
+// (now, now + lead].
+function leadWindowUtc(now = new Date(), hours = leadHours()) {
+  const start = new Date(now.getTime());
+  const end = new Date(now.getTime() + hours * 60 * 60 * 1000);
   return { start, end };
 }
 
@@ -86,15 +100,17 @@ async function sweepOnce() {
   const prisma = await resolvePrisma();
   const svc = await resolveService();
   const settings = await resolveSettings();
-  const { start, end } = tomorrowFLWindowUtc();
+  const { start, end } = leadWindowUtc();
 
-  // Active rentals (out on rent) due back tomorrow (FL).
+  // Active rentals (out on rent) whose return is within the lead window: still in
+  // the future (returnAt > now) and no more than lead-hours away (returnAt <= end).
+  // Rolling hours — catches short rentals that a calendar-day window would miss.
   const reservations = await prisma.reservation.findMany({
-    where: { status: 'CHECKED_OUT', returnAt: { gte: start, lt: end } },
+    where: { status: 'CHECKED_OUT', returnAt: { gt: start, lte: end } },
     select: { id: true, tenantId: true },
   });
   if (!reservations.length) {
-    log.info('[checkin-reminders] no reservations returning tomorrow');
+    log.info('[checkin-reminders] no reservations within the return lead window');
     return { scanned: 0, sent: 0, skipped: 0 };
   }
 
