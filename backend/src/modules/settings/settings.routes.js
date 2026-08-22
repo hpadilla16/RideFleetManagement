@@ -288,6 +288,31 @@ settingsRouter.put('/citation-ocr', requireRole('ADMIN'), async (req, res, next)
   }
 });
 
+// Staff 2FA policy (2026-08-22). ADMIN sets the policy for their tenant;
+// SUPER_ADMIN (scopeFor → {}) sets the unscoped GLOBAL default that applies to
+// every tenant without an override. Mirrors the citation-ocr scoping.
+settingsRouter.get('/two-factor-policy', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.getTwoFactorPolicy(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/two-factor-policy', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.updateTwoFactorPolicy(req.body || {}, scopeFor(req)));
+  } catch (e) {
+    if (e?.code === 'ENCRYPTION_NOT_CONFIGURED') {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
+    if (/invalid role|graceUntil|at least one required role/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
 // Long-term (monthly) billing — email templates + dunning/billing config.
 // Stored in appSetting key 'longTermEmailTemplates' (tenant-scoped).
 // Defaults + normalization live in modules/long-term/long-term-emails.js.

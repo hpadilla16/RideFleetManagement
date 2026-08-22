@@ -9,6 +9,131 @@ export default function SecuritySettingsPage() {
   return <AuthGate>{({ token, me, logout }) => <Inner token={token} me={me} logout={logout} />}</AuthGate>;
 }
 
+// Staff 2FA (2026-08-22) — self-service for the CURRENT user: status, enable
+// (QR enrollment → one-time backup codes), regenerate codes, disable (requires
+// password + a current code).
+function TwoFactorSelfService({ token }) {
+  const [status, setStatus] = useState(null);
+  const [msg, setMsg] = useState('');
+  const [enroll, setEnroll] = useState(null); // { qrDataUrl, secret }
+  const [code, setCode] = useState('');
+  const [codes, setCodes] = useState(null);   // one-time backup codes to show
+  const [busy, setBusy] = useState(false);
+
+  const loadStatus = async () => {
+    try {
+      setStatus(await api('/api/auth/2fa/status', {}, token));
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+  useEffect(() => { loadStatus(); }, [token]);
+
+  const beginEnable = async () => {
+    setMsg('');
+    try {
+      const out = await api('/api/auth/2fa/enroll/start', { method: 'POST' }, token);
+      setEnroll({ qrDataUrl: out.qrDataUrl, secret: out.secret });
+      setCode('');
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const confirmEnable = async (e) => {
+    e.preventDefault();
+    try {
+      setBusy(true);
+      const out = await api('/api/auth/2fa/enroll/verify', { method: 'POST', body: JSON.stringify({ code: code.trim() }) }, token);
+      setCodes(out.backupCodes || []);
+      setEnroll(null);
+      setCode('');
+      setMsg('Two-factor authentication enabled.');
+      await loadStatus();
+    } catch (e2) {
+      setMsg(e2.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const regenerate = async () => {
+    if (!window.confirm('Generate new backup codes? Your existing codes will stop working.')) return;
+    try {
+      const out = await api('/api/auth/2fa/backup-codes/regenerate', { method: 'POST' }, token);
+      setCodes(out.backupCodes || []);
+      setMsg('New backup codes generated.');
+      await loadStatus();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  const disable = async () => {
+    const password = window.prompt('Confirm your password to disable 2FA:');
+    if (password === null) return;
+    const currentCode = window.prompt('Enter a current authentication code (or a backup code):');
+    if (currentCode === null) return;
+    try {
+      await api('/api/auth/2fa/disable', { method: 'POST', body: JSON.stringify({ password, code: currentCode.trim() }) }, token);
+      setMsg('Two-factor authentication disabled.');
+      setCodes(null);
+      await loadStatus();
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
+  return (
+    <section className="glass card-lg stack">
+      <div className="row-between"><h2>Two-Factor Authentication</h2>
+        <span className={`status-chip ${status?.enabled ? 'good' : 'warn'}`}>
+          {status?.enabled ? 'Enabled' : 'Not enabled'}
+        </span>
+      </div>
+      <p className="ui-muted">Protect your own account with a time-based one-time code from an authenticator app.</p>
+      {msg ? <div className="label">{msg}</div> : null}
+
+      {codes ? (
+        <div className="app-banner stack">
+          <strong>Save your backup codes</strong>
+          <p className="ui-muted">Each works once if you lose your authenticator. They will not be shown again.</p>
+          <div style={{ fontFamily: 'monospace', fontSize: 16 }}>
+            {codes.map((c) => (<div key={c}>{c}</div>))}
+          </div>
+          <button type="button" onClick={() => setCodes(null)}>I saved these</button>
+        </div>
+      ) : null}
+
+      {!status?.enabled && !enroll ? (
+        <div className="inline-actions"><button type="button" onClick={beginEnable}>Enable 2FA</button></div>
+      ) : null}
+
+      {enroll ? (
+        <div className="stack">
+          <p className="ui-muted">Scan with your authenticator app, then enter the 6-digit code.</p>
+          {enroll.qrDataUrl ? <img src={enroll.qrDataUrl} alt="2FA QR code" style={{ width: 180, height: 180 }} /> : null}
+          {enroll.secret ? <p className="label">Manual key: <code>{enroll.secret}</code></p> : null}
+          <form className="inline-actions" onSubmit={confirmEnable}>
+            <input placeholder="6-digit code" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} required />
+            <button type="submit" disabled={busy}>{busy ? 'Verifying…' : 'Verify and enable'}</button>
+          </form>
+        </div>
+      ) : null}
+
+      {status?.enabled ? (
+        <div className="stack">
+          <div className="label">Backup codes remaining: {status.backupCodesRemaining ?? '-'}</div>
+          <div className="inline-actions">
+            <button type="button" onClick={regenerate}>Regenerate backup codes</button>
+            <button type="button" className="button-subtle" onClick={disable}>Disable 2FA</button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function Inner({ token, me, logout }) {
   const [users, setUsers] = useState([]);
   const [msg, setMsg] = useState('');
@@ -64,6 +189,7 @@ function Inner({ token, me, logout }) {
 
   return (
     <AppShell me={me} logout={logout}>
+      <TwoFactorSelfService token={token} />
       <section className="glass card-lg stack">
         <div className="row-between"><h2>Security Settings</h2><span className="badge">Admin</span></div>
         <div className="app-banner">

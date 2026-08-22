@@ -12,10 +12,35 @@ import { MODULE_LABELS, MODULE_DENIED_HINTS } from '../lib/module-access.js';
 // is deliberately tiny: change-password (the way out), me (session
 // hydration), refresh (token keep-alive so the forced screen doesn't expire
 // mid-typing). Default-deny, mirroring the service-account allowlist.
+//
+// Staff 2FA deadlock fix (2026-08-22, QA): 2FA is SEQUENCED BEFORE the forced
+// password change. When a user is BOTH mustChangePassword AND holding a pending
+// 2FA token (an enrolled user gets an admin password reset, or a temp-password
+// user whose role requires enrollment), this password gate runs first — so the
+// 2FA second-leg endpoints MUST be reachable here too, or the two gates would
+// each 403 the other's only way out and brick the account. After 2FA issues
+// the full token (no mfa claim), this gate then forces change-password
+// normally. The pending gate below still restricts every OTHER route.
 const PASSWORD_GATE_ALLOWLIST = new Set([
   'POST /api/auth/change-password',
   'GET /api/auth/me',
-  'POST /api/auth/refresh'
+  'POST /api/auth/refresh',
+  'POST /api/auth/2fa/verify-login',
+  'POST /api/auth/2fa/enroll/start',
+  'POST /api/auth/2fa/enroll/verify'
+]);
+
+// Staff 2FA (2026-08-22): a PENDING challenge token (carries the `mfa` claim,
+// minted by signPendingToken between the password and TOTP steps) is NOT a
+// full session. It may reach ONLY the second-leg endpoints — verify-login and
+// the enrollment pair — plus /me for hydration. Everything else 403s with
+// TWO_FACTOR_REQUIRED. Default-deny, mirroring PASSWORD_GATE_ALLOWLIST. Per-mode
+// tightening (a VERIFY token cannot drive enrollment) lives at the routes.
+const TWO_FACTOR_PENDING_ALLOWLIST = new Set([
+  'POST /api/auth/2fa/verify-login',
+  'POST /api/auth/2fa/enroll/start',
+  'POST /api/auth/2fa/enroll/verify',
+  'GET /api/auth/me'
 ]);
 
 export async function requireAuth(req, res, next) {
@@ -55,6 +80,19 @@ export async function requireAuth(req, res, next) {
         return res.status(403).json({
           error: 'You must change your temporary password before using the app',
           code: 'PASSWORD_CHANGE_REQUIRED'
+        });
+      }
+    }
+
+    // Staff 2FA (2026-08-22): a pending challenge token (payload.mfa set) is
+    // boxed into the two-factor allowlist. The claim lives on the JWT payload,
+    // not the hydrated session, so we read it from `payload`.
+    if (payload?.mfa) {
+      const gatePath = String(req.originalUrl || req.url || '').split('?')[0];
+      if (!TWO_FACTOR_PENDING_ALLOWLIST.has(`${req.method} ${gatePath}`)) {
+        return res.status(403).json({
+          error: 'Two-factor authentication is required to complete sign-in',
+          code: 'TWO_FACTOR_REQUIRED'
         });
       }
     }
