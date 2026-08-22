@@ -146,7 +146,10 @@ customersRouter.delete('/:id', async (req, res) => {
     //   P2003/P2014 — blocked by a related record     → 409, and say so
     // The proper erasure path (anonymisation that keeps legally-required rows)
     // is tracked separately; this stops the delete from lying in the meantime.
-    if (err?.code === 'P2025') {
+    // remove() pre-checks existence and throws a plain Error('Customer not
+    // found') with no .code for a missing/out-of-scope customer; P2025 only
+    // fires on a delete-time race. Match both so a genuine miss stays 404.
+    if (err?.code === 'P2025' || err?.message === 'Customer not found') {
       return res.status(404).json({ error: 'Customer not found' });
     }
     if (err?.code === 'P2003' || err?.code === 'P2014') {
