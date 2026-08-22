@@ -12,10 +12,22 @@ import { MODULE_LABELS, MODULE_DENIED_HINTS } from '../lib/module-access.js';
 // is deliberately tiny: change-password (the way out), me (session
 // hydration), refresh (token keep-alive so the forced screen doesn't expire
 // mid-typing). Default-deny, mirroring the service-account allowlist.
+//
+// Staff 2FA deadlock fix (2026-08-22, QA): 2FA is SEQUENCED BEFORE the forced
+// password change. When a user is BOTH mustChangePassword AND holding a pending
+// 2FA token (an enrolled user gets an admin password reset, or a temp-password
+// user whose role requires enrollment), this password gate runs first — so the
+// 2FA second-leg endpoints MUST be reachable here too, or the two gates would
+// each 403 the other's only way out and brick the account. After 2FA issues
+// the full token (no mfa claim), this gate then forces change-password
+// normally. The pending gate below still restricts every OTHER route.
 const PASSWORD_GATE_ALLOWLIST = new Set([
   'POST /api/auth/change-password',
   'GET /api/auth/me',
-  'POST /api/auth/refresh'
+  'POST /api/auth/refresh',
+  'POST /api/auth/2fa/verify-login',
+  'POST /api/auth/2fa/enroll/start',
+  'POST /api/auth/2fa/enroll/verify'
 ]);
 
 // Staff 2FA (2026-08-22): a PENDING challenge token (carries the `mfa` claim,

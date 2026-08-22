@@ -303,6 +303,9 @@ settingsRouter.put('/two-factor-policy', requireRole('ADMIN'), async (req, res, 
   try {
     res.json(await settingsService.updateTwoFactorPolicy(req.body || {}, scopeFor(req)));
   } catch (e) {
+    if (e?.code === 'ENCRYPTION_NOT_CONFIGURED') {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
     if (/invalid role|graceUntil|at least one required role/i.test(String(e?.message || ''))) {
       return res.status(400).json({ error: e.message });
     }

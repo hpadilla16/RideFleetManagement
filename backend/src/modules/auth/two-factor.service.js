@@ -155,7 +155,16 @@ export const twoFactorService = {
 
   /**
    * Consume a backup code: bcrypt-compare against the user's UNUSED codes and,
-   * on the first match, stamp usedAt (single-use). Returns boolean.
+   * on the first match, atomically claim it (single-use). Returns boolean.
+   *
+   * ATOMIC CLAIM (QA, 2026-08-22): the claim is an
+   *   updateMany({ where: { id, usedAt: null }, data: { usedAt } })
+   * guarded on usedAt:null, and we count `count === 1` as the win. A plain
+   * update({ where: { id } }) would stamp the row unconditionally, so two
+   * concurrent requests presenting the SAME code could both match the same
+   * still-unused row and both succeed. With the conditional updateMany, exactly
+   * one request flips usedAt null→now (count 1) and the loser sees count 0 —
+   * it keeps scanning (the code is spent) and ultimately returns false.
    */
   async consumeBackupCode(userId, code, deps = {}) {
     const db = deps.prisma || prisma;
@@ -168,11 +177,14 @@ export const twoFactorService = {
       // eslint-disable-next-line no-await-in-loop
       const match = await bcrypt.compare(normalized, row.codeHash);
       if (match) {
-        await db.twoFactorBackupCode.update({
-          where: { id: row.id },
+        // eslint-disable-next-line no-await-in-loop
+        const claim = await db.twoFactorBackupCode.updateMany({
+          where: { id: row.id, usedAt: null },
           data: { usedAt: new Date() }
         });
-        return true;
+        // count === 1 → we won the race; 0 → another request already spent this
+        // exact code between our read and our write, so it is NOT a valid use.
+        return claim.count === 1;
       }
     }
     return false;

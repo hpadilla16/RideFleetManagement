@@ -9,10 +9,12 @@ import '../../lib/_two-factor-test-env.mjs'; // MUST be first — sets env befor
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
 import { requireAuth } from '../../middleware/auth.js';
 import { authService, loginTwoFactorOutcome } from './auth.service.js';
 import { twoFactorService } from './two-factor.service.js';
 import { normalizePolicy, requiresTwoFactor } from '../../lib/two-factor-policy.js';
+import { prisma } from '../../lib/prisma.js';
 
 const SECRET = process.env.JWT_SECRET;
 
@@ -145,4 +147,87 @@ test('admin reset disables 2FA so the next login re-enters ENROLL when required'
   const policy = { enabled: true, requiredRoles: ['ADMIN'], graceUntil: null };
   assert.equal(requiresTwoFactor(after, policy), true);
   assert.equal(loginTwoFactorOutcome({ user: after, policy, killed: false }), 'ENROLL');
+});
+
+// ── FIX 1 (QA): mustChangePassword + pending-2FA-token must NOT deadlock ─────
+// The password gate runs before the 2FA gate; both must let the 2FA second leg
+// through so a user who is BOTH mustChangePassword AND holding a pending token
+// can complete 2FA first, THEN be forced to change the password. Neither gate
+// may be weakened for any OTHER route.
+
+test('deadlock (a): enrolled + mustChangePassword can reach verify-login', async () => {
+  const { nextCalled, res } = await runRequireAuth({
+    sessionUser: { id: 'u1', role: 'ADMIN', tenantId: 't1', twoFactorEnabled: true, mustChangePassword: true },
+    claims: { mfa: 'VERIFY' }, method: 'POST', url: '/api/auth/2fa/verify-login'
+  });
+  assert.equal(nextCalled, true, 'both gates let verify-login through');
+  assert.equal(res.statusCode, null);
+});
+
+test('deadlock (b): required-not-enrolled + mustChangePassword can reach the enroll endpoints', async () => {
+  for (const url of ['/api/auth/2fa/enroll/start', '/api/auth/2fa/enroll/verify']) {
+    const { nextCalled } = await runRequireAuth({
+      sessionUser: { id: 'u1', role: 'ADMIN', tenantId: 't1', twoFactorEnabled: false, mustChangePassword: true },
+      claims: { mfa: 'ENROLL' }, method: 'POST', url
+    });
+    assert.equal(nextCalled, true, `enroll reachable while mustChangePassword: ${url}`);
+  }
+});
+
+test('after 2FA (full token) + mustChangePassword can reach change-password', async () => {
+  // A full token has NO mfa claim, so only the password gate applies — and it
+  // still forces the change-password step. That is the intended sequencing.
+  const { nextCalled } = await runRequireAuth({
+    sessionUser: { id: 'u1', role: 'ADMIN', tenantId: 't1', twoFactorEnabled: true, mustChangePassword: true },
+    method: 'POST', url: '/api/auth/change-password'
+  });
+  assert.equal(nextCalled, true);
+});
+
+test('mustChangePassword + pending token is still blocked on a business route', async () => {
+  const { nextCalled, res } = await runRequireAuth({
+    sessionUser: { id: 'u1', role: 'ADMIN', tenantId: 't1', twoFactorEnabled: true, mustChangePassword: true },
+    claims: { mfa: 'VERIFY' }, method: 'GET', url: '/api/reservations'
+  });
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403, 'business route still denied');
+});
+
+test('the pending gate is NOT weakened: a pending token still cannot reach change-password', async () => {
+  // change-password is on the PASSWORD gate allowlist but NOT the 2FA pending
+  // allowlist, so a pending token (no mustChangePassword) is still 403'd there.
+  const { nextCalled, res } = await runRequireAuth({
+    sessionUser: { id: 'u1', role: 'ADMIN', tenantId: 't1', twoFactorEnabled: true, mustChangePassword: false },
+    claims: { mfa: 'VERIFY' }, method: 'POST', url: '/api/auth/change-password'
+  });
+  assert.equal(nextCalled, false);
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.code, 'TWO_FACTOR_REQUIRED');
+});
+
+// ── FIX 2 (QA): a failing policy read must FAIL OPEN, never lock users out ───
+
+test('login FAILS OPEN to a full token when the policy read throws', async () => {
+  // Stub the shared prisma singleton: the user resolves (password matches), but
+  // the appSetting read (resolveTwoFactorPolicy) THROWS. login() must swallow
+  // it and issue the full {token,user} — never a thrown 401.
+  const password = 'correct-horse-battery';
+  const passwordHash = await bcrypt.hash(password, 4);
+  const origUserFind = prisma.user.findUnique;
+  const origAppFind = prisma.appSetting.findUnique;
+  // SUPER_ADMIN so buildSessionUser's module-access path never touches prisma.
+  prisma.user.findUnique = async () => ({
+    id: 'ua', email: 'a@b.com', role: 'SUPER_ADMIN', tenantId: 't1',
+    isActive: true, passwordHash, twoFactorEnabled: false, hostProfile: null
+  });
+  prisma.appSetting.findUnique = async () => { throw new Error('settings store unavailable'); };
+  try {
+    const out = await authService.login({ email: 'a@b.com', password });
+    assert.ok(out.token, 'a full token is issued despite the policy read failure');
+    assert.ok(out.user, 'the full session user is returned');
+    assert.notEqual(out.mfaRequired, true, 'no challenge — password-only full login');
+  } finally {
+    prisma.user.findUnique = origUserFind;
+    prisma.appSetting.findUnique = origAppFind;
+  }
 });

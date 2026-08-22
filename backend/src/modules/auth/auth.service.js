@@ -5,6 +5,7 @@ import { getJwtExpiresIn, getJwtSecret } from './auth.config.js';
 import { getEffectiveModuleAccessForUser } from '../../lib/module-access.js';
 import { cache } from '../../lib/cache.js';
 import { globalKey } from '../../lib/cache/tenantKey.js';
+import logger from '../../lib/logger.js';
 import {
   resolveTwoFactorPolicy,
   requiresTwoFactor,
@@ -332,9 +333,23 @@ export const authService = {
     // actually change the outcome — i.e. not killed and not already enrolled —
     // so the enrolled/killed short-circuits cost no settings read.
     const killed = isEnforcementKilled();
-    const policy = (!killed && !user.twoFactorEnabled)
-      ? await resolveTwoFactorPolicy(user.tenantId || null)
-      : null;
+    let policy = null;
+    if (!killed && !user.twoFactorEnabled) {
+      // FAIL OPEN (QA, 2026-08-22): a DB/settings read that THROWS must never
+      // propagate out of login() — that would 401 every non-enrolled user
+      // (mass lockout). resolveTwoFactorPolicy already swallows JSON.parse
+      // errors, but a connection/query failure would escape; on ANY failure we
+      // treat the policy as absent (⇒ 'FULL', password-only) rather than deny.
+      // An enrolled user never reaches here, so their challenge is unaffected.
+      try {
+        policy = await resolveTwoFactorPolicy(user.tenantId || null);
+      } catch (e) {
+        logger.warn('[auth] 2FA policy resolution failed — failing open (password-only)', {
+          userId: user.id, error: e?.message
+        });
+        policy = null;
+      }
+    }
     const outcome = loginTwoFactorOutcome({ user, policy, killed });
     if (outcome === 'VERIFY') {
       return { mfaRequired: true, mode: 'VERIFY', challengeToken: signPendingToken(user, 'VERIFY') };

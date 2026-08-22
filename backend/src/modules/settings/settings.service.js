@@ -932,6 +932,16 @@ export const settingsService = {
 
   async updateTwoFactorPolicy(payload = {}, scope = {}) {
     const enabled = !!payload?.enabled;
+    // Guard against an un-enrollable state (QA, 2026-08-22): 2FA secrets are
+    // AES-256-GCM encrypted, so enrollment 503s when INTEGRATION_ENC_KEY is
+    // unset. Enabling a policy in that state would compel required users to
+    // enroll while enrollment is impossible — nobody can get in. Refuse the
+    // flip instead of bricking the tenant. Disabling is always allowed.
+    if (enabled && !isEncryptionConfigured()) {
+      const err = new Error('Cannot enable two-factor authentication: encryption key (INTEGRATION_ENC_KEY) is not configured');
+      err.code = 'ENCRYPTION_NOT_CONFIGURED';
+      throw err;
+    }
     const requiredRoles = Array.isArray(payload?.requiredRoles)
       ? Array.from(new Set(payload.requiredRoles.map((r) => String(r || '').toUpperCase())))
       : [];

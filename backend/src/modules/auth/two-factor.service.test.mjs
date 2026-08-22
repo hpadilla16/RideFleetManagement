@@ -59,6 +59,18 @@ function makeFakePrisma(user) {
         Object.assign(row, data);
         return { ...row };
       },
+      // Atomic conditional claim used by consumeBackupCode: only updates rows
+      // matching the FULL where (incl. usedAt:null) and reports how many. This
+      // is what makes the single-use guard race-safe.
+      async updateMany({ where, data }) {
+        const matches = backupCodes.filter((c) =>
+          (where.id === undefined || c.id === where.id) &&
+          (where.userId === undefined || c.userId === where.userId) &&
+          (where.usedAt === null ? c.usedAt === null : true)
+        );
+        for (const row of matches) Object.assign(row, data);
+        return { count: matches.length };
+      },
       async count({ where }) {
         return backupCodes.filter((c) => c.userId === where.userId && c.usedAt === null).length;
       }
@@ -123,6 +135,19 @@ test('backup codes are single-use', async () => {
   const code = backupCodes[0];
   assert.equal(await twoFactorService.consumeBackupCode('u1', code, deps), true, 'first use accepted');
   assert.equal(await twoFactorService.consumeBackupCode('u1', code, deps), false, 'second use rejected');
+});
+
+test('concurrent consume of the SAME code wins exactly once (atomic claim)', async () => {
+  // Two requests present the same code before either has committed. The
+  // conditional updateMany (usedAt:null guard) must let exactly one win — a
+  // plain update-by-id would let both stamp the row and both succeed.
+  const { deps, backupCodes } = await enrolledSetup();
+  const code = backupCodes[0];
+  const results = await Promise.all([
+    twoFactorService.consumeBackupCode('u1', code, deps),
+    twoFactorService.consumeBackupCode('u1', code, deps)
+  ]);
+  assert.equal(results.filter(Boolean).length, 1, 'exactly one of the concurrent consumes succeeds');
 });
 
 test('backup codes are case-insensitive on input', async () => {
