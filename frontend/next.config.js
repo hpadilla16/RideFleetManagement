@@ -99,6 +99,32 @@ module.exports = {
           NOAI,
         ],
       },
+      {
+        // Baseline security headers on every response (TL due diligence,
+        // 2026-08-22). These are the safe, no-conflict ones:
+        //  - nosniff: stop MIME-type guessing.
+        //  - Permissions-Policy: deny features we don't use; camera/geolocation
+        //    stay 'self' because the kiosk captures licence photos and the
+        //    tracker uses location.
+        // Content-Security-Policy is deliberately NOT set here — a real CSP has
+        // to be tuned against Google Maps, Sentry and the inline theme-boot
+        // script, and shipping a wrong one silently breaks the app. It gets its
+        // own change with browser verification.
+        source: '/:path*',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Permissions-Policy', value: 'geolocation=(self), camera=(self), microphone=()' },
+        ],
+      },
+      {
+        // Default Referrer-Policy everywhere EXCEPT /shuttle, which sets its own
+        // `origin` above for Google Maps referrer validation. Excluding shuttle
+        // here avoids emitting two conflicting Referrer-Policy headers on it.
+        source: '/:path((?!shuttle).*)',
+        headers: [
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        ],
+      },
     ];
   },
 };

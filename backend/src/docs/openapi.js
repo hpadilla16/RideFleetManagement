@@ -418,15 +418,22 @@ export function buildOpenApiSpec(serverUrl) {
             action: { type: 'string', example: 'cancel' }
           }
         },
+        // This endpoint never accepts a raw PAN/CVV — captureCustomerCardOnFile
+        // takes ONLY the Authorize.Net profile identifiers and rejects anything
+        // else (rental-agreements.service.js). The old example advertised a
+        // card-number/CVV body we do not have; removed 2026-08-22 so a PCI
+        // assessor doesn't read a capability into the docs that isn't real.
         CardOnFilePayload: {
           type: 'object',
-          additionalProperties: true,
+          required: ['authnetCustomerProfileId', 'authnetPaymentProfileId'],
+          properties: {
+            authnetCustomerProfileId: { type: 'string', example: '1234567890' },
+            authnetPaymentProfileId: { type: 'string', example: '9876543210' }
+          },
+          additionalProperties: false,
           example: {
-            cardHolderName: 'Jane Doe',
-            cardNumber: '4111111111111111',
-            expiryMonth: '12',
-            expiryYear: '2030',
-            cvv: '123'
+            authnetCustomerProfileId: '1234567890',
+            authnetPaymentProfileId: '9876543210'
           }
         },
         ChargeCardPayload: {
