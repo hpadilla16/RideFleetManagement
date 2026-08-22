@@ -99,6 +99,37 @@ module.exports = {
           NOAI,
         ],
       },
+      {
+        // Baseline security headers on every response (TL due diligence,
+        // 2026-08-22). These are the safe, no-conflict ones:
+        //  - nosniff: stop MIME-type guessing.
+        //  - Permissions-Policy: only geolocation is restricted to self (the
+        //    shuttle tracker uses it same-origin). Camera and microphone are
+        //    DELIBERATELY left unrestricted: the kiosk embeds the VozIA
+        //    live-agent iframe (a per-tenant cross-origin host) whose video/voice
+        //    handoff needs camera+mic, and it grants them via its own `allow`
+        //    attribute. `camera=(self)` / `microphone=()` would override that and
+        //    break the embed (QA, 2026-08-22). First-party capture (licence
+        //    scan, selfie, photos) is same-origin and needs no allowlisting.
+        // Content-Security-Policy is deliberately NOT set here — a real CSP has
+        // to be tuned against Google Maps, Sentry and the inline theme-boot
+        // script, and shipping a wrong one silently breaks the app. It gets its
+        // own change with browser verification.
+        source: '/:path*',
+        headers: [
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Permissions-Policy', value: 'geolocation=(self)' },
+        ],
+      },
+      {
+        // Default Referrer-Policy everywhere EXCEPT /shuttle, which sets its own
+        // `origin` above for Google Maps referrer validation. Excluding shuttle
+        // here avoids emitting two conflicting Referrer-Policy headers on it.
+        source: '/:path((?!shuttle).*)',
+        headers: [
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+        ],
+      },
     ];
   },
 };

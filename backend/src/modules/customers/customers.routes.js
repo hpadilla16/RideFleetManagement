@@ -136,8 +136,29 @@ customersRouter.delete('/:id', async (req, res) => {
   try {
     await customersService.remove(req.params.id, scopeFor(req));
     res.status(204).send();
-  } catch {
-    res.status(404).json({ error: 'Customer not found' });
+  } catch (err) {
+    // Honest errors (2026-08-22). This used to answer 404 "Customer not found"
+    // for EVERY failure — including the common one where the customer has a
+    // reservation and a database referential-integrity rule blocks the delete.
+    // Someone trying to honour an erasure request was told the record didn't
+    // exist while it sat there intact. Distinguish the cases:
+    //   P2025 — record genuinely not found            → 404
+    //   P2003/P2014 — blocked by a related record     → 409, and say so
+    // The proper erasure path (anonymisation that keeps legally-required rows)
+    // is tracked separately; this stops the delete from lying in the meantime.
+    // remove() pre-checks existence and throws a plain Error('Customer not
+    // found') with no .code for a missing/out-of-scope customer; P2025 only
+    // fires on a delete-time race. Match both so a genuine miss stays 404.
+    if (err?.code === 'P2025' || err?.message === 'Customer not found') {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+    if (err?.code === 'P2003' || err?.code === 'P2014') {
+      return res.status(409).json({
+        error: 'This customer has reservations or other linked records and cannot be hard-deleted. Use the erasure/anonymisation flow instead.',
+        code: 'CUSTOMER_HAS_LINKED_RECORDS'
+      });
+    }
+    return res.status(500).json({ error: 'Failed to delete customer' });
   }
 });
 
