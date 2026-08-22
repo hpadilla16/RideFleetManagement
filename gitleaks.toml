@@ -1,0 +1,60 @@
+title = "RideFleetManagement gitleaks config"
+
+# Extends gitleaks' built-in ruleset (the full default rule pack) and adds an
+# allowlist for the KNOWN CI / test dummy secrets that already live in this
+# repo's workflows and test fixtures. Without this allowlist the secret-scan
+# job in .github/workflows/security-scan.yml would fail permanently on these
+# established, harmless fixtures instead of on genuinely new material.
+#
+# This allowlist is deliberately SPECIFIC. It names the exact dummy strings and
+# a couple of example-only files. It does NOT blanket-allow real-looking
+# secrets, and it does NOT globally ignore the whole test tree — a real secret
+# accidentally committed into a *.test.mjs file would still trip the gate.
+#
+# Source of each entry (verified 2026-08-22):
+#   - .github/workflows/beta-ci.yml            → JWT_SECRET + dummy DATABASE_URLs
+#   - backend/src/**/*.test.mjs                → per-suite test JWT secrets
+#   - backend/.env.example                     → placeholder JWT secret
+#   - backend/src/modules/auth/auth.config.js  → the rejected insecure default
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known CI and test dummy secrets — not real credentials"
+# Match against the whole line so a line CONTAINING one of these known dummy
+# values is exempt, regardless of which default rule flagged it.
+regexTarget = "line"
+regexes = [
+  # ── beta-ci.yml dummy JWT secrets ──────────────────────────────────────────
+  '''ci-test-secret-do-not-use-in-prod''',
+  '''ci-resolve-only''',
+
+  # ── beta-ci.yml dummy DATABASE_URLs (postgres:postgres, throwaway DBs) ──────
+  '''postgresql://postgres:postgres@localhost:5432/ci_unit_only''',
+  '''postgresql://postgres:postgres@localhost:5432/ci_resolve_only''',
+  '''postgresql://postgres:postgres@db:5432/fleet_management''',
+  # doc/example connection strings that interpolate the local user, never a
+  # real credential:
+  '''postgresql://\$\(whoami\)@localhost:5432/fleet_management''',
+  '''postgresql://u:p@localhost:5432/db''',
+
+  # ── per-suite test JWT secrets in backend/src/**/*.test.mjs ─────────────────
+  '''test-jwt-secret-for-account-deletion''',
+  '''test-jwt-secret-for-inspection''',
+  '''test-secret-for-password-gate-tests-0123456789''',
+  '''test-secret-for-service-auth-tests-0123456789''',
+  '''test-secret-for-va-commission-tests-0123456789''',
+  '''test-secret-for-mileage-override-tests-0123456789''',
+  '''test-secret-for-kiosk-staff-assist-0123456789''',
+  '''test-secret-key''',
+
+  # ── placeholder / rejected-default secrets (never accepted at runtime) ──────
+  '''change-this-secret''',
+  '''dev-secret-change-me''',
+]
+
+# Example/template files that only ever contain placeholders.
+paths = [
+  '''backend/\.env\.example$''',
+]

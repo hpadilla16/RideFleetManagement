@@ -1,0 +1,248 @@
+name: security-scan
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AUTOMATED SECURITY SCAN — Phase 1 (report-first)
+#
+# WHY THIS IS A SEPARATE WORKFLOW. This file is intentionally NOT part of the
+# test chain in beta-ci.yml / rideops-ci.yml. Those workflows gate merges on
+# money-path and tenant-isolation correctness and must stay fast and
+# deterministic. Security scanning is noisier, slower (image builds), and — for
+# now — advisory. Mixing the two would let a transient CVE feed or a SARIF
+# upload permission block a correctness merge. So it lives on its own.
+#
+# POSTURE: REPORT-FIRST. Every job here is non-blocking EXCEPT `secret-scan`.
+#   - dependency-audit  → continue-on-error, writes a summary, never gates
+#   - codeql            → report-only, SARIF upload is best-effort
+#   - secret-scan       → the ONE intentional gate: a NEW, non-allowlisted
+#                         secret fails the job. Known CI dummies are
+#                         allowlisted in gitleaks.toml so this never turns into
+#                         a permanently-red check on test fixtures.
+#   - container-scan    → continue-on-error, and only runs when a Dockerfile /
+#                         backend / frontend path actually changed (or on the
+#                         weekly schedule / manual dispatch).
+#
+# The full fail-vs-warn matrix and the planned path to hard-gating each scanner
+# live in doc/security-scanning-2026-08-22.md. Update that doc when you change
+# the posture here.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Weekly, Sunday 06:00 UTC — a fixed off-peak slot (early weekend morning
+    # UTC = Saturday night in the Americas). NOT randomised: a stable time keeps
+    # the scheduled run predictable and lets the weekly cost land off-peak.
+    - cron: '0 6 * * 0'
+  workflow_dispatch:
+
+# Least-privilege token. CodeQL needs security-events: write to upload SARIF;
+# everything else only reads. If SARIF upload is not permitted (no GHAS on a
+# private repo), the codeql job still RUNS — the upload step is best-effort.
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Dependency vulnerability audit — backend and frontend workspaces ONLY.
+  # Root package.json is a near-empty shell; auditing it is noise, so it is not
+  # in the matrix. Report-first: prints a readable summary and never gates.
+  # ───────────────────────────────────────────────────────────────────────────
+  dependency-audit:
+    name: dependency-audit (${{ matrix.workspace }})
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [ backend, frontend ]
+    defaults:
+      run:
+        working-directory: ${{ matrix.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: ${{ matrix.workspace }}/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: npm audit (high+; report-first, non-blocking)
+        run: |
+          echo "## Dependency audit — \`${{ matrix.workspace }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          # `|| true` — a non-zero exit (vulnerabilities found) must NOT fail the
+          # job in report-first mode. We summarise counts instead of gating.
+          npm audit --audit-level=high > audit.txt 2>&1 || true
+          # Machine-readable counts for the summary table.
+          npm audit --json > audit.json 2>/dev/null || true
+          node -e '
+            const fs = require("fs");
+            let j = {};
+            try { j = JSON.parse(fs.readFileSync("audit.json", "utf8")); } catch (e) {}
+            const v = (j.metadata && j.metadata.vulnerabilities) || {};
+            const out = [
+              "| Severity | Count |",
+              "|---|---|",
+              `| critical | ${v.critical ?? 0} |`,
+              `| high | ${v.high ?? 0} |`,
+              `| moderate | ${v.moderate ?? 0} |`,
+              `| low | ${v.low ?? 0} |`,
+              "",
+              "<details><summary>Full <code>npm audit --audit-level=high</code> output</summary>",
+              "",
+              "```",
+              fs.readFileSync("audit.txt", "utf8").trim(),
+              "```",
+              "",
+              "</details>",
+              "",
+            ].join("\n");
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, out);
+          '
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # CodeQL static analysis — backend + frontend JavaScript/TypeScript.
+  # Report-only, NEVER gates. The whole job is continue-on-error so that a
+  # missing-GHAS SARIF-upload rejection on a private repo cannot fail the run;
+  # the analysis itself still executes and results still upload when permitted.
+  # ───────────────────────────────────────────────────────────────────────────
+  codeql:
+    name: codeql (javascript-typescript)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # Covers backend/ (Express/Prisma) and frontend/ (Next 14) JS+TS.
+          # No build step: the JS/TS extractor analyses source directly.
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        continue-on-error: true
+        with:
+          category: '/language:javascript-typescript'
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Secret scan — gitleaks over FULL history. THIS IS THE ONE INTENTIONAL GATE:
+  # a NEW, non-allowlisted secret fails this job (no continue-on-error). Known
+  # CI dummy secrets are allowlisted in gitleaks.toml, so the gate fires only on
+  # genuinely new material, never on the established test fixtures.
+  # ───────────────────────────────────────────────────────────────────────────
+  secret-scan:
+    name: secret-scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so gitleaks scans every commit, not just the tip.
+          fetch-depth: 0
+      - name: Install gitleaks (pinned)
+        run: |
+          GL_VERSION=8.18.4
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GL_VERSION}/gitleaks_${GL_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /tmp gitleaks
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Run gitleaks (allowlisted CI dummies in gitleaks.toml)
+        # `detect` scans the git history. --redact keeps any finding out of the
+        # log. Default exit code 1 on a leak IS the gate. The allowlist in
+        # gitleaks.toml prevents the known dummy JWT secret / dummy DATABASE_URLs
+        # / *.test.mjs fixtures from ever tripping it.
+        run: |
+          gitleaks detect \
+            --source . \
+            --config gitleaks.toml \
+            --redact \
+            --report-format sarif \
+            --report-path gitleaks.sarif \
+            --exit-code 1
+      - name: Upload gitleaks SARIF (best-effort)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-sarif
+          path: gitleaks.sarif
+          if-no-files-found: ignore
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Change detector — decides whether the (expensive) container-scan runs on a
+  # PR/push. We CANNOT put path filters at the workflow `on:` level, because
+  # that would also suppress the other jobs on unrelated PRs. So we detect the
+  # changed paths here and guard container-scan with an `if`.
+  # ───────────────────────────────────────────────────────────────────────────
+  changes:
+    name: detect docker/app changes
+    runs-on: ubuntu-latest
+    outputs:
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            docker:
+              - 'backend/**'
+              - 'frontend/**'
+              - 'backend/Dockerfile.prod'
+              - 'frontend/Dockerfile.prod'
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Container image scan — builds the PROD images and Trivy-scans each.
+  # Report-first (continue-on-error). Runs on schedule + manual dispatch always,
+  # and on push/PR ONLY when a backend/frontend/Dockerfile path changed — not on
+  # every unrelated PR.
+  # ───────────────────────────────────────────────────────────────────────────
+  container-scan:
+    name: container-scan (${{ matrix.image.name }})
+    runs-on: ubuntu-latest
+    needs: [ changes ]
+    continue-on-error: true
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      needs.changes.outputs.docker == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: backend
+            context: backend
+            dockerfile: backend/Dockerfile.prod
+            tag: rfm-backend:scan
+          - name: frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile.prod
+            tag: rfm-frontend:scan
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ${{ matrix.image.name }} prod image
+        run: docker build -f ${{ matrix.image.dockerfile }} -t ${{ matrix.image.tag }} ${{ matrix.image.context }}
+      - name: Trivy scan (HIGH,CRITICAL; ignore-unfixed; report-first)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: image
+          image-ref: ${{ matrix.image.tag }}
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+          format: table
+          exit-code: '0'
+          output: trivy-${{ matrix.image.name }}.txt
+      - name: Publish Trivy findings to summary
+        if: always()
+        run: |
+          echo "## Trivy — \`${{ matrix.image.name }}\` (HIGH,CRITICAL, fixable only)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat trivy-${{ matrix.image.name }}.txt >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "(no report produced)" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
