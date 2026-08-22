@@ -36,6 +36,13 @@ GREEN_BACKEND_PORT=4010
 GREEN_FRONTEND_PORT=3010
 
 HEALTH_TIMEOUT_SECS="${HEALTH_TIMEOUT_SECS:-90}"
+# Seconds to let in-flight requests drain on the OLD upstream after nginx has
+# been flipped away from it, before we disrupt that container. Without this, a
+# request nginx already routed to a container gets its connection reset when we
+# stop/recreate that container a beat later (observed: 1×502 on the first
+# zero-downtime deploy, at the green-stop instant). 5s covers normal request
+# latency (proxy_read_timeout is 120s, but real responses are sub-second).
+DRAIN_SECS="${DRAIN_SECS:-5}"
 
 log()  { echo "[deploy] $(date -u +%H:%M:%S) $*"; }
 fail() { echo "[deploy] FAIL: $*" >&2; exit 1; }
@@ -125,6 +132,9 @@ point_nginx "$GREEN_BACKEND_PORT" "$GREEN_FRONTEND_PORT"
 # successful flip back to blue at step 6.
 trap - EXIT
 
+# Let any request nginx already routed to BLUE finish before we recreate blue.
+sleep "$DRAIN_SECS"
+
 log "5/6 recreate blue (prod) on the new image"
 # NOTE: relies on compose's default STOP-FIRST recreate (old blue releases its
 # ~96 pooler connections before the new one opens), so blue 96 + green 16 +
@@ -143,6 +153,10 @@ fi
 
 log "6/6 flip nginx -> blue (prod)"
 point_nginx "$BLUE_BACKEND_PORT" "$BLUE_FRONTEND_PORT"
+
+# Let any request nginx already routed to GREEN finish before we stop green —
+# this is the exact race that caused the single 502 on the first deploy.
+sleep "$DRAIN_SECS"
 
 # Blue is live again — now it is safe to remove green (explicit, since the trap
 # was disarmed at step 4).
