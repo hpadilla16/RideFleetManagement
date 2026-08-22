@@ -24,7 +24,11 @@ customerInspectionPublicRouter.use(express.json({ limit: '15mb' }));
 // (or the printed QR) is the only credential — so without a guard it had no
 // brute-force or abuse ceiling at all. Mirrors terms-signing's tiers: a tight
 // cap on the QR resolve (it mints a token) and the write, looser on reads.
-customerInspectionPublicRouter.use(attachPublicRequestMeta);
+// attachPublicRequestMeta is a FACTORY — it must be CALLED with a name to get
+// the middleware. Passing the factory itself to .use() made Express run it as
+// (req,res,next), which never calls next() and hung every route on this router
+// (hotfix 2026-08-22).
+customerInspectionPublicRouter.use(attachPublicRequestMeta('customer-inspection'));
 const qrResolveLimit = createPublicRateLimitGuard({ name: 'customer-inspection-qr', maxRequests: 10, windowMs: 60 * 1000 });
 const readLimit = createPublicRateLimitGuard({ name: 'customer-inspection-read', maxRequests: 60, windowMs: 60 * 1000 });
 const writeLimit = createPublicRateLimitGuard({ name: 'customer-inspection-write', maxRequests: 30, windowMs: 60 * 1000 });
