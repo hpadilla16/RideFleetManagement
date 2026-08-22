@@ -5,8 +5,8 @@ import { sendEmail } from '../../lib/mailer.js';
 import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import logger from '../../lib/logger.js';
 import { getJwtSecret } from '../auth/auth.config.js';
+import { eraseCustomer } from '../customers/customer-erasure.service.js';
 
-const ANON_REVIEWER_NAME = 'Anonymous user';
 const ACTIVE_TRIP_STATES = ['RESERVED', 'CONFIRMED', 'READY_FOR_PICKUP', 'IN_PROGRESS', 'DISPUTED'];
 
 function generateDeletionToken() {
@@ -186,62 +186,29 @@ export const accountDeletionService = {
       throw err;
     }
 
-    // Anonymize-in-place. Reservation.customerId and Conversation.customerId
-    // are NOT NULL FKs with no cascade, so a hard DELETE on Customer would
-    // fail. Per GDPR, anonymizing PII to make re-identification impossible
-    // is equivalent to physical deletion. We blank all PII on the Customer
-    // row but keep the row itself, preserving audit + accounting integrity
-    // on Reservations / Trips / Conversations.
+    // ONE erasure path (GDPR Wave 2 Phase A). This used to anonymise only the
+    // master Customer row + reviewer names — leaving the denormalised PII on
+    // agreements, drivers, conversations, quotes, etc. untouched. Delegate to
+    // the shared erasure primitive so self-service deletion covers the SAME
+    // complete surface as the admin erasure endpoint, deletes the KYC document
+    // bytes from Storage, and removes the Authorize.Net profile.
     //
-    // Sprint 9 follow-up: call Authorize.Net's deleteCustomerProfile API
-    // for full upstream PII removal. For now we just null the local IDs.
-    await prisma.$transaction(async (tx) => {
-      // Anonymize reviewer name on any host reviews written by this guest.
-      await tx.hostReview.updateMany({
-        where: { guestCustomerId: customer.id },
-        data: { reviewerName: ANON_REVIEWER_NAME }
-      }).catch(() => null);
-
-      // Anonymize the Customer row in-place. Required-non-null fields get
-      // sentinel values; nullable PII gets nulled; doNotRent prevents
-      // re-engagement if the same email tries to re-register.
-      await tx.customer.update({
-        where: { id: customer.id },
-        data: {
-          firstName: 'Deleted',
-          lastName: 'User',
-          email: null,
-          phone: '[deleted]',
-          licenseNumber: null,
-          licenseState: null,
-          dateOfBirth: null,
-          insurancePolicyNumber: null,
-          insuranceExpiry: null,
-          insuranceDocumentUrl: null,
-          address1: null,
-          address2: null,
-          city: null,
-          state: null,
-          zip: null,
-          country: null,
-          idPhotoUrl: null,
-          authnetCustomerProfileId: null,
-          authnetPaymentProfileId: null,
-          creditBalance: 0,
-          portalResetToken: null,
-          portalResetExpiresAt: null,
-          guestAccessToken: null,
-          guestAccessExpiresAt: null,
-          deletionToken: null,
-          deletionTokenExpiresAt: null,
-          notes: null,
-          doNotRent: true,
-          doNotRentReason: 'Account deleted by user'
-        }
-      });
+    // NOTE: eraseCustomer is gated by GDPR_ERASURE_ENABLED. While that flag is
+    // off (its default), a dryRun:false call throws ErasureNotEnabledError (503)
+    // and NOTHING is mutated — the intended "off by default" behaviour. The
+    // token/active-trip guards above still run first regardless.
+    const report = await eraseCustomer(customer.id, {
+      actor: 'self-service',
+      reason: 'account-deletion',
+      dryRun: false,
+      scope: customer.tenantId ? { tenantId: customer.tenantId } : {},
     });
 
-    logger.info('account-deletion-completed', { customerId: customer.id, email: customer.email });
+    logger.info('account-deletion-completed', {
+      customerId: customer.id,
+      tables: report?.tables,
+      authnet: report?.authnetProfile?.action || 'none',
+    });
 
     return { ok: true };
   }
