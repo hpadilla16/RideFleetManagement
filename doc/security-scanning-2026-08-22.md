@@ -111,4 +111,5 @@ promote it from warn to gate per the matrix above.
 
 | Date | Scanner | Finding | Severity | Disposition (fix / ignore+reason / allowlist) | Owner |
 |---|---|---|---|---|---|
-| _(pending first run)_ | | | | | |
+| 2026-08-22 | gitleaks | 4 `generic-api-key` in test data — `rideops/test/helpers/checkout_test_helpers.dart`, `rideops/test/fixtures/handoff_token.json`, `rideops/test/fixtures/login_response.json`, `backend/src/modules/payment-gateway/card-on-file.test.mjs` | none (dummy) | ignore — dummy test fixtures; pinned by fingerprint in `.gitleaksignore` | infra |
+| 2026-08-22 | gitleaks | 3 `generic-api-key` in `.deploy-notes/2026-06-25-*.sh` (beta228/229/230) — smoke-test capability tokens | low | ignore — **verified DEAD**: the value is not present in ANY live token column in the prod DB (checked 2026-08-22); per-reservation public tokens for reservations since cycled out, nothing to rotate; pinned by fingerprint in `.gitleaksignore` | infra |
