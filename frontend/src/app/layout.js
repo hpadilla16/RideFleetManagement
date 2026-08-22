@@ -4,6 +4,7 @@ import { I18nBoot } from '../components/I18nBoot';
 import { TourMount } from '../components/training/TourMount';
 import { PracticeBanner } from '../components/training/PracticeBanner';
 import { WelcomeOffer } from '../components/training/WelcomeOffer';
+import { StaleBuildWatcher } from '../components/StaleBuildWatcher';
 
 export const metadata = {
   title: 'Ride Fleet',
@@ -128,6 +129,11 @@ export default function RootLayout({ children }) {
         <TourMount />
         {/* Same reason as TourMount: both survive navigation. The banner
             frames practice mode; the offer greets a first login exactly once. */}
+        {/* A counter tablet keeps one tab open for days; after a deploy its
+            JavaScript no longer matches the server and screens quietly stop
+            loading data (2026-08-22). This tells the person, and lets THEM
+            pick the moment to reload — never mid-checkout. */}
+        <StaleBuildWatcher />
         <PracticeBanner />
         <WelcomeOffer />
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
