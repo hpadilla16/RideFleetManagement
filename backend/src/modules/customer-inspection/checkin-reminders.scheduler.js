@@ -1,10 +1,12 @@
 /**
- * Customer CHECK-IN inspection D-1 reminder scheduler (Fase D, 2026-06-18).
+ * Customer CHECK-IN inspection reminder scheduler (Fase D, 2026-06-18; moved to
+ * D-2 in the 2026-08-22 security redesign).
  *
- * Periodic sweep that, the DAY BEFORE a rental's return, emails the customer a
- * self-inspection link (phase=CHECKIN) so check-in is fast and the agent doesn't
- * have to walk the car. Mirrors the interval-timer + overlap-guard + startup-delay
- * pattern of dealership-loaner/loaner-reminders.scheduler.js.
+ * Periodic sweep that, ~48h BEFORE a rental's return (configurable via
+ * CUSTOMER_INSPECTION_CHECKIN_LEAD_HOURS, default 48 → the day-after-tomorrow),
+ * emails the customer a self-inspection link (phase=CHECKIN) so check-in is fast
+ * and the agent doesn't have to walk the car. Mirrors the interval-timer +
+ * overlap-guard + startup-delay pattern of dealership-loaner/loaner-reminders.scheduler.js.
  *
  * Dedupe is at the DB level: customerInspectionService.sendCheckinInspection()
  * skips a reservation that already has a CHECKIN inspection, so re-running the
@@ -67,12 +69,25 @@ function startupDelayMs() {
   return (Number.isFinite(s) && s >= 0 ? s : DEFAULT_STARTUP_DELAY_SECONDS) * 1000;
 }
 
-// [start, end) UTC for TOMORROW's calendar date in Florida (America/New_York).
-function tomorrowFLWindowUtc(now = new Date()) {
-  const tmr = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+// Send lead time (2026-08-22 redesign): the reminder now goes out ~48h before
+// return (D-2) instead of D-1. Configurable via CUSTOMER_INSPECTION_CHECKIN_LEAD_HOURS
+// (default 48). The sweep still targets a whole FL calendar day, so the lead is
+// applied at day granularity (48h → the day-after-tomorrow's date); dedupe in
+// sendCheckinInspection keeps it single-send.
+const DEFAULT_LEAD_HOURS = 48;
+function leadDays() {
+  const h = Number(process.env.CUSTOMER_INSPECTION_CHECKIN_LEAD_HOURS || DEFAULT_LEAD_HOURS);
+  const hours = Number.isFinite(h) && h > 0 ? h : DEFAULT_LEAD_HOURS;
+  return Math.max(1, Math.round(hours / 24));
+}
+
+// [start, end) UTC for the FL (America/New_York) calendar date `days` ahead.
+// days=1 is tomorrow (legacy D-1); the default 2 is the day after tomorrow (D-2).
+function leadWindowFLUtc(now = new Date(), days = leadDays()) {
+  const target = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
   const ymd = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(tmr); // YYYY-MM-DD of "tomorrow" in FL
+  }).format(target); // YYYY-MM-DD of the target day in FL
   const tzShort = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'short' })
     .formatToParts(now).find((p) => p.type === 'timeZoneName')?.value;
   const off = tzShort === 'EST' ? '-05:00' : '-04:00';
@@ -86,15 +101,15 @@ async function sweepOnce() {
   const prisma = await resolvePrisma();
   const svc = await resolveService();
   const settings = await resolveSettings();
-  const { start, end } = tomorrowFLWindowUtc();
+  const { start, end } = leadWindowFLUtc();
 
-  // Active rentals (out on rent) due back tomorrow (FL).
+  // Active rentals (out on rent) due back on the lead-day (FL) — default D-2.
   const reservations = await prisma.reservation.findMany({
     where: { status: 'CHECKED_OUT', returnAt: { gte: start, lt: end } },
     select: { id: true, tenantId: true },
   });
   if (!reservations.length) {
-    log.info('[checkin-reminders] no reservations returning tomorrow');
+    log.info('[checkin-reminders] no reservations returning on the lead day');
     return { scanned: 0, sent: 0, skipped: 0 };
   }
 

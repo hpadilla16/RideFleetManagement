@@ -56,6 +56,19 @@ customerInspectionPublicRouter.get('/v/:payload', qrResolveLimit, async (req, re
   }
 });
 
+// GET /api/customer-inspection/r/:payload — resolve a scanned RESERVATION-bound QR
+// (payload = "reservationId.expMs.sig", printed on the rental agreement) to a
+// CHECK-IN inspection token for that reservation. Signed + expiring; supersedes
+// the static per-vehicle sticker as the primary QR. Defined BEFORE /:token so the
+// two-segment static route wins.
+customerInspectionPublicRouter.get('/r/:payload', qrResolveLimit, async (req, res) => {
+  try {
+    res.json(await customerInspectionService.startInspectionByReservationQr({ payload: req.params.payload }));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 // GET /api/customer-inspection/:token — step 1 context (identity + vehicle +
 // diagram type + views).
 customerInspectionPublicRouter.get('/:token', readLimit, async (req, res) => {

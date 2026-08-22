@@ -2422,6 +2422,39 @@ function agreementProgramWhere(scope) {
   return Object.keys(fragment).length ? { reservation: fragment } : {};
 }
 
+// Vehicle-inspection QR block for the printed rental agreement (2026-08-22
+// security redesign). When the tenant has customer-led inspection enabled AND
+// the agreement has a reservation, render a reservation-bound, expiring QR the
+// renter can scan to self-inspect / report damage. The QR encodes a signed,
+// time-boxed resolver URL (/inspect/r/<reservationId>.<expMs>.<sig>) and is
+// embedded as an inline data-URL so Puppeteer renders it with NO network fetch.
+// Returns '' when inspection is disabled (or on any failure) so other tenants'
+// contracts are byte-unchanged and a QR hiccup never breaks a print.
+export async function buildInspectionQrBlockHtml({ reservationId, tenantId, returnAt } = {}) {
+  try {
+    if (!reservationId) return '';
+    const inspCfg = await settingsService.getCustomerInspectionConfig({ tenantId: tenantId || undefined });
+    if (!inspCfg?.enabled) return '';
+    const { customerInspectionService } = await import('../customer-inspection/customer-inspection.service.js');
+    const graceH = Number(process.env.CUSTOMER_INSPECTION_RESOLVER_GRACE_HOURS);
+    const graceMs = (Number.isFinite(graceH) && graceH > 0 ? graceH : 48) * 60 * 60 * 1000;
+    const base = returnAt ? new Date(returnAt).getTime() : Date.now();
+    const expiresAt = new Date((Number.isFinite(base) ? base : Date.now()) + graceMs);
+    const resolverUrl = customerInspectionService.inspectionResolverUrlForReservation(reservationId, { expiresAt });
+    const QRCode = (await import('qrcode')).default;
+    const qrDataUrl = await QRCode.toDataURL(resolverUrl, { margin: 1, width: 220 });
+    return `
+        <section class="inspection-qr-block" style="page-break-inside:avoid;margin-top:24px;padding:16px;border:1px solid #d8d5ea;border-radius:10px;text-align:center;font-family:Arial,Helvetica,sans-serif">
+          <h3 style="margin:0 0 6px;color:#5b3df5;font-size:15px">Vehicle inspection — scan to inspect / report damage</h3>
+          <p style="margin:0 0 12px;font-size:12px;color:#555">Scan this code with your phone to walk around the vehicle and report any damage. Reporting existing damage protects you.</p>
+          <img src="${qrDataUrl}" alt="Vehicle inspection QR code" style="width:200px;height:200px;display:block;margin:0 auto" />
+          <p style="margin:10px 0 0;font-size:10px;color:#888;word-break:break-all">${esc(resolverUrl)}</p>
+        </section>`;
+  } catch (e) {
+    return '';
+  }
+}
+
 export const rentalAgreementsService = {
   getAccessibleAgreement(id, scope = null) {
     return prisma.rentalAgreement.findFirst({
@@ -3846,7 +3879,14 @@ export const rentalAgreementsService = {
     const addendumPages = addendums.length ? buildAddendumPagesHtml(addendums, ctx) : '';
     const signedTermsPages = buildSignedTermsBlock(agreement, ctx);
     const declinedInsurancePage = buildDeclinedInsuranceBlock(agreement, ctx);
-    const extraPages = [addendumPages, signedTermsPages, declinedInsurancePage].filter(Boolean).join('\n');
+    // Reservation-bound vehicle-inspection QR (2026-08-22). '' when the tenant
+    // has inspection disabled → other tenants' contracts stay byte-identical.
+    const inspectionQrPage = await buildInspectionQrBlockHtml({
+      reservationId: agreement.reservation?.id || agreement.reservationId || null,
+      tenantId: agreement.tenantId || null,
+      returnAt: agreement.reservation?.returnAt || agreement.returnAt || null,
+    });
+    const extraPages = [addendumPages, signedTermsPages, declinedInsurancePage, inspectionQrPage].filter(Boolean).join('\n');
     if (!extraPages) return baseHtml;
 
     // Splice before </body>. Falls back to append if a custom tenant template

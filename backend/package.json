@@ -175,9 +175,11 @@
     "pdfkit": "^0.17.2",
     "pg": "^8.13.0",
     "puppeteer": "^24.39.1",
+    "qrcode": "^1.5.4",
     "redis": "^4.7.1",
     "ssh2-sftp-client": "^12.1.1",
     "stripe": "^16.10.0",
+    "triangle-dealers-site": "file:../../../../../triangle-dealers-site/.claude/worktrees/agent-a562166e407918347",
     "winston": "^3.19.0"
   },
   "devDependencies": {
