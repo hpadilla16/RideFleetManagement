@@ -82,8 +82,22 @@ stop_green() {
   dcg rm -sf backend-green frontend-green >/dev/null 2>&1 || true
 }
 
-# Always clean up green on exit (success or failure) so no stray container or
-# extra DB connections linger between deploys.
+# PRECONDITION: the nginx server block must proxy to the upstream NAMES, not to
+# a hardcoded 127.0.0.1:4000/3000 — otherwise flipping the upstream file does
+# nothing and every blue-recreate still 502s. Refuse to run if it isn't migrated
+# (one-time setup: see ops/nginx/rfm-upstreams.conf and the runbook).
+grep -rqs 'proxy_pass http://rfm_backend' /etc/nginx/sites-enabled/ \
+  || fail "nginx server block not migrated to upstream names (proxy_pass http://rfm_backend). Do the one-time migration first — this flip would be a no-op."
+
+# Reclaim any orphan green left by a previously SIGKILLed run (it would still be
+# holding pooler connections). Safe: nginx points at blue in steady state.
+stop_green
+
+# EXIT-trap cleanup is armed ONLY for the pre-flip window (steps 3-4): if green
+# fails to come up before we touch nginx, kill it — nginx is still on blue, so
+# that's safe. The moment nginx is flipped to green (step 4) we DISARM the trap,
+# because from then on a failure must LEAVE green serving live traffic rather
+# than have the trap yank it out from under nginx (that was the O1 outage bug).
 trap 'stop_green' EXIT
 
 # ---------------------------------------------------------------------------
@@ -105,8 +119,17 @@ fi
 
 log "4/6 flip nginx -> green"
 point_nginx "$GREEN_BACKEND_PORT" "$GREEN_FRONTEND_PORT"
+# DISARM the cleanup trap: nginx now serves via green. Any failure past this
+# point must leave green running (it is the live upstream); killing it here
+# would blackhole the site. Green is stopped explicitly only after the
+# successful flip back to blue at step 6.
+trap - EXIT
 
 log "5/6 recreate blue (prod) on the new image"
+# NOTE: relies on compose's default STOP-FIRST recreate (old blue releases its
+# ~96 pooler connections before the new one opens), so blue 96 + green 16 +
+# worker 12 = 124 stays under the Supabase 160 cap. Do NOT switch this to a
+# start-first / --wait rolling strategy without re-checking that budget.
 dc up -d --no-deps backend worker
 if ! wait_healthy "http://127.0.0.1:${BLUE_BACKEND_PORT}/health" "blue backend"; then
   log "WARN: blue backend unhealthy after recreate — leaving nginx on green, aborting before flip-back"
@@ -120,5 +143,9 @@ fi
 
 log "6/6 flip nginx -> blue (prod)"
 point_nginx "$BLUE_BACKEND_PORT" "$BLUE_FRONTEND_PORT"
+
+# Blue is live again — now it is safe to remove green (explicit, since the trap
+# was disarmed at step 4).
+stop_green
 
 log "done — deploy complete with no downtime"
