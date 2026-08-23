@@ -53,19 +53,20 @@ import {
   classifyStorageRef,
   REDACTION,
 } from './customer-pii-map.js';
+// Reach resolution is SHARED with Phase B export so the two cannot drift — see
+// customer-pii-reach.js. This service does not carry its own copy.
+import {
+  OR_MATCH_KINDS,
+  chunk,
+  buildWheres,
+  resolveTargets,
+} from './customer-pii-reach.js';
 
 // Interactive-transaction guards. The default Prisma interactive-transaction
 // timeout is 5s; a customer with thousands of rentals needs more headroom, and
 // id-IN lists are chunked to keep each statement bounded.
 const TX_TIMEOUT_MS = 30_000;
 const TX_MAX_WAIT_MS = 10_000;
-const ID_CHUNK = 500;
-
-// Match kinds whose where-branches can overlap (OR of several conditions), so
-// row counts must be de-duplicated by id rather than summed.
-const OR_MATCH_KINDS = new Set([
-  'quote', 'loanerRequest', 'externalReservation', 'reservationOrAgreement',
-]);
 
 export class ErasureNotEnabledError extends Error {
   constructor(message = 'Customer erasure is not enabled (GDPR_ERASURE_ENABLED is off).') {
@@ -123,84 +124,6 @@ function buildEraseData(spec, mode) {
   return data;
 }
 
-function chunk(arr, size = ID_CHUNK) {
-  const out = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
-// Compact, safe OR builder — drops empty/undefined branches and returns null
-// when nothing can match (caller then skips the model entirely).
-function orWhere(branches) {
-  const kept = branches.filter(Boolean);
-  if (kept.length === 0) return null;
-  if (kept.length === 1) return kept[0];
-  return { OR: kept };
-}
-
-function inClause(ids) {
-  return { in: Array.isArray(ids) ? ids : [] };
-}
-
-/**
- * Resolve the where-clauses that select THIS customer's rows for a map entry.
- * Returns an ARRAY (empty = nothing can match, caller skips the model). Any
- * `WHERE <field> IN (<ids>)` list is chunked so no single statement carries an
- * unbounded id list; OR-shaped matches become one where per branch.
- */
-function buildWheres(spec, ctx) {
-  const m = spec.match;
-  const tenantScope = ctx.tenantId ? { tenantId: ctx.tenantId } : {};
-  const idIn = (field, ids) => chunk(ids).map((c) => ({ [field]: { in: c } }));
-  switch (m.kind) {
-    case 'self':
-      return [{ id: ctx.customerId }];
-    case 'customerFk':
-      return [{ [m.field]: ctx.customerId }];
-    case 'reservationRelation':
-    case 'reservationScalar':
-      return ctx.reservationIds.length ? idIn(m.field, ctx.reservationIds) : [];
-    case 'agreementRelation':
-      return ctx.agreementIds.length ? idIn(m.field, ctx.agreementIds) : [];
-    case 'loanerRelation':
-      return ctx.loanerAgreementIds.length ? idIn(m.field, ctx.loanerAgreementIds) : [];
-    case 'tripRelation':
-      return ctx.tripIds.length ? idIn(m.field, ctx.tripIds) : [];
-    case 'tripIncidentRelation':
-      return ctx.tripIncidentIds.length ? idIn(m.field, ctx.tripIncidentIds) : [];
-    case 'citationDocument':
-      return ctx.citationIds.length ? idIn('citationId', ctx.citationIds) : [];
-    case 'reservationOrAgreement': {
-      const w = [];
-      if (ctx.reservationIds.length) w.push(...idIn('reservationId', ctx.reservationIds));
-      if (ctx.agreementIds.length) w.push(...idIn('rentalAgreementId', ctx.agreementIds));
-      return w;
-    }
-    case 'quote': {
-      const w = [{ ...tenantScope, customerId: ctx.customerId }];
-      if (ctx.email) w.push({ ...tenantScope, contactEmail: { equals: ctx.email, mode: 'insensitive' } });
-      if (ctx.phone) w.push({ ...tenantScope, contactPhone: ctx.phone });
-      return w;
-    }
-    case 'loanerRequest': {
-      const w = [];
-      if (ctx.email) w.push({ ...tenantScope, email: { equals: ctx.email, mode: 'insensitive' } });
-      if (ctx.phone && ctx.fullName) {
-        w.push({ ...tenantScope, AND: [{ phone: ctx.phone }, { name: { equals: ctx.fullName, mode: 'insensitive' } }] });
-      }
-      return w;
-    }
-    case 'externalReservation': {
-      const w = [];
-      if (ctx.reservationIds.length) w.push(...idIn('promotedToReservationId', ctx.reservationIds));
-      if (ctx.email) w.push({ ...tenantScope, customerEmail: { equals: ctx.email, mode: 'insensitive' } });
-      return w;
-    }
-    default:
-      return [];
-  }
-}
-
 /**
  * Read the rows a storage-bearing spec matches (across all chunked/OR wheres)
  * and collect the deletable Storage objects, BEFORE any nulling. De-dupes rows
@@ -248,89 +171,6 @@ async function countRows(prisma, spec, wheres) {
   let total = 0;
   for (const where of wheres) total += await prisma[spec.model].count({ where });
   return total;
-}
-
-/**
- * Resolve every id-set needed to reach this customer's PII, from the master
- * Customer row outward.
- */
-async function resolveTargets(prisma, customer) {
-  const customerId = customer.id;
-
-  const reservations = await prisma.reservation.findMany({
-    where: { customerId },
-    select: { id: true },
-  });
-  const reservationIds = reservations.map((r) => r.id);
-
-  const agreements = reservationIds.length
-    ? await prisma.rentalAgreement.findMany({
-        where: { reservationId: inClause(reservationIds) },
-        select: { id: true },
-      })
-    : [];
-  const agreementIds = agreements.map((a) => a.id);
-
-  const loanerAgreements = reservationIds.length
-    ? await prisma.loanerAgreement.findMany({
-        where: { reservationId: inClause(reservationIds) },
-        select: { id: true },
-      })
-    : [];
-  const loanerAgreementIds = loanerAgreements.map((a) => a.id);
-
-  const trips = await prisma.trip.findMany({
-    where: { guestCustomerId: customerId },
-    select: { id: true },
-  });
-  const tripIds = trips.map((t) => t.id);
-
-  const conversations = await prisma.conversation.findMany({
-    where: { customerId },
-    select: { id: true, pickupPhotoUrl: true },
-  });
-  const conversationIds = conversations.map((c) => c.id);
-
-  // TripIncident links via reservation OR trip.
-  const tripIncidents = (reservationIds.length || tripIds.length)
-    ? await prisma.tripIncident.findMany({
-        where: orWhere([
-          reservationIds.length ? { reservationId: inClause(reservationIds) } : null,
-          tripIds.length ? { tripId: inClause(tripIds) } : null,
-        ]),
-        select: { id: true },
-      })
-    : [];
-  const tripIncidentIds = tripIncidents.map((t) => t.id);
-
-  const citations = reservationIds.length
-    ? await prisma.citation.findMany({
-        where: { reservationId: inClause(reservationIds) },
-        select: { id: true },
-      })
-    : [];
-  const citationIds = citations.map((c) => c.id);
-
-  const fullName = [customer.firstName, customer.lastName]
-    .map((s) => String(s || '').trim())
-    .filter(Boolean)
-    .join(' ') || null;
-
-  return {
-    customerId,
-    tenantId: customer.tenantId || null,
-    email: customer.email ? String(customer.email).trim() : null,
-    phone: customer.phone ? String(customer.phone).trim() : null,
-    fullName,
-    reservationIds,
-    agreementIds,
-    loanerAgreementIds,
-    tripIds,
-    conversationIds,
-    conversationPickupPhotos: conversations.map((c) => c.pickupPhotoUrl).filter(Boolean),
-    tripIncidentIds,
-    citationIds,
-  };
 }
 
 /**
