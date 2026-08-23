@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../lib/prisma.js';
 import { authService } from '../auth/auth.service.js';
+import { recordAudit, AUDIT_ACTIONS, AUDIT_OUTCOME } from '../audit/audit.service.js';
 import {
   assertTenantUserCapacity,
   getTenantPlanCatalog,
@@ -240,7 +241,11 @@ export const tenantsService = {
     return { ok: true, userId: user.id, email: user.email, tempPassword: password };
   },
 
-  async impersonateTenantAdmin(tenantId, targetUserId) {
+  // Wave 3 (2026-08-24): `actor` (the super-admin req.user from the route) is
+  // threaded through so the minted session carries the impersonation marker AND
+  // the event is auditable with WHO initiated it. Optional/back-compatible: an
+  // absent actor mints a plain token and audits with a null actor.
+  async impersonateTenantAdmin(tenantId, targetUserId, { actor } = {}) {
     let user = null;
     if (targetUserId) {
       user = await prisma.user.findFirst({ where: { id: targetUserId, tenantId, isActive: true } });
@@ -248,9 +253,43 @@ export const tenantsService = {
       user = await prisma.user.findFirst({ where: { tenantId, role: 'ADMIN', isActive: true }, orderBy: { createdAt: 'asc' } });
       if (!user) user = await prisma.user.findFirst({ where: { tenantId, isActive: true }, orderBy: { createdAt: 'asc' } });
     }
-    if (!user) throw new Error('No active tenant user found for impersonation');
+    if (!user) {
+      // FAILURE branch: no target found. Audit the attempt (best-effort) with the
+      // super-admin as actor and the target TENANT, then rethrow unchanged.
+      await recordAudit({
+        tenantId,
+        actorUserId: actor?.id ?? actor?.sub ?? null,
+        actorEmail: actor?.email ?? null,
+        actorRole: actor?.role ?? null,
+        action: AUDIT_ACTIONS.IMPERSONATION_START,
+        targetType: 'TENANT',
+        targetId: tenantId,
+        outcome: AUDIT_OUTCOME.FAILURE,
+        metadata: { requestedUserId: targetUserId || null, reason: 'no active tenant user found' },
+      });
+      throw new Error('No active tenant user found for impersonation');
+    }
 
-    const token = authService.issueTokenForUser(user);
+    const impersonatedBy = actor?.id ?? actor?.sub ?? null;
+    const token = impersonatedBy
+      ? authService.issueImpersonationToken(user, { impersonatedBy })
+      : authService.issueTokenForUser(user);
+
+    // SUCCESS: actor = super-admin; tenantId = the TARGET tenant; target = the
+    // impersonated user. Best-effort — a dropped audit row never blocks the
+    // impersonation itself.
+    await recordAudit({
+      tenantId: user.tenantId || tenantId || null,
+      actorUserId: impersonatedBy,
+      actorEmail: actor?.email ?? null,
+      actorRole: actor?.role ?? null,
+      action: AUDIT_ACTIONS.IMPERSONATION_START,
+      targetType: 'USER',
+      targetId: user.id,
+      outcome: AUDIT_OUTCOME.SUCCESS,
+      metadata: { targetEmail: user.email, targetRole: user.role },
+    });
+
     return {
       token,
       user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role, tenantId: user.tenantId || null }

@@ -31,6 +31,14 @@ function signToken(user, options = {}) {
     claims.svc = true;
     claims.tv = user.tokenVersion ?? 0;
   }
+  // Wave 3 (2026-08-24): impersonation traceability. `imp` names the super-admin
+  // operating behind an impersonated session; middleware/auth.js surfaces it on
+  // req.user.imp so every audited action carries WHO is really acting. CONDITIONAL,
+  // exactly like svc/tv/mfa/prac — absent for a normal login, so a
+  // non-impersonation token stays BYTE-IDENTICAL to before this change.
+  if (options.impersonatedBy) {
+    claims.imp = options.impersonatedBy;
+  }
   return jwt.sign(claims, getJwtSecret(), { expiresIn: options.expiresIn || getJwtExpiresIn() });
 }
 
@@ -190,6 +198,15 @@ async function buildSessionUser(user) {
 export const authService = {
   issueTokenForUser(user) {
     return signToken(user);
+  },
+
+  // Wave 3 (2026-08-24): mint a session token for `user` that CARRIES the
+  // impersonation marker — the super-admin id in `impersonatedBy` lands in the
+  // token's conditional `imp` claim. Kept separate from issueTokenForUser so a
+  // normal login path can never accidentally stamp `imp`, and so the normal
+  // token stays byte-compatible. `impersonatedBy` falsy ⇒ a plain token.
+  issueImpersonationToken(user, { impersonatedBy } = {}) {
+    return signToken(user, { impersonatedBy });
   },
 
   issueGuestToken(customer) {

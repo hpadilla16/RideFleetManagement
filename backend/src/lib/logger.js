@@ -169,6 +169,10 @@ export function requestLogger() {
         userAgent: req.headers['user-agent']?.slice(0, 120),
         userId: req.user?.id || req.user?.sub || undefined,
         tenantId: req.user?.tenantId || undefined,
+        // Wave 3 (2026-08-24): when the session is an impersonation, surface the
+        // super-admin behind it (token `imp` claim → req.user.imp) so a log line
+        // made under impersonation is attributable. Absent on normal sessions.
+        impersonatedBy: req.user?.imp || undefined,
       });
 
       // Drop a Sentry breadcrumb on slow requests so they show up alongside

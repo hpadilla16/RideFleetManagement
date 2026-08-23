@@ -99,9 +99,17 @@ tenantsRouter.post('/:id/admins/:userId/reset-password', async (req, res) => {
   }
 });
 
+// Wave 3 (2026-08-24): AUDIT_ACTIONS.IMPERSONATION_START is recorded inside the
+// service (success + failure). There is deliberately NO IMPERSONATION_END
+// marker: an impersonation is a plain short-lived JWT with the `imp` claim and
+// no server-side session to close, and the impersonated session is the TENANT
+// admin — it cannot reach this super-admin-guarded router to signal an end.
+// The window is therefore bounded by the token's own expiry (getJwtExpiresIn),
+// and everything done within it is attributable via the `imp` claim on each
+// request (requestLogger + auditFromReq both surface it).
 tenantsRouter.post('/:id/impersonate', async (req, res) => {
   try {
-    const out = await tenantsService.impersonateTenantAdmin(req.params.id, req.body?.userId || null);
+    const out = await tenantsService.impersonateTenantAdmin(req.params.id, req.body?.userId || null, { actor: req.user });
     res.json(out);
   } catch (e) {
     res.status(400).json({ error: e.message });
