@@ -2541,7 +2541,7 @@ export const rentalAgreementsService = {
       where: { id: reservationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
       include: { customer: true }
     });
-    if (!reservation) throw new Error('Reservation not found');
+    if (!reservation) { const e = new Error('Reservation not found'); e.status = 404; throw e; }
     if (reservation.status === 'CANCELLED' || reservation.status === 'NO_SHOW') {
       throw new Error('Cannot start checkout for cancelled/no-show reservation');
     }
@@ -2620,7 +2620,7 @@ export const rentalAgreementsService = {
       }
     });
 
-    if (!reservation) throw new Error('Reservation not found');
+    if (!reservation) { const e = new Error('Reservation not found'); e.status = 404; throw e; }
     if (reservation.status === 'CANCELLED' || reservation.status === 'NO_SHOW') {
       throw new Error('Cannot start rental for cancelled/no-show reservation');
     }
@@ -4583,7 +4583,7 @@ export const rentalAgreementsService = {
         }
       }
     });
-    if (!reservation) throw new Error('Reservation not found');
+    if (!reservation) { const e = new Error('Reservation not found'); e.status = 404; throw e; }
 
     const expectedAmount = Number(payload.amount || reservation.rentalAgreement?.balance || 0);
     if (!(expectedAmount > 0)) throw new Error('No unpaid Authorize.Net amount to reconcile');
