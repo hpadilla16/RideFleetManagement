@@ -499,13 +499,13 @@ described against each entry, under contract, and for no independent purpose of 
 | Document | Status |
 |---|---|
 | Current privacy policy / data protection policy | **Exists** — published on the platform. Being reviewed against the requirements of this request before submission. |
-| Current information-security policy or security overview | A formal standalone policy is in preparation; Section 3.9 above serves as the current security overview. |
-| Current sub-processor list | **Provided** — Section 3.4 above; to be reissued as a standalone maintained document. |
-| Data-retention schedule / policy | The retention schedule is set out in 3.10 and is being issued as a standalone document. |
-| Data-breach / incident-response procedure | In preparation; see 3.11. |
+| Current information-security policy or security overview | **Provided** — as a standalone information-security policy, consistent with Section 3.9. |
+| Current sub-processor list | **Provided** — Section 3.4 above, and as a standalone maintained sub-processor list. |
+| Data-retention schedule / policy | **Provided** — as a standalone data-retention schedule; formalises Section 3.10. |
+| Data-breach / incident-response procedure | **Provided** — as a standalone incident-response procedure; formalises Section 3.11. |
 | PCI DSS evidence | **Available** — PCI DSS SAQ C (v4.0.1) with Attestation of Compliance, assessed COMPLIANT 10 June 2026 via SecurityMetrics; see 3.8. |
 | Security certifications or independent audit / assurance reports | No ISO 27001 or SOC 2 is held. A dynamic application security scan report is available (see 3.9); an independent penetration-test report is not. |
-| Network / data-flow or architecture diagram | **In preparation** — will show the systems in 3.2, the sub-processors in 3.4, and the inbound and outbound flows in Section 2. |
+| Network / data-flow or architecture diagram | **Provided** — a standalone architecture and data-flow diagram showing the systems in 3.2, the sub-processors in 3.4, and the inbound/outbound flows in Section 2. |
 | API security / integration documentation for the collect-and-push process | **In preparation** — will be produced jointly, once TL provides the API details listed below. |
 
 ---
