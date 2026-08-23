@@ -2271,6 +2271,12 @@ model RentalAgreement {
   locked           Boolean   @default(false)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  // GDPR Wave 2 Phase C — retention-sweep idempotency marker. Stamped when the
+  // automatic sweep has stripped the IDENTITY snapshot on THIS record (past the
+  // identity/claims clock). NULL = never swept; a set value makes re-runs skip
+  // it. Distinct from customer-level erasure; accounting-residual removal (the
+  // accounting clock) is tracked separately via agreementNumber anonymisation.
+  piiPurgedAt      DateTime?
 
   drivers          AgreementDriver[]
   charges          RentalAgreementCharge[]
@@ -4450,6 +4456,26 @@ model ModuleAccessAuditLog {
   @@index([changedAt])
 }
 
+// GDPR Wave 2 Phase C — automatic retention-sweep run history.
+// One row per sweep tick. AuditLog cannot hold this (its reservationId is a
+// required non-null FK, and a sweep spans many/zero reservations), so run
+// history gets its own table. `perCategoryCounts` is the per-category
+// {total, processed, aborted} breakdown; `aborted` is true when ANY category
+// tripped the safety threshold. `mode` is PREVIEW (logs only, mutates nothing)
+// or APPLY (purged).
+model RetentionSweepRun {
+  id                String    @id @default(cuid())
+  startedAt         DateTime  @default(now())
+  finishedAt        DateTime?
+  mode              String // 'PREVIEW' | 'APPLY'
+  perCategoryCounts Json
+  aborted           Boolean   @default(false)
+  notes             String?
+  createdAt         DateTime  @default(now())
+
+  @@index([startedAt])
+}
+
 // PR-5 — Endpoint-level performance telemetry (PERF pillar).
 // Distinct from `LoadObservation` (business volume): this table captures raw
 // per-request samples (HTTP method, normalized route, status, duration, db
@@ -5503,6 +5529,10 @@ model LoanerAgreement {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  // GDPR Wave 2 Phase C — retention-sweep idempotency marker (see the same
+  // field on RentalAgreement). Loaner records anchor the identity clock on
+  // closedAt (they have no separate returnedAt).
+  piiPurgedAt DateTime?
 
   photos       LoanerPhoto[]
   damagePoints LoanerDamagePoint[]

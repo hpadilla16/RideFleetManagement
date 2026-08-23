@@ -105,7 +105,7 @@ export function gdprErasureEnabled() {
 //   storage.requiredRedact → REDACTION (a required column whose object we reap)
 //   conservativeRetain → retained in CONSERVATIVE; redacted in FULL_DELETE
 // ---------------------------------------------------------------------------
-function buildEraseData(spec, mode) {
+export function buildEraseData(spec, mode) {
   const cols = spec.columns || {};
   const data = {};
   for (const c of cols.redact || []) data[c] = REDACTION;
@@ -129,7 +129,7 @@ function buildEraseData(spec, mode) {
  * and collect the deletable Storage objects, BEFORE any nulling. De-dupes rows
  * matched by more than one where. Returns [{ bucket, path, source }].
  */
-async function collectStorageRefs(prisma, spec, wheres) {
+export async function collectStorageRefs(prisma, spec, wheres) {
   // Storage refs may sit under columns.storage (anonymised rows) or at the spec
   // top level (HARD_DELETE rows whose bytes we reap before deleting the row).
   const storageCols = spec.columns?.storage || spec.storage || [];
@@ -414,4 +414,4 @@ function buildRetainedDisclosure(mode) {
   ];
 }
 
-export default { eraseCustomer, gdprErasureEnabled, ErasureNotEnabledError, CustomerNotFoundError };
+export default { eraseCustomer, gdprErasureEnabled, ErasureNotEnabledError, CustomerNotFoundError, buildEraseData, collectStorageRefs };

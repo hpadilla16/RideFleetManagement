@@ -92,6 +92,10 @@ import { paymentGatewayRouter } from './modules/payment-gateway/payment-gateway.
 // triggered from the API still run here, under the global page cap.
 import { startHandoffReminderScheduler, stopHandoffReminderScheduler } from './modules/car-sharing/car-sharing.scheduler.js';
 import { startCheckoutSessionCleanupScheduler, stopCheckoutSessionCleanupScheduler } from './modules/checkout-session/checkout-session.scheduler.js';
+// GDPR Wave 2 Phase C — automatic retention sweep. OFF BY DEFAULT: the
+// scheduler no-ops unless RETENTION_SWEEP_ENABLED=true, and even then runs in
+// PREVIEW (mutates nothing) unless RETENTION_SWEEP_APPLY=true.
+import { startRetentionSweepScheduler, stopRetentionSweepScheduler } from './modules/retention/retention.scheduler.js';
 import { buildOpenApiSpec, swaggerHtml } from './docs/openapi.js';
 import { smsRouter } from './modules/sms/sms.routes.js';
 import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
@@ -475,6 +479,8 @@ if (process.env.SKIP_LISTEN !== '1') {
     if (isFirstWorker) {
       startHandoffReminderScheduler();
       startCheckoutSessionCleanupScheduler();
+      // Self-guarded: registers a timer only when RETENTION_SWEEP_ENABLED=true.
+      startRetentionSweepScheduler();
       // Surface Spin misconfiguration (missing TPN/key, sandbox on,
       // dry-run on) at boot rather than at the moment a customer taps
       // their card. Lazy-load so the unit-test harness doesn't pull
@@ -498,6 +504,7 @@ if (process.env.SKIP_LISTEN !== '1') {
 process.on('SIGINT', async () => {
   stopHandoffReminderScheduler();
   stopCheckoutSessionCleanupScheduler();
+  stopRetentionSweepScheduler();
   await closeBrowser();
   await flushSentry();
   await prisma.$disconnect();
@@ -507,6 +514,7 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
   stopHandoffReminderScheduler();
   stopCheckoutSessionCleanupScheduler();
+  stopRetentionSweepScheduler();
   await closeBrowser();
   await flushSentry();
   await prisma.$disconnect();
