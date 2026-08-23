@@ -1,3 +1,15 @@
+import logger from '../lib/logger.js';
+// Wave 1 (2026-08-23): the per-IP login limiter is now backed by Redis so a
+// brute-forcer cannot get N attempts PER WORKER by having their requests spread
+// across the cluster — the fixed-window counter is shared across all workers.
+// Redis is loaded through the SAME shared loader as the tenant limiter, and if
+// it is unavailable/slow/errors we FALL BACK to the in-process Map below
+// (fail-open, never lock everyone out). See lib/redis-client.js.
+import { getRedis, REDIS_OP_TIMEOUT_MS } from '../lib/redis-client.js';
+import { withTimeout } from '../lib/with-timeout.js';
+
+// Retained for the fail-open fallback path (Redis null/slow/error) and still
+// the only store for the idempotency guard.
 const rateLimitBuckets = new Map();
 const idempotencyBuckets = new Map();
 
@@ -34,16 +46,38 @@ export function attachPublicRequestMeta(name = 'public-endpoint') {
   };
 }
 
-export function createPublicRateLimitGuard(options = {}) {
+export function createPublicRateLimitGuard(options = {}, deps = {}) {
   const name = String(options?.name || 'public-endpoint');
   const windowMs = Number.isFinite(options?.windowMs) ? options.windowMs : 60 * 1000;
   const maxRequests = Number.isFinite(options?.maxRequests) ? options.maxRequests : 60;
+  // Injectable for tests (Map-backed Redis stand-in + deterministic clock),
+  // exactly like createTenantRateLimit. Callers pass only `options`.
+  const _getRedis = deps.getRedis || getRedis;
+  const _now = deps.now || nowMs;
+  // Fixed window in whole seconds (matches the tenant limiter's bucket math so
+  // the key scheme reads the same). Guard against a sub-second window rounding
+  // to 0, which would make the EXPIRE meaningless.
+  const windowSeconds = Math.max(1, Math.round(windowMs / 1000));
 
-  return (req, res, next) => {
-    // CI / test bypass: when RATE_LIMIT_DISABLED=1 the guard becomes a passthrough.
-    // Never set this in production — it removes the brute-force protection on auth endpoints.
-    if (process.env.RATE_LIMIT_DISABLED === '1') return next();
-    const currentTime = nowMs();
+  function setHeaders(res, count) {
+    const remaining = Math.max(0, maxRequests - count);
+    res.setHeader('x-public-rate-limit-window-ms', String(windowMs));
+    res.setHeader('x-public-rate-limit-limit', String(maxRequests));
+    res.setHeader('x-public-rate-limit-remaining', String(remaining));
+  }
+
+  function tooMany(res) {
+    return res.status(429).json({
+      error: `Rate limit exceeded for ${name}. Try again shortly.`
+    });
+  }
+
+  // In-process fixed window. RETAINED as the fail-open fallback: Redis null,
+  // slow, or throwing all land here so a Redis hiccup can never lock everyone
+  // out. Per-worker (each worker keeps its own Map) — that is strictly weaker
+  // than the shared Redis counter, but weaker-and-up beats fully-open.
+  function inProcess(req, res, next) {
+    const currentTime = _now();
     cleanupExpired(rateLimitBuckets, currentTime);
     const bucketKey = `${name}:${requestIp(req)}`;
     const existing = rateLimitBuckets.get(bucketKey);
@@ -53,18 +87,53 @@ export function createPublicRateLimitGuard(options = {}) {
     bucket.count += 1;
     rateLimitBuckets.set(bucketKey, bucket);
 
-    const remaining = Math.max(0, maxRequests - bucket.count);
-    res.setHeader('x-public-rate-limit-window-ms', String(windowMs));
-    res.setHeader('x-public-rate-limit-limit', String(maxRequests));
-    res.setHeader('x-public-rate-limit-remaining', String(remaining));
+    setHeaders(res, bucket.count);
+    if (bucket.count > maxRequests) return tooMany(res);
+    return next();
+  }
 
-    if (bucket.count > maxRequests) {
-      return res.status(429).json({
-        error: `Rate limit exceeded for ${name}. Try again shortly.`
+  return async (req, res, next) => {
+    // CI / test bypass: when RATE_LIMIT_DISABLED=1 the guard becomes a passthrough.
+    // Never set this in production — it removes the brute-force protection on auth endpoints.
+    if (process.env.RATE_LIMIT_DISABLED === '1') return next();
+
+    let client = null;
+    try {
+      client = await _getRedis();
+    } catch {
+      client = null; // getRedis never throws today, but never trust it to.
+    }
+    // FAIL-OPEN #1: no Redis in this environment → per-worker Map fallback.
+    if (!client) return inProcess(req, res, next);
+
+    // Shared fixed window across all workers. Key carries the guard NAME so
+    // distinct guards (auth-login vs auth-pin) never share a bucket, the IP so
+    // it is per-client, and the bucket index so it rolls over each window.
+    const epochSeconds = Math.floor(_now() / 1000);
+    const bucket = Math.floor(epochSeconds / windowSeconds);
+    const key = `rate:public:${name}:${requestIp(req)}:${bucket}`;
+
+    let count;
+    try {
+      count = await withTimeout(client.incr(key), REDIS_OP_TIMEOUT_MS, 'public-rate incr');
+      if (count === 1) {
+        // +5s slack so a client can read the window header without a race, and
+        // so the key always outlives its window even under clock skew.
+        await withTimeout(client.expire(key, windowSeconds + 5), REDIS_OP_TIMEOUT_MS, 'public-rate expire');
+      }
+    } catch (err) {
+      // FAIL-OPEN #2: hard Redis error OR timeout (slow/zombie connection) →
+      // fall back to the in-process limiter. Never 500 / hang the client.
+      logger.warn('[public-rate] redis incr failed/slow - falling back to in-process limiter', {
+        name,
+        message: err?.message,
       });
+      return inProcess(req, res, next);
     }
 
-    next();
+    setHeaders(res, count);
+    if (count > maxRequests) return tooMany(res);
+    return next();
   };
 }
 

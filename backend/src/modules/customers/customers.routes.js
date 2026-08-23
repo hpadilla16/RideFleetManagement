@@ -15,6 +15,7 @@ import {
 // ({ tenantId: '__no_tenant__' }) for that case, and gives super-admins {}
 // or the explicit ?tenantId narrowing.
 import { scopeFor } from '../../lib/tenant-scope.js';
+import { auditFromReq, AUDIT_ACTIONS } from '../audit/audit.service.js';
 
 export const customersRouter = Router();
 
@@ -40,6 +41,15 @@ customersRouter.post('/bulk/import', async (req, res) => {
 customersRouter.get('/:id', async (req, res) => {
   const row = await customersService.getById(req.params.id, scopeFor(req));
   if (!row) return res.status(404).json({ error: 'Customer not found' });
+  // Sensitive-read audit (Wave 3): ONE identified customer's full record was
+  // disclosed. Audited only on a FOUND record (a 404 discloses nothing), and
+  // only here — the list endpoint above is deliberately NOT audited (threshold
+  // rule in audit.service.js). Best-effort; never blocks the read.
+  auditFromReq(req, {
+    action: AUDIT_ACTIONS.CUSTOMER_RECORD_READ,
+    targetType: 'CUSTOMER',
+    targetId: req.params.id,
+  });
   res.json(row);
 });
 
@@ -51,6 +61,16 @@ customersRouter.get('/:id', async (req, res) => {
 async function serveCustomerDocument(kind, req, res) {
   const doc = await customersService.getDocument(req.params.id, kind, scopeFor(req));
   if (!doc) return res.status(404).json({ error: 'Document not found' });
+  // Sensitive-read audit (Wave 3): a KYC document (ID photo / insurance /
+  // license) was disclosed for ONE customer. Instrumented once here so all
+  // three doc endpoints are covered; metadata records which kind. Audited only
+  // on a FOUND doc. Best-effort.
+  auditFromReq(req, {
+    action: AUDIT_ACTIONS.CUSTOMER_DOCUMENT_READ,
+    targetType: 'CUSTOMER',
+    targetId: req.params.id,
+    metadata: { kind },
+  });
   res.json(doc);
 }
 
