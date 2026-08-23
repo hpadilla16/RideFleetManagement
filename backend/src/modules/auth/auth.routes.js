@@ -5,6 +5,14 @@ import { isPublicRegisterEnabled } from './auth.config.js';
 import { isSuperAdmin, requireAuth, requireRole } from '../../middleware/auth.js';
 import { createPublicRateLimitGuard, attachPublicRequestMeta } from '../../middleware/public-endpoint-guards.js';
 import logger from '../../lib/logger.js';
+import {
+  auditFromReq,
+  recordAudit,
+  auditIpFromReq,
+  auditUserAgentFromReq,
+  AUDIT_ACTIONS,
+  AUDIT_OUTCOME
+} from '../audit/audit.service.js';
 
 export const authRouter = Router();
 
@@ -54,12 +62,40 @@ authRouter.post('/register', authRateLimit, async (req, res) => {
 });
 
 authRouter.post('/login', authRateLimit, async (req, res) => {
+  const { email, password } = req.body || {};
   try {
-    const { email, password } = req.body || {};
     if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
     const result = await authService.login({ email, password });
+    // Audit a COMPLETED login only (result.token). An mfaRequired result is a
+    // half-login — its completion is audited at /2fa/verify-login instead. This
+    // is a public route (no req.user), so we take the actor from the result and
+    // ip/userAgent from the request. NEVER the password. Best-effort.
+    if (result?.token && result?.user) {
+      recordAudit({
+        tenantId: result.user.tenantId || null,
+        actorUserId: result.user.id || null,
+        actorEmail: result.user.email || null,
+        actorRole: result.user.role || null,
+        action: AUDIT_ACTIONS.LOGIN,
+        targetType: 'USER',
+        targetId: result.user.id || null,
+        ip: auditIpFromReq(req),
+        userAgent: auditUserAgentFromReq(req),
+        outcome: AUDIT_OUTCOME.SUCCESS,
+      });
+    }
     res.json(result);
   } catch (e) {
+    // FAILURE: actor is UNKNOWN (bad credentials), so actorUserId is null. Record
+    // the attempted email under a non-PII-shaped key so it survives redaction —
+    // it is the whole point of a failed-login trail — but NEVER the password.
+    recordAudit({
+      action: AUDIT_ACTIONS.LOGIN,
+      outcome: AUDIT_OUTCOME.FAILURE,
+      ip: auditIpFromReq(req),
+      userAgent: auditUserAgentFromReq(req),
+      metadata: { attemptedEmail: String(email || '').trim().toLowerCase() || null },
+    });
     res.status(401).json({ error: e.message });
   }
 });
@@ -82,6 +118,11 @@ authRouter.post('/change-password', requireAuth, pinRateLimit, async (req, res) 
       newPassword
     });
     logger.info('[auth] password changed', { userId: req.user?.id || req.user?.sub });
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.CHANGE_PASSWORD,
+      targetType: 'USER',
+      targetId: req.user?.id || req.user?.sub || null,
+    });
     res.json(result);
   } catch (e) {
     const msg = String(e?.message || '');
@@ -131,9 +172,21 @@ authRouter.post('/2fa/verify-login', requireAuth, authRateLimit, async (req, res
     if (!code) return res.status(400).json({ error: 'code is required' });
     const result = await authService.verifyLogin({ userId: req.user.id || req.user.sub, code });
     logger.info('[auth] 2fa login verified', { userId: req.user.id || req.user.sub });
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.TWO_FACTOR_VERIFY_LOGIN,
+      targetType: 'USER',
+      targetId: req.user.id || req.user.sub || null,
+      outcome: AUDIT_OUTCOME.SUCCESS,
+    });
     res.json(result);
   } catch (e) {
     const msg = String(e?.message || '');
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.TWO_FACTOR_VERIFY_LOGIN,
+      targetType: 'USER',
+      targetId: req.user?.id || req.user?.sub || null,
+      outcome: AUDIT_OUTCOME.FAILURE,
+    });
     if (/invalid authentication code/i.test(msg)) return res.status(401).json({ error: msg, code: 'INVALID_2FA_CODE' });
     res.status(401).json({ error: msg || 'Unable to verify code' });
   }
@@ -167,6 +220,11 @@ authRouter.post('/2fa/enroll/verify', requireAuth, async (req, res) => {
     if (!code) return res.status(400).json({ error: 'code is required' });
     const out = await twoFactorService.verifyAndEnable(userId, code);
     logger.info('[auth] 2fa enrolled', { userId });
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.TWO_FACTOR_ENROLL,
+      targetType: 'USER',
+      targetId: userId,
+    });
     // If this completed an ENROLL login (policy-forced), the caller still holds
     // only a pending token — hand back a full session so they enter the app in
     // one round trip. A Settings-driven enrollment already has a full session,
@@ -198,6 +256,11 @@ authRouter.post('/2fa/backup-codes/regenerate', requireAuth, async (req, res) =>
   try {
     const out = await twoFactorService.regenerateBackupCodes(req.user?.id || req.user?.sub);
     logger.info('[auth] 2fa backup codes regenerated', { userId: req.user?.id || req.user?.sub });
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.TWO_FACTOR_BACKUP_REGEN,
+      targetType: 'USER',
+      targetId: req.user?.id || req.user?.sub || null,
+    });
     res.json(out);
   } catch (e) {
     const msg = String(e?.message || '');
@@ -221,6 +284,12 @@ authRouter.post('/2fa/disable', requireAuth, pinRateLimit, async (req, res) => {
     if (!codeOk) return res.status(401).json({ error: 'Invalid authentication code', code: 'INVALID_2FA_CODE' });
     const out = await twoFactorService.disableFor(userId);
     logger.info('[auth] 2fa disabled (self-service)', { userId });
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.TWO_FACTOR_DISABLE,
+      targetType: 'USER',
+      targetId: userId,
+      metadata: { mode: 'self-service' },
+    });
     res.json(out);
   } catch (e) {
     res.status(400).json({ error: e.message || 'Unable to disable 2FA' });
@@ -228,15 +297,20 @@ authRouter.post('/2fa/disable', requireAuth, pinRateLimit, async (req, res) => {
 });
 
 // Admin reset — clears a user's 2FA entirely. If tenant policy still requires
-// their role, their next login re-enters the ENROLL flow (no manual step). No
-// AuditLog row (its reservationId FK can't hold auth events); logger.info per
-// the service-token precedent.
+// their role, their next login re-enters the ENROLL flow (no manual step).
+// Wave 3 (2026-08-24): now also recorded in AdminAuditLog (AuditLog's
+// reservationId FK still can't hold auth events); the logger.info stays.
 authRouter.post('/users/:id/reset-2fa', requireAuth, requireRole('ADMIN'), async (req, res, next) => {
   try {
     const out = await authService.resetTwoFactorForUser(req.params.id, scopeFor(req));
     logger.info('[auth] 2fa reset by admin', {
       targetUserId: req.params.id,
       actorUserId: req.user?.id || req.user?.sub || null
+    });
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.TWO_FACTOR_ADMIN_RESET,
+      targetType: 'USER',
+      targetId: req.params.id,
     });
     res.json(out);
   } catch (e) {
@@ -262,6 +336,12 @@ authRouter.post('/service-token', requireAuth, requireRole('SUPER_ADMIN'), async
       tokenVersion: out.tokenVersion,
       actorUserId: req.user?.id || req.user?.sub || null
     });
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.SERVICE_TOKEN_ISSUE,
+      targetType: 'USER',
+      targetId: out.userId,
+      metadata: { expiresIn: out.expiresIn, tokenVersion: out.tokenVersion },
+    });
     res.status(201).json(out);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -277,6 +357,12 @@ authRouter.post('/service-token/revoke', requireAuth, requireRole('SUPER_ADMIN')
       targetUserId: out.userId,
       tokenVersion: out.tokenVersion,
       actorUserId: req.user?.id || req.user?.sub || null
+    });
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.SERVICE_TOKEN_REVOKE,
+      targetType: 'USER',
+      targetId: out.userId,
+      metadata: { tokenVersion: out.tokenVersion },
     });
     res.json(out);
   } catch (e) {

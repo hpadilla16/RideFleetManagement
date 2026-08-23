@@ -10,6 +10,7 @@ import {
   getStoredUserModuleConfig,
   getTenantModuleConfig
 } from '../../lib/module-access.js';
+import { auditFromReq, AUDIT_ACTIONS } from '../audit/audit.service.js';
 
 export const settingsRouter = Router();
 
@@ -54,6 +55,15 @@ settingsRouter.put('/tenant-modules', requireRole('ADMIN'), async (req, res, nex
       actor: req.user,
       before,
       after: out?.config || {}
+    });
+
+    // Wave 3: also record on the unified admin trail (ModuleAccessAuditLog stays
+    // the detailed system of record; this gives one place to see all admin acts).
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.USER_MODULE_ACCESS_CHANGE,
+      targetType: 'TENANT',
+      targetId: scope?.tenantId || null,
+      metadata: { scope: 'TENANT' },
     });
 
     res.json(out);
@@ -151,6 +161,14 @@ settingsRouter.put('/users/:userId/module-access', requireRole('ADMIN'), enforce
       actor: req.user,
       before,
       after
+    });
+
+    // Wave 3: unified admin trail (ModuleAccessAuditLog remains the detailed record).
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.USER_MODULE_ACCESS_CHANGE,
+      targetType: 'USER',
+      targetId: req.targetUser.id,
+      metadata: { scope: 'USER' },
     });
 
     res.json(out);
@@ -301,7 +319,15 @@ settingsRouter.get('/two-factor-policy', requireRole('ADMIN'), async (req, res, 
 
 settingsRouter.put('/two-factor-policy', requireRole('ADMIN'), async (req, res, next) => {
   try {
-    res.json(await settingsService.updateTwoFactorPolicy(req.body || {}, scopeFor(req)));
+    const result = await settingsService.updateTwoFactorPolicy(req.body || {}, scopeFor(req));
+    // Wave 3: who changed the tenant (or global) 2FA policy, and when. A
+    // super-admin (scopeFor → {}) is editing the GLOBAL default; targetId null.
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.TWO_FACTOR_POLICY_CHANGE,
+      targetType: 'TENANT',
+      targetId: scopeFor(req)?.tenantId || null,
+    });
+    res.json(result);
   } catch (e) {
     if (e?.code === 'ENCRYPTION_NOT_CONFIGURED') {
       return res.status(400).json({ error: e.message, code: e.code });

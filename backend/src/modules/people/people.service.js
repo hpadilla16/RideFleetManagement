@@ -6,6 +6,23 @@ import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.
 import { assertTenantUserCapacity } from '../../lib/tenant-plan-limits.js';
 import { cache } from '../../lib/cache.js';
 import { globalKey } from '../../lib/cache/tenantKey.js';
+import { recordAudit, AUDIT_ACTIONS } from '../audit/audit.service.js';
+
+// Wave 3 (2026-08-24): write an AdminAuditLog row using the actor context the
+// route folded into `scope` (see people.routes.js auditActor). Best-effort —
+// recordAudit never throws — so a dropped audit row never fails a create/update.
+function auditFromScope(scope = {}, entry = {}) {
+  return recordAudit({
+    tenantId: scope?.tenantId ?? null,
+    actorUserId: scope?.actorUserId ?? null,
+    actorEmail: scope?.actorEmail ?? null,
+    actorRole: scope?.actorRole ?? null,
+    impersonatedByUserId: scope?.impersonatedByUserId ?? null,
+    ip: scope?.actorIp ?? null,
+    userAgent: scope?.actorUserAgent ?? null,
+    ...entry,
+  });
+}
 
 // Validate + normalize a user's location scope (Fase 1). Returns:
 //   undefined → not provided (don't change on update)
@@ -373,6 +390,15 @@ export const peopleService = {
       });
     }
 
+    // USER_CREATE audit (best-effort). Target is the login user when one was
+    // created, else the host-only profile. Never records the temp password.
+    auditFromScope(scope, {
+      action: AUDIT_ACTIONS.USER_CREATE,
+      targetType: user ? 'USER' : 'HOST_PROFILE',
+      targetId: user?.id || hostProfile?.id || null,
+      metadata: { personType, role: user?.role || null, enableLogin, hasHostProfile: !!hostProfile },
+    });
+
     return {
       ok: true,
       person: user ? mapUserPerson({ ...user, hostProfile }) : mapHostOnlyPerson(hostProfile),
@@ -418,6 +444,13 @@ export const peopleService = {
         tenantId: user.tenant?.id || user.tenantId || null
       });
     }
+
+    auditFromScope(scope, {
+      action: AUDIT_ACTIONS.USER_PASSWORD_RESET,
+      targetType: 'USER',
+      targetId: user.id,
+      metadata: { inviteSent: !!(sendInvite && user.email) },
+    });
 
     return {
       ok: true,
@@ -557,6 +590,28 @@ export const peopleService = {
       // so the new locationIds/programScope take effect on the user's next
       // request (Fase 2 enforcement; program scoping 2026-07-02).
       cache.del(globalKey('session', user.id));
+
+      // Audit the two security-relevant transitions this update can make
+      // (best-effort). old-vs-new is known HERE, which is why the audit lives in
+      // the service and not the route. A role change and an active-flag change
+      // are logged as distinct events even when they happen in one request.
+      const oldRole = user.role;
+      const newRole = userPatch.role ?? user.role;
+      if (newRole !== oldRole) {
+        auditFromScope(scope, {
+          action: AUDIT_ACTIONS.USER_ROLE_CHANGE,
+          targetType: 'USER',
+          targetId: user.id,
+          metadata: { from: oldRole, to: newRole },
+        });
+      }
+      if (userPatch.isActive !== user.isActive) {
+        auditFromScope(scope, {
+          action: userPatch.isActive ? AUDIT_ACTIONS.USER_REACTIVATE : AUDIT_ACTIONS.USER_DEACTIVATE,
+          targetType: 'USER',
+          targetId: user.id,
+        });
+      }
 
       return {
         ok: true,
