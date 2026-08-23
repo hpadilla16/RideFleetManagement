@@ -45,6 +45,7 @@ const MODELS = [
   'customerInspection', 'reservationIncident', 'vehicleDamageReport', 'reviewProof',
   'tripIncident', 'tripIncidentCommunication', 'shuttleRequest', 'kioskSession',
   'externalReservation', 'citation', 'citationDocument',
+  'tollTransaction', 'paymentOpsFlag', 'checkoutSession', 'auditLog', 'overdueVehicleAlert',
   'handoffToken', 'shuttleTrackerLink',
 ];
 
@@ -206,8 +207,11 @@ function seedData() {
       customerIp: '203.0.113.7',
     }],
     rentalAgreementInspection: [{
-      id: 'ins1', rentalAgreementId: 'a1', phase: 'CHECKOUT', actorIp: '203.0.113.7',
-      photosJson: '[{"path":"tenants/t1/insp/1.jpg"}]', photoStorageRefs: null, notes: 'clean',
+      id: 'ins1', rentalAgreementId: 'a1', phase: 'CHECKOUT', actorIp: PII.ip,
+      photosJson: '[{"path":"tenants/t1/insp/1.jpg"}]', photoStorageRefs: null,
+      // Free-text that names the customer — the whole-store scan must catch a regression here.
+      notes: 'returned late, ' + PII.first + ' argued', damages: 'dent, called ' + PII.phone,
+      exterior: 'ok', interior: 'ok',
     }],
     quote: [{
       id: 'q1', tenantId: 't1', quoteNumber: 'Q-1', customerId: 'c1',
@@ -262,7 +266,9 @@ function seedData() {
     }],
     citation: [{
       id: 'cit1', tenantId: 't1', reservationId: 'r1', citationNo: 'CIT-1', agency: 'City',
-      amount: 50,
+      amount: 50, location: 'Main St', violationType: 'PARKING',
+      reviewNotes: 'driver ' + PII.first + ' disputes', holdReason: 'AMBIGUOUS_PLATE',
+      sourcePayloadJson: '{"driver":"' + PII.first + ' ' + PII.last + '","phone":"' + PII.phone + '"}',
     }],
     citationDocument: [{
       id: 'cd1', tenantId: 't1', citationId: 'cit1',
@@ -343,7 +349,8 @@ function seedData() {
     }],
     tripIncident: [{
       id: 'ti1', reservationId: 'r1', type: 'DAMAGE', status: 'OPEN', title: 'incident',
-      description: 'damage', amountClaimed: 100,
+      description: 'damage caused by ' + PII.first, waiveReason: 'goodwill for ' + PII.phone,
+      evidenceJson: '{"note":"' + PII.email + '"}', amountClaimed: 100,
     }],
     tripIncidentCommunication: [{
       id: 'tic1', incidentId: 'ti1', direction: 'OUTBOUND', channel: 'EMAIL',
@@ -354,6 +361,38 @@ function seedData() {
     loanerRequest: [{
       id: 'lr1', tenantId: 't1', name: PII.first + ' ' + PII.last, phone: PII.phone,
       email: PII.email, notes: 'wants a loaner', status: 'RECEIVED',
+    }],
+
+    // ---- Retained records whose free-text names the customer ----
+    reservationIncident: [{
+      id: 'ri1', tenantId: 't1', reservationId: 'r1', reportNumber: 'INC-1', type: 'INTERIOR',
+      title: 'Interior damage', discoveryAt: new Date('2026-01-03Z'),
+      narrative: 'renter ' + PII.first + ' ' + PII.last + ' left it filthy',
+      rebuttalText: 'per contract', conditionAtReturn: 'dirty', preRentalCondition: 'clean',
+      odorNoted: 'smoke — ' + PII.phone,
+      certifiedByName: 'Staff Member', signatureDataUrl: 'data:image/png;base64,STAFFSIG',
+    }],
+    tollTransaction: [{
+      id: 'tt1', tenantId: 't1', reservationId: 'r1', amount: 5, location: 'Turnpike',
+      reviewNotes: 'billed to ' + PII.first, sourcePayloadJson: '{"plate":"ABC","email":"' + PII.email + '"}',
+    }],
+    paymentOpsFlag: [{
+      id: 'pof1', tenantId: 't1', reservationId: 'r1', rentalAgreementId: 'a1', kind: 'CAPTURE',
+      reference: 'AUTHNET:123', note: 'call ' + PII.first, resolvedNote: 'left vm at ' + PII.phone,
+      lastError: 'declined for ' + PII.email,
+    }],
+    checkoutSession: [{
+      id: 'cs1', tenantId: 't1', reservationId: 'r1', agreementId: 'a1',
+      events: '[{"step":"ID","name":"' + PII.first + '"}]', abandonedReason: 'timeout for ' + PII.first,
+    }],
+    auditLog: [{
+      id: 'al1', tenantId: 't1', reservationId: 'r1', action: 'ADMIN_OVERRIDE',
+      reason: 'note by staff', metadata: '{"by":"admin"}', // audit trail — retained by design
+    }],
+    overdueVehicleAlert: [{
+      id: 'ova1', tenantId: 't1', reservationId: 'r1', status: 'OPEN',
+      latitude: 25.7617, longitude: -80.1918, address: PII.addr1 + ', ' + PII.city,
+      distanceKm: 12, positionAt: new Date('2026-01-04Z'),
     }],
 
     // ---- Live capability token tables (hard-deleted) ----
@@ -583,6 +622,59 @@ describe('customer erasure — live reconciliation', () => {
     assert.equal(fake._store.loanerRequest[0].name, REDACTION);
     assert.equal(fake._store.loanerRequest[0].email, null);
     assert.equal(fake._store.loanerRequest[0].notes, null);
+  });
+
+  it('scrubs the newly-mapped free-text/regulatory tables (round-3 gaps)', () => {
+    // Reservation loaner/service notes.
+    const r = fake._store.reservation[0];
+    assert.equal(r.loanerProgramNotes ?? null, null);
+    assert.equal(r.serviceAdvisorNotes ?? null, null);
+    assert.equal(r.readyForPickupOverrideNote ?? null, null);
+    // RentalAgreementInspection free-text.
+    assert.equal(fake._store.rentalAgreementInspection[0].notes, null);
+    assert.equal(fake._store.rentalAgreementInspection[0].damages, null);
+    assert.equal(fake._store.rentalAgreementInspection[0].exterior, 'ok'); // condition fact retained
+    // Citation.
+    const cit = fake._store.citation[0];
+    assert.equal(cit.reviewNotes, null);
+    assert.equal(cit.holdReason, null);
+    assert.equal(cit.sourcePayloadJson, null);
+    assert.equal(cit.citationNo, 'CIT-1'); // regulatory fact retained
+    // ReservationIncident narrative erased; certifier + facts retained.
+    const ri = fake._store.reservationIncident[0];
+    assert.equal(ri.narrative, null);
+    assert.equal(ri.rebuttalText, null);
+    assert.equal(ri.conditionAtReturn, null);
+    assert.equal(ri.preRentalCondition, null);
+    assert.equal(ri.odorNoted, null);
+    assert.equal(ri.certifiedByName, 'Staff Member'); // staff — retained
+    assert.equal(ri.title, 'Interior damage'); // fact retained
+    // TripIncident free-text.
+    assert.equal(fake._store.tripIncident[0].description, null);
+    assert.equal(fake._store.tripIncident[0].waiveReason, null);
+    assert.equal(fake._store.tripIncident[0].evidenceJson, null);
+    assert.equal(fake._store.tripIncident[0].amountClaimed, 100); // amount retained
+    // TollTransaction.
+    assert.equal(fake._store.tollTransaction[0].reviewNotes, null);
+    assert.equal(fake._store.tollTransaction[0].sourcePayloadJson, null);
+    assert.equal(fake._store.tollTransaction[0].amount, 5); // toll fact retained
+    // PaymentOpsFlag.
+    assert.equal(fake._store.paymentOpsFlag[0].note, null);
+    assert.equal(fake._store.paymentOpsFlag[0].resolvedNote, null);
+    assert.equal(fake._store.paymentOpsFlag[0].lastError, null);
+    assert.equal(fake._store.paymentOpsFlag[0].reference, 'AUTHNET:123'); // money ref retained
+    // CheckoutSession.
+    assert.equal(fake._store.checkoutSession[0].events, REDACTION);
+    assert.equal(fake._store.checkoutSession[0].abandonedReason, null);
+    // AuditLog retained by design.
+    assert.equal(fake._store.auditLog[0].reason, 'note by staff');
+    assert.equal(fake._store.auditLog[0].metadata, '{"by":"admin"}');
+    // OverdueVehicleAlert — renter GPS location erased; alert skeleton kept.
+    const ova = fake._store.overdueVehicleAlert[0];
+    assert.equal(ova.latitude, null);
+    assert.equal(ova.longitude, null);
+    assert.equal(ova.address, null);
+    assert.equal(ova.status, 'OPEN'); // skeleton retained
   });
 
   it('revokes live capability tokens on the reservation + ephemeral token tables', () => {

@@ -219,6 +219,9 @@ export const CUSTOMER_PII_MAP = Object.freeze({
         { column: 'insuranceDocumentUrl', defaultBucket: CUSTOMER_DOCS_BUCKET },
       ],
     },
+    // doNotRentReason is WRITTEN by erasure (the minimised suppression record),
+    // not customer PII — intentionally retained.
+    documentedRetain: ['doNotRentReason'],
     suppression: true,
   },
 
@@ -234,15 +237,28 @@ export const CUSTOMER_PII_MAP = Object.freeze({
         'pickupInstructions', 'customerInfoReviewNote',
         'loanerBillingContactName', 'loanerBillingContactEmail', 'loanerBillingContactPhone',
         'loanerBorrowerPacketJson',
+        // Loaner/service free-text notes ABOUT the borrower (staff-authored, same
+        // class as `notes` — can carry the customer's identity).
+        'loanerProgramNotes', 'loanerBillingNotes', 'loanerReturnExceptionNotes',
+        'serviceAdvisorNotes', 'loanerCloseoutNotes', 'loanerAccountingNotes',
+        'readyForPickupOverrideNote',
         // Live capability tokens that resolve to this reservation — revoked.
         'customerInfoToken', 'customerInfoTokenExpiresAt',
         'signatureToken', 'signatureTokenExpiresAt',
         'paymentRequestToken', 'paymentRequestTokenExpiresAt',
       ],
     },
+    // Service-advisor CONTACT is the dealership staff member, not the erasure
+    // subject — retained. serviceVehicle* describe the customer's own car in for
+    // service (a third-party asset record, not renter identity) — retained.
+    documentedRetain: [
+      'serviceAdvisorName', 'serviceAdvisorEmail', 'serviceAdvisorPhone',
+      'serviceVehicleMake', 'serviceVehicleModel', 'serviceVehiclePlate', 'serviceVehicleVin',
+    ],
     retainNote:
       'Retain the whole rental record (money, status, vehicle/location, timestamps). ' +
-      'Erase the pre-check-in signature image, free-text notes, and live tokens.',
+      'Erase the pre-check-in signature image, free-text notes, loaner/service notes, ' +
+      'and live tokens.',
   },
   conversation: {
     model: 'conversation',
@@ -312,6 +328,8 @@ export const CUSTOMER_PII_MAP = Object.freeze({
         'signatureToken', 'signatureTokenExpiresAt', // live signing token — revoked
       ],
     },
+    // The addendum reason ("date correction") + category are contract facts.
+    documentedRetain: ['reason', 'reasonCategory'],
     retainNote: 'Retain the addendum reason + charge deltas; erase the signature image, IP + token.',
   },
   agreementDriver: {
@@ -347,7 +365,14 @@ export const CUSTOMER_PII_MAP = Object.freeze({
     label: 'RentalAgreementInspection',
     retention: 'ANONYMISE',
     match: { kind: 'agreementRelation', field: 'rentalAgreementId' },
-    columns: { null: ['actorIp'] },
+    // Erase the person IP AND the two free-text columns (an inspector can type
+    // the customer's name into notes/damages). The condition fields
+    // (exterior/interior/tires/lights/windshield/fuelLevel/odometer) are
+    // vehicle-condition facts, retained.
+    columns: { null: ['actorIp', 'notes', 'damages'] },
+    documentedRetain: [
+      'exterior', 'interior', 'tires', 'lights', 'windshield', 'fuelLevel',
+    ],
     retainedPhotoNote: 'photosJson + photoStorageRefs are vehicle-condition evidence — retained.',
   },
   rentalAgreementVehicleSwap: {
@@ -413,6 +438,7 @@ export const CUSTOMER_PII_MAP = Object.freeze({
     label: 'LoanerPhoto',
     retention: 'RETAIN_PHOTOS',
     match: { kind: 'loanerRelation', field: 'loanerAgreementId' },
+    documentedRetain: ['storagePath'], // vehicle walkaround photo, retained
     retainedPhotoNote: 'Walkaround / damage VEHICLE photos on a retained loaner agreement — retained.',
   },
   loanerDamagePoint: {
@@ -493,7 +519,16 @@ export const CUSTOMER_PII_MAP = Object.freeze({
     label: 'ReservationIncident (+ IncidentEvidence)',
     retention: 'RETAIN_STATUTORY',
     match: { kind: 'reservationRelation', field: 'reservationId' },
-    columns: {},
+    // "Erase-even-when-retained": the free-text narrative fields can name the
+    // customer. Erase them; keep the damage facts, amounts, cited clauses, and
+    // the STAFF certifier fields.
+    columns: {
+      null: ['narrative', 'rebuttalText', 'conditionAtReturn', 'preRentalCondition', 'odorNoted'],
+    },
+    documentedRetain: [
+      'signatureDataUrl', 'certifiedByName', // STAFF certifier, not the erasure subject
+      'title', // banner headline (incident fact, not customer identity)
+    ],
     retainedPhotoNote:
       'IncidentEvidence photos are vehicle damage evidence — retained. Certifier ' +
       'signature/name are staff, not the erasure subject — retained.',
@@ -504,6 +539,11 @@ export const CUSTOMER_PII_MAP = Object.freeze({
     retention: 'RETAIN_STATUTORY',
     match: { kind: 'reservationScalar', field: 'reservationId' },
     columns: { null: ['customerAckSignatureDataUrl', 'customerAckSignerName', 'customerAckIp'] },
+    // Vehicle photos + the damage-fact description + the signed statement wording
+    // are retained damage evidence.
+    documentedRetain: [
+      'description', 'photoJson', 'estimatePhotoJson', 'fixedPhotoJson', 'customerAckStatementText',
+    ],
     retainedPhotoNote: 'photoJson / estimatePhotoJson / fixedPhotoJson are vehicle photos — retained.',
   },
   reviewProof: {
@@ -522,8 +562,12 @@ export const CUSTOMER_PII_MAP = Object.freeze({
     label: 'TripIncident (+ TripIncidentCommunication)',
     retention: 'RETAIN_STATUTORY',
     match: { kind: 'reservationRelation', field: 'reservationId' },
-    columns: {},
-    retainNote: 'Retain incident facts + amounts; scrub the communication child.',
+    // Erase the free-text that can name the customer (description, the staff
+    // waive reason, and the evidence blob which can hold person notes/photos);
+    // keep the amounts, status, type, resolution and title headline.
+    columns: { null: ['description', 'waiveReason', 'evidenceJson'] },
+    documentedRetain: ['title'],
+    retainNote: 'Retain incident amounts/status/type; erase free-text; scrub the communication child.',
   },
   tripIncidentCommunication: {
     model: 'tripIncidentCommunication',
@@ -572,6 +616,77 @@ export const CUSTOMER_PII_MAP = Object.freeze({
       null: ['ocrJson'],
       storage: [{ column: 'bucketPath', defaultBucket: INVENTORY_PHOTOS_BUCKET, requiredRedact: true }],
     },
+  },
+  citation: {
+    model: 'citation',
+    label: 'Citation',
+    retention: 'RETAIN_STATUTORY',
+    match: { kind: 'reservationRelation', field: 'reservationId' },
+    // Regulatory record — retain the citation facts (citationNo, agency, plate,
+    // amounts, dates). Erase the free-text review/hold notes and the raw
+    // provider payload (which can embed the driver's identity).
+    columns: { null: ['reviewNotes', 'holdReason', 'sourcePayloadJson'] },
+    documentedRetain: [
+      // Plate/location/violation are vehicle+regulatory facts, not renter identity.
+      'location', 'violationType', 'externalUrl', 'documentPath',
+    ],
+    retainNote: 'Retain the regulatory citation facts; erase free-text notes + the raw payload.',
+  },
+  tollTransaction: {
+    model: 'tollTransaction',
+    label: 'TollTransaction',
+    retention: 'RETAIN_STATUTORY',
+    match: { kind: 'reservationRelation', field: 'reservationId' },
+    // Toll billing record — retain the toll facts (amount, plate, tag, time,
+    // lane, direction). Erase the free-text review notes + the raw provider
+    // payload (can embed identity).
+    columns: { null: ['reviewNotes', 'sourcePayloadJson'] },
+    documentedRetain: ['location'],
+    retainNote: 'Retain the toll facts; erase the review notes + raw payload.',
+  },
+  paymentOpsFlag: {
+    model: 'paymentOpsFlag',
+    label: 'PaymentOpsFlag',
+    retention: 'RETAIN_STATUTORY',
+    // Reachable via reservationId OR rentalAgreementId scalars.
+    match: { kind: 'reservationOrAgreement', fields: ['reservationId', 'rentalAgreementId'] },
+    // Money-ops flag — retain the reference/gateway/amount facts. Erase the
+    // free-text note + resolution note + last gateway error (can carry PII).
+    columns: { null: ['note', 'resolvedNote', 'lastError'] },
+    retainNote: 'Retain the payment-ops facts; erase the free-text notes + gateway error.',
+  },
+  checkoutSession: {
+    model: 'checkoutSession',
+    label: 'CheckoutSession',
+    retention: 'ANONYMISE',
+    match: { kind: 'reservationRelation', field: 'reservationId' },
+    // `events` is a required @db.Text funnel/telemetry blob (can hold scanned ID
+    // data) — redacted. abandonedReason is free-text.
+    columns: { redact: ['events'], null: ['abandonedReason'] },
+    retainNote: 'Erase the checkout telemetry blob + abandoned reason; keep the session skeleton.',
+  },
+  auditLog: {
+    model: 'auditLog',
+    label: 'AuditLog',
+    retention: 'RETAIN_STATUTORY',
+    match: { kind: 'reservationRelation', field: 'reservationId' },
+    // The audit trail is retained BY DESIGN — it is the tamper record of who
+    // changed what (incl. the erasure itself). `reason` + `metadata` are the
+    // audit content and are intentionally NOT erased.
+    columns: {},
+    documentedRetain: ['reason', 'metadata'],
+    retainNote: 'Audit trail retained by design (reason + metadata are the record).',
+  },
+  overdueVehicleAlert: {
+    model: 'overdueVehicleAlert',
+    label: 'OverdueVehicleAlert',
+    retention: 'ANONYMISE',
+    match: { kind: 'reservationRelation', field: 'reservationId' },
+    // The last-known GPS position + address of the overdue vehicle DURING a
+    // rental is the RENTER'S location — GDPR location data. Erase it; keep the
+    // alert skeleton (status, distance, nearest location, timestamps).
+    columns: { null: ['latitude', 'longitude', 'address', 'positionAt'] },
+    retainNote: 'Erase the renter-location fields (GPS + address); keep the alert skeleton.',
   },
 
   // (2b) LIVE CAPABILITY TOKEN TABLES — hard-deleted so no unexpired token can
