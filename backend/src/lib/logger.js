@@ -21,7 +21,12 @@ const isProduction = process.env.NODE_ENV === 'production';
 // Case-insensitive set of meta keys whose VALUES must never be logged in clear.
 const REDACT_KEYS = new Set([
   'firstname', 'lastname', 'phone', 'email', 'dob', 'dateofbirth',
-  'licensenumber', 'license', 'cardonfiletoken', 'ssn', 'password'
+  'licensenumber', 'license', 'cardonfiletoken', 'ssn', 'password',
+  // Wave 3 defense-in-depth (2026-08-23): mask any field literally NAMED a
+  // credential, everywhere the redactor runs (logs, audit metadata, Sentry).
+  // EXACT-key matches only — 'tokenVersion'/'apiKeyId' etc. do NOT match, so no
+  // over-redaction of normal data. Deliberately NOT 'url' (redacts legit URLs).
+  'token', 'secret', 'totp', 'otp', 'backupcode', 'apikey', 'privatekey'
 ]);
 
 // 2026-06-10 — `name` used to live in REDACT_KEYS unconditionally, which

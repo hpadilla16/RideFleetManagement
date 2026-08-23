@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import jwt from 'jsonwebtoken';
 
 import { prisma } from '../../lib/prisma.js';
+import { redactSensitive } from '../../lib/logger.js';
 import {
   recordAudit,
   auditFromReq,
@@ -265,4 +266,94 @@ test('BEST-EFFORT at the real call site: login STILL succeeds when the audit wri
   } finally {
     authService.login = originalLogin;
   }
+});
+
+// ── FIX 1: SUPER_ADMIN tenant-admin mutations are audited ────────────────────
+
+test('createTenantAdmin → USER_CREATE row (actor = super-admin, correct target/tenant)', async () => {
+  const actor = { id: 'super-9', email: 'root@ride', role: 'SUPER_ADMIN' };
+  const created = { id: 'new-admin-1', email: 'admin@beta.com', fullName: 'B', role: 'ADMIN', tenantId: 'tenant-beta' };
+
+  // Stub the DB surface: user.create (the write) plus the capacity gate's reads
+  // (assertTenantUserCapacity → tenant.findUnique + appSetting + counts). Plan
+  // ENTERPRISE has unlimited limits, so the gate passes with no real DB.
+  const orig = {
+    userCreate: prisma.user.create,
+    tenantFind: prisma.tenant.findUnique,
+    appSetting: prisma.appSetting.findUnique,
+    userCount: prisma.user.count,
+    vehicleCount: prisma.vehicle.count,
+  };
+  prisma.user.create = async () => created;
+  prisma.tenant.findUnique = async () => ({ id: 'tenant-beta', name: 'Beta', plan: 'ENTERPRISE' });
+  prisma.appSetting.findUnique = async () => null;
+  prisma.user.count = async () => 0;
+  prisma.vehicle.count = async () => 0;
+  const rows = [];
+  try {
+    await withAuditCreate(async ({ data }) => { rows.push(data); return data; }, async () => {
+      await tenantsService.createTenantAdmin('tenant-beta', { email: 'admin@beta.com', fullName: 'B', password: 'TempPass123!' }, { actor });
+      await flush();
+    });
+  } finally {
+    prisma.user.create = orig.userCreate;
+    prisma.tenant.findUnique = orig.tenantFind;
+    prisma.appSetting.findUnique = orig.appSetting;
+    prisma.user.count = orig.userCount;
+    prisma.vehicle.count = orig.vehicleCount;
+  }
+
+  const row = rows.find((r) => r.action === AUDIT_ACTIONS.USER_CREATE);
+  assert.ok(row, 'a USER_CREATE row was written');
+  assert.equal(row.actorUserId, 'super-9', 'actor is the super-admin');
+  assert.equal(row.targetId, 'new-admin-1', 'target is the new admin');
+  assert.equal(row.tenantId, 'tenant-beta');
+  assert.equal(row.metadata.role, 'ADMIN');
+  assert.ok(!/TempPass123/.test(JSON.stringify(row.metadata)), 'the temp password is never stored');
+});
+
+test('resetTenantAdminPassword → USER_PASSWORD_RESET row (actor = super-admin, correct target/tenant)', async () => {
+  const actor = { id: 'super-9', email: 'root@ride', role: 'SUPER_ADMIN' };
+  const target = { id: 'tenant-admin-5', email: 'admin@beta.com', tenantId: 'tenant-beta' };
+
+  const originalFind = prisma.user.findFirst;
+  const originalUpdate = prisma.user.update;
+  prisma.user.findFirst = async () => target;
+  prisma.user.update = async () => ({ id: target.id });
+  const rows = [];
+  try {
+    await withAuditCreate(async ({ data }) => { rows.push(data); return data; }, async () => {
+      await tenantsService.resetTenantAdminPassword('tenant-beta', 'tenant-admin-5', 'TempPass123!', { actor });
+      await flush();
+    });
+  } finally {
+    prisma.user.findFirst = originalFind;
+    prisma.user.update = originalUpdate;
+  }
+
+  const row = rows.find((r) => r.action === AUDIT_ACTIONS.USER_PASSWORD_RESET);
+  assert.ok(row, 'a USER_PASSWORD_RESET row was written');
+  assert.equal(row.actorUserId, 'super-9', 'actor is the super-admin');
+  assert.equal(row.targetId, 'tenant-admin-5', 'target is the reset user');
+  assert.equal(row.tenantId, 'tenant-beta');
+  assert.ok(!/TempPass123/.test(JSON.stringify(row.metadata || {})), 'the temp password is never stored');
+});
+
+// ── FIX 2: credential-named fields are masked by the shared redactor ─────────
+
+test('redactSensitive masks credential-named fields ({ token, secret, ... })', () => {
+  const out = redactSensitive({
+    token: 'abc', secret: 'xyz', totp: '123456', otp: '000', apiKey: 'k', privateKey: 'p', backupCode: 'bc',
+    tokenVersion: 3, note: 'keep-me',
+  });
+  assert.equal(out.token, '[redacted]');
+  assert.equal(out.secret, '[redacted]');
+  assert.equal(out.totp, '[redacted]');
+  assert.equal(out.otp, '[redacted]');
+  assert.equal(out.apiKey, '[redacted]');
+  assert.equal(out.privateKey, '[redacted]');
+  assert.equal(out.backupCode, '[redacted]');
+  // Exact-key match only — these must NOT be over-redacted.
+  assert.equal(out.tokenVersion, 3, 'tokenVersion is not a credential and passes through');
+  assert.equal(out.note, 'keep-me');
 });

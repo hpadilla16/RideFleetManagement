@@ -83,7 +83,7 @@ tenantsRouter.get('/:id/admins', async (req, res, next) => {
 
 tenantsRouter.post('/:id/admins', async (req, res, next) => {
   try {
-    const user = await tenantsService.createTenantAdmin(req.params.id, req.body || {});
+    const user = await tenantsService.createTenantAdmin(req.params.id, req.body || {}, { actor: req.user });
     res.status(201).json(user);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -92,7 +92,7 @@ tenantsRouter.post('/:id/admins', async (req, res, next) => {
 
 tenantsRouter.post('/:id/admins/:userId/reset-password', async (req, res) => {
   try {
-    const out = await tenantsService.resetTenantAdminPassword(req.params.id, req.params.userId, req.body?.password || 'TempPass123!');
+    const out = await tenantsService.resetTenantAdminPassword(req.params.id, req.params.userId, req.body?.password || 'TempPass123!', { actor: req.user });
     res.json(out);
   } catch (e) {
     res.status(400).json({ error: e.message });

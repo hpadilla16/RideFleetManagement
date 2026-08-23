@@ -189,7 +189,10 @@ export const tenantsService = {
     }
   },
 
-  async createTenantAdmin(tenantId, payload = {}) {
+  // Wave 3 (2026-08-24): `actor` (the super-admin req.user from the route) is
+  // threaded through so USER_CREATE is auditable with WHO created the admin —
+  // the SUPER_ADMIN equivalent of people.service.createPerson's audit.
+  async createTenantAdmin(tenantId, payload = {}, { actor } = {}) {
     const email = String(payload.email || '').trim().toLowerCase();
     const fullName = String(payload.fullName || '').trim();
     const password = String(payload.password || 'TempPass123!');
@@ -218,6 +221,20 @@ export const tenantsService = {
       mapTenantWriteError(error, 'Unable to create tenant admin');
     }
 
+    // USER_CREATE audit (best-effort, fire-and-forget). Never records the temp
+    // password. actor = the super-admin from the route.
+    recordAudit({
+      tenantId: user?.tenantId || tenantId || null,
+      actorUserId: actor?.id ?? actor?.sub ?? null,
+      actorEmail: actor?.email ?? null,
+      actorRole: actor?.role ?? null,
+      impersonatedByUserId: actor?.imp ?? null,
+      action: AUDIT_ACTIONS.USER_CREATE,
+      targetType: 'USER',
+      targetId: user?.id || null,
+      metadata: { role: user?.role || 'ADMIN' },
+    });
+
     return { ...user, tempPassword: password };
   },
 
@@ -229,7 +246,9 @@ export const tenantsService = {
     });
   },
 
-  async resetTenantAdminPassword(tenantId, userId, password = 'TempPass123!') {
+  // Wave 3 (2026-08-24): `actor` threaded through for USER_PASSWORD_RESET audit —
+  // the SUPER_ADMIN equivalent of people.service.resetPassword's audit.
+  async resetTenantAdminPassword(tenantId, userId, password = 'TempPass123!', { actor } = {}) {
     const user = await prisma.user.findFirst({ where: { id: userId, tenantId } });
     if (!user) throw new Error('Tenant admin not found');
     const passwordHash = await bcrypt.hash(String(password), SALT_ROUNDS);
@@ -238,6 +257,20 @@ export const tenantsService = {
     // worker (siblings converge within the 30s TTL).
     await prisma.user.update({ where: { id: user.id }, data: { passwordHash, mustChangePassword: true } });
     authService.invalidateSessionCache(user.id);
+
+    // USER_PASSWORD_RESET audit (best-effort, fire-and-forget). Never records the
+    // temp password. actor = the super-admin from the route.
+    recordAudit({
+      tenantId: user.tenantId || tenantId || null,
+      actorUserId: actor?.id ?? actor?.sub ?? null,
+      actorEmail: actor?.email ?? null,
+      actorRole: actor?.role ?? null,
+      impersonatedByUserId: actor?.imp ?? null,
+      action: AUDIT_ACTIONS.USER_PASSWORD_RESET,
+      targetType: 'USER',
+      targetId: user.id,
+    });
+
     return { ok: true, userId: user.id, email: user.email, tempPassword: password };
   },
 
