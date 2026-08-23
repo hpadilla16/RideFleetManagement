@@ -437,6 +437,49 @@ async function authNetCustomerProfile(profileId, scope = {}) {
   return out?.getCustomerProfileResponse || out || {};
 }
 
+/**
+ * GDPR sub-processor erasure: delete an Authorize.Net CIM customer profile.
+ *
+ * BEST-EFFORT. Called by the customer-erasure service AFTER the DB transaction
+ * commits, so a gateway hiccup never rolls back the local erasure. Never throws:
+ * returns { ok, code, message } so the caller can log + continue. Deleting the
+ * customer profile removes its payment profiles (stored cards) upstream too.
+ *
+ * A 'E00040' (record not found) is treated as success — the profile is already
+ * gone, which is exactly the desired end state and keeps re-runs idempotent.
+ */
+export async function authNetDeleteCustomerProfile(profileId, scope = {}) {
+  const customerProfileId = String(profileId || '').trim();
+  if (!customerProfileId) return { ok: true, code: 'NOOP', message: 'no profile id' };
+  try {
+    const cfg = await authNetConfig(scope);
+    if (!cfg.loginId || !cfg.transactionKey) {
+      return { ok: false, code: 'NOT_CONFIGURED', message: 'Authorize.Net is not configured' };
+    }
+    const out = await authNetRequest({
+      deleteCustomerProfileRequest: {
+        merchantAuthentication: {
+          name: cfg.loginId,
+          transactionKey: cfg.transactionKey
+        },
+        customerProfileId
+      }
+    }, scope);
+    const resp = out?.deleteCustomerProfileResponse || out || {};
+    const resultCode = String(resp?.messages?.resultCode || '').trim();
+    if (resultCode === 'Ok') return { ok: true, code: 'DELETED', message: '' };
+    const firstMsg = Array.isArray(resp?.messages?.message)
+      ? resp.messages.message[0]
+      : resp?.messages?.message;
+    const errCode = String(firstMsg?.code || '').trim();
+    // Already-absent profile — the desired end state.
+    if (errCode === 'E00040') return { ok: true, code: 'ALREADY_ABSENT', message: authNetMessage(resp) };
+    return { ok: false, code: errCode || 'ERROR', message: authNetMessage(resp) || 'delete failed' };
+  } catch (err) {
+    return { ok: false, code: 'EXCEPTION', message: err?.message || String(err) };
+  }
+}
+
 function authNetExtractPaymentProfileId(profileResp = {}) {
   const profile = profileResp?.profile || profileResp?.customerProfile || null;
   const paymentProfiles = Array.isArray(profile?.paymentProfiles)
