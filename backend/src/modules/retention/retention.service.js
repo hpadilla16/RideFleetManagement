@@ -174,8 +174,15 @@ async function agreementIdentityCandidates(prisma, model, cutoff) {
         ],
       }
     : { piiPurgedAt: null, closedAt: { lt: cutoff } };
-  const rows = await prisma[model].findMany({ where, select: { id: true } });
-  return rows.map((r) => r.id);
+  const rows = await prisma[model].findMany({ where, select: { id: true, reservationId: true } });
+  // Freeze the identity clock while a claim is still open. The 4-year identity
+  // window IS the claims-limitations window, and disputes/subrogation/litigation
+  // routinely outlive it — stripping the renter's identity off the contract that
+  // backs an OPEN claim would destroy evidence needed to defend it. Mirrors the
+  // customer-level hasOpenClaim guard, which the record-level path was missing.
+  const reservationIds = rows.map((r) => r.reservationId).filter(Boolean);
+  const openClaims = await openClaimReservationIds(prisma, reservationIds);
+  return rows.filter((r) => !r.reservationId || !openClaims.has(r.reservationId)).map((r) => r.id);
 }
 
 async function agreementAccountingCandidates(prisma, model, cutoff) {
@@ -217,6 +224,30 @@ async function inactiveCustomerCandidates(prisma, cutoff) {
     out.push(c.id);
   }
   return out;
+}
+
+// The subset of the given reservation ids that carry an OPEN incident/damage/
+// claim. Used by the record-level identity sweep to skip agreements whose
+// dispute window is still live. Same status vocab + chunking as hasOpenClaim.
+async function openClaimReservationIds(prisma, reservationIds) {
+  const open = new Set();
+  if (!reservationIds.length) return open;
+  for (const ids of chunk(reservationIds)) {
+    const collect = (rows) => rows.forEach((r) => open.add(r.reservationId));
+    collect(await prisma.reservationIncident.findMany({
+      where: { reservationId: { in: ids }, status: { in: OPEN_RESERVATION_INCIDENT } },
+      select: { reservationId: true },
+    }));
+    collect(await prisma.tripIncident.findMany({
+      where: { reservationId: { in: ids }, status: { in: OPEN_TRIP_INCIDENT } },
+      select: { reservationId: true },
+    }));
+    collect(await prisma.vehicleDamageReport.findMany({
+      where: { reservationId: { in: ids }, status: { in: OPEN_DAMAGE_REPORT } },
+      select: { reservationId: true },
+    }));
+  }
+  return open;
 }
 
 async function hasOpenClaim(prisma, reservationIds) {

@@ -143,12 +143,16 @@ function seed() {
     reservationIncident: [
       { id: 'inc_open', reservationId: 'r_open', status: 'ISSUED' }, // OPEN → blocks c_open
       { id: 'inc_closed', reservationId: 'r_old', status: 'CLOSED' }, // terminal → does not block
+      // OPEN claim on a 5y+ agreement's reservation → must FREEZE its identity sweep.
+      { id: 'inc_ra_open', reservationId: 'res_ra_5y_oc', status: 'DISPUTED' },
     ],
     rentalAgreement: [
       raRow('ra_3y', 'RA-3Y', yAgo(3), 100),
       raRow('ra_5y', 'RA-5Y', yAgo(5), 200),
       raRow('ra_11y', 'RA-11Y', yAgo(11), 300),
       raRow('ra_recent', 'RA-REC', yAgo(1), 400),
+      // 5y+ but its reservation has an OPEN dispute → identity must be retained.
+      raRow('ra_5y_oc', 'RA-5Y-OC', yAgo(5), 250),
     ],
     agreementDriver: [
       { id: 'ad_5y', rentalAgreementId: 'ra_5y', firstName: 'Jane', lastName: 'Driver', email: 'jane@x.com', licenseNumber: 'DL9' },
@@ -303,6 +307,26 @@ describe('retention sweep — identity clock (record-level)', () => {
       assert.equal(ra.piiPurgedAt, null);
     }
     assert.equal(byId('loanerAgreement', 'la_recent').customerFirstName, 'Bob');
+  });
+
+  it('does NOT strip a 5y+ agreement whose reservation has an OPEN claim (claims window freezes the clock)', async () => {
+    const { deps, prisma } = makeDeps(seed());
+    process.env.GDPR_ERASURE_ENABLED = 'true';
+    await runSweep({ apply: true, now: NOW, deps });
+    const byId = (m, id) => prisma._store[m].find((r) => r.id === id);
+
+    // ra_5y_oc is 5 years old (past the identity clock) BUT its reservation
+    // carries a DISPUTED incident — its renter identity must be retained.
+    const oc = byId('rentalAgreement', 'ra_5y_oc');
+    assert.equal(oc.customerFirstName, 'John', 'open-claim agreement first name retained');
+    assert.equal(oc.customerEmail, 'john@x.com', 'open-claim agreement email retained');
+    assert.equal(oc.licenseNumber, 'DL123', 'open-claim agreement licence retained');
+    assert.equal(oc.dateOfBirth != null, true, 'open-claim agreement DOB retained');
+    assert.equal(oc.piiPurgedAt, null, 'open-claim agreement NOT marked purged');
+
+    // Control: the sibling 5y agreement with no open claim WAS swept.
+    assert.equal(byId('rentalAgreement', 'ra_5y').customerFirstName, REDACTION);
+    assert.ok(byId('rentalAgreement', 'ra_5y').piiPurgedAt instanceof Date);
   });
 
   it('re-run is a no-op (piiPurgedAt idempotency)', async () => {
