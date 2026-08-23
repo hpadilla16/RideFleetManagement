@@ -159,10 +159,18 @@ const corsOriginFn = (origin, cb) => {
 // because some public HTML pages (payarc-bridge / accept-hosted) legitimately
 // embed third-party content and must not get a blanket CSP. COOP/COEP/CORP are
 // deliberately omitted — COEP/CORP can break cross-origin resource loads.
-app.use((_req, res, next) => {
+app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(self)');
+  // HSTS — only when the request actually reached us over HTTPS (nginx sets
+  // X-Forwarded-Proto; `trust proxy` makes req.secure reflect it). Browsers
+  // ignore HSTS over plain HTTP anyway, but gating keeps local/dev http clean
+  // and avoids asserting HSTS on a connection that wasn't secure. 1 year +
+  // includeSubDomains; no `preload` yet (one-way commitment). Hardening 2026-08-23.
+  if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
   next();
 });
 app.use(compression({ threshold: 1024 }));

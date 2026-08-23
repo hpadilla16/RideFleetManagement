@@ -119,6 +119,14 @@ module.exports = {
         headers: [
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Permissions-Policy', value: 'geolocation=(self)' },
+          // HSTS — production only (served over HTTPS behind nginx). Browsers
+          // ignore HSTS over plain HTTP, but gating on NODE_ENV keeps local dev
+          // clean. 1 year + includeSubDomains (no `preload` yet — that is a
+          // one-way commitment and needs the apex + all subdomains on HTTPS
+          // first). Hardening 2026-08-23.
+          ...(process.env.NODE_ENV === 'production'
+            ? [{ key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' }]
+            : []),
         ],
       },
       {
