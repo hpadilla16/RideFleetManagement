@@ -72,8 +72,8 @@ in ~2–3 months.*
 | Incident-response procedure | ✅ done |
 | Sub-processor list | ✅ done |
 | Architecture / data-flow diagram | ✅ done |
-| **Risk assessment + risk register** | ▶ next |
-| Asset / data inventory | ☐ |
+| Risk assessment + risk register | ✅ done |
+| **Asset / data inventory** | ▶ next |
 | Access-control policy + periodic access-review procedure | ☐ |
 | Change-management policy | ☐ |
 | Vendor / third-party risk-management policy + register | ☐ |
