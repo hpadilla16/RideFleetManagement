@@ -24,6 +24,13 @@ const pinRateLimit = [
   attachPublicRequestMeta('auth-pin'),
   createPublicRateLimitGuard({ name: 'auth-pin', maxRequests: 5, windowMs: 60 * 1000 })
 ];
+// Logout is authenticated (requireAuth) but still throttled per-IP so a stolen
+// token can't be used to hammer tokenVersion bumps. Its own name = its own
+// bucket, never shared with the login/pin guards.
+const logoutRateLimit = [
+  attachPublicRequestMeta('auth-logout'),
+  createPublicRateLimitGuard({ name: 'auth-logout', maxRequests: 10, windowMs: 60 * 1000 })
+];
 
 const PASSWORD_MIN_LENGTH = 12;
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z0-9]).{12,}$/;
@@ -156,6 +163,30 @@ authRouter.post('/refresh', requireAuth, async (req, res, next) => {
     res.json(await authService.refreshToken(userId));
   } catch (e) {
     res.status(401).json({ error: e.message });
+  }
+});
+
+// Wave 1 (2026-08-23): human logout = server-side token revocation. logout()
+// bumps User.tokenVersion, so EVERY outstanding token for this user dies at once
+// (coarse / all-sessions, per product-owner decision) — enforced by requireAuth's
+// human tv check. CROSS-WORKER REVOCATION WINDOW: a sibling worker may keep
+// honoring the just-killed token for up to SESSION_CACHE_TTL_MS (≤30s) until its
+// cached session expires and reloads the bumped tokenVersion; this worker busts
+// its own cache immediately. Recorded in AdminAuditLog (AuditLog's required
+// reservationId FK can't hold an auth event). Best-effort audit, never blocks.
+authRouter.post('/logout', requireAuth, logoutRateLimit, async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?.sub;
+    const out = await authService.logout(userId);
+    logger.info('[auth] logout', { userId });
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.LOGOUT,
+      targetType: 'USER',
+      targetId: userId || null,
+    });
+    res.json(out);
+  } catch (e) {
+    res.status(400).json({ error: e.message || 'Unable to log out' });
   }
 });
 

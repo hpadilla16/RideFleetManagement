@@ -39,6 +39,10 @@
 
 import logger from '../lib/logger.js';
 import { withTimeout } from '../lib/with-timeout.js';
+// Redis loader + request-path op timeout are shared with the per-IP public
+// guard (public-endpoint-guards.js) via lib/redis-client.js — see that file's
+// header for why the loader was extracted rather than copied a third time.
+import { getRedis, REDIS_OP_TIMEOUT_MS } from '../lib/redis-client.js';
 // Prisma is imported lazily inside getPrisma() so this module can be unit-tested
 // without spinning up the Prisma client (which requires platform-matching
 // query-engine binaries).
@@ -55,23 +59,6 @@ const DEFAULT_TIER = 'STANDARD';
 const WINDOW_SECONDS = 60;
 const KEY_TTL_SECONDS = 65; // 60s window + 5s slack
 const TENANT_TIER_CACHE_TTL_MS = 60 * 1000; // 1 min - tier changes are rare
-const REDIS_URL = process.env.REDIS_URL || '';
-
-// Hard timeout for Redis ops on the request path. A managed-Redis maintenance/
-// failover (DigitalOcean fleet-cache-prod, 2026-06-20) left the singleton
-// ioredis client reconnecting in a loop; `incr` then HUNG rather than rejecting
-// — it only rejects on a hard error, not on a slow/flapping connection. Result:
-// every non-SUPER_ADMIN request stalled inside this middleware until the socket
-// finally gave up, i.e. a site-wide stall for regular users (super-admin is
-// bypassed above, which is why the outage looked selective). We now race every
-// Redis op against a short timeout and fail OPEN (allow the request), exactly as
-// we already do on an explicit Redis error. Tunable via env for ops.
-const REDIS_OP_TIMEOUT_MS = Number(process.env.RATE_LIMIT_REDIS_TIMEOUT_MS) || 75;
-
-
-let redisClient = null;
-let redisLoading = null;
-let redisDisabled = false;
 
 let prismaClient = null;
 async function getPrisma() {
@@ -79,43 +66,6 @@ async function getPrisma() {
   const mod = await import('../lib/prisma.js');
   prismaClient = mod.prisma;
   return prismaClient;
-}
-
-/**
- * Lazy-load ioredis. Same pattern as backend/src/lib/queue/index.js so we
- * don't pay the import cost on processes that never hit an authed route.
- *
- * Returns null on any failure - callers MUST treat null as "skip rate limit
- * check, allow the request".
- */
-async function getRedis() {
-  if (redisClient) return redisClient;
-  if (redisDisabled || !REDIS_URL) return null;
-  if (redisLoading) return redisLoading;
-  redisLoading = (async () => {
-    try {
-      const IORedis = await import('ioredis').then((m) => m.default || m);
-      const client = new IORedis(REDIS_URL, {
-        maxRetriesPerRequest: 1,    // fail fast on the request path
-        enableReadyCheck: false,
-        lazyConnect: false,
-      });
-      client.on('error', (err) => {
-        logger.warn('[tenant-rate-limit] redis connection error', { message: err.message });
-      });
-      redisClient = client;
-      return client;
-    } catch (err) {
-      logger.warn('[tenant-rate-limit] failed to load ioredis - rate limiting disabled', {
-        message: err.message,
-      });
-      redisDisabled = true;
-      return null;
-    } finally {
-      redisLoading = null;
-    }
-  })();
-  return redisLoading;
 }
 
 /**

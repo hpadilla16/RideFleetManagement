@@ -71,6 +71,28 @@ export async function requireAuth(req, res, next) {
       }
     }
 
+    // Wave 1 (2026-08-23): HUMAN token-version revocation. logout /
+    // change-password / admin 2FA-reset bump User.tokenVersion; a token minted
+    // with an older tv is dead. Mirrors the service-account tv check above, but
+    // ONLY for full human sessions — the three short-lived token classes are
+    // EXEMPT because they legitimately carry no tv and must not be judged
+    // against the user row's tokenVersion:
+    //   - payload.mfa  : pending-2FA challenge token (mid-login) — a false 401
+    //                    here would break the 2FA second leg. Boxed by the
+    //                    TWO_FACTOR_PENDING_ALLOWLIST gate below instead.
+    //   - payload.prac : Ride University practice token (4h demo session).
+    //   - role GUEST   : magic-link customer token (public-booking only).
+    // MISSING-TV-MEANS-0: a legacy human token from before this deploy has no
+    // tv claim; (payload.tv ?? 0) is then 0, which equals a fresh user's default
+    // tokenVersion of 0 — so the deploy does NOT mass-log-out existing sessions.
+    // Placed BEFORE the mustChangePassword and payload.mfa gates so the
+    // exemptions above hold and a revoked token can't slip through either gate.
+    if (!hydrated.isServiceAccount && !payload?.mfa && !payload?.prac && hydrated.role !== 'GUEST') {
+      if ((payload?.tv ?? 0) !== (hydrated.tokenVersion ?? 0)) {
+        return res.status(401).json({ error: 'Token revoked' });
+      }
+    }
+
     // First-login onboarding (2026-07-25): humans with a temp password are
     // boxed into the change-password allowlist. Service accounts are exempt
     // (no interactive login; their own default-deny allowlist governs them).
