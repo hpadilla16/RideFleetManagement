@@ -144,6 +144,42 @@ const SCALAR_REF_NAME_RE =
 const JSON_PHOTO_NAME_RE =
   /(photojson|photostoragerefs|photosjson|estimatephotojson|fixedphotojson|previousinspectionjson|nextinspectionjson)$/i;
 
+// ---------------------------------------------------------------------------
+// SECRET-COLUMN DENY-LIST — applied CENTRALLY to every serialised row (the
+// subject, every category, and the message cascade) so it can never be
+// forgotten per-model. These are usable CREDENTIALS, not DSAR-relevant personal
+// data: a live reset/access/capability TOKEN or a credential HASH dumped into
+// JSON that could be stored or forwarded would hand someone account access.
+// They are OMITTED from the output entirely.
+//
+// We KEEP the non-secret facts around them: a token's `*ExpiresAt` /
+// `*CreatedAt` timestamp stays (it discloses "a link existed" without the value
+// — and does not end in "token", so the pattern below leaves it alone), and the
+// Authorize.Net profile-id REFERENCES stay as a sub-processor disclosure (a
+// reference, not a usable secret).
+//
+//   - exact names: portalResetToken, guestAccessToken, deletionToken, token
+//                  (HandoffToken.token / ShuttleTrackerLink.token) + the
+//                  credential hashes nameUpdateCodeHash / codeHash / lockPinHash.
+//   - by pattern:  any `*Token` VALUE column (customerInfoToken,
+//                  paymentRequestToken, signatureToken, portalToken,
+//                  publicToken, …); any credential `*Hash`
+//                  (code/pin/token/secret/password/otp/backup).
+// ---------------------------------------------------------------------------
+const SECRET_COLUMN_NAMES = new Set([
+  'portalResetToken', 'guestAccessToken', 'deletionToken', 'token',
+  'nameUpdateCodeHash', 'codeHash', 'lockPinHash',
+]);
+const SECRET_TOKEN_RE = /token$/i; // a token VALUE (…Token / token) — NOT …TokenExpiresAt
+const SECRET_HASH_RE = /(code|pin|token|secret|password|otp|backup)hash$/i;
+
+export function isSecretColumn(name) {
+  if (SECRET_COLUMN_NAMES.has(name)) return true;
+  if (SECRET_TOKEN_RE.test(name)) return true;
+  if (SECRET_HASH_RE.test(name)) return true;
+  return false;
+}
+
 function heuristicBucket(column) {
   const c = String(column).toLowerCase();
   if (c.includes('bucketpath')) return INVENTORY_PHOTOS_BUCKET;
@@ -198,6 +234,8 @@ async function serializeRow(spec, row, signer, expiresIn) {
   const declared = mapDeclaredBuckets(spec);
   const out = {};
   for (const [k, v] of Object.entries(row)) {
+    // Central deny-list: usable credentials are OMITTED from every row, always.
+    if (isSecretColumn(k)) continue;
     if (v == null) { out[k] = v; continue; }
     if (JSON_PHOTO_NAME_RE.test(k)) {
       out[k] = await materializeJsonRefs(v, declared[k] || heuristicBucket(k), signer, expiresIn);

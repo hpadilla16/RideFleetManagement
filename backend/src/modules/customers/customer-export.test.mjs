@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 process.env.DATABASE_URL ||= 'postgresql://user:pass@localhost:5432/db?schema=public';
 process.env.NODE_ENV ||= 'test';
 
-const { exportCustomer, CustomerNotFoundError, EXPORT_MODEL_CATEGORY, exportUrlTtlSeconds } =
+const { exportCustomer, CustomerNotFoundError, EXPORT_MODEL_CATEGORY, exportUrlTtlSeconds, isSecretColumn } =
   await import('./customer-export.service.js');
 const { CUSTOMER_PII_MAP } = await import('./customer-pii-map.js');
 
@@ -131,11 +131,19 @@ function seedData() {
       insuranceDocumentUrl: 'https://cdn.example.com/ins.pdf',   // external URL → passthrough
       authnetCustomerProfileId: 'cust-prof-1', cardLast4: '4242', cardBrand: 'Visa',
       creditBalance: 25, doNotRent: true, doNotRentReason: 'Erased earlier: gdpr',
+      // SECRETS — must be stripped from the export.
+      portalResetToken: 'SECRETVAL-portalResetToken', portalResetExpiresAt: new Date('2027-01-01Z'),
+      guestAccessToken: 'SECRETVAL-guestAccessToken', guestAccessExpiresAt: new Date('2027-01-01Z'),
+      deletionToken: 'SECRETVAL-deletionToken', deletionTokenExpiresAt: new Date('2027-01-01Z'),
     }],
     reservation: [{
       id: 'r1', tenantId: 't1', customerId: 'c1', reservationNumber: 'RES-1',
       signatureDataUrl: 'data:image/png;base64,AAAA',           // inline signature → passthrough
       notes: 'John Doe underage', flightNumber: 'AA123',
+      // Capability tokens (values are SECRETS) — but keep their *ExpiresAt.
+      customerInfoToken: 'SECRETVAL-customerInfoToken', customerInfoTokenExpiresAt: new Date('2027-01-01Z'),
+      signatureToken: 'SECRETVAL-signatureToken', signatureTokenExpiresAt: new Date('2027-01-01Z'),
+      paymentRequestToken: 'SECRETVAL-paymentRequestToken', paymentRequestTokenExpiresAt: new Date('2027-01-01Z'),
     }],
     rentalAgreement: [{
       id: 'a1', tenantId: 't1', reservationId: 'r1', agreementNumber: 'RA-1',
@@ -186,6 +194,30 @@ function seedData() {
     citationDocument: [{
       id: 'cd1', tenantId: 't1', citationId: 'cit1',
       bucketPath: 'inventory-photos:tenants/t1/citations/cd1.pdf', ocrJson: '{"name":"John Doe"}',
+    }],
+    // ---- Rows carrying SECRET tokens/hashes that must NOT appear in the export ----
+    hostReview: [{
+      id: 'hr1', tripId: 'tr1', guestCustomerId: 'c1', rating: 5, comments: 'great guest',
+      reviewerName: 'John Doe',
+      publicToken: 'SECRETVAL-hostReviewPublicToken', publicTokenExpiresAt: new Date('2027-01-01Z'),
+    }],
+    loanerAgreement: [{
+      id: 'la1', tenantId: 't1', reservationId: 'r1', agreementNumber: 'LA-1',
+      customerFirstName: 'John', customerLastName: 'Doe',
+      signatureToken: 'SECRETVAL-loanerSignatureToken', signatureTokenExpiresAt: new Date('2027-01-01Z'),
+      portalToken: 'SECRETVAL-loanerPortalToken', portalTokenExpiresAt: new Date('2027-01-01Z'),
+    }],
+    kioskSession: [{
+      id: 'ks1', tenantId: 't1', deviceId: 'd1', reservationId: 'r1', kind: 'CHECKOUT',
+      nameUpdateCodeHash: 'SECRETVAL-nameUpdateCodeHash', outcome: 'IN_PROGRESS',
+    }],
+    handoffToken: [{
+      id: 'ho1', reservationId: 'r1', kind: 'CHECKIN',
+      token: 'SECRETVAL-handoffToken', expiresAt: new Date('2027-01-01Z'),
+    }],
+    shuttleTrackerLink: [{
+      id: 'stl1', tenantId: 't1', reservationId: 'r1',
+      token: 'SECRETVAL-shuttleTrackerToken', expiresAt: new Date('2027-01-01Z'),
     }],
     // A second tenant's customer — must be unreachable from tenant t1.
   };
@@ -318,6 +350,53 @@ describe('customer export — seeded content', () => {
     // Sub-processor disclosure surfaced (without re-fetching card data).
     assert.equal(report.subProcessors.authnet.held, true);
     assert.equal(report.subProcessors.authnet.profileId, 'cust-prof-1');
+  });
+
+  it('STRIPS live credentials/tokens/hashes — none appear anywhere in the export', async () => {
+    const { report } = await runExport();
+    const blob = JSON.stringify(report);
+
+    // (a) No seeded secret VALUE survives anywhere in the output.
+    assert.ok(!blob.includes('SECRETVAL-'), 'a secret token/hash value leaked into the export');
+
+    // (b) No secret COLUMN NAME appears anywhere in the output (recursively).
+    const SECRET_NAMES = [
+      'portalResetToken', 'guestAccessToken', 'deletionToken', 'token',
+      'customerInfoToken', 'signatureToken', 'paymentRequestToken', 'portalToken', 'publicToken',
+      'nameUpdateCodeHash', 'codeHash', 'lockPinHash',
+    ];
+    const found = [];
+    (function walk(node) {
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      if (node && typeof node === 'object') {
+        for (const [k, v] of Object.entries(node)) {
+          if (isSecretColumn(k)) found.push(k);
+          walk(v);
+        }
+      }
+    })(report);
+    assert.deepEqual([...new Set(found)], [], `secret column name(s) present in export: ${[...new Set(found)].join(', ')}`);
+    for (const name of SECRET_NAMES) {
+      assert.ok(!Object.prototype.hasOwnProperty.call(report.data.subject, name), `subject still carries ${name}`);
+    }
+
+    // (c) The NON-secret facts around the tokens are KEPT (a link existed).
+    assert.ok('portalResetExpiresAt' in report.data.subject, 'subject *ExpiresAt kept');
+    assert.ok('signatureTokenExpiresAt' in report.data.reservations[0], 'reservation token *ExpiresAt kept');
+    assert.ok('publicTokenExpiresAt' in report.data.hostReviews[0], 'hostReview token *ExpiresAt kept');
+    assert.equal(report.data.handoffTokens.length, 1, 'the handoff link row is still disclosed');
+    assert.ok('expiresAt' in report.data.handoffTokens[0], 'handoff link expiresAt kept');
+    assert.ok(!('token' in report.data.handoffTokens[0]), 'handoff token value stripped');
+    assert.ok('expiresAt' in report.data.shuttleTrackerLinks[0] && !('token' in report.data.shuttleTrackerLinks[0]));
+  });
+
+  it('isSecretColumn: token VALUES and credential hashes yes; timestamps/refs no', () => {
+    for (const yes of ['token', 'portalResetToken', 'signatureToken', 'publicToken', 'nameUpdateCodeHash', 'codeHash', 'lockPinHash']) {
+      assert.equal(isSecretColumn(yes), true, `${yes} should be secret`);
+    }
+    for (const no of ['signatureTokenExpiresAt', 'portalResetExpiresAt', 'expiresAt', 'authnetCustomerProfileId', 'reference', 'agreementNumber']) {
+      assert.equal(isSecretColumn(no), false, `${no} should NOT be secret`);
+    }
   });
 
   it('is strictly READ-ONLY: nothing mutated, no write method called', async () => {
