@@ -785,3 +785,44 @@ describe('customer erasure — config-driven retention mode', () => {
     assert.equal(fake._store.rentalAgreement[0].customerLastName, REDACTION);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Namesake / shared-phone isolation (the tightened shared resolver). Two
+// same-tenant customers share a phone but differ in name + email. Erasing A must
+// NOT scrub B's quote / loaner-request that only share the phone.
+// ---------------------------------------------------------------------------
+describe('customer erasure — namesake / shared-phone isolation', () => {
+  const SHARED = '+15550009999';
+
+  function namesakeSeed() {
+    return {
+      customer: [
+        { id: 'A', tenantId: 't1', firstName: 'John', lastName: 'Doe', email: 'john@x.com', phone: SHARED, doNotRent: false },
+        { id: 'B', tenantId: 't1', firstName: 'Jane', lastName: 'Roe', email: 'jane@x.com', phone: SHARED, doNotRent: false },
+      ],
+      quote: [
+        { id: 'qA', tenantId: 't1', quoteNumber: 'Q-A', customerId: 'A', contactName: 'John Doe', contactPhone: SHARED, contactEmail: 'john@x.com' },
+        { id: 'qB', tenantId: 't1', quoteNumber: 'Q-B', customerId: 'B', contactName: 'Jane Roe', contactPhone: SHARED, contactEmail: 'jane@x.com' },
+        { id: 'qU', tenantId: 't1', quoteNumber: 'Q-U', customerId: null, contactName: 'Jane Roe', contactPhone: SHARED, contactEmail: 'jane@x.com' },
+      ],
+      loanerRequest: [
+        { id: 'lrB', tenantId: 't1', name: 'Jane Roe', phone: SHARED, email: 'jane@x.com', notes: 'B request', status: 'RECEIVED' },
+      ],
+    };
+  }
+
+  it("erasing A leaves B's shared-phone quote + loaner-request untouched", async () => {
+    process.env.GDPR_ERASURE_ENABLED = 'true';
+    const fake = makeFake(namesakeSeed());
+    await eraseCustomer('A', { actor: 'admin', reason: 'gdpr', dryRun: false, scope: { tenantId: 't1' } }, makeDeps(fake, [], []));
+
+    const byId = (m, id) => fake._store[m].find((r) => r.id === id);
+    // A WAS processed — its own linked quote is scrubbed.
+    assert.equal(byId('quote', 'qA').contactName, null, "A's own quote should be scrubbed");
+    // B's rows survive intact — the shared phone must not reach them.
+    assert.equal(byId('quote', 'qB').contactName, 'Jane Roe', "B's linked quote was wrongly scrubbed");
+    assert.equal(byId('quote', 'qU').contactName, 'Jane Roe', "an unlinked namesake quote was wrongly scrubbed");
+    assert.equal(byId('quote', 'qU').contactEmail, 'jane@x.com');
+    assert.equal(byId('loanerRequest', 'lrB').name, 'Jane Roe', "B's loaner request was wrongly scrubbed");
+  });
+});

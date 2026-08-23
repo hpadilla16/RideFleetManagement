@@ -39,6 +39,9 @@ customerExportRouter.get('/:id/export', async (req, res) => {
       scope: scopeFor(req),
     });
 
+    // Full-PII payload: never let a browser or intermediary cache it.
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Pragma', 'no-cache');
     // Downloadable snapshot; the filename carries only the opaque id (not PII).
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="customer-${customerId}-export.json"`);
