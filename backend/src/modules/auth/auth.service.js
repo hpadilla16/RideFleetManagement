@@ -24,12 +24,30 @@ const LOCK_PIN_SALT_ROUNDS = 10;
 
 function signToken(user, options = {}) {
   const claims = { sub: user.id, email: user.email, role: user.role, tenantId: user.tenantId || null };
-  // VozIA Fase 3 (2026-07-03): service accounts carry svc + tv (tokenVersion)
-  // claims so requireAuth can enforce the allowlist + one-shot revocation.
-  // Only added for service accounts — human JWTs stay byte-compatible.
+  // Wave 1 (2026-08-23): the `tv` (tokenVersion) claim now rides on EVERY token
+  // minted here — humans as well as service accounts — so requireAuth can revoke
+  // a human's outstanding sessions by bumping User.tokenVersion (logout, admin
+  // 2FA reset, password change). This carries every human mint path: login,
+  // register, refresh, verifyLogin, changePassword, and impersonation (all route
+  // through signToken on a real User row that includes tokenVersion). The three
+  // SHORT-LIVED token classes that requireAuth exempts — pending-2FA, practice,
+  // guest — are minted by their own jwt.sign() helpers, NOT here, so they never
+  // carry `tv` and are never judged against the user row. A legacy human token
+  // minted before this deploy has no tv; requireAuth reads that as tv=0 (the
+  // default column), so the deploy itself logs nobody out.
+  claims.tv = user.tokenVersion ?? 0;
+  // VozIA Fase 3 (2026-07-03): service accounts additionally carry svc so
+  // requireAuth can enforce the default-deny allowlist. (tv is set above.)
   if (user.isServiceAccount) {
     claims.svc = true;
-    claims.tv = user.tokenVersion ?? 0;
+  }
+  // Wave 3 (2026-08-24): impersonation traceability. `imp` names the super-admin
+  // operating behind an impersonated session; middleware/auth.js surfaces it on
+  // req.user.imp so every audited action carries WHO is really acting. CONDITIONAL,
+  // exactly like svc/tv/mfa/prac — absent for a normal login, so a
+  // non-impersonation token stays BYTE-IDENTICAL to before this change.
+  if (options.impersonatedBy) {
+    claims.imp = options.impersonatedBy;
   }
   return jwt.sign(claims, getJwtSecret(), { expiresIn: options.expiresIn || getJwtExpiresIn() });
 }
@@ -192,6 +210,15 @@ export const authService = {
     return signToken(user);
   },
 
+  // Wave 3 (2026-08-24): mint a session token for `user` that CARRIES the
+  // impersonation marker — the super-admin id in `impersonatedBy` lands in the
+  // token's conditional `imp` claim. Kept separate from issueTokenForUser so a
+  // normal login path can never accidentally stamp `imp`, and so the normal
+  // token stays byte-compatible. `impersonatedBy` falsy ⇒ a plain token.
+  issueImpersonationToken(user, { impersonatedBy } = {}) {
+    return signToken(user, { impersonatedBy });
+  },
+
   issueGuestToken(customer) {
     return signGuestToken(customer);
   },
@@ -281,6 +308,28 @@ export const authService = {
     });
     cache.del(globalKey('session', user.id));
     return { ok: true, userId: user.id, tokenVersion: updated.tokenVersion };
+  },
+
+  // Wave 1 (2026-08-23): HUMAN logout = token revocation. Bumping
+  // User.tokenVersion invalidates EVERY outstanding token for this human at
+  // once (COARSE / invalidate-all-sessions, per product-owner decision) —
+  // requireAuth's human tv check then 401s any token minted with the old tv.
+  // Mirrors revokeServiceTokens (the same bump-and-bust for service accounts).
+  // The actor is the already-authenticated caller themselves, so unlike the
+  // service-account path there is nothing to re-validate. Cross-worker
+  // convergence is bounded by SESSION_CACHE_TTL_MS (≤30s): this worker clears
+  // the session cache now; a sibling may serve the cached session until its 30s
+  // TTL lapses, at which point the reloaded tokenVersion rejects the old token.
+  async logout(userId, deps = {}) {
+    const db = deps.prisma || prisma;
+    const id = String(userId || '');
+    if (!id) throw new Error('Missing userId');
+    await db.user.update({
+      where: { id },
+      data: { tokenVersion: { increment: 1 } }
+    });
+    cache.del(globalKey('session', id));
+    return { ok: true };
   },
 
   async refreshToken(userId) {
@@ -416,6 +465,15 @@ export const authService = {
     });
     if (!target) throw new Error('User not found');
     const out = await twoFactorService.disableFor(target.id);
+    // Wave 1 (2026-08-23): an admin 2FA reset must also KILL the target's live
+    // sessions — bump tokenVersion so any token they still hold is revoked by
+    // requireAuth's human tv check. Otherwise a walked-away/compromised session
+    // survives the very reset meant to re-secure the account. Paired with the
+    // existing cache bust so the cleared 2FA status + new tv hydrate together.
+    await prisma.user.update({
+      where: { id: target.id },
+      data: { tokenVersion: { increment: 1 } }
+    });
     cache.del(globalKey('session', target.id));
     return out;
   },
@@ -447,7 +505,15 @@ export const authService = {
       data: {
         passwordHash,
         mustChangePassword: false,
-        passwordChangedAt: new Date()
+        passwordChangedAt: new Date(),
+        // Wave 1 (2026-08-23): a password change revokes OTHER sessions. Bumping
+        // tokenVersion invalidates every token minted before this point; because
+        // update() RETURNS the incremented row and we re-sign below from
+        // `updated`, THIS session's fresh token carries the new tv and survives,
+        // while every other device holding the old tv is logged out on its next
+        // request. Standard "changing your password signs out your other
+        // sessions" behavior.
+        tokenVersion: { increment: 1 }
       },
       include: { hostProfile: { select: { id: true } } }
     });

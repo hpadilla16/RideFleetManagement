@@ -2153,6 +2153,64 @@ model AuditLog {
   @@index([action, createdAt])
 }
 
+/// Administrative / security audit trail (Wave 3, 2026-08-24).
+///
+/// WHY A NEW TABLE (not AuditLog): `AuditLog.reservationId` is a REQUIRED
+/// String with a required `reservation` relation — it is reservation-scoped by
+/// construction. The events recorded here (logins, password changes, 2FA
+/// mutations, role changes, DSAR export/erase, sensitive-record reads,
+/// impersonation) have NO reservation to attach to. Routing them into AuditLog
+/// is impossible, not merely awkward: every insert would throw
+/// PrismaClientValidationError into recordAudit's best-effort catch and produce
+/// zero rows — the same trap ModuleAccessAuditLog documents. This table is
+/// modelled on FeeRateAuditLog / ModuleAccessAuditLog (standalone, PII-light).
+///
+/// SURVIVES ERASURE: `actorUserId` / `tenantId` are PLAIN STRINGS with NO
+/// foreign key. An audit row must outlive the tenant or user it describes — a
+/// GDPR erasure or tenant teardown must NOT cascade away the record that the
+/// erasure happened. (Contrast AuditLog, whose actorUser/tenant FKs would.)
+///
+/// `action` is a String, NOT a Prisma enum: new event types must not require a
+/// schema migration. The known values live in AUDIT_ACTIONS (audit.service.js).
+///
+/// RETENTION: rows are aged out by the Wave 2 retention sweep at ~24 months
+/// (RETENTION_AUDIT_MONTHS, counsel-confirmable). That sweep is NOT wired here —
+/// it lives on the unmerged Wave 2 branch; deferring avoids a cross-branch
+/// dependency. See migration 20260824_admin_audit_log for the documented intent.
+model AdminAuditLog {
+  id                   String   @id @default(cuid())
+  at                   DateTime @default(now())
+
+  // Tenant context, PLAIN STRING (no FK) so the row survives tenant deletion.
+  tenantId             String?
+
+  // Actor identity captured at write time. actorUserId is a plain string (no FK)
+  // so the row survives the actor's erasure; email/role are snapshotted because
+  // a join target may no longer exist when the trail is read.
+  actorUserId          String?
+  actorEmail           String?
+  actorRole            String?
+
+  // Set ONLY when the actor is operating under an impersonation token — the
+  // super-admin behind the impersonated session (req.user.imp). Indexed so
+  // "everything done while impersonating" is answerable.
+  impersonatedByUserId String?
+
+  action               String
+  targetType           String?
+  targetId             String?
+
+  ip                   String?
+  userAgent            String?
+  metadata             Json?
+  outcome              String   @default("SUCCESS")
+
+  @@index([tenantId, at])
+  @@index([actorUserId, at])
+  @@index([action, at])
+  @@index([impersonatedByUserId, at])
+}
+
 model RentalAgreement {
   id              String                @id @default(cuid())
   tenantId        String?
@@ -2271,6 +2329,12 @@ model RentalAgreement {
   locked           Boolean   @default(false)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  // GDPR Wave 2 Phase C — retention-sweep idempotency marker. Stamped when the
+  // automatic sweep has stripped the IDENTITY snapshot on THIS record (past the
+  // identity/claims clock). NULL = never swept; a set value makes re-runs skip
+  // it. Distinct from customer-level erasure; accounting-residual removal (the
+  // accounting clock) is tracked separately via agreementNumber anonymisation.
+  piiPurgedAt      DateTime?
 
   drivers          AgreementDriver[]
   charges          RentalAgreementCharge[]
@@ -4450,6 +4514,26 @@ model ModuleAccessAuditLog {
   @@index([changedAt])
 }
 
+// GDPR Wave 2 Phase C — automatic retention-sweep run history.
+// One row per sweep tick. AuditLog cannot hold this (its reservationId is a
+// required non-null FK, and a sweep spans many/zero reservations), so run
+// history gets its own table. `perCategoryCounts` is the per-category
+// {total, processed, aborted} breakdown; `aborted` is true when ANY category
+// tripped the safety threshold. `mode` is PREVIEW (logs only, mutates nothing)
+// or APPLY (purged).
+model RetentionSweepRun {
+  id                String    @id @default(cuid())
+  startedAt         DateTime  @default(now())
+  finishedAt        DateTime?
+  mode              String // 'PREVIEW' | 'APPLY'
+  perCategoryCounts Json
+  aborted           Boolean   @default(false)
+  notes             String?
+  createdAt         DateTime  @default(now())
+
+  @@index([startedAt])
+}
+
 // PR-5 — Endpoint-level performance telemetry (PERF pillar).
 // Distinct from `LoadObservation` (business volume): this table captures raw
 // per-request samples (HTTP method, normalized route, status, duration, db
@@ -5503,6 +5587,10 @@ model LoanerAgreement {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  // GDPR Wave 2 Phase C — retention-sweep idempotency marker (see the same
+  // field on RentalAgreement). Loaner records anchor the identity clock on
+  // closedAt (they have no separate returnedAt).
+  piiPurgedAt DateTime?
 
   photos       LoanerPhoto[]
   damagePoints LoanerDamagePoint[]
