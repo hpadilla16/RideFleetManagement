@@ -441,6 +441,13 @@ test('the set of files naming declinedInsurance is a ratchet', () => {
     'src/modules/kiosk/kiosk-checkout.test.mjs',
     'src/modules/kiosk/kiosk-staff-assist.test.mjs',
     'src/modules/reservations/declined-insurance-getbyid.embedded.test.mjs',
+    // GDPR erasure (Wave 2). Neither touches the declinedInsurance BOOLEAN the
+    // gate protects — they name only `declinedInsuranceSignatureDataUrl`, the
+    // declined-insurance signature IMAGE, which erasure nulls as PII. The
+    // ratchet matches the substring, so they are listed here; no gate applies
+    // (destroying a signature image is not editing the insurance selection).
+    'src/modules/customers/customer-pii-map.js',
+    'src/modules/customers/customer-erasure.test.mjs',
   ]);
 
   const found = [];
