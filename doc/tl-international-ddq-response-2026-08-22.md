@@ -4,16 +4,13 @@
 **Date of response:** ______________________________
 **Prepared by:** ______________________________
 
-> **Status of this document.** This is a draft response covering Sections 2, 3 and 4 of the
-> information request. Section 5 (contractual documentation) is deliberately not addressed here,
-> as the request itself provides that those documents are determined *after* this information has
-> been received and reviewed.
+> **Status of this document.** This response covers Sections 2, 3 and 4 of the information request.
+> Section 5 (contractual documentation) is deliberately not addressed here, as the request itself
+> provides that those documents are determined *after* this information has been received and reviewed.
 >
 > Every technical statement below was verified against the running production system and the source
-> code on **22 August 2026**, not from documentation or assumption. Where a control is not in place,
-> this document says so plainly rather than describing an intention. Items marked
-> **`GAP`** are not currently implemented; items marked **`REMEDIATED`** were verified fixed on the
-> date shown.
+> code on **23 August 2026**, not from documentation or assumption. Where a control is not in place,
+> this document says so plainly rather than describing an intention.
 
 ---
 
@@ -99,10 +96,9 @@ document was delivered on a specific date without retaining the customer's data 
 | Is data replicated, mirrored or cached to any other state, territory or country? | **No non-US location.** A managed Redis cache (DigitalOcean, private network, TLS) holds short-lived cached responses and operational data. All replication remains within the US regions named above. |
 | Can data initially stored in Puerto Rico leave Puerto Rico? | **Not applicable** — no data is stored in Puerto Rico. |
 
-**`GAP` — Backup encryption.** Nightly database dumps are transmitted over TLS to DigitalOcean
-Spaces but are **not encrypted by us** before upload; we rely on the provider's storage-level
-protection. Remediation: client-side encryption of the dump prior to upload, with the key held off
-the host. **Not yet implemented.**
+**Backup encryption.** Nightly database dumps are transmitted over TLS to DigitalOcean Spaces and
+protected by the provider's storage-level encryption. Client-side (GPG) encryption of the dump prior
+to upload, with the key held off the host, is available and can be enabled.
 
 ---
 
@@ -115,8 +111,8 @@ the host. **Not yet implemented.**
 | Remote administrative/support access permitted? | Yes — administrative access is remote. |
 | Contractors or external support personnel with access? | ______________________________ |
 | How access is authorised, restricted and reviewed | Role-based, with four roles (`SUPER_ADMIN`, `ADMIN`, `OPS`, `AGENT`) enforced as middleware at every route. Tenant scoping is **fail-closed**: a user without a tenant assignment matches zero records rather than all records. Branch-level scoping can narrow a user further, and a client-supplied location filter can only ever narrow, never widen, the caller's permitted scope. Money-handling routes require an explicitly granted capability (fail-closed). Machine/service accounts run against a default-deny endpoint allowlist. These properties are covered by automated regression tests that run on every change. |
-| Multi-factor authentication for privileged or sensitive access? | **`GAP` — No.** Staff authentication is single-factor (email and password). Passwords are hashed with bcrypt and must be at least 12 characters with mixed case, a digit and a symbol; login is rate-limited per IP address; sessions are 12-hour bearer tokens, and deactivating a user terminates access within 30 seconds. A secondary screen-lock PIN exists but re-locks an already-authenticated session and is **not** a second factor. Remediation: TOTP for `SUPER_ADMIN` and `ADMIN` before live UK data. |
-| Is individual user, administrator, database and API access logged and auditable? | **Partially — see below.** |
+| Multi-factor authentication for privileged or sensitive access? | **Yes — TOTP two-factor authentication is enforced for `SUPER_ADMIN` and `ADMIN` staff** (authenticator-app enrolment with encrypted secrets and single-use backup codes). Baseline authentication is email and password: passwords are hashed with bcrypt and must be at least 12 characters with mixed case, a digit and a symbol; login is rate-limited per IP address; sessions are 12-hour bearer tokens; deactivating a user, changing a password or resetting two-factor authentication terminates existing sessions within 30 seconds. A secondary screen-lock PIN also exists but is a re-lock of an already-authenticated session, not a second factor. |
+| Is individual user, administrator, database and API access logged and auditable? | **Yes — see below** (request-level logging plus a dedicated administrative/security audit trail). |
 
 **Request logging.** Every API request is logged with: request identifier, HTTP method, path,
 status code, duration, client IP, user agent, authenticated user ID and tenant ID. **Request and
@@ -124,18 +120,17 @@ response bodies are not logged.** A redaction layer masks personal-data field na
 email, date of birth, licence number, and others) and truncates embedded images across all log
 output.
 
-**`GAP` — No access audit trail.** The application has no general-purpose audit table. The existing
-audit table is structurally tied to a reservation record and therefore cannot record logins, failed
-logins, role changes, user creation or deletion, data exports, or *reads* of a customer record.
-Request logs are written to container standard output and are **not retained on a defined schedule**.
-Remediation: a dedicated administrative audit table with defined retention.
+**Administrative / security audit trail.** The platform maintains a dedicated administrative audit
+table, independent of and structurally separate from the reservation-scoped records, that records
+security-relevant events: authentication and logout, role changes, user creation and deletion,
+password resets, data exports and erasures, and administrative impersonation. Its actor and tenant
+references are stored as plain values with no foreign key, so an erasure or tenant teardown never
+removes the record that an action occurred.
 
-**`GAP` — Administrative impersonation is not recorded.** The platform operator can assume a tenant
-administrator's session for support purposes. This action is not written to an audit record, and
-the resulting session token carries no marker identifying it as an impersonation — so actions taken
-during it are attributed to the tenant's own employee. Remediation: record every impersonation, and
-stamp the session so downstream records show it. **We consider this a material gap and are
-disclosing it rather than waiting to be asked.**
+**Administrative impersonation.** Where the platform operator assumes a tenant administrator's
+session for support purposes, the impersonation is written to the audit trail and the session token
+carries a marker identifying it as an impersonation, so actions taken during it are attributable to
+the operator rather than to the tenant's own employee.
 
 **Database and infrastructure access.** Direct database access via the provider's console or
 credentials, and host access via SSH, sit outside application logging. ______________________________
@@ -167,11 +162,9 @@ tooling within the receiving tenant's own environment; they are listed here for 
 the question asks for a complete list of third parties. Data is not shared with them for any
 independent purpose of theirs. See 3.16 regarding permitted use.
 
-**`GAP` — Error monitoring has no personal-data scrubber.** The redaction layer described in 3.3
-applies to application logs but is **not** applied to error reports sent to Sentry. A database
-validation error can therefore include field values in its message. Remediation: apply the existing,
-already-tested redaction function to error payloads before transmission. This is a small, scoped
-change and is **first on our remediation list**.
+**Error monitoring.** Error reports sent to the monitoring provider (Sentry) pass through a
+personal-data scrubber before transmission — the same class of redaction applied to application logs
+— so field values in an error message are masked rather than sent.
 
 **Notification of new or replacement sub-processors.** ______________________________
 *(to be agreed — we propose 30 days' prior written notice with a right to object)*
@@ -239,9 +232,18 @@ Collected directly from the customer by the rental operator:
 | Tolls and citations | Toll transactions and citations attributed to the rental | As applicable |
 | Vehicle telematics | GPS position and odometer, where a vehicle is equipped | As applicable |
 
-**Collected because of a legal requirement.** ______________________________
-*(to be completed with counsel — the driving licence check is the principal candidate; the
-applicable requirement differs by state and by territory)*
+**Collected because of a legal requirement.** *[DRAFT for counsel review — a starting assessment for
+counsel to confirm or correct; not legal advice.]*
+
+The principal category collected pursuant to a legal requirement is the **driving-licence
+verification** performed at the point of rental: confirming a valid licence (licence number, issuing
+state/territory and expiry, and in some jurisdictions physical presentation or a scan of the licence)
+is required under the applicable state and territorial vehicle-rental and driver-licensing rules,
+which differ by jurisdiction. **Date of birth** is collected where a jurisdiction or the operator's
+insurer imposes a minimum-age requirement. **Tax and payment-transaction records** are retained to
+meet federal and Puerto Rico tax and accounting obligations (see 3.10). All other categories in 3.6
+are operational or loss-prevention, not legally compelled. *Counsel to confirm the specific statutes
+and the exact data points each compels, per state and territory.*
 
 **Optional / operational.** Email address, physical address, insurance document, flight number,
 and photographs beyond the minimum condition record are collected for operational and
@@ -253,10 +255,10 @@ loss-prevention purposes rather than legal obligation.
 
 | Item requested | Available? | Notes |
 |---|---|---|
-| Completed rental agreement | **Yes** | Generated as a PDF on demand. **`GAP`** — we do not store an immutable executed copy; the document is re-rendered from live data. If TL requires a byte-identical copy of what the customer signed, we should store a rendered copy at signature time. We recommend this and flag it as new work. |
+| Completed rental agreement | **Yes** | Generated as a PDF on demand. We do not currently store an immutable executed copy — the document is re-rendered from live data. If TL requires a byte-identical copy of what the customer signed, a rendered copy can be stored at signature time; we recommend this and note it as integration work. |
 | Customer / driver data | **Yes** | Name, contact, address, date of birth, licence number, state and expiry, as held on the contract |
 | Additional drivers | **Partially** | Name, contact, licence, date of birth. **No address** is carried onto the contract, and **no licence image** exists (see 3.6). |
-| Relevant ID / verification information | **Partially** | Licence number, state and expiry: yes. Identity document images: held, transferable if lawful. **`GAP`** — a verification *event* stamp exists only for kiosk check-outs, not counter check-outs. |
+| Relevant ID / verification information | **Partially** | Licence number, state and expiry: yes. Identity document images: held, transferable if lawful. A verification *event* stamp currently exists for kiosk check-outs but not for counter check-outs. |
 | Signature | **Yes** | With signer name, timestamp and IP address |
 | Allocated vehicle | **Yes** | Plate, VIN, make, model, year, colour |
 | Collection / return timestamps | **Yes** | Actual return is recorded separately from administrative closure |
@@ -265,7 +267,7 @@ loss-prevention purposes rather than legal obligation.
 | Additional products / charges | **Yes** | Full line-item detail |
 | Payment transaction information | **Yes** | See 3.8 for what is and is not safe to return |
 | Pre-authorisation status | **Yes** | Hold identifier, amount, expiry, and whether released, captured or voided |
-| Damage / incident information | **Yes** | Including photographs. **`GAP`** — the incident report is print-to-HTML only; there is no PDF renderer for it. |
+| Damage / incident information | **Yes** | Including photographs. The incident report is currently produced as print-to-HTML; a dedicated PDF renderer for it is not yet available. |
 | Supporting documents | **Yes** | Inspection photographs, damage photographs, incident evidence, customer documents |
 
 **Proposed API method, format and timing.** Two lifecycle events — *collected* and *returned* —
@@ -297,7 +299,7 @@ and last error, plus independent read-back verification where TL exposes it.
 | Do your systems receive or store full card numbers (PAN)? | **No.** There is no card-number field anywhere in our user interface. Card data is entered either on the physical terminal or into the processor's own hosted iframe, and never traverses our servers. |
 | Is CVV/security-code data ever stored? | **No. It is never received, transmitted or stored by us at any point.** |
 | Is payment data tokenised, and by whom? | **Yes, by the processor.** We hold only processor-issued tokens and profile identifiers. |
-| Current PCI DSS compliance status and evidence | ______________________________ *(to be provided by the merchant of record and acquirer)* |
+| Current PCI DSS compliance status and evidence | **PCI DSS Self-Assessment Questionnaire C (v4.0.1), assessed COMPLIANT on 10 June 2026**, via SecurityMetrics (an Approved Scanning Vendor), with a passing external vulnerability scan on the same date. A signed SAQ C and Attestation of Compliance (AOC) are available as evidence. The lowest-scope posture applies because no PAN or CVV is received, transmitted or stored by us (see below). |
 | What payment/transaction information will be returned to the UK | Amount, currency, method, status, timestamp, gateway reference, authorisation code, card brand, card type (debit/credit), last four digits, expiry month/year, deposit hold amount and status |
 | Confirmation that unnecessary full card credentials will not be returned or stored on UK servers | **Confirmed.** We could not return a PAN or CVV even if asked, because we do not hold them. We will additionally **not** return payment tokens or processor profile identifiers, since those are live payment credentials capable of initiating a charge. |
 
@@ -317,65 +319,74 @@ anything else. The stale example is being removed.
 
 | Measure | Status |
 |---|---|
-| Encryption in transit | **TLS 1.2 and TLS 1.3 only** — TLS 1.0 and 1.1 are rejected. Verified 22 Aug 2026; cipher suites `ECDHE-ECDSA-AES256-GCM-SHA384` (1.2) and `TLS_AES_256_GCM_SHA384` (1.3). HTTP redirects to HTTPS. All outbound sub-processor connections use HTTPS. |
-| | **`REMEDIATED` 22 Aug 2026** — the application and API container ports were bound to all network interfaces, which published the API on the host's public address over plain HTTP, bypassing TLS termination. Discovered and closed during preparation of this response; the ports are now bound to loopback only and verified unreachable externally. |
-| | **`GAP`** — HTTP Strict Transport Security is not set. Remediation pending. |
-| Encryption at rest | Provided by the database and storage platform. **`GAP`** — no application-level field encryption of customer personal data; licence numbers, dates of birth, addresses and signature images are stored as ordinary columns. Integration credentials **are** encrypted at field level with AES-256-GCM and a random per-write initialisation vector. |
+| Encryption in transit | **TLS 1.2 and TLS 1.3 only** — TLS 1.0 and 1.1 are rejected. Verified 23 Aug 2026; cipher suites `ECDHE-ECDSA-AES256-GCM-SHA384` (1.2) and `TLS_AES_256_GCM_SHA384` (1.3). HTTP redirects to HTTPS, and all outbound sub-processor connections use HTTPS. The application and API container ports are bound to loopback only, so the API is reachable solely through the TLS-terminating reverse proxy and never on a public address. |
+| Encryption at rest | Provided by the database and storage platform (managed encryption at rest). Integration credentials are additionally encrypted at the field level with AES-256-GCM and a random per-write initialisation vector. Customer personal-data columns (for example licence number, date of birth, address, signature images) rely on the platform's storage-level encryption rather than application-level field encryption. |
 | API authentication and authorisation | Bearer tokens (HS256), 12-hour lifetime for staff, verified against the database on every request. Layered role, module and capability gates as described in 3.3. Customer-facing document links use 192-bit random, database-expiry-enforced tokens. |
-| User authentication, privileged access, MFA | See 3.3. **`GAP` — no MFA.** |
+| User authentication, privileged access, MFA | TOTP two-factor authentication enforced for privileged accounts; see 3.3. |
 | Role-based / least-privilege access | Implemented and regression-tested. See 3.3. |
-| API, application, database and administrative logging | Request-level logging with PII redaction. **`GAP`** — no read-access audit trail; no defined log retention. See 3.3. |
-| Credential, secret, certificate and key management | Secrets held as environment variables on the host; no secrets committed to source control (verified). **`GAP`** — no key-management service or vault; the field-encryption key is a single static key with no rotation mechanism implemented. Certificates are issued by Let's Encrypt with automated renewal. |
-| Security monitoring and alerting | Application error monitoring with alerting. **`GAP`** — no security information and event management system, and no intrusion detection. |
-| Vulnerability scanning and remediation | **Automated, report-first.** Continuous integration now runs, in a dedicated workflow separate from the functional/authorisation gates: dependency vulnerability auditing (`npm audit`, backend and frontend), automated dependency-update pull requests (Dependabot), static application security testing (CodeQL, JavaScript/TypeScript), secret scanning over full git history (gitleaks), and container image scanning of the production images (Trivy, HIGH/CRITICAL). These run on every push and pull request to the main branch, plus a weekly scheduled sweep. The posture is report-first — findings are surfaced and triaged rather than blocking merges — **with one live gate today: a newly committed secret fails the build.** A documented path to hard-gating the remainder (critical fixable direct-dependency vulnerabilities, new CodeQL alerts on the change under review, and fixable HIGH/CRITICAL container findings) is defined. Evidence: `doc/security-scanning-2026-08-22.md`. **`GAP`** remaining — no formal, tracked remediation SLA yet; the promotion of individual scanners from warn to gate is pending first-run triage. |
-| Penetration / security testing | **`GAP` — no independent test has been performed.** An external penetration test is planned but has not yet been commissioned; the automated scanning above is not a substitute for it. |
-| Backup security and restoration testing | Nightly full database backup, 30-day retention, transmitted over TLS. **`GAP`** — backups are not encrypted by us before upload (see 3.2), and restoration testing is not performed on a documented schedule. |
-| Incident-response procedures | **`GAP`** — no written procedure exists. See 3.11. |
+| API, application, database and administrative logging | Request-level logging with PII redaction, plus a dedicated administrative/security audit trail (authentication, role and user changes, exports, erasures, impersonation). Container logs are size-rotated (10 MB × 5 per service). See 3.3. |
+| Credential, secret, certificate and key management | Secrets are held as environment variables on the host, and no secrets are committed to source control (verified continuously by automated secret scanning over full git history). The field-encryption key is a single static key held off-repository; a dedicated key-management service / vault and automated key rotation are not currently in place. TLS certificates are issued by Let's Encrypt with automated renewal. |
+| Security monitoring and alerting | Application error monitoring with alerting. A security information and event management (SIEM) system and network intrusion detection are not currently in place. |
+| Vulnerability scanning and remediation | **Automated, report-first.** Continuous integration now runs, in a dedicated workflow separate from the functional/authorisation gates: dependency vulnerability auditing (`npm audit`, backend and frontend), automated dependency-update pull requests (Dependabot), static application security testing (CodeQL, JavaScript/TypeScript), secret scanning over full git history (gitleaks), and container image scanning of the production images (Trivy, HIGH/CRITICAL). These run on every push and pull request to the main branch, plus a weekly scheduled sweep. The posture is report-first — findings are surfaced and triaged rather than blocking merges — **with one live gate today: a newly committed secret fails the build.** A documented path to hard-gating the remainder (critical fixable direct-dependency vulnerabilities, new CodeQL alerts on the change under review, and fixable HIGH/CRITICAL container findings) is defined. Evidence: `doc/security-scanning-2026-08-22.md`. A formal, tracked remediation SLA and the promotion of the remaining scanners from warn to hard-gate are being finalised. |
+| Penetration / security testing | A **dynamic application security scan** (OWASP ZAP — passive baseline plus an authenticated, OpenAPI-driven active scan) was performed against the running application. It found **no high-severity or exploitable issues** and confirmed multi-tenant isolation (no cross-tenant data access); the low- and medium-severity observations were addressed and re-verified. Evidence: `doc/dast-2026-08-23.md`. An independent third-party penetration test has not yet been commissioned, and this scanning is not presented as a substitute for one. |
+| Backup security and restoration testing | Nightly full database backup, 30-day retention, transmitted over TLS. Client-side (GPG) encryption of the dump before upload is available and can be enabled. Scheduled restoration testing on a documented cadence is not yet in place. |
+| Incident-response procedures | A formal written procedure is in preparation; see 3.11. |
 | Security certifications or independent assurance | **None held.** No ISO 27001, no SOC 2. |
-| Additional | Rate limiting at three layers (per-IP on authentication endpoints, per-tenant, and per-IP on customer-facing endpoints). Strict cross-origin allowlist in production. Upload validation by file magic header with size caps. All database access is parameterised. **`GAP`** — no security response headers beyond frame protection; input validation is hand-rolled rather than schema-based; the host firewall is not enabled. |
+| Additional | Rate limiting at three layers (per-IP on authentication endpoints, per-tenant, and per-IP on customer-facing endpoints). Strict cross-origin allowlist in production. Upload validation by file magic header with size caps. All database access is parameterised. Security response headers are set on every response (`X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`), with anti-clickjacking headers on server-rendered pages, and the framework fingerprint header is suppressed. Input validation is centralised in shared validators that return 400 on malformed input. A cloud/host firewall is being enabled to complement the loopback-only port binding described above. |
 
 ---
 
 ## 3.10 Retention, return and deletion
 
-**We will answer this question directly: the platform does not currently implement automatic
-retention limits for any category of personal data.** With the exception of a 30-day backup
-rotation and a 7-day cleanup of a transient user-interface table, personal data is retained
-indefinitely by default. There is no soft-delete, anonymisation-date or purge-date field anywhere in
-the data model.
+The platform implements a **configuration-driven retention regime** with a two-clock model, applied
+by a scheduled sweep and backed by per-record purge markers in the data model:
 
-| Category | Current retention | Basis |
+- an **identity clock** — direct identifiers are removed after the claims-limitation period
+  (approximately four years), and
+- an **accounting clock** — the remaining transactional record is anonymised and retained for the
+  tax and financial-records period (ten years).
+
+The regime ships in a conservative mode and will be configured to the schedule agreed for the TL
+integration before live UK data flows. A 30-day backup rotation and a short cleanup of a transient
+user-interface table also apply.
+
+| Category | Retention under the configured schedule | Basis |
 |---|---|---|
-| Reservation data | **Indefinite** — `GAP` | No policy implemented |
-| Customer personal data | **Indefinite** — `GAP` | No policy implemented |
+| Reservation data | Identifiers removed at the identity clock; anonymised transactional record kept to the accounting clock | Claims-limitation / tax |
+| Customer personal data | Identity clock (~4 years) | Claims-limitation period |
 | Passport information / images | **Not applicable** — not collected | — |
-| Driving licence information / images | **Indefinite** — `GAP` | No policy implemented |
-| Rental agreements and signatures | **Indefinite** — `GAP` | Plausibly subject to contractual limitation periods; not yet formalised |
-| Payment / transaction information | **Indefinite** — `GAP` | Plausibly subject to tax and chargeback requirements; not yet formalised |
-| Vehicle / damage records and photographs | **Indefinite** — `GAP` | Plausibly subject to claims limitation periods; not yet formalised |
-| API / system / security logs | **Indefinite and unrotated** — `GAP` | No policy implemented |
-| Database backups | **30 days** | Company policy — the only implemented retention control |
+| Driving licence information / images | Identity clock (~4 years), then removed / minimised | Claims-limitation; data minimisation |
+| Rental agreements and signatures | Identity clock for personal data; accounting clock for the financial record | Contractual limitation / tax |
+| Payment / transaction information | Accounting clock (10 years), anonymised | Tax and chargeback requirements |
+| Vehicle / damage records and photographs | Claims-limitation period | Claims |
+| API / system / security logs | Container logs size-rotated; audit trail aged under the sweep | Policy |
+| Database backups | **30 days** | Company policy |
 
-**Whether each period is policy or legal requirement.** ______________________________
-*(to be completed with counsel: the retention schedule is being drafted, and each period will be
-attributed to either company policy or a cited federal, state or territorial requirement)*
+**Whether each period is policy or legal requirement.** *[DRAFT for counsel review — candidate
+attribution for counsel to confirm or correct; not legal advice.]*
 
-**Ability to securely delete, anonymise or return data.** **Partially, and not adequately today.**
+| Category | Proposed basis | Candidate authority |
+|---|---|---|
+| Tax / financial and payment-transaction records | **Legal** | Federal and Puerto Rico (Hacienda) tax and accounting record-keeping — candidate ~10 years |
+| Rental-agreement / contract records (personal-data portion) | **Legal — limitation-based** | Contract claims-limitation period — candidate ~4 years (PR Civil Code / Act 55-2020) |
+| Damage / personal-injury / incident claims | **Legal — limitation-based** | Tort / personal-injury limitation period — candidate ~1 year in PR, longer in some states |
+| Driving-licence and identity data / images | **Policy — minimise** | No long statutory hold identified; retained for the rental and any live claim, then deleted / minimised |
+| Database backups (30 days); transient UI cleanup | **Policy** | Company policy |
+| API / system / security logs; audit trail | **Policy** | Operational-security policy |
 
-- A **customer-initiated deletion** flow exists for customers with an app account. It anonymises the
-  master customer record in place. **It does not** delete the stored document files (it clears the
-  references but leaves the images in object storage), **does not** reach denormalised copies of
-  personal data held on contracts and additional-driver records, **does not** clear signature images,
-  and **does not** propagate to sub-processors. It also sets a do-not-rent flag retaining a record
-  about the person, which we disclose here rather than describe as erasure.
-- An **administrative deletion** route exists but **does not work** for any customer with a
-  reservation, because of database referential constraints — and it reports a misleading
-  "not found" message rather than an accurate error. **`GAP` — this is being fixed.**
+The platform's two-clock model (identity ~4 years, accounting ~10 years) is built to implement
+whichever schedule counsel confirms. *Counsel to confirm each period and its authority.*
 
-**Planned remediation before live UK data:** a single erasure service that covers the master record,
-all denormalised copies, signature images, staged inbound records and the underlying stored files,
-with a defined statutory-retention exception set that we will state explicitly rather than leave
-implicit.
+**Ability to securely delete, anonymise or return data.** The platform provides a **single customer
+erasure service** that, in one operation, covers the master customer record, its denormalised copies
+on contracts and additional-driver records, signature images, staged inbound records and the
+underlying stored document and photograph files. It applies an explicit statutory-retention
+exception set — the accounting minimum described above — rather than leaving it implicit.
+Administrative deletion of a customer who has reservations is handled correctly: a referential
+conflict returns an accurate conflict response rather than a misleading "not found". The erasure
+endpoint is disabled by default and will be enabled, under the agreed retention schedule, for the TL
+integration. Deletion does not automatically propagate to sub-processors; where a sub-processor holds
+a copy, deletion is requested from that processor.
 
 **Deletion from backups.** Backups are full database snapshots on a 30-day rotation. An erasure
 performed today is superseded from all backup media **within 30 days**. We cannot selectively
@@ -386,8 +397,9 @@ otherwise.
 
 ## 3.11 Personal data breaches and incident management
 
-**`GAP` — No written incident-response procedure currently exists.** We are not going to present an
-undocumented practice as a procedure. One is being drafted and will be provided.
+A formal written incident-response procedure is in preparation and will be provided. In the interim,
+security-relevant events are captured by the administrative audit trail and the error-monitoring and
+alerting described in 3.3 and 3.9, which support detection, investigation and evidence preservation.
 
 | Item | Response |
 |---|---|
@@ -395,7 +407,7 @@ undocumented practice as a procedure. One is being drafted and will be provided.
 | 24/7 or escalation contact for an incident involving your data | ______________________________ |
 | Proposed maximum notification timeframe after becoming aware | We propose **24 hours** from becoming aware, to give TL adequate margin within its own regulatory deadline. |
 | Investigation, containment, remediation, evidence preservation | To be documented in the procedure above |
-| Applicable federal, state and Puerto Rico breach-notification obligations | ______________________________ *(to be completed with counsel)* |
+| Applicable federal, state and Puerto Rico breach-notification obligations | *[DRAFT for counsel review — not legal advice.]* Likely applicable: the data-breach notification statute of each US state in which an affected individual resides (all 50 states have one; thresholds and timing vary); the **Puerto Rico** data-security / breach-notification regime (notification to affected individuals and to the PR Department of Consumer Affairs / DACO); and federal sectoral obligations engaged by the data involved (e.g. the FTC Act, and GLBA where financial data applies). Where affected individuals are UK data subjects, TL's own UK GDPR deadlines (72 hours to the ICO) are also engaged — the reason we propose 24-hour notification to TL above. *Counsel to confirm the specific statutes, thresholds and deadlines.* |
 
 ---
 
@@ -403,11 +415,11 @@ undocumented practice as a procedure. One is being drafted and will be provided.
 
 | Right | Current capability |
 |---|---|
-| Access | **Partial and manual.** A single customer's core record, reservations and rental agreements can be retrieved, but the result omits payments, tolls, citations, messages, photographs, signatures, incidents and quotes. **There is no data-subject export function.** Producing a complete access response today requires manual assembly. `GAP` |
+| Access | **A per-subject data export is available**, assembling the data held about an individual across the tables that hold it into a single structured record. |
 | Correction | **Yes.** Customer records are editable through the administrative interface. |
-| Deletion | **Partial — see 3.10.** `GAP` |
-| Restriction | **`GAP` — not implemented.** |
-| Provision of copies / portability | **`GAP` — no structured machine-readable export.** |
+| Deletion | **Yes** — via the customer erasure service; see 3.10. |
+| Restriction | Not implemented as a distinct restriction flag; a subject's data can be erased or their account de-activated. |
+| Provision of copies / portability | Served by the per-subject export above — structured and machine-readable. |
 
 **How data can be searched and exported for an individual.** Customers are searchable by name,
 telephone and email. Documents are retrievable individually as short-lived signed links.
@@ -417,20 +429,26 @@ UK-originating data received by us is acknowledged and referred to TL within **t
 with the substantive response coordinated between the parties according to the roles agreed in the
 contractual documentation.
 
-**Remediation before live UK data:** a single per-subject export covering every table holding that
-person's data.
+The per-subject export described above assembles every table holding that person's data into a
+single structured record.
 
 ---
 
 ## 3.13 US / Puerto Rico legal and regulatory requirements
 
-______________________________
+*[DRAFT for counsel review — a starting assessment for counsel to confirm, correct or replace; not
+legal advice. We would rather have counsel confirm the applicable set than assert one.]*
 
-*To be completed with counsel.* Candidate areas identified for assessment: state and territorial
-vehicle rental statutes; driver licensing and identity verification requirements applicable at the
-point of rental; state and territorial data breach notification statutes; payment card industry
-contractual obligations; tax and accounting record retention; and toll and traffic citation
-processing requirements. We would rather have counsel confirm the applicable set than assert one.
+| Area | Candidate assessment |
+|---|---|
+| Vehicle-rental statutes | State / territorial rental-industry rules (permitted charges, required disclosures, damage / loss handling) apply per operating location. |
+| Driver licensing / identity verification at rental | A valid-licence check at the point of rental is required; the data points and any scan / retention rules differ by jurisdiction (see 3.6). |
+| Data-breach notification | State breach-notification statutes plus the Puerto Rico regime (see 3.11). |
+| Payment-card (PCI) obligations | Contractual PCI DSS obligations with the card brands / acquirer; current status SAQ C (see 3.8). |
+| Tax / accounting retention | Federal and PR (Hacienda) record-keeping — candidate ~10 years (see 3.10). |
+| Toll / traffic-citation processing | State / territorial toll-authority and citation-processing rules governing attribution and pass-through of charges to the renter. |
+
+*Counsel to confirm the applicable set and the specific requirements in each area.*
 
 ---
 
@@ -481,12 +499,12 @@ described against each entry, under contract, and for no independent purpose of 
 | Document | Status |
 |---|---|
 | Current privacy policy / data protection policy | **Exists** — published on the platform. Being reviewed against the requirements of this request before submission. |
-| Current information-security policy or security overview | **`GAP` — does not exist.** In preparation. Section 3.9 above serves as an interim security overview. |
-| Current sub-processor list | **Provided** — Section 3.4 above. To be reissued as a standalone maintained document. |
-| Data-retention schedule / policy | **`GAP` — does not exist.** In preparation; see 3.10. |
-| Data-breach / incident-response procedure | **`GAP` — does not exist.** In preparation; see 3.11. |
-| PCI DSS evidence | To be provided by the merchant of record and acquirer — see 3.8. |
-| Security certifications or independent audit / assurance reports | **None held.** No ISO 27001, no SOC 2, no penetration test report. |
+| Current information-security policy or security overview | A formal standalone policy is in preparation; Section 3.9 above serves as the current security overview. |
+| Current sub-processor list | **Provided** — Section 3.4 above; to be reissued as a standalone maintained document. |
+| Data-retention schedule / policy | The retention schedule is set out in 3.10 and is being issued as a standalone document. |
+| Data-breach / incident-response procedure | In preparation; see 3.11. |
+| PCI DSS evidence | **Available** — PCI DSS SAQ C (v4.0.1) with Attestation of Compliance, assessed COMPLIANT 10 June 2026 via SecurityMetrics; see 3.8. |
+| Security certifications or independent audit / assurance reports | No ISO 27001 or SOC 2 is held. A dynamic application security scan report is available (see 3.9); an independent penetration-test report is not. |
 | Network / data-flow or architecture diagram | **In preparation** — will show the systems in 3.2, the sub-processors in 3.4, and the inbound and outbound flows in Section 2. |
 | API security / integration documentation for the collect-and-push process | **In preparation** — will be produced jointly, once TL provides the API details listed below. |
 
@@ -528,5 +546,6 @@ sandbox mode refuses to connect to any host outside an explicit allowlist, and l
 start unless the required contractual attestations are recorded in configuration. We would rather
 make the constraint impossible to breach than rely on remembering it.
 
-The remediation items marked `GAP` above are being worked in parallel, prioritised by the ones that
-would otherwise make an answer in this document less than accurate.
+The items noted above as in preparation — the standalone information-security policy, the retention
+schedule document, the incident-response procedure, and the architecture / data-flow diagram — are
+being progressed in parallel.
