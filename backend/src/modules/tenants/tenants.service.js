@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../lib/prisma.js';
 import { authService } from '../auth/auth.service.js';
@@ -11,6 +12,17 @@ import {
 } from '../../lib/tenant-plan-limits.js';
 
 const SALT_ROUNDS = 10;
+
+// 2026-08-23: crypto-strong temp password for super-admin-minted secrets
+// (was the hardcoded 'TempPass123!' literal — trivially guessable). Mirrors
+// people.service.js randomTempPassword: same 12-char-plus shape, satisfies the
+// auth password policy (upper, lower, digit, special — see auth.routes.js
+// validatePassword). One-shot secrets — mustChangePassword forces replacement
+// on first login — but they travel to the super-admin, so they must not be
+// guessable. 64 bits of entropy.
+function randomTempPassword() {
+  return `Temp${crypto.randomBytes(8).toString('hex')}!9`;
+}
 
 function normalizePrismaTarget(error) {
   const raw = error?.meta?.target;
@@ -195,7 +207,7 @@ export const tenantsService = {
   async createTenantAdmin(tenantId, payload = {}, { actor } = {}) {
     const email = String(payload.email || '').trim().toLowerCase();
     const fullName = String(payload.fullName || '').trim();
-    const password = String(payload.password || 'TempPass123!');
+    const password = String(payload.password || randomTempPassword());
     if (!email || !fullName) throw new Error('email and fullName are required');
 
     await assertTenantUserCapacity(tenantId, { userDelta: 1, adminDelta: 1 });
@@ -210,8 +222,8 @@ export const tenantsService = {
           role: 'ADMIN',
           passwordHash,
           // First-login onboarding (2026-07-25): the creating SUPER_ADMIN
-          // knows this password (often the TempPass123! literal) — force
-          // the new admin to replace it.
+          // receives this generated temp password (returned as tempPassword) —
+          // force the new admin to replace it on first login.
           mustChangePassword: true,
           tenant: { connect: { id: tenantId } }
         },
@@ -248,10 +260,13 @@ export const tenantsService = {
 
   // Wave 3 (2026-08-24): `actor` threaded through for USER_PASSWORD_RESET audit —
   // the SUPER_ADMIN equivalent of people.service.resetPassword's audit.
-  async resetTenantAdminPassword(tenantId, userId, password = 'TempPass123!', { actor } = {}) {
+  async resetTenantAdminPassword(tenantId, userId, password, { actor } = {}) {
     const user = await prisma.user.findFirst({ where: { id: userId, tenantId } });
     if (!user) throw new Error('Tenant admin not found');
-    const passwordHash = await bcrypt.hash(String(password), SALT_ROUNDS);
+    // Fall back to a crypto-strong temp password when the super-admin did not
+    // supply one (was the hardcoded 'TempPass123!' literal).
+    const tempPassword = String(password || randomTempPassword());
+    const passwordHash = await bcrypt.hash(tempPassword, SALT_ROUNDS);
     // First-login onboarding (2026-07-25): admin reset = temp password again.
     // Session cache busted so an open session gates immediately on this
     // worker (siblings converge within the 30s TTL).
@@ -271,7 +286,7 @@ export const tenantsService = {
       targetId: user.id,
     });
 
-    return { ok: true, userId: user.id, email: user.email, tempPassword: password };
+    return { ok: true, userId: user.id, email: user.email, tempPassword };
   },
 
   // Wave 3 (2026-08-24): `actor` (the super-admin req.user from the route) is

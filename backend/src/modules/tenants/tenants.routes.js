@@ -92,7 +92,7 @@ tenantsRouter.post('/:id/admins', async (req, res, next) => {
 
 tenantsRouter.post('/:id/admins/:userId/reset-password', async (req, res) => {
   try {
-    const out = await tenantsService.resetTenantAdminPassword(req.params.id, req.params.userId, req.body?.password || 'TempPass123!', { actor: req.user });
+    const out = await tenantsService.resetTenantAdminPassword(req.params.id, req.params.userId, req.body?.password, { actor: req.user });
     res.json(out);
   } catch (e) {
     res.status(400).json({ error: e.message });
