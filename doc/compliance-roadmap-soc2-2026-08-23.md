@@ -83,7 +83,7 @@ in ~2–3 months.*
 | Acceptable-use policy | ☐ |
 | Secure-SDLC policy | ☐ |
 | Vulnerability-management policy | ☐ |
-| Logging & monitoring policy | ☐ |
+| Logging & monitoring policy (+ SIEM plan) | ✅ done |
 | Backup policy | ☐ |
 | HR security: onboarding/offboarding checklist + confidentiality agreement + security-awareness policy | ☐ |
 
