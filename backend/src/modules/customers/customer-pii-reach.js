@@ -83,12 +83,30 @@ export function buildWheres(spec, ctx) {
       return w;
     }
     case 'quote': {
+      // Quote has a customerId scalar link — PREFER it. The contact-identifier
+      // branches are a FALLBACK for quotes not yet linked to a customer
+      // (customerId null); gating them on `customerId: null` stops a quote that
+      // already belongs to another customer from folding into this subject via a
+      // shared email/phone. Email is the strong key; a bare shared PHONE must
+      // NOT pull a row in on its own — it is accepted only WITH a name match.
       const w = [{ ...tenantScope, customerId: ctx.customerId }];
-      if (ctx.email) w.push({ ...tenantScope, contactEmail: { equals: ctx.email, mode: 'insensitive' } });
-      if (ctx.phone) w.push({ ...tenantScope, contactPhone: ctx.phone });
+      if (ctx.email) {
+        w.push({ ...tenantScope, customerId: null, contactEmail: { equals: ctx.email, mode: 'insensitive' } });
+      }
+      if (ctx.phone && ctx.fullName) {
+        w.push({
+          ...tenantScope,
+          customerId: null,
+          AND: [{ contactPhone: ctx.phone }, { contactName: { equals: ctx.fullName, mode: 'insensitive' } }],
+        });
+      }
       return w;
     }
     case 'loanerRequest': {
+      // Public intake with no customerId link — matched by contact identifiers.
+      // EMAIL is the strong key; a bare shared PHONE is accepted only WITH a
+      // first+last name match (a family member on the same number must not pull
+      // this subject's loaner request into theirs).
       const w = [];
       if (ctx.email) w.push({ ...tenantScope, email: { equals: ctx.email, mode: 'insensitive' } });
       if (ctx.phone && ctx.fullName) {
@@ -97,6 +115,9 @@ export function buildWheres(spec, ctx) {
       return w;
     }
     case 'externalReservation': {
+      // Matched by the promoted-reservation id link OR by EMAIL (the strong key).
+      // Deliberately NO bare-phone branch — a shared number never pulls another
+      // person's import row in.
       const w = [];
       if (ctx.reservationIds.length) w.push(...idIn('promotedToReservationId', ctx.reservationIds));
       if (ctx.email) w.push({ ...tenantScope, customerEmail: { equals: ctx.email, mode: 'insensitive' } });

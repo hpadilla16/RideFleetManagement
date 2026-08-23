@@ -416,3 +416,62 @@ describe('customer export — seeded content', () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// (3) NAMESAKE / shared-phone isolation — the tightened shared resolver.
+// Two same-tenant customers share a phone but have different names + emails.
+// Subject A's export must NOT fold in subject B's quote or loaner-request via
+// the shared phone (or via B's own linked/contact rows).
+// ---------------------------------------------------------------------------
+const SHARED_PHONE = '+15550009999';
+
+function namesakeSeed() {
+  return {
+    customer: [
+      { id: 'A', tenantId: 't1', firstName: 'John', lastName: 'Doe', email: 'john@x.com', phone: SHARED_PHONE },
+      { id: 'B', tenantId: 't1', firstName: 'Jane', lastName: 'Roe', email: 'jane@x.com', phone: SHARED_PHONE },
+    ],
+    quote: [
+      // A's own linked quote — MUST appear.
+      { id: 'qA', tenantId: 't1', quoteNumber: 'Q-A', customerId: 'A', contactName: 'John Doe', contactPhone: SHARED_PHONE, contactEmail: 'john@x.com' },
+      // B's linked quote — MUST NOT appear (belongs to B, only shares the phone).
+      { id: 'qB', tenantId: 't1', quoteNumber: 'Q-B', customerId: 'B', contactName: 'Jane Roe', contactPhone: SHARED_PHONE, contactEmail: 'jane@x.com' },
+      // An UNLINKED quote that is really B's (B's name+email) but on the shared
+      // phone — MUST NOT appear in A's set (bare shared phone must not pull it).
+      { id: 'qU', tenantId: 't1', quoteNumber: 'Q-U', customerId: null, contactName: 'Jane Roe', contactPhone: SHARED_PHONE, contactEmail: 'jane@x.com' },
+    ],
+    loanerRequest: [
+      // B's loaner request on the shared phone — MUST NOT appear in A's set.
+      { id: 'lrB', tenantId: 't1', name: 'Jane Roe', phone: SHARED_PHONE, email: 'jane@x.com', status: 'RECEIVED' },
+    ],
+    externalReservation: [
+      // B's import row on the shared phone — MUST NOT appear in A's set.
+      { id: 'extB', tenantId: 't1', customerFirstName: 'Jane', customerLastName: 'Roe', customerEmail: 'jane@x.com', customerPhone: SHARED_PHONE },
+    ],
+  };
+}
+
+describe('customer export — namesake / shared-phone isolation (shared resolver)', () => {
+  it("subject A's export excludes subject B's quote / loaner-request / import that only share a phone", async () => {
+    const writeCalls = [];
+    const fake = makeReadOnlyFake(namesakeSeed(), writeCalls);
+    const report = await exportCustomer('A', { actor: 'admin', scope: { tenantId: 't1' } }, {
+      prisma: fake, logger: silentLogger(), getSignedUrl: makeSigner([]),
+    });
+    const d = report.data;
+
+    // Only A's own linked quote is present.
+    const quoteNumbers = d.quotes.map((q) => q.quoteNumber).sort();
+    assert.deepEqual(quoteNumbers, ['Q-A'], `A's export pulled a namesake quote: ${quoteNumbers.join(', ')}`);
+
+    // B's loaner request (shared phone, different name+email) is not pulled in.
+    assert.equal(d.loanerRequests.length, 0, "A's export pulled B's loaner request via the shared phone");
+
+    // B's import row (shared phone, different email) is not pulled in.
+    assert.equal(d.externalReservations.length, 0, "A's export pulled B's import row via the shared phone");
+
+    // No B PII leaked anywhere in A's export.
+    assert.ok(!JSON.stringify(report).includes('Jane'), "subject B's data leaked into A's export");
+    assert.ok(!JSON.stringify(report).includes('jane@x.com'), "subject B's email leaked into A's export");
+  });
+});
