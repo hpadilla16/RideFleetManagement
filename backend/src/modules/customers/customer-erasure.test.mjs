@@ -15,7 +15,7 @@
  *   - KYC/document Storage bytes + the AuthNet profile are reaped
  */
 
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 // The service transitively imports lib/prisma.js, which constructs a
@@ -35,12 +35,17 @@ const { REDACTION } = await import('./customer-pii-map.js');
 // null, OR, AND.
 // ---------------------------------------------------------------------------
 const MODELS = [
-  'customer', 'reservation', 'rentalAgreement', 'loanerAgreement', 'loanerPhoto',
-  'loanerRequest', 'trip', 'tripDocument', 'conversation', 'message', 'hostReview',
-  'quote', 'agreementDriver', 'reservationAdditionalDriver', 'agreementSectionInitial',
-  'rentalAgreementInspection', 'reservationIncident', 'vehicleDamageReport',
+  'customer', 'reservation', 'rentalAgreement', 'rentalAgreementAddendum',
+  'loanerAgreement', 'loanerPhoto', 'loanerDamagePoint', 'loanerRequest',
+  'trip', 'tripDocument', 'tripFulfillmentPlan', 'tripTimelineEvent', 'tripPayout',
+  'conversation', 'message', 'hostReview', 'quote',
+  'agreementDriver', 'reservationAdditionalDriver', 'agreementSectionInitial',
+  'rentalAgreementInspection', 'rentalAgreementVehicleSwap', 'rentalAgreementCharge',
+  'rentalAgreementPayment', 'agreementCommission', 'reservationCharge', 'reservationPayment',
+  'customerInspection', 'reservationIncident', 'vehicleDamageReport', 'reviewProof',
   'tripIncident', 'tripIncidentCommunication', 'shuttleRequest', 'kioskSession',
   'externalReservation', 'citation', 'citationDocument',
+  'handoffToken', 'shuttleTrackerLink',
 ];
 
 function matchCond(value, cond) {
@@ -133,6 +138,12 @@ const PII = {
   first: 'John',
   last: 'Doe',
   driverFirst: 'Jane',
+  addr1: '1 Main St',
+  addr2: 'Apt 2',
+  city: 'Miami',
+  zip: '33101',
+  driverAddr: '5 Oak Ave',
+  ip: '203.0.113.7',
 };
 
 function seedData() {
@@ -160,6 +171,10 @@ function seedData() {
       pickupInstructions: 'call ' + PII.phone, customerInfoReviewNote: null,
       loanerBillingContactName: null, loanerBillingContactEmail: null,
       loanerBillingContactPhone: null, loanerBorrowerPacketJson: null,
+      // Live capability tokens that must be revoked (nulled).
+      customerInfoToken: 'cit-tok', customerInfoTokenExpiresAt: new Date('2027-01-01Z'),
+      signatureToken: 'sig-tok', signatureTokenExpiresAt: new Date('2027-01-01Z'),
+      paymentRequestToken: 'pay-tok', paymentRequestTokenExpiresAt: new Date('2027-01-01Z'),
     }],
     rentalAgreement: [{
       id: 'a1', tenantId: 't1', reservationId: 'r1', agreementNumber: 'RA-1',
@@ -211,6 +226,7 @@ function seedData() {
     hostReview: [{
       id: 'hr1', tripId: 'tr1', hostProfileId: 'hp1', guestCustomerId: 'c1',
       rating: 5, comments: 'great guest ' + PII.first, reviewerName: PII.first + ' ' + PII.last,
+      publicToken: 'hr-tok', publicTokenExpiresAt: new Date('2027-01-01Z'),
     }],
     trip: [{
       id: 'tr1', tenantId: 't1', guestCustomerId: 'c1', tripCode: 'TRIP-1',
@@ -258,12 +274,96 @@ function seedData() {
       customerPhone: PII.phone, dateOfBirth: PII.dob, licenseNumber: PII.license, licenseState: 'FL',
       licenseImagePath: 'tenants/t1/loaner-agreements/la1/license.jpg',
       insurancePolicyNumber: 'POL-9', insuranceImagePath: 'tenants/t1/loaner-agreements/la1/ins.jpg',
-      signatureDataUrl: 'data:image/png;base64,GGGG', signerName: PII.first, signerIp: '203.0.113.7',
-      notes: null, closedAt: new Date('2026-01-03T12:00:00Z'),
+      signatureDataUrl: 'data:image/png;base64,GGGG', signerName: PII.first, signerIp: PII.ip,
+      portalRequestNote: 'please extend', notes: null, closedAt: new Date('2026-01-03T12:00:00Z'),
+      signatureToken: 'la-sig-tok', signatureTokenExpiresAt: new Date('2027-01-01Z'),
+      portalToken: 'la-portal-tok', portalTokenExpiresAt: new Date('2027-01-01Z'),
     }],
     loanerPhoto: [{
       id: 'lp1', loanerAgreementId: 'la1', tenantId: 't1', kind: 'WALKAROUND',
       storagePath: 'tenants/t1/loaner-agreements/la1/WALK.jpg',
+    }],
+    loanerDamagePoint: [{
+      id: 'ldp1', loanerAgreementId: 'la1', tenantId: 't1', x: 0.3, y: 0.4, side: 'FRONT',
+      note: 'scratch reported by ' + PII.first, preExisting: true,
+    }],
+
+    // ---- Cascade-children of a RETAINED parent (the gaps QA found) ----
+    rentalAgreementAddendum: [{
+      id: 'raa1', rentalAgreementId: 'a1', tenantId: 't1',
+      pickupAt: new Date('2026-01-01Z'), returnAt: new Date('2026-01-04Z'),
+      reason: 'date correction', status: 'SIGNED',
+      signatureSignedBy: PII.first + ' ' + PII.last, signatureDataUrl: 'data:image/png;base64,HHHH',
+      signatureIp: PII.ip, signatureToken: 'raa-tok', signatureTokenExpiresAt: new Date('2027-01-01Z'),
+      originalCharges: '[]', newCharges: '[]',
+    }],
+    rentalAgreementVehicleSwap: [{
+      id: 'ras1', rentalAgreementId: 'a1', nextVehicleId: 'v2',
+      note: 'swapped because ' + PII.first + ' complained',
+      previousInspectionJson: '{"photos":["tenants/t1/swap/1.jpg"]}',
+    }],
+    rentalAgreementCharge: [{
+      id: 'rac1', rentalAgreementId: 'a1', name: 'Daily Rate', total: 90, // accounting label — retained
+    }],
+    rentalAgreementPayment: [{
+      id: 'rap1', rentalAgreementId: 'a1', amount: 100, method: 'CARD',
+      reference: 'ref-1', notes: 'paid by ' + PII.first,
+    }],
+    agreementCommission: [{
+      id: 'acm1', rentalAgreementId: 'a1', amount: 5, notes: 'commission for ' + PII.first,
+    }],
+    reservationCharge: [{
+      id: 'rc1', reservationId: 'r1', name: 'Daily Rate', total: 90, notes: 'note ' + PII.phone,
+    }],
+    reservationPayment: [{
+      id: 'rp1', reservationId: 'r1', amount: 100, notes: 'paid — ' + PII.email,
+    }],
+    customerInspection: [{
+      id: 'ci1', tenantId: 't1', vehicleId: 'v1', reservationId: 'r1', rentalAgreementId: 'a1',
+      phase: 'CHECKIN', status: 'SENT', emailTo: PII.email,
+    }],
+    reviewProof: [{
+      id: 'rvp1', tenantId: 't1', employeeUserId: 'u1', monthKey: '2026-01',
+      reservationId: 'r1', rentalAgreementId: 'a1', status: 'VALIDATED',
+      aiReviewerName: PII.first + ' ' + PII.last, aiNotes: 'reviewer said great, signed ' + PII.first,
+      photoJson: { storage: true, refs: [{ path: 'tenants/t1/review/1.jpg' }] },
+    }],
+    tripFulfillmentPlan: [{
+      id: 'tfp1', tenantId: 't1', tripId: 'tr1', fulfillmentChoice: 'DELIVERY',
+      exactAddress1: PII.addr1, exactAddress2: PII.addr2, city: PII.city, state: 'FL',
+      postalCode: PII.zip, country: 'US', latitude: 25.76, longitude: -80.19,
+      instructions: 'ring ' + PII.phone,
+    }],
+    tripTimelineEvent: [{
+      id: 'tte1', tripId: 'tr1', eventType: 'NOTE', notes: 'called ' + PII.first + ' at ' + PII.phone,
+      metadata: '{"email":"' + PII.email + '"}',
+    }],
+    tripPayout: [{
+      id: 'tp1', tripId: 'tr1', hostProfileId: 'hp1', notes: 'payout re ' + PII.first,
+    }],
+    tripIncident: [{
+      id: 'ti1', reservationId: 'r1', type: 'DAMAGE', status: 'OPEN', title: 'incident',
+      description: 'damage', amountClaimed: 100,
+    }],
+    tripIncidentCommunication: [{
+      id: 'tic1', incidentId: 'ti1', direction: 'OUTBOUND', channel: 'EMAIL',
+      subject: 'About your incident', message: 'Hi ' + PII.first + ', call ' + PII.phone,
+      attachmentsJson: '[]', senderRefId: 'c1',
+      publicToken: 'tic-tok', publicTokenExpiresAt: new Date('2027-01-01Z'),
+    }],
+    loanerRequest: [{
+      id: 'lr1', tenantId: 't1', name: PII.first + ' ' + PII.last, phone: PII.phone,
+      email: PII.email, notes: 'wants a loaner', status: 'RECEIVED',
+    }],
+
+    // ---- Live capability token tables (hard-deleted) ----
+    handoffToken: [{
+      id: 'ho1', reservationId: 'r1', kind: 'CHECKIN', token: 'ho-tok',
+      expiresAt: new Date('2027-01-01Z'),
+    }],
+    shuttleTrackerLink: [{
+      id: 'stl1', tenantId: 't1', reservationId: 'r1', token: 'stl-tok',
+      expiresAt: new Date('2027-01-01Z'),
     }],
   };
 }
@@ -281,8 +381,13 @@ function makeDeps(fake, deleteCalls, authnetCalls) {
   };
 }
 
-// Erasable PII literals that must NOT survive anywhere after a live erase.
-const FORBIDDEN = [PII.email, PII.phone, PII.license, '1990-01-15', 'John', 'Jane', 'jane@example.com'];
+// Erasable PII literals that must NOT survive anywhere after a live erase —
+// includes the customer's ADDRESS strings and IP address (an address/IP left
+// behind must fail the scan).
+const FORBIDDEN = [
+  PII.email, PII.phone, PII.license, '1990-01-15', 'John', 'Jane', 'jane@example.com',
+  PII.addr1, PII.addr2, PII.city, PII.zip, PII.driverAddr, PII.ip,
+];
 
 function assertNoForbiddenPII(fake) {
   for (const m of MODELS) {
@@ -343,6 +448,7 @@ describe('customer erasure — live reconciliation', () => {
 
   beforeEach(async () => {
     process.env.GDPR_ERASURE_ENABLED = 'true';
+    delete process.env.GDPR_RETENTION_MODE; // default CONSERVATIVE
     fake = makeFake(seedData());
     deleteCalls = []; authnetCalls = [];
     report = await eraseCustomer('c1', { actor: 'admin@x.com', reason: 'gdpr-request', dryRun: false }, makeDeps(fake, deleteCalls, authnetCalls));
@@ -431,6 +537,68 @@ describe('customer erasure — live reconciliation', () => {
     assert.ok(fake._store.loanerPhoto[0].storagePath); // vehicle walkaround retained
   });
 
+  it('scrubs the cascade-children of RETAINED parents (the gaps QA found)', () => {
+    // RentalAgreementAddendum — signature image + IP + token gone; reason kept.
+    const raa = fake._store.rentalAgreementAddendum[0];
+    assert.equal(raa.signatureDataUrl, null);
+    assert.equal(raa.signatureSignedBy, null);
+    assert.equal(raa.signatureIp, null);
+    assert.equal(raa.signatureToken, null);
+    assert.equal(raa.reason, 'date correction'); // retained
+    // TripFulfillmentPlan — exact address + coords + instructions gone.
+    const tfp = fake._store.tripFulfillmentPlan[0];
+    assert.equal(tfp.exactAddress1, null);
+    assert.equal(tfp.city, null);
+    assert.equal(tfp.postalCode, null);
+    assert.equal(tfp.latitude, null);
+    assert.equal(tfp.instructions, null);
+    // CustomerInspection — recipient email gone (matched via reservationId OR rentalAgreementId).
+    assert.equal(fake._store.customerInspection[0].emailTo, null);
+    // TripTimelineEvent — notes + metadata gone.
+    assert.equal(fake._store.tripTimelineEvent[0].notes, null);
+    assert.equal(fake._store.tripTimelineEvent[0].metadata, null);
+    // Payment/charge/commission free-text notes gone; accounting labels retained.
+    assert.equal(fake._store.rentalAgreementPayment[0].notes, null);
+    assert.equal(fake._store.rentalAgreementPayment[0].reference, 'ref-1'); // retained
+    assert.equal(fake._store.agreementCommission[0].notes, null);
+    assert.equal(fake._store.reservationCharge[0].notes, null);
+    assert.equal(fake._store.reservationCharge[0].name, 'Daily Rate'); // accounting label retained
+    assert.equal(fake._store.reservationPayment[0].notes, null);
+    assert.equal(fake._store.tripPayout[0].notes, null);
+    assert.equal(fake._store.rentalAgreementVehicleSwap[0].note, null);
+    assert.ok(fake._store.rentalAgreementVehicleSwap[0].previousInspectionJson); // vehicle photos retained
+    // LoanerDamagePoint — note gone.
+    assert.equal(fake._store.loanerDamagePoint[0].note, null);
+    // ReviewProof — reviewer identity + screenshot gone; commission status kept.
+    assert.equal(fake._store.reviewProof[0].aiReviewerName, null);
+    assert.equal(fake._store.reviewProof[0].aiNotes, null);
+    assert.deepEqual(fake._store.reviewProof[0].photoJson, {});
+    assert.equal(fake._store.reviewProof[0].status, 'VALIDATED'); // retained
+    // TripIncidentCommunication — message/subject/token gone; incident facts kept.
+    assert.equal(fake._store.tripIncidentCommunication[0].message, null);
+    assert.equal(fake._store.tripIncidentCommunication[0].subject, null);
+    assert.equal(fake._store.tripIncidentCommunication[0].publicToken, null);
+    assert.equal(fake._store.tripIncident[0].title, 'incident'); // fact retained
+    // LoanerRequest — matched by email/phone+name.
+    assert.equal(fake._store.loanerRequest[0].name, REDACTION);
+    assert.equal(fake._store.loanerRequest[0].email, null);
+    assert.equal(fake._store.loanerRequest[0].notes, null);
+  });
+
+  it('revokes live capability tokens on the reservation + ephemeral token tables', () => {
+    const r = fake._store.reservation[0];
+    assert.equal(r.signatureToken, null);
+    assert.equal(r.customerInfoToken, null);
+    assert.equal(r.paymentRequestToken, null);
+    const la = fake._store.loanerAgreement[0];
+    assert.equal(la.signatureToken, null);
+    assert.equal(la.portalToken, null);
+    assert.equal(fake._store.hostReview[0].publicToken, null);
+    // Ephemeral token tables hard-deleted.
+    assert.equal(fake._store.handoffToken.length, 0);
+    assert.equal(fake._store.shuttleTrackerLink.length, 0);
+  });
+
   it('HARD-DELETES chat threads + personal trip documents', () => {
     assert.equal(fake._store.conversation.length, 0);
     assert.equal(fake._store.message.length, 0);
@@ -474,5 +642,54 @@ describe('customer erasure — live reconciliation', () => {
     assert.equal(fake._store.conversation.length, 0);
     // AuthNet profile id is already gone, so no second upstream delete.
     assert.equal(authnetCalls2.length, 0);
+  });
+});
+
+describe('customer erasure — config-driven retention mode', () => {
+  beforeEach(() => { process.env.GDPR_ERASURE_ENABLED = 'true'; });
+  afterEach(() => { delete process.env.GDPR_RETENTION_MODE; });
+
+  it('CONSERVATIVE (default) retains customerLastName on agreements', async () => {
+    delete process.env.GDPR_RETENTION_MODE;
+    const fake = makeFake(seedData());
+    const report = await eraseCustomer(
+      'c1', { actor: 'admin', reason: 'gdpr', dryRun: false }, makeDeps(fake, [], []),
+    );
+    assert.equal(report.retentionMode, 'CONSERVATIVE');
+    assert.equal(fake._store.rentalAgreement[0].customerLastName, PII.last);
+    assert.equal(fake._store.loanerAgreement[0].customerLastName, PII.last);
+    // First name is still always erased.
+    assert.equal(fake._store.rentalAgreement[0].customerFirstName, REDACTION);
+  });
+
+  it('FULL_DELETE erases customerLastName too (config switch, no code change)', async () => {
+    process.env.GDPR_RETENTION_MODE = 'FULL_DELETE';
+    const fake = makeFake(seedData());
+    const report = await eraseCustomer(
+      'c1', { actor: 'admin', reason: 'gdpr', dryRun: false }, makeDeps(fake, [], []),
+    );
+    assert.equal(report.retentionMode, 'FULL_DELETE');
+    assert.equal(fake._store.rentalAgreement[0].customerLastName, REDACTION);
+    assert.equal(fake._store.loanerAgreement[0].customerLastName, REDACTION);
+    // Structural/accounting facts still retained in FULL_DELETE.
+    assert.equal(fake._store.rentalAgreement[0].agreementNumber, 'RA-1');
+    assert.equal(fake._store.rentalAgreement[0].total, 100);
+    // No 'Doe' survives anywhere in FULL_DELETE mode.
+    for (const m of MODELS) {
+      for (const row of fake._store[m]) {
+        assert.ok(!JSON.stringify(row).includes(PII.last), `last name survived in ${m}`);
+      }
+    }
+  });
+
+  it('opts.retentionMode overrides the env for a single call', async () => {
+    process.env.GDPR_RETENTION_MODE = 'CONSERVATIVE';
+    const fake = makeFake(seedData());
+    const report = await eraseCustomer(
+      'c1', { actor: 'admin', reason: 'gdpr', dryRun: false, retentionMode: 'FULL_DELETE' },
+      makeDeps(fake, [], []),
+    );
+    assert.equal(report.retentionMode, 'FULL_DELETE');
+    assert.equal(fake._store.rentalAgreement[0].customerLastName, REDACTION);
   });
 });

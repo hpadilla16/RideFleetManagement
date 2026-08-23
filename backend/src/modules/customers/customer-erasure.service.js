@@ -24,10 +24,19 @@
  * WHAT/WHERE is driven entirely by ./customer-pii-map.js so this service, the
  * Phase B export, and the Phase C sweep cannot drift apart.
  *
- * BEHAVIOUR NOTE (deliberate): the self-service account-deletion flow now
- * DELEGATES here (dryRun:false), so it too is gated by GDPR_ERASURE_ENABLED.
- * Until an operator flips the flag on, NO erasure path mutates — that is the
- * point of invariant #1.
+ * RETENTION MODE is config-driven (GDPR_RETENTION_MODE): CONSERVATIVE (default,
+ * keeps customerLastName on agreements) or FULL_DELETE (erases it too). The
+ * legal set is being researched separately — the code must not hard-code one
+ * answer, so the switch lives in the map.
+ *
+ * SCOPE NOTE: this is the ADMIN-only gated path. The self-service
+ * account-deletion flow keeps its own in-place anonymiser for now (it must not
+ * break while this engine is dark); it migrates onto eraseCustomer at go-live
+ * when GDPR_ERASURE_ENABLED is flipped on.
+ *
+ * TRANSACTION SAFETY: all DB work runs in ONE $transaction with a raised
+ * timeout, and every `WHERE id IN (...)` list is chunked so a customer with
+ * thousands of rentals cannot blow the interactive-transaction limit.
  *
  * ESM. No new npm deps. `prisma`, `deleteObject`, `logger`, and the AuthNet
  * delete are injectable (deps arg) so the suite runs DB-free.
@@ -39,9 +48,24 @@ import { deleteObject as defaultDeleteObject } from '../../lib/storage/index.js'
 import {
   CUSTOMER_PII_MAP,
   SUBPROCESSOR,
+  RETENTION_MODES,
+  getRetentionMode,
   classifyStorageRef,
   REDACTION,
 } from './customer-pii-map.js';
+
+// Interactive-transaction guards. The default Prisma interactive-transaction
+// timeout is 5s; a customer with thousands of rentals needs more headroom, and
+// id-IN lists are chunked to keep each statement bounded.
+const TX_TIMEOUT_MS = 30_000;
+const TX_MAX_WAIT_MS = 10_000;
+const ID_CHUNK = 500;
+
+// Match kinds whose where-branches can overlap (OR of several conditions), so
+// row counts must be de-duplicated by id rather than summed.
+const OR_MATCH_KINDS = new Set([
+  'quote', 'loanerRequest', 'externalReservation', 'reservationOrAgreement',
+]);
 
 export class ErasureNotEnabledError extends Error {
   constructor(message = 'Customer erasure is not enabled (GDPR_ERASURE_ENABLED is off).') {
@@ -71,14 +95,16 @@ export function gdprErasureEnabled() {
 }
 
 // ---------------------------------------------------------------------------
-// Build the Prisma `data` patch for one map entry.
-//   redact   → REDACTION sentinel (required, non-null identity columns)
-//   null     → null
-//   zero     → 0
-//   jsonEmpty→ the given empty JSON value
+// Build the Prisma `data` patch for one map entry, for the active retention
+// mode.
+//   redact             → REDACTION sentinel (required, non-null identity columns)
+//   null               → null
+//   zero               → 0
+//   jsonEmpty          → the given empty JSON value
 //   storage.requiredRedact → REDACTION (a required column whose object we reap)
+//   conservativeRetain → retained in CONSERVATIVE; redacted in FULL_DELETE
 // ---------------------------------------------------------------------------
-function buildEraseData(spec) {
+function buildEraseData(spec, mode) {
   const cols = spec.columns || {};
   const data = {};
   for (const c of cols.redact || []) data[c] = REDACTION;
@@ -89,7 +115,18 @@ function buildEraseData(spec) {
     if (s.requiredRedact) data[s.column] = REDACTION;
     // non-required storage columns are already covered by cols.null
   }
+  // Config-driven retention: columns retained ONLY in CONSERVATIVE mode are
+  // redacted when FULL_DELETE is active (the legal switch, flipped via env).
+  if (mode === RETENTION_MODES.FULL_DELETE) {
+    for (const c of cols.conservativeRetain || []) data[c] = REDACTION;
+  }
   return data;
+}
+
+function chunk(arr, size = ID_CHUNK) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
 }
 
 // Compact, safe OR builder — drops empty/undefined branches and returns null
@@ -106,81 +143,111 @@ function inClause(ids) {
 }
 
 /**
- * Resolve the where-clause that selects THIS customer's rows for a map entry.
- * Returns null when the entry cannot match anything (so the caller skips it).
+ * Resolve the where-clauses that select THIS customer's rows for a map entry.
+ * Returns an ARRAY (empty = nothing can match, caller skips the model). Any
+ * `WHERE <field> IN (<ids>)` list is chunked so no single statement carries an
+ * unbounded id list; OR-shaped matches become one where per branch.
  */
-function whereForSpec(spec, ctx) {
+function buildWheres(spec, ctx) {
   const m = spec.match;
   const tenantScope = ctx.tenantId ? { tenantId: ctx.tenantId } : {};
+  const idIn = (field, ids) => chunk(ids).map((c) => ({ [field]: { in: c } }));
   switch (m.kind) {
     case 'self':
-      return { id: ctx.customerId };
+      return [{ id: ctx.customerId }];
     case 'customerFk':
-      return { [m.field]: ctx.customerId };
+      return [{ [m.field]: ctx.customerId }];
     case 'reservationRelation':
     case 'reservationScalar':
-      return ctx.reservationIds.length ? { [m.field]: inClause(ctx.reservationIds) } : null;
+      return ctx.reservationIds.length ? idIn(m.field, ctx.reservationIds) : [];
     case 'agreementRelation':
-      return ctx.agreementIds.length ? { [m.field]: inClause(ctx.agreementIds) } : null;
+      return ctx.agreementIds.length ? idIn(m.field, ctx.agreementIds) : [];
     case 'loanerRelation':
-      return ctx.loanerAgreementIds.length ? { [m.field]: inClause(ctx.loanerAgreementIds) } : null;
+      return ctx.loanerAgreementIds.length ? idIn(m.field, ctx.loanerAgreementIds) : [];
     case 'tripRelation':
-      return ctx.tripIds.length ? { [m.field]: inClause(ctx.tripIds) } : null;
+      return ctx.tripIds.length ? idIn(m.field, ctx.tripIds) : [];
     case 'tripIncidentRelation':
-      return ctx.tripIncidentIds.length ? { [m.field]: inClause(ctx.tripIncidentIds) } : null;
+      return ctx.tripIncidentIds.length ? idIn(m.field, ctx.tripIncidentIds) : [];
     case 'citationDocument':
-      return ctx.citationIds.length ? { citationId: inClause(ctx.citationIds) } : null;
+      return ctx.citationIds.length ? idIn('citationId', ctx.citationIds) : [];
+    case 'reservationOrAgreement': {
+      const w = [];
+      if (ctx.reservationIds.length) w.push(...idIn('reservationId', ctx.reservationIds));
+      if (ctx.agreementIds.length) w.push(...idIn('rentalAgreementId', ctx.agreementIds));
+      return w;
+    }
     case 'quote': {
-      const or = orWhere([
-        { customerId: ctx.customerId },
-        ctx.email ? { contactEmail: { equals: ctx.email, mode: 'insensitive' } } : null,
-        ctx.phone ? { contactPhone: ctx.phone } : null,
-      ]);
-      return or ? { ...tenantScope, ...or } : null;
+      const w = [{ ...tenantScope, customerId: ctx.customerId }];
+      if (ctx.email) w.push({ ...tenantScope, contactEmail: { equals: ctx.email, mode: 'insensitive' } });
+      if (ctx.phone) w.push({ ...tenantScope, contactPhone: ctx.phone });
+      return w;
     }
     case 'loanerRequest': {
-      const or = orWhere([
-        ctx.email ? { email: { equals: ctx.email, mode: 'insensitive' } } : null,
-        ctx.phone && ctx.fullName
-          ? { AND: [{ phone: ctx.phone }, { name: { equals: ctx.fullName, mode: 'insensitive' } }] }
-          : null,
-      ]);
-      return or ? { ...tenantScope, ...or } : null;
+      const w = [];
+      if (ctx.email) w.push({ ...tenantScope, email: { equals: ctx.email, mode: 'insensitive' } });
+      if (ctx.phone && ctx.fullName) {
+        w.push({ ...tenantScope, AND: [{ phone: ctx.phone }, { name: { equals: ctx.fullName, mode: 'insensitive' } }] });
+      }
+      return w;
     }
     case 'externalReservation': {
-      const or = orWhere([
-        ctx.reservationIds.length ? { promotedToReservationId: inClause(ctx.reservationIds) } : null,
-        ctx.email ? { customerEmail: { equals: ctx.email, mode: 'insensitive' } } : null,
-      ]);
-      return or ? { ...tenantScope, ...or } : null;
+      const w = [];
+      if (ctx.reservationIds.length) w.push(...idIn('promotedToReservationId', ctx.reservationIds));
+      if (ctx.email) w.push({ ...tenantScope, customerEmail: { equals: ctx.email, mode: 'insensitive' } });
+      return w;
     }
     default:
-      return null;
+      return [];
   }
 }
 
 /**
- * Read the rows a storage-bearing spec matches and collect the deletable
- * Storage objects, BEFORE any nulling. Returns [{ bucket, path, source }].
+ * Read the rows a storage-bearing spec matches (across all chunked/OR wheres)
+ * and collect the deletable Storage objects, BEFORE any nulling. De-dupes rows
+ * matched by more than one where. Returns [{ bucket, path, source }].
  */
-async function collectStorageRefs(prisma, spec, where) {
+async function collectStorageRefs(prisma, spec, wheres) {
   // Storage refs may sit under columns.storage (anonymised rows) or at the spec
   // top level (HARD_DELETE rows whose bytes we reap before deleting the row).
   const storageCols = spec.columns?.storage || spec.storage || [];
-  if (!storageCols.length || !where) return [];
+  if (!storageCols.length || !wheres.length) return [];
   const select = { id: true };
   for (const s of storageCols) select[s.column] = true;
-  const rows = await prisma[spec.model].findMany({ where, select });
   const refs = [];
-  for (const row of rows) {
-    for (const s of storageCols) {
-      const cls = classifyStorageRef(row[s.column], { defaultBucket: s.defaultBucket });
-      if (cls.kind === 'object') {
-        refs.push({ bucket: cls.bucket, path: cls.path, source: `${spec.label}.${s.column}` });
+  const seen = new Set();
+  for (const where of wheres) {
+    const rows = await prisma[spec.model].findMany({ where, select });
+    for (const row of rows) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      for (const s of storageCols) {
+        const cls = classifyStorageRef(row[s.column], { defaultBucket: s.defaultBucket });
+        if (cls.kind === 'object') {
+          refs.push({ bucket: cls.bucket, path: cls.path, source: `${spec.label}.${s.column}` });
+        }
       }
     }
   }
   return refs;
+}
+
+/**
+ * Count matched rows for a spec across its wheres. OR-shaped matches can hit the
+ * same row from >1 branch, so those are de-duplicated by id; disjoint id-chunk
+ * wheres are summed cheaply via count().
+ */
+async function countRows(prisma, spec, wheres) {
+  if (OR_MATCH_KINDS.has(spec.match.kind)) {
+    const ids = new Set();
+    for (const where of wheres) {
+      const rows = await prisma[spec.model].findMany({ where, select: { id: true } });
+      for (const r of rows) ids.add(r.id);
+    }
+    return ids.size;
+  }
+  let total = 0;
+  for (const where of wheres) total += await prisma[spec.model].count({ where });
+  return total;
 }
 
 /**
@@ -284,6 +351,7 @@ export async function eraseCustomer(customerId, opts = {}, deps = {}) {
     reason,
     dryRun = true,
     scope = {},
+    retentionMode = getRetentionMode(),
   } = opts;
   const {
     prisma = defaultPrisma,
@@ -331,16 +399,16 @@ export async function eraseCustomer(customerId, opts = {}, deps = {}) {
     // suppression flag and its storage refs come from the already-loaded row).
     if (spec.match.kind === 'self') continue;
 
-    const where = whereForSpec(spec, ctx);
-    if (!where) continue;
+    const wheres = buildWheres(spec, ctx);
+    if (!wheres.length) continue;
 
     // Collect storage bytes to reap (person documents only — vehicle photos
     // are retained and never listed under columns.storage).
-    const refs = await collectStorageRefs(prisma, spec, where);
+    const refs = await collectStorageRefs(prisma, spec, wheres);
     storageToDelete = storageToDelete.concat(refs);
 
-    const count = await prisma[spec.model].count({ where });
-    plan.push({ spec, where, count });
+    const count = await countRows(prisma, spec, wheres);
+    plan.push({ spec, wheres, count });
   }
 
   // Master customer storage refs (from the row we already hold).
@@ -361,7 +429,7 @@ export async function eraseCustomer(customerId, opts = {}, deps = {}) {
     ? String(customer[SUBPROCESSOR.authnet.profileIdColumn]).trim()
     : null;
 
-  const retainedDisclosure = buildRetainedDisclosure();
+  const retainedDisclosure = buildRetainedDisclosure(retentionMode);
 
   // ---- DRY RUN: return the plan, mutate NOTHING -------------------------
   if (!willMutate) {
@@ -372,6 +440,7 @@ export async function eraseCustomer(customerId, opts = {}, deps = {}) {
       actor,
       reason: String(reason).trim(),
       gdprEnabled,
+      retentionMode,
       tables,
       storageToDelete,
       authnetProfile: authnetProfileId
@@ -387,33 +456,34 @@ export async function eraseCustomer(customerId, opts = {}, deps = {}) {
   // Customer with the complete column set + set the suppression flag.
   await prisma.$transaction(async (tx) => {
     for (const p of plan) {
-      const { spec, where } = p;
+      const { spec, wheres } = p;
       if (spec.retention === 'RETAIN_PHOTOS') {
         continue; // vehicle photos retained — nothing to mutate
       }
       if (spec.retention === 'HARD_DELETE') {
         // Cascade children explicitly (do not rely on DB cascade), then delete.
+        // Both sides chunked so no statement carries an unbounded id list.
         if (spec.model === 'conversation') {
-          await tx.message.deleteMany({
-            where: { conversationId: inClause(ctx.conversationIds) },
-          });
+          for (const c of chunk(ctx.conversationIds)) {
+            await tx.message.deleteMany({ where: { conversationId: { in: c } } });
+          }
         }
-        await tx[spec.model].deleteMany({ where });
+        for (const where of wheres) await tx[spec.model].deleteMany({ where });
         continue;
       }
       // RETAIN_STATUTORY + ANONYMISE both anonymise-in-place.
-      const data = buildEraseData(spec);
+      const data = buildEraseData(spec, retentionMode);
       if (Object.keys(data).length > 0) {
-        await tx[spec.model].updateMany({ where, data });
+        for (const where of wheres) await tx[spec.model].updateMany({ where, data });
       }
     }
 
     // Master Customer — complete column set + suppression flag.
-    const customerData = buildEraseData(customerSpec);
+    const customerData = buildEraseData(customerSpec, retentionMode);
     customerData.doNotRent = true;
     customerData.doNotRentReason = `Erased: ${String(reason).trim()} (by ${actor})`;
     await tx.customer.update({ where: { id: customerId }, data: customerData });
-  });
+  }, { timeout: TX_TIMEOUT_MS, maxWait: TX_MAX_WAIT_MS });
 
   // ---- AFTER COMMIT: storage + sub-processor (best-effort) --------------
   const storageDeleted = [];
@@ -475,6 +545,7 @@ export async function eraseCustomer(customerId, opts = {}, deps = {}) {
     actor,
     reason: String(reason).trim(),
     gdprEnabled,
+    retentionMode,
     tables,
     storageToDelete,
     storageDeleted,
@@ -484,16 +555,20 @@ export async function eraseCustomer(customerId, opts = {}, deps = {}) {
   };
 }
 
-function buildRetainedDisclosure() {
+function buildRetainedDisclosure(mode) {
+  const lastNameClause = mode === RETENTION_MODES.FULL_DELETE
+    ? 'In FULL_DELETE mode even the customer LAST name is erased on these records.'
+    : 'In CONSERVATIVE mode the customer LAST name is retained on agreements (money ' +
+      'columns, timestamps, agreement numbers and vehicle/location IDs are always kept).';
   return [
+    `Retention mode: ${mode}.`,
     'A minimised suppression record is retained: Customer.doNotRent is set to true ' +
       'with a reason, so a future sign-up with the same details cannot silently ' +
       're-onboard. This is NOT total erasure.',
     'Statutory records are retained in anonymised form: Reservations, RentalAgreements, ' +
-      'LoanerAgreements, payments and damage/incident reports keep their money columns, ' +
-      'timestamps, agreement numbers, vehicle/location IDs and the customer LAST name. ' +
-      'Personal identifiers, signature images, licence/insurance documents, addresses and ' +
-      'card data on those records are erased.',
+      'LoanerAgreements, payments and damage/incident reports keep their non-identifying ' +
+      'accounting facts. Personal identifiers, signature images, licence/insurance ' +
+      'documents, addresses, IPs and card data on those records are erased. ' + lastNameClause,
     'Vehicle-condition photos (inspection walkarounds, loaner and damage photos) are ' +
       'retained as evidence on the retained contracts.',
   ];
