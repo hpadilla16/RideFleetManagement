@@ -55,7 +55,7 @@ A large share of the technical controls exist and are documented:
 
 | Phase | Window | Work | Owner |
 |---|---|---|---|
-| **0 — Foundation & docs** | weeks 0–4 | Write the readiness document set (§5); define scope, roles, asset inventory, risk assessment; select a readiness platform (Vanta / Drata / Secureframe) | Docs: engineering · Platform choice/budget: **[org]** |
+| **0 — Foundation & docs** | weeks 0–4 | Write the readiness document set (§5); define scope, roles, asset inventory, risk assessment; **readiness platform selected = Vanta** — begin onboarding + connect integrations; engage a CPA firm via Vanta's auditor network (see `soc2-auditor-engagement-guide-2026-08-23.md`) | Docs: engineering · Vanta onboarding + auditor + budget: **[org]** |
 | **1 — Implement & remediate** | month 1–3 | Close the technical gaps (HSTS, key rotation, restoration testing, log retention, field encryption if in scope); stand up process controls (access reviews, vendor assessments, HR controls, security-awareness training); connect the platform to auto-collect evidence | Eng + **[org]** |
 | **2 — Observation window** | month 3–6+ | Operate the controls; the platform continuously collects evidence; run internal review; (optional) obtain a **Type I** report as an interim milestone | **[org]** + eng |
 | **3 — Audit** | month 6–9 | Engage a licensed **CPA firm**; Type II audit over the observation window; receive the report; then plan ISO 27001 (Stage 1/2 with an accredited body) if pursued | **[org]** |
@@ -73,11 +73,12 @@ in ~2–3 months.*
 | Sub-processor list | ✅ done |
 | Architecture / data-flow diagram | ✅ done |
 | Risk assessment + risk register | ✅ done |
-| **Asset / data inventory** | ▶ next |
-| Access-control policy + periodic access-review procedure | ☐ |
-| Change-management policy | ☐ |
-| Vendor / third-party risk-management policy + register | ☐ |
-| Business-continuity & disaster-recovery plan | ☐ |
+| Asset / data inventory | ✅ done |
+| Access-control policy + periodic access-review procedure | ✅ done |
+| Change-management policy | ✅ done |
+| Vendor / third-party risk-management policy + register | ✅ done |
+| SOC 2 auditor (CPA) engagement guide | ✅ done |
+| **Business-continuity & disaster-recovery plan** | ▶ next |
 | Data-classification policy | ☐ |
 | Acceptable-use policy | ☐ |
 | Secure-SDLC policy | ☐ |
