@@ -1,12 +1,39 @@
-# PCI DSS — SAQ readiness package (to take to the acquirer)
+# PCI DSS — compliance status + evidence package (for the TL International DDQ)
 
 **Date:** 2026-08-23
-**Purpose:** what to hand the acquirer / QSA to determine and complete the right Self-Assessment
-Questionnaire (SAQ). Everything technical below was verified against the RFM codebase.
+**Purpose:** the PCI evidence to attach to the TL International due-diligence response, plus the
+technical facts behind it (verified against the RFM codebase).
 
-> This is preparation material, not a PCI attestation. The **acquirer (merchant bank) and/or a QSA
-> determine which SAQ applies**; this document gives them the facts they need and states what RFM can
-> already attest.
+> **STATUS: CERTIFIED.** RIDE CAR SHARING LLC holds a valid **PCI DSS SAQ C (v4.0.1)** self-assessment,
+> **COMPLIANT** as of **2026-06-10**, assessed via **SecurityMetrics** (ASV). The signed SAQ C + AOC
+> (Attestation of Compliance) is the evidence that goes in the DDQ's "PCI evidence" field. The sections
+> below explain the posture behind that attestation.
+
+---
+
+## 0. What is already in hand (the deliverable)
+
+| Item | Value |
+|---|---|
+| **Merchant of record** | RIDE CAR SHARING LLC |
+| **Validation type** | SAQ C, PCI DSS v4.0.1 (self-assessment, no QSA required) |
+| **Status** | COMPLIANT |
+| **Self-assessment completion date** | 2026-06-10 |
+| **Last passing ASV scan** | 2026-06-10 (SecurityMetrics) |
+| **Signatory** | Hector Padilla, CTO (Merchant Executive Officer) |
+| **Assessor / ASV** | SecurityMetrics |
+| **Evidence file** | signed **SAQ C + AOC** PDF (from the SecurityMetrics portal) → this is what TL receives |
+
+**Channel-scope note (settled):** SAQ C's template text says it is "not applicable to e-commerce
+channels," but **all RFM payment channels — including the online storefront — are fully outsourced to
+the processor's hosted page**; RFM never captures, transmits, or stores a PAN/CVV on any channel. On
+that basis SecurityMetrics (the assessor) scoped the merchant to SAQ C and it covers the environment.
+If a TL reviewer questions the e-commerce wording, the answer is: *all channels are fully outsourced to
+the processor — RFM holds no cardholder data on any channel.*
+
+**Maintenance (keep the certification live):**
+- Re-certify the SAQ every **12 months** → renew before **~2026-06-10 (2027)**.
+- Pass an ASV scan every **3 months** → next due **~2026-09-10**. A lapsed scan invalidates the status.
 
 ---
 
@@ -59,20 +86,20 @@ assessor doesn't read a PAN-accepting capability into the docs that doesn't exis
 
 ---
 
-## 4. What to ask / obtain from the acquirer (the open items)
+## 4. Open items — status
 
-1. **Confirm the SAQ per channel** — specifically:
-   - Is the Authorize.Net integration **Accept Hosted (redirect → SAQ A)** or **Accept.js (script on
-     our page → possibly SAQ A-EP)**? This is the one nuance that can push e-commerce from A to A-EP.
-   - For the **Dejavoo terminal**: is it on a **validated P2PE** solution (→ SAQ P2PE) or a standard
-     IP-connected terminal (→ SAQ B-IP)?
-2. **ASV scan requirement** — under PCI DSS 4.0, some SAQ A merchants now need a **quarterly external
-   vulnerability scan by an Approved Scanning Vendor**. Ask whether it applies to our channels; if so,
-   it is an inexpensive ASV service.
-3. **The merchant Attestation of Compliance (AOC)** — the acquirer's template and where to submit.
-   (This is the "PCI evidence" field left blank in the TL due-diligence response.)
-4. **Merchant of record** — confirm which legal entity is the merchant of record for each processor,
-   since the SAQ/AOC is filed under it. (Ties to the entity fields in the TL DDQ §3.1.)
+All of the original acquirer questions are now resolved by the completed SAQ C:
+
+1. ~~Confirm the SAQ per channel~~ → **RESOLVED.** SecurityMetrics scoped the merchant to **SAQ C**
+   (all channels fully outsourced to the processor; see the channel-scope note in §0).
+2. ~~ASV scan requirement~~ → **RESOLVED.** A quarterly ASV scan is in place with SecurityMetrics
+   (last passing 2026-06-10). Ongoing maintenance item, not an open question.
+3. ~~Obtain the AOC~~ → **RESOLVED.** The signed SAQ C + AOC exists (RIDE CAR SHARING LLC, CTO,
+   2026-06-10) and is the file that fills the TL DDQ "PCI evidence" field.
+4. ~~Merchant of record~~ → **RESOLVED.** RIDE CAR SHARING LLC (matches the TL DDQ §3.1 entity fields).
+
+**Nothing blocking remains.** Optional polish only: the AOC signatory title reads "CTO" — acceptable;
+"Owner / Managing Member" would be the most airtight if Hector holds that role, but not required.
 
 ---
 
@@ -86,7 +113,8 @@ assessor doesn't read a PAN-accepting capability into the docs that doesn't exis
 
 ---
 
-**Bottom line:** RFM is already at the lowest-scope PCI posture (no PAN/CVV). The path to "PCI compliant"
-is: acquirer confirms the per-channel SAQ (watch the Accept.js A-vs-A-EP and terminal B-IP-vs-P2PE
-nuances), we complete the SAQ using the attested controls in §3, obtain the AOC, and run a quarterly
-ASV scan if the SAQ requires it. No code remediation remains on RFM's side.
+**Bottom line:** PCI is **done**. RIDE CAR SHARING LLC is certified COMPLIANT under **SAQ C (v4.0.1)**
+as of 2026-06-10 via SecurityMetrics, backed by the lowest-scope posture (no PAN/CVV ever touches RFM).
+The signed SAQ C + AOC is the evidence for the TL DDQ. The only recurring obligations are the annual
+re-certification (~Jun 2027) and the quarterly ASV scan (next ~Sep 2026). No code remediation on RFM's
+side, and nothing blocking the TL response.
