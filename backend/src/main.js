@@ -116,6 +116,11 @@ initSentry();
 
 const app = express();
 
+// SECURITY (DAST 2026-08-23): don't advertise the framework. Express sets
+// `X-Powered-By: Express` by default — a free fingerprint for an attacker and a
+// standard DAST finding. Nothing depends on it.
+app.disable('x-powered-by');
+
 // SECURITY (P0): trust exactly ONE proxy hop. In production the droplet runs
 // nginx (and/or the docker bridge) in front of this process, so the real client
 // IP arrives in X-Forwarded-For. With `trust proxy` set, Express derives req.ip
@@ -146,6 +151,20 @@ const corsOriginFn = (origin, cb) => {
   return cb(new Error(`CORS: origin not allowed: ${origin}`));
 };
 
+// SECURITY HEADERS (DAST 2026-08-23): set on EVERY response (JSON + HTML). These
+// three are safe everywhere — they restrict neither framing nor resource loading,
+// so they cannot break the Flutter WebView payment bridge or the processor
+// hosted-fields pages. Clickjacking protection (X-Frame-Options / CSP
+// frame-ancestors) is added PER-PAGE on terminal HTML routes instead of globally,
+// because some public HTML pages (payarc-bridge / accept-hosted) legitimately
+// embed third-party content and must not get a blanket CSP. COOP/COEP/CORP are
+// deliberately omitted — COEP/CORP can break cross-origin resource loads.
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(self)');
+  next();
+});
 app.use(compression({ threshold: 1024 }));
 app.use(requestLogger());
 // PR-5 PERF telemetry — sampled per-request load observations. Mounted
@@ -436,9 +455,32 @@ app.use((err, req, res, _next) => {
    * 5xx keeps the old behavior exactly — opaque message, Sentry, console —
    * because an UNEXPECTED error must never leak internals.
    */
-  const status = Number(err?.status || err?.statusCode) || 500;
+  // `httpStatus` is honored too (DAST 2026-08-23): 19 service files across the
+  // app throw typed 4xx as `e.httpStatus = 400` (e.g. settings market-pricing
+  // validation), a convention this handler used to silently drop — every one of
+  // them was surfacing as a 500. All three shapes are deliberate 4xx.
+  const status = Number(err?.status || err?.statusCode || err?.httpStatus) || 500;
   if (status >= 400 && status < 500) {
     return res.status(status).json({ error: err?.message || 'Request failed' });
+  }
+  // MALFORMED CLIENT INPUT (DAST 2026-08-23): a bad path id or wrong-typed query
+  // arg reaches Prisma as a known client error, not a server fault. These were
+  // surfacing as opaque 500s (e.g. /host-app/listings/:id/availability,
+  // /knowledge-base/:id/helpful, /citations/documents, /issue-center/dashboard
+  // when fed a non-cuid id / junk query). Map to 4xx and SKIP Sentry. The
+  // message is deliberately GENERIC — a raw Prisma message names columns/types
+  // (schema leak), which is exactly what we don't want a scanner to see.
+  const prismaCode = err?.code;
+  if (
+    err?.name === 'PrismaClientValidationError' ||
+    prismaCode === 'P2023' || // inconsistent column data (malformed id)
+    prismaCode === 'P2009' || // failed to validate the query
+    prismaCode === 'P2000'    // value too long for column
+  ) {
+    return res.status(400).json({ error: 'Invalid request' });
+  }
+  if (prismaCode === 'P2025') { // required record(s) not found
+    return res.status(404).json({ error: 'Not found' });
   }
   captureBackendException(err, {
     request: {

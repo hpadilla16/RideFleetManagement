@@ -23,7 +23,17 @@ export const citationsRouter = Router();
 export const citationsInternalRouter = Router();
 
 function handle(err, res) {
-  const status = err?.status || (/required|invalid|must be/i.test(String(err?.message || '')) ? 400 : 500);
+  // Malformed input reaches Prisma as a known client error — map to a GENERIC
+  // 400 and NEVER echo its message (DAST 2026-08-23: a null byte leaked a raw
+  // Prisma ConnectorError here because its "...invalid byte sequence..." text
+  // matched the /invalid/ heuristic below). Deliberate app 4xx keep their
+  // message; unknown/Prisma errors stay opaque.
+  const code = err?.code;
+  if (err?.name === 'PrismaClientValidationError' || code === 'P2023' || code === 'P2009' || code === 'P2000') {
+    return res.status(400).json({ error: 'Invalid request' });
+  }
+  const isPrisma = typeof err?.name === 'string' && err.name.startsWith('Prisma');
+  const status = err?.status || (!isPrisma && /required|invalid|must be/i.test(String(err?.message || '')) ? 400 : 500);
   if (status >= 500) return res.status(500).json({ error: 'Internal error' });
   return res.status(status).json({ error: err.message });
 }
