@@ -7,6 +7,8 @@ import { reservationsRouter } from './modules/reservations/reservations.routes.j
 import { reservationExtendRouter } from './modules/reservations/reservation-extend.routes.js';
 import { reservationOverrideRouter } from './modules/admin/reservation-override.routes.js';
 import { idempotencyAdminRouter } from './modules/admin/idempotency-admin.routes.js';
+import { customerErasureRouter } from './modules/admin/customer-erasure.routes.js';
+import { customerExportRouter } from './modules/admin/customer-export.routes.js';
 import { customersRouter } from './modules/customers/customers.routes.js';
 import { publicVehicleTelematicsRouter, vehiclesRouter } from './modules/vehicles/vehicles.routes.js';
 import { inventoryRouter } from './modules/inventory/inventory.routes.js';
@@ -303,6 +305,12 @@ app.use('/api/admin/integrations/mex', tenantRateLimit, mexRouter);
 app.use('/api/admin/reservations', requireAuth, requireRole('ADMIN', 'SUPER_ADMIN'), reservationOverrideRouter);
 // VozIA Fase 6 re-scope (2026-07-04) — SUPER_ADMIN ops: free a wedged idempotency key.
 app.use('/api/admin/idempotency', requireAuth, requireRole('SUPER_ADMIN'), idempotencyAdminRouter);
+// GDPR Wave 2 Phase A — customer erasure (dry-run by default; gated by
+// GDPR_ERASURE_ENABLED which ships OFF). Tenant-scoped via scopeFor.
+app.use('/api/admin/customers', requireAuth, requireRole('ADMIN'), tenantRateLimit, customerErasureRouter);
+// GDPR Wave 2 Phase B — per-customer data-subject EXPORT (read-only). Same base,
+// same guards, same tenant scope as erase; walks the same PII map.
+app.use('/api/admin/customers', requireAuth, requireRole('ADMIN'), tenantRateLimit, customerExportRouter);
 app.use('/api/store-board', requireAuth, tenantRateLimit, requireRole('SUPER_ADMIN', 'ADMIN', 'OPS'), storeBoardRouter);
 app.use('/api/inventory', requireAuth, tenantRateLimit, requireModuleAccess('vehicles'), inventoryRouter);
 app.use('/api/repair-orders', requireAuth, tenantRateLimit, requireModuleAccess('maintenance'), repairOrdersRouter);
