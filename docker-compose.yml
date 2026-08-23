@@ -1,7 +1,18 @@
+# Log rotation (2026-08-23, GDPR Wave 2 Phase C — 3.10 log-retention gap).
+# Docker's default json-file driver NEVER rotates, so container logs grew
+# unbounded until they filled the disk. Cap each container at 5 x 10 MB.
+# Reused by every service below via the YAML anchor.
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   db:
     image: postgres:16-alpine
     container_name: fleet-db
+    logging: *default-logging
     environment:
       POSTGRES_DB: fleet_management
       POSTGRES_USER: postgres
@@ -15,6 +26,7 @@ services:
     build:
       context: ./backend
     container_name: fleet-backend
+    logging: *default-logging
     ports:
       - "4000:4000"
     env_file:
@@ -34,6 +46,7 @@ services:
     build:
       context: ./frontend
     container_name: fleet-frontend
+    logging: *default-logging
     ports:
       - "3000:3000"
     environment:

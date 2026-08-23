@@ -1,3 +1,13 @@
+# Log rotation (2026-08-23, GDPR Wave 2 Phase C — 3.10 log-retention gap).
+# Docker's default json-file driver NEVER rotates, so container logs grew
+# unbounded until they filled the droplet disk. Cap each container at 5 x 10 MB.
+# Reused by every service below via the YAML anchor.
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   # NOTE (2026-06-09, Phase 0 hardening): the local `db` Postgres container
   # (fleet-db-prod) was REMOVED. Prod has run on Supabase Postgres (pgbouncer
@@ -14,6 +24,7 @@ services:
       dockerfile: Dockerfile.prod
     container_name: fleet-backend-prod
     restart: unless-stopped
+    logging: *default-logging
     env_file:
       - ./backend/.env
     environment:
@@ -65,6 +76,7 @@ services:
       dockerfile: Dockerfile.prod
     container_name: fleet-worker-prod
     restart: unless-stopped
+    logging: *default-logging
     env_file:
       - ./backend/.env
     environment:
@@ -111,6 +123,7 @@ services:
         NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: ${NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE:-0.1}
     container_name: fleet-frontend-prod
     restart: unless-stopped
+    logging: *default-logging
     ports:
       # Loopback only — same reasoning as the backend above. nginx proxies to
       # 127.0.0.1:3000; nothing else should reach the Next server directly.
