@@ -40,6 +40,7 @@ Before a new sub-processor handles data:
 | Google (Maps) | Map rendering | viewer IP/URL | US | ______ | ______ | ______ |
 | Anthropic | OCR | ID images + fields | US | ______ | ______ | ______ |
 | OpenAI | NL search / assist | queries + res. context | US | ______ | ______ | ______ |
+| Axiom | Security log aggregation / SIEM | audit events (staff email, IP, action) | US | ______ | ______ | ______ |
 
 *(Assurance / DPA / last-review columns to be completed as each vendor's documentation is gathered —
 Vanta can automate collection of many of these.)*

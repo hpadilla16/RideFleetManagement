@@ -26,6 +26,7 @@ replacement.
 | 10 | **Google** (Maps JavaScript API) | Map rendering on customer-facing tracking pages | The viewer's IP address and page URL, in the viewer's browser | US | ______ |
 | 11 | **Anthropic** | OCR of identity documents / citation notices (where a tenant enables it) | Images of driving licences / identity documents and the fields extracted | US | ______ |
 | 12 | **OpenAI** | Natural-language search and an operational planning assistant | Free-text queries; reservation context incl. customer names | US | ______ |
+| 13 | **Axiom, Inc.** | Security/audit log aggregation (SIEM): centralises the administrative/security audit trail for retention, search and alerting | Administrative/security audit events — staff actor email/role/id, tenant id, IP, user agent, action, target, outcome, timestamp. **No customer personal data.** | US (US data region) | ______ |
 
 *\*DPF status = whether the provider self-certifies under the EU–US Data Privacy Framework; to be
 confirmed per provider.*

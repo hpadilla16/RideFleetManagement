@@ -156,6 +156,7 @@ Complete list of third parties that may process, store, transmit or access data.
 | Google (Maps JavaScript API) | Map rendering on customer-facing tracking pages | The viewer's IP address and page URL, in the viewer's browser | US |
 | Anthropic | Optical character recognition of identity documents and citation notices, where a tenant enables it | Images of driving licences / identity documents and the fields extracted from them | US |
 | OpenAI | Natural-language search and an operational planning assistant | Free-text queries; reservation context including customer names | US |
+| Axiom | Security/audit log aggregation (SIEM); centralises the security audit trail for retention and alerting | Administrative/security audit events — staff actor email, IP, action, tenant/target ids, outcome, timestamp (no customer personal data) | US |
 
 **Notes on the two AI providers.** These are used for document text-extraction and operational
 tooling within the receiving tenant's own environment; they are listed here for completeness because
