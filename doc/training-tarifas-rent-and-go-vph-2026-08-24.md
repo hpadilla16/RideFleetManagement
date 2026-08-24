@@ -43,26 +43,27 @@ Cuando hay varias candidatas, el sistema prefiere en este orden:
 |---|---|---|---|
 | `RETAIL-ONLINE` | Retail (Online) | ✅ Sí | **La que usan las reservas web** |
 | `SJU` | *(sin nombre)* | ❌ No | **La que usan las reservas del mostrador** |
-| `Test` | *(sin nombre)* | ✅ Sí | ⚠️ Tarifa de prueba — **ver sección 6** |
+| `Test` | *(sin nombre)* | ❌ No | Desactivada el 24-ago-2026 (era una tarifa de prueba con $0) |
 | `__LOANER_PROGRAM__` | Loaner Program Rates | ❌ No | Programa de loaners del dealer (automática) |
 
 ### Precios actuales por clase
 
-| Clase de vehículo | Web (`RETAIL-ONLINE`) | Mostrador (`SJU`) |
-|---|---|---|
-| Economy | $45.00 | $35.00 |
-| Standard SUV | $45.00 | $45.00 |
-| Luxury SUV | $59.95 | $60.00 |
-| Full Size SUV | $69.95 | $65.00 |
-| Cargo Van | $79.95 | $90.00 |
-| Jeep Wrangler | $79.95 | $65.00 |
-| Minivan | $79.95 | $65.00 |
-| Pick UP | $89.95 | $50.00 |
-| **Sedan** | $99.00 | **$0.00** ⚠️ |
-| Passenger Van | $99.95 | $140.00 |
-| Box Truck | $250.00 | $90.00 |
+| Clase de vehículo | Precio diario (web y mostrador) |
+|---|---|
+| Economy | $45.00 |
+| Standard SUV | $45.00 |
+| Luxury SUV | $59.95 |
+| Full Size SUV | $69.95 |
+| Cargo Van | $79.95 |
+| Jeep Wrangler | $79.95 |
+| Minivan | $79.95 |
+| Pick UP | $89.95 |
+| Sedan | $99.00 |
+| Passenger Van | $99.95 |
+| Box Truck | $250.00 |
 
-- Solo `SJU` tiene precios **semanales y mensuales** configurados. `RETAIL-ONLINE` solo tiene diario, así que una renta larga por web se cobra **diario × días**.
+- **Los precios de la web y el mostrador ahora son idénticos** (sincronizados el 24-ago-2026).
+- **Semanal y mensual están en $0.00** en ambas tarifas, así que **todo se cobra diario × días**. Cuando definan sus precios de semana y mes, se cargan en esos campos.
 - No hay **precios por fecha** (feriados/temporada) configurados en ninguna tarifa.
 
 ---
@@ -100,22 +101,21 @@ Ese precio **manda solo ese día**; los demás días siguen con el precio normal
 
 ---
 
-## 6. ⚠️ Dos cosas que hay que atender
+## 6. Cambios aplicados el 24 de agosto de 2026
 
-### 🔴 A. El Sedan está en $0.00 en el mostrador
-En la tarifa `SJU` (la que usa el mostrador), el **Sedan tiene precio $0.00**. Si un agente crea una reserva de Sedan en el mostrador, **cobrará $0**.
-**Acción:** poner el precio correcto del Sedan en `SJU`.
+Se corrigieron tres cosas en la configuración:
 
-### 🔴 B. Existe una tarifa llamada "Test" publicada en la web
-La tarifa `Test` está **activa, marcada para salir en la web**, y vigente hasta junio 2027. Tiene **$0.00 en casi todas las clases** (solo Economy tiene $30).
+1. **Sedan estaba en $0.00** en la tarifa del mostrador → corregido a **$99.00**.
+2. **La tarifa `Test`** estaba activa y publicada en la web con $0.00 en casi todas las clases → **desactivada**.
+3. **Los precios diarios del mostrador se sincronizaron con los de la web**, así que ahora cobran igual por los dos canales.
+4. **Semanal y mensual quedaron en $0.00** — todo se cobra por día hasta que ustedes definan esos precios.
 
-Hoy **no** se está usando porque `RETAIL-ONLINE` le gana en el orden de selección — pero eso es **frágil**: si alguien le cambia una fecha a cualquiera de las dos, `Test` podría empezar a ganar y **cotizar $0 en la web**.
-**Acción recomendada:** desactivarla o quitarle el "Display Online".
+### Pendiente para ustedes
+Definir los **precios semanales y mensuales** por clase y cargarlos (sección 4). Mientras estén en $0.00, una renta de 7 días se cobra como 7 días sueltos.
 
-### 🟡 Otras recomendaciones
-- **Ponerle nombre** a `SJU` y `Test` (están vacíos) — así se identifican rápido.
-- La tarifa `SJU` **no está asignada a la sede de San Juan** a pesar del nombre; aplica a todas. Si la idea era que fuera solo de esa sede, hay que asignarle la location.
-- **Revisar las diferencias web vs mostrador.** Algunas son grandes (Pick UP: $89.95 web vs $50 mostrador; Box Truck: $250 vs $90). Si es intencional, perfecto; si no, hay dinero en juego.
+### Recomendaciones abiertas
+- **Ponerle nombre** a la tarifa `SJU` (el campo está vacío).
+- `SJU` **no está asignada a la sede de San Juan** a pesar del nombre; aplica a todas las sedes. Si la idea era limitarla a esa sede, hay que asignarle la location.
 
 ---
 
