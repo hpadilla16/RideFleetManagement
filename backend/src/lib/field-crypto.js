@@ -70,14 +70,19 @@ import logger from './logger.js';
 // Keys are prisma delegate names (camelCase), matching extension model keys.
 // ---------------------------------------------------------------------------
 export const FIELD_ENC_MAP = {
+  // Scope (2026-08-23): street lines only. city/state/zip are deliberately
+  // LEFT PLAINTEXT — low sensitivity (not identifying on their own) and used as
+  // custom-report dimensions/filters (encrypting `state` broke the report
+  // filter for near-zero privacy gain). The identifying part of an address is
+  // the street line; licence/DOB/signatures remain encrypted.
   customer: {
-    strings: ['licenseNumber', 'address1', 'address2', 'city', 'state', 'zip'],
+    strings: ['licenseNumber', 'address1', 'address2'],
     dob: true,
   },
   rentalAgreement: {
     strings: [
       'licenseNumber',
-      'customerAddress1', 'customerAddress2', 'customerCity', 'customerState', 'customerZip',
+      'customerAddress1', 'customerAddress2',
       'tcSignatureDataUrl', 'declinedInsuranceSignatureDataUrl',
     ],
     dob: true,
