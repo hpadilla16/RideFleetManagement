@@ -6011,6 +6011,19 @@ model Quote {
   revenuePricingApplied Boolean @default(false)
   engineSnapshotJson    String?
 
+  // Staff rate override (2026-08-24). NULL on every quote the engine priced
+  // untouched — the non-override path writes none of these. When an ADMIN/OPS
+  // agent overrides the daily rate, dailyRate/subtotal/fees/taxes/total above
+  // hold the RECOMPUTED numbers, pricingSource becomes MANUAL_OVERRIDE, and
+  // engineSnapshotJson still holds the ENGINE's original row, so the
+  // pre-override price is always recoverable. rateOverrideOriginalDaily is that
+  // original per-day rate denormalized for reporting. A reason is REQUIRED by
+  // the service — an override with no stated reason is rejected, never stored.
+  rateOverrideOriginalDaily Decimal?  @db.Decimal(10, 2)
+  rateOverrideReason        String?   @db.Text
+  rateOverrideByUserId      String?
+  rateOverrideAt            DateTime?
+
   status                 QuoteStatus @default(ACTIVE)
   expiresAt              DateTime
   convertedReservationId String?

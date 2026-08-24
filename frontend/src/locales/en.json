@@ -780,7 +780,14 @@
     "viewReservation": "View reservation",
     "days": "days",
     "confirmCancel": "Cancel quote {{number}}? The locked price is lost — a new quote gets fresh prices.",
-    "newQuoteTitle": "New quote"
+    "newQuoteTitle": "New quote",
+    "engineRate": "Rate: {{rate}}",
+    "rateReadOnly": "Only a manager can change the quoted rate.",
+    "rateInvalid": "Enter a daily rate greater than 0.",
+    "overrideReason": "Reason for the rate change",
+    "overrideReasonPlaceholder": "e.g. Corporate rate match — Acme",
+    "overrideReasonRequired": "A reason is required to change the rate.",
+    "overrideNote": "Subtotal, fees and taxes are recalculated from the new daily rate when you save."
   },
   "incidents": {
     "title": "Incident Reports",

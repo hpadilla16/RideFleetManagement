@@ -7,6 +7,10 @@
  *   GET /preview · POST / · GET / · GET /:id · POST /:id/convert   → allowed
  *   POST /:id/cancel                                               → humans only
  *
+ * POST / additionally runs requireRateOverrideRole FIRST (before idempotency),
+ * so a forbidden override never reserves an idempotency key. It engages ONLY
+ * when the body carries a staff daily-rate override (2026-08-24).
+ *
  * POST / and POST /:id/convert run the idempotency middleware (kind 'quote' is
  * benign/recyclable like 'note' — re-creating the same quote or re-converting is
  * caught by the service's own idempotent convert; keys are still REQUIRED for
@@ -15,7 +19,8 @@
 import { Router } from 'express';
 import { scopeFor } from '../../lib/tenant-scope.js';
 import { idempotency } from '../../middleware/idempotency.js';
-import { quotesService } from './quotes.service.js';
+import { auditIpFromReq, auditUserAgentFromReq } from '../audit/audit.service.js';
+import { quotesService, canOverrideRate, hasRateOverrideIntent } from './quotes.service.js';
 
 export const quotesRouter = Router();
 
@@ -29,7 +34,39 @@ function fail(res, e) {
 }
 
 function actorFor(req) {
-  return { userId: req.user?.id || null };
+  return {
+    userId: req.user?.id || null,
+    // Role + request identity ride along so the service can gate the rate
+    // override and the audit row can name who did it. Additive: every existing
+    // caller of actorFor (convert, setAddOns) only ever reads userId/author.
+    role: req.user?.role || null,
+    email: req.user?.email || null,
+    ip: auditIpFromReq(req),
+    userAgent: auditUserAgentFromReq(req)
+  };
+}
+
+/**
+ * Rate-override role gate (2026-08-24). POST /api/quotes stays open to every
+ * authenticated staff role — an AGENT must keep creating ordinary quotes — so
+ * the gate cannot be a blanket requireRole() at the mount. Instead it engages
+ * ONLY when the body actually carries an override, and then applies the same
+ * shape requireRole() uses in middleware/auth.js: 401 with no user, 403 when
+ * the role is not allowed (SUPER_ADMIN passes via RATE_OVERRIDE_ROLES).
+ *
+ * The service re-checks this independently — this middleware is the consistent
+ * route-level surface, not the only line of defence.
+ */
+function requireRateOverrideRole(req, res, next) {
+  if (!hasRateOverrideIntent(req.body || {})) return next();
+  if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
+  if (!canOverrideRate(req.user.role)) {
+    return res.status(403).json({
+      error: 'Your role cannot override the quoted daily rate',
+      code: 'RATE_OVERRIDE_FORBIDDEN'
+    });
+  }
+  return next();
 }
 
 // Compute WITHOUT saving (also answers availability). Params via query string.
@@ -55,9 +92,26 @@ quotesRouter.get('/', async (req, res, next) => {
   }
 });
 
-quotesRouter.post('/', quoteIdempotency, async (req, res, next) => {
+// Create. Body may carry `dailyRateOverride` (number > 0) + `rateOverrideReason`
+// (non-empty) — ADMIN/OPS/SUPER_ADMIN + STAFF source only; see the service.
+quotesRouter.post('/', requireRateOverrideRole, quoteIdempotency, async (req, res, next) => {
   try {
-    const row = await quotesService.create(req.body || {}, scopeFor(req), actorFor(req));
+    const {
+      pickupLocationId, returnLocationId, vehicleTypeId, pickupAt, returnAt,
+      customerId, contactName, contactPhone, contactEmail,
+      source, author, ticketId,
+      dailyRateOverride, rateOverrideReason
+    } = req.body || {};
+    const row = await quotesService.create(
+      {
+        pickupLocationId, returnLocationId, vehicleTypeId, pickupAt, returnAt,
+        customerId, contactName, contactPhone, contactEmail,
+        source, author, ticketId,
+        dailyRateOverride, rateOverrideReason
+      },
+      scopeFor(req),
+      actorFor(req)
+    );
     res.status(201).json(row);
   } catch (e) {
     if (!fail(res, e)) next(e);

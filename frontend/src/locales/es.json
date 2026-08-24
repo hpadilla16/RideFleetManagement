@@ -780,7 +780,14 @@
     "viewReservation": "Ver reservación",
     "days": "días",
     "confirmCancel": "¿Cancelar la cotización {{number}}? El precio fijado se pierde — una nueva cotización trae precios frescos.",
-    "newQuoteTitle": "Nueva cotización"
+    "newQuoteTitle": "Nueva cotización",
+    "engineRate": "Tarifa: {{rate}}",
+    "rateReadOnly": "Solo un gerente puede cambiar la tarifa cotizada.",
+    "rateInvalid": "Ingresa una tarifa diaria mayor que 0.",
+    "overrideReason": "Motivo del cambio de tarifa",
+    "overrideReasonPlaceholder": "ej. Tarifa corporativa igualada — Acme",
+    "overrideReasonRequired": "Se requiere un motivo para cambiar la tarifa.",
+    "overrideNote": "El subtotal, los cargos y los impuestos se recalculan con la nueva tarifa diaria al guardar."
   },
   "incidents": {
     "title": "Reportes de Incidentes",

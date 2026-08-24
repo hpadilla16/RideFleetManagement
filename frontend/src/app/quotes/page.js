@@ -24,6 +24,15 @@ const dateShort = (v) => { if (!v) return '—'; const d = new Date(v); return N
 const daysLeft = (v) => { if (!v) return null; const ms = new Date(v).getTime() - Date.now(); return ms > 0 ? Math.ceil(ms / 86400000) : 0; };
 
 const STATUS_TONE = { ACTIVE: 'good', EXPIRED: 'neutral', CONVERTED: '', CANCELLED: 'warn' };
+
+/**
+ * Who may edit the engine's daily rate (2026-08-24). Mirrors the backend's
+ * RATE_OVERRIDE_ROLES exactly — an AGENT sees the rate READ-ONLY. Same shape
+ * the rest of the app uses for role gates (see reservations/[id]/checkin-wizard
+ * canBackdate). This is UX only: the API 403s an AGENT regardless.
+ */
+const RATE_OVERRIDE_ROLES = ['SUPER_ADMIN', 'ADMIN', 'OPS'];
+const canOverrideRate = (me) => RATE_OVERRIDE_ROLES.includes(String(me?.role || '').toUpperCase().trim());
 const TABS = [
   { key: 'ACTIVE', labelKey: 'quotes.tabActive' },
   { key: 'CONVERTED', labelKey: 'quotes.tabConverted' },
@@ -178,7 +187,7 @@ function QuotesInner({ token, me, logout }) {
           }} />
       ) : null}
       {creating ? (
-        <NewQuotePanel token={token} locations={locations} t={t}
+        <NewQuotePanel token={token} locations={locations} t={t} me={me}
           onClose={() => setCreating(false)}
           onSaved={async (quote) => {
             setCreating(false);
@@ -375,14 +384,21 @@ function AddOnsEditor({ token, quote, t, onClose, onSaved }) {
   );
 }
 
-function NewQuotePanel({ token, locations, t, onClose, onSaved }) {
+function NewQuotePanel({ token, locations, t, me, onClose, onSaved }) {
   const [form, setForm] = useState({ pickupLocationId: '', pickupAt: '', returnAt: '', contactName: '', contactPhone: '', contactEmail: '' });
   const [preview, setPreview] = useState({ state: 'idle', results: [], ttlHours: 72 }); // idle|loading|ready|error
   const [vehicleTypeId, setVehicleTypeId] = useState('');
+  // Staff rate override (2026-08-24). rateInput stays a STRING — that is what
+  // lets the box be cleared without snapping back to 0. It is seeded from the
+  // engine's rate for the selected class and re-seeded whenever the class or
+  // its price changes, so it always starts at the number the engine quoted.
+  const [rateInput, setRateInput] = useState('');
+  const [overrideReason, setOverrideReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [errMsg, setErrMsg] = useState('');
   const debounceRef = useRef(null);
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const mayOverride = canOverrideRate(me);
 
   const loadPreview = useCallback(() => {
     const { pickupLocationId, pickupAt, returnAt } = form;
@@ -400,12 +416,38 @@ function NewQuotePanel({ token, locations, t, onClose, onSaved }) {
   }, [form.pickupLocationId, form.pickupAt, form.returnAt, loadPreview]);
 
   const chosen = preview.results.find((r) => r.vehicleTypeId === vehicleTypeId);
-  const canSave = !!(chosen && chosen.available && !busy);
+  const engineRate = chosen ? Number(chosen.dailyRate || 0) : null;
+
+  // Re-seed the rate box from the engine whenever the class (or its price)
+  // changes, and drop any half-typed override with it — a reason written for
+  // one class must never ride along to another.
+  useEffect(() => {
+    setRateInput(engineRate === null ? '' : engineRate.toFixed(2));
+    setOverrideReason('');
+  }, [vehicleTypeId, engineRate]);
+
+  // "Changed" compares ROUNDED cents, so retyping "45" over "45.00" is not an
+  // override. An AGENT can never reach this state: mayOverride gates it.
+  const typedRate = Number(String(rateInput).trim());
+  const rateIsNumber = String(rateInput).trim() !== '' && Number.isFinite(typedRate);
+  const rateChanged = mayOverride && engineRate !== null && rateIsNumber
+    && Math.round(typedRate * 100) !== Math.round(engineRate * 100);
+  const rateInvalid = mayOverride && chosen ? (!rateIsNumber || typedRate <= 0) : false;
+  const reasonMissing = rateChanged && !overrideReason.trim();
+
+  const canSave = !!(chosen && chosen.available && !busy && !rateInvalid && !reasonMissing);
 
   async function save() {
     setBusy(true); setErrMsg('');
     try {
-      const quote = await api('/api/quotes', { method: 'POST', body: JSON.stringify({ ...form, vehicleTypeId }) }, token);
+      const body = { ...form, vehicleTypeId };
+      // Only send the override fields when the rate ACTUALLY changed — an
+      // untouched form must post the exact payload it always did.
+      if (rateChanged) {
+        body.dailyRateOverride = typedRate;
+        body.rateOverrideReason = overrideReason.trim();
+      }
+      const quote = await api('/api/quotes', { method: 'POST', body: JSON.stringify(body) }, token);
       onSaved(quote);
     } catch (e) { setErrMsg(String(e?.message || e)); } finally { setBusy(false); }
   }
@@ -468,6 +510,46 @@ function NewQuotePanel({ token, locations, t, onClose, onSaved }) {
             <div style={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}>{r.available ? money(r.total) : '—'}</div>
           </button>
         ))
+      ) : null}
+
+      {chosen && chosen.available ? (
+        <div style={{ border: '1.5px solid rgba(135,82,254,.18)', borderRadius: 14, padding: 12, margin: '4px 0 10px' }}>
+          <label className="label" style={{ display: 'block' }}>{t('quotes.dailyRate')}
+            <input
+              type="number" step="0.01" min="0" inputMode="decimal"
+              value={rateInput}
+              readOnly={!mayOverride}
+              disabled={!mayOverride}
+              onChange={(e) => setRateInput(e.target.value)}
+              style={{ width: '100%', marginTop: 4, opacity: mayOverride ? 1 : 0.7 }}
+            />
+          </label>
+          <div style={{ fontSize: 11.5, opacity: 0.65, marginTop: 4 }}>
+            {t('quotes.engineRate', { rate: money(engineRate) })}
+          </div>
+          {!mayOverride ? (
+            <div style={{ fontSize: 11.5, opacity: 0.65, marginTop: 4 }}>{t('quotes.rateReadOnly')}</div>
+          ) : null}
+          {rateInvalid ? (
+            <div style={{ fontSize: 11.5, marginTop: 6, color: '#e5484d' }}>{t('quotes.rateInvalid')}</div>
+          ) : null}
+          {rateChanged ? (
+            <div style={{ marginTop: 10 }}>
+              <label className="label" style={{ display: 'block' }}>{t('quotes.overrideReason')}
+                <input
+                  value={overrideReason}
+                  onChange={(e) => setOverrideReason(e.target.value)}
+                  placeholder={t('quotes.overrideReasonPlaceholder')}
+                  style={{ width: '100%', marginTop: 4, borderColor: reasonMissing ? 'rgba(229,72,77,.55)' : undefined }}
+                />
+              </label>
+              <div style={{ fontSize: 11.5, opacity: 0.7, marginTop: 4 }}>{t('quotes.overrideNote')}</div>
+              {reasonMissing ? (
+                <div style={{ fontSize: 11.5, marginTop: 4, color: '#e5484d' }}>{t('quotes.overrideReasonRequired')}</div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       <div className="surface-note" style={{ margin: '10px 0' }}>{t('quotes.priceNote', { hours: preview.ttlHours })}</div>

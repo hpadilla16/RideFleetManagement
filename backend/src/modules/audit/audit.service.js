@@ -59,6 +59,13 @@ export const AUDIT_ACTIONS = Object.freeze({
   // ── Impersonation ──
   IMPERSONATION_START: 'IMPERSONATION_START',
   IMPERSONATION_END: 'IMPERSONATION_END',
+
+  // ── Pricing overrides ──
+  // A staff member replaced the engine's quoted daily rate with their own
+  // number. Money-adjacent and discretionary, so it is audited even though it
+  // is a create (not a read): the row carries the original rate, the new rate
+  // and the stated reason.
+  QUOTE_RATE_OVERRIDE: 'QUOTE_RATE_OVERRIDE',
 });
 
 export const AUDIT_OUTCOME = Object.freeze({
