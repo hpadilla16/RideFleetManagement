@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
 import logger, { requestLogger } from './lib/logger.js';
+import { flushSecurityEvents, stopSecurityLogForwarder } from './lib/security-log-forwarder.js';
 import { reservationsRouter } from './modules/reservations/reservations.routes.js';
 import { reservationExtendRouter } from './modules/reservations/reservation-extend.routes.js';
 import { reservationOverrideRouter } from './modules/admin/reservation-override.routes.js';
@@ -555,6 +556,10 @@ process.on('SIGINT', async () => {
   stopHandoffReminderScheduler();
   stopCheckoutSessionCleanupScheduler();
   stopRetentionSweepScheduler();
+  // Best-effort drain of any buffered security-audit events before exit (no-op
+  // when the forwarder is unconfigured); then cancel its timer.
+  await flushSecurityEvents();
+  stopSecurityLogForwarder();
   await closeBrowser();
   await flushSentry();
   await prisma.$disconnect();
@@ -565,6 +570,8 @@ process.on('SIGTERM', async () => {
   stopHandoffReminderScheduler();
   stopCheckoutSessionCleanupScheduler();
   stopRetentionSweepScheduler();
+  await flushSecurityEvents();
+  stopSecurityLogForwarder();
   await closeBrowser();
   await flushSentry();
   await prisma.$disconnect();
