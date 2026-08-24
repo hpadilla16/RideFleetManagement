@@ -201,7 +201,7 @@ export const CUSTOMER_PII_MAP = Object.freeze({
     columns: {
       redact: ['firstName', 'lastName', 'phone'],
       null: [
-        'email', 'phoneNormalized', 'licenseNumber', 'licenseState', 'dateOfBirth',
+        'email', 'phoneNormalized', 'licenseNumber', 'licenseState', 'dateOfBirth', 'dateOfBirthEnc',
         'insurancePolicyNumber', 'insuranceExpiry', 'insuranceDocumentUrl',
         'address1', 'address2', 'city', 'state', 'zip', 'country',
         'idPhotoUrl', 'licenseBackUrl', 'locale',
@@ -303,7 +303,7 @@ export const CUSTOMER_PII_MAP = Object.freeze({
         'customerEmail', 'customerPhone',
         'customerAddress1', 'customerAddress2', 'customerCity', 'customerState',
         'customerZip', 'customerCountry',
-        'dateOfBirth', 'licenseNumber', 'licenseState', 'licenseExpiry',
+        'dateOfBirth', 'dateOfBirthEnc', 'licenseNumber', 'licenseState', 'licenseExpiry',
         'insurancePolicyNumber', 'insuranceDocumentUrl',
         'tcSignatureDataUrl', 'tcSignerName', 'tcCustomerIp',
         'declinedInsuranceSignatureDataUrl',
@@ -339,7 +339,7 @@ export const CUSTOMER_PII_MAP = Object.freeze({
     match: { kind: 'agreementRelation', field: 'rentalAgreementId' },
     columns: {
       redact: ['firstName', 'lastName'],
-      null: ['email', 'phone', 'licenseNumber', 'licenseState', 'licenseExpiry', 'dateOfBirth'],
+      null: ['email', 'phone', 'licenseNumber', 'licenseState', 'licenseExpiry', 'dateOfBirth', 'dateOfBirthEnc'],
     },
   },
   reservationAdditionalDriver: {
@@ -349,7 +349,7 @@ export const CUSTOMER_PII_MAP = Object.freeze({
     match: { kind: 'reservationRelation', field: 'reservationId' },
     columns: {
       redact: ['firstName', 'lastName'],
-      null: ['address', 'dateOfBirth', 'licenseNumber', 'notes'],
+      null: ['address', 'dateOfBirth', 'dateOfBirthEnc', 'licenseNumber', 'notes'],
     },
   },
   agreementSectionInitial: {
@@ -418,7 +418,7 @@ export const CUSTOMER_PII_MAP = Object.freeze({
       redact: ['customerFirstName'],
       conservativeRetain: ['customerLastName'],
       null: [
-        'customerEmail', 'customerPhone', 'dateOfBirth',
+        'customerEmail', 'customerPhone', 'dateOfBirth', 'dateOfBirthEnc',
         'licenseNumber', 'licenseState', 'licenseExpiry', 'licenseImagePath',
         'insurancePolicyNumber', 'insuranceImagePath',
         'signatureDataUrl', 'signerName', 'signerIp',

@@ -1302,6 +1302,7 @@ model Customer {
   licenseNumber            String?
   licenseState             String?
   dateOfBirth              DateTime?
+  dateOfBirthEnc           String?   @db.Text // encrypted DOB (field-crypto encf:v1 format); when set, dateOfBirth is null
   insurancePolicyNumber    String?
   // 2026-07-28 (LAX #5) — insurance policy expiration ("Exp Date" on the
   // pre-check-in forms). Named after LoanerAgreement.insuranceExpiry.
@@ -2244,6 +2245,7 @@ model RentalAgreement {
   customerZip           String?
   customerCountry       String?
   dateOfBirth           DateTime?
+  dateOfBirthEnc        String?   @db.Text // encrypted DOB (field-crypto encf:v1 format); when set, dateOfBirth is null
   licenseNumber         String?
   licenseState          String?
   licenseExpiry         DateTime?
@@ -2526,6 +2528,7 @@ model AgreementDriver {
   licenseState  String?
   licenseExpiry DateTime?
   dateOfBirth   DateTime?
+  dateOfBirthEnc String?   @db.Text // encrypted DOB (field-crypto encf:v1 format); when set, dateOfBirth is null
   isPrimary     Boolean   @default(false)
 
   createdAt DateTime @default(now())
@@ -3026,6 +3029,7 @@ model ReservationAdditionalDriver {
   lastName             String
   address              String?
   dateOfBirth          DateTime?
+  dateOfBirthEnc       String?   @db.Text // encrypted DOB (field-crypto encf:v1 format); when set, dateOfBirth is null
   licenseNumber        String?
   licenseImageUploaded Boolean   @default(false)
   notes                String?
@@ -5533,6 +5537,7 @@ model LoanerAgreement {
   customerEmail     String?
   customerPhone     String?
   dateOfBirth       DateTime?
+  dateOfBirthEnc    String?   @db.Text // encrypted DOB (field-crypto encf:v1 format); when set, dateOfBirth is null
   licenseNumber     String?
   licenseState      String?
   licenseExpiry     DateTime?

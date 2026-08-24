@@ -448,6 +448,11 @@ test('the set of files naming declinedInsurance is a ratchet', () => {
     // (destroying a signature image is not editing the insurance selection).
     'src/modules/customers/customer-pii-map.js',
     'src/modules/customers/customer-erasure.test.mjs',
+    // Field-level PII encryption (2026-08-23). Names only the
+    // declinedInsuranceSignatureDataUrl IMAGE column in its encrypt/decrypt
+    // field map — a crypto passthrough, not a reader or writer of the
+    // declinedInsurance BOOLEAN; no gate applies.
+    'src/lib/field-crypto.js',
   ]);
 
   const found = [];
