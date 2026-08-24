@@ -21,6 +21,7 @@
 // identified person's full PII is audited; a filtered list of many is not.
 import { prisma } from '../../lib/prisma.js';
 import logger, { redactSensitive } from '../../lib/logger.js';
+import { forwardSecurityEvent } from '../../lib/security-log-forwarder.js';
 
 // Known action types. `action` is a plain String column (not a Prisma enum) so
 // adding a value here never needs a migration. Grouped by area.
@@ -114,22 +115,32 @@ export async function recordAudit(entry = {}, deps = {}) {
     // Redact BEFORE persist: metadata must never carry raw PII / secrets.
     const safeMetadata = metadata == null ? null : redactSensitive(metadata);
 
-    await db.adminAuditLog.create({
-      data: {
-        tenantId: tenantId ?? null,
-        actorUserId: actorUserId ?? null,
-        actorEmail: actorEmail ?? null,
-        actorRole: actorRole ?? null,
-        impersonatedByUserId: impersonatedByUserId ?? null,
-        action,
-        targetType: targetType ?? null,
-        targetId: targetId ?? null,
-        ip: ip ?? null,
-        userAgent: userAgent ? String(userAgent).slice(0, 120) : null,
-        metadata: safeMetadata,
-        outcome: outcome || AUDIT_OUTCOME.SUCCESS,
-      },
-    });
+    const data = {
+      tenantId: tenantId ?? null,
+      actorUserId: actorUserId ?? null,
+      actorEmail: actorEmail ?? null,
+      actorRole: actorRole ?? null,
+      impersonatedByUserId: impersonatedByUserId ?? null,
+      action,
+      targetType: targetType ?? null,
+      targetId: targetId ?? null,
+      ip: ip ?? null,
+      userAgent: userAgent ? String(userAgent).slice(0, 120) : null,
+      metadata: safeMetadata,
+      outcome: outcome || AUDIT_OUTCOME.SUCCESS,
+    };
+
+    await db.adminAuditLog.create({ data });
+
+    // Best-effort SIEM forward of the SAME already-redacted fields (safeMetadata
+    // is the redactSensitive output above — we do NOT re-redact). Inert unless
+    // SECURITY_LOG_FORWARD_URL is set; fire-and-forget; can never throw or block
+    // here (forwardSecurityEvent swallows everything internally, and this extra
+    // try/catch is belt-and-suspenders so a failed forward never changes
+    // recordAudit's outcome).
+    try {
+      forwardSecurityEvent({ ...data, timestamp: new Date().toISOString() });
+    } catch { /* forwarder is best-effort; ignore */ }
   } catch (err) {
     // BEST-EFFORT: swallow. A dropped audit row must not fail the request that
     // triggered it. Log so the drop is itself observable.
