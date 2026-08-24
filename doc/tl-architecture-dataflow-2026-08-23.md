@@ -40,7 +40,6 @@ flowchart TB
       SMS["Transactional SMS<br/>Telnyx / Twilio / Plivo"]
       PAY["Payment processing<br/>Authorize.Net · Dejavoo/iPOSpays<br/>PayArc · Stripe"]
       MON["Error monitoring<br/>Sentry — PII-scrubbed"]
-      AI["Document OCR / assist<br/>Anthropic · OpenAI"]
       MAPS["Maps — Google<br/>rendered in the viewer's browser"]
     end
 
@@ -61,7 +60,6 @@ flowchart TB
     API --> SMS
     API --> PAY
     API --> MON
-    API --> AI
     API -. serves map script to browser .-> MAPS
 ```
 
