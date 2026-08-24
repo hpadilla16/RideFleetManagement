@@ -133,7 +133,43 @@ const KEY_ENV_BY_VERSION = {
 const KEY_BYTES = 32;
 let keyCache = new Map();
 
+// Keys handed in at boot by the KMS key provider (lib/kms-key-provider.js).
+// When present for a version, this WINS over the env var — that is the whole
+// point of envelope encryption: the plaintext DEK is unwrapped from KMS into
+// memory at startup and injected here, so the host never stores it as a
+// plaintext env var. Empty by default → field-crypto falls back to reading
+// FIELD_ENC_KEY from the environment exactly as before (inert / backward-
+// compatible). The key is resolved ONCE at boot (KMS Decrypt is async); every
+// per-op encrypt/decrypt below stays synchronous against this in-memory Buffer.
+let injectedKeys = new Map();
+
+/**
+ * Install a resolved key for a version, in memory, from the KMS key provider.
+ * Called once at boot on the KMS-enabled path with the UNWRAPPED 32-byte DEK.
+ * Passing null clears any injected key for that version (falls back to env).
+ * Throws on a malformed key — a bad key must fail loudly at boot, never later
+ * silently corrupt a write.
+ *
+ * The key itself is identical to what FIELD_ENC_KEY holds today (KMS changes
+ * WHERE the key comes from, not the key), so all existing `encf:v1` data keeps
+ * decrypting unchanged.
+ */
+export function initFieldKey(key, version = WRITE_VERSION) {
+  if (key == null) {
+    injectedKeys.delete(version);
+    return;
+  }
+  if (!Buffer.isBuffer(key) || key.length !== KEY_BYTES) {
+    throw new Error(`initFieldKey(): key must be a ${KEY_BYTES}-byte Buffer`);
+  }
+  injectedKeys.set(version, key);
+  // Drop any cached env miss so the injected key takes effect immediately.
+  keyCache.delete(version);
+}
+
 function loadKeyForVersion(version) {
+  // Boot-injected key (KMS path) wins over the env var.
+  if (injectedKeys.has(version)) return injectedKeys.get(version);
   if (keyCache.has(version)) return keyCache.get(version);
   const envName = KEY_ENV_BY_VERSION[version];
   let key = null;
@@ -391,7 +427,8 @@ export const fieldCryptoExtension = {
   },
 };
 
-// Test seam — flush cached keys after process.env mutation.
+// Test seam — flush cached + boot-injected keys after process.env mutation.
 export function _resetFieldKeyCacheForTests() {
   keyCache = new Map();
+  injectedKeys = new Map();
 }

@@ -511,6 +511,21 @@ const isFirstWorker = !cluster.isWorker || cluster.worker.id === 1;
 // or starting schedulers. Production / dev / docker-compose all leave it
 // unset, so the listener starts as before.
 if (process.env.SKIP_LISTEN !== '1') {
+  // Resolve the field-encryption DEK before serving traffic. Inert by default
+  // (FIELD_ENC_KMS_ENABLED unset → no AWS SDK loaded, no KMS call; field-crypto
+  // keeps reading FIELD_ENC_KEY). With KMS enabled it unwraps the DEK via AWS
+  // KMS and hands it to field-crypto. ANY failure must STOP the boot — never
+  // serve traffic with a broken/half-resolved key, which would corrupt PII
+  // reads and writes.
+  try {
+    const { resolveFieldKey, isKmsEnabled } = await import('./lib/kms-key-provider.js');
+    const r = await resolveFieldKey();
+    if (isKmsEnabled()) console.log('[field-key] DEK resolved via AWS KMS', { source: r.source });
+  } catch (e) {
+    console.error('[field-key] FATAL: could not resolve field-encryption key:', e?.message);
+    process.exit(1);
+  }
+
   // Apply pending DB migrations before accepting traffic, so a release that adds
   // a column can't go live against a DB missing it (2026-06-27 outage fix).
   // Fail-open + disable via AUTO_MIGRATE_ON_BOOT=false.
