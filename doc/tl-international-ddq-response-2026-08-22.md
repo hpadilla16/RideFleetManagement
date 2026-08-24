@@ -309,11 +309,6 @@ first four digits alongside the last four. These values cross our API boundary i
 are **not persisted** — only brand, type and last four are stored. We raise it because an assessor
 will ask.
 
-**One cleanup item we are addressing.** Our published internal API documentation contains an
-example schema showing a card number and CVV for an endpoint that **does not exist and never
-accepted such data** — the live endpoint accepts only processor profile identifiers and rejects
-anything else. The stale example is being removed.
-
 ---
 
 ## 3.9 Technical and organisational security measures
