@@ -145,6 +145,23 @@ async function main() {
     process.exit(1);
   }
 
+  // Resolve the field-encryption DEK BEFORE any handler/scheduler runs — this
+  // worker reads/writes encrypted models (customers, reservations, loaner
+  // agreements, …) through the field-crypto prisma extension. Mirrors main.js:
+  // unwrap from AWS KMS when enabled, else use the plaintext FIELD_ENC_KEY;
+  // FAIL LOUD so the worker never runs with a missing/broken key (which would
+  // silently null-out encrypted reads or throw on encrypted writes). Without
+  // this, removing the plaintext FIELD_ENC_KEY once KMS is on would break the
+  // worker even though the API is fine. (2026-08-24)
+  try {
+    const { resolveFieldKey, isKmsEnabled } = await import('./lib/kms-key-provider.js');
+    const r = await resolveFieldKey();
+    if (isKmsEnabled()) logger.info('[field-key] DEK resolved via AWS KMS', { source: r.source });
+  } catch (e) {
+    logger.error('[field-key] FATAL: could not resolve field-encryption key', { message: e?.message });
+    process.exit(1);
+  }
+
   // Register handlers BEFORE startWorkers — otherwise handlers map is empty
   // when startWorkers reads it and no Worker instances are created.
   await registerAllHandlers();
