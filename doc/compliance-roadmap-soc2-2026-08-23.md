@@ -79,13 +79,13 @@ in ~2–3 months.*
 | Vendor / third-party risk-management policy + register | ✅ done |
 | SOC 2 auditor (CPA) engagement guide | ✅ done |
 | **Business-continuity & disaster-recovery plan** | ▶ next |
-| Data-classification policy | ☐ |
-| Acceptable-use policy | ☐ |
-| Secure-SDLC policy | ☐ |
-| Vulnerability-management policy | ☐ |
+| Data-classification policy | ✅ done |
+| Acceptable-use policy | ✅ done |
+| Secure-SDLC policy | ✅ done |
+| Vulnerability-management policy | ✅ done |
 | Logging & monitoring policy (+ SIEM plan) | ✅ done |
-| Backup policy | ☐ |
-| HR security: onboarding/offboarding checklist + confidentiality agreement + security-awareness policy | ☐ |
+| Backup policy | ✅ done |
+| HR security: onboarding/offboarding checklist + confidentiality agreement + security-awareness policy | ✅ done |
 
 ## 6. What only the organisation can do
 
