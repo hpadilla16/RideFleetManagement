@@ -26,6 +26,10 @@
  * hit is what makes the next person distrust the whole inventory. No backfill
  * script,
  * no raw-SQL UPDATE, and no RideOps/Flutter writer touched it at that date.
+ * 2026-08-23: src/lib/field-crypto.js joined the list — it names ONLY
+ * declinedInsuranceSignatureDataUrl (the signature IMAGE column, in its
+ * field-encryption map); it never reads or writes the declinedInsurance
+ * boolean this gate protects.
  *
  * That list is a SNAPSHOT, not a guarantee, and a comment cannot keep itself
  * honest — so it is ratcheted by a test: `the set of files naming

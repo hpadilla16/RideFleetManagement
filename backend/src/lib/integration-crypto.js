@@ -73,10 +73,25 @@ function loadKey() {
  * @returns {string} base64(iv || authTag || ciphertext)
  */
 export function encrypt(plaintext) {
+  return encryptWithKey(loadKey(), plaintext);
+}
+
+/**
+ * Keyed variant of encrypt() — same wire format, caller-supplied key.
+ * Added 2026-08-23 so field-level PII encryption (field-crypto.js, its own
+ * FIELD_ENC_KEY) reuses this exact primitive instead of re-implementing GCM.
+ *
+ * @param {Buffer} key — 32-byte key
+ * @param {string} plaintext
+ * @returns {string} base64(iv || authTag || ciphertext)
+ */
+export function encryptWithKey(key, plaintext) {
+  if (!Buffer.isBuffer(key) || key.length !== KEY_BYTES) {
+    throw new TypeError(`encryptWithKey(): key must be a ${KEY_BYTES}-byte Buffer`);
+  }
   if (typeof plaintext !== 'string') {
     throw new TypeError('encrypt(): plaintext must be a string');
   }
-  const key = loadKey();
   const iv = crypto.randomBytes(IV_BYTES);
   const cipher = crypto.createCipheriv(ALGO, key, iv);
   const ct = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
@@ -91,10 +106,23 @@ export function encrypt(plaintext) {
  * @returns {string} plaintext
  */
 export function decrypt(payload) {
+  return decryptWithKey(loadKey(), payload);
+}
+
+/**
+ * Keyed variant of decrypt() — same wire format, caller-supplied key.
+ *
+ * @param {Buffer} key — 32-byte key
+ * @param {string} payload — base64(iv || authTag || ciphertext)
+ * @returns {string} plaintext
+ */
+export function decryptWithKey(key, payload) {
+  if (!Buffer.isBuffer(key) || key.length !== KEY_BYTES) {
+    throw new TypeError(`decryptWithKey(): key must be a ${KEY_BYTES}-byte Buffer`);
+  }
   if (typeof payload !== 'string' || payload.length === 0) {
     throw new TypeError('decrypt(): payload must be a non-empty string');
   }
-  const key = loadKey();
   let buf;
   try {
     buf = Buffer.from(payload, 'base64');
