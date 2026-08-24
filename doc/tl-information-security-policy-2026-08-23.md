@@ -47,9 +47,14 @@ access, and the third-party providers engaged to deliver the service (the sub-pr
 - **In transit:** TLS 1.2 / 1.3 only (TLS 1.0/1.1 rejected); HTTP redirects to HTTPS; all outbound
   sub-processor connections use HTTPS. Application/API ports are bound to loopback and reachable only
   through the TLS-terminating reverse proxy.
-- **At rest:** managed encryption at rest is provided by the database and storage platform.
-  Integration credentials are additionally field-encrypted (AES-256-GCM, random per-write IV).
-  Application-level field encryption of customer personal-data columns is **(planned)**.
+- **At rest:** managed encryption at rest is provided by the database and storage platform. In
+  addition, **the most sensitive customer personal-data columns — driving-licence number, date of
+  birth, street address and signature images — are encrypted at the application (field) level**
+  (AES-256-GCM, random per-write IV), so they are never stored in readable form; integration
+  credentials are field-encrypted the same way. **The encryption key is managed by AWS KMS
+  (envelope encryption): it is stored only in KMS-wrapped form and unwrapped into memory at process
+  start — never held as plaintext on the host** — and the ciphertext format carries a key version to
+  support rotation.
 - **Payment data:** no full card number (PAN) or CVV is received, transmitted or stored by RFM; card
   data is captured on the processor's hosted fields or the physical terminal. PCI DSS SAQ C
   (COMPLIANT, 2026-06-10).
@@ -66,7 +71,9 @@ access, and the third-party providers engaged to deliver the service (the sub-pr
   stamped so actions are attributable to the operator, not the tenant's staff).
 - **Error monitoring** (Sentry) with a personal-data scrubber applied before transmission and
   alerting on failures. Container logs are size-rotated.
-- **Security information and event management (SIEM) / intrusion detection** are **(planned)**.
+- **Centralised security logging:** the administrative/security audit trail is forwarded to a
+  dedicated log-management / SIEM platform (US data region) for retention, search and alerting.
+  Extended log retention and network intrusion detection (IDS) are **(planned)**.
 
 ## 6. Vulnerability and patch management
 
@@ -76,8 +83,9 @@ access, and the third-party providers engaged to deliver the service (the sub-pr
   every push/PR to the main branch plus a weekly sweep. A newly committed secret fails the build; a
   documented path to hard-gating the remaining scanners is defined.
 - A **dynamic application security scan** (OWASP ZAP, authenticated) is performed against the running
-  application; findings are triaged and remediated. An independent third-party penetration test is
-  **(planned)**.
+  application; findings are triaged and remediated. The most recent scan identified no high-severity
+  or exploitable issues and confirmed tenant isolation. Independent third-party penetration testing is
+  scheduled as part of the ongoing compliance programme.
 
 ## 7. Secure development
 
