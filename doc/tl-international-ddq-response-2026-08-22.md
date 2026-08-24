@@ -9,7 +9,7 @@
 > provides that those documents are determined *after* this information has been received and reviewed.
 >
 > Every technical statement below was verified against the running production system and the source
-> code on **23 August 2026**, not from documentation or assumption. Where a control is not in place,
+> code on **24 August 2026**, not from documentation or assumption. Where a control is not in place,
 > this document says so plainly rather than describing an intention.
 
 ---
@@ -319,7 +319,7 @@ anything else. The stale example is being removed.
 
 | Measure | Status |
 |---|---|
-| Encryption in transit | **TLS 1.2 and TLS 1.3 only** — TLS 1.0 and 1.1 are rejected. Verified 23 Aug 2026; cipher suites `ECDHE-ECDSA-AES256-GCM-SHA384` (1.2) and `TLS_AES_256_GCM_SHA384` (1.3). HTTP redirects to HTTPS, and all outbound sub-processor connections use HTTPS. The application and API container ports are bound to loopback only, so the API is reachable solely through the TLS-terminating reverse proxy and never on a public address. |
+| Encryption in transit | **TLS 1.2 and TLS 1.3 only** — TLS 1.0 and 1.1 are rejected. Verified 23 Aug 2026; cipher suites `ECDHE-ECDSA-AES256-GCM-SHA384` (1.2) and `TLS_AES_256_GCM_SHA384` (1.3). HTTP redirects to HTTPS, **HTTP Strict Transport Security (HSTS) is set** (`max-age` 1 year, `includeSubDomains`), and all outbound sub-processor connections use HTTPS. The application and API container ports are bound to loopback only, so the API is reachable solely through the TLS-terminating reverse proxy and never on a public address. |
 | Encryption at rest | Provided by the database and storage platform (managed encryption at rest). In addition, **the most sensitive customer personal-data columns — driving-licence number, date of birth, street address, and signature images — are encrypted at the application (field) level with AES-256-GCM and a random per-write initialisation vector**, so they are never stored as readable plaintext in the database; integration credentials are field-encrypted the same way. Lower-sensitivity columns (name, email, telephone, city/state/postal code) rely on the platform's storage-level encryption. |
 | API authentication and authorisation | Bearer tokens (HS256), 12-hour lifetime for staff, verified against the database on every request. Layered role, module and capability gates as described in 3.3. Customer-facing document links use 192-bit random, database-expiry-enforced tokens. |
 | User authentication, privileged access, MFA | TOTP two-factor authentication enforced for privileged accounts; see 3.3. |
@@ -330,7 +330,7 @@ anything else. The stale example is being removed.
 | Vulnerability scanning and remediation | **Automated, report-first.** Continuous integration now runs, in a dedicated workflow separate from the functional/authorisation gates: dependency vulnerability auditing (`npm audit`, backend and frontend), automated dependency-update pull requests (Dependabot), static application security testing (CodeQL, JavaScript/TypeScript), secret scanning over full git history (gitleaks), and container image scanning of the production images (Trivy, HIGH/CRITICAL). These run on every push and pull request to the main branch, plus a weekly scheduled sweep. The posture is report-first — findings are surfaced and triaged rather than blocking merges — **with one live gate today: a newly committed secret fails the build.** A documented path to hard-gating the remainder (critical fixable direct-dependency vulnerabilities, new CodeQL alerts on the change under review, and fixable HIGH/CRITICAL container findings) is defined. Evidence: `doc/security-scanning-2026-08-22.md`. A formal, tracked remediation SLA and the promotion of the remaining scanners from warn to hard-gate are being finalised. |
 | Penetration / security testing | A **dynamic application security scan** (OWASP ZAP — passive baseline plus an authenticated, OpenAPI-driven active scan) was performed against the running application. It found **no high-severity or exploitable issues** and confirmed multi-tenant isolation (no cross-tenant data access); the low- and medium-severity observations were addressed and re-verified. Evidence: `doc/dast-2026-08-23.md`. An independent third-party penetration test has not yet been commissioned, and this scanning is not presented as a substitute for one. |
 | Backup security and restoration testing | Nightly full database backup, 30-day retention, transmitted over TLS. Client-side (GPG) encryption of the dump before upload is available and can be enabled. Scheduled restoration testing on a documented cadence is not yet in place. |
-| Incident-response procedures | A formal written procedure is in preparation; see 3.11. |
+| Incident-response procedures | A formal written incident-response procedure is provided (escalation contacts to be completed); see 3.11. |
 | Security certifications or independent assurance | No ISO 27001 or SOC 2 is currently held. A formal compliance programme is **underway, targeting SOC 2 Type II** (with the information-security management foundation also positioning the organisation for ISO 27001); the security policies, retention schedule and incident-response procedure provided here are the first deliverables of that programme. |
 | Additional | Rate limiting at three layers (per-IP on authentication endpoints, per-tenant, and per-IP on customer-facing endpoints). Strict cross-origin allowlist in production. Upload validation by file magic header with size caps. All database access is parameterised. Security response headers are set on every response (`X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`), with anti-clickjacking headers on server-rendered pages, and the framework fingerprint header is suppressed. Input validation is centralised in shared validators that return 400 on malformed input. A cloud firewall fronts the host with a **default-deny inbound policy**, permitting only the required service ports (SSH and HTTP/HTTPS) and denying all other inbound traffic, complementing the loopback-only application port binding described above. |
 
@@ -397,13 +397,14 @@ otherwise.
 
 ## 3.11 Personal data breaches and incident management
 
-A formal written incident-response procedure is in preparation and will be provided. In the interim,
-security-relevant events are captured by the administrative audit trail and the error-monitoring and
-alerting described in 3.3 and 3.9, which support detection, investigation and evidence preservation.
+A formal written incident-response procedure **is provided** (escalation contacts to be completed by
+the responding organisation). Security-relevant events are captured by the administrative audit trail
+and the error-monitoring and alerting described in 3.3 and 3.9, which support detection, investigation
+and evidence preservation.
 
 | Item | Response |
 |---|---|
-| Incident and breach-response procedure | To be provided — in preparation |
+| Incident and breach-response procedure | **Provided** — a standalone incident-response procedure |
 | 24/7 or escalation contact for an incident involving your data | ______________________________ |
 | Proposed maximum notification timeframe after becoming aware | We propose **24 hours** from becoming aware, to give TL adequate margin within its own regulatory deadline. |
 | Investigation, containment, remediation, evidence preservation | To be documented in the procedure above |
@@ -546,6 +547,7 @@ sandbox mode refuses to connect to any host outside an explicit allowlist, and l
 start unless the required contractual attestations are recorded in configuration. We would rather
 make the constraint impossible to breach than rely on remembering it.
 
-The items noted above as in preparation — the standalone information-security policy, the retention
-schedule document, the incident-response procedure, and the architecture / data-flow diagram — are
-being progressed in parallel.
+The standalone information-security policy, retention schedule, incident-response procedure, and
+architecture / data-flow diagram referenced above are **provided** as accompanying documents. The
+only remaining open items are the entity/contact fields (3.1), a small number of items for counsel,
+and the API integration documentation — which depends on TL providing the API details listed above.
