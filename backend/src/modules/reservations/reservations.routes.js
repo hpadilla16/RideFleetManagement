@@ -2,6 +2,8 @@
 import { Router } from 'express';
 import { checkRentalSpan, rentalSpanMessage } from '../rates/rental-minimum.js';
 import { previewLocationMandatoryFees } from './reservation-pricing.service.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
+import { parseDateTimeInTz } from '../../lib/date-utils.js';
 import { reservationsService } from './reservations.service.js';
 import { looksLikeXlsx, parseReservationImportWorkbook } from './reservation-import-parse.js';
 import { validateReservationCreate, validateReservationPatch } from './reservations.rules.js';
@@ -1260,6 +1262,47 @@ reservationsRouter.post('/', async (req, res, next) => {
       .replace(/\n?\[RES_DEPOSIT_META\]\{[^\n]*\}/g, '')
       .replace(/\n?\[SECURITY_DEPOSIT_META\]\{[^\n]*\}/g, '')
       .trim();
+
+    // Short-window content dedup (2026-08-24). A rapid double/triple-click or a
+    // client retry submits the SAME reservation two-to-four times within ~1s;
+    // the frontend mints a fresh reservationNumber per submit, so the UNIQUE
+    // index on reservationNumber never catches these — production saw one renter
+    // produce 3-4 identical reservations inside 0.9-1.3s. Guard: if THIS agent
+    // (createdByUserId) already created a reservation for the same customer +
+    // pickup + return + vehicle type in the last 10s, return THAT one instead of
+    // minting a duplicate. Scoped strictly to the tenant; the single-submit path
+    // is behaviorally unchanged (the lookup simply finds nothing). Frontend
+    // in-flight guard removes the trigger; this 10s window is the backstop.
+    const dedupCreatedByUserId = req.user?.sub || req.user?.id || null;
+    const dedupTz = await resolveTenantTimeZone(req.user?.tenantId);
+    const dedupPickupAt = parseDateTimeInTz(String(req.body.pickupAt), dedupTz);
+    const dedupReturnAt = parseDateTimeInTz(String(req.body.returnAt), dedupTz);
+    if (dedupCreatedByUserId && dedupPickupAt && dedupReturnAt) {
+      const dedupTenantId = scopeFor(req).tenantId;
+      const existingDuplicate = await withTenantSchema(req.user.tenantId, (db) => db.reservation.findFirst({
+        where: {
+          ...(dedupTenantId ? { tenantId: dedupTenantId } : {}),
+          createdByUserId: dedupCreatedByUserId,
+          customerId: String(req.body.customerId),
+          vehicleTypeId: String(req.body.vehicleTypeId),
+          pickupAt: dedupPickupAt,
+          returnAt: dedupReturnAt,
+          createdAt: { gt: new Date(Date.now() - 10_000) }
+        },
+        orderBy: { createdAt: 'desc' },
+        include: { customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } }
+      }));
+      if (existingDuplicate) {
+        logger.info('[reservation-create] deduped rapid duplicate submit', {
+          reservationId: existingDuplicate.id,
+          reservationNumber: existingDuplicate.reservationNumber,
+          customerId: existingDuplicate.customerId,
+          createdByUserId: dedupCreatedByUserId,
+          tenantId: existingDuplicate.tenantId || dedupTenantId || null
+        });
+        return res.status(201).json(existingDuplicate);
+      }
+    }
 
     const row = await reservationsService.create({
       ...(req.body || {}),
