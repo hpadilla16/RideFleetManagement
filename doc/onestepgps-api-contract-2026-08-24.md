@@ -80,3 +80,20 @@ conversion library (github.com/onestepgps/units) because of this.
 Device identity for `VehicleTelematicsDevice.externalDeviceId` = `device_id`;
 provider = `'ONESTEPGPS'` (String column — no migration needed). `license_plate` from device-info
 enables plate-based auto-mapping to `Vehicle`.
+
+## Zones & Alerts — VERIFIED surface (added 2026-08-25, read live via authenticated session)
+
+- **Zones CRUD:** `POST /v3/api/public/zone` · `PUT /zone/:zone_id` · `DELETE /zone/:zone_id` ·
+  `GET /zone` (search: limit/offset/criteria/order_by) · `GET /zone/:zone_id`. Bulk creates exist
+  (`zone-list`, `zone-address-list`). Create fields: `display_name`, `zone_type`, `detail`,
+  `hex_color`, `label_visible`, `visible`, `zone_label_color_setting`, `label_hex_color`,
+  `shape_data`, `vertices`. (zone_type's enum was not shown in the field table.)
+- **Alert polling (account-wide):** `GET /v3/api/public/alert/user/devices/` — params `limit`,
+  `alert_cursor`, `alert_at_from`, `alert_at_to`, `asc`, `search_text`; response
+  `{ result_length, result_list, alert_cursor, outside_time_bound }` → **cursor-paginated tailing**
+  (persist `alert_cursor` per tenant as an optimization over the lookback window).
+- Per-device reads: `GET /alert/device/:device_id`, `GET /alert/:alert_id/device/:device_id`.
+- **`GET /v3/api/public/device-zone/current`** — which zone(s) each device is in RIGHT NOW; useful
+  arrival-detection fallback if alert items lack zone refs.
+- Alert ITEM field shape is still not rendered in the doc's examples — the shape-tolerant parser in
+  `telematics-onestepgps.js` remains the guard; verify against the first live alert.

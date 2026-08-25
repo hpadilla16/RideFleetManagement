@@ -395,7 +395,11 @@ export async function getDevicesWithPositions(tenantId) {
 // without this client.
 
 const zonesPath = () => (process.env.ONESTEPGPS_ZONES_PATH || 'zone').replace(/^\//, '');
-const alertsPath = () => (process.env.ONESTEPGPS_ALERTS_PATH || 'alert').replace(/^\//, '');
+// VERIFIED against the live apidoc (2026-08-25, via Hector's session): the
+// account-wide polling endpoint is GET /v3/api/public/alert/user/devices/
+// (cursor-paginated: limit, alert_cursor, alert_at_from/to, asc; response
+// { result_length, result_list, alert_cursor, outside_time_bound }).
+const alertsPath = () => (process.env.ONESTEPGPS_ALERTS_PATH || 'alert/user/devices/').replace(/^\//, '');
 
 /** Tolerant id extraction from a zone create/update answer. */
 export function pickProviderZoneId(data) {
@@ -419,10 +423,18 @@ export function pickProviderZoneId(data) {
  * server-side reader finds one. Returns { providerZoneId }.
  */
 export async function pushProviderZone(tenantId, { providerZoneId = null, name, points }) {
+  // VERIFIED create-zone fields (live apidoc 2026-08-25): display_name,
+  // zone_type, vertices (+ cosmetics hex_color/label_*/shape_data). zone_type's
+  // enum wasn't shown in the field table, so it is omitted and left to the
+  // provider default; the legacy tolerant spellings ride along unchanged in
+  // case an older deployment reads them.
+  const vertexList = (points || []).map((p) => ({ lat: p.lat, lng: p.lng }));
   const body = {
+    display_name: String(name || '').slice(0, 120),
+    vertices: vertexList,
     zone_name: String(name || '').slice(0, 120),
-    points: (points || []).map((p) => ({ lat: p.lat, lng: p.lng })),
-    latlng_list: (points || []).map((p) => ({ lat: p.lat, lng: p.lng })),
+    points: vertexList,
+    latlng_list: vertexList,
   };
   let data;
   if (providerZoneId) {
