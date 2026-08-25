@@ -423,18 +423,18 @@ export function pickProviderZoneId(data) {
  * server-side reader finds one. Returns { providerZoneId }.
  */
 export async function pushProviderZone(tenantId, { providerZoneId = null, name, points }) {
-  // VERIFIED create-zone fields (live apidoc 2026-08-25): display_name,
-  // zone_type, vertices (+ cosmetics hex_color/label_*/shape_data). zone_type's
-  // enum wasn't shown in the field table, so it is omitted and left to the
-  // provider default; the legacy tolerant spellings ride along unchanged in
-  // case an older deployment reads them.
-  const vertexList = (points || []).map((p) => ({ lat: p.lat, lng: p.lng }));
+  // VERIFIED create-zone contract (live apidoc, second read 2026-08-25 after
+  // their validator 500'd the first live push): zone_type is REQUIRED and
+  // "Currently only \"polygon\" is supported"; vertices is "an array of FLOATS
+  // representing latlng coordinates. [Lat, Lng, Lat, Lng, ...]" nested under
+  // shape_data. Clean payload only — the legacy object-list spellings were
+  // dropped the moment their validator proved it is strict, not tolerant.
+  const flatVertices = (points || []).flatMap((p) => [Number(p.lat), Number(p.lng)]);
   const body = {
     display_name: String(name || '').slice(0, 120),
-    vertices: vertexList,
-    zone_name: String(name || '').slice(0, 120),
-    points: vertexList,
-    latlng_list: vertexList,
+    zone_type: 'polygon',
+    shape_data: { vertices: flatVertices },
+    vertices: flatVertices,
   };
   let data;
   if (providerZoneId) {

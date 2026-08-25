@@ -353,8 +353,16 @@ test('pushProviderZone create: POST with Bearer auth, no key in URL, id parsed f
   const url = new URL(calls[0].url);
   assert.equal(url.searchParams.get('api-key'), null, 'key must NEVER ride in the URL');
   const body = JSON.parse(calls[0].opts.body);
-  assert.equal(body.zone_name, 'LAX Pickup Lot B');
-  assert.equal(body.points.length, 3);
+  // VERIFIED contract (live apidoc 2026-08-25): display_name + zone_type
+  // 'polygon' (the only supported value) + FLAT float vertices under
+  // shape_data. Legacy object-list spellings must be gone — their validator
+  // is strict and 500s on surprises.
+  assert.equal(body.display_name, 'LAX Pickup Lot B');
+  assert.equal(body.zone_type, 'polygon');
+  assert.deepEqual(body.shape_data.vertices, [18.1, -66.1, 18.2, -66.1, 18.2, -66.2]);
+  assert.deepEqual(body.vertices, body.shape_data.vertices);
+  assert.equal(body.zone_name, undefined);
+  assert.equal(body.points, undefined);
   assert.ok(!calls[0].opts.body.includes('sk-zone-key'), 'key must never enter the request body');
 });
 
