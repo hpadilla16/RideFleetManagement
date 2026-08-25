@@ -111,6 +111,9 @@ export function driverZonePayload(zone) {
     geometry: zone?.geometryJson ?? null,
     toleranceM: num(zone?.toleranceM),
     walkingDirections: String(zone?.walkingDirections || '').trim() || null,
+    // Spanish variant (2026-08-25) — the driver UI is ES-primary and prefers
+    // this text, falling back to the English one.
+    walkingDirectionsEs: String(zone?.walkingDirectionsEs || '').trim() || null,
   };
 }
 

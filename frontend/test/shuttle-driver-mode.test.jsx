@@ -140,6 +140,31 @@ describe('Screen 12 — home', () => {
     expect(within(fallback).getByText('Isla B, letrero B-4')).toBeInTheDocument();
     expect(within(fallback).queryByText('Airport loop')).not.toBeInTheDocument();
   });
+
+  it('per-language spot directions (2026-08-25): ES-primary prefers the Spanish text, EN toggle flips it, EN-only falls back', async () => {
+    mockFetch({
+      ...BASE,
+      zones: [
+        BASE.zones[0],
+        { ...BASE.zones[1], walkingDirections: 'Island B, sign B-4', walkingDirectionsEs: 'Isla B, letrero B-4' },
+      ],
+    });
+    render(<DriverClient token={TOKEN} />);
+
+    // lang = es (beforeEach): the Spanish text wins.
+    const fallback = await screen.findByTestId('spots-fallback');
+    expect(within(fallback).getByText('Isla B, letrero B-4')).toBeInTheDocument();
+    expect(within(fallback).queryByText('Island B, sign B-4')).not.toBeInTheDocument();
+
+    // The driver flips to EN → the English text takes over, live.
+    fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+    expect(within(screen.getByTestId('spots-fallback')).getByText('Island B, sign B-4')).toBeInTheDocument();
+
+    // Back to ES — and the existing BASE fixture (EN-only text) is the
+    // fallback case: shows anyway (covered by the test above).
+    fireEvent.click(screen.getByRole('button', { name: 'ES' }));
+    expect(within(screen.getByTestId('spots-fallback')).getByText('Isla B, letrero B-4')).toBeInTheDocument();
+  });
 });
 
 describe('Screen 13 — roster', () => {

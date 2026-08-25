@@ -81,6 +81,9 @@ export function validateZoneInput(body = {}) {
       kind,
       isPickupSpot: kind === 'ZONE' && body.isPickupSpot === true,
       walkingDirections: String(body.walkingDirections || '').trim().slice(0, 500) || null,
+      // Spanish variant (2026-08-25) — same caps, same trim-to-null rule, so
+      // the two languages can never drift in what a save accepts.
+      walkingDirectionsEs: String(body.walkingDirectionsEs || '').trim().slice(0, 500) || null,
       geometryJson: { type: kind === 'ROUTE' ? 'polyline' : (String(body.geometry?.type || 'polygon').toLowerCase() === 'rectangle' ? 'rectangle' : 'polygon'), points },
       toleranceM,
       notifyOnEnter: kind === 'ZONE' && body.notifyOnEnter === true,
@@ -240,6 +243,7 @@ export function arrivalState(alerts = [], zoneById = new Map(), now = Date.now()
         arrivedAtSpot: true,
         spotName: zone?.name || null,
         spotWalkingDirections: zone?.walkingDirections || null,
+        spotWalkingDirectionsEs: zone?.walkingDirectionsEs || null,
         arrivedZoneId: a.zoneId || null,
       };
     }

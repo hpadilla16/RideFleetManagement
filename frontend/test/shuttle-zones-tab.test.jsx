@@ -303,11 +303,40 @@ describe('ZonesRoutesTab — editor without a Maps key', () => {
       kind: 'ZONE',
       isPickupSpot: true,
       walkingDirections: 'Cross to island B.',
+      walkingDirectionsEs: '',
       notifyOnEnter: true,
       notifyOnExit: false,
     });
     // No geometry key — an untouched shape must not trigger a provider re-push.
     expect('geometry' in puts[0]).toBe(false);
+  });
+
+  it('pickup spot editor shows BOTH language textareas and PUTs both texts (2026-08-25)', async () => {
+    const puts = [];
+    routeDefaults([
+      [['PUT', '/api/shuttle-zones/z1'], (path, opts) => {
+        puts.push(opts.body);
+        return { ok: true, zone: { ...ZONES[0], walkingDirectionsEs: 'Cruza a la isleta B.' } };
+      }],
+    ]);
+    render(<ZonesRoutesTab token="tok" />);
+
+    const row1 = await findZoneRow('LAX Pickup Lot B');
+    fireEvent.click(within(row1).getByRole('button', { name: 'shuttleZones.edit' }));
+    const editor = await screen.findByTestId('zone-editor');
+
+    // Two textareas, one per language, only while "Pickup spot" is on.
+    const enBox = within(editor).getByRole('textbox', { name: 'shuttleZones.walkingDirectionsEn' });
+    const esBox = within(editor).getByRole('textbox', { name: 'shuttleZones.walkingDirectionsEs' });
+    expect(enBox).toHaveValue('Cross to island B.');
+    expect(esBox).toHaveValue('');
+
+    fireEvent.change(esBox, { target: { value: 'Cruza a la isleta B.' } });
+    fireEvent.click(within(editor).getByRole('button', { name: 'shuttleZones.save' }));
+
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0].walkingDirections).toBe('Cross to island B.');
+    expect(puts[0].walkingDirectionsEs).toBe('Cruza a la isleta B.');
   });
 
   it('route editor shows tolerance slider and the in-house detection note (coming-soon copy is gone)', async () => {

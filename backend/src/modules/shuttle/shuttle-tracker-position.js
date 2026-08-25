@@ -36,6 +36,58 @@ const num = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+/** A COORDINATE read: null/undefined/''/NaN AND exact 0 are all "unset".
+ *  Number(null) === 0, which is how a NULL latitude became a Null-Island pin
+ *  — see the pickup-point comment in publicPositionPayload. */
+const coordNum = (v) => {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n !== 0 ? n : null;
+};
+
+/** Both axes valid or nothing. */
+const coordPair = (lat, lng) => {
+  const la = coordNum(lat);
+  const ln = coordNum(lng);
+  return la !== null && ln !== null ? { latitude: la, longitude: ln } : null;
+};
+
+/**
+ * Centroid of a zone's stored geometry — the pickup-point fallback when the
+ * LOCATION has no coordinates of its own (Null-Island fix, 2026-08-25).
+ * Plain vertex mean: these are small curb-side polygons, not continents.
+ * Null when the geometry cannot yield an honest point (fewer than 3 valid
+ * vertices — a pickup-spot ZONE is >= 3 by validation).
+ */
+export function zoneCentroid(geometryJson) {
+  const raw = Array.isArray(geometryJson?.points) ? geometryJson.points : [];
+  const points = raw
+    .map((p) => ({ lat: Number(p?.lat), lng: Number(p?.lng) }))
+    .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (points.length < 3) return null;
+  const latitude = points.reduce((s, p) => s + p.lat, 0) / points.length;
+  const longitude = points.reduce((s, p) => s + p.lng, 0) / points.length;
+  return coordPair(latitude, longitude);
+}
+
+/**
+ * Which text fills the walking-directions keys (2026-08-25, found live: the
+ * owner wrote rich directions on the SPOT and they only ever showed during
+ * arrival). Resolution, per language, most specific first:
+ *   1. while arrived — the arrived zone's own text (unchanged behavior);
+ *   2. the designated single pickup spot's text — PRIMARY at all times now;
+ *   3. the location-level config text.
+ * Language-pure on purpose: en never bleeds into es here — the PAGE prefers
+ * the viewer's language and falls back across languages itself.
+ */
+export function resolveWalkingDirections({ arrival = null, pickupSpot = null, locationEn = '', locationEs = '' } = {}) {
+  const arrived = arrival?.arrivedAtSpot === true;
+  return {
+    en: (arrived && arrival.spotWalkingDirections) || pickupSpot?.walkingDirections || locationEn || '',
+    es: (arrived && arrival.spotWalkingDirectionsEs) || pickupSpot?.walkingDirectionsEs || locationEs || '',
+  };
+}
+
 /** The only request states the public page may learn about. CANCELLED and
  *  NO_SHOW deliberately collapse to null — the curb page shows progress, not
  *  the counter's bookkeeping. */
@@ -78,33 +130,54 @@ const PUBLIC_REQUEST_STATUSES = ['READY', 'VIEWED', 'COMPLETED'];
  *     coordinates; see shuttle-customer-location.js)
  * Anything further needs its own review — do not spread, keep picking.
  *
+ * DELIBERATE WHITELIST EXPANSION (2026-08-25, per-language directions —
+ * owner-approved). Exactly two more keys crossed, both sede-written prose:
+ *   • walkingDirectionsEs             (the Spanish variant of the existing
+ *     walkingDirections; '' when the sede has not written one — the PAGE
+ *     does the EN↔ES fallback, the payload stays language-pure)
+ *   • pickupSpot.walkingDirectionsEs  (same, for the designated spot's text)
+ *
  * @param {object} args
  * @param {{latitude,longitude,heading,speedMph,eventAt}|null} args.position latest fix
  * @param {{mode,headwayMinutes}} args.config
  * @param {{name,latitude,longitude}|null} args.location
  * @param {string} [args.pickupInstructions]
  * @param {string} [args.walkingDirections]
+ * @param {string} [args.walkingDirectionsEs]
  * @param {string|null} [args.brandName]
  * @param {string|null} [args.counterPhone]
  * @param {{make,model,color,plate}|null} [args.vehicle]
  * @param {string|null} [args.requestStatus]
+ * @param {{latitude,longitude}|null} [args.pickupFallback] pickup point used
+ *   when the location's own coordinates are unset (see zoneCentroid)
  * @param {number} [args.now]
  */
 export function publicPositionPayload({
   position, config, location, pickupInstructions = '',
-  walkingDirections = '', brandName = null, counterPhone = null,
+  walkingDirections = '', walkingDirectionsEs = '',
+  brandName = null, counterPhone = null,
   vehicle = null, requestStatus = null,
   arrivedAtSpot = false, arrivedSpotName = null,
   assigned = false, shuttles = null, locationSharing = null,
-  intake = null, pickupSpot = null,
+  intake = null, pickupSpot = null, pickupFallback = null,
   now = Date.now(),
 }) {
   // The pickup POINT (where to stand) is the location's own coordinates —
   // already public knowledge (it's the rental counter's address), and it lets
-  // the page draw "you are here → wait there". Absent coordinates simply omit
-  // the key; the page degrades to text instructions.
-  const pickupLat = num(location?.latitude);
-  const pickupLng = num(location?.longitude);
+  // the page draw "you are here → wait there". A NULL or zero coordinate is
+  // treated as UNSET, not as a place: Number(null) === 0, so the old num()
+  // read turned an unconfigured location into a pin at (0,0) — Null Island,
+  // "~9141 km from pickup spot" (found live 2026-08-25). When the location
+  // has no usable coordinates the caller-provided fallback (the single
+  // pickup-spot zone's centroid) steps in; with neither, the key is simply
+  // omitted and the page degrades to text instructions.
+  // Whole-point decision — one bad axis invalidates the pair (never a chimera
+  // of location-lat + fallback-lng).
+  const locPoint = coordPair(location?.latitude, location?.longitude);
+  const fallbackPoint = coordPair(pickupFallback?.latitude, pickupFallback?.longitude);
+  const pickupPoint = locPoint || fallbackPoint;
+  const pickupLat = pickupPoint?.latitude ?? null;
+  const pickupLng = pickupPoint?.longitude ?? null;
 
   // NEW #3 — vehicle identity, PICKED field-by-field. The name is make+model
   // only: year/VIN/internalNumber stay staff-side. All-empty rows (a vehicle
@@ -124,6 +197,8 @@ export function publicPositionPayload({
     pickupInstructions: String(pickupInstructions || ''),
     // ── deliberate whitelist additions (2026-08-24) — see header comment ──
     walkingDirections: String(walkingDirections || ''),
+    // ── deliberate whitelist addition (2026-08-25) — see header comment ──
+    walkingDirectionsEs: String(walkingDirectionsEs || ''),
     brandName: String(brandName || '').trim() || null,
     counterPhone: String(counterPhone || '').trim() || null,
     requestStatus: PUBLIC_REQUEST_STATUSES.includes(status) ? status : null,
@@ -149,6 +224,7 @@ export function publicPositionPayload({
           zoneId: String(pickupSpot.id || pickupSpot.zoneId || ''),
           name: String(pickupSpot.name || ''),
           walkingDirections: String(pickupSpot.walkingDirections || ''),
+          walkingDirectionsEs: String(pickupSpot.walkingDirectionsEs || ''),
         }
       : null,
     locationSharing: {

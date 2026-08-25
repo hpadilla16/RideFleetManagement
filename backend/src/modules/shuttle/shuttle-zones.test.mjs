@@ -32,6 +32,27 @@ test('validateZoneInput: a clean polygon zone normalizes with defaults', () => {
   assert.deepEqual(v.zone.geometryJson.points, TRIANGLE);
 });
 
+test('validateZoneInput: per-language walking directions — same trim/cap/null rules for EN and ES', () => {
+  const v = validateZoneInput({
+    name: 'Lot B', points: TRIANGLE, isPickupSpot: true,
+    walkingDirections: '  Cross to island B.  ',
+    walkingDirectionsEs: '  Cruza a la isleta B.  ',
+  });
+  assert.equal(v.ok, true);
+  assert.equal(v.zone.walkingDirections, 'Cross to island B.');
+  assert.equal(v.zone.walkingDirectionsEs, 'Cruza a la isleta B.');
+
+  // Empty/whitespace collapses to null — both languages, identically.
+  const empty = validateZoneInput({ name: 'Lot B', points: TRIANGLE, walkingDirections: '  ', walkingDirectionsEs: '' });
+  assert.equal(empty.zone.walkingDirections, null);
+  assert.equal(empty.zone.walkingDirectionsEs, null);
+
+  // Both capped at 500 — the ES text obeys the same limit as the EN one.
+  const long = validateZoneInput({ name: 'Lot B', points: TRIANGLE, walkingDirections: 'x'.repeat(900), walkingDirectionsEs: 'y'.repeat(900) });
+  assert.equal(long.zone.walkingDirections.length, 500);
+  assert.equal(long.zone.walkingDirectionsEs.length, 500);
+});
+
 test('validateZoneInput: geometry rules — a ZONE needs 3 points, a ROUTE needs 2, one NaN kills the save', () => {
   assert.equal(validateZoneInput({ name: 'x', points: TRIANGLE.slice(0, 2) }).ok, false);
   assert.equal(validateZoneInput({ name: 'x', kind: 'ROUTE', points: TRIANGLE.slice(0, 2) }).ok, true);
@@ -228,6 +249,36 @@ test('list and update are tenant-scoped fail-closed; cross-tenant update is a 40
   // A geometry change DOES.
   await shuttleZonesService.update({ tenantId: 't1', zoneId: 'z1', body: { geometry: { points: [...TRIANGLE, { lat: 18.3, lng: -66.3 }] } } }, w.deps);
   assert.equal(w.providerCalls.length, 1);
+});
+
+test('per-language directions round-trip the service: create stores both, a partial PATCH keeps the other', async () => {
+  const w = fakeWorld({ locations: LOCS });
+  const created = await shuttleZonesService.create({
+    tenantId: 't1', locationId: 'locA',
+    body: {
+      name: 'Lot B', points: TRIANGLE, isPickupSpot: true,
+      walkingDirections: 'Cross to island B.',
+      walkingDirectionsEs: 'Cruza a la isleta B.',
+    },
+  }, w.deps);
+  assert.equal(created.walkingDirections, 'Cross to island B.');
+  assert.equal(created.walkingDirectionsEs, 'Cruza a la isleta B.');
+
+  // PATCH only the Spanish text: the English one must survive the merge.
+  const patched = await shuttleZonesService.update({
+    tenantId: 't1', zoneId: created.id,
+    body: { walkingDirectionsEs: 'Ve al letrero B-4.' },
+  }, w.deps);
+  assert.equal(patched.walkingDirections, 'Cross to island B.');
+  assert.equal(patched.walkingDirectionsEs, 'Ve al letrero B-4.');
+
+  // And the other way around.
+  const patched2 = await shuttleZonesService.update({
+    tenantId: 't1', zoneId: created.id,
+    body: { walkingDirections: 'Go to sign B-4.' },
+  }, w.deps);
+  assert.equal(patched2.walkingDirections, 'Go to sign B-4.');
+  assert.equal(patched2.walkingDirectionsEs, 'Ve al letrero B-4.');
 });
 
 test('remove: cross-tenant is 404; own zone deletes ours even when the provider delete fails', async () => {

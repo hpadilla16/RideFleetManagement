@@ -242,7 +242,12 @@ async function notifyArrival(row, zone, deps) {
           to: request.customerPhone,
           body: buildArrivalSms({
             spotName: zone.name,
-            walkingDirections: zone.walkingDirections,
+            // Per-language directions (2026-08-25): the SMS follows the
+            // customer's own locale — Spanish text for es, English for the
+            // rest — each falling back to the other when unwritten.
+            walkingDirections: String(request.reservation?.customer?.locale || '').toLowerCase().startsWith('es')
+              ? (zone.walkingDirectionsEs || zone.walkingDirections)
+              : (zone.walkingDirections || zone.walkingDirectionsEs),
             vehicleName,
             vehiclePlate: vehicle?.plate || null,
             brandName: brand?.companyName,

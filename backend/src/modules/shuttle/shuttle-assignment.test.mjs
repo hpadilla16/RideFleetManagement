@@ -152,10 +152,16 @@ test('THE WHITELIST, Phase 3 edition: assigned + locationSharing joined the cont
     location: { name: 'LAX' }, now: NOW,
   };
   const onDemand = publicPositionPayload({ ...base, config: { mode: 'ON_DEMAND' } });
+  // 2026-08-25: this pin had silently fallen behind the contract — intake +
+  // pickupSpot (Phase 3 core) were never added here, so the suite was red on
+  // main. Brought back in sync (and walkingDirectionsEs joined the same day,
+  // per-language directions — see shuttle-tracker-position.test.mjs for the
+  // full review record).
   assert.deepEqual(Object.keys(onDemand).sort(), [
     'arrivedAtSpot', 'arrivedSpotName', 'assigned', 'brandName', 'counterPhone',
-    'headwayMinutes', 'locationName', 'locationSharing', 'mode',
-    'pickupInstructions', 'position', 'requestStatus', 'status', 'walkingDirections',
+    'headwayMinutes', 'intake', 'locationName', 'locationSharing', 'mode',
+    'pickupInstructions', 'pickupSpot', 'position', 'requestStatus', 'status',
+    'walkingDirections', 'walkingDirectionsEs',
   ]);
 
   // Even a caller passing a shuttles array cannot make ON_DEMAND show the fleet.

@@ -324,7 +324,15 @@ export function ShuttleTrackerClient({ token }) {
   const pickupSpot = state?.pickupSpot && typeof state.pickupSpot === 'object' ? state.pickupSpot : null;
   const spotName = pickupSpot?.name || null;
   const spotZoneId = pickupSpot?.zoneId || pickupSpot?.id || null;
-  const spotDirections = pickupSpot?.walkingDirections || state?.walkingDirections || '';
+  // Per-language directions (2026-08-25): the payload carries EN + ES variants
+  // (walkingDirections / walkingDirectionsEs, same pair on pickupSpot). The
+  // CURRENT toggle language picks and the other language is the fallback, so
+  // a sede that wrote only one text still shows it in both modes. Re-renders
+  // live on toggle because `lang` is state. Tolerant of old payloads (missing
+  // Es keys read as empty).
+  const byLang = (en, es) => (lang === 'es' ? (es || en) : (en || es)) || '';
+  const walkingText = byLang(state?.walkingDirections, state?.walkingDirectionsEs);
+  const spotDirections = byLang(pickupSpot?.walkingDirections, pickupSpot?.walkingDirectionsEs) || walkingText;
   // Screen 8b: the loop — mode-aware markers come from shuttles[], never ids.
   const loopShuttles = state?.mode === 'NON_STOP' && Array.isArray(state?.shuttles) ? state.shuttles : null;
   const loopMode = !!(loopShuttles && loopShuttles.length);
@@ -922,10 +930,10 @@ export function ShuttleTrackerClient({ token }) {
               {state.pickupInstructions}
             </div>
           )}
-          {state.walkingDirections && (
+          {walkingText && (
             <div style={{ ...S.where, marginTop: 8, whiteSpace: 'pre-line' }}>
               <span style={S.whereTag}>{t('howToGetThere')}</span>
-              {state.walkingDirections}
+              {walkingText}
             </div>
           )}
           {/* Phase 3 (Screen 9): with an OPEN request, sharing has a server

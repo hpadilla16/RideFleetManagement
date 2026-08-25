@@ -96,13 +96,13 @@ test('driverZonePayload: drawing fields cross, provider/sync/notify state does N
   const out = driverZonePayload({
     id: 'z1', name: 'Lot B', kind: 'ROUTE', isPickupSpot: true,
     geometryJson: { type: 'polyline', points: [{ lat: 1, lng: 2 }] }, toleranceM: 300,
-    walkingDirections: ' sign B-4 ',
+    walkingDirections: ' sign B-4 ', walkingDirectionsEs: ' letrero B-4 ',
     providerZoneId: 'osg_99', providerSyncStatus: 'SYNCED', notifyOnEnter: true, active: true,
   });
   assert.deepEqual(out, {
     id: 'z1', name: 'Lot B', kind: 'ROUTE', isPickupSpot: true,
     geometry: { type: 'polyline', points: [{ lat: 1, lng: 2 }] }, toleranceM: 300,
-    walkingDirections: 'sign B-4',
+    walkingDirections: 'sign B-4', walkingDirectionsEs: 'letrero B-4',
   });
   assert.equal('providerZoneId' in out, false, 'PICKED, never spread — provider ids stay staff-side');
 });

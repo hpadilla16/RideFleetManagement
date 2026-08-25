@@ -3436,6 +3436,9 @@ model ShuttleZone {
   isPickupSpot Boolean @default(false)
   // Sede-written "go to sign B-4" text shown with the arrival notification.
   walkingDirections String?
+  // Spanish variant (2026-08-25, owner-approved per-language directions).
+  // NULL = not written yet; readers fall back to the English text.
+  walkingDirectionsEs String?
 
   // ZONE:  { type: 'polygon'|'rectangle', points: [{lat,lng}, ...] }  (>= 3 points)
   // ROUTE: { type: 'polyline', points: [{lat,lng}, ...] }             (>= 2 points)

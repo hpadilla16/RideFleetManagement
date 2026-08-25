@@ -18,6 +18,7 @@ import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import {
   publicPositionPayload, publicShuttleEntry, linkState, configVehicleIds,
+  zoneCentroid, resolveWalkingDirections,
   watchKey, posKey, WATCH_TTL_S, POSITION_STALE_MS,
 } from './shuttle-tracker-position.js';
 import { parseIntakeConfig } from './shuttle-intake.js';
@@ -169,6 +170,7 @@ export const shuttleTrackerService = {
 
     let pickupInstructions = '';
     let walkingDirections = '';
+    let walkingDirectionsEs = '';
     let locationCompanyPhone = '';
     try {
       const parsed = location?.locationConfig ? JSON.parse(location.locationConfig) : null;
@@ -176,6 +178,8 @@ export const shuttleTrackerService = {
       // NEW #4 (2026-08-24, approved): sede-written "how to get there" text.
       // Static prose beside the pickup instructions — no routing engine.
       walkingDirections = parsed?.shuttleWalkingDirections || '';
+      // Spanish variant (2026-08-25) — same JSON blob, new key.
+      walkingDirectionsEs = parsed?.shuttleWalkingDirectionsEs || '';
       // The branch's own phone first (Settings → "Location Phone"), then the
       // agreement-config companyPhone some branches use instead.
       locationCompanyPhone = parsed?.locationPhone || parsed?.companyPhone || '';
@@ -291,7 +295,10 @@ export const shuttleTrackerService = {
     try {
       spotZones = await prisma.shuttleZone.findMany({
         where: { tenantId: link.tenantId, locationId: config.locationId, isPickupSpot: true, active: true },
-        select: { id: true, name: true, walkingDirections: true },
+        // geometryJson stays SERVER-SIDE: it feeds the centroid fallback below
+        // and never crosses into the public payload (zoneCentroid → a single
+        // lat/lng pair, same public-knowledge status as the counter address).
+        select: { id: true, name: true, walkingDirections: true, walkingDirectionsEs: true, geometryJson: true },
       });
       if (spotZones.length) {
         const zoneById = new Map(spotZones.map((z) => [z.id, z]));
@@ -317,12 +324,23 @@ export const shuttleTrackerService = {
     // The read IS the demand signal for the fast poll.
     await signalWatch(link.tenantId);
 
+    // The DESIGNATED spot: exactly one active pickup-spot zone — ambiguity
+    // (zero or many) means no spot-level text and no centroid fallback.
+    const designatedSpot = spotZones.length === 1 ? spotZones[0] : null;
+    // Which text fills the walking keys (2026-08-25 fix): the designated
+    // spot's own directions are PRIMARY at all times — the sede wrote them
+    // FOR that spot — with the location-level config as the fallback; while
+    // arrived, the arrived zone's text still wins (unchanged). Per language,
+    // resolved in resolveWalkingDirections.
+    const directions = resolveWalkingDirections({
+      arrival, pickupSpot: designatedSpot,
+      locationEn: walkingDirections, locationEs: walkingDirectionsEs,
+    });
+
     return publicPositionPayload({
       position, config, location, pickupInstructions,
-      // The spot's own walking text (staff wrote it FOR this spot) beats the
-      // location-level default while the shuttle is at the spot — same
-      // whitelisted key, more specific content.
-      walkingDirections: (arrival.arrivedAtSpot && arrival.spotWalkingDirections) || walkingDirections,
+      walkingDirections: directions.en,
+      walkingDirectionsEs: directions.es,
       brandName, counterPhone, vehicle,
       requestStatus: lastRequest?.status || null,
       arrivedAtSpot: arrival.arrivedAtSpot,
@@ -332,7 +350,10 @@ export const shuttleTrackerService = {
       shuttles: loopShuttles,
       locationSharing,
       intake: parseIntakeConfig(config),
-      pickupSpot: spotZones.length === 1 ? spotZones[0] : null,
+      pickupSpot: designatedSpot,
+      // Null-Island fix (2026-08-25): a location with NULL/0 coordinates falls
+      // back to the single spot's centroid instead of pinning (0,0).
+      pickupFallback: designatedSpot ? zoneCentroid(designatedSpot.geometryJson) : null,
     });
   },
 

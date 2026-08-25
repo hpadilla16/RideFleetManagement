@@ -53,6 +53,7 @@ const zoneOut = (z) => ({
   kind: z.kind,
   isPickupSpot: z.isPickupSpot,
   walkingDirections: z.walkingDirections,
+  walkingDirectionsEs: z.walkingDirectionsEs,
   geometry: z.geometryJson,
   toleranceM: z.toleranceM,
   notifyOnEnter: z.notifyOnEnter,
@@ -154,6 +155,7 @@ export const shuttleZonesService = {
       kind: existing.kind, // kind is immutable — a ZONE cannot become a ROUTE
       isPickupSpot: body.isPickupSpot ?? existing.isPickupSpot,
       walkingDirections: body.walkingDirections ?? existing.walkingDirections,
+      walkingDirectionsEs: body.walkingDirectionsEs ?? existing.walkingDirectionsEs,
       geometry: body.geometry ?? existing.geometryJson,
       toleranceM: body.toleranceM ?? existing.toleranceM,
       notifyOnEnter: body.notifyOnEnter ?? existing.notifyOnEnter,

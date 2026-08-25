@@ -1421,6 +1421,8 @@
     "toleranceAria": "Tolerancia de desvío (metros)",
     "toleranceChip": "tolerancia {{m}} m",
     "toleranceLabel": "Tolerancia de desvío: {{m}} m",
-    "walkingDirections": "Indicaciones a pie (se muestran al cliente al llegar)"
+    "walkingDirections": "Indicaciones a pie (se muestran al cliente al llegar)",
+    "walkingDirectionsEn": "Indicaciones a pie (Inglés)",
+    "walkingDirectionsEs": "Instrucciones a pie (Español)"
   }
 }

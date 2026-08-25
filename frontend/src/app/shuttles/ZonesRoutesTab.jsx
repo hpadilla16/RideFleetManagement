@@ -125,6 +125,7 @@ function ZoneEditor({ token, location, zone, kind, onSaved, onCancel }) {
   const [name, setName] = useState(zone?.name || '');
   const [isPickupSpot, setIsPickupSpot] = useState(!!zone?.isPickupSpot);
   const [walkingDirections, setWalkingDirections] = useState(zone?.walkingDirections || '');
+  const [walkingDirectionsEs, setWalkingDirectionsEs] = useState(zone?.walkingDirectionsEs || '');
   const [notifyOnEnter, setNotifyOnEnter] = useState(!!zone?.notifyOnEnter);
   const [notifyOnExit, setNotifyOnExit] = useState(!!zone?.notifyOnExit);
   const [notifyOnOffRoute, setNotifyOnOffRoute] = useState(!!zone?.notifyOnOffRoute);
@@ -316,6 +317,7 @@ function ZoneEditor({ token, location, zone, kind, onSaved, onCancel }) {
         : {
           isPickupSpot,
           walkingDirections: isPickupSpot ? walkingDirections : '',
+          walkingDirectionsEs: isPickupSpot ? walkingDirectionsEs : '',
           notifyOnEnter,
           notifyOnExit,
         }),
@@ -485,16 +487,31 @@ function ZoneEditor({ token, location, zone, kind, onSaved, onCancel }) {
       </div>
 
       {!isRoute && isPickupSpot ? (
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, marginTop: 10 }}>
-          <span className="label">{t('shuttleZones.walkingDirections', 'Walking directions (shown to the customer on arrival)')}</span>
-          <textarea
-            value={walkingDirections}
-            onChange={(e) => setWalkingDirections(e.target.value)}
-            maxLength={500}
-            rows={3}
-            aria-label={t('shuttleZones.walkingDirections', 'Walking directions (shown to the customer on arrival)')}
-          />
-        </label>
+        <>
+          {/* Per-language directions (2026-08-25): one textarea per language.
+              The tracker page shows the variant matching the customer's ES/EN
+              toggle, falling back to the other when one is unwritten. */}
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, marginTop: 10 }}>
+            <span className="label">{t('shuttleZones.walkingDirectionsEn', 'Walking directions (English)')}</span>
+            <textarea
+              value={walkingDirections}
+              onChange={(e) => setWalkingDirections(e.target.value)}
+              maxLength={500}
+              rows={3}
+              aria-label={t('shuttleZones.walkingDirectionsEn', 'Walking directions (English)')}
+            />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, marginTop: 10 }}>
+            <span className="label">{t('shuttleZones.walkingDirectionsEs', 'Instrucciones a pie (Español)')}</span>
+            <textarea
+              value={walkingDirectionsEs}
+              onChange={(e) => setWalkingDirectionsEs(e.target.value)}
+              maxLength={500}
+              rows={3}
+              aria-label={t('shuttleZones.walkingDirectionsEs', 'Instrucciones a pie (Español)')}
+            />
+          </label>
+        </>
       ) : null}
 
       {isRoute ? (

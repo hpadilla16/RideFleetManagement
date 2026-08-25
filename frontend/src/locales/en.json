@@ -1421,6 +1421,8 @@
     "toleranceAria": "Off-route tolerance (meters)",
     "toleranceChip": "tolerance {{m}} m",
     "toleranceLabel": "Off-route tolerance: {{m}} m",
-    "walkingDirections": "Walking directions (shown to the customer on arrival)"
+    "walkingDirections": "Walking directions (shown to the customer on arrival)",
+    "walkingDirectionsEn": "Walking directions (English)",
+    "walkingDirectionsEs": "Instrucciones a pie (Español)"
   }
 }

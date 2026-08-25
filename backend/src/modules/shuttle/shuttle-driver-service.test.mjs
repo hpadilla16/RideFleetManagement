@@ -157,7 +157,7 @@ function makeWorld({ mode = 'ON_DEMAND', deviceMapped = false, recipients = [{ n
       {
         id: 'z1', tenantId: 't1', locationId: 'lax', name: 'Lot B', kind: 'ZONE', isPickupSpot: true,
         geometryJson: { type: 'rectangle', points: [{ lat: 1, lng: 2 }, { lat: 3, lng: 4 }, { lat: 5, lng: 6 }] },
-        toleranceM: null, walkingDirections: 'sign B-4', active: true,
+        toleranceM: null, walkingDirections: 'sign B-4', walkingDirectionsEs: 'letrero B-4', active: true,
         providerZoneId: 'osg_1', providerSyncStatus: 'SYNCED', notifyOnEnter: true,
       },
       { id: 'z_inactive', tenantId: 't1', locationId: 'lax', name: 'Old Lot', kind: 'ZONE', isPickupSpot: false, geometryJson: {}, active: false },
@@ -336,6 +336,9 @@ test('shiftContext: vehicle + location + zones-with-geometry + roster, scoped to
   assert.deepEqual(ctx.zones.map((z) => z.id), ['z1'], 'inactive + cross-sede zones stay out');
   assert.equal(ctx.zones[0].name, 'Lot B');
   assert.ok(ctx.zones[0].geometry, 'geometry crosses — the driver draws the spots');
+  // Per-language directions (2026-08-25): both texts ride to the driver page.
+  assert.equal(ctx.zones[0].walkingDirections, 'sign B-4');
+  assert.equal(ctx.zones[0].walkingDirectionsEs, 'letrero B-4');
   assert.equal('providerZoneId' in ctx.zones[0], false);
 
   // Roster: the OPEN queue of the shift's sede — closed, cross-sede and

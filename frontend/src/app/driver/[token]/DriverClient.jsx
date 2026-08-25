@@ -435,6 +435,12 @@ export function DriverClient({ token }) {
   const roster = Array.isArray(state?.roster) ? state.roster : [];
   const zones = Array.isArray(state?.zones) ? state.zones : [];
   const pickupSpots = zones.filter((z) => z.isPickupSpot);
+  // Per-language directions (2026-08-25): the driver page is ES-primary, so
+  // the Spanish text wins with the English one as fallback — flipped when the
+  // driver toggles EN. Tolerant of old payloads without walkingDirectionsEs.
+  const zoneWalkText = (z) => ((lang === 'en'
+    ? (z?.walkingDirections || z?.walkingDirectionsEs)
+    : (z?.walkingDirectionsEs || z?.walkingDirections)) || '');
   const openRoster = roster.filter((r) => isOpen(r) && !actioned[r.id]);
   const sharingCount = openRoster.filter((r) => r.sharing).length;
 
@@ -871,7 +877,7 @@ export function DriverClient({ token }) {
                     <span style={S.spotNum}>{i + 1}</span>
                     <div>
                       <div style={{ fontSize: 15, fontWeight: 800 }}>{z.name}</div>
-                      {z.walkingDirections && <div style={{ ...S.note, marginTop: 2 }}>{z.walkingDirections}</div>}
+                      {zoneWalkText(z) && <div style={{ ...S.note, marginTop: 2 }}>{zoneWalkText(z)}</div>}
                     </div>
                   </div>
                 )) : <p style={S.note}>{t('noSpots')}</p>}

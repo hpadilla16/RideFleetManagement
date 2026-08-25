@@ -277,6 +277,7 @@ export const shuttleDriverService = {
         select: {
           id: true, name: true, kind: true, isPickupSpot: true,
           geometryJson: true, toleranceM: true, walkingDirections: true,
+          walkingDirectionsEs: true,
         },
       }),
       deps.prisma.shuttleRequest.findMany({

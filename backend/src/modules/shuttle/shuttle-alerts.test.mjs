@@ -259,6 +259,32 @@ test('ARRIVAL FAN-OUT: ENTER on a pickup spot notifies opted-in open requests ON
   assert.ok(w.alertRows[0].arrivalNotifiedAt instanceof Date, 'processed-marker stamped');
 });
 
+test('ARRIVAL SMS per-language (2026-08-25): the walking text follows the customer locale, falling back across languages', async () => {
+  const w = world({
+    zones: [{ ...PICKUP_ZONE, walkingDirections: 'Go to sign B-4', walkingDirectionsEs: 'Ve al letrero B-4' }],
+    rawAlerts: [RAW_ENTER],
+    requests: [
+      { id: 'r-es', smsOptIn: true, customerPhone: '+17875550100', reservation: { customer: { locale: 'es-PR' } } },
+      { id: 'r-en', smsOptIn: true, customerPhone: '+13105550200', reservation: { customer: { locale: 'en-US' } } },
+    ],
+  });
+  await pollTenantAlerts('t1', w.deps);
+  assert.equal(w.smses.length, 2);
+  const bodyFor = (to) => w.smses.find((s) => s.to === to).body;
+  assert.match(bodyFor('+17875550100'), /Ve al letrero B-4/);
+  assert.doesNotMatch(bodyFor('+17875550100'), /Go to sign B-4/);
+  assert.match(bodyFor('+13105550200'), /Go to sign B-4/);
+
+  // ES text unwritten → the es customer still gets directions (the EN text).
+  const w2 = world({
+    zones: [{ ...PICKUP_ZONE, walkingDirections: 'Go to sign B-4', walkingDirectionsEs: null }],
+    rawAlerts: [RAW_ENTER],
+    requests: [{ id: 'r-es', smsOptIn: true, customerPhone: '+17875550100', reservation: { customer: { locale: 'es' } } }],
+  });
+  await pollTenantAlerts('t1', w2.deps);
+  assert.match(w2.smses[0].body, /Go to sign B-4/);
+});
+
 test('an ENTER on a NON-pickup zone notifies staff (per toggle) but never customers', async () => {
   const w = world({
     zones: [{ ...PICKUP_ZONE, isPickupSpot: false }],

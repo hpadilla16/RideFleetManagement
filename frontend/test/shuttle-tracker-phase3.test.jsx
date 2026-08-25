@@ -288,3 +288,67 @@ describe('Screen 16 — arrival banner', () => {
     expect(screen.queryByTestId('arrival-banner')).not.toBeInTheDocument();
   });
 });
+
+describe('Per-language walking directions (2026-08-25)', () => {
+  const BILINGUAL = {
+    ...BASE,
+    walkingDirections: 'Cross both crosswalks to sign B-4',
+    walkingDirectionsEs: 'Cruza ambos cruces hasta el letrero B-4',
+  };
+
+  it('EN toggle shows the English text; flipping to ES swaps to the Spanish one live', async () => {
+    mockFetch(BILINGUAL);
+    render(<ShuttleTrackerClient token={TOKEN} />);
+    await screen.findByText('Cross both crosswalks to sign B-4');
+    expect(screen.queryByText('Cruza ambos cruces hasta el letrero B-4')).not.toBeInTheDocument();
+
+    // The ES/EN toggle already re-renders every string — the directions must
+    // ride the same state, no refetch needed.
+    fireEvent.click(screen.getByRole('button', { name: 'ES' }));
+    expect(screen.getByText('Cruza ambos cruces hasta el letrero B-4')).toBeInTheDocument();
+    expect(screen.queryByText('Cross both crosswalks to sign B-4')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'EN' }));
+    expect(screen.getByText('Cross both crosswalks to sign B-4')).toBeInTheDocument();
+  });
+
+  it('falls back across languages: only-ES shows in EN mode, only-EN shows in ES mode', async () => {
+    mockFetch({ ...BASE, walkingDirections: '', walkingDirectionsEs: 'Solo en español' });
+    render(<ShuttleTrackerClient token={TOKEN} />);
+    // lang is 'en' (beforeEach) — the ES text is better than nothing.
+    expect(await screen.findByText('Solo en español')).toBeInTheDocument();
+  });
+
+  it('only-EN text still shows after toggling to ES (fallback the other way)', async () => {
+    mockFetch({ ...BASE, walkingDirectionsEs: '' });
+    render(<ShuttleTrackerClient token={TOKEN} />);
+    await screen.findByText('Cross both crosswalks to sign B-4');
+    fireEvent.click(screen.getByRole('button', { name: 'ES' }));
+    expect(screen.getByText('Cross both crosswalks to sign B-4')).toBeInTheDocument();
+  });
+
+  it('old payloads without walkingDirectionsEs render exactly as before', async () => {
+    mockFetch({ ...BASE }); // no walkingDirectionsEs key at all
+    render(<ShuttleTrackerClient token={TOKEN} />);
+    expect(await screen.findByText('Cross both crosswalks to sign B-4')).toBeInTheDocument();
+  });
+
+  it('intake spot step prefers the SPOT text per language', async () => {
+    mockFetch({
+      ...BILINGUAL,
+      intake: { enabled: true, partySizeCap: 8, bagsCap: 4 },
+      pickupSpot: {
+        id: 'zone123', name: 'Pickup Spot B',
+        walkingDirections: 'Under sign B-4',
+        walkingDirectionsEs: 'Bajo el letrero B-4',
+      },
+    });
+    render(<ShuttleTrackerClient token={TOKEN} />);
+    fireEvent.click(await screen.findByTestId('intake-start'));
+    fireEvent.click(screen.getByRole('button', { name: 'ES' }));
+    fireEvent.click(screen.getByTestId('intake-continue'));
+    const flow = screen.getByTestId('intake-flow');
+    expect(within(flow).getByText('Bajo el letrero B-4')).toBeInTheDocument();
+    expect(within(flow).queryByText('Under sign B-4')).not.toBeInTheDocument();
+  });
+});
