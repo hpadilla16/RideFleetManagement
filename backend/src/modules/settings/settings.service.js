@@ -10,6 +10,7 @@ import {
 } from '../../lib/module-access.js';
 import { getTenantPlanCatalog, resolveTenantPlanConfig } from '../../lib/tenant-plan-limits.js';
 import { encrypt, decrypt, isEncryptionConfigured } from '../../lib/integration-crypto.js';
+import { encryptSettingSecret, carrySettingSecret, decryptSettingSecret } from '../../lib/setting-secret-crypto.js';
 import { normalizePolicy as normalizeTwoFactorPolicy, VALID_TWO_FACTOR_ROLES } from '../../lib/two-factor-policy.js';
 
 const DEFAULTS = {
@@ -417,8 +418,12 @@ function normalizeTelematicsConfig(raw = {}, options = {}) {
 
   // Voltswitch GPS
   const allowVoltswitchConnector = raw?.allowVoltswitchConnector == null ? !!DEFAULT_TELEMATICS_CONFIG.allowVoltswitchConnector : !!raw?.allowVoltswitchConnector;
-  const voltswitchApiEmail = String(raw?.voltswitchApiEmail || '').trim();
-  const voltswitchApiPassword = String(raw?.voltswitchApiPassword || '').trim();
+  // Dual-read: stored values may be `enci:` ciphertext (2026-08-24) or legacy
+  // plaintext; decryptSettingSecret passes plaintext through and yields '' on
+  // a failed decrypt, so a missing key reads as "no credentials", never as
+  // ciphertext leaking into the UI or a Voltswitch login attempt.
+  const voltswitchApiEmail = String(decryptSettingSecret(raw?.voltswitchApiEmail) || '').trim();
+  const voltswitchApiPassword = String(decryptSettingSecret(raw?.voltswitchApiPassword) || '').trim();
   const voltswitchSyncIntervalMinutes = Math.max(1, Math.min(60, Number(raw?.voltswitchSyncIntervalMinutes) || DEFAULT_TELEMATICS_CONFIG.voltswitchSyncIntervalMinutes));
   const voltswitchConnectorReady = provider === 'VOLTSWITCH' && allowVoltswitchConnector && !!voltswitchApiEmail && !!voltswitchApiPassword;
 
@@ -1354,6 +1359,23 @@ export const settingsService = {
   async updateTelematicsConfig(payload = {}, scope = {}) {
     if (!scope?.tenantId) throw new Error('tenantId is required');
     const existing = await this.getTelematicsConfig(scope, { includeSecret: true });
+    // Blank-means-keep must carry the STORED credential bytes verbatim, never
+    // a decrypt→re-encrypt round trip through `existing`: if the encryption
+    // key were missing/wrong for one request, the decrypted value would read
+    // '' and the save would silently erase the creds — the pre-2026-08-13 bug
+    // in a new costume. So the carry reads the raw row. carrySettingSecret
+    // keeps ciphertext as-is and lazily encrypts legacy plaintext (that IS the
+    // migration: any save upgrades the blob).
+    const key = scopedKey('telematicsConfig', scope);
+    let stored = {};
+    try {
+      const rawRow = await prisma.appSetting.findUnique({ where: { key } });
+      stored = rawRow?.value ? (JSON.parse(rawRow.value) || {}) : {};
+    } catch {
+      stored = {};
+    }
+    const newVoltswitchEmail = payload?.voltswitchApiEmail == null ? null : String(payload.voltswitchApiEmail).trim();
+    const newVoltswitchPassword = String(payload?.voltswitchApiPassword || '').trim();
     const next = {
       enabled: !!payload?.enabled,
       provider: String(payload?.provider || DEFAULT_TELEMATICS_CONFIG.provider).trim().toUpperCase() || DEFAULT_TELEMATICS_CONFIG.provider,
@@ -1367,18 +1389,23 @@ export const settingsService = {
       // here, so any save from the UI erased the connector's config — that is
       // why the connector never went live. The password follows the
       // zubieWebhookSecret rule: blank in the payload means "keep what is
-      // saved"; only the explicit clear flag erases.
+      // saved"; only the explicit clear flag erases. Since 2026-08-24 both
+      // credential fields are stored as `enci:` ciphertext (setting-secret-
+      // crypto); a kept value carries the stored bytes verbatim.
       allowVoltswitchConnector: !!payload?.allowVoltswitchConnector,
       voltswitchApiEmail: payload?.clearVoltswitchCredentials
         ? ''
-        : String(payload?.voltswitchApiEmail ?? existing?.voltswitchApiEmail ?? '').trim(),
+        : (newVoltswitchEmail == null
+          ? carrySettingSecret(stored?.voltswitchApiEmail)
+          : encryptSettingSecret(newVoltswitchEmail)),
       voltswitchApiPassword: payload?.clearVoltswitchCredentials
         ? ''
-        : String(payload?.voltswitchApiPassword || '').trim() || String(existing?.voltswitchApiPassword || '').trim(),
+        : (newVoltswitchPassword
+          ? encryptSettingSecret(newVoltswitchPassword)
+          : carrySettingSecret(stored?.voltswitchApiPassword)),
       voltswitchSyncIntervalMinutes: Math.max(1, Math.min(60,
         Number(payload?.voltswitchSyncIntervalMinutes) || Number(existing?.voltswitchSyncIntervalMinutes) || DEFAULT_TELEMATICS_CONFIG.voltswitchSyncIntervalMinutes))
     };
-    const key = scopedKey('telematicsConfig', scope);
     await prisma.appSetting.upsert({
       where: { key },
       create: { key, value: JSON.stringify(next) },
