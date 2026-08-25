@@ -3495,6 +3495,57 @@ model ShuttleAlert {
   @@index([tenantId, zoneId, type, occurredAt])
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Shuttle driver mode (Phase 3 driver surface, 2026-08-25 — approved mockup
+// Screens 12–15 + 17a). Driver auth is a TOKENIZED PER-SHIFT LINK, no user
+// account — same public-token idiom as ShuttleTrackerLink (192-bit random,
+// expiring, revocable, bare-404 on anything unusable). Tracker-substrate
+// style: plain String refs, no Prisma relations, ownership re-verified on
+// every read.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// One driver, one shuttle, one shift. Minted by staff from the monitor;
+// expires end-of-day by default (24h hard max) and dies instantly on revoke.
+model ShuttleDriverShift {
+  id         String @id @default(cuid())
+  tenantId   String
+  locationId String
+  // The shuttle this driver drives. Plain ref, NO relation — same style as
+  // ShuttleAlert.vehicleId: a sold (hard-deleted) vehicle must never cascade
+  // into a shift row. Shuttle-configured-ness is re-verified on every read.
+  vehicleId  String
+  // Free text — drivers have no user account (approved decision).
+  driverName String
+
+  token     String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Monitor's active-shift list + token resolution cleanup.
+  @@index([tenantId, locationId, expiresAt])
+  @@index([tenantId, vehicleId])
+}
+
+// Store→driver messages ("Recoge también en Terminal B"). A dedicated tiny
+// table rather than ShuttleAlert reuse: messages are scoped to ONE shift and
+// read by shiftId on every driver poll — ShuttleAlert's rawJson is a String
+// (no keyed shiftId lookup without scanning) and its feed is the geofence
+// surface staff watch; mixing chat into it would pollute both.
+model ShuttleDriverMessage {
+  id              String   @id @default(cuid())
+  tenantId        String
+  shiftId         String   // plain ref — dies with the shift's relevance, no cascade needed
+  message         String
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId, shiftId, createdAt])
+}
+
 model PlannerScenario {
   id                String   @id @default(cuid())
   tenantId          String
