@@ -33,10 +33,22 @@ export const viewport = {
   themeColor: '#6e49ff'
 };
 
+// 3-state theme boot (topbar redesign 2026-08-25): 'ui.theme' is
+// light | dark | system; a missing key falls back to the legacy 2-state
+// 'ui.darkMode' so an existing explicit choice survives, and 'system'
+// (or nothing at all) follows prefers-color-scheme. AppShell keeps both
+// keys in sync; data-theme on <html> stays the single consumption point.
 const themeBootScript = `
 (function () {
   try {
-    var dark = localStorage.getItem('ui.darkMode') === '1';
+    var pref = localStorage.getItem('ui.theme');
+    if (pref !== 'light' && pref !== 'dark' && pref !== 'system') {
+      var legacy = localStorage.getItem('ui.darkMode');
+      pref = legacy === '1' ? 'dark' : legacy === '0' ? 'light' : 'system';
+    }
+    var dark = pref === 'dark' || (pref === 'system' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches);
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
   } catch (e) {}
 })();

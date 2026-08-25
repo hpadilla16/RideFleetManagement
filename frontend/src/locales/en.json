@@ -40,7 +40,15 @@
     "light": "Light",
     "lock": "Lock",
     "logout": "Logout",
-    "returnToSuperAdmin": "Return to Super Admin"
+    "returnToSuperAdmin": "Return to Super Admin",
+    "profileMenu": "Profile",
+    "languageLabel": "Idioma · Language",
+    "themeLabel": "Theme",
+    "themeSystem": "System",
+    "lockScreen": "Lock screen",
+    "lockHint": "auto · 2 min",
+    "viewingTenant": "Viewing: {{tenant}}",
+    "viewingTenantUnknown": "Viewing tenant"
   },
   "lockScreen": {
     "screenLocked": "Screen Locked",

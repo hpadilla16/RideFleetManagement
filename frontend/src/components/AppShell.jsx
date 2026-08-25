@@ -98,7 +98,15 @@ const NAV_ICON_PATHS = {
   building: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
   chev: '<path d="m6 9 6 6 6-6"/>',
-  panel: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>'
+  panel: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>',
+  /* Topbar redesign (2026-08-25, approved mockup) */
+  pin: '<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/>',
+  display: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
+  lock: '<rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'
 };
 
 function NavIcon({ name, className }) {
@@ -131,6 +139,40 @@ const NAV_RAIL_KEY = 'ui.nav.rail';
 const NAV_RAIL_AUTO_QUERY = '(min-width: 768px) and (max-width: 1280px)';
 
 const IDLE_LOCK_MS = 2 * 60 * 1000;
+
+/* Theme persistence (topbar redesign 2026-08-25, approved decision (a)):
+   3 states — 'light' | 'dark' | null (= follow the OS via
+   prefers-color-scheme). Stored under 'ui.theme'; the legacy 2-state
+   'ui.darkMode' key is still read as a fallback (a user's explicit old
+   choice survives) and mirrored with the RESOLVED value so nothing that
+   consumed it (layout.js boot script on stale builds) breaks. data-theme
+   on <html> stays the single consumption point — unchanged. */
+const THEME_KEY = 'ui.theme';
+function readThemePref() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    if (v === 'light' || v === 'dark') return v;
+    if (v === 'system') return null;
+    const legacy = localStorage.getItem('ui.darkMode');
+    if (legacy === '1') return 'dark';
+    if (legacy === '0') return 'light';
+    return null;
+  } catch { return null; }
+}
+
+/* Avatar initials from the user's name (brand-tinted background in CSS). */
+function userInitials(me) {
+  const src = String(me?.fullName || me?.name || '').trim();
+  if (src) {
+    const parts = src.split(/\s+/).filter(Boolean);
+    const first = parts[0]?.[0] || '';
+    const second = parts.length > 1 ? (parts[parts.length - 1][0] || '') : (parts[0]?.[1] || '');
+    return (first + second).toUpperCase();
+  }
+  const mail = String(me?.email || '').trim();
+  return mail ? mail.slice(0, 2).toUpperCase() : 'U';
+}
 
 function formatDate(d) {
   return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -168,10 +210,29 @@ export function AppShell({ me, logout, children }) {
   const { t, i18n } = useTranslation();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [darkMode, setDarkMode] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    try { return localStorage.getItem('ui.darkMode') === '1'; } catch { return false; }
+  // 3-state theme (approved decision (a)): 'light' | 'dark' | null = system.
+  const [themePref, setThemePref] = useState(() => readThemePref());
+  const [systemDark, setSystemDark] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+    try { return window.matchMedia('(prefers-color-scheme: dark)').matches; } catch { return false; }
   });
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => setSystemDark(!!mq.matches);
+    apply();
+    if (mq.addEventListener) mq.addEventListener('change', apply);
+    else if (mq.addListener) mq.addListener(apply);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', apply);
+      else if (mq.removeListener) mq.removeListener(apply);
+    };
+  }, []);
+  const darkMode = themePref === 'dark' || (themePref === null && systemDark);
+  const pickTheme = (pref) => {
+    setThemePref(pref);
+    try { localStorage.setItem(THEME_KEY, pref === null ? 'system' : pref); } catch {}
+  };
 
   const [locked, setLocked] = useState(false);
   const [hasPin, setHasPin] = useState(false);
@@ -258,8 +319,59 @@ export function AppShell({ me, logout, children }) {
     try { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true })); } catch { /* no-op */ }
   };
 
+  // Profile dropdown (topbar redesign 2026-08-25): open/close + click-outside
+  // + Esc (returns focus to the avatar button) + ArrowUp/ArrowDown between
+  // the menu's controls. Pure presentation — the actions inside reuse the
+  // exact same handlers the old flat topbar buttons had.
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileBtnRef = useRef(null);
+  const profileMenuRef = useRef(null);
+  const closeProfileMenu = (refocus) => {
+    setProfileOpen(false);
+    if (refocus && profileBtnRef.current) profileBtnRef.current.focus();
+  };
+  useEffect(() => {
+    if (!profileOpen) return;
+    const onDown = (e) => {
+      if (profileMenuRef.current && profileMenuRef.current.contains(e.target)) return;
+      if (profileBtnRef.current && profileBtnRef.current.contains(e.target)) return;
+      setProfileOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        closeProfileMenu(true);
+        return;
+      }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        const root = profileMenuRef.current;
+        if (!root) return;
+        const items = Array.from(root.querySelectorAll('button:not(:disabled)'));
+        if (!items.length) return;
+        e.preventDefault();
+        const idx = items.indexOf(document.activeElement);
+        const next = e.key === 'ArrowDown'
+          ? items[(idx + 1) % items.length]
+          : items[(idx - 1 + items.length) % items.length];
+        next.focus();
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileOpen]);
+
   const idleTimerRef = useRef(null);
   const role = String(me?.role || '').toUpperCase();
+  // Identity bits for the avatar button + dropdown header. Same sources the
+  // old identity block used, plus whatever tenant name the shell already has.
+  const displayName = me?.fullName || me?.name || me?.email || t('appShell.userFallback');
+  const initials = useMemo(() => userInitials(me), [me]);
+  const tenantName = me?.tenantName || me?.tenant?.name || me?.tenantSlug || '';
   // 2026-06-04 — per-user exemption (ops/reporting agent accounts): never
   // arm the idle lock and ignore any persisted locked flag for these users.
   const screenLockExempt = !!me?.screenLockExempt;
@@ -285,7 +397,7 @@ export function AppShell({ me, logout, children }) {
 
   useEffect(() => {
     try {
-      setDarkMode(localStorage.getItem('ui.darkMode') === '1');
+      setThemePref(readThemePref());
       const persistedLocked = localStorage.getItem('ui.screenLocked') === '1';
       if (persistedLocked && !me?.screenLockExempt) {
         setLocked(true);
@@ -317,7 +429,9 @@ export function AppShell({ me, logout, children }) {
   }, []);
 
   useEffect(() => {
+    // Legacy mirror: resolved 2-state value, so old consumers keep working.
     try { localStorage.setItem('ui.darkMode', darkMode ? '1' : '0'); } catch {}
+    // data-theme on <html> stays the single consumption point — unchanged.
     if (typeof document !== 'undefined') document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
   }, [darkMode]);
 
@@ -535,6 +649,13 @@ export function AppShell({ me, logout, children }) {
         {/* Shuttle arc (2026-08-05): a customer at the curb outranks whatever
             screen the agent is on — banner lives in the shell, not a page. */}
         <ShuttleBanner />
+        {/* Topbar redesign (2026-08-25, approved mockup): left = hamburger
+            (mobile) + mobile-only search icon + location chip-select; right =
+            impersonation pill + Display + avatar/profile dropdown. ZERO logic
+            changes — every control keeps its old handler and visibility
+            condition; identity/language/theme/lock/logout consolidated into
+            the profile menu. Desktop search left the topbar on purpose (the
+            sidebar "Go to… Ctrl+K" is the only desktop entry). */}
         <div className="topbar glass">
           <div className="topbar-primary">
             <button
@@ -547,45 +668,179 @@ export function AppShell({ me, logout, children }) {
                 <path d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <div className="topbar-identity">
-              <div className="topbar-name">{me?.fullName || me?.name || me?.email || t('appShell.userFallback')}</div>
-              <div className="topbar-role">{me?.role || 'ADMIN'}</div>
-            </div>
+            <button
+              type="button"
+              className="tb-search-mobile"
+              data-tour="global-search"
+              title={t('search.open', 'Search (Ctrl+K)')}
+              aria-label={t('search.open', 'Search (Ctrl+K)')}
+              onClick={openCommandPalette}
+            >
+              <NavIcon name="search" className="tb-search-mobile-icon" />
+            </button>
             {viewLocations.length > 1 ? (
-              <select
-                data-tour="view-location-switcher"
-                value={viewLocationId}
-                onChange={(e) => switchViewLocation(e.target.value)}
-                title={t('appShell.viewLocation', 'Which location you are viewing')}
-                style={{ maxWidth: 190, border: '1px solid var(--border-2, #d9d2ea)', background: 'var(--surface-2, #f7f5fd)', color: 'var(--text-2, #4a4258)', borderRadius: 8, padding: '7px 8px', fontSize: 12.5, cursor: 'pointer' }}
-              >
-                <option value="">{t('appShell.allLocations', 'All my locations')}</option>
-                {viewLocations.map((l) => (
-                  <option key={l.id} value={l.id}>{l.code ? `${l.code} · ${l.name}` : l.name}</option>
-                ))}
-              </select>
+              <span className="tb-loc" title={t('appShell.viewLocation', 'Which location you are viewing')}>
+                <NavIcon name="pin" className="tb-loc-icon" />
+                <select
+                  data-tour="view-location-switcher"
+                  className="tb-loc-select"
+                  value={viewLocationId}
+                  onChange={(e) => switchViewLocation(e.target.value)}
+                  title={t('appShell.viewLocation', 'Which location you are viewing')}
+                >
+                  <option value="">{t('appShell.allLocations', 'All my locations')}</option>
+                  {viewLocations.map((l) => (
+                    <option key={l.id} value={l.id}>{l.code ? `${l.code} · ${l.name}` : l.name}</option>
+                  ))}
+                </select>
+                <NavIcon name="chev" className="tb-loc-chev" />
+              </span>
+            ) : null}
+          </div>
+
+          <div className="tb-right">
+            {canReturnSuper ? (
+              <span className="tb-impersonation">
+                <NavIcon name="eye" className="tb-imp-icon" />
+                <span className="tb-imp-label">
+                  {tenantName ? t('topbar.viewingTenant', { tenant: tenantName }) : t('topbar.viewingTenantUnknown')}
+                </span>
+                <button
+                  type="button"
+                  className="tb-imp-return"
+                  title={t('topbar.returnToSuperAdmin')}
+                  onClick={returnToSuperAdmin}
+                >
+                  {t('appShell.return')}
+                </button>
+              </span>
             ) : null}
             <button
               type="button"
-              className="topbar-search-btn"
-              data-tour="global-search"
-              title={t('search.open', 'Search (Ctrl+K)')}
-              onClick={() => { try { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true })); } catch { /* no-op */ } }}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, border: '1px solid var(--border-2, #d9d2ea)', background: 'var(--surface-2, #f7f5fd)', color: 'var(--text-3, #736a8b)', borderRadius: 8, padding: '7px 12px', fontSize: 12.5, cursor: 'pointer', minWidth: 0 }}
+              className="tb-display"
+              title={t('appShell.openCustomerDisplay')}
+              onClick={() => window.open('/customer-display', 'customer-display', 'width=600,height=900,scrollbars=yes,resizable=yes')}
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
-              <span className="topbar-search-label">{t('search.placeholder', 'Search plate, booking, customer…')}</span>
-              <kbd style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono, ui-monospace, monospace)', fontSize: 10, border: '1px solid var(--border-2, #d9d2ea)', borderRadius: 5, padding: '1px 6px' }}>⌘K</kbd>
+              <NavIcon name="display" className="tb-display-icon" />
+              <span className="tb-display-label">{t('appShell.display')}</span>
             </button>
-          </div>
-
-          <div className="topbar-actions">
-            {canReturnSuper ? <button className="button-subtle topbar-action-btn topbar-action-wide" title={t('topbar.returnToSuperAdmin')} onClick={returnToSuperAdmin}>{t('appShell.return')}</button> : null}
-            <button className="button-subtle topbar-action-btn topbar-display-btn" title={t('appShell.openCustomerDisplay')} onClick={() => window.open('/customer-display', 'customer-display', 'width=600,height=900,scrollbars=yes,resizable=yes')}>{t('appShell.display')}</button>
-            <button className="button-subtle topbar-action-btn topbar-lang-btn" onClick={() => setLanguage(i18n.language === 'es' ? 'en' : 'es')}>{i18n.language === 'es' ? 'EN' : 'ES'}</button>
-            <button className="button-subtle topbar-action-btn" title={t('appShell.toggleDarkMode')} onClick={() => setDarkMode((v) => !v)}>{darkMode ? t('topbar.light') : t('topbar.dark')}</button>
-            <button className="button-subtle topbar-action-btn" title={t('topbar.lock')} onClick={lockNow}>{t('topbar.lock')}</button>
-            <button className="topbar-action-btn" onClick={logout}>{t('topbar.logout')}</button>
+            <span className="tb-sep" aria-hidden="true" />
+            <span className="tb-profile-anchor">
+              <button
+                type="button"
+                ref={profileBtnRef}
+                className="tb-profile"
+                aria-haspopup="menu"
+                aria-expanded={profileOpen}
+                onClick={() => setProfileOpen((v) => !v)}
+              >
+                <span className="tb-avatar" aria-hidden="true">{initials}</span>
+                <span className="tb-id">
+                  <span className="tb-id-name">{displayName}</span>
+                  <span className="tb-id-role">{me?.role || 'ADMIN'}</span>
+                </span>
+                <NavIcon name="chev" className="tb-profile-chev" />
+              </button>
+              {profileOpen ? (
+                <div className="profile-dd" role="menu" aria-label={t('topbar.profileMenu', 'Profile')} ref={profileMenuRef}>
+                  <div className="profile-dd-head">
+                    <span className="tb-avatar tb-avatar-lg" aria-hidden="true">{initials}</span>
+                    <div className="profile-dd-who">
+                      <div className="profile-dd-name">{displayName}</div>
+                      {me?.email ? <div className="profile-dd-mail">{me.email}</div> : null}
+                      <div className="profile-dd-meta">
+                        <span className="profile-chip">{me?.role || 'ADMIN'}</span>
+                        {tenantName ? <span className="profile-chip neutral">{tenantName}</span> : null}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="profile-dd-sep" />
+                  <div className="profile-dd-group">
+                    <div className="profile-dd-glabel">{t('topbar.languageLabel')}</div>
+                    <div className="profile-seg" role="radiogroup" aria-label={t('topbar.languageLabel')}>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={i18n.language === 'es'}
+                        className={i18n.language === 'es' ? 'on' : ''}
+                        onClick={() => setLanguage('es')}
+                      >
+                        ES
+                      </button>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={i18n.language !== 'es'}
+                        className={i18n.language !== 'es' ? 'on' : ''}
+                        onClick={() => setLanguage('en')}
+                      >
+                        EN
+                      </button>
+                    </div>
+                  </div>
+                  <div className="profile-dd-group">
+                    <div className="profile-dd-glabel">{t('topbar.themeLabel')}</div>
+                    <div className="profile-seg" role="radiogroup" aria-label={t('topbar.themeLabel')}>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={themePref === 'light'}
+                        className={themePref === 'light' ? 'on' : ''}
+                        onClick={() => pickTheme('light')}
+                      >
+                        <NavIcon name="sun" className="profile-seg-icon" />
+                        {t('topbar.light')}
+                      </button>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={themePref === 'dark'}
+                        className={themePref === 'dark' ? 'on' : ''}
+                        onClick={() => pickTheme('dark')}
+                      >
+                        <NavIcon name="moon" className="profile-seg-icon" />
+                        {t('topbar.dark')}
+                      </button>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={themePref === null}
+                        className={themePref === null ? 'on' : ''}
+                        onClick={() => pickTheme(null)}
+                      >
+                        <NavIcon name="display" className="profile-seg-icon" />
+                        {t('topbar.themeSystem')}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="profile-dd-sep" />
+                  {!screenLockExempt ? (
+                    <>
+                      <button
+                        type="button"
+                        className="profile-dd-item"
+                        role="menuitem"
+                        onClick={() => { closeProfileMenu(false); lockNow(); }}
+                      >
+                        <NavIcon name="lock" className="profile-dd-item-icon" />
+                        {t('topbar.lockScreen')}
+                        <span className="profile-dd-hint">{t('topbar.lockHint')}</span>
+                      </button>
+                      <div className="profile-dd-sep" />
+                    </>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="profile-dd-item danger"
+                    role="menuitem"
+                    onClick={logout}
+                  >
+                    <NavIcon name="logout" className="profile-dd-item-icon" />
+                    {t('topbar.logout')}
+                  </button>
+                </div>
+              ) : null}
+            </span>
           </div>
         </div>
 

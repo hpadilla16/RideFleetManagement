@@ -40,7 +40,15 @@
     "light": "Claro",
     "lock": "Bloquear",
     "logout": "Cerrar Sesión",
-    "returnToSuperAdmin": "Volver a Super Admin"
+    "returnToSuperAdmin": "Volver a Super Admin",
+    "profileMenu": "Perfil",
+    "languageLabel": "Idioma · Language",
+    "themeLabel": "Tema",
+    "themeSystem": "Sistema",
+    "lockScreen": "Bloquear pantalla",
+    "lockHint": "auto · 2 min",
+    "viewingTenant": "Viendo: {{tenant}}",
+    "viewingTenantUnknown": "Viendo tenant"
   },
   "lockScreen": {
     "screenLocked": "Pantalla Bloqueada",

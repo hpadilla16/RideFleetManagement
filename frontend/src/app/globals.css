@@ -140,14 +140,9 @@ a { color: inherit; text-decoration: none; }
    content underneath bled through and looked like the header was covering /
    smearing content. Make it fully opaque so it cleanly sits above scrolled
    content. Still sticky at top:10px. */
-.topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; margin-bottom: 16px; border-radius: var(--r-lg); border: 1px solid var(--border); background: var(--surface-card); box-shadow: var(--sh-1); position: sticky; top: 10px; z-index: 25; }
+.topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 14px; margin-bottom: 16px; border-radius: var(--r-lg); border: 1px solid var(--border); background: var(--surface-card); box-shadow: var(--sh-1); position: sticky; top: 10px; z-index: 25; }
 .topbar-primary { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.topbar-identity { min-width: 0; }
-.topbar-name { font-weight: 800; color: var(--brand-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.topbar-role { color: var(--text-3); font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
-.topbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .topbar-action-btn { min-height: 42px; padding: 10px 14px; border-radius: 14px; white-space: nowrap; }
-.topbar-action-wide { min-width: 104px; }
 /* Secondary button — target .btn--secondary anatomy: white plate, strong
    border (glare mandate: never a tint alone), dark text. */
 .button-subtle { background: var(--n-0); color: var(--text-1); border-color: var(--border-strong); box-shadow: var(--sh-1); }
@@ -155,10 +150,6 @@ a { color: inherit; text-decoration: none; }
 .mobile-menu-btn { display: none; min-width: 52px; padding: 8px 12px; border-radius: var(--r-sm); }
 .drawer-backdrop { display: none; }
 .nav-link-disabled { opacity: .55; cursor: not-allowed; }
-/* Customer-display opener — semantic ok tint (was an inline green style). */
-.topbar-display-btn { background: var(--ok-bg); border-color: var(--ok-bd); color: var(--ok-tx); }
-.topbar-display-btn:hover { background: var(--ok-bg); border-color: var(--ok); }
-.topbar-lang-btn { font-weight: 700; letter-spacing: .03em; }
 
 /* .glass — the name stays (454 JSX usages), the glass is gone (review Q4:
    the repo's own bug history voted for flat; blur cost sub-30fps scroll on
@@ -892,7 +883,6 @@ tr:hover td { background: var(--p-50); }
   .nav-link { padding: 9px 10px; font-size: 14px; }
   .brand { margin-bottom: 0; font-size: 18px; }
   .topbar { margin-bottom: 10px; }
-  .topbar-actions { width: 100%; justify-content: flex-start; }
   .grid2 { grid-template-columns: 1fr; }
   .legal-layout { grid-template-columns: 1fr; }
   .legal-nav { position: static; }
@@ -929,61 +919,25 @@ tr:hover td { background: var(--p-50); }
   }
   .label { letter-spacing: .04em; }
   .topbar { padding: 12px 14px; }
-  .topbar-name { white-space: normal; }
   .button-subtle, button { width: auto; }
 }
 
 @media (max-width: 820px) {
+  /* Redesigned topbar stays ONE row on mobile (approved mockup screen 4b):
+     hamburger + search icon left, Display icon + avatar right. */
   .topbar {
-    gap: 10px;
-    align-items: stretch;
-    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 8px 10px;
   }
   .topbar-primary {
     align-items: center;
-    gap: 12px;
-    width: 100%;
-  }
-  .topbar-identity {
-    display: grid;
-    gap: 2px;
-    flex: 1;
-    min-width: 0;
-  }
-  .topbar-name {
-    font-size: 16px;
-    line-height: 1.12;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-  }
-  .topbar-role {
-    font-size: 10px;
-    display: none;
-  }
-  .topbar-actions {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
     gap: 8px;
-    width: 100%;
-  }
-  .topbar-action-btn {
-    width: 100%;
     min-width: 0;
-    min-height: 44px;
-    padding: 10px 8px;
-    font-size: 12px;
-    line-height: 1.1;
-  }
-  .topbar-action-wide {
-    grid-column: span 3;
   }
   .mobile-menu-btn {
-    min-width: 52px;
-    width: 52px;
+    min-width: 44px;
+    width: 44px;
     padding: 10px 0;
-    font-size: 22px;
     line-height: 1;
   }
 }
@@ -1282,51 +1236,18 @@ label input[type="radio"],
   .centered-login {
     text-align: left;
   }
-  .topbar { padding: 10px 12px; }
   .topbar {
-    gap: 10px;
-    align-items: stretch;
-    padding: 10px;
+    gap: 6px;
+    padding: 8px;
   }
   .topbar-primary {
     align-items: center;
-    gap: 10px;
-    width: 100%;
-  }
-  .topbar-identity {
-    display: grid;
-    gap: 2px;
-    flex: 1;
+    gap: 6px;
     min-width: 0;
-  }
-  .topbar-name {
-    font-size: 14px;
-    line-height: 1.1;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .topbar-actions {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
-    gap: 8px;
-    width: 100%;
-    margin-top: 2px;
-  }
-  .topbar-action-btn {
-    width: 100%;
-    min-width: 0;
-    min-height: 44px;
-    padding: 10px 6px;
-    font-size: 11px;
-  }
-  .topbar-action-wide {
-    grid-column: span 3;
   }
   .mobile-menu-btn {
-    min-width: 52px;
-    width: 52px;
-    font-size: 20px;
+    min-width: 44px;
+    width: 44px;
   }
   .brand-subtitle {
     font-size: 11px;
@@ -2301,3 +2222,178 @@ tr.osg-dirty td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
 :root[data-theme='dark'] .nav-sec-head:hover { color: #ffffff; background: var(--surface-3); }
 :root[data-theme='dark'] .sb-collapse:hover { color: #ffffff; background: var(--surface-3); }
 :root[data-theme='dark'] .nav-link.active .nav-icon { color: var(--p-300, #c0a8ff); }
+
+/* ============================================================
+   Topbar redesign (2026-08-25, approved mockup): left = hamburger
+   (mobile) + mobile-only search icon + location chip-select; right
+   = impersonation pill + Display + avatar/profile dropdown.
+   Presentation only — handlers and visibility conditions unchanged.
+   ============================================================ */
+
+/* Mobile-only search icon — opens the same CommandPalette (Ctrl+K).
+   Desktop has NO topbar search (the sidebar "Go to…" is the only entry). */
+.tb-search-mobile {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 42px; min-height: 42px; flex: none; padding: 0;
+  border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  background: var(--surface-card); color: var(--text-2); box-shadow: var(--sh-1);
+}
+.tb-search-mobile:hover { background: var(--surface-3); color: var(--text-1); border-color: var(--border-strong); box-shadow: var(--sh-1); }
+.tb-search-mobile-icon { width: 17px; height: 17px; }
+@media (min-width: 981px) {
+  .tb-search-mobile { display: none; }
+}
+
+/* Location chip-select — the existing <select> re-skinned as a chip. */
+.tb-loc {
+  position: relative; display: inline-flex; align-items: center; gap: 7px;
+  height: 40px; padding: 0 10px 0 12px; flex: none; min-width: 0;
+  border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  background: var(--surface-2); color: var(--text-2);
+  font-size: 12.5px; font-weight: 650; cursor: pointer;
+}
+.tb-loc-icon { flex: none; width: 14px; height: 14px; color: var(--icon-quiet); }
+.tb-loc-select {
+  appearance: none; -webkit-appearance: none;
+  width: auto; max-width: 190px; min-height: 0; min-width: 0;
+  border: none; background: transparent; box-shadow: none;
+  color: inherit; font: inherit; font-weight: 650;
+  padding: 0 18px 0 0; cursor: pointer;
+}
+.tb-loc-select:focus { border: none; box-shadow: none; outline: 3px solid var(--focus); outline-offset: 2px; }
+.tb-loc-chev { position: absolute; right: 9px; width: 12px; height: 12px; color: var(--icon-quiet); pointer-events: none; }
+
+/* Right cluster. */
+.tb-right { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; min-width: 0; }
+
+/* Impersonation pill — the old "Return" button re-skinned (same handler,
+   same visibility): warn tint + visible tenant + "Return" inside. */
+.tb-impersonation {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 6px 0 11px; min-width: 0;
+  border: 1px solid var(--warn-bd); border-radius: var(--r-pill);
+  background: var(--warn-bg); color: var(--warn-tx);
+  font-size: 12px; font-weight: 700;
+}
+.tb-imp-icon { flex: none; width: 13px; height: 13px; }
+.tb-imp-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.tb-imp-return {
+  flex: none; height: 22px; min-height: 0; padding: 0 9px;
+  border: 1px solid var(--warn-bd); border-radius: var(--r-pill);
+  background: var(--surface-card); color: var(--warn-tx); box-shadow: none;
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+}
+.tb-imp-return:hover { background: var(--surface-card); border-color: var(--warn); color: var(--warn-tx); box-shadow: none; }
+
+/* Display — the counter's daily control stays one click away. Icon+text on
+   desktop, icon-only below 981px (label hidden, tooltip = title). */
+.tb-display {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 40px; min-height: 0; padding: 0 14px; flex: none;
+  border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  background: var(--surface-card); color: var(--text-2); box-shadow: var(--sh-1);
+  font-size: 12.5px; font-weight: 700;
+}
+.tb-display:hover { border-color: var(--brand); color: var(--brand-tx); background: var(--brand-a08); box-shadow: var(--sh-1); }
+.tb-display-icon { flex: none; width: 16px; height: 16px; color: var(--icon-quiet); }
+.tb-display:hover .tb-display-icon { color: var(--brand-tx); }
+
+.tb-sep { width: 1px; height: 24px; background: var(--border); flex: none; }
+
+/* Avatar + identity button → profile dropdown. */
+.tb-profile-anchor { position: relative; display: inline-flex; flex: none; min-width: 0; }
+.tb-profile {
+  display: inline-flex; align-items: center; gap: 10px;
+  height: 44px; min-height: 0; padding: 2px 10px 2px 3px; min-width: 0;
+  border: 1px solid transparent; border-radius: 12px;
+  background: transparent; color: var(--text-1); box-shadow: none;
+  font-weight: 600; text-align: left;
+}
+.tb-profile:hover,
+.tb-profile[aria-expanded='true'] { background: var(--surface-3); border-color: var(--border); box-shadow: none; }
+.tb-avatar {
+  width: 36px; height: 36px; border-radius: 10px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--brand), var(--p-500));
+  color: #fff; font-size: 13px; font-weight: 800; letter-spacing: .02em;
+}
+.tb-avatar-lg { width: 42px; height: 42px; font-size: 15px; border-radius: 12px; }
+.tb-id { display: block; text-align: left; min-width: 0; }
+.tb-id-name { display: block; font-size: 13px; font-weight: 800; color: var(--text-1); white-space: nowrap; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.tb-id-role { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.tb-profile-chev { flex: none; width: 14px; height: 14px; color: var(--icon-quiet); transition: transform .18s ease; }
+.tb-profile[aria-expanded='true'] .tb-profile-chev { transform: rotate(180deg); }
+
+/* The dropdown. */
+.profile-dd {
+  position: absolute; right: 0; top: calc(100% + 8px); width: 296px; z-index: 70;
+  border: 1px solid var(--border); border-radius: var(--r-lg);
+  background: var(--surface-card); box-shadow: var(--sh-3); overflow: hidden;
+}
+.profile-dd-head { display: flex; gap: 12px; padding: 14px 14px 12px; align-items: center; }
+.profile-dd-who { min-width: 0; }
+.profile-dd-name { font-size: 14px; font-weight: 800; color: var(--text-1); }
+.profile-dd-mail { font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.profile-dd-meta { display: flex; gap: 6px; margin-top: 5px; flex-wrap: wrap; }
+.profile-chip {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 8px;
+  border-radius: var(--r-pill); font-size: 10.5px; font-weight: 800;
+  letter-spacing: .05em; text-transform: uppercase;
+  background: var(--p-50); color: var(--brand-tx); border: 1px solid var(--border-brand);
+}
+.profile-chip.neutral {
+  background: var(--surface-3); color: var(--text-2); border-color: var(--border);
+  text-transform: none; letter-spacing: .01em; font-weight: 700;
+}
+.profile-dd-sep { height: 1px; background: var(--border-subtle); margin: 2px 0; }
+.profile-dd-group { padding: 10px 14px; }
+.profile-dd-group + .profile-dd-group { padding-top: 2px; }
+.profile-dd-glabel { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-3); margin-bottom: 7px; }
+
+/* Segmented control (language / theme). */
+.profile-seg { display: flex; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-2); padding: 2px; gap: 2px; }
+.profile-seg button {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 30px; min-height: 0; padding: 0 4px;
+  border: 1px solid transparent; border-radius: 7px;
+  background: transparent; color: var(--text-3); box-shadow: none;
+  font-size: 12px; font-weight: 700;
+}
+.profile-seg button:hover { background: var(--surface-3); color: var(--text-2); border-color: transparent; box-shadow: none; }
+.profile-seg button.on { background: var(--surface-card); color: var(--text-1); border-color: var(--border); box-shadow: var(--sh-1); }
+.profile-seg button.on:hover { background: var(--surface-card); color: var(--text-1); }
+.profile-seg-icon { flex: none; width: 13px; height: 13px; color: var(--icon-quiet); }
+.profile-seg button.on .profile-seg-icon { color: var(--brand-tx); }
+
+/* Menu rows. */
+.profile-dd-item {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  padding: 10px 14px; min-height: 0;
+  border: none; border-radius: 0; background: transparent; box-shadow: none;
+  color: var(--text-2); font-size: 13px; font-weight: 650; text-align: left;
+}
+.profile-dd-item:hover { background: var(--surface-3); color: var(--text-1); border: none; box-shadow: none; }
+.profile-dd-item-icon { flex: none; width: 16px; height: 16px; color: var(--icon-quiet); }
+.profile-dd-hint { margin-left: auto; font-size: 11px; color: var(--text-3); font-weight: 600; }
+.profile-dd-item.danger { color: var(--danger-tx); }
+.profile-dd-item.danger .profile-dd-item-icon { color: var(--danger-tx); }
+.profile-dd-item.danger:hover { background: var(--danger-bg); color: var(--danger-tx); }
+
+/* Mobile (<981px, mockup screen 4b): icon-only Display, avatar-only profile
+   button; the separator goes away. The dropdown itself is unchanged. */
+@media (max-width: 980px) {
+  .tb-right { gap: 6px; }
+  .tb-display { width: 42px; padding: 0; justify-content: center; }
+  .tb-display-label { display: none; }
+  .tb-sep { display: none; }
+  .tb-profile { padding: 2px; height: 42px; gap: 0; }
+  .tb-id, .tb-profile-chev { display: none; }
+  .tb-imp-label { max-width: 96px; }
+  .profile-dd { width: min(296px, calc(100vw - 24px)); }
+}
+
+/* Dark theme nudges (tokens do the rest, same pattern as the sidebar). */
+:root[data-theme='dark'] .tb-search-mobile:hover,
+:root[data-theme='dark'] .profile-dd-item:hover { color: #ffffff; }
+:root[data-theme='dark'] .profile-dd-item.danger:hover { color: var(--danger-tx); }
+:root[data-theme='dark'] .tb-avatar { color: #ffffff; }
