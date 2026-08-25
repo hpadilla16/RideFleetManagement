@@ -13,6 +13,8 @@ const {
   setApiKey, getApiKey, hasApiKey, getCredentialStatus,
   _setPrismaForTests,
 } = await import('../../vehicles/telematics-onestepgps.js');
+const { prisma } = await import('../../../lib/prisma.js');
+const { AUDIT_ACTIONS, AUDIT_OUTCOME } = await import('../../audit/audit.service.js');
 
 test('onestepgpsRouter mounts the full connector endpoint inventory', () => {
   assert.ok(onestepgpsRouter);
@@ -131,4 +133,186 @@ test('credentials POST contract: apiKey required, never echoed back', () => {
   const ok = handle({ apiKey: 'sk-echo-check' });
   assert.equal(ok.status, 200);
   assert.ok(!JSON.stringify(ok.json).includes('sk-echo-check'), 'key echoed in response');
+});
+
+// ── SECURITY GATE: audit trail on every admin mutation ──────────────────────
+// The four mutations must leave an AdminAuditLog row via the house audit
+// module (best-effort auditFromReq). Spy = swap prisma.adminAuditLog.create on
+// the shared client, exactly like audit.test.mjs's withAuditCreate.
+
+const flush = () => new Promise((r) => setImmediate(r));
+
+function makeRes() {
+  const res = { statusCode: 200, body: undefined };
+  res.status = (c) => { res.statusCode = c; return res; };
+  res.json = (b) => { res.body = b; return res; };
+  return res;
+}
+
+// Grab the FINAL handler for method+path (router-level auth guard is a router
+// middleware, not part of the route stack, so this is the asyncHandler-wrapped
+// route handler itself). Same helper shape as audit.test.mjs.
+function lastHandler(method, path) {
+  const layer = onestepgpsRouter.stack.find((l) => l.route && l.route.path === path && l.route.methods[method]);
+  if (!layer) throw new Error(`no ${method.toUpperCase()} ${path} on router`);
+  const handlers = layer.route.stack.filter((s) => !s.method || s.method === method);
+  return handlers[handlers.length - 1].handle;
+}
+
+function adminReq(over = {}) {
+  return {
+    user: { id: 'u1', tenantId: 't1', role: 'ADMIN', email: 'admin@t1.test' },
+    headers: { 'user-agent': 'node-test', 'x-forwarded-for': '203.0.113.9' },
+    params: {}, query: {}, body: {},
+    ...over,
+  };
+}
+
+// Run fn with prisma.adminAuditLog.create captured (plus optional extra model
+// patches), restoring everything after. Returns the captured audit rows.
+async function withAuditSpy(patches, fn) {
+  const rows = [];
+  const originals = [];
+  const patch = (obj, key, impl) => {
+    originals.push([obj, key, obj[key]]);
+    obj[key] = impl;
+  };
+  patch(prisma.adminAuditLog, 'create', async ({ data }) => { rows.push(data); return { id: 'aud1', ...data }; });
+  for (const [model, key, impl] of patches) patch(prisma[model], key, impl);
+  try {
+    await fn();
+    await flush(); // audit writes are fire-and-forget — let them land
+  } finally {
+    for (const [obj, key, orig] of originals) obj[key] = orig;
+  }
+  return rows;
+}
+
+test('POST /credentials records TELEMATICS_KEY_SET with actor/tenant — and NEVER the key', async () => {
+  const world = fakeDb();
+  _setPrismaForTests(world.prisma);
+  try {
+    const res = makeRes();
+    const rows = await withAuditSpy([], async () => {
+      await lastHandler('post', '/credentials')(
+        adminReq({ body: { apiKey: 'sk-audit-leak-canary' } }), res, (e) => { throw e; },
+      );
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(rows.length, 1, 'expected exactly one audit row');
+    const row = rows[0];
+    assert.equal(row.action, AUDIT_ACTIONS.TELEMATICS_KEY_SET);
+    assert.equal(row.outcome, AUDIT_OUTCOME.SUCCESS);
+    assert.equal(row.tenantId, 't1');
+    assert.equal(row.actorUserId, 'u1');
+    assert.equal(row.targetType, 'TENANT');
+    assert.equal(row.targetId, 't1');
+    assert.equal(row.ip, '203.0.113.9');
+    assert.equal(row.metadata.provider, 'ONESTEPGPS');
+    // Spy assertion: the key must not appear ANYWHERE in the audit row —
+    // metadata included — not even in redacted-shaped form.
+    const wire = JSON.stringify(row);
+    assert.ok(!wire.includes('sk-audit-leak-canary'), `API key leaked into audit row: ${wire}`);
+    assert.ok(!('apiKey' in (row.metadata || {})), 'apiKey key must not be passed to audit metadata at all');
+  } finally {
+    _setPrismaForTests(null);
+  }
+});
+
+test('DELETE /credentials records TELEMATICS_KEY_CLEAR', async () => {
+  const world = fakeDb();
+  _setPrismaForTests(world.prisma);
+  try {
+    await setApiKey('t1', 'sk-to-clear');
+    const res = makeRes();
+    const rows = await withAuditSpy([], async () => {
+      await lastHandler('delete', '/credentials')(adminReq(), res, (e) => { throw e; });
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].action, AUDIT_ACTIONS.TELEMATICS_KEY_CLEAR);
+    assert.equal(rows[0].outcome, AUDIT_OUTCOME.SUCCESS);
+    assert.equal(rows[0].targetId, 't1');
+    assert.deepEqual(rows[0].metadata, { provider: 'ONESTEPGPS', deleted: 1 });
+    assert.ok(!JSON.stringify(rows[0]).includes('sk-to-clear'), 'cleared key leaked into audit row');
+  } finally {
+    _setPrismaForTests(null);
+  }
+});
+
+test('POST /device-mappings records TELEMATICS_MAPPING_CREATE with vehicle + device targets', async () => {
+  const res = makeRes();
+  const rows = await withAuditSpy(
+    [
+      ['vehicle', 'findFirst', async () => ({ id: 'veh1', tenantId: 't1' })],
+      ['vehicleTelematicsDevice', 'upsert', async ({ create }) => ({ id: 'map1', ...create })],
+    ],
+    async () => {
+      await lastHandler('post', '/device-mappings')(
+        adminReq({ body: { vehicleId: 'veh1', externalDeviceId: 'osg-dev-42' } }), res, (e) => { throw e; },
+      );
+    },
+  );
+  assert.equal(res.statusCode, 200);
+  assert.equal(rows.length, 1);
+  const row = rows[0];
+  assert.equal(row.action, AUDIT_ACTIONS.TELEMATICS_MAPPING_CREATE);
+  assert.equal(row.outcome, AUDIT_OUTCOME.SUCCESS);
+  assert.equal(row.targetType, 'VEHICLE');
+  assert.equal(row.targetId, 'veh1');
+  assert.equal(row.metadata.provider, 'ONESTEPGPS');
+  assert.equal(row.metadata.vehicleId, 'veh1');
+  assert.equal(row.metadata.externalDeviceId, 'osg-dev-42');
+});
+
+test('POST /device-mappings vehicle-not-found records a FAILURE outcome (cross-tenant probe trail)', async () => {
+  const res = makeRes();
+  const rows = await withAuditSpy(
+    [['vehicle', 'findFirst', async () => null]],
+    async () => {
+      await lastHandler('post', '/device-mappings')(
+        adminReq({ body: { vehicleId: 'veh-other-tenant', externalDeviceId: 'osg-dev-42' } }), res, (e) => { throw e; },
+      );
+    },
+  );
+  assert.equal(res.statusCode, 404);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, AUDIT_ACTIONS.TELEMATICS_MAPPING_CREATE);
+  assert.equal(rows[0].outcome, AUDIT_OUTCOME.FAILURE);
+  assert.equal(rows[0].metadata.reason, 'VEHICLE_NOT_FOUND');
+});
+
+test('DELETE /device-mappings/:id records TELEMATICS_MAPPING_DEACTIVATE (success and 404-FAILURE)', async () => {
+  // success
+  let res = makeRes();
+  let rows = await withAuditSpy(
+    [['vehicleTelematicsDevice', 'updateMany', async () => ({ count: 1 })]],
+    async () => {
+      await lastHandler('delete', '/device-mappings/:id')(
+        adminReq({ params: { id: 'map1' } }), res, (e) => { throw e; },
+      );
+    },
+  );
+  assert.equal(res.statusCode, 200);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, AUDIT_ACTIONS.TELEMATICS_MAPPING_DEACTIVATE);
+  assert.equal(rows[0].outcome, AUDIT_OUTCOME.SUCCESS);
+  assert.equal(rows[0].targetType, 'VEHICLE_TELEMATICS_DEVICE');
+  assert.equal(rows[0].targetId, 'map1');
+  assert.deepEqual(rows[0].metadata, { provider: 'ONESTEPGPS', mappingId: 'map1' });
+
+  // not found → FAILURE row
+  res = makeRes();
+  rows = await withAuditSpy(
+    [['vehicleTelematicsDevice', 'updateMany', async () => ({ count: 0 })]],
+    async () => {
+      await lastHandler('delete', '/device-mappings/:id')(
+        adminReq({ params: { id: 'ghost' } }), res, (e) => { throw e; },
+      );
+    },
+  );
+  assert.equal(res.statusCode, 404);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].outcome, AUDIT_OUTCOME.FAILURE);
+  assert.equal(rows[0].metadata.reason, 'MAPPING_NOT_FOUND');
 });

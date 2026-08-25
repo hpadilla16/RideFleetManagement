@@ -46,6 +46,13 @@ import {
   OneStepGpsAuthError,
 } from '../../vehicles/telematics-onestepgps.js';
 import { vehiclesService } from '../../vehicles/vehicles.service.js';
+import { auditFromReq, AUDIT_ACTIONS, AUDIT_OUTCOME } from '../../audit/audit.service.js';
+
+// Every mutation below leaves an AdminAuditLog row via auditFromReq
+// (SECURITY GATE): best-effort, never throws, actor/tenant/ip/userAgent from
+// the request. metadata carries provider + mapping targets ONLY — the API key
+// (or any fragment of it) must never be passed, not even for redaction.
+const AUDIT_PROVIDER = 'ONESTEPGPS';
 
 export const onestepgpsRouter = Router();
 
@@ -92,6 +99,13 @@ onestepgpsRouter.post('/credentials', asyncHandler(async (req, res) => {
   const apiKey = String(req.body?.apiKey ?? '').trim();
   if (!apiKey) return send400(res, 'apiKey is required');
   const row = await setApiKey(tenantId, apiKey, req.user?.id || null);
+  // Audit the set/rotate — fire-and-forget; the key itself is NEVER passed.
+  auditFromReq(req, {
+    action: AUDIT_ACTIONS.TELEMATICS_KEY_SET,
+    targetType: 'TENANT',
+    targetId: tenantId,
+    metadata: { provider: AUDIT_PROVIDER },
+  });
   // The key is NEVER echoed back — the panel re-reads /status.
   res.json({ ok: true, credentialId: row.id, rotatedAt: row.rotatedAt });
 }));
@@ -100,6 +114,12 @@ onestepgpsRouter.delete('/credentials', asyncHandler(async (req, res) => {
   const tenantId = resolveTenantId(req);
   if (!tenantId) return send400(res, 'tenantId is required');
   const out = await clearApiKey(tenantId);
+  auditFromReq(req, {
+    action: AUDIT_ACTIONS.TELEMATICS_KEY_CLEAR,
+    targetType: 'TENANT',
+    targetId: tenantId,
+    metadata: { provider: AUDIT_PROVIDER, deleted: out.deleted },
+  });
   res.json({ ok: true, deleted: out.deleted });
 }));
 
@@ -174,9 +194,24 @@ onestepgpsRouter.post('/device-mappings', asyncHandler(async (req, res, next) =>
       isActive: true,
     }, { tenantId, allowCrossTenant: false });
     logger.info('[onestepgps] device mapping saved', { tenantId, vehicleId, externalDeviceId });
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.TELEMATICS_MAPPING_CREATE,
+      targetType: 'VEHICLE',
+      targetId: vehicleId,
+      metadata: { provider: AUDIT_PROVIDER, vehicleId, externalDeviceId, mappingId: row.id },
+    });
     res.json({ ok: true, mapping: row });
   } catch (err) {
     if (/Vehicle not found/i.test(String(err?.message || ''))) {
+      // FAILURE trail (mirrors the LOGIN_FAILURE pattern): a mapping attempt
+      // against a vehicle outside the tenant is exactly what an auditor wants.
+      auditFromReq(req, {
+        action: AUDIT_ACTIONS.TELEMATICS_MAPPING_CREATE,
+        outcome: AUDIT_OUTCOME.FAILURE,
+        targetType: 'VEHICLE',
+        targetId: vehicleId,
+        metadata: { provider: AUDIT_PROVIDER, vehicleId, externalDeviceId, reason: 'VEHICLE_NOT_FOUND' },
+      });
       return res.status(404).json({ error: 'Vehicle not found in this tenant' });
     }
     next(err);
@@ -188,10 +223,26 @@ onestepgpsRouter.delete('/device-mappings/:id', asyncHandler(async (req, res) =>
   if (!tenantId) return send400(res, 'tenantId is required');
   // Deactivate, not delete: VehicleTelematicsEvent rows keep their device FK,
   // and the fast poll only reads isActive: true.
+  const mappingId = String(req.params.id || '');
   const out = await prisma.vehicleTelematicsDevice.updateMany({
-    where: { id: String(req.params.id || ''), tenantId, provider: 'ONESTEPGPS' },
+    where: { id: mappingId, tenantId, provider: 'ONESTEPGPS' },
     data: { isActive: false },
   });
-  if (!out.count) return res.status(404).json({ error: 'Mapping not found' });
+  if (!out.count) {
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.TELEMATICS_MAPPING_DEACTIVATE,
+      outcome: AUDIT_OUTCOME.FAILURE,
+      targetType: 'VEHICLE_TELEMATICS_DEVICE',
+      targetId: mappingId,
+      metadata: { provider: AUDIT_PROVIDER, mappingId, reason: 'MAPPING_NOT_FOUND' },
+    });
+    return res.status(404).json({ error: 'Mapping not found' });
+  }
+  auditFromReq(req, {
+    action: AUDIT_ACTIONS.TELEMATICS_MAPPING_DEACTIVATE,
+    targetType: 'VEHICLE_TELEMATICS_DEVICE',
+    targetId: mappingId,
+    metadata: { provider: AUDIT_PROVIDER, mappingId },
+  });
   res.json({ ok: true });
 }));
