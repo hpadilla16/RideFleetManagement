@@ -37,6 +37,7 @@ import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettin
 import { ShuttleTrackerSettings } from '../../components/settings/ShuttleTrackerSettings';
 import { TwoFactorPolicySettings } from '../../components/settings/TwoFactorPolicySettings';
 import { LoanerRatesTab } from './LoanerRatesTab';
+import { OneStepGpsConnectorTab } from './OneStepGpsConnectorTab';
 import { API_BASE, api } from '../../lib/client';
 import { MODULE_DEFINITIONS } from '../../lib/moduleAccess';
 
@@ -5521,6 +5522,19 @@ function SettingsInner({ token, me, logout }) {
                 </button>
               </div>
             </section>
+
+            {/* OneStepGPS connector (2026-08-24): API key + device↔vehicle mapping,
+                per the approved mockups. Factored into its own component so this
+                page does not grow — it talks only to
+                /api/admin/integrations/onestepgps. Rendered unconditionally in
+                this tab: the key lives in IntegrationCredential, independent of
+                the telematicsConfig provider dropdown above (which the settings
+                blob save can therefore never erase). */}
+            <OneStepGpsConnectorTab
+              token={token}
+              scopedSettingsPath={scopedSettingsPath}
+              onPageMsg={setMsg}
+            />
 
             <section className="glass card section-card">
               <div className="row-between" style={{ alignItems: 'flex-start', gap: 12 }}>
