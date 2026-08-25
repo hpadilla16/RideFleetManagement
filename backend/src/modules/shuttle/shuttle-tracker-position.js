@@ -36,28 +36,74 @@ const num = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+/** The only request states the public page may learn about. CANCELLED and
+ *  NO_SHOW deliberately collapse to null — the curb page shows progress, not
+ *  the counter's bookkeeping. */
+const PUBLIC_REQUEST_STATUSES = ['READY', 'VIEWED', 'COMPLETED'];
+
 /**
  * The public payload — the ONLY shape the unauthenticated endpoint returns.
+ *
+ * DELIBERATE WHITELIST EXPANSION (2026-08-24, approved tracker polish,
+ * mockup Screen 3). Exactly these crossed the public boundary, each picked
+ * field-by-field, nothing else:
+ *   • vehicle { name, color, plate }  (NEW #3 — "look for the white Ford
+ *     Transit · IKT-482"; shuttle-configured vehicles only, by construction)
+ *   • counterPhone                    (NEW #5 — the tel: fallback button)
+ *   • brandName                       (NEW #1 — tenant brand header; the
+ *     cascade never yields the platform's name)
+ *   • requestStatus                   (NEW #2 — READY|VIEWED|COMPLETED|null,
+ *     the existing state machine, no ETA invented)
+ *   • walkingDirections               (NEW #4 — sede-written static text)
+ * Anything further needs its own review — do not spread, keep picking.
  *
  * @param {object} args
  * @param {{latitude,longitude,heading,speedMph,eventAt}|null} args.position latest fix
  * @param {{mode,headwayMinutes}} args.config
  * @param {{name,latitude,longitude}|null} args.location
  * @param {string} [args.pickupInstructions]
+ * @param {string} [args.walkingDirections]
+ * @param {string|null} [args.brandName]
+ * @param {string|null} [args.counterPhone]
+ * @param {{make,model,color,plate}|null} [args.vehicle]
+ * @param {string|null} [args.requestStatus]
  * @param {number} [args.now]
  */
-export function publicPositionPayload({ position, config, location, pickupInstructions = '', now = Date.now() }) {
+export function publicPositionPayload({
+  position, config, location, pickupInstructions = '',
+  walkingDirections = '', brandName = null, counterPhone = null,
+  vehicle = null, requestStatus = null, now = Date.now(),
+}) {
   // The pickup POINT (where to stand) is the location's own coordinates —
   // already public knowledge (it's the rental counter's address), and it lets
   // the page draw "you are here → wait there". Absent coordinates simply omit
   // the key; the page degrades to text instructions.
   const pickupLat = num(location?.latitude);
   const pickupLng = num(location?.longitude);
+
+  // NEW #3 — vehicle identity, PICKED field-by-field. The name is make+model
+  // only: year/VIN/internalNumber stay staff-side. All-empty rows (a vehicle
+  // record with no make/model/color/plate) simply omit the key.
+  const vehicleName = [vehicle?.make, vehicle?.model].map((p) => String(p || '').trim()).filter(Boolean).join(' ') || null;
+  const vehicleColor = String(vehicle?.color || '').trim() || null;
+  const vehiclePlate = String(vehicle?.plate || '').trim() || null;
+  const vehicleOut = (vehicleName || vehicleColor || vehiclePlate)
+    ? { name: vehicleName, color: vehicleColor, plate: vehiclePlate }
+    : null;
+
+  const status = String(requestStatus || '').toUpperCase();
   const base = {
     mode: config?.mode === 'NON_STOP' ? 'NON_STOP' : 'ON_DEMAND',
     headwayMinutes: num(config?.headwayMinutes) || null,
     locationName: location?.name || null,
     pickupInstructions: String(pickupInstructions || ''),
+    // ── deliberate whitelist additions (2026-08-24) — see header comment ──
+    walkingDirections: String(walkingDirections || ''),
+    brandName: String(brandName || '').trim() || null,
+    counterPhone: String(counterPhone || '').trim() || null,
+    requestStatus: PUBLIC_REQUEST_STATUSES.includes(status) ? status : null,
+    ...(vehicleOut ? { vehicle: vehicleOut } : {}),
+    // ─────────────────────────────────────────────────────────────────────
     ...(pickupLat !== null && pickupLng !== null
       ? { pickup: { latitude: pickupLat, longitude: pickupLng } }
       : {}),

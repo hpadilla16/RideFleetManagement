@@ -35,15 +35,29 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { API_BASE } from '../../../lib/client';
+import { tenantBrandName } from '../../../lib/tenant-brand';
+import { MAPS_KEY, loadGoogleMaps } from '../../../lib/google-maps-loader';
 
 const POLL_MS = 12_000;
 const TWEEN_MS = 1600;
 const LANG_KEY = 'ride-shuttle-lang';
-const MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY || '';
 
 const STRINGS = {
   es: {
     live: 'EN VIVO',
+    // NEW #7 (2026-08-24): freshness copy — same data, honest age.
+    liveUpdated: 'EN VIVO · actualizado hace {s}s',
+    trackerSub: 'Rastreo del shuttle',
+    statusReceived: 'Recibimos tu solicitud — el counter fue avisado',
+    statusOnWay: '✓ Tu shuttle va en camino',
+    statusPickedUp: '✓ Recogido — ¡buen viaje!',
+    stepRequested: 'Solicitado',
+    stepOnWay: 'En camino',
+    stepPickedUp: 'Recogido',
+    lookFor: 'Busca el {desc}',
+    plateWord: 'tablilla',
+    howToGetThere: 'Cómo llegar',
+    callCounter: '📞 ¿Problemas? Llama al counter',
     agingMin: 'visto hace {m} min',
     offlineTitle: 'El shuttle no está transmitiendo ahora mismo',
     offlineBody: 'El servicio sigue corriendo — pasa aproximadamente cada {n} minutos.',
@@ -69,6 +83,19 @@ const STRINGS = {
   },
   en: {
     live: 'LIVE',
+    // NEW #7 (2026-08-24): freshness copy — same data, honest age.
+    liveUpdated: 'LIVE · updated {s}s ago',
+    trackerSub: 'Shuttle tracker',
+    statusReceived: 'We got your request — the counter has been alerted',
+    statusOnWay: '✓ Your shuttle is on its way',
+    statusPickedUp: '✓ Picked up — enjoy the ride!',
+    stepRequested: 'Requested',
+    stepOnWay: 'On its way',
+    stepPickedUp: 'Picked up',
+    lookFor: 'Look for the {desc}',
+    plateWord: 'plate',
+    howToGetThere: 'How to get there',
+    callCounter: '📞 Having trouble? Call the counter',
     agingMin: 'seen {m} min ago',
     offlineTitle: 'The shuttle is not transmitting right now',
     offlineBody: 'Service is still running — it passes about every {n} minutes.',
@@ -115,36 +142,8 @@ function useStrings() {
   return { t, lang, setLang };
 }
 
-/**
- * Load the Google Maps JS API exactly once, however many components ask.
- *
- * This is Google's OFFICIAL inline bootstrap (their documented loader,
- * reformatted) — not a bare script tag. The first prod deploy used a plain
- * <script src=...&loading=async> and importLibrary was not yet a function
- * when onload fired ("t.maps.importLibrary is not a function", 2026-08-16).
- * The bootstrap defines google.maps.importLibrary SYNCHRONOUSLY and only
- * fetches the network script on first use, which removes the race entirely.
- */
-let bootstrapped = false;
-function ensureMapsBootstrap() {
-  if (!MAPS_KEY || bootstrapped || window.google?.maps?.importLibrary) { bootstrapped = true; return; }
-  bootstrapped = true;
-  /* eslint-disable */
-  (g => { var h, a, k, p = "The Google Maps JavaScript API", c = "google", l = "importLibrary", q = "__ib__", m = document, b = window; b = b[c] || (b[c] = {}); var d = b.maps || (b.maps = {}), r = new Set, e = new URLSearchParams, u = () => h || (h = new Promise(async (f, n) => { await (a = m.createElement("script")); e.set("libraries", [...r] + ""); for (k in g) e.set(k.replace(/[A-Z]/g, t => "_" + t[0].toLowerCase()), g[k]); e.set("callback", c + ".maps." + q); a.src = `https://maps.${c}apis.com/maps/api/js?` + e; d[q] = f; a.onerror = () => h = n(Error(p + " could not load.")); a.nonce = m.querySelector("script[nonce]")?.nonce || ""; m.head.append(a) })); d[l] ? console.warn(p + " only loads once. Ignoring:", g) : d[l] = (f, ...n) => r.add(f) && u().then(() => d[l](f, ...n)) })({ key: MAPS_KEY, v: "weekly" });
-  /* eslint-enable */
-}
-async function loadGoogleMaps() {
-  if (!MAPS_KEY) return null;
-  ensureMapsBootstrap();
-  try {
-    // Force the bootstrap to actually fetch + settle before callers touch
-    // importLibrary for their own libraries.
-    await window.google.maps.importLibrary('core');
-    return window.google;
-  } catch {
-    return null; // bad key / network blocked — page degrades to card-only
-  }
-}
+// Google Maps loader lives in lib/google-maps-loader.js (shared with the
+// staff Shuttle Monitor since 2026-08-24) — same bootstrap, same key wiring.
 
 /** Meters between two coordinates — enough precision for "how far is my walk". */
 function metersBetween(a, b) {
@@ -174,6 +173,10 @@ export function ShuttleTrackerClient({ token }) {
   const [following, setFollowing] = useState(true);
   const [geo, setGeo] = useState('idle');     // idle|locating|on|denied
   const [userPos, setUserPos] = useState(null);
+  // NEW #7 (2026-08-24): tick locally between the 12s polls so the "updated
+  // Ns ago" chip counts up instead of freezing on the last payload's age.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const payloadAtRef = useRef(Date.now());
 
   const mapRef = useRef(null);
   const mapObj = useRef(null);
@@ -198,6 +201,7 @@ export function ShuttleTrackerClient({ token }) {
         if (res.status === 404) { setGone(true); return; } // dead links never revive — stop polling
         if (!res.ok) throw new Error(String(res.status));
         setState(await res.json());
+        payloadAtRef.current = Date.now();
         setStale(false);
       } catch {
         if (alive) setStale(true); // keep the last view; the badge says we're reconnecting
@@ -207,6 +211,13 @@ export function ShuttleTrackerClient({ token }) {
     poll();
     return () => { alive = false; clearTimeout(timer); };
   }, [token]);
+
+  // NEW #7: one-second heartbeat, armed only while a position is showing.
+  useEffect(() => {
+    if (!state?.position) return undefined;
+    const timer = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [state?.position]);
 
   // ── map lifecycle: build once we have coordinates, tween on updates ──────
   const pos = state?.position;
@@ -416,14 +427,28 @@ export function ShuttleTrackerClient({ token }) {
     cardOuter: { background: '#fff', borderRadius: '16px 16px 0 0', marginTop: -14, zIndex: 6, boxShadow: '0 -4px 18px rgba(0,0,0,.08)' },
     card: { maxWidth: 520, margin: '0 auto', padding: '18px 18px calc(24px + env(safe-area-inset-bottom, 0px))' },
     headRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-    h1: { margin: 0, fontSize: 17, fontWeight: 700 },
+    // NEW #6 (2026-08-24): larger accessibility-friendly type on the lines a
+    // customer reads at a curb in sunlight (14→15.5 notes/instructions, 17→18
+    // title) — approved mockup Screen 3 "bigtype".
+    h1: { margin: 0, fontSize: 18, fontWeight: 700 },
     langWrap: { display: 'flex', border: '1px solid #d8d3e0', borderRadius: 999, overflow: 'hidden', flexShrink: 0 },
     langBtn: (active) => ({ minHeight: 34, padding: '6px 12px', fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer', background: active ? '#5b21b6' : '#fff', color: active ? '#fff' : '#5b5266' }),
-    note: { margin: '6px 0 0', fontSize: 14, lineHeight: 1.5, color: '#5b5266' },
-    where: { margin: '14px 0 0', padding: '10px 12px', background: '#f4f2f7', borderRadius: 10, fontSize: 14, lineHeight: 1.5 },
+    note: { margin: '6px 0 0', fontSize: 15.5, lineHeight: 1.5, color: '#5b5266' },
+    where: { margin: '14px 0 0', padding: '10px 12px', background: '#f4f2f7', borderRadius: 10, fontSize: 15.5, lineHeight: 1.5 },
     whereTag: { display: 'block', fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#5b5266', fontWeight: 700, marginBottom: 2 },
+    // NEW #1: tenant brand bar above the map.
+    brandBar: { display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', background: '#fff', borderBottom: '1px solid #eee9f5', fontSize: 14, fontWeight: 800, color: '#2a2333' },
+    brandSub: { marginLeft: 'auto', fontSize: 11.5, fontWeight: 600, color: '#5b5266' },
+    // NEW #2: request-state status line + 3-step progress.
+    statusLine: { marginTop: 13, padding: '11px 13px', borderRadius: 12, fontSize: 15, fontWeight: 600, background: '#e7f6ec', color: '#166b2f', display: 'flex', alignItems: 'center', gap: 8 },
+    steps: { display: 'flex', alignItems: 'flex-start', marginTop: 12 },
+    step: (state_) => ({ flex: 1, textAlign: 'center', fontSize: 11.5, fontWeight: 700, color: state_ === 'todo' ? '#5b5266' : '#5b21b6', position: 'relative' }),
+    stepDot: (state_) => ({ width: 12, height: 12, borderRadius: '50%', background: state_ === 'todo' ? '#d8d3e0' : '#5b21b6', margin: '0 auto 4px', position: 'relative', zIndex: 1 }),
+    stepBar: (state_) => ({ content: '""', position: 'absolute', top: 5, left: '-50%', width: '100%', height: 2, background: state_ === 'todo' ? '#d8d3e0' : '#5b21b6', zIndex: 0 }),
+    // NEW #5: tel: fallback to the counter.
+    telBtn: { marginTop: 12, width: '100%', minHeight: 46, padding: '11px 14px', fontSize: 15, fontWeight: 700, color: '#2a2333', background: '#f4f2f7', border: '1px solid #d8d3e0', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, textDecoration: 'none', boxSizing: 'border-box' },
     geoBtn: { marginTop: 12, width: '100%', minHeight: 44, padding: '10px 14px', fontSize: 14, fontWeight: 700, color: '#5b21b6', background: '#fff', border: '2px solid #5b21b6', borderRadius: 12, cursor: 'pointer' },
-    geoInfo: { marginTop: 10, padding: '10px 12px', background: '#eaf1fe', color: '#173e8a', borderRadius: 10, fontSize: 14, lineHeight: 1.5 },
+    geoInfo: { marginTop: 10, padding: '10px 12px', background: '#eaf1fe', color: '#173e8a', borderRadius: 10, fontSize: 15, lineHeight: 1.5 },
     btn: (sending) => ({ marginTop: 16, width: '100%', minHeight: 48, padding: '14px 16px', fontSize: 16, fontWeight: 700, color: '#fff', background: '#5b21b6', opacity: sending ? 0.7 : 1, border: 'none', borderRadius: 12, cursor: sending ? 'default' : 'pointer' }),
     ok: { marginTop: 16, padding: '12px 14px', background: '#e7f6ec', color: '#166b2f', borderRadius: 12, fontSize: 15, fontWeight: 600, textAlign: 'center' },
     partyRow: { display: 'flex', alignItems: 'center', gap: 10, marginTop: 14, fontSize: 14 },
@@ -467,20 +492,54 @@ export function ShuttleTrackerClient({ token }) {
   const offline = state.status === 'OFFLINE' || !state.position || !MAPS_KEY;
   // Legacy config rows can carry a null headway; never interpolate "null".
   const headway = Number(state.headwayMinutes) >= 1 ? Number(state.headwayMinutes) : 10;
-  const ageMin = Math.floor((state.position?.ageSeconds ?? 0) / 60);
+  // NEW #7: display age = payload age + seconds since the payload landed, so
+  // the chip counts up honestly between polls instead of freezing.
+  const displayAgeSec = Math.max(0, (state.position?.ageSeconds ?? 0)
+    + Math.floor(Math.max(0, nowTick - payloadAtRef.current) / 1000));
+  const ageMin = Math.floor(displayAgeSec / 60);
   const transmitting = state.status !== 'OFFLINE' && state.position;
-  // Under a minute the freshness IS "live"; raw seconds read as telemetry and
-  // freeze between polls (GD review). No position → no badge at all.
   const badge = stale
     ? { bg: '#8a8394', text: t('reconnecting') }
     : (transmitting && ageMin >= 1) ? { bg: '#b45309', text: t('agingMin', { m: ageMin }) }
-      : transmitting ? { bg: '#1a7f37', text: t('live') }
+      : transmitting ? { bg: '#1a7f37', text: t('liveUpdated', { s: displayAgeSec }) }
         : null;
 
   const walkMeters = (userPos && pickup) ? metersBetween(userPos, pickup) : null;
 
+  // NEW #1: tenant brand — the backend cascade never yields the platform
+  // name, and tenantBrandName filters it again client-side. Empty = no bar.
+  const brand = tenantBrandName({ companyName: state.brandName });
+
+  // NEW #2: progress from the EXISTING request state machine. The server's
+  // requestStatus is authoritative; a just-sent request shows READY until the
+  // next poll confirms it.
+  const requestStatus = state.requestStatus
+    || ((reqStatus === 'done' || reqStatus === 'again') ? 'READY' : null);
+  const statusCopy = requestStatus === 'READY' ? t('statusReceived')
+    : requestStatus === 'VIEWED' ? t('statusOnWay')
+      : requestStatus === 'COMPLETED' ? t('statusPickedUp') : null;
+  const stepStates = requestStatus === 'READY' ? ['now', 'todo', 'todo']
+    : requestStatus === 'VIEWED' ? ['done', 'now', 'todo']
+      : requestStatus === 'COMPLETED' ? ['done', 'done', 'now'] : null;
+  const stepLabels = [t('stepRequested'), t('stepOnWay'), t('stepPickedUp')];
+
+  // NEW #3: "look for the white Ford Transit · plate IKT-482". Sede-written
+  // color stays as written (no translation), lowercased to read as prose.
+  const vehicleDesc = state.vehicle
+    ? [String(state.vehicle.color || '').toLowerCase(), state.vehicle.name].filter(Boolean).join(' ')
+    : '';
+
+  // NEW #5: tel: wants digits (+ leading +); the label shows the pretty form.
+  const telHref = state.counterPhone ? `tel:${String(state.counterPhone).replace(/[^\d+]/g, '')}` : null;
+
   return (
     <div style={S.page}>
+      {brand ? (
+        <div style={S.brandBar}>
+          {brand}
+          <span style={S.brandSub}>{t('trackerSub')}</span>
+        </div>
+      ) : null}
       {!offline && (
         <div style={S.map}>
           {badge && <div style={S.badge(badge.bg)} role="status" aria-live="polite">{badge.text}</div>}
@@ -505,10 +564,36 @@ export function ShuttleTrackerClient({ token }) {
           ) : (
             <p style={S.note}>{t('headwayNote', { n: headway })}</p>
           )}
+          {statusCopy && (
+            <>
+              <div style={S.statusLine} role="status">{statusCopy}</div>
+              <div style={S.steps} aria-hidden="true">
+                {stepStates.map((st, i) => (
+                  <div key={stepLabels[i]} style={S.step(st)}>
+                    {i > 0 && <span style={S.stepBar(st)} />}
+                    <div style={S.stepDot(st)} />
+                    {stepLabels[i]}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+          {vehicleDesc && (
+            <p style={{ ...S.note, marginTop: 12 }}>
+              {t('lookFor', { desc: '' })}<strong>{vehicleDesc}</strong>
+              {state.vehicle?.plate ? <> · {t('plateWord')} <strong>{state.vehicle.plate}</strong></> : null}
+            </p>
+          )}
           {state.pickupInstructions && (
             <div style={S.where}>
               <span style={S.whereTag}>{t('where')}</span>
               {state.pickupInstructions}
+            </div>
+          )}
+          {state.walkingDirections && (
+            <div style={{ ...S.where, marginTop: 8, whiteSpace: 'pre-line' }}>
+              <span style={S.whereTag}>{t('howToGetThere')}</span>
+              {state.walkingDirections}
             </div>
           )}
           {pickup && geo !== 'on' && geo !== 'locating' && (
@@ -523,24 +608,27 @@ export function ShuttleTrackerClient({ token }) {
                 : t('youAreHere')}
             </div>
           )}
-          {state.mode === 'ON_DEMAND' && (
-            (reqStatus === 'done' || reqStatus === 'again') ? (
-              <div style={S.ok} role="status">{t(reqStatus === 'done' ? 'requested' : 'requestedAgain')}</div>
-            ) : (
-              <>
-                <div style={S.partyRow}>
-                  <label htmlFor="shuttle-party">{t('party')}</label>
-                  <select id="shuttle-party" value={party} onChange={(e) => setParty(Number(e.target.value))} style={S.partySelect}>
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </div>
-                <button type="button" style={S.btn(reqStatus === 'sending')} disabled={reqStatus === 'sending'} onClick={requestShuttle}>
-                  {reqStatus === 'sending' ? t('requesting') : t('request')}
-                </button>
-                {reqStatus === 'cooldown' && <p style={{ ...S.note, textAlign: 'center' }} role="status">{t('tooFast')}</p>}
-                {reqStatus === 'failed' && <p style={{ ...S.note, textAlign: 'center', color: '#b3261e' }} role="status">{t('failed')}</p>}
-              </>
-            )
+          {/* NEW #2: an OPEN request (READY/VIEWED) is already telling its
+              story in the status line above — no second button. COMPLETED or
+              no request at all keeps the request UI available. */}
+          {state.mode === 'ON_DEMAND' && requestStatus !== 'READY' && requestStatus !== 'VIEWED' && (
+            <>
+              <div style={S.partyRow}>
+                <label htmlFor="shuttle-party">{t('party')}</label>
+                <select id="shuttle-party" value={party} onChange={(e) => setParty(Number(e.target.value))} style={S.partySelect}>
+                  {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+              <button type="button" style={S.btn(reqStatus === 'sending')} disabled={reqStatus === 'sending'} onClick={requestShuttle}>
+                {reqStatus === 'sending' ? t('requesting') : t('request')}
+              </button>
+              {reqStatus === 'cooldown' && <p style={{ ...S.note, textAlign: 'center' }} role="status">{t('tooFast')}</p>}
+              {reqStatus === 'failed' && <p style={{ ...S.note, textAlign: 'center', color: '#b3261e' }} role="status">{t('failed')}</p>}
+            </>
+          )}
+          {/* NEW #5: one-tap fallback to a human at the counter. */}
+          {telHref && (
+            <a href={telHref} style={S.telBtn}>{t('callCounter')}</a>
           )}
         </div>
       </div>

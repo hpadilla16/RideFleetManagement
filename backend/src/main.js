@@ -102,6 +102,7 @@ import { smsRouter } from './modules/sms/sms.routes.js';
 import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
 import { trainingRouter } from './modules/training/training.routes.js';
 import { shuttleTrackerPublicRouter, shuttleTrackerAdminRouter } from './modules/shuttle/shuttle-tracker.routes.js';
+import { shuttleMonitorRouter } from './modules/shuttle/shuttle-monitor.routes.js';
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
 import { economyRouter } from './modules/integrations/economy/economy.routes.js';
 import { nuRouter } from './modules/integrations/nu/nu.routes.js';
@@ -295,6 +296,9 @@ app.use('/api/shuttle-requests', requireAuth, tenantRateLimit, requireModuleAcce
 // Shuttle tracker settings (2026-08-15) — per-location config for the public
 // tracker page; same module gate as the shuttle queue it feeds.
 app.use('/api/shuttle-tracker', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), shuttleTrackerAdminRouter);
+// Staff Shuttle Monitor (2026-08-24) — house-stored positions + open queues
+// on one map. Same gate as the shuttle queue it summarizes; no public path.
+app.use('/api/shuttle-monitor', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), shuttleMonitorRouter);
 // Quotes module (2026-07-17) — doc/quotes-module-plan-2026-07-17.md
 app.use('/api/quotes', requireAuth, tenantRateLimit, requireModuleAccess('quotes'), quotesRouter);
 app.use('/api/payment-gateway', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), paymentGatewayRouter);
