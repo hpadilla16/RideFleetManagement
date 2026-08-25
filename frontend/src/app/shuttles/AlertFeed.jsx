@@ -29,7 +29,7 @@ export function alertText(t, alert) {
   return t(meta.labelKey, { defaultValue: meta.labelDefault, who, zone });
 }
 
-export function AlertFeed({ alerts = [], onSelect }) {
+export function AlertFeed({ alerts = [], onSelect, onOpenRequests }) {
   const { t } = useTranslation();
   return (
     <div data-testid="alert-feed">
@@ -60,6 +60,21 @@ export function AlertFeed({ alerts = [], onSelect }) {
                 <span style={{ minWidth: 0 }}>
                   <strong>{alertText(t, a)}</strong>
                   {sub ? (<><br /><span className="ui-muted">{sub}</span></>) : null}
+                  {/* Phase 3 (Screen 17c): a no-show row's request re-opens
+                      nothing — the action hands staff the queue, where the
+                      NO_SHOW history row has the phone and the reservation. */}
+                  {a?.type === 'REQUEST_NO_SHOW' && onOpenRequests ? (
+                    <><br />
+                      <button
+                        type="button"
+                        data-testid="alert-open-requests"
+                        onClick={(e) => { e.stopPropagation(); onOpenRequests(a); }}
+                        style={{ fontSize: 11.5, marginTop: 4, padding: '3px 8px' }}
+                      >
+                        {t('shuttleMonitor.alertViewRequests', 'View requests')}
+                      </button>
+                    </>
+                  ) : null}
                 </span>
                 <span
                   className="ui-muted"

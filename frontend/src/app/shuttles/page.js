@@ -23,6 +23,17 @@
  * the side panel + a toast for alerts newer than the previous poll. The feed
  * rides the SAME 12s cycle as positions and is best-effort: a feed failure
  * never takes the monitor down.
+ *
+ * PHASE 3 STAFF UI (2026-08-25, approved mockup Screens 10 + 17c):
+ *  - waiting-customer pins — initials dots for customers actively SHARING
+ *    their location (Redis-TTL fix in waitingCustomers[]); non-sharers stay
+ *    list-only. Same 12s cycle, no extra endpoint.
+ *  - the Waiting side-panel list with the ON_DEMAND assignment picker
+ *    (POST/DELETE /api/shuttle-requests/:id/assign).
+ *  - a "Driver shifts" tab (DriverShiftsTab): mint/revoke/notify the
+ *    per-shift driver links; the tokenized link is shown ONCE at mint.
+ *  - REQUEST_NO_SHOW alerts render in the existing feed/toast with a
+ *    "View requests" deep-link into the queue.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -33,7 +44,10 @@ import { api } from '../../lib/client';
 import { MAPS_KEY, loadGoogleMaps } from '../../lib/google-maps-loader';
 import { AlertFeed, AlertToast } from './AlertFeed';
 import { ZonesRoutesTab } from './ZonesRoutesTab';
+import { WaitingPanel } from './WaitingPanel';
+import { DriverShiftsTab } from './DriverShiftsTab';
 import { alertsNewerThan, newestAlertTs } from '../../lib/shuttle-alert-feed';
+import { initialsOf, sharingPins } from '../../lib/shuttle-staff';
 
 const POLL_MS = 12_000; // same cadence as the customer tracker page
 const ALERT_FEED_LIMIT = 20; // mockup Screen 5: "last ~20, today-ish"
@@ -61,6 +75,19 @@ const markerDiv = (n, color) => {
   return el;
 };
 
+// Customer initials dot (mockup Screen 10 `.cdot`) — deliberately smaller
+// and blue-haloed so it can never be confused with a shuttle marker.
+const CUST_PIN_COLOR = '#1d6ef2';
+const custPinDiv = (initials) => {
+  const el = document.createElement('div');
+  el.style.cssText = 'width:24px;height:24px;display:flex;align-items:center;justify-content:center;'
+    + `background:${CUST_PIN_COLOR};border:2.5px solid #fff;border-radius:50%;`
+    + 'box-shadow:0 0 0 5px rgba(29,110,242,.22),0 1px 4px rgba(0,0,0,.3);'
+    + 'color:#fff;font-size:9px;font-weight:800';
+  el.textContent = String(initials);
+  return el;
+};
+
 function ShuttleMonitorInner({ me, token, logout }) {
   const { t } = useTranslation();
   const router = useRouter();
@@ -68,16 +95,20 @@ function ShuttleMonitorInner({ me, token, logout }) {
   const [error, setError] = useState('');
   const [locationId, setLocationId] = useState('');
   const [selectedId, setSelectedId] = useState(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState(null); // Phase 3 (Screen 10)
   const [nowTick, setNowTick] = useState(() => Date.now());
   const payloadAtRef = useRef(Date.now());
-  const [tab, setTab] = useState('monitor'); // 'monitor' | 'zones'
+  const [tab, setTab] = useState('monitor'); // 'monitor' | 'zones' | 'drivers'
   const [alerts, setAlerts] = useState([]);  // Phase 2 feed (mockup Screen 5)
   const [toastAlert, setToastAlert] = useState(null);
   const prevNewestAlertRef = useRef(null);   // null = first poll → never toast
+  // Bumped after an assignment write so the fresh truth shows now, not in 12s.
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
   const mapRef = useRef(null);
   const mapObj = useRef(null);
   const markersRef = useRef({}); // vehicleId → AdvancedMarkerElement
+  const custMarkersRef = useRef({}); // requestId → AdvancedMarkerElement (sharing customers)
   const fittedRef = useRef(false);
 
   // ── poll every 12s ───────────────────────────────────────────────────────
@@ -111,7 +142,7 @@ function ShuttleMonitorInner({ me, token, logout }) {
     };
     poll();
     return () => { alive = false; clearTimeout(timer); };
-  }, [token]);
+  }, [token, refreshNonce]);
 
   // Toast auto-dismisses; a newer alert replaces it and restarts the clock.
   useEffect(() => {
@@ -133,14 +164,22 @@ function ShuttleMonitorInner({ me, token, logout }) {
   }, [data, locationId]);
   const requestsByLocation = data?.requestsByLocation || {};
   const locations = Array.isArray(data?.locations) ? data.locations : [];
+  // Phase 3 (Screen 10): the waiting list mirrors the location filter.
+  const waitingCustomers = useMemo(() => {
+    const list = Array.isArray(data?.waitingCustomers) ? data.waitingCustomers : [];
+    return locationId ? list.filter((c) => c.locationId === locationId) : list;
+  }, [data, locationId]);
 
   const transmitting = shuttles.filter((s) => s.status === 'LIVE' || s.status === 'AGING').length;
   const noDevice = shuttles.filter((s) => s.status === 'NO_DEVICE').length;
   const anyDeviceInTenant = (data?.shuttles || []).some((s) => s.status !== 'NO_DEVICE');
 
   // ── map lifecycle ────────────────────────────────────────────────────────
+  const custPins = useMemo(() => sharingPins(waitingCustomers), [waitingCustomers]);
+
   useEffect(() => {
-    if (!MAPS_KEY || !mapRef.current || !shuttles.some((s) => s.position)) return;
+    if (!MAPS_KEY || !mapRef.current) return;
+    if (!shuttles.some((s) => s.position) && !custPins.length) return;
     let cancelled = false;
     (async () => {
       const google = await loadGoogleMaps();
@@ -152,6 +191,7 @@ function ShuttleMonitorInner({ me, token, logout }) {
       if (mapObj.current && mapObj.current.getDiv() !== mapRef.current) {
         mapObj.current = null;
         markersRef.current = {};
+        custMarkersRef.current = {};
         fittedRef.current = false;
       }
       if (!mapObj.current) {
@@ -190,11 +230,37 @@ function ShuttleMonitorInner({ me, token, logout }) {
           delete markersRef.current[vehicleId];
         }
       }
-      if (!fittedRef.current && seen.size) {
+
+      // Phase 3 (Screen 10): initials dots for customers actively sharing.
+      // The Redis fix has a 5-min TTL — a customer who stops sharing drops
+      // out of custPins on the next poll and their dot is removed here.
+      const seenCustomers = new Set();
+      custPins.forEach((c) => {
+        seenCustomers.add(c.requestId);
+        const pos = { lat: Number(c.lat), lng: Number(c.lng) };
+        const existing = custMarkersRef.current[c.requestId];
+        if (existing) {
+          existing.position = pos;
+          existing.content = custPinDiv(initialsOf(c.name));
+        } else {
+          const marker = new AdvancedMarkerElement({ map, position: pos, content: custPinDiv(initialsOf(c.name)), title: c.name, zIndex: 5 });
+          marker.addListener('click', () => setSelectedCustomerId(c.requestId));
+          custMarkersRef.current[c.requestId] = marker;
+        }
+      });
+      for (const [requestId, marker] of Object.entries(custMarkersRef.current)) {
+        if (!seenCustomers.has(requestId)) {
+          marker.map = null;
+          delete custMarkersRef.current[requestId];
+        }
+      }
+
+      if (!fittedRef.current && (seen.size || seenCustomers.size)) {
         try {
           const bounds = new google.maps.LatLngBounds();
           shuttles.forEach((s) => { if (s.position) bounds.extend({ lat: s.position.latitude, lng: s.position.longitude }); });
-          if (seen.size === 1) { map.setCenter(bounds.getCenter()); map.setZoom(14); } else { map.fitBounds(bounds, 60); }
+          custPins.forEach((c) => bounds.extend({ lat: Number(c.lat), lng: Number(c.lng) }));
+          if (seen.size + seenCustomers.size === 1) { map.setCenter(bounds.getCenter()); map.setZoom(14); } else { map.fitBounds(bounds, 60); }
           fittedRef.current = true;
         } catch { /* framing is cosmetic */ }
       }
@@ -202,7 +268,7 @@ function ShuttleMonitorInner({ me, token, logout }) {
     return () => { cancelled = true; };
     // `tab` is a dep so the map rebuilds promptly when the user returns from
     // the Zones & Routes tab (the map div remounts with a fresh ref).
-  }, [shuttles, tab]);
+  }, [shuttles, custPins, tab]);
 
   // Re-frame when the location filter changes.
   useEffect(() => { fittedRef.current = false; }, [locationId]);
@@ -212,6 +278,15 @@ function ShuttleMonitorInner({ me, token, logout }) {
     if (s.position && mapObj.current) {
       mapObj.current.panTo({ lat: s.position.latitude, lng: s.position.longitude });
       mapObj.current.setZoom(15);
+    }
+  };
+
+  // Phase 3 (Screen 10): waiting-list row / pin click → focus the customer.
+  const focusCustomer = (c) => {
+    setSelectedCustomerId(c.requestId);
+    if (c?.sharing && mapObj.current && Number.isFinite(Number(c.lat)) && Number.isFinite(Number(c.lng))) {
+      mapObj.current.panTo({ lat: Number(c.lat), lng: Number(c.lng) });
+      mapObj.current.setZoom(16);
     }
   };
 
@@ -262,18 +337,24 @@ function ShuttleMonitorInner({ me, token, logout }) {
           ) : null}
         </div>
 
-        {canManageZones ? (
-          <div style={{ display: 'flex', gap: 2, marginTop: 12, borderBottom: '1px solid var(--border, #e9e4f4)' }} role="tablist">
-            <button type="button" role="tab" aria-selected={tab === 'monitor'} style={tabBtnStyle(tab === 'monitor')} onClick={() => setTab('monitor')}>
-              {t('shuttleMonitor.tabMonitor', 'Live map')}
-            </button>
+        <div style={{ display: 'flex', gap: 2, marginTop: 12, borderBottom: '1px solid var(--border, #e9e4f4)' }} role="tablist">
+          <button type="button" role="tab" aria-selected={tab === 'monitor'} style={tabBtnStyle(tab === 'monitor')} onClick={() => setTab('monitor')}>
+            {t('shuttleMonitor.tabMonitor', 'Live map')}
+          </button>
+          {/* Driver shifts share the monitor's staff gate — every monitor
+              viewer can mint/revoke/notify (server enforces scope). */}
+          <button type="button" role="tab" aria-selected={tab === 'drivers'} style={tabBtnStyle(tab === 'drivers')} onClick={() => setTab('drivers')}>
+            {t('shuttleMonitor.tabDrivers', 'Driver shifts')}
+          </button>
+          {canManageZones ? (
             <button type="button" role="tab" aria-selected={tab === 'zones'} style={tabBtnStyle(tab === 'zones')} onClick={() => setTab('zones')}>
               {t('shuttleMonitor.tabZones', 'Zones & Routes')}
             </button>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
 
         {tab === 'zones' ? <ZonesRoutesTab token={token} /> : null}
+        {tab === 'drivers' ? <DriverShiftsTab token={token} shuttles={data?.shuttles || []} /> : null}
 
         {tab === 'monitor' && error ? <p className="surface-note warn" style={{ marginTop: 10 }}>{error}</p> : null}
         {tab === 'monitor' && loading ? <p className="ui-muted" style={{ marginTop: 12 }}>{t('shuttleMonitor.loading', 'Loading shuttles…')}</p> : null}
@@ -322,6 +403,10 @@ function ShuttleMonitorInner({ me, token, logout }) {
                 <span className="status-chip good">{t('shuttleMonitor.legendLive', 'live < 90s')}</span>
                 <span className="status-chip warn">{t('shuttleMonitor.legendAging', 'last known 90s–4m')}</span>
                 <span className="status-chip">{t('shuttleMonitor.legendOffline', 'offline / no device')}</span>
+                <span className="status-chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: '#1d6ef2', display: 'inline-block' }} />
+                  {t('shuttleMonitor.legendCustomer', 'customer sharing location')}
+                </span>
               </div>
             </div>
 
@@ -404,6 +489,19 @@ function ShuttleMonitorInner({ me, token, logout }) {
                 );
               })}
 
+              {/* Phase 3 waiting list (mockup Screen 10) — same payload/cycle. */}
+              <div style={{ marginTop: 4 }}>
+                <WaitingPanel
+                  customers={waitingCustomers}
+                  shuttles={shuttles}
+                  token={token}
+                  selectedRequestId={selectedCustomerId}
+                  onFocus={focusCustomer}
+                  onViewRequests={(c) => router.push(`/shuttle?locationId=${encodeURIComponent(c.locationId || '')}`)}
+                  onChanged={() => setRefreshNonce((n) => n + 1)}
+                />
+              </div>
+
               {/* Phase 2 alert feed (mockup Screen 5) — same 12s poll cycle. */}
               <div style={{ marginTop: 4 }}>
                 <AlertFeed
@@ -411,6 +509,10 @@ function ShuttleMonitorInner({ me, token, logout }) {
                   onSelect={(a) => {
                     const s = shuttles.find((x) => x.vehicleId === a?.vehicle?.id);
                     if (s?.position) focusShuttle(s);
+                  }}
+                  onOpenRequests={(a) => {
+                    const loc = a?.zone?.locationId || '';
+                    router.push(loc ? `/shuttle?locationId=${encodeURIComponent(loc)}` : '/shuttle');
                   }}
                 />
               </div>

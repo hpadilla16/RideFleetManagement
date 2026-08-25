@@ -14,6 +14,11 @@ export const ALERT_META = {
   ENTER: { icon: '✓', tone: 'ok', labelKey: 'shuttleMonitor.alertEnter', labelDefault: '{{who}} entered {{zone}}' },
   EXIT: { icon: '↩', tone: 'neutral', labelKey: 'shuttleMonitor.alertExit', labelDefault: '{{who}} exited {{zone}}' },
   OFF_ROUTE: { icon: '⚠', tone: 'warn', labelKey: 'shuttleMonitor.alertOffRoute', labelDefault: '{{who}} left the route corridor' },
+  // Phase 3 no-show fan-out (Screen 17c). The feed payload carries zone +
+  // vehicle labels only — customer name/party stay in the backend's rawJson,
+  // which this endpoint deliberately does not expose — so the sentence leans
+  // on the pickup spot, and the row's action deep-links to the queue.
+  REQUEST_NO_SHOW: { icon: '⚠', tone: 'warn', labelKey: 'shuttleMonitor.alertNoShow', labelDefault: 'No-show — customer not picked up at {{zone}}' },
 };
 
 /** occurredAt → epoch ms, 0 when unparseable (never NaN out). */
