@@ -285,3 +285,51 @@ export function buildArrivalSms({ spotName, walkingDirections, vehicleName, vehi
     ? `${who}: tu shuttle llegó a ${spot}.${vanLine}${walkLine}`
     : `${who}: your shuttle has arrived at ${spot}.${vanLine}${walkLine}`;
 }
+
+/**
+ * Customer no-show SMS (Phase 3, Screen 17b) — MODE-AWARE, the approved
+ * distinction verbatim: in CYCLICAL (NON_STOP) mode "espera el próximo
+ * shuttle" is a real promise (a next pass exists), so the headway hint shows;
+ * in ON_DEMAND no next bus is implied — "el counter te contactará". Bilingual
+ * like the arrival SMS; the counter phone rides along as a plain tel the
+ * handset can tap.
+ */
+export function buildNoShowSms({ mode, spotName, headwayMinutes, counterPhone, brandName, locale }) {
+  const es = String(locale || '').toLowerCase().startsWith('es');
+  const who = brandName || 'Ride Fleet';
+  const spot = spotName || (es ? 'tu punto de recogida' : 'your pickup spot');
+  const phone = String(counterPhone || '').trim();
+  const headway = Number(headwayMinutes);
+  const cyclical = String(mode || '').toUpperCase() === 'NON_STOP';
+  if (es) {
+    const next = cyclical
+      ? ` Espera el próximo shuttle${Number.isFinite(headway) && headway > 0 ? ` (~${headway} min)` : ''}.`
+      : ' El counter te contactará para coordinar tu recogida.';
+    const call = phone ? ` O llama al counter: ${phone}.` : '';
+    return `${who}: no pudimos encontrarte en ${spot}.${next}${call}`;
+  }
+  const next = cyclical
+    ? ` Please wait for the next shuttle${Number.isFinite(headway) && headway > 0 ? ` (~${headway} min)` : ''}.`
+    : ' The counter will contact you to coordinate your pickup.';
+  const call = phone ? ` Or call the counter: ${phone}.` : '';
+  return `${who}: we couldn't find you at ${spot}.${next}${call}`;
+}
+
+/** Staff no-show notice (Screen 17c → optional recipients email). Names and
+ *  counts only — never the customer's phone or any coordinates. */
+export function buildNoShowStaffEmail({ customerName, partySize, bags, spotName, vehicleLabel, locationName, occurredAt }) {
+  const who = String(customerName || '').trim() || 'Customer';
+  const chips = [
+    Number.isFinite(Number(partySize)) && Number(partySize) > 0 ? `${Number(partySize)} pax` : null,
+    Number.isFinite(Number(bags)) && Number(bags) >= 0 ? `${Number(bags)} bags` : null,
+  ].filter(Boolean).join(', ');
+  const where = spotName ? ` at ${spotName}` : '';
+  const sede = locationName ? ` — ${locationName}` : '';
+  const at = occurredAt instanceof Date ? occurredAt : new Date(occurredAt || Date.now());
+  const hhmm = at.toISOString().slice(11, 16);
+  const byVan = vehicleLabel ? ` Marked from ${vehicleLabel}.` : '';
+  return {
+    subject: `Shuttle no-show: ${who}${where}${sede}`,
+    text: `${who}${chips ? ` (${chips})` : ''} could not be picked up${where} at ${hhmm} UTC${sede}.${byVan}\n\nThe customer was notified per their SMS preference; please contact them to coordinate. This is an automated notice from the shuttle monitor.`,
+  };
+}

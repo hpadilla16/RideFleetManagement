@@ -3305,6 +3305,17 @@ model ShuttleRequest {
   customerName   String
   customerPhone  String?
   partySize      Int                  @default(1)
+  // Phase 3 intake (2026-08-25, mockup Screen 7): "how many bags?". NULL =
+  // intake disabled at the sede or the row predates the column.
+  bags           Int?
+  // Manual staff assignment (Phase 3, Screen 8a). Plain String ref, NO
+  // relation — same style as ShuttleAlert.vehicleId: a sold (hard-deleted)
+  // vehicle must never cascade into or block on a request row. Ownership and
+  // shuttle-configured-ness are re-verified at assign time and on every read.
+  assignedVehicleId String?
+  // Which pickup spot (ShuttleZone.isPickupSpot) intake directed the customer
+  // to. Plain ref for the same no-cascade reason.
+  pickupSpotZoneId  String?
   pickupNote     String?
   status         ShuttleRequestStatus @default(READY)
   callCount      Int                  @default(1)
@@ -3331,6 +3342,8 @@ model ShuttleRequest {
   // The global banner polls this every few seconds.
   @@index([tenantId, locationId, status])
   @@index([reservationId, status])
+  // Mode-aware tracker read + future driver surface ("which pickups are mine").
+  @@index([assignedVehicleId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3365,6 +3378,12 @@ model ShuttleTrackerConfig {
   // per-location shuttle anchor and the list is tiny; parseAlertRecipients in
   // shuttle-zone-alerts.js is the single validator both sides use.
   alertRecipientsJson Json?
+
+  // Phase 3 intake knobs (2026-08-25, Screen 7) — { enabled, partySizeCap,
+  // bagsCap }. NULL = intake OFF, server defaults (50/20) apply; the flag
+  // keeps every existing tenant byte-for-byte unchanged until a sede opts in.
+  // parseIntakeConfig in shuttle-intake.js is the single reader/validator.
+  intakeJson Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

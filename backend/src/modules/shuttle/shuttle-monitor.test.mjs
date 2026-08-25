@@ -93,9 +93,23 @@ test('open-queue summary: per location, oldest leads, next capped at 3', () => {
   assert.equal(out.lax.oldest.waitingMinutes, 12);
   assert.equal(out.lax.oldest.pickupNote, 'Lot B');
   assert.equal(out.lax.next.length, 3);
-  assert.deepEqual(out.lax.next[0], { customerName: 'M. Rivera', partySize: 1 });
+  // Phase 3: every entry names its assignment (null when nobody pinned one).
+  assert.deepEqual(out.lax.next[0], { customerName: 'M. Rivera', partySize: 1, assignedVehicle: null });
   assert.equal(out.sju.openCount, 1);
   assert.equal('missing' in out, false);
+});
+
+test('Phase 3: assignments resolve ONLY through the caller\'s tenant-verified vehicle map', () => {
+  const rows = [
+    { locationId: 'lax', customerName: 'Juan P.', partySize: 2, bags: 3, assignedVehicleId: 'v1', createdAt: secondsAgo(600) },
+    { locationId: 'lax', customerName: 'K. Osei', partySize: 1, assignedVehicleId: 'v_stale', createdAt: secondsAgo(300) },
+  ];
+  const vehicleById = { v1: { id: 'v1', year: 2023, make: 'Ford', model: 'Transit 350', plate: 'IKT-482' } };
+  const out = summarizeOpenRequests(rows, NOW, vehicleById);
+  assert.deepEqual(out.lax.oldest.assignedVehicle, { vehicleId: 'v1', label: '2023 Ford Transit 350', plate: 'IKT-482' });
+  assert.equal(out.lax.oldest.bags, 3);
+  // A stale/foreign id the map does not know renders as null — never a lookup.
+  assert.equal(out.lax.next[0].assignedVehicle, null);
 });
 
 // ─── service scoping, with an in-memory prisma ──────────────────────────────
@@ -199,4 +213,43 @@ test('enabled(): true only when the caller scope holds a mode≠OFF config', asy
   assert.equal((await shuttleMonitorService.enabled({ tenantId: 't1' }, deps)).enabled, true);
   assert.equal((await shuttleMonitorService.enabled({ tenantId: 't1', allowedLocationIds: ['off'] }, deps)).enabled, false);
   assert.equal((await shuttleMonitorService.enabled({ tenantId: 't-none' }, deps)).enabled, false);
+});
+
+// ─── Phase 3: waiting customers with the ephemeral shared fix ───────────────
+
+test('waitingCustomers: staff-only coordinates come from the injected Redis read, scoped like the queue', async () => {
+  const data = {
+    ...DATA,
+    requests: [
+      { id: 'r1', tenantId: 't1', locationId: 'lax', status: 'READY', customerName: 'Juan P.', partySize: 2, bags: 3, assignedVehicleId: 'v1', pickupSpotZoneId: 'zone_b', createdAt: secondsAgo(12 * 60) },
+      { id: 'r3', tenantId: 't1', locationId: 'lax', status: 'READY', customerName: 'M. Rivera', partySize: 1, createdAt: secondsAgo(2 * 60) },
+      { id: 'r2', tenantId: 't2', locationId: 'mia', status: 'READY', customerName: 'Foreign', partySize: 1, createdAt: secondsAgo(60) },
+    ],
+  };
+  const fixes = { r1: { lat: 33.941, lng: -118.401, at: NOW - 45_000 } };
+  const deps = {
+    prisma: fakePrisma(data),
+    latestPositionsByVehicle: positionsFor(T1_FIXES),
+    readCustomerLocation: async (id) => fixes[id] || null,
+  };
+  const out = await shuttleMonitorService.positions({ tenantId: 't1' }, deps, NOW);
+
+  assert.equal(out.waitingCustomers.length, 2, 'the foreign-tenant request never surfaces');
+  const juan = out.waitingCustomers.find((c) => c.requestId === 'r1');
+  assert.equal(juan.sharing, true);
+  assert.equal(juan.lat, 33.941);
+  assert.equal(juan.ageSeconds, 45);
+  assert.equal(juan.bags, 3);
+  assert.equal(juan.waitingMinutes, 12);
+  assert.deepEqual(juan.assignedVehicle, { vehicleId: 'v1', label: '2023 Ford Transit 350', plate: 'IKT-482' });
+
+  const rivera = out.waitingCustomers.find((c) => c.requestId === 'r3');
+  assert.equal(rivera.sharing, false);
+  assert.equal('lat' in rivera, false, 'not sharing = list only, no coordinate keys');
+
+  // Redis down: everyone renders as not sharing, the monitor never breaks.
+  const dark = await shuttleMonitorService.positions({ tenantId: 't1' }, {
+    ...deps, readCustomerLocation: async () => { throw new Error('redis down'); },
+  }, NOW);
+  assert.equal(dark.waitingCustomers.every((c) => c.sharing === false), true);
 });

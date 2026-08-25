@@ -64,6 +64,18 @@ const PUBLIC_REQUEST_STATUSES = ['READY', 'VIEWED', 'COMPLETED'];
  *     "Pickup Lot B"; null unless arrived)
  * No coordinates, no zone geometry, no alert history cross here — the page
  * learns "it is at your spot", nothing about how we know.
+ *
+ * DELIBERATE WHITELIST EXPANSION (2026-08-25, Phase 3 core — approved mockup
+ * Screens 8a/8b/9). Exactly three more keys crossed:
+ *   • assigned                        (true only when the viewer's OPEN
+ *     request carries an assignedVehicleId the config still owns — then the
+ *     single-position keys show THAT van, not the freshest)
+ *   • shuttles                        (NON_STOP only — every configured
+ *     shuttle's fix, each entry built by publicShuttleEntry's own pick;
+ *     Screen 8b "the loop", no ids, no ETA)
+ *   • locationSharing                 ({ active, distanceMeters } — the
+ *     viewer's OWN sharing state. distance only, NEVER an echo of their
+ *     coordinates; see shuttle-customer-location.js)
  * Anything further needs its own review — do not spread, keep picking.
  *
  * @param {object} args
@@ -82,7 +94,9 @@ export function publicPositionPayload({
   position, config, location, pickupInstructions = '',
   walkingDirections = '', brandName = null, counterPhone = null,
   vehicle = null, requestStatus = null,
-  arrivedAtSpot = false, arrivedSpotName = null, now = Date.now(),
+  arrivedAtSpot = false, arrivedSpotName = null,
+  assigned = false, shuttles = null, locationSharing = null,
+  now = Date.now(),
 }) {
   // The pickup POINT (where to stand) is the location's own coordinates —
   // already public knowledge (it's the rental counter's address), and it lets
@@ -116,6 +130,17 @@ export function publicPositionPayload({
     // ── Phase 2 arrival (2026-08-24, approved #21) — see header comment ──
     arrivedAtSpot: arrivedAtSpot === true,
     arrivedSpotName: arrivedAtSpot === true ? (String(arrivedSpotName || '').trim() || null) : null,
+    // ── Phase 3 core (2026-08-25, Screens 8a/8b/9) — see header comment ──
+    assigned: assigned === true,
+    locationSharing: {
+      active: locationSharing?.active === true,
+      distanceMeters: locationSharing?.active === true ? num(locationSharing?.distanceMeters) : null,
+    },
+    // NON_STOP only, and only entries publicShuttleEntry itself built — the
+    // caller cannot smuggle a raw row through the array.
+    ...(config?.mode === 'NON_STOP' && Array.isArray(shuttles)
+      ? { shuttles: shuttles.filter((s) => s && s[SHUTTLE_ENTRY_MARK] === true).map(({ [SHUTTLE_ENTRY_MARK]: _m, ...rest }) => rest) }
+      : {}),
     // ─────────────────────────────────────────────────────────────────────
     ...(pickupLat !== null && pickupLng !== null
       ? { pickup: { latitude: pickupLat, longitude: pickupLng } }
@@ -136,6 +161,50 @@ export function publicPositionPayload({
     return { ...base, status: 'OFFLINE' };
   }
 
+  return {
+    ...base,
+    status: now - at > POSITION_AGING_MS ? 'AGING' : 'LIVE',
+    position: {
+      latitude: lat,
+      longitude: lng,
+      heading: num(position.heading),
+      speedMph: num(position.speedMph),
+      asOf: new Date(at).toISOString(),
+      ageSeconds: Math.max(0, Math.round((now - at) / 1000)),
+    },
+  };
+}
+
+/** Proof-of-construction mark: only entries publicShuttleEntry built may
+ *  enter the public `shuttles` array. A Symbol, so it can never serialize. */
+export const SHUTTLE_ENTRY_MARK = Symbol('publicShuttleEntry');
+
+/**
+ * ONE public loop-shuttle entry (Screen 8b) — picked field-by-field, same
+ * rule as the main payload. No vehicle id (the loop page has no per-vehicle
+ * action), no VIN/year/internalNumber, and OFFLINE entries carry NO
+ * coordinates — a dead dot on the loop map lies exactly like the single one.
+ *
+ * @param {{make,model,color,plate}|null} vehicle owned Vehicle row
+ * @param {{latitude,longitude,heading,speedMph,eventAt}|null} position
+ */
+export function publicShuttleEntry({ vehicle, position, now = Date.now() }) {
+  const name = [vehicle?.make, vehicle?.model].map((p) => String(p || '').trim()).filter(Boolean).join(' ') || null;
+  const base = {
+    [SHUTTLE_ENTRY_MARK]: true,
+    name,
+    color: String(vehicle?.color || '').trim() || null,
+    plate: String(vehicle?.plate || '').trim() || null,
+  };
+
+  const at = position?.eventAt instanceof Date
+    ? position.eventAt.getTime()
+    : position?.eventAt ? new Date(position.eventAt).getTime() : NaN;
+  const lat = num(position?.latitude);
+  const lng = num(position?.longitude);
+  if (lat === null || lng === null || !Number.isFinite(at) || now - at > POSITION_STALE_MS) {
+    return { ...base, status: 'OFFLINE' };
+  }
   return {
     ...base,
     status: now - at > POSITION_AGING_MS ? 'AGING' : 'LIVE',

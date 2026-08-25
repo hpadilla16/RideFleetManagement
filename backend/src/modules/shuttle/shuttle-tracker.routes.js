@@ -16,8 +16,10 @@ import {
 import { requireRole } from '../../middleware/auth.js';
 import { userAllowedLocationIds } from '../../lib/tenant-scope.js';
 import { prisma } from '../../lib/prisma.js';
-import { shuttleTrackerService } from './shuttle-tracker.service.js';
+import { shuttleTrackerService, storeCustomerLocation } from './shuttle-tracker.service.js';
 import { shuttleRequestsService } from './shuttle-requests.service.js';
+import { parseIntakeConfig, validateIntake, validateIntakeInput } from './shuttle-intake.js';
+import { validateCustomerFix } from './shuttle-customer-location.js';
 
 export const shuttleTrackerPublicRouter = Router();
 
@@ -60,6 +62,35 @@ shuttleTrackerPublicRouter.post('/:token/request', requestGuards, async (req, re
     const ctx = await shuttleTrackerService.publicRequestContext(req.params.token);
     if (!ctx) return res.status(404).json({ error: 'Not found' });
 
+    // Phase 3 intake (Screen 7): validated against the LOCATION's config.
+    // Flag off — the pre-Phase-3 contract, byte-for-byte (partySize passes
+    // through to the same legacy clamp; bags stores only when incidentally
+    // valid). Flag on — party+bags REQUIRED within the sede's caps, and the
+    // 400 says which and what range, nothing about the token.
+    const intakeCfg = parseIntakeConfig(ctx.config);
+    const intake = validateIntake(req.body || {}, intakeCfg);
+    if (!intake.ok) return res.status(400).json({ error: intake.error });
+
+    // Which pickup spot intake pointed the customer at. Fail-closed to null:
+    // only an ACTIVE pickup-spot zone of THIS tenant at THIS sede may be
+    // referenced — anything else (foreign id, deleted zone, garbage) is
+    // dropped, never stored and never an oracle.
+    let pickupSpotZoneId = null;
+    const claimedSpot = String(req.body?.pickupSpotZoneId || '').trim();
+    if (claimedSpot) {
+      const spot = await prisma.shuttleZone.findFirst({
+        where: {
+          id: claimedSpot,
+          tenantId: ctx.reservation.tenantId,
+          locationId: ctx.reservation.pickupLocationId,
+          isPickupSpot: true,
+          active: true,
+        },
+        select: { id: true },
+      }).catch(() => null);
+      pickupSpotZoneId = spot?.id || null;
+    }
+
     const customerName = `${ctx.reservation.customer?.firstName || ''} ${ctx.reservation.customer?.lastName || ''}`.trim() || 'Customer';
     const { request, deduplicated } = await shuttleRequestsService.create({
       tenantId: ctx.reservation.tenantId,
@@ -67,7 +98,9 @@ shuttleTrackerPublicRouter.post('/:token/request', requestGuards, async (req, re
       reservationId: ctx.reservation.id,
       customerName,
       customerPhone: ctx.reservation.customer?.phone || '',
-      partySize: req.body?.partySize,
+      partySize: intake.values.partySize,
+      bags: intake.values.bags,
+      pickupSpotZoneId,
       pickupNote: String(req.body?.pickupNote || '').slice(0, 280),
       source: 'PUBLIC_LINK',
       // Phase 2 arrival SMS consent (approved #21): a bare boolean is the
@@ -82,6 +115,36 @@ shuttleTrackerPublicRouter.post('/:token/request', requestGuards, async (req, re
     // Whitelisted like every public payload: enough for the page to say "on
     // its way" and absorb double-taps, nothing about the queue behind it.
     res.json({ ok: true, deduplicated, status: request.status });
+  } catch (e) { next(e); }
+});
+
+const locationGuards = [
+  attachPublicRequestMeta('public-shuttle-location'),
+  // The consented page pushes a fix every ~10s while sharing — a real
+  // customer is ~6/min, same envelope as the tracker poll. 60/min per IP.
+  createPublicRateLimitGuard({ name: 'public-shuttle-location', maxRequests: 60, windowMs: 60 * 1000 }),
+];
+
+/**
+ * Phase 3 (Screen 9, privacy constraints binding): the customer's own
+ * ephemeral fix. Token-validated exactly like the tracker GET, and requires
+ * an OPEN request — sharing exists only while someone waits. The fix goes to
+ * Redis with a 5-minute TTL and NOWHERE else: no DB row, no log line, no
+ * audit metadata; the response confirms and echoes NOTHING back.
+ */
+shuttleTrackerPublicRouter.post('/:token/location', locationGuards, async (req, res, next) => {
+  try {
+    const ctx = await shuttleTrackerService.publicLocationContext(req.params.token);
+    if (!ctx) return res.status(404).json({ error: 'Not found' });
+
+    const fix = validateCustomerFix(req.body || {});
+    if (!fix.ok) return res.status(400).json({ error: fix.error });
+
+    const stored = await storeCustomerLocation(ctx.request.id, fix.fix);
+    res.setHeader('Cache-Control', 'no-store');
+    // `active: false` = Redis is down — the page can fall back to "sharing
+    // unavailable" instead of pretending. Nothing else crosses.
+    res.json({ ok: true, active: stored === true });
   } catch (e) { next(e); }
 });
 
@@ -127,6 +190,9 @@ shuttleTrackerAdminRouter.get('/config', requireSettingsAuthor, async (req, res,
       mode: row?.mode || 'OFF',
       vehicleIds: Array.isArray(row?.vehicleIdsJson) ? row.vehicleIdsJson : [],
       headwayMinutes: row?.headwayMinutes ?? 10,
+      // Phase 3 intake knobs — parse-normalized, so the UI always sees the
+      // effective values (defaults included), never the raw JSON.
+      intake: parseIntakeConfig(row),
     });
   } catch (e) { next(e); }
 });
@@ -145,6 +211,17 @@ shuttleTrackerAdminRouter.put('/config', requireSettingsAuthor, async (req, res,
     if (!MODES.includes(mode)) return res.status(400).json({ error: `mode must be one of ${MODES.join(', ')}` });
     if (!Number.isFinite(headwayMinutes) || headwayMinutes < 1 || headwayMinutes > 120) {
       return res.status(400).json({ error: 'headwayMinutes must be between 1 and 120' });
+    }
+
+    // Phase 3 intake knobs. ABSENT = keep what is stored (an older Settings
+    // page must not silently reset a sede's intake); null = clear; an object
+    // is validated. The flag is what keeps every un-opted tenant unchanged.
+    let intakeProvided = 'intake' in body;
+    let intakeClean = null;
+    if (intakeProvided) {
+      const v = validateIntakeInput(body.intake);
+      if (!v.ok) return res.status(400).json({ error: v.error });
+      intakeClean = v.intake;
     }
 
     if (!(await scopedLocation(req, locationId))) return res.status(404).json({ error: 'Location not found' });
@@ -166,19 +243,21 @@ shuttleTrackerAdminRouter.put('/config', requireSettingsAuthor, async (req, res,
     }
 
     const data = { tenantId: req.user.tenantId, locationId, mode, vehicleIdsJson: ownedIds, headwayMinutes };
+    const intakePatch = intakeProvided ? { intakeJson: intakeClean } : {};
     const row = await prisma.shuttleTrackerConfig.upsert({
       where: { locationId },
       // tenantId refreshes on update too — a re-tenanted location must not
       // keep a config stamped with the old tenant (it would 404 every link
       // while Settings shows a healthy mode-ON row).
-      update: { tenantId: data.tenantId, mode: data.mode, vehicleIdsJson: data.vehicleIdsJson, headwayMinutes: data.headwayMinutes },
-      create: data,
+      update: { tenantId: data.tenantId, mode: data.mode, vehicleIdsJson: data.vehicleIdsJson, headwayMinutes: data.headwayMinutes, ...intakePatch },
+      create: { ...data, ...intakePatch },
     });
     res.json({
       locationId,
       mode: row.mode,
       vehicleIds: Array.isArray(row.vehicleIdsJson) ? row.vehicleIdsJson : [],
       headwayMinutes: row.headwayMinutes,
+      intake: parseIntakeConfig(row),
     });
   } catch (e) { next(e); }
 });

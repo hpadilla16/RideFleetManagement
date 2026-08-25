@@ -12,6 +12,7 @@
  */
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
+import logger from '../../lib/logger.js';
 // The list/notice DECISIONS live in a pure module so CI's DB-free step can
 // guard them — this suite needs embedded postgres and does not run there.
 import {
@@ -22,14 +23,49 @@ import {
   appendNotice,
   markNoticeFailed
 } from './shuttle-query.js';
+import { configVehicleIds } from './shuttle-tracker-position.js';
+import { clearCustomerLocation } from './shuttle-tracker.service.js';
+import { parseAlertRecipients, buildNoShowSms, buildNoShowStaffEmail } from './shuttle-zone-alerts.js';
+
+/** Phase-3 deps, injectable for the DB-free suites; production passes none.
+ *  smsSend/resolveBrand resolve lazily inside the fan-out (same idiom as the
+ *  alert scheduler) so this module stays importable without the SMS module. */
+function phase3Deps(overrides = {}) {
+  return {
+    prisma,
+    logger,
+    sendEmail,
+    clearCustomerLocation,
+    smsSend: null,
+    resolveBrand: null,
+    now: () => new Date(),
+    ...overrides
+  };
+}
+async function resolveSms(deps) {
+  if (deps.smsSend) return deps.smsSend;
+  const mod = await import('../sms/sms.service.js');
+  return (args) => mod.smsService.sendCustom(args);
+}
+async function resolveBrandFn(deps) {
+  if (deps.resolveBrand) return deps.resolveBrand;
+  const mod = await import('../../lib/email-template.js');
+  return mod.resolveEmailBrand;
+}
 
 export const shuttleRequestsService = {
   /**
    * Create — or absorb into the existing open request for the reservation.
    * Caller (the route) has already resolved+validated tenant/reservation.
    */
-  async create({ tenantId, locationId, reservationId, customerName, customerPhone, partySize, pickupNote, source = null, smsOptIn = undefined }) {
+  async create({ tenantId, locationId, reservationId, customerName, customerPhone, partySize, pickupNote, source = null, smsOptIn = undefined, bags = undefined, pickupSpotZoneId = undefined }) {
     if (!tenantId || !locationId || !reservationId) throw new Error('tenantId, locationId and reservationId are required');
+
+    // Phase 3 intake (Screen 7): bags/spot are already validated by the
+    // caller against the location's intake config; this is only the
+    // defensive normalization every other field gets. Absent = untouched.
+    const cleanBags = Number.isFinite(Number(bags)) && Number(bags) >= 0 ? Math.min(200, Math.floor(Number(bags))) : null;
+    const cleanSpotId = String(pickupSpotZoneId || '').trim() || null;
 
     const existing = await prisma.shuttleRequest.findFirst({
       where: { tenantId, reservationId, status: { in: OPEN_STATUSES } },
@@ -48,7 +84,11 @@ export const shuttleRequestsService = {
           customerPhone: String(customerPhone || '').trim() || existing.customerPhone,
           // Arrival-SMS consent (Phase 2): an explicit boolean on the repeat
           // call updates it either way; absent = the original choice stands.
-          ...(typeof smsOptIn === 'boolean' ? { smsOptIn } : {})
+          ...(typeof smsOptIn === 'boolean' ? { smsOptIn } : {}),
+          // Same blank-repeat rule as pickupNote: a repeat call that says
+          // nothing about bags/spot must not erase what we know.
+          ...(cleanBags !== null ? { bags: cleanBags } : {}),
+          ...(cleanSpotId ? { pickupSpotZoneId: cleanSpotId } : {})
         }
       });
       return { request: updated, deduplicated: true };
@@ -67,7 +107,9 @@ export const shuttleRequestsService = {
         // On absorb (above) the ORIGINAL source stands: the first call named it.
         source: source ? String(source).trim() : null,
         // Strictly opt-IN: anything but an explicit true is false.
-        smsOptIn: smsOptIn === true
+        smsOptIn: smsOptIn === true,
+        bags: cleanBags,
+        pickupSpotZoneId: cleanSpotId
       }
     });
     return { request, deduplicated: false };
@@ -112,10 +154,29 @@ export const shuttleRequestsService = {
         usersById = Object.fromEntries(users.map((u) => [u.id, u.fullName || u.email || u.id]));
       } catch { usersById = {}; }
     }
+    // Phase 3: assignment labels for the queue UI ("Van 2 · IKT-482") — the
+    // same cosmetic keyed-lookup rule as the user names, and tenant-guarded
+    // even here so a stale cross-tenant id resolves to null, not a label.
+    const assignedIds = [...new Set(rows.map((r) => r.assignedVehicleId).filter(Boolean))];
+    let assignedById = {};
+    if (assignedIds.length) {
+      try {
+        const vehicles = await prisma.vehicle.findMany({
+          where: { id: { in: assignedIds }, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
+          select: { id: true, make: true, model: true, plate: true }
+        });
+        assignedById = Object.fromEntries(vehicles.map((v) => [v.id, {
+          id: v.id,
+          name: [v.make, v.model].map((p) => String(p || '').trim()).filter(Boolean).join(' ') || null,
+          plate: v.plate || null
+        }]));
+      } catch { assignedById = {}; }
+    }
     const enriched = rows.map((r) => ({
       ...r,
       viewedByName: r.viewedByUserId ? usersById[r.viewedByUserId] || null : null,
-      closedByName: r.closedByUserId ? usersById[r.closedByUserId] || null : null
+      closedByName: r.closedByUserId ? usersById[r.closedByUserId] || null : null,
+      assignedVehicle: r.assignedVehicleId ? assignedById[r.assignedVehicleId] || null : null
     }));
 
     return {
@@ -206,16 +267,217 @@ export const shuttleRequestsService = {
     return { ok: true, request: updated, notice };
   },
 
-  async close(id, outcome, scope = {}, userId = null, reason = null) {
+  async close(id, outcome, scope = {}, userId = null, reason = null, depsOverride = {}) {
+    const deps = phase3Deps(depsOverride);
     const status = String(outcome || '').toUpperCase();
     if (!['CANCELLED', 'NO_SHOW', 'COMPLETED'].includes(status)) throw new Error(`Invalid close outcome ${outcome}`);
-    const row = await prisma.shuttleRequest.findFirst({ where: { id, ...scopeWhere(scope) } });
+    const row = await deps.prisma.shuttleRequest.findFirst({ where: { id, ...scopeWhere(scope) } });
     if (!row) { const e = new Error('Shuttle request not found'); e.status = 404; throw e; }
     if (!OPEN_STATUSES.includes(row.status)) return row;
-    return prisma.shuttleRequest.update({
+    const updated = await deps.prisma.shuttleRequest.update({
       where: { id: row.id },
       data: { status, closedAt: new Date(), closedByUserId: userId || null, closeReason: reason ? String(reason).trim() : null }
     });
+    // Ephemeral location sharing stops the moment the wait ends (Screen 9
+    // binding constraint): any close deletes the Redis key. Best-effort —
+    // the TTL is the backstop, and a failed delete must not fail the close.
+    Promise.resolve(deps.clearCustomerLocation(row.id)).catch(() => {});
+    return updated;
+  },
+
+  /**
+   * Manual staff assignment (Phase 3, Screen 8a): pin ONE shuttle vehicle to
+   * an open request. FAIL-CLOSED on every edge: the vehicle must belong to
+   * the request's tenant AND be in the location's tracker-config vehicle
+   * list — anything else is a 400/404, never a silent write. The public
+   * tracker re-verifies ownership again on read, so even a stale assignment
+   * can never leak another tenant's GPS.
+   */
+  async assign(id, vehicleId, scope = {}, userId = null, depsOverride = {}) {
+    const deps = phase3Deps(depsOverride);
+    const cleanVehicleId = String(vehicleId || '').trim();
+    if (!cleanVehicleId) { const e = new Error('vehicleId is required'); e.status = 400; throw e; }
+
+    const row = await deps.prisma.shuttleRequest.findFirst({ where: { id, ...scopeWhere(scope) } });
+    if (!row) { const e = new Error('Shuttle request not found'); e.status = 404; throw e; }
+    if (!OPEN_STATUSES.includes(row.status)) {
+      const e = new Error(`Request is ${row.status} — nothing to assign`); e.status = 409; throw e;
+    }
+
+    const [vehicle, config] = await Promise.all([
+      deps.prisma.vehicle.findFirst({ where: { id: cleanVehicleId, tenantId: row.tenantId }, select: { id: true } }),
+      deps.prisma.shuttleTrackerConfig.findFirst({ where: { locationId: row.locationId, tenantId: row.tenantId } })
+    ]);
+    if (!vehicle || !config || !configVehicleIds(config).includes(cleanVehicleId)) {
+      const e = new Error('Vehicle is not a configured shuttle at this location'); e.status = 400; throw e;
+    }
+
+    return deps.prisma.shuttleRequest.update({
+      where: { id: row.id },
+      data: { assignedVehicleId: cleanVehicleId }
+    });
+  },
+
+  /** Undo the assignment. Same scoping; idempotent on an already-bare row. */
+  async unassign(id, scope = {}, userId = null, depsOverride = {}) {
+    const deps = phase3Deps(depsOverride);
+    const row = await deps.prisma.shuttleRequest.findFirst({ where: { id, ...scopeWhere(scope) } });
+    if (!row) { const e = new Error('Shuttle request not found'); e.status = 404; throw e; }
+    if (!row.assignedVehicleId) return row;
+    return deps.prisma.shuttleRequest.update({
+      where: { id: row.id },
+      data: { assignedVehicleId: null }
+    });
+  },
+
+  /**
+   * No-show fan-out (Phase 3, Screen 17) — the one service function the
+   * staff endpoint calls today and the driver-token surface will call later.
+   *
+   * Chain: NO_SHOW transition (the existing close, so the idempotency rule
+   * is inherited — an already-closed request returns as-is with ZERO
+   * re-notification) → customer SMS (mode-aware copy, bilingual, opt-in
+   * consent + phone required, best-effort) → ShuttleAlert row typed
+   * REQUEST_NO_SHOW so the existing monitor feed/toast shows it (deduped by
+   * the providerRef unique — one no-show, one alert, ever) → optional staff
+   * recipients email (EMAIL channel of the Phase-2 list).
+   *
+   * Every fan-out leg is best-effort: the state change is the truth, a dead
+   * SMS provider must not resurrect the request. No coordinates and no
+   * customer phone ever reach logs from here.
+   */
+  async markNoShow(id, { scope = {}, userId = null, reason = null, actorContext = null } = {}, depsOverride = {}) {
+    const deps = phase3Deps(depsOverride);
+
+    const before = await deps.prisma.shuttleRequest.findFirst({ where: { id, ...scopeWhere(scope) } });
+    if (!before) { const e = new Error('Shuttle request not found'); e.status = 404; throw e; }
+    if (!OPEN_STATUSES.includes(before.status)) return { request: before, notified: false };
+
+    const request = await this.close(id, 'NO_SHOW', scope, userId, reason, depsOverride);
+
+    let notified = false;
+    try {
+      const [config, location, zone, reservation] = await Promise.all([
+        deps.prisma.shuttleTrackerConfig.findFirst({ where: { locationId: request.locationId, tenantId: request.tenantId } }),
+        deps.prisma.location.findFirst({
+          where: { id: request.locationId, tenantId: request.tenantId },
+          select: { name: true, locationConfig: true }
+        }),
+        request.pickupSpotZoneId
+          ? deps.prisma.shuttleZone.findFirst({
+            where: { id: request.pickupSpotZoneId, tenantId: request.tenantId },
+            select: { name: true }
+          })
+          : null,
+        deps.prisma.reservation.findFirst({
+          where: { id: request.reservationId },
+          select: { customer: { select: { locale: true } } }
+        })
+      ]);
+
+      const mode = config?.mode === 'NON_STOP' ? 'NON_STOP' : 'ON_DEMAND';
+      const occurredAt = deps.now();
+
+      // Counter phone: the sede's own number first (same locCfg rule the
+      // tracker uses) — global-config fallback deliberately skipped here to
+      // keep the fan-out one query lighter; the SMS simply omits the call
+      // line when the sede has no number saved.
+      let counterPhone = null;
+      try {
+        const parsed = location?.locationConfig ? JSON.parse(location.locationConfig) : null;
+        const phone = String(parsed?.locationPhone || parsed?.companyPhone || '').trim();
+        counterPhone = phone && phone !== '(787) 000-0000' ? phone : null;
+      } catch { counterPhone = null; }
+
+      // 1) Customer SMS — consent (smsOptIn) + a phone on the request, same
+      //    gate as the Phase-2 arrival SMS.
+      if (request.smsOptIn === true && String(request.customerPhone || '').trim()) {
+        try {
+          const smsSend = await resolveSms(deps);
+          let brand = null;
+          try { brand = await (await resolveBrandFn(deps))({ tenantId: request.tenantId }); } catch { brand = null; }
+          await smsSend({
+            to: request.customerPhone,
+            body: buildNoShowSms({
+              mode,
+              spotName: zone?.name || null,
+              headwayMinutes: config?.headwayMinutes,
+              counterPhone,
+              brandName: brand?.companyName,
+              locale: reservation?.customer?.locale
+            }),
+            tenantId: request.tenantId
+          });
+          notified = true;
+        } catch (err) {
+          deps.logger.info('[shuttle-no-show] customer sms not sent', { tenantId: request.tenantId, requestId: request.id, message: err.message });
+        }
+      }
+
+      // 2) Staff alert row — the existing feed + toast surface (Screen 17c).
+      //    providerRef `noshow:<requestId>` + the (tenantId, providerRef)
+      //    unique = one alert per request no matter how many times anything
+      //    retries. rawJson carries ids/counts ONLY — no phone, no coords.
+      try {
+        await deps.prisma.shuttleAlert.create({
+          data: {
+            tenantId: request.tenantId,
+            zoneId: request.pickupSpotZoneId || null,
+            vehicleId: request.assignedVehicleId || null,
+            type: 'REQUEST_NO_SHOW',
+            occurredAt,
+            providerRef: `noshow:${request.id}`,
+            rawJson: JSON.stringify({
+              requestId: request.id,
+              customerName: request.customerName,
+              partySize: request.partySize,
+              bags: request.bags ?? null,
+              markedBy: actorContext ? String(actorContext).slice(0, 40) : 'staff'
+            })
+          }
+        });
+      } catch (err) {
+        if (err?.code !== 'P2002') {
+          deps.logger.warn('[shuttle-no-show] alert row insert failed', { tenantId: request.tenantId, requestId: request.id, message: err.message });
+        }
+      }
+
+      // 3) Optional staff email — EMAIL-channel recipients of the location's
+      //    Phase-2 alert list. Best-effort per mailbox.
+      const recipients = parseAlertRecipients(config?.alertRecipientsJson).filter((r) => r.channels.includes('EMAIL') && r.email);
+      if (recipients.length) {
+        const msg = buildNoShowStaffEmail({
+          customerName: request.customerName,
+          partySize: request.partySize,
+          bags: request.bags,
+          spotName: zone?.name || null,
+          vehicleLabel: null,
+          locationName: location?.name || null,
+          occurredAt
+        });
+        for (const r of recipients) {
+          try {
+            await deps.sendEmail({ tenantId: request.tenantId, to: r.email, subject: msg.subject, text: msg.text });
+          } catch (err) {
+            deps.logger.warn('[shuttle-no-show] staff email failed', { tenantId: request.tenantId, requestId: request.id, message: err.message });
+          }
+        }
+      }
+    } catch (err) {
+      deps.logger.warn('[shuttle-no-show] fan-out failed', { requestId: id, message: err.message });
+    }
+
+    return { request, notified };
+  },
+
+  /**
+   * "✓ Recogido" (Screen 17a) — the driver/staff picked the customer up.
+   * Thin, named wrapper over the existing COMPLETED close so the future
+   * driver surface and today's queue button share one path (and one
+   * location-key cleanup).
+   */
+  async markPickedUp(id, scope = {}, userId = null, reason = null, depsOverride = {}) {
+    return this.close(id, 'COMPLETED', scope, userId, reason, depsOverride);
   }
 };
 

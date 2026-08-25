@@ -31,8 +31,10 @@ test('THE WHITELIST: nothing beyond the contract ever leaves, even if the caller
   // exactly five keys — brandName, counterPhone, requestStatus,
   // walkingDirections, and (when a vehicle is passed) vehicle{name,color,
   // plate}. 2026-08-24 (Phase 2, approved #21): two more — arrivedAtSpot +
-  // arrivedSpotName. This list IS the review record; growing it again means
-  // editing this assertion on purpose.
+  // arrivedSpotName. 2026-08-25 (Phase 3 core, Screens 8a/8b/9): two more —
+  // assigned + locationSharing{active,distanceMeters}, plus the NON_STOP-only
+  // shuttles array (pinned in shuttle-assignment.test.mjs). This list IS the
+  // review record; growing it again means editing this assertion on purpose.
   const leaky = {
     latitude: 18.4, longitude: -66.0, heading: 90, speedMph: 30, eventAt: secondsAgo(5),
     plate: 'ABC-123', vin: '1FTBW3XM…', odometer: 88123, engineOn: true,
@@ -40,11 +42,15 @@ test('THE WHITELIST: nothing beyond the contract ever leaves, even if the caller
   };
   const out = publicPositionPayload({ position: leaky, config: CONFIG, location: LOCATION, now: NOW });
   assert.deepEqual(Object.keys(out).sort(), [
-    'arrivedAtSpot', 'arrivedSpotName', 'brandName', 'counterPhone',
-    'headwayMinutes', 'locationName', 'mode',
+    'arrivedAtSpot', 'arrivedSpotName', 'assigned', 'brandName', 'counterPhone',
+    'headwayMinutes', 'locationName', 'locationSharing', 'mode',
     'pickupInstructions', 'position', 'requestStatus', 'status', 'walkingDirections',
   ]);
   assert.deepEqual(Object.keys(out.position).sort(), ['ageSeconds', 'asOf', 'heading', 'latitude', 'longitude', 'speedMph']);
+  // Phase 3 defaults: not assigned, not sharing — and locationSharing is the
+  // two-key distance-only shape, never a coordinate carrier.
+  assert.equal(out.assigned, false);
+  assert.deepEqual(out.locationSharing, { active: false, distanceMeters: null });
 });
 
 test('PHASE 2 arrival fields: default off, spot name only when arrived, never invented', () => {

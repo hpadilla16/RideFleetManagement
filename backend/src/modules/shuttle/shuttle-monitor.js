@@ -97,7 +97,7 @@ export function monitorShuttlePayload({ vehicle, hasDevice, position, config, lo
  * @param {Array} rows open ShuttleRequest rows, oldest first (buildListQuery
  *   order for the live queue)
  */
-export function summarizeOpenRequests(rows, now = Date.now()) {
+export function summarizeOpenRequests(rows, now = Date.now(), vehicleById = {}) {
   const byLocation = new Map();
   for (const r of Array.isArray(rows) ? rows : []) {
     const locId = String(r?.locationId || '');
@@ -105,6 +105,13 @@ export function summarizeOpenRequests(rows, now = Date.now()) {
     if (!byLocation.has(locId)) byLocation.set(locId, []);
     byLocation.get(locId).push(r);
   }
+  // Phase 3: "Van 2 · IKT-482" beside the waiting name. Resolved from the
+  // caller's ALREADY tenant-verified vehicle map — an id the map does not
+  // know (stale, foreign) renders as null, never a lookup here.
+  const assignedOut = (r) => {
+    const v = r?.assignedVehicleId ? vehicleById[r.assignedVehicleId] : null;
+    return v ? { vehicleId: String(v.id || r.assignedVehicleId), label: vehicleLabel(v), plate: String(v.plate || '').trim() || null } : null;
+  };
   const out = {};
   for (const [locId, list] of byLocation) {
     const oldest = list[0];
@@ -115,8 +122,10 @@ export function summarizeOpenRequests(rows, now = Date.now()) {
         ? {
           customerName: String(oldest.customerName || '').trim() || 'Customer',
           partySize: num(oldest.partySize) || 1,
+          bags: num(oldest.bags),
           pickupNote: String(oldest.pickupNote || '').trim() || null,
           waitingMinutes: Number.isFinite(createdAt) ? Math.max(0, Math.round((now - createdAt) / 60000)) : null,
+          assignedVehicle: assignedOut(oldest),
         }
         : null,
       // "then: M. Rivera ×1 · K. Osei ×2" — names only, capped so one busy
@@ -124,8 +133,46 @@ export function summarizeOpenRequests(rows, now = Date.now()) {
       next: list.slice(1, 4).map((r) => ({
         customerName: String(r.customerName || '').trim() || 'Customer',
         partySize: num(r.partySize) || 1,
+        assignedVehicle: assignedOut(r),
       })),
     };
   }
   return out;
+}
+
+/**
+ * One waiting-customer entry for the STAFF monitor (Phase 3, Screen 10).
+ * This is the ONE place the customer's shared coordinates leave the server —
+ * behind requireAuth, from Redis, never persisted. Built by PICKING, same
+ * rule as every payload here: name/party/bags/spot + the ephemeral fix.
+ * Not sharing = same card, `sharing: false`, no lat/lng keys at all —
+ * sharing is never required to be picked up.
+ *
+ * @param {object} args.request open ShuttleRequest row
+ * @param {{lat,lng,at}|null} args.fix parseStoredFix output (null = not sharing)
+ * @param {object|null} args.assignedVehicle vehicle row from the tenant-verified map
+ * @param {number} [args.now]
+ */
+export function waitingCustomerPayload({ request, fix, assignedVehicle = null, now = Date.now() }) {
+  const createdAt = request?.createdAt ? new Date(request.createdAt).getTime() : NaN;
+  return {
+    requestId: String(request?.id || ''),
+    locationId: String(request?.locationId || ''),
+    name: String(request?.customerName || '').trim() || 'Customer',
+    partySize: num(request?.partySize) || 1,
+    bags: num(request?.bags),
+    pickupSpotZoneId: request?.pickupSpotZoneId || null,
+    waitingMinutes: Number.isFinite(createdAt) ? Math.max(0, Math.round((now - createdAt) / 60000)) : null,
+    assignedVehicle: assignedVehicle
+      ? { vehicleId: String(assignedVehicle.id || ''), label: vehicleLabel(assignedVehicle), plate: String(assignedVehicle.plate || '').trim() || null }
+      : null,
+    sharing: !!fix,
+    ...(fix
+      ? {
+        lat: num(fix.lat),
+        lng: num(fix.lng),
+        ageSeconds: Number.isFinite(Number(fix.at)) ? Math.max(0, Math.round((now - Number(fix.at)) / 1000)) : null,
+      }
+      : {}),
+  };
 }
