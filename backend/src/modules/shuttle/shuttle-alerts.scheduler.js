@@ -27,6 +27,8 @@ import { withTimeout } from '../../lib/with-timeout.js';
 import {
   hasApiKey as onestepgpsHasApiKey,
   listRawAlerts as onestepgpsListRawAlerts,
+  pushProviderZone as onestepgpsPushProviderZone,
+  deleteProviderZone as onestepgpsDeleteProviderZone,
 } from '../vehicles/telematics-onestepgps.js';
 import { syncZoneToProvider } from './shuttle-zones.service.js';
 import {
@@ -84,7 +86,17 @@ function defaultDeps() {
     prisma,
     logger,
     now: () => Date.now(),
-    provider: { hasApiKey: onestepgpsHasApiKey, listRawAlerts: onestepgpsListRawAlerts },
+    // FULL provider surface (fix 2026-08-25): the zone-sync retry below hands
+    // THIS deps object to syncZoneToProvider, whose spread lets it SHADOW the
+    // service's own provider — with push/delete missing, every worker retry
+    // died with "pushProviderZone is not a function" and overwrote the real
+    // sync status. Caught live on the first tenant zone (Base MCO).
+    provider: {
+      hasApiKey: onestepgpsHasApiKey,
+      listRawAlerts: onestepgpsListRawAlerts,
+      pushProviderZone: onestepgpsPushProviderZone,
+      deleteProviderZone: onestepgpsDeleteProviderZone,
+    },
     syncZoneToProvider,
     // mailer/smsSend/resolveBrand resolved lazily inside the fan-out so the
     // poll path stays importable in DB-free tests without the SMS module.
