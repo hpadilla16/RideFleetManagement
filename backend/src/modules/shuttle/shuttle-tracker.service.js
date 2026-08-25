@@ -17,10 +17,14 @@
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import {
-  publicPositionPayload, linkState, configVehicleIds,
-  watchKey, posKey, WATCH_TTL_S,
+  publicPositionPayload, publicShuttleEntry, linkState, configVehicleIds,
+  watchKey, posKey, WATCH_TTL_S, POSITION_STALE_MS,
 } from './shuttle-tracker-position.js';
 import { arrivalState, ARRIVAL_FRESH_MS } from './shuttle-zone-alerts.js';
+import {
+  custLocKey, CUSTOMER_LOC_TTL_S, parseStoredFix, publicLocationSharing,
+} from './shuttle-customer-location.js';
+import { OPEN_STATUSES } from './shuttle-query.js';
 
 const REDIS_URL = process.env.REDIS_URL || '';
 let redisClient = null;
@@ -190,20 +194,67 @@ export const shuttleTrackerService = {
       })
       : [];
     const vehicleIds = owned.map((v) => v.id);
-    const position = await latestPosition(vehicleIds);
-
-    // Which van is the customer looking for? The one whose fix we are about
-    // to show; a single-vehicle config is unambiguous even with no fix yet.
-    const shownVehicleId = position?.vehicleId || (vehicleIds.length === 1 ? vehicleIds[0] : null);
-    const vehicle = shownVehicleId ? owned.find((v) => v.id === shownVehicleId) || null : null;
 
     // NEW #2: the request-state status line comes from the EXISTING shuttle
     // request state machine — the latest request for THIS link's reservation.
+    // Phase 3 reads two more columns off the same row: the manual assignment
+    // and the id (the ephemeral-location Redis key).
     const lastRequest = await prisma.shuttleRequest.findFirst({
       where: { tenantId: link.tenantId, reservationId: link.reservationId },
       orderBy: { createdAt: 'desc' },
-      select: { status: true },
+      select: { id: true, status: true, assignedVehicleId: true },
     }).catch(() => null);
+    const requestOpen = !!lastRequest && OPEN_STATUSES.includes(lastRequest.status);
+    // The assignment only steers the page while the request is OPEN and the
+    // vehicle is still in the (ownership-re-verified) config list —
+    // fail-closed to the old freshest-fix behavior on any doubt.
+    const assignedVehicleId = requestOpen && lastRequest.assignedVehicleId && vehicleIds.includes(lastRequest.assignedVehicleId)
+      ? lastRequest.assignedVehicleId
+      : null;
+
+    // Mode-aware read (Phase 3, Screens 8a/8b):
+    //   NON_STOP    → every configured shuttle (the loop), single-position
+    //                 keys keep showing the freshest for old pages;
+    //   ON_DEMAND   → the assigned vehicle ONLY when one is pinned — a
+    //                 customer with "Van 2 assigned to you" must never watch
+    //                 Van 1's dot; otherwise the freshest, as before.
+    let position = null;
+    let loopShuttles = null;
+    let fixesByVehicle = null;
+    if (config.mode === 'NON_STOP') {
+      fixesByVehicle = await latestPositionsByVehicle(vehicleIds);
+      const all = Object.values(fixesByVehicle);
+      position = all.length ? all.sort((a, b) => new Date(b.eventAt) - new Date(a.eventAt))[0] : null;
+      loopShuttles = owned.map((v) => publicShuttleEntry({ vehicle: v, position: fixesByVehicle[v.id] || null }));
+    } else if (assignedVehicleId) {
+      position = await latestPosition([assignedVehicleId]);
+    } else {
+      position = await latestPosition(vehicleIds);
+    }
+
+    // Which van is the customer looking for? The assigned one wins; else the
+    // one whose fix we are about to show; a single-vehicle config is
+    // unambiguous even with no fix yet.
+    const shownVehicleId = assignedVehicleId || position?.vehicleId || (vehicleIds.length === 1 ? vehicleIds[0] : null);
+    const vehicle = shownVehicleId ? owned.find((v) => v.id === shownVehicleId) || null : null;
+
+    // Phase 3 (Screen 9): the viewer's own sharing state. Distance is
+    // computed HERE and only the distance crosses — the customer's
+    // coordinates are never echoed back through the public payload.
+    let locationSharing = { active: false, distanceMeters: null };
+    if (requestOpen) {
+      try {
+        const custFix = await readCustomerLocation(lastRequest.id);
+        if (custFix) {
+          const fresh = (p) => {
+            const at = p?.eventAt instanceof Date ? p.eventAt.getTime() : new Date(p?.eventAt || 0).getTime();
+            return Number.isFinite(at) && Date.now() - at <= POSITION_STALE_MS;
+          };
+          const candidates = (fixesByVehicle ? Object.values(fixesByVehicle) : [position]).filter((p) => p && fresh(p));
+          locationSharing = publicLocationSharing(custFix, candidates);
+        }
+      } catch { locationSharing = { active: false, distanceMeters: null }; }
+    }
 
     // NEW #1 + #5: tenant brand + counter phone. Brand goes through the
     // customer-facing cascade (never the platform's name); the phone follows
@@ -274,6 +325,10 @@ export const shuttleTrackerService = {
       requestStatus: lastRequest?.status || null,
       arrivedAtSpot: arrival.arrivedAtSpot,
       arrivedSpotName: arrival.spotName,
+      // Phase 3 additions — each individually whitelisted in the payload.
+      assigned: !!assignedVehicleId,
+      shuttles: loopShuttles,
+      locationSharing,
     });
   },
 
@@ -312,7 +367,79 @@ export const shuttleTrackerService = {
 
     return { link, reservation, config };
   },
+
+  /**
+   * Resolution for the public location-sharing POST (Phase 3, Screen 9).
+   * Same token chain as publicState — link ACTIVE, reservation and config in
+   * the link's tenant, tracker not OFF — plus one more gate: an OPEN shuttle
+   * request must exist for the reservation. Sharing is "only while you wait";
+   * with nothing open there is nothing to attach a fix to, and the same bare
+   * 404 keeps the token oracle silent. Works in BOTH modes: a cyclical-loop
+   * customer waiting at a spot is exactly who the driver needs to find.
+   */
+  async publicLocationContext(token) {
+    const clean = String(token || '').trim();
+    if (!clean || clean.length < 16) return null;
+
+    const link = await prisma.shuttleTrackerLink.findUnique({ where: { token: clean } });
+    if (linkState(link) !== 'ACTIVE') return null;
+
+    const reservation = await prisma.reservation.findUnique({
+      where: { id: link.reservationId },
+      select: { id: true, tenantId: true, pickupLocationId: true },
+    });
+    if (!reservation || reservation.tenantId !== link.tenantId) return null;
+
+    const config = await prisma.shuttleTrackerConfig.findUnique({
+      where: { locationId: reservation.pickupLocationId || '' },
+    });
+    if (!config || config.tenantId !== link.tenantId || config.mode === 'OFF') return null;
+
+    const request = await prisma.shuttleRequest.findFirst({
+      where: { tenantId: link.tenantId, reservationId: reservation.id, status: { in: OPEN_STATUSES } },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (!request) return null;
+
+    return { link, request };
+  },
 };
+
+// ─── Ephemeral customer location (Phase 3, Screens 9/10) ────────────────────
+// Redis ONLY — never a DB row, never a logged coordinate. Key = request id
+// (a cuid, no PII), TTL refreshed on every push, deleted on any close. The
+// optional redisOverride keeps these testable without a live Redis.
+
+/** @returns {Promise<boolean>} stored (false = Redis off/unreachable) */
+export async function storeCustomerLocation(requestId, { lat, lng }, redisOverride) {
+  const redis = redisOverride !== undefined ? redisOverride : await getRedis();
+  if (!redis || !requestId) return false;
+  try {
+    await redis.set(custLocKey(requestId), JSON.stringify({ lat, lng, at: Date.now() }), 'EX', CUSTOMER_LOC_TTL_S);
+    return true;
+  } catch {
+    return false; // ephemeral by design — losing one push loses nothing durable
+  }
+}
+
+/** @returns {Promise<{lat,lng,at}|null>} the fresh fix, or null */
+export async function readCustomerLocation(requestId, redisOverride) {
+  const redis = redisOverride !== undefined ? redisOverride : await getRedis();
+  if (!redis || !requestId) return null;
+  try {
+    return parseStoredFix(await redis.get(custLocKey(requestId)));
+  } catch {
+    return null;
+  }
+}
+
+/** Delete-on-state-change (close/cancel/no-show). TTL is the backstop. */
+export async function clearCustomerLocation(requestId, redisOverride) {
+  const redis = redisOverride !== undefined ? redisOverride : await getRedis();
+  if (!redis || !requestId) return;
+  try { await redis.del(custLocKey(requestId)); } catch { /* TTL reaps it */ }
+}
 
 /** Worker/simulator write path: publish a fix to Redis beside the DB row. */
 export async function publishPosition(vehicleId, fix) {

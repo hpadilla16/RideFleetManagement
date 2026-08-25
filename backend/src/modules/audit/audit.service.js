@@ -86,6 +86,13 @@ export const AUDIT_ACTIONS = Object.freeze({
   ZONE_UPDATE: 'ZONE_UPDATE',
   ZONE_DELETE: 'ZONE_DELETE',
   ALERT_RECIPIENTS_CHANGE: 'ALERT_RECIPIENTS_CHANGE',
+
+  // ── Shuttle assignment (Phase 3, 2026-08-25) ──
+  // Pinning a vehicle to a request decides WHICH shuttle's GPS a customer's
+  // public page follows, so both directions leave a trail. Metadata carries
+  // request/vehicle/location ids only — never customer PII, never coordinates.
+  SHUTTLE_ASSIGN: 'SHUTTLE_ASSIGN',
+  SHUTTLE_UNASSIGN: 'SHUTTLE_UNASSIGN',
 });
 
 export const AUDIT_OUTCOME = Object.freeze({

@@ -16,12 +16,12 @@
  * Deps are injectable for the DB-free test suite; production passes none.
  */
 import { prisma } from '../../lib/prisma.js';
-import { latestPositionsByVehicle, signalWatch } from './shuttle-tracker.service.js';
+import { latestPositionsByVehicle, signalWatch, readCustomerLocation } from './shuttle-tracker.service.js';
 import { configVehicleIds } from './shuttle-tracker-position.js';
 import { OPEN_STATUSES, scopeWhere } from './shuttle-query.js';
-import { monitorShuttlePayload, summarizeOpenRequests } from './shuttle-monitor.js';
+import { monitorShuttlePayload, summarizeOpenRequests, waitingCustomerPayload } from './shuttle-monitor.js';
 
-const EMPTY = () => ({ enabled: false, shuttles: [], requestsByLocation: {}, locations: [], generatedAt: new Date().toISOString() });
+const EMPTY = () => ({ enabled: false, shuttles: [], requestsByLocation: {}, waitingCustomers: [], locations: [], generatedAt: new Date().toISOString() });
 
 function allowedIds(scope) {
   const ids = Array.isArray(scope?.allowedLocationIds) ? scope.allowedLocationIds.filter(Boolean).map(String) : [];
@@ -29,7 +29,7 @@ function allowedIds(scope) {
 }
 
 function defaultDeps() {
-  return { prisma, latestPositionsByVehicle };
+  return { prisma, latestPositionsByVehicle, readCustomerLocation };
 }
 
 export const shuttleMonitorService = {
@@ -137,13 +137,33 @@ export const shuttleMonitorService = {
         locationId: { in: locationIds },
       },
       orderBy: { createdAt: 'asc' },
-      select: { locationId: true, customerName: true, partySize: true, pickupNote: true, createdAt: true },
+      select: {
+        id: true, locationId: true, customerName: true, partySize: true, bags: true,
+        pickupNote: true, pickupSpotZoneId: true, assignedVehicleId: true, createdAt: true,
+      },
     });
+
+    // Phase 3 (Screen 10): waiting customers, with the ephemeral shared fix
+    // for those who opted in. STAFF-ONLY surface — this endpoint sits behind
+    // requireAuth, and the coordinates come straight from Redis (TTL 5min),
+    // never from a table and never through the public payload. Best-effort:
+    // Redis down = everyone shows as not sharing, the list still renders.
+    const waitingCustomers = await Promise.all(openRows.map(async (r) => {
+      let fix = null;
+      try { fix = await deps.readCustomerLocation(r.id); } catch { fix = null; }
+      return waitingCustomerPayload({
+        request: r,
+        fix,
+        assignedVehicle: r.assignedVehicleId ? vehicleById[r.assignedVehicleId] || null : null,
+        now,
+      });
+    }));
 
     return {
       enabled: true,
       shuttles,
-      requestsByLocation: summarizeOpenRequests(openRows, now),
+      requestsByLocation: summarizeOpenRequests(openRows, now, vehicleById),
+      waitingCustomers,
       locations,
       generatedAt: new Date(now).toISOString(),
     };
