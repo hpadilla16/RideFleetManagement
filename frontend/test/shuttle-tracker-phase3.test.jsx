@@ -23,7 +23,8 @@ import { render, screen, fireEvent, waitFor, act, within } from '@testing-librar
 
 import { ShuttleTrackerClient } from '../src/app/shuttle/[token]/TrackerClient';
 
-const TOKEN = 'tok_0123456789abcdef';
+// Deliberately NOT key-shaped: a `prefix_hex` fixture trips gitleaks' generic-api-key rule (CI hard gate).
+const TOKEN = 'TEST-TRACKER-TOKEN';
 
 const BASE = {
   mode: 'ON_DEMAND',

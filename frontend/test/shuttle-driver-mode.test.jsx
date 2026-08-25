@@ -27,7 +27,8 @@ import { render, screen, fireEvent, waitFor, act, within } from '@testing-librar
 
 import { DriverClient } from '../src/app/driver/[token]/DriverClient';
 
-const TOKEN = 'shift_0123456789abcdef';
+// Deliberately NOT key-shaped: a `prefix_hex` fixture trips gitleaks' generic-api-key rule (CI hard gate).
+const TOKEN = 'TEST-DRIVER-SHIFT-TOKEN';
 
 const BASE = {
   driverName: 'Carlos M.',
