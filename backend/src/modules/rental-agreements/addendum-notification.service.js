@@ -93,21 +93,22 @@ export async function scheduleAddendumNotification(rentalAgreementId, addendumId
     };
   }
 
-  // Fire both notifications in parallel. Each helper has its own try/catch
-  // and never throws — Promise.allSettled is belt-and-suspenders so an
-  // unexpected throw in one path doesn't take down the other.
-  const [customerResult, adminResult] = await Promise.allSettled([
-    _notifyAddendumCustomer({ agreement, addendum }),
-    _notifyAddendumAdmins({ agreement, addendum, tenantId })
+  // Owner decision (Hector, 2026-08-25): addendum creation emails ONLY the
+  // customer with their signature link. The staff broadcast that used to fire
+  // here alongside it (every active platform SUPER_ADMIN + the tenant's
+  // ADMIN/OPS) was noise — an agent fixing a drop-off time blasted nine
+  // inboxes. Staff see addendums where they work: on the reservation, which
+  // already shows PENDING_SIGNATURE. _notifyAddendumAdmins is kept below,
+  // uncalled, in case a targeted digest is ever wanted.
+  const [customerResult] = await Promise.allSettled([
+    _notifyAddendumCustomer({ agreement, addendum })
   ]);
 
   return {
     customer: customerResult.status === 'fulfilled'
       ? customerResult.value
       : { error: String(customerResult.reason?.message || customerResult.reason) },
-    admin: adminResult.status === 'fulfilled'
-      ? adminResult.value
-      : { error: String(adminResult.reason?.message || adminResult.reason) }
+    admin: { skipped: 'staff-broadcast-disabled' }
   };
 }
 
@@ -197,6 +198,7 @@ async function _notifyAddendumCustomer({ agreement, addendum }) {
 // public-booking.service.js → notifyTenantAdminsNewSubmission so the routing
 // rules stay consistent across the codebase.
 // ─────────────────────────────────────────────────────────────────────────────
+// eslint-disable-next-line no-unused-vars -- kept for a possible future targeted digest (see above)
 async function _notifyAddendumAdmins({ agreement, addendum, tenantId }) {
   try {
     // Always notify platform SUPER_ADMINs — they're not tenant-scoped, so
