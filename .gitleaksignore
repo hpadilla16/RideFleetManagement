@@ -1,18 +1,7 @@
-# Triaged gitleaks findings — 2026-08-22. Each entry is a KNOWN, non-live match
-# assessed as safe. Fingerprints pin the exact commit:file:rule:line so a NEW
-# secret anywhere (including these files) is still caught. See the triage log in
-# doc/security-scanning-2026-08-22.md.
-#
-# 4 test fixtures (dummy tokens in test data):
-0eee8766f14730de0f1bb3597d3b69c212e2e987:rideops/test/helpers/checkout_test_helpers.dart:generic-api-key:226
-29a331604ae697bfd1a25d470ad88c1d2b529362:rideops/test/fixtures/handoff_token.json:generic-api-key:2
-29a331604ae697bfd1a25d470ad88c1d2b529362:rideops/test/fixtures/login_response.json:generic-api-key:2
-43f49d716fa2060ba88a1fe81db496c703d8c8a9:backend/src/modules/payment-gateway/card-on-file.test.mjs:generic-api-key:65
-#
-# 3 historical deploy-note smoke-test tokens (June 2026). Verified DEAD: the
-# value is not present in ANY live token column in the production DB (checked
-# 2026-08-22), so there is nothing to rotate. They are per-reservation public
-# capability tokens for reservations that have since cycled out.
-9cce84d68a917b3d291ce6b59c03ff08ee6ed994:.deploy-notes/2026-06-25-ship-public-addons-insurance-beta230.sh:generic-api-key:34
-6200072347d320dcd2553db6517bc4aeda25bed9:.deploy-notes/2026-06-25-ship-public-loaner-selfservice-beta229.sh:generic-api-key:36
-2462f43acd692a0346d4d56f09303efc047ac593:.deploy-notes/2026-06-25-ship-vehicle-profile-public-api-beta228.sh:generic-api-key:38
+# Historical false positives — dummy TEST fixtures ('shift_/tok_' + sequential hex)
+# that matched generic-api-key. The live files were renamed to non-key-shaped
+# constants in d349c751; these fingerprints silence ONLY the two historical
+# commits (full-history scan). Never ignore a finding here without verifying
+# the string is not a real credential.
+d7a58467d138f581d4f35233d0a9a2c5365dfb06:frontend/test/shuttle-driver-mode.test.jsx:generic-api-key:30
+540c3c5cba6d3e854a30ef3ca66ec5d0e01c8979:frontend/test/shuttle-tracker-phase3.test.jsx:generic-api-key:26
