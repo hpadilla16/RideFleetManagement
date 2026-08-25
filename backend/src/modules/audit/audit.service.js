@@ -66,6 +66,17 @@ export const AUDIT_ACTIONS = Object.freeze({
   // is a create (not a read): the row carries the original rate, the new rate
   // and the stated reason.
   QUOTE_RATE_OVERRIDE: 'QUOTE_RATE_OVERRIDE',
+
+  // ── Telematics connectors ──
+  // Provider-AGNOSTIC on purpose: the acting connector (ONESTEPGPS,
+  // VOLTSWITCH, …) goes in metadata.provider so future connectors reuse
+  // these actions instead of minting per-vendor ones. Call sites must NEVER
+  // put the API key — or any fragment of it — in metadata; redactSensitive
+  // is a safety net, not a license.
+  TELEMATICS_KEY_SET: 'TELEMATICS_KEY_SET',
+  TELEMATICS_KEY_CLEAR: 'TELEMATICS_KEY_CLEAR',
+  TELEMATICS_MAPPING_CREATE: 'TELEMATICS_MAPPING_CREATE',
+  TELEMATICS_MAPPING_DEACTIVATE: 'TELEMATICS_MAPPING_DEACTIVATE',
 });
 
 export const AUDIT_OUTCOME = Object.freeze({

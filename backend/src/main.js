@@ -108,6 +108,7 @@ import { nuRouter } from './modules/integrations/nu/nu.routes.js';
 import { flexwaysRouter } from './modules/integrations/flexways/flexways.routes.js';
 import { advantageRouter } from './modules/integrations/advantage/advantage.routes.js';
 import { mexRouter } from './modules/integrations/mex/mex.routes.js';
+import { onestepgpsRouter } from './modules/integrations/onestepgps/onestepgps.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
 import { closeBrowser } from './lib/puppeteer-browser.js';
@@ -330,6 +331,10 @@ app.use('/api/admin/integrations/advantage', tenantRateLimit, advantageRouter);
 // module/flag/queue. Routes always available; MEX_INTEGRATION_ENABLED gates
 // only the autonomous scheduler.
 app.use('/api/admin/integrations/mex', tenantRateLimit, mexRouter);
+// OneStepGPS telematics connector (2026-08-24) — API key + device→vehicle
+// mappings for the shuttle tracker's fast poll. No scheduler flag: the stored
+// key IS the readiness gate (no key → the fast poll never calls the provider).
+app.use('/api/admin/integrations/onestepgps', tenantRateLimit, onestepgpsRouter);
 // Round 26 (2026-06-01) — reservation status override + smart rewind.
 // 2026-07-10: widened from SUPER_ADMIN-only to ADMIN + SUPER_ADMIN (Hector). ADMIN
 // gets the same power (all target statuses + the smart rewind); SUPER_ADMIN still
