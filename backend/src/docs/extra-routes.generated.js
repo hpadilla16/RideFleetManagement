@@ -435,6 +435,16 @@ export const EXTRA_ROUTES = [
   ['POST', '/api/admin/integrations/economy/pending-imports/{id}/promote', 'Economy (RezLight)', 'Promote pending import'],
   ['POST', '/api/admin/integrations/economy/pending-imports/{id}/reject', 'Economy (RezLight)', 'Reject pending import'],
 
+  // ── OneStepGPS (telematics connector) ─────────────────────────────────────
+  ['GET', '/api/admin/integrations/onestepgps/status', 'OneStepGPS', 'Connector status (hasApiKey/lastTest; key never returned)'],
+  ['POST', '/api/admin/integrations/onestepgps/credentials', 'OneStepGPS', 'Set/rotate the API key (encrypted; never returned)'],
+  ['DELETE', '/api/admin/integrations/onestepgps/credentials', 'OneStepGPS', 'Clear the stored API key'],
+  ['POST', '/api/admin/integrations/onestepgps/test-connection', 'OneStepGPS', 'Live device-info probe (ok + device count)'],
+  ['GET', '/api/admin/integrations/onestepgps/devices', 'OneStepGPS', 'Live device list with mapped vehicle ids'],
+  ['GET', '/api/admin/integrations/onestepgps/device-mappings', 'OneStepGPS', 'List device→vehicle mappings'],
+  ['POST', '/api/admin/integrations/onestepgps/device-mappings', 'OneStepGPS', 'Upsert a device→vehicle mapping'],
+  ['DELETE', '/api/admin/integrations/onestepgps/device-mappings/{id}', 'OneStepGPS', 'Deactivate a mapping'],
+
   // ── Admin (reservation override) ──────────────────────────────────────────
   ['GET', '/api/admin/reservations/{id}/override-preview', 'Admin', 'Preview reservation status override'],
   ['PATCH', '/api/admin/reservations/{id}/status', 'Admin', 'Apply reservation status override'],

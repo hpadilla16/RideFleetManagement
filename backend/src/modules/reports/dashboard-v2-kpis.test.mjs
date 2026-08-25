@@ -13,9 +13,20 @@ import { computeDashboardV2Kpis } from './dashboard-v2-kpis.js';
 const NOW = new Date('2026-08-03T18:00:00.000Z');
 const DAY = 86400000;
 
-function fakeDb({ vehicles = [], reservations = [], tollSum = 0, tollCount = 0, inReview = 0 } = {}) {
+function fakeDb({ vehicles = [], reservations = [], tollSum = 0, tollCount = 0, inReview = 0, captured = {} } = {}) {
   return {
-    vehicle: { findMany: async () => vehicles },
+    vehicle: {
+      // Honors the programCategory allowlist (rows default to BOTH like the
+      // DB column does) and captures the where for shape assertions.
+      findMany: async ({ where } = {}) => {
+        captured.vehicleWhere = where;
+        return vehicles.filter((v) => {
+          const cat = v.programCategory || 'BOTH';
+          if (where?.programCategory?.in && !where.programCategory.in.includes(cat)) return false;
+          return true;
+        });
+      },
+    },
     reservation: { findMany: async () => reservations },
     tollTransaction: {
       aggregate: async () => ({ _sum: { amount: tollSum }, _count: { _all: tollCount } }),
@@ -162,5 +173,39 @@ describe('dashboard-v2 KPIs', () => {
       },
     });
     assert.ok(out.utilization.pct <= 100);
+  });
+
+  it('excludes LOANER_ONLY and SHUTTLE_ONLY units from the fleet — and so from the utilization denominator', async () => {
+    // 2026-08-24 (owner complaint): dedicated shuttles and loaner-only units
+    // are not rentable, so they must not dilute utilization or pollute the
+    // Turn-Ready mix. 1 rentable vehicle + 1 loaner + 1 shuttle, with one
+    // reservation covering the whole window on the rentable one → 100%, not
+    // ~33%.
+    const captured = {};
+    const out = await computeDashboardV2Kpis('t1', {
+      now: NOW,
+      deps: {
+        prisma: fakeDb({
+          captured,
+          vehicles: [
+            veh('rentable'), // programCategory defaults to BOTH
+            { ...veh('loaner'), programCategory: 'LOANER_ONLY' },
+            { ...veh('shuttle'), programCategory: 'SHUTTLE_ONLY' },
+          ],
+          reservations: [{ pickupAt: new Date(NOW - 20 * DAY), returnAt: new Date(NOW.getTime() + 5 * DAY) }],
+        }),
+        buildVehicleOperationalSignalsMap: fakeSignals({
+          rentable: tr(90, 'READY'), loaner: tr(10, 'BLOCKED'), shuttle: tr(10, 'BLOCKED'),
+        }),
+      },
+    });
+    assert.equal(out.fleetCount, 1, 'loaner + shuttle must drop out of the fleet count');
+    assert.ok(Math.abs(out.utilization.pct - 100) < 1.5, `pct=${out.utilization.pct}`);
+    // Turn-Ready only rolls up the rentable unit — the excluded units' fake
+    // BLOCKED signals must not appear.
+    assert.equal(out.turnReady.blocked, 0);
+    assert.equal(out.turnReady.ready, 1);
+    // Pin the canonical filter shape so a drive-by rewrite can't widen it.
+    assert.deepEqual(captured.vehicleWhere.programCategory, { in: ['RENTAL_ONLY', 'BOTH'] });
   });
 });

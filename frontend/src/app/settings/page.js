@@ -37,6 +37,7 @@ import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettin
 import { ShuttleTrackerSettings } from '../../components/settings/ShuttleTrackerSettings';
 import { TwoFactorPolicySettings } from '../../components/settings/TwoFactorPolicySettings';
 import { LoanerRatesTab } from './LoanerRatesTab';
+import { OneStepGpsConnectorTab } from './OneStepGpsConnectorTab';
 import { API_BASE, api } from '../../lib/client';
 import { MODULE_DEFINITIONS } from '../../lib/moduleAccess';
 
@@ -5522,6 +5523,19 @@ function SettingsInner({ token, me, logout }) {
               </div>
             </section>
 
+            {/* OneStepGPS connector (2026-08-24): API key + device↔vehicle mapping,
+                per the approved mockups. Factored into its own component so this
+                page does not grow — it talks only to
+                /api/admin/integrations/onestepgps. Rendered unconditionally in
+                this tab: the key lives in IntegrationCredential, independent of
+                the telematicsConfig provider dropdown above (which the settings
+                blob save can therefore never erase). */}
+            <OneStepGpsConnectorTab
+              token={token}
+              scopedSettingsPath={scopedSettingsPath}
+              onPageMsg={setMsg}
+            />
+
             <section className="glass card section-card">
               <div className="row-between" style={{ alignItems: 'flex-start', gap: 12 }}>
                 <div className="stack" style={{ gap: 6 }}>
@@ -6530,6 +6544,8 @@ function SettingsInner({ token, me, logout }) {
                   </div>
                   <div className="stack"><label className="label">Pickup Instructions</label><textarea rows={3} value={locationEditor.config?.pickupInstructions || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), pickupInstructions: e.target.value } })} /></div>
                   <div className="stack"><label className="label">Shuttle Pickup Spot (what the voice agent tells a caller who is already waiting — just WHERE to stand; leave empty to reuse Pickup Instructions)</label><textarea rows={2} value={locationEditor.config?.shuttlePickupInstructions || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), shuttlePickupInstructions: e.target.value } })} placeholder="e.g. Wait between columns 4 and 5, outside of baggage claim." /></div>
+                  {/* Shuttle tracker polish NEW #4 (2026-08-24): static walking directions shown on the customer tracker page under "How to get there". Plain sede-written text, no routing engine. */}
+                  <div className="stack"><label className="label">Shuttle Walking Directions (customer tracker page — HOW to get to the pickup spot, step by step)</label><textarea rows={3} value={locationEditor.config?.shuttleWalkingDirections || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), shuttleWalkingDirections: e.target.value } })} placeholder="e.g. 1. Take the elevator to Level 1 (Arrivals). 2. Cross both crosswalks to the outer island. 3. Wait under sign B-4 — about a 3 minute walk." /></div>
                   {locationEditor.id && <ShuttleTrackerSettings locationId={locationEditor.id} />}
                   <div className="stack"><label className="label">Drop-off Instructions</label><textarea rows={3} value={locationEditor.config?.dropoffInstructions || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), dropoffInstructions: e.target.value } })} /></div>
 

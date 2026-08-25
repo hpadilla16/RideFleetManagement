@@ -1024,6 +1024,7 @@ function VehicleProfileInner({ token, me, logout }) {
                     <option value="BOTH">Flexible (rental and loaner)</option>
                     <option value="RENTAL_ONLY">Rental only</option>
                     <option value="LOANER_ONLY">Loaner only</option>
+                    <option value="SHUTTLE_ONLY">Shuttle only</option>
                   </select>
                 </div>
                 <div className="row-between">

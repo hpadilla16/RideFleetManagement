@@ -118,7 +118,13 @@ function ShuttleInner({ me, token, logout }) {
   const [from, setFrom] = useState(todayISO());
   const [to, setTo] = useState(todayISO());
   const [locations, setLocations] = useState([]);
-  const [locationId, setLocationId] = useState('');
+  // Deep-linkable location filter (2026-08-24): the Shuttle Monitor's "View
+  // requests" lands here as /shuttle?locationId=… . Read once at mount from
+  // the URL — no useSearchParams to keep the page statically prerenderable.
+  const [locationId, setLocationId] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try { return new URLSearchParams(window.location.search).get('locationId') || ''; } catch { return ''; }
+  });
   const [pickupSpots, setPickupSpots] = useState({});
   const [delayRow, setDelayRow] = useState(null);
   const [msg, setMsg] = useState('');

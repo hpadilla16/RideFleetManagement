@@ -102,12 +102,14 @@ import { smsRouter } from './modules/sms/sms.routes.js';
 import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
 import { trainingRouter } from './modules/training/training.routes.js';
 import { shuttleTrackerPublicRouter, shuttleTrackerAdminRouter } from './modules/shuttle/shuttle-tracker.routes.js';
+import { shuttleMonitorRouter } from './modules/shuttle/shuttle-monitor.routes.js';
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
 import { economyRouter } from './modules/integrations/economy/economy.routes.js';
 import { nuRouter } from './modules/integrations/nu/nu.routes.js';
 import { flexwaysRouter } from './modules/integrations/flexways/flexways.routes.js';
 import { advantageRouter } from './modules/integrations/advantage/advantage.routes.js';
 import { mexRouter } from './modules/integrations/mex/mex.routes.js';
+import { onestepgpsRouter } from './modules/integrations/onestepgps/onestepgps.routes.js';
 import { captureBackendException, flushSentry, initSentry, isSentryEnabled } from './lib/sentry.js';
 import { appErrorHandler } from './lib/errors.js';
 import { closeBrowser } from './lib/puppeteer-browser.js';
@@ -294,6 +296,9 @@ app.use('/api/shuttle-requests', requireAuth, tenantRateLimit, requireModuleAcce
 // Shuttle tracker settings (2026-08-15) — per-location config for the public
 // tracker page; same module gate as the shuttle queue it feeds.
 app.use('/api/shuttle-tracker', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), shuttleTrackerAdminRouter);
+// Staff Shuttle Monitor (2026-08-24) — house-stored positions + open queues
+// on one map. Same gate as the shuttle queue it summarizes; no public path.
+app.use('/api/shuttle-monitor', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), shuttleMonitorRouter);
 // Quotes module (2026-07-17) — doc/quotes-module-plan-2026-07-17.md
 app.use('/api/quotes', requireAuth, tenantRateLimit, requireModuleAccess('quotes'), quotesRouter);
 app.use('/api/payment-gateway', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), paymentGatewayRouter);
@@ -330,6 +335,10 @@ app.use('/api/admin/integrations/advantage', tenantRateLimit, advantageRouter);
 // module/flag/queue. Routes always available; MEX_INTEGRATION_ENABLED gates
 // only the autonomous scheduler.
 app.use('/api/admin/integrations/mex', tenantRateLimit, mexRouter);
+// OneStepGPS telematics connector (2026-08-24) — API key + device→vehicle
+// mappings for the shuttle tracker's fast poll. No scheduler flag: the stored
+// key IS the readiness gate (no key → the fast poll never calls the provider).
+app.use('/api/admin/integrations/onestepgps', tenantRateLimit, onestepgpsRouter);
 // Round 26 (2026-06-01) — reservation status override + smart rewind.
 // 2026-07-10: widened from SUPER_ADMIN-only to ADMIN + SUPER_ADMIN (Hector). ADMIN
 // gets the same power (all target statuses + the smart rewind); SUPER_ADMIN still

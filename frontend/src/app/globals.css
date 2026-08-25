@@ -2133,3 +2133,29 @@ label input[type="radio"],
   flex: 0 0 auto; font-weight: 700; padding: 6px 16px; cursor: pointer;
   background: var(--warn-tx); color: #fff; border: 0; border-radius: var(--r-sm);
 }
+
+/* OneStepGPS connector panel (Settings → Telematics, 2026-08-24, approved
+   mockups). All colors ride existing tokens so dark mode needs no overrides. */
+.osg-provider-mark {
+  width: 38px; height: 38px; border-radius: var(--r-sm); display: grid; place-items: center;
+  background: var(--p-50); border: 1px solid var(--border-brand); color: var(--p-700);
+  font-weight: 800; font-size: 13px; letter-spacing: -.02em; flex: 0 0 auto;
+}
+.osg-hint-es { color: var(--text-3); font-size: 12px; font-style: italic; }
+.osg-key-state {
+  display: flex; align-items: center; gap: 10px; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 12px;
+  font-family: var(--font-mono, ui-monospace, Consolas, monospace); font-size: 13px; color: var(--text-2);
+}
+.osg-banner { border-radius: var(--r-md); padding: 10px 12px; font-size: 13px; display: flex; gap: 9px; align-items: flex-start; }
+.osg-banner.ok { background: var(--ok-bg); border: 1px solid var(--ok-bd); color: var(--ok-tx); }
+.osg-banner.err { background: var(--danger-bg); border: 1px solid var(--danger-bd); color: var(--danger-tx); }
+.osg-banner-ic { font-weight: 800; }
+/* Dirty (unsaved) mapping rows: purple inset edge on the first cell. */
+tr.osg-dirty td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
+.osg-badge-auto { background: var(--ok-bg); color: var(--ok-tx); border-color: var(--ok-bd); }
+.osg-empty {
+  text-align: center; padding: 34px 20px; border: 1.5px dashed var(--border-strong);
+  border-radius: var(--r-lg); background: var(--surface-card); display: grid; gap: 10px; justify-items: center;
+}
+.osg-empty-glyph { font-size: 30px; opacity: .75; }
