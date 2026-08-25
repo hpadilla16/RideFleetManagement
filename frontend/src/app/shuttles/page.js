@@ -17,6 +17,12 @@
  * Map = Google Maps via the SAME shared loader/key as the public tracker
  * (lib/google-maps-loader). No key → the panel still works, the map area
  * explains itself.
+ *
+ * PHASE 2 (2026-08-24, approved mockup Screens 4+5): a "Zones & Routes" tab
+ * (ZonesRoutesTab — ADMIN-gated server-side) and the geofence alert feed in
+ * the side panel + a toast for alerts newer than the previous poll. The feed
+ * rides the SAME 12s cycle as positions and is best-effort: a feed failure
+ * never takes the monitor down.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -25,8 +31,13 @@ import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
 import { MAPS_KEY, loadGoogleMaps } from '../../lib/google-maps-loader';
+import { AlertFeed, AlertToast } from './AlertFeed';
+import { ZonesRoutesTab } from './ZonesRoutesTab';
+import { alertsNewerThan, newestAlertTs } from '../../lib/shuttle-alert-feed';
 
 const POLL_MS = 12_000; // same cadence as the customer tracker page
+const ALERT_FEED_LIMIT = 20; // mockup Screen 5: "last ~20, today-ish"
+const TOAST_MS = 8_000;
 
 const STATUS_META = {
   LIVE: { label: 'live', color: '#1a7f37', chipClass: 'good' },
@@ -59,6 +70,10 @@ function ShuttleMonitorInner({ me, token, logout }) {
   const [selectedId, setSelectedId] = useState(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const payloadAtRef = useRef(Date.now());
+  const [tab, setTab] = useState('monitor'); // 'monitor' | 'zones'
+  const [alerts, setAlerts] = useState([]);  // Phase 2 feed (mockup Screen 5)
+  const [toastAlert, setToastAlert] = useState(null);
+  const prevNewestAlertRef = useRef(null);   // null = first poll → never toast
 
   const mapRef = useRef(null);
   const mapObj = useRef(null);
@@ -79,11 +94,31 @@ function ShuttleMonitorInner({ me, token, logout }) {
       } catch (e) {
         if (alive) setError(e?.message || 'Could not load shuttle positions');
       }
+      // Alert feed rides the same 12s cycle — additive: a feed failure must
+      // never take the position monitor down with it.
+      try {
+        const out = await api(`/api/shuttle-monitor/alerts?limit=${ALERT_FEED_LIMIT}`, { bypassCache: true }, token);
+        const list = Array.isArray(out?.alerts) ? out.alerts : [];
+        if (alive) {
+          const prev = prevNewestAlertRef.current;
+          const fresh = alertsNewerThan(list, prev);
+          if (fresh.length) setToastAlert(fresh[0]); // newest-first from the API
+          prevNewestAlertRef.current = newestAlertTs(list) ?? prev;
+          setAlerts(list);
+        }
+      } catch { /* feed is best-effort */ }
       if (alive) timer = setTimeout(poll, POLL_MS);
     };
     poll();
     return () => { alive = false; clearTimeout(timer); };
   }, [token]);
+
+  // Toast auto-dismisses; a newer alert replaces it and restarts the clock.
+  useEffect(() => {
+    if (!toastAlert) return undefined;
+    const timer = setTimeout(() => setToastAlert(null), TOAST_MS);
+    return () => clearTimeout(timer);
+  }, [toastAlert]);
 
   // "last update Ns ago" ticks locally between polls.
   useEffect(() => {
@@ -165,7 +200,9 @@ function ShuttleMonitorInner({ me, token, logout }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [shuttles]);
+    // `tab` is a dep so the map rebuilds promptly when the user returns from
+    // the Zones & Routes tab (the map div remounts with a fresh ref).
+  }, [shuttles, tab]);
 
   // Re-frame when the location filter changes.
   useEffect(() => { fittedRef.current = false; }, [locationId]);
@@ -190,32 +227,59 @@ function ShuttleMonitorInner({ me, token, logout }) {
 
   const loading = data == null && !error;
   const enabled = data?.enabled !== false;
+  // Zones & Routes is ADMIN-gated server-side (/api/shuttle-zones); hiding
+  // the tab for other staff is cosmetic — the backend is the enforcement.
+  const canManageZones = ['SUPER_ADMIN', 'ADMIN'].includes(String(me?.role || '').toUpperCase());
+
+  const tabBtnStyle = (on) => ({
+    fontSize: 12.5, fontWeight: 700, padding: '9px 14px', cursor: 'pointer',
+    background: 'none', border: 'none', borderRadius: 0,
+    borderBottom: on ? '2px solid var(--brand, #8752FE)' : '2px solid transparent',
+    color: on ? 'var(--p-700, #5a26c9)' : 'var(--text-3, #736a8b)', boxShadow: 'none',
+  });
 
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg section-card">
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <h2 style={{ margin: 0 }}>{t('shuttleMonitor.title', 'Shuttle Monitor')}</h2>
-          {data?.enabled ? (
+          {tab === 'monitor' ? (
             <>
-              <span className="status-chip good">{t('shuttleMonitor.transmitting', { defaultValue: '{{count}} transmitting', count: transmitting })}</span>
-              {noDevice ? <span className="status-chip">{t('shuttleMonitor.noDeviceCount', { defaultValue: '{{count}} no device', count: noDevice })}</span> : null}
+              {data?.enabled ? (
+                <>
+                  <span className="status-chip good">{t('shuttleMonitor.transmitting', { defaultValue: '{{count}} transmitting', count: transmitting })}</span>
+                  {noDevice ? <span className="status-chip">{t('shuttleMonitor.noDeviceCount', { defaultValue: '{{count}} no device', count: noDevice })}</span> : null}
+                </>
+              ) : null}
+              <select value={locationId} onChange={(e) => setLocationId(e.target.value)} style={{ marginLeft: 'auto' }}>
+                <option value="">{t('shuttleMonitor.allLocations', 'All my locations')}</option>
+                {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+              <span className="ui-muted" style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+                {t('shuttleMonitor.refreshNote', { defaultValue: '⟳ positions refresh every 12s · last update {{s}}s ago', s: sinceUpdate })}
+              </span>
             </>
           ) : null}
-          <select value={locationId} onChange={(e) => setLocationId(e.target.value)} style={{ marginLeft: 'auto' }}>
-            <option value="">{t('shuttleMonitor.allLocations', 'All my locations')}</option>
-            {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </select>
-          <span className="ui-muted" style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
-            {t('shuttleMonitor.refreshNote', { defaultValue: '⟳ positions refresh every 12s · last update {{s}}s ago', s: sinceUpdate })}
-          </span>
         </div>
 
-        {error ? <p className="surface-note warn" style={{ marginTop: 10 }}>{error}</p> : null}
-        {loading ? <p className="ui-muted" style={{ marginTop: 12 }}>{t('shuttleMonitor.loading', 'Loading shuttles…')}</p> : null}
+        {canManageZones ? (
+          <div style={{ display: 'flex', gap: 2, marginTop: 12, borderBottom: '1px solid var(--border, #e9e4f4)' }} role="tablist">
+            <button type="button" role="tab" aria-selected={tab === 'monitor'} style={tabBtnStyle(tab === 'monitor')} onClick={() => setTab('monitor')}>
+              {t('shuttleMonitor.tabMonitor', 'Live map')}
+            </button>
+            <button type="button" role="tab" aria-selected={tab === 'zones'} style={tabBtnStyle(tab === 'zones')} onClick={() => setTab('zones')}>
+              {t('shuttleMonitor.tabZones', 'Zones & Routes')}
+            </button>
+          </div>
+        ) : null}
+
+        {tab === 'zones' ? <ZonesRoutesTab token={token} /> : null}
+
+        {tab === 'monitor' && error ? <p className="surface-note warn" style={{ marginTop: 10 }}>{error}</p> : null}
+        {tab === 'monitor' && loading ? <p className="ui-muted" style={{ marginTop: 12 }}>{t('shuttleMonitor.loading', 'Loading shuttles…')}</p> : null}
 
         {/* Empty state 1: no location has the tracker on. */}
-        {data && !enabled ? (
+        {tab === 'monitor' && data && !enabled ? (
           <div style={{ textAlign: 'center', padding: '44px 24px' }}>
             <div style={{ fontSize: 34 }}>🚐</div>
             <h3 style={{ marginTop: 10 }}>{t('shuttleMonitor.notConfiguredTitle', 'The shuttle tracker is not turned on yet')}</h3>
@@ -229,7 +293,7 @@ function ShuttleMonitorInner({ me, token, logout }) {
         ) : null}
 
         {/* Empty state 2: tracker ON but nothing can transmit. */}
-        {data && enabled && !anyDeviceInTenant ? (
+        {tab === 'monitor' && data && enabled && !anyDeviceInTenant ? (
           <div style={{ textAlign: 'center', padding: '44px 24px' }}>
             <div style={{ fontSize: 34 }}>🛰️</div>
             <h3 style={{ marginTop: 10 }}>{t('shuttleMonitor.noDevicesTitle', 'Shuttle is on, but no vehicle is transmitting')}</h3>
@@ -243,7 +307,7 @@ function ShuttleMonitorInner({ me, token, logout }) {
           </div>
         ) : null}
 
-        {data && enabled && anyDeviceInTenant ? (
+        {tab === 'monitor' && data && enabled && anyDeviceInTenant ? (
           <div style={{ display: 'flex', gap: 14, marginTop: 14, flexWrap: 'wrap' }}>
             {/* map */}
             <div style={{ flex: '1 1 460px', minHeight: 480, position: 'relative', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border-2, #d9d2ea)', background: 'var(--surface-2, #f7f5fd)' }}>
@@ -339,8 +403,32 @@ function ShuttleMonitorInner({ me, token, logout }) {
                   </div>
                 );
               })}
+
+              {/* Phase 2 alert feed (mockup Screen 5) — same 12s poll cycle. */}
+              <div style={{ marginTop: 4 }}>
+                <AlertFeed
+                  alerts={alerts}
+                  onSelect={(a) => {
+                    const s = shuttles.find((x) => x.vehicleId === a?.vehicle?.id);
+                    if (s?.position) focusShuttle(s);
+                  }}
+                />
+              </div>
             </aside>
           </div>
+        ) : null}
+
+        {toastAlert ? (
+          <AlertToast
+            alert={toastAlert}
+            onClose={() => setToastAlert(null)}
+            onShow={() => {
+              setTab('monitor');
+              const s = shuttles.find((x) => x.vehicleId === toastAlert?.vehicle?.id);
+              if (s?.position) focusShuttle(s);
+              setToastAlert(null);
+            }}
+          />
         ) : null}
       </section>
     </AppShell>
