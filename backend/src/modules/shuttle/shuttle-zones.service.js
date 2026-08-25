@@ -9,12 +9,15 @@
  * by the alert scheduler: a provider outage (or a not-yet-stored API key)
  * leaves the zone PENDING, visibly, instead of failing the staff save.
  *
- * ROUTE HONESTY: the provider's route/corridor alert surface is NOT
- * discoverable (auth-gated apidoc — see telematics-onestepgps.js). ROUTE rows
- * are therefore STORE-ONLY: saved, listed, editable, but providerSyncStatus
- * is UNSUPPORTED and no OFF_ROUTE detection happens. The TODO is logged at
- * save time so the gap is visible in ops, not silently absent. Do NOT fake
- * detection here — wire it only when the provider contract is captured.
+ * ROUTE = IN-HOUSE detection (2026-08-25, owner-approved): the provider has
+ * no route/corridor alert API, so ROUTE rows are never pushed anywhere —
+ * OFF_ROUTE is detected by OUR worker (shuttle-alerts.scheduler.js →
+ * detectInHouseEvents + route-corridor.js) against house GPS fixes at ~60s
+ * resolution. providerSyncStatus for a ROUTE is therefore ACTIVE: "our
+ * detector is wired for this route". ACTIVE is stamped on every save
+ * regardless of notifyOnOffRoute — the toggle ARMS alerting (exactly like a
+ * ZONE's notify toggles beside its SYNCED chip); the chip describes the
+ * machinery. Legacy UNSUPPORTED rows are self-healed by the scheduler.
  *
  * TENANT-SCOPED FAIL-CLOSED: every read/write filters by tenantId, and a
  * zone's location must belong to the tenant before create. Out-of-scope rows
@@ -69,14 +72,12 @@ const zoneOut = (z) => ({
 export async function syncZoneToProvider(zone, depsOverride = {}) {
   const deps = { ...defaultDeps(), ...depsOverride };
   if (zone.kind === 'ROUTE') {
-    // TODO(provider-contract): OneStepGPS route/corridor alerts are not
-    // discoverable — ROUTE zones are store-only, detection intentionally OFF.
-    deps.logger.warn('[shuttle-zones] ROUTE detection unsupported — stored without provider sync', {
-      tenantId: zone.tenantId, zoneId: zone.id,
-    });
+    // ROUTEs never touch the provider: OFF_ROUTE is detected IN-HOUSE by the
+    // worker (~60s resolution) — see the header. ACTIVE = our detector has
+    // this route; the notifyOnOffRoute toggle arms the alerting.
     return deps.prisma.shuttleZone.update({
       where: { id: zone.id },
-      data: { providerSyncStatus: 'UNSUPPORTED', providerSyncError: null },
+      data: { providerSyncStatus: 'ACTIVE', providerSyncError: null },
     });
   }
   try {

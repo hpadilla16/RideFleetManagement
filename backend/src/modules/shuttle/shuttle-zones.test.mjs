@@ -181,16 +181,26 @@ test('create against a shape-drifted provider goes ERROR with the message, never
   assert.equal(w.zoneRows[0].providerZoneId, null);
 });
 
-test('a ROUTE is STORE-ONLY: saved as UNSUPPORTED, no provider call, TODO warn logged — detection is never faked', async () => {
+test('a ROUTE saves ACTIVE (in-house detection) with NO provider call — the worker is the detector', async () => {
   const w = fakeWorld({ locations: LOCS });
   const zone = await shuttleZonesService.create({
     tenantId: 't1', locationId: 'locA',
     body: { name: 'Base ⇄ LAX', kind: 'ROUTE', points: TRIANGLE.slice(0, 2), notifyOnOffRoute: true },
   }, w.deps);
-  assert.equal(zone.providerSyncStatus, 'UNSUPPORTED');
+  assert.equal(zone.providerSyncStatus, 'ACTIVE');
+  assert.equal(zone.providerSyncError, null);
   assert.equal(zone.toleranceM, 300);
-  assert.equal(w.providerCalls.length, 0, 'no provider zone API call for a ROUTE');
-  assert.ok(w.warns.some((x) => x.msg.includes('ROUTE detection unsupported')));
+  assert.equal(w.providerCalls.length, 0, 'ROUTEs never touch the provider zone API');
+});
+
+test('a ROUTE with the notify toggle OFF is still ACTIVE — the chip describes the machinery, the toggle arms it', async () => {
+  const w = fakeWorld({ locations: LOCS });
+  const zone = await shuttleZonesService.create({
+    tenantId: 't1', locationId: 'locA',
+    body: { name: 'Quiet corridor', kind: 'ROUTE', points: TRIANGLE.slice(0, 2), notifyOnOffRoute: false },
+  }, w.deps);
+  assert.equal(zone.providerSyncStatus, 'ACTIVE');
+  assert.equal(zone.notifyOnOffRoute, false);
 });
 
 test('list and update are tenant-scoped fail-closed; cross-tenant update is a 404', async () => {

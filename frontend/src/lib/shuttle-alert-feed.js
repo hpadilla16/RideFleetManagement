@@ -14,6 +14,8 @@ export const ALERT_META = {
   ENTER: { icon: '✓', tone: 'ok', labelKey: 'shuttleMonitor.alertEnter', labelDefault: '{{who}} entered {{zone}}' },
   EXIT: { icon: '↩', tone: 'neutral', labelKey: 'shuttleMonitor.alertExit', labelDefault: '{{who}} exited {{zone}}' },
   OFF_ROUTE: { icon: '⚠', tone: 'warn', labelKey: 'shuttleMonitor.alertOffRoute', labelDefault: '{{who}} left the route corridor' },
+  // In-house corridor recovery (2026-08-25) — feed-only, informational.
+  BACK_ON_ROUTE: { icon: '✓', tone: 'ok', labelKey: 'shuttleMonitor.alertBackOnRoute', labelDefault: '{{who}} is back on the route' },
   // Phase 3 no-show fan-out (Screen 17c). The feed payload carries zone +
   // vehicle labels only — customer name/party stay in the backend's rawJson,
   // which this endpoint deliberately does not expose — so the sentence leans

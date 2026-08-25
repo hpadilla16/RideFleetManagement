@@ -20,6 +20,13 @@
  * House scheduler rules (2026-08-08 incident): overlap guard, every provider
  * call timeout-bounded, per-tenant failure isolation. The provider API key
  * never appears in logs — client errors are already redacted.
+ *
+ * IN-HOUSE DETECTION (2026-08-25, owner-approved — now the PRIMARY path):
+ * the provider has no corridor alerts, and its zone triggers produced
+ * nothing for a real crossing, so OFF_ROUTE *and* ENTER/EXIT are detected
+ * here every tick from house fixes — see detectInHouseEvents below and
+ * route-corridor.js for the pure math and state machines. The provider poll
+ * above remains as enrichment.
  */
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
@@ -29,6 +36,7 @@ import {
   listRawAlerts as onestepgpsListRawAlerts,
   pushProviderZone as onestepgpsPushProviderZone,
   deleteProviderZone as onestepgpsDeleteProviderZone,
+  getDevicesWithPositions as onestepgpsGetDevicesWithPositions,
 } from '../vehicles/telematics-onestepgps.js';
 import { syncZoneToProvider } from './shuttle-zones.service.js';
 import {
@@ -37,6 +45,9 @@ import {
   buildStaffAlertMessages,
   buildArrivalSms,
 } from './shuttle-zone-alerts.js';
+import { isOffRoute, createOffRouteTracker, isInsideZone, createZonePresenceTracker } from './route-corridor.js';
+import { configVehicleIds } from './shuttle-tracker-position.js';
+import { latestPositionsByVehicle } from './shuttle-tracker.service.js';
 
 const TICK_MS = Math.max(30 * 1000, parseInt(process.env.SHUTTLE_ALERT_POLL_MS || String(60 * 1000), 10) || 60 * 1000);
 const CALL_TIMEOUT_MS = 10 * 1000;
@@ -49,6 +60,12 @@ const LOOKBACK_MS = 10 * 60 * 1000;
 const FIRST_POLL_LOOKBACK_MS = 60 * 60 * 1000;
 /** Unsynced-zone retries per tenant per tick — provider-gentle. */
 const SYNC_RETRIES_PER_TICK = 3;
+/** In-house detection (2026-08-25): a house fix older than this is refreshed
+ *  with ONE bulk provider call per tenant per tick… */
+const FRESH_FIX_MS = 90 * 1000;
+/** …and a fix still older than this after the refresh SKIPS the vehicle for
+ *  the tick — no false alarms on stale data. */
+const MAX_FIX_AGE_MS = 5 * 60 * 1000;
 
 let timerHandle = null;
 let running = false;
@@ -58,6 +75,17 @@ let running = false;
 // window into P2002 no-ops.
 const watermarks = new Map();
 export function __resetWatermarksForTests() { watermarks.clear(); }
+
+// In-house detection state — in-memory per worker like the fast poll's write
+// memo; a restart forgets in-flight excursions/presence (bounded by the
+// providerRef minute bucket + the ENTER baseline seeding). Pure machines live
+// in route-corridor.js.
+const offRouteTracker = createOffRouteTracker();
+const zonePresenceTracker = createZonePresenceTracker();
+export function __resetInHouseDetectionForTests() {
+  offRouteTracker.reset();
+  zonePresenceTracker.reset();
+}
 
 let _mailer = null;
 async function resolveDefaultMailer() {
@@ -96,8 +124,12 @@ function defaultDeps() {
       listRawAlerts: onestepgpsListRawAlerts,
       pushProviderZone: onestepgpsPushProviderZone,
       deleteProviderZone: onestepgpsDeleteProviderZone,
+      getDevicesWithPositions: onestepgpsGetDevicesWithPositions,
     },
     syncZoneToProvider,
+    latestPositionsByVehicle,
+    offRouteTracker,
+    zonePresenceTracker,
     // mailer/smsSend/resolveBrand resolved lazily inside the fan-out so the
     // poll path stays importable in DB-free tests without the SMS module.
     mailer: null,
@@ -292,6 +324,19 @@ export async function pollTenantAlerts(tenantId, depsOverride = {}) {
 
   // Fan-out for genuinely NEW rows only. A zone-less alert (provider-side
   // rule we don't know) stays feed-only by construction.
+  const { staffAttempts, arrivalSms } = await fanOutCreatedAlerts(tenantId, created, zones, deps);
+
+  return { skipped: false, fetched: (raws || []).length, created: created.length, skippedEntries, staffAttempts, arrivalSms };
+}
+
+/**
+ * THE fan-out choke point (extracted 2026-08-25): every genuinely-new alert
+ * row — provider-ingested OR minted by the in-house detector — goes through
+ * this one function, so a synthetic pickup-spot ENTER triggers the customer
+ * arrival SMS exactly like a provider ENTER would. Notify prefs gate the
+ * email/SMS only; the row itself always exists for the feed.
+ */
+async function fanOutCreatedAlerts(tenantId, created, zones, deps) {
   let staffAttempts = 0;
   let arrivalSms = 0;
   for (const row of created) {
@@ -309,22 +354,250 @@ export async function pollTenantAlerts(tenantId, depsOverride = {}) {
       deps.logger.warn('[shuttle-alerts] fan-out failed', { tenantId, alertId: row.id, message: err.message });
     }
   }
+  return { staffAttempts, arrivalSms };
+}
 
-  return { skipped: false, fetched: (raws || []).length, created: created.length, skippedEntries, staffAttempts, arrivalSms };
+// ─── In-house geofence detection (2026-08-25, owner-approved) ───────────────
+//
+// PRIMARY detection path. Discovered live: the provider's trigger system
+// produced NOTHING for a real zone crossing, and it never had corridor
+// alerts — so BOTH detections run HERE, every tick (~60s resolution), from
+// HOUSE fixes (Redis fast path + Postgres fallback via
+// latestPositionsByVehicle). Provider alert ingestion above stays as
+// enrichment only; if the provider ever starts delivering, its ENTER/EXIT
+// rows carry different providerRefs than ours, so the feed could show both —
+// an accepted, visible redundancy, not silent loss.
+//
+//   * ROUTE corridors → OFF_ROUTE / BACK_ON_ROUTE (route-corridor.js:
+//     2-tick debounce, 2-tick recovery, 10-min cooldown backstop).
+//   * ZONE polygons → ENTER / EXIT (zone presence tracker: first observation
+//     seeds the baseline WITHOUT emitting — a van already inside at worker
+//     boot is not an arrival — then any confirmed flip emits).
+//
+// Because the fast poll is DEMAND-driven, an unwatched tenant may have no
+// fresh fix at all: a fix older than FRESH_FIX_MS is refreshed with ONE bulk
+// device-info call per tenant per tick (detection-only — deliberately NOT
+// the fast poll's DB write path, so this never duplicates
+// VehicleTelematicsEvent rows). A fix still older than MAX_FIX_AGE_MS skips
+// that vehicle: silence, not a false alarm.
+//
+// All emitted rows go through fanOutCreatedAlerts — the SAME choke point as
+// provider alerts — so notify prefs gate email/SMS (rows always land in the
+// feed) and a pickup-spot ENTER fires the customer arrival SMS exactly like
+// a provider ENTER would. BACK_ON_ROUTE alone is feed-only by design.
+
+const fixAtMs = (fix) => {
+  if (!fix) return NaN;
+  const at = fix.eventAt instanceof Date ? fix.eventAt.getTime() : new Date(fix.eventAt || 0).getTime();
+  return Number.isFinite(at) && at > 0 ? at : NaN;
+};
+
+/** One tenant's in-house sweep. Deps injectable for tests; production passes none. */
+export async function detectInHouseEvents(tenantId, depsOverride = {}) {
+  const deps = { ...defaultDeps(), ...depsOverride };
+  const routeTracker = deps.offRouteTracker || offRouteTracker;
+  const presenceTracker = deps.zonePresenceTracker || zonePresenceTracker;
+  const now = deps.now();
+
+  const all = await deps.prisma.shuttleZone.findMany({ where: { tenantId, active: true } });
+  if (!all.length) return { skipped: true };
+  const routes = all.filter((z) => z.kind === 'ROUTE');
+  const plainZones = all.filter((z) => z.kind === 'ZONE');
+
+  // One-time self-heal: ROUTE rows saved while routes were store-only carry
+  // UNSUPPORTED — flip them to ACTIVE so pre-existing routes light up without
+  // a re-save. New saves already land ACTIVE (shuttle-zones.service.js).
+  const legacy = routes.filter((r) => r.providerSyncStatus === 'UNSUPPORTED');
+  if (legacy.length) {
+    try {
+      await deps.prisma.shuttleZone.updateMany({
+        where: { id: { in: legacy.map((r) => r.id) } },
+        data: { providerSyncStatus: 'ACTIVE', providerSyncError: null },
+      });
+      legacy.forEach((r) => { r.providerSyncStatus = 'ACTIVE'; });
+      deps.logger.info('[shuttle-offroute] legacy ROUTE rows now ACTIVE (in-house detection)', {
+        tenantId, zoneIds: legacy.map((r) => r.id),
+      });
+    } catch (err) {
+      deps.logger.warn('[shuttle-offroute] legacy ROUTE self-heal failed', { tenantId, message: err.message });
+    }
+  }
+
+  // Routes detect only when armed (notifyOnOffRoute); ZONE rows ALWAYS
+  // detect — the feed shows every crossing, the prefs gate only the
+  // notifications (same contract the provider path always had).
+  const armedRoutes = routes.filter((r) => r.notifyOnOffRoute);
+  const watched = [...armedRoutes, ...plainZones];
+  if (!watched.length) return { skipped: true };
+
+  // The vehicles a zone/route watches = its LOCATION's shuttle config list —
+  // the same source of truth the tracker page resolves (an SJU van far from
+  // an MCO corridor is not "off" that route; it was never on it).
+  const configs = await deps.prisma.shuttleTrackerConfig.findMany({
+    where: { tenantId, locationId: { in: [...new Set(watched.map((z) => z.locationId))] } },
+  });
+  const vehiclesByLocation = new Map(configs.map((c) => [c.locationId, configVehicleIds(c)]));
+  const allVehicleIds = [...new Set([...vehiclesByLocation.values()].flat())];
+  if (!allVehicleIds.length) return { skipped: true };
+
+  const fixes = await deps.latestPositionsByVehicle(allVehicleIds);
+
+  // Demand-independent freshness: ONE bulk call per tenant per tick, only
+  // when needed and only when a key exists. Detection-only — no DB write.
+  const staleIds = allVehicleIds.filter((id) => {
+    const at = fixAtMs(fixes[id]);
+    return !Number.isFinite(at) || now - at > FRESH_FIX_MS;
+  });
+  let refreshed = 0;
+  if (staleIds.length) {
+    try {
+      if (await deps.provider.hasApiKey(tenantId)) {
+        const devices = await deps.prisma.vehicleTelematicsDevice.findMany({
+          where: { tenantId, provider: 'ONESTEPGPS', isActive: true, vehicleId: { in: staleIds } },
+          select: { externalDeviceId: true, vehicleId: true },
+        });
+        if (devices.length) {
+          const bulk = await withTimeout(
+            deps.provider.getDevicesWithPositions(tenantId),
+            CALL_TIMEOUT_MS,
+            `shuttle offroute bulk ${tenantId}`,
+          );
+          const byExternalId = new Map((bulk || []).map((f) => [f.externalDeviceId, f]));
+          for (const device of devices) {
+            const f = byExternalId.get(device.externalDeviceId);
+            if (!f || f.latitude == null || f.longitude == null) continue;
+            const freshAt = fixAtMs(f);
+            const haveAt = fixAtMs(fixes[device.vehicleId]);
+            if (Number.isFinite(freshAt) && (!Number.isFinite(haveAt) || freshAt > haveAt)) {
+              fixes[device.vehicleId] = {
+                vehicleId: device.vehicleId,
+                latitude: f.latitude,
+                longitude: f.longitude,
+                eventAt: f.eventAt,
+              };
+              refreshed++;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      // Detection degrades to the house fixes it has — stale ones skip below.
+      deps.logger.warn('[shuttle-offroute] bulk position refresh failed', { tenantId, message: err.message });
+    }
+  }
+
+  /** Minute-bucketed refs = idempotent under retries/restarts within the
+   *  bucket; the (tenantId, providerRef) unique is the ledger. Returns the
+   *  inserted row, or null on duplicate/failure. */
+  const createAlert = async (data) => {
+    try {
+      return await deps.prisma.shuttleAlert.create({ data: { tenantId, ...data } });
+    } catch (err) {
+      if (err?.code !== 'P2002') {
+        deps.logger.warn('[shuttle-offroute] alert row insert failed', { tenantId, message: err.message });
+      }
+      return null;
+    }
+  };
+
+  let skippedStale = 0;
+  let backOnRoute = 0;
+  const created = []; // rows that fan out (OFF_ROUTE / ENTER / EXIT)
+  const usableFix = (vehicleId) => {
+    const fix = fixes[vehicleId];
+    const at = fixAtMs(fix);
+    if (!Number.isFinite(at) || now - at > MAX_FIX_AGE_MS) { skippedStale++; return null; }
+    return { fix, at };
+  };
+
+  // ── ROUTE corridors ──
+  for (const route of armedRoutes) {
+    for (const vehicleId of vehiclesByLocation.get(route.locationId) || []) {
+      const u = usableFix(vehicleId);
+      if (!u) continue;
+      const verdict = isOffRoute({ lat: Number(u.fix.latitude), lng: Number(u.fix.longitude) }, route);
+      const out = routeTracker.observe({ zoneId: route.id, vehicleId, off: verdict.off, now });
+      if (!out.fire) continue;
+      const isRecovery = out.fire === 'BACK_ON_ROUTE';
+      const row = await createAlert({
+        type: out.fire,
+        occurredAt: new Date(u.at), // the FIX's own time, same rule as provider alerts
+        providerRef: isRecovery
+          ? `backonroute:${route.id}:${vehicleId}:${Math.floor(now / 60000)}`
+          : `offroute:${route.id}:${vehicleId}:${Math.floor(out.firstOffAt / 60000)}`,
+        zoneId: route.id,
+        vehicleId,
+        // Distances only — NO coordinates persist in rawJson.
+        rawJson: JSON.stringify({
+          source: 'IN_HOUSE_CORRIDOR',
+          distanceM: verdict.distanceM == null ? null : Math.round(verdict.distanceM),
+          toleranceM: verdict.toleranceM,
+        }),
+      });
+      if (!row) continue;
+      if (isRecovery) backOnRoute++; // feed-only by design — no email/SMS
+      else created.push(row);
+    }
+  }
+
+  // ── ZONE polygons (ENTER/EXIT) ──
+  for (const zone of plainZones) {
+    for (const vehicleId of vehiclesByLocation.get(zone.locationId) || []) {
+      const u = usableFix(vehicleId);
+      if (!u) continue;
+      const inside = isInsideZone({ lat: Number(u.fix.latitude), lng: Number(u.fix.longitude) }, zone);
+      const out = presenceTracker.observe({ zoneId: zone.id, vehicleId, inside, now });
+      if (!out.fire) continue;
+      const row = await createAlert({
+        type: out.fire,
+        occurredAt: new Date(u.at),
+        providerRef: `zonedet:${zone.id}:${vehicleId}:${out.fire}:${Math.floor(now / 60000)}`,
+        zoneId: zone.id,
+        vehicleId,
+        rawJson: JSON.stringify({ source: 'IN_HOUSE_GEOFENCE' }),
+      });
+      if (row) created.push(row);
+    }
+  }
+
+  // Same choke point as provider ingestion: prefs gate the notifications,
+  // pickup-spot ENTERs reach the customer arrival SMS, rows stay regardless.
+  const { staffAttempts, arrivalSms } = await fanOutCreatedAlerts(tenantId, created, all, deps);
+
+  routeTracker.prune(now);
+  presenceTracker.prune(now);
+  return {
+    skipped: false,
+    routes: armedRoutes.length,
+    zones: plainZones.length,
+    vehicles: allVehicleIds.length,
+    refreshed,
+    skippedStale,
+    created: created.length + backOnRoute,
+    backOnRoute,
+    staffAttempts,
+    arrivalSms,
+  };
 }
 
 async function tick() {
   if (running) return;
   running = true;
   try {
-    // Configured tenants only: at least one active zone AND a stored key.
+    // Tenants with at least one active zone; provider polling additionally
+    // needs a stored key, but the in-house geofence sweep (the PRIMARY
+    // detector) reads HOUSE fixes and must not go dark for a keyless
+    // (e.g. VoltSwitch-only) tenant.
     const grouped = await prisma.shuttleZone.groupBy({ by: ['tenantId'], where: { active: true } });
     for (const g of grouped) {
       const tenantId = g.tenantId;
       try {
-        if (!(await onestepgpsHasApiKey(tenantId))) continue; // zones parked until the key lands
-        const out = await withTimeout(pollTenantAlerts(tenantId), TENANT_TIMEOUT_MS, `shuttle alerts tenant ${tenantId}`);
-        if (out.created) logger.info('[shuttle-alerts] alerts ingested', { tenantId, ...out });
+        if (await onestepgpsHasApiKey(tenantId)) {
+          const out = await withTimeout(pollTenantAlerts(tenantId), TENANT_TIMEOUT_MS, `shuttle alerts tenant ${tenantId}`);
+          if (out.created) logger.info('[shuttle-alerts] alerts ingested', { tenantId, ...out });
+        }
+        const det = await withTimeout(detectInHouseEvents(tenantId), TENANT_TIMEOUT_MS, `shuttle in-house detection tenant ${tenantId}`);
+        if (det.created) logger.info('[shuttle-offroute] in-house geofence alerts created', { tenantId, ...det });
       } catch (err) {
         logger.warn('[shuttle-alerts] tenant failed', { tenantId, message: err.message });
       }

@@ -7,12 +7,13 @@
  * pushes ZONE geometry to the GPS provider best-effort.
  *
  * HONESTY RULES carried from the mockup + backend contract:
- *  - providerSyncStatus is shown as-is: SYNCED (detection live), PENDING
- *    (waiting on the provider / API key — the worker retries every ~minute),
- *    ERROR (provider rejected the push; also auto-retried), UNSUPPORTED
- *    (ROUTE rows: the provider exposes no corridor alerts yet, so the route
- *    is STORE-ONLY and the UI says "off-route detection: coming soon" —
- *    never promises detection).
+ *  - providerSyncStatus is shown as-is: SYNCED (provider-side detection
+ *    live), PENDING (waiting on the provider / API key — the worker retries
+ *    every ~minute), ERROR (provider rejected the push; also auto-retried),
+ *    ACTIVE (ROUTE rows, 2026-08-25: off-route detection runs IN-HOUSE in
+ *    our worker at ~1 min resolution — nothing is pushed to the provider).
+ *    UNSUPPORTED is legacy for ROUTEs saved before in-house detection; the
+ *    worker self-heals those to ACTIVE on its next tick.
  *  - There is no force-resync endpoint: the ERROR chip's refresh button
  *    re-reads the list; the scheduler does the actual retrying.
  *  - Zones/routes are ADMIN-gated server-side (/api/shuttle-zones); this tab
@@ -30,6 +31,9 @@ const SYNC_META = {
   SYNCED: { cls: 'chip--ok', key: 'syncSynced', fallback: 'Synced' },
   PENDING: { cls: 'chip--warn', key: 'syncPending', fallback: 'Sync pending' },
   ERROR: { cls: 'chip--danger', key: 'syncError', fallback: 'Sync error' },
+  // ROUTE rows: in-house corridor detection in our worker (~1 min).
+  ACTIVE: { cls: 'chip--ok', key: 'syncActiveRoute', fallback: 'In-house detection · ~1 min' },
+  // Legacy pre-in-house ROUTE rows; the worker flips them to ACTIVE.
   UNSUPPORTED: { cls: 'chip--neutral', key: 'syncUnsupported', fallback: 'No detection' },
 };
 
@@ -344,9 +348,6 @@ function ZoneEditor({ token, location, zone, kind, onSaved, onCancel }) {
         <span className={`chip ${isRoute ? 'chip--brand' : 'chip--neutral'}`}>
           {isRoute ? t('shuttleZones.kindRoute', 'Route') : t('shuttleZones.kindZone', 'Zone')}
         </span>
-        {isRoute ? (
-          <span className="badge-building">{t('shuttleZones.routeComingSoon', 'Off-route detection: coming soon')}</span>
-        ) : null}
       </div>
 
       {/* Draw canvas */}
@@ -498,7 +499,7 @@ function ZoneEditor({ token, location, zone, kind, onSaved, onCancel }) {
 
       {isRoute ? (
         <p className="ui-muted" style={{ fontSize: 12, marginTop: 8 }}>
-          {t('shuttleZones.routeUnsupportedNote', 'The GPS provider does not expose route-corridor alerts yet — this route is stored, but no off-route detection runs.')}
+          {t('shuttleZones.routeInHouseNote', 'Off-route detection runs in-house on the shuttle’s GPS fixes, about once a minute. “Notify when off-route” turns the staff alerts on.')}
         </p>
       ) : null}
 
@@ -836,7 +837,6 @@ export function ZonesRoutesTab({ token }) {
                           {t('shuttleZones.toleranceChip', { defaultValue: 'tolerance {{m}} m', m: zone.toleranceM })}
                         </span>
                       ) : null}
-                      <span className="badge-building">{t('shuttleZones.routeComingSoon', 'Off-route detection: coming soon')}</span>
                     </>
                   ) : (
                     <>

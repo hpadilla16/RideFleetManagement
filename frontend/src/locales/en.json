@@ -1278,6 +1278,7 @@
     "emptyCta": "Go to the connector card · Ir al conector"
   },
   "shuttleMonitor": {
+    "alertBackOnRoute": "{{who}} is back on the route",
     "alertEnter": "{{who}} entered {{zone}}",
     "alertExit": "{{who}} exited {{zone}}",
     "alertNoShow": "No-show — customer not picked up at {{zone}}",
@@ -1406,10 +1407,10 @@
     "recipientsNote": "Alerts also show in the Monitor feed.",
     "recipientsTitle": "Who gets alerted",
     "remove": "Remove",
-    "routeComingSoon": "Off-route detection: coming soon",
-    "routeUnsupportedNote": "The GPS provider does not expose route-corridor alerts yet — this route is stored, but no off-route detection runs.",
+    "routeInHouseNote": "Off-route detection runs in-house on the shuttle's GPS fixes, about once a minute. \"Notify when off-route\" turns the staff alerts on.",
     "save": "Save",
     "shapeCaptured": "✓ shape captured ({{n}} points)",
+    "syncActiveRoute": "In-house detection · ~1 min",
     "syncError": "Sync error",
     "syncErrorHint": "Provider sync failed — it retries automatically about every minute.",
     "syncPending": "Sync pending",

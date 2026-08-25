@@ -1278,6 +1278,7 @@
     "emptyCta": "Ir a la tarjeta del conector"
   },
   "shuttleMonitor": {
+    "alertBackOnRoute": "{{who}} volvió a la ruta",
     "alertEnter": "{{who}} entró a {{zone}}",
     "alertExit": "{{who}} salió de {{zone}}",
     "alertNoShow": "No-show — cliente no recogido en {{zone}}",
@@ -1406,10 +1407,10 @@
     "recipientsNote": "Las alertas también aparecen en el feed del Monitor.",
     "recipientsTitle": "Quién recibe alertas",
     "remove": "Quitar",
-    "routeComingSoon": "Detección de desvío: próximamente",
-    "routeUnsupportedNote": "El proveedor GPS aún no expone alertas de corredor de ruta — esta ruta se guarda, pero no corre detección de desvío.",
+    "routeInHouseNote": "La detección de desvío corre in-house sobre los fixes GPS del shuttle, aprox. cada minuto. \"Avisar al salir de la ruta\" activa las alertas al personal.",
     "save": "Guardar",
     "shapeCaptured": "✓ forma capturada ({{n}} puntos)",
+    "syncActiveRoute": "detección in-house · ~1 min",
     "syncError": "Error de sync",
     "syncErrorHint": "La sincronización con el proveedor falló — se reintenta automáticamente cada minuto aprox.",
     "syncPending": "Sync pendiente",

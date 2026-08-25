@@ -4,13 +4,14 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 /**
  * Zones & Routes tab (Phase 2, approved mockup Screen 4) — what these tests
  * pin down:
- *  - Zone list renders per-kind: Zone/Route chip, pickup badge, and the FOUR
- *    honest providerSyncStatus chips (SYNCED/PENDING/ERROR/UNSUPPORTED, the
- *    ERROR one carrying the redacted provider message as its title).
+ *  - Zone list renders per-kind: Zone/Route chip, pickup badge, and the
+ *    honest providerSyncStatus chips (SYNCED/PENDING/ERROR for zones, the
+ *    ERROR one carrying the redacted provider message as its title; ACTIVE
+ *    for routes — in-house detection, 2026-08-25).
  *  - Notify toggles PATCH inline (PUT /api/shuttle-zones/:id with just the
  *    flipped flag) and the row re-renders from the server's answer.
- *  - Routes expose ONLY the off-route toggle + the "coming soon" honesty
- *    badge — no enter/exit toggles, no promised detection.
+ *  - Routes expose ONLY the off-route toggle — no enter/exit toggles — and
+ *    the green ACTIVE chip replaced the old "coming soon" badge.
  *  - Delete asks for confirmation, then DELETEs.
  *  - Without a Maps key the editor says drawing is unavailable and a NEW zone
  *    cannot be saved (create requires geometry).
@@ -105,7 +106,7 @@ const ZONES = [
     isPickupSpot: false, walkingDirections: null,
     geometry: { type: 'polyline', points: [{ lat: 1, lng: 1 }, { lat: 2, lng: 2 }] },
     toleranceM: 300, notifyOnEnter: false, notifyOnExit: false, notifyOnOffRoute: true,
-    active: true, providerSyncStatus: 'UNSUPPORTED', providerSyncError: null,
+    active: true, providerSyncStatus: 'ACTIVE', providerSyncError: null,
   },
 ];
 
@@ -176,12 +177,14 @@ describe('ZonesRoutesTab — list rendering', () => {
 
     const rowR = await findZoneRow('Base ⇄ LAX corridor');
     expect(within(rowR).getByText('shuttleZones.kindRoute')).toBeInTheDocument();
+    // Routes are ACTIVE (in-house detection) — green, not the grey
+    // "no detection" chip they carried while store-only.
     const chipR = within(rowR).getByTestId('sync-chip');
-    expect(chipR).toHaveTextContent('shuttleZones.syncUnsupported');
-    expect(chipR.className).toContain('chip--neutral');
+    expect(chipR).toHaveTextContent('shuttleZones.syncActiveRoute');
+    expect(chipR.className).toContain('chip--ok');
   });
 
-  it('routes show only the off-route toggle plus the coming-soon badge — never enter/exit', async () => {
+  it('routes show only the off-route toggle — never enter/exit, and no "coming soon" badge anywhere', async () => {
     routeDefaults();
     render(<ZonesRoutesTab token="tok" />);
 
@@ -189,8 +192,7 @@ describe('ZonesRoutesTab — list rendering', () => {
     expect(within(rowR).getByRole('checkbox', { name: 'shuttleZones.notifyOffRoute' })).toBeChecked();
     expect(within(rowR).queryByRole('checkbox', { name: 'shuttleZones.notifyEnter' })).not.toBeInTheDocument();
     expect(within(rowR).queryByRole('checkbox', { name: 'shuttleZones.notifyExit' })).not.toBeInTheDocument();
-    // Honesty rule: the route row itself says detection is not live yet.
-    expect(within(rowR).getByText('shuttleZones.routeComingSoon')).toBeInTheDocument();
+    expect(screen.queryByText('shuttleZones.routeComingSoon')).not.toBeInTheDocument();
     expect(within(rowR).getByText(/shuttleZones\.toleranceChip\[.*m=300\]/)).toBeInTheDocument();
   });
 });
@@ -308,7 +310,7 @@ describe('ZonesRoutesTab — editor without a Maps key', () => {
     expect('geometry' in puts[0]).toBe(false);
   });
 
-  it('route editor shows tolerance slider and the coming-soon honesty badge', async () => {
+  it('route editor shows tolerance slider and the in-house detection note (coming-soon copy is gone)', async () => {
     routeDefaults();
     render(<ZonesRoutesTab token="tok" />);
     const rowR = await findZoneRow('Base ⇄ LAX corridor');
@@ -316,8 +318,9 @@ describe('ZonesRoutesTab — editor without a Maps key', () => {
 
     const editor = await screen.findByTestId('zone-editor');
     expect(within(editor).getByText(/shuttleZones\.toleranceLabel\[.*m=300\]/)).toBeInTheDocument();
-    expect(within(editor).getByText('shuttleZones.routeComingSoon')).toBeInTheDocument();
-    expect(within(editor).getByText('shuttleZones.routeUnsupportedNote')).toBeInTheDocument();
+    expect(within(editor).getByText('shuttleZones.routeInHouseNote')).toBeInTheDocument();
+    expect(within(editor).queryByText('shuttleZones.routeComingSoon')).not.toBeInTheDocument();
+    expect(within(editor).queryByText('shuttleZones.routeUnsupportedNote')).not.toBeInTheDocument();
     // Route editor never grows zone-only controls.
     expect(within(editor).queryByText('shuttleZones.pickupSpot')).not.toBeInTheDocument();
   });

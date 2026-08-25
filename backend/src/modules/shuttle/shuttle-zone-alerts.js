@@ -14,7 +14,10 @@
 import crypto from 'crypto';
 
 export const ZONE_KINDS = ['ZONE', 'ROUTE'];
-export const ALERT_TYPES = ['ENTER', 'EXIT', 'OFF_ROUTE'];
+// ENTER/EXIT arrive from the provider; OFF_ROUTE and BACK_ON_ROUTE are minted
+// by OUR in-house corridor detection (route-corridor.js + the alert
+// scheduler). BACK_ON_ROUTE is feed-only — never emailed/SMSed.
+export const ALERT_TYPES = ['ENTER', 'EXIT', 'OFF_ROUTE', 'BACK_ON_ROUTE'];
 
 /** ROUTE corridor tolerance bounds (meters). */
 export const ROUTE_TOLERANCE_DEFAULT_M = 300;
