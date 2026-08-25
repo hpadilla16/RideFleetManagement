@@ -20,6 +20,7 @@ import {
   publicPositionPayload, publicShuttleEntry, linkState, configVehicleIds,
   watchKey, posKey, WATCH_TTL_S, POSITION_STALE_MS,
 } from './shuttle-tracker-position.js';
+import { parseIntakeConfig } from './shuttle-intake.js';
 import { arrivalState, ARRIVAL_FRESH_MS } from './shuttle-zone-alerts.js';
 import {
   custLocKey, CUSTOMER_LOC_TTL_S, parseStoredFix, publicLocationSharing,
@@ -286,8 +287,9 @@ export const shuttleTrackerService = {
     // never the provider — and guarded whole: a rolling deploy whose old
     // Prisma client predates the table must not break the tracker.
     let arrival = { arrivedAtSpot: false, spotName: null };
+    let spotZones = [];
     try {
-      const spotZones = await prisma.shuttleZone.findMany({
+      spotZones = await prisma.shuttleZone.findMany({
         where: { tenantId: link.tenantId, locationId: config.locationId, isPickupSpot: true, active: true },
         select: { id: true, name: true, walkingDirections: true },
       });
@@ -329,6 +331,8 @@ export const shuttleTrackerService = {
       assigned: !!assignedVehicleId,
       shuttles: loopShuttles,
       locationSharing,
+      intake: parseIntakeConfig(config),
+      pickupSpot: spotZones.length === 1 ? spotZones[0] : null,
     });
   },
 

@@ -43,8 +43,8 @@ test('THE WHITELIST: nothing beyond the contract ever leaves, even if the caller
   const out = publicPositionPayload({ position: leaky, config: CONFIG, location: LOCATION, now: NOW });
   assert.deepEqual(Object.keys(out).sort(), [
     'arrivedAtSpot', 'arrivedSpotName', 'assigned', 'brandName', 'counterPhone',
-    'headwayMinutes', 'locationName', 'locationSharing', 'mode',
-    'pickupInstructions', 'position', 'requestStatus', 'status', 'walkingDirections',
+    'headwayMinutes', 'intake', 'locationName', 'locationSharing', 'mode',
+    'pickupInstructions', 'pickupSpot', 'position', 'requestStatus', 'status', 'walkingDirections',
   ]);
   assert.deepEqual(Object.keys(out.position).sort(), ['ageSeconds', 'asOf', 'heading', 'latitude', 'longitude', 'speedMph']);
   // Phase 3 defaults: not assigned, not sharing — and locationSharing is the

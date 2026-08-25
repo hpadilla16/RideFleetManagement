@@ -96,6 +96,7 @@ export function publicPositionPayload({
   vehicle = null, requestStatus = null,
   arrivedAtSpot = false, arrivedSpotName = null,
   assigned = false, shuttles = null, locationSharing = null,
+  intake = null, pickupSpot = null,
   now = Date.now(),
 }) {
   // The pickup POINT (where to stand) is the location's own coordinates —
@@ -132,6 +133,24 @@ export function publicPositionPayload({
     arrivedSpotName: arrivedAtSpot === true ? (String(arrivedSpotName || '').trim() || null) : null,
     // ── Phase 3 core (2026-08-25, Screens 8a/8b/9) — see header comment ──
     assigned: assigned === true,
+    // Intake config for the request flow (Phase 3 fix): without this the page
+    // cannot know a sede enabled intake, and its legacy one-tap POST would 400.
+    // Field-picked; caps are plain numbers, nothing else from intakeJson crosses.
+    intake: {
+      enabled: intake?.enabled === true,
+      partySizeCap: num(intake?.partySizeCap),
+      bagsCap: num(intake?.bagsCap),
+    },
+    // The designated pickup spot, exposed ONLY when the location has exactly
+    // one active spot (no ambiguity to resolve without the customer's position).
+    // Field-picked: zone id + name + its walking text; geometry never crosses.
+    pickupSpot: pickupSpot
+      ? {
+          zoneId: String(pickupSpot.id || pickupSpot.zoneId || ''),
+          name: String(pickupSpot.name || ''),
+          walkingDirections: String(pickupSpot.walkingDirections || ''),
+        }
+      : null,
     locationSharing: {
       active: locationSharing?.active === true,
       distanceMeters: locationSharing?.active === true ? num(locationSharing?.distanceMeters) : null,
