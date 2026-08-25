@@ -28,6 +28,11 @@ const NAV_ITEMS = [
   { href: '/issues', labelKey: 'nav.issueCenter', moduleKey: 'issueCenter' },
   // Incidents hub (2026-07-28): reservation-bound documents — gated with reservations.
   { href: '/incidents', labelKey: 'nav.incidents', moduleKey: 'reservations' },
+  // Staff Shuttle Monitor (2026-08-24, approved): its own nav item, shown
+  // only when the tenant has at least one location with the tracker ≠ OFF
+  // (feature check below, /api/shuttle-monitor/enabled). Rides on the
+  // reservations module like the queue and tracker settings it summarizes.
+  { href: '/shuttles', labelKey: 'nav.shuttles', feature: 'shuttleMonitor', moduleKey: 'reservations' },
   { href: '/loaner', labelKey: 'nav.loaner', feature: 'dealershipLoaner', moduleKey: 'loaner' },
   { href: '/tolls', labelKey: 'nav.tolls', moduleKey: 'tolls' },
   { href: '/maintenance', labelKey: 'nav.maintenance', moduleKey: 'maintenance' },
@@ -99,6 +104,26 @@ export function AppShell({ me, logout, children }) {
   const [canReturnSuper, setCanReturnSuper] = useState(false);
   const [carSharingVisible, setCarSharingVisible] = useState(() => isModuleEnabled(me, 'carSharing'));
   const [dealershipLoanerVisible, setDealershipLoanerVisible] = useState(() => isModuleEnabled(me, 'loaner'));
+  // Shuttle Monitor visibility (2026-08-24): ONE fetch at mount, no polling —
+  // the nav shows only for tenants with a tracker turned on somewhere in the
+  // caller's scope. Soft-fail hidden: a backend mid-deploy hides a nav item,
+  // it never breaks the shell.
+  const [shuttleMonitorVisible, setShuttleMonitorVisible] = useState(false);
+  // Open-request badge on the Shuttles item — fed by the ShuttleBanner's
+  // existing 20s poll via a window event, so the shell adds ZERO requests.
+  const [shuttleOpenCount, setShuttleOpenCount] = useState(0);
+  useEffect(() => {
+    const token = readStoredToken();
+    if (!token || !isModuleEnabled(me, 'reservations')) return;
+    api('/api/shuttle-monitor/enabled', {}, token)
+      .then((out) => setShuttleMonitorVisible(!!out?.enabled))
+      .catch(() => setShuttleMonitorVisible(false));
+  }, [me]);
+  useEffect(() => {
+    const onCount = (e) => setShuttleOpenCount(Number(e?.detail) || 0);
+    window.addEventListener('shuttle:openCount', onCount);
+    return () => window.removeEventListener('shuttle:openCount', onCount);
+  }, []);
 
   const idleTimerRef = useRef(null);
   const role = String(me?.role || '').toUpperCase();
@@ -291,6 +316,7 @@ export function AppShell({ me, logout, children }) {
             .filter((item) => !item.adminOnly || isAdminNavRole)
             .filter((item) => item.feature !== 'carSharing' || carSharingVisible)
             .filter((item) => item.feature !== 'dealershipLoaner' || dealershipLoanerVisible)
+            .filter((item) => item.feature !== 'shuttleMonitor' || shuttleMonitorVisible)
             .filter((item) => isModuleEnabled(me, item.moduleKey))
             .map((item) => (
               item.disabled ? (
@@ -306,6 +332,11 @@ export function AppShell({ me, logout, children }) {
                   onClick={() => setMobileOpen(false)}
                 >
                   <span className="nav-label">{t(item.labelKey)}</span>
+                  {item.href === '/shuttles' && shuttleOpenCount > 0 ? (
+                    <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 800, background: 'var(--brand, #8752FE)', color: '#fff', padding: '1px 7px', borderRadius: 999 }}>
+                      {shuttleOpenCount}
+                    </span>
+                  ) : null}
                 </Link>
               )
             ))}

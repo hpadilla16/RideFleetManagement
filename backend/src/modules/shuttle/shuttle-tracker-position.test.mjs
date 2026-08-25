@@ -26,14 +26,74 @@ test('THE WHITELIST: nothing beyond the contract ever leaves, even if the caller
   // The payload is built by picking, not spreading — feed it a record dripping
   // with internals and assert none survive. This is the test that fails if
   // someone "conveniently" spreads the row later.
+  //
+  // 2026-08-24 (approved tracker polish): the contract DELIBERATELY grew by
+  // exactly five keys — brandName, counterPhone, requestStatus,
+  // walkingDirections, and (when a vehicle is passed) vehicle{name,color,
+  // plate}. This list IS the review record; growing it again means editing
+  // this assertion on purpose.
   const leaky = {
     latitude: 18.4, longitude: -66.0, heading: 90, speedMph: 30, eventAt: secondsAgo(5),
     plate: 'ABC-123', vin: '1FTBW3XM…', odometer: 88123, engineOn: true,
-    customerName: 'María', tenantId: 't1', id: 'veh_123',
+    customerName: 'María', tenantId: 't1', id: 'veh_123', vehicleId: 'veh_123',
   };
   const out = publicPositionPayload({ position: leaky, config: CONFIG, location: LOCATION, now: NOW });
-  assert.deepEqual(Object.keys(out).sort(), ['headwayMinutes', 'locationName', 'mode', 'pickupInstructions', 'position', 'status']);
+  assert.deepEqual(Object.keys(out).sort(), [
+    'brandName', 'counterPhone', 'headwayMinutes', 'locationName', 'mode',
+    'pickupInstructions', 'position', 'requestStatus', 'status', 'walkingDirections',
+  ]);
   assert.deepEqual(Object.keys(out.position).sort(), ['ageSeconds', 'asOf', 'heading', 'latitude', 'longitude', 'speedMph']);
+});
+
+test('NEW #3 vehicle identity: name/color/plate only — a leaky vehicle row never crosses', () => {
+  const leakyVehicle = {
+    id: 'veh_1', tenantId: 't1', make: 'Ford', model: 'Transit 350', year: 2023,
+    color: 'White', plate: 'IKT-482', vin: '1FTBW3XM0PKA00001', internalNumber: 'U-17',
+    mileage: 88123, acquisitionCost: '41000.00',
+  };
+  const out = publicPositionPayload({
+    position: { latitude: 18.4, longitude: -66.0, eventAt: secondsAgo(5) },
+    config: CONFIG, location: LOCATION, vehicle: leakyVehicle, now: NOW,
+  });
+  assert.deepEqual(out.vehicle, { name: 'Ford Transit 350', color: 'White', plate: 'IKT-482' });
+  assert.deepEqual(Object.keys(out.vehicle).sort(), ['color', 'name', 'plate']);
+  // year / VIN / internalNumber stay staff-side.
+  assert.equal(String(JSON.stringify(out)).includes('1FTBW3XM'), false);
+  assert.equal(String(JSON.stringify(out)).includes('U-17'), false);
+});
+
+test('NEW #3: an all-empty vehicle record omits the key entirely', () => {
+  const out = publicPositionPayload({
+    position: { latitude: 18.4, longitude: -66.0, eventAt: secondsAgo(5) },
+    config: CONFIG, location: LOCATION, vehicle: { id: 'v', make: '', model: null, color: '', plate: '' }, now: NOW,
+  });
+  assert.equal('vehicle' in out, false);
+});
+
+test('NEW #2 requestStatus: only READY/VIEWED/COMPLETED cross; bookkeeping states collapse to null', () => {
+  const at = { position: null, config: CONFIG, location: LOCATION, now: NOW };
+  assert.equal(publicPositionPayload({ ...at, requestStatus: 'READY' }).requestStatus, 'READY');
+  assert.equal(publicPositionPayload({ ...at, requestStatus: 'VIEWED' }).requestStatus, 'VIEWED');
+  assert.equal(publicPositionPayload({ ...at, requestStatus: 'COMPLETED' }).requestStatus, 'COMPLETED');
+  assert.equal(publicPositionPayload({ ...at, requestStatus: 'CANCELLED' }).requestStatus, null);
+  assert.equal(publicPositionPayload({ ...at, requestStatus: 'NO_SHOW' }).requestStatus, null);
+  assert.equal(publicPositionPayload({ ...at, requestStatus: 'garbage' }).requestStatus, null);
+  assert.equal(publicPositionPayload(at).requestStatus, null);
+});
+
+test('NEW #1/#4/#5: brand, walking directions and counter phone default to empty — never invented', () => {
+  const bare = publicPositionPayload({ position: null, config: CONFIG, location: LOCATION, now: NOW });
+  assert.equal(bare.brandName, null);
+  assert.equal(bare.counterPhone, null);
+  assert.equal(bare.walkingDirections, '');
+  const full = publicPositionPayload({
+    position: null, config: CONFIG, location: LOCATION, now: NOW,
+    brandName: 'International Rental Corp', counterPhone: '(787) 555-0142',
+    walkingDirections: 'Take the elevator to Level 1.',
+  });
+  assert.equal(full.brandName, 'International Rental Corp');
+  assert.equal(full.counterPhone, '(787) 555-0142');
+  assert.equal(full.walkingDirections, 'Take the elevator to Level 1.');
 });
 
 test('aging fix is flagged, stale fix goes OFFLINE with NO coordinates', () => {
