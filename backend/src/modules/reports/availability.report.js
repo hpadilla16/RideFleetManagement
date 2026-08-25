@@ -26,6 +26,7 @@ import {
   dayLabelInTz,
 } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
+import { RENTAL_PROGRAM_FILTER } from '../../lib/program-category.js';
 
 const VEHICLE_STATUSES = ['AVAILABLE', 'RESERVED', 'ON_RENT', 'IN_MAINTENANCE', 'OUT_OF_SERVICE'];
 
@@ -124,7 +125,15 @@ async function computeData({ tenantId, query }, deps = {}) {
   // is terminal (vehicle sold, not coming back); OUT_OF_SERVICE is the
   // retired/totaled sink. Both already excluded by the dashboard, so
   // this report stays consistent.
-  const where = { tenantId, status: { notIn: ['SOLD', 'OUT_OF_SERVICE'] } };
+  // Program filter (2026-08-24): this is the RENTAL availability snapshot —
+  // "available now" must mean bookable by a renter. LOANER_ONLY and
+  // SHUTTLE_ONLY units are never rentable, so they sat in AVAILABLE forever
+  // and inflated the count.
+  const where = {
+    tenantId,
+    status: { notIn: ['SOLD', 'OUT_OF_SERVICE'] },
+    programCategory: RENTAL_PROGRAM_FILTER,
+  };
   if (locationId) where.homeLocationId = locationId;
 
   // The exports carry a full per-vehicle roster (2026-08-14, Hector), which
@@ -276,8 +285,15 @@ async function typeDrillDownHandler(req, res, { tenantId }) {
     return res.status(400).json({ error: 'type query param required' });
   }
 
-  // Same SOLD/OUT_OF_SERVICE exclusion as the top-level fleet base above.
-  const where = { tenantId, vehicleTypeId: typeId, status: { notIn: ['SOLD', 'OUT_OF_SERVICE'] } };
+  // Same SOLD/OUT_OF_SERVICE + rental-program exclusion as the top-level
+  // fleet base above — the drill-down roster must agree with the cell count
+  // it explains.
+  const where = {
+    tenantId,
+    vehicleTypeId: typeId,
+    status: { notIn: ['SOLD', 'OUT_OF_SERVICE'] },
+    programCategory: RENTAL_PROGRAM_FILTER,
+  };
   if (locationId) where.homeLocationId = locationId;
 
   const vehicles = await prisma.vehicle.findMany({

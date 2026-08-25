@@ -201,6 +201,7 @@
     "invalidCredentials": "Correo o contraseña inválidos"
   },
   "common": {
+    "programShuttleOnly": "Solo shuttle",
     "loading": "Cargando...",
     "error": "Error",
     "save": "Guardar",

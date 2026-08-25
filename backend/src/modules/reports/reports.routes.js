@@ -106,7 +106,7 @@ reportsRouter.get('/inventory.xlsx', async (req, res, next) => {
 });
 
 // Per-vehicle revenue. Query params: start (ISO date), end (ISO date),
-// programCategory (optional: RENTAL_ONLY | LOANER_ONLY | BOTH).
+// programCategory (optional: RENTAL_ONLY | LOANER_ONLY | BOTH | SHUTTLE_ONLY).
 reportsRouter.get('/vehicle-revenue', async (req, res, next) => {
   try {
     const out = await reportsService.vehicleRevenue(req.query || {}, scopeFor(req));

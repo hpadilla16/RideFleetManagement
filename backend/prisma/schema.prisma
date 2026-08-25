@@ -218,10 +218,17 @@ enum VehicleFleetMode {
 // LOANER_ONLY tagging so their loaner units don't surface in the public
 // booking search; their service rentals stay RENTAL_ONLY. Existing
 // vehicles default to BOTH for backward compatibility.
+//
+// SHUTTLE_ONLY (2026-08-24): dedicated airport-shuttle units. Excluded from
+// BOTH consumption sides — never rentable inventory (search / availability /
+// utilization denominators) and never loaner-pool candidates. Dual-use
+// vehicles that merely also run shuttle duty keep RENTAL_ONLY/BOTH; the tag
+// is only for vehicles that exist solely to move customers.
 enum VehicleProgramCategory {
   RENTAL_ONLY
   LOANER_ONLY
   BOTH
+  SHUTTLE_ONLY
 }
 
 // EmployeeProgramScope (2026-07-02): per-employee program visibility. Mirrors

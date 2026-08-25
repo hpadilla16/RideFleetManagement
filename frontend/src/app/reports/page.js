@@ -915,6 +915,7 @@ function Inner({ token, me, logout }) {
                   <option value="ALL">All programs</option>
                   <option value="RENTAL_ONLY">Rental only</option>
                   <option value="LOANER_ONLY">Loaner only</option>
+                  <option value="SHUTTLE_ONLY">Shuttle only</option>
                   <option value="BOTH">Flexible only</option>
                 </select>
                 <button onClick={exportVehicleRevenueXlsx} disabled={exportingVehicleRevenue || !vehicleRevenue?.vehicles?.length}>
@@ -956,16 +957,19 @@ function Inner({ token, me, logout }) {
                           className="badge"
                           style={{
                             background:
-                              (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'rgba(255,140,0,0.18)'
+                              (v.programCategory || 'BOTH') === 'SHUTTLE_ONLY' ? 'rgba(147,51,234,0.18)'
+                              : (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'rgba(255,140,0,0.18)'
                               : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? 'rgba(73,140,255,0.18)'
                               : 'rgba(160,160,160,0.18)',
                             color:
-                              (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? '#b56300'
+                              (v.programCategory || 'BOTH') === 'SHUTTLE_ONLY' ? '#7e22ce'
+                              : (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? '#b56300'
                               : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? '#1d4ed8'
                               : '#444'
                           }}
                         >
-                          {(v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'Loaner'
+                          {(v.programCategory || 'BOTH') === 'SHUTTLE_ONLY' ? 'Shuttle'
+                            : (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'Loaner'
                             : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? 'Rental'
                             : 'Flex'}
                         </span>
@@ -1001,6 +1005,7 @@ function Inner({ token, me, logout }) {
                   <option value="ALL">All programs</option>
                   <option value="RENTAL_ONLY">Rental only</option>
                   <option value="LOANER_ONLY">Loaner only</option>
+                  <option value="SHUTTLE_ONLY">Shuttle only</option>
                   <option value="BOTH">Flexible only</option>
                 </select>
                 <button onClick={exportInventoryXlsx} disabled={exportingInventory || !inventoryReport?.vehicles?.length}>
@@ -1047,16 +1052,19 @@ function Inner({ token, me, logout }) {
                           className="badge"
                           style={{
                             background:
-                              (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'rgba(255,140,0,0.18)'
+                              (v.programCategory || 'BOTH') === 'SHUTTLE_ONLY' ? 'rgba(147,51,234,0.18)'
+                              : (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'rgba(255,140,0,0.18)'
                               : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? 'rgba(73,140,255,0.18)'
                               : 'rgba(160,160,160,0.18)',
                             color:
-                              (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? '#b56300'
+                              (v.programCategory || 'BOTH') === 'SHUTTLE_ONLY' ? '#7e22ce'
+                              : (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? '#b56300'
                               : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? '#1d4ed8'
                               : '#444'
                           }}
                         >
-                          {(v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'Loaner'
+                          {(v.programCategory || 'BOTH') === 'SHUTTLE_ONLY' ? 'Shuttle'
+                            : (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'Loaner'
                             : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? 'Rental'
                             : 'Flex'}
                         </span>
@@ -1103,6 +1111,7 @@ function Inner({ token, me, logout }) {
                   <option value="ALL">All programs</option>
                   <option value="RENTAL_ONLY">Rental only</option>
                   <option value="LOANER_ONLY">Loaner only</option>
+                  <option value="SHUTTLE_ONLY">Shuttle only</option>
                   <option value="BOTH">Flexible only</option>
                 </select>
                 <select
@@ -1160,16 +1169,19 @@ function Inner({ token, me, logout }) {
                           className="badge"
                           style={{
                             background:
-                              (r.vehicleProgramCategory || 'BOTH') === 'LOANER_ONLY' ? 'rgba(255,140,0,0.18)'
+                              (r.vehicleProgramCategory || 'BOTH') === 'SHUTTLE_ONLY' ? 'rgba(147,51,234,0.18)'
+                              : (r.vehicleProgramCategory || 'BOTH') === 'LOANER_ONLY' ? 'rgba(255,140,0,0.18)'
                               : (r.vehicleProgramCategory || 'BOTH') === 'RENTAL_ONLY' ? 'rgba(73,140,255,0.18)'
                               : 'rgba(160,160,160,0.18)',
                             color:
-                              (r.vehicleProgramCategory || 'BOTH') === 'LOANER_ONLY' ? '#b56300'
+                              (r.vehicleProgramCategory || 'BOTH') === 'SHUTTLE_ONLY' ? '#7e22ce'
+                              : (r.vehicleProgramCategory || 'BOTH') === 'LOANER_ONLY' ? '#b56300'
                               : (r.vehicleProgramCategory || 'BOTH') === 'RENTAL_ONLY' ? '#1d4ed8'
                               : '#444'
                           }}
                         >
-                          {(r.vehicleProgramCategory || 'BOTH') === 'LOANER_ONLY' ? 'Loaner'
+                          {(r.vehicleProgramCategory || 'BOTH') === 'SHUTTLE_ONLY' ? 'Shuttle'
+                            : (r.vehicleProgramCategory || 'BOTH') === 'LOANER_ONLY' ? 'Loaner'
                             : (r.vehicleProgramCategory || 'BOTH') === 'RENTAL_ONLY' ? 'Rental'
                             : 'Flex'}
                         </span>
