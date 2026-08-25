@@ -52,27 +52,65 @@ export function SyncStatusChip({ zone }) {
   );
 }
 
-/** DrawingManager overlay → our geometry JSON ({type, points}). */
-export function overlayToGeometry(type, overlay) {
-  if (type === 'rectangle') {
-    const b = overlay.getBounds();
-    const ne = b.getNorthEast();
-    const sw = b.getSouthWest();
-    return {
-      type: 'rectangle',
-      points: [
-        { lat: ne.lat(), lng: sw.lng() },
-        { lat: ne.lat(), lng: ne.lng() },
-        { lat: sw.lat(), lng: ne.lng() },
-        { lat: sw.lat(), lng: sw.lng() },
-      ],
-    };
-  }
-  if (type === 'polygon' || type === 'polyline') {
-    const points = overlay.getPath().getArray().map((p) => ({ lat: p.lat(), lng: p.lng() }));
-    return { type: type === 'polyline' ? 'polyline' : 'polygon', points };
-  }
-  return null;
+// ─── Pure geometry builders (the backend contract, unchanged) ───────────────
+//
+// These produce the exact same JSON the old drawing-library-based
+// overlayToGeometry emitted: { type: 'rectangle'|'polygon'|'polyline',
+// points: [{lat, lng}] }, with rectangle points ordered NW → NE → SE → SW.
+// Google removed the drawing library from the Maps JS API (v3.65), so drawing is
+// now hand-rolled on plain map events and these builders ARE the contract.
+
+/** Two opposite corners (clicked in any order) → the 4-point rectangle. */
+export function rectangleGeometry(a, b) {
+  const north = Math.max(a.lat, b.lat);
+  const south = Math.min(a.lat, b.lat);
+  const east = Math.max(a.lng, b.lng);
+  const west = Math.min(a.lng, b.lng);
+  return {
+    type: 'rectangle',
+    points: [
+      { lat: north, lng: west },
+      { lat: north, lng: east },
+      { lat: south, lng: east },
+      { lat: south, lng: west },
+    ],
+  };
+}
+
+/** Clicked vertices → polygon geometry (min 3 vertices, else null). */
+export function polygonGeometry(points) {
+  if (!Array.isArray(points) || points.length < 3) return null;
+  return { type: 'polygon', points: points.map((p) => ({ lat: p.lat, lng: p.lng })) };
+}
+
+/** Clicked points → polyline (route) geometry (min 2 points, else null). */
+export function polylineGeometry(points) {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  return { type: 'polyline', points: points.map((p) => ({ lat: p.lat, lng: p.lng })) };
+}
+
+/** Approximate ground distance between two {lat,lng} in meters (equirectangular — fine at zone scale). */
+function metersBetween(a, b) {
+  const latM = (b.lat - a.lat) * 111320;
+  const lngM = (b.lng - a.lng) * 111320 * Math.cos(((a.lat + b.lat) / 2) * (Math.PI / 180));
+  return Math.hypot(latM, lngM);
+}
+
+/** True when two points are within `px` screen pixels of each other at the given zoom. */
+export function withinPixels(a, b, zoom, px = 12) {
+  const metersPerPixel = (156543.03392 * Math.cos((a.lat * Math.PI) / 180)) / 2 ** zoom;
+  return metersBetween(a, b) <= px * metersPerPixel;
+}
+
+/**
+ * A double-click also fires the underlying click(s), so the final vertex can
+ * land in the list two or three times — collapse the near-duplicate tail down
+ * to a single occurrence before closing the shape.
+ */
+export function collapseTail(points, zoom, px = 10) {
+  const out = points.slice();
+  while (out.length >= 2 && withinPixels(out[out.length - 1], out[out.length - 2], zoom, px)) out.pop();
+  return out;
 }
 
 // ─── Editor (create or edit one zone/route) ─────────────────────────────────
@@ -92,78 +130,172 @@ function ZoneEditor({ token, location, zone, kind, onSaved, onCancel }) {
   const [draftGeometry, setDraftGeometry] = useState(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  // drawMode: null | 'rectangle' | 'polygon' | 'polyline' — armed by the
+  // explicit toolbar buttons above the map (the old drawing library is gone from the
+  // Maps JS API as of v3.65, so drawing is hand-rolled on plain map events).
+  const [drawMode, setDrawMode] = useState(null);
+  const [mapCtx, setMapCtx] = useState(null); // { google, map } once the map is live
+  const [mapError, setMapError] = useState(false);
 
   const mapRef = useRef(null);
   const draftOverlayRef = useRef(null);
 
-  // Map + DrawingManager — one instance per editor mount.
+  // Map — one instance per editor mount. Any failure surfaces as an honest
+  // error note instead of a silently dead map.
   useEffect(() => {
     if (!MAPS_KEY || !mapRef.current) return undefined;
     let cancelled = false;
     (async () => {
-      const google = await loadGoogleMaps();
-      if (!google || cancelled || !mapRef.current) return;
-      const { Map } = await google.maps.importLibrary('maps');
-      const { DrawingManager } = await google.maps.importLibrary('drawing');
-      if (cancelled || !mapRef.current) return;
+      try {
+        const google = await loadGoogleMaps();
+        if (cancelled || !mapRef.current) return;
+        if (!google) { setMapError(true); return; }
+        const { Map } = await google.maps.importLibrary('maps');
+        if (cancelled || !mapRef.current) return;
 
-      const lat = Number(location?.latitude);
-      const lng = Number(location?.longitude);
-      const center = Number.isFinite(lat) && Number.isFinite(lng)
-        ? { lat, lng }
-        : { lat: 18.4, lng: -66.0 };
-      const map = new Map(mapRef.current, {
-        center,
-        zoom: 14,
-        mapId: 'DEMO_MAP_ID',
-        disableDefaultUI: true,
-        zoomControl: true,
-        clickableIcons: false,
-        gestureHandling: 'greedy',
-      });
+        const lat = Number(location?.latitude);
+        const lng = Number(location?.longitude);
+        const center = Number.isFinite(lat) && Number.isFinite(lng)
+          ? { lat, lng }
+          : { lat: 18.4, lng: -66.0 };
+        const map = new Map(mapRef.current, {
+          center,
+          zoom: 14,
+          mapId: 'DEMO_MAP_ID',
+          disableDefaultUI: true,
+          zoomControl: true,
+          clickableIcons: false,
+          gestureHandling: 'greedy',
+        });
 
-      // Existing geometry, drawn read-only; a new drawing replaces it.
-      const pts = Array.isArray(zone?.geometry?.points) ? zone.geometry.points : [];
-      if (pts.length) {
-        const path = pts.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) }));
-        if (isRoute) {
-          new google.maps.Polyline({ map, path, strokeColor: '#8752FE', strokeWeight: 3.5 });
-        } else {
-          new google.maps.Polygon({
-            map, paths: path, strokeColor: '#0f8a68', strokeWeight: 2.5,
-            fillColor: '#0f8a68', fillOpacity: 0.14,
-          });
+        // Existing geometry, drawn read-only; a new drawing replaces it.
+        const pts = Array.isArray(zone?.geometry?.points) ? zone.geometry.points : [];
+        if (pts.length) {
+          const path = pts.map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) }));
+          if (isRoute) {
+            new google.maps.Polyline({ map, path, strokeColor: '#8752FE', strokeWeight: 3.5 });
+          } else {
+            new google.maps.Polygon({
+              map, paths: path, strokeColor: '#0f8a68', strokeWeight: 2.5,
+              fillColor: '#0f8a68', fillOpacity: 0.14,
+            });
+          }
+          try {
+            const bounds = new google.maps.LatLngBounds();
+            path.forEach((p) => bounds.extend(p));
+            map.fitBounds(bounds, 48);
+          } catch { /* framing is cosmetic */ }
         }
-        try {
-          const bounds = new google.maps.LatLngBounds();
-          path.forEach((p) => bounds.extend(p));
-          map.fitBounds(bounds, 48);
-        } catch { /* framing is cosmetic */ }
-      }
 
-      const dm = new DrawingManager({
-        map,
-        drawingControl: true,
-        drawingControlOptions: {
-          position: google.maps.ControlPosition.TOP_CENTER,
-          drawingModes: isRoute ? ['polyline'] : ['rectangle', 'polygon'],
-        },
-        polygonOptions: { strokeColor: '#0f8a68', fillColor: '#0f8a68', fillOpacity: 0.14 },
-        rectangleOptions: { strokeColor: '#0f8a68', fillColor: '#0f8a68', fillOpacity: 0.14 },
-        polylineOptions: { strokeColor: '#8752FE', strokeWeight: 3.5 },
-      });
-      google.maps.event.addListener(dm, 'overlaycomplete', (e) => {
-        const g = overlayToGeometry(e.type, e.overlay);
-        if (!g) { e.overlay.setMap(null); return; }
-        if (draftOverlayRef.current) draftOverlayRef.current.setMap(null);
-        draftOverlayRef.current = e.overlay;
-        dm.setDrawingMode(null);
-        setDraftGeometry(g);
-      });
+        setMapCtx({ google, map });
+      } catch {
+        if (!cancelled) setMapError(true);
+      }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Hand-rolled drawing — armed per mode, torn down on mode change/unmount.
+  useEffect(() => {
+    if (!mapCtx || !drawMode) return undefined;
+    const { google, map } = mapCtx;
+    const listeners = [];
+    let clicks = [];
+    let preview = null;
+
+    const ZONE_STYLE = { strokeColor: '#0f8a68', strokeWeight: 2.5, fillColor: '#0f8a68', fillOpacity: 0.14 };
+    const ROUTE_STYLE = { strokeColor: '#8752FE', strokeWeight: 3.5 };
+
+    map.setOptions({ draggableCursor: 'crosshair', disableDoubleClickZoom: true });
+
+    const clearPreview = () => { if (preview) { preview.setMap(null); preview = null; } };
+    const toLiteral = (e) => ({ lat: e.latLng.lat(), lng: e.latLng.lng() });
+    const zoomNow = () => (Number.isFinite(map.getZoom?.()) ? map.getZoom() : 14);
+
+    // Draw the final overlay with the same styling the editor has always
+    // used, replace any previous draft, capture the geometry, exit the mode.
+    const complete = (geometry) => {
+      if (!geometry) return;
+      clearPreview();
+      if (draftOverlayRef.current) draftOverlayRef.current.setMap(null);
+      let overlay;
+      if (geometry.type === 'rectangle') {
+        const [nw, ne, se] = geometry.points;
+        overlay = new google.maps.Rectangle({
+          map, clickable: false, ...ZONE_STYLE,
+          bounds: { north: nw.lat, south: se.lat, east: ne.lng, west: nw.lng },
+        });
+      } else if (geometry.type === 'polygon') {
+        overlay = new google.maps.Polygon({ map, clickable: false, paths: geometry.points, ...ZONE_STYLE });
+      } else {
+        overlay = new google.maps.Polyline({ map, clickable: false, path: geometry.points, ...ROUTE_STYLE });
+      }
+      draftOverlayRef.current = overlay;
+      setDraftGeometry(geometry);
+      setDrawMode(null); // cleanup below restores the cursor + listeners
+    };
+
+    if (drawMode === 'rectangle') {
+      // Two clicks: first corner, then the opposite corner; a live preview
+      // rectangle follows the cursor in between.
+      listeners.push(google.maps.event.addListener(map, 'click', (e) => {
+        const p = toLiteral(e);
+        if (!clicks.length) {
+          clicks = [p];
+          preview = new google.maps.Rectangle({
+            map, clickable: false, ...ZONE_STYLE,
+            bounds: { north: p.lat, south: p.lat, east: p.lng, west: p.lng },
+          });
+        } else {
+          complete(rectangleGeometry(clicks[0], p));
+        }
+      }));
+      listeners.push(google.maps.event.addListener(map, 'mousemove', (e) => {
+        if (!clicks.length || !preview) return;
+        const g = rectangleGeometry(clicks[0], toLiteral(e));
+        const [nw, ne, se] = g.points;
+        preview.setBounds({ north: nw.lat, south: se.lat, east: ne.lng, west: nw.lng });
+      }));
+    } else {
+      // Polygon (zone) / polyline (route): click per vertex with a live
+      // polyline preview; double-click — or, for polygons, clicking the
+      // first vertex — closes.
+      const isPoly = drawMode === 'polygon';
+      const minPts = isPoly ? 3 : 2;
+      preview = new google.maps.Polyline({
+        map, clickable: false, path: [],
+        ...(isPoly ? { strokeColor: ZONE_STYLE.strokeColor, strokeWeight: ZONE_STYLE.strokeWeight } : ROUTE_STYLE),
+      });
+      const finishWith = (pts) => complete(isPoly ? polygonGeometry(pts) : polylineGeometry(pts));
+      listeners.push(google.maps.event.addListener(map, 'click', (e) => {
+        const p = toLiteral(e);
+        if (isPoly && clicks.length >= minPts && withinPixels(clicks[0], p, zoomNow())) {
+          finishWith(clicks.slice()); // clicked the first vertex → close
+          return;
+        }
+        clicks.push(p);
+        if (preview) preview.setPath(clicks.slice());
+      }));
+      listeners.push(google.maps.event.addListener(map, 'mousemove', (e) => {
+        if (clicks.length && preview) preview.setPath([...clicks, toLiteral(e)]);
+      }));
+      listeners.push(google.maps.event.addListener(map, 'dblclick', (e) => {
+        const pts = collapseTail([...clicks, toLiteral(e)], zoomNow());
+        if (pts.length >= minPts) finishWith(pts);
+      }));
+    }
+
+    const onKeyDown = (ev) => { if (ev.key === 'Escape') setDrawMode(null); };
+    document.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      listeners.forEach((l) => google.maps.event.removeListener(l));
+      clearPreview();
+      map.setOptions({ draggableCursor: null, disableDoubleClickZoom: false });
+    };
+  }, [mapCtx, drawMode]);
 
   const save = async () => {
     const nm = name.trim();
@@ -218,22 +350,68 @@ function ZoneEditor({ token, location, zone, kind, onSaved, onCancel }) {
       </div>
 
       {/* Draw canvas */}
-      {MAPS_KEY ? (
+      {MAPS_KEY && !mapError ? (
         <>
+          {/* Explicit draw-mode toolbar (replaces the removed drawing library) */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }} data-testid="draw-toolbar">
+            {isRoute ? (
+              <button
+                type="button"
+                data-testid="draw-polyline"
+                className={drawMode === 'polyline' ? '' : 'button-subtle'}
+                aria-pressed={drawMode === 'polyline'}
+                style={{ fontSize: 12 }}
+                onClick={() => setDrawMode((m) => (m === 'polyline' ? null : 'polyline'))}
+              >
+                {t('shuttleZones.drawRoute', '— Draw route')}
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  data-testid="draw-rectangle"
+                  className={drawMode === 'rectangle' ? '' : 'button-subtle'}
+                  aria-pressed={drawMode === 'rectangle'}
+                  style={{ fontSize: 12 }}
+                  onClick={() => setDrawMode((m) => (m === 'rectangle' ? null : 'rectangle'))}
+                >
+                  {t('shuttleZones.drawRectangle', '▭ Draw rectangle')}
+                </button>
+                <button
+                  type="button"
+                  data-testid="draw-polygon"
+                  className={drawMode === 'polygon' ? '' : 'button-subtle'}
+                  aria-pressed={drawMode === 'polygon'}
+                  style={{ fontSize: 12 }}
+                  onClick={() => setDrawMode((m) => (m === 'polygon' ? null : 'polygon'))}
+                >
+                  {t('shuttleZones.drawPolygon', '⬠ Draw polygon')}
+                </button>
+              </>
+            )}
+          </div>
           <div
             ref={mapRef}
-            style={{ marginTop: 10, height: 320, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border, #e9e4f4)' }}
+            style={{ marginTop: 8, height: 320, borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border, #e9e4f4)' }}
           />
           <p className="ui-muted" style={{ fontSize: 12, marginTop: 6 }}>
-            {isRoute
-              ? t('shuttleZones.drawHintRoute', 'Draw the route as a line on the map — click points, double-click to finish.')
-              : t('shuttleZones.drawHintZone', 'Draw the zone on the map — rectangle or polygon.')}
-            {draftGeometry ? ` ${t('shuttleZones.shapeCaptured', { defaultValue: '✓ shape captured ({{n}} points)', n: draftGeometry.points.length })}` : ''}
+            {drawMode === 'rectangle'
+              ? t('shuttleZones.drawActiveHintRectangle', 'Click two corners — one corner, then the opposite one. Esc cancels.')
+              : drawMode === 'polygon'
+                ? t('shuttleZones.drawActiveHintPolygon', 'Click once per vertex; double-click or click the first vertex to close (min. 3). Esc cancels.')
+                : drawMode === 'polyline'
+                  ? t('shuttleZones.drawActiveHintPolyline', 'Click once per point; double-click to finish (min. 2). Esc cancels.')
+                  : isRoute
+                    ? t('shuttleZones.drawHintRoute', 'Draw the route as a line on the map — click points, double-click to finish.')
+                    : t('shuttleZones.drawHintZone', 'Draw the zone on the map — rectangle or polygon.')}
+            {draftGeometry && !drawMode ? ` ${t('shuttleZones.shapeCaptured', { defaultValue: '✓ shape captured ({{n}} points)', n: draftGeometry.points.length })}` : ''}
           </p>
         </>
       ) : (
         <p className="surface-note warn" style={{ marginTop: 10 }}>
-          {t('shuttleZones.noMapsKeyDraw', 'No Google Maps key is configured for this build — shapes cannot be drawn. Existing zones can still be renamed and toggled.')}
+          {mapError
+            ? t('shuttleZones.mapLoadError', 'The map could not be loaded — drawing is unavailable right now. Existing zones can still be renamed and toggled.')
+            : t('shuttleZones.noMapsKeyDraw', 'No Google Maps key is configured for this build — shapes cannot be drawn. Existing zones can still be renamed and toggled.')}
         </p>
       )}
 

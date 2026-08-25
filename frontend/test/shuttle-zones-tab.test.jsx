@@ -18,12 +18,17 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
  *    cleaned list on add.
  */
 
-const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }));
+const { apiMock, mapsState } = vi.hoisted(() => ({
+  apiMock: vi.fn(),
+  // Default: no key — the tab must fully work list-side anyway. Draw-mode
+  // tests flip `key` on and hand back a fake `google` object.
+  mapsState: { key: '', load: async () => null },
+}));
 
 vi.mock('../src/lib/client', () => ({ api: apiMock }));
 vi.mock('../src/lib/google-maps-loader', () => ({
-  MAPS_KEY: '', // no key in tests — the tab must fully work list-side anyway
-  loadGoogleMaps: vi.fn(async () => null),
+  get MAPS_KEY() { return mapsState.key; },
+  loadGoogleMaps: (...args) => mapsState.load(...args),
 }));
 
 vi.mock('react-i18next', () => ({
@@ -38,7 +43,40 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-import { ZonesRoutesTab } from '../src/app/shuttles/ZonesRoutesTab';
+import {
+  ZonesRoutesTab,
+  rectangleGeometry,
+  polygonGeometry,
+  polylineGeometry,
+  withinPixels,
+  collapseTail,
+} from '../src/app/shuttles/ZonesRoutesTab';
+
+/** Minimal google.maps fake — enough for the editor's map + drawing effects. */
+function makeFakeGoogle() {
+  class FakeOverlay {
+    constructor(opts) { this.opts = opts; }
+    setMap() {}
+    setPath() {}
+    setBounds() {}
+  }
+  class FakeMap {
+    constructor(el, opts) { this.opts = opts; }
+    setOptions() {}
+    getZoom() { return 14; }
+    fitBounds() {}
+  }
+  return {
+    maps: {
+      importLibrary: vi.fn(async () => ({ Map: FakeMap })),
+      Rectangle: FakeOverlay,
+      Polygon: FakeOverlay,
+      Polyline: FakeOverlay,
+      LatLngBounds: class { extend() {} },
+      event: { addListener: vi.fn(() => ({})), removeListener: vi.fn() },
+    },
+  };
+}
 
 const ZONES = [
   {
@@ -98,7 +136,11 @@ function routeDefaults(extraRoutes = []) {
   ]);
 }
 
-beforeEach(() => { apiMock.mockReset(); });
+beforeEach(() => {
+  apiMock.mockReset();
+  mapsState.key = '';
+  mapsState.load = async () => null;
+});
 afterEach(() => { vi.restoreAllMocks(); });
 
 async function findZoneRow(name) {
@@ -331,5 +373,123 @@ describe('ZonesRoutesTab — recipients panel', () => {
 
     expect(await within(panel).findByText('shuttleZones.recipientNeedsChannel')).toBeInTheDocument();
     expect(apiMock.mock.calls.some(([p, o]) => p.includes('/recipients') && String(o?.method).toUpperCase() === 'PUT')).toBe(false);
+  });
+});
+
+describe('ZonesRoutesTab — hand-rolled draw modes (Maps key present)', () => {
+  beforeEach(() => {
+    mapsState.key = 'test-key';
+    mapsState.load = vi.fn(async () => makeFakeGoogle());
+  });
+
+  it('zone editor shows rectangle + polygon draw buttons and no route button', async () => {
+    routeDefaults();
+    render(<ZonesRoutesTab token="tok" />);
+    await findZoneRow('LAX Pickup Lot B');
+
+    fireEvent.click(screen.getByRole('button', { name: 'shuttleZones.newZone' }));
+    const editor = await screen.findByTestId('zone-editor');
+
+    expect(within(editor).getByTestId('draw-rectangle')).toBeInTheDocument();
+    expect(within(editor).getByTestId('draw-polygon')).toBeInTheDocument();
+    expect(within(editor).queryByTestId('draw-polyline')).not.toBeInTheDocument();
+    // Passive hint until a mode is armed.
+    expect(within(editor).getByText('shuttleZones.drawHintZone')).toBeInTheDocument();
+
+    // Arming a mode presses its button and swaps in the mode-specific hint.
+    fireEvent.click(within(editor).getByTestId('draw-rectangle'));
+    expect(within(editor).getByTestId('draw-rectangle')).toHaveAttribute('aria-pressed', 'true');
+    expect(within(editor).getByText('shuttleZones.drawActiveHintRectangle')).toBeInTheDocument();
+
+    // Switching modes flips the pressed state; clicking again disarms.
+    fireEvent.click(within(editor).getByTestId('draw-polygon'));
+    expect(within(editor).getByTestId('draw-rectangle')).toHaveAttribute('aria-pressed', 'false');
+    expect(within(editor).getByTestId('draw-polygon')).toHaveAttribute('aria-pressed', 'true');
+    expect(within(editor).getByText('shuttleZones.drawActiveHintPolygon')).toBeInTheDocument();
+    fireEvent.click(within(editor).getByTestId('draw-polygon'));
+    expect(within(editor).getByTestId('draw-polygon')).toHaveAttribute('aria-pressed', 'false');
+    expect(within(editor).getByText('shuttleZones.drawHintZone')).toBeInTheDocument();
+  });
+
+  it('route editor shows only the route draw button', async () => {
+    routeDefaults();
+    render(<ZonesRoutesTab token="tok" />);
+    await findZoneRow('LAX Pickup Lot B');
+
+    fireEvent.click(screen.getByRole('button', { name: 'shuttleZones.newRoute' }));
+    const editor = await screen.findByTestId('zone-editor');
+
+    expect(within(editor).getByTestId('draw-polyline')).toBeInTheDocument();
+    expect(within(editor).queryByTestId('draw-rectangle')).not.toBeInTheDocument();
+    expect(within(editor).queryByTestId('draw-polygon')).not.toBeInTheDocument();
+
+    fireEvent.click(within(editor).getByTestId('draw-polyline'));
+    expect(within(editor).getByTestId('draw-polyline')).toHaveAttribute('aria-pressed', 'true');
+    expect(within(editor).getByText('shuttleZones.drawActiveHintPolyline')).toBeInTheDocument();
+  });
+
+  it('a failed maps load shows the honest error note instead of a dead map', async () => {
+    mapsState.load = vi.fn(async () => null); // key present but load fails
+    routeDefaults();
+    render(<ZonesRoutesTab token="tok" />);
+    await findZoneRow('LAX Pickup Lot B');
+
+    fireEvent.click(screen.getByRole('button', { name: 'shuttleZones.newZone' }));
+    const editor = await screen.findByTestId('zone-editor');
+    expect(await within(editor).findByText('shuttleZones.mapLoadError')).toBeInTheDocument();
+    expect(within(editor).queryByTestId('draw-toolbar')).not.toBeInTheDocument();
+    // Create still needs geometry, so Save stays disabled.
+    expect(within(editor).getByRole('button', { name: 'shuttleZones.save' })).toBeDisabled();
+  });
+});
+
+describe('pure geometry builders — backend contract unchanged', () => {
+  it('rectangleGeometry: two opposite corners (any order) → NW, NE, SE, SW', () => {
+    // Same ordering the old DrawingManager overlayToGeometry produced:
+    // [{ne.lat, sw.lng}, {ne.lat, ne.lng}, {sw.lat, ne.lng}, {sw.lat, sw.lng}]
+    const expected = {
+      type: 'rectangle',
+      points: [
+        { lat: 2, lng: 10 }, // NW
+        { lat: 2, lng: 20 }, // NE
+        { lat: 1, lng: 20 }, // SE
+        { lat: 1, lng: 10 }, // SW
+      ],
+    };
+    expect(rectangleGeometry({ lat: 1, lng: 10 }, { lat: 2, lng: 20 })).toEqual(expected);
+    // Corner click order must not matter.
+    expect(rectangleGeometry({ lat: 2, lng: 20 }, { lat: 1, lng: 10 })).toEqual(expected);
+    expect(rectangleGeometry({ lat: 2, lng: 10 }, { lat: 1, lng: 20 })).toEqual(expected);
+  });
+
+  it('polygonGeometry: min 3 vertices, passes points through', () => {
+    const pts = [{ lat: 1, lng: 1 }, { lat: 2, lng: 2 }, { lat: 3, lng: 1 }];
+    expect(polygonGeometry(pts)).toEqual({ type: 'polygon', points: pts });
+    expect(polygonGeometry(pts.slice(0, 2))).toBeNull();
+    expect(polygonGeometry([])).toBeNull();
+  });
+
+  it('polylineGeometry: min 2 points, passes points through', () => {
+    const pts = [{ lat: 1, lng: 1 }, { lat: 2, lng: 2 }];
+    expect(polylineGeometry(pts)).toEqual({ type: 'polyline', points: pts });
+    expect(polylineGeometry(pts.slice(0, 1))).toBeNull();
+  });
+
+  it('withinPixels: near points close at low zoom, far points never', () => {
+    const a = { lat: 33.94, lng: -118.4 };
+    const nudge = { lat: 33.940001, lng: -118.400001 }; // ~0.15 m
+    expect(withinPixels(a, nudge, 14)).toBe(true);
+    const far = { lat: 33.95, lng: -118.4 }; // ~1.1 km
+    expect(withinPixels(a, far, 14)).toBe(false);
+  });
+
+  it('collapseTail: drops the duplicate vertices a double-click leaves behind', () => {
+    const a = { lat: 33.94, lng: -118.4 };
+    const b = { lat: 33.95, lng: -118.41 };
+    const c = { lat: 33.96, lng: -118.4 };
+    const cDup = { lat: 33.960001, lng: -118.400001 };
+    expect(collapseTail([a, b, c, cDup, cDup], 14)).toEqual([a, b, c]);
+    // Distinct vertices are never dropped.
+    expect(collapseTail([a, b, c], 14)).toEqual([a, b, c]);
   });
 });
