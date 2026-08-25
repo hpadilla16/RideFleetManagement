@@ -86,6 +86,15 @@ export function ShuttleTrackerSettings({ locationId }) {
   if (status === 'error') return <div className="ui-muted" style={{ fontSize: 12 }}>Shuttle tracker: {message}</div>;
 
   const on = config.mode !== 'OFF';
+  // Owner decision (2026-08-25): the picker lists ONLY vehicles marked
+  // SHUTTLE_ONLY — the whole point of the program category is that dedicated
+  // shuttles are not rental inventory, and a 200-unit fleet in this list was
+  // noise. Vehicles ALREADY selected on this config stay visible regardless
+  // (a legacy config pointing at a not-yet-recategorized van must not have its
+  // selection silently hidden).
+  const shuttleVehicles = vehicles.filter(
+    (v) => v.programCategory === 'SHUTTLE_ONLY' || config.vehicleIds.includes(v.id)
+  );
   const plate = (v) => v.plate || v.licensePlate || '';
   const vehicleLabel = (v) => [v.year, v.make, v.model].filter(Boolean).join(' ') + (plate(v) ? ` · ${plate(v)}` : '');
 
@@ -118,8 +127,14 @@ export function ShuttleTrackerSettings({ locationId }) {
               The units checked here are the only ones the public map will ever show.
             </div>
             <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border, #ddd)', borderRadius: 8, padding: 8 }}>
-              {vehicles.length === 0 && <div className="ui-muted" style={{ fontSize: 12 }}>No vehicles found.</div>}
-              {vehicles.map((v) => (
+              {shuttleVehicles.length === 0 && (
+                <div className="ui-muted" style={{ fontSize: 12 }}>
+                  No vehicles are marked as shuttles yet. Set a vehicle&apos;s program to
+                  &quot;Shuttle only&quot; in Vehicles and it will appear here. / Marca un
+                  vehículo como &quot;Solo shuttle&quot; en Vehículos y aparecerá aquí.
+                </div>
+              )}
+              {shuttleVehicles.map((v) => (
                 <label key={v.id} className="label" style={{ display: 'block', fontWeight: 400 }}>
                   <input type="checkbox" checked={config.vehicleIds.includes(v.id)} onChange={() => toggleVehicle(v.id)} /> {vehicleLabel(v)}
                 </label>
