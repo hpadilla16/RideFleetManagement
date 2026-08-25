@@ -35,3 +35,12 @@ shuttleMonitorRouter.get('/positions', async (req, res, next) => {
     res.json(await shuttleMonitorService.positions(staffScope(req)));
   } catch (e) { next(e); }
 });
+
+/** Phase-2 alert feed (mockup Screen 5): geofence enter/exit alerts, newest
+ *  first, same staff gate + tenant/location scoping as the positions read. */
+shuttleMonitorRouter.get('/alerts', async (req, res, next) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await shuttleMonitorService.alerts(staffScope(req), { limit: req.query?.limit }));
+  } catch (e) { next(e); }
+});

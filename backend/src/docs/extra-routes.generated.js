@@ -445,6 +445,15 @@ export const EXTRA_ROUTES = [
   ['POST', '/api/admin/integrations/onestepgps/device-mappings', 'OneStepGPS', 'Upsert a device→vehicle mapping'],
   ['DELETE', '/api/admin/integrations/onestepgps/device-mappings/{id}', 'OneStepGPS', 'Deactivate a mapping'],
 
+  // ── Shuttle zones + alerts (Phase 2) ──────────────────────────────────────
+  ['GET', '/api/shuttle-zones', 'Shuttle', 'List geofence zones/routes (admin, tenant-scoped)'],
+  ['POST', '/api/shuttle-zones', 'Shuttle', 'Create a zone/route (synced to the GPS provider; audited)'],
+  ['PUT', '/api/shuttle-zones/{id}', 'Shuttle', 'Update a zone/route (audited)'],
+  ['DELETE', '/api/shuttle-zones/{id}', 'Shuttle', 'Delete a zone/route (audited)'],
+  ['GET', '/api/shuttle-zones/recipients', 'Shuttle', 'Per-location staff alert recipients'],
+  ['PUT', '/api/shuttle-zones/recipients', 'Shuttle', 'Set per-location staff alert recipients (audited)'],
+  ['GET', '/api/shuttle-monitor/alerts', 'Shuttle', 'Geofence alert feed (staff, tenant/location scoped)'],
+
   // ── Admin (reservation override) ──────────────────────────────────────────
   ['GET', '/api/admin/reservations/{id}/override-preview', 'Admin', 'Preview reservation status override'],
   ['PATCH', '/api/admin/reservations/{id}/status', 'Admin', 'Apply reservation status override'],

@@ -148,4 +148,71 @@ export const shuttleMonitorService = {
       generatedAt: new Date(now).toISOString(),
     };
   },
+
+  /**
+   * The Phase-2 alert feed (approved mockup Screen 5): normalized geofence
+   * alerts, newest first, enriched with zone + vehicle labels via keyed
+   * lookups (ShuttleZone/ShuttleAlert carry plain refs, no relations).
+   *
+   * SCOPING: tenant fail-closed like everything here. Location-scoped staff
+   * see only alerts attributable to a zone at one of their sedes; zone-less
+   * provider alerts (a rule made by hand in the provider's own UI) have no
+   * location to check, so they are visible to unscoped staff only.
+   */
+  async alerts(scope = {}, { limit = 50 } = {}, depsOverride = {}) {
+    const deps = { ...defaultDeps(), ...depsOverride };
+    if (!scope?.tenantId) return { alerts: [] };
+    const allowed = allowedIds(scope);
+    const take = Math.min(200, Math.max(1, Number(limit) || 50));
+
+    const zones = await deps.prisma.shuttleZone.findMany({
+      where: {
+        tenantId: scope.tenantId,
+        ...(allowed ? { locationId: { in: allowed } } : {}),
+      },
+      select: { id: true, name: true, kind: true, locationId: true, isPickupSpot: true },
+    });
+    const zoneById = new Map(zones.map((z) => [z.id, z]));
+
+    const rows = await deps.prisma.shuttleAlert.findMany({
+      where: {
+        tenantId: scope.tenantId,
+        ...(allowed ? { zoneId: { in: zones.map((z) => z.id) } } : {}),
+      },
+      orderBy: { occurredAt: 'desc' },
+      take,
+    });
+
+    // Vehicle labels — cosmetic keyed lookup, a failure never fails the feed.
+    const vehicleIds = [...new Set(rows.map((r) => r.vehicleId).filter(Boolean))];
+    let vehicleById = {};
+    if (vehicleIds.length) {
+      try {
+        const vehicles = await deps.prisma.vehicle.findMany({
+          where: { id: { in: vehicleIds }, tenantId: scope.tenantId },
+          select: { id: true, make: true, model: true, plate: true },
+        });
+        vehicleById = Object.fromEntries(vehicles.map((v) => [v.id, v]));
+      } catch { vehicleById = {}; }
+    }
+
+    return {
+      alerts: rows.map((r) => {
+        const zone = r.zoneId ? zoneById.get(r.zoneId) || null : null;
+        const vehicle = r.vehicleId ? vehicleById[r.vehicleId] || null : null;
+        return {
+          id: r.id,
+          type: r.type,
+          occurredAt: r.occurredAt,
+          zone: zone ? { id: zone.id, name: zone.name, kind: zone.kind, locationId: zone.locationId, isPickupSpot: zone.isPickupSpot } : null,
+          vehicle: vehicle ? {
+            id: vehicle.id,
+            name: [vehicle.make, vehicle.model].map((p) => String(p || '').trim()).filter(Boolean).join(' ') || null,
+            plate: vehicle.plate || null,
+          } : null,
+          staffNotifiedAt: r.staffNotifiedAt,
+        };
+      }),
+    };
+  },
 };

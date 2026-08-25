@@ -54,6 +54,20 @@ export class OneStepGpsAuthError extends Error {
   }
 }
 
+/**
+ * The provider answered, but not in a shape we recognize (Phase 2 zones/
+ * alerts — the apidoc is auth-gated and marked "under development", so the
+ * zone/alert contract is ASSUMED, not verified; see the section header
+ * below). Callers treat this as "sync stays PENDING / entry skipped with a
+ * warn", never as a crash.
+ */
+export class OneStepGpsShapeError extends Error {
+  constructor(message = 'OneStepGPS response shape not recognized') {
+    super(message);
+    this.name = 'OneStepGpsShapeError';
+  }
+}
+
 // ─── Test seams (production path unchanged when unset) ───────────────────────
 
 let _prismaOverride = null;
@@ -158,29 +172,40 @@ async function recordTestStatus(tenantId, status) {
 // ─── HTTP ────────────────────────────────────────────────────────────────────
 
 /**
- * GET a public API path with the tenant's key. The key lives ONLY in the
- * Authorization header; error messages carry status + a truncated body with
- * any occurrence of the key redacted (an echoing proxy must not leak it into
- * our logs).
+ * One API call with the tenant's key. The key lives ONLY in the Authorization
+ * header; error messages carry status + a truncated body with any occurrence
+ * of the key redacted (an echoing proxy must not leak it into our logs).
  */
-async function apiGet(tenantId, path, params = {}) {
+async function apiCall(tenantId, method, path, { params = {}, body = undefined } = {}) {
   const apiKey = await getApiKey(tenantId);
   const url = new URL(path, BASE_URL);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
+  const init = {
+    method,
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+  };
+  if (body !== undefined) {
+    init.headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(body);
+  }
   const res = await withTimeout(
-    doFetch(url.toString(), {
-      headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
-    }),
+    doFetch(url.toString(), init),
     CALL_TIMEOUT_MS,
-    `onestepgps GET ${path}`
+    `onestepgps ${method} ${path}`
   );
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     const safe = String(text).split(apiKey).join('[redacted]').slice(0, 200);
-    throw new Error(`OneStepGPS GET ${path} failed: ${res.status} ${safe}`);
+    throw new Error(`OneStepGPS ${method} ${path} failed: ${res.status} ${safe}`);
   }
-  return res.json();
+  // Mutations may answer 204/empty/non-JSON — a body-less success is null;
+  // callers that NEED a body (zone create) shape-check what they got.
+  try { return await res.json(); } catch { return null; }
+}
+
+async function apiGet(tenantId, path, params = {}) {
+  return apiCall(tenantId, 'GET', path, { params });
 }
 
 /** device-info returns a bare array; tolerate a paginated wrapper too. */
@@ -346,4 +371,109 @@ export async function getDevicesWithPositions(tenantId) {
     }
   }
   return out;
+}
+
+// ─── Zones + Alerts (Phase 2, 2026-08-24) — ASSUMED CONTRACT, DEFENSIVE ─────
+//
+// The apidoc (doc/onestepgps-api-contract-2026-08-24.md) covers device-info /
+// device-point only; the Zone/ZoneGroup and Alert sections sit behind the
+// auth-gated docs page and could not be re-read when this shipped, and no
+// public client or spec exists (checked onestepgps's GitHub org, 2026-08-24 —
+// only the units library is public). So everything below is built to the
+// VERIFIED base contract (base URL, Bearer auth, bare-array-or-result_list
+// unwrapping, RFC3339 UTC times) with the endpoint names and field spellings
+// ASSUMED and overridable by env until a real capture pins them:
+//
+//   ONESTEPGPS_ZONES_PATH   (default 'zone')
+//   ONESTEPGPS_ALERTS_PATH  (default 'alert')
+//
+// Tolerance rules: ids are picked from several candidate spellings; an
+// answer with no recognizable id is an OneStepGpsShapeError the caller turns
+// into "sync stays PENDING, warn logged" — never a crash, and NEVER a faked
+// success. Raw alert entries are returned as-is; normalization (with its own
+// warn+skip rules) lives in shuttle/shuttle-zone-alerts.js so it is testable
+// without this client.
+
+const zonesPath = () => (process.env.ONESTEPGPS_ZONES_PATH || 'zone').replace(/^\//, '');
+// VERIFIED against the live apidoc (2026-08-25, via Hector's session): the
+// account-wide polling endpoint is GET /v3/api/public/alert/user/devices/
+// (cursor-paginated: limit, alert_cursor, alert_at_from/to, asc; response
+// { result_length, result_list, alert_cursor, outside_time_bound }).
+const alertsPath = () => (process.env.ONESTEPGPS_ALERTS_PATH || 'alert/user/devices/').replace(/^\//, '');
+
+/** Tolerant id extraction from a zone create/update answer. */
+export function pickProviderZoneId(data) {
+  if (data == null) return null;
+  if (typeof data === 'string' || typeof data === 'number') return String(data).trim() || null;
+  if (typeof data !== 'object') return null;
+  const containers = [data, data.zone, data.result, data.data];
+  for (const c of containers) {
+    if (!c || typeof c !== 'object') continue;
+    for (const key of ['zone_id', 'zoneId', 'id', '_id', 'uuid']) {
+      const v = c[key];
+      if (v != null && String(v).trim()) return String(v).trim();
+    }
+  }
+  return null;
+}
+
+/**
+ * Create or update the provider-side copy of a zone. `points` is our
+ * canonical [{lat,lng},...] list; both common spellings are sent so either
+ * server-side reader finds one. Returns { providerZoneId }.
+ */
+export async function pushProviderZone(tenantId, { providerZoneId = null, name, points }) {
+  // VERIFIED create-zone fields (live apidoc 2026-08-25): display_name,
+  // zone_type, vertices (+ cosmetics hex_color/label_*/shape_data). zone_type's
+  // enum wasn't shown in the field table, so it is omitted and left to the
+  // provider default; the legacy tolerant spellings ride along unchanged in
+  // case an older deployment reads them.
+  const vertexList = (points || []).map((p) => ({ lat: p.lat, lng: p.lng }));
+  const body = {
+    display_name: String(name || '').slice(0, 120),
+    vertices: vertexList,
+    zone_name: String(name || '').slice(0, 120),
+    points: vertexList,
+    latlng_list: vertexList,
+  };
+  let data;
+  if (providerZoneId) {
+    body.zone_id = providerZoneId;
+    data = await apiCall(tenantId, 'PUT', `${zonesPath()}/${encodeURIComponent(providerZoneId)}`, { body });
+    // An empty PUT answer is fine — the id we addressed is the id.
+    return { providerZoneId: pickProviderZoneId(data) || providerZoneId };
+  }
+  data = await apiCall(tenantId, 'POST', zonesPath(), { body });
+  const id = pickProviderZoneId(data);
+  if (!id) {
+    throw new OneStepGpsShapeError('zone create answered without a recognizable zone id');
+  }
+  return { providerZoneId: id };
+}
+
+/** Best-effort provider-side delete. 404-ish failures are the caller's call. */
+export async function deleteProviderZone(tenantId, providerZoneId) {
+  if (!providerZoneId) return { ok: true, skipped: true };
+  await apiCall(tenantId, 'DELETE', `${zonesPath()}/${encodeURIComponent(providerZoneId)}`);
+  return { ok: true };
+}
+
+/**
+ * Raw alert entries since `sinceIso` (RFC3339). Window params are sent in
+ * both documented device-point spellings (dt_server_from is the doc's own
+ * "tail new records" idiom) — unknown params are assumed ignored. Returns the
+ * unwrapped array UNNORMALIZED; a non-array answer is a ShapeError.
+ */
+export async function listRawAlerts(tenantId, { sinceIso } = {}) {
+  const params = {};
+  if (sinceIso) {
+    params.dt_server_from = sinceIso;
+    params.dt_from = sinceIso;
+  }
+  const data = await apiGet(tenantId, alertsPath(), params);
+  if (Array.isArray(data)) return data;
+  for (const key of ['result_list', 'alerts', 'data', 'result']) {
+    if (Array.isArray(data?.[key])) return data[key];
+  }
+  throw new OneStepGpsShapeError('alerts endpoint answered with no recognizable list');
 }

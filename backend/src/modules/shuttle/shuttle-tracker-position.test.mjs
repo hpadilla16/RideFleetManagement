@@ -30,8 +30,9 @@ test('THE WHITELIST: nothing beyond the contract ever leaves, even if the caller
   // 2026-08-24 (approved tracker polish): the contract DELIBERATELY grew by
   // exactly five keys — brandName, counterPhone, requestStatus,
   // walkingDirections, and (when a vehicle is passed) vehicle{name,color,
-  // plate}. This list IS the review record; growing it again means editing
-  // this assertion on purpose.
+  // plate}. 2026-08-24 (Phase 2, approved #21): two more — arrivedAtSpot +
+  // arrivedSpotName. This list IS the review record; growing it again means
+  // editing this assertion on purpose.
   const leaky = {
     latitude: 18.4, longitude: -66.0, heading: 90, speedMph: 30, eventAt: secondsAgo(5),
     plate: 'ABC-123', vin: '1FTBW3XM…', odometer: 88123, engineOn: true,
@@ -39,10 +40,33 @@ test('THE WHITELIST: nothing beyond the contract ever leaves, even if the caller
   };
   const out = publicPositionPayload({ position: leaky, config: CONFIG, location: LOCATION, now: NOW });
   assert.deepEqual(Object.keys(out).sort(), [
-    'brandName', 'counterPhone', 'headwayMinutes', 'locationName', 'mode',
+    'arrivedAtSpot', 'arrivedSpotName', 'brandName', 'counterPhone',
+    'headwayMinutes', 'locationName', 'mode',
     'pickupInstructions', 'position', 'requestStatus', 'status', 'walkingDirections',
   ]);
   assert.deepEqual(Object.keys(out.position).sort(), ['ageSeconds', 'asOf', 'heading', 'latitude', 'longitude', 'speedMph']);
+});
+
+test('PHASE 2 arrival fields: default off, spot name only when arrived, never invented', () => {
+  const base = { position: null, config: CONFIG, location: LOCATION, now: NOW };
+  const off = publicPositionPayload(base);
+  assert.equal(off.arrivedAtSpot, false);
+  assert.equal(off.arrivedSpotName, null);
+
+  const on = publicPositionPayload({ ...base, arrivedAtSpot: true, arrivedSpotName: 'Pickup Lot B' });
+  assert.equal(on.arrivedAtSpot, true);
+  assert.equal(on.arrivedSpotName, 'Pickup Lot B');
+
+  // A spot name without an arrival never crosses — the flag gates the name.
+  const nameOnly = publicPositionPayload({ ...base, arrivedAtSpot: false, arrivedSpotName: 'Pickup Lot B' });
+  assert.equal(nameOnly.arrivedAtSpot, false);
+  assert.equal(nameOnly.arrivedSpotName, null);
+
+  // Truthy-but-not-true never flips the flag (defensive against a caller
+  // passing a row or a string where the boolean belongs).
+  const truthy = publicPositionPayload({ ...base, arrivedAtSpot: 'yes', arrivedSpotName: 'X' });
+  assert.equal(truthy.arrivedAtSpot, false);
+  assert.equal(truthy.arrivedSpotName, null);
 });
 
 test('NEW #3 vehicle identity: name/color/plate only — a leaky vehicle row never crosses', () => {

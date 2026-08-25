@@ -3321,6 +3321,10 @@ model ShuttleRequest {
   // PUBLIC_LINK (the customer's tracker page). Null = created before this
   // column existed. Reporting and abuse triage both want the distinction.
   source         String?
+  // Phase 2 arrival notification (2026-08-24, approved #21 / mockup Screen
+  // 16): the customer said "text me when it arrives". Default false — the
+  // arrival SMS is strictly opt-in; the tracker-page banner needs no opt-in.
+  smsOptIn       Boolean              @default(false)
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
@@ -3355,6 +3359,13 @@ model ShuttleTrackerConfig {
   // NON_STOP: "runs every ~N minutes" — tenant-stated, shown verbatim.
   headwayMinutes Int @default(10)
 
+  // Phase 2 (2026-08-24, approved mockup Screen 4): per-location staff alert
+  // recipients — JSON array of { name, email?, phone?, channels: ['EMAIL'|'SMS'] }.
+  // Lives here (not a table) because the tracker config is already the
+  // per-location shuttle anchor and the list is tiny; parseAlertRecipients in
+  // shuttle-zone-alerts.js is the single validator both sides use.
+  alertRecipientsJson Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -3379,6 +3390,90 @@ model ShuttleTrackerLink {
 
   @@index([reservationId])
   @@index([tenantId, expiresAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shuttle zones + alerts (Phase 2, 2026-08-24 — approved mockup Screens 4/5/16).
+// Detection is PROVIDER-SIDE (approved decision #9): zones are synced to the
+// GPS provider (OneStepGPS Zone API) and enter/exit events come back through
+// its Alerts endpoint — no in-house point-in-polygon engine. These models
+// follow the tracker-substrate style: plain String refs, no Prisma relations,
+// keyed lookups at read time (same as ShuttleTrackerConfig/Link).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A staff-defined named area (pickup spot, base lot) or route corridor.
+// We are the source of truth for name/type/notify prefs; the provider holds
+// the live geometry copy under providerZoneId.
+model ShuttleZone {
+  id         String @id @default(cuid())
+  tenantId   String
+  locationId String
+
+  name String
+  // ZONE (rectangle/polygon) | ROUTE (polyline + corridor tolerance).
+  kind String @default("ZONE")
+  // A zone the customer waits in. ENTER here fires the arrival notification
+  // (mockup Screen 16) for open shuttle requests at the location.
+  isPickupSpot Boolean @default(false)
+  // Sede-written "go to sign B-4" text shown with the arrival notification.
+  walkingDirections String?
+
+  // ZONE:  { type: 'polygon'|'rectangle', points: [{lat,lng}, ...] }  (>= 3 points)
+  // ROUTE: { type: 'polyline', points: [{lat,lng}, ...] }             (>= 2 points)
+  geometryJson Json
+  // ROUTE corridor half-width in meters (default 300). Null for ZONE.
+  toleranceM Int?
+
+  // Provider sync state. PENDING → the scheduler retries; SYNCED carries
+  // providerZoneId; ERROR keeps the (redacted) message; UNSUPPORTED = the
+  // provider has no API for this kind (ROUTE today — see shuttle-zones.service).
+  providerZoneId     String?
+  providerSyncStatus String  @default("PENDING")
+  providerSyncError  String?
+
+  notifyOnEnter    Boolean @default(false)
+  notifyOnExit     Boolean @default(false)
+  notifyOnOffRoute Boolean @default(false)
+
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, locationId, active])
+  @@index([tenantId, providerZoneId])
+}
+
+// One normalized provider alert (ENTER | EXIT | OFF_ROUTE). providerRef is
+// the idempotency anchor: the poller re-reads a lookback window every tick
+// and the unique (tenantId, providerRef) turns re-seen alerts into no-ops.
+model ShuttleAlert {
+  id       String @id @default(cuid())
+  tenantId String
+  // Our ShuttleZone id (resolved from the provider's zone ref). Null when the
+  // alert carries no zone we know (e.g. a provider-side rule staff made by
+  // hand) — still recorded for the feed, but never fans out.
+  zoneId    String?
+  vehicleId String?
+
+  type       String // ENTER | EXIT | OFF_ROUTE
+  occurredAt DateTime
+  // Provider's alert id when it has one; otherwise a stable hash of
+  // (device, zone, type, time) — see alertDedupeRef in shuttle-zone-alerts.js.
+  providerRef String
+  rawJson     String?
+
+  // Stamped after the staff email/SMS fan-out attempt (best-effort record).
+  staffNotifiedAt DateTime?
+  // Stamped after the customer arrival fan-out. One row = one arrival = one
+  // notification — the dedupe on providerRef IS the debounce.
+  arrivalNotifiedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, providerRef])
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, zoneId, type, occurredAt])
 }
 
 model PlannerScenario {

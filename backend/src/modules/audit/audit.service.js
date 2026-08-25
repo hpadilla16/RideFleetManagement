@@ -77,6 +77,15 @@ export const AUDIT_ACTIONS = Object.freeze({
   TELEMATICS_KEY_CLEAR: 'TELEMATICS_KEY_CLEAR',
   TELEMATICS_MAPPING_CREATE: 'TELEMATICS_MAPPING_CREATE',
   TELEMATICS_MAPPING_DEACTIVATE: 'TELEMATICS_MAPPING_DEACTIVATE',
+
+  // ── Shuttle geofence zones (Phase 2, 2026-08-24) ──
+  // Zone CRUD is ADMIN-gated and shapes what triggers customer-facing
+  // notifications, so every mutation is audited; metadata carries provider +
+  // zone identifiers only (never geometry dumps, never credentials).
+  ZONE_CREATE: 'ZONE_CREATE',
+  ZONE_UPDATE: 'ZONE_UPDATE',
+  ZONE_DELETE: 'ZONE_DELETE',
+  ALERT_RECIPIENTS_CHANGE: 'ALERT_RECIPIENTS_CHANGE',
 });
 
 export const AUDIT_OUTCOME = Object.freeze({
