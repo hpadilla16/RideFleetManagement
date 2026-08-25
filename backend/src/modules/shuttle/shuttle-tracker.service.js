@@ -122,8 +122,11 @@ export async function latestPositionsByVehicle(vehicleIds) {
   return out;
 }
 
-/** Re-arm the worker's fast-poll signal. Best-effort — never blocks the read. */
-async function signalWatch(tenantId) {
+/** Re-arm the worker's fast-poll signal. Best-effort — never blocks the read.
+ * Exported (2026-08-25, innovation P1): the STAFF monitor read must also arm
+ * it — without this, an OneStepGPS-only tenant with no customer page open and
+ * no open requests never polls, and the monitor stares at stale fixes. */
+export async function signalWatch(tenantId) {
   const redis = await getRedis();
   if (!redis) return;
   try { await redis.set(watchKey(tenantId), '1', 'EX', WATCH_TTL_S); } catch { /* signal only */ }

@@ -7,7 +7,10 @@ import crypto from 'node:crypto';
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://u:p@localhost:5432/testdb';
 process.env.INTEGRATION_ENC_KEY = process.env.INTEGRATION_ENC_KEY || crypto.randomBytes(32).toString('base64');
 
-const { pollTenant } = await import('./shuttle-fast-poll.scheduler.js');
+const { pollTenant, __resetWriteMemoForTests } = await import('./shuttle-fast-poll.scheduler.js');
+// The write memo is process-lifetime by design; these cases replay identical
+// fixture eventAts, so each test starts from a clean memo.
+test.beforeEach(() => { __resetWriteMemoForTests(); });
 
 // ── the fake world ──────────────────────────────────────────────────────────
 

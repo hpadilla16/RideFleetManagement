@@ -49,8 +49,25 @@ let timerHandle = null;
 let running = false;
 
 /** The house write path: DB row (best-effort) + Redis fix, identical for every provider. */
+// Last WRITTEN device-time per vehicle (innovation P2, 2026-08-25): a stalled
+// device keeps returning the same latest point every tick — without this memo
+// that's ~4 duplicate rows/min until STALE, and thousands/day on a watched
+// shuttle. In-memory is enough: this scheduler runs only in the single worker
+// process, and a restart merely rewrites one row. `null` eventAt fixes always
+// write (no device time to compare).
+const lastWrittenEventAt = new Map();
+
+/** Test seam: the memo is process-lifetime by design; suites that replay the
+ * same fixture fixes across cases reset it between tests. */
+export function __resetWriteMemoForTests() { lastWrittenEventAt.clear(); }
+
 async function writeFix(deps, tenantId, vehicleId, fix) {
   const eventAt = fix.eventAt ? new Date(fix.eventAt) : new Date();
+  if (fix.eventAt) {
+    const iso = eventAt.toISOString();
+    if (lastWrittenEventAt.get(vehicleId) === iso) return false; // unchanged fix
+    lastWrittenEventAt.set(vehicleId, iso);
+  }
   await deps.prisma.vehicleTelematicsEvent.create({
     data: {
       tenantId,
@@ -69,6 +86,7 @@ async function writeFix(deps, tenantId, vehicleId, fix) {
     heading: fix.heading, speedMph: fix.speedMph,
     eventAt: eventAt.toISOString(),
   });
+  return true;
 }
 
 function defaultDeps() {
@@ -149,11 +167,22 @@ export async function pollTenant(config, depsOverride = {}) {
     try {
       const ready = await deps.onestepgps.hasApiKey(tenantId);
       if (ready) {
-        const fixes = await withTimeout(
-          deps.onestepgps.getDevicesWithPositions(tenantId),
-          CALL_TIMEOUT_MS,
-          `shuttle onestepgps bulk ${tenantId}`
-        );
+        // Per-tick memo (innovation P1, 2026-08-25): the bulk call already
+        // returns EVERY device on the account, so a tenant with N tracked
+        // locations must not make N identical calls per tick against an API
+        // with undocumented rate limits. tick() passes one shared Map per
+        // sweep; the PROMISE is cached, so concurrent locations coalesce and
+        // a failed call is not retried within the same tick.
+        let fixesPromise = deps.bulkCache?.get(tenantId);
+        if (!fixesPromise) {
+          fixesPromise = withTimeout(
+            deps.onestepgps.getDevicesWithPositions(tenantId),
+            CALL_TIMEOUT_MS,
+            `shuttle onestepgps bulk ${tenantId}`
+          );
+          deps.bulkCache?.set(tenantId, fixesPromise);
+        }
+        const fixes = await fixesPromise;
         const byExternalId = new Map((fixes || []).map((f) => [f.externalDeviceId, f]));
         for (const device of onestepDevices) {
           const fix = byExternalId.get(device.externalDeviceId);
@@ -175,9 +204,11 @@ async function tick() {
   running = true;
   try {
     const configs = await prisma.shuttleTrackerConfig.findMany({ where: { mode: { not: 'OFF' } } });
+    // One OneStepGPS bulk result per tenant per sweep (see pollTenant).
+    const bulkCache = new Map();
     for (const config of configs) {
       try {
-        const out = await withTimeout(pollTenant(config), 60 * 1000, `shuttle tenant ${config.tenantId}`);
+        const out = await withTimeout(pollTenant(config, { bulkCache }), 60 * 1000, `shuttle tenant ${config.tenantId}`);
         if (out.polled) logger.info('[shuttle-poll] fixes published', { tenantId: config.tenantId, polled: out.polled });
       } catch (err) {
         logger.warn('[shuttle-poll] tenant failed', { tenantId: config.tenantId, message: err.message });

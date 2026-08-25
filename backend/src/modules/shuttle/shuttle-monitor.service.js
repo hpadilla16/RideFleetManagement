@@ -16,7 +16,7 @@
  * Deps are injectable for the DB-free test suite; production passes none.
  */
 import { prisma } from '../../lib/prisma.js';
-import { latestPositionsByVehicle } from './shuttle-tracker.service.js';
+import { latestPositionsByVehicle, signalWatch } from './shuttle-tracker.service.js';
 import { configVehicleIds } from './shuttle-tracker-position.js';
 import { OPEN_STATUSES, scopeWhere } from './shuttle-query.js';
 import { monitorShuttlePayload, summarizeOpenRequests } from './shuttle-monitor.js';
@@ -62,6 +62,12 @@ export const shuttleMonitorService = {
     // deny-all sentinel; this also refuses a super who picked no tenant.)
     if (!scope?.tenantId) return EMPTY();
     const allowed = allowedIds(scope);
+
+    // Staff demand signal (innovation P1, 2026-08-25): the monitor is a
+    // watcher too. Arming the same shuttle:watch key the customer page uses
+    // wakes the fast poll for OneStepGPS-only tenants — otherwise the staff
+    // map goes dark whenever no customer link is open. Best-effort.
+    signalWatch(scope.tenantId).catch(() => {});
 
     const configs = await deps.prisma.shuttleTrackerConfig.findMany({
       where: {

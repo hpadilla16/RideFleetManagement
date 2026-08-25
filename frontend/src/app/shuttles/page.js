@@ -181,7 +181,7 @@ function ShuttleMonitorInner({ me, token, logout }) {
   const statusChip = (s) => {
     const meta = STATUS_META[s.status] || STATUS_META.OFFLINE;
     const age = ageText(s.ageSeconds);
-    const text = s.status === 'LIVE' ? `live · ${age}`
+    const text = s.status === 'LIVE' ? `${t('shuttleMonitor.live', 'live')} · ${age}`
       : s.status === 'AGING' ? `${t('shuttleMonitor.lastKnown', 'last known')} · ${age}`
         : s.status === 'OFFLINE' ? t('shuttleMonitor.offline', 'offline')
           : t('shuttleMonitor.noDevice', 'no device');
