@@ -126,13 +126,13 @@ a { color: inherit; text-decoration: none; }
 
 .auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
 .app-shell { display: grid; grid-template-columns: 270px 1fr; min-height: 100vh; gap: 18px; padding: 18px; max-width: var(--content-max); margin: 0 auto; }
-.sidebar { padding: 18px; border-radius: var(--r-lg); border: 1px solid var(--border); background: var(--surface-1); box-shadow: var(--sh-1); overflow-y: auto; overscroll-behavior: contain; }
+.sidebar { display: flex; flex-direction: column; padding: 18px; border-radius: var(--r-lg); border: 1px solid var(--border); background: var(--surface-1); box-shadow: var(--sh-1); overflow-y: auto; overscroll-behavior: contain; }
 .brand-block { display: grid; gap: 8px; margin-bottom: 18px; }
 .brand { font-size: 22px; font-weight: 850; color: var(--brand-ink); letter-spacing: .2px; }
 .brand-subtitle { color: var(--ios-muted); font-size: 12px; line-height: 1.55; }
 .nav-section-label { color: var(--ios-muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 8px; }
 .nav-stack { gap: 6px; }
-.nav-link { display: block; padding: 10px 12px; border-radius: var(--r-sm); color: var(--text-2); transition: background .18s ease, color .18s ease; border: 1px solid transparent; font-weight: 600; }
+.nav-link { position: relative; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: var(--r-sm); color: var(--text-2); transition: background .18s ease, color .18s ease; border: 1px solid transparent; font-weight: 600; font-size: 13px; }
 .nav-link:hover { background: var(--surface-3); color: var(--text-1); }
 .nav-link.active { background: var(--p-50); color: var(--p-800); box-shadow: inset 0 0 0 1px var(--border-brand); }
 .content { padding-right: 8px; min-width: 0; }
@@ -2159,3 +2159,145 @@ tr.osg-dirty td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
   border-radius: var(--r-lg); background: var(--surface-card); display: grid; gap: 10px; justify-items: center;
 }
 .osg-empty-glyph { font-size: 30px; opacity: .75; }
+
+/* ============================================================
+   Sidebar redesign (2026-08-24, approved mockup): collapsible
+   sections + icon rail. Presentation only — gating unchanged.
+   ============================================================ */
+
+/* Quick search — opens the existing CommandPalette (Ctrl+K). */
+.sb-search {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  margin: 2px 0 10px;
+  border: 1px solid var(--border-strong); background: var(--surface-2);
+  color: var(--text-3); border-radius: var(--r-sm);
+  padding: 7px 10px; font-size: 12.5px; font-weight: 600;
+  box-shadow: none; cursor: pointer; text-align: left;
+}
+.sb-search:hover { background: var(--surface-3); color: var(--text-2); border-color: var(--border-strong); box-shadow: none; }
+.sb-search:active { background: var(--surface-3); }
+.sb-search-icon { flex: none; width: 14px; height: 14px; }
+.sb-search-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-search-kbd {
+  margin-left: auto; font-family: ui-monospace, Consolas, monospace; font-size: 10px;
+  border: 1px solid var(--border-strong); border-radius: 5px; padding: 1px 5px;
+  color: var(--text-3); background: var(--surface-1);
+}
+
+/* Nav scroller: only the nav scrolls; the little indicator bar at -12px stays
+   visible thanks to the padding/negative-margin pair (clip edge moves out). */
+.nav-scroll {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin;
+  padding: 0 12px 8px; margin: 0 -12px;
+}
+
+/* Section headers (11px uppercase + chevron). */
+.nav-sec { margin-top: 8px; }
+.nav-sec:first-child { margin-top: 0; }
+.nav-sec-head {
+  width: 100%; display: flex; align-items: center; gap: 6px;
+  background: none; border: 1px solid transparent; box-shadow: none;
+  cursor: pointer; font-family: inherit;
+  padding: 5px 8px 5px 10px; border-radius: var(--r-xs);
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .09em;
+  color: var(--text-3); text-align: left;
+}
+.nav-sec-head:hover { color: var(--text-2); background: var(--surface-3); border-color: transparent; box-shadow: none; }
+.nav-sec-head:active { background: var(--surface-3); }
+.nav-sec-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-sec-chev { margin-left: auto; flex: none; width: 13px; height: 13px; color: var(--icon-quiet, var(--text-3)); transition: transform .18s ease; }
+.nav-sec.closed .nav-sec-chev { transform: rotate(-90deg); }
+.nav-sec-items { display: flex; flex-direction: column; gap: 3px; padding-top: 2px; }
+.nav-sec.closed .nav-sec-items { display: none; }
+
+/* Nav item internals: 18px icon, ellipsized label, badge/chip on the right. */
+.nav-icon { flex: none; width: 18px; height: 18px; color: var(--icon-quiet, var(--text-3)); transition: color .15s ease; }
+.nav-link:hover .nav-icon { color: var(--text-2); }
+.nav-link.active .nav-icon { color: var(--brand-tx, var(--p-700)); }
+.nav-link .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-link.active { font-weight: 750; }
+/* 3px brand rail indicator on the active item. */
+.nav-link.active::before {
+  content: ""; position: absolute; left: -12px; top: 7px; bottom: 7px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--brand, #8752FE);
+}
+.nav-badge {
+  margin-left: auto; flex: none; font-size: 10px; font-weight: 800; line-height: 1;
+  background: var(--brand, #8752FE); color: #fff;
+  padding: 3px 7px; border-radius: 999px;
+}
+.nav-chip {
+  margin-left: auto; flex: none; font-size: 9px; font-weight: 800; letter-spacing: .06em;
+  color: var(--text-3); border: 1px solid var(--border-strong);
+  border-radius: 5px; padding: 1.5px 5px;
+}
+.nav-chip + .nav-badge { margin-left: 6px; }
+
+/* Footer: collapse toggle pinned to the bottom. */
+.sb-foot { margin-top: auto; border-top: 1px solid var(--border-subtle); padding-top: 10px; }
+.sb-collapse {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: 1px solid transparent; border-radius: var(--r-sm);
+  color: var(--text-3); font-family: inherit; font-size: 12px; font-weight: 700;
+  padding: 7px 10px; cursor: pointer; box-shadow: none; text-align: left;
+}
+.sb-collapse:hover { background: var(--surface-3); color: var(--text-1); border-color: transparent; box-shadow: none; }
+.sb-collapse:active { background: var(--surface-3); }
+.sb-collapse-icon { flex: none; width: 16px; height: 16px; }
+
+/* Mobile drawer (<=980px, existing behavior untouched): the rail never applies
+   there, and the rail toggle is hidden — the drawer is always full width. */
+@media (max-width: 980px) {
+  .sb-foot { display: none; }
+}
+
+/* Icon rail (~68px inner). Scoped to >980px so the mobile drawer CSS wins
+   below that exactly as before; auto-collapse is decided in JS (768–1280px,
+   manual choice persisted overrides auto). */
+@media (min-width: 981px) {
+  .app-shell.nav-rail { grid-template-columns: 92px 1fr; }
+  .sidebar.rail { padding: 14px 12px; overflow: visible; }
+  .sidebar.rail .nav-scroll { overflow: visible; }
+  .sidebar.rail .brand { font-size: 15px; text-align: center; }
+  .sidebar.rail .brand-block { margin-bottom: 12px; }
+  .sidebar.rail .brand-subtitle { display: none; }
+  .sidebar.rail .sb-search { justify-content: center; padding: 8px 0; }
+  .sidebar.rail .sb-search-label, .sidebar.rail .sb-search-kbd { display: none; }
+  /* rail hides section headers and ignores collapse state; thin separators */
+  .sidebar.rail .nav-sec-head { display: none; }
+  .sidebar.rail .nav-sec { margin-top: 0; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
+  .sidebar.rail .nav-sec:first-child { border-top: none; padding-top: 0; }
+  .sidebar.rail .nav-sec.closed .nav-sec-items { display: flex; }
+  .sidebar.rail .nav-link { justify-content: center; padding: 9px 0; }
+  .sidebar.rail .nav-link .nav-label, .sidebar.rail .nav-chip { display: none; }
+  /* badge floats on the icon */
+  .sidebar.rail .nav-badge {
+    position: absolute; top: 2px; right: 6px; margin: 0;
+    min-width: 15px; height: 15px; padding: 0 4px;
+    display: grid; place-items: center; font-size: 9px;
+  }
+  /* tooltips */
+  .sidebar.rail .nav-link::after {
+    content: attr(data-tip);
+    position: absolute; left: calc(100% + 14px); top: 50%; transform: translateY(-50%);
+    background: var(--text-1); color: var(--surface-1);
+    font-size: 11.5px; font-weight: 700; white-space: nowrap;
+    padding: 5px 10px; border-radius: 7px;
+    opacity: 0; pointer-events: none; transition: opacity .12s ease;
+    z-index: 70; box-shadow: var(--sh-2);
+  }
+  .sidebar.rail .nav-link:hover::after,
+  .sidebar.rail .nav-link:focus-visible::after { opacity: 1; }
+  .sidebar.rail .sb-foot { padding-top: 8px; }
+  .sidebar.rail .sb-collapse { justify-content: center; padding: 7px 0; }
+  .sidebar.rail .sb-collapse-label { display: none; }
+}
+
+/* Dark theme: everything above resolves through tokens; only the pieces that
+   used hardcoded plates need a nudge (matches the existing dark nav rules). */
+:root[data-theme='dark'] .sb-search { background: var(--surface-2); color: var(--text-3); }
+:root[data-theme='dark'] .sb-search:hover { color: #ffffff; background: var(--surface-3); }
+:root[data-theme='dark'] .nav-sec-head:hover { color: #ffffff; background: var(--surface-3); }
+:root[data-theme='dark'] .sb-collapse:hover { color: #ffffff; background: var(--surface-3); }
+:root[data-theme='dark'] .nav-link.active .nav-icon { color: var(--p-300, #c0a8ff); }

@@ -10,45 +10,125 @@ import { setLanguage } from '../lib/i18n';
 import { CommandPalette } from './CommandPalette';
 import { ShuttleBanner } from './ShuttleBanner';
 
-const NAV_ITEMS = [
-  { href: '/dashboard', labelKey: 'nav.dashboard', moduleKey: 'dashboard', tour: 'nav-dashboard' },
-  { href: '/reservations', labelKey: 'nav.reservations', moduleKey: 'reservations', tour: 'nav-reservations' },
-  { href: '/quotes', labelKey: 'nav.quotes', moduleKey: 'quotes' },
-  { href: '/vehicles', labelKey: 'nav.vehicles', moduleKey: 'vehicles' },
-  { href: '/vehicles/inventory-helper', labelKey: 'nav.inventoryHelper', moduleKey: 'vehicles' },
-  { href: '/customers', labelKey: 'nav.customers', moduleKey: 'customers' },
-  { href: '/people', labelKey: 'nav.people', adminOnly: true, moduleKey: 'people', tour: 'nav-people' },
-  { href: '/planner', labelKey: 'nav.planner', moduleKey: 'planner' },
-  { href: '/reports-v2', labelKey: 'nav.reports', moduleKey: 'reports', tour: 'nav-reports' },
-  // Inventory Reports now lives INSIDE Reports (tile on the /reports-v2 landing).
-  { href: '/car-sharing', labelKey: 'nav.carSharing', feature: 'carSharing', moduleKey: 'carSharing' },
-  { href: '/host', labelKey: 'nav.hostApp', feature: 'carSharing', moduleKey: 'hostApp' },
-  // Employee App hidden 2026-06-16 — not in use right now (route still works at /employee).
-  // { href: '/employee', labelKey: 'nav.employeeApp', moduleKey: 'employeeApp' },
-  { href: '/issues', labelKey: 'nav.issueCenter', moduleKey: 'issueCenter' },
-  // Incidents hub (2026-07-28): reservation-bound documents — gated with reservations.
-  { href: '/incidents', labelKey: 'nav.incidents', moduleKey: 'reservations' },
-  // Staff Shuttle Monitor (2026-08-24, approved): its own nav item, shown
-  // only when the tenant has at least one location with the tracker ≠ OFF
-  // (feature check below, /api/shuttle-monitor/enabled). Rides on the
-  // reservations module like the queue and tracker settings it summarizes.
-  { href: '/shuttles', labelKey: 'nav.shuttles', feature: 'shuttleMonitor', moduleKey: 'reservations' },
-  { href: '/loaner', labelKey: 'nav.loaner', feature: 'dealershipLoaner', moduleKey: 'loaner' },
-  { href: '/tolls', labelKey: 'nav.tolls', moduleKey: 'tolls' },
-  { href: '/maintenance', labelKey: 'nav.maintenance', moduleKey: 'maintenance' },
-  { href: '/citations', labelKey: 'nav.citations', moduleKey: 'citations' },
-  // Self service (kiosk B3b): ops surface with live devices/sessions —
-  // top-level like Maintenance, gated by the opt-in 'kiosk' module.
-  { href: '/kiosks', labelKey: 'nav.kiosks', moduleKey: 'kiosk' },
-  { href: '/market', labelKey: 'nav.marketIntelligence', adminOnly: true, moduleKey: 'marketIntelligence', tour: 'nav-market' },
-  { href: '/suggestions', labelKey: 'nav.pricingSuggestions', adminOnly: true, moduleKey: 'marketIntelligence' },
-  { href: '/knowledge-base', labelKey: 'nav.knowledgeBase', tour: 'nav-university' },
-  { href: '/settings', labelKey: 'nav.settings', moduleKey: 'settings', tour: 'nav-settings' },
-  { href: '/tenants', labelKey: 'nav.tenants', superOnly: true, moduleKey: 'tenants' },
-  { href: '/settings/security', labelKey: 'nav.security', adminOnly: true, moduleKey: 'security' },
-  { href: '/settings/store-boards', labelKey: 'nav.actionBoards', adminOnly: true, moduleKey: 'settings' }
-  // Agreement clauses removed from the sidebar — it already lives inside Settings.
+/**
+ * Sidebar redesign (2026-08-24, approved mockup): the flat NAV_ITEMS list is
+ * regrouped into collapsible sections. PRESENTATION ONLY — every item keeps the
+ * exact same href, labelKey, module/feature/admin gate and tour anchor it had in
+ * the flat list. Gated-away items stay HIDDEN (same filters as before); a
+ * section whose items are all gated away renders nothing.
+ */
+export const NAV_SECTIONS = [
+  { key: 'dailyOps', labelKey: 'nav.sectionDailyOps', items: [
+    { href: '/dashboard', labelKey: 'nav.dashboard', moduleKey: 'dashboard', tour: 'nav-dashboard', icon: 'gauge' },
+    { href: '/reservations', labelKey: 'nav.reservations', moduleKey: 'reservations', tour: 'nav-reservations', icon: 'calcheck' },
+    { href: '/quotes', labelKey: 'nav.quotes', moduleKey: 'quotes', icon: 'quote' },
+    { href: '/planner', labelKey: 'nav.planner', moduleKey: 'planner', icon: 'planner' },
+    { href: '/customers', labelKey: 'nav.customers', moduleKey: 'customers', icon: 'users' },
+    // Incidents hub (2026-07-28): reservation-bound documents — gated with reservations.
+    { href: '/incidents', labelKey: 'nav.incidents', moduleKey: 'reservations', icon: 'alert' },
+    // Self service (kiosk B3b): ops surface with live devices/sessions —
+    // counter surface, gated by the opt-in 'kiosk' module.
+    { href: '/kiosks', labelKey: 'nav.kiosks', moduleKey: 'kiosk', icon: 'kiosk' }
+  ] },
+  { key: 'fleet', labelKey: 'nav.sectionFleet', items: [
+    { href: '/vehicles', labelKey: 'nav.vehicles', moduleKey: 'vehicles', icon: 'car' },
+    { href: '/vehicles/inventory-helper', labelKey: 'nav.inventoryHelper', moduleKey: 'vehicles', icon: 'clipboard' },
+    { href: '/maintenance', labelKey: 'nav.maintenance', moduleKey: 'maintenance', icon: 'wrench' },
+    // Staff Shuttle Monitor (2026-08-24, approved): its own nav item, shown
+    // only when the tenant has at least one location with the tracker ≠ OFF
+    // (feature check below, /api/shuttle-monitor/enabled). Rides on the
+    // reservations module like the queue and tracker settings it summarizes.
+    { href: '/shuttles', labelKey: 'nav.shuttles', feature: 'shuttleMonitor', moduleKey: 'reservations', icon: 'bus' },
+    { href: '/loaner', labelKey: 'nav.loaner', feature: 'dealershipLoaner', moduleKey: 'loaner', icon: 'key' },
+    { href: '/car-sharing', labelKey: 'nav.carSharing', feature: 'carSharing', moduleKey: 'carSharing', icon: 'share' },
+    { href: '/host', labelKey: 'nav.hostApp', feature: 'carSharing', moduleKey: 'hostApp', icon: 'phone' }
+    // Employee App hidden 2026-06-16 — not in use right now (route still works at /employee).
+    // { href: '/employee', labelKey: 'nav.employeeApp', moduleKey: 'employeeApp' },
+  ] },
+  { key: 'money', labelKey: 'nav.sectionMoney', items: [
+    { href: '/tolls', labelKey: 'nav.tolls', moduleKey: 'tolls', icon: 'road' },
+    { href: '/citations', labelKey: 'nav.citations', moduleKey: 'citations', icon: 'ticket' },
+    // Inventory Reports now lives INSIDE Reports (tile on the /reports-v2 landing).
+    { href: '/reports-v2', labelKey: 'nav.reports', moduleKey: 'reports', tour: 'nav-reports', icon: 'chart' }
+  ] },
+  { key: 'growth', labelKey: 'nav.sectionGrowth', items: [
+    { href: '/market', labelKey: 'nav.marketIntelligence', adminOnly: true, moduleKey: 'marketIntelligence', tour: 'nav-market', icon: 'trend' },
+    { href: '/suggestions', labelKey: 'nav.pricingSuggestions', adminOnly: true, moduleKey: 'marketIntelligence', icon: 'percent' }
+  ] },
+  { key: 'admin', labelKey: 'nav.sectionAdmin', items: [
+    { href: '/people', labelKey: 'nav.people', adminOnly: true, moduleKey: 'people', tour: 'nav-people', icon: 'idcard' },
+    { href: '/issues', labelKey: 'nav.issueCenter', moduleKey: 'issueCenter', icon: 'lifebuoy' },
+    { href: '/knowledge-base', labelKey: 'nav.knowledgeBase', tour: 'nav-university', icon: 'grad' },
+    { href: '/settings', labelKey: 'nav.settings', moduleKey: 'settings', tour: 'nav-settings', icon: 'gear' },
+    { href: '/settings/security', labelKey: 'nav.security', adminOnly: true, moduleKey: 'security', icon: 'shield' },
+    { href: '/settings/store-boards', labelKey: 'nav.actionBoards', adminOnly: true, moduleKey: 'settings', icon: 'kanban' },
+    { href: '/tenants', labelKey: 'nav.tenants', superOnly: true, moduleKey: 'tenants', icon: 'building', chip: 'SA' }
+    // Agreement clauses removed from the sidebar — it already lives inside Settings.
+  ] }
 ];
+
+/* 18px inline stroke icon set (approved mockup, consistent 1.8 weight). Inline
+   on purpose — no icon library. */
+const NAV_ICON_PATHS = {
+  gauge: '<path d="M12 15l3.5-3.5"/><path d="M3.5 18.5a10 10 0 1 1 17 0"/>',
+  calcheck: '<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 9.5h18"/><path d="m9 15.5 2 2 4-4"/>',
+  quote: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h4"/>',
+  planner: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8.5h6M9 12h8M7 15.5h4"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  alert: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/>',
+  kiosk: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M12 18h.01"/><path d="M8 6h8"/>',
+  car: '<path d="M19 17h2v-4.5L18.5 8h-13L3 12.5V17h2"/><circle cx="7.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/><path d="M9.3 17h5.4"/><path d="M3 12.5h18"/>',
+  clipboard: '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6M9 16h6"/>',
+  wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>',
+  bus: '<path d="M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M4 11h16"/><path d="M8 18v2M16 18v2"/><path d="M8 15h.01M16 15h.01"/>',
+  key: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m11 12 9.5-9.5"/><path d="M15.5 7.5l3 3"/><path d="M18 5l2 2"/>',
+  share: '<path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>',
+  phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M12 18h.01"/>',
+  road: '<path d="M4 20 8 4M20 20 16 4"/><path d="M12 6v2M12 11v2.5M12 16.5v2.5"/>',
+  ticket: '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5.5v2M13 11v2M13 16.5v2"/>',
+  chart: '<path d="M3 3v18h18"/><path d="M8 17v-5M13 17V8M18 17v-3"/>',
+  trend: '<path d="m22 7-8.5 8.5-5-5L2 17"/><path d="M16 7h6v6"/>',
+  percent: '<circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/><path d="M19 5 5 19"/>',
+  idcard: '<rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="9" r="2.5"/><path d="M8 16.5a4 4 0 0 1 8 0"/>',
+  lifebuoy: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="m5.7 5.7 3.4 3.4M18.3 5.7l-3.4 3.4M18.3 18.3l-3.4-3.4M5.7 18.3l3.4-3.4"/>',
+  grad: '<path d="M22 9 12 4 2 9l10 5z"/><path d="M6 11.5V16c0 1.4 2.7 2.8 6 2.8s6-1.4 6-2.8v-4.5"/><path d="M22 9v5"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  kanban: '<path d="M6 5v14M12 5v8M18 5v11"/>',
+  building: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+  chev: '<path d="m6 9 6 6 6-6"/>',
+  panel: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>'
+};
+
+function NavIcon({ name, className }) {
+  const markup = NAV_ICON_PATHS[name];
+  if (!markup) return null;
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      dangerouslySetInnerHTML={{ __html: markup }}
+    />
+  );
+}
+
+/* Section open/closed + rail collapse persistence (per approved mockup). */
+const NAV_SECTION_STATE_PREFIX = 'ui.nav.section.';
+const NAV_RAIL_KEY = 'ui.nav.rail';
+/* Auto-collapse to the icon rail on narrow laptops. NOTE: the existing mobile
+   drawer takes over below 981px (globals.css @media 980px) and is untouched —
+   rail styles are scoped to min-width 981px, so within 768–980px the drawer
+   still wins exactly as before. */
+const NAV_RAIL_AUTO_QUERY = '(min-width: 768px) and (max-width: 1280px)';
 
 const IDLE_LOCK_MS = 2 * 60 * 1000;
 
@@ -124,6 +204,59 @@ export function AppShell({ me, logout, children }) {
     window.addEventListener('shuttle:openCount', onCount);
     return () => window.removeEventListener('shuttle:openCount', onCount);
   }, []);
+
+  // Collapsible sections — open by default, closed state remembered per
+  // section (one localStorage key each, so future sections default open).
+  const [closedSections, setClosedSections] = useState(() => {
+    const out = {};
+    if (typeof window === 'undefined') return out;
+    for (const sec of NAV_SECTIONS) {
+      try { out[sec.key] = localStorage.getItem(NAV_SECTION_STATE_PREFIX + sec.key) === '1'; } catch { out[sec.key] = false; }
+    }
+    return out;
+  });
+  const toggleSection = (key) => {
+    setClosedSections((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      try { localStorage.setItem(NAV_SECTION_STATE_PREFIX + key, next[key] ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
+
+  // Icon-rail collapse — manual choice (persisted) wins; otherwise the
+  // 768–1280px auto-collapse decides. Mobile drawer (<981px CSS) unaffected.
+  const [railPref, setRailPref] = useState(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const v = localStorage.getItem(NAV_RAIL_KEY);
+      return v === '1' ? true : v === '0' ? false : null;
+    } catch { return null; }
+  });
+  const [autoRail, setAutoRail] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia(NAV_RAIL_AUTO_QUERY);
+    const apply = () => setAutoRail(!!mq.matches);
+    apply();
+    if (mq.addEventListener) mq.addEventListener('change', apply);
+    else if (mq.addListener) mq.addListener(apply);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', apply);
+      else if (mq.removeListener) mq.removeListener(apply);
+    };
+  }, []);
+  const railCollapsed = railPref === null ? autoRail : railPref;
+  const toggleRail = () => {
+    const next = !railCollapsed;
+    setRailPref(next);
+    try { localStorage.setItem(NAV_RAIL_KEY, next ? '1' : '0'); } catch {}
+  };
+
+  // Same trigger the topbar search button uses — opens the EXISTING
+  // CommandPalette (it listens for Ctrl/Cmd+K on window).
+  const openCommandPalette = () => {
+    try { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true })); } catch { /* no-op */ }
+  };
 
   const idleTimerRef = useRef(null);
   const role = String(me?.role || '').toUpperCase();
@@ -301,45 +434,98 @@ export function AppShell({ me, logout, children }) {
     }
   };
 
+  // The SAME visibility filters the old flat list applied — gate logic is
+  // untouched, only the grouping around it changed.
+  const isNavItemVisible = (item) =>
+    (!item.superOnly || role === 'SUPER_ADMIN') &&
+    (!item.adminOnly || isAdminNavRole) &&
+    (item.feature !== 'carSharing' || carSharingVisible) &&
+    (item.feature !== 'dealershipLoaner' || dealershipLoanerVisible) &&
+    (item.feature !== 'shuttleMonitor' || shuttleMonitorVisible) &&
+    isModuleEnabled(me, item.moduleKey);
+
+  const renderNavItem = (item) => {
+    const label = t(item.labelKey);
+    const showBadge = item.href === '/shuttles' && shuttleOpenCount > 0;
+    if (item.disabled) {
+      return (
+        <span key={item.href} className="nav-link nav-link-disabled">
+          <NavIcon name={item.icon} className="nav-icon" />
+          <span className="nav-label">{label}</span>
+        </span>
+      );
+    }
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        className={`nav-link ${pathname?.startsWith(item.href) ? 'active' : ''}`}
+        data-tour={item.tour}
+        data-tip={showBadge ? `${label} (${shuttleOpenCount})` : label}
+        onClick={() => setMobileOpen(false)}
+      >
+        <NavIcon name={item.icon} className="nav-icon" />
+        <span className="nav-label">{label}</span>
+        {item.chip ? <span className="nav-chip">{item.chip}</span> : null}
+        {showBadge ? <span className="nav-badge">{shuttleOpenCount}</span> : null}
+      </Link>
+    );
+  };
+
   return (
-    <div className="app-shell">
-      <aside className={`sidebar glass ${mobileOpen ? 'open' : ''}`}>
+    <div className={`app-shell ${railCollapsed ? 'nav-rail' : ''}`}>
+      <aside className={`sidebar glass ${mobileOpen ? 'open' : ''} ${railCollapsed ? 'rail' : ''}`}>
         <div className="brand-block">
           <div className="brand">Ride Fleet</div>
           <div className="brand-subtitle">{t('appShell.brandSubtitle')}</div>
         </div>
 
-        <div className="nav-section-label">{t('appShell.workspace')}</div>
-        <div className="stack nav-stack">
-          {NAV_ITEMS
-            .filter((item) => !item.superOnly || role === 'SUPER_ADMIN')
-            .filter((item) => !item.adminOnly || isAdminNavRole)
-            .filter((item) => item.feature !== 'carSharing' || carSharingVisible)
-            .filter((item) => item.feature !== 'dealershipLoaner' || dealershipLoanerVisible)
-            .filter((item) => item.feature !== 'shuttleMonitor' || shuttleMonitorVisible)
-            .filter((item) => isModuleEnabled(me, item.moduleKey))
-            .map((item) => (
-              item.disabled ? (
-                <span key={item.href} className="nav-link nav-link-disabled">
-                  <span className="nav-label">{t(item.labelKey)}</span>
-                </span>
-              ) : (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`nav-link ${pathname?.startsWith(item.href) ? 'active' : ''}`}
-                  data-tour={item.tour}
-                  onClick={() => setMobileOpen(false)}
+        <button
+          type="button"
+          className="sb-search"
+          title={t('search.open', 'Search (Ctrl+K)')}
+          onClick={openCommandPalette}
+        >
+          <NavIcon name="search" className="sb-search-icon" />
+          <span className="sb-search-label">{t('appShell.goTo', 'Go to…')}</span>
+          <kbd className="sb-search-kbd">Ctrl K</kbd>
+        </button>
+
+        <div className="nav-scroll">
+          {NAV_SECTIONS.map((sec) => {
+            const visibleItems = sec.items.filter(isNavItemVisible);
+            if (!visibleItems.length) return null; // fully gated section: no empty header
+            const closed = !!closedSections[sec.key];
+            return (
+              <div key={sec.key} className={`nav-sec ${closed ? 'closed' : ''}`}>
+                <button
+                  type="button"
+                  className="nav-sec-head"
+                  aria-expanded={!closed}
+                  onClick={() => toggleSection(sec.key)}
                 >
-                  <span className="nav-label">{t(item.labelKey)}</span>
-                  {item.href === '/shuttles' && shuttleOpenCount > 0 ? (
-                    <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 800, background: 'var(--brand, #8752FE)', color: '#fff', padding: '1px 7px', borderRadius: 999 }}>
-                      {shuttleOpenCount}
-                    </span>
-                  ) : null}
-                </Link>
-              )
-            ))}
+                  <span className="nav-sec-title">{t(sec.labelKey)}</span>
+                  <NavIcon name="chev" className="nav-sec-chev" />
+                </button>
+                <div className="nav-sec-items">
+                  {visibleItems.map(renderNavItem)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="sb-foot">
+          <button
+            type="button"
+            className="sb-collapse"
+            aria-pressed={railCollapsed}
+            title={railCollapsed ? t('appShell.expandNav', 'Expand') : t('appShell.collapseNav', 'Collapse')}
+            onClick={toggleRail}
+          >
+            <NavIcon name="panel" className="sb-collapse-icon" />
+            <span className="sb-collapse-label">{railCollapsed ? t('appShell.expandNav', 'Expand') : t('appShell.collapseNav', 'Collapse')}</span>
+          </button>
         </div>
       </aside>
 

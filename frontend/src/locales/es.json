@@ -28,7 +28,12 @@
     "agreementClauses": "Agreement clauses",
     "quotes": "Cotizaciones",
     "incidents": "Incidentes",
-    "shuttles": "Shuttles"
+    "shuttles": "Shuttles",
+    "sectionDailyOps": "Operación diaria",
+    "sectionFleet": "Flota",
+    "sectionMoney": "Dinero",
+    "sectionGrowth": "Crecimiento",
+    "sectionAdmin": "Administración"
   },
   "topbar": {
     "dark": "Oscuro",
@@ -255,7 +260,10 @@
     "display": "Pantalla",
     "openCustomerDisplay": "Abrir Pantalla del Cliente en una segunda pantalla",
     "toggleDarkMode": "Cambiar modo oscuro",
-    "resetPin": "Restablecer PIN"
+    "resetPin": "Restablecer PIN",
+    "goTo": "Ir a…",
+    "collapseNav": "Colapsar",
+    "expandNav": "Expandir"
   },
   "blockedModule": {
     "eyebrow": "Acceso Controlado",
