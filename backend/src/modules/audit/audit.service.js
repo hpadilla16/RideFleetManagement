@@ -93,6 +93,14 @@ export const AUDIT_ACTIONS = Object.freeze({
   // request/vehicle/location ids only — never customer PII, never coordinates.
   SHUTTLE_ASSIGN: 'SHUTTLE_ASSIGN',
   SHUTTLE_UNASSIGN: 'SHUTTLE_UNASSIGN',
+
+  // ── Shuttle driver shifts (Phase 3 driver surface, 2026-08-25) ──
+  // Minting hands out a public token that reads waiting customers' shared
+  // coordinates and closes their requests — a real credential, so issue and
+  // revoke leave a trail exactly like SERVICE_TOKEN_ISSUE/REVOKE. Metadata
+  // carries shift/vehicle/location ids and expiry only — NEVER the token.
+  DRIVER_SHIFT_ISSUE: 'DRIVER_SHIFT_ISSUE',
+  DRIVER_SHIFT_REVOKE: 'DRIVER_SHIFT_REVOKE',
 });
 
 export const AUDIT_OUTCOME = Object.freeze({

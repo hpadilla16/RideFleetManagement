@@ -102,6 +102,7 @@ import { smsRouter } from './modules/sms/sms.routes.js';
 import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.routes.js';
 import { trainingRouter } from './modules/training/training.routes.js';
 import { shuttleTrackerPublicRouter, shuttleTrackerAdminRouter } from './modules/shuttle/shuttle-tracker.routes.js';
+import { shuttleDriverPublicRouter } from './modules/shuttle/shuttle-driver.routes.js';
 import { shuttleMonitorRouter } from './modules/shuttle/shuttle-monitor.routes.js';
 import { shuttleZonesRouter } from './modules/shuttle/shuttle-zones.routes.js';
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
@@ -271,6 +272,9 @@ app.use('/api/public/telematics', publicVehicleTelematicsRouter);
 // Shuttle tracker: token-only public read, one whitelisted payload. The
 // token resolves everything; unusable tokens are a uniform 404.
 app.use('/api/public/shuttle', shuttleTrackerPublicRouter);
+// Driver mode (Phase 3): per-shift token-only surface — same bare-404 rule.
+// Staff mint/revoke lives on /api/shuttle-monitor behind requireAuth.
+app.use('/api/public/driver', shuttleDriverPublicRouter);
 app.use('/api/host-app', requireAuth, tenantRateLimit, requireModuleAccess('hostApp'), hostAppRouter);
 app.use('/api/employee-app', requireAuth, tenantRateLimit, requireModuleAccess('employeeApp'), employeeAppRouter);
 app.use('/api/dealership-loaner', requireAuth, tenantRateLimit, requireModuleAccess('loaner'), dealershipLoanerRouter);
