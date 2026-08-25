@@ -70,6 +70,12 @@ shuttleTrackerPublicRouter.post('/:token/request', requestGuards, async (req, re
       partySize: req.body?.partySize,
       pickupNote: String(req.body?.pickupNote || '').slice(0, 280),
       source: 'PUBLIC_LINK',
+      // Phase 2 arrival SMS consent (approved #21): a bare boolean is the
+      // only thing the body may say about it — identity still comes from the
+      // token, and the SMS goes to the RESERVATION's phone, never a typed
+      // one. Absent (an older page) = undefined, so a repeat tap without the
+      // field never silently clears an earlier opt-in.
+      smsOptIn: typeof req.body?.smsOptIn === 'boolean' ? req.body.smsOptIn : undefined,
     });
 
     res.setHeader('Cache-Control', 'no-store');

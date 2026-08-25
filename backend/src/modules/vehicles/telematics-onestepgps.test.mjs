@@ -310,3 +310,119 @@ test('testConnection failure is ok:false with a redacted message, records ERROR'
   assert.ok(!out.error.includes('sk-probe-key'));
   assert.equal(store.get('t1|ONESTEPGPS').lastTestStatus, 'ERROR');
 });
+
+// ── Phase 2: zones + alerts (ASSUMED contract — defensive by design) ────────
+// These imports live down here so the top of the file stays byte-identical to
+// its Phase 1 shape; node resolves them before any test runs regardless.
+const {
+  pickProviderZoneId,
+  pushProviderZone,
+  deleteProviderZone,
+  listRawAlerts,
+  OneStepGpsShapeError,
+} = await import('./telematics-onestepgps.js');
+
+test('pickProviderZoneId tolerates every plausible id spelling and nesting', () => {
+  assert.equal(pickProviderZoneId({ zone_id: 'z-1' }), 'z-1');
+  assert.equal(pickProviderZoneId({ id: 42 }), '42');
+  assert.equal(pickProviderZoneId({ _id: 'abc' }), 'abc');
+  assert.equal(pickProviderZoneId({ zone: { zone_id: 'nested' } }), 'nested');
+  assert.equal(pickProviderZoneId({ result: { id: 'r-1' } }), 'r-1');
+  assert.equal(pickProviderZoneId('bare-id'), 'bare-id');
+  assert.equal(pickProviderZoneId({}), null);
+  assert.equal(pickProviderZoneId(null), null);
+  assert.equal(pickProviderZoneId({ unrelated: true }), null);
+});
+
+test('pushProviderZone create: POST with Bearer auth, no key in URL, id parsed from the answer', async () => {
+  useDb();
+  await setApiKey('t1', 'sk-zone-key');
+  const calls = [];
+  _setFetchForTests(async (url, opts) => {
+    calls.push({ url, opts });
+    return jsonResponse({ zone_id: 'prov-9' });
+  });
+  const out = await pushProviderZone('t1', {
+    name: 'LAX Pickup Lot B',
+    points: [{ lat: 18.1, lng: -66.1 }, { lat: 18.2, lng: -66.1 }, { lat: 18.2, lng: -66.2 }],
+  });
+  assert.deepEqual(out, { providerZoneId: 'prov-9' });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].opts.method, 'POST');
+  assert.equal(calls[0].opts.headers.Authorization, 'Bearer sk-zone-key');
+  const url = new URL(calls[0].url);
+  assert.equal(url.searchParams.get('api-key'), null, 'key must NEVER ride in the URL');
+  const body = JSON.parse(calls[0].opts.body);
+  assert.equal(body.zone_name, 'LAX Pickup Lot B');
+  assert.equal(body.points.length, 3);
+  assert.ok(!calls[0].opts.body.includes('sk-zone-key'), 'key must never enter the request body');
+});
+
+test('pushProviderZone create: an answer with NO recognizable id is a ShapeError, never a fake success', async () => {
+  useDb();
+  await setApiKey('t1', 'k');
+  _setFetchForTests(async () => jsonResponse({ status: 'ok, trust me' }));
+  await assert.rejects(
+    () => pushProviderZone('t1', { name: 'X', points: [{ lat: 1, lng: 2 }] }),
+    OneStepGpsShapeError,
+  );
+});
+
+test('pushProviderZone update: PUT to the existing id; an empty answer keeps that id', async () => {
+  useDb();
+  await setApiKey('t1', 'k');
+  const calls = [];
+  _setFetchForTests(async (url, opts) => { calls.push({ url, opts }); return jsonResponse(null); });
+  const out = await pushProviderZone('t1', { providerZoneId: 'prov-7', name: 'Base', points: [{ lat: 1, lng: 2 }] });
+  assert.equal(out.providerZoneId, 'prov-7');
+  assert.equal(calls[0].opts.method, 'PUT');
+  assert.match(new URL(calls[0].url).pathname, /\/zone\/prov-7$/);
+});
+
+test('deleteProviderZone: DELETE to the id; a null id is a no-op skip', async () => {
+  useDb();
+  await setApiKey('t1', 'k');
+  const calls = [];
+  _setFetchForTests(async (url, opts) => { calls.push({ url, opts }); return jsonResponse(null); });
+  assert.deepEqual(await deleteProviderZone('t1', null), { ok: true, skipped: true });
+  assert.equal(calls.length, 0, 'no network call without an id');
+  assert.deepEqual(await deleteProviderZone('t1', 'prov-3'), { ok: true });
+  assert.equal(calls[0].opts.method, 'DELETE');
+});
+
+test('listRawAlerts unwraps bare arrays AND the known wrapper spellings; garbage is a ShapeError', async () => {
+  useDb();
+  await setApiKey('t1', 'k');
+  const entry = { alert_id: 'a1', alert_type: 'zone_enter' };
+
+  _setFetchForTests(async () => jsonResponse([entry]));
+  assert.deepEqual(await listRawAlerts('t1', { sinceIso: '2026-08-24T00:00:00Z' }), [entry]);
+
+  for (const key of ['result_list', 'alerts', 'data', 'result']) {
+    _setFetchForTests(async () => jsonResponse({ [key]: [entry] }));
+    assert.deepEqual(await listRawAlerts('t1', {}), [entry], `wrapper ${key}`);
+  }
+
+  _setFetchForTests(async () => jsonResponse({ nothing: 'recognizable' }));
+  await assert.rejects(() => listRawAlerts('t1', {}), OneStepGpsShapeError);
+});
+
+test('listRawAlerts sends the since window and errors stay key-redacted', async () => {
+  useDb();
+  await setApiKey('t1', 'sk-alert-key');
+  const calls = [];
+  _setFetchForTests(async (url) => { calls.push(url); return jsonResponse([]); });
+  await listRawAlerts('t1', { sinceIso: '2026-08-24T12:00:00.000Z' });
+  const url = new URL(calls[0]);
+  assert.equal(url.searchParams.get('dt_server_from'), '2026-08-24T12:00:00.000Z');
+  assert.equal(url.searchParams.get('api-key'), null);
+
+  _setFetchForTests(async () => jsonResponse(null, { ok: false, status: 500, text: 'boom sk-alert-key' }));
+  await assert.rejects(
+    () => listRawAlerts('t1', {}),
+    (err) => {
+      assert.ok(!err.message.includes('sk-alert-key'), `key leaked: ${err.message}`);
+      return true;
+    },
+  );
+});

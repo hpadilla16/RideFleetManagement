@@ -20,6 +20,7 @@ import {
   publicPositionPayload, linkState, configVehicleIds,
   watchKey, posKey, WATCH_TTL_S,
 } from './shuttle-tracker-position.js';
+import { arrivalState, ARRIVAL_FRESH_MS } from './shuttle-zone-alerts.js';
 
 const REDIS_URL = process.env.REDIS_URL || '';
 let redisClient = null;
@@ -228,13 +229,51 @@ export const shuttleTrackerService = {
       logger.warn('[shuttle-tracker] brand/phone resolution failed', { message: err.message });
     }
 
+    // Phase 2 arrival (approved #21, mockup Screen 16): a fresh provider
+    // ENTER on a pickup-spot zone at this location, not yet exited, lets the
+    // page say "your shuttle has arrived". Read from OUR ShuttleAlert rows —
+    // never the provider — and guarded whole: a rolling deploy whose old
+    // Prisma client predates the table must not break the tracker.
+    let arrival = { arrivedAtSpot: false, spotName: null };
+    try {
+      const spotZones = await prisma.shuttleZone.findMany({
+        where: { tenantId: link.tenantId, locationId: config.locationId, isPickupSpot: true, active: true },
+        select: { id: true, name: true, walkingDirections: true },
+      });
+      if (spotZones.length) {
+        const zoneById = new Map(spotZones.map((z) => [z.id, z]));
+        const recent = await prisma.shuttleAlert.findMany({
+          where: {
+            tenantId: link.tenantId,
+            zoneId: { in: spotZones.map((z) => z.id) },
+            type: { in: ['ENTER', 'EXIT'] },
+            occurredAt: { gte: new Date(Date.now() - ARRIVAL_FRESH_MS) },
+            // Only the vehicles this page may show — an unrelated van of the
+            // same tenant entering the lot is not "your shuttle".
+            ...(vehicleIds.length ? { OR: [{ vehicleId: { in: vehicleIds } }, { vehicleId: null }] } : {}),
+          },
+          orderBy: { occurredAt: 'desc' },
+          take: 10,
+        });
+        arrival = arrivalState(recent, zoneById);
+      }
+    } catch (err) {
+      logger.warn('[shuttle-tracker] arrival lookup failed', { message: err.message });
+    }
+
     // The read IS the demand signal for the fast poll.
     await signalWatch(link.tenantId);
 
     return publicPositionPayload({
       position, config, location, pickupInstructions,
-      walkingDirections, brandName, counterPhone, vehicle,
+      // The spot's own walking text (staff wrote it FOR this spot) beats the
+      // location-level default while the shuttle is at the spot — same
+      // whitelisted key, more specific content.
+      walkingDirections: (arrival.arrivedAtSpot && arrival.spotWalkingDirections) || walkingDirections,
+      brandName, counterPhone, vehicle,
       requestStatus: lastRequest?.status || null,
+      arrivedAtSpot: arrival.arrivedAtSpot,
+      arrivedSpotName: arrival.spotName,
     });
   },
 

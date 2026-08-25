@@ -283,6 +283,18 @@ async function main() {
     logger.warn('[worker] shuttle link-invite scheduler not started', { message: err.message });
   }
 
+  // Shuttle geofence alert poll (Phase 2, 2026-08-24) — ingests the
+  // provider's zone enter/exit alerts and fans out staff + arrival
+  // notifications. Gentle 60s cadence; only tenants with an API key AND at
+  // least one active zone are ever polled, so it is naturally inert today.
+  try {
+    const shuttleAlertsMod = await import('./modules/shuttle/shuttle-alerts.scheduler.js');
+    shuttleAlertsMod.startShuttleAlertScheduler();
+    logger.info('[worker] started: shuttle alert scheduler');
+  } catch (err) {
+    logger.warn('[worker] shuttle alert scheduler not started', { message: err.message });
+  }
+
   // Voltswitch GPS periodic pull (2026-08-13). Per-tenant interval from
   // Settings > Telematics; only tenants with the connector fully configured
   // (provider VOLTSWITCH + enabled + credentials) are touched. Each tenant

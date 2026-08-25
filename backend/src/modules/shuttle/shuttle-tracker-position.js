@@ -55,6 +55,15 @@ const PUBLIC_REQUEST_STATUSES = ['READY', 'VIEWED', 'COMPLETED'];
  *   • requestStatus                   (NEW #2 — READY|VIEWED|COMPLETED|null,
  *     the existing state machine, no ETA invented)
  *   • walkingDirections               (NEW #4 — sede-written static text)
+ *
+ * DELIBERATE WHITELIST EXPANSION (2026-08-24, Phase 2 — approved #21, mockup
+ * Screen 16). Exactly two more keys crossed, both booleans/short strings:
+ *   • arrivedAtSpot                   (true only while a fresh provider ENTER
+ *     on a pickup-spot zone stands un-exited — see arrivalState)
+ *   • arrivedSpotName                 (the zone's staff-given name, e.g.
+ *     "Pickup Lot B"; null unless arrived)
+ * No coordinates, no zone geometry, no alert history cross here — the page
+ * learns "it is at your spot", nothing about how we know.
  * Anything further needs its own review — do not spread, keep picking.
  *
  * @param {object} args
@@ -72,7 +81,8 @@ const PUBLIC_REQUEST_STATUSES = ['READY', 'VIEWED', 'COMPLETED'];
 export function publicPositionPayload({
   position, config, location, pickupInstructions = '',
   walkingDirections = '', brandName = null, counterPhone = null,
-  vehicle = null, requestStatus = null, now = Date.now(),
+  vehicle = null, requestStatus = null,
+  arrivedAtSpot = false, arrivedSpotName = null, now = Date.now(),
 }) {
   // The pickup POINT (where to stand) is the location's own coordinates —
   // already public knowledge (it's the rental counter's address), and it lets
@@ -103,6 +113,9 @@ export function publicPositionPayload({
     counterPhone: String(counterPhone || '').trim() || null,
     requestStatus: PUBLIC_REQUEST_STATUSES.includes(status) ? status : null,
     ...(vehicleOut ? { vehicle: vehicleOut } : {}),
+    // ── Phase 2 arrival (2026-08-24, approved #21) — see header comment ──
+    arrivedAtSpot: arrivedAtSpot === true,
+    arrivedSpotName: arrivedAtSpot === true ? (String(arrivedSpotName || '').trim() || null) : null,
     // ─────────────────────────────────────────────────────────────────────
     ...(pickupLat !== null && pickupLng !== null
       ? { pickup: { latitude: pickupLat, longitude: pickupLng } }

@@ -28,7 +28,7 @@ export const shuttleRequestsService = {
    * Create — or absorb into the existing open request for the reservation.
    * Caller (the route) has already resolved+validated tenant/reservation.
    */
-  async create({ tenantId, locationId, reservationId, customerName, customerPhone, partySize, pickupNote, source = null }) {
+  async create({ tenantId, locationId, reservationId, customerName, customerPhone, partySize, pickupNote, source = null, smsOptIn = undefined }) {
     if (!tenantId || !locationId || !reservationId) throw new Error('tenantId, locationId and reservationId are required');
 
     const existing = await prisma.shuttleRequest.findFirst({
@@ -45,7 +45,10 @@ export const shuttleRequestsService = {
           status: 'READY',
           partySize: Number.isFinite(Number(partySize)) && Number(partySize) > 0 ? Number(partySize) : existing.partySize,
           pickupNote: String(pickupNote || '').trim() || existing.pickupNote,
-          customerPhone: String(customerPhone || '').trim() || existing.customerPhone
+          customerPhone: String(customerPhone || '').trim() || existing.customerPhone,
+          // Arrival-SMS consent (Phase 2): an explicit boolean on the repeat
+          // call updates it either way; absent = the original choice stands.
+          ...(typeof smsOptIn === 'boolean' ? { smsOptIn } : {})
         }
       });
       return { request: updated, deduplicated: true };
@@ -62,7 +65,9 @@ export const shuttleRequestsService = {
         pickupNote: String(pickupNote || '').trim() || null,
         // VOICE (VozIA) | VALET | PUBLIC_LINK — where the request came from.
         // On absorb (above) the ORIGINAL source stands: the first call named it.
-        source: source ? String(source).trim() : null
+        source: source ? String(source).trim() : null,
+        // Strictly opt-IN: anything but an explicit true is false.
+        smsOptIn: smsOptIn === true
       }
     });
     return { request, deduplicated: false };

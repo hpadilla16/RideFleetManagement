@@ -103,6 +103,7 @@ import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.rou
 import { trainingRouter } from './modules/training/training.routes.js';
 import { shuttleTrackerPublicRouter, shuttleTrackerAdminRouter } from './modules/shuttle/shuttle-tracker.routes.js';
 import { shuttleMonitorRouter } from './modules/shuttle/shuttle-monitor.routes.js';
+import { shuttleZonesRouter } from './modules/shuttle/shuttle-zones.routes.js';
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
 import { economyRouter } from './modules/integrations/economy/economy.routes.js';
 import { nuRouter } from './modules/integrations/nu/nu.routes.js';
@@ -299,6 +300,11 @@ app.use('/api/shuttle-tracker', requireAuth, tenantRateLimit, requireModuleAcces
 // Staff Shuttle Monitor (2026-08-24) — house-stored positions + open queues
 // on one map. Same gate as the shuttle queue it summarizes; no public path.
 app.use('/api/shuttle-monitor', requireAuth, tenantRateLimit, requireModuleAccess('reservations'), shuttleMonitorRouter);
+// Shuttle zones + alert recipients (Phase 2, 2026-08-24) — ADMIN-tier CRUD
+// (requireAuth + requireRole inside the router, same shape as the OneStepGPS
+// connector panel): zone geometry decides what notifies customers, so it is
+// NOT opened to the wider OPS tier. Every mutation is audited.
+app.use('/api/shuttle-zones', tenantRateLimit, shuttleZonesRouter);
 // Quotes module (2026-07-17) — doc/quotes-module-plan-2026-07-17.md
 app.use('/api/quotes', requireAuth, tenantRateLimit, requireModuleAccess('quotes'), quotesRouter);
 app.use('/api/payment-gateway', requireAuth, tenantRateLimit, requireRole('ADMIN', 'OPS'), paymentGatewayRouter);
