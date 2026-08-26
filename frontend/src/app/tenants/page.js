@@ -547,8 +547,16 @@ function Inner({ token, me, logout }) {
                         {/* "First charge" until one has actually been taken.
                             After that it is the next one. authorizedAt alone is
                             not enough — a deferred start is authorised weeks
-                            before any money moves. */}
-                        {r.billing.status === 'ACTIVE' && r.billing.startDate === r.billing.nextChargeDate
+                            before any money moves.
+
+                            The date comparison carries this on its own: the
+                            moment a charge succeeds, nextChargeDate advances
+                            past startDate. Requiring ACTIVE as well got it
+                            backwards for the one row that has DEFINITELY never
+                            been charged — a PENDING_AUTHORIZATION row, which has
+                            no card yet and no subscription at Authorize.Net, was
+                            reading "Next charge". */}
+                        {r.billing.startDate === r.billing.nextChargeDate
                           ? 'First charge ' : 'Next charge '}
                         {billingDate(r.billing.nextChargeDate)}
                         {r.billing.cardLast4 ? ` | ${r.billing.cardBrand || 'card'} ...${r.billing.cardLast4}` : ''}
