@@ -29,8 +29,18 @@ export const termsSigningPublicRouter = Router();
 // when they waived counter coverage. (damage_acknowledgement is NOT one of
 // them — terms-content.js is explicit that it belongs to the Report Damage
 // wizard and never reaches AgreementSectionInitial.) A customer correcting
-// sloppy initials re-posts the same section, because the pad fires on every
-// finger-lift. 7 × 5 attempts = 35, so 45/min leaves a renter who redoes EVERY
+// sloppy initials re-posts the same section, and saveInitial upserts on
+// (agreementId, sectionKey), so the retry overwrites rather than erroring.
+//
+// The pad used to fire on every finger-lift, which put a four-stroke "H.P."
+// at four POSTs — and, worse, locked itself after the first one. Since
+// 2026-08-26 it debounces to ONE post per settled initial (SignClient.jsx,
+// INITIAL_COMMIT_DELAY_MS), so real traffic here is a fraction of what the
+// numbers below were sized for. They stay as they are: the cap only ever had
+// to be generous enough never to catch a legitimate renter, and it now is by
+// a wider margin than when it was written.
+//
+// 7 × 5 attempts = 35, so 45/min leaves a renter who redoes EVERY
 // section five times inside one minute untouched, and still absorbs two or
 // three customers signing at once from the counter's guest wi-fi, which shares
 // one public IP — a real signing spans minutes, so their posts do not stack
