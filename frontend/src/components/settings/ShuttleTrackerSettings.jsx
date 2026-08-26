@@ -11,8 +11,16 @@
  * The vehicle picker lists the tenant's fleet; the ids chosen here are the
  * ONLY vehicles the public page will ever resolve (whitelist, enforced
  * server-side on both write and read).
+ *
+ * TENANT SCOPE (2026-08-26): every call goes through the SAME
+ * `scopedSettingsPath` the rest of the settings page uses, so a SUPER_ADMIN
+ * who picked a tenant at the top of Settings reads and writes THAT tenant's
+ * config. Without it the backend resolved the tenant from the super's own
+ * token, 404'd on every location, and this card collapsed into a single grey
+ * line of body text — an hour of live debugging. The prop is optional and
+ * defaults to identity so the component still works if mounted bare.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api, readStoredToken } from '../../lib/client';
 
 const MODES = [
@@ -21,25 +29,40 @@ const MODES = [
   { value: 'NON_STOP', label: 'Non-stop loop — watch only, runs on a headway' },
 ];
 
-export function ShuttleTrackerSettings({ locationId }) {
+// Mirrors CAP_MIN / CAP_MAX in backend/src/modules/shuttle/shuttle-intake.js —
+// the server rejects anything outside, so the inputs must not invite it.
+const CAP_MIN = 1;
+const CAP_MAX = 200;
+const INTAKE_DEFAULTS = { enabled: false, partySizeCap: 50, bagsCap: 20 };
+
+export function ShuttleTrackerSettings({ locationId, scopedSettingsPath }) {
   const [config, setConfig] = useState(null);
   const [vehicles, setVehicles] = useState([]);
   const [status, setStatus] = useState('loading'); // loading | ready | saving | error
   const [message, setMessage] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
+
+  // Identity fallback: mounted without the prop (tests, a future bare use) the
+  // component keeps its old unscoped behavior instead of crashing.
+  const scoped = useCallback(
+    (path) => (typeof scopedSettingsPath === 'function' ? scopedSettingsPath(path) : path),
+    [scopedSettingsPath],
+  );
 
   useEffect(() => {
     if (!locationId) return;
     let alive = true;
     (async () => {
       setStatus('loading');
+      setMessage('');
       try {
         const token = readStoredToken();
         const [cfg, fleet] = await Promise.all([
-          api(`/api/shuttle-tracker/config?locationId=${encodeURIComponent(locationId)}`, {}, token),
-          api('/api/vehicles?limit=2000', {}, token),
+          api(scoped(`/api/shuttle-tracker/config?locationId=${encodeURIComponent(locationId)}`), {}, token),
+          api(scoped('/api/vehicles?limit=2000'), {}, token),
         ]);
         if (!alive) return;
-        setConfig(cfg);
+        setConfig({ ...cfg, intake: { ...INTAKE_DEFAULTS, ...(cfg?.intake || {}) } });
         setVehicles(Array.isArray(fleet?.rows) ? fleet.rows : (Array.isArray(fleet) ? fleet : []));
         setStatus('ready');
       } catch (err) {
@@ -49,22 +72,36 @@ export function ShuttleTrackerSettings({ locationId }) {
       }
     })();
     return () => { alive = false; };
-  }, [locationId]);
+  }, [locationId, scoped, reloadKey]);
+
+  const setIntake = (patch) => setConfig((c) => ({ ...c, intake: { ...INTAKE_DEFAULTS, ...(c?.intake || {}), ...patch } }));
+
+  // Empty string while typing must not become 0 (the server would 400 on a cap
+  // below CAP_MIN); fall back to the default the GET normalizes to anyway.
+  const capOrDefault = (value, fallback) => {
+    const n = Number(value);
+    return Number.isInteger(n) && n >= CAP_MIN && n <= CAP_MAX ? n : fallback;
+  };
 
   const save = async () => {
     setStatus('saving');
     setMessage('');
     try {
-      const saved = await api('/api/shuttle-tracker/config', {
+      const saved = await api(scoped('/api/shuttle-tracker/config'), {
         method: 'PUT',
         body: JSON.stringify({
           locationId,
           mode: config.mode,
           vehicleIds: config.vehicleIds,
           headwayMinutes: Number(config.headwayMinutes) || 10,
+          intake: {
+            enabled: config.intake?.enabled === true,
+            partySizeCap: capOrDefault(config.intake?.partySizeCap, INTAKE_DEFAULTS.partySizeCap),
+            bagsCap: capOrDefault(config.intake?.bagsCap, INTAKE_DEFAULTS.bagsCap),
+          },
         }),
       }, readStoredToken());
-      setConfig(saved);
+      setConfig({ ...saved, intake: { ...INTAKE_DEFAULTS, ...(saved?.intake || {}) } });
       setStatus('ready');
       setMessage('Saved');
       setTimeout(() => setMessage(''), 2500);
@@ -83,7 +120,34 @@ export function ShuttleTrackerSettings({ locationId }) {
 
   if (!locationId) return null;
   if (status === 'loading') return <div className="ui-muted" style={{ fontSize: 12 }}>Loading shuttle tracker…</div>;
-  if (status === 'error') return <div className="ui-muted" style={{ fontSize: 12 }}>Shuttle tracker: {message}</div>;
+  // A failed load used to render as a 12px grey sentence indistinguishable from
+  // the helper text around it, so the card looked ABSENT rather than broken.
+  // Bordered, titled, with a way out.
+  if (status === 'error') {
+    return (
+      <div
+        role="alert"
+        data-testid="shuttle-tracker-error"
+        style={{
+          border: '1px solid #b3261e', borderRadius: 8, padding: 12,
+          background: 'rgba(179, 38, 30, 0.06)', display: 'flex',
+          flexDirection: 'column', gap: 8, alignItems: 'flex-start',
+        }}
+      >
+        <div style={{ fontWeight: 600, color: '#b3261e' }}>
+          Shuttle Tracker settings could not be loaded / No se pudieron cargar los ajustes del Shuttle Tracker
+        </div>
+        <div style={{ fontSize: 13 }}>{message || 'Unknown error'}</div>
+        <div className="ui-muted" style={{ fontSize: 12 }}>
+          If you are a super admin, pick the tenant at the top of Settings first — the tracker
+          config is per tenant. / Si eres super admin, elige primero el tenant arriba en Ajustes.
+        </div>
+        <button type="button" onClick={() => setReloadKey((k) => k + 1)}>
+          Retry / Reintentar
+        </button>
+      </div>
+    );
+  }
 
   const on = config.mode !== 'OFF';
   // Owner decision (2026-08-25): the picker lists ONLY vehicles marked
@@ -140,6 +204,62 @@ export function ShuttleTrackerSettings({ locationId }) {
                 </label>
               ))}
             </div>
+          </div>
+
+          {/* Phase 3 intake (Screen 7). Until now the ONLY way to flip this was
+              an UPDATE on ShuttleTrackerConfig.intakeJson by hand. The knobs are
+              the same three the GET returns and the PUT accepts. */}
+          <div className="stack">
+            <label className="label">Intake questions / Preguntas antes de pedir el shuttle</label>
+            <label className="label" style={{ fontWeight: 400 }}>
+              <input
+                type="checkbox"
+                data-testid="intake-enabled"
+                checked={config.intake?.enabled === true}
+                onChange={(e) => setIntake({ enabled: e.target.checked })}
+              />{' '}
+              Ask the customer before they request / Preguntar al cliente antes de pedir
+            </label>
+            <div className="ui-muted" style={{ fontSize: 12 }}>
+              When ON, the customer must answer how many people are travelling and how many bags
+              they have — and is offered the arrival-SMS opt-in — before the &quot;Send the shuttle&quot;
+              button works. The driver sees party and bags on the pickup, so a 6-person family with
+              8 bags never gets a car that cannot take them. When OFF nothing is asked and the page
+              behaves exactly as before. / Cuando está activo, el cliente indica cuántas personas y
+              cuántas maletas, y acepta (o no) el SMS de llegada, antes de poder pedir el shuttle.
+              {config.mode === 'NON_STOP' && ' Solo aplica en modo "On demand" — este local está en circuito continuo. / Only applies in On-demand mode.'}
+            </div>
+            {config.intake?.enabled && (
+              <div className="grid2">
+                <div className="stack">
+                  <label className="label">Max party size / Máximo de personas</label>
+                  <input
+                    type="number"
+                    min={CAP_MIN}
+                    max={CAP_MAX}
+                    data-testid="intake-party-cap"
+                    value={config.intake?.partySizeCap ?? ''}
+                    onChange={(e) => setIntake({ partySizeCap: e.target.value === '' ? '' : Number(e.target.value) })}
+                  />
+                </div>
+                <div className="stack">
+                  <label className="label">Max bags / Máximo de maletas</label>
+                  <input
+                    type="number"
+                    min={CAP_MIN}
+                    max={CAP_MAX}
+                    data-testid="intake-bags-cap"
+                    value={config.intake?.bagsCap ?? ''}
+                    onChange={(e) => setIntake({ bagsCap: e.target.value === '' ? '' : Number(e.target.value) })}
+                  />
+                </div>
+                <div className="ui-muted" style={{ fontSize: 12, gridColumn: '1 / -1' }}>
+                  Upper limits the customer may pick ({CAP_MIN}–{CAP_MAX}). Set them to what your
+                  largest shuttle can actually carry. / Límites que el cliente puede elegir; ponlos
+                  según lo que tu shuttle más grande pueda llevar de verdad.
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}

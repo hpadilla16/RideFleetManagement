@@ -94,6 +94,23 @@ const SIPP_LABELS = {
   STAR: 'Sports/Convertible', PUAR: 'Pickup'
 };
 
+/**
+ * Every value `tab` may hold. Deep links (`/settings?tab=telematics`) are
+ * validated against this set — an unknown or hand-typed tab silently keeps the
+ * default rather than rendering a blank page.
+ *
+ * Added 2026-08-26: the shuttle Monitor's empty-state buttons and the GPS
+ * connector empty state pushed to a bare `/settings`, so an operator told to
+ * "turn the tracker on" landed on Agreement and had to hunt for the tab.
+ * Keep in sync with the `tab === '…'` render guards below.
+ */
+const SETTINGS_TABS = new Set([
+  'access', 'agreement', 'ai', 'carSharing', 'commissions', 'emails', 'feeRates',
+  'fees', 'franchises', 'insurance', 'integrations', 'kioskUpsell', 'loanerRates',
+  'locations', 'marketIntel', 'payments', 'rates', 'revenue', 'selfService',
+  'services', 'stopSales', 'telematics', 'vehicleTypes',
+]);
+
 export default function SettingsPage() {
   return <AuthGate>{({ token, me, logout }) => <SettingsInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -101,6 +118,19 @@ export default function SettingsPage() {
 function SettingsInner({ token, me, logout }) {
   const [tab, setTab] = useState('agreement');
   const [msg, setMsg] = useState('');
+
+  // Deep link support: `/settings?tab=telematics` opens that tab on mount.
+  // Read from window.location rather than useSearchParams so this page needs no
+  // Suspense boundary (same idiom as customer/pay, customer/precheckin, …).
+  // Mount-only on purpose — after the first render the tab buttons own `tab`,
+  // and re-applying the query string would fight the operator's clicks.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const wanted = new URLSearchParams(window.location.search).get('tab');
+      if (wanted && SETTINGS_TABS.has(wanted)) setTab(wanted);
+    } catch { /* malformed query string — keep the default tab */ }
+  }, []);
 
   const [cfg, setCfg] = useState(DEFAULTS);
   const [locations, setLocations] = useState([]);
@@ -6548,7 +6578,7 @@ function SettingsInner({ token, me, logout }) {
                   <div className="stack"><label className="label">Shuttle Walking Directions (customer tracker page — HOW to get to the pickup spot, step by step)</label><textarea rows={3} value={locationEditor.config?.shuttleWalkingDirections || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), shuttleWalkingDirections: e.target.value } })} placeholder="e.g. 1. Take the elevator to Level 1 (Arrivals). 2. Cross both crosswalks to the outer island. 3. Wait under sign B-4 — about a 3 minute walk." /></div>
                   {/* Per-language directions (2026-08-25): Spanish variant of the same text — the tracker page shows it when the customer's ES/EN toggle is on ES, falling back to the English one when empty. */}
                   <div className="stack"><label className="label">Shuttle Walking Directions (Español) — shown when the customer picks ES on the tracker page</label><textarea rows={3} value={locationEditor.config?.shuttleWalkingDirectionsEs || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), shuttleWalkingDirectionsEs: e.target.value } })} placeholder="ej. 1. Toma el ascensor al Nivel 1 (Llegadas). 2. Cruza ambos cruces peatonales hasta la isleta exterior. 3. Espera bajo el letrero B-4 — unos 3 minutos a pie." /></div>
-                  {locationEditor.id && <ShuttleTrackerSettings locationId={locationEditor.id} />}
+                  {locationEditor.id && <ShuttleTrackerSettings locationId={locationEditor.id} scopedSettingsPath={scopedSettingsPath} />}
                   <div className="stack"><label className="label">Drop-off Instructions</label><textarea rows={3} value={locationEditor.config?.dropoffInstructions || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), dropoffInstructions: e.target.value } })} /></div>
 
                   <div className="label">Self-Service Handoff Overrides</div>
