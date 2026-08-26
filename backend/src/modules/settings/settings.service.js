@@ -12,6 +12,7 @@ import { getTenantPlanCatalog, resolveTenantPlanConfig } from '../../lib/tenant-
 import { encrypt, decrypt, isEncryptionConfigured } from '../../lib/integration-crypto.js';
 import { encryptSettingSecret, carrySettingSecret, decryptSettingSecret } from '../../lib/setting-secret-crypto.js';
 import { normalizePolicy as normalizeTwoFactorPolicy, VALID_TWO_FACTOR_ROLES } from '../../lib/two-factor-policy.js';
+import { isCheckoutPaymentRequired, setCheckoutPaymentRequired } from './checkout-payment-policy.js';
 
 const DEFAULTS = {
   companyName: 'Ride Fleet',
@@ -818,6 +819,34 @@ export const settingsService = {
   // checkinModel (Fase D, 2026-06-18): 'AGENT' = the agent does the return inspection (today's
   // behavior) · 'CUSTOMER' = the customer self-inspects at return, so the agent can skip the
   // inspection step and close (agent can still view/add). Only takes effect when enabled=true.
+  /**
+   * Per-tenant "is the wizard's payment step mandatory?" switch (2026-08-26).
+   *
+   * Storage / fail-safe rules live in checkout-payment-policy.js — this is the
+   * API-shaped wrapper. FAIL-CLOSED ON TENANT: without a tenantId we throw
+   * rather than read or write the unscoped key, because the unscoped key would
+   * be a GLOBAL default that could turn payment off for every tenant at once.
+   * (A SUPER_ADMIN who has not picked a tenant hits this and gets a 400.)
+   */
+  async getCheckoutPaymentPolicy(scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    return { checkoutPaymentRequired: await isCheckoutPaymentRequired(scope.tenantId) };
+  },
+
+  async updateCheckoutPaymentPolicy(payload = {}, scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    const raw = payload?.checkoutPaymentRequired;
+    // Strict boolean on the WRITE path so a client that sends "false"/0/null
+    // gets a clear 400 instead of silently landing on the safe default and
+    // leaving the admin staring at a switch that snapped back. The storage
+    // layer normalizes again anyway (defense in depth).
+    if (typeof raw !== 'boolean') {
+      throw new Error('checkoutPaymentRequired must be a boolean');
+    }
+    const value = await setCheckoutPaymentRequired(scope.tenantId, raw);
+    return { checkoutPaymentRequired: value };
+  },
+
   async getCustomerInspectionConfig(scope = {}) {
     const row = await prisma.appSetting.findUnique({ where: { key: scopedKey('customerInspectionConfig', scope) } });
     const fallback = { enabled: false, checkinModel: 'AGENT' };
