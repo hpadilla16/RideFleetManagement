@@ -26,7 +26,10 @@ const REDACT_KEYS = new Set([
   // credential, everywhere the redactor runs (logs, audit metadata, Sentry).
   // EXACT-key matches only — 'tokenVersion'/'apiKeyId' etc. do NOT match, so no
   // over-redaction of normal data. Deliberately NOT 'url' (redacts legit URLs).
-  'token', 'secret', 'totp', 'otp', 'backupcode', 'apikey', 'privatekey'
+  // 'authkey' added 2026-08-26 with per-tenant terminal config: the Dejavoo/
+  // SPIn auth key is a live payment credential and no call site is supposed to
+  // log it. This is the net under that rule, not a substitute for it.
+  'token', 'secret', 'totp', 'otp', 'backupcode', 'apikey', 'privatekey', 'authkey'
 ]);
 
 // 2026-06-10 — `name` used to live in REDACT_KEYS unconditionally, which

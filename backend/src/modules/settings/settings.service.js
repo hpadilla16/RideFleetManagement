@@ -11,6 +11,7 @@ import {
 import { getTenantPlanCatalog, resolveTenantPlanConfig } from '../../lib/tenant-plan-limits.js';
 import { encrypt, decrypt, isEncryptionConfigured } from '../../lib/integration-crypto.js';
 import { encryptSettingSecret, carrySettingSecret, decryptSettingSecret } from '../../lib/setting-secret-crypto.js';
+import { invalidateTenantTerminalConfig } from '../payment-gateway/tenant-terminal-config.js';
 import { normalizePolicy as normalizeTwoFactorPolicy, VALID_TWO_FACTOR_ROLES } from '../../lib/two-factor-policy.js';
 import { isCheckoutPaymentRequired, setCheckoutPaymentRequired } from './checkout-payment-policy.js';
 
@@ -544,13 +545,29 @@ function defaultPaymentGatewayConfig() {
       // longer has a sandbox code path (SPIN_ENV / SPIN_SANDBOX removed);
       // exposing those fields here would be misleading. environment is
       // pinned to 'production' for the admin panel display.
-      enabled: !!process.env.SPIN_AUTH_KEY,
+      //
+      // 2026-08-26 — the PLATFORM env terminal is no longer used as this
+      // tenant's default. Two reasons, both money-safety:
+      //   1. SPIN_AUTH_KEY is a live payment credential; pre-filling it into
+      //      every tenant admin's Settings form handed the platform merchant's
+      //      key to anyone with tenant ADMIN.
+      //   2. Worse, the form round-trips: a tenant admin who opened the page
+      //      and pressed Save would have COPIED the platform TPN into their own
+      //      config, permanently pinning their charges to somebody else's
+      //      merchant account. That is the wrong-merchant bug, self-inflicted
+      //      through the UI.
+      // An unconfigured tenant now reads as empty here, and the charge path
+      // decides what to do about it (modules/payment-gateway/tenant-terminal-config).
+      enabled: false,
       environment: 'production',
-      authKey: String(process.env.SPIN_AUTH_KEY || ''),
-      tpn: String(process.env.SPIN_TPN || ''),
-      merchantNumber: String(process.env.SPIN_MERCHANT_NUMBER || '1'),
-      callbackUrl: String(process.env.SPIN_CALLBACK_URL || ''),
-      proxyTimeout: String(process.env.SPIN_PROXY_TIMEOUT || '120')
+      // NEVER populated on read — see getPaymentGatewayConfig. `hasAuthKey`
+      // is what tells the UI a key is on file.
+      authKey: '',
+      hasAuthKey: false,
+      tpn: '',
+      merchantNumber: '1',
+      callbackUrl: '',
+      proxyTimeout: '120'
     },
     // PayArc — used for US-mainland car-sharing pickups. Puerto Rico
     // pickups stay on Authorize.Net regardless. Selector lives in
@@ -572,6 +589,25 @@ function defaultPaymentGatewayConfig() {
       merchantEmail: String(process.env.PAYARC_MERCHANT_EMAIL || '')
     }
   };
+}
+
+/**
+ * Shape the stored `spin` block for a READ.
+ *
+ * The Dejavoo/SPIn authKey is a live payment credential. Since 2026-08-26 it is
+ * stored as `enci:` ciphertext (lib/setting-secret-crypto) and is NEVER handed
+ * back to the client — not the ciphertext (useless and leaky) and not the
+ * plaintext (the settings page is not a credential vault). The UI gets a
+ * boolean instead and follows blank-means-keep on save, exactly like the
+ * VoltSwitch credentials do.
+ *
+ * `clearAuthKey` is a write-only command flag; it must never echo back.
+ */
+function spinBlockForRead(spin = {}) {
+  const stored = typeof spin?.authKey === 'string' ? spin.authKey.trim() : '';
+  const out = { ...spin, authKey: '', hasAuthKey: !!stored };
+  delete out.clearAuthKey;
+  return out;
 }
 
 function scopedKey(baseKey, scope = {}) {
@@ -1019,10 +1055,10 @@ export const settingsService = {
           ...defaults.square,
           ...(parsed?.square || {})
         },
-        spin: {
+        spin: spinBlockForRead({
           ...defaults.spin,
           ...(parsed?.spin || {})
-        },
+        }),
         payarc: {
           ...defaults.payarc,
           ...(parsed?.payarc || {})
@@ -1039,6 +1075,22 @@ export const settingsService = {
 
   async updatePaymentGatewayConfig(payload = {}, scope = {}) {
     const defaults = defaultPaymentGatewayConfig();
+    const key = scopedKey('paymentGatewayConfig', scope);
+
+    // Blank-means-keep for the SPIn authKey must carry the STORED BYTES, never
+    // a decrypt→re-encrypt round trip: if INTEGRATION_ENC_KEY were missing or
+    // wrong for one request, the decrypted value would read '' and the save
+    // would silently ERASE a live terminal credential — the 2026-08-13
+    // VoltSwitch bug, on the money path this time. So read the raw row.
+    let storedRaw = {};
+    try {
+      const rawRow = await prisma.appSetting.findUnique({ where: { key } });
+      storedRaw = rawRow?.value ? (JSON.parse(rawRow.value) || {}) : {};
+    } catch {
+      storedRaw = {};
+    }
+    const newSpinAuthKey = String(payload?.spin?.authKey || '').trim();
+
     const next = {
       ...defaults,
       ...(payload || {}),
@@ -1086,11 +1138,23 @@ export const settingsService = {
         ...(payload?.spin || {}),
         enabled: !!payload?.spin?.enabled,
         environment: String(payload?.spin?.environment || defaults.spin.environment).trim().toLowerCase(),
-        authKey: String(payload?.spin?.authKey || '').trim(),
+        // ENCRYPTED AT REST (2026-08-26). Blank in the payload means KEEP —
+        // the read path never gives the UI the key back, so a plain form
+        // round-trip must not wipe it. Only `clearAuthKey: true` erases.
+        // encryptSettingSecret THROWS (code ENCRYPTION_NOT_CONFIGURED) rather
+        // than storing a new live credential in plaintext.
+        authKey: payload?.spin?.clearAuthKey
+          ? ''
+          : (newSpinAuthKey
+            ? encryptSettingSecret(newSpinAuthKey)
+            : carrySettingSecret(storedRaw?.spin?.authKey)),
         tpn: String(payload?.spin?.tpn || '').trim(),
         merchantNumber: String(payload?.spin?.merchantNumber || '1').trim(),
         callbackUrl: String(payload?.spin?.callbackUrl || '').trim(),
-        proxyTimeout: String(payload?.spin?.proxyTimeout || '120').trim()
+        proxyTimeout: String(payload?.spin?.proxyTimeout || '120').trim(),
+        // Read-shape / command-only fields never belong in the stored blob.
+        hasAuthKey: undefined,
+        clearAuthKey: undefined
       },
       payarc: {
         ...defaults.payarc,
@@ -1104,13 +1168,19 @@ export const settingsService = {
         merchantEmail: String(payload?.payarc?.merchantEmail || '').trim()
       }
     };
-    const key = scopedKey('paymentGatewayConfig', scope);
     await prisma.appSetting.upsert({
       where: { key },
       create: { key, value: JSON.stringify(next) },
       update: { value: JSON.stringify(next) }
     });
-    return next;
+    // The live charge path caches this row (60s TTL). Invalidate HERE, in the
+    // service, so every writer of this key invalidates — not just the one route
+    // we happen to know about today. Cross-worker fan-out rides the cache's
+    // Redis pub/sub.
+    invalidateTenantTerminalConfig(scope?.tenantId);
+    // Re-read rather than returning `next`: `next.spin.authKey` is CIPHERTEXT
+    // at this point and must not go back over the wire.
+    return this.getPaymentGatewayConfig(scope);
   },
 
   async getPlannerCopilotConfig(scope = {}, options = {}) {

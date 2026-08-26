@@ -11,6 +11,7 @@ import {
   getTenantModuleConfig
 } from '../../lib/module-access.js';
 import { auditFromReq, AUDIT_ACTIONS } from '../audit/audit.service.js';
+import { buildTerminalAuditMetadata } from '../payment-gateway/tenant-terminal-config.js';
 
 export const settingsRouter = Router();
 
@@ -411,9 +412,25 @@ settingsRouter.get('/payment-gateway', requireRole('ADMIN'), async (_req, res, n
 
 settingsRouter.put('/payment-gateway', requireRole('ADMIN'), async (req, res, next) => {
   try {
-    const cfg = await settingsService.updatePaymentGatewayConfig(req.body || {}, scopeFor(req));
+    const scope = scopeFor(req);
+    const cfg = await settingsService.updatePaymentGatewayConfig(req.body || {}, scope);
+    // MONEY PATH. This row decides which merchant account a tenant's card
+    // charges settle into, so the change is audited on the unified admin trail.
+    // Metadata is deliberately credential-free: gateway, flags, a MASKED TPN
+    // and booleans. The auth key itself never appears here.
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.PAYMENT_TERMINAL_CONFIG_CHANGE,
+      targetType: 'TENANT',
+      targetId: scope?.tenantId || null,
+      metadata: buildTerminalAuditMetadata(cfg, req.body || {}, scope?.tenantId || null),
+    });
     res.json(cfg);
   } catch (e) {
+    // A new terminal credential cannot be stored without INTEGRATION_ENC_KEY —
+    // refusing the save beats writing a live payment key in plaintext.
+    if (e?.code === 'ENCRYPTION_NOT_CONFIGURED') {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
     next(e);
   }
 });
