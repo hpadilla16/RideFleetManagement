@@ -15,6 +15,7 @@ import {
   isTerminal,
 } from './state-machine.js';
 import { assertInsuranceSelectionEditable, messageFor, INSURANCE_LOCK } from './insurance-selection-gate.js';
+import { isCheckoutPaymentRequired } from '../settings/checkout-payment-policy.js';
 import { CheckoutSessionError } from './checkout-session.errors.js';
 
 // Re-exported so the 13 modules that import CheckoutSessionError from here keep
@@ -175,6 +176,25 @@ async function ensureCheckoutGates(reservationId) {
 }
 
 /**
+ * Why (if at all) this session starts with the payment step already satisfied.
+ * Returns a reason string to stamp into the log, or null for "collect payment
+ * in the wizard, exactly as before".
+ *
+ * Split out of createForReservation so the decision is testable on its own: the
+ * creation path touches a dozen Prisma models, and the thing that actually
+ * matters on the money path is this three-line rule.
+ *
+ * ORDER IS LOAD-BEARING. DEALERSHIP_LOANER is checked FIRST and short-circuits,
+ * so a loaner check-out neither reads nor depends on the tenant setting — the
+ * loaner behavior shipped in beta and must keep working on its own.
+ */
+export async function resolvePaymentPrestampReason({ workflowMode, tenantId } = {}) {
+  if (String(workflowMode) === 'DEALERSHIP_LOANER') return 'DEALERSHIP_LOANER';
+  if (!(await isCheckoutPaymentRequired(tenantId || null))) return 'TENANT_PAYMENT_NOT_REQUIRED';
+  return null;
+}
+
+/**
  * Create a CheckoutSession for the given reservation. Idempotent: if
  * one already exists and is non-terminal, return it. If it's terminal
  * (CLOSED/CANCELLED), refuse — the caller has to explicitly start a
@@ -282,14 +302,39 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
     },
   });
 
-  // Loaner checkout has no online payment (billing is COURTESY/WARRANTY/etc. on the reservation,
-  // or the CUSTOMER_PAY upgrade differential the advisor collects). Pre-stamp paymentCompletedAt
-  // so the PAID entry guard passes and the wizard skips the Spin payment step.
+  // Two reasons a session starts with the payment step already satisfied. Both
+  // pre-stamp paymentCompletedAt so the PAID entry guard passes and the wizard
+  // skips the Spin payment step — a DATA-level skip; state-machine.js is
+  // untouched by either.
+  //
+  //  1. DEALERSHIP_LOANER — loaner checkout has no online payment (billing is
+  //     COURTESY/WARRANTY/etc. on the reservation, or the CUSTOMER_PAY upgrade
+  //     differential the advisor collects).
+  //  2. Tenant policy `checkoutPaymentRequired === false` (2026-08-26) — the
+  //     tenant does not collect payment during check-out at all (Rent & Go by
+  //     VPH Motors). Defaults to TRUE, so a tenant that never touches the
+  //     switch behaves exactly as before. See settings/checkout-payment-policy.js.
+  //
+  // Loaner is evaluated FIRST and short-circuits: it needs no settings read, and
+  // the wizard still owes the advisor the loaner-specific differential screen.
+  //
+  // NEITHER reason disables taking money elsewhere. View Payments, manual
+  // sale/deposit and the post-rental charge paths are all unaffected — the only
+  // thing that changes is whether the wizard BLOCKS on step 3.
   let finalSession = session;
-  if (String(resv?.workflowMode) === 'DEALERSHIP_LOANER') {
+  const paymentPolicyTenantId = resv?.tenantId || tenantId || null;
+  const prestampReason = await resolvePaymentPrestampReason({
+    workflowMode: resv?.workflowMode,
+    tenantId: paymentPolicyTenantId,
+  });
+  if (prestampReason) {
     finalSession = await prisma.checkoutSession.update({
       where: { id: session.id },
       data: { paymentCompletedAt: new Date() },
+    });
+    logger.info('[checkout-session] payment step pre-stamped', {
+      sessionId: session.id, reservationId, reason: prestampReason,
+      tenantId: paymentPolicyTenantId,
     });
   }
 

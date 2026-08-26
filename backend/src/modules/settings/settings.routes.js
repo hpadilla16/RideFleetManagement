@@ -268,6 +268,46 @@ settingsRouter.put('/customer-inspection', requireRole('ADMIN'), async (req, res
   }
 });
 
+// Checkout payment policy (2026-08-26): does this tenant's check-out wizard
+// force the payment step? Default TRUE (unchanged behavior); Rent & Go by VPH
+// Motors runs it OFF. ADMIN-gated; SUPER_ADMIN targets a tenant with ?tenantId
+// through the same scopeFor() super-scoping every other settings route uses.
+// FAIL-CLOSED: no tenantId → 400, never a global write.
+settingsRouter.get('/checkout-payment', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.getCheckoutPaymentPolicy(scopeFor(req)));
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for checkout payment settings' });
+    }
+    next(e);
+  }
+});
+
+settingsRouter.put('/checkout-payment', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const scope = scopeFor(req);
+    const out = await settingsService.updateCheckoutPaymentPolicy(req.body || {}, scope);
+    // Money-path policy change — audited on the unified admin trail. Metadata is
+    // the new boolean + tenantId only; no PII, no amounts.
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.CHECKOUT_PAYMENT_POLICY_CHANGE,
+      targetType: 'TENANT',
+      targetId: scope?.tenantId || null,
+      metadata: { checkoutPaymentRequired: out.checkoutPaymentRequired, tenantId: scope?.tenantId || null },
+    });
+    res.json(out);
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for checkout payment settings' });
+    }
+    if (/must be a boolean/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
 // Vehicle Profile pack (2026-06-10): fleet rotation rule (TIME | MILEAGE).
 settingsRouter.get('/fleet-rotation', async (_req, res, next) => {
   try {

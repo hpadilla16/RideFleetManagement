@@ -30,6 +30,7 @@ import {
   createSession, getSessionByReservation, transition,
   mintTermsToken, mintHandoffToken, abandon,
   stepNumber, isTerminal, STEP_INFO,
+  paymentStepMode, PAYMENT_STEP_MODES,
 } from '../../../../lib/checkout-session';
 import QRCode from 'qrcode';
 
@@ -547,12 +548,22 @@ function StepRenderer({ session, reservation, token, onAdvance }) {
       return <Step2TermsPending session={session} reservation={reservation} token={token} onSigned={() => onAdvance('TC_SIGNED')} />;
     case 'TC_SIGNED':
       return <StepBridge label="Terms signed" onNext={() => onAdvance('PAYMENT_PENDING')} />;
-    case 'PAYMENT_PENDING':
-      // Loaners have no online payment (billing is on the reservation; backend pre-stamps
-      // paymentCompletedAt). Skip the Spin payment step entirely.
-      return reservation.workflowMode === 'DEALERSHIP_LOANER'
-        ? <LoanerPaymentBridge reservation={reservation} onNext={() => onAdvance('PAID')} />
-        : <Step3PaymentPending session={session} reservation={reservation} token={token} onPaid={() => onAdvance('PAID')} />;
+    case 'PAYMENT_PENDING': {
+      // Which of the three payment screens this session gets — see
+      // paymentStepMode() in lib/checkout-session.js for the ordering rule.
+      // LOANER keeps its own bridge (billing is on the reservation); SKIP is a
+      // session the backend already stamped paymentCompletedAt on, either
+      // because the tenant does not collect payment during check-out
+      // (`checkoutPaymentRequired=false`) or because a charge already landed.
+      const mode = paymentStepMode(session, reservation);
+      if (mode === PAYMENT_STEP_MODES.LOANER) {
+        return <LoanerPaymentBridge reservation={reservation} onNext={() => onAdvance('PAID')} />;
+      }
+      if (mode === PAYMENT_STEP_MODES.SKIP) {
+        return <StepBridge label="No payment required at check-out" onNext={() => onAdvance('PAID')} />;
+      }
+      return <Step3PaymentPending session={session} reservation={reservation} token={token} onPaid={() => onAdvance('PAID')} />;
+    }
     case 'PAID':
       return <StepBridge label="Payment captured" onNext={() => onAdvance('INSPECTION_HANDOFF')} />;
     case 'INSPECTION_HANDOFF':

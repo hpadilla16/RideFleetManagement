@@ -167,6 +167,10 @@ function SettingsInner({ token, me, logout }) {
   const [customerInspectionEnabled, setCustomerInspectionEnabled] = useState(false);
   // Check-in inspection model (Fase D, 2026-06-18): 'AGENT' (current) vs 'CUSTOMER' (agent-less).
   const [customerInspectionCheckinModel, setCustomerInspectionCheckinModel] = useState('AGENT');
+  // Checkout payment policy (2026-08-26). Seeded TRUE so a failed/slow load
+  // never renders the switch as "payment off" for a tenant that requires it.
+  const [checkoutPaymentRequired, setCheckoutPaymentRequired] = useState(true);
+  const [checkoutPaymentSaving, setCheckoutPaymentSaving] = useState(false);
   // Citations OCR (2026-06-15): per-tenant vision-LLM credentials for mail intake.
   const [ocrCfg, setOcrCfg] = useState({ provider: 'anthropic', model: '', hasKey: false });
   const [ocrKeyInput, setOcrKeyInput] = useState('');
@@ -272,6 +276,12 @@ function SettingsInner({ token, me, logout }) {
       .catch(() => {});
     api(scopedSettingsPath('/api/settings/citation-ocr'), {}, token)
       .then((out) => out && setOcrCfg(out))
+      .catch(() => {});
+    // Checkout payment policy. `!== false` (not `!!`) so anything the API does
+    // not return as an explicit false leaves the switch ON — same fail-safe
+    // direction the backend resolver uses.
+    api(scopedSettingsPath('/api/settings/checkout-payment'), {}, token)
+      .then((out) => setCheckoutPaymentRequired(out?.checkoutPaymentRequired !== false))
       .catch(() => {});
     // activeSettingsTenantId in deps (2026-07-26 fix): for a SUPER_ADMIN these
     // three loads are tenant-scoped via scopedSettingsPath, but the effect only
@@ -2781,6 +2791,70 @@ function SettingsInner({ token, me, logout }) {
                     step (agent can still view/add damage before closing). <strong>Agent inspection</strong>
                     keeps today&apos;s flow where the agent always inspects.
                   </div>
+                </div>
+              ) : null}
+            </div>
+
+            {/*
+              Checkout payment policy (2026-08-26). Per-TENANT only — no
+              per-location, no per-reservation override. Turning it OFF makes the
+              wizard skip step 3 for this tenant; it does NOT remove any other
+              way to take money (View Payments, manual sale/deposit, post-rental
+              charges all stay exactly as they are).
+            */}
+            <div className="glass card" style={{ padding: 12 }}>
+              <h3 style={{ marginBottom: 8 }}>Check-out Payment · Pago en el check-out</h3>
+              <div className="form-grid-2">
+                <label className="label" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={checkoutPaymentRequired}
+                    disabled={checkoutPaymentSaving}
+                    onChange={async (e) => {
+                      const required = e.target.checked;
+                      const previous = checkoutPaymentRequired;
+                      setCheckoutPaymentRequired(required);
+                      setCheckoutPaymentSaving(true);
+                      try {
+                        const out = await api(
+                          scopedSettingsPath('/api/settings/checkout-payment'),
+                          { method: 'PUT', body: JSON.stringify({ checkoutPaymentRequired: required }) },
+                          token,
+                        );
+                        // Trust the server's answer, not the optimistic flip.
+                        setCheckoutPaymentRequired(out?.checkoutPaymentRequired !== false);
+                        setMsg(required
+                          ? 'Payment is required during check-out · Se exige pago durante el check-out'
+                          : 'Check-out will skip the payment step · El check-out omitirá el paso de pago');
+                      } catch (err) {
+                        // Roll back — leaving the switch showing a state the
+                        // server rejected is how a tenant thinks payment is off
+                        // when it is not.
+                        setCheckoutPaymentRequired(previous);
+                        setMsg(err?.message || 'Failed to save checkout payment setting');
+                      } finally {
+                        setCheckoutPaymentSaving(false);
+                      }
+                    }}
+                  />
+                  Require payment during check-out · Exigir pago durante el check-out
+                </label>
+                <div className="surface-note">
+                  ON (default) keeps today&apos;s flow: the wizard stops at step 3 until the sale and
+                  the deposit hold are taken. When OFF, the wizard skips the payment step for this
+                  tenant — agents can still take payments afterwards from <strong>View Payments</strong>
+                  {' '}(manual sale, deposit, refunds are all unchanged).
+                  <br />
+                  ON (por defecto) mantiene el flujo actual: el wizard se detiene en el paso 3 hasta
+                  cobrar la venta y el depósito. Cuando está OFF, el wizard omite el paso de pago para
+                  este tenant — los agentes pueden cobrar después desde <strong>View Payments</strong>.
+                </div>
+              </div>
+              {!checkoutPaymentRequired ? (
+                <div className="surface-note" style={{ marginTop: 8 }}>
+                  Applies to check-out sessions started from now on. Sessions already in progress keep
+                  the payment step. · Aplica a los check-outs que empiecen desde ahora; los que ya
+                  están en progreso conservan el paso de pago.
                 </div>
               ) : null}
             </div>

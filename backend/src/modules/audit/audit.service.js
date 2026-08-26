@@ -101,6 +101,13 @@ export const AUDIT_ACTIONS = Object.freeze({
   // carries shift/vehicle/location ids and expiry only — NEVER the token.
   DRIVER_SHIFT_ISSUE: 'DRIVER_SHIFT_ISSUE',
   DRIVER_SHIFT_REVOKE: 'DRIVER_SHIFT_REVOKE',
+
+  // ── Checkout payment policy (2026-08-26) ──
+  // Turning the wizard's payment step off for a tenant changes whether staff
+  // are ever prompted to collect at the counter, so "who made check-out stop
+  // asking for money, and when" has to be answerable. Metadata carries the new
+  // boolean + tenantId ONLY — no amounts, no customer or card data.
+  CHECKOUT_PAYMENT_POLICY_CHANGE: 'CHECKOUT_PAYMENT_POLICY_CHANGE',
 });
 
 export const AUDIT_OUTCOME = Object.freeze({
