@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { isSuperAdmin } from '../../middleware/auth.js';
 import { tenantsService } from './tenants.service.js';
 import { demoResetService } from './demo-reset.service.js';
+import { billingService } from '../billing/billing.service.js';
 import { auditFromReq, AUDIT_ACTIONS } from '../audit/audit.service.js';
 
 export const tenantsRouter = Router();
@@ -77,6 +78,83 @@ tenantsRouter.patch('/:id', async (req, res, next) => {
   try {
     const tenant = await tenantsService.updateTenant(req.params.id, req.body || {});
     res.json(tenant);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+/**
+ * Mint an autopay enrollment link for this tenant — Phase 3's ONE write.
+ *
+ * Not a panel. Design §7 gives billing its own screens in Phase 4; this is the
+ * single "Send enroll link" action hung off the existing /tenants row, and it
+ * is deliberately the only billing mutation that exists before that panel does.
+ * There is no cancel here, no plan change, no manual charge: each of those has
+ * an invariant attached (§2.2, §6) that a convenience button must not be able
+ * to trip by implication.
+ *
+ * SUPER_ADMIN only, by the router-level guard above — NOT `requireRole`, which
+ * short-circuits on isSuperAdmin before it checks the list and would therefore
+ * let an ADMIN through if the list ever changed (design §8).
+ *
+ * THE RESPONSE CARRIES THE PLAINTEXT TOKEN, EXACTLY ONCE, INSIDE THE URL. It is
+ * stored only as a sha256 hash, so this response is the only chance to capture
+ * it and there is no "show me that link again". That is a deliberate cost of
+ * hashing (autopay-invites.service.js) and the reason the caller is expected to
+ * put it straight into an email. It is never logged and never audited — the
+ * audit row carries the 8-character tokenPrefix so support can answer "is this
+ * the link I sent?" without the trail itself becoming a way in.
+ *
+ * 400, not 500, on a refusal: "this tenant already has a live subscription" and
+ * "that plan has no price" are both things the operator can act on, and they
+ * arrive while he is looking at the row he just clicked.
+ */
+tenantsRouter.post('/:id/billing/enroll-link', requireSuperAdmin, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const out = await billingService.issueEnrollInvite({
+      tenantId: req.params.id,
+      planCode: body.planCode,
+      cycle: body.cycle || 'monthly',
+      email: body.email,
+      companyName: body.companyName,
+      // A negotiated per-tenant price. Passed through as an OVERRIDE so the
+      // catalog is not edited and no other tenant's default moves — the price
+      // lands on this subscription and nowhere else (design §1.7).
+      amountOverride: body.amount == null || body.amount === '' ? null : Number(body.amount),
+      // An explicit first-charge date is a DEFERRED START, not a trial: it
+      // suppresses the catalog's trialDays and the row activates to ACTIVE
+      // rather than TRIALING. See issueEnrollInvite for why that wording
+      // matters more than it looks like it should.
+      startDate: body.startDate || null,
+      trialDays: body.trialDays == null || body.trialDays === '' ? null : Number(body.trialDays),
+      validForDays: body.validForDays,
+      notes: body.notes || null,
+      actorUserId: req.user?.id || req.user?.sub || null,
+      actorEmail: req.user?.email || null,
+      actorRole: req.user?.role || null,
+    });
+
+    res.status(201).json({
+      url: out.url,
+      tokenPrefix: out.invite.tokenPrefix,
+      expiresAt: out.invite.expiresAt,
+      // True when an unauthorised PENDING row was reused and its old links
+      // revoked, rather than a new subscription being created.
+      resent: !!out.resent,
+      subscription: {
+        id: out.subscription.id,
+        status: out.subscription.status,
+        planCode: out.subscription.planCode,
+        planName: out.subscription.planNameSnapshot,
+        amount: String(out.subscription.amount),
+        currency: out.subscription.currency,
+        intervalUnit: out.subscription.intervalUnit,
+        intervalLength: out.subscription.intervalLength,
+        startDate: out.subscription.startDate,
+        trialEndsAt: out.subscription.trialEndsAt,
+      },
+    });
   } catch (e) {
     res.status(400).json({ error: e.message });
   }

@@ -150,7 +150,7 @@ export function merchantCustomerIdForTenant(tenantId) {
  * not set prices yet, so today every call throws until the catalog is filled in
  * — which is the correct behaviour for a phase whose job is to charge nobody.
  */
-export async function resolvePlanOffer(planCode, cycle = 'monthly', overrides = {}) {
+export async function resolvePlanOffer(planCode, cycle = 'monthly', overrides = {}, opts = {}) {
   const d = deps(overrides);
   const spec = CYCLES[cycle];
   if (!spec) throw new Error(`Unknown billing cycle "${cycle}" (expected monthly or annual).`);
@@ -158,15 +158,37 @@ export async function resolvePlanOffer(planCode, cycle = 'monthly', overrides = 
   const catalog = await getTenantPlanCatalog(d.prisma);
   const plan = resolveTenantPlanConfig(planCode, catalog);
   if (!plan.isActive) throw new Error(`Plan ${plan.code} is not active in the plan catalog.`);
-  if (!plan.billable) {
-    throw new Error(
-      `Plan ${plan.code} is not marked billable in the plan catalog. `
-      + 'Set billable + a price via PUT /api/tenants/plan-catalog before issuing an invite.',
-    );
-  }
+
+  /**
+   * A NEGOTIATED PRICE DOES NOT NEED A CATALOG PRICE (Phase 3).
+   *
+   * Ride's first real subscription is a per-tenant negotiated figure that is
+   * deliberately NOT a list price — the design says the catalog is "the default
+   * offered", and the owner asked for that price without changing the catalog.
+   * Demanding `billable` + a `priceMonthly` before an invite whose amount is
+   * supplied explicitly would force a catalog edit purely to satisfy a lookup
+   * whose result is then thrown away, and that edit would re-price the DEFAULT
+   * for every future enrollment. So when the caller names the amount, the
+   * catalog is consulted for the plan's NAME and nothing else.
+   *
+   * `isActive` is still enforced above: billing someone for a plan that has been
+   * retired is a different mistake, and no override makes it right.
+   */
   const amount = plan[spec.priceField];
-  if (amount == null) {
-    throw new Error(`Plan ${plan.code} has no ${cycle} price set in the plan catalog.`);
+  if (!opts.priceSuppliedByCaller) {
+    if (!plan.billable) {
+      throw new Error(
+        `Plan ${plan.code} is not marked billable in the plan catalog. `
+        + 'Set billable + a price via PUT /api/tenants/plan-catalog before issuing an invite, '
+        + 'or pass an explicit amount for a negotiated per-tenant price.',
+      );
+    }
+    if (amount == null) {
+      throw new Error(
+        `Plan ${plan.code} has no ${cycle} price set in the plan catalog. `
+        + 'Set one, or pass an explicit amount for a negotiated per-tenant price.',
+      );
+    }
   }
 
   return {
@@ -266,20 +288,53 @@ export async function issueEnrollInvite(input = {}, overrides = {}) {
   });
   if (!tenant) throw new Error('Tenant not found');
 
-  const offer = await resolvePlanOffer(input.planCode, input.cycle || 'monthly', overrides);
+  const offer = await resolvePlanOffer(
+    input.planCode,
+    input.cycle || 'monthly',
+    overrides,
+    { priceSuppliedByCaller: input.amountOverride != null },
+  );
   // The amount may be negotiated per tenant — the catalog price is only the
   // default. Whatever lands here is what the subscription snapshots.
   const amount = input.amountOverride == null ? offer.amount : Number(input.amountOverride);
   if (!(Number(amount) >= 0)) throw new Error('Subscription amount must be a non-negative number.');
 
-  // A trial is a DEFERRED START, not ARB trialOccurrences (design §5A): the card
-  // is captured and validated now, ARB charges nothing until startDate, and our
-  // own TRIALING bookkeeping cannot disagree with Authorize.Net because there is
-  // nothing at Authorize.Net to disagree with.
-  const trialDays = input.trialDays == null ? offer.trialDays : Number(input.trialDays);
-  const startDate = input.startDate
+  /**
+   * WHEN THE FIRST CHARGE RUNS — AND WHETHER THAT MAKES IT A TRIAL.
+   *
+   * Both shapes use the SAME proven ARB mechanism (design §5A): a deferred
+   * `startDate` with `trialOccurrences = 0`, card captured and validated at
+   * enrollment via hostedProfileValidationMode. ARB charges nothing until
+   * startDate either way. What differs is what we CALL it, and that difference
+   * is not cosmetic — it is the word the customer reads and the word every
+   * future panel repeats.
+   *
+   *   EXPLICIT startDate  → the caller is naming the first charge date. This is
+   *                         a DEFERRED START, not a trial. `trialEndsAt` stays
+   *                         null and the subscription activates straight to
+   *                         ACTIVE. The catalog's trialDays does NOT apply: the
+   *                         caller has already answered the question trialDays
+   *                         exists to answer, and silently adding a catalog
+   *                         trial on top would move the date they just typed.
+   *
+   *   NO startDate        → derive it from trialDays. THAT is a trial: the
+   *                         customer was promised free days, so `trialEndsAt`
+   *                         is set and the row sits in TRIALING until the cron
+   *                         rolls it.
+   *
+   * Ride's first real subscription is the first shape — Rent & Go by VPH Motors
+   * have been running on the software for months and were sold a start date,
+   * not a free period. Labelling that a trial would put "prueba gratis" in front
+   * of a customer who is not on one, and would make every later panel and email
+   * repeat the error.
+   */
+  const explicitStart = input.startDate != null && input.startDate !== '';
+  const trialDays = explicitStart
+    ? 0
+    : Math.max(0, Number(input.trialDays == null ? offer.trialDays : input.trialDays) || 0);
+  const startDate = explicitStart
     ? assertCalendarDate(input.startDate, 'startDate')
-    : addCalendarDays(today, Math.max(0, trialDays));
+    : addCalendarDays(today, trialDays);
   if (startDate < today) {
     // Authorize.Net rejects a past startDate outright; catch it here where the
     // message can say something useful.
@@ -301,34 +356,85 @@ export async function issueEnrollInvite(input = {}, overrides = {}) {
     email,
   });
 
+  const terms = {
+    planCode: offer.planCode,
+    // THE SNAPSHOT. A catalog edit after this moment must never re-price a
+    // live subscriber or rewrite what their history says they agreed to.
+    planNameSnapshot: offer.planName,
+    amount,
+    currency: offer.currency,
+    intervalUnit: offer.intervalUnit,
+    intervalLength: offer.intervalLength,
+    startDate,
+    nextChargeDate: startDate,
+    // Null for a deferred start. Only a genuine trial — days the customer was
+    // promised free — puts a date here, and only that date drives TRIALING.
+    trialEndsAt: trialDays > 0 ? startDate : null,
+  };
+
+  /**
+   * RESEND, RATHER THAN A SECOND ROW.
+   *
+   * At most one live subscription per tenant is a partial unique index, so a
+   * second "Send enroll link" would otherwise hit a P2002 and dead-end the
+   * owner at exactly the moment he is trying to correct a typo in the price,
+   * the date or the email. But it must only ever reuse a row that has NOT been
+   * authorised: PENDING_AUTHORIZATION with no arbSubscriptionId is a row where
+   * nothing exists at Authorize.Net and nobody's card has been touched, so
+   * rewriting its terms cannot contradict anything a customer has agreed to.
+   *
+   * Anything past that point — a live ARB subscription, any other status — is
+   * refused here. Changing the price of a running subscription is a plan change
+   * (design §6) and cancelling one is an ARB call with an invariant attached
+   * (§2.2); neither is a thing a "send a link" button may do by implication.
+   */
+  const existingLive = await d.prisma.tenantSubscription.findFirst({
+    where: { tenantId: tenant.id, status: { in: LIVE_SUBSCRIPTION_STATUSES } },
+  });
+
   let subscription;
-  try {
-    subscription = await d.prisma.tenantSubscription.create({
-      data: {
-        tenantId: tenant.id,
-        planCode: offer.planCode,
-        // THE SNAPSHOT. A catalog edit after this moment must never re-price a
-        // live subscriber or rewrite what their history says they agreed to.
-        planNameSnapshot: offer.planName,
-        amount,
-        currency: offer.currency,
-        intervalUnit: offer.intervalUnit,
-        intervalLength: offer.intervalLength,
-        status: SUBSCRIPTION_STATUS.PENDING_AUTHORIZATION,
-        startDate,
-        nextChargeDate: startDate,
-        trialEndsAt: trialDays > 0 ? startDate : null,
-        createdByUserId: input.actorUserId ?? null,
-        notes: input.notes ?? null,
-      },
-    });
-  } catch (e) {
-    if (e?.code === 'P2002') {
+  let resent = false;
+  if (existingLive) {
+    if (existingLive.status !== SUBSCRIPTION_STATUS.PENDING_AUTHORIZATION
+      || existingLive.arbSubscriptionId) {
       throw new Error(
-        `${tenant.name} already has a live subscription. Cancel it before enrolling a new one.`,
+        `${tenant.name} already has a live subscription (${existingLive.status}). `
+        + 'Cancel it before enrolling a new one.',
       );
     }
-    throw e;
+    // The old link must die with the old terms. A revoked invite 404s exactly
+    // like an expired one, so a customer who kept the first email cannot enroll
+    // at a price that has since been corrected.
+    for (const stale of await d.prisma.autopayInvite.findMany({
+      where: { subscriptionId: existingLive.id, usedAt: null, revokedAt: null },
+    })) {
+      await revokeInvite(stale.id, overrides);
+    }
+    subscription = await d.prisma.tenantSubscription.update({
+      where: { id: existingLive.id },
+      data: terms,
+    });
+    resent = true;
+  } else {
+    try {
+      subscription = await d.prisma.tenantSubscription.create({
+        data: {
+          tenantId: tenant.id,
+          ...terms,
+          status: SUBSCRIPTION_STATUS.PENDING_AUTHORIZATION,
+          createdByUserId: input.actorUserId ?? null,
+          notes: input.notes ?? null,
+        },
+      });
+    } catch (e) {
+      if (e?.code === 'P2002') {
+        // The index caught a race the read above could not.
+        throw new Error(
+          `${tenant.name} already has a live subscription. Cancel it before enrolling a new one.`,
+        );
+      }
+      throw e;
+    }
   }
 
   const { invite, token, url } = await createInvite(
@@ -373,11 +479,70 @@ export async function issueEnrollInvite(input = {}, overrides = {}) {
       intervalUnit: offer.intervalUnit,
       intervalLength: offer.intervalLength,
       startDate,
+      resent,
       expiresAt: invite.expiresAt.toISOString(),
     },
   });
 
-  return { subscription, invite, token, url };
+  return { subscription, invite, token, url, resent };
+}
+
+/**
+ * The one-line billing fact for each tenant on the SUPER_ADMIN /tenants list.
+ *
+ * DELIBERATELY NOT THE PANEL. Design §7 gives billing its own screens in Phase
+ * 4 — overview, detail, history, event log. This is the minimum the existing
+ * row needs so that the "Send enroll link" button is not a button you press
+ * blind: what state is this tenant in, at what price, and when does the first
+ * charge run. Everything the panel will add (charges, events, actions) is
+ * deliberately absent.
+ *
+ * A tenant with NO row comes back `{ status: 'NONE' }` rather than being
+ * omitted, because "nobody ever enrolled this tenant" is the single most
+ * important thing this surface can say — it is the revenue that is missing
+ * rather than late, and an omitted key reads as a loading state.
+ *
+ * ONE QUERY FOR THE WHOLE LIST, not one per row: the tenants list already runs
+ * a per-tenant usage read and does not need a second N+1 behind it.
+ */
+export async function summariseTenantBilling(tenantIds = [], overrides = {}) {
+  const d = deps(overrides);
+  const ids = tenantIds.map(String);
+  const out = new Map(ids.map((id) => [id, { status: 'NONE' }]));
+  if (!ids.length) return out;
+
+  const subs = await d.prisma.tenantSubscription.findMany({
+    where: { tenantId: { in: ids }, status: { in: LIVE_SUBSCRIPTION_STATUSES } },
+  });
+
+  for (const sub of subs) {
+    out.set(sub.tenantId, {
+      status: sub.status,
+      subscriptionId: sub.id,
+      planCode: sub.planCode,
+      planName: sub.planNameSnapshot,
+      amount: String(sub.amount),
+      currency: sub.currency,
+      intervalUnit: sub.intervalUnit,
+      intervalLength: sub.intervalLength,
+      startDate: sub.startDate,
+      nextChargeDate: sub.nextChargeDate,
+      // Null unless this is a GENUINE trial. A deferred first charge is not one,
+      // and the row must not imply otherwise. See issueEnrollInvite.
+      trialEndsAt: sub.trialEndsAt,
+      cardBrand: sub.cardBrand,
+      cardLast4: sub.cardLast4,
+      authorizedAt: sub.authorizedAt,
+      // Support looks this up in the Authorize.Net portal. Useless without the
+      // transaction key, and this whole surface is SUPER_ADMIN-only.
+      arbSubscriptionId: sub.arbSubscriptionId,
+      // The BILLING plan may legitimately differ from Tenant.plan (the
+      // ENTITLEMENT key). Activating a subscription does not rewrite
+      // entitlements — design open question 9 — so the caller badges the
+      // divergence rather than either side silently winning.
+    });
+  }
+  return out;
 }
 
 export async function revokeInviteById(inviteId, actor = {}, overrides = {}) {
@@ -557,6 +722,18 @@ export async function completeEnrollment(token, meta = {}, overrides = {}) {
     addInterval(existing.startDate, existing.intervalUnit, existing.intervalLength),
     -1,
   );
+  /**
+   * PENDING_AUTHORIZATION → ACTIVE, or → TRIALING?
+   *
+   * `trialEndsAt` decides, and it is set at invite time ONLY for a genuine trial
+   * (see issueEnrollInvite). A future `startDate` on its own is NOT enough: a
+   * deferred start goes straight to ACTIVE with its first charge date in the
+   * future, because nothing about it was ever free.
+   *
+   * That distinction has to survive here as well as at issuance, or the two ends
+   * of the flow would disagree about the same subscription — so the future-date
+   * check is an AND, never an OR.
+   */
   const trialing = !!existing.trialEndsAt && existing.startDate > todayCalendarDate(now);
 
   const description = buildScheduledChargeDescription({
@@ -786,6 +963,7 @@ function receipt(subscription, invite) {
 export const billingService = {
   resolvePlanOffer,
   issueEnrollInvite,
+  summariseTenantBilling,
   revokeInviteById,
   resolvePublicInvite,
   startHostedSession,

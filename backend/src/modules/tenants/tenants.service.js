@@ -10,6 +10,7 @@ import {
   resolveTenantPlanConfig,
   saveTenantPlanCatalog
 } from '../../lib/tenant-plan-limits.js';
+import { summariseTenantBilling } from '../billing/billing.service.js';
 
 const SALT_ROUNDS = 10;
 
@@ -69,13 +70,28 @@ export const tenantsService = {
     );
     const usageByTenantId = new Map(usageEntries);
 
+    // One query for the whole list, not one per row. `NONE` for a tenant with no
+    // subscription at all — the row that matters most, because it is revenue
+    // nobody remembered to collect rather than revenue that is merely late.
+    const billingByTenantId = await summariseTenantBilling(tenants.map((t) => t.id));
+
     return tenants.map((tenant) => {
       const planConfig = resolveTenantPlanConfig(tenant.plan, catalog);
       const planUsage = usageByTenantId.get(tenant.id) || { admins: 0, users: 0, vehicles: 0 };
+      const billing = billingByTenantId.get(tenant.id) || { status: 'NONE' };
       return {
         ...tenant,
         planConfig,
         planUsage,
+        billing: {
+          ...billing,
+          // Tenant.plan is the ENTITLEMENT key; billing.planCode is the BILLING
+          // key. They should normally match, and activating a subscription
+          // deliberately does NOT rewrite entitlements (design open question 9,
+          // answered "by hand"). Billed at PRO while entitled at STARTER is a
+          // revenue leak; the reverse is a freebie. Neither should be invisible.
+          planDiverges: !!billing.planCode && billing.planCode !== tenant.plan,
+        },
         planStatus: {
           overAdmins: planConfig.maxAdmins != null && planUsage.admins > planConfig.maxAdmins,
           overUsers: planConfig.maxUsers != null && planUsage.users > planConfig.maxUsers,

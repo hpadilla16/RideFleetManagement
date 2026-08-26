@@ -59,6 +59,11 @@ function matchVal(val, cond) {
     if ('gte' in cond) return v != null && compare(v, cond.gte) >= 0;
     if ('lt' in cond) return v != null && compare(v, cond.lt) < 0;
     if ('lte' in cond) return v != null && compare(v, cond.lte) <= 0;
+    // The heartbeat separates real Authorize.Net deliveries (`net.authorize.*`)
+    // from the reconciler's own synthetic rows (`reconcile.*`) with a prefix
+    // match. Modelled rather than approximated, because counting a synthetic row
+    // as a delivery is precisely the bug that filter exists to prevent.
+    if ('startsWith' in cond) return typeof v === 'string' && v.startsWith(cond.startsWith);
     return true;
   }
   if (v instanceof Date || cond instanceof Date) {
