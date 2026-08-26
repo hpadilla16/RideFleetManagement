@@ -188,13 +188,11 @@ test('getTenantSpinConfig stays fail-closed (sandbox) without tenant settings', 
 // `tenant: { omit: { settingsJson: true } }`. This is a RATCHET so a new one
 // cannot quietly join them.
 // ---------------------------------------------------------------------------
-const BARE_TENANT_INCLUDE_ALLOWED = {
-  // Renders print HTML server-side; the row is never serialized to a client,
-  // and settingsJson.incidentReportingWindowHours is the one setting this
-  // module legitimately wants (reportingWindowHours()).
-  'src/modules/incident-report/incident-report.service.js':
-    'server-side HTML render, and the intended reader of incidentReportingWindowHours',
-};
+// Empty on purpose, and it should stay that way. incident-report.service.js was
+// briefly listed here on the theory that it legitimately wanted the field for
+// reportingWindowHours() — it does not: only `tenant.name` is read from that
+// row, and reportingWindowHours() is reachable only from its own __test export.
+const BARE_TENANT_INCLUDE_ALLOWED = {};
 
 function sourceFiles(dir) {
   return readdirSync(dir).flatMap((name) => {

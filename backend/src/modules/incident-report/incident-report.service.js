@@ -590,7 +590,15 @@ export const incidentReportService = {
     const row = await findScoped(user, id);
     const reservation = await prisma.reservation.findFirst({
       where: { id: row.reservationId },
-      include: { customer: true, vehicle: true, rentalAgreement: { include: { charges: true } }, tenant: true }
+      // Only `tenant.name` is ever read from this row (assembleReport's
+      // company fields), so omit settingsJson for the same reason as the other
+      // eight sites: nothing here wants the tenant's SMS/SPIn credentials.
+      include: {
+        customer: true,
+        vehicle: true,
+        rentalAgreement: { include: { charges: true } },
+        tenant: { omit: { settingsJson: true } }
+      }
     });
     const report = await assembleReport(row, reservation);
     return buildIncidentReportHtml(report);
