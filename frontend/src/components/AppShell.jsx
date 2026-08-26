@@ -491,10 +491,14 @@ export function AppShell({ me, logout, children }) {
       const t = localStorage.getItem('superadmin_backup_token');
       const u = localStorage.getItem('superadmin_backup_user');
       if (!t || !u) return;
+      const v = localStorage.getItem('superadmin_backup_viewlocation');
       localStorage.setItem(TOKEN_KEY, t);
       localStorage.setItem(USER_KEY, u);
+      if (v) localStorage.setItem('ui.viewLocationId', v);
+      else localStorage.removeItem('ui.viewLocationId');
       localStorage.removeItem('superadmin_backup_token');
       localStorage.removeItem('superadmin_backup_user');
+      localStorage.removeItem('superadmin_backup_viewlocation');
       window.location.href = '/tenants';
     } catch {}
   };
