@@ -207,7 +207,13 @@ function Inner({ token, me, logout }) {
       if (role === 'SUPER_ADMIN') {
         localStorage.setItem('superadmin_backup_token', token);
         localStorage.setItem('superadmin_backup_user', JSON.stringify(me || {}));
+        localStorage.setItem('superadmin_backup_viewlocation', localStorage.getItem('ui.viewLocationId') || '');
       }
+      // The location we were viewing belongs to OUR tenant. Left in place it
+      // rides along as x-view-location under the impersonated token, and every
+      // scoped read 403s because that location is not theirs. Practice mode
+      // already parks it the same way (PRACTICE_REAL_VIEW_LOCATION_KEY).
+      localStorage.removeItem('ui.viewLocationId');
       localStorage.setItem(TOKEN_KEY, out.token);
       localStorage.setItem(USER_KEY, JSON.stringify(out.user || {}));
       window.location.href = '/dashboard';

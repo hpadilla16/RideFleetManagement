@@ -81,6 +81,9 @@ function buildGetCacheKey(url, token) {
   return `${url}::${String(token || '')}`;
 }
 
+// One-shot guard so the recovery reload below can never become a loop.
+const VIEW_LOCATION_RECOVERY_KEY = 'ui.viewLocationRecovered';
+
 async function parseApiResponse(res, path) {
   if (!res.ok) {
     let msg = `${path} failed (${res.status})`;
@@ -104,6 +107,21 @@ async function parseApiResponse(res, path) {
     if (typeof window !== 'undefined' && res.status === 403 && code === 'PASSWORD_CHANGE_REQUIRED') {
       window.dispatchEvent(new CustomEvent(PASSWORD_CHANGE_REQUIRED_EVENT, { detail: { path } }));
     }
+    // A stored location the current user does not own 403s EVERY scoped read,
+    // so the app looks broken rather than mis-scoped: zeros, empty lists, and
+    // "could not load" banners. It happens whenever the stored value outlives
+    // the session it was chosen in — a super-admin impersonating a tenant, or
+    // any user whose location assignment was changed under them. Drop it and
+    // reload once; the retry sends no header and falls back to their own scope.
+    if (typeof window !== 'undefined' && res.status === 403 && code === 'VIEW_LOCATION_DENIED') {
+      try {
+        if (readViewLocation() && !sessionStorage.getItem(VIEW_LOCATION_RECOVERY_KEY)) {
+          sessionStorage.setItem(VIEW_LOCATION_RECOVERY_KEY, '1');
+          writeViewLocation('');
+          window.location.reload();
+        }
+      } catch {}
+    }
     if (
       typeof window !== 'undefined' &&
       res.status === 401 &&
@@ -116,6 +134,11 @@ async function parseApiResponse(res, path) {
       }));
     }
     throw error;
+  }
+  // Whatever location is stored was accepted, so re-arm the recovery guard for
+  // the next time the stored value goes stale.
+  if (typeof window !== 'undefined') {
+    try { sessionStorage.removeItem(VIEW_LOCATION_RECOVERY_KEY); } catch {}
   }
   if (res.status === 204) return null;
   return res.json();
