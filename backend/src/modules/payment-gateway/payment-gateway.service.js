@@ -165,3 +165,8 @@ export const paymentGatewayService = {
     return spinClient.summaryReport(config);
   },
 };
+
+// Test-only surface (same convention as incident-report.service.js). Exposed so
+// the Tenant.settingsJson drift guard can call the resolver directly instead of
+// reaching it through a charge path that needs a terminal.
+export const __test = { getTenantSpinConfig };

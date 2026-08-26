@@ -19,7 +19,11 @@ function listingInclude() {
         }
       }
     },
-    tenant: true,
+    // This row is serialized straight into the API response, so it must never
+    // carry Tenant.settingsJson — that column holds the tenant's live SMS and
+    // SPIn terminal credentials. `omit` keeps the payload byte-identical to
+    // what it was before settingsJson was declared on the model (2026-08-26).
+    tenant: { omit: { settingsJson: true } },
     availabilityWindows: {
       orderBy: [{ startAt: 'asc' }]
     }
@@ -158,7 +162,7 @@ async function resolveHostContext(user, requestedHostProfileId) {
         ...tenantFilter
       },
       include: {
-        tenant: true,
+        tenant: { omit: { settingsJson: true } }, // credentials — see the note above
         user: true
       }
     });
@@ -175,7 +179,7 @@ async function resolveHostContext(user, requestedHostProfileId) {
       userId: user?.id || user?.sub || null
     },
     include: {
-      tenant: true,
+      tenant: { omit: { settingsJson: true } }, // credentials — see the note above
       user: true
     }
   });

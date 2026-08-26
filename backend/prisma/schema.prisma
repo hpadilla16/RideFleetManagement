@@ -566,6 +566,17 @@ model Tenant {
   // rental-agreement renderer (see getEffectiveTermsHtmlForTenant).
   // When null/empty, the system continues to render the canonical T&C.
   termsHtml                 String?  @db.Text
+  // Free-form per-tenant integration settings (jsonb). The column has existed in
+  // production since before the migration runner and was NEVER declared here —
+  // so every `select: { settingsJson: true }` on Tenant was a Prisma validation
+  // error at runtime, and the per-tenant config it holds has never applied:
+  //   - sms.service.js getTenantSmsConfig      -> smsProvider/smsFromNumber/creds
+  //   - payment-gateway.service.js getTenantSpinConfig -> spinAuthKey/spinTpn/...
+  //   - incident-report.service.js reportingWindowHours -> incidentReportingWindowHours
+  // Both readers accept the jsonb object OR a legacy JSON string, so declaring it
+  // Json? is safe either way. Nothing in the app WRITES it yet — today it is set
+  // by SQL only. See migration 20260826_tenant_settings_json (additive, no-op in prod).
+  settingsJson              Json?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
