@@ -547,7 +547,7 @@ function StepRenderer({ session, reservation, token, onAdvance }) {
     case 'TC_PENDING':
       return <Step2TermsPending session={session} reservation={reservation} token={token} onSigned={() => onAdvance('TC_SIGNED')} />;
     case 'TC_SIGNED':
-      return <StepBridge label="Terms signed" onNext={() => onAdvance('PAYMENT_PENDING')} />;
+      return <StepBridge key="TC_SIGNED" label="Terms signed" onNext={() => onAdvance('PAYMENT_PENDING')} />;
     case 'PAYMENT_PENDING': {
       // Which of the three payment screens this session gets — see
       // paymentStepMode() in lib/checkout-session.js for the ordering rule.
@@ -560,12 +560,12 @@ function StepRenderer({ session, reservation, token, onAdvance }) {
         return <LoanerPaymentBridge reservation={reservation} onNext={() => onAdvance('PAID')} />;
       }
       if (mode === PAYMENT_STEP_MODES.SKIP) {
-        return <StepBridge label="No payment required at check-out" onNext={() => onAdvance('PAID')} />;
+        return <StepBridge key="PAYMENT_SKIPPED" label="No payment required at check-out" onNext={() => onAdvance('PAID')} />;
       }
       return <Step3PaymentPending session={session} reservation={reservation} token={token} onPaid={() => onAdvance('PAID')} />;
     }
     case 'PAID':
-      return <StepBridge label="Payment captured" onNext={() => onAdvance('INSPECTION_HANDOFF')} />;
+      return <StepBridge key="PAID" label="Payment captured" onNext={() => onAdvance('INSPECTION_HANDOFF')} />;
     case 'INSPECTION_HANDOFF':
       return <Step4Handoff session={session} token={token} reservationId={reservation?.id} onContinue={() => onAdvance('INSPECTION_IN_PROGRESS')} />;
     case 'INSPECTION_IN_PROGRESS':
@@ -582,7 +582,7 @@ function StepRenderer({ session, reservation, token, onAdvance }) {
         onSigned={() => onAdvance('FINALIZING')}
       />;
     case 'FINALIZING':
-      return <StepBridge label="Building agreement…" onNext={() => onAdvance('CLOSED')} />;
+      return <StepBridge key="FINALIZING" label="Building agreement…" onNext={() => onAdvance('CLOSED')} />;
     case 'CLOSED':
       return <StepClosed reservation={reservation} />;
     case 'CANCELLED':
