@@ -140,6 +140,86 @@ export function summarizeOpenRequests(rows, now = Date.now(), vehicleById = {}) 
   return out;
 }
 
+// ─── Alert feed detail (2026-08-26) ─────────────────────────────────────────
+
+/**
+ * Which request does this alert row talk about?
+ *
+ * Two honest sources, both already written by the no-show fan-out: the
+ * rawJson's own `requestId`, and the deterministic `noshow:<requestId>`
+ * providerRef that makes the row idempotent. Never a guess — anything else
+ * yields null and the caller resolves no detail at all.
+ */
+export function alertRequestId(row) {
+  const fromRaw = String(parseAlertRaw(row?.rawJson)?.requestId || '').trim();
+  if (fromRaw) return fromRaw;
+  const ref = String(row?.providerRef || '').trim();
+  return ref.startsWith('noshow:') ? ref.slice('noshow:'.length) || null : null;
+}
+
+/** rawJson is a stored blob — a broken one is never a reason to fail a feed. */
+function parseAlertRaw(rawJson) {
+  if (!rawJson) return null;
+  if (typeof rawJson === 'object') return rawJson;
+  try {
+    const parsed = JSON.parse(rawJson);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch { return null; }
+}
+
+/**
+ * The no-show detail line the staff feed renders — "Juan P. (2 pax, 3 maletas)
+ * — marcado por el conductor", plus a [Contactar cliente] tel: action.
+ *
+ * FIELD-PICKED, never the raw blob: rawJson is written by several code paths
+ * and one added key there must not become a new response field here. The
+ * PHONE is deliberate and does NOT come from rawJson (which must stay
+ * PII-light) — the caller resolves it from the ShuttleRequest row under the
+ * caller's OWN tenant+location scope. This is a staff-authed endpoint
+ * (requireAuth + module access), the same surface that already shows the
+ * customer's name and shared coordinates, so a callback number is in scope;
+ * it is still picked one field at a time.
+ *
+ * @param {object} row ShuttleAlert row
+ * @param {string|null} [customerPhone] resolved by the caller, scope-checked
+ * @returns {object|null} null when the row carries no no-show payload at all
+ */
+export function alertDetail(row, customerPhone = null) {
+  const raw = parseAlertRaw(row?.rawJson);
+  const requestId = alertRequestId(row);
+  const name = String(raw?.customerName || '').trim() || null;
+  const partySize = num(raw?.partySize);
+  const bags = num(raw?.bags);
+  const markedBy = String(raw?.markedBy || '').trim().slice(0, 40) || null;
+  const phone = String(customerPhone || '').trim() || null;
+  if (!requestId && !name && partySize === null && bags === null && !markedBy) return null;
+  return { requestId: requestId || null, customerName: name, partySize, bags, markedBy, customerPhone: phone };
+}
+
+/**
+ * May a location-scoped caller see this ZONE-LESS alert? (2026-08-26)
+ *
+ * The feed used to filter on `zoneId ∈ scoped zones`, which silently hid every
+ * REQUEST_NO_SHOW / DRIVER_ISSUE without a zone from exactly the staff who
+ * work that sede. Resolution, most authoritative first, and FAIL-CLOSED at
+ * every step — an alert we cannot tie to an allowed location stays hidden:
+ *   1. the alert's request (its locationId is the truth) — the caller passes
+ *      the request only when it survived their own scopeWhere;
+ *   2. otherwise the alert's vehicle, when that vehicle is configured as a
+ *      shuttle at one of the caller's allowed locations;
+ *   3. otherwise: not visible.
+ *
+ * @param {object} row ShuttleAlert row (zoneId null)
+ * @param {object|null} scopedRequest the request row, already scope-filtered
+ * @param {Set<string>} allowedVehicleIds vehicles configured at allowed sedes
+ * @param {boolean} hasRequestRef did the row name a request at all?
+ */
+export function zoneLessAlertVisible({ row, scopedRequest = null, allowedVehicleIds = new Set(), hasRequestRef = false }) {
+  if (hasRequestRef) return !!scopedRequest;
+  const vehicleId = row?.vehicleId ? String(row.vehicleId) : '';
+  return !!vehicleId && allowedVehicleIds.has(vehicleId);
+}
+
 /**
  * One waiting-customer entry for the STAFF monitor (Phase 3, Screen 10).
  * This is the ONE place the customer's shared coordinates leave the server —
@@ -151,9 +231,13 @@ export function summarizeOpenRequests(rows, now = Date.now(), vehicleById = {}) 
  * @param {object} args.request open ShuttleRequest row
  * @param {{lat,lng,at}|null} args.fix parseStoredFix output (null = not sharing)
  * @param {object|null} args.assignedVehicle vehicle row from the tenant-verified map
+ * @param {string|null} [args.spotName] the pickupSpotZoneId's resolved zone name
+ *   (2026-08-26): the id alone was useless to non-admin staff because
+ *   /api/shuttle-zones is ADMIN-gated. One extra picked string, nothing else
+ *   from the zone row.
  * @param {number} [args.now]
  */
-export function waitingCustomerPayload({ request, fix, assignedVehicle = null, now = Date.now() }) {
+export function waitingCustomerPayload({ request, fix, assignedVehicle = null, spotName = null, now = Date.now() }) {
   const createdAt = request?.createdAt ? new Date(request.createdAt).getTime() : NaN;
   return {
     requestId: String(request?.id || ''),
@@ -162,6 +246,7 @@ export function waitingCustomerPayload({ request, fix, assignedVehicle = null, n
     partySize: num(request?.partySize) || 1,
     bags: num(request?.bags),
     pickupSpotZoneId: request?.pickupSpotZoneId || null,
+    pickupSpotName: String(spotName || '').trim() || null,
     waitingMinutes: Number.isFinite(createdAt) ? Math.max(0, Math.round((now - createdAt) / 60000)) : null,
     assignedVehicle: assignedVehicle
       ? { vehicleId: String(assignedVehicle.id || ''), label: vehicleLabel(assignedVehicle), plate: String(assignedVehicle.plate || '').trim() || null }
