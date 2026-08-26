@@ -96,6 +96,14 @@ export function hostedPageUrl(mode = 'enroll') {
  * the first billing run, weeks later, on a customer who thinks they are enrolled. The
  * rehearsal affordance belongs to a sandbox gateway (BILLING_AUTHNET_ENV=sandbox), which
  * cannot be confused with the real one.
+ *
+ * PHASE 3 RECONSIDERED AND KEPT THE REMOVAL. The first real enrollment is exactly the
+ * moment the flag would have been reached for, so the argument was re-run with a live
+ * customer in front of it and came out the same way: the rehearsal is a full end-to-end run
+ * against BILLING_AUTHNET_ENV=sandbox with sandbox credentials, verified in the sandbox
+ * portal, after which all three BILLING_AUTHNET_* values move to production together. One
+ * source of truth for which gateway we are on, and no setting that can quietly outlive its
+ * rehearsal. authorize-net.test.mjs pins the variable's absence; that test stays.
  */
 function cardValidationMode() {
   return billingEnv() === 'production' ? 'liveMode' : 'testMode';

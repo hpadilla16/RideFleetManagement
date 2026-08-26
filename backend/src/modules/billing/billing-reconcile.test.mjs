@@ -129,7 +129,15 @@ test('SILENCE DETECTOR fires with ZERO webhooks ever received', async () => {
 
   // Loud, and named so it can be alerted on.
   assert.ok(w.logger.has('NO_CHARGE_OBSERVED'));
-  assert.deepEqual(w.notify.calls.map((c) => c.kind), ['PAST_DUE', 'NO_CHARGE_OBSERVED']);
+  // WEBHOOK_SILENCE rides along, and correctly: this world is one where a charge
+  // date passed AND not one verified delivery has ever arrived, which is two true
+  // statements about two different things. Until Phase 3 the heartbeat was
+  // silenced here by the reconciler's OWN synthetic event being counted as a
+  // delivery — it reassured itself with its own alarm.
+  assert.deepEqual(
+    w.notify.calls.map((c) => c.kind),
+    ['PAST_DUE', 'NO_CHARGE_OBSERVED', 'WEBHOOK_SILENCE'],
+  );
 
   // And the decision is in the same ledger a webhook would have landed in.
   const synthetic = w.prisma.tenantSubscriptionEvent.rows.find(
@@ -294,8 +302,8 @@ test('TRIALING is not "corrected" to ACTIVE just because ARB calls it active', a
   assert.equal(counts.driftEscalated, 0);
   assert.equal(counts.driftRefused, 0);
   assert.equal((await w.reload()).status, SUBSCRIPTION_STATUS.TRIALING);
-  // Specifically no DRIFT alarm. (The heartbeat still fires in this world —
-  // no event has ever arrived — and that is a different, correct alarm.)
+  // Specifically no DRIFT alarm. (Nor any other: since Phase 3 the heartbeat
+  // is armed by a charge date having PASSED, and this one has not.)
   assert.equal(w.notify.calls.filter((c) => c.kind === 'DRIFT').length, 0);
 });
 
@@ -398,7 +406,9 @@ test('a synthetic event is written once per day, not once per sweep', async () =
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('HEARTBEAT alarms when zero verified webhooks have arrived in 72 hours', async () => {
-  const w = await makeWorld({ nextChargeDate: '2026-09-20', arbStatus: 'active' });
+  // A charge date that has PASSED is what arms the heartbeat (see below): money
+  // was supposed to move and not one verified delivery has arrived anywhere.
+  const w = await makeWorld({ nextChargeDate: '2026-09-01', arbStatus: 'active' });
   await runBillingReconcile(w.overrides);
 
   assert.ok(w.logger.has('BILLING_WEBHOOK_SILENCE'));
@@ -409,7 +419,7 @@ test('HEARTBEAT alarms when zero verified webhooks have arrived in 72 hours', as
 });
 
 test('HEARTBEAT stays quiet when a webhook arrived inside the window', async () => {
-  const w = await makeWorld({ nextChargeDate: '2026-09-20', arbStatus: 'active' });
+  const w = await makeWorld({ nextChargeDate: '2026-09-01', arbStatus: 'active' });
   await w.prisma.tenantSubscriptionEvent.create({
     data: {
       notificationId: 'n-recent', eventType: BILLING_EVENT.SUB_EXPIRING,
@@ -435,6 +445,24 @@ test('HEARTBEAT stays quiet when there is nothing enrolled to hear from', async 
   await runBillingReconcile(w.overrides);
   assert.equal(w.logger.has('BILLING_WEBHOOK_SILENCE'), false);
   assert.equal(w.notify.calls.length, 0);
+});
+
+test('HEARTBEAT stays quiet when nothing was DUE yet, enrolled or not', async () => {
+  // Phase 3 tightened the gate from "anything is enrolled" to "a charge date has
+  // already passed". THE CASE THAT FORCED IT: Ride's first real subscription is
+  // authorised on 26 August with a first charge on 1 September. It is live at
+  // Authorize.Net, entirely healthy, and produces no traffic for six days —
+  // which the old gate reported as a dead webhook pipe, three days running,
+  // before the customer had been charged once.
+  //
+  // The same tightening is what stops a single monthly subscription alarming on
+  // the twenty-seven days a month when nothing is due.
+  const w = await makeWorld({ nextChargeDate: '2026-09-20', arbStatus: 'active' });
+
+  await runBillingReconcile(w.overrides);
+
+  assert.equal(w.logger.has('BILLING_WEBHOOK_SILENCE'), false);
+  assert.equal(w.notify.calls.length, 0, 'a healthy not-yet-due subscription alarmed');
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

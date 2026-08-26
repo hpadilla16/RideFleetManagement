@@ -638,27 +638,75 @@ async function markPastDue(sub, now, failureCode, detectedBy, overrides = {}) {
  * the poll itself is refreshing, the ledger is quiet because no money events
  * arrive, and the panel is green.
  *
- * GATED ON THERE BEING SOMETHING TO HEAR. With zero live subscriptions there is
- * no expectation of traffic, and an alarm that fires every day of a phase whose
- * whole point is that nothing is enrolled yet would be muted long before the
- * first real customer.
+ * GATED ON THERE BEING SOMETHING TO HEAR — AND THAT GATE IS NARROWER THAN IT
+ * FIRST LOOKS (tightened 2026-08-27, billing Phase 3).
+ *
+ * Phase 2 armed this on "any live subscription exists". That was right while
+ * nothing was enrolled and wrong the moment anything was, because a live
+ * subscription does NOT imply expected webhook traffic:
+ *
+ *   - A DEFERRED START. Ride's first real subscription is authorised on 26 Aug
+ *     with a first charge on 1 Sep. It is live at Authorize.Net and correct in
+ *     every way, and it will produce exactly one event (subscription.created)
+ *     and then nothing for six days. Under the old gate that is a
+ *     BILLING_WEBHOOK_SILENCE alarm on 29, 30 and 31 August — three false
+ *     alarms before the customer has been charged once.
+ *   - LOW VOLUME GENERALLY. One monthly subscription produces traffic around
+ *     one day in thirty. A 72-hour silence window would alarm on the other
+ *     twenty-seven, every month, forever.
+ *
+ * An alarm that fires on healthy rows is an alarm people learn to close without
+ * reading — the same argument this file already makes about never "correcting"
+ * TRIALING to ACTIVE. So the gate is not "is anything enrolled" but "was money
+ * supposed to move already": a live subscription whose charge date has come and
+ * gone. If a charge date has passed and NOT ONE verified webhook has arrived
+ * platform-wide, the pipe really is suspect.
+ *
+ * What this costs, stated plainly: the heartbeat no longer notices a dead pipe
+ * during a genuinely quiet stretch. It could not have noticed it truthfully
+ * anyway — with nothing due, silence and death are indistinguishable — and the
+ * first passed charge date re-arms it, one day ahead of detector 3.
  */
 async function checkWebhookHeartbeat(now, counts, overrides) {
   const d = deps(overrides);
+  const today = todayCalendarDate(now);
   const liveSubscriptions = await d.prisma.tenantSubscription.count({
-    where: { status: { in: POLLABLE }, arbSubscriptionId: { not: null } },
+    where: {
+      status: { in: POLLABLE },
+      arbSubscriptionId: { not: null },
+      // Calendar-date STRING comparison is chronological by design
+      // (billing-dates.js), the same property pass 3 relies on. A null
+      // nextChargeDate — a cancelled or expired row — never arms this.
+      nextChargeDate: { lt: today },
+    },
   });
   if (liveSubscriptions === 0) return;
 
+  /**
+   * ONLY EVENTS THAT ACTUALLY CAME FROM AUTHORIZE.NET COUNT.
+   *
+   * This ledger holds two kinds of row. Real deliveries carry Authorize.Net's own
+   * event names, every one of which begins `net.authorize.` — see BILLING_EVENT.
+   * The reconciler's own decisions are written into the SAME table (deliberately:
+   * a correction should be visible next to the webhooks it compensated for) under
+   * `reconcile.*` names, and those are not deliveries at all.
+   *
+   * Counting them here made this detector self-blinding in exactly the situation
+   * it exists for (found by the deferred-start suite, 2026-08-27): a charge date
+   * passes with no webhook, detector 3 raises NO_CHARGE_OBSERVED and writes a
+   * synthetic row — and that row is then read back as proof the pipe is alive.
+   * The reconciler would have been quietly reassuring itself with its own alarm.
+   */
   const since = new Date(now.getTime() - HEARTBEAT_WINDOW_MS);
+  const fromAuthorizeNet = { eventType: { startsWith: 'net.authorize.' }, signatureOk: true };
   const verified = await d.prisma.tenantSubscriptionEvent.count({
-    where: { receivedAt: { gte: since }, signatureOk: true },
+    where: { ...fromAuthorizeNet, receivedAt: { gte: since } },
   });
   if (verified > 0) return;
 
   counts.heartbeatAlert = 1;
   const last = await d.prisma.tenantSubscriptionEvent.findFirst({
-    where: { signatureOk: true },
+    where: fromAuthorizeNet,
     orderBy: { receivedAt: 'desc' },
   });
 
@@ -666,8 +714,8 @@ async function checkWebhookHeartbeat(now, counts, overrides) {
     windowHours: HEARTBEAT_WINDOW_MS / 3600000,
     liveSubscriptions,
     lastEventAt: last?.receivedAt?.toISOString() || null,
-    message: 'Zero verified billing webhooks platform-wide. Check the Authorize.Net portal subscription, '
-      + 'the endpoint DNS, and whether the Signature Key rotated.',
+    message: 'Zero verified billing webhooks platform-wide while a charge date has already passed. '
+      + 'Check the Authorize.Net portal subscription, the endpoint DNS, and whether the Signature Key rotated.',
   });
   await d.notifyOwner('WEBHOOK_SILENCE', {}, {
     lastEventAt: last?.receivedAt || null,

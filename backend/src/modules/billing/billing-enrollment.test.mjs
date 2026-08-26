@@ -224,12 +224,22 @@ test('a tenant may not have two live subscriptions', async () => {
   // The real guard is a PARTIAL unique index in raw SQL, which Prisma cannot
   // express. This proves the service surfaces it as something a human can act on
   // rather than a P2002 stack trace.
+  //
+  // AUTHORISED, not merely existing (Phase 3): a second invite against an
+  // UNauthorised PENDING row is a resend and is covered separately below. What
+  // must never happen is a second subscription for a tenant whose card is
+  // already charging — that is the double-billing case.
   const w = await world();
-  await issueEnrollInvite(INVITE_INPUT, w.deps);
+  const first = await issueEnrollInvite(INVITE_INPUT, w.deps);
+  await w.prisma.tenantSubscription.update({
+    where: { id: first.subscription.id },
+    data: { status: SUBSCRIPTION_STATUS.ACTIVE, arbSubscriptionId: 'arb_live' },
+  });
   await assert.rejects(
     () => issueEnrollInvite(INVITE_INPUT, w.deps),
     /already has a live subscription/,
   );
+  assert.equal(w.prisma.tenantSubscription.rows.length, 1);
 });
 
 test('a CANCELLED subscription does not block a new one', async () => {
@@ -325,7 +335,10 @@ test('the first charge row is PENDING and explains itself in a sentence', async 
   assert.match(c.description, /26 de septiembre de 2026/);
 });
 
-test('a deferred start lands in TRIALING, not ACTIVE', async () => {
+test('a TRIAL lands in TRIALING, not ACTIVE', async () => {
+  // Days the customer was PROMISED FREE. Contrast the deferred-start suite in
+  // billing-deferred-start.test.mjs, which uses the same ARB mechanism and must
+  // NOT be called a trial.
   const w = await world();
   const issued = await issueEnrollInvite({ ...INVITE_INPUT, trialDays: 30 }, w.deps);
   await w.prisma.autopayInvite.update({

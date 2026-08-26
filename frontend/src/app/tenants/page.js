@@ -26,6 +26,61 @@ function limitLabel(value) {
   return value == null || value === '' ? 'Unlimited' : String(value);
 }
 
+/**
+ * A calendar date, rendered in UTC to match how the backend built it.
+ *
+ * `timeZone: 'UTC'` is LOAD-BEARING, for the same reason it is on the customer's
+ * enrollment page: billing dates are 'YYYY-MM-DD' strings because Authorize.Net
+ * bills on a calendar day, and rendering one in es-PR/AST (UTC-4) without this
+ * option shows the day BEFORE the one that will actually charge. The operator
+ * must see the same date the customer consented to.
+ */
+function billingDate(value) {
+  const [y, m, d] = String(value || '').split('-').map(Number);
+  if (!y || !m || !d) return '—';
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC',
+  }).format(new Date(Date.UTC(y, m - 1, d)));
+}
+
+function money(amount, currency = 'USD') {
+  if (amount == null || amount === '') return '';
+  return `$${Number(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
+}
+
+/**
+ * The first day of next month, as a calendar date.
+ *
+ * The default first-charge date offered in the form, because "start billing at
+ * the top of the next cycle" is what the enrollment conversation almost always
+ * lands on. Built in UTC so it agrees with every other billing date in the
+ * system rather than shifting by a day for an operator west of Greenwich.
+ */
+function firstOfNextMonth(now = new Date()) {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * What the row says about a tenant's billing, in one line.
+ *
+ * "Not enrolled" is the important one and is why a tenant with no subscription
+ * still gets a label instead of a blank cell: that is revenue nobody remembered
+ * to collect, and a blank reads as "still loading" rather than "nobody did this".
+ *
+ * PENDING_AUTHORIZATION says "link sent, no card yet" rather than "pending",
+ * because the operator's next question is always whether the ball is in the
+ * customer's court.
+ */
+const BILLING_LABEL = {
+  NONE: 'Not enrolled',
+  PENDING_AUTHORIZATION: 'Link sent - awaiting card',
+  TRIALING: 'Trial',
+  ACTIVE: 'Active',
+  PAST_DUE: 'Past due',
+  SUSPENDED: 'Suspended',
+};
+
 export default function TenantsPage() {
   return <AuthGate>{({ token, me, logout }) => <Inner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -38,6 +93,13 @@ function Inner({ token, me, logout }) {
   const [adminForm, setAdminForm] = useState(EMPTY_ADMIN);
   const [activeTenantId, setActiveTenantId] = useState('');
   const [admins, setAdmins] = useState([]);
+  // Which row has the enroll form open, and what is typed in it. One at a time:
+  // this mints a link that starts a real billing relationship, and two half
+  // filled forms side by side is how the wrong price reaches the wrong tenant.
+  const [enrollFor, setEnrollFor] = useState('');
+  const [enrollForm, setEnrollForm] = useState(null);
+  const [enrollBusy, setEnrollBusy] = useState(false);
+  const [enrollLink, setEnrollLink] = useState(null);
 
   const role = String(me?.role || '').toUpperCase().trim();
   const isSuper = role === 'SUPER_ADMIN';
@@ -197,6 +259,63 @@ function Inner({ token, me, logout }) {
       return undefined;
     } catch (e) {
       return setMsg(e.message);
+    }
+  };
+
+  /**
+   * Open the enroll form for one row, prefilled with the safest defaults.
+   *
+   * Prefilled, not pre-decided: every field is editable, because the price is
+   * negotiated per tenant and the catalog default is only an opening offer. The
+   * amount box is left EMPTY when the catalog has no price for the plan — an
+   * empty box asks a question, whereas a 0 would quietly enroll somebody at
+   * nothing and look deliberate afterwards.
+   */
+  const openEnroll = (row) => {
+    const plan = planCatalog.find((p) => p.code === row.plan);
+    setEnrollLink(null);
+    setEnrollFor(row.id);
+    setEnrollForm({
+      email: '',
+      planCode: row.plan || 'BETA',
+      cycle: 'monthly',
+      amount: plan?.priceMonthly == null ? '' : String(plan.priceMonthly),
+      // The first charge date, and the page says exactly that. It is the date
+      // the customer will read on their own enrollment screen as "Primer
+      // cargo", so it is worth being deliberate about.
+      startDate: firstOfNextMonth(),
+    });
+  };
+
+  /**
+   * Mint the link. The response carries the plaintext token exactly once — it is
+   * stored only as a hash — so it is parked in state and shown until dismissed
+   * rather than flashed in the transient message line. There is no way to ask
+   * for it again; a lost link means minting a new invite.
+   */
+  const sendEnrollLink = async () => {
+    if (!enrollFor || !enrollForm) return;
+    if (!String(enrollForm.email || '').trim()) {
+      setMsg('A billing contact email is required — it is who the receipts go to.');
+      return;
+    }
+    setEnrollBusy(true);
+    try {
+      const out = await api(`/api/tenants/${enrollFor}/billing/enroll-link`, {
+        method: 'POST',
+        body: JSON.stringify(enrollForm),
+      }, token);
+      setEnrollLink(out);
+      setEnrollFor('');
+      setEnrollForm(null);
+      setMsg(out.resent
+        ? 'Previous links revoked and a new one minted.'
+        : 'Enrollment link minted.');
+      await load();
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setEnrollBusy(false);
     }
   };
 
@@ -363,8 +482,37 @@ function Inner({ token, me, logout }) {
 
         <div id="tenant-edit-card" className="glass card" style={{ padding: 12 }}>
           <h3 className="section-title">Edit / Suspend Tenants</h3>
+          {/* The link, shown until dismissed. It contains the plaintext invite
+              token, which exists nowhere else — the invite row stores only a
+              sha256 — so this is the single chance to copy it. */}
+          {enrollLink ? (
+            <div className="app-banner" style={{ marginBottom: 10 }}>
+              <div className="stack" style={{ gap: 6 }}>
+                <span className="eyebrow">Enrollment link - copy it now</span>
+                <div className="label">
+                  This is the only time this link is shown. It is stored hashed, so it cannot be
+                  retrieved again — losing it means minting a new one. Send it to the billing
+                  contact; it expires {billingDate(String(enrollLink.expiresAt).slice(0, 10))}.
+                </div>
+                <input readOnly value={enrollLink.url} onFocus={(e) => e.target.select()} />
+                <div className="label">
+                  {enrollLink.subscription.planName} - {money(enrollLink.subscription.amount, enrollLink.subscription.currency)}
+                  {' '}/ {enrollLink.subscription.intervalLength === 12 ? 'year' : 'month'}
+                  {' '}| First charge {billingDate(enrollLink.subscription.startDate)}
+                  {/* trialEndsAt is null for a deferred start. Saying "trial"
+                      here when there is none would be the same error the
+                      customer-facing page is careful to avoid. */}
+                  {enrollLink.subscription.trialEndsAt ? ' | Trial until ' + billingDate(enrollLink.subscription.trialEndsAt) : ' | No trial'}
+                  {' '}| ref {enrollLink.tokenPrefix}...
+                </div>
+              </div>
+              <div className="inline-actions">
+                <button type="button" onClick={() => setEnrollLink(null)}>Done</button>
+              </div>
+            </div>
+          ) : null}
           <table>
-            <thead><tr><th>Name</th><th>Slug</th><th>Status</th><th>Plan</th><th>Car Sharing</th><th>Loaner</th><th>Tolls</th><th>Citations</th><th>Market Int.</th><th>Counts</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Name</th><th>Slug</th><th>Status</th><th>Plan</th><th>Billing</th><th>Car Sharing</th><th>Loaner</th><th>Tolls</th><th>Citations</th><th>Market Int.</th><th>Counts</th><th>Actions</th></tr></thead>
             <tbody>
               {(rows || []).map((r) => (
                 <tr key={r.id}>
@@ -385,6 +533,92 @@ function Inner({ token, me, logout }) {
                     <div className="label">
                       {r.planConfig?.name || r.plan || 'Plan'} | Admins {limitLabel(r.planConfig?.maxAdmins)} | Users {limitLabel(r.planConfig?.maxUsers)} | Vehicles {limitLabel(r.planConfig?.maxVehicles)}
                     </div>
+                  </td>
+                  {/* Billing. One line of status plus ONE button — the panel
+                      with history, events and the write actions is Phase 4. */}
+                  <td>
+                    <div className="label">
+                      {BILLING_LABEL[r.billing?.status] || r.billing?.status || 'Not enrolled'}
+                      {r.billing?.amount ? ` - ${money(r.billing.amount, r.billing.currency)}` : ''}
+                    </div>
+                    {r.billing?.nextChargeDate ? (
+                      <div className="label">
+                        {/* "First charge" until one has actually been taken.
+                            After that it is the next one. authorizedAt alone is
+                            not enough — a deferred start is authorised weeks
+                            before any money moves. */}
+                        {r.billing.status === 'ACTIVE' && r.billing.startDate === r.billing.nextChargeDate
+                          ? 'First charge ' : 'Next charge '}
+                        {billingDate(r.billing.nextChargeDate)}
+                        {r.billing.cardLast4 ? ` | ${r.billing.cardBrand || 'card'} ...${r.billing.cardLast4}` : ''}
+                      </div>
+                    ) : null}
+                    {r.billing?.planDiverges ? (
+                      <div className="error">
+                        Billed {r.billing.planCode}, entitled {r.plan}
+                      </div>
+                    ) : null}
+                    {enrollFor === r.id && enrollForm ? (
+                      <div className="stack" style={{ gap: 4, marginTop: 6 }}>
+                        <input
+                          placeholder="Billing contact email"
+                          value={enrollForm.email}
+                          onChange={(e) => setEnrollForm((f) => ({ ...f, email: e.target.value }))}
+                        />
+                        <select
+                          value={enrollForm.planCode}
+                          onChange={(e) => setEnrollForm((f) => ({ ...f, planCode: e.target.value }))}
+                        >
+                          {(activePlanOptions.length ? activePlanOptions : [{ code: r.plan || 'BETA' }]).map((plan) => (
+                            <option key={plan.code} value={plan.code}>{plan.code}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={enrollForm.cycle}
+                          onChange={(e) => setEnrollForm((f) => ({ ...f, cycle: e.target.value }))}
+                        >
+                          <option value="monthly">monthly</option>
+                          <option value="annual">annual</option>
+                        </select>
+                        <input
+                          type="number" min="0" step="0.01"
+                          placeholder="Amount (negotiated)"
+                          value={enrollForm.amount}
+                          onChange={(e) => setEnrollForm((f) => ({ ...f, amount: e.target.value }))}
+                        />
+                        <input
+                          type="date"
+                          value={enrollForm.startDate}
+                          onChange={(e) => setEnrollForm((f) => ({ ...f, startDate: e.target.value }))}
+                        />
+                        <div className="label">
+                          First charge date. Setting it means a deferred start, not a trial -
+                          the subscription goes ACTIVE and the customer is shown this exact
+                          date as their first charge.
+                        </div>
+                        <div className="inline-actions">
+                          <button type="button" onClick={sendEnrollLink} disabled={enrollBusy}>
+                            {enrollBusy ? 'Minting...' : 'Mint link'}
+                          </button>
+                          <button
+                            type="button"
+                            className="button-subtle"
+                            onClick={() => { setEnrollFor(''); setEnrollForm(null); }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (r.billing?.status === 'NONE' || r.billing?.status === 'PENDING_AUTHORIZATION') ? (
+                      /* Offered ONLY where it can succeed. Once a card is
+                         authorised the server refuses this (changing a running
+                         subscription's price is a plan change, not a resend), so
+                         showing the button there would be an invitation to a
+                         400. Those tenants get the Phase 4 panel instead. */
+                      <button type="button" className="button-subtle" onClick={() => openEnroll(r)}>
+                        {r.billing.status === 'PENDING_AUTHORIZATION' ? 'Resend enroll link' : 'Send enroll link'}
+                      </button>
+                    ) : null}
                   </td>
                   <td>
                     <label className="label">
