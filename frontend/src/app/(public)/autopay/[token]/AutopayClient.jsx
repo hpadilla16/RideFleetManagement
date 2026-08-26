@@ -21,36 +21,111 @@
  * reading the disclosure burns that clock on the one page we actually want them
  * to read. The groundwork minted it on render and said in its own comment that
  * it should be moved; this is that advice taken.
+ *
+ * LANGUAGE — English by default, Spanish reachable, see ./autopay-lang.js for
+ * why the choice is page-local rather than the app's i18next instance.
+ *
+ * BILLING DATES: rendered by that module's formatCalendarDate, whose
+ * `timeZone: 'UTC'` is LOAD-BEARING and does NOT vary with the language. These
+ * are 'YYYY-MM-DD' calendar strings because Authorize.Net bills on a calendar
+ * day; without the option, a reader west of UTC sees the day BEFORE the one
+ * that actually charges. The reasoning is written out in full there.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../../../lib/client';
+import {
+  LangToggle,
+  formatMoney,
+  languageName,
+  toSupportedLang,
+  useAutopayLang,
+} from './autopay-lang';
 
-/**
- * `startDate` is a CALENDAR date, not an instant — Authorize.Net bills on that
- * day in the merchant's own time, and the backend stores it as the string
- * 'YYYY-MM-DD' for exactly that reason.
- *
- * `timeZone: 'UTC'` is LOAD-BEARING and must match how the Date was built.
- * WITHOUT it, es-PR (UTC-4) renders midnight UTC as the PREVIOUS day, and the
- * customer authorises a charge dated one day before the one that actually runs.
- * Do not "simplify" this option away.
- */
-function formatDate(iso) {
-  const [y, m, d] = String(iso).split('-').map(Number);
-  if (!y || !m || !d) return iso;
-  return new Intl.DateTimeFormat('es-PR', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).format(new Date(Date.UTC(y, m - 1, d)));
-}
+const STRINGS = {
+  en: {
+    docTitle: 'Payment method',
+    loading: 'Loading…',
+    deadTitle: 'This link is no longer active',
+    deadBody: 'Payment links are personal and they expire. Contact us and we will send you a new one.',
+    enrolledTitle: 'Autopay is already active',
+    enrolledBody: '{company}’s subscription already has a payment method saved. If you need to change it, contact us and we will send you a new link.',
+    titleUpdate: 'Update payment method',
+    titleEnroll: 'Authorize automatic payment',
+    ledeUpdate: '{company}, here you can replace the card or account your subscription is charged to. The plan and the amount do not change.',
+    ledeEnroll: '{company}, you are about to save a payment method so your subscription renews on its own, without you having to process an invoice every cycle.',
+    detailsLabel: 'Charge details',
+    rowPlan: 'Plan',
+    rowAmount: 'Amount',
+    rowFrequency: 'Frequency',
+    rowNextCharge: 'Next charge',
+    rowFirstCharge: 'First charge',
+    whatHappens: 'What happens next',
+    step1: 'We send you to the secure form at Authorize.Net, our payment processor.',
+    step2Update: 'You replace the saved method there, on their site.',
+    step2Enroll: 'You enter your card or bank account there, on their site.',
+    step3Update: 'You come back here and we confirm it is updated.',
+    step3Enroll: 'You come back here and we confirm it is active.',
+    noteTitle: 'Your details do not pass through us',
+    noteBody: 'The full number is entered and stored on Authorize.Net’s servers. We only receive an identifier and the last four digits — we never see or store the full card.',
+    startFailed: 'We could not open the secure form. Try again in a moment.',
+    btnBusy: 'Opening the secure form…',
+    btnUpdate: 'Continue and update the method',
+    btnEnroll: 'Continue to the secure form',
+    disclosureNote: 'The authorization below is the record of what you are agreeing to, shown exactly as it was issued, in {language}.',
+    // Cadence. `every {n} {unit}` is the fallback for anything the four named
+    // intervals do not cover.
+    cadenceMonths1: 'monthly',
+    cadenceMonths3: 'quarterly',
+    cadenceMonths6: 'every 6 months',
+    cadenceMonths12: 'yearly',
+    cadenceOtherMonths: 'every {n} months',
+    cadenceOtherDays: 'every {n} days',
+  },
+  es: {
+    docTitle: 'Método de pago',
+    loading: 'Cargando…',
+    deadTitle: 'Este enlace ya no está activo',
+    deadBody: 'Los enlaces de pago son personales y expiran. Comunícate con nosotros y te enviamos uno nuevo.',
+    enrolledTitle: 'El autopago ya está activo',
+    enrolledBody: 'La suscripción de {company} ya tiene un método de pago guardado. Si necesitas cambiarlo, comunícate con nosotros y te enviamos un enlace nuevo.',
+    titleUpdate: 'Actualizar método de pago',
+    titleEnroll: 'Autorizar cobro automático',
+    ledeUpdate: '{company}, aquí puedes reemplazar la tarjeta o cuenta con la que se cobra tu suscripción. El plan y el monto no cambian.',
+    ledeEnroll: '{company}, vas a guardar un método de pago para que tu suscripción se renueve sola, sin que tengas que procesar una factura cada ciclo.',
+    detailsLabel: 'Detalles del cobro',
+    rowPlan: 'Plan',
+    rowAmount: 'Monto',
+    rowFrequency: 'Frecuencia',
+    rowNextCharge: 'Próximo cargo',
+    rowFirstCharge: 'Primer cargo',
+    whatHappens: 'Qué va a pasar',
+    step1: 'Te llevamos al formulario seguro de Authorize.Net, nuestro procesador de pagos.',
+    step2Update: 'Reemplazas el método guardado ahí, en su sitio.',
+    step2Enroll: 'Ingresas tu tarjeta o cuenta bancaria ahí, en su sitio.',
+    step3Update: 'Vuelves aquí y te confirmamos que quedó actualizado.',
+    step3Enroll: 'Vuelves aquí y te confirmamos que quedó activo.',
+    noteTitle: 'Tus datos no pasan por nosotros',
+    noteBody: 'El número completo se ingresa y se guarda en los servidores de Authorize.Net. Solo recibimos un identificador y los últimos cuatro dígitos — nunca vemos ni almacenamos la tarjeta completa.',
+    startFailed: 'No pudimos abrir el formulario seguro. Intenta de nuevo en un momento.',
+    btnBusy: 'Abriendo el formulario seguro…',
+    btnUpdate: 'Continuar y actualizar el método',
+    btnEnroll: 'Continuar al formulario seguro',
+    disclosureNote: 'La autorización que aparece abajo es el registro de lo que estás autorizando, tal como se emitió, en {language}.',
+    cadenceMonths1: 'mensual',
+    cadenceMonths3: 'trimestral',
+    cadenceMonths6: 'semestral',
+    cadenceMonths12: 'anual',
+    cadenceOtherMonths: 'cada {n} meses',
+    cadenceOtherDays: 'cada {n} días',
+  },
+};
 
-const CADENCE = { months: { 1: 'mensual', 3: 'trimestral', 6: 'semestral', 12: 'anual' }, days: {} };
-
-function cadenceLabel(unit, length) {
-  return CADENCE[unit]?.[length] || `cada ${length} ${unit === 'months' ? 'meses' : 'días'}`;
+function cadenceLabel(t, unit, length) {
+  if (unit === 'months' && [1, 3, 6, 12].includes(Number(length))) {
+    return t(`cadenceMonths${Number(length)}`);
+  }
+  return t(unit === 'months' ? 'cadenceOtherMonths' : 'cadenceOtherDays', { n: length });
 }
 
 export function AutopayClient({ token }) {
@@ -59,6 +134,7 @@ export function AutopayClient({ token }) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const { t, lang, setLang, fmtDate } = useAutopayLang(STRINGS);
 
   useEffect(() => {
     if (!token) return;
@@ -75,6 +151,14 @@ export function AutopayClient({ token }) {
       }
     })();
   }, [token]);
+
+  // The server-rendered <title> can only carry one language, and it carries the
+  // default; once the reader's language is resolved, the tab follows it. No
+  // company name, no amount — this route's URL is a credential and the title is
+  // the one part of it a screenshot or a shared tab strip leaks by accident.
+  useEffect(() => {
+    document.title = t('docTitle');
+  }, [t]);
 
   const isUpdate = invite?.mode === 'update';
 
@@ -102,107 +186,125 @@ export function AutopayClient({ token }) {
     } catch {
       setSubmitting(false);
       // Never surface the server's text here: it can carry a gateway error code
-      // the customer cannot act on, and on this route the URL contains the
-      // token. Say the one thing they can actually do.
-      setError('No pudimos abrir el formulario seguro. Intenta de nuevo en un momento.');
+      // the customer cannot act on, it is written in one fixed language, and on
+      // this route the URL contains the token. Say the one thing they can
+      // actually do, in the language they are reading.
+      setError(t('startFailed'));
     }
-  }, [token]);
+  }, [token, t]);
 
-  if (loading) return <Shell><p style={S.p}>Cargando…</p></Shell>;
+  if (loading) {
+    return <Shell lang={lang} setLang={setLang}><p style={S.p}>{t('loading')}</p></Shell>;
+  }
 
   if (dead) {
     return (
-      <Shell>
-        <h1 style={S.h1}>Este enlace ya no está activo</h1>
-        <p style={S.p}>
-          Los enlaces de pago son personales y expiran. Comunícate con nosotros y te
-          enviamos uno nuevo.
-        </p>
+      <Shell lang={lang} setLang={setLang}>
+        <h1 style={S.h1}>{t('deadTitle')}</h1>
+        <p style={S.p}>{t('deadBody')}</p>
       </Shell>
     );
   }
 
   if (invite.alreadyEnrolled) {
     return (
-      <Shell>
-        <h1 style={S.h1}>El autopago ya está activo</h1>
-        <p style={S.p}>
-          La suscripción de {invite.companyName} ya tiene un método de pago guardado. Si
-          necesitas cambiarlo, comunícate con nosotros y te enviamos un enlace nuevo.
-        </p>
+      <Shell lang={lang} setLang={setLang}>
+        <h1 style={S.h1}>{t('enrolledTitle')}</h1>
+        <p style={S.p}>{t('enrolledBody', { company: invite.companyName })}</p>
       </Shell>
     );
   }
 
-  const amount = Number(invite.amount).toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+  const amount = formatMoney(invite.amount);
+
+  /**
+   * THE CONSENT ARCHIVE AND THE LANGUAGE TOGGLE.
+   *
+   * `disclosureText` is the consent artefact: frozen when the link was sent,
+   * hashed, and copied onto the subscription at activation (schema.prisma,
+   * TenantSubscription.authorizedDisclosureText). It is rendered from the
+   * server payload rather than restated here so that what the customer READS
+   * and what we ARCHIVED can never drift apart — and that invariant is exactly
+   * why the toggle must NOT translate it in the browser. A client-side
+   * translation would put text on screen that no stored record matches, which
+   * defeats the point of archiving it.
+   *
+   * The backend builds that string in one fixed language today
+   * (billing.service.js buildDisclosureText — Spanish). So when the reader's
+   * language differs from the disclosure's, say so plainly instead of leaving
+   * an unexplained foreign-language paragraph under the button.
+   *
+   * `disclosureLang` is read from the payload and only DEFAULTS to Spanish.
+   * The day the backend issues the disclosure in the subscriber's language and
+   * sends the tag alongside it, this note disappears on its own and the
+   * archived record matches what was on screen with no further change here.
+   */
+  const disclosureLang = toSupportedLang(invite.disclosureLang) || 'es';
 
   return (
-    <Shell>
-      <h1 style={S.h1}>
-        {isUpdate ? 'Actualizar método de pago' : 'Autorizar cobro automático'}
-      </h1>
+    <Shell lang={lang} setLang={setLang}>
+      <h1 style={S.h1}>{t(isUpdate ? 'titleUpdate' : 'titleEnroll')}</h1>
       <p style={S.lede}>
-        {isUpdate
-          ? `${invite.companyName}, aquí puedes reemplazar la tarjeta o cuenta con la que se cobra tu suscripción. El plan y el monto no cambian.`
-          : `${invite.companyName}, vas a guardar un método de pago para que tu suscripción se renueve sola, sin que tengas que procesar una factura cada ciclo.`}
+        {t(isUpdate ? 'ledeUpdate' : 'ledeEnroll', { company: invite.companyName })}
       </p>
 
-      <section style={S.card} aria-label="Detalles del cobro">
-        <Row k="Plan" v={invite.planName} />
-        <Row k="Monto" v={`$${amount} ${invite.currency}`} />
-        <Row k="Frecuencia" v={cadenceLabel(invite.intervalUnit, invite.intervalLength)} />
-        {/* "Primer cargo", never "próximo cargo", on an enrollment: it is what
-            stops the "why was I charged, I thought this was free" call. */}
+      <section style={S.card} aria-label={t('detailsLabel')}>
+        <Row k={t('rowPlan')} v={invite.planName} />
+        <Row k={t('rowAmount')} v={`$${amount} ${invite.currency}`} />
+        <Row k={t('rowFrequency')} v={cadenceLabel(t, invite.intervalUnit, invite.intervalLength)} />
+        {/* "First charge", never "next charge", on an enrollment: it is what
+            stops the "why was I charged, I thought this was free" call. Both
+            languages keep the distinction — see rowFirstCharge / rowNextCharge. */}
         <Row
-          k={isUpdate ? 'Próximo cargo' : 'Primer cargo'}
-          v={formatDate(invite.nextChargeDate || invite.startDate)}
+          k={t(isUpdate ? 'rowNextCharge' : 'rowFirstCharge')}
+          v={fmtDate(invite.nextChargeDate || invite.startDate)}
           last
         />
       </section>
 
-      <h2 style={S.h2}>Qué va a pasar</h2>
+      <h2 style={S.h2}>{t('whatHappens')}</h2>
       <ol style={S.list}>
-        <li>Te llevamos al formulario seguro de Authorize.Net, nuestro procesador de pagos.</li>
-        <li>
-          {isUpdate
-            ? 'Reemplazas el método guardado ahí, en su sitio.'
-            : 'Ingresas tu tarjeta o cuenta bancaria ahí, en su sitio.'}
-        </li>
-        <li>Vuelves aquí y te confirmamos que quedó {isUpdate ? 'actualizado' : 'activo'}.</li>
+        <li>{t('step1')}</li>
+        <li>{t(isUpdate ? 'step2Update' : 'step2Enroll')}</li>
+        <li>{t(isUpdate ? 'step3Update' : 'step3Enroll')}</li>
       </ol>
 
       <div style={S.note}>
-        <strong style={S.noteTitle}>Tus datos no pasan por nosotros</strong>
-        <p style={S.noteBody}>
-          El número completo se ingresa y se guarda en los servidores de Authorize.Net.
-          Solo recibimos un identificador y los últimos cuatro dígitos — nunca vemos ni
-          almacenamos la tarjeta completa.
-        </p>
+        <strong style={S.noteTitle}>{t('noteTitle')}</strong>
+        <p style={S.noteBody}>{t('noteBody')}</p>
       </div>
 
       {error ? <p style={S.error} role="alert">{error}</p> : null}
 
       <button type="button" style={S.btn} onClick={start} disabled={submitting}>
         {submitting
-          ? 'Abriendo el formulario seguro…'
-          : isUpdate ? 'Continuar y actualizar el método' : 'Continuar al formulario seguro'}
+          ? t('btnBusy')
+          : t(isUpdate ? 'btnUpdate' : 'btnEnroll')}
       </button>
 
-      {/* The consent artefact, verbatim as it was frozen when the link was sent.
-          Rendered from the server payload rather than restated here, so what the
-          customer reads and what we archived can never drift apart. */}
-      <p style={S.fine}>{invite.disclosureText}</p>
+      {disclosureLang !== lang ? (
+        <p style={S.disclosureNote}>
+          {t('disclosureNote', { language: languageName(disclosureLang, lang) })}
+        </p>
+      ) : null}
+      {/* Verbatim, as it was frozen when the link was sent. */}
+      <p
+        style={disclosureLang !== lang ? { ...S.fine, marginTop: 0 } : S.fine}
+        lang={disclosureLang}
+      >
+        {invite.disclosureText}
+      </p>
     </Shell>
   );
 }
 
-function Shell({ children }) {
+function Shell({ lang, setLang, children }) {
   return (
     <main style={S.wrap}>
-      <img src="/ride-logo.png" alt="" width={132} style={S.logo} />
+      <div style={S.head}>
+        <img src="/ride-logo.png" alt="" width={132} style={S.logo} />
+        <LangToggle lang={lang} setLang={setLang} />
+      </div>
       {children}
     </main>
   );
@@ -226,7 +328,14 @@ const S = {
     color: '#17141F',
     lineHeight: 1.6,
   },
-  logo: { height: 'auto', display: 'block', marginBottom: '2rem' },
+  head: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: '1rem',
+    marginBottom: '2rem',
+  },
+  logo: { height: 'auto', display: 'block' },
   h1: { fontSize: '1.6rem', fontWeight: 700, margin: '0 0 .6rem', letterSpacing: '-.01em' },
   h2: { fontSize: '1rem', fontWeight: 700, margin: '2rem 0 .6rem' },
   lede: { fontSize: '1rem', color: '#4A4458', margin: '0 0 1.75rem' },
@@ -272,6 +381,14 @@ const S = {
     fontSize: '1rem',
     fontWeight: 600,
     cursor: 'pointer',
+  },
+  disclosureNote: {
+    fontSize: '.8rem',
+    color: '#6B6478',
+    marginTop: '1.25rem',
+    marginBottom: '.4rem',
+    lineHeight: 1.55,
+    fontStyle: 'italic',
   },
   fine: { fontSize: '.82rem', color: '#6B6478', marginTop: '1.25rem', lineHeight: 1.55 },
 };
