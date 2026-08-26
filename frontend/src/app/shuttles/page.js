@@ -367,7 +367,7 @@ function ShuttleMonitorInner({ me, token, logout }) {
             <p className="ui-muted" style={{ maxWidth: 460, margin: '8px auto 0' }}>
               {t('shuttleMonitor.notConfiguredBody', 'No location has the shuttle tracker enabled. Turn it on per location — pick the shuttle vehicles and the mode — in the location settings.')}
             </p>
-            <button type="button" style={{ marginTop: 14 }} onClick={() => router.push('/settings')}>
+            <button type="button" style={{ marginTop: 14 }} onClick={() => router.push('/settings?tab=locations')}>
               {t('shuttleMonitor.openSettings', 'Shuttle settings')}
             </button>
           </div>
@@ -382,8 +382,8 @@ function ShuttleMonitorInner({ me, token, logout }) {
               {t('shuttleMonitor.noDevicesBody', 'The shuttle tracker is enabled, but none of the selected shuttle vehicles has a GPS device mapped — so there is nothing to draw yet. Map a device in the GPS connector, or check the vehicle selection in the location’s shuttle settings.')}
             </p>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 14 }}>
-              <button type="button" onClick={() => router.push('/settings')}>{t('shuttleMonitor.openConnector', 'Open GPS connector')}</button>
-              <button type="button" className="button-subtle" onClick={() => router.push('/settings')}>{t('shuttleMonitor.openSettings', 'Shuttle settings')}</button>
+              <button type="button" onClick={() => router.push('/settings?tab=telematics')}>{t('shuttleMonitor.openConnector', 'Open GPS connector')}</button>
+              <button type="button" className="button-subtle" onClick={() => router.push('/settings?tab=telematics')}>{t('shuttleMonitor.openSettings', 'Shuttle settings')}</button>
             </div>
           </div>
         ) : null}
@@ -480,7 +480,7 @@ function ShuttleMonitorInner({ me, token, logout }) {
                         {t('shuttleMonitor.viewRequests', 'View requests')}
                       </button>
                       {s.status === 'NO_DEVICE' ? (
-                        <button type="button" className="button-subtle" style={{ fontSize: 12 }} onClick={(e) => { e.stopPropagation(); router.push('/settings'); }}>
+                        <button type="button" className="button-subtle" style={{ fontSize: 12 }} onClick={(e) => { e.stopPropagation(); router.push('/settings?tab=telematics'); }}>
                           {t('shuttleMonitor.openConnector', 'Open GPS connector')}
                         </button>
                       ) : null}
