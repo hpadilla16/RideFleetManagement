@@ -15,8 +15,9 @@ import {
   mintDriverToken, shiftExpiry, shiftState, SHIFT_MAX_HOURS,
   DRIVER_ISSUE_CATEGORIES, ISSUE_NOTE_MAX, validateIssueInput,
   validateDriverMessage, validateDriverName, MESSAGE_MAX,
-  driverZonePayload, driverRosterEntry,
+  driverZonePayload, driverRosterEntry, driverOwnPosition, driverClosedEntry,
 } from './shuttle-driver.js';
+import { POSITION_AGING_MS, POSITION_STALE_MS } from './shuttle-tracker-position.js';
 
 // ─── token ──────────────────────────────────────────────────────────────────
 
@@ -151,4 +152,42 @@ test('driverRosterEntry assignment: assignedToYou highlights THIS vehicle only; 
   assert.equal(theirs.assignedVehicle.plate, 'XYZ-001');
   const none = driverRosterEntry({ request: { ...request, assignedVehicleId: null }, shiftVehicleId: 'v1' });
   assert.equal(none.assignedVehicle, null);
+});
+
+// ─── 2026-08-26 additions ───────────────────────────────────────────────────
+
+test('driverOwnPosition: the SHARED thresholds — never a private driver-mode grading', () => {
+  const now = Date.now();
+  const fix = (s) => ({ latitude: 33.94, longitude: -118.41, eventAt: new Date(now - s * 1000) });
+  assert.equal(driverOwnPosition(fix(14), now).status, 'LIVE');
+  assert.equal(driverOwnPosition(fix(14), now).ageSeconds, 14);
+  assert.equal(driverOwnPosition(fix(POSITION_AGING_MS / 1000 + 5), now).status, 'AGING');
+  assert.equal(driverOwnPosition(fix(POSITION_STALE_MS / 1000 + 5), now).status, 'OFFLINE');
+  assert.equal(driverOwnPosition(null, now).status, 'OFFLINE');
+});
+
+test('driverOwnPosition: OFFLINE carries no coordinates — the driver must not chase their own ghost', () => {
+  const now = Date.now();
+  const live = driverOwnPosition({ latitude: 33.94, longitude: -118.41, eventAt: new Date(now - 5000) }, now);
+  assert.deepEqual(Object.keys(live).sort(), ['ageSeconds', 'latitude', 'longitude', 'status']);
+  const dead = driverOwnPosition({ latitude: 33.94, longitude: -118.41, eventAt: new Date(now - 30 * 60 * 1000) }, now);
+  assert.deepEqual(Object.keys(dead).sort(), ['ageSeconds', 'status']);
+  assert.equal(dead.ageSeconds, null);
+});
+
+test('driverClosedEntry: four picked fields — a leaky closed row never crosses', () => {
+  const out = driverClosedEntry({
+    id: 'req_1', customerName: '  Juan P.  ', status: 'NO_SHOW',
+    closedAt: new Date('2026-08-26T17:30:00Z'),
+    customerPhone: '+13105550182', pickupNote: 'blue jacket', reservationId: 'res_1',
+    closedByUserId: 'user_9', closeReason: 'driver: Luis M.', tenantId: 't1',
+  });
+  assert.deepEqual(Object.keys(out).sort(), ['closedAt', 'id', 'name', 'status']);
+  assert.equal(out.name, 'Juan P.');
+  assert.equal(out.closedAt, '2026-08-26T17:30:00.000Z');
+  assert.equal(JSON.stringify(out).includes('3105550182'), false, 'no phone on a closed card');
+  assert.equal(JSON.stringify(out).includes('Luis M.'), false, 'no close reason either');
+  // A row with no closedAt (impossible by query, defensive anyway) is honest.
+  assert.equal(driverClosedEntry({ id: 'x', customerName: '', status: 'COMPLETED' }).closedAt, null);
+  assert.equal(driverClosedEntry({ id: 'x', status: 'COMPLETED' }).name, 'Customer');
 });

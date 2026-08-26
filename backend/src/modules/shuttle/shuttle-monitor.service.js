@@ -19,7 +19,10 @@ import { prisma } from '../../lib/prisma.js';
 import { latestPositionsByVehicle, signalWatch, readCustomerLocation } from './shuttle-tracker.service.js';
 import { configVehicleIds } from './shuttle-tracker-position.js';
 import { OPEN_STATUSES, scopeWhere } from './shuttle-query.js';
-import { monitorShuttlePayload, summarizeOpenRequests, waitingCustomerPayload } from './shuttle-monitor.js';
+import {
+  monitorShuttlePayload, summarizeOpenRequests, waitingCustomerPayload,
+  alertDetail, alertRequestId, zoneLessAlertVisible,
+} from './shuttle-monitor.js';
 
 const EMPTY = () => ({ enabled: false, shuttles: [], requestsByLocation: {}, waitingCustomers: [], locations: [], generatedAt: new Date().toISOString() });
 
@@ -143,6 +146,22 @@ export const shuttleMonitorService = {
       },
     });
 
+    // Pickup-spot NAMES (2026-08-26): the payload used to carry the zone id
+    // alone, and /api/shuttle-zones is ADMIN-gated — a non-admin agent had no
+    // way to turn "zone_b" into "Lot B". Tenant + configured-location pinned,
+    // and cosmetic: a failed lookup leaves the names null, never breaks the map.
+    const spotIds = [...new Set(openRows.map((r) => r.pickupSpotZoneId).filter(Boolean))];
+    let spotNameById = {};
+    if (spotIds.length) {
+      try {
+        const spots = await deps.prisma.shuttleZone.findMany({
+          where: { id: { in: spotIds }, tenantId: scope.tenantId, locationId: { in: locationIds } },
+          select: { id: true, name: true },
+        });
+        spotNameById = Object.fromEntries(spots.map((z) => [z.id, z.name]));
+      } catch { spotNameById = {}; }
+    }
+
     // Phase 3 (Screen 10): waiting customers, with the ephemeral shared fix
     // for those who opted in. STAFF-ONLY surface — this endpoint sits behind
     // requireAuth, and the coordinates come straight from Redis (TTL 5min),
@@ -155,6 +174,7 @@ export const shuttleMonitorService = {
         request: r,
         fix,
         assignedVehicle: r.assignedVehicleId ? vehicleById[r.assignedVehicleId] || null : null,
+        spotName: r.pickupSpotZoneId ? spotNameById[r.pickupSpotZoneId] || null : null,
         now,
       });
     }));
@@ -175,9 +195,18 @@ export const shuttleMonitorService = {
    * lookups (ShuttleZone/ShuttleAlert carry plain refs, no relations).
    *
    * SCOPING: tenant fail-closed like everything here. Location-scoped staff
-   * see only alerts attributable to a zone at one of their sedes; zone-less
-   * provider alerts (a rule made by hand in the provider's own UI) have no
-   * location to check, so they are visible to unscoped staff only.
+   * see alerts attributable to a zone at one of their sedes — PLUS (2026-08-26)
+   * the ZONE-LESS ones that belong to them: a REQUEST_NO_SHOW with no pickup
+   * spot, or a DRIVER_ISSUE, used to be invisible to precisely the agents who
+   * had to act on it. Those are re-attributed through the alert's own request
+   * (its locationId) or its vehicle's tracker config, and anything that cannot
+   * be tied to an allowed location stays hidden — the filter never widens.
+   *
+   * DETAIL (2026-08-26): no-show rows carry a field-picked `detail` block so
+   * the feed can render "Juan P. (2 pax, 3 maletas) — marcado por el
+   * conductor" and a [Contactar cliente] tel: action. Fields come from the
+   * row's rawJson (never the blob itself); the PHONE comes from the request
+   * row, resolved under the caller's OWN scope — see alertDetail.
    */
   async alerts(scope = {}, { limit = 50 } = {}, depsOverride = {}) {
     const deps = { ...defaultDeps(), ...depsOverride };
@@ -194,14 +223,81 @@ export const shuttleMonitorService = {
     });
     const zoneById = new Map(zones.map((z) => [z.id, z]));
 
-    const rows = await deps.prisma.shuttleAlert.findMany({
-      where: {
-        tenantId: scope.tenantId,
-        ...(allowed ? { zoneId: { in: zones.map((z) => z.id) } } : {}),
-      },
-      orderBy: { occurredAt: 'desc' },
-      take,
-    });
+    // requestId → { id, locationId, customerPhone }, ALWAYS read under the
+    // caller's own scope. Populated by the zone-less re-attribution below and
+    // topped up for the detail block; a request outside the scope is simply
+    // absent, which reads as "no location match" and "no phone".
+    const scopedRequestById = {};
+    const loadScopedRequests = async (ids) => {
+      const wanted = ids.filter((id) => id && !(id in scopedRequestById));
+      if (!wanted.length) return;
+      try {
+        const reqs = await deps.prisma.shuttleRequest.findMany({
+          where: { id: { in: [...new Set(wanted)] }, ...scopeWhere(scope) },
+          select: { id: true, locationId: true, customerPhone: true },
+        });
+        for (const id of wanted) scopedRequestById[id] = null;
+        for (const r of reqs) scopedRequestById[r.id] = r;
+      } catch { /* keyed lookup — never fails the feed */ }
+    };
+
+    let rows;
+    if (!allowed) {
+      // Unscoped staff: the whole tenant feed, unchanged.
+      rows = await deps.prisma.shuttleAlert.findMany({
+        where: { tenantId: scope.tenantId },
+        orderBy: { occurredAt: 'desc' },
+        take,
+      });
+    } else {
+      // Two reads instead of one nested OR — the zone-less half still has to
+      // be re-attributed in JS below, so keeping the queries flat keeps the
+      // fail-closed rule readable (and the zoned half can never be crowded
+      // out of the page by zone-less noise).
+      const [zoned, zoneLess] = await Promise.all([
+        deps.prisma.shuttleAlert.findMany({
+          where: { tenantId: scope.tenantId, zoneId: { in: zones.map((z) => z.id) } },
+          orderBy: { occurredAt: 'desc' },
+          take,
+        }),
+        deps.prisma.shuttleAlert.findMany({
+          where: { tenantId: scope.tenantId, zoneId: null },
+          orderBy: { occurredAt: 'desc' },
+          take,
+        }),
+      ]);
+
+      // Which vehicles count as "one of mine"? The tracker configs at the
+      // caller's allowed locations — the same "this is a shuttle here" marker
+      // the mint and the monitor use.
+      let allowedVehicleIds = new Set();
+      try {
+        const configs = await deps.prisma.shuttleTrackerConfig.findMany({
+          where: { tenantId: scope.tenantId, locationId: { in: allowed } },
+        });
+        allowedVehicleIds = new Set(configs.flatMap((c) => configVehicleIds(c)));
+      } catch { allowedVehicleIds = new Set(); }
+
+      // The requests those zone-less rows name, fetched under the CALLER's
+      // scope: a row pointing at another sede's request simply finds nothing
+      // and stays hidden.
+      const refIds = new Map(zoneLess.map((r) => [r.id, alertRequestId(r)]));
+      await loadScopedRequests([...refIds.values()].filter(Boolean));
+
+      const visibleZoneLess = zoneLess.filter((r) => {
+        const requestId = refIds.get(r.id) || null;
+        return zoneLessAlertVisible({
+          row: r,
+          scopedRequest: requestId ? scopedRequestById[requestId] || null : null,
+          allowedVehicleIds,
+          hasRequestRef: !!requestId,
+        });
+      });
+
+      rows = [...zoned, ...visibleZoneLess]
+        .sort((a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime())
+        .slice(0, take);
+    }
 
     // Vehicle labels — cosmetic keyed lookup, a failure never fails the feed.
     const vehicleIds = [...new Set(rows.map((r) => r.vehicleId).filter(Boolean))];
@@ -216,10 +312,15 @@ export const shuttleMonitorService = {
       } catch { vehicleById = {}; }
     }
 
+    // Callback numbers for the rows that name a request — one keyed read,
+    // scope-filtered so a foreign-sede request yields no phone at all.
+    await loadScopedRequests(rows.map((r) => alertRequestId(r)).filter(Boolean));
+
     return {
       alerts: rows.map((r) => {
         const zone = r.zoneId ? zoneById.get(r.zoneId) || null : null;
         const vehicle = r.vehicleId ? vehicleById[r.vehicleId] || null : null;
+        const requestId = alertRequestId(r);
         return {
           id: r.id,
           type: r.type,
@@ -231,6 +332,8 @@ export const shuttleMonitorService = {
             plate: vehicle.plate || null,
           } : null,
           staffNotifiedAt: r.staffNotifiedAt,
+          // Field-picked no-show payload (null for rows that carry none).
+          detail: alertDetail(r, requestId ? scopedRequestById[requestId]?.customerPhone || null : null),
         };
       }),
     };

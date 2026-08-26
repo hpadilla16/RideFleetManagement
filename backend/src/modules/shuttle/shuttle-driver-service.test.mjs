@@ -77,7 +77,13 @@ function table(rows, { idPrefix = 'row', uniqueBy = null } = {}) {
   };
 }
 
-function makeWorld({ mode = 'ON_DEMAND', deviceMapped = false, recipients = [{ name: 'Ops', email: 'ops@rentgo.example', channels: ['EMAIL'] }] } = {}) {
+function makeWorld({
+  mode = 'ON_DEMAND', deviceMapped = false,
+  recipients = [{ name: 'Ops', email: 'ops@rentgo.example', channels: ['EMAIL'] }],
+  // The van's own house-stored fix (2026-08-26, the "GPS LIVE · 14s" chip).
+  // undefined = a 14s-old fix; null = never a fix at all.
+  ownFix = { latitude: 33.9412, longitude: -118.4099, heading: 180, speedMph: 12, eventAt: new Date(NOW.getTime() - 14 * 1000) },
+} = {}) {
   const shifts = table([
     {
       id: 'shift_1', tenantId: 't1', locationId: 'lax', vehicleId: 'v1', driverName: 'Luis M.',
@@ -118,7 +124,24 @@ function makeWorld({ mode = 'ON_DEMAND', deviceMapped = false, recipients = [{ n
     {
       id: 'req_closed', tenantId: 't1', locationId: 'lax', reservationId: 'res_3',
       customerName: 'Done D.', status: 'COMPLETED', partySize: 1, smsOptIn: false,
-      createdAt: new Date('2026-08-25T15:00:00Z'),
+      createdAt: new Date('2026-08-25T15:00:00Z'), closedAt: new Date('2026-08-25T17:40:00Z'),
+    },
+    // recentlyClosed fixtures (2026-08-26): inside the hour, outside it, and
+    // at another sede — the driver's history must show exactly the first two.
+    {
+      id: 'req_noshow_recent', tenantId: 't1', locationId: 'lax', reservationId: 'res_5',
+      customerName: 'Ghost G.', status: 'NO_SHOW', partySize: 2, smsOptIn: false,
+      createdAt: new Date('2026-08-25T17:10:00Z'), closedAt: new Date('2026-08-25T17:30:00Z'),
+    },
+    {
+      id: 'req_closed_old', tenantId: 't1', locationId: 'lax', reservationId: 'res_6',
+      customerName: 'Ancient A.', status: 'COMPLETED', partySize: 1, smsOptIn: false,
+      createdAt: new Date('2026-08-25T15:30:00Z'), closedAt: new Date('2026-08-25T16:00:00Z'),
+    },
+    {
+      id: 'req_closed_sju', tenantId: 't1', locationId: 'sju', reservationId: 'res_7',
+      customerName: 'Elsewhere E.', status: 'COMPLETED', partySize: 1, smsOptIn: false,
+      createdAt: new Date('2026-08-25T17:20:00Z'), closedAt: new Date('2026-08-25T17:45:00Z'),
     },
     {
       id: 'req_sju', tenantId: 't1', locationId: 'sju', reservationId: 'res_4',
@@ -144,7 +167,7 @@ function makeWorld({ mode = 'ON_DEMAND', deviceMapped = false, recipients = [{ n
     events: table([], { idPrefix: 'evt' }),
     devices: table(deviceMapped ? [{ id: 'd1', vehicleId: 'v1', isActive: true, provider: 'ONESTEPGPS' }] : [], { idPrefix: 'dev' }),
     published: [], watched: [], sms: [], emails: [], cleared: [],
-    requestCalls: [],
+    requestCalls: [], ownPositionReads: [], brandCalls: [],
   };
 
   const prisma = {
@@ -201,6 +224,17 @@ function makeWorld({ mode = 'ON_DEMAND', deviceMapped = false, recipients = [{ n
       requestId === 'req_shared' ? { lat: 33.9401, lng: -118.4109, at: NOW.getTime() - 30 * 1000 } : null
     ),
     publishPosition: async (vehicleId, fix) => { world.published.push({ vehicleId, fix }); },
+    // The HOUSE read the monitor uses — never a provider call from the driver.
+    latestPositionsByVehicle: async (ids) => {
+      world.ownPositionReads.push(ids);
+      return ownFix && ids.includes('v1') ? { v1: { vehicleId: 'v1', ...ownFix } } : {};
+    },
+    // The customer-facing brand cascade, stubbed (the real one needs settings
+    // + franchise tables; its own suite covers the cascade).
+    resolveBrandName: async ({ tenantId, location }) => {
+      world.brandCalls.push({ tenantId, locationId: location?.id || null });
+      return 'Rent & Go';
+    },
     requests: {
       markPickedUp: (...args) => { world.requestCalls.push(['markPickedUp', args[0]]); return shuttleRequestsService.markPickedUp(...args); },
       markNoShow: (...args) => { world.requestCalls.push(['markNoShow', args[0]]); return shuttleRequestsService.markNoShow(...args); },
@@ -362,6 +396,92 @@ test('shiftContext: vehicle + location + zones-with-geometry + roster, scoped to
   assert.deepEqual(w.watched, ['t1'], 'the driver page arms the fast-poll watch signal');
 });
 
+// ─── 2026-08-26 payload additions (brand, deviceMapped, ownPosition, history) ─
+
+test('PINNED: the driver context key set — the 2026-08-26 additions and nothing else', async () => {
+  const w = makeWorld();
+  const ctx = await shuttleDriverService.shiftContext(TOK_ACTIVE, w.deps);
+  assert.deepEqual(Object.keys(ctx).sort(), [
+    'brandName', 'deviceMapped', 'driverName', 'expiresAt', 'generatedAt',
+    'headwayMinutes', 'location', 'mode', 'ownPosition', 'recentlyClosed',
+    'roster', 'vehicle', 'zones',
+  ]);
+  // locationConfig is read for the brand cascade — it must NEVER cross.
+  assert.deepEqual(Object.keys(ctx.location).sort(), ['latitude', 'longitude', 'name']);
+  assert.equal(JSON.stringify(ctx).includes('locationPhone'), false);
+});
+
+test('brandName rides the customer-facing cascade with the shift sede, never the platform name', async () => {
+  const w = makeWorld();
+  const ctx = await shuttleDriverService.shiftContext(TOK_ACTIVE, w.deps);
+  assert.equal(ctx.brandName, 'Rent & Go');
+  assert.deepEqual(w.brandCalls, [{ tenantId: 't1', locationId: 'lax' }]);
+
+  // A dead brand resolver never breaks the page the driver is working from.
+  const broken = makeWorld();
+  broken.deps.resolveBrandName = async () => { throw new Error('settings down'); };
+  const degraded = await shuttleDriverService.shiftContext(TOK_ACTIVE, broken.deps);
+  assert.equal(degraded.brandName, null);
+  assert.equal(degraded.roster.length, 2, 'the roster still renders');
+});
+
+test('deviceMapped: the page learns it from the GET, not from a POST /position echo', async () => {
+  const unmapped = makeWorld({ deviceMapped: false });
+  assert.equal((await shuttleDriverService.shiftContext(TOK_ACTIVE, unmapped.deps)).deviceMapped, false);
+  const mapped = makeWorld({ deviceMapped: true });
+  const ctx = await shuttleDriverService.shiftContext(TOK_ACTIVE, mapped.deps);
+  assert.equal(ctx.deviceMapped, true);
+  // And it agrees with what the POST would have told them.
+  const echo = await shuttleDriverService.pushPosition(TOK_ACTIVE, { lat: 33.94, lng: -118.41 }, mapped.deps);
+  assert.equal(echo.accepted, false);
+});
+
+test('ownPosition: the HOUSE read on the shared 90s/4min thresholds; a stale fix carries NO coordinates', async () => {
+  const live = makeWorld();
+  const ctx = await shuttleDriverService.shiftContext(TOK_ACTIVE, live.deps);
+  assert.deepEqual(Object.keys(ctx.ownPosition).sort(), ['ageSeconds', 'latitude', 'longitude', 'status']);
+  assert.equal(ctx.ownPosition.status, 'LIVE');
+  assert.equal(ctx.ownPosition.ageSeconds, 14);
+  assert.equal(ctx.ownPosition.latitude, 33.9412);
+  assert.deepEqual(live.ownPositionReads, [['v1']], 'the shift van only — never the whole config list');
+
+  const aging = makeWorld({ ownFix: { latitude: 33.9, longitude: -118.4, eventAt: new Date(NOW.getTime() - 120 * 1000) } });
+  assert.equal((await shuttleDriverService.shiftContext(TOK_ACTIVE, aging.deps)).ownPosition.status, 'AGING');
+
+  const stale = makeWorld({ ownFix: { latitude: 33.9, longitude: -118.4, eventAt: new Date(NOW.getTime() - 10 * 60 * 1000) } });
+  const staleCtx = await shuttleDriverService.shiftContext(TOK_ACTIVE, stale.deps);
+  assert.equal(staleCtx.ownPosition.status, 'OFFLINE');
+  assert.equal('latitude' in staleCtx.ownPosition, false, 'a 10-minute-old dot would send the driver chasing a ghost');
+
+  const never = makeWorld({ ownFix: null });
+  assert.equal((await shuttleDriverService.shiftContext(TOK_ACTIVE, never.deps)).ownPosition.status, 'OFFLINE');
+
+  // Redis/house read down: the chip goes dark, the page does not.
+  const down = makeWorld();
+  down.deps.latestPositionsByVehicle = async () => { throw new Error('redis down'); };
+  const darkCtx = await shuttleDriverService.shiftContext(TOK_ACTIVE, down.deps);
+  assert.equal(darkCtx.ownPosition.status, 'OFFLINE');
+  assert.equal(darkCtx.roster.length, 2);
+});
+
+test('recentlyClosed: last 60 minutes at the SHIFT sede only, newest first, four picked fields', async () => {
+  const w = makeWorld();
+  const ctx = await shuttleDriverService.shiftContext(TOK_ACTIVE, w.deps);
+  assert.deepEqual(ctx.recentlyClosed.map((r) => r.id), ['req_closed', 'req_noshow_recent'],
+    'newest first; the 2h-old row and the SJU row stay out');
+  assert.deepEqual(Object.keys(ctx.recentlyClosed[0]).sort(), ['closedAt', 'id', 'name', 'status']);
+  assert.equal(ctx.recentlyClosed[0].name, 'Done D.');
+  assert.equal(ctx.recentlyClosed[1].status, 'NO_SHOW');
+  // No phone, no coordinates, no pickup note — the wait is over.
+  assert.equal(JSON.stringify(ctx.recentlyClosed).includes('+1310'), false);
+
+  // A closed row a driver just created shows up on the next poll.
+  await shuttleDriverService.markPickedUp(TOK_ACTIVE, 'req_shared', w.deps);
+  const after = await shuttleDriverService.shiftContext(TOK_ACTIVE, w.deps);
+  assert.equal(after.recentlyClosed.some((r) => r.id === 'req_shared'), true);
+  assert.equal(after.roster.some((r) => r.id === 'req_shared'), false, 'and leaves the open roster');
+});
+
 // ─── driver-phone position fallback ─────────────────────────────────────────
 
 test('pushPosition unmapped vehicle: the house write path — event row (source DRIVER_PHONE) + Redis publish', async () => {
@@ -477,10 +597,14 @@ test('notifyShift guards: empty message 400, foreign scope 404, dead shift 409',
 test('reportIssue: a DRIVER_ISSUE alert row (ids + words only) + email to the EMAIL-channel recipients', async () => {
   const w = makeWorld();
   const out = await shuttleDriverService.reportIssue(TOK_ACTIVE, { category: 'mecanico', note: 'Se calienta el motor' }, w.deps);
-  assert.deepEqual(out, { ok: true });
+  assert.equal(out.ok, true);
 
   const alert = w.alerts.rows.find((a) => a.type === 'DRIVER_ISSUE');
   assert.ok(alert);
+  // 2026-08-26: the response names the row — the page shows "Reporte #…" so
+  // the driver has something to quote on the radio. An id ONLY.
+  assert.deepEqual(Object.keys(out).sort(), ['ok', 'reportId']);
+  assert.equal(out.reportId, alert.id);
   assert.equal(alert.tenantId, 't1');
   assert.equal(alert.vehicleId, 'v1');
   assert.match(alert.providerRef, /^drvissue:shift_1:/);

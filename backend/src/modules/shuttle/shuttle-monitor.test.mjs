@@ -12,6 +12,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   positionFreshness, vehicleLabel, monitorShuttlePayload, summarizeOpenRequests,
+  waitingCustomerPayload, alertDetail, alertRequestId, zoneLessAlertVisible,
 } from './shuttle-monitor.js';
 import { POSITION_AGING_MS, POSITION_STALE_MS } from './shuttle-tracker-position.js';
 import { shuttleMonitorService } from './shuttle-monitor.service.js';
@@ -118,12 +119,23 @@ test('Phase 3: assignments resolve ONLY through the caller\'s tenant-verified ve
 const matches = (row, where = {}) => Object.entries(where).every(([k, v]) => {
   if (v && typeof v === 'object' && 'in' in v) return v.in.includes(row[k]);
   if (v && typeof v === 'object' && 'not' in v) return row[k] !== v.not;
+  // `zoneId: null` must match an absent key too (the alert feed's zone-less half).
+  if (v === null) return (row[k] ?? null) === null;
   return row[k] === v;
 });
 
 function fakePrisma(data) {
   const table = (rows) => ({
-    findMany: async ({ where } = {}) => rows.filter((r) => matches(r, where)),
+    rows,
+    findMany: async ({ where, orderBy, take } = {}) => {
+      let out = rows.filter((r) => matches(r, where));
+      const clause = Array.isArray(orderBy) ? orderBy[0] : orderBy;
+      if (clause) {
+        const [k, dir] = Object.entries(clause)[0];
+        out = [...out].sort((a, b) => (new Date(a[k]).getTime() - new Date(b[k]).getTime()) * (dir === 'desc' ? -1 : 1));
+      }
+      return take ? out.slice(0, take) : out;
+    },
     count: async ({ where } = {}) => rows.filter((r) => matches(r, where)).length,
   });
   return {
@@ -132,6 +144,8 @@ function fakePrisma(data) {
     vehicle: table(data.vehicles || []),
     vehicleTelematicsDevice: table(data.devices || []),
     shuttleRequest: table(data.requests || []),
+    shuttleZone: table(data.zones || []),
+    shuttleAlert: table(data.alerts || []),
   };
 }
 
@@ -252,4 +266,203 @@ test('waitingCustomers: staff-only coordinates come from the injected Redis read
     ...deps, readCustomerLocation: async () => { throw new Error('redis down'); },
   }, NOW);
   assert.equal(dark.waitingCustomers.every((c) => c.sharing === false), true);
+});
+
+// ─── 2026-08-26: pickup-spot NAME on the waiting list ───────────────────────
+
+test('waitingCustomerPayload: pickupSpotName is one extra picked string beside the id', () => {
+  const request = { id: 'r1', locationId: 'lax', customerName: 'Juan P.', partySize: 2, bags: 3, pickupSpotZoneId: 'zone_b', createdAt: secondsAgo(600) };
+  const named = waitingCustomerPayload({ request, fix: null, spotName: '  Lot B  ', now: NOW });
+  assert.equal(named.pickupSpotZoneId, 'zone_b');
+  assert.equal(named.pickupSpotName, 'Lot B', 'trimmed');
+  assert.deepEqual(Object.keys(named).sort(), [
+    'assignedVehicle', 'bags', 'locationId', 'name', 'partySize',
+    'pickupSpotName', 'pickupSpotZoneId', 'requestId', 'sharing', 'waitingMinutes',
+  ]);
+  // Unresolvable (a deleted zone, a failed lookup) is honestly null — never
+  // the raw id dressed up as a name.
+  assert.equal(waitingCustomerPayload({ request, fix: null, now: NOW }).pickupSpotName, null);
+});
+
+test('waitingCustomers resolve the spot name inside the tenant + configured sedes', async () => {
+  const data = {
+    ...DATA,
+    zones: [
+      { id: 'zone_b', tenantId: 't1', locationId: 'lax', name: 'Lot B' },
+      { id: 'zone_foreign', tenantId: 't2', locationId: 'mia', name: 'Foreign Curb' },
+    ],
+    requests: [
+      { id: 'r1', tenantId: 't1', locationId: 'lax', status: 'READY', customerName: 'Juan P.', partySize: 2, pickupSpotZoneId: 'zone_b', createdAt: secondsAgo(600) },
+      { id: 'r4', tenantId: 't1', locationId: 'lax', status: 'READY', customerName: 'Cross C.', partySize: 1, pickupSpotZoneId: 'zone_foreign', createdAt: secondsAgo(300) },
+    ],
+  };
+  const deps = {
+    prisma: fakePrisma(data),
+    latestPositionsByVehicle: positionsFor(T1_FIXES),
+    readCustomerLocation: async () => null,
+  };
+  const out = await shuttleMonitorService.positions({ tenantId: 't1' }, deps, NOW);
+  const byId = Object.fromEntries(out.waitingCustomers.map((c) => [c.requestId, c]));
+  assert.equal(byId.r1.pickupSpotName, 'Lot B');
+  assert.equal(byId.r4.pickupSpotName, null, 'a zone from another tenant never resolves');
+
+  // Cosmetic only: a dead zone table leaves names null and the map intact.
+  const broken = fakePrisma(data);
+  broken.shuttleZone.findMany = async () => { throw new Error('zones down'); };
+  const degraded = await shuttleMonitorService.positions({ tenantId: 't1' }, { ...deps, prisma: broken }, NOW);
+  assert.equal(degraded.waitingCustomers.length, 2);
+  assert.equal(degraded.waitingCustomers.every((c) => c.pickupSpotName === null), true);
+});
+
+// ─── 2026-08-26: alert feed detail + zone-less visibility ───────────────────
+
+test('alertRequestId: rawJson first, then the deterministic noshow: providerRef, else null', () => {
+  assert.equal(alertRequestId({ rawJson: JSON.stringify({ requestId: 'req_1' }), providerRef: 'noshow:req_9' }), 'req_1');
+  assert.equal(alertRequestId({ rawJson: null, providerRef: 'noshow:req_9' }), 'req_9');
+  assert.equal(alertRequestId({ rawJson: 'not json', providerRef: 'noshow:req_9' }), 'req_9');
+  assert.equal(alertRequestId({ providerRef: 'a-100' }), null, 'a provider geofence alert names no request');
+  assert.equal(alertRequestId({ rawJson: JSON.stringify(['array']) }), null);
+  assert.equal(alertRequestId({}), null);
+});
+
+test('alertDetail is FIELD-PICKED — a fattened rawJson never becomes new response keys', () => {
+  const row = {
+    providerRef: 'noshow:req_1',
+    rawJson: JSON.stringify({
+      requestId: 'req_1', customerName: 'Juan P.', partySize: 2, bags: 3, markedBy: 'driver: Luis M.',
+      // Anything a later code path adds must stay behind the whitelist.
+      customerPhone: '+13105550999', lat: 33.94, lng: -118.41, reservationId: 'res_1', internalNote: 'x',
+    }),
+  };
+  const out = alertDetail(row, '+13105550182');
+  assert.deepEqual(Object.keys(out).sort(), ['bags', 'customerName', 'customerPhone', 'markedBy', 'partySize', 'requestId']);
+  assert.equal(out.customerName, 'Juan P.');
+  assert.equal(out.partySize, 2);
+  assert.equal(out.bags, 3);
+  assert.equal(out.markedBy, 'driver: Luis M.');
+  // The phone is the CALLER's scope-checked value, never the blob's.
+  assert.equal(out.customerPhone, '+13105550182');
+  assert.equal(JSON.stringify(out).includes('3105550999'), false);
+  assert.equal(JSON.stringify(out).includes('33.94'), false, 'coordinates never ride an alert detail');
+  assert.equal(JSON.stringify(out).includes('res_1'), false);
+
+  // No payload at all = no detail block (a plain geofence ENTER).
+  assert.equal(alertDetail({ providerRef: 'a-100', rawJson: JSON.stringify({ zone: 'prov-1' }) }), null);
+  assert.equal(alertDetail({}), null);
+  // No resolved phone is null, never an empty string the UI would tel: to.
+  assert.equal(alertDetail(row).customerPhone, null);
+});
+
+test('zoneLessAlertVisible: request wins, then the vehicle, then FAIL CLOSED', () => {
+  const vehicles = new Set(['v1']);
+  // 1) names a request the caller can see
+  assert.equal(zoneLessAlertVisible({ row: { vehicleId: null }, scopedRequest: { id: 'r', locationId: 'lax' }, allowedVehicleIds: vehicles, hasRequestRef: true }), true);
+  // 1b) names one they cannot — hidden even though the vehicle is theirs
+  assert.equal(zoneLessAlertVisible({ row: { vehicleId: 'v1' }, scopedRequest: null, allowedVehicleIds: vehicles, hasRequestRef: true }), false);
+  // 2) no request ref, but the vehicle is configured at an allowed sede
+  assert.equal(zoneLessAlertVisible({ row: { vehicleId: 'v1' }, allowedVehicleIds: vehicles }), true);
+  assert.equal(zoneLessAlertVisible({ row: { vehicleId: 'v-other' }, allowedVehicleIds: vehicles }), false);
+  // 3) nothing to tie it to
+  assert.equal(zoneLessAlertVisible({ row: { vehicleId: null }, allowedVehicleIds: vehicles }), false);
+  assert.equal(zoneLessAlertVisible({ row: {}, allowedVehicleIds: new Set() }), false);
+});
+
+const ALERT_DATA = () => ({
+  ...DATA,
+  zones: [
+    { id: 'z_lax', tenantId: 't1', locationId: 'lax', name: 'Lot B', kind: 'ZONE', isPickupSpot: true },
+    { id: 'z_sju', tenantId: 't1', locationId: 'sju', name: 'SJU Curb', kind: 'ZONE', isPickupSpot: true },
+  ],
+  requests: [
+    { id: 'req_lax', tenantId: 't1', locationId: 'lax', status: 'NO_SHOW', customerName: 'Juan P.', customerPhone: '+13105550182', partySize: 2, bags: 3, createdAt: secondsAgo(3600) },
+    { id: 'req_sju', tenantId: 't1', locationId: 'sju', status: 'NO_SHOW', customerName: 'Ana R.', customerPhone: '+17875550100', partySize: 1, createdAt: secondsAgo(3600) },
+  ],
+  alerts: [
+    // zoned — visible to LAX staff the old way
+    { id: 'al_zoned', tenantId: 't1', zoneId: 'z_lax', vehicleId: 'v1', type: 'ENTER', providerRef: 'a-1', rawJson: null, occurredAt: new Date(NOW - 60_000), staffNotifiedAt: null },
+    // zone-less no-show for a LAX request, no assigned van
+    {
+      id: 'al_noshow_lax', tenantId: 't1', zoneId: null, vehicleId: null, type: 'REQUEST_NO_SHOW',
+      providerRef: 'noshow:req_lax', occurredAt: new Date(NOW - 120_000), staffNotifiedAt: null,
+      rawJson: JSON.stringify({ requestId: 'req_lax', customerName: 'Juan P.', partySize: 2, bags: 3, markedBy: 'driver: Luis M.' }),
+    },
+    // zone-less no-show at ANOTHER sede
+    {
+      id: 'al_noshow_sju', tenantId: 't1', zoneId: null, vehicleId: null, type: 'REQUEST_NO_SHOW',
+      providerRef: 'noshow:req_sju', occurredAt: new Date(NOW - 180_000), staffNotifiedAt: null,
+      rawJson: JSON.stringify({ requestId: 'req_sju', customerName: 'Ana R.', partySize: 1, markedBy: 'staff' }),
+    },
+    // zone-less driver issue on a LAX-configured van
+    {
+      id: 'al_issue_lax', tenantId: 't1', zoneId: null, vehicleId: 'v1', type: 'DRIVER_ISSUE',
+      providerRef: 'drvissue:shift_1:aabb', occurredAt: new Date(NOW - 240_000), staffNotifiedAt: null,
+      rawJson: JSON.stringify({ shiftId: 'shift_1', category: 'MECANICO', note: 'humo', driverName: 'Luis M.' }),
+    },
+    // zone-less driver issue on the SJU van
+    {
+      id: 'al_issue_sju', tenantId: 't1', zoneId: null, vehicleId: 'v2', type: 'DRIVER_ISSUE',
+      providerRef: 'drvissue:shift_2:ccdd', occurredAt: new Date(NOW - 300_000), staffNotifiedAt: null,
+      rawJson: JSON.stringify({ shiftId: 'shift_2', category: 'TRAFICO', driverName: 'Ana' }),
+    },
+    // unattributable: no zone, no vehicle, no request — nobody scoped sees it
+    { id: 'al_orphan', tenantId: 't1', zoneId: null, vehicleId: null, type: 'OFF_ROUTE', providerRef: 'a-orphan', rawJson: null, occurredAt: new Date(NOW - 360_000), staffNotifiedAt: null },
+    // another tenant's row, never anywhere
+    { id: 'al_t2', tenantId: 't2', zoneId: null, vehicleId: 'vx', type: 'DRIVER_ISSUE', providerRef: 'x', rawJson: null, occurredAt: new Date(NOW - 10_000), staffNotifiedAt: null },
+  ],
+});
+
+test('alerts FAIL-CLOSED: no tenant, no feed — and another tenant’s rows never appear', async () => {
+  const deps = { prisma: fakePrisma(ALERT_DATA()) };
+  assert.deepEqual(await shuttleMonitorService.alerts({}, {}, deps), { alerts: [] });
+  const out = await shuttleMonitorService.alerts({ tenantId: 't1' }, {}, deps);
+  assert.equal(out.alerts.some((a) => a.id === 'al_t2'), false);
+});
+
+test('alerts detail: the no-show payload is whitelisted in, WITH the scope-checked callback number', async () => {
+  const deps = { prisma: fakePrisma(ALERT_DATA()) };
+  const out = await shuttleMonitorService.alerts({ tenantId: 't1' }, {}, deps);
+
+  const noshow = out.alerts.find((a) => a.id === 'al_noshow_lax');
+  assert.deepEqual(Object.keys(noshow).sort(), ['detail', 'id', 'occurredAt', 'staffNotifiedAt', 'type', 'vehicle', 'zone']);
+  assert.deepEqual(noshow.detail, {
+    requestId: 'req_lax', customerName: 'Juan P.', partySize: 2, bags: 3,
+    markedBy: 'driver: Luis M.', customerPhone: '+13105550182',
+  });
+
+  // A plain geofence alert grows no detail block at all.
+  assert.equal(out.alerts.find((a) => a.id === 'al_zoned').detail, null);
+  // And the raw blob itself never ships.
+  assert.equal(JSON.stringify(out).includes('rawJson'), false);
+  assert.equal(JSON.stringify(out).includes('shiftId'), false);
+});
+
+test('ZONE-LESS alerts reach location-scoped staff — their own, and ONLY their own', async () => {
+  const deps = { prisma: fakePrisma(ALERT_DATA()) };
+
+  const lax = await shuttleMonitorService.alerts({ tenantId: 't1', allowedLocationIds: ['lax'] }, {}, deps);
+  const laxIds = lax.alerts.map((a) => a.id).sort();
+  assert.deepEqual(laxIds, ['al_issue_lax', 'al_noshow_lax', 'al_zoned'],
+    'the LAX no-show (via its request) and the LAX van issue (via its config) now arrive');
+  assert.equal(lax.alerts.find((a) => a.id === 'al_noshow_lax').detail.customerPhone, '+13105550182');
+
+  const sju = await shuttleMonitorService.alerts({ tenantId: 't1', allowedLocationIds: ['sju'] }, {}, deps);
+  assert.deepEqual(sju.alerts.map((a) => a.id).sort(), ['al_issue_sju', 'al_noshow_sju']);
+  assert.equal(sju.alerts.some((a) => ['al_noshow_lax', 'al_issue_lax'].includes(a.id)), false,
+    'the other sede stays invisible — the fix widens nothing');
+  assert.equal(sju.alerts.find((a) => a.id === 'al_noshow_sju').detail.customerPhone, '+17875550100');
+
+  // Unattributable rows stay hidden from every scoped caller, visible only in
+  // the unscoped tenant feed.
+  assert.equal([...laxIds, ...sju.alerts.map((a) => a.id)].includes('al_orphan'), false);
+  const unscoped = await shuttleMonitorService.alerts({ tenantId: 't1' }, {}, deps);
+  assert.equal(unscoped.alerts.some((a) => a.id === 'al_orphan'), true);
+  assert.deepEqual(unscoped.alerts.map((a) => a.id), [
+    'al_zoned', 'al_noshow_lax', 'al_noshow_sju', 'al_issue_lax', 'al_issue_sju', 'al_orphan',
+  ], 'newest first');
+});
+
+test('alerts: a scope naming a FOREIGN location yields nothing, not that location', async () => {
+  const deps = { prisma: fakePrisma(ALERT_DATA()) };
+  const out = await shuttleMonitorService.alerts({ tenantId: 't1', allowedLocationIds: ['mia'] }, {}, deps);
+  assert.deepEqual(out.alerts, []);
 });

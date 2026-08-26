@@ -153,12 +153,18 @@ test('waitingCustomerPayload: sharing rows carry lat/lng/ageSeconds; non-sharing
     request,
     fix: { lat: 18.44, lng: -66.0, at: NOW - 45_000 },
     assignedVehicle: { id: 'v1', year: 2023, make: 'Ford', model: 'Transit 350', plate: 'IKT-482' },
+    spotName: 'Lot B',
     now: NOW,
   });
+  // 2026-08-26: the key set grew by exactly one — pickupSpotName, the zone
+  // name beside the id (the zones endpoint is ADMIN-gated, so a non-admin
+  // agent could not resolve it). No new coordinate keys.
   assert.deepEqual(Object.keys(sharing).sort(), [
     'ageSeconds', 'assignedVehicle', 'bags', 'lat', 'lng', 'locationId',
-    'name', 'partySize', 'pickupSpotZoneId', 'requestId', 'sharing', 'waitingMinutes',
+    'name', 'partySize', 'pickupSpotName', 'pickupSpotZoneId', 'requestId',
+    'sharing', 'waitingMinutes',
   ]);
+  assert.equal(sharing.pickupSpotName, 'Lot B');
   assert.equal(sharing.sharing, true);
   assert.equal(sharing.lat, 18.44);
   assert.equal(sharing.ageSeconds, 45);
