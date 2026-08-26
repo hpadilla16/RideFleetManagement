@@ -104,15 +104,31 @@ test('NEW #3: an all-empty vehicle record omits the key entirely', () => {
   assert.equal('vehicle' in out, false);
 });
 
-test('NEW #2 requestStatus: only READY/VIEWED/COMPLETED cross; bookkeeping states collapse to null', () => {
+test('NEW #2 requestStatus: READY/VIEWED/COMPLETED/NO_SHOW cross; CANCELLED and garbage collapse to null', () => {
+  // 2026-08-26 (approved, mockup Screen 17b): the allowed set DELIBERATELY
+  // grew by NO_SHOW. A customer the driver marked absent used to see a page
+  // frozen mid-progress; the honest state is what lets them act. CANCELLED
+  // stays out — that is the counter's own bookkeeping. Editing this list is
+  // the review record; do it on purpose.
   const at = { position: null, config: CONFIG, location: LOCATION, now: NOW };
   assert.equal(publicPositionPayload({ ...at, requestStatus: 'READY' }).requestStatus, 'READY');
   assert.equal(publicPositionPayload({ ...at, requestStatus: 'VIEWED' }).requestStatus, 'VIEWED');
   assert.equal(publicPositionPayload({ ...at, requestStatus: 'COMPLETED' }).requestStatus, 'COMPLETED');
+  assert.equal(publicPositionPayload({ ...at, requestStatus: 'NO_SHOW' }).requestStatus, 'NO_SHOW');
+  assert.equal(publicPositionPayload({ ...at, requestStatus: 'no_show' }).requestStatus, 'NO_SHOW', 'case-normalized like the rest');
   assert.equal(publicPositionPayload({ ...at, requestStatus: 'CANCELLED' }).requestStatus, null);
-  assert.equal(publicPositionPayload({ ...at, requestStatus: 'NO_SHOW' }).requestStatus, null);
   assert.equal(publicPositionPayload({ ...at, requestStatus: 'garbage' }).requestStatus, null);
   assert.equal(publicPositionPayload(at).requestStatus, null);
+
+  // The status line is the ONLY thing NO_SHOW may add: no reason, no closer,
+  // no timestamp — the key set is unchanged from the whitelist pin above.
+  const shown = publicPositionPayload({ ...at, requestStatus: 'NO_SHOW' });
+  assert.deepEqual(Object.keys(shown).sort(), [
+    'arrivedAtSpot', 'arrivedSpotName', 'assigned', 'brandName', 'counterPhone',
+    'headwayMinutes', 'intake', 'locationName', 'locationSharing', 'mode',
+    'pickupInstructions', 'pickupSpot', 'requestStatus', 'status',
+    'walkingDirections', 'walkingDirectionsEs',
+  ]);
 });
 
 test('NEW #1/#4/#5: brand, walking directions and counter phone default to empty — never invented', () => {

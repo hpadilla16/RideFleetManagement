@@ -88,10 +88,17 @@ export function resolveWalkingDirections({ arrival = null, pickupSpot = null, lo
   };
 }
 
-/** The only request states the public page may learn about. CANCELLED and
- *  NO_SHOW deliberately collapse to null — the curb page shows progress, not
- *  the counter's bookkeeping. */
-const PUBLIC_REQUEST_STATUSES = ['READY', 'VIEWED', 'COMPLETED'];
+/**
+ * The only request states the public page may learn about.
+ *
+ * DELIBERATE WHITELIST EXPANSION (2026-08-26, mockup Screen 17b): NO_SHOW now
+ * crosses. A customer whose driver marked them absent was previously shown a
+ * page frozen mid-progress — the honest state ("the shuttle came and left,
+ * call the counter") is what lets them act. CANCELLED stays collapsed: that is
+ * the counter's own bookkeeping, taken on a request the customer never sees
+ * resolve, and the page has nothing useful to say about it.
+ */
+const PUBLIC_REQUEST_STATUSES = ['READY', 'VIEWED', 'COMPLETED', 'NO_SHOW'];
 
 /**
  * The public payload — the ONLY shape the unauthenticated endpoint returns.
@@ -105,7 +112,8 @@ const PUBLIC_REQUEST_STATUSES = ['READY', 'VIEWED', 'COMPLETED'];
  *   • brandName                       (NEW #1 — tenant brand header; the
  *     cascade never yields the platform's name)
  *   • requestStatus                   (NEW #2 — READY|VIEWED|COMPLETED|null,
- *     the existing state machine, no ETA invented)
+ *     the existing state machine, no ETA invented; NO_SHOW joined the allowed
+ *     set 2026-08-26 — see PUBLIC_REQUEST_STATUSES)
  *   • walkingDirections               (NEW #4 — sede-written static text)
  *
  * DELIBERATE WHITELIST EXPANSION (2026-08-24, Phase 2 — approved #21, mockup
