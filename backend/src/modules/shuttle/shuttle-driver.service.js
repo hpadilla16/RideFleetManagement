@@ -19,7 +19,7 @@ import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
 import { sendEmail } from '../../lib/mailer.js';
 import { configVehicleIds } from './shuttle-tracker-position.js';
-import { signalWatch, readCustomerLocation, publishPosition } from './shuttle-tracker.service.js';
+import { signalWatch, readCustomerLocation, publishPosition, latestPositionsByVehicle } from './shuttle-tracker.service.js';
 import { validateCustomerFix } from './shuttle-customer-location.js';
 import { OPEN_STATUSES, scopeWhere } from './shuttle-query.js';
 import { parseAlertRecipients } from './shuttle-zone-alerts.js';
@@ -28,9 +28,27 @@ import { vehicleLabel } from './shuttle-monitor.js';
 import {
   mintDriverToken, shiftExpiry, shiftState,
   validateIssueInput, validateDriverMessage, validateDriverName,
-  driverZonePayload, driverRosterEntry,
+  driverZonePayload, driverRosterEntry, driverOwnPosition, driverClosedEntry,
+  RECENTLY_CLOSED_MS, RECENTLY_CLOSED_MAX,
 } from './shuttle-driver.js';
 import crypto from 'node:crypto';
+
+/**
+ * Customer-facing brand for the driver page header (2026-08-26). The SAME
+ * cascade the customer tracker runs — locationConfig → franchise → location
+ * name → tenant — which by construction never yields the platform's own name.
+ * Injectable so the DB-free suites need neither settings nor franchise tables.
+ */
+async function resolveBrandFn(deps) {
+  if (deps.resolveBrandName) return deps.resolveBrandName;
+  return async ({ tenantId, location }) => {
+    const { settingsService } = await import('../settings/settings.service.js');
+    const globalConfig = await settingsService.getRentalAgreementConfig({ tenantId });
+    const { resolveCustomerFacingBrand } = await import('../../lib/tenant-brand.js');
+    const brand = await resolveCustomerFacingBrand({ tenantId, location, globalConfig });
+    return brand?.companyName || null;
+  };
+}
 
 function defaultDeps() {
   return {
@@ -40,6 +58,9 @@ function defaultDeps() {
     signalWatch,
     readCustomerLocation,
     publishPosition,
+    latestPositionsByVehicle,
+    // null = use the real settings/franchise cascade (see resolveBrandFn).
+    resolveBrandName: null,
     requests: shuttleRequestsService,
     // Passed through to shuttleRequestsService.markNoShow/markPickedUp so the
     // DB-free suites can hand ONE in-memory prisma to both layers.
@@ -259,6 +280,20 @@ export const shuttleDriverService = {
    * at the location. Customer coordinates cross ONLY for sharing customers —
    * Redis-only read, never logged, never persisted (same treatment as the
    * staff monitor, because the driver is the one picking them up).
+   *
+   * DELIBERATE PAYLOAD ADDITIONS (2026-08-26), each picked field-by-field:
+   *   • brandName      the customer-facing brand cascade (never the platform's
+   *                    own name) — the header the driver shows a customer;
+   *   • deviceMapped   does this van have an active telematics device? The
+   *                    page previously learned this only from a POST /position
+   *                    echo, i.e. after already asking for the phone's GPS;
+   *   • ownPosition    {status, ageSeconds, latitude?, longitude?} — the van's
+   *                    own fix from HOUSE storage on the shared 90s/4min
+   *                    thresholds, for the "GPS LIVE · 14s" chip;
+   *   • recentlyClosed COMPLETED/NO_SHOW at this sede in the last 60 minutes
+   *                    (id, name, status, closedAt) so a tapped card becomes
+   *                    history instead of vanishing.
+   * No phone numbers and no new coordinates beyond the van's own.
    */
   async shiftContext(token, depsOverride = {}) {
     const deps = { ...defaultDeps(), ...depsOverride };
@@ -267,10 +302,11 @@ export const shuttleDriverService = {
     const { shift, config, vehicle, ownedVehicles } = ctx;
     const now = deps.now().getTime();
 
-    const [location, zones, openRows] = await Promise.all([
+    const [location, zones, openRows, closedRows, deviceCount] = await Promise.all([
       deps.prisma.location.findFirst({
         where: { id: shift.locationId, tenantId: shift.tenantId },
-        select: { id: true, name: true, latitude: true, longitude: true },
+        // locationConfig feeds the brand cascade ONLY — it never crosses.
+        select: { id: true, name: true, latitude: true, longitude: true, locationConfig: true },
       }),
       deps.prisma.shuttleZone.findMany({
         where: { tenantId: shift.tenantId, locationId: shift.locationId, active: true },
@@ -290,6 +326,26 @@ export const shuttleDriverService = {
           pickupNote: true, pickupSpotZoneId: true, assignedVehicleId: true, createdAt: true,
         },
       }),
+      // "Recién cerrados" (2026-08-26): what this sede closed in the last
+      // hour, so the roster can show history instead of a card vanishing the
+      // instant the driver taps it. Same tenant+location pin as the open
+      // queue — never another sede's, never another tenant's.
+      deps.prisma.shuttleRequest.findMany({
+        where: {
+          tenantId: shift.tenantId,
+          locationId: shift.locationId,
+          status: { in: ['COMPLETED', 'NO_SHOW'] },
+          closedAt: { gte: new Date(now - RECENTLY_CLOSED_MS) },
+        },
+        orderBy: { closedAt: 'desc' },
+        take: RECENTLY_CLOSED_MAX,
+        select: { id: true, customerName: true, status: true, closedAt: true },
+      }).catch(() => []),
+      // Is this van device-mapped? The page used to learn this only from a
+      // POST /position echo — i.e. after already asking for the phone's GPS.
+      deps.prisma.vehicleTelematicsDevice.count({
+        where: { vehicleId: shift.vehicleId, isActive: true },
+      }).catch(() => 0),
     ]);
     // A re-tenanted location kills the link, same as the tracker.
     if (!location) return null;
@@ -313,11 +369,39 @@ export const shuttleDriverService = {
     // The driver page is a watcher too — arm the fast poll (best-effort).
     try { await deps.signalWatch(shift.tenantId); } catch { /* signal only */ }
 
+    // The van's OWN fix, from the same HOUSE storage the monitor reads (Redis
+    // fix written by the fast poll / simulator / this driver's own pushes,
+    // Postgres fallback) — never a provider call from here. Best-effort: no
+    // GPS chip is better than a dead driver page.
+    let ownPosition = null;
+    try {
+      const fixes = await deps.latestPositionsByVehicle([shift.vehicleId]);
+      ownPosition = driverOwnPosition(fixes?.[shift.vehicleId] || null, now);
+    } catch { ownPosition = driverOwnPosition(null, now); }
+
+    // Customer-facing brand for the header — the cascade, never the platform
+    // name. Branding must never be able to break the page that renders it.
+    let brandName = null;
+    try {
+      brandName = clean(await (await resolveBrandFn(deps))({ tenantId: shift.tenantId, location })) || null;
+    } catch (err) {
+      deps.logger.warn('[shuttle-driver] brand resolution failed', { shiftId: shift.id, message: err.message });
+    }
+
     // PICKED, never spread — the public-payload law.
     const vehicleName = [vehicle.make, vehicle.model].map((p) => clean(p)).filter(Boolean).join(' ') || null;
     return {
       driverName: shift.driverName,
       expiresAt: shift.expiresAt,
+      // ── deliberate driver-payload additions (2026-08-26) ──────────────────
+      brandName,
+      // A device-mapped van's GPS is the truth; the page uses this to stop
+      // asking for the phone's location at all (it used to find out only from
+      // a POST /position echo, i.e. after already asking).
+      deviceMapped: Number(deviceCount) > 0,
+      ownPosition,
+      recentlyClosed: closedRows.map((r) => driverClosedEntry(r)),
+      // ─────────────────────────────────────────────────────────────────────
       mode: config.mode === 'NON_STOP' ? 'NON_STOP' : 'ON_DEMAND',
       headwayMinutes: Number.isFinite(Number(config.headwayMinutes)) ? Number(config.headwayMinutes) : null,
       vehicle: {
@@ -464,7 +548,7 @@ export const shuttleDriverService = {
 
     // Unique per report — a driver CAN file two MECANICO issues in one shift.
     const providerRef = `drvissue:${shift.id}:${crypto.randomBytes(6).toString('hex')}`;
-    await deps.prisma.shuttleAlert.create({
+    const alertRow = await deps.prisma.shuttleAlert.create({
       data: {
         tenantId: shift.tenantId,
         zoneId: null,
@@ -518,6 +602,9 @@ export const shuttleDriverService = {
       deps.logger.warn('[shuttle-driver] issue fan-out failed', { shiftId: shift.id, message: err.message });
     }
 
-    return { ok: true };
+    // "Reporte #…" (2026-08-26): the created ShuttleAlert id, so the driver
+    // has something to quote on the radio. An id only — the row's contents
+    // stay on the staff feed.
+    return { ok: true, reportId: String(alertRow?.id || '') || null };
   },
 };

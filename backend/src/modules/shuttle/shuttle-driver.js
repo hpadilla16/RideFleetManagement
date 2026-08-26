@@ -13,6 +13,7 @@
  * staff monitor: Redis-only read, never logged, never persisted).
  */
 import crypto from 'node:crypto';
+import { positionFreshness } from './shuttle-monitor.js';
 
 /** 192-bit random, base64url — the house public-token mint (same as
  *  ShuttleTrackerLink's crypto.randomBytes(24).toString('base64url')). */
@@ -162,5 +163,50 @@ export function driverRosterEntry({ request, fix = null, spotName = null, shiftV
         ageSeconds: Number.isFinite(Number(fix.at)) ? Math.max(0, Math.round((now - Number(fix.at)) / 1000)) : null,
       }
       : {}),
+  };
+}
+
+/**
+ * The shift vehicle's OWN latest fix, for Driver Mode's "GPS LIVE · 14s" chip
+ * (2026-08-26). Same house read and the SAME 90s/4min thresholds the staff
+ * monitor and the customer page use — three surfaces may never disagree about
+ * whether a shuttle is live.
+ *
+ * An OFFLINE fix carries NO coordinates, exactly like every other payload
+ * here: a 40-minute-old dot on the driver's own map would send them chasing
+ * their own ghost.
+ *
+ * @returns {{status:'LIVE'|'AGING'|'OFFLINE', ageSeconds:number|null, latitude?:number, longitude?:number}}
+ */
+export function driverOwnPosition(position, now = Date.now()) {
+  const fresh = positionFreshness(position, now);
+  const lat = num(position?.latitude);
+  const lng = num(position?.longitude);
+  const show = fresh.status !== 'OFFLINE' && lat !== null && lng !== null;
+  return {
+    status: fresh.status,
+    ageSeconds: fresh.ageSeconds,
+    ...(show ? { latitude: lat, longitude: lng } : {}),
+  };
+}
+
+/** How far back the driver roster remembers what it just closed. */
+export const RECENTLY_CLOSED_MS = 60 * 60 * 1000;
+/** And how many rows, so a busy sede cannot balloon the driver payload. */
+export const RECENTLY_CLOSED_MAX = 20;
+
+/**
+ * One "just handled" roster-history row (2026-08-26). Four picked fields, and
+ * deliberately none of the live-roster extras: no phone, no coordinates, no
+ * pickup note — the wait is over, the driver only needs to see that it closed
+ * and how.
+ */
+export function driverClosedEntry(request) {
+  const closedAt = request?.closedAt ? new Date(request.closedAt) : null;
+  return {
+    id: String(request?.id || ''),
+    name: String(request?.customerName || '').trim() || 'Customer',
+    status: String(request?.status || ''),
+    closedAt: closedAt && Number.isFinite(closedAt.getTime()) ? closedAt.toISOString() : null,
   };
 }

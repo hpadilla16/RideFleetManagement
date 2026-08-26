@@ -46,7 +46,8 @@ const issueGuards = [
   createPublicRateLimitGuard({ name: 'public-driver-issue', maxRequests: 5, windowMs: 60 * 1000 }),
 ];
 
-/** Shift context: vehicle, location, zones/pickup spots, roster. */
+/** Shift context: brand, vehicle (+ deviceMapped / ownPosition), location,
+ *  zones/pickup spots, the open roster and the last hour's closed rows. */
 shuttleDriverPublicRouter.get('/:token', readGuards, async (req, res, next) => {
   try {
     const state = await shuttleDriverService.shiftContext(req.params.token);
@@ -117,7 +118,9 @@ shuttleDriverPublicRouter.get('/:token/notifications', readGuards, async (req, r
   } catch (e) { next(e); }
 });
 
-/** Issue report (MECANICO | ACCIDENTE | TRAFICO | CLIENTE_NO_APARECE | OTRO). */
+/** Issue report (MECANICO | ACCIDENTE | TRAFICO | CLIENTE_NO_APARECE | OTRO).
+ *  Responds { ok, reportId } — the ShuttleAlert id, which the page shows as
+ *  "Reporte #…" so the driver can quote it on the radio. */
 shuttleDriverPublicRouter.post('/:token/issues', issueGuards, async (req, res, next) => {
   try {
     const out = await shuttleDriverService.reportIssue(req.params.token, req.body || {});
