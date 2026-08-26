@@ -61,6 +61,48 @@ export const DEFAULT_TENANT_PLAN_CATALOG = [
   }
 ];
 
+/**
+ * BILLING PRICE FIELDS (2026-08-27, tenant subscriptions Phase 1).
+ *
+ * There is exactly ONE plan catalog and it lives here. The billing module adds
+ * `priceMonthly` / `priceAnnual` / `currency` / `billable` / `trialDays` to the
+ * SAME rows that already carry the entitlements, rather than introducing a Plan
+ * table or a Prisma enum:
+ *
+ *  - a second catalog would drift from this one, and the drift would be
+ *    invisible — the entitlement editor and the price editor would disagree
+ *    about what "PRO" means;
+ *  - an enum would make every new or renamed plan a migration, while
+ *    Tenant.plan is already a free String validated against this catalog.
+ *
+ * Every price DEFAULTS TO NULL and `billable` defaults to FALSE, deliberately.
+ * The real prices are the owner's to set through PUT /api/tenants/plan-catalog;
+ * inventing a default here would be inventing what a customer gets charged. A
+ * plan with no price simply cannot back a subscription, which is the correct
+ * failure: loud, at invite time, before anyone's card is involved.
+ *
+ * The catalog price is only the DEFAULT OFFERED at invite time. What a live
+ * subscriber pays is TenantSubscription.amount, snapshotted at enrollment — so
+ * editing a price here can never re-price an existing subscriber, and can never
+ * rewrite what their history says they were charged.
+ */
+function normalizePrice(value) {
+  if (value === '' || value == null) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error('Plan prices must be a non-negative amount or blank for "not priced"');
+  }
+  // Two decimals: the same precision the Decimal(10,2) ledger columns hold, so a
+  // catalog value can never round differently from the row it seeded.
+  return Number(parsed.toFixed(2));
+}
+
+function normalizeCurrency(value) {
+  const code = String(value || 'USD').trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(code)) throw new Error('Plan currency must be a 3-letter code');
+  return code;
+}
+
 function normalizePlanCode(value) {
   return String(value || '').trim().toUpperCase();
 }
@@ -108,6 +150,12 @@ export function normalizeTenantPlanCatalog(plans = []) {
       plannerCopilotAllowedModels: normalizeStringList(plan?.plannerCopilotAllowedModels, ['gpt-4.1-mini']),
       telematicsIncluded: normalizeBoolean(plan?.telematicsIncluded, false),
       inspectionIntelligenceIncluded: normalizeBoolean(plan?.inspectionIntelligenceIncluded, true),
+      // ── Billing (see the normalizePrice comment above) ──
+      priceMonthly: normalizePrice(plan?.priceMonthly),
+      priceAnnual: normalizePrice(plan?.priceAnnual),
+      currency: normalizeCurrency(plan?.currency),
+      billable: normalizeBoolean(plan?.billable, false),
+      trialDays: normalizeLimit(plan?.trialDays) ?? 0,
       isActive: plan?.isActive !== false
     };
   });
@@ -152,6 +200,13 @@ export function resolveTenantPlanConfig(planCode, catalog = DEFAULT_TENANT_PLAN_
     plannerCopilotAllowedModels: ['gpt-4.1-mini'],
     telematicsIncluded: false,
     inspectionIntelligenceIncluded: true,
+    // An unknown plan code is NOT priced and NOT billable. Falling back to a
+    // price would let a typo in Tenant.plan quietly become a charge.
+    priceMonthly: null,
+    priceAnnual: null,
+    currency: 'USD',
+    billable: false,
+    trialDays: 0,
     isActive: false
   };
 }

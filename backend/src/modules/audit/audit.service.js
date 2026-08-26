@@ -116,6 +116,40 @@ export const AUDIT_ACTIONS = Object.freeze({
   // MASKED TPN and booleans about the auth key — NEVER the auth key itself,
   // nor any fragment of it. The shared redactor is a safety net, not a licence.
   PAYMENT_TERMINAL_CONFIG_CHANGE: 'PAYMENT_TERMINAL_CONFIG_CHANGE',
+
+  // ── Tenant subscriptions: RIDE billing its own tenants (2026-08-27) ──
+  // Money flowing TO US, on the BILLING_AUTHNET_* merchant account — not the
+  // per-tenant rental gateway (AUTHNET_*), which bills a renter on the
+  // tenant's account. Do not reuse these for rental payments.
+  //
+  // METADATA RULE, following the PAYMENT_TERMINAL_CONFIG_CHANGE precedent:
+  // ids, amounts, plan codes, transId, card brand and last4 ONLY.
+  // customerProfileId is fine — it is useless without the transaction key and
+  // support needs it to look a customer up in the Authorize.Net portal.
+  // NEVER the invite token (not one character beyond the stored tokenPrefix),
+  // never the transaction or signature key, never a card number. The shared
+  // redactor is a safety net, not a licence.
+  //
+  // The audit row is ATTRIBUTION, not the ledger. recordAudit is best-effort
+  // and swallows its own failures, which is right for a trail and wrong for
+  // money — so the record of money is TenantSubscriptionCharge, a hard write.
+  // Neither depends on the other.
+  //
+  // The plan-change / cancel / refund / suspend actions from the design land
+  // with the phases that can perform them; a constant for an action nothing
+  // can take would just be a promise the trail does not keep.
+  AUTOPAY_INVITE_SEND: 'AUTOPAY_INVITE_SEND',
+  AUTOPAY_INVITE_REVOKE: 'AUTOPAY_INVITE_REVOKE',
+  // The customer completed the return leg: a card is on file and an ARB
+  // subscription now exists. This is the row that answers "who authorised
+  // this recurring charge, when, and from where".
+  AUTOPAY_ENROLL: 'AUTOPAY_ENROLL',
+  AUTOPAY_METHOD_UPDATE: 'AUTOPAY_METHOD_UPDATE',
+  SUBSCRIPTION_CREATE: 'SUBSCRIPTION_CREATE',
+  // Editing the catalog now edits PRICES. Not itself a charge, but it decides
+  // what the next invite offers, so "who changed the price list" has to be
+  // answerable from the trail alone.
+  BILLING_PLAN_CATALOG_CHANGE: 'BILLING_PLAN_CATALOG_CHANGE',
 });
 
 export const AUDIT_OUTCOME = Object.freeze({

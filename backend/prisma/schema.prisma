@@ -577,6 +577,16 @@ model Tenant {
   // Json? is safe either way. Nothing in the app WRITES it yet — today it is set
   // by SQL only. See migration 20260826_tenant_settings_json (additive, no-op in prod).
   settingsJson              Json?
+  // Distinguishes "suspended because they did not pay" from "suspended by a
+  // human for some other reason" (tenant subscriptions, 2026-08-27). Tenant.status
+  // stays THE enforcement primitive — it already darkens the public booking site
+  // and stops integration syncs — and this column only records who set it, so
+  // automation may ONLY clear a suspension it set itself. Without it, a dunning
+  // job that later sees a payment land would happily reactivate a tenant somebody
+  // had deliberately switched off.
+  // NULL for every existing tenant. Nothing reads it yet: the suspension gate is
+  // a later phase.
+  billingSuspendedAt        DateTime?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
@@ -662,6 +672,7 @@ model Tenant {
   loanerAgreements         LoanerAgreement[]
   longTermPlans            LongTermPlan[]
   customReports            CustomReport[]
+  subscriptions            TenantSubscription[]
 }
 
 model Location {
@@ -6235,4 +6246,296 @@ model Quote {
   @@index([tenantId, status])
   @@index([tenantId, customerId])
   @@index([tenantId, createdAt])
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// TENANT SUBSCRIPTIONS — Ride billing its OWN tenants for Ride Fleet Manager
+// (2026-08-27, Phase 1). NOT the rental gateway that bills a renter on a
+// tenant's merchant account. Money direction, merchant account and credential
+// set are all different; see modules/billing/authorize-net.js.
+//
+// CALENDAR DATES ARE VARCHAR(10) 'YYYY-MM-DD', NOT DateTime. ARB bills on a
+// calendar DAY in the merchant's own time, not at an instant. Puerto Rico is
+// UTC-4, so a DateTime rendered without an explicit UTC zone shows the day
+// BEFORE the one Authorize.Net actually charges — the customer consents to one
+// date and their card moves on another. Storing text makes the value we send,
+// the value we store and the value we render byte-identical and removes the
+// bug class at the schema. Genuine instants (authorizedAt, cancelledAt,
+// receivedAt, …) stay DateTime.
+//
+// NEVER A PAN. Only customerProfileId, customerPaymentProfileId, brand and
+// last4 are persisted. The platform is PCI SAQ C certified; a card number in
+// one of these tables moves it to SAQ D.
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Ride's own subscription revenue from ONE tenant. There may be several rows
+/// per tenant over time (a cycle change is cancel+create — ARB cannot change an
+/// interval), but at most ONE live row. That invariant is enforced by a PARTIAL
+/// unique index declared in raw SQL (Prisma cannot express one) plus a service
+/// guard. See migration 20260827_tenant_subscriptions.
+model TenantSubscription {
+  id                       String   @id @default(cuid())
+  tenantId                 String
+  /// Restrict is a FEATURE: you cannot delete a tenant that still has billing
+  /// history. Cancel first. (Contrast AdminAuditLog.tenantId, a plain String
+  /// with no FK precisely so the trail SURVIVES deletion — different
+  /// requirement, different choice.)
+  tenant                   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  /// planCode matches a `code` in the EXISTING catalog (AppSetting
+  /// 'tenantPlanCatalog', lib/tenant-plan-limits.js). name + amount are
+  /// SNAPSHOTS: the catalog is editable at any time via PUT
+  /// /api/tenants/plan-catalog, and a price edit must never retroactively
+  /// change what an existing subscriber is charged or what their history says.
+  planCode                 String
+  planNameSnapshot         String
+  amount                   Decimal  @db.Decimal(10, 2)
+  currency                 String   @default("USD")
+  /// ARB's own vocabulary, stored verbatim so nothing translates at call time.
+  intervalUnit             String
+  intervalLength           Int
+
+  status                   String   @default("PENDING_AUTHORIZATION")
+
+  // ── Authorize.Net handles. NEVER a PAN. ────────────────────────────────
+  arbSubscriptionId        String?  @unique
+  customerProfileId        String?
+  customerPaymentProfileId String?
+  cardBrand                String?
+  cardLast4                String?  @db.VarChar(4)
+  cardExpMonth             Int?
+  cardExpYear              Int?
+
+  trialOccurrences         Int      @default(0)
+  trialAmount              Decimal? @db.Decimal(10, 2)
+  trialEndsAt              String?  @db.VarChar(10)
+
+  startDate                String   @db.VarChar(10)
+  nextChargeDate           String?  @db.VarChar(10)
+  currentPeriodStart       String?  @db.VarChar(10)
+  currentPeriodEnd         String?  @db.VarChar(10)
+
+  /// Scheduled change — downgrades and cycle moves land at period end.
+  pendingPlanCode          String?
+  pendingAmount            Decimal? @db.Decimal(10, 2)
+  pendingEffectiveDate     String?  @db.VarChar(10)
+
+  // ── Dunning ────────────────────────────────────────────────────────────
+  failedAttempts             Int       @default(0)
+  lastFailureCode            String?
+  lastFailureText            String?
+  lastFailureAt              DateTime?
+  pastDueSince               DateTime?
+  suspendedAt                DateTime?
+  cancelledAt                DateTime?
+  cancelReason               String?
+  cancelRequestedByUserId    String?
+  supersededBySubscriptionId String?
+
+  /// Consent archive — sits NEXT TO the customerProfileId on purpose: "here is
+  /// the token we charge, here is the exact text they agreed to, at this
+  /// instant, from this IP." Copied off the invite at activation so it survives
+  /// invite pruning. disclosureText is stored VERBATIM, not a template id:
+  /// templates get edited, and a dispute is about what THEY saw.
+  authorizedAt             DateTime?
+  authorizedIp             String?
+  authorizedUserAgent      String?  @db.VarChar(120)
+  authorizedEmail          String?
+  authorizedName           String?
+  authorizedDisclosureText String?  @db.Text
+  authorizedDisclosureHash String?
+  authorizedInviteId       String?
+
+  lastWebhookAt            DateTime?
+  lastReconciledAt         DateTime?
+  /// Last value ARB itself reported for this subscription.
+  arbStatusSnapshot        String?
+
+  notes                    String?  @db.Text
+  createdByUserId          String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  charges                  TenantSubscriptionCharge[]
+  events                   TenantSubscriptionEvent[]
+  invites                  AutopayInvite[]
+
+  @@index([tenantId, createdAt])
+  @@index([status, nextChargeDate])
+  @@index([customerProfileId])
+  @@index([cardExpYear, cardExpMonth])
+}
+
+/// THE LEDGER. This table, not AdminAuditLog, is the record of money.
+/// recordAudit is best-effort by design and never throws into its caller — right
+/// for an audit trail, wrong for a ledger. Charge rows are hard writes, in the
+/// same transaction as the state change they explain.
+model TenantSubscriptionCharge {
+  id                  String   @id @default(cuid())
+  subscriptionId      String
+  subscription        TenantSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  /// Denormalised plain string for cheap tenant reads.
+  tenantId            String
+
+  /// RECURRING | TRIAL | PRORATION | CREDIT_APPLIED | SETUP | MANUAL | REFUND | CHARGEBACK
+  kind                String
+  /// PENDING | SETTLED | DECLINED | VOIDED | REFUNDED | ERROR
+  status              String
+  amount              Decimal  @db.Decimal(10, 2)
+  currency            String   @default("USD")
+
+  /// transId is THE idempotency key. A webhook and the reconciler both upsert on
+  /// it, so a duplicated event physically cannot double-count revenue.
+  transId             String?  @unique
+  /// Our own reference, sent on chargeCustomerProfileRequest, so a call whose
+  /// response we never saw is still FINDABLE by getTransactionDetails. This is
+  /// what makes a timed-out charge recoverable by QUERY instead of by retry.
+  refId               String?  @unique
+  arbSubscriptionId   String?
+  arbPaymentNum       Int?
+  authCode            String?
+  responseCode        String?
+  responseReasonCode  String?
+  responseReasonText  String?
+  avsResponse         String?
+
+  cardBrand           String?
+  cardLast4           String?  @db.VarChar(4)
+
+  chargeDate          String   @db.VarChar(10)
+  settledAt           DateTime?
+
+  /// EXPLAINABILITY. Unexplained charges are the #1 dispute cause, so the
+  /// explanation is a STORED COLUMN written once at charge time — never a view
+  /// computed later from a catalog that has since been edited. When the tenant
+  /// calls about the odd $59.94 in September, the answer is a stored sentence,
+  /// not a reconstruction.
+  description         String   @db.Text
+  periodStart         String?  @db.VarChar(10)
+  periodEnd           String?  @db.VarChar(10)
+  prorationDays       Int?
+  prorationDailyDelta Decimal? @db.Decimal(10, 4)
+  fromPlanCode        String?
+  toPlanCode          String?
+  fromAmount          Decimal? @db.Decimal(10, 2)
+  toAmount            Decimal? @db.Decimal(10, 2)
+
+  /// ENROLLMENT | WEBHOOK | RECONCILE | DIRECT_CHARGE | ADMIN
+  source              String
+  sourceEventId       String?
+  /// Set for ADMIN-initiated charges and refunds only.
+  actorUserId         String?
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([subscriptionId, chargeDate])
+  @@index([tenantId, createdAt])
+  @@index([status, chargeDate])
+  @@index([arbSubscriptionId, arbPaymentNum])
+}
+
+/// The webhook ledger. Created in Phase 1 and deliberately left EMPTY: the
+/// receiver that fills it is Phase 2. The table lands now so the migration is
+/// one additive change rather than two, and so the reconciler's shape is
+/// already decided when the endpoint arrives.
+model TenantSubscriptionEvent {
+  id                String   @id @default(cuid())
+  /// Authorize.Net's own envelope id — THE idempotency key for replay safety.
+  /// INSERT ... ON CONFLICT DO NOTHING against this is how a redelivered
+  /// webhook becomes a no-op instead of a second charge row.
+  notificationId    String   @unique
+  eventType         String
+  eventDate         DateTime?
+  arbSubscriptionId String?
+  transId           String?
+  subscriptionId    String?
+  subscription      TenantSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  payload           Json
+  /// Only signature-verified bodies are stored at all — an endpoint that
+  /// persisted unverified bodies would be a free write primitive for anyone who
+  /// found the URL.
+  signatureOk       Boolean  @default(true)
+  receivedAt        DateTime @default(now())
+  processedAt       DateTime?
+  processingError   String?  @db.Text
+  attempts          Int      @default(0)
+
+  @@index([eventType, receivedAt])
+  @@index([arbSubscriptionId, receivedAt])
+  @@index([processedAt])
+}
+
+/// The long-lived half of the two-token enrollment link. Authorize.Net's own
+/// hosted-page token dies in ~15 minutes and can never be the thing we email;
+/// this one is what goes in the email, and the short one is minted when the
+/// customer clicks.
+model AutopayInvite {
+  id                       String   @id @default(cuid())
+
+  /// WE STORE THE HASH, NEVER THE TOKEN. Precedent: Tenant.websiteTokenHash.
+  /// A leaked DB dump of plaintext autopay tokens would hand an attacker the
+  /// ability to enroll a card against a tenant and to read that tenant's plan
+  /// and price. (ShuttleTrackerLink stores plaintext — that token reveals a
+  /// van's position; this one reveals a billing relationship.)
+  /// Cost, and it is real: a sent link can never be shown again. tokenPrefix
+  /// exists so support can answer "is this the link I sent?", and a resend
+  /// means minting a NEW invite.
+  tokenHash                String   @unique
+  tokenPrefix              String   @db.VarChar(8)
+
+  /// enroll = first card. update = repoint an existing subscription.
+  mode                     String   @default("enroll")
+
+  tenantId                 String
+  subscriptionId           String?
+  subscription             TenantSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  /// 20 chars, matching the cap ensureCustomerProfile already truncates to.
+  /// Declared at the column so the truncation is a schema fact, not a runtime
+  /// hope — Authorize.Net rejects the whole request on an overflow.
+  merchantCustomerId       String   @db.VarChar(20)
+  email                    String
+  companyName              String
+  planCode                 String
+  planName                 String
+  amount                   Decimal  @db.Decimal(10, 2)
+  intervalUnit             String   @default("months")
+  intervalLength           Int      @default(1)
+  startDate                String   @db.VarChar(10)
+  /// Rendered by the update page as "Próximo cargo".
+  nextChargeDate           String?  @db.VarChar(10)
+  trialOccurrences         Int      @default(0)
+  trialAmount              Decimal? @db.Decimal(10, 2)
+
+  customerProfileId        String?
+  customerPaymentProfileId String?
+  arbSubscriptionId        String?
+  /// brand + last4, not a masked number: every surface renders brand + last 4,
+  /// so store what we render.
+  cardBrand                String?
+  cardLast4                String?  @db.VarChar(4)
+
+  /// The consent artefact, frozen at SEND time and hashed. Copied onto the
+  /// subscription at activation.
+  disclosureText           String   @db.Text
+  disclosureHash           String
+
+  expiresAt                DateTime
+  /// Single use. Set by an atomic claim guarded on `usedAt IS NULL`, which is
+  /// what stops a double-click creating two ARB subscriptions.
+  usedAt                   DateTime?
+  /// A link emailed to the wrong address must be killable without waiting 14 days.
+  revokedAt                DateTime?
+  openedAt                 DateTime?
+  attempts                 Int      @default(0)
+
+  createdByUserId          String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([tenantId, createdAt])
+  @@index([subscriptionId])
+  @@index([expiresAt])
 }
