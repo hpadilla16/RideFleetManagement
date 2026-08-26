@@ -8,6 +8,10 @@ import { settingsService } from '../settings/settings.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { evaluateAgeRules } from '../../lib/age-rules.js';
 import { parseDateTimeInTz, startOfDayInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
+// Operating-hours evaluation lives in lib/ as a pure function so it is testable
+// without Postgres — see location-window.test.mjs for the UTC-vs-location-tz
+// regression it was extracted for.
+import { evaluateLocationWindow } from '../../lib/location-window.js';
 import { readFreshCounters, refreshCountersAsync } from './reservation-summary-counters.service.js';
 import { reservationProgramWhereForScope } from '../../lib/program-category.js';
 // VozIA Fase 1 (2026-07-03): getById accepts a reservationNumber
@@ -123,36 +127,10 @@ function derivePrecheckinGateForReservation(reservation) {
   }
 }
 
-function isOutsideHours(date, openTime, closeTime) {
-  if (!openTime || !closeTime) return false;
-  const [oh, om] = String(openTime).split(':').map(Number);
-  const [ch, cm] = String(closeTime).split(':').map(Number);
-  if ([oh, om, ch, cm].some((x) => Number.isNaN(x))) return false;
-  const mins = date.getHours() * 60 + date.getMinutes();
-  const openMins = oh * 60 + om;
-  const closeMins = ch * 60 + cm;
-  return mins < openMins || mins > closeMins;
-}
-
-function resolveHoursForDate(cfg, date) {
-  const dayKeys = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-  const dayKey = dayKeys[date.getDay()];
-  const weekly = cfg?.weeklyHours?.[dayKey];
-
-  if (weekly && typeof weekly === 'object') {
-    return {
-      closed: weekly.enabled === false,
-      openTime: weekly.open || cfg.operationsOpenTime,
-      closeTime: weekly.close || cfg.operationsCloseTime
-    };
-  }
-
-  return {
-    closed: false,
-    openTime: cfg.operationsOpenTime,
-    closeTime: cfg.operationsCloseTime
-  };
-}
+// isOutsideHours / resolveHoursForDate moved to lib/location-window.js on
+// 2026-08-26. They read the instant on the SERVER's clock (UTC in the
+// container) instead of the location's, which rejected legitimate evening
+// bookings; the replacements take an explicit timezone.
 
 function scopedSettingKey(baseKey, scope = {}) {
   return scope?.tenantId ? `tenant:${scope.tenantId}:${baseKey}` : baseKey;
@@ -865,6 +843,18 @@ async function completeLinkedCarSharingTripForReservation(reservationId, actorUs
   return trip;
 }
 
+/**
+ * The wall clock this location keeps: its own configured timezone, else the
+ * tenant's, else the PR default. Same cascade kiosk-session.js resolves for
+ * pickup-day matching — a location's `timezone` is what its counter staff
+ * read off the wall, and the tenant setting is the fallback for the (common)
+ * case where nobody filled it in per location.
+ */
+function locationTimeZone(cfg, tenantTz) {
+  const locTz = String(cfg?.timezone || cfg?.timeZone || '').trim();
+  return locTz || tenantTz || DEFAULT_TENANT_TIMEZONE;
+}
+
 async function validateLocationWindow({ locationId, at, label }, scope = {}) {
   const location = await prisma.location.findFirst({
     where: { id: locationId, ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}) },
@@ -873,21 +863,33 @@ async function validateLocationWindow({ locationId, at, label }, scope = {}) {
   if (!location) return;
 
   const cfg = parseLocationConfig(location.locationConfig);
-  const date = new Date(at);
-  const ymd = date.toISOString().slice(0, 10);
-  const weekday = date.getDay();
+  // 2026-08-26: this used to read the instant with getHours()/getDay()/
+  // toISOString(), i.e. in the container's UTC clock, so a 5:53 PM AST pickup
+  // (21:53Z) was compared against an 08:00–18:00 window and rejected. The
+  // window is a WALL-CLOCK promise the sede makes; evaluate it on that clock.
+  const tz = locationTimeZone(cfg, await resolveTenantTimeZone(scope));
+  const verdict = evaluateLocationWindow(cfg, at, tz);
+  if (verdict.ok) return;
 
-  const dayHours = resolveHoursForDate(cfg, date);
-
-  if ((cfg.closedWeekdays || []).includes(weekday) || (cfg.closedDates || []).includes(ymd) || dayHours.closed) {
+  const locationName = location.name || 'selected location';
+  if (verdict.reason === 'CLOSED') {
     // Expected, user-driven condition (selected date the location is closed) -> 400, not 500.
-    const e = new Error(`${label} location is closed for ${ymd}`); e.statusCode = 400; e.expected = true; throw e;
+    // Keep the literal "location is closed": three route handlers in
+    // reservations.routes.js map THIS phrase to a 400 instead of a 500.
+    const e = new Error(`${label} location is closed for ${verdict.ymd} (${locationName}, ${verdict.timeZone})`);
+    e.statusCode = 400; e.expected = true; throw e;
   }
 
-  const allowOutside = !!cfg.allowOutsideHours;
-  if (!allowOutside && isOutsideHours(date, dayHours.openTime, dayHours.closeTime)) {
-    const e = new Error(`${label} time is outside operating hours for ${location.name || 'selected location'}`); e.statusCode = 400; e.expected = true; throw e;
-  }
+  // Name the hours and the clock they are read on — "outside operating hours"
+  // with no numbers is what sent an agent hunting for a bug that was a
+  // timezone, and it still reads as arbitrary when the rejection is correct.
+  // The literal "outside operating hours" is load-bearing for the same three
+  // route handlers that map it to a 400.
+  const e = new Error(
+    `${label} time ${verdict.localTime} is outside operating hours for ${locationName} `
+    + `(${verdict.openTime}–${verdict.closeTime} ${verdict.timeZone})`
+  );
+  e.statusCode = 400; e.expected = true; throw e;
 }
 
 export async function ensureNoVehicleConflict({ vehicleId, pickupAt, returnAt, ignoreReservationId = null }, scope = {}, db = prisma) {

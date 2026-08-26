@@ -61,7 +61,7 @@ const STRINGS = {
     expiredBody: 'Pide uno nuevo al counter. · This link has expired — ask the counter for a new one.',
     shiftUntil: 'Turno hasta {t}',
     modeLoop: 'Circuito continuo · pasa cada {n} min',
-    modeOnDemand: 'A demanda',
+    modeOnDemand: 'A demanda · recoges cuando el counter asigna',
     tabHome: 'Mapa',
     tabRoster: 'Recogidas',
     tabNotifs: 'Avisos',
@@ -137,7 +137,7 @@ const STRINGS = {
     expiredBody: 'Ask the counter for a new one. · Pide uno nuevo al counter.',
     shiftUntil: 'Shift until {t}',
     modeLoop: 'Continuous loop · passes every {n} min',
-    modeOnDemand: 'On demand',
+    modeOnDemand: 'On demand · you pick up when the counter assigns',
     tabHome: 'Map',
     tabRoster: 'Pickups',
     tabNotifs: 'Alerts',
@@ -743,6 +743,12 @@ export function DriverClient({ token }) {
     ? new Date(state.expiresAt).toLocaleTimeString(lang === 'es' ? 'es-PR' : 'en-US', { hour: 'numeric', minute: '2-digit' })
     : null;
   const headway = Number(state.headwayMinutes) >= 1 ? Number(state.headwayMinutes) : null;
+  // MODE decides the copy, not the headway (2026-08-26). headwayMinutes always
+  // has a value — the config column defaults to 10 — so keying the line on it
+  // showed "Continuous loop · passes every 30 min" to ON_DEMAND drivers, who
+  // run no loop at all. The payload has carried `mode` since Phase 3.
+  const isNonStop = String(state.mode || '').toUpperCase() === 'NON_STOP';
+  const modeLine = isNonStop && headway ? t('modeLoop', { n: headway }) : t('modeOnDemand');
 
   const statusChip = (r) => {
     const mark = actioned[r.id];
@@ -904,8 +910,8 @@ export function DriverClient({ token }) {
 
             <div style={{ ...S.card, marginBottom: 12 }}>
               {gpsControl}
-              <p style={{ ...S.note, marginBottom: 0 }}>
-                {headway ? t('modeLoop', { n: headway }) : t('modeOnDemand')}
+              <p style={{ ...S.note, marginBottom: 0 }} data-testid="driver-mode-line">
+                {modeLine}
                 {expiresLabel ? ` · ${t('shiftUntil', { t: expiresLabel })}` : ''}
               </p>
             </div>

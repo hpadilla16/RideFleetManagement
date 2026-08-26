@@ -13,7 +13,7 @@ import {
   createPublicRateLimitGuard,
   createOptionalIdempotencyGuard,
 } from '../../middleware/public-endpoint-guards.js';
-import { requireRole } from '../../middleware/auth.js';
+import { requireRole, isSuperAdmin } from '../../middleware/auth.js';
 import { userAllowedLocationIds } from '../../lib/tenant-scope.js';
 import { prisma } from '../../lib/prisma.js';
 import { shuttleTrackerService, storeCustomerLocation } from './shuttle-tracker.service.js';
@@ -152,10 +152,10 @@ shuttleTrackerPublicRouter.post('/:token/location', locationGuards, async (req, 
  * Staff-side tracker configuration, one row per location.
  *
  * Mounted at /api/shuttle-tracker with requireAuth + tenantRateLimit (main.js);
- * writes gated here to the same author tier as the rest of Settings. Tenant
- * always comes from the TOKEN — the location is verified to belong to it, and
- * every vehicle id is verified too, so a config can never point the public
- * page at another tenant's GPS.
+ * writes gated here to the same author tier as the rest of Settings. The
+ * location is verified to belong to the resolved tenant, and every vehicle id
+ * is verified too, so a config can never point the public page at another
+ * tenant's GPS.
  */
 export const shuttleTrackerAdminRouter = Router();
 const requireSettingsAuthor = requireRole('SUPER_ADMIN', 'ADMIN', 'OPS');
@@ -163,13 +163,36 @@ const requireSettingsAuthor = requireRole('SUPER_ADMIN', 'ADMIN', 'OPS');
 const MODES = ['OFF', 'ON_DEMAND', 'NON_STOP'];
 
 /**
+ * Which tenant this request operates on. IDENTICAL to the sibling
+ * shuttle-zones / onestepgps helper, deliberately: a SUPER_ADMIN browsing
+ * another tenant's location passes ?tenantId= (or body.tenantId on the PUT)
+ * and falls back to their own; ANY other role ignores the parameter entirely
+ * and gets req.user.tenantId, so a non-super can never widen scope by
+ * appending a query string.
+ *
+ * Added 2026-08-26: both handlers resolved the tenant from req.user.tenantId
+ * only, so a super admin operating inside a tenant got a 404 on GET /config
+ * for every location — and the Settings card silently collapsed to a one-line
+ * "Shuttle tracker: Location not found" (cost an hour of live debugging).
+ */
+function resolveTenantId(req) {
+  if (isSuperAdmin(req.user)) {
+    const t = req.query?.tenantId || req.body?.tenantId || req.user?.tenantId;
+    if (!t) throw Object.assign(new Error('tenantId is required (SUPER_ADMIN must pick one)'), { status: 400 });
+    return String(t);
+  }
+  return req.user?.tenantId;
+}
+
+/**
  * Tenant AND branch scope (QA, 2026-08-15 — same rule locations.service
  * learned on 2026-07-24): a LAX-scoped admin must not read or rewrite
  * Orlando's tracker. Out-of-scope looks identical to nonexistent.
  */
-async function scopedLocation(req, locationId) {
+async function scopedLocation(req, locationId, tenantId) {
+  if (!tenantId) return null;
   const location = await prisma.location.findFirst({
-    where: { id: locationId, tenantId: req.user.tenantId },
+    where: { id: locationId, tenantId },
     select: { id: true },
   });
   if (!location) return null;
@@ -182,7 +205,9 @@ shuttleTrackerAdminRouter.get('/config', requireSettingsAuthor, async (req, res,
   try {
     const locationId = String(req.query?.locationId || '').trim();
     if (!locationId) return res.status(400).json({ error: 'locationId is required' });
-    if (!(await scopedLocation(req, locationId))) return res.status(404).json({ error: 'Location not found' });
+    const tenantId = resolveTenantId(req);
+    if (!tenantId) return res.status(400).json({ error: 'tenantId is required' });
+    if (!(await scopedLocation(req, locationId, tenantId))) return res.status(404).json({ error: 'Location not found' });
 
     const row = await prisma.shuttleTrackerConfig.findUnique({ where: { locationId } });
     res.json({
@@ -224,7 +249,9 @@ shuttleTrackerAdminRouter.put('/config', requireSettingsAuthor, async (req, res,
       intakeClean = v.intake;
     }
 
-    if (!(await scopedLocation(req, locationId))) return res.status(404).json({ error: 'Location not found' });
+    const tenantId = resolveTenantId(req);
+    if (!tenantId) return res.status(400).json({ error: 'tenantId is required' });
+    if (!(await scopedLocation(req, locationId, tenantId))) return res.status(404).json({ error: 'Location not found' });
 
     // Ids that no longer resolve to this tenant are DROPPED, not rejected
     // (QA, 2026-08-15): vehicles are hard-deleted when sold, and a stale id
@@ -233,7 +260,7 @@ shuttleTrackerAdminRouter.put('/config', requireSettingsAuthor, async (req, res,
     let ownedIds = [];
     if (vehicleIds.length) {
       const owned = await prisma.vehicle.findMany({
-        where: { id: { in: vehicleIds }, tenantId: req.user.tenantId },
+        where: { id: { in: vehicleIds }, tenantId },
         select: { id: true },
       });
       ownedIds = owned.map((v) => v.id);
@@ -242,7 +269,7 @@ shuttleTrackerAdminRouter.put('/config', requireSettingsAuthor, async (req, res,
       return res.status(400).json({ error: 'Pick at least one shuttle vehicle before turning the tracker on' });
     }
 
-    const data = { tenantId: req.user.tenantId, locationId, mode, vehicleIdsJson: ownedIds, headwayMinutes };
+    const data = { tenantId, locationId, mode, vehicleIdsJson: ownedIds, headwayMinutes };
     const intakePatch = intakeProvided ? { intakeJson: intakeClean } : {};
     const row = await prisma.shuttleTrackerConfig.upsert({
       where: { locationId },
