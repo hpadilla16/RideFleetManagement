@@ -108,6 +108,14 @@ export const AUDIT_ACTIONS = Object.freeze({
   // asking for money, and when" has to be answerable. Metadata carries the new
   // boolean + tenantId ONLY — no amounts, no customer or card data.
   CHECKOUT_PAYMENT_POLICY_CHANGE: 'CHECKOUT_PAYMENT_POLICY_CHANGE',
+
+  // ── Payment terminal / gateway configuration (2026-08-26) ──
+  // Editing this row decides WHICH merchant account a tenant's card charges
+  // settle into. "Who repointed the terminal, and when" has to be answerable
+  // from the trail alone. Metadata carries the gateway, the enabled flags, a
+  // MASKED TPN and booleans about the auth key — NEVER the auth key itself,
+  // nor any fragment of it. The shared redactor is a safety net, not a licence.
+  PAYMENT_TERMINAL_CONFIG_CHANGE: 'PAYMENT_TERMINAL_CONFIG_CHANGE',
 });
 
 export const AUDIT_OUTCOME = Object.freeze({

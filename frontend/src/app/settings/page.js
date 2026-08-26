@@ -3107,7 +3107,13 @@ function SettingsInner({ token, me, logout }) {
                 </div>
                 <div className="stack">
                   <label className="label">Auth Key</label>
-                  <input value={paymentGatewayConfig.spin?.authKey || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, spin: { ...paymentGatewayConfig.spin, authKey: e.target.value } })} />
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={paymentGatewayConfig.spin?.authKey || ''}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, spin: { ...paymentGatewayConfig.spin, authKey: e.target.value } })}
+                    placeholder={paymentGatewayConfig.spin?.hasAuthKey ? 'Saved — leave blank to keep' : 'Paste the Auth Key from your iPOS merchant portal'}
+                  />
                 </div>
               </div>
               <div className="form-grid-2">
@@ -3132,6 +3138,9 @@ function SettingsInner({ token, me, logout }) {
               </div>
               <div className="surface-note">
                 SPIn is a card-present terminal gateway for in-person payments. Configure the Auth Key and TPN from your SPIn merchant portal.
+                These credentials are <strong>per tenant</strong>: checkout charges settle into the merchant account behind the TPN saved here.
+                The Auth Key is encrypted at rest and never shown again — leave it blank to keep the saved one.
+                Auth Key <strong>and</strong> TPN must BOTH be set; a half-filled pair is refused at the counter rather than paired with another terminal.
               </div>
             </section>
 

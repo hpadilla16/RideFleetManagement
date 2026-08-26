@@ -151,7 +151,9 @@ const UNRUN_FILES_BASELINE = new Set([
   'src/modules/booking-engine/car-sharing-discovery.test.mjs',
   'src/modules/checkout-session/age-rules-gate.test.mjs',
   'src/modules/checkout-session/checkout-session.scheduler.test.mjs',
-  'src/modules/checkout-session/spin-charge.test.mjs',
+  // spin-charge.test.mjs left this list 2026-08-26: per-tenant terminal config
+  // made it a load-bearing money-path suite, so it got an env bootstrap, DB
+  // fakes for the new AppSetting read, and a script (test:spin-charge).
   'src/modules/checkout-session/state-machine.test.mjs',
   'src/modules/citations/citations-archive.test.mjs',
   'src/modules/customer-portal/customer-portal-rate-limit.test.mjs',

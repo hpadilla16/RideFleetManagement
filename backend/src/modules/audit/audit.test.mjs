@@ -344,8 +344,12 @@ test('resetTenantAdminPassword → USER_PASSWORD_RESET row (actor = super-admin,
 test('redactSensitive masks credential-named fields ({ token, secret, ... })', () => {
   const out = redactSensitive({
     token: 'abc', secret: 'xyz', totp: '123456', otp: '000', apiKey: 'k', privateKey: 'p', backupCode: 'bc',
+    // 2026-08-26: the Dejavoo/SPIn terminal credential. No call site is meant
+    // to log it; this is the net under that rule.
+    authKey: 'spin-live-key',
     tokenVersion: 3, note: 'keep-me',
   });
+  assert.equal(out.authKey, '[redacted]');
   assert.equal(out.token, '[redacted]');
   assert.equal(out.secret, '[redacted]');
   assert.equal(out.totp, '[redacted]');
