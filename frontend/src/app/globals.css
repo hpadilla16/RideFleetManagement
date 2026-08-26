@@ -673,6 +673,19 @@ th {
   z-index: 1;
 }
 th.th-strong { color: var(--text-2); }
+/* Wide operational tables scroll inside their own well. Without one, the
+   browser satisfies `width:100%` by crushing whichever columns are most
+   compressible — which is never the ones you can afford to lose. */
+.table-scroll { overflow-x: auto; }
+/* Super-admin tenant editor: 12 columns, two of them editable identity fields.
+   The generic 760px floor is far too low for it, so the table never overflowed
+   and Name and Slug were squeezed to a few characters instead — leaving the
+   operator unable to tell which tenant a row belonged to, right beside a button
+   that mints a real billing link. Give it a floor wide enough for the columns it
+   actually has, and let it scroll. */
+.tenants-table { min-width: 1480px; }
+.tenants-table td:nth-child(1) input { min-width: 200px; }
+.tenants-table td:nth-child(2) input { min-width: 160px; }
 tbody tr:nth-child(even) td { background: var(--n-25); }
 tr:hover td { background: var(--p-50); }
 .card-lg { overflow: auto; }

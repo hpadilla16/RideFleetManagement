@@ -511,7 +511,8 @@ function Inner({ token, me, logout }) {
               </div>
             </div>
           ) : null}
-          <table>
+          <div className="table-scroll">
+          <table className="tenants-table">
             <thead><tr><th>Name</th><th>Slug</th><th>Status</th><th>Plan</th><th>Billing</th><th>Car Sharing</th><th>Loaner</th><th>Tolls</th><th>Citations</th><th>Market Int.</th><th>Counts</th><th>Actions</th></tr></thead>
             <tbody>
               {(rows || []).map((r) => (
@@ -655,6 +656,7 @@ function Inner({ token, me, logout }) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
 
         <div id="tenant-admin-card" className="glass card" style={{ padding: 12 }}>
