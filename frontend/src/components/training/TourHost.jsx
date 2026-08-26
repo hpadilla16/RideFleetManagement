@@ -85,6 +85,31 @@ const anchorEl = (name) => {
   return isUsable(el) ? el : null;
 };
 
+/**
+ * A COLLAPSED SIDEBAR SECTION MUST NOT KILL A NAV STEP (2026-08-26).
+ *
+ * The sectioned sidebar (ac789836) hides a closed group with
+ * `.nav-sec.closed .nav-sec-items { display: none }`. The link is still in the
+ * DOM, so querySelector finds it — but isUsable() correctly rejects it, and the
+ * step is judged missing. Anyone who had collapsed "Dinero" lost the whole
+ * Reports step of the onboarding tour, silently.
+ *
+ * Rather than click the section open (which writes the person's own
+ * `ui.nav.section.<key>` preference and would leave their sidebar rearranged
+ * after the tour), a tour in progress stamps the document and CSS un-hides
+ * collapsed sections for its duration. The rail mode already overrides exactly
+ * this rule the same way, so the mechanism is not new — see globals.css.
+ *
+ * Set SYNCHRONOUSLY, before any isPresent()/settleStart() decision runs.
+ */
+const TOUR_ACTIVE_ATTR = 'data-tour-active';
+const setTourActive = (on) => {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  if (on) root.setAttribute(TOUR_ACTIVE_ATTR, '1');
+  else root.removeAttribute(TOUR_ACTIVE_ATTR);
+};
+
 export function TourHost({ viewer }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -108,6 +133,18 @@ export function TourHost({ viewer }) {
     } catch { /* private browsing — the tour still works, it just won't resume */ }
   }, []);
 
+  /**
+   * Keep the document stamp in step with the tour. Declared BEFORE the
+   * anchor-locating effect on purpose: effects run in declaration order within
+   * a commit, so the stamp is on the element by the time anchorEl() looks. A
+   * PARKED tour (state.waiting) still counts as running — its watcher is
+   * polling isPresent() and needs the same sections open.
+   */
+  useEffect(() => {
+    setTourActive(!!state && !state.endedAs);
+  }, [state]);
+  useEffect(() => () => setTourActive(false), []);
+
   // ── launch ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const onStart = (event) => {
@@ -120,6 +157,10 @@ export function TourHost({ viewer }) {
       walkedModules.current = new Set();
       // The showcase runs itself until a person takes over.
       setAutoPlay(track === TOUR_TRACKS.SHOWCASE);
+      // Before settleStart, which asks isPresent() about the first step: a nav
+      // link inside a collapsed section must already be revealed by now, or the
+      // tour would start by skipping it.
+      setTourActive(true);
       const settled = settleStart(fresh, list, isPresent);
       // A module that walks through one record (a reservation's own page)
       // finds nothing from Ride University. Park the tour instead of ending

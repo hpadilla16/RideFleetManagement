@@ -2131,6 +2131,15 @@ tr.osg-dirty td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
 .nav-sec.closed .nav-sec-chev { transform: rotate(-90deg); }
 .nav-sec-items { display: flex; flex-direction: column; gap: 3px; padding-top: 2px; }
 .nav-sec.closed .nav-sec-items { display: none; }
+/* While a Ride University tour is running, every section is open (TourHost
+   stamps [data-tour-active] on <html>). A tour step that points at a nav item
+   inside a group the person happened to collapse was in the DOM but
+   `display: none`, so the tour judged it missing and skipped the step — the
+   Reports step of the onboarding tour vanished for anyone who had closed
+   "Dinero". Un-hiding for the tour's duration leaves the person's own
+   ui.nav.section.* preference untouched; the chevron still reads "closed",
+   and the section snaps back the moment the tour ends. */
+:root[data-tour-active] .nav-sec.closed .nav-sec-items { display: flex; }
 
 /* Nav item internals: 18px icon, ellipsized label, badge/chip on the right. */
 .nav-icon { flex: none; width: 18px; height: 18px; color: var(--icon-quiet, var(--text-3)); transition: color .15s ease; }

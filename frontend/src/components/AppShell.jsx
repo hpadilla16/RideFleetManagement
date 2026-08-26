@@ -594,9 +594,18 @@ export function AppShell({ me, logout, children }) {
           <div className="brand-subtitle">{t('appShell.brandSubtitle')}</div>
         </div>
 
+        {/* The `global-search` tour anchor lives HERE, not on the topbar's
+            mobile search button (2026-08-26). The 2026-08-25 topbar redesign
+            removed the duplicate desktop search field, leaving the anchor on
+            `.tb-search-mobile`, which is `display: none` above 980px — so the
+            onboarding tour's "Find anything from here" step waited forever on
+            an element no desktop user could see. This sidebar control is the
+            only always-present desktop entry to the command palette, which is
+            exactly what the step describes. */}
         <button
           type="button"
           className="sb-search"
+          data-tour="global-search"
           title={t('search.open', 'Search (Ctrl+K)')}
           onClick={openCommandPalette}
         >
@@ -671,7 +680,6 @@ export function AppShell({ me, logout, children }) {
             <button
               type="button"
               className="tb-search-mobile"
-              data-tour="global-search"
               title={t('search.open', 'Search (Ctrl+K)')}
               aria-label={t('search.open', 'Search (Ctrl+K)')}
               onClick={openCommandPalette}
