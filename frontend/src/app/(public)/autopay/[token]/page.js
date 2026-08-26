@@ -24,7 +24,11 @@
  * cadence, and the first charge date, shown BEFORE any card is typed. Informed
  * consent up front is also the cheapest dispute insurance there is.
  *
- *  - title: neutral, the task and not the platform.
+ *  - title: neutral, the task and not the platform. It can only carry ONE
+ *    language — this is the server render, before any browser hint or stored
+ *    choice is readable — so it carries the page's DEFAULT, English.
+ *    AutopayClient rewrites document.title once the reader's language is
+ *    resolved, which is also why the string is duplicated in its STRINGS map.
  *  - noindex/nofollow: the token in the URL IS the credential; a search engine
  *    that cached this page would outlive the link.
  *  - referrer no-referrer: the page loads nothing third-party, so the token
@@ -39,7 +43,7 @@
 import { AutopayClient } from './AutopayClient';
 
 export const metadata = {
-  title: 'Método de pago',
+  title: 'Payment method',
   manifest: null,
   referrer: 'no-referrer',
   robots: { index: false, follow: false },

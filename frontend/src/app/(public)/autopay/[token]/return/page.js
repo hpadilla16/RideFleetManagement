@@ -16,11 +16,14 @@
  *  - manifest: null — the one identity field a layout cannot neutralise in
  *    next 14.2, enforced by test/public-route-group.test.jsx. See
  *    (public)/layout.js for the mechanism.
+ *  - title: the server render cannot know the reader's language, so it carries
+ *    the page's DEFAULT, English. AutopayReturnClient rewrites document.title
+ *    once the language resolves.
  */
 import { AutopayReturnClient } from './AutopayReturnClient';
 
 export const metadata = {
-  title: 'Confirmación de autopago',
+  title: 'Autopay confirmation',
   manifest: null,
   referrer: 'no-referrer',
   robots: { index: false, follow: false },
