@@ -13,20 +13,83 @@
 
 let seq = 0;
 
+/**
+ * Comparable form of a value.
+ *
+ * Numbers stay numbers and strings stay strings; only Dates (and things that
+ * parse as one) become epoch millis. The original coerced EVERYTHING through
+ * `new Date()`, which happened to work for `attempts: { lt: 10 }` only because
+ * `new Date(10)` is 10ms past the epoch. Phase 2 compares attempt counts and
+ * VARCHAR(10) calendar dates in the same predicate, so the coercion is made
+ * explicit rather than left as a coincidence that holds until it does not.
+ *
+ * Calendar dates ('YYYY-MM-DD') compare correctly as PLAIN STRINGS — that is a
+ * designed property of the format (billing-dates.js), and it is what the real
+ * Postgres VARCHAR comparison does too, so the fake matches production here.
+ */
+function cmpVal(v) {
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') {
+    // An ISO instant is a Date in disguise; a calendar date is not.
+    if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return new Date(v).getTime();
+    return v;
+  }
+  return v;
+}
+
+function compare(a, b) {
+  const x = cmpVal(a);
+  const y = cmpVal(b);
+  if (x == null && y == null) return 0;
+  if (x == null) return -1;
+  if (y == null) return 1;
+  if (typeof x === 'string' || typeof y === 'string') {
+    return String(x) < String(y) ? -1 : String(x) > String(y) ? 1 : 0;
+  }
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
 function matchVal(val, cond) {
   const v = val ?? null;
   if (cond && typeof cond === 'object' && !(cond instanceof Date)) {
     if ('in' in cond) return cond.in.includes(v);
     if ('not' in cond) return v !== cond.not;
-    if ('gt' in cond) return new Date(v).getTime() > new Date(cond.gt).getTime();
-    if ('gte' in cond) return new Date(v).getTime() >= new Date(cond.gte).getTime();
-    if ('lt' in cond) return new Date(v).getTime() < new Date(cond.lt).getTime();
+    if ('gt' in cond) return v != null && compare(v, cond.gt) > 0;
+    if ('gte' in cond) return v != null && compare(v, cond.gte) >= 0;
+    if ('lt' in cond) return v != null && compare(v, cond.lt) < 0;
+    if ('lte' in cond) return v != null && compare(v, cond.lte) <= 0;
     return true;
   }
   if (v instanceof Date || cond instanceof Date) {
     return v != null && cond != null && new Date(v).getTime() === new Date(cond).getTime();
   }
   return v === (cond ?? null);
+}
+
+/**
+ * Sort like Prisma-on-Postgres, INCLUDING ITS NULL HANDLING.
+ *
+ * Postgres puts NULLs FIRST on `ORDER BY x DESC`. That is not a detail here: the
+ * webhook ordering watermark is a `findFirst({ orderBy: { eventDate: 'desc' } })`,
+ * and an undated event sorting to the top would make the watermark read back as
+ * null and silently switch the out-of-order guard off. The fake reproduces the
+ * behaviour so a test can prove the production query excludes undated rows,
+ * rather than passing because the fake happened to sort NULLs last.
+ */
+function applyOrderBy(rows, orderBy) {
+  if (!orderBy) return rows;
+  const [field, dir] = Object.entries(orderBy)[0] || [];
+  if (!field) return rows;
+  const desc = String(dir).toLowerCase() === 'desc';
+  return [...rows].sort((a, b) => {
+    const av = a[field] ?? null;
+    const bv = b[field] ?? null;
+    if (av == null && bv == null) return 0;
+    if (av == null) return desc ? -1 : 1; // NULLS FIRST on DESC, LAST on ASC
+    if (bv == null) return desc ? 1 : -1;
+    return desc ? -compare(av, bv) : compare(av, bv);
+  });
 }
 
 const matches = (row, where = {}) => Object.entries(where).every(([k, c]) => matchVal(row[k], c));
@@ -75,6 +138,12 @@ export function table(name, { defaults = {}, unique = [], partialUnique = [] } =
         id: data.id || `${name}_${++seq}`,
         createdAt: new Date(),
         updatedAt: new Date(),
+        // TenantSubscriptionEvent.receivedAt is `@default(now())` in the schema,
+        // and the webhook path relies on the database filling it in. It cannot
+        // live in `defaults` — that object is spread, so every row would share
+        // one frozen timestamp and both `orderBy: { receivedAt }` and the
+        // 72-hour heartbeat window would stop meaning anything.
+        receivedAt: new Date(),
         ...defaults,
         ...data,
       };
@@ -85,12 +154,13 @@ export function table(name, { defaults = {}, unique = [], partialUnique = [] } =
       const r = rows.find((row) => matches(row, where));
       return r ? { ...r } : null;
     },
-    async findFirst({ where } = {}) {
-      const r = rows.find((row) => matches(row, where));
-      return r ? { ...r } : null;
+    async findFirst({ where, orderBy } = {}) {
+      const hit = applyOrderBy(rows.filter((row) => matches(row, where)), orderBy);
+      return hit.length ? { ...hit[0] } : null;
     },
-    async findMany({ where } = {}) {
-      return rows.filter((row) => matches(row, where)).map((r) => ({ ...r }));
+    async findMany({ where, orderBy, take } = {}) {
+      const hit = applyOrderBy(rows.filter((row) => matches(row, where)), orderBy);
+      return (take == null ? hit : hit.slice(0, take)).map((r) => ({ ...r }));
     },
     async count({ where } = {}) {
       return rows.filter((row) => matches(row, where)).length;
@@ -108,6 +178,17 @@ export function table(name, { defaults = {}, unique = [], partialUnique = [] } =
       const hit = rows.filter((row) => matches(row, where));
       hit.forEach((r) => applyData(r, data));
       return { count: hit.length };
+    },
+    /**
+     * Upsert on a unique key. This is the SECOND idempotency layer of the money
+     * path — `transId @unique` on the charge ledger — so it is modelled rather
+     * than faked with a find-then-create, which would race in a way the real
+     * upsert does not and would let a suite pass that production would not.
+     */
+    async upsert({ where, create, update }) {
+      const existing = rows.find((row) => matches(row, where));
+      if (existing) return { ...applyData(existing, update) };
+      return this.create({ data: { ...where, ...create } });
     },
   };
 }
@@ -150,9 +231,23 @@ export function makePrisma() {
       }],
     }),
     tenantSubscriptionCharge: table('tenantSubscriptionCharge', {
+      // No `defaults` here on purpose. The nullable columns are all supplied
+      // explicitly by their writers, and filling them in would change what an
+      // unset column reads back as — which billing-enrollment.test.mjs asserts
+      // on directly ("a transId before any transaction would be a fiction").
       unique: [['transId'], ['refId']],
     }),
     tenantSubscriptionEvent: table('tenantSubscriptionEvent', {
+      defaults: {
+        eventDate: null,
+        arbSubscriptionId: null,
+        transId: null,
+        subscriptionId: null,
+        signatureOk: true,
+        processedAt: null,
+        processingError: null,
+        attempts: 0,
+      },
       unique: [['notificationId']],
     }),
     // The service passes an ARRAY of already-started promises, exactly as the

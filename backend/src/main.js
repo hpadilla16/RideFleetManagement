@@ -104,6 +104,7 @@ import { trainingRouter } from './modules/training/training.routes.js';
 import { shuttleTrackerPublicRouter, shuttleTrackerAdminRouter } from './modules/shuttle/shuttle-tracker.routes.js';
 import { shuttleDriverPublicRouter } from './modules/shuttle/shuttle-driver.routes.js';
 import { billingPublicRouter } from './modules/billing/billing-public.routes.js';
+import { billingWebhookRouter } from './modules/billing/billing-webhook.routes.js';
 import { shuttleMonitorRouter } from './modules/shuttle/shuttle-monitor.routes.js';
 import { shuttleZonesRouter } from './modules/shuttle/shuttle-zones.routes.js';
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
@@ -282,6 +283,17 @@ app.use('/api/public/driver', shuttleDriverPublicRouter);
 // (BILLING_AUTHNET_*) — the per-tenant rental gateway lives under
 // /api/public/payment-gateway and uses AUTHNET_*; they must never be confused.
 app.use('/api/public/billing', billingPublicRouter);
+// Authorize.Net's webhook receiver for RIDE'S OWN billing account (Phase 2).
+// POST /api/public/billing/authorizenet/webhook — unauthenticated by design:
+// the X-ANET-Signature HMAC is the credential, verified over req.rawBodyBuffer
+// (captured by the express.json verify hook above) before anything is parsed.
+//
+// SEPARATE ROUTER, SEPARATE KEY, ON PURPOSE. The rental receiver at
+// /api/public/payment-gateway/authorizenet/webhook belongs to the per-tenant
+// gateway and reads its Signature Key from per-tenant AppSettings; this one
+// reads BILLING_AUTHNET_SIGNATURE_KEY from env. One route holding both
+// credential sets would have to guess which merchant an event belonged to.
+app.use('/api/public/billing', billingWebhookRouter);
 app.use('/api/host-app', requireAuth, tenantRateLimit, requireModuleAccess('hostApp'), hostAppRouter);
 app.use('/api/employee-app', requireAuth, tenantRateLimit, requireModuleAccess('employeeApp'), employeeAppRouter);
 app.use('/api/dealership-loaner', requireAuth, tenantRateLimit, requireModuleAccess('loaner'), dealershipLoanerRouter);
