@@ -26,12 +26,15 @@
  * blob `{"checkoutPaymentRequired": false}`. This is the same scoped-AppSetting
  * shape every other tenant toggle on the Settings page uses (customerInspection
  * Config, fleetRotationConfig, twoFactorPolicy, …) via settings.service.js's
- * `scopedKey`. It is deliberately NOT `Tenant.settingsJson`: that column does
- * not exist on the Tenant model (see the note in the report / the latent bug in
- * sms.service.js + payment-gateway.service.js, which both `select` it), so
- * using it would have required a migration on the hot tenant table to store one
- * boolean. The PARSE shape here — JSON string, try/catch, tenant-scoped cache
- * with a short TTL — mirrors `getTenantSmsConfig` / `getTenantSpinConfig`.
+ * `scopedKey`. It is deliberately NOT `Tenant.settingsJson`. When this module
+ * was written that column was missing from the Tenant model entirely — the
+ * latent bug in sms.service.js + payment-gateway.service.js, which both
+ * `select` it; it was declared on 2026-08-26 (see migration
+ * 20260826_tenant_settings_json). The choice still stands: settingsJson is the
+ * tenant's credentials blob, a scoped AppSetting is where the Settings-page
+ * toggles live, and this one is a boolean. The PARSE shape here — JSON string,
+ * try/catch, tenant-scoped cache with a short TTL — mirrors
+ * `getTenantSmsConfig` / `getTenantSpinConfig`.
  *
  * CACHING — `tenantKey(tenantId, 'checkout', 'payment-policy')`, 60s TTL, and
  * `invalidateCheckoutPaymentPolicy` is called by the settings write path. Without
