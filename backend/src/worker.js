@@ -261,6 +261,23 @@ async function main() {
     });
   }
 
+  // Tenant subscriptions — RIDE billing its own tenants (Phase 2, 2026-08-27).
+  // Daily backstop for the Authorize.Net webhook path: retries events that
+  // failed to apply, polls ARB for status drift, hunts charges that should
+  // have happened and did not, and alarms if NO verified webhook has arrived
+  // platform-wide in 72 hours. Makes zero external calls while no tenant is
+  // enrolled, so it is safe to run before the module carries any real money.
+  // BILLING_AUTHNET_* credentials only — never the per-tenant rental gateway.
+  try {
+    const billingReconcileMod = await import('./modules/billing/billing-reconcile.scheduler.js');
+    billingReconcileMod.startBillingReconcileScheduler();
+    logger.info('[worker] started: billing reconcile scheduler');
+  } catch (err) {
+    logger.warn('[worker] billing reconcile scheduler not started', {
+      message: err.message,
+    });
+  }
+
   // Shuttle fast poll (2026-08-15) — demand-driven: fast only while a
   // customer tracker page is open or a shuttle request is pending. The only
   // consumer of the VoltSwitch client above the tenant sync.
@@ -451,6 +468,10 @@ async function main() {
     try {
       const rpMod = await import('./modules/integrations/economy/economy-rate-push.scheduler.js');
       rpMod.stopEconomyRatePushScheduler();
+    } catch {}
+    try {
+      const billingReconcileMod = await import('./modules/billing/billing-reconcile.scheduler.js');
+      billingReconcileMod.stopBillingReconcileScheduler();
     } catch {}
     try {
       const ocrMod = await import('./modules/citations/citation-ocr.scheduler.js');

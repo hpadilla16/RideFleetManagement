@@ -363,18 +363,121 @@ export async function cancelSubscription(subscriptionId, deps = {}) {
 }
 
 /**
+ * ARB's OWN vocabulary for a subscription's state. Stored verbatim in
+ * `arbStatusSnapshot` and mapped to ours at exactly one place (billing-events.js
+ * ARB_STATUS_TO_SUBSCRIPTION), so nothing translates at call time and a value
+ * Authorize.Net adds later shows up as an unmapped string we can see rather than
+ * as a silent no-op.
+ */
+export const ARB_STATUS = Object.freeze({
+  ACTIVE: 'active',
+  EXPIRED: 'expired',
+  SUSPENDED: 'suspended',
+  CANCELED: 'canceled', // ARB spells it with one L. Do not "fix" it.
+  TERMINATED: 'terminated',
+});
+
+/**
+ * What Authorize.Net thinks this subscription's status is — DETECTOR 2.
+ *
+ * The cheapest authoritative answer to "is this still charging?", and the one
+ * that does not depend on any webhook having arrived. ARB is the source of truth
+ * about whether money moves; when it disagrees with us, it wins.
+ *
+ * Returns the raw lowercase string (see ARB_STATUS), or null when ARB answers
+ * without one — a shape change we must notice rather than read as "fine".
+ */
+export async function getSubscriptionStatus(subscriptionId, deps = {}) {
+  const res = await _call('ARBGetSubscriptionStatusRequest', { subscriptionId }, deps);
+  const status = res?.status;
+  return status ? String(status).trim().toLowerCase() : null;
+}
+
+/**
+ * The full subscription, optionally with its transaction history — DETECTOR 3.
+ *
+ * `includeTransactions` is what lets the silence detector answer "did a charge
+ * happen for the period that should have billed?" without a single webhook ever
+ * having arrived. That is the whole reason this call exists: the endpoint can be
+ * unreachable for a week and this still finds the truth.
+ *
+ * NOTE: ARB returns `arbTransactions` as an ARRAY when there are several and as
+ * a BARE OBJECT when there is exactly one — the standard XML-to-JSON collapse.
+ * Normalising here means no caller has to remember, and a one-transaction
+ * subscription cannot read as zero.
+ */
+export async function getSubscription(subscriptionId, { includeTransactions = false } = {}, deps = {}) {
+  const res = await _call('ARBGetSubscriptionRequest', {
+    subscriptionId,
+    includeTransactions: !!includeTransactions,
+  }, deps);
+
+  const sub = res?.subscription || {};
+  const rawTx = sub.arbTransactions?.arbTransaction ?? sub.arbTransactions ?? [];
+  const transactions = (Array.isArray(rawTx) ? rawTx : [rawTx]).filter(Boolean);
+
+  return {
+    name: sub.name ?? null,
+    status: sub.status ? String(sub.status).trim().toLowerCase() : null,
+    amount: sub.amount ?? null,
+    paymentSchedule: sub.paymentSchedule ?? null,
+    // Authorize.Net's count of payments already taken. The reconciler uses it to
+    // spot "ARB has billed more times than we have charge rows".
+    pastOccurrences: numberOrNull(sub.arbTransactions?.pastOccurrences ?? sub.pastOccurrences),
+    transactions: transactions.map((t) => ({
+      transId: t.transId != null ? String(t.transId) : null,
+      // 1 = the first payment of the subscription, and so on.
+      payNum: numberOrNull(t.payNum),
+      // 1 approved | 2 declined | 3 error | 4 held for review. A DECLINE IS NOT
+      // AN ERROR: it means the card said no, which is exactly the signal
+      // detector 3 exists to find.
+      responseCode: numberOrNull(t.response?.code ?? t.responseCode),
+      responseReasonCode: numberOrNull(t.response?.reasonCode ?? t.responseReasonCode),
+      // Deliberately NOT carrying response text out of this function. See the
+      // note on logAuthnetFailure below: Authorize.Net echoes offending values
+      // back inside message text, and this is the money path.
+      submitTimeUTC: t.submitTimeUTC ?? null,
+    })),
+  };
+}
+
+function numberOrNull(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
  * Log a billing call's failure WITHOUT leaking a credential.
  *
  * The rental-side Authorize.Net webhook route logs key fingerprints and HMAC prefixes on a
  * verification failure — a useful debugging affordance and a bad idea on a route guarding
  * Ride's own revenue. Same rule here: codes and ids, never keys, never tokens, never a
  * masked card number.
+ *
+ * THE FREE-TEXT MESSAGE IS NOT LOGGED (tightened 2026-08-27, billing Phase 2).
+ * As shipped in Phase 1 this function's comment promised "codes and ids" while the body
+ * logged `err.message`, and Authorize.Net ECHOES THE OFFENDING VALUE BACK INSIDE ITS ERROR
+ * TEXT — the same hazard billing-public.routes.js:75-81 already refuses to take on the
+ * hosted-session mint, where the echoed value would be a live enrollment token. Phase 2 adds
+ * reconciler and webhook call sites that run unattended against every live subscription, so
+ * the number of chances for a value to ride out in prose goes from two to continuous. The
+ * shared redactor masks a field NAMED token; it cannot see one embedded in a sentence.
+ *
+ * `code` (Authorize.Net's own EXXXXX) plus `name` is what actually gets used when debugging
+ * one of these, and neither can carry a secret. If a specific message is ever genuinely
+ * needed, read it from the caught error at the call site and decide there — do not widen
+ * this function, which every billing path shares.
  */
 export function logAuthnetFailure(scope, err, meta = {}) {
   logger.error(`[billing-authnet] ${scope} failed`, {
     ...meta,
     code: err instanceof AuthorizeNetError ? err.code : null,
-    error: err instanceof Error ? err.message : String(err),
+    name: err instanceof Error ? err.name : null,
+    // A timeout means WE DO NOT KNOW whether the call took effect (see
+    // CALL_TIMEOUT_MS). That distinction drives real branching in callers, so it
+    // is surfaced as a boolean rather than left to be re-derived from prose.
+    timedOut: err instanceof Error && /timed out after/.test(String(err.message || '')),
   });
 }
 
@@ -388,4 +491,6 @@ export const authorizeNet = {
   getNewestPaymentMethod,
   createSubscription,
   cancelSubscription,
+  getSubscriptionStatus,
+  getSubscription,
 };

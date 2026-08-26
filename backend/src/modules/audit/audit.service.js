@@ -146,6 +146,25 @@ export const AUDIT_ACTIONS = Object.freeze({
   AUTOPAY_ENROLL: 'AUTOPAY_ENROLL',
   AUTOPAY_METHOD_UPDATE: 'AUTOPAY_METHOD_UPDATE',
   SUBSCRIPTION_CREATE: 'SUBSCRIPTION_CREATE',
+  // ── Phase 2 (webhooks + reconciliation), 2026-08-27 ──
+  // ONE action for every status transition, with from/to/source in metadata,
+  // rather than an action per destination status. The question a trail has to
+  // answer here is "what moved this subscription, and what moved it there" —
+  // and a SUBSCRIPTION_PAST_DUE constant answers only half of it while making
+  // the from-status somebody's optional metadata habit. `source` is WEBHOOK |
+  // RECONCILE | ADMIN, which is the part that matters in a dispute: a status
+  // Authorize.Net told us is a different kind of fact from one we inferred
+  // because a charge never appeared.
+  //
+  // NO ACTOR on these. They are written from a public webhook and from an
+  // unattended sweep; there is no user, and filling actorUserId with the
+  // platform owner because he owns the platform would be a lie about who acted.
+  SUBSCRIPTION_STATE_CHANGE: 'SUBSCRIPTION_STATE_CHANGE',
+  // Authorize.Net and our row disagreed and we adopted Authorize.Net's answer.
+  // Separate from a plain state change because the interesting fact is not the
+  // new status but that we were WRONG — which almost always means a webhook
+  // never arrived, and that is a systems problem, not a billing one.
+  SUBSCRIPTION_RECONCILE_DRIFT: 'SUBSCRIPTION_RECONCILE_DRIFT',
   // Editing the catalog now edits PRICES. Not itself a charge, but it decides
   // what the next invite offers, so "who changed the price list" has to be
   // answerable from the trail alone.
