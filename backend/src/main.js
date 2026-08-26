@@ -103,6 +103,7 @@ import { knowledgeBaseRouter } from './modules/knowledge-base/knowledge-base.rou
 import { trainingRouter } from './modules/training/training.routes.js';
 import { shuttleTrackerPublicRouter, shuttleTrackerAdminRouter } from './modules/shuttle/shuttle-tracker.routes.js';
 import { shuttleDriverPublicRouter } from './modules/shuttle/shuttle-driver.routes.js';
+import { billingPublicRouter } from './modules/billing/billing-public.routes.js';
 import { shuttleMonitorRouter } from './modules/shuttle/shuttle-monitor.routes.js';
 import { shuttleZonesRouter } from './modules/shuttle/shuttle-zones.routes.js';
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
@@ -275,6 +276,12 @@ app.use('/api/public/shuttle', shuttleTrackerPublicRouter);
 // Driver mode (Phase 3): per-shift token-only surface — same bare-404 rule.
 // Staff mint/revoke lives on /api/shuttle-monitor behind requireAuth.
 app.use('/api/public/driver', shuttleDriverPublicRouter);
+// Autopay enrollment (tenant subscriptions Phase 1): the tokenized surface a
+// TENANT's owner opens to put a card on file for their Ride Fleet Manager
+// subscription. Same bare-404 rule. Note this is RIDE's billing account
+// (BILLING_AUTHNET_*) — the per-tenant rental gateway lives under
+// /api/public/payment-gateway and uses AUTHNET_*; they must never be confused.
+app.use('/api/public/billing', billingPublicRouter);
 app.use('/api/host-app', requireAuth, tenantRateLimit, requireModuleAccess('hostApp'), hostAppRouter);
 app.use('/api/employee-app', requireAuth, tenantRateLimit, requireModuleAccess('employeeApp'), employeeAppRouter);
 app.use('/api/dealership-loaner', requireAuth, tenantRateLimit, requireModuleAccess('loaner'), dealershipLoanerRouter);

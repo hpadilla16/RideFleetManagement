@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { isSuperAdmin } from '../../middleware/auth.js';
 import { tenantsService } from './tenants.service.js';
 import { demoResetService } from './demo-reset.service.js';
+import { auditFromReq, AUDIT_ACTIONS } from '../audit/audit.service.js';
 
 export const tenantsRouter = Router();
 
@@ -29,9 +30,35 @@ tenantsRouter.get('/plan-catalog', async (_req, res, next) => {
   }
 });
 
+/**
+ * The catalog now carries PRICES as well as entitlements (tenant subscriptions,
+ * 2026-08-27), so editing it decides what the next enrollment invite offers.
+ * Not itself a charge — a live subscriber's price is snapshotted on their
+ * subscription and cannot be moved from here — but "who changed the price list,
+ * and when" has to be answerable from the trail alone.
+ *
+ * Metadata carries plan codes and prices only. No PII, no credentials.
+ */
 tenantsRouter.put('/plan-catalog', async (req, res) => {
   try {
-    res.json(await tenantsService.savePlanCatalog(req.body?.plans || []));
+    const saved = await tenantsService.savePlanCatalog(req.body?.plans || []);
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.BILLING_PLAN_CATALOG_CHANGE,
+      targetType: 'AppSetting',
+      targetId: 'tenantPlanCatalog',
+      metadata: {
+        plans: saved.map((p) => ({
+          code: p.code,
+          billable: p.billable,
+          priceMonthly: p.priceMonthly,
+          priceAnnual: p.priceAnnual,
+          currency: p.currency,
+          trialDays: p.trialDays,
+          isActive: p.isActive,
+        })),
+      },
+    });
+    res.json(saved);
   } catch (e) {
     res.status(400).json({ error: e.message });
   }
