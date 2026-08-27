@@ -169,6 +169,29 @@ export const AUDIT_ACTIONS = Object.freeze({
   // what the next invite offers, so "who changed the price list" has to be
   // answerable from the trail alone.
   BILLING_PLAN_CATALOG_CHANGE: 'BILLING_PLAN_CATALOG_CHANGE',
+  // ── Phase 4 (the SUPER_ADMIN billing panel), 2026-08-27 ──
+  // Each of these now has a caller, which is the bar set above: a constant for
+  // an action nothing can take is a promise the trail does not keep.
+  //
+  // Written TWICE for one click when Authorize.Net refuses or times out — once
+  // with outcome FAILURE, and never with a state change beside it, because the
+  // whole invariant of the cancel path is that our row is not marked CANCELLED
+  // until ARB has confirmed. A trail that showed only successes would hide the
+  // exact case (a timeout, state unknown) that a human most needs to see.
+  SUBSCRIPTION_CANCEL: 'SUBSCRIPTION_CANCEL',
+  // Access cut / restored by a human from the billing panel. Distinct from
+  // SUBSCRIPTION_STATE_CHANGE because the subject is the TENANT, not the
+  // subscription: what changed is whether their software works, and the reason
+  // is a sentence a person typed. `billingSuspendedAt` is what separates these
+  // from a suspension somebody set by hand for an unrelated reason.
+  TENANT_SUSPEND: 'TENANT_SUSPEND',
+  TENANT_RESTORE: 'TENANT_RESTORE',
+  // Moving Tenant.plan (the ENTITLEMENT key) to match the subscription's
+  // planCode (the BILLING key). Billing never does this on its own — the owner's
+  // rule — so every occurrence is a deliberate click, and this is the only
+  // action that ever reconciles the two. Metadata carries from/to plus the caps
+  // the new plan implies, since a downgrade can leave a tenant over them.
+  TENANT_PLAN_APPLY: 'TENANT_PLAN_APPLY',
 });
 
 export const AUDIT_OUTCOME = Object.freeze({

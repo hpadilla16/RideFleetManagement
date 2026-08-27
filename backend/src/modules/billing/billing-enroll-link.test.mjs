@@ -191,33 +191,58 @@ test('a CANCELLED subscription does not block a fresh enrollment', async () => {
 
 // ═══ THE CANCEL INVARIANT ═══════════════════════════════════════════════════
 
-test('nothing in Phase 3 can mark a row CANCELLED — the ARB call has no caller yet', async () => {
+test('the ENROLLMENT services still cannot mark a row CANCELLED — only the audited cancel path may', async () => {
   /**
-   * §2.2's worst outcome, enforced by ABSENCE rather than by hope.
+   * §2.2's worst outcome. This test was Phase 3's placeholder, which pinned the
+   * invariant by ABSENCE across the whole module because no cancel action
+   * existed yet, and carried instructions to replace it when Phase 4 added one.
    *
-   * A row marked CANCELLED whose ARB subscription is still live keeps charging a
-   * card belonging to somebody who believes they cancelled. Phase 3 ships no
-   * cancel ACTION at all — the panel's cancel button is Phase 4 — so the safe
-   * property today is that no code path writes that status without calling
-   * Authorize.Net first.
+   * PHASE 4 REPLACED IT, in two halves:
    *
-   * This greps the two services Phase 3 owns rather than asserting on behaviour,
-   * because the failure mode is a WRITE THAT SHOULD NOT EXIST: a behavioural test
-   * can only check the paths somebody thought to test, and the way this bug
-   * arrives is someone adding a convenient `status: 'CANCELLED'` update in a
-   * hurry. When Phase 4 adds the real cancel, this test must be replaced by one
-   * that asserts ARBCancelSubscriptionRequest is called FIRST and that a throw or
-   * a timeout leaves the row uncancelled — not deleted.
+   *   1. The BEHAVIOURAL half now lives in billing-admin.test.mjs, under "THE
+   *      CANCEL INVARIANT". It proves ARBCancelSubscriptionRequest is called
+   *      FIRST — the stub reads the database from inside the ARB call and fails
+   *      if our row is already marked — and that a throw and a timeout each
+   *      leave the row uncancelled and undeleted. That is what the placeholder
+   *      asked for, and a grep could never have shown it.
+   *
+   *   2. This half SURVIVES, narrowed to the two ENROLLMENT services, because
+   *      the property it guards is still true of them and still worth guarding:
+   *      issuing and completing an enrollment must never stop a subscription as
+   *      a side effect. The failure mode is a WRITE THAT SHOULD NOT EXIST —
+   *      someone adding a convenient `status: 'CANCELLED'` update in a hurry —
+   *      and behaviour can only cover the paths somebody thought to test.
+   *
+   * billing-admin.service.js is DELIBERATELY not in this list: it is the one
+   * file that may write CANCELLED, and it earns that by calling ARB first, which
+   * is asserted over there rather than assumed here.
    */
   for (const file of ['./billing.service.js', './autopay-invites.service.js']) {
     const src = readFileSync(new URL(file, import.meta.url), 'utf8');
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     assert.ok(
       !/status:\s*['"`]?CANCELLED/.test(code) && !/SUBSCRIPTION_STATUS\.CANCELLED\s*[,}]/.test(code),
-      `${file} writes CANCELLED. If that is a real cancel path it MUST call `
-      + 'ARBCancelSubscriptionRequest first, and this test must be replaced by one that proves it.',
+      `${file} writes CANCELLED. Stopping a subscription is not something an enrollment path may do `
+      + 'by implication. If it is a real cancel it belongs in billing-admin.service.js, which calls '
+      + 'ARBCancelSubscriptionRequest FIRST and proves it in billing-admin.test.mjs.',
     );
   }
+});
+
+test('the behavioural ARB-first cancel proof still exists and still asserts ordering', async () => {
+  // The guard on the replacement. Half of this invariant moved to another file
+  // (see above); if that half is ever deleted or softened into a stub, the
+  // narrowed grep left here would keep passing and the module would look
+  // protected while the only test of the actual ordering was gone.
+  const src = readFileSync(new URL('./billing-admin.test.mjs', import.meta.url), 'utf8');
+  assert.match(src, /CANCEL IS ARB-FIRST/, 'the behavioural cancel-ordering test was removed');
+  assert.match(
+    src,
+    /statusAtArbCallTime/,
+    'the cancel test no longer inspects our row from INSIDE the ARB call, so it no longer proves ordering',
+  );
+  assert.match(src, /when ARB THROWS the row stays live/);
+  assert.match(src, /when ARB TIMES OUT the row stays live/);
 });
 
 test('the reconciler is still the thing that catches cancelled-here-live-at-ARB', async () => {

@@ -100,6 +100,9 @@ const OLD_FLAT_NAV = [
   { href: '/knowledge-base' },
   { href: '/settings', moduleKey: 'settings' },
   { href: '/tenants', superOnly: true, moduleKey: 'tenants' },
+  // Phase 4 of the tenant-subscriptions module: Ride's own billing of its
+  // tenants. Same gates as /tenants, deliberately.
+  { href: '/tenants/billing', superOnly: true, moduleKey: 'tenants' },
   { href: '/settings/security', adminOnly: true, moduleKey: 'security' },
   { href: '/settings/store-boards', adminOnly: true, moduleKey: 'settings' },
 ];

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api, TOKEN_KEY, USER_KEY } from '../../lib/client';
@@ -627,6 +628,17 @@ function Inner({ token, me, logout }) {
                       <button type="button" className="button-subtle" onClick={() => openEnroll(r)}>
                         {r.billing.status === 'PENDING_AUTHORIZATION' ? 'Resend enroll link' : 'Send enroll link'}
                       </button>
+                    ) : null}
+                    {/* Everything AFTER enrollment lives in the panel: charge
+                        history, the event log, cancel, suspend/restore,
+                        apply-plan, new-card links. Enrollment itself stays here
+                        because this row already owns the plan, amount and
+                        start-date form the invite needs, and enrolling happens
+                        during onboarding — which is this page's job. */}
+                    {r.billing?.status && r.billing.status !== 'NONE' ? (
+                      <div>
+                        <Link href={`/tenants/billing/${r.id}`} className="button-subtle">Billing panel</Link>
+                      </div>
                     ) : null}
                   </td>
                   <td>
