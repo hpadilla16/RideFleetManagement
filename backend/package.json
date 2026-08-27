@@ -205,7 +205,7 @@
   "dependencies": {
     "@aws-sdk/client-kms": "^3.1116.0",
     "@prisma/client": "^6.14.0",
-    "@sentry/node": "^10.46.0",
+    "@sentry/node": "^10.71.0",
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.34.0",
     "cheerio": "^1.2.0",
@@ -217,8 +217,8 @@
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^6.10.1",
     "otplib": "^12.0.1",
-    "pdfkit": "^0.17.2",
-    "pg": "^8.13.0",
+    "pdfkit": "^0.20.1",
+    "pg": "^8.23.0",
     "puppeteer": "^24.39.1",
     "qrcode": "^1.5.4",
     "redis": "^4.7.1",
@@ -227,7 +227,7 @@
     "winston": "^3.19.0"
   },
   "devDependencies": {
-    "playwright-core": "^1.59.1",
+    "playwright-core": "^1.62.1",
     "prisma": "^6.14.0"
   }
 }
