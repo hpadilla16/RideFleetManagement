@@ -62,7 +62,14 @@ export const NAV_SECTIONS = [
     { href: '/settings', labelKey: 'nav.settings', moduleKey: 'settings', tour: 'nav-settings', icon: 'gear' },
     { href: '/settings/security', labelKey: 'nav.security', adminOnly: true, moduleKey: 'security', icon: 'shield' },
     { href: '/settings/store-boards', labelKey: 'nav.actionBoards', adminOnly: true, moduleKey: 'settings', icon: 'kanban' },
-    { href: '/tenants', labelKey: 'nav.tenants', superOnly: true, moduleKey: 'tenants', icon: 'building', chip: 'SA' }
+    { href: '/tenants', labelKey: 'nav.tenants', superOnly: true, moduleKey: 'tenants', icon: 'building', chip: 'SA' },
+    // Ride's own subscription revenue from its tenants. A sibling of /tenants
+    // rather than a tab inside it: "who is past due today?" is a daily,
+    // cross-tenant question and should not require picking a tenant first.
+    // Reuses moduleKey 'tenants' deliberately — a new module key would ripple
+    // through lib/module-access.js and trip test:module-defaults-drift for no
+    // gain, since anyone who can see Tenants should see Tenant Billing.
+    { href: '/tenants/billing', labelKey: 'nav.tenantBilling', superOnly: true, moduleKey: 'tenants', icon: 'card', chip: 'SA' }
     // Agreement clauses removed from the sidebar — it already lives inside Settings.
   ] }
 ];
@@ -96,6 +103,7 @@ const NAV_ICON_PATHS = {
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   kanban: '<path d="M6 5v14M12 5v8M18 5v11"/>',
   building: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01"/>',
+  card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
   chev: '<path d="m6 9 6 6 6-6"/>',
   panel: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>',

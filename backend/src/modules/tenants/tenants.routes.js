@@ -3,6 +3,7 @@ import { isSuperAdmin } from '../../middleware/auth.js';
 import { tenantsService } from './tenants.service.js';
 import { demoResetService } from './demo-reset.service.js';
 import { billingService } from '../billing/billing.service.js';
+import { billingAdminRouter } from '../billing/billing-admin.routes.js';
 import { auditFromReq, AUDIT_ACTIONS } from '../audit/audit.service.js';
 
 export const tenantsRouter = Router();
@@ -64,6 +65,21 @@ tenantsRouter.put('/plan-catalog', async (req, res) => {
     res.status(400).json({ error: e.message });
   }
 });
+
+/**
+ * The SUPER_ADMIN billing panel (Phase 4) — /api/tenants/billing/**.
+ *
+ * Mounted HERE rather than as its own top-level app.use so it inherits this
+ * router's guard stack unchanged: requireAuth + tenantRateLimit +
+ * requireModuleAccess('tenants') from main.js, and requireSuperAdmin above.
+ * Reusing the `tenants` module key is deliberate (design §7.1) — a new key would
+ * ripple through lib/module-access.js and trip test:module-defaults-drift for no
+ * gain, since anyone who can see Tenants should see Tenant Billing.
+ *
+ * Registered BEFORE `/:id` so the literal `billing` segment is never swallowed
+ * by the parameter route, exactly as `/plan-catalog` is above.
+ */
+tenantsRouter.use('/billing', billingAdminRouter);
 
 tenantsRouter.post('/', async (req, res, next) => {
   try {
