@@ -70,6 +70,15 @@ module.exports = {
         source: '/showcase',
         headers: [
           {
+            // demo.ridefleetmanager.com is where the marketing site actually
+            // lives since 2026-08-26. It has to be spelled out: `'self'` is
+            // an ORIGIN, so it covers ridefleetmanager.com and nothing else —
+            // a subdomain of our own domain is as foreign to this header as
+            // a stranger's. Leaving it out is what broke the embed the hour
+            // the site moved, and the failure is silent from the framing
+            // side: the parent page gets a grey box, no console error it can
+            // read, and no build anywhere goes red.
+            //
             // The two Vercel origins are the marketing site's STABLE aliases
             // (project alias + git-main branch alias, 2026-08-17) so the team
             // can verify the embed before ridefleet.com goes live. Hashed
@@ -77,7 +86,8 @@ module.exports = {
             // one, and never the *.vercel.app wildcard (it would let anyone
             // with a Vercel account frame the showcase as their own).
             key: 'Content-Security-Policy',
-            value: "frame-ancestors 'self' https://ridefleet.com https://www.ridefleet.com https://ridefleet-web.vercel.app https://ridefleet-web-git-main-hpadilla16s-projects.vercel.app",
+            value:
+              "frame-ancestors 'self' https://demo.ridefleetmanager.com https://ridefleet.com https://www.ridefleet.com https://ridefleet-web.vercel.app https://ridefleet-web-git-main-hpadilla16s-projects.vercel.app",
           },
           NOAI,
         ],
