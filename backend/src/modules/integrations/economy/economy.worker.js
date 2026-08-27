@@ -189,8 +189,76 @@ function detVal(v) {
   return s === '' ? null : s;
 }
 
+/**
+ * Candidate sources for the two date fields, in priority order.
+ *
+ * `full: true` means the key carries "MM/DD/YYYY HH:mm" (date AND time).
+ * `full: false` is a date-only degradation — resolving from it silently pins
+ * the reservation to local midnight, which is exactly how the dropoff bug
+ * survived a month unnoticed (see resolveDateField's onFallback).
+ *
+ * NOTE ON SPELLING: the portal is inconsistent WITH ITSELF. It sends
+ * resDropOffDate, resDropOffTime and resDropOffLocation with a capital "O",
+ * but the full-date field as `resDropoffFullDate` — lowercase "o". Verified
+ * against production 2026-08-26: of 4,661 Economy rows carrying detail JSON,
+ * 4,661 have the lowercase key and ZERO have the capitalised one. Both
+ * spellings are accepted, lowercase first, because the portal has proven it
+ * may rename this again.
+ */
+const DATE_SOURCES = Object.freeze({
+  pickupAt: Object.freeze({
+    detail: Object.freeze([
+      { key: 'resPickupFullDate', full: true },
+      { key: 'resPickupDate', full: false },
+    ]),
+    listKey: 'rgDatePickup',
+  }),
+  dropoffAt: Object.freeze({
+    detail: Object.freeze([
+      { key: 'resDropoffFullDate', full: true },  // what the portal actually sends
+      { key: 'resDropOffFullDate', full: true },  // symmetric spelling, tolerated
+      { key: 'resDropOffDate', full: false },     // date-only → local midnight
+    ]),
+    listKey: 'rgDateDropOff',
+  }),
+});
+
+/**
+ * Resolve pickupAt/dropoffAt and REPORT which source won.
+ *
+ * A missing field must never degrade silently: when the winning source is not
+ * the preferred full-date key, `onFallback` fires so the caller can surface it
+ * on day one instead of after a month of midnight timestamps.
+ *
+ * @param {(info: {field, source, degraded, externalRef}) => void} [onFallback]
+ */
+function resolveDateField(field, d, row, timeZone, externalRef, onFallback) {
+  const spec = DATE_SOURCES[field];
+  const preferred = spec.detail[0].key;
+  const report = (source, degraded) => {
+    if (source === preferred || typeof onFallback !== 'function') return;
+    onFallback({ field, source, degraded, externalRef });
+  };
+
+  for (const cand of spec.detail) {
+    const v = detVal(d[cand.key]);
+    if (v == null) continue;
+    report(cand.key, !cand.full);
+    return toDate(v, timeZone);
+  }
+
+  const listVal = pickCol(row, spec.listKey);
+  if (listVal != null) {
+    report(spec.listKey, true); // list columns are date-only
+    return toDate(listVal, timeZone);
+  }
+
+  report(null, true);
+  return null;
+}
+
 export function mapRowToExternalReservation(row, opts = {}) {
-  const { detail = null, timeZone = 'America/New_York' } = opts;
+  const { detail = null, timeZone = 'America/New_York', onDateFallback = null } = opts;
   const d = detail && typeof detail === 'object' ? detail : {};
 
   const externalRef = String(pickCol(row, 'rgConfirmation') || '').trim();
@@ -213,18 +281,30 @@ export function mapRowToExternalReservation(row, opts = {}) {
     customerLastName: detVal(d.resCustomerLastName) ?? (lastName != null ? String(lastName).trim() : null),
     customerEmail: detVal(d.resCustomerEmail) ?? (email != null ? String(email).trim() : null),
     customerPhone: detVal(d.resCustomerPhone),
+    // CONFIRMED ABSENT (production key audit 2026-08-26): the RezLight detail
+    // payload has NO country field at all — not resCustomerCountry, not any
+    // alias. This column is therefore always null for Economy. Left in place
+    // (harmless) rather than removed, so the intent stays visible; there is no
+    // correct key to point it at.
     customerCountry: detVal(d.resCustomerCountry),
     // resReqFlight is a Y/N "flight required" flag — the actual flight lives in
     // resCustomerFlightInfo.
     flightNumber: detVal(d.resCustomerFlightInfo),
     vehicleAcriss: detVal(d.resVehClass) ?? (acriss != null ? String(acriss).trim().toUpperCase() : null),
-    vehicleDescription: detVal(d.resVehDescription) ?? detVal(d.resDescription),
-    // resPickupFullDate carries "MM/DD/YYYY HH:mm" — THE fix for the 8pm bug.
-    // resPickupDate (detail) and rgDatePickup (list) are date-only fallbacks.
-    pickupAt: toDate(detVal(d.resPickupFullDate) ?? detVal(d.resPickupDate) ?? pickCol(row, 'rgDatePickup'), timeZone),
+    // The portal's key is resVehClassDescription. resVehDescription/resDescription
+    // were never sent (0 of 4,661 production rows carry either), so this column
+    // was always null before 2026-08-26; they are kept only as tolerated aliases.
+    vehicleDescription:
+      detVal(d.resVehClassDescription) ?? detVal(d.resVehDescription) ?? detVal(d.resDescription),
+    // Both dates resolve through DATE_SOURCES so a portal rename is reported
+    // instead of silently degrading to a date-only (local midnight) value.
+    pickupAt: resolveDateField('pickupAt', d, row, timeZone, externalRef, onDateFallback),
     pickupLocation: detVal(d.resPickupLocation) ?? (locPickup != null ? String(locPickup).trim() : null),
-    dropoffAt: toDate(detVal(d.resDropOffFullDate) ?? detVal(d.resDropOffDate) ?? pickCol(row, 'rgDateDropOff'), timeZone),
+    dropoffAt: resolveDateField('dropoffAt', d, row, timeZone, externalRef, onDateFallback),
     dropoffLocation: detVal(d.resDropOffLocation) ?? (locDropOff != null ? String(locDropOff).trim() : null),
+    // d.RateTotal and d.Currency are CONFIRMED ABSENT from the portal payload
+    // (0 of 4,661 rows). Both are dead branches, but resRateTotal/resCurrency
+    // are present on every row, so the resolved values are correct today.
     totalAmount: toDecimalString(detVal(d.resRateTotal) ?? detVal(d.RateTotal) ?? rate),
     currency: detVal(d.Currency) ?? detVal(d.resCurrency) ?? 'USD',
     // Economy's detail carries a real prepaid boolean (e.g. PRICELINE prepays).
@@ -290,6 +370,22 @@ export async function economySyncHandler(job) {
   let skippedCrossTenant = 0;
   let finalStatus = 'OK';
   const errorSamples = [];
+
+  // Date-source drift tracking. Aggregated per RUN (not per reservation) so a
+  // portal-wide rename produces a handful of actionable lines instead of one
+  // per row — chatty warnings get muted, and a muted warning is no warning.
+  const dateFallbacks = new Map(); // `${field}:${source}` → entry
+  const noteDateFallback = ({ field, source, degraded, externalRef }) => {
+    const key = `${field}:${source ?? '(none)'}`;
+    let entry = dateFallbacks.get(key);
+    if (!entry) {
+      entry = { field, source: source ?? null, degraded, count: 0, sampleRefs: [] };
+      dateFallbacks.set(key, entry);
+    }
+    entry.count++;
+    entry.degraded = entry.degraded || degraded;
+    if (externalRef && entry.sampleRefs.length < 5) entry.sampleRefs.push(externalRef);
+  };
 
   try {
     if (areaToLocation.size === 0) {
@@ -384,7 +480,9 @@ export async function economySyncHandler(job) {
         // Detail enrichment: pickup/dropoff TIME, phone, email, flight (null
         // on a per-row failure — the list row alone still stages the import).
         const detail = await fetchReservationDetail(tenantId, externalRef, { userAgent });
-        const mapped = mapRowToExternalReservation(row, { detail, timeZone });
+        const mapped = mapRowToExternalReservation(row, {
+          detail, timeZone, onDateFallback: noteDateFallback,
+        });
 
         const upserted = await prisma.externalReservation.upsert({
           where: { source_ref_unique: { sourceSystem: SOURCE_SYSTEM, externalRef } },
@@ -489,6 +587,23 @@ export async function economySyncHandler(job) {
     }
   }
 
+  // One line per (field, source) pair per run. `timeLost: true` means the value
+  // degraded to a date-only source and every affected reservation is now pinned
+  // to local midnight — that is the resDropoffFullDate incident, and it should
+  // be visible on day one rather than a month later.
+  for (const entry of dateFallbacks.values()) {
+    logger.warn('[economy-sync] date resolved from a fallback source — portal may have renamed a field', {
+      tenantId,
+      runId: runRow.id,
+      field: entry.field,
+      expectedKey: DATE_SOURCES[entry.field].detail[0].key,
+      resolvedFrom: entry.source,
+      timeLost: entry.degraded,
+      count: entry.count,
+      sampleRefs: entry.sampleRefs,
+    });
+  }
+
   const finishedAt = new Date();
   await prisma.externalSyncRun.update({
     where: { id: runRow.id },
@@ -518,6 +633,7 @@ export async function economySyncHandler(job) {
     droppedByArea,
     droppedByAreaWindow,
     skippedCrossTenant,
+    dateFallbacks: [...dateFallbacks.values()],
   };
 }
 
