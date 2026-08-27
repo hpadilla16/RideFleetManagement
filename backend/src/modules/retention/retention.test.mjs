@@ -153,6 +153,12 @@ function seed() {
       raRow('ra_recent', 'RA-REC', yAgo(1), 400),
       // 5y+ but its reservation has an OPEN dispute → identity must be retained.
       raRow('ra_5y_oc', 'RA-5Y-OC', yAgo(5), 250),
+      // The car came back 6 years ago, the balance never resolved, so the
+      // agreement was never CLOSED. Neither clock has started: purging the
+      // renter identity here would erase who owes the debt. (Only reachable
+      // since 2026-08-26, when check-in close began stamping returnedAt on
+      // the with-balance branch too, where the agreement stays open.)
+      { ...raRow('ra_open_6y', 'RA-OPEN-6Y', yAgo(6), 500), closedAt: null, balance: 500, paidAmount: 0 },
     ],
     agreementDriver: [
       { id: 'ad_5y', rentalAgreementId: 'ra_5y', firstName: 'Jane', lastName: 'Driver', email: 'jane@x.com', licenseNumber: 'DL9' },
@@ -228,13 +234,38 @@ describe('retention sweep — candidates', () => {
   it('selects only identity-expired (5y+) agreements, the inactive customer, expired accounting + old logs', async () => {
     const { deps } = makeDeps(seed());
     const cands = await computeCandidates(deps, { now: NOW });
+    // ra_open_6y is absent: returnedAt is 6y old but the agreement never closed.
     assert.deepEqual(cands.rentalAgreementIdentity.ids.sort(), ['ra_11y', 'ra_5y']);
     assert.deepEqual(cands.loanerAgreementIdentity.ids, ['la_5y']);
     assert.deepEqual(cands.inactiveCustomer.ids, ['c_inactive']); // c_open blocked by OPEN incident; c_erased suppressed; c_recent recent
-    assert.deepEqual(cands.rentalAgreementAccounting.ids, ['ra_11y']); // only 11y past the 10y accounting clock
+    assert.deepEqual(cands.rentalAgreementAccounting.ids, ['ra_11y']); // 11y past the 10y clock; ra_open_6y never closed
     assert.deepEqual(cands.moduleAccessLog.ids, ['mal_old']);
     assert.deepEqual(cands.endpointLoadObservation.ids, ['elo_old']);
     assert.deepEqual(cands.endpointLoadObservationDaily.ids, ['elod_old']);
+  });
+
+  it('an agreement that was never closed is on NEITHER clock, however old the return', async () => {
+    // Regression guard for the 2026-08-26 check-in-close change. returnedAt is
+    // now stamped on the with-balance branch, which leaves the agreement OPEN
+    // until the money resolves. Reading returnedAt alone would have turned
+    // every 4-year-old unsettled rental into a purge candidate and destroyed
+    // the identity behind a debt still owed. The purge is irreversible, so the
+    // guard is asserted directly, not implied by the list above.
+    const store = seed();
+    const open = store.rentalAgreement.find((r) => r.id === 'ra_open_6y');
+    assert.equal(open.closedAt, null, 'fixture really is an open agreement');
+    assert.ok(open.returnedAt, 'and it really does carry a returnedAt');
+
+    const { deps } = makeDeps(store);
+    const cands = await computeCandidates(deps, { now: NOW });
+    assert.ok(!cands.rentalAgreementIdentity.ids.includes('ra_open_6y'), 'identity clock has not started');
+    assert.ok(!cands.rentalAgreementAccounting.ids.includes('ra_open_6y'), 'accounting clock has not started');
+
+    // Closing it puts it on the clock, dated from the RETURN, not the close.
+    open.closedAt = NOW;
+    const after = await computeCandidates(makeDeps(store).deps, { now: NOW });
+    assert.ok(after.rentalAgreementIdentity.ids.includes('ra_open_6y'),
+      'once closed, the 6-year-old return counts — the clock runs from the car coming back');
   });
 });
 
