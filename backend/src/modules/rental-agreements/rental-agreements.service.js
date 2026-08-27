@@ -3693,20 +3693,44 @@ export const rentalAgreementsService = {
     const chargesRowsHtml = chargesRows || '<tr><td colspan="4">No charges recorded</td></tr>';
     const paymentsRowsHtml = paymentsForPrint.length ? paymentsRows : '<tr><td colspan="5">No payments recorded</td></tr>';
 
-    // Fall back to the new checkout-wizard-v2 T&C signature when the
-    // legacy pre-checkin path didn't capture one. This puts the same
-    // signature image into both the legacy 'Customer Signature' block
-    // on page 2 AND the new 'Signed acknowledgement' section we
-    // append later, so neither version of the print looks blank.
+    // WHICH signature is the customer's, and it is not the one this block
+    // used to show.
     //
-    // pickInkedSignature, not ||: a BLANK interactive signature (an untouched
-    // pad is still a valid PNG) must never mask a real T&C stroke.
-    // RA-20260701152550 printed a white box in this block while the customer's
-    // actual signature sat on the appendix page.
-    const rawSigUrl = pickInkedSignature(
-      agreement.reservation?.signatureDataUrl,
-      agreement.tcSignatureDataUrl
-    );
+    // Two different marks exist on a rental. The T&C signature is the
+    // customer's assent to the contract: they signed it themselves, on their
+    // own device, before driving away. The reservation signature is captured
+    // when the rental is CLOSED — a different act, often days later, on staff
+    // hardware at the counter.
+    //
+    // Until 2026-08-27 the close signature was tried FIRST here, so it won
+    // whenever both existed — 835 of 1,573 agreements — and printed under the
+    // heading "Customer Signature", carrying whatever name the closing agent
+    // typed. A customer queried exactly that: an agreement showing "Signed by"
+    // an employee. The stored data was right all along; only this block lied.
+    //
+    // Order flipped. pickInkedSignature (not ||) still does the picking, so
+    // both original properties survive: a blank-but-valid PNG from an
+    // untouched pad cannot mask real ink, and an agreement with no T&C
+    // signature still falls through to the close signature rather than
+    // printing an empty box (RA-20260701152550).
+    const tcSigRaw = String(agreement.tcSignatureDataUrl || '').trim();
+    const closeSigRaw = String(agreement.reservation?.signatureDataUrl || '').trim();
+    const rawSigUrl = pickInkedSignature(tcSigRaw, closeSigRaw);
+
+    // Name, timestamp and IP must describe the mark actually rendered.
+    // Showing the customer's signature beside the closer's name and the
+    // counter's IP would just relocate the defect rather than fix it.
+    const showingTcSignature = !!rawSigUrl && rawSigUrl === tcSigRaw;
+    const customerFullName = `${agreement.customerFirstName || ''} ${agreement.customerLastName || ''}`.trim();
+    const signatureSignedByName = showingTcSignature
+      ? (agreement.tcSignerName || customerFullName || '-')
+      : (agreement.reservation?.signatureSignedBy || customerFullName || '-');
+    const signatureTimeShown = showingTcSignature
+      ? (agreement.tcSignedAt || signatureTime)
+      : signatureTime;
+    const signatureIpShown = showingTcSignature
+      ? (agreement.tcCustomerIp || signatureIp)
+      : signatureIp;
     const signatureImageBlock = rawSigUrl
       ? `<img src="${rawSigUrl}" alt="Signature" style="max-height:60px;max-width:320px;width:auto;height:auto;display:block;object-fit:contain" />`
       : '<div class="sig-meta">No signature on file</div>';
@@ -3867,9 +3891,9 @@ export const rentalAgreementsService = {
             )),
             !!agreement?.declinedInsurance,
           ) + (cfg.termsText ? `<div class="tc-tenant-addendum"><h2>Tenant Addendum</h2><p>${esc(cfg.termsText)}</p></div>` : ''),
-      signatureSignedBy: esc(agreement.reservation?.signatureSignedBy || '-'),
-      signatureDateTime: esc(fmtDate(signatureTime)),
-      signatureIp: esc(signatureIp),
+      signatureSignedBy: esc(signatureSignedByName),
+      signatureDateTime: esc(fmtDate(signatureTimeShown)),
+      signatureIp: esc(signatureIpShown),
       signatureImageBlock,
       signatureDataUrl: rawSigUrl
     };

@@ -106,3 +106,56 @@ describe('pickInkedSignature', () => {
     assert.equal(pickInkedSignature(null, undefined, ''), '');
   });
 });
+
+/**
+ * Which signature the printed agreement calls "the customer's".
+ *
+ * A rental carries two marks: the T&C signature the customer made themselves
+ * before driving away, and the close signature captured at the counter on
+ * staff hardware when the rental ends. Until 2026-08-27 the print block tried
+ * the close signature FIRST, so it won on the 835 of 1,573 agreements that had
+ * both — printing under the heading "Customer Signature" with whatever name
+ * the closing agent typed. A customer queried an agreement that read
+ * "Signed by: <an employee>". The stored records were correct throughout;
+ * only the rendering attributed the wrong mark.
+ */
+describe('printed agreement — customer signature precedence', () => {
+  it("the customer's own T&C stroke wins over the counter's closing stroke", () => {
+    const tc = STROKE;
+    const close = SPECKS;
+    assert.equal(pickInkedSignature(tc, close), tc);
+  });
+
+  it('an untouched T&C pad does not blank the block — the close stroke still prints', () => {
+    assert.equal(pickInkedSignature(BLANK_WHITE, STROKE), STROKE);
+  });
+
+  it('no T&C signature at all still falls through rather than printing an empty box', () => {
+    assert.equal(pickInkedSignature('', STROKE), STROKE);
+    assert.equal(pickInkedSignature(null, STROKE), STROKE);
+  });
+
+  it('the print builder passes the T&C signature first', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile(
+      new URL('../modules/rental-agreements/rental-agreements.service.js', import.meta.url),
+      'utf8',
+    );
+    const call = src.match(/pickInkedSignature\(\s*([A-Za-z0-9_.?\[\]]+)\s*,\s*([A-Za-z0-9_.?\[\]]+)\s*\)/);
+    assert.ok(call, 'expected a two-argument pickInkedSignature call in the print builder');
+    assert.equal(call[1], 'tcSigRaw', "the customer's T&C signature must be the first candidate");
+    assert.equal(call[2], 'closeSigRaw', 'the closing signature must be the fallback, not the winner');
+  });
+
+  it('the rendered name is not read straight off the reservation any more', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile(
+      new URL('../modules/rental-agreements/rental-agreements.service.js', import.meta.url),
+      'utf8',
+    );
+    assert.ok(
+      !/signatureSignedBy:\s*esc\(agreement\.reservation\?\.signatureSignedBy/.test(src),
+      'the name must follow whichever signature is shown, not always the closing one',
+    );
+  });
+});
