@@ -599,6 +599,18 @@ if (process.env.SKIP_LISTEN !== '1') {
       import('./modules/payment-gateway/spin-client.js')
         .then(({ auditSpinConfig }) => auditSpinConfig())
         .catch(() => {});
+      // Ride University's written half. A knowledge-base article used to
+      // reach a tenant only if somebody pressed "Seed defaults", a button
+      // that renders only when they have NO articles — so article number
+      // seven never shipped to anyone and two had to be inserted into
+      // production by hand. This tops up the GLOBAL corpus with any article
+      // the release added, matching on slug: it never rewrites a body and
+      // never touches a tenant's own copy. Lazy-loaded and fail-open, like
+      // the audits below — training content is not worth failing a boot for.
+      import('./modules/knowledge-base/knowledge-base.service.js')
+        .then(({ knowledgeBaseService }) => knowledgeBaseService.ensureGlobalArticles())
+        .then((r) => { if (r?.seeded) console.log('[knowledge-base] published new articles', r); })
+        .catch((e) => console.error('[knowledge-base] article top-up skipped:', e?.message));
       // Same audit for the iPOSpays Transact API (CNP token operations).
       import('./modules/payment-gateway/ipos-transact-client.js')
         .then(({ auditIposTransactConfig }) => auditIposTransactConfig())

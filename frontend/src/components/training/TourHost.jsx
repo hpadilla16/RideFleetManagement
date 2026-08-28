@@ -26,12 +26,15 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createPortal } from 'react-dom';
 import { useRouter, usePathname } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
-import { TOUR_TRACKS, stepsForTrack, stepsForModule, findModule } from '../../lib/training/curriculum.js';
+import {
+  TOUR_TRACKS, stepsForTrack, stepsForModule, findModule,
+  moduleForStep, moduleRunEnd, recordScopedRunEnd,
+} from '../../lib/training/curriculum.js';
 import { stepKey, moduleKey as mKeyOf, trainingText } from '../../lib/training/i18n-keys.js';
 import {
   TOUR_STORAGE_KEY, TOUR_END,
   startTour, settleStart, currentStep, advance, retreat, dismiss,
-  waitForRecord, resumeAt,
+  waitForRecord, resumeAt, stopWaiting,
   progressOf, serialize, deserialize,
 } from '../../lib/training/tour-state.js';
 
@@ -125,6 +128,51 @@ export function TourHost({ viewer }) {
 
   const isPresent = useCallback((name) => !!anchorEl(name), []);
 
+  /**
+   * A missing anchor is only BROKEN when the step should have been there.
+   *
+   * For a module that walks a record, it usually means the person has not
+   * moved to the next screen yet: step one is the button on the reservation,
+   * steps two and three live inside the check-out wizard it opens. Ending the
+   * tour there told them to "open a reservation" while they were looking at
+   * one (Hector, 2026-08-17). Park instead, and the watcher picks the guide
+   * back up wherever they land.
+   *
+   * THE MODULE COMES FROM THE STEP, NOT THE TOUR (2026-08-28). Asking
+   * `state.moduleKey` works only for a MODULE-track tour launched from Ride
+   * University. The ONBOARDING track has no moduleKey — it is all the modules
+   * in one sequence — so this returned null there, never parked, and the tour
+   * died at step 11 of 33, on the boundary into check-out. The step knows
+   * which module it belongs to; the tour does not.
+   *
+   * `list` is passed rather than closed over: onStart parks before setSteps
+   * has applied, so the `steps` state is still the PREVIOUS tour's (empty on
+   * the first launch) at that moment.
+   */
+  const parkIfRecordScoped = useCallback((next, list) => {
+    if (next?.endedAs !== TOUR_END.BROKEN) return next;
+    const at = next.index || 0;
+    const mod = moduleForStep(list?.[at]) || (next.moduleKey ? findModule(next.moduleKey) : null);
+    if (!mod?.needsRecord) return next;
+    // "Already inside the record" is a question about the STEP, not the index.
+    // Parked on a module's FIRST step, the person still has to open a
+    // reservation. Parked on a later one they are in a reservation already and
+    // only have to move to the next screen. Index > 0 conflated the two, and on
+    // the onboarding track every record-scoped module begins mid-list — so the
+    // boundary into check-out told them to "open the next screen" and hid the
+    // one button that would have helped.
+    const first = at === 0 || list?.[at - 1]?.moduleKey !== list?.[at]?.moduleKey;
+    return waitForRecord(next, {
+      midTour: !first,
+      from: at,
+      // Resume only within this module (see moduleRunEnd) …
+      through: moduleRunEnd(list, at),
+      // … but let one press of "Skip this part" clear every record-scoped
+      // module that follows, not just this one.
+      skipThrough: recordScopedRunEnd(list, at),
+    });
+  }, []);
+
   const persist = useCallback((next) => {
     setState(next);
     try {
@@ -165,12 +213,11 @@ export function TourHost({ viewer }) {
       // A module that walks through one record (a reservation's own page)
       // finds nothing from Ride University. Park the tour instead of ending
       // it, and pick up the moment the person opens one.
-      const mod = moduleKey ? findModule(moduleKey) : null;
-      persist(parkIfRecordScoped(settled));
+      persist(parkIfRecordScoped(settled, list));
     };
     window.addEventListener(TOUR_START_EVENT, onStart);
     return () => window.removeEventListener(TOUR_START_EVENT, onStart);
-  }, [viewer, isPresent, persist]);
+  }, [viewer, isPresent, persist, parkIfRecordScoped]);
 
   // ── resume across navigation ──────────────────────────────────────────────
   useEffect(() => {
@@ -228,10 +275,17 @@ export function TourHost({ viewer }) {
         return;
       }
       if ((tries += 16) < SETTLE_MS) { raf = requestAnimationFrame(look); return; }
-      // Still absent after the route settled — let the state machine decide
-      // whether that is expected (optional) or a broken step.
       setRect(null);
-      persist(parkIfRecordScoped(advance(state, steps, isPresent, state.index - 1)));
+      // THE ROUTE EXCUSE IS SPENT (2026-08-28). scanFrom trusts any step that
+      // carries a route, because its element lives on a page we have not
+      // loaded yet. We are now ON that page and the element is still missing,
+      // so that trust cannot be re-applied: re-scanning from index - 1 landed
+      // on this same step again, and the tour sat there showing a card with no
+      // spotlight and no way forward but Next. Judge it on presence alone.
+      const judged = step.optional
+        ? advance(state, steps, isPresent, state.index)
+        : { ...state, endedAs: TOUR_END.BROKEN };
+      persist(parkIfRecordScoped(judged, steps));
     };
     raf = requestAnimationFrame(look);
     return () => cancelAnimationFrame(raf);
@@ -253,23 +307,6 @@ export function TourHost({ viewer }) {
     };
   }, [step?.anchor]);
 
-  /**
-   * A missing anchor is only BROKEN when the step should have been there.
-   *
-   * For a module that walks a record, it usually means the person has not
-   * moved to the next screen yet: step one is the button on the reservation,
-   * steps two and three live inside the check-out wizard it opens. Ending the
-   * tour there told them to "open a reservation" while they were looking at
-   * one (Hector, 2026-08-17). Park instead, and the watcher picks the guide
-   * back up wherever they land.
-   */
-  const parkIfRecordScoped = useCallback((next) => {
-    if (next?.endedAs !== TOUR_END.BROKEN) return next;
-    const mod = next.moduleKey ? findModule(next.moduleKey) : null;
-    if (!mod?.needsRecord) return next;
-    return waitForRecord(next, { midTour: (next.index || 0) > 0 });
-  }, []);
-
   const close = useCallback(() => {
     persist(dismiss(state));
     setRect(null);
@@ -285,13 +322,30 @@ export function TourHost({ viewer }) {
       walkedModules.current.add(state.moduleKey);
       window.dispatchEvent(new CustomEvent(TOUR_MODULE_DONE_EVENT, { detail: { moduleKey: state.moduleKey } }));
     }
-    persist(parkIfRecordScoped(after));
+    persist(parkIfRecordScoped(after, steps));
   }, [state, steps, isPresent, persist, parkIfRecordScoped]);
 
   // Any manual move stops the showcase advancing on its own — a person is
   // driving now.
   const next = useCallback(() => { setAutoPlay(false); goNext(); }, [goNext]);
-  const back = useCallback(() => { setAutoPlay(false); persist(parkIfRecordScoped(retreat(state, steps, isPresent))); }, [state, steps, isPresent, persist, parkIfRecordScoped]);
+  const back = useCallback(() => { setAutoPlay(false); persist(parkIfRecordScoped(retreat(state, steps, isPresent), steps)); }, [state, steps, isPresent, persist, parkIfRecordScoped]);
+
+  /**
+   * Leave a parked stretch without abandoning the tour.
+   *
+   * A trainee walking the onboarding track at their desk has no live rental,
+   * so check-out, check-in and payments cannot be demonstrated — and before
+   * this the tour simply stopped there, which is the whole complaint. Skipping
+   * the record-scoped run resumes at the first step after it, so the remaining
+   * modules are still reachable. It does NOT count those modules as done: they
+   * are OPPORTUNISTIC and only the backend's record check completes them.
+   */
+  const skipParked = useCallback(() => {
+    if (!state?.waiting) return;
+    const end = [state.skipThrough, state.resumeThrough, state.index]
+      .find((n) => Number.isInteger(n));
+    persist(parkIfRecordScoped(advance(stopWaiting(state), steps, isPresent, end), steps));
+  }, [state, steps, isPresent, persist, parkIfRecordScoped]);
 
   // ── showcase autoplay ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -336,7 +390,9 @@ export function TourHost({ viewer }) {
    * /reservations with no thread back (Hector, 2026-08-17).
    */
   if (state?.waiting) {
-    const waitModule = state.moduleKey ? findModule(state.moduleKey) : null;
+    // From the step, not the tour — the onboarding track has no moduleKey.
+    const waitModule = moduleForStep(steps[state.index])
+      || (state.moduleKey ? findModule(state.moduleKey) : null);
     const waitName = waitModule
       ? trainingText(t, mKeyOf(waitModule, 'title'), waitModule.title)
       : '';
@@ -365,6 +421,16 @@ export function TourHost({ viewer }) {
             {t('training.needsRecordCta', 'Go to reservations')}
           </button>
         )}
+        {Number.isInteger(state.skipThrough ?? state.resumeThrough)
+          && (state.skipThrough ?? state.resumeThrough) < steps.length - 1 && (
+          <button
+            type="button"
+            onClick={skipParked}
+            style={{ background: 'transparent', color: '#fff', border: '1px solid #6d5f8a', borderRadius: 999, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer' }}
+          >
+            {t('training.skipThisPart', 'Skip this part')}
+          </button>
+        )}
         <button
           type="button"
           onClick={close}
@@ -378,7 +444,8 @@ export function TourHost({ viewer }) {
   }
 
   if (state?.endedAs === TOUR_END.BROKEN) {
-    const brokenModule = state.moduleKey ? findModule(state.moduleKey) : null;
+    const brokenModule = moduleForStep(steps[state.index])
+      || (state.moduleKey ? findModule(state.moduleKey) : null);
     const where = brokenModule?.needsRecord;
     const modName = brokenModule
       ? trainingText(t, mKeyOf(brokenModule, 'title'), brokenModule.title)

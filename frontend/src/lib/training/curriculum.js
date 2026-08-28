@@ -110,6 +110,12 @@ export const COURSES = [
           {
             anchor: 'nav-dashboard',
             route: '/',
+            // The nav item is gated on the `dashboard` tenant module while this
+            // course is deliberately ungated (it also teaches search and
+            // reservations, which everyone has). A tenant with the dashboard
+            // switched off would otherwise hit a required anchor that is
+            // correctly absent on its very first step (2026-08-28).
+            optional: true,
             title: 'This is your day',
             body: 'Pickups and returns for the date you are looking at, what is overdue, and what needs attention. Every tile clicks through to the list behind it.',
           },
@@ -308,7 +314,8 @@ export const COURSES = [
         kind: 'ON_DEMAND',
         verify: null,
         points: 5,
-        showcase: 8,
+        // Still the finale; the shuttle console now runs at 8 ahead of it.
+        showcase: 9,
         gotcha: 'Never screenshot or forward a tracker link — each one is personal to a single reservation and expires when the rental ends. The next customer gets their own automatically, by email and SMS. A shared link that suddenly dies at the curb is worse than no link.',
         steps: [
           {
@@ -354,6 +361,51 @@ export const COURSES = [
             optional: true,
             title: 'Where the car actually is',
             body: 'With GPS connected, anything overdue and outside every one of your branches raises an alert here, with the distance and a map link. Nothing showing means nothing is missing.',
+          },
+        ],
+      },
+
+      {
+        // The shuttle program shipped in August with a driver mode, on-demand
+        // and non-stop running, zones and geofence alerts — and the curriculum
+        // taught only the customer's tracker link. This is the staff side
+        // (2026-08-28). Read-only on purpose: dispatching is done from the
+        // live queue against real customers waiting at a curb, so there is
+        // nothing here a trainee should be nudged to "do now" to earn points.
+        key: 'shuttle-dispatch',
+        title: 'Run the shuttle console',
+        summary: 'The live map, who is driving, and the zones that raise alerts.',
+        roles: ['OPS', 'ADMIN', 'SUPER_ADMIN'],
+        // Shuttle has no module key of its own — it rides on `reservations`,
+        // the same gate the backend routes enforce.
+        gate: 'reservations',
+        kind: 'ON_DEMAND',
+        verify: null,
+        points: 10,
+        // Slots in as the last OPS beat, immediately before the tracker —
+        // the deck deliberately closes on the customer-facing finale
+        // (2026-08-16), so the console goes before it, not after.
+        showcase: 8,
+        gotcha: 'A driver link is a shift, not a person. Minting a second link for the same driver does not move them — it leaves two live shifts, and the map shows the bus twice. Revoke the old one when a shift changes hands.',
+        steps: [
+          {
+            anchor: 'shuttle-console',
+            route: '/shuttles',
+            title: 'The console, in three tabs',
+            body: 'The live map shows every shuttle transmitting right now, filtered to the location you pick. Positions refresh on their own roughly every twelve seconds — you never need to reload the page.',
+          },
+          {
+            anchor: 'shuttle-drivers-tab',
+            title: 'Who is driving, right now',
+            body: 'Driver shifts are handed out as links, not logins: mint one, the driver opens it on their phone, and their position starts feeding the map customers watch. Revoke it and the feed stops immediately.',
+          },
+          {
+            // ADMIN-only tab, so a non-admin ops viewer correctly has no
+            // element here.
+            anchor: 'shuttle-zones-tab',
+            optional: true,
+            title: 'Zones are what make alerts mean something',
+            body: 'A zone is the area a shuttle is supposed to stay inside. Draw them once and the system tells you when a bus leaves its route or stops moving — instead of you watching a map all day.',
           },
         ],
       },
@@ -425,6 +477,11 @@ export const COURSES = [
           },
           {
             anchor: 'person-locations',
+            // Rendered only when the tenant HAS locations to tick, and hidden
+            // for a HOST. Both are legitimate absences, so skip rather than
+            // strand the tour — the same treatment the switcher below already
+            // gets (2026-08-28).
+            optional: true,
             title: 'Scope them to their branch',
             body: 'Check the locations this person works at. Leaving every box UNCHECKED is not "no access" — it means they see ALL locations. That is the most common mistake on this screen.',
           },
@@ -558,6 +615,58 @@ export function stepsForTrack(track, viewer = {}) {
   }
   return modulesFor(viewer)
     .flatMap((m) => (m.steps || []).map((s) => ({ ...s, moduleKey: m.key, moduleTitle: m.title })));
+}
+
+/**
+ * The module a STEP belongs to.
+ *
+ * Read the step, never the tour. A MODULE-track tour carries its own
+ * moduleKey, but the ONBOARDING track carries none — it is every module in one
+ * sequence — and code that asked the TOUR which module it was in got null and
+ * silently skipped the record-scoped handling. That is precisely how the tour
+ * came to die at step 11 of 33 (2026-08-28). Every step is stamped with its
+ * moduleKey by stepsForTrack/stepsForModule, so the step always knows.
+ */
+export function moduleForStep(step) {
+  return step?.moduleKey ? findModule(step.moduleKey) : null;
+}
+
+/**
+ * The last index of the run of steps belonging to the SAME MODULE as
+ * `startIndex` — the fence a parked tour may resume inside.
+ *
+ * It must be the module and not the whole record-scoped run (caught in the
+ * browser, 2026-08-28). A reservation's own page carries the first step of
+ * check-out, check-in AND payments at once. Parked on "terms", which lives one
+ * screen further into the check-out wizard, a run-wide scan found check-in's
+ * button sitting right there and resumed on it — silently skipping the two
+ * steps that actually teach the handover.
+ */
+export function moduleRunEnd(steps, startIndex) {
+  if (!Array.isArray(steps)) return startIndex;
+  const key = steps[startIndex]?.moduleKey;
+  let end = startIndex;
+  for (let i = startIndex + 1; i < steps.length && steps[i]?.moduleKey === key; i++) end = i;
+  return end;
+}
+
+/**
+ * The last index of the run of record-scoped steps beginning at `startIndex`.
+ *
+ * Check-out, check-in and take-payment are consecutive and all live inside one
+ * reservation's page, so a tour parked at the first of them may legitimately
+ * resume at any step up to the end of that run — and must not resume beyond
+ * it, or opening a reservation would jump the person past whole modules.
+ * Returns startIndex - 1 when the step there is not record-scoped at all.
+ */
+export function recordScopedRunEnd(steps, startIndex) {
+  if (!Array.isArray(steps)) return startIndex - 1;
+  let end = startIndex - 1;
+  for (let i = startIndex; i < steps.length; i++) {
+    if (!moduleForStep(steps[i])?.needsRecord) break;
+    end = i;
+  }
+  return end;
 }
 
 /** The steps of one module, for the guided-practice launcher. */
