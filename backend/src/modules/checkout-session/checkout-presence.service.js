@@ -127,7 +127,7 @@ async function upsertPresence({ sessionId, surface, actorUserId, displayLabel })
  * requireAuth + requireModuleAccess('reservations'):
  *     GET /api/checkout-sessions/:id
  *     GET /api/checkout-sessions/by-reservation/:reservationId
- * The customer-facing surfaces never receive this array at all:
+ * No customer-CREDENTIALED payload receives this array:
  *   • customer phone (token) — /api/public/checkout-handoff/:token returns
  *     exchangeHandoffToken()'s { reservation, kind, consumedAt }. No presence.
  *   • public T&C signing (/api/sign/*) — no presence.
@@ -135,6 +135,22 @@ async function upsertPresence({ sessionId, surface, actorUserId, displayLabel })
  *     recordPresenceSafe() and never reads it back.
  * So there is no customer-credentialed payload to redact, and no staff/customer
  * split to invent: the field is added once, for the staff-authenticated array.
+ *
+ * KNOWN, ACCEPTED EXCEPTION — say it here so nobody reads the list above as
+ * wider than it is. Credentialed-by-staff is NOT the same as unseen-by-the
+ * customer. Two staff second screens fetch the by-reservation route with a
+ * staff JWT and therefore DO receive this array:
+ *     frontend/src/app/customer-display/page.js
+ *     frontend/src/app/reservations/[id]/customer-view/page.js
+ * Neither renders presence today, and customer-display is physically the panel
+ * the renter looks at. Accepted because reaching the field needs devtools on a
+ * dealership-owned workstation, and whoever has that already holds the staff
+ * JWT, the customer PII, and — since M2 P1 — the employees' FULL NAMES in the
+ * same JSON. A cuid beside a name is not a new risk class. The thing worth
+ * fixing there is the names, not this id, and it is tracked separately.
+ * presence-boundary.test.mjs guards the BACKEND routing only: it cannot see
+ * which frontend page calls a staff route, so nothing below tests this
+ * paragraph. It is a statement about the world, kept honest by reading it.
  *
  * THAT audit is the actual invariant, not this comment — presence-boundary
  * .test.mjs re-derives it from the source on every CI run and fails if a
