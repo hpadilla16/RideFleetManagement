@@ -139,6 +139,24 @@ export const AUDIT_ACTIONS = Object.freeze({
   // with the phases that can perform them; a constant for an action nothing
   // can take would just be a promise the trail does not keep.
   AUTOPAY_INVITE_SEND: 'AUTOPAY_INVITE_SEND',
+  // ── Phase 7 (2026-08-28) — the platform DELIVERS the link, so delivery is
+  // its own audited act.
+  //
+  // Separate from AUTOPAY_INVITE_SEND on purpose: minting and delivering are
+  // now two things that can succeed independently, and collapsing them would
+  // make "we sent it" unfalsifiable — the trail would say a link was issued
+  // and leave the far more useful question, whether it ever left the building
+  // and at what address, unanswered. `outcome` is the ordinary FAILURE for a
+  // mailer outage, so a link that was minted but never delivered is visible in
+  // the trail rather than inferred from its absence.
+  //
+  // METADATA EXCEPTION, STATED DELIBERATELY: this row carries the RECIPIENT
+  // ADDRESS, which the ids-and-amounts rule above would otherwise exclude. It
+  // is the one fact the action is about. The recovery path for a mistyped
+  // billing contact is "look at where it actually went", and an address the
+  // invite row already stores is not new exposure. Still never the token, not
+  // one character past tokenPrefix, and never the URL that contains it.
+  AUTOPAY_INVITE_EMAIL: 'AUTOPAY_INVITE_EMAIL',
   AUTOPAY_INVITE_REVOKE: 'AUTOPAY_INVITE_REVOKE',
   // The customer completed the return leg: a card is on file and an ARB
   // subscription now exists. This is the row that answers "who authorised

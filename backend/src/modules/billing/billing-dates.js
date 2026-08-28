@@ -85,6 +85,27 @@ export function formatCalendarDateEs(date) {
   }).format(new Date(Date.UTC(y, m - 1, d)));
 }
 
+/**
+ * The same date in English. Added with the bilingual enrollment email
+ * (Phase 7): nothing on the tenant, the subscription or the invite records a
+ * language, so that email carries BOTH and needs both renderings of the one
+ * date it is about.
+ *
+ * `timeZone: 'UTC'` is load-bearing here for the same reason as above and is
+ * not merely copied: en-US readers are commonly UTC-5/-8, further west than
+ * es-PR, so dropping it moves the date backwards by a day more often, not less.
+ */
+export function formatCalendarDateEn(date) {
+  const [y, m, d] = String(date).split('-').map(Number);
+  if (!y || !m || !d) return String(date);
+  return new Intl.DateTimeFormat('en-US', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(y, m - 1, d)));
+}
+
 const CADENCE_ES = {
   months: { 1: 'mensual', 3: 'trimestral', 6: 'semestral', 12: 'anual' },
   days: {},
@@ -94,6 +115,18 @@ export function cadenceLabelEs(intervalUnit, intervalLength) {
   return (
     CADENCE_ES[intervalUnit]?.[Number(intervalLength)]
     || `cada ${intervalLength} ${intervalUnit === 'months' ? 'meses' : 'días'}`
+  );
+}
+
+const CADENCE_EN = {
+  months: { 1: 'monthly', 3: 'quarterly', 6: 'every six months', 12: 'annually' },
+  days: {},
+};
+
+export function cadenceLabelEn(intervalUnit, intervalLength) {
+  return (
+    CADENCE_EN[intervalUnit]?.[Number(intervalLength)]
+    || `every ${intervalLength} ${intervalUnit === 'months' ? 'months' : 'days'}`
   );
 }
 
