@@ -32,12 +32,18 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://u:p@localhost:5432/testdb';
+// lib/prisma.js constructs a PrismaClient at import time and throws without
+// DATABASE_URL. Static `import` declarations are hoisted above every statement
+// here, so this has to be set before a DYNAMIC import or the assignment lands
+// too late. Every DB call below is stubbed — nothing reaches a database, which
+// is what lets this data-protection suite run anywhere, including CI without a
+// Postgres. (Same pattern as tolls-scope-guard.test.mjs.)
+process.env.DATABASE_URL ||= 'postgresql://unused:unused@127.0.0.1:1/unused';
 
-import { prisma } from '../../lib/prisma.js';
-import logger from '../../lib/logger.js';
-import { runOnce } from './citation-ocr.scheduler.js';
-import { citationAttachmentsService } from './citation-attachments.service.js';
+const { prisma } = await import('../../lib/prisma.js');
+const logger = (await import('../../lib/logger.js')).default;
+const { runOnce } = await import('./citation-ocr.scheduler.js');
+const { citationAttachmentsService } = await import('./citation-attachments.service.js');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TENANT = 'tenant-corpusa';

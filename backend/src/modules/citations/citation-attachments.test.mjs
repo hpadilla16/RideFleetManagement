@@ -10,17 +10,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://u:p@localhost:5432/testdb';
+// The service modules transitively import lib/prisma.js, which constructs a
+// PrismaClient AT IMPORT TIME and throws without DATABASE_URL. Static `import`
+// declarations are hoisted above every statement in this file, so setting the
+// variable next to them would be too late — it has to be set before a DYNAMIC
+// import, which is what makes this suite genuinely runnable with no database.
+// (Same pattern as tolls-scope-guard.test.mjs.) Nothing here touches the DB.
+process.env.DATABASE_URL ||= 'postgresql://unused:unused@127.0.0.1:1/unused';
 
-import {
+const {
   ATTACHMENT_DOC_TYPES, ATTACHMENT_MAX_BYTES,
   normalizeDocType, isAllowedMime, isEmbeddable, mayContainCardData,
   CARD_WARNING_CODE,
-} from './citation-attachments.js';
-import {
+} = await import('./citation-attachments.js');
+const {
   citationAttachmentsService, decodeAttachment, parseStorageRef,
-} from './citation-attachments.service.js';
-import { planParts, buildCoverHtml } from './citation-export.service.js';
+} = await import('./citation-attachments.service.js');
+const { planParts, buildCoverHtml } = await import('./citation-export.service.js');
 
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const PNG_DATA_URL = `data:image/png;base64,${PNG_B64}`;
