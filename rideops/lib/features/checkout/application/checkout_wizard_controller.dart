@@ -15,6 +15,9 @@ import '../../../core/outbox/network_status.dart';
 import '../../../core/session/active_location.dart';
 import '../../../core/session/session_controller.dart';
 import '../../../core/telemetry/event_logger.dart';
+import '../domain/checkout_attribution.dart';
+import '../domain/checkout_changes.dart';
+import '../domain/checkout_entry.dart';
 import '../domain/checkout_event_log.dart';
 import '../domain/checkout_step_catalog.dart';
 import 'checkout_wizard_state.dart';
@@ -432,30 +435,35 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       _logger.log(CheckoutEvents.termsSignedSeen);
     }
     if (fresh.stateVersion != null) _appliedVersion = fresh.stateVersion;
-    if (detectForeign &&
-        prev != null &&
-        prev.currentStep != fresh.currentStep) {
-      final events = parseCheckoutEvents(fresh.events);
-      final event = lastTransitionTo(events, fresh.currentStep);
-      final actor = event?.actorKind(_myUserId) ?? CheckoutActorKind.otherSurface;
-      if (actor == CheckoutActorKind.you) {
-        // Fuimos nosotros (otro teléfono, o nuestro POST que ya se aplicó):
-        // el stepper se mueve, pero no hay a quién atribuirle nada.
-        advance = null;
+    if (detectForeign && prev != null) {
+      if (prev.currentStep != fresh.currentStep) {
+        final notice = _foreignStepMove(prev, fresh);
+        if (notice == null) {
+          // Fuimos nosotros (otro teléfono, o nuestro POST que ya se aplicó):
+          // el stepper se mueve, pero no hay a quién atribuirle nada.
+          advance = null;
+        } else {
+          advance = notice;
+          _logReconciled(
+            from: prev.step,
+            to: fresh.step,
+            fromRaw: prev.currentStep,
+            toRaw: fresh.currentStep,
+            via: via,
+          );
+        }
       } else {
-        advance = ForeignAdvanceNotice(
-          completedStep: prev.currentStep,
-          currentStep: fresh.currentStep,
-          actor: actor,
-          at: event?.at,
-        );
-        _logReconciled(
-          from: prev.step,
-          to: fresh.step,
-          fromRaw: prev.currentStep,
-          toRaw: fresh.currentStep,
-          via: via,
-        );
+        // M2-H6, frame 21C: el paso NO se movió pero cayó un SELLO. Pasa de
+        // verdad —el mostrador registra el pago mientras el agente teclea el
+        // odómetro en el paso 7— y hasta H6 era invisible: `_hasMaterialChange`
+        // ya lo detectaba para el ritmo del poll, pero nadie se lo contaba al
+        // agente.
+        //
+        // NO se emite `checkout.reconciled`: no hubo movimiento que reconciliar
+        // y contarlo inflaría la métrica con la que el épico mide cuánto se
+        // pisan las superficies (un sello y un salto de paso no son lo mismo).
+        final landed = _landedStamp(prev, fresh);
+        if (landed != null) advance = landed;
       }
     }
     // La presencia SOBREVIVE a una respuesta que no la trae (INN SC-2): los
@@ -478,8 +486,109 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       networkAvailable: true,
       advance: advance,
       clearAdvance: advance == null,
+      // "Desde que entraste" se congela en la PRIMERA lectura y no se vuelve
+      // a tocar: si se moviera con cada poll, el diff de 21B diría "no cambió
+      // nada" treinta segundos después de que cambiara todo.
+      baseline: state.baseline ?? merged,
     );
     _logStepRendered(fresh.currentStep);
+    _heartbeat(fresh.id);
+  }
+
+  /// Avance ajeno POR MOVIMIENTO DE PASO. Null cuando fuimos nosotros.
+  ForeignAdvanceNotice? _foreignStepMove(
+    CheckoutSessionDto prev,
+    CheckoutSessionDto fresh,
+  ) {
+    final events = parseCheckoutEvents(fresh.events);
+    final event = lastTransitionTo(events, fresh.currentStep);
+    final actor = event?.actorKind(_myUserId) ?? CheckoutActorKind.otherSurface;
+    if (actor == CheckoutActorKind.you) return null;
+    return ForeignAdvanceNotice(
+      completedStep: prev.currentStep,
+      currentStep: fresh.currentStep,
+      actor: actor,
+      at: event?.at,
+      // Nombre propio cuando la presencia lo resuelve; null ⇒ el banner cae
+      // al copy genérico de H1. Único punto de consumo de
+      // `presence[].actorUserId` (checkout_attribution.dart).
+      actorName: resolveActorName(
+        event,
+        namesById: presenceNamesById(fresh.presence ?? prev.presence),
+        myUserId: _myUserId,
+      ),
+    );
+  }
+
+  /// Sello que cayó SIN que el paso se moviera (21C). Se reporta uno solo —el
+  /// primero de la cadena que cambió— porque el banner tiene una línea, no
+  /// una lista: la lista completa vive en "Ver qué cambió".
+  ForeignAdvanceNotice? _landedStamp(
+    CheckoutSessionDto prev,
+    CheckoutSessionDto fresh,
+  ) {
+    final before = prev.stamps;
+    final now = fresh.stamps;
+    final (kind, field) = switch (null) {
+      _ when before.tc == null && now.tc != null => (
+          CheckoutStampKind.tc,
+          'tcCompletedAt'
+        ),
+      _ when before.payment == null && now.payment != null => (
+          CheckoutStampKind.payment,
+          'paymentCompletedAt'
+        ),
+      _ when before.inspection == null && now.inspection != null => (
+          CheckoutStampKind.inspection,
+          'inspectionCompletedAt'
+        ),
+      _ when before.signature == null && now.signature != null => (
+          CheckoutStampKind.signature,
+          'customerSignedAt'
+        ),
+      _ => (null, null),
+    };
+    if (kind == null || field == null) return null;
+    // Y NO se avisa del sello que este paso está esperando: en `TC_PENDING` el
+    // agente enseña el QR justo para que caiga `tcCompletedAt`, y anunciárselo
+    // como noticia ajena sería contarle el resultado de su propio trabajo —
+    // el paso ya tiene su estado de éxito. 21C es el sello que llega de un
+    // tramo que la sesión ya dejó atrás.
+    if (stampIsCurrentStepBusiness(kind: kind, currentStep: fresh.step)) {
+      return null;
+    }
+    // `stampSideEffect` escribe `{kind, field, at}` y NADA más: sin actor y
+    // sin marca de kiosco. Se puede fechar el sello; no se puede nombrar a
+    // quien lo puso, y no se va a inventar (service:1042-1044).
+    final event = lastSideEffectFor(parseCheckoutEvents(fresh.events), field);
+    return ForeignAdvanceNotice(
+      kind: ForeignAdvanceKind.stampLanded,
+      stamp: kind,
+      completedStep: prev.currentStep,
+      currentStep: fresh.currentStep,
+      actor: CheckoutActorKind.otherSurface,
+      at: event?.at,
+    );
+  }
+
+  /// Latido de presencia (M2-H6, §20). **Colgado del poll que ya existe**, no
+  /// de un temporizador propio: dos relojes serían doble consumo de batería y,
+  /// peor, una presencia que sobrevive al dato que la respalda.
+  ///
+  /// Se late solo con el wizard EN PRIMER PLANO. El latido afirma "estoy
+  /// mirando esto", y un teléfono en el bolsillo no está mirando nada — por
+  /// eso no se late desde el drenador de la bandeja ni en background.
+  ///
+  /// Fire-and-forget total: la presencia es informativa y no bloquea nada, así
+  /// que su fallo **no puede** convertirse en un error de pantalla ni matar el
+  /// poll del que viaja colgado. No hay `DELETE /presence` al salir y no se
+  /// pide: el TTL de 45 s ES el apagado.
+  void _heartbeat(String sessionId) {
+    if (!ref.read(appVisibilityProvider)) return;
+    if (!ref.read(sessionControllerProvider).isAuthenticated) return;
+    unawaited(
+      _api.heartbeatPresence(id: sessionId).catchError((_) {}),
+    );
   }
 
   void _logStepRendered(String step) {
@@ -596,10 +705,42 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
 
       final updated = await _api.transition(id: session.id, toStep: toStep.wire);
       if (gen != _generation || !ref.mounted) return blocked;
-      // Nuestro propio avance: se aplica sin detección de avance ajeno y el
-      // banner previo se retira (el agente ya interactuó con el paso nuevo).
+      // ── M2-H6 · el 200 que NO movimos nosotros ──────────────────────────
+      //
+      // Desde M2-H8 el backend responde **200** —no 409— cuando otra
+      // superficie ya hizo exactamente esta transición: la trata como
+      // idempotente y, a propósito, **no escribe evento** para que `events[]`
+      // siga nombrando a quien de verdad la movió
+      // (checkout-session.service.js:508-518).
+      //
+      // Sin esta detección H8 nos dejó un agujero silencioso justo en la
+      // historia de la reconciliación: el agente toca "Continuar", el kiosco
+      // ya lo había hecho, la app dice `transition_ok` como si hubiera sido
+      // él, y **el banner de avance ajeno nunca aparece**. Se perdía la
+      // atribución y la métrica de concurrencia a la vez.
+      //
+      // La regla es la de 03-observability.md §checkout.transition_noop, y es
+      // la ÚNICA: **es noop cuando el último `TRANSITION` hacia el destino no
+      // nos nombra**. No hay atajo por `stateVersion` — el caso que la métrica
+      // vigila (v0 en FINALIZING, el kiosco commitea CLOSED → v1) lo
+      // sub-reporta.
+      final noop = _detectNoop(updated, toStep);
       _apply(updated, detectForeign: false, isWrite: true);
-      state = state.copyWith(clearAdvance: true);
+      if (noop != null) {
+        state = state.copyWith(advance: noop);
+        _logger.log(CheckoutEvents.transitionNoop, data: {'to': toStep.wire});
+        _logReconciled(
+          from: session.step,
+          to: updated.step,
+          fromRaw: session.currentStep,
+          toRaw: updated.currentStep,
+          via: 'noop',
+        );
+      } else {
+        // Nuestro propio avance: el banner previo se retira (el agente ya
+        // interactuó con el paso nuevo).
+        state = state.copyWith(clearAdvance: true);
+      }
       _logger.log(CheckoutEvents.transitionOk, data: {'to': toStep.wire});
       _unchangedCycles = 0;
       _slowLane = false;
@@ -659,6 +800,42 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       }
       _scheduleNext(gen);
     }
+  }
+
+  /// ¿Este 200 lo movió OTRA superficie? (M2-H8 idempotente.)
+  ///
+  /// Devuelve el aviso a mostrar, o null cuando el avance es nuestro o cuando
+  /// **no se puede afirmar** que no lo sea. Los dos casos de "no se puede
+  /// afirmar" son deliberados y van hacia el mismo lado seguro — no acusar:
+  ///
+  ///  - **sin `myUserId`** (sesión degradada sin `/me`): `actorKind` no puede
+  ///    devolver `you` NUNCA, así que sin este guard TODA transición propia se
+  ///    marcaría como ajena. Sería el peor de los dos errores: un banner que
+  ///    le dice al agente que otro hizo su propio trabajo.
+  ///  - **sin evento** (log truncado, corrupto, o fila vieja): no hay prueba
+  ///    de que fuera otro. Se calla.
+  ForeignAdvanceNotice? _detectNoop(
+    CheckoutSessionDto updated,
+    CheckoutStep toStep,
+  ) {
+    final me = _myUserId;
+    if (me == null) return null;
+    final events = parseCheckoutEvents(updated.events);
+    final event = lastTransitionTo(events, toStep.wire);
+    if (event == null) return null;
+    final actor = event.actorKind(me);
+    if (actor == CheckoutActorKind.you) return null;
+    return ForeignAdvanceNotice(
+      completedStep: toStep.wire,
+      currentStep: updated.currentStep,
+      actor: actor,
+      at: event.at,
+      actorName: resolveActorName(
+        event,
+        namesById: presenceNamesById(updated.presence ?? state.session?.presence),
+        myUserId: me,
+      ),
+    );
   }
 
   /// Re-fetch previo a la transición (nota 7 del mockup). Devuelve non-null
@@ -726,7 +903,17 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
           );
           return CheckoutTransitionOutcome.alreadyDone;
         }
-        _setConflict(CheckoutConflictKind.generic, e);
+        // M2-H6, frame 22A: el MISMO code, la situación OPUESTA. Tras
+        // reconciliar la sesión sigue ANTES del destino ⇒ no es "alguien te
+        // ganó", es "pediste un paso que aún no toca" (pantalla vieja, doble
+        // toque tras reconciliar). Hasta H6 caía en [generic], que le daba al
+        // agente un cartel sin salida.
+        _setConflict(
+          CheckoutConflictKind.tooEarly,
+          e,
+          attemptedStep: toStep,
+          currentStep: fresh?.step ?? state.session?.step,
+        );
         return CheckoutTransitionOutcome.conflict;
 
       case 'ENTRY_GUARD':
@@ -736,18 +923,46 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
           CheckoutConflictKind.entryGuard,
           e,
           guard: infoFor(toStep)?.entryGuard,
+          attemptedStep: toStep,
+          currentStep: fresh?.step ?? state.session?.step,
         );
         return CheckoutTransitionOutcome.conflict;
 
       case 'SESSION_TERMINAL':
       case 'CHECKOUT_TERMINAL':
+        // `CHECKOUT_TERMINAL` es INALCANZABLE desde RideOps —solo lo lanza el
+        // router del kiosco (kiosk-checkout.service.js:731, 831, 913) y esta
+        // app consume `/api/checkout-sessions/*`. El mapeo se mantiene como
+        // cinturón, sin pantalla propia: dibujar una fingiría un caso que no
+        // ocurre.
         _setConflict(CheckoutConflictKind.terminal, e);
         return CheckoutTransitionOutcome.conflict;
 
       case 'VEHICLE_CONFLICT':
-        // Gancho de H1: se muestra la negativa del servidor. El swap de
-        // vehículo (mockup 9D/9E) es M2-H2.
-        _setConflict(CheckoutConflictKind.vehicleConflict, e);
+        // La unidad quedó comprometida por otra reserva en la misma ventana.
+        //
+        // **Aquí vive la regla de las puertas falsas.** El CTA "Elegir otro
+        // vehículo" solo se dibuja si el swap TODAVÍA es legal: la sesión
+        // tiene que estar antes de `INSPECTION_IN_PROGRESS`
+        // (vehicle-swap.service.js:46-51, 409 `SWAP_LOCKED`). Pasado ese
+        // punto el botón daría 409 para siempre, y la pantalla nombra el
+        // callejón en vez de ofrecer una acción imposible.
+        //
+        // Se calcula contra el paso RECONCILIADO, no contra el que se tenía:
+        // el 409 pudo llegar precisamente porque la sesión ya se movió.
+        _setConflict(
+          CheckoutConflictKind.vehicleConflict,
+          e,
+          attemptedStep: toStep,
+          currentStep: fresh?.step ?? state.session?.step,
+          swapAvailable: _swapStillLegal(fresh?.step ?? state.session?.step),
+          // MISMO puente que el guard 11D de H7 (`conflictingReservationNumberOf`),
+          // no un segundo parser: el copy del backend es uno solo y el día que
+          // cambie tiene que romperse en un único sitio. Null ⇒ el CTA "Buscar
+          // R-…" no se dibuja.
+          conflictReservationRef:
+              conflictingReservationNumberOf(e.message),
+        );
         return CheckoutTransitionOutcome.conflict;
 
       default:
@@ -761,6 +976,10 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
     CheckoutConflictKind kind,
     ApiError e, {
     CheckoutEntryGuard? guard,
+    CheckoutStep? attemptedStep,
+    CheckoutStep? currentStep,
+    bool swapAvailable = false,
+    String? conflictReservationRef,
   }) {
     state = state.copyWith(
       conflict: CheckoutConflict(
@@ -768,8 +987,33 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
         message: e.message,
         code: e.code,
         guard: guard,
+        attemptedStep: attemptedStep,
+        currentStep: currentStep,
+        swapAvailable: swapAvailable,
+        conflictReservationRef: conflictReservationRef,
       ),
     );
+  }
+
+  /// ¿El swap de unidad sigue siendo legal en [step]?
+  ///
+  /// `vehicle-swap.service.js:46-51` lo cierra a partir de
+  /// `INSPECTION_IN_PROGRESS`. Con el paso FUERA del catálogo (paso nuevo del
+  /// backend) devuelve **false**: sin certeza no se dibuja una acción — el
+  /// error caro de esta historia es el botón que no puede triunfar, no el
+  /// botón de menos.
+  bool _swapStillLegal(CheckoutStep? step) {
+    final info = infoFor(step);
+    final locked = infoFor(CheckoutStep.inspectionInProgress);
+    if (info == null || locked == null) return false;
+    return info.position < locked.position;
+  }
+
+  /// El agente vio la antesala de enganche (23A) y entra a trabajar.
+  void acknowledgeJoin() {
+    if (!state.joinAcknowledged) {
+      state = state.copyWith(joinAcknowledged: true);
+    }
   }
 
   /// Re-fetch de reconciliación. Su fallo NO puede tapar el rechazo que se

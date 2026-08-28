@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'api_error.dart';
 import 'dto/checkout_session.dart';
 import 'dto/inspection.dart';
+import 'enums.dart';
 import 'interceptors.dart';
 
 /// Rutas de checkout-session e inspección móvil que H5 necesita. Dos Dio,
@@ -71,6 +72,47 @@ class CheckoutApi {
             : null,
       );
       return CheckoutSessionDto.fromJson(res.data!);
+    } on DioException catch (e) {
+      throw ApiError.fromDio(e);
+    }
+  }
+
+  /// `POST /api/checkout-sessions/:id/presence` (routes:118) — el LATIDO
+  /// (M2-H6). Hasta H5 RideOps leía presencia sin emitirla: el agente veía al
+  /// kiosco y al mostrador, y ellos no lo veían a él. Aquí se enciende.
+  ///
+  /// **No se manda `label`, y es una decisión, no un olvido** (Hector,
+  /// 2026-08-28: el usuario se identifica). El servicio resuelve el nombre en
+  /// cascada —etiqueta explícita → `fullName` del actor → etiqueta genérica de
+  /// la superficie (checkout-presence.service.js:130-137)— y `req.user` ya
+  /// trae `fullName` porque `requireAuth` hidrata la fila. Mandar una etiqueta
+  /// corta desde el cliente duplicaría la fuente de verdad del nombre en
+  /// cuatro superficies para no ganar nada. `displayLabel` queda reservado
+  /// para superficies SIN usuario; no es asunto de RideOps.
+  ///
+  /// **Fire-and-forget por contrato.** La presencia es informativa y no
+  /// bloquea nada (reglas duras del módulo): un latido que falla no puede
+  /// convertirse en un error de pantalla ni matar el poll del que viaja
+  /// colgado. Por eso devuelve `void` y el llamador se traga el fallo.
+  ///
+  /// LLEVA `x-view-location` como el resto del wizard: si el agente perdió la
+  /// sede, que el latido también sea negado es correcto — no queremos que la
+  /// app anuncie presencia sobre una sesión que ya no puede ver.
+  Future<void> heartbeatPresence({
+    required String id,
+    CheckoutSurface surface = CheckoutSurface.rideops,
+  }) async {
+    try {
+      await authedDio.post<Map<String, dynamic>>(
+        '/api/checkout-sessions/$id/presence',
+        data: {'surface': surface.wire},
+        // El latido NO reintenta ante 429: es el dato más barato de perder de
+        // toda la app (el siguiente poll lo vuelve a mandar 5 s después) y
+        // amplificar un throttle por un chip sería exactamente al revés.
+        options: Options(
+          extra: {RateLimitRetryInterceptor.skipRetry: true},
+        ),
+      );
     } on DioException catch (e) {
       throw ApiError.fromDio(e);
     }

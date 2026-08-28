@@ -19,18 +19,24 @@ import '../../shell/location_denied_view.dart';
 import '../application/checkout_close_controller.dart';
 import '../application/checkout_wizard_controller.dart';
 import '../application/checkout_wizard_state.dart';
+import '../domain/checkout_attribution.dart';
+import '../domain/checkout_changes.dart';
 import '../domain/checkout_presence.dart';
 import 'checkout_labels.dart';
 import 'steps/confirming_step.dart';
 import 'steps/inspection_step.dart';
 import 'steps/sign_step.dart';
 import 'steps/terms_step.dart';
+import 'widgets/changed_sheet.dart';
 import 'widgets/close_outcome_view.dart';
+import 'widgets/join_view.dart';
 import 'widgets/pause_sheet.dart';
+import 'widgets/presence_sheet.dart';
 import 'widgets/steps_sheet.dart';
 import 'widgets/terminal_view.dart';
 import 'widgets/wizard_banners.dart';
 import 'widgets/wizard_chrome.dart';
+import 'widgets/wizard_dock.dart';
 import 'widgets/wizard_skeleton.dart';
 
 /// Shell del wizard de checkout (M2-H1, mockup 8A–8F). Ruta
@@ -260,6 +266,11 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
       return CheckoutTerminalView(
         session: session,
         myUserId: ref.watch(sessionControllerProvider).user?.id,
+        // 21D: la pantalla tiene que responder "¿perdí mi trabajo?". El log de
+        // abajo dice quién le hizo qué a la SESIÓN; esto dice si lo del
+        // teléfono llegó — y en el escenario del marco (el kiosco cierra
+        // mientras el agente captura) son cosas distintas.
+        pendingUploads: _pendingUploads(ref, state),
         onExit: _leave,
         // Solo cuando se LLEGÓ desde el resumen: en una sesión que ya estaba
         // cerrada al entrar no hay resumen al que volver.
@@ -267,6 +278,7 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
       );
     }
 
+    final myUserId = ref.watch(sessionControllerProvider).user?.id;
     final age = state.fetchedAt == null
         ? Duration.zero
         : clock.now().difference(state.fetchedAt!);
@@ -286,8 +298,11 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
             clock.now(),
             // Nunca listarse a uno mismo como acompañante (inerte hasta que
             // el backend mande `actorUserId` — ver el WHY en el DTO).
-            myUserId: ref.watch(sessionControllerProvider).user?.id,
+            myUserId: myUserId,
           ),
+          // M2-H6: el chip abre la hoja "Quién está aquí" (20B) — donde el
+          // agente además se entera de que él también es visible.
+          onPresenceTap: _openPresenceSheet,
           mini: mini,
           // Sin red el punto de presencia se apaga: el verde afirma "está
           // AHORA" y esa afirmación la sostiene un heartbeat del servidor que
@@ -338,21 +353,110 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
           OfflineBanner(age: age, onRetry: _controller.refresh),
           const SizedBox(height: 10),
         ],
-        if (state.advance != null) ...[
+        // El avance ajeno por MOVIMIENTO de paso va en el scroll: el paso ya
+        // cambió debajo del agente, así que el cuerpo se reconstruyó de todas
+        // formas y el banner encabeza lo nuevo.
+        //
+        // El de SELLO (21C) NO: ese llega con el paso intacto y, muchas veces,
+        // con el agente tecleando. Va anclado al pie — ver [_anchoredNotice].
+        if (state.advance case final advance?
+            when advance.kind != ForeignAdvanceKind.stampLanded) ...[
           ForeignAdvanceBanner(
-            notice: state.advance!,
-            onSeeChanged: _openStepsSheet,
+            notice: advance,
+            // M2-H6: "Ver qué cambió" por fin tiene destino propio. Hasta hoy
+            // abría la lista de pasos, que responde OTRA pregunta.
+            onSeeChanged: _openChangedSheet,
           ),
           const SizedBox(height: 10),
         ],
         if (state.conflict != null) ...[
-          ConflictBanner(
-            conflict: state.conflict!,
-            onDismiss: _controller.dismissConflict,
-          ),
+          _conflictBanner(state),
           const SizedBox(height: 10),
         ],
       ];
+
+  /// 21C — el aviso de avance ajeno por SELLO. **Fuera del scroll del paso, y
+  /// por eso existe.**
+  ///
+  /// El caso que hace daño en el patio es concreto: el agente teclea el
+  /// odómetro con el teclado abierto, y un aviso inyectado a la CABEZA del
+  /// scroll queda fuera de vista *y* empuja hacia abajo el campo que está
+  /// escribiendo. El banner es estrictamente aditivo: no toca el árbol del
+  /// paso, no reordena nada y no se lo puede llevar el scroll.
+  ///
+  /// **Dónde cae dentro del pie lo resolvió el marco 21C-bis** (decisión de
+  /// Hector). Sube DENTRO del dock, en flujo, encima del primario. Yo lo había
+  /// puesto debajo leyendo el `.anchored` de la lámina como un overlay —y con
+  /// esa lectura era correcto, un overlay taparía el CTA—, pero el `.anchored`
+  /// es absoluto solo porque aquel frame no tiene dock que lo sostenga. La
+  /// tercera opción no era flotar: era estar en flujo.
+  ///
+  /// Lo que se gana, medido: el CTA primario pasa de 141 px del teclado a 14 —
+  /// de fuera del alcance del pulgar a dentro. Y se acaban los DOS pies: la
+  /// franja más alcanzable deja de estar ocupada por información cuya única
+  /// acción es opcional.
+  ///
+  /// Va PELADO a propósito (GD-SC-2): sin filete y sin sombra propios. El dock
+  /// ya pone el suyo y el paso ya pone el inset; el contenedor full-bleed que
+  /// tenía antes —borde a borde, filete arriba, sombra hacia arriba— era
+  /// literalmente el vocabulario visual del dock, y con sol y guantes se leía
+  /// como un segundo pie.
+  Widget? _dockNotice(CheckoutWizardState state) {
+    final advance = state.advance;
+    if (advance == null || advance.kind != ForeignAdvanceKind.stampLanded) {
+      return null;
+    }
+    return ForeignAdvanceBanner(
+      notice: advance,
+      onSeeChanged: _openChangedSheet,
+    );
+  }
+
+  /// La matriz 409 con sus acciones, cada una pasada SOLO cuando puede tener
+  /// éxito (la última columna de la matriz del mockup, hecha código).
+  Widget _conflictBanner(CheckoutWizardState state) {
+    final conflict = state.conflict!;
+    // La bandeja se consulta SOLO donde puede cambiar algo: el `ENTRY_GUARD`
+    // es el único 409 cuya causa real puede ser evidencia sin enviar. Mirarla
+    // en todos los conflictos montaría el stream de drift —con su suscripción
+    // viva— por un contador que ningún otro caso usa.
+    final pending = conflict.kind == CheckoutConflictKind.entryGuard
+        ? _pendingUploads(ref, state)
+        : 0;
+    return ConflictBanner(
+      conflict: conflict,
+      onDismiss: _controller.dismissConflict,
+      // 22A — navegación LOCAL al paso que el servidor sí reporta. No pasa por
+      // el servidor: no puede dar 409. Lo único que hay que hacer es retirar
+      // el banner; la pantalla ya está renderizando el paso reconciliado.
+      onGoToStep: conflict.kind == CheckoutConflictKind.tooEarly
+          ? _controller.dismissConflict
+          : null,
+      // 22B — la Bandeja, donde el bloqueo es real y accionable.
+      onOpenOutbox: () => context.push(AppRoutes.outbox),
+      pendingUploads: pending,
+      onSearchReservation: conflict.conflictReservationRef == null
+          ? null
+          : () => context.push(
+                '${AppRoutes.search}?q='
+                '${Uri.encodeQueryComponent(conflict.conflictReservationRef!)}',
+              ),
+    );
+  }
+
+  /// Filas de la bandeja de ESTA sesión que aún no llegaron al servidor.
+  ///
+  /// Es lo único que permite decir "nada se perdió" con cara seria: la
+  /// promesa solo se puede hacer sobre lo que el SERVIDOR tiene. Sin sesión
+  /// —o sin que el stream haya emitido— se devuelve 0 y el CTA de la Bandeja
+  /// no se dibuja: mandar al agente a una pantalla vacía sería otra puerta
+  /// falsa, más educada.
+  int _pendingUploads(WidgetRef ref, CheckoutWizardState state) {
+    final id = state.session?.id;
+    if (id == null) return 0;
+    final view = ref.watch(inspectionOutboxProvider(id));
+    return view.loaded ? view.totalRows : 0;
+  }
 
   /// Cuerpo del paso. H1 entregó el shell; H2 monta CONFIRMING y T&C. Los
   /// pasos que aún no tienen historia (pago H3, inspección H4, firma H5)
@@ -364,6 +468,46 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     Duration age,
   ) {
     final banners = _banners(state, age);
+    // El aviso del pie viaja por herencia hasta el único widget que dibuja el
+    // dock (ver `WizardDockNotice`): así ninguno de los 14 sitios que
+    // construyen un pie tiene que acordarse de reenviarlo.
+    final dockNotice = _dockNotice(state);
+
+    // ── M2-H6 · antesala de enganche (23A/B/C) ──────────────────────────
+    //
+    // Sustituye el CUERPO del paso, no la pantalla: el rail, la stepline y el
+    // chip de presencia siguen detrás contando la verdad del servidor, y el
+    // wizbar conserva "Pausar" y la salida. Un solo toque y desaparece para el
+    // resto de la visita.
+    final myUserId = ref.watch(sessionControllerProvider).user?.id;
+    if (state.showJoinGate(myUserId)) {
+      return CheckoutJoinView(
+        session: session,
+        position: state.position,
+        roster: presenceRoster(
+          session.presence,
+          clock.now(),
+          myUserId: myUserId,
+        ),
+        myUserId: myUserId,
+        onContinue: _controller.acknowledgeJoin,
+        onLeave: _leave,
+      );
+    }
+
+    return WizardDockNotice(
+      notice: dockNotice,
+      child: _stepBodyFor(state, session, age, banners, dockNotice),
+    );
+  }
+
+  Widget _stepBodyFor(
+    CheckoutWizardState state,
+    CheckoutSessionDto session,
+    Duration age,
+    List<Widget> banners,
+    Widget? dockNotice,
+  ) {
     return switch (state.step) {
       CheckoutStep.confirming => ConfirmingStep(
           reservationId: widget.reservationId,
@@ -390,11 +534,25 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
           banners: banners,
           onPause: _openPauseSheet,
         ),
-      _ => ListView(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
+      // Este paso no construye [WizardDock], así que no hay pie que sostenga
+      // el aviso: vuelve al anclaje de la lámina (21C tal cual), pegado al pie
+      // y fuera del scroll. "El caso sin dock no cambia" — DoD del addendum.
+      _ => Column(
           children: [
-            ...banners,
-            _StampsCard(session: session, dataAge: age),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
+                children: [
+                  ...banners,
+                  _StampsCard(session: session, dataAge: age),
+                ],
+              ),
+            ),
+            if (dockNotice != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                child: dockNotice,
+              ),
           ],
         ),
     };
@@ -448,6 +606,91 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
             dataAge: live.fetchedAt == null
                 ? Duration.zero
                 : clock.now().difference(live.fetchedAt!),
+          );
+        },
+      ),
+    );
+    if (mounted) setState(() => _sheetOpen = false);
+  }
+
+  /// Hoja 20B — "Quién está en esta sesión". VIVA (`Consumer` + `watch`): es
+  /// una lista de presencia, y una lista de presencia congelada al instante de
+  /// abrirla diría "ahora" un minuto después.
+  Future<void> _openPresenceSheet() async {
+    if (ref.read(_provider).session == null) return;
+    setState(() => _sheetOpen = true);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      barrierColor: const Color(0x6B17122B),
+      useSafeArea: true,
+      backgroundColor: RideTokens.n0,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      constraints: const BoxConstraints(maxHeight: 620),
+      builder: (sheetContext) => Consumer(
+        builder: (_, sheetRef, _) {
+          final live = sheetRef.watch(_provider);
+          final session = live.session;
+          if (session == null) return const SizedBox.shrink();
+          final me = sheetRef.watch(sessionControllerProvider).user;
+          return WhoIsHereSheet(
+            roster: presenceRoster(
+              session.presence,
+              clock.now(),
+              myUserId: me?.id,
+            ),
+            myName: me?.fullName,
+            offline: live.offline,
+            onClose: () => Navigator.of(sheetContext).pop(),
+          );
+        },
+      ),
+    );
+    if (mounted) setState(() => _sheetOpen = false);
+  }
+
+  /// Hoja 21B — "Qué cambió desde que entraste". El destino real del botón que
+  /// H1 dejó apuntando a la lista de pasos.
+  ///
+  /// Abrirla RETIRA el banner de avance ajeno: el agente ya está viendo qué
+  /// cambió, que es exactamente lo que el banner le pedía.
+  Future<void> _openChangedSheet() async {
+    final state = ref.read(_provider);
+    if (state.session == null) return;
+    _controller.dismissAdvance();
+    setState(() => _sheetOpen = true);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      barrierColor: const Color(0x6B17122B),
+      useSafeArea: true,
+      backgroundColor: RideTokens.n0,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      constraints: const BoxConstraints(maxHeight: 640),
+      builder: (sheetContext) => Consumer(
+        builder: (_, sheetRef, _) {
+          final live = sheetRef.watch(_provider);
+          final session = live.session;
+          if (session == null) return const SizedBox.shrink();
+          final me = sheetRef.watch(sessionControllerProvider).user?.id;
+          return ChangedSheet(
+            changes: buildChangeSet(
+              baseline: live.baseline,
+              current: session,
+              observedAt: live.fetchedAt ?? clock.now(),
+              myUserId: me,
+              // Nombres propios cuando el backend emita
+              // `presence[].actorUserId`; hoy el mapa sale vacío y la
+              // atribución cae al copy genérico.
+              namesById: presenceNamesById(session.presence),
+            ),
+            currentPosition: live.position,
+            pendingUploads: _pendingUploads(sheetRef, live),
+            onStay: () => Navigator.of(sheetContext).pop(),
           );
         },
       ),

@@ -21,13 +21,21 @@
   "presence": [
     {
       "surface": "KIOSK",
+      "actorUserId": null,
       "displayName": "María G.",
       "lastSeenAt": "2026-08-16T14:03:52.000Z"
     },
     {
       "surface": "COUNTER",
+      "actorUserId": "cmdusr002fixture0000000002",
       "displayName": "Jorge Salas",
       "lastSeenAt": "2026-08-16T14:03:31.000Z"
+    },
+    {
+      "surface": "RIDEOPS",
+      "actorUserId": "cmdusr001fixture0000000001",
+      "displayName": "Ana Ruiz",
+      "lastSeenAt": "2026-08-16T14:03:58.000Z"
     }
   ]
 }

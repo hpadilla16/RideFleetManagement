@@ -140,6 +140,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    // M2-H6: entrar a media sesión muestra primero la antesala de enganche
+    // (23A). Estos tests prueban el CUERPO del paso, así que la cruzan; la
+    // antesala tiene su propia suite (checkout_join_test.dart).
+    await skipJoinGate(tester);
   }
 
   /// El cuerpo del paso es un scroll y el lienzo del test mide 600 px: el QR
