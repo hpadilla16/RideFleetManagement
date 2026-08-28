@@ -12,6 +12,7 @@ import { getTenantPlanCatalog, resolveTenantPlanConfig } from '../../lib/tenant-
 import { encrypt, decrypt, isEncryptionConfigured } from '../../lib/integration-crypto.js';
 import { encryptSettingSecret, carrySettingSecret, decryptSettingSecret } from '../../lib/setting-secret-crypto.js';
 import { invalidateTenantTerminalConfig } from '../payment-gateway/tenant-terminal-config.js';
+import { resolveTenantProviderCredential } from '../../lib/tenant-provider-credential.js';
 import { normalizePolicy as normalizeTwoFactorPolicy, VALID_TWO_FACTOR_ROLES } from '../../lib/two-factor-policy.js';
 import { isCheckoutPaymentRequired, setCheckoutPaymentRequired } from './checkout-payment-policy.js';
 
@@ -947,6 +948,12 @@ export const settingsService = {
       model: cfg?.model || '',
       confidenceMin: Number.isFinite(Number(cfg?.confidenceMin)) ? Number(cfg.confidenceMin) : 70,
       hasKey: !!cfg?.apiKeyEncrypted,
+      // 2026-08-27. The opt-in that has to be TRUE before this tenant's
+      // documents may be sent to the provider under the PLATFORM account.
+      // Defaults false for every tenant, including ones that pre-date this
+      // field — an absent key in an old AppSetting row reads as "no", which is
+      // exactly the posture the Corpusa incident should have had.
+      allowPlatformKeyFallback: !!cfg?.allowPlatformKeyFallback,
     };
   },
 
@@ -967,11 +974,24 @@ export const settingsService = {
       if (!isEncryptionConfigured()) throw new Error('Encryption key (INTEGRATION_ENC_KEY) is not configured');
       apiKeyEncrypted = encrypt(payload.apiKey.trim());
     }
-    await writeJsonSetting(key, { provider, model, confidenceMin, apiKeyEncrypted });
-    return { provider, model, confidenceMin, hasKey: !!apiKeyEncrypted };
+    // Opt-in to the PLATFORM key. Only an explicit boolean in the payload
+    // moves it; anything else preserves what is on file, so a partial PUT from
+    // the Settings page (provider/model only) can never silently turn it on.
+    let allowPlatformKeyFallback = !!current.allowPlatformKeyFallback;
+    if (typeof payload?.allowPlatformKeyFallback === 'boolean') {
+      allowPlatformKeyFallback = payload.allowPlatformKeyFallback;
+    }
+    await writeJsonSetting(key, { provider, model, confidenceMin, apiKeyEncrypted, allowPlatformKeyFallback });
+    return { provider, model, confidenceMin, hasKey: !!apiKeyEncrypted, allowPlatformKeyFallback };
   },
 
-  // Internal — decrypts the key for the OCR worker. Returns { provider, model, confidenceMin, apiKey|null }.
+  // Internal — decrypts the key for the OCR worker. Returns
+  // { provider, model, confidenceMin, apiKey|null, allowPlatformKeyFallback }.
+  //
+  // NOTE: `apiKey` here is the TENANT'S OWN key and nothing else. It has never
+  // meant "the key to call with" — every caller used to finish the job with
+  // `cfg.apiKey || process.env.ANTHROPIC_API_KEY`, which is the bug. Callers
+  // must now go through resolveCitationOcrCredential() below.
   async getCitationOcrResolved(scope = {}) {
     const cfg = await readJsonSetting(scopedKey('citationOcrConfig', scope), null);
     let apiKey = null;
@@ -983,7 +1003,47 @@ export const settingsService = {
       model: cfg?.model || '',
       confidenceMin: Number.isFinite(Number(cfg?.confidenceMin)) ? Number(cfg.confidenceMin) : null,
       apiKey,
+      allowPlatformKeyFallback: !!cfg?.allowPlatformKeyFallback,
     };
+  },
+
+  /**
+   * The ONE credential read for every Anthropic-backed, tenant-scoped feature
+   * that shares the citationOcrConfig block: citation mail OCR, kiosk ID photo
+   * reading and commission review-proof validation.
+   *
+   * Returns the tenant's provider/model/threshold PLUS a `credential` decision
+   * from lib/tenant-provider-credential.js — `{ credential, source, reason }`,
+   * where source is TENANT / PLATFORM / NONE and a PLATFORM resolution has
+   * already WARNed by tenant and feature. A NONE result carries an empty
+   * credential; callers must fail closed on it rather than reaching for env.
+   *
+   * `feature` distinguishes the three consumers so the opt-in allowlist and the
+   * log line name which one is calling out — the citation scheduler and the
+   * kiosk are very different data-protection stories even though they read the
+   * same key.
+   */
+  async resolveCitationOcrCredential(scope = {}, { feature = 'citation-ocr' } = {}) {
+    const cfg = await this.getCitationOcrResolved(scope);
+    const tenantId = scope?.tenantId || null;
+    let tenantName = '';
+    if (tenantId) {
+      // Cosmetic — only used to make the WARN readable. A failed lookup must
+      // never change the decision, so it degrades to ''.
+      try {
+        const t = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true } });
+        tenantName = String(t?.name || '');
+      } catch { tenantName = ''; }
+    }
+    const credential = resolveTenantProviderCredential({
+      tenantId,
+      feature,
+      tenantCredential: cfg.apiKey || '',
+      platformCredential: process.env.ANTHROPIC_API_KEY || '',
+      tenantOptIn: cfg.allowPlatformKeyFallback,
+      tenantName,
+    });
+    return { ...cfg, credential };
   },
 
   // Staff 2FA policy (2026-08-22). Stored as AppSetting JSON under

@@ -154,8 +154,14 @@ export const commissionsService = {
     let verdict = null;
     let status = 'PENDING_AI';
     try {
-      const cfg = await settingsService.getCitationOcrResolved({ tenantId: tenantId || null }).catch(() => ({ apiKey: null, model: '' }));
-      const apiKey = cfg.apiKey || process.env.ANTHROPIC_API_KEY || null;
+      const cfg = await settingsService
+        .resolveCitationOcrCredential({ tenantId: tenantId || null }, { feature: 'review-proof' })
+        .catch(() => ({ credential: { source: 'NONE' }, model: '' }));
+      // Fail-closed, as before — but the "no key" branch is now reached by a
+      // tenant that simply has not configured one, instead of being papered
+      // over by the platform key. The employee's uploaded photo (a review
+      // screenshot, often carrying their own name) stays inside the platform.
+      const apiKey = cfg?.credential?.source === 'NONE' ? null : (cfg?.credential?.credential || null);
       if (!apiKey) throw new Error('no API key configured');
       // Business-name resolution is FAIL-CLOSED (QA m2): a transient DB
       // error must not let the model judge against a placeholder name — a
