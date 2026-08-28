@@ -36,6 +36,7 @@ export const viewport = {
   viewportFit: 'cover',
 };
 
-export default function AutopayReturnPage({ params }) {
+export default async function AutopayReturnPage(props) {
+  const params = await props.params;
   return <AutopayReturnClient token={params.token} />;
 }
