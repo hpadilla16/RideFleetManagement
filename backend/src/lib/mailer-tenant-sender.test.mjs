@@ -27,6 +27,11 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), '..');
 const EXEMPT = new Map([
   ['lib/email-template.js', 'usage example inside a doc comment, not a call'],
   ['modules/messaging/trip-chat.service.js', 'car-sharing chat: the loaded conversation carries the trip but not its tenant; needs a query change, tracked separately'],
+  // Ride billing ITS OWN tenants. This is the one direction the rule inverts:
+  // the recipient IS the tenant, and an invoice for Ride Fleet Manager that
+  // arrived branded as the customer's own rental company would read as a
+  // forgery of their own mail. Same call billing-notify.js makes.
+  ['modules/billing/billing-invite-email.js', 'Ride invoicing a tenant: must arrive from the PLATFORM, not the tenant brand'],
 ]);
 
 function sourceFiles(dir, out = []) {
