@@ -130,8 +130,13 @@ class WhoIsHereSheet extends StatelessWidget {
                           offline ? RideTokens.warnBg : RideTokens.infoBg,
                       border: offline ? RideTokens.warnBd : RideTokens.infoBd,
                       child: Text(
+                        // Sin red la causa YA está en el subtítulo de la hoja
+                        // (dos líneas más arriba): repetirla aquí sería la
+                        // misma frase dos veces a ~100 px de distancia. Lo que
+                        // falta decir es lo otro — que el vacío tampoco se
+                        // puede leer como "no hay nadie".
                         offline
-                            ? l10n.coPresenceOfflineWhy
+                            ? l10n.coPresenceEmptyUnverifiable
                             : l10n.coPresenceEmpty,
                         style: TextStyle(
                           fontSize: 13,
@@ -143,15 +148,27 @@ class WhoIsHereSheet extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                   ],
-                  _YouRow(myName: myName),
+                  _YouRow(myName: myName, offline: offline),
                   const SizedBox(height: 10),
                   WizardBanner(
-                    icon: Icons.visibility_outlined,
-                    iconColor: RideTokens.focus,
-                    background: RideTokens.infoBg,
-                    border: RideTokens.infoBd,
+                    icon: offline
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                    iconColor:
+                        offline ? RideTokens.warnTx : RideTokens.focus,
+                    background:
+                        offline ? RideTokens.warnBg : RideTokens.infoBg,
+                    border: offline ? RideTokens.warnBd : RideTokens.infoBd,
                     child: Text(
-                      l10n.coWhoIsHereDisclosure,
+                      // Sin red el `POST /presence` no aterriza y a los 45 s
+                      // el agente NO está visible para nadie. Afirmar
+                      // "apareces con tu nombre" justo ahí convertiría la
+                      // única pantalla construida para explicar el reverso del
+                      // latido en la única que no puede sostener lo que dice —
+                      // el mismo defecto del vacío, en espejo.
+                      offline
+                          ? l10n.coWhoIsHereDisclosureOffline
+                          : l10n.coWhoIsHereDisclosure,
                       style: const TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w600,
@@ -323,9 +340,14 @@ class _Avatar extends StatelessWidget {
 /// "Tú · RideOps — los demás te ven como Ana Ruiz". El reverso vive AQUÍ y en
 /// ningún otro sitio.
 class _YouRow extends StatelessWidget {
-  const _YouRow({required this.myName});
+  const _YouRow({required this.myName, required this.offline});
 
   final String? myName;
+
+  /// Sin red el latido no sale, así que esta fila degrada igual que las de los
+  /// demás: el punto se apaga y el estado deja de decir "ahora". Era la ÚNICA
+  /// que afirmaba presencia sin mirar la red.
+  final bool offline;
 
   @override
   Widget build(BuildContext context) {
@@ -385,14 +407,14 @@ class _YouRow extends StatelessWidget {
               ],
             ),
           ),
-          const _Dot(live: true),
+          _Dot(live: !offline),
           const SizedBox(width: 6),
           Text(
-            l10n.coWhoIsHereNow,
-            style: const TextStyle(
+            offline ? l10n.coWhoIsHereYouOffline : l10n.coWhoIsHereNow,
+            style: TextStyle(
               fontSize: 11.5,
               fontWeight: FontWeight.w800,
-              color: RideTokens.okTx,
+              color: offline ? RideTokens.n600 : RideTokens.okTx,
             ),
           ),
         ],

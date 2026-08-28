@@ -935,5 +935,30 @@
     }
   },
   "coConflictVehicleKept": "Kept: the customer already verified and the step you're on.",
-  "coGuardWhyServer": "The server closes this step when the stamp lands, not this screen. Nothing is lost: you can pause and come back."
+  "coGuardWhyServer": "The server closes this step when the stamp lands, not this screen. Nothing is lost: you can pause and come back.",
+  "coPresenceChipLive": "{name} · {surface}",
+  "@coPresenceChipLive": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "surface": {
+        "type": "String"
+      }
+    }
+  },
+  "coPresenceChipAged": "{name} · {age} ago",
+  "@coPresenceChipAged": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coWhoIsHereYouOffline": "No connection",
+  "coWhoIsHereDisclosureOffline": "With no connection your heartbeat isn't landing: in under a minute you stop appearing to the other surfaces. You reappear on your own once you have signal. This never reserves anything.",
+  "coPresenceEmptyUnverifiable": "And it can't be read as “nobody is here” either: another surface may be moving ahead without us seeing it."
 }

@@ -77,10 +77,15 @@ CheckoutSessionDto sessionAt(
   raw['customerSignedAt'] = signature?.toIso8601String();
   raw['abandonedAt'] = abandonedAt?.toIso8601String();
   if (presence != null) {
+    // `actorUserId` VIAJA. Se le olvidaba a este serializer, y eso dejaba la
+    // auto-supresión inerte en cualquier prueba que pasara presencia por aquí
+    // — sin que la prueba se enterara. Hoy no cuesta nada porque el fixture
+    // real sí lo cubre; mañana es una trampa puesta para el siguiente.
     raw['presence'] = [
       for (final p in presence)
         {
           'surface': p.surface,
+          'actorUserId': p.actorUserId,
           'displayName': p.displayName,
           'lastSeenAt': p.lastSeenAt?.toIso8601String(),
         },
@@ -445,7 +450,8 @@ class MutableSessionController extends SessionController {
 /// desde H6, abrir una sesión que no está en el paso 1 —o que abrió otra
 /// persona— muestra primero "qué hay hecho / qué falta". Los tests que van a
 /// probar el CUERPO de un paso no deberían tener que saber eso; los que
-/// prueban la antesala la tocan de verdad (checkout_join_test.dart).
+/// prueban la antesala la tocan de verdad (`checkout_h6_widgets_test.dart`
+/// para la pantalla, `checkout_h6_controller_test.dart` para cuándo aparece).
 ///
 /// No-op cuando la antesala no está: así el mismo helper sirve para escenarios
 /// que arrancan en CONFIRMING.

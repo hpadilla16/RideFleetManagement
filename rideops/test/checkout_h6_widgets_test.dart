@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/core/api/dto/checkout_session.dart';
 import 'package:rideops/core/api/enums.dart';
 import 'package:rideops/core/l10n/app_localizations.dart';
+import 'package:rideops/core/theme/ride_tokens.dart';
 import 'package:rideops/core/widgets/ride_buttons.dart';
 import 'package:rideops/features/checkout/application/checkout_wizard_state.dart';
 import 'package:rideops/features/checkout/domain/checkout_changes.dart';
@@ -45,6 +46,20 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+
+  /// Cuántos puntos VIVOS (verde `RideTokens.ok`, circulares) hay en pantalla.
+  /// El estado nunca lo lleva solo el color, pero el color tampoco puede
+  /// mentir: sin red no puede quedar ninguno encendido.
+  int liveDots(WidgetTester tester) => tester
+      .widgetList<Container>(find.byType(Container))
+      .where((c) {
+        final d = c.decoration;
+        return d is BoxDecoration &&
+            d.shape == BoxShape.circle &&
+            d.color == RideTokens.ok;
+      })
+      .length;
 
   CheckoutPresenceDto presence(
     String surface, {
@@ -133,9 +148,11 @@ void main() {
       );
       // El chip NO desaparece: desaparecer sigue siendo cosa del TTL.
       expect(find.text('Diego Torres'), findsOneWidget);
-      // Y el punto vivo se apaga: la fila deja de decir "now".
-      expect(find.text('now'), findsOneWidget,
-          reason: 'solo el "ahora" de la fila propia');
+      // NADIE dice "ahora" sin red — tampoco la fila propia (GD-MC-2): el
+      // latido es un POST y sin red no aterriza, así que a los 45 s el agente
+      // no está visible para nadie.
+      expect(find.text('now'), findsNothing);
+      expect(find.text('No connection'), findsOneWidget);
       // Sin /me no se finge saber el nombre exacto.
       expect(find.text('Others see you by your full name'), findsOneWidget);
     });
@@ -512,7 +529,17 @@ void main() {
       await pump(
         tester,
         CheckoutJoinView(
-          session: sessionAt(CheckoutStep.customerSignPending),
+          // Los TRES sellos que la guarda de este paso exige: llegar al paso 8
+          // sin `inspectionCompletedAt` es imposible (ENTRY_REQUIRES), y la
+          // antesala existe precisamente para pintar "qué hay hecho y qué
+          // falta" — alimentarla con todo en pendiente la vaciaba de sentido
+          // aunque ninguna aserción leyera un sello.
+          session: sessionAt(
+            CheckoutStep.customerSignPending,
+            tc: DateTime.utc(2026, 8, 28, 10, 19),
+            payment: DateTime.utc(2026, 8, 28, 10, 41),
+            inspection: DateTime.utc(2026, 8, 28, 11, 2),
+          ),
           position: 8,
           roster: presenceRoster(
             [presence('KIOSK', name: 'Kiosk')],
@@ -636,6 +663,133 @@ void main() {
       expect(find.textContaining('el cliente no se presentó'), findsOneWidget);
     });
 
+    testWidgets('GD-MC-1 · el chip dice la SUPERFICIE, que es su propósito — '
+        'y a 360 dp la línea larga no cabe', (tester) async {
+      tester.view.physicalSize = const Size(360, 780);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await pump(
+        tester,
+        SessionHead(
+          context_: const CheckoutReservationContext(
+            customerName: 'Laura Méndez',
+            vehicleLabel: 'U-112',
+          ),
+          presence: pickPresenceChip(
+            [presence('COUNTER', name: 'Diego Torres')],
+            now,
+          ),
+          mini: true,
+          onPresenceTap: () {},
+        ),
+      );
+      // Con el punto VIVO la edad es irrelevante y manda la superficie: es la
+      // decisión que el chip habilita (a Diego le gritas; al kiosco hay que
+      // caminarle al lobby).
+      expect(find.text('Diego Torres · counter'), findsOneWidget);
+      // Y la línea larga —la que se cortaba en 19 caracteres y se comía justo
+      // la superficie— ya no se pinta en el chip.
+      expect(find.textContaining('is in this session'), findsNothing);
+
+      // El lector de pantalla SÍ recibe la línea completa: el recorte es de
+      // ancho, no de información.
+      final semantics = tester.getSemantics(find.byType(PresenceChip).first);
+      expect(semantics.label, contains('Diego Torres'));
+      expect(semantics.label, contains('counter'));
+      expect(semantics.label, contains('is in this session'));
+    });
+
+    testWidgets('GD-MC-1 · con el punto apagado la noticia es la EDAD',
+        (tester) async {
+      // La EDAD la calcula el chip contra `clock.now()`, así que esta fila se
+      // ancla al reloj real y no al `now` fijo del resto del archivo — si no,
+      // el chip mediría horas y la aserción no probaría nada.
+      final realNow = DateTime.now();
+      await pump(
+        tester,
+        Align(
+          alignment: Alignment.topLeft,
+          child: PresenceChip(
+            data: pickPresenceChip(
+              [
+                CheckoutPresenceDto(
+                  surface: 'KIOSK',
+                  displayName: 'The lobby kiosk',
+                  lastSeenAt: realNow.subtract(const Duration(seconds: 38)),
+                ),
+              ],
+              realNow,
+            ),
+          ),
+        ),
+      );
+      // Se afirma la FORMA, no el segundo exacto: entre construir la fila y
+      // pintarla puede cruzarse un borde de segundo, y un test que falla por
+      // eso es un test que se acaba silenciando.
+      expect(
+        find.byWidgetPredicate(
+          (w) =>
+              w is Text &&
+              w.data != null &&
+              RegExp(r'^The lobby kiosk · \d+ s ago$').hasMatch(w.data!),
+        ),
+        findsOneWidget,
+      );
+      // Y NO la línea larga: con el punto apagado lo que el agente necesita
+      // saber es cuánto hace, no dónde estaba.
+      expect(find.textContaining('is in this session'), findsNothing);
+    });
+
+    testWidgets('GD-MC-2 · sin red la fila "Tú" NO afirma que estás visible: '
+        'el latido es un POST y no está aterrizando', (tester) async {
+      final roster = presenceRoster(
+        [presence('COUNTER', name: 'Diego Torres')],
+        now,
+      );
+
+      await pump(
+        tester,
+        WhoIsHereSheet(
+          roster: roster,
+          myName: 'Ana Ruiz',
+          offline: false,
+          onClose: () {},
+        ),
+      );
+      expect(find.text('Others see you as Ana Ruiz'), findsOneWidget);
+      expect(
+        find.textContaining('You appear by name while this screen is open'),
+        findsOneWidget,
+      );
+
+      await pump(
+        tester,
+        WhoIsHereSheet(
+          roster: roster,
+          myName: 'Ana Ruiz',
+          offline: true,
+          onClose: () {},
+        ),
+      );
+      // La única pantalla construida para explicar el reverso del latido no
+      // puede ser, justo sin red, la única que afirma lo que no sostiene.
+      expect(
+        find.textContaining('You appear by name while this screen is open'),
+        findsNothing,
+      );
+      expect(
+        find.textContaining("your heartbeat isn't landing"),
+        findsOneWidget,
+      );
+      expect(find.text('No connection'), findsOneWidget);
+      // Y el PUNTO también se apaga. Se comprueba el color y no el texto: un
+      // punto verde afirmando presencia al lado de "sin conexión" es
+      // exactamente el estado que GD-MC-2 vino a cerrar, y una aserción de
+      // texto lo dejaría pasar.
+      expect(liveDots(tester), 0);
+    });
+
     testWidgets('23C · el barrido nocturno NO se atribuye a "otro agente": '
         'nadie la pausó, la marcó un cron', (tester) async {
       Future<void> withReason(String reason) async {
@@ -686,9 +840,17 @@ void main() {
           onClose: () {},
         ),
       );
+      // UNA vez, no dos: la causa vive en el subtítulo de la hoja, y
+      // repetirla en el banner del vacío la ponía dos veces a ~100 px.
       expect(
         find.textContaining("we can't state that anyone is here right now"),
-        findsWidgets,
+        findsOneWidget,
+      );
+      // Y lo que el banner sí añade es la otra mitad: el vacío tampoco se
+      // puede leer como "no hay nadie".
+      expect(
+        find.textContaining("it can't be read as"),
+        findsOneWidget,
       );
       expect(find.textContaining('Nobody is visible right now'), findsNothing);
       // Y en ninguno de los dos casos se dice "estás solo".

@@ -164,11 +164,16 @@ void main() {
     for (final phase in ['Confirm', 'T&C', 'Payment', 'Inspection', 'Closing']) {
       expect(find.text(phase), findsOneWidget, reason: phase);
     }
-    // Presencia: informativa, con la superficie nombrada.
+    // Presencia: informativa, con la superficie nombrada — que es el propósito
+    // del chip. Desde M2-H6 se dice en la forma CORTA de los marcos: la línea
+    // larga no cabía a 360 dp y lo primero que se cortaba era justo la
+    // superficie (GD-MC-1).
     expect(find.byType(PresenceChip), findsOneWidget);
+    expect(find.text('María G. · kiosk'), findsOneWidget);
+    // La línea completa no se pierde: viaja entera al lector de pantalla.
     expect(
-      find.textContaining('María G. is in this session · kiosk'),
-      findsOneWidget,
+      tester.getSemantics(find.byType(PresenceChip)).label,
+      contains('María G. is in this session · kiosk'),
     );
     // Header completo (8A): la fila del cliente del display-data.
     expect(find.text('María González'), findsOneWidget);

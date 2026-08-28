@@ -406,4 +406,35 @@ void main() {
       expect(initialsOf('   '), '·');
     });
   });
+
+  group('el serializer del helper de pruebas no puede tragarse el campo', () {
+    test('la presencia construida por `sessionAt` CONSERVA `actorUserId`, o la '
+        'auto-supresión quedaría inerte sin que ninguna prueba se entere', () {
+      final session = sessionAt(
+        CheckoutStep.tcPending,
+        presence: [
+          CheckoutPresenceDto(
+            surface: 'RIDEOPS',
+            displayName: 'Ana Ruiz',
+            actorUserId: kMyUserId,
+            lastSeenAt: now,
+          ),
+          CheckoutPresenceDto(
+            surface: 'COUNTER',
+            displayName: 'Diego Torres',
+            actorUserId: 'u-99',
+            lastSeenAt: now.subtract(const Duration(seconds: 4)),
+          ),
+        ],
+      );
+      // El campo tiene que llegar al DTO…
+      expect(session.presence!.first.actorUserId, kMyUserId);
+      // …y con él, el filtro tiene que poder actuar. Si el helper lo descarta,
+      // el chip encabeza con el propio agente y esto falla.
+      final chip = pickPresenceChip(session.presence, now,
+          myUserId: kMyUserId);
+      expect(chip!.entry.displayName, 'Diego Torres');
+      expect(chip.others, 0);
+    });
+  });
 }

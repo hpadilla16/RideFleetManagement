@@ -2656,4 +2656,25 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get coGuardWhyServer =>
       'Este paso lo cierra el servidor cuando reciba el sello, no esta pantalla. Nada se pierde: puedes pausar y volver.';
+
+  @override
+  String coPresenceChipLive(String name, String surface) {
+    return '$name · $surface';
+  }
+
+  @override
+  String coPresenceChipAged(String name, String age) {
+    return '$name · hace $age';
+  }
+
+  @override
+  String get coWhoIsHereYouOffline => 'Sin conexión';
+
+  @override
+  String get coWhoIsHereDisclosureOffline =>
+      'Sin conexión tu latido no está llegando: en menos de un minuto dejas de aparecer para las demás superficies. Vuelves a aparecer solo al recuperar señal. Esto nunca reserva nada.';
+
+  @override
+  String get coPresenceEmptyUnverifiable =>
+      'Y tampoco se puede leer como «no hay nadie»: otra superficie puede estar avanzando sin que lo veamos.';
 }

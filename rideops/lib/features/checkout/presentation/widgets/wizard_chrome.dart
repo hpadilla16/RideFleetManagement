@@ -459,15 +459,40 @@ class PresenceChip extends StatelessWidget {
     final age = lastSeen == null
         ? Duration.zero
         : clock.now().difference(lastSeen);
-    final text = entry == null
+    final live =
+        !offline && data?.freshness == PresenceFreshness.live;
+    // FORMA CORTA, la de los marcos aprobados (GD-MC-1). El chip vive con
+    // ~111 px útiles a 360 dp una vez descontados el tope de ancho y el
+    // avatar; `coPresenceLine` entera se corta en 19 caracteres y lo primero
+    // que se come es la SUPERFICIE — justo el propósito declarado del chip: a
+    // "Diego Torres · mostrador" le gritas desde la otra punta del patio, al
+    // kiosco hay que caminarle al lobby.
+    //
+    // Cuál de los dos datos acompaña al nombre lo decide el estado, como en la
+    // lámina: con el punto VIVO la edad es irrelevante (es ahora) y manda la
+    // superficie (20A); con el punto apagado la noticia ES la edad (20C).
+    //
+    // No se pierde nada: la línea completa —nombre, superficie y edad— sigue
+    // llegando entera al lector de pantalla por `coPresenceChipSemantics`, que
+    // no tiene límite de ancho.
+    final full = entry == null
         ? l10n.coPresenceEmptyShort
         : l10n.coPresenceLine(
             entry.displayName,
             surfaceLabel(l10n, entry.surface),
             checkoutAgeLabel(l10n, age),
           );
-    final live =
-        !offline && data?.freshness == PresenceFreshness.live;
+    final text = entry == null
+        ? l10n.coPresenceEmptyShort
+        : live
+            ? l10n.coPresenceChipLive(
+                entry.displayName,
+                surfaceLabel(l10n, entry.surface),
+              )
+            : l10n.coPresenceChipAged(
+                entry.displayName,
+                checkoutAgeLabel(l10n, age),
+              );
     // Vacío o sin red ⇒ rampa NEUTRA, no morada: el morado sobre gris cae a
     // 4,4:1 y, peor, un chip vacío en color de marca se lee como si afirmara
     // algo. n700 sobre n50 mide 8,9:1.
@@ -542,7 +567,7 @@ class PresenceChip extends StatelessWidget {
     // que TalkBack diga QUÉ hay antes de QUÉ se puede hacer.
     return Semantics(
       button: true,
-      label: l10n.coPresenceChipSemantics(text),
+      label: l10n.coPresenceChipSemantics(full),
       onTap: tap,
       child: ExcludeSemantics(
         child: Material(

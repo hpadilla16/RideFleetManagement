@@ -2652,4 +2652,25 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get coGuardWhyServer =>
       'The server closes this step when the stamp lands, not this screen. Nothing is lost: you can pause and come back.';
+
+  @override
+  String coPresenceChipLive(String name, String surface) {
+    return '$name · $surface';
+  }
+
+  @override
+  String coPresenceChipAged(String name, String age) {
+    return '$name · $age ago';
+  }
+
+  @override
+  String get coWhoIsHereYouOffline => 'No connection';
+
+  @override
+  String get coWhoIsHereDisclosureOffline =>
+      'With no connection your heartbeat isn\'t landing: in under a minute you stop appearing to the other surfaces. You reappear on your own once you have signal. This never reserves anything.';
+
+  @override
+  String get coPresenceEmptyUnverifiable =>
+      'And it can\'t be read as “nobody is here” either: another surface may be moving ahead without us seeing it.';
 }

@@ -51,9 +51,11 @@ String guardLabel(AppLocalizations l10n, CheckoutEntryGuard guard) =>
       CheckoutEntryGuard.signature => l10n.coGuardSignature,
     };
 
-/// Superficie de una presencia. El enum `CheckoutSurface` NO está espejado en
-/// Dart todavía (aterriza con M2-H6), así que esto compara el wire crudo y
-/// cae a "otra superficie" ante cualquier valor nuevo.
+/// Superficie de una presencia. `CheckoutSurface` YA está espejado en
+/// `enums.dart` (aterrizó en M2-H6, con su marcador `// mirrors:`), pero esto
+/// sigue comparando el WIRE CRUDO a propósito: la etiqueta tiene que existir
+/// también para una superficie que esta versión no conoce, y ahí el enum
+/// devuelve null. Cae a "otra superficie" y la app sigue viva.
 String surfaceLabel(AppLocalizations l10n, String surface) =>
     switch (surface) {
       'KIOSK' => l10n.coSurfaceKiosk,

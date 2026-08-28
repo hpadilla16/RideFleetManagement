@@ -4248,6 +4248,36 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Este paso lo cierra el servidor cuando reciba el sello, no esta pantalla. Nada se pierde: puedes pausar y volver.'**
   String get coGuardWhyServer;
+
+  /// Forma CORTA del chip, la que dibujan los marcos aprobados (20A). El chip vive con ~111 px utiles a 360 dp: la linea larga de `coPresenceLine` se corta en 19 caracteres y se come justo la SUPERFICIE, que es el proposito declarado del chip (a Diego le gritas desde la otra punta del patio; al kiosco hay que caminarle). Con el punto VIVO la edad es irrelevante —es ahora— asi que los dos datos que caben son nombre y superficie.
+  ///
+  /// In es, this message translates to:
+  /// **'{name} · {surface}'**
+  String coPresenceChipLive(String name, String surface);
+
+  /// Forma corta del chip cuando el punto ya NO esta vivo (20C: «El kiosco · hace 38 s»). Ahi la noticia es la EDAD, no la superficie. La linea completa —nombre, superficie y edad— sigue llegando entera al lector de pantalla por `coPresenceChipSemantics`, que no tiene limite de ancho: nada se pierde para accesibilidad.
+  ///
+  /// In es, this message translates to:
+  /// **'{name} · hace {age}'**
+  String coPresenceChipAged(String name, String age);
+
+  /// Estado de la fila «Tú» sin red. El latido es un POST: sin red no aterriza, y a los 45 s el agente deja de estar visible para las demas superficies.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin conexión'**
+  String get coWhoIsHereYouOffline;
+
+  /// La divulgacion NO puede afirmar «apareces con tu nombre» justo cuando es falso. Es el espejo exacto del defecto del vacio: la unica pantalla construida para explicar el reverso del latido seria, sin red, la unica que no puede sostener lo que dice.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin conexión tu latido no está llegando: en menos de un minuto dejas de aparecer para las demás superficies. Vuelves a aparecer solo al recuperar señal. Esto nunca reserva nada.'**
+  String get coWhoIsHereDisclosureOffline;
+
+  /// Complementa el subtitulo de la hoja cuando NO hay red y la lista viene vacia. La causa («sin red no se puede afirmar que alguien este ahora») ya la dice el subtitulo dos lineas mas arriba; repetirla seria la misma frase dos veces a ~100 px. Lo que falta decir es que el vacio tampoco autoriza la lectura contraria.
+  ///
+  /// In es, this message translates to:
+  /// **'Y tampoco se puede leer como «no hay nadie»: otra superficie puede estar avanzando sin que lo veamos.'**
+  String get coPresenceEmptyUnverifiable;
 }
 
 class _AppLocalizationsDelegate
