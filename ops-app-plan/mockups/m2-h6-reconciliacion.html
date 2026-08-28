@@ -1,0 +1,1715 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RideOps · Mockup M2-H6 — Reconciliación multi-superficie (presencia · avance ajeno · matriz 409 · engancharse en cualquier paso)</title>
+<style>
+/* ============================================================
+   TOKENS — IDÉNTICOS a m2-tanda-a/b/c.html (lenguaje aprobado
+   por Hector). Nada nuevo salvo lo que se declara como token
+   propio de esta lámina y va medido.
+   ============================================================ */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-200:#d9c9ff; --p-300:#c0a8ff;
+  --p-400:#9f79ff; --p-500:#7f4ff0; --p-600:#6a35e0; --p-700:#5a26c9;
+  --p-800:#45189e; --p-900:#2e1071;
+  --brand:#8752FE;
+  --brand-a08:rgba(135,82,254,.08); --brand-a12:rgba(135,82,254,.12);
+  --brand-a16:rgba(135,82,254,.16); --brand-a20:rgba(135,82,254,.20);
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --focus:#0b63d6; --focus-halo:rgba(11,99,214,.22);
+  --tonal:#f6f2ff;
+  --sh-b1:0 1px 0 rgba(255,255,255,.85) inset,0 2px 6px -2px rgba(69,24,158,.14),0 10px 24px -10px rgba(135,82,254,.22);
+  --sh-float:0 6px 16px -6px rgba(23,18,43,.18),0 24px 48px -18px rgba(69,24,158,.30);
+  --r-xl:24px; --r-2xl:28px;
+  --bd-lite:1px solid rgba(135,82,254,.14);
+  --sh-3:0 1px 3px rgba(24,16,54,.06),0 14px 30px -10px rgba(38,20,90,.14),0 44px 80px -28px rgba(38,20,90,.22);
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+  background:var(--n-100);color:var(--n-900);font-size:14px;line-height:1.5}
+h1,h2,h3{margin:0;letter-spacing:.005em}
+a{text-decoration:none;color:inherit}
+.tnum{font-variant-numeric:tabular-nums}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.92em;background:var(--n-50);
+  border:1px solid var(--n-200);border-radius:5px;padding:0 4px}
+
+/* ---------- chrome del documento (idéntico a las tandas aprobadas) ---------- */
+.doc-head{max-width:1720px;margin:0 auto;padding:26px 24px 10px}
+.doc-head h1{font-size:24px;font-weight:850}
+.doc-head h1 .v2{display:inline-flex;align-items:center;margin-left:10px;padding:3px 12px;border-radius:999px;
+  background:linear-gradient(135deg,var(--p-600),var(--p-800));color:#fff;font-size:13px;font-weight:800;vertical-align:middle}
+.doc-head p{margin:8px 0 0;color:var(--n-700);max-width:1020px}
+.meta-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.mchip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 11px;
+  border-radius:8px;background:var(--p-50);border:1px solid var(--brand-a20);
+  color:var(--p-800);font-size:12.5px;font-weight:700}
+.mchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.mchip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.mchip.dang{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.jump{position:sticky;top:0;z-index:60;display:flex;gap:8px;flex-wrap:wrap;
+  padding:10px 24px;background:rgba(255,255,255,.94);border-bottom:1px solid var(--n-200);box-shadow:var(--sh-1)}
+.jump a{display:inline-flex;align-items:center;min-height:40px;padding:6px 14px;border-radius:12px;
+  border:1px solid var(--n-300);background:var(--n-0);font-weight:700;font-size:13px;color:var(--n-800)}
+.jump a:hover{background:var(--p-50);border-color:var(--brand-a20);color:var(--p-800)}
+.jump a.gate{border-color:var(--danger-bd);background:var(--danger-bg);color:var(--danger-tx)}
+section.blk{max-width:1720px;margin:0 auto;padding:30px 24px 8px;scroll-margin-top:76px}
+.blk-head{margin-bottom:16px}
+.blk-head .eyebrow{color:var(--p-700);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.blk-head h2{font-size:20px;font-weight:800;margin-top:2px}
+.blk-head p{color:var(--n-700);margin:6px 0 0;max-width:1000px}
+.state-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.schip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:6px;
+  font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--n-50);border:1px solid var(--n-200);color:var(--n-700)}
+.schip i{width:6px;height:6px;border-radius:50%;background:currentColor;font-style:normal}
+.frames{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;padding-bottom:26px}
+figure{margin:0}
+figcaption{font-size:13px;font-weight:800;color:var(--n-800);margin:0 0 8px 6px;max-width:380px}
+figcaption small{display:block;font-weight:600;color:var(--n-600);font-size:12px}
+.tag{display:inline-flex;align-items:center;min-height:20px;padding:1px 8px;border-radius:6px;
+  font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;margin-right:6px;vertical-align:2px}
+.tag.cont{background:var(--ok-bg);border:1px solid var(--ok-bd);color:var(--ok-tx)}
+.tag.prop{background:var(--info-bg);border:1px solid var(--info-bd);color:#0a4c9e}
+.tag.corr{background:var(--warn-bg);border:1px solid var(--warn-bd);color:var(--warn-tx)}
+
+/* ---------- notas / anotaciones ---------- */
+.notes{flex:1 1 330px;max-width:430px;background:var(--n-0);border:var(--bd-lite);
+  border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1)}
+.notes h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+.note{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--n-100);font-size:13px;color:var(--n-700)}
+.note:last-child{border-bottom:0}
+.note b{color:var(--n-900)}
+.m{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;
+  border-radius:50%;background:var(--p-600);color:#fff;font-size:12px;font-weight:800;line-height:1}
+.m.inframe{position:absolute;z-index:9;box-shadow:0 0 0 2px #fff}
+.drop{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--n-50);border:1px solid var(--n-300);
+  border-left:4px solid var(--n-500);font-size:12.5px;color:var(--n-800)}
+.drop b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:6px}
+.drop ul{margin:0;padding-left:16px}
+.drop li{margin:5px 0}
+.decision{margin-top:14px;padding:14px 16px;border-radius:16px;background:var(--warn-bg);
+  border:1.5px dashed var(--warn-bd);color:var(--warn-tx);font-size:13px}
+.decision.hard{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.decision b{display:block;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.decision ul{margin:6px 0 0;padding-left:18px}
+.decision li{margin:3px 0}
+.contrast{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--n-50);
+  border:1px solid var(--n-200);font-size:12.5px;color:var(--n-700)}
+.contrast b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:6px}
+.contrast ul{margin:0;padding-left:16px}
+.contrast li{margin:3px 0}
+
+/* ---------- tabla de copy es/en ---------- */
+.copy{flex:1 1 460px;max-width:700px;background:var(--n-0);border:var(--bd-lite);border-radius:20px;
+  padding:16px 18px;box-shadow:var(--sh-b1)}
+.copy h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+table.ct{width:100%;border-collapse:collapse;font-size:12.5px}
+table.ct th{text-align:left;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--n-600);
+  border-bottom:1.5px solid var(--n-200);padding:6px 8px 6px 0}
+table.ct td{border-bottom:1px solid var(--n-100);padding:7px 8px 7px 0;vertical-align:top;color:var(--n-800)}
+table.ct td.k{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--p-800);white-space:nowrap}
+table.ct td.fr{font-weight:850;color:var(--n-900);white-space:nowrap}
+
+/* ============================================================
+   FRAME DE TELÉFONO — 360 px de SUPERFICIE REAL
+   Las tandas A–C dibujaron 372 px útiles (390 - 2×9 de marco).
+   Esta lámina baja a 360 dp porque H6 es la historia que APILA
+   cromo (wizbar + header + banner + stepline) y el peor caso
+   real del patio es un Android de gama media a 360 dp. Los
+   tamaños de tipo, targets y radios NO cambian: es el mismo
+   lenguaje, medido en el ancho más apretado.
+   ============================================================ */
+.phone{position:relative;width:378px;border:9px solid var(--n-900);border-radius:40px;
+  overflow:hidden;background:var(--n-50);box-shadow:var(--sh-3)}
+.statusbar{position:relative;z-index:4;display:flex;justify-content:space-between;align-items:center;height:32px;
+  padding:0 18px;font-size:11.5px;font-weight:700;color:var(--n-700);background:var(--n-50)}
+.statusbar.on-white{background:var(--n-0)}
+.statusbar .off{color:var(--danger-tx)}
+.scr{position:relative;display:flex;flex-direction:column;min-height:740px;padding:0}
+
+/* ---------- WIZARD: barra, header de sesión, presencia, rail ---------- */
+.wizbar{position:relative;z-index:4;display:flex;align-items:center;gap:8px;padding:7px 8px;
+  background:rgba(255,255,255,.98);border-bottom:1px solid var(--n-200)} /* cero BackdropFilter en todo el wizard */
+.icobtn{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+  color:var(--n-800);flex:0 0 auto;border:1.5px solid var(--n-300);background:var(--n-0)}
+.wizbar .tt{flex:1;min-width:0}
+.wizbar .tt b{display:block;font-size:15.5px;font-weight:850;color:var(--n-900);line-height:1.15}
+.wizbar .tt span{font-size:12px;font-weight:650;color:var(--n-700)}
+.pausebtn{min-height:48px;display:inline-flex;align-items:center;gap:6px;padding:0 11px;border-radius:14px;
+  border:1.5px solid var(--n-300);background:var(--n-0);font-size:13px;font-weight:800;color:var(--n-800);flex:0 0 auto}
+.sesshead{background:var(--tonal);border-bottom:1px solid var(--n-200);padding:11px 13px;display:grid;gap:9px}
+.sesshead.mini{display:flex;align-items:center;gap:8px;padding:7px 11px}
+.sesshead.mini .who{display:flex;align-items:center;gap:7px;min-width:0;flex:1;font-size:13.5px;font-weight:800;color:var(--n-900)}
+.sesshead.mini .who svg{flex:0 0 auto;color:var(--p-800)}
+.sesrow{display:flex;align-items:center;gap:10px}
+.sesrow .sic{width:38px;height:38px;border-radius:13px;background:var(--n-0);border:1px solid var(--n-200);color:var(--p-800);
+  display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.sesrow .sb{min-width:0;flex:1}
+.sesrow .sb b{display:block;font-size:14.5px;font-weight:850;color:var(--n-900);line-height:1.2}
+.sesrow .sb span{font-size:12.5px;font-weight:700;color:var(--n-700)}
+.presence{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:3px 10px;border-radius:12px;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800);font-size:12.5px;font-weight:750}
+.sesshead.mini .presence{min-height:32px;padding:2px 8px;font-size:11.5px;gap:5px}
+.presence .pv{width:22px;height:22px;border-radius:50%;background:var(--p-200);color:var(--p-900);
+  font-size:10px;font-weight:850;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.sesshead.mini .presence .pv{width:19px;height:19px;font-size:9px}
+.presence .lv{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:led 2.4s ease-in-out infinite;flex:0 0 auto}
+.presence .lv.stale{background:var(--n-500);animation:none}
+.presence .plus{background:var(--p-200);color:var(--p-900);border-radius:7px;padding:1px 6px;font-size:11px;font-weight:850}
+.presence.mut{background:var(--n-50);border-color:var(--n-300);color:var(--n-700)}
+@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
+.srail{display:flex;align-items:flex-start;padding:12px 6px 6px;background:var(--n-0)}
+.sr{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:5px;position:relative;min-height:48px}
+.sr .d{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  border:2px solid var(--n-300);background:var(--n-0);color:var(--n-600);font-size:11px;font-weight:850;
+  position:relative;z-index:2}
+.sr .lb{font-size:11.5px;font-weight:800;color:var(--n-600);text-align:center;line-height:1.15}
+.sr::before{content:"";position:absolute;top:11px;right:50%;width:100%;height:3px;background:var(--n-200);z-index:1}
+.sr:first-child::before{display:none}
+.sr.done .d{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.sr.done .lb{color:var(--ok-tx)}
+.sr.done::before,.sr.on::before{background:var(--ok-bd)}
+.sr.on .d{background:var(--p-600);border-color:var(--p-600);color:#fff;box-shadow:0 0 0 4px var(--brand-a16)}
+.sr.on .lb{color:var(--p-800);font-weight:850}
+.sr.jump .d{border-style:dashed;border-color:var(--info-bd);background:var(--info-bg);color:var(--info)}
+.stepline{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 13px;background:var(--n-0);
+  border-top:1px solid var(--n-200);border-bottom:1px solid var(--n-200);font-size:13.5px;font-weight:750;color:var(--n-800)}
+.stepline .ix{font-variant-numeric:tabular-nums;font-weight:850;color:var(--p-800);background:var(--p-50);
+  border:1px solid var(--brand-a20);border-radius:8px;padding:2px 7px;font-size:12px;flex:0 0 auto}
+.stepline .more{margin-left:auto;font-size:12.5px;font-weight:800;color:var(--p-700);
+  display:inline-flex;align-items:center;gap:4px;min-height:48px;flex:0 0 auto}
+.stepline.stale{background:var(--n-50);color:var(--n-700)}
+.stepline.nb{border-bottom:0}
+
+/* ---------- tarjetas ---------- */
+.vcard{background:linear-gradient(180deg,#fff,#fdfcff);border:var(--bd-lite);border-radius:20px;
+  padding:12px 13px;box-shadow:var(--sh-b1)}
+.vcard.bad{border:1.5px solid var(--danger-bd);background:#fffbfb}
+.vcard.warn{border:1.5px solid var(--warn-bd);background:#fffdf7}
+.vcard.okc{border:1.5px solid var(--ok-bd);background:#fbfffd}
+.vhead{display:flex;align-items:center;gap:9px}
+.vhead b{font-size:14.5px;font-weight:850;color:var(--n-900);flex:1}
+.vpill{display:inline-flex;align-items:center;gap:5px;min-height:26px;padding:2px 9px;border-radius:8px;
+  font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.vpill.ok{background:var(--ok-bg);border:1px solid var(--ok-bd);color:var(--ok-tx)}
+.vpill.warn{background:var(--warn-bg);border:1px solid var(--warn-bd);color:var(--warn-tx)}
+.vpill.bad{background:var(--danger-bg);border:1px solid var(--danger-bd);color:var(--danger-tx)}
+.vpill.mut{background:var(--n-50);border:1px solid var(--n-200);color:var(--n-700)}
+.kv{display:flex;align-items:flex-start;gap:8px;padding:7px 0 6px;border-top:1px solid var(--n-100);font-size:13.5px}
+.kv:first-of-type{border-top:0}
+.kv .k{color:var(--n-700);font-weight:650;flex:0 0 96px}
+.kv .v{color:var(--n-900);font-weight:750;flex:1;min-width:0}
+.kv .v.miss{color:var(--danger-tx);font-weight:800}
+.kv .v.pend{color:var(--n-700);font-weight:700}
+.kv .v.okv{color:var(--ok-tx);font-weight:800}
+.quote{margin-top:8px;padding:10px 12px;border-radius:12px;background:var(--n-25);border:1px solid var(--n-200);
+  border-left:4px solid var(--n-400);font-size:13px;font-weight:700;color:var(--n-800);line-height:1.4}
+.quote i{display:block;font-style:normal;font-size:11px;font-weight:800;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--n-600);margin-bottom:4px}
+
+/* ---------- comunes ---------- */
+.banner{display:flex;gap:9px;align-items:flex-start;padding:11px 12px;border-radius:14px;
+  font-size:13px;font-weight:600;line-height:1.45;border:1px solid}
+.banner svg{flex:0 0 auto;margin-top:1px}
+.banner .ba{display:inline-flex;align-items:center;min-height:44px;font-weight:850;text-decoration:underline}
+.b-danger{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.b-warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.b-ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.b-info{background:var(--info-bg);border-color:var(--info-bd);color:var(--n-800)}
+.b-info .ba{color:var(--p-700)}
+/* banner ANCLADO al pie: 21C. No es un toast (no se va solo) ni un modal
+   (no roba el foco). Vive pegado al dock, encima del CTA. */
+.anchored{position:absolute;left:12px;right:12px;bottom:12px;z-index:7;box-shadow:var(--sh-float)}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:56px;border-radius:18px;
+  font-size:16px;font-weight:800;letter-spacing:.01em}
+.btn-primary{background:linear-gradient(180deg,#7442e8,var(--p-600));color:#fff;
+  box-shadow:0 1px 0 rgba(255,255,255,.28) inset,0 4px 10px -4px rgba(69,24,158,.35),0 14px 28px -12px rgba(135,82,254,.45)}
+.btn-ghost{background:var(--n-0);border:1.5px solid var(--n-300);color:var(--n-800);box-shadow:var(--sh-1)}
+.btn-neutral{background:var(--n-800);color:#fff;box-shadow:var(--sh-1)}
+.btn.is-disabled{opacity:.55}
+.btn-sm{min-height:48px;font-size:14.5px;border-radius:14px}
+.btn-md{min-height:54px;font-size:15.5px;border-radius:16px}
+.wpad{padding:13px 12px 16px;display:flex;flex-direction:column;flex:1;gap:10px;position:relative;z-index:2}
+.dock{margin-top:auto;display:grid;gap:9px;padding:12px 0 0;position:relative}
+.dock::before{content:"";position:absolute;top:0;left:-12px;right:-12px;height:1px;background:var(--n-200)}
+.dock .why{font-size:12.5px;font-weight:750;color:var(--n-700);text-align:center;line-height:1.4}
+.center-state{margin:auto 0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;padding:0 6px}
+.big-ic{width:72px;height:72px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.big-ic.ok{background:var(--ok-bg);color:var(--ok-tx)}
+.big-ic.info{background:var(--info-bg);border:1.5px solid var(--info-bd);color:var(--info)}
+.big-ic.warn{background:var(--warn-bg);border:1.5px solid var(--warn-bd);color:var(--warn-tx)}
+.big-ic.deny{background:var(--danger-bg);border:1.5px solid var(--danger-bd);color:var(--danger-tx)}
+.center-state h4{margin:0;font-size:21px;font-weight:850;color:var(--n-900);line-height:1.2}
+.center-state p{margin:0;font-size:14px;color:var(--n-700);max-width:290px}
+.scrim{position:absolute;inset:0;z-index:5;background:rgba(23,18,43,.42)}
+.sheet{position:absolute;left:0;right:0;bottom:0;z-index:6;background:var(--n-0);
+  border-radius:var(--r-2xl) var(--r-2xl) 0 0;box-shadow:var(--sh-float);padding:8px 13px 16px;
+  display:flex;flex-direction:column;gap:10px;max-height:74%}
+.grab{width:44px;height:5px;border-radius:3px;background:var(--n-300);margin:2px auto 4px}
+.sheet h4{margin:0;font-size:17px;font-weight:850;color:var(--n-900)}
+.sheet .sub{font-size:12.5px;font-weight:700;color:var(--n-700);margin-top:-4px}
+.prow{display:flex;align-items:center;gap:10px;min-height:56px;padding:7px 10px;border-radius:16px;
+  border:1px solid var(--n-200);background:var(--n-0)}
+.prow.me{background:var(--tonal);border-color:var(--brand-a20)}
+.prow .av{width:36px;height:36px;border-radius:50%;background:var(--p-100);color:var(--p-900);flex:0 0 auto;
+  display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:850}
+.prow .av.mine{background:var(--p-600);color:#fff}
+/* APARATO, no persona: cuadrado (no círculo), glifo (no iniciales), rampa
+   neutra (no morada). Las tres señales cambian a la vez a propósito — con
+   guantes y sol, una sola no se lee. */
+.prow .av.dev{border-radius:12px;background:var(--n-100);color:var(--n-700);border:1px solid var(--n-300)}
+.presence .pv.dev{border-radius:7px;background:var(--n-200);color:var(--n-800)}
+.prow .pb{flex:1;min-width:0}
+.prow .pb b{display:block;font-size:14px;font-weight:850;color:var(--n-900);line-height:1.2}
+.prow .pb span{font-size:12px;font-weight:700;color:var(--n-700)}
+.prow .st{flex:0 0 auto;display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:800;color:var(--ok-tx)}
+.prow .st i{width:7px;height:7px;border-radius:50%;background:var(--ok);font-style:normal;animation:led 2.4s ease-in-out infinite}
+.prow .st.old{color:var(--n-600)} .prow .st.old i{background:var(--n-500);animation:none}
+/* ---------- diff de cambios (21B) ---------- */
+.dlist{display:grid;gap:7px;overflow-y:auto;flex:1;min-height:0}
+.drow{display:flex;gap:10px;align-items:flex-start;padding:9px 11px;border-radius:14px;
+  border:1px solid var(--ok-bd);background:#fbfffd}
+.drow.mine{border-color:var(--brand-a20);background:var(--p-50)}
+.drow.none{border-color:var(--n-200);background:var(--n-25)}
+.drow .dic{width:26px;height:26px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  background:var(--ok-bg);color:var(--ok-tx)}
+.drow.mine .dic{background:var(--p-100);color:var(--p-800)}
+.drow.none .dic{background:var(--n-100);color:var(--n-600)}
+.drow .db{flex:1;min-width:0}
+.drow .db b{display:block;font-size:13.5px;font-weight:850;color:var(--n-900);line-height:1.25}
+.drow .db span{font-size:12px;font-weight:700;color:var(--n-700)}
+/* ---------- estado local preservado (21C) ---------- */
+.f-label{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--n-600);margin:8px 0 6px}
+.inp{position:relative;display:flex;align-items:center;min-height:54px;border:1.5px solid var(--n-300);
+  border-radius:16px;background:var(--n-0);padding:0 14px;font-size:15.5px;color:var(--n-900);font-weight:600;
+  box-shadow:0 1px 0 rgba(255,255,255,.8) inset,0 1px 2px rgba(24,16,54,.04)}
+.inp.focus{border-color:var(--focus);box-shadow:0 0 0 4px var(--focus-halo)}
+.inp .unit{margin-left:auto;font-size:13px;font-weight:750;color:var(--n-600)}
+.inp.big{min-height:60px;font-size:24px;font-weight:850;font-variant-numeric:tabular-nums}
+.caret{display:inline-block;width:2px;height:24px;background:var(--focus);margin-left:2px;animation:led 1.1s steps(1) infinite}
+.tchip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:8px;
+  font-size:12.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800)}
+.tchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.tchip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.tchip.dang{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.tchip.mut{background:var(--n-50);border-color:var(--n-200);color:var(--n-700)}
+/* ---------- log de sesión (22D / 23C) ---------- */
+.log{display:grid;gap:0}
+.lrow{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--n-100);font-size:13px}
+.lrow:last-child{border-bottom:0}
+.lrow .lt{flex:0 0 62px;font-variant-numeric:tabular-nums;font-weight:800;color:var(--n-700);font-size:12.5px}
+.lrow .lb{flex:1;min-width:0;color:var(--n-800);font-weight:700}
+.lrow .lb i{display:block;font-style:normal;font-size:11.5px;font-weight:700;color:var(--n-600)}
+
+footer.dod{max-width:1720px;margin:0 auto;padding:10px 24px 60px;color:var(--n-700);font-size:13px}
+footer.dod .card{background:var(--n-0);border:var(--bd-lite);border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1);margin-bottom:14px}
+footer.dod b{color:var(--n-900)}
+footer.dod h3{font-size:15px;font-weight:850;margin-bottom:8px;color:var(--n-900)}
+footer.dod li{margin:5px 0}
+.mtx{width:100%;border-collapse:collapse;font-size:12.5px}
+.mtx th{text-align:left;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--n-600);
+  border-bottom:1.5px solid var(--n-200);padding:7px 10px 7px 0;vertical-align:bottom}
+.mtx td{border-bottom:1px solid var(--n-100);padding:9px 10px 9px 0;vertical-align:top;color:var(--n-800)}
+.mtx td.c{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--p-800);font-weight:700;white-space:nowrap}
+.mtx td.g{color:var(--ok-tx);font-weight:800}
+.mtx td.r{color:var(--danger-tx);font-weight:800}
+.mtx tr.dead td{background:var(--n-25);color:var(--n-600)}
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <h1>RideOps · Mockup <span class="v2">M2-H6 — Reconciliación multi-superficie</span></h1>
+  <p>Cuatro superficies operan la <b>misma</b> fila <code>CheckoutSession</code>: el wizard web del mostrador, el
+  kiosko del lobby, el teléfono del cliente y esta app. H6 es lo que hace que el agente <b>no se lleve una sorpresa</b>
+  cuando otra se le adelanta. Continúa el lenguaje aprobado en las Tandas A, B y C — mismos tokens, mismo cromo, mismo
+  tono — y cierra las cuatro piezas de la fila <code>M2-H6</code> del plan: <b>UX de presencia</b> (§20),
+  <b>banner de avance ajeno con atribución</b> (§21), <b>matriz 409 completa</b> (§22) y
+  <b>engancharse a una sesión en cualquier paso</b> (§23).</p>
+  <div class="meta-chips">
+    <span class="mchip">Superficie real <b>360 dp</b> · targets ≥ 48 · CTA 56 · una mano · legible al sol</span>
+    <span class="mchip">Todo string en l10n (ADR-8) — tabla es/en por sección</span>
+    <span class="mchip ok">Verificado contra <code>state-machine.js</code>, <code>checkout-session.service.js</code>,
+      <code>checkout-presence.service.js</code>, <code>kiosk-checkout.service.js</code> y el build de H1–H5</span>
+    <span class="mchip dang">ADR-4: el servidor manda. Cero copia de la máquina en Dart, cero reproducción de un paso sellado</span>
+    <span class="mchip warn"><b>Aquí se enciende el latido</b>: a partir de H6 el agente también es VISIBLE, <b>con su nombre</b>, para las otras superficies</span>
+    <span class="mchip dang">Prohibida la puerta falsa: si se dibuja una acción, tiene que poder tener éxito</span>
+  </div>
+  <div class="meta-chips" style="margin-top:6px">
+    <span class="tag cont">Continuidad</span><span style="font-size:12.5px;color:var(--n-700);margin-right:14px">ya aprobado/construido en H1–H5: se muestra cómo encaja, no se rediseña</span>
+    <span class="tag corr">Corrección</span><span style="font-size:12.5px;color:var(--n-700);margin-right:14px">arregla algo verificado en código; rechazarlo deja un hueco real</span>
+    <span class="tag prop">Propuesta</span><span style="font-size:12.5px;color:var(--n-700)">Hector puede rechazarlo sin que se caiga nada</span>
+  </div>
+</div>
+
+<nav class="jump">
+  <a href="#s20">20 · Presencia y el latido</a>
+  <a href="#s21">21 · Avance ajeno</a>
+  <a href="#s22">22 · Matriz 409 con cara humana</a>
+  <a href="#s23">23 · Engancharse en cualquier paso</a>
+  <a href="#mtx" class="gate">La matriz completa (tabla)</a>
+  <a href="#priv" class="gate">Identidad y visibilidad</a>
+  <a href="#rej">Si Hector rechaza…</a>
+  <a href="#gaps">Lo que NO se puede hoy</a>
+</nav>
+
+<!-- ============================================================ 20 · PRESENCIA -->
+<section class="blk" id="s20">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 20 · M2-H6 · presencia</span>
+    <h2>La presencia deja de ser asimétrica: RideOps empieza a latir — y eso hay que decírselo al agente</h2>
+    <p>Hasta hoy <b>RideOps lee presencia pero no late</b> (H1, decisión registrada en el M2-PLAN línea 378): el chip
+    del header ya muestra a quien está en el kiosko o en el mostrador, pero el mostrador y el kiosko <b>no ven</b> al
+    agente. H6 enciende <code>POST /:id/presence</code>, y con eso el agente pasa de observador a observado. La regla
+    que gobierna toda esta sección es la de H1, sin cambios: <b>la presencia solo puede afirmar presencia, jamás
+    soledad</b> — ni <code>null</code> ni <code>[]</code> autorizan un “estás solo, avanza tranquilo”
+    (<code>withPresence</code> degrada a <code>[]</code> ante error). Informativa siempre: <b>nada</b> se bloquea,
+    se reserva ni se 409-ea por presencia (<code>checkout-presence.service.js</code>, reglas duras del módulo).</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Acompañante vivo</span><span class="schip"><i></i>Hoja “Quién está aquí”</span>
+      <span class="schip"><i></i>Nadie más / sin red</span><span class="schip"><i></i>El reverso: qué ven de mí</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <!-- 20A -->
+    <figure>
+      <figcaption><span class="tag cont">Continuidad</span>20A — El chip que ya existe (H1), ahora con dos acompañantes
+        <small>header mini · punto vivo (&lt; 20 s) · <b>persona con nombre</b> · “+1” = hay otro detrás</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:26</span><span>LTE · 78 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></svg>Pausar</div>
+          </div>
+          <div class="sesshead mini">
+            <span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span>
+            <span class="presence"><span class="lv"></span><span class="pv">DT</span>Diego Torres · mostrador<span class="plus">+1</span></span>
+            <span class="m inframe" style="margin:34px 0 0 232px">1</span>
+          </div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr on"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Cobrar en terminal
+            <span class="more">Ver todos los pasos <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+          <div class="wpad">
+            <div class="vcard">
+              <div class="vhead"><b>Cliente y unidad</b><span class="vpill ok">Verificado</span></div>
+              <div class="kv"><span class="k">Cliente</span><span class="v">Laura Méndez</span></div>
+              <div class="kv"><span class="k">Unidad</span><span class="v">U-112 · Corolla 2023 · MXA-4471</span></div>
+              <div class="kv"><span class="k">Salida</span><span class="v">Hoy 10:30</span></div>
+            </div>
+            <div class="banner b-info">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8v.5"/></svg>
+              <span>El chip de arriba <b>solo afirma quién está</b>. Que no aparezca nadie no significa que estés solo.
+                <span class="m" style="margin-left:4px">2</span></span></div>
+            <div class="dock">
+              <div class="btn btn-primary">Cobrar en la terminal</div>
+              <div class="why">El servidor confirma el avance; si otra superficie ya lo hizo, esta pantalla se actualiza sola.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- 20B -->
+    <figure>
+      <figcaption><span class="tag prop">Propuesta</span>20B — “Quién está aquí”: <b>personas y aparatos no se dibujan igual</b>
+        <small>a quien tiene nombre le puedes gritar desde la otra punta del patio; a un mueble no</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:26</span><span>LTE · 78 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini">
+            <span class="who">Laura Méndez · U-112</span>
+            <span class="presence"><span class="lv"></span><span class="pv">DT</span>Diego Torres · mostrador<span class="plus">+1</span></span></div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Cobrar en terminal</div>
+          <div class="wpad"></div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <h4>Quién está en esta sesión</h4>
+            <div class="sub">Ventana de 45 s del servidor · se actualiza con cada lectura<span class="m" style="margin-left:6px">3</span></div>
+            <div class="prow">
+              <span class="av">DT</span>
+              <span class="pb"><b>Diego Torres</b><span>Mostrador</span></span>
+              <span class="st"><i></i>ahora</span>
+            </div>
+            <div class="prow">
+              <span class="av dev"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
+              <span class="pb"><b>El kiosco del lobby</b><span>Aparato · sin persona identificada</span></span>
+              <span class="st old"><i></i>hace 31 s</span>
+              <span class="m inframe" style="margin:44px 0 0 -8px">4</span>
+            </div>
+            <div class="prow me">
+              <span class="av mine">AR</span>
+              <span class="pb"><b>Tú · RideOps</b><span>Los demás te ven como <b>Ana Ruiz</b></span></span>
+              <span class="st"><i></i>ahora</span>
+            </div>
+            <div class="banner b-info" style="margin-top:2px">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8v.5"/></svg>
+              <span>Apareces con tu nombre mientras esta pantalla esté abierta. Al salir o pausar dejas de aparecer en
+                <b>menos de un minuto</b>. Esto no reserva nada: nadie queda bloqueado por estar aquí.<span class="m" style="margin-left:4px">5</span></span></div>
+            <div class="btn btn-ghost btn-sm">Cerrar</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- 20C -->
+    <figure>
+      <figcaption><span class="tag corr">Corrección</span>20C — Sin red, y sin nadie: las dos formas de <b>no</b> mentir
+        <small>punto gris (no verde) + la frase que impide leer el vacío como “estás solo”</small></figcaption>
+      <div class="phone">
+        <div class="statusbar"><span>10:41</span><span class="off">Sin red · 74 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini">
+            <span class="who">Laura Méndez · U-112</span>
+            <span class="presence mut"><span class="lv stale"></span><span class="pv dev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8"/></svg></span>El kiosco · hace 38 s</span>
+            <span class="m inframe" style="margin:34px 0 0 240px">6</span>
+          </div>
+          <div class="stepline stale"><span class="ix">Paso 4 de 10</span>Cobrar en terminal
+            <span class="more" style="color:var(--n-700)">vista de hace 2 min</span></div>
+          <div class="wpad">
+            <div class="banner b-warn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 9v5"/><path d="M12 17v.5"/><path d="M10.3 3.9L2.6 17.4c-.8 1.3.2 3 1.7 3h15.4c1.5 0 2.5-1.7 1.7-3L13.7 3.9c-.8-1.3-2.6-1.3-3.4 0z"/></svg>
+              <span>Sin conexión. Esto es lo último que vio el servidor hace 2 min — puede haber cambiado en otra
+                superficie.<br><span class="ba">Reintentar</span></span></div>
+            <div class="vcard warn">
+              <div class="vhead"><b>Quién está aquí</b><span class="vpill warn">No verificable</span></div>
+              <div class="kv"><span class="k">Última vez</span><span class="v pend">El kiosco · hace 38 s</span></div>
+              <div class="quote"><i>Regla de la casa</i>Sin red no se puede afirmar que alguien esté <b>ahora</b>.
+                El punto verde se apaga; el chip <b>no</b> desaparece — desaparecer sigue siendo cosa exclusiva del TTL
+                del servidor.</div>
+            </div>
+            <div class="vcard">
+              <div class="vhead"><b>Y cuando la lista llega vacía</b><span class="vpill mut">Con red</span></div>
+              <div class="quote" style="margin-top:0"><i>Lo que la app NO dice</i>“Nadie más está en esta sesión.”</div>
+              <div class="quote"><i>Lo que sí dice</i>“No hay nadie visible ahora mismo. Otra superficie puede estar
+                avanzando sin aparecer aquí.”<span class="m" style="margin-left:4px">7</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary is-disabled">Cobrar en la terminal</div>
+              <div class="why">Sin conexión: el servidor confirma el avance. Nada de este paso va a la Bandeja.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Decisiones · §20</h3>
+      <div class="note"><span class="m">1</span><span><b>El chip no cambia de forma respecto de H1.</b> Ya está
+        construido y aprobado (<code>PresenceChip</code>, <code>wizard_chrome.dart</code>): avatar, nombre, superficie,
+        edad y punto vivo/apagado según <code>presenceFreshness</code> (&lt; 20 s vivo · 20–45 s apagado · &gt; 45 s no se
+        pinta). H6 le agrega dos cosas y nada más: <b>“+1”</b> ya existía en el dominio (<code>others</code>) y ahora
+        tiene destino — la hoja 20B — y el chip se vuelve <b>tocable</b> (48 px de alto real).</span></div>
+      <div class="note"><span class="m">2</span><span><b>La frase antisoledad va en pantalla, no en un comentario de
+        código.</b> Es la regla más fácil de romper por lectura: el agente ve un header sin chip y concluye “puedo
+        avanzar tranquilo”. En H1 esto se declaró para el equipo; en H6, con el latido encendido, hay que decírselo al
+        agente porque su propio latido lo va a acostumbrar a confiar en el dato.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Los 45 s se nombran, no se esconden.</b> Es el
+        <code>PRESENCE_TTL_MS</code> real, filtrado en lectura. Decirlo evita la pregunta de patio “¿por qué desapareció
+        María si sigue ahí?”: tres polls perdidos y te vas.</span></div>
+      <div class="note"><span class="m">4</span><span><b>Una persona y un aparato no se dibujan igual — y esto no es
+        una elección estética, es el modelo del backend.</b> <code>CheckoutPresence</code> lleva
+        <code>actorUserId</code>, y las superficies de personal lo mandan mientras el kiosco (aparato) y el teléfono del
+        cliente (token) lo dejan <b>nulo a propósito</b>. La cascada de <code>activePresence()</code> resuelve
+        <i>etiqueta explícita → <code>fullName</code> del actor → etiqueta genérica de la superficie</i>, así que ese
+        nulo ya llega como “Kiosk”, nunca como un hueco ni como un id crudo. La app solo tiene que <b>no aplanar</b> los
+        dos casos: <b>círculo + iniciales + morado</b> para quien tiene nombre, <b>cuadrado + glifo + gris</b> para el
+        mueble. Con guantes y sol, las tres señales cambian a la vez porque una sola no se lee.
+        <b>Por qué importa en el patio:</b> a “Diego Torres · mostrador” le puedes gritar desde la otra punta; al kiosco
+        no — lo que hay que hacer es caminar hasta el lobby.</span></div>
+      <div class="note"><span class="m">5</span><span><b>El reverso vive AQUÍ y en ningún otro sitio, y va con nombre
+        completo.</b> Decidido por Hector: <b>el usuario se identifica</b> — conviene saber quién es en los registros.
+        La fila “Tú” responde de un vistazo las tres preguntas: <b>qué</b> se anuncia (tu nombre y tu superficie),
+        <b>a quién</b> (a las otras superficies de esta sesión) y <b>cuánto</b> (mientras la pantalla esté abierta + el
+        TTL). No es un ajuste ni una política enterrada: es una línea honesta la primera vez que entras a una sesión
+        compartida. Y cierra con <b>“esto no reserva nada”</b>, porque el riesgo real de encender el latido no es la
+        identidad: es que alguien lea la presencia como un candado y se quede esperando. Ver <a href="#priv" style="color:var(--p-700);font-weight:800">Identidad y visibilidad</a>.</span></div>
+      <div class="note"><span class="m">6</span><span><b>Sin red el punto se apaga pero el chip se queda.</b> Ya es el
+        comportamiento construido (<code>SessionHead.offline</code>). Se dibuja aquí porque es la mitad del patio: mala
+        WiFi es el estado normal, no el excepcional.</span></div>
+      <div class="note"><span class="m">7</span><span><b>Dos frases distintas para dos vacíos distintos:</b> “no
+        verificable” (sin red) y “nadie visible” (con red y lista vacía). Fundirlas en una sola sería más barato y
+        exactamente igual de mentiroso en uno de los dos casos.</span></div>
+      <div class="drop"><b>Descartado en §20</b>
+        <ul>
+          <li><b>Un interruptor de “invisible”.</b> Una presencia que se puede apagar es una presencia en la que nadie
+            puede confiar — y el único valor de todo esto es evitar la colisión antes del 409. Además invita a la
+            pregunta equivocada (“¿me están vigilando?”) en vez de la correcta (“¿quién está tocando esta salida?”).</li>
+          <li><b>Un contador de “X personas aquí” sin nombres.</b> Un número no permite decidir nada; un nombre y una
+            superficie sí (“el kiosco está dentro” ⇒ el cliente está firmando, no interrumpo).</li>
+          <li><b>Mandar un <code>label</code> corto (“Ana R.”) en vez del nombre completo.</b> Era mi propuesta
+            inicial y <b>queda descartada por decisión de Hector</b>: el usuario se identifica. Además el camino sin
+            <code>label</code> es el que menos código tiene — el backend ya resuelve <code>fullName</code> solo. Se
+            manda <code>{surface: 'RIDEOPS'}</code> y punto.</li>
+          <li><b>Un avatar genérico para el kiosco.</b> Un círculo con iniciales “KI” lo disfrazaría de persona. El
+            aparato lleva glifo de aparato.</li>
+          <li><b>Chat o “tocar para avisar”.</b> Fuera de alcance y peligroso: convertiría el chip en una bandeja de
+            mensajes sin backend detrás, y el patio ya tiene radio.</li>
+          <li><b>Un <code>DELETE /presence</code> al salir.</b> No existe ese endpoint y pedirlo sería inventar backend
+            para ahorrar 45 segundos. El TTL ya es el apagado.</li>
+          <li><b>Un temporizador propio de latido (cada 20 s).</b> Se descarta: el latido <b>viaja pegado al poll que ya
+            existe</b> (5–15 s). Dos temporizadores serían doble consumo de batería y, peor, una presencia que sobrevive
+            al dato que la respalda.</li>
+        </ul>
+      </div>
+      <div class="decision"><b>Lo único que le falta al backend para encender el latido</b>
+        La identidad ya está resuelta y no hay que diseñarla: <code>CheckoutPresence</code> guarda
+        <code>actorUserId</code>, <code>heartbeat({sessionId, surface, actorUserId, label, tenantId})</code> lo recibe
+        de <code>req.user</code> (que trae <code>fullName</code> porque <code>requireAuth</code> hidrata la fila), y la
+        cascada de <code>activePresence()</code> lo convierte en un nombre legible. <b>Lo que falta es una sola cosa,
+        y es de forma, no de fondo:</b> el objeto que sale al cliente es <code>{surface, displayName, lastSeenAt}</code>
+        — <b>el id no viaja en la respuesta</b>. Sin él la app no puede reconocer su propia fila, y en cuanto RideOps
+        late <b>el agente se ve a sí mismo</b> en su chip de acompañantes. El filtro ya está escrito e inerte en
+        <code>pickPresenceChip</code>.
+        <ul>
+          <li><b>Pedido de backend, una línea:</b> agregar <code>actorUserId: row.actorUserId</code> al map de
+            <code>activePresence()</code>.</li>
+          <li><b>Si no llega a tiempo</b>, hay un plan B decente (no el que temía): la app conoce
+            <code>me.fullName</code>, así que puede suprimir la fila cuyo <code>surface == RIDEOPS</code> y cuyo
+            <code>displayName</code> coincide con el propio. Es comparar texto — se rompe con dos empleados
+            homónimos — pero es <b>local, reversible y muy superior</b> a esconder todas las presencias de RideOps
+            (que taparía a un compañero real en otro teléfono).</li>
+        </ul>
+      </div>
+    </aside>
+
+    <div class="copy">
+      <h3>Copy exacta · §20 (es / en)</h3>
+      <table class="ct">
+        <tr><th>Frame</th><th>Clave l10n</th><th>ES</th><th>EN</th></tr>
+        <tr><td class="fr">20A</td><td class="k">coPresenceLine</td><td>{name} está en esta sesión · {surface} · hace {age}</td><td>{name} is in this session · {surface} · {age} ago</td></tr>
+        <tr><td class="fr">20A</td><td class="k">coPresenceMore</td><td>+{count}</td><td>+{count}</td></tr>
+        <tr><td class="fr">20A</td><td class="k">coPresenceChipSemantics</td><td>{line}: ver quién está en esta sesión</td><td>{line}: see who is in this session</td></tr>
+        <tr><td class="fr">20A</td><td class="k">coPresenceNeverAlone</td><td>El chip solo afirma quién está. Que no aparezca nadie no significa que estés solo.</td><td>The chip can only state who is here. Nobody showing does not mean you are alone.</td></tr>
+        <tr><td class="fr">20B</td><td class="k">coWhoIsHereTitle</td><td>Quién está en esta sesión</td><td>Who is in this session</td></tr>
+        <tr><td class="fr">20B</td><td class="k">coWhoIsHereSub</td><td>Ventana de 45 s del servidor · se actualiza con cada lectura</td><td>The server's 45 s window · refreshed on every read</td></tr>
+        <tr><td class="fr">20B</td><td class="k">coWhoIsHereNow</td><td>ahora</td><td>now</td></tr>
+        <tr><td class="fr">20B</td><td class="k">coWhoIsHereAge</td><td>hace {age}</td><td>{age} ago</td></tr>
+        <tr><td class="fr">20B</td><td class="k">coWhoIsHereDevice</td><td>El kiosco del lobby</td><td>The lobby kiosk</td></tr>
+        <tr><td class="fr">20B</td><td class="k">coWhoIsHereDeviceSub</td><td>Aparato · sin persona identificada</td><td>Device · no person identified</td></tr>
+        <tr><td class="fr">20B</td><td class="k">coWhoIsHereCustomerPhone</td><td>El teléfono del cliente</td><td>The customer's phone</td></tr>
+        <tr><td class="fr">20B</td><td class="k">coWhoIsHereYou</td><td>Tú · RideOps</td><td>You · RideOps</td></tr>
+        <tr><td class="fr">20B</td><td class="k">coWhoIsHereYouSeenAs</td><td>Los demás te ven como {name}</td><td>Others see you as {name}</td></tr>
+        <tr><td class="fr">20B</td><td class="k">coWhoIsHereDisclosure</td><td>Apareces con tu nombre mientras esta pantalla esté abierta. Al salir o pausar dejas de aparecer en menos de un minuto. Esto no reserva nada: nadie queda bloqueado por estar aquí.</td><td>You appear by name while this screen is open. When you leave or pause, you stop appearing in under a minute. This reserves nothing: nobody is blocked by your being here.</td></tr>
+        <tr><td class="fr">20B</td><td class="k">coSheetClose</td><td>Cerrar</td><td>Close</td></tr>
+        <tr><td class="fr">20C</td><td class="k">coPresenceOfflineTitle</td><td>Quién está aquí</td><td>Who is here</td></tr>
+        <tr><td class="fr">20C</td><td class="k">coPresenceOfflinePill</td><td>No verificable</td><td>Can't be verified</td></tr>
+        <tr><td class="fr">20C</td><td class="k">coPresenceOfflineWhy</td><td>Sin red no se puede afirmar que alguien esté ahora. El punto verde se apaga; el chip no desaparece.</td><td>With no signal we can't state that anyone is here right now. The green dot goes out; the chip does not disappear.</td></tr>
+        <tr><td class="fr">20C</td><td class="k">coPresenceEmpty</td><td>No hay nadie visible ahora mismo. Otra superficie puede estar avanzando sin aparecer aquí.</td><td>Nobody is visible right now. Another surface may be moving ahead without showing here.</td></tr>
+        <tr><td class="fr">20C</td><td class="k">coOfflineBanner</td><td>Sin conexión. Esto es lo último que vio el servidor hace {age} — puede haber cambiado en otra superficie.</td><td>No connection. This is the last thing the server reported {age} ago — it may have changed on another surface.</td></tr>
+      </table>
+      <div class="contrast"><b>Pares nuevos medidos · §20</b>
+        <ul>
+          <li><code>.presence.mut</code>: <code>--n-700</code> sobre <code>--n-50</code> = <b>8,9:1</b> (el chip apagado
+            no hereda el morado, que sobre gris caía a 4,4:1).</li>
+          <li><code>.prow.me</code>: <code>--n-900</code> sobre <code>--tonal</code> = <b>14,8:1</b>; el subtítulo en
+            <code>--n-700</code> = <b>8,4:1</b>.</li>
+          <li><code>.prow .st.old</code>: <code>--n-600</code> sobre blanco = <b>5,5:1</b> (AA a 11,5 px en negrita).</li>
+          <li>El punto vivo <b>nunca</b> es el único portador del estado: siempre va acompañado de “ahora” / “hace
+            {age}” en texto.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 21 · AVANCE AJENO -->
+<section class="blk" id="s21">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 21 · M2-H6 · avance ajeno</span>
+    <h2>Alguien más avanzó el paso. Avisar sin robar el foco — y sin mentir sobre lo que está confirmado</h2>
+    <p>El banner de avance ajeno <b>ya está construido y visto en vivo</b> (H1, prueba de humo en emulador:
+    <i>«Términos firmados» se completó en el kiosco hace 52 h</i> + “Ver qué cambió”). H6 no lo sustituye: lo
+    <b>completa</b> en tres puntos que hoy quedan abiertos — <b>qué hace “Ver qué cambió”</b>, <b>qué pasa si el aviso
+    llega con trabajo a medias en pantalla</b>, y <b>cuándo el aviso deja de ser un banner</b> porque el paso que el
+    agente miraba dejó de existir. La atribución sale del log <code>events[]</code>
+    (<code>metadata.kiosk</code> ⇒ kiosco; <code>actorUserId</code> ajeno ⇒ otro agente; sin nada ⇒ “otra superficie”:
+    se dice lo que se sabe, no más).</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Banner informativo</span><span class="schip"><i></i>Diff “Ver qué cambió”</span>
+      <span class="schip"><i></i>Con trabajo a medias</span><span class="schip"><i></i>El paso dejó de existir</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <!-- 21A -->
+    <figure>
+      <figcaption><span class="tag cont">Continuidad</span>21A — El banner tal como se vio en el emulador
+        <small>informativo, nunca modal · el rail YA se movió solo; el banner solo explica por qué</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:28</span><span>LTE · 78 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini">
+            <span class="who">Laura Méndez · U-112</span>
+            <span class="presence"><span class="lv"></span><span class="pv dev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8"/></svg></span>El kiosco</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr on"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+            <span class="m inframe" style="margin:-6px 0 0 128px">8</span>
+          </div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Cobrar en terminal
+            <span class="more">Ver todos los pasos <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+          <div class="wpad">
+            <div class="banner b-info">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8v.5"/></svg>
+              <span>«Términos firmados» se completó en el kiosco hace 40 s. Ya vas en: Cobrar en terminal.
+                <br><span class="ba">Ver qué cambió</span><span class="m" style="margin-left:6px">9</span></span></div>
+            <div class="vcard">
+              <div class="vhead"><b>Cliente y unidad</b><span class="vpill ok">Verificado</span></div>
+              <div class="kv"><span class="k">Cliente</span><span class="v">Laura Méndez</span></div>
+              <div class="kv"><span class="k">Unidad</span><span class="v">U-112 · Corolla 2023 · MXA-4471</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Cobrar en la terminal</div>
+              <div class="why">El servidor confirma el avance; si otra superficie ya lo hizo, esta pantalla se actualiza sola.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- 21B -->
+    <figure>
+      <figcaption><span class="tag prop">Propuesta</span>21B — “Ver qué cambió”: el diff de sellos, con atribución
+        <small>lo que el botón de H1 todavía no tenía detrás · sale de <code>events[]</code> + los sellos de la fila</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:28</span><span>LTE · 78 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who">Laura Méndez · U-112</span>
+            <span class="presence"><span class="lv"></span><span class="pv dev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8"/></svg></span>El kiosco</span></div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Cobrar en terminal</div>
+          <div class="wpad"></div>
+          <div class="scrim"></div>
+          <div class="sheet" style="max-height:80%">
+            <div class="grab"></div>
+            <h4>Qué cambió desde que entraste</h4>
+            <div class="sub">Estado reportado por el servidor · 10:28<span class="m" style="margin-left:6px">10</span></div>
+            <div class="dlist">
+              <div class="drow">
+                <span class="dic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+                <span class="db"><b>Firma de T&amp;C</b><span>Completado en el kiosco · 10:27</span></span>
+              </div>
+              <div class="drow">
+                <span class="dic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+                <span class="db"><b>El paso se movió</b><span>Términos firmados → Cobrar en terminal</span></span>
+              </div>
+              <div class="drow mine">
+                <span class="dic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg></span>
+                <span class="db"><b>Cliente y unidad verificados</b><span>Lo hiciste tú · 10:24 · sin cambios</span></span>
+              </div>
+              <div class="drow none">
+                <span class="dic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+                <span class="db"><b>Pago</b><span>Pendiente · no lo ha tocado nadie</span></span>
+              </div>
+              <div class="drow none">
+                <span class="dic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+                <span class="db"><b>Inspección</b><span>Pendiente · no lo ha tocado nadie</span></span>
+              </div>
+            </div>
+            <div class="banner b-ok">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg>
+              <span>Nada de lo que hiciste se perdió.<span class="m" style="margin-left:4px">11</span></span></div>
+            <div class="btn btn-primary btn-sm">Seguir en el paso 4</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- 21C -->
+    <figure>
+      <figcaption><span class="tag corr">Corrección</span>21C — El aviso llega con el odómetro a medio escribir
+        <small>banner ANCLADO al pie · el foco, el teclado y lo tecleado no se tocan</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:44</span><span>LTE · 71 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Inspección · R-2481</b><span>Corolla 2023 · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who">Laura Méndez · U-112</span>
+            <span class="presence"><span class="lv"></span><span class="pv">DT</span>Diego Torres · mostrador</span></div>
+          <div class="stepline nb"><span class="ix">Paso 7 de 10</span>Inspección · métricas</div>
+          <div class="wpad">
+            <div class="f-label">Odómetro</div>
+            <div class="inp big focus"><span class="tnum">41 3</span><span class="caret"></span><span class="unit">mi</span>
+              <span class="m inframe" style="margin:-46px 0 0 296px">12</span></div>
+            <div style="font-size:12.5px;font-weight:700;color:var(--n-700)">Última lectura registrada: 41 250 mi</div>
+            <div class="f-label">Combustible</div>
+            <div style="display:flex;gap:4px">
+              <i style="flex:1;height:26px;border-radius:7px;background:linear-gradient(180deg,var(--p-400),var(--p-600));border:1px solid var(--p-600)"></i>
+              <i style="flex:1;height:26px;border-radius:7px;background:linear-gradient(180deg,var(--p-400),var(--p-600));border:1px solid var(--p-600)"></i>
+              <i style="flex:1;height:26px;border-radius:7px;background:linear-gradient(180deg,var(--p-400),var(--p-600));border:1px solid var(--p-600)"></i>
+              <i style="flex:1;height:26px;border-radius:7px;background:linear-gradient(180deg,var(--p-400),var(--p-600));border:1px solid var(--p-600)"></i>
+              <i style="flex:1;height:26px;border-radius:7px;background:linear-gradient(180deg,var(--p-400),var(--p-600));border:1px solid var(--p-600)"></i>
+              <i style="flex:1;height:26px;border-radius:7px;background:linear-gradient(180deg,var(--p-400),var(--p-600));border:1px solid var(--p-600)"></i>
+              <i style="flex:1;height:26px;border-radius:7px;background:var(--n-200);border:1px solid var(--n-300)"></i>
+              <i style="flex:1;height:26px;border-radius:7px;background:var(--n-200);border:1px solid var(--n-300)"></i>
+            </div>
+            <div style="font-size:12.5px;font-weight:700;color:var(--n-700);margin-top:6px">6 de 8 · tres cuartos</div>
+          </div>
+          <div class="banner b-info anchored">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8v.5"/></svg>
+            <span>El mostrador registró el <b>pago</b> hace 12 s. Sigue capturando: <b>este paso no cambió</b>.
+              <br><span class="ba">Ver qué cambió</span><span class="m" style="margin-left:6px">13</span></span></div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- 21D -->
+    <figure>
+      <figcaption><span class="tag corr">Corrección</span>21D — Cuando el aviso <b>ya no cabe</b> en un banner
+        <small>el kiosco cerró la entrega mientras el agente capturaba: el paso que miraba dejó de existir</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:52</span><span>LTE · 69 %</span></div>
+        <div class="scr" style="background:var(--n-0)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+          </div>
+          <div class="wpad">
+            <div class="center-state">
+              <div class="big-ic ok"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></div>
+              <h4>Esta entrega ya se cerró</h4>
+              <p>Se completó en el kiosco a las 10:51, mientras capturabas. La sesión ya no admite más pasos.</p>
+              <span class="m inframe" style="margin:-84px 0 0 150px">14</span>
+            </div>
+            <div class="vcard">
+              <div class="vhead"><b>Qué pasó con lo tuyo</b><span class="vpill ok">A salvo</span></div>
+              <div class="kv"><span class="k">Fotos</span><span class="v okv">6 recibidas por el servidor · 10:49</span></div>
+              <div class="kv"><span class="k">Métricas</span><span class="v okv">Odómetro 41 380 mi · recibidas 10:50</span></div>
+              <div class="kv"><span class="k">Firma</span><span class="v okv">Del cliente, en el kiosco · 10:51</span></div>
+            </div>
+            <div class="vcard">
+              <div class="vhead"><b>Registro de la sesión</b></div>
+              <div class="log">
+                <div class="lrow"><span class="lt tnum">10:24</span><span class="lb">Cliente y unidad verificados<i>Tú · RideOps</i></span></div>
+                <div class="lrow"><span class="lt tnum">10:27</span><span class="lb">Términos firmados<i>Kiosco</i></span></div>
+                <div class="lrow"><span class="lt tnum">10:36</span><span class="lb">Pago registrado<i>Diego Torres · mostrador</i></span></div>
+                <div class="lrow"><span class="lt tnum">10:50</span><span class="lb">Inspección completada<i>Tú · RideOps</i></span></div>
+                <div class="lrow"><span class="lt tnum">10:51</span><span class="lb">Entrega cerrada<i>Kiosco</i></span></div>
+              </div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-neutral">Volver a la lista</div>
+              <div class="why">Si crees que se cerró por error, abre la reserva: desde aquí no se puede reabrir.
+                <span class="m" style="margin-left:4px">15</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Decisiones · §21</h3>
+      <div class="note"><span class="m">8</span><span><b>El rail se mueve solo, sin animación de celebración.</b> El
+        avance ajeno no es un logro del agente: es un hecho del servidor. Un confeti o un “¡listo!” convertiría un aviso
+        de reconciliación en una falsa felicitación por trabajo que hizo otro.</span></div>
+      <div class="note"><span class="m">9</span><span><b>Informativo, nunca modal.</b> Regla ya construida en H1 y
+        confirmada por el patio: con 4 superficies conviviendo, un diálogo por avance ajeno sería un bloqueo cada pocos
+        minutos. El banner persiste hasta que el agente interactúa con el paso nuevo — no se va solo como un toast, que
+        es exactamente lo que un agente con guantes y sol de frente se pierde.</span></div>
+      <div class="note"><span class="m">10</span><span><b>El diff se construye con lo que YA llega,</b> sin backend
+        nuevo: los sellos de la fila (<code>tcCompletedAt</code>, <code>paymentCompletedAt</code>,
+        <code>inspectionCompletedAt</code>, <code>customerSignedAt</code>) contra los que se tenían al entrar, y
+        <code>events[]</code> para el <b>quién</b> y el <b>cuándo</b>. Es la misma fuente de atribución que ya alimenta
+        el banner; aquí solo se lista completa. <b>La atribución usa la MISMA cascada que la presencia</b> — nombre de
+        la persona cuando el actor existe, superficie cuando no — así que la forma ya vista en vivo («se completó en el
+        kiosco hace 52 h») no cambia: se le suma «lo completó Diego Torres» cuando hay un usuario detrás. Un solo
+        patrón, dos rellenos, cero invención.</span></div>
+      <div class="note"><span class="m">11</span><span><b>La única frase que el agente vino a leer.</b> El miedo real
+        al ver “alguien más avanzó” no es de proceso: es “¿perdí mi trabajo?”. Se responde primero y en verde. Si
+        <b>sí</b> se perdió algo (una foto muerta en la bandeja, por ejemplo), esta franja cambia a ámbar y nombra qué —
+        nunca se queda en verde por comodidad.</span></div>
+      <div class="note"><span class="m">12</span><span><b>Lo tecleado no se toca. Punto.</b> Este es el caso que más
+        daño hace en el patio: un aviso que re-renderiza el paso y borra el odómetro a medio escribir. Que el
+        <code>currentStep</code> del servidor cambie <b>no</b> autoriza a reconstruir la pantalla del paso actual si el
+        paso actual sigue siendo el mismo. El banner es aditivo; el cuerpo del paso es intocable.</span></div>
+      <div class="note"><span class="m">13</span><span><b>Anclado al pie, no arriba.</b> Con teclado abierto y una
+        mano, la mitad superior de un 360 dp no existe. Y el texto lleva la frase que desarma la alarma:
+        <b>“este paso no cambió”</b> — el avance ajeno ocurrió en OTRO paso y no exige nada del agente ahora.</span></div>
+      <div class="note"><span class="m">14</span><span><b>Aquí sí se le quita la pantalla, y es lo correcto.</b> La
+        frontera entre banner y pantalla no es la gravedad del cambio: es si <b>el paso que el agente estaba haciendo
+        todavía existe</b>. Si existe ⇒ banner (21A, 21C). Si dejó de existir — sesión terminal, o el servidor saltó más
+        allá del paso que se veía — ⇒ pantalla, porque dejarlo capturando fotos para una entrega ya cerrada sí es
+        mentirle.</span></div>
+      <div class="note"><span class="m">15</span><span><b>Terminal significa terminal</b> (nota 8 de la Tanda A, sin
+        cambios): no se ofrece “reintentar” ni “reabrir”. La única puerta es la reserva, donde sí hay
+        herramientas.</span></div>
+      <div class="drop"><b>Descartado en §21</b>
+        <ul>
+          <li><b>Un modal para el avance ajeno.</b> Descartado desde H1 y reconfirmado aquí: 4 superficies × una sesión
+            larga = un bloqueo cada pocos minutos.</li>
+          <li><b>Un toast que se va solo.</b> Sol directo + guantes + una mano: lo que se va en 3 s no se leyó nunca.
+            El banner se queda hasta que el agente toca el paso nuevo.</li>
+          <li><b>Sonido o vibración.</b> El patio es ruidoso y el teléfono va en el bolsillo entre foto y foto: sería
+            una alarma sin información. Descartado también porque entrena a ignorarla.</li>
+          <li><b>Un diff “de campos” estilo control de versiones.</b> Se probó en papel y no dice nada al agente:
+            <code>currentStep: TC_SIGNED → PAYMENT_PENDING</code> es cierto e inútil. El diff se escribe en sellos y
+            personas, no en columnas.</li>
+          <li><b>Auto-navegar al paso nuevo.</b> Tentador y peligroso: arrastraría al agente fuera de un formulario a
+            medio llenar. El servidor manda sobre el ESTADO; no sobre dónde está mirando el agente.</li>
+        </ul>
+      </div>
+    </aside>
+
+    <div class="copy">
+      <h3>Copy exacta · §21 (es / en)</h3>
+      <table class="ct">
+        <tr><th>Frame</th><th>Clave l10n</th><th>ES</th><th>EN</th></tr>
+        <tr><td class="fr">21A</td><td class="k">coAdvancedKiosk</td><td>«{step}» se completó en el kiosco hace {age}.</td><td>“{step}” was completed on the kiosk {age} ago.</td></tr>
+        <tr><td class="fr">21A</td><td class="k">coAdvancedOtherAgent</td><td>«{step}» lo completó otro agente hace {age}.</td><td>“{step}” was completed by another agent {age} ago.</td></tr>
+        <tr><td class="fr">21A</td><td class="k">coAdvancedOtherSurface</td><td>«{step}» se completó en otra superficie hace {age}.</td><td>“{step}” was completed on another surface {age} ago.</td></tr>
+        <tr><td class="fr">21A</td><td class="k">coAdvancedNow</td><td>Ya vas en: {step}.</td><td>You are now on: {step}.</td></tr>
+        <tr><td class="fr">21A</td><td class="k">coAdvancedSeeChanged</td><td>Ver qué cambió</td><td>See what changed</td></tr>
+        <tr><td class="fr">21B</td><td class="k">coChangedTitle</td><td>Qué cambió desde que entraste</td><td>What changed since you came in</td></tr>
+        <tr><td class="fr">21B</td><td class="k">coChangedSub</td><td>Estado reportado por el servidor · {time}</td><td>State reported by the server · {time}</td></tr>
+        <tr><td class="fr">21B</td><td class="k">coChangedStepMoved</td><td>El paso se movió</td><td>The step moved</td></tr>
+        <tr><td class="fr">21B</td><td class="k">coChangedStepMovedDetail</td><td>{from} → {to}</td><td>{from} → {to}</td></tr>
+        <tr><td class="fr">21B</td><td class="k">coChangedByKiosk</td><td>Completado en el kiosco · {time}</td><td>Completed on the kiosk · {time}</td></tr>
+        <tr><td class="fr">21B</td><td class="k">coChangedByOtherAgent</td><td>Lo completó {name} · {time}</td><td>Completed by {name} · {time}</td></tr>
+        <tr><td class="fr">21B</td><td class="k">coChangedByYou</td><td>Lo hiciste tú · {time} · sin cambios</td><td>You did this · {time} · unchanged</td></tr>
+        <tr><td class="fr">21B</td><td class="k">coChangedUntouched</td><td>Pendiente · no lo ha tocado nadie</td><td>Pending · nobody has touched it</td></tr>
+        <tr><td class="fr">21B</td><td class="k">coChangedNothingLost</td><td>Nada de lo que hiciste se perdió.</td><td>Nothing you did was lost.</td></tr>
+        <tr><td class="fr">21B</td><td class="k">coChangedSomethingLost</td><td>Ojo: {what} no llegó al servidor. Revisa la Bandeja antes de seguir.</td><td>Careful: {what} did not reach the server. Check the Outbox before moving on.</td></tr>
+        <tr><td class="fr">21B</td><td class="k">coChangedStayCta</td><td>Seguir en el paso {index}</td><td>Stay on step {index}</td></tr>
+        <tr><td class="fr">21C</td><td class="k">coAdvancedElsewhere</td><td>{surfaceLine} hace {age}. Sigue capturando: este paso no cambió.</td><td>{surfaceLine} {age} ago. Keep capturing: this step did not change.</td></tr>
+        <tr><td class="fr">21C</td><td class="k">coAdvancedElsewherePayment</td><td>El mostrador registró el pago</td><td>The counter recorded the payment</td></tr>
+        <tr><td class="fr">21D</td><td class="k">coClosedElsewhereTitle</td><td>Esta entrega ya se cerró</td><td>This hand-over is already closed</td></tr>
+        <tr><td class="fr">21D</td><td class="k">coClosedElsewhereBodyKiosk</td><td>Se completó en el kiosco a las {time}, mientras capturabas. La sesión ya no admite más pasos.</td><td>It was completed on the kiosk at {time}, while you were capturing. The session takes no more steps.</td></tr>
+        <tr><td class="fr">21D</td><td class="k">coYourWorkTitle</td><td>Qué pasó con lo tuyo</td><td>What happened to your work</td></tr>
+        <tr><td class="fr">21D</td><td class="k">coYourWorkSafePill</td><td>A salvo</td><td>Safe</td></tr>
+        <tr><td class="fr">21D</td><td class="k">coYourWorkPhotos</td><td>{n} recibidas por el servidor · {time}</td><td>{n} received by the server · {time}</td></tr>
+        <tr><td class="fr">21D</td><td class="k">coTerminalLogTitle</td><td>Registro de la sesión</td><td>Session log</td></tr>
+        <tr><td class="fr">21D</td><td class="k">coTerminalBackToList</td><td>Volver a la lista</td><td>Back to the list</td></tr>
+        <tr><td class="fr">21D</td><td class="k">coTerminalWhy</td><td>Si crees que se cerró por error, abre la reserva: desde aquí no se puede reabrir.</td><td>If you think it closed by mistake, open the reservation: it cannot be reopened from here.</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 22 · MATRIZ 409 -->
+<section class="blk" id="s22">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 22 · M2-H6 · matriz 409</span>
+    <h2>Los cinco códigos de ADR-4 (más uno que llegó después). Ninguno es “un error”</h2>
+    <p>ADR-4 fija el contrato: <b>todo 409 se resuelve re-consultando y reconciliando</b>, jamás reintentando a ciegas
+    ni reproduciendo un paso sellado. Eso ya está construido (<code>_resolveConflict</code>). Lo que H6 agrega es la
+    <b>cara humana</b>: <code>VEHICLE_CONFLICT</code> no es lo mismo que <code>SESSION_TERMINAL</code>, y meterlos en la
+    misma franja roja obliga al agente a traducir. Cada frame responde tres preguntas en este orden: <b>qué pasó en el
+    patio</b>, <b>qué se conserva</b>, y <b>qué botón puede tener éxito</b>. La regla dura de la sección:
+    <b>si el botón dibujado daría 409 otra vez, no se dibuja</b> — es la puerta falsa que ya nos mordió dos veces en
+    esta historia.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>ILLEGAL_TRANSITION</span><span class="schip"><i></i>ENTRY_GUARD</span>
+      <span class="schip"><i></i>VEHICLE_CONFLICT</span><span class="schip"><i></i>SESSION_TERMINAL</span>
+      <span class="schip"><i></i>STALE_VERSION (P2)</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <!-- 22A -->
+    <figure>
+      <figcaption><span class="tag corr">Corrección</span>22A — <code>ILLEGAL_TRANSITION</code> que <b>no</b> es “ya lo hicieron”
+        <small>el caso silencioso ya está resuelto (es 21A). Este es el otro: el paso que pediste no toca</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:33</span><span>LTE · 76 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who">Laura Méndez · U-112</span>
+            <span class="presence"><span class="lv"></span><span class="pv">DT</span>Diego Torres · mostrador</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr on"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+            <div class="sr jump"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 2 de 10</span>Términos y condiciones</div>
+          <div class="wpad">
+            <div class="banner b-warn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 9v5"/><path d="M12 17v.5"/><path d="M10.3 3.9L2.6 17.4c-.8 1.3.2 3 1.7 3h15.4c1.5 0 2.5-1.7 1.7-3L13.7 3.9c-.8-1.3-2.6-1.3-3.4 0z"/></svg>
+              <span><b>Ese paso todavía no toca</b><br>La sesión está en <b>Términos y condiciones</b> (paso 2) y el
+                cobro es el paso 4. El servidor solo deja avanzar de uno en uno.
+                <span class="m" style="margin-left:4px">16</span></span></div>
+            <div class="vcard">
+              <div class="vhead"><b>El servidor dijo</b><span class="vpill mut">409</span></div>
+              <div class="quote" style="margin-top:0">Illegal transition TC_PENDING → PAYMENT_PENDING</div>
+              <div class="kv" style="margin-top:6px"><span class="k">Qué falta</span><span class="v">Que el cliente firme los términos</span></div>
+              <div class="kv"><span class="k">Dónde</span><span class="v">Aquí mismo, con el QR del paso 2</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Ir al paso 2 · Términos</div>
+              <div class="btn btn-ghost btn-sm">Entendido</div>
+              <div class="why">Ir al paso 2 es navegación dentro de esta app: siempre funciona.
+                <span class="m" style="margin-left:4px">17</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- 22B -->
+    <figure>
+      <figcaption><span class="tag corr">Corrección</span>22B — <code>ENTRY_GUARD</code>: falta un sello, y el sello vive en otra superficie
+        <small>se nombra QUÉ falta y DÓNDE se consigue — el mismo copy que la lista de pasos ya anticipaba con candado</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:38</span><span>LTE · 75 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who">Laura Méndez · U-112</span>
+            <span class="presence"><span class="lv"></span><span class="pv dev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8"/></svg></span>El kiosco</span></div>
+          <div class="stepline"><span class="ix">Paso 7 de 10</span>Inspección en curso</div>
+          <div class="wpad">
+            <div class="banner b-danger">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v6"/><path d="M12 16v.5"/></svg>
+              <span><b>Falta un paso previo</b><br><b>Falta: la inspección completada.</b><br>
+                <span style="color:var(--n-800);font-weight:650">Cannot enter CUSTOMER_SIGN_PENDING:
+                inspectionCompletedAt is not stamped yet</span><span class="m" style="margin-left:4px">18</span></span></div>
+            <div class="vcard warn">
+              <div class="vhead"><b>Por qué pasa esto</b><span class="vpill warn">Bandeja</span></div>
+              <div class="kv"><span class="k">En el teléfono</span><span class="v okv">Inspección terminada 10:37</span></div>
+              <div class="kv"><span class="k">En el servidor</span><span class="v pend">2 fotos por enviar</span></div>
+              <div class="quote"><i>La regla</i>Este paso lo cierra el <b>servidor</b> cuando reciba la inspección, no
+                esta pantalla. Nada se pierde: puedes pausar el checkout y volver.</div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Ver la Bandeja (2)</div>
+              <div class="btn btn-ghost btn-sm">Entendido</div>
+              <div class="why">La Bandeja drena sola al recuperar señal; el paso avanza cuando el sello llegue.
+                <span class="m" style="margin-left:4px">19</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- 22C -->
+    <figure>
+      <figcaption><span class="tag corr">Corrección</span>22C — <code>VEHICLE_CONFLICT</code>: la unidad se la llevó otra reserva
+        <small>dos caras según el paso: con swap posible (aquí) y con swap ya cerrado (nota 21)</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:29</span><span>LTE · 77 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who">Laura Méndez · U-112</span></div>
+          <div class="stepline"><span class="ix">Paso 1 de 10</span>Confirmar cliente y vehículo</div>
+          <div class="wpad">
+            <div class="banner b-danger">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v6"/><path d="M12 16v.5"/></svg>
+              <span><b>El vehículo ya no está libre</b><br>
+                <span style="color:var(--n-800);font-weight:650">Vehicle U-112 is already committed to reservation
+                R-2465 for this window</span><span class="m" style="margin-left:4px">20</span></span></div>
+            <div class="vcard bad">
+              <div class="vhead"><b>La unidad U-112</b><span class="vpill bad">En conflicto</span></div>
+              <div class="kv"><span class="k">Se la llevó</span><span class="v">R-2465 · misma ventana</span></div>
+              <div class="kv"><span class="k">Tu reserva</span><span class="v">Clase reservada: Compacto</span></div>
+              <div class="kv"><span class="k">Se conserva</span><span class="v okv">Cliente ya verificado · sigues en el paso 1</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Elegir otro vehículo</div>
+              <div class="btn btn-ghost btn-sm">Buscar R-2465</div>
+              <div class="why">Nada se perdió: al cambiar la unidad sigues en el paso 1 con el cliente ya verificado.
+                <span class="m" style="margin-left:4px">21</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- 22D -->
+    <figure>
+      <figcaption><span class="tag cont">Continuidad</span>22D — <code>SESSION_TERMINAL</code>: no es un error, es un final
+        <small>ya construido en H1 (<code>terminal_view.dart</code>) · aquí solo se le suma el registro con atribución</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>11:02</span><span>LTE · 66 %</span></div>
+        <div class="scr" style="background:var(--n-0)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+          </div>
+          <div class="wpad">
+            <div class="center-state">
+              <div class="big-ic warn"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/></svg></div>
+              <h4>Este checkout fue cancelado</h4>
+              <p>Lo canceló otro agente a las 10:58. Esta sesión ya no admite más pasos.</p>
+            </div>
+            <div class="vcard">
+              <div class="vhead"><b>Registro de la sesión</b><span class="vpill mut">Cancelada</span></div>
+              <div class="log">
+                <div class="lrow"><span class="lt tnum">10:24</span><span class="lb">Cliente y unidad verificados<i>Tú · RideOps</i></span></div>
+                <div class="lrow"><span class="lt tnum">10:27</span><span class="lb">Términos firmados<i>Kiosco</i></span></div>
+                <div class="lrow"><span class="lt tnum">10:58</span><span class="lb">Sesión cancelada<i>Diego Torres · mostrador · “cliente no se presentó”</i></span></div>
+              </div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-neutral">Volver a la lista</div>
+              <div class="why">Si crees que se canceló por error, abre la reserva: desde aquí no se puede reabrir.
+                <span class="m" style="margin-left:4px">22</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- 22E -->
+    <figure>
+      <figcaption><span class="tag prop">Propuesta</span>22E — <code>STALE_VERSION</code>: el 409 <b>más barato del patio</b>
+        <small>P2 ya envía la fila fresca DENTRO del 409 · una sola llamada, no dos</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:35</span><span>Edge · 74 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who">Laura Méndez · U-112</span>
+            <span class="presence"><span class="lv"></span><span class="pv">DT</span>Diego Torres · mostrador</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">Pago</span></div>
+            <div class="sr on"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 6 de 10</span>Pasar a inspección</div>
+          <div class="wpad">
+            <div class="banner b-info">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8v.5"/></svg>
+              <span><b>La sesión se movió mientras decidías</b><br>Diego Torres registró el pago desde el mostrador hace
+                4 s. Esto es lo que hay <b>ahora</b>.<span class="m" style="margin-left:4px">23</span></span></div>
+            <div class="vcard okc">
+              <div class="vhead"><b>Lo que el servidor ya tiene</b><span class="vpill ok">Al día</span></div>
+              <div class="kv"><span class="k">T&amp;C</span><span class="v okv">Firmado · 10:27 · kiosco</span></div>
+              <div class="kv"><span class="k">Pago</span><span class="v okv">Registrado · 10:35 · Diego Torres</span></div>
+              <div class="kv"><span class="k">Inspección</span><span class="v pend">Pendiente</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Pasar a inspección</div>
+              <div class="why">Vuelves a decidir sobre lo que hay ahora. No se reintentó nada por tu cuenta.
+                <span class="m" style="margin-left:4px">24</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Decisiones · §22</h3>
+      <div class="note"><span class="m">16</span><span><b>Un <code>ILLEGAL_TRANSITION</code>, dos situaciones
+        opuestas.</b> Si tras reconciliar la sesión está <b>en o pasado</b> el destino ⇒ alguien te ganó: no-op
+        silencioso + banner de 21A (ya construido). Si <b>no</b> lo está ⇒ pediste un paso que aún no toca, y eso es un
+        callejón que hay que nombrar. Hoy los dos caen en el mismo cartel genérico; ahí está el hueco que cierra
+        H6.</span></div>
+      <div class="note"><span class="m">17</span><span><b>La puerta falsa que NO se dibuja aquí: “Reintentar”.</b>
+        Verificado: <code>FORWARD</code> es estrictamente lineal y dirigido (<code>state-machine.js:59-71</code>), así
+        que reintentar <code>TC_PENDING → PAYMENT_PENDING</code> da <b>409 para siempre</b>. Un botón que no puede
+        triunfar nunca es peor que ningún botón: entrena al agente a machacarlo bajo el sol. Lo que sí se dibuja es
+        <b>navegación</b> — “Ir al paso 2” es una pantalla local, no una transición: no puede fallar.</span></div>
+      <div class="note"><span class="m">18</span><span><b>El mensaje del servidor se enmarca, no se sustituye</b>
+        (DoD #5). Encima va la línea de causa traducida — <i>“Falta: la inspección completada”</i> — con el mismo copy
+        que la lista de pasos ya usaba con candado. Debajo, el cuerpo del backend tal cual, en la rampa neutra alta para
+        que se lea al sol.</span></div>
+      <div class="note"><span class="m">19</span><span><b>“Ver la Bandeja” sí puede tener éxito;</b> “Reintentar el
+        paso” no. El sello no lo estampa esta pantalla: lo estampa el servidor al drenar el <code>complete</code>. La
+        acción honesta lleva al agente al lugar donde el bloqueo es <b>real y accionable</b> (fotos sin enviar), no al
+        botón que volvería a rebotar.</span></div>
+      <div class="note"><span class="m">20</span><span><b>El número de la otra reserva se extrae del TEXTO del
+        mensaje</b> — puente ya documentado en la Tanda A. Si el copy del backend cambia, el botón “Buscar R-2465”
+        <b>desaparece</b> y el resto de la pantalla sigue igual: la degradación es a “sin botón”, nunca a un botón que
+        busca una reserva inventada. El pedido de backend que lo cierra de verdad es
+        <code>conflictReservationId</code> en el cuerpo del 409.</span></div>
+      <div class="note"><span class="m">21</span><span><b>“Elegir otro vehículo” solo se dibuja cuando el swap es
+        legal.</b> <code>vehicle-swap.service.js:46-51</code> cierra el swap a partir de
+        <code>INSPECTION_IN_PROGRESS</code> (409 <code>SWAP_LOCKED</code>). Dibujar el CTA después de ese punto sería
+        la segunda puerta falsa de esta historia. Pasado ese paso, la pantalla cambia: nombra el callejón (“esta unidad
+        ya no se puede cambiar desde aquí; se resuelve en el mostrador”) y ofrece solo <b>Pausar</b> y
+        <b>Volver</b>.</span></div>
+      <div class="note"><span class="m">22</span><span><b>Terminal cancelado ≠ terminal cerrado.</b> Cerrado (21D) es
+        una entrega exitosa que otro completó: icono verde, tono de cierre. Cancelado (22D) es una salida que no
+        ocurrió: icono ámbar, y el motivo (<code>abandonedReason</code>) es el dato que el agente necesita para saber si
+        va a discutir con alguien. Un solo cartel “sesión terminal” para los dos habría sido más barato y menos
+        útil.</span></div>
+      <div class="note"><span class="m">23</span><span><b><code>STALE_VERSION</code> es el sexto código, y no está en
+        la lista de ADR-4</b> porque nació después, con P2. Ya está desplegado
+        (<code>checkout-session.service.js:91-100</code>) y su 409 <b>trae la fila fresca en el cuerpo</b> — el router
+        la reenvía a propósito para que la superficie desactualizada re-renderice <b>sin un GET de seguimiento</b>. En
+        una WiFi de patio eso es la diferencia entre una llamada y dos. La “matriz 409 completa” de H6 estaría
+        incompleta sin él.</span></div>
+      <div class="note"><span class="m">24</span><span><b>Se re-confirma, no se reintenta.</b> El agente vuelve a
+        decidir sobre el estado nuevo con un toque. La app <b>nunca</b> reenvía sola la transición con la versión
+        corregida: eso sería exactamente “reproducir un paso” con otro nombre, y en el camino de dinero es el escenario
+        que ADR-4 y ADR-5 existen para impedir.</span></div>
+      <div class="drop"><b>Descartado en §22</b>
+        <ul>
+          <li><b>Un botón “Reintentar” genérico para toda la matriz.</b> Es <i>la</i> puerta falsa: contra una máquina
+            lineal, cuatro de los cinco códigos darían 409 indefinidamente. Solo sobrevive donde el reintento cambia
+            algo real (la re-confirmación de 22E, que es un toque nuevo del agente sobre datos nuevos).</li>
+          <li><b>Mostrar el <code>code</code> en pantalla.</b> <code>ENTRY_GUARD</code> no significa nada en el patio.
+            El código va a la telemetría (<code>CheckoutEvents.transition409</code>), no a la cara del agente.</li>
+          <li><b>Una franja roja única para los cinco.</b> Se descarta por lo mismo que se descartó en pago: el color
+            comunica gravedad, no categoría. <code>STALE_VERSION</code> es azul (informativo, nadie hizo nada mal),
+            <code>ILLEGAL_TRANSITION</code> es ámbar (mira lo que pediste), <code>ENTRY_GUARD</code> y
+            <code>VEHICLE_CONFLICT</code> son rojos (algo bloquea de verdad).</li>
+          <li><b>Auto-corregir la transición al paso legal.</b> Tentador (“ya sé a dónde querías ir”) y prohibido: es
+            construir la máquina de estados en Dart. Se navega a la pantalla; se transiciona solo con el toque del
+            agente.</li>
+          <li><b>Una pantalla propia para <code>CHECKOUT_TERMINAL</code>.</b> Verificado: ese código solo lo lanza el
+            router del <b>kiosco</b> (<code>kiosk-checkout.service.js:731, 831, 913</code>), y RideOps consume
+            <code>/api/checkout-sessions/*</code>, no el router del kiosco. Es <b>inalcanzable por construcción</b>
+            desde esta app. Se mantiene el mapeo (una línea de cinturón, ya escrita) pero no se dibuja una pantalla que
+            finja que ocurre.</li>
+        </ul>
+      </div>
+    </aside>
+
+    <div class="copy">
+      <h3>Copy exacta · §22 (es / en)</h3>
+      <table class="ct">
+        <tr><th>Frame</th><th>Clave l10n</th><th>ES</th><th>EN</th></tr>
+        <tr><td class="fr">22A</td><td class="k">coConflictTooEarlyTitle</td><td>Ese paso todavía no toca</td><td>That step isn't up yet</td></tr>
+        <tr><td class="fr">22A</td><td class="k">coConflictTooEarlyBody</td><td>La sesión está en {current} (paso {index}) y {target} es el paso {targetIndex}. El servidor solo deja avanzar de uno en uno.</td><td>The session is on {current} (step {index}) and {target} is step {targetIndex}. The server only lets you move one step at a time.</td></tr>
+        <tr><td class="fr">22A</td><td class="k">coConflictServerSaidLabel</td><td>El servidor dijo</td><td>The server said</td></tr>
+        <tr><td class="fr">22A</td><td class="k">coGoToStepCta</td><td>Ir al paso {index} · {step}</td><td>Go to step {index} · {step}</td></tr>
+        <tr><td class="fr">22A</td><td class="k">coGoToStepWhy</td><td>Ir al paso {index} es navegación dentro de esta app: siempre funciona.</td><td>Going to step {index} is navigation inside this app: it always works.</td></tr>
+        <tr><td class="fr">22A</td><td class="k">coConflictDismiss</td><td>Entendido</td><td>Got it</td></tr>
+        <tr><td class="fr">22B</td><td class="k">coConflictEntryGuardTitle</td><td>Falta un paso previo</td><td>A previous step is missing</td></tr>
+        <tr><td class="fr">22B</td><td class="k">coGuardInspection</td><td>Falta: la inspección completada</td><td>Waiting on: completed inspection</td></tr>
+        <tr><td class="fr">22B</td><td class="k">coGuardWhyTitle</td><td>Por qué pasa esto</td><td>Why this happens</td></tr>
+        <tr><td class="fr">22B</td><td class="k">coGuardOnPhone</td><td>En el teléfono</td><td>On this phone</td></tr>
+        <tr><td class="fr">22B</td><td class="k">coGuardOnServer</td><td>En el servidor</td><td>On the server</td></tr>
+        <tr><td class="fr">22B</td><td class="k">coGuardOutboxCta</td><td>Ver la Bandeja ({n})</td><td>Open the Outbox ({n})</td></tr>
+        <tr><td class="fr">22B</td><td class="k">coGuardOutboxWhy</td><td>La Bandeja drena sola al recuperar señal; el paso avanza cuando el sello llegue.</td><td>The Outbox drains itself once you have signal; the step moves on when the stamp lands.</td></tr>
+        <tr><td class="fr">22C</td><td class="k">coConflictVehicleTitle</td><td>El vehículo ya no está libre</td><td>The vehicle is no longer free</td></tr>
+        <tr><td class="fr">22C</td><td class="k">coConflictVehicleTaken</td><td>Se la llevó {reservation} · misma ventana</td><td>Taken by {reservation} · same window</td></tr>
+        <tr><td class="fr">22C</td><td class="k">coConflictVehicleKept</td><td>Cliente ya verificado · sigues en el paso 1</td><td>Customer already verified · you stay on step 1</td></tr>
+        <tr><td class="fr">22C</td><td class="k">coConflictSwapCta</td><td>Elegir otro vehículo</td><td>Pick another vehicle</td></tr>
+        <tr><td class="fr">22C</td><td class="k">coEntrySearchReservation</td><td>Buscar {reservation}</td><td>Search {reservation}</td></tr>
+        <tr><td class="fr">22C</td><td class="k">coConflictSwapWhy</td><td>Nada se perdió: al cambiar la unidad sigues en el paso 1 con el cliente ya verificado.</td><td>Nothing was lost: swapping the unit keeps you on step 1 with the customer already verified.</td></tr>
+        <tr><td class="fr">22C</td><td class="k">coConflictSwapLockedBody</td><td>Esta unidad ya no se puede cambiar desde aquí: la inspección ya empezó. Se resuelve en el mostrador.</td><td>This unit can no longer be swapped from here: the inspection already started. It's handled at the desk.</td></tr>
+        <tr><td class="fr">22D</td><td class="k">coTerminalCancelledTitle</td><td>Este checkout fue cancelado</td><td>This checkout was cancelled</td></tr>
+        <tr><td class="fr">22D</td><td class="k">coTerminalCancelledOtherAgent</td><td>Lo canceló otro agente a las {time}. Esta sesión ya no admite más pasos.</td><td>Another agent cancelled it at {time}. This session takes no more steps.</td></tr>
+        <tr><td class="fr">22D</td><td class="k">coTerminalCancelReason</td><td>{name} · {surface} · “{reason}”</td><td>{name} · {surface} · “{reason}”</td></tr>
+        <tr><td class="fr">22E</td><td class="k">coStaleVersionTitle</td><td>La sesión se movió mientras decidías</td><td>The session moved while you were deciding</td></tr>
+        <tr><td class="fr">22E</td><td class="k">coStaleVersionBody</td><td>{name} {action} desde {surface} hace {age}. Esto es lo que hay ahora.</td><td>{name} {action} from the {surface} {age} ago. This is what's there now.</td></tr>
+        <tr><td class="fr">22E</td><td class="k">coStaleVersionHasTitle</td><td>Lo que el servidor ya tiene</td><td>What the server already has</td></tr>
+        <tr><td class="fr">22E</td><td class="k">coStaleVersionUpToDatePill</td><td>Al día</td><td>Up to date</td></tr>
+        <tr><td class="fr">22E</td><td class="k">coStaleVersionWhy</td><td>Vuelves a decidir sobre lo que hay ahora. No se reintentó nada por tu cuenta.</td><td>You decide again on what's there now. Nothing was retried on your behalf.</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ MATRIZ TABLA -->
+<section class="blk" id="mtx">
+  <div class="blk-head">
+    <span class="eyebrow">La matriz completa</span>
+    <h2>Un código, una situación del patio, un botón que puede tener éxito</h2>
+    <p>La columna que decide si algo se dibuja es la última: <b>por qué ese botón PUEDE triunfar</b>. Si no se puede
+    llenar con una frase verificable, el botón no existe.</p>
+  </div>
+  <div class="copy" style="max-width:1660px;flex:1 1 100%">
+    <table class="mtx">
+      <tr><th style="width:150px">Código 409</th><th style="width:210px">Qué pasó de verdad en el patio</th>
+        <th style="width:200px">Qué ve el agente</th><th style="width:190px">Acción ofrecida</th>
+        <th>Por qué esa acción puede tener éxito</th></tr>
+      <tr>
+        <td class="c">ILLEGAL_TRANSITION<br><span style="color:var(--n-600);font-weight:600">(ya-en-o-pasado)</span></td>
+        <td>Otra superficie hizo el paso mientras el agente lo tocaba.</td>
+        <td><b>Nada especial.</b> El rail se movió y el banner de 21A explica quién y cuándo.</td>
+        <td class="g">Ninguna — no-op silencioso</td>
+        <td>No hay acción porque no hay problema: el trabajo ya está hecho. Ya construido en H1.</td>
+      </tr>
+      <tr>
+        <td class="c">ILLEGAL_TRANSITION<br><span style="color:var(--n-600);font-weight:600">(paso adelantado)</span></td>
+        <td>Se pidió un paso que la cadena lineal aún no permite (pantalla vieja, doble toque tras reconciliar).</td>
+        <td>22A · “Ese paso todavía no toca” + qué falta y dónde.</td>
+        <td class="g">Ir al paso {n}</td>
+        <td>Es navegación local, no una transición. No pasa por el servidor: no puede dar 409.</td>
+      </tr>
+      <tr>
+        <td class="c">ENTRY_GUARD</td>
+        <td>Falta un sello previo — casi siempre porque lo estampa <b>otra</b> superficie o la Bandeja no drenó.</td>
+        <td>22B · “Falta: {sello}” + qué tiene el teléfono vs. qué tiene el servidor.</td>
+        <td class="g">Ver la Bandeja ({n}) · o el paso donde vive el sello</td>
+        <td>Ataca la causa real y accionable (fotos sin enviar). Reintentar la transición volvería a rebotar hasta que el sello exista.</td>
+      </tr>
+      <tr>
+        <td class="c">VEHICLE_CONFLICT<br><span style="color:var(--n-600);font-weight:600">(antes de inspección)</span></td>
+        <td>La unidad quedó comprometida por otra reserva en la misma ventana.</td>
+        <td>22C · “El vehículo ya no está libre” + quién se la llevó + qué se conserva.</td>
+        <td class="g">Elegir otro vehículo · Buscar {reserva}</td>
+        <td>El swap es legal antes de <code>INSPECTION_IN_PROGRESS</code> (H2, ya construido). El botón de búsqueda solo aparece si el número se pudo leer.</td>
+      </tr>
+      <tr>
+        <td class="c">VEHICLE_CONFLICT<br><span style="color:var(--n-600);font-weight:600">(pasada la inspección)</span></td>
+        <td>Lo mismo, pero el swap ya está cerrado por el servidor (<code>SWAP_LOCKED</code>).</td>
+        <td>Se nombra el callejón: “no se puede cambiar desde aquí; se resuelve en el mostrador”.</td>
+        <td class="r">Ninguna acción de cambio — solo Pausar / Volver</td>
+        <td><b>Aquí NO se dibuja el swap.</b> Daría 409 siempre. Se nombra dónde vive la puerta verdadera.</td>
+      </tr>
+      <tr>
+        <td class="c">SESSION_TERMINAL</td>
+        <td>La sesión terminó: cerrada por el kiosco (21D) o cancelada por el mostrador (22D).</td>
+        <td>Pantalla completa, no banner + registro con atribución y motivo.</td>
+        <td class="g">Volver a la lista</td>
+        <td>Es la única acción verdadera. Terminal significa terminal: no se ofrece reabrir porque el servidor no lo permite.</td>
+      </tr>
+      <tr>
+        <td class="c">STALE_VERSION<br><span style="color:var(--n-600);font-weight:600">(P2, fuera de ADR-4)</span></td>
+        <td>El agente decidía mientras otra superficie escribía. Nadie hizo nada mal.</td>
+        <td>22E · “La sesión se movió mientras decidías” + lo que el servidor tiene ahora.</td>
+        <td class="g">Re-confirmar el mismo avance (un toque)</td>
+        <td>La fila fresca <b>viene dentro del 409</b>; el segundo intento sale con la versión correcta. Reintento del <b>agente</b>, jamás automático.</td>
+      </tr>
+      <tr class="dead">
+        <td class="c">CHECKOUT_TERMINAL</td>
+        <td>Solo lo lanza el router del <b>kiosco</b>. RideOps consume <code>/api/checkout-sessions/*</code>.</td>
+        <td>— (inalcanzable por construcción desde esta app)</td>
+        <td>Mapeado a la cara de SESSION_TERMINAL</td>
+        <td>Se mantiene el mapeo como cinturón, sin pantalla propia. Dibujar una fingiría un caso que no ocurre.</td>
+      </tr>
+      <tr>
+        <td class="c">409 sin <code>code</code></td>
+        <td>Existe de verdad: el <code>abandon</code> sobre una sesión ya terminal.</td>
+        <td>Mensaje del servidor tal cual, enmarcado con el título genérico.</td>
+        <td class="g">Entendido · y re-render de lo reconciliado</td>
+        <td>No se inventa una acción sobre un caso que la app no sabe clasificar. El re-fetch ya corrigió la pantalla.</td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<!-- ============================================================ 23 · ENGANCHARSE -->
+<section class="blk" id="s23">
+  <div class="blk-head">
+    <span class="eyebrow">Pantalla 23 · M2-H6 · adjuntarse a la sesión</span>
+    <h2>El agente abre una reserva cuyo checkout ya va por la mitad, empezado por otro</h2>
+    <p>Hoy el wizard entra directo al paso que reporta el servidor. Funciona, y es correcto por ADR-4 — pero deja al
+    agente aterrizando en el <b>paso 7</b> sin saber quién hizo los seis anteriores ni si puede fiarse de ellos. H6
+    agrega una <b>antesala de un toque</b>: qué hay hecho, quién lo hizo, qué falta, y quién está dentro ahora mismo.
+    No es un paso nuevo de la máquina — es la misma lectura de <code>GET /by-reservation/:id</code> mostrada antes de
+    empujar al agente a trabajar.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Entrada a media sesión</span><span class="schip"><i></i>Alguien está activo AHORA</span>
+      <span class="schip"><i></i>La dejó pausada otro</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <!-- 23A -->
+    <figure>
+      <figcaption><span class="tag prop">Propuesta</span>23A — La antesala: qué hay hecho y quién lo hizo
+        <small>un toque para continuar · el rail ya muestra la verdad del servidor detrás</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:46</span><span>LTE · 72 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead">
+            <div class="sesrow">
+              <span class="sic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg></span>
+              <span class="sb"><b>Laura Méndez</b><span>U-112 · Corolla 2023 · Salida hoy 10:30</span></span>
+            </div>
+            <span class="presence"><span class="lv"></span><span class="pv">DT</span>Diego Torres · mostrador · hace 6 s</span>
+          </div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">Pago</span></div>
+            <div class="sr on"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 6 de 10</span>Pasar a inspección
+            <span class="more">Ver todos los pasos <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+          <div class="wpad">
+            <div class="banner b-info">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8v.5"/></svg>
+              <span>Esta salida <b>ya empezó</b>. La abrió el mostrador a las 10:12 y va por el paso 6 de 10.
+                <span class="m" style="margin-left:4px">25</span></span></div>
+            <div class="vcard okc">
+              <div class="vhead"><b>Lo que ya está hecho</b><span class="vpill ok">3 de 5 fases</span></div>
+              <div class="kv"><span class="k">Cliente</span><span class="v okv">Verificado · 10:12 · Diego Torres</span></div>
+              <div class="kv"><span class="k">T&amp;C</span><span class="v okv">Firmado · 10:19 · kiosco</span></div>
+              <div class="kv"><span class="k">Pago</span><span class="v okv">Registrado · 10:41 · Diego Torres</span></div>
+              <span class="m inframe" style="margin:-72px 0 0 300px">26</span>
+            </div>
+            <div class="vcard">
+              <div class="vhead"><b>Lo que falta</b><span class="vpill mut">Tuyo</span></div>
+              <div class="kv"><span class="k">Inspección</span><span class="v pend">8 ángulos, métricas y firma</span></div>
+              <div class="kv"><span class="k">Cierre</span><span class="v pend">Contrato y entrega</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Continuar desde el paso 6</div>
+              <div class="btn btn-ghost btn-sm">Ver todos los pasos</div>
+              <div class="why">Entras al paso que reporta el servidor, no al que dejó nadie. Nada se re-hace.
+                <span class="m" style="margin-left:4px">27</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- 23B -->
+    <figure>
+      <figcaption><span class="tag corr">Corrección</span>23B — Entras mientras el cliente está firmando en el kiosco
+        <small>la presencia viva cambia el consejo, no el permiso: nada se bloquea</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:47</span><span>LTE · 72 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead">
+            <div class="sesrow">
+              <span class="sic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg></span>
+              <span class="sb"><b>Laura Méndez</b><span>U-112 · Corolla 2023 · Salida hoy 10:30</span></span>
+            </div>
+            <span class="presence"><span class="lv"></span><span class="pv dev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8"/></svg></span>El kiosco del lobby · ahora</span>
+          </div>
+          <div class="stepline"><span class="ix">Paso 8 de 10</span>Firma del cliente</div>
+          <div class="wpad">
+            <div class="banner b-warn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 9v5"/><path d="M12 17v.5"/><path d="M10.3 3.9L2.6 17.4c-.8 1.3.2 3 1.7 3h15.4c1.5 0 2.5-1.7 1.7-3L13.7 3.9c-.8-1.3-2.6-1.3-3.4 0z"/></svg>
+              <span><b>El cliente está firmando en el kiosco ahora mismo.</b><br>
+                Si avanzas desde aquí puedes interrumpirle la firma.<span class="m" style="margin-left:4px">28</span></span></div>
+            <div class="vcard">
+              <div class="vhead"><b>Qué conviene hacer</b><span class="vpill mut">Consejo</span></div>
+              <div class="kv"><span class="k">Esperar</span><span class="v">Esta pantalla se actualiza sola cuando el kiosco termine</span></div>
+              <div class="kv"><span class="k">O irte</span><span class="v">Nada se pierde: la sesión sigue igual</span></div>
+              <div class="quote"><i>Lo que esto NO es</i>No es un bloqueo. Puedes avanzar igual — el servidor decide,
+                no este aviso. Solo te decimos lo que está pasando del otro lado.</div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-ghost">Avanzar de todas formas</div>
+              <div class="btn btn-neutral btn-sm">Volver a la lista</div>
+              <div class="why">Si el kiosco termina primero, esta pantalla te lo dirá con quién y a qué hora.
+                <span class="m" style="margin-left:4px">29</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <!-- 23C -->
+    <figure>
+      <figcaption><span class="tag corr">Corrección</span>23C — La dejó pausada otro agente
+        <small><code>abandonedAt</code> + <code>abandonedReason</code>: el dato que decide si conviene continuar</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>14:03</span><span>LTE · 58 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2503</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead">
+            <div class="sesrow">
+              <span class="sic"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg></span>
+              <span class="sb"><b>Óscar Rivas</b><span>U-140 · Versa 2024 · Salida hoy 13:15</span></span>
+            </div>
+            <span class="presence mut"><span class="lv stale"></span>Nadie visible ahora mismo</span>
+            <span class="m inframe" style="margin:78px 0 0 210px">30</span>
+          </div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr on"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+            <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 2 de 10</span>Términos y condiciones</div>
+          <div class="wpad">
+            <div class="banner b-warn">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              <span><b>Otro agente pausó esta salida hace 47 min.</b><br>
+                Diego Torres · <i>“el cliente fue por su tarjeta”</i><span class="m" style="margin-left:4px">31</span></span></div>
+            <div class="vcard">
+              <div class="vhead"><b>Dónde quedó</b><span class="vpill warn">Paso 2</span></div>
+              <div class="kv"><span class="k">Cliente</span><span class="v okv">Verificado · 13:12 · Diego Torres</span></div>
+              <div class="kv"><span class="k">T&amp;C</span><span class="v pend">Sin firmar</span></div>
+              <div class="kv"><span class="k">Salida</span><span class="v miss">Era a las 13:15 · hace 48 min</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Continuar desde el paso 2</div>
+              <div class="btn btn-ghost btn-sm">Volver a la lista</div>
+              <div class="why">Continuar no le quita nada a Diego: la sesión es una sola y el registro guarda quién hizo qué.
+                <span class="m" style="margin-left:4px">32</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Decisiones · §23</h3>
+      <div class="note"><span class="m">25</span><span><b>La antesala solo aparece cuando hay algo que contar.</b>
+        Regla: se muestra si el paso reportado <b>no es el 1</b> <i>o</i> si el <code>startedByUserId</code> es de otro.
+        Una sesión que el propio agente acaba de abrir entra directo al paso 1 como hoy — meterle una antesala a un
+        checkout recién creado sería un toque de más por cada salida del día.</span></div>
+      <div class="note"><span class="m">26</span><span><b>La atribución completa el rail, no lo repite.</b> El rail
+        dice <b>dónde</b> está la sesión; esta tarjeta dice <b>quién</b> la trajo hasta ahí. Es la misma lectura de
+        <code>events[]</code> del banner de 21A, servida completa en el único momento en que el agente la necesita
+        entera: al llegar sin contexto.</span></div>
+      <div class="note"><span class="m">27</span><span><b>“Entras al paso que reporta el servidor, no al que dejó
+        nadie.”</b> Es la frase de ADR-4 en idioma de patio, y ya está en el copy de la hoja de pausa
+        (<code>coPauseWarn</code>). Repetirla en la entrada cierra el círculo: se prometió al pausar y se cumple al
+        volver.</span></div>
+      <div class="note"><span class="m">28</span><span><b>La presencia viva cambia el CONSEJO, nunca el permiso.</b>
+        Aquí se ve el valor de encender el latido: sin presencia, el agente entra al paso 8 y toca “continuar” mientras
+        el cliente está firmando. El aviso es fuerte (ámbar) porque la consecuencia es real, pero el CTA sigue
+        disponible: presencia que bloquea es un candado, y un kiosco muerto que dejó de latir atascaría la salida —
+        exactamente lo que el módulo del backend prohíbe.</span></div>
+      <div class="note"><span class="m">29</span><span><b>El botón principal cambia de peso, no de existencia.</b>
+        “Avanzar de todas formas” baja a fantasma y “Volver a la lista” sube: la jerarquía visual carga el consejo sin
+        quitarle la decisión al agente, que es quien está viendo el patio.</span></div>
+      <div class="note"><span class="m">30</span><span><b>Aquí el chip dice “nadie visible”, no desaparece.</b> Es la
+        misma regla de §20 aplicada al momento en que más tienta romperla: llegar a una sesión abandonada e inferir
+        “está libre”. Puede haber alguien en el mostrador cuya pestaña no late.</span></div>
+      <div class="note"><span class="m">31</span><span><b><code>abandonedReason</code> es el dato que decide.</b>
+        “El cliente fue por su tarjeta” y “la unidad no arranca” llevan a acciones opuestas. El campo ya viaja en el
+        DTO y hoy no se muestra en la entrada: mostrarlo cuesta una fila y ahorra una llamada por radio.</span></div>
+      <div class="note"><span class="m">32</span><span><b>Se nombra explícitamente que continuar no “roba” la sesión.</b>
+        Hay una sola <code>CheckoutSession</code> por reserva (<code>reservationId @unique</code>): no existe transferir,
+        reclamar ni desbloquear. Decirlo evita que el agente busque un botón de “tomar el control” que ninguna versión
+        de esta app va a tener.</span></div>
+      <div class="drop"><b>Descartado en §23</b>
+        <ul>
+          <li><b>“Tomar el control de esta sesión”.</b> No existe tal cosa: la sesión es única por reserva y la
+            presencia no reserva nada. Un botón así sería una puerta falsa con nombre tranquilizador.</li>
+          <li><b>Antesala SIEMPRE, incluso al abrir una sesión nueva.</b> Un toque extra por cada salida del día, para
+            contar que no ha pasado nada. Se descarta por respeto al patio.</li>
+          <li><b>Un resumen “inteligente” que recomiende el siguiente paso.</b> Sería una copia de la máquina de estados
+            en Dart con otro nombre. El único “siguiente paso” legítimo es el que reporta el servidor.</li>
+          <li><b>Bloquear la entrada cuando otra superficie está activa.</b> Convierte la presencia informativa en un
+            lease. Un kiosco que se quedó sin batería a mitad de firma atascaría la salida hasta que expire el TTL —
+            y el patio no espera 45 s mirando el teléfono.</li>
+          <li><b>Pedir confirmación (“¿seguro que quieres continuar la sesión de Diego?”).</b> Un diálogo por cada
+            enganche, para una operación que no destruye nada y queda registrada. Se resuelve con una frase en el
+            <code>why</code> del dock.</li>
+        </ul>
+      </div>
+    </aside>
+
+    <div class="copy">
+      <h3>Copy exacta · §23 (es / en)</h3>
+      <table class="ct">
+        <tr><th>Frame</th><th>Clave l10n</th><th>ES</th><th>EN</th></tr>
+        <tr><td class="fr">23A</td><td class="k">coJoinBannerOtherAgent</td><td>Esta salida ya empezó. La abrió {name} a las {time} y va por el paso {index} de {total}.</td><td>This departure already started. {name} opened it at {time} and it's on step {index} of {total}.</td></tr>
+        <tr><td class="fr">23A</td><td class="k">coJoinBannerCounter</td><td>Esta salida ya empezó. La abrió el mostrador a las {time} y va por el paso {index} de {total}.</td><td>This departure already started. The counter opened it at {time} and it's on step {index} of {total}.</td></tr>
+        <tr><td class="fr">23A</td><td class="k">coJoinDoneTitle</td><td>Lo que ya está hecho</td><td>What's already done</td></tr>
+        <tr><td class="fr">23A</td><td class="k">coJoinDonePill</td><td>{done} de {total} fases</td><td>{done} of {total} phases</td></tr>
+        <tr><td class="fr">23A</td><td class="k">coJoinStampByAgent</td><td>{state} · {time} · {name}</td><td>{state} · {time} · {name}</td></tr>
+        <tr><td class="fr">23A</td><td class="k">coJoinStampByKiosk</td><td>{state} · {time} · kiosco</td><td>{state} · {time} · kiosk</td></tr>
+        <tr><td class="fr">23A</td><td class="k">coJoinPendingTitle</td><td>Lo que falta</td><td>What's left</td></tr>
+        <tr><td class="fr">23A</td><td class="k">coJoinPendingPill</td><td>Tuyo</td><td>Yours</td></tr>
+        <tr><td class="fr">23A</td><td class="k">coJoinContinueCta</td><td>Continuar desde el paso {index}</td><td>Continue from step {index}</td></tr>
+        <tr><td class="fr">23A</td><td class="k">coJoinContinueWhy</td><td>Entras al paso que reporta el servidor, no al que dejó nadie. Nada se re-hace.</td><td>You enter the step the server reports, not the one anyone left. Nothing is redone.</td></tr>
+        <tr><td class="fr">23B</td><td class="k">coJoinKioskActiveTitle</td><td>El cliente está firmando en el kiosco ahora mismo.</td><td>The customer is signing on the kiosk right now.</td></tr>
+        <tr><td class="fr">23B</td><td class="k">coJoinKioskActiveBody</td><td>Si avanzas desde aquí puedes interrumpirle la firma.</td><td>Moving ahead from here may interrupt their signature.</td></tr>
+        <tr><td class="fr">23B</td><td class="k">coJoinAdviceTitle</td><td>Qué conviene hacer</td><td>What's worth doing</td></tr>
+        <tr><td class="fr">23B</td><td class="k">coJoinAdviceWait</td><td>Esta pantalla se actualiza sola cuando el kiosco termine</td><td>This screen updates itself when the kiosk finishes</td></tr>
+        <tr><td class="fr">23B</td><td class="k">coJoinAdviceLeave</td><td>Nada se pierde: la sesión sigue igual</td><td>Nothing is lost: the session stays as it is</td></tr>
+        <tr><td class="fr">23B</td><td class="k">coJoinNotABlock</td><td>No es un bloqueo. Puedes avanzar igual — el servidor decide, no este aviso. Solo te decimos lo que está pasando del otro lado.</td><td>This is not a block. You can move ahead — the server decides, not this notice. We're only telling you what's happening on the other side.</td></tr>
+        <tr><td class="fr">23B</td><td class="k">coJoinProceedAnyway</td><td>Avanzar de todas formas</td><td>Move ahead anyway</td></tr>
+        <tr><td class="fr">23C</td><td class="k">coJoinPausedByOther</td><td>Otro agente pausó esta salida hace {age}.</td><td>Another agent paused this departure {age} ago.</td></tr>
+        <tr><td class="fr">23C</td><td class="k">coJoinPausedReason</td><td>{name} · “{reason}”</td><td>{name} · “{reason}”</td></tr>
+        <tr><td class="fr">23C</td><td class="k">coJoinWhereItStoppedTitle</td><td>Dónde quedó</td><td>Where it stopped</td></tr>
+        <tr><td class="fr">23C</td><td class="k">coJoinPickupOverdue</td><td>Era a las {time} · hace {age}</td><td>Was due at {time} · {age} ago</td></tr>
+        <tr><td class="fr">23C</td><td class="k">coJoinNoStealWhy</td><td>Continuar no le quita nada a {name}: la sesión es una sola y el registro guarda quién hizo qué.</td><td>Continuing takes nothing away from {name}: there is one session and the log keeps who did what.</td></tr>
+        <tr><td class="fr">23C</td><td class="k">coPresenceEmpty</td><td>Nadie visible ahora mismo</td><td>Nobody visible right now</td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ PRIVACIDAD -->
+<footer class="dod" id="priv">
+  <div class="card">
+    <h3>Identidad y visibilidad — decidido, y ya resuelto en el backend</h3>
+    <p style="margin-top:0"><b>Decisión de Hector: el usuario se identifica</b> — conviene saber quién es en los
+    registros. Esta lámina no diseña nada de eso desde cero, porque el modelo ya existe y es correcto. Lo verificado en
+    código:</p>
+    <ul>
+      <li><code>CheckoutPresence</code> (<code>prisma/schema.prisma</code>) lleva <code>actorUserId</code> y
+        <code>displayLabel</code>. Las superficies de <b>personal</b> mandan el usuario autenticado; el <b>kiosco</b>
+        (aparato, sin usuario) y el <b>teléfono del cliente</b> (token, sin usuario) lo dejan <b>nulo a propósito</b>.
+        Ese nulo no es un agujero: es el dato.</li>
+      <li><code>activePresence()</code> (<code>checkout-presence.service.js:109-115</code>) resuelve el nombre en
+        cascada: <b>etiqueta explícita → <code>fullName</code> del actor → etiqueta genérica de la superficie</b>. Un
+        compañero aparece con su nombre; una superficie sin usuario aparece como lo que es (“el kiosco”), nunca como un
+        identificador crudo ni como un hueco.</li>
+      <li>La firma del latido es <code>heartbeat({ sessionId, surface, actorUserId, label, tenantId })</code>, y
+        <code>req.user</code> ya trae <code>fullName</code> porque <code>requireAuth</code> hidrata la fila del usuario
+        — el JWT por sí solo no lo lleva. El nombre está disponible en el servidor <b>sin pedir nada más</b>.</li>
+    </ul>
+    <p><b>Lo que hace la app, en consecuencia:</b></p>
+    <ul>
+      <li><b>No manda <code>label</code>.</b> Manda <code>{surface: 'RIDEOPS'}</code> y deja que la cascada resuelva
+        <code>fullName</code>. Es el camino con menos código y el que cumple la decisión de Hector.
+        <code>displayLabel</code> queda reservado para superficies que no tienen usuario — no es asunto de RideOps.</li>
+      <li><b>Nombre cuando lo hay, superficie cuando no</b>, y los dos casos <b>visualmente distintos</b> (nota 4):
+        círculo + iniciales + morado para la persona; cuadrado + glifo + gris para el aparato. Se lee de un vistazo,
+        con una mano y a pleno sol.</li>
+      <li><b>La atribución del avance ajeno usa la misma cascada</b>, encajada en la forma que ya existe y ya se vio
+        funcionando («se completó en el kiosco hace 52 h» / «lo completó Diego Torres hace 40 s»). No se inventa un
+        segundo patrón.</li>
+      <li><b>Se late solo con el wizard en primer plano.</b> Ni en segundo plano, ni desde el drenador de la Bandeja:
+        el latido afirma “estoy mirando esto”, y un servicio de fondo no está mirando nada.</li>
+      <li><b>El reverso se le dice al agente</b>, una vez y donde puede verlo: la fila “Tú · RideOps — los demás te ven
+        como Ana Ruiz” de 20B, con el cuándo (“mientras esta pantalla esté abierta”) y el hasta cuándo (“dejas de
+        aparecer en menos de un minuto”). No es un ajuste ni una política enterrada.</li>
+    </ul>
+    <div class="decision"><b>Lo que queda anotado, sin bloquear</b>
+      El <code>displayName</code> viaja en <code>GET /:id</code> y <code>GET /by-reservation/:id</code>, que también
+      consumen el mostrador y el kiosco. Hoy <b>ninguna otra superficie lo pinta</b> (verificado: la “co-presencia” del
+      kiosco es de Vozia, otra cosa), pero el dato ya está en su carga útil. Si algún día el kiosco —
+      <b>un mueble del lobby, frente al cliente</b> — pinta un chip de presencia, ahí aparecería el nombre de un
+      empleado de patio delante de quien renta el coche. <b>No cambia nada de esta lámina</b> y no es decisión de H6;
+      queda escrito para que, cuando le toque a esa superficie, sea una decisión y no un descubrimiento.
+    </div>
+  </div>
+
+  <div class="card" id="rej">
+    <h3>Si Hector rechaza…</h3>
+    <table class="mtx">
+      <tr><th style="width:230px">Si se rechaza…</th><th style="width:300px">Qué se cae</th><th>Qué queda en pie</th></tr>
+      <tr><td class="fr">La hoja “Quién está aquí” (20B)</td>
+        <td>El agente nunca se entera de que él también es visible. Se enciende el latido en silencio.</td>
+        <td>Todo lo demás. El chip sigue como en H1. <b>Pero</b> entonces el reverso hay que ponerlo en algún sitio —
+          la alternativa mínima sería una línea en la hoja de Pausar.</td></tr>
+      <tr><td class="fr">El diff “Ver qué cambió” (21B)</td>
+        <td>El botón que ya existe en el banner construido se queda sin destino real (hoy abre la lista de pasos).</td>
+        <td>El banner, la atribución y el rail. Se podría degradar a abrir la lista de pasos, como hoy — pero es la
+          respuesta a otra pregunta.</td></tr>
+      <tr><td class="fr">La antesala de enganche (23A)</td>
+        <td>El agente sigue aterrizando en el paso 7 sin contexto. No se rompe nada; se pierde la mitad del valor de
+          “engancharse en cualquier paso”.</td>
+        <td>La entrada directa de hoy, que es correcta por ADR-4. La fila del plan quedaría cubierta solo a
+          medias.</td></tr>
+      <tr><td class="fr">El aviso de kiosco activo (23B)</td>
+        <td>Se pierde el único caso donde la presencia <b>previene</b> una colisión en vez de explicarla.</td>
+        <td>Todo lo demás: el 409 que resultaría sigue teniendo su cara humana en §22.</td></tr>
+      <tr><td class="fr">La distinción persona / aparato (nota 4)</td>
+        <td>“El kiosco” y “Diego Torres” se leerían igual, y el agente no sabría si puede resolverlo gritando o tiene
+          que caminar al lobby.</td>
+        <td>Todo lo demás. Es la parte más barata de construir de toda la lámina — tres tokens ya definidos — y la que
+          más devuelve por minuto de patio.</td></tr>
+      <tr><td class="fr">Los 360 dp de esta lámina</td>
+        <td>Nada. Es una decisión de medición, no de producto.</td>
+        <td>Todo. Si Hector prefiere seguir a los 372 dp de las Tandas A–C, las pantallas ganan 12 px y ninguna
+          apretaba.</td></tr>
+    </table>
+  </div>
+
+  <div class="card" id="gaps">
+    <h3>Lo que la app / el backend NO pueden hoy (pedidos, no bloqueos — salvo el primero)</h3>
+    <ul>
+      <li><b><code>actorUserId</code> existe en la fila, pero no viaja en la respuesta.</b> La columna está y la
+        cascada de nombres funciona; lo que sale al cliente es <code>{surface, displayName, lastSeenAt}</code>. Sin el
+        id, la app no reconoce su propia fila y el agente se vería a sí mismo en su chip en cuanto RideOps late. El
+        filtro ya está escrito e inerte (<code>pickPresenceChip</code>). <b>Pedido: una línea en el map de
+        <code>activePresence()</code>.</b> Plan B aceptable si no llega: comparar <code>displayName</code> con
+        <code>me.fullName</code> en la superficie <code>RIDEOPS</code> — frágil con homónimos, pero local y
+        reversible.</li>
+      <li><b><code>ApiError</code> tira el cuerpo del 409.</b> Hoy conserva <code>message</code>, <code>code</code> y
+        <code>status</code>, pero descarta el resto del JSON — incluida la fila fresca que <code>STALE_VERSION</code>
+        manda a propósito. Sin un campo nuevo en <code>ApiError</code>, el frame 22E funciona igual pero pagando el GET
+        de reconciliación que P2 diseñó para evitar. Trabajo de cliente, pequeño.</li>
+      <li><b><code>conflictReservationId</code> en el 409 <code>VEHICLE_CONFLICT</code></b> — ya listado como gap del
+        plan. Mientras no exista, el botón “Buscar R-2465” depende de leer el número del texto del mensaje y
+        <b>degrada a no dibujarse</b> si el copy cambia.</li>
+      <li><b><code>CHECKOUT_TERMINAL</code> es inalcanzable desde RideOps</b> (solo lo lanza el router del kiosco). No
+        es un gap que arreglar: es un hecho que la matriz debe declarar para no fingir una pantalla que nunca se
+        muestra.</li>
+      <li><b>La card del dashboard no emite nada de <code>CheckoutSession</code></b> (gap ya registrado): por eso el
+        agente no puede saber desde la home que una salida ya va por el paso 6 — se entera al abrirla (23A). El chip
+        “En curso · paso N de 10” sigue siendo pedido de backend.</li>
+      <li><b>El log <code>events</code> es un TEXT con lost-update reconocido</b> (lo cierra M2-H8). Toda la atribución
+        de §21 y §23 sale de ahí, así que degrada igual que hoy: log ilegible ⇒ “otra superficie”, nunca una caída ni
+        un culpable inventado.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>DoD de esta lámina</h3>
+    <ul>
+      <li><b>Superficie real 360 dp</b> (378 px con el marco). Targets ≥ 48 px, CTA 56 px, todo alcanzable con el pulgar
+        en la mitad inferior; el banner de 21C está anclado al pie justo por eso.</li>
+      <li><b>Cero <code>BackdropFilter</code></b> en todo el wizard, como en las Tandas A–C: placas opacas.</li>
+      <li><b>Todo string en l10n</b> (ADR-8) con clave propuesta siguiendo el prefijo <code>co*</code> del wizard:
+        20 claves en §20, 26 en §21, 28 en §22 y 23 en §23 — <b>96 únicas</b>, de las cuales <b>21 ya existen</b> en
+        <code>app_es.arb</code>/<code>app_en.arb</code> y se reusan tal cual (verificado contra el archivo, no
+        estimado).</li>
+      <li><b>Ninguna pantalla afirma lo que el servidor no garantiza.</b> Los sellos se cuentan por lo que el servidor
+        tiene, no por lo que el teléfono cree (22B es literalmente ese caso).</li>
+      <li><b>Ninguna acción dibujada puede dar 409 para siempre.</b> La columna final de la matriz existe para poder
+        verificarlo una por una.</li>
+      <li><b>Estados por pantalla</b>: cargando (skeleton 8F, sin cambios), vacío (presencia vacía ≠ soledad), error
+        (sin red en 20C, 409 en §22).</li>
+    </ul>
+  </div>
+</footer>
+
+</body>
+</html>
