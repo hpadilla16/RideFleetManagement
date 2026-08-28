@@ -136,6 +136,17 @@ jobs:
         #     serializer must NEVER break the session poll, and STALE_VERSION
         #     must stay strictly opt-in — a regression here silently changes
         #     behavior for every pre-M2 client (web wizard, kiosk, precheckin).
+        #   - test:presence-boundary (M2-H6, 2026-08-28): WHO receives the
+        #     presence array. It carries staff full names and, since H6, the
+        #     employee's actorUserId — safe only because the array is emitted
+        #     on two requireAuth routes and reaches no customer-facing surface
+        #     (the phone's handoff-token payload has none; the lobby kiosk
+        #     writes presence and never reads it). That is a property of the
+        #     ROUTING, not of the module, so it is re-derived from the source
+        #     here on every run: a future route that serializes presence onto
+        #     the public or device-authed surface fails this suite. The leak it
+        #     guards would be invisible in review — a payload nobody reads, on
+        #     a screen the customer is holding.
         #   - test:checkout-cas (M2-H8, 2026-08-17): the compare-and-set commit
         #     in transition(). Two surfaces on the same step must produce ONE
         #     hop, and the loser must be told the truth instead of a fake
@@ -172,7 +183,7 @@ jobs:
         #     `npm test`, which is the trap documented above.
         env:
           DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_unit_only?schema=public'
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance && npm run test:terms-signing && npm run test:tenant-brand && npm run test:checkout-multisurface && npm run test:checkout-cas
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance && npm run test:terms-signing && npm run test:tenant-brand && npm run test:checkout-multisurface && npm run test:checkout-cas && npm run test:presence-boundary
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:
