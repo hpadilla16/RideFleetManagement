@@ -304,6 +304,47 @@ const SEVERITY_ORDER = [
   SUBSCRIPTION_STATUS.ACTIVE,
 ];
 
+/**
+ * THE ONE RULE for what a billing restore puts `Tenant.status` back to.
+ *
+ * Exported and shared because the panel has to SAY what the button will do and
+ * the service has to DO it — the same reason `suspensionEnforcement` is
+ * serialised into the detail payload. Two copies of this rule would drift, and
+ * the drift is a dialog promising one outcome while the write performs another,
+ * which on this screen means lying about a paying customer's public surface.
+ *
+ * Rules, in order:
+ *   - NOTHING RECORDED (null) -> ACTIVE. A tenant suspended before
+ *     `billingPreviousStatus` existed, or by a path that did not record one.
+ *     This is the old behaviour, kept deliberately as the fallback.
+ *   - a recorded SUSPENDED -> ACTIVE. Restoring to SUSPENDED would clear
+ *     `billingSuspendedAt` while leaving the tenant off, and restore refuses a
+ *     suspension billing did not set — so that combination is the one state
+ *     this screen could never undo again.
+ *   - anything else -> itself, VERBATIM. Untrimmed, unchanged, byte for byte.
+ *
+ * NULL AND EMPTY STRING ARE NOT THE SAME THING, and collapsing them was a bug.
+ * `Tenant.status` is non-nullable but tenants.service.js updateTenant writes
+ * `String(patch.status || '').toUpperCase()`, so a tenant CAN sit at ''. That
+ * tenant is already off the public surface (nothing matches '' either), and
+ * treating its recorded '' as "nothing was recorded" would promote it to ACTIVE
+ * and publish it — the exact defect this function exists to prevent, surviving
+ * in the one branch nobody looks at. Only a NULL column means nothing was
+ * recorded; '' means '' was.
+ *
+ * The SUSPENDED test is case-insensitive but the returned value keeps its
+ * original casing and spacing. Both writers uppercase, but a row written by
+ * hand could hold 'suspended', and a case-sensitive test would let it through
+ * into the unrecoverable state above. Normalising the OUTPUT instead would mean
+ * restore silently rewriting a value it was only asked to put back.
+ */
+export function resolveRestoredTenantStatus(billingPreviousStatus) {
+  if (billingPreviousStatus == null) return 'ACTIVE';
+  const previous = String(billingPreviousStatus);
+  if (previous.trim().toUpperCase() === 'SUSPENDED') return 'ACTIVE';
+  return previous;
+}
+
 export function severityRank(status) {
   const i = SEVERITY_ORDER.indexOf(status);
   return i === -1 ? SEVERITY_ORDER.length : i;
@@ -374,6 +415,20 @@ export async function getTenantBillingDetail(tenantId, overrides = {}) {
       plan: tenant.plan,
       planName: entitlement.name,
       billingSuspendedAt: tenant.billingSuspendedAt || null,
+      // What restore will put this tenant BACK to, for the same reason
+      // suspensionEnforcement below is serialised: the dialog must describe the
+      // lever the operator is really pulling, and only the server knows this
+      // value. Without it the restore copy could only generalise ("normally
+      // Active"), which is a hedge on a screen whose whole job is to be exact
+      // about a customer's access.
+      //
+      // TWO fields, not one, because they answer different questions. The raw
+      // value says what was RECORDED (null = nothing was, which is worth seeing
+      // as itself). `restoresToStatus` is the RESOLVED answer, straight out of
+      // the same helper restoreTenantAccess writes with, so the panel cannot
+      // re-derive the rule and drift from it.
+      billingPreviousStatus: tenant.billingPreviousStatus || null,
+      restoresToStatus: resolveRestoredTenantStatus(tenant.billingPreviousStatus),
     },
     // Phase 5 (2026-08-28): WHAT SUSPENSION ACTUALLY DOES ON THIS DEPLOY.
     // 'off' | 'log' | 'enforce'. The suspend dialog must describe the lever the
@@ -772,7 +827,10 @@ export async function suspendTenantAccess(input = {}, overrides = {}) {
   const writes = [
     d.prisma.tenant.update({
       where: { id: tenant.id },
-      data: { status: 'SUSPENDED', billingSuspendedAt: now },
+      // billingPreviousStatus is captured in the SAME write that sets
+      // SUSPENDED, so the pair can never disagree: there is no window in which
+      // a tenant is off with no record of what it was.
+      data: { status: 'SUSPENDED', billingSuspendedAt: now, billingPreviousStatus: tenant.status },
     }),
   ];
   if (subscription && subscription.status !== SUBSCRIPTION_STATUS.SUSPENDED) {
@@ -868,10 +926,35 @@ export async function restoreTenantAccess(input = {}, overrides = {}) {
     ? SUBSCRIPTION_STATUS.PAST_DUE
     : SUBSCRIPTION_STATUS.ACTIVE;
 
+  /**
+   * WHAT THE TENANT GOES BACK TO — whatever it was, not ACTIVE.
+   *
+   * `Tenant.status` is a free-text String — tenants.service.js updateTenant
+   * accepts any string and only uppercases it — and ACTIVE is not a synonym for
+   * "on": the public booking token resolver, resolvePublicTenant() in the
+   * booking engine and the car-sharing marketplace tenant list all match
+   * `status: 'ACTIVE'` exactly. Restoring a tenant that held ANY other value to
+   * ACTIVE therefore does not just mislabel it, it puts it on the public booking
+   * surface. Suspend recorded the real value; read it back.
+   *
+   * The fallback is ACTIVE, for a tenant suspended before billingPreviousStatus
+   * existed or by a path that did not record one. SUSPENDED is treated as
+   * nothing recorded: restoring to SUSPENDED would leave the tenant off with
+   * billingSuspendedAt cleared, which is the one state this screen can no
+   * longer undo.
+   *
+   * DELIBERATELY NOT AN INPUT. The caller does not get to name the target
+   * status — that would turn a restore button into a status editor. It comes
+   * only from what suspend itself wrote.
+   */
+  const restoredTenantStatus = resolveRestoredTenantStatus(tenant.billingPreviousStatus);
+
   const writes = [
     d.prisma.tenant.update({
       where: { id: tenant.id },
-      data: { status: 'ACTIVE', billingSuspendedAt: null },
+      // Cleared alongside billingSuspendedAt: both describe a suspension that
+      // is over, and a stale value here would be read by the NEXT restore.
+      data: { status: restoredTenantStatus, billingSuspendedAt: null, billingPreviousStatus: null },
     }),
   ];
   if (subscription) {
@@ -901,13 +984,18 @@ export async function restoreTenantAccess(input = {}, overrides = {}) {
       subscriptionId: subscription ? subscription.id : null,
       subscriptionStatus: subscription ? restoredStatus : null,
       suspendedSince: tenant.billingSuspendedAt,
+      // What it went back to, and whether that came from a recorded value or
+      // from the ACTIVE fallback — so a restore that guessed is distinguishable
+      // in the trail from one that knew.
+      restoredTenantStatus,
+      previousTenantStatus: tenant.billingPreviousStatus ?? null,
       sessionsInvalidated: bust?.invalidated ?? 0,
     },
   });
 
   return {
     tenantId: tenant.id,
-    status: 'ACTIVE',
+    status: restoredTenantStatus,
     subscriptionStatus: subscription ? restoredStatus : null,
     sessionsInvalidated: bust?.invalidated ?? 0,
   };

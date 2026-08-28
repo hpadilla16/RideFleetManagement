@@ -26,6 +26,18 @@ const MIGRATION_DIR = '20260827_tenant_subscriptions';
 const SQL = readFileSync(join(ROOT, 'prisma', 'migrations', MIGRATION_DIR, 'migration.sql'), 'utf8');
 const SCHEMA = readFileSync(join(ROOT, 'prisma', 'schema.prisma'), 'utf8');
 
+// Restore-previous-status (2026-08-28), shipped as TWO directories on purpose:
+// startup-migrate sends each file as one simple-query batch, which Postgres
+// wraps in an implicit transaction, so a failing backfill bundled with the ALTER
+// would roll the column back and retry-fail on every boot thereafter.
+const PREV_STATUS_DIR = '20260828_tenant_billing_previous_status';
+const PREV_STATUS_BACKFILL_DIR = '20260828_tenant_billing_previous_status_backfill';
+const PREV_STATUS_SQL = readFileSync(join(ROOT, 'prisma', 'migrations', PREV_STATUS_DIR, 'migration.sql'), 'utf8');
+const PREV_STATUS_BACKFILL_SQL =
+  readFileSync(join(ROOT, 'prisma', 'migrations', PREV_STATUS_BACKFILL_DIR, 'migration.sql'), 'utf8');
+const PREV_STATUS_STATEMENTS = PREV_STATUS_SQL.replace(/^\s*--.*$/gm, '');
+const PREV_STATUS_BACKFILL_STATEMENTS = PREV_STATUS_BACKFILL_SQL.replace(/^\s*--.*$/gm, '');
+
 /**
  * Statement-level checks run against the SQL with `--` comments stripped. The
  * comments in this migration deliberately NAME the things the assertions
@@ -196,13 +208,98 @@ test('Tenant.billingSuspendedAt is nullable in Prisma too', () => {
   assert.match(SCHEMA, /billingSuspendedAt\s+DateTime\?/);
 });
 
-test('the migration directory sorts AFTER the last one that shipped', () => {
+// The newest migration that had already shipped when Phase 1 was written.
+// Frozen on purpose — see the test below.
+const MIGRATION_PREDECESSOR = '20260826_tenant_settings_json';
+
+test('the migration directory sorts AFTER the ones that had already shipped', () => {
   // startup-migrate applies directories in sorted order. A name that sorts
   // before an already-applied migration would be skipped forever on a baselined
   // database.
+  //
+  // Pinned against its PREDECESSOR rather than against "the newest directory in
+  // the repo". The latter asserted that no migration may ever ship after this
+  // one, so every unrelated later migration re-failed this suite — a false
+  // alarm that says nothing about billing. What actually matters is that this
+  // directory sorts after everything that was already applied when it shipped.
   const dirs = readdirSync(join(ROOT, 'prisma', 'migrations'), { withFileTypes: true })
     .filter((d) => d.isDirectory()).map((d) => d.name).sort();
-  assert.equal(dirs[dirs.length - 1], MIGRATION_DIR);
+  // Indexes into the REAL sorted listing, not a comparison of two constants in
+  // this file — that form can never fail and is not coverage.
+  const at = dirs.indexOf(MIGRATION_DIR);
+  const predecessorAt = dirs.indexOf(MIGRATION_PREDECESSOR);
+  assert.ok(at !== -1, `${MIGRATION_DIR} is missing from prisma/migrations`);
+  assert.ok(predecessorAt !== -1, `${MIGRATION_PREDECESSOR} is missing from prisma/migrations`);
+  assert.ok(
+    at > predecessorAt,
+    `${MIGRATION_DIR} sorts before ${MIGRATION_PREDECESSOR} and would be skipped on a baselined DB`,
+  );
+});
+
+// ── Tenant.billingPreviousStatus ───────────────────────────────────────────
+//
+// THIS IS THE ONLY PRE-PRODUCTION VERIFICATION THESE TWO MIGRATIONS GET. There
+// is no Postgres on the build machines and CI has no Postgres service (its
+// DATABASE_URL is a dummy nothing connects with), so the SQL first executes on
+// deploy. And startup-migrate is FAIL-OPEN: a typo in the column name boots
+// green, then every suspend and every restore throws for as long as it stands,
+// the dunning sweep included. Pin the shape here or nothing does.
+
+test('both restore-previous-status migrations exist and sort after the subscriptions one', () => {
+  const dirs = readdirSync(join(ROOT, 'prisma', 'migrations'), { withFileTypes: true })
+    .filter((d) => d.isDirectory()).map((d) => d.name).sort();
+  // Every assertion here indexes the REAL listing. Comparing PREV_STATUS_DIR to
+  // MIGRATION_DIR directly would be two constants in this file arguing with each
+  // other: it can never fail, so it is documentation, not a guard.
+  const alterAt = dirs.indexOf(PREV_STATUS_DIR);
+  const backfillAt = dirs.indexOf(PREV_STATUS_BACKFILL_DIR);
+  assert.ok(alterAt !== -1, `${PREV_STATUS_DIR} is missing from prisma/migrations`);
+  assert.ok(backfillAt !== -1, `${PREV_STATUS_BACKFILL_DIR} is missing from prisma/migrations`);
+  assert.ok(alterAt > dirs.indexOf(MIGRATION_DIR), 'the ALTER would be skipped on a baselined DB');
+  // The ALTER must run BEFORE the backfill that reads the column, and
+  // startup-migrate orders by a plain .sort() of the directory names. Adjacent,
+  // so nothing can be introduced between the column and the write that fills it.
+  assert.equal(backfillAt, alterAt + 1, 'the backfill does not run immediately after the ALTER');
+});
+
+test('the column is added nullable, idempotent, with no default and no backfill', () => {
+  assert.match(
+    PREV_STATUS_STATEMENTS,
+    /ALTER TABLE "Tenant"\s+ADD COLUMN IF NOT EXISTS "billingPreviousStatus" TEXT/,
+  );
+  // No DEFAULT and no NOT NULL: an existing tenant must be untouched, and a
+  // default would rewrite every row of a ~60-column table on boot.
+  assert.ok(!/NOT NULL/.test(PREV_STATUS_STATEMENTS));
+  assert.ok(!/DEFAULT/.test(PREV_STATUS_STATEMENTS));
+  // The ALTER file must stay INERT. Anything that can fail belongs in the
+  // backfill file, or a failure takes the column down with it.
+  for (const forbidden of [/DROP/i, /TRUNCATE/i, /DELETE\s+FROM/i, /UPDATE\s+"/i, /INSERT\s+INTO/i]) {
+    assert.ok(!forbidden.test(PREV_STATUS_STATEMENTS), `the ALTER migration contains ${forbidden}`);
+  }
+});
+
+test('Tenant.billingPreviousStatus is nullable in Prisma too', () => {
+  // The migration and schema.prisma are two declarations of one truth; when
+  // they drift the symptom is a runtime Prisma error on the suspend path.
+  assert.match(SCHEMA, /billingPreviousStatus\s+String\?/);
+});
+
+test('the backfill destroys nothing and can be re-run', () => {
+  for (const forbidden of [/DROP/i, /TRUNCATE/i, /DELETE\s+FROM/i, /INSERT\s+INTO/i]) {
+    assert.ok(!forbidden.test(PREV_STATUS_BACKFILL_STATEMENTS), `the backfill contains ${forbidden}`);
+  }
+  const updates = [...PREV_STATUS_BACKFILL_STATEMENTS.matchAll(/UPDATE\s+"([A-Za-z]+)"/g)];
+  assert.equal(updates.length, 1, 'the backfill writes to more than one table');
+  assert.equal(updates[0][1], 'Tenant');
+  // The re-run guard. Without it a second boot would overwrite a value the new
+  // code had already written with a stale one from the audit trail.
+  assert.match(PREV_STATUS_BACKFILL_STATEMENTS, /"billingPreviousStatus" IS NULL/);
+  // Never seeds the one value restore cannot act on — case-insensitively, to
+  // match resolveRestoredTenantStatus()'s guard.
+  assert.match(PREV_STATUS_BACKFILL_STATEMENTS, /UPPER\(src\.prev\)\s*<>\s*'SUSPENDED'/);
+  // Only tenants billing itself switched off — a hand-set suspension is not
+  // this screen's to lift, so seeding one would be seeding a dead value.
+  assert.match(PREV_STATUS_BACKFILL_STATEMENTS, /"billingSuspendedAt" IS NOT NULL/);
 });
 
 // ── PCI ────────────────────────────────────────────────────────────────────

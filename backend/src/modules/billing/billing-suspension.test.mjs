@@ -37,9 +37,9 @@ const { globalKey } = await import('../../lib/cache/tenantKey.js');
 const NOW = new Date('2026-09-10T15:00:00.000Z');
 const DAY = 24 * 60 * 60 * 1000;
 
-function seed({ tenantStatus = 'ACTIVE', billingSuspendedAt = null, subscription = {} } = {}) {
+function seed({ tenantStatus = 'ACTIVE', billingSuspendedAt = null, billingPreviousStatus = null, subscription = {} } = {}) {
   const prisma = makePrisma();
-  const tenant = { id: 't1', name: 'Autos del Valle', status: tenantStatus, plan: 'PRO', billingSuspendedAt };
+  const tenant = { id: 't1', name: 'Autos del Valle', status: tenantStatus, plan: 'PRO', billingSuspendedAt, billingPreviousStatus };
   prisma.tenant.rows.push(tenant);
   const sub = {
     id: 's1',
@@ -181,6 +181,193 @@ test('a delinquent subscription comes back as PAST_DUE, not ACTIVE — restore i
   const { overrides } = overridesFor(prisma);
   const out = await restoreTenantAccess({ tenantId: 't1' }, overrides);
   assert.equal(out.subscriptionStatus, SUBSCRIPTION_STATUS.PAST_DUE);
+});
+
+// ─── RESTORE PUTS BACK WHAT WAS THERE, NOT ACTIVE ──────────────────────────
+//
+// Tenant.status is a free-text String, not a Prisma enum, and 'ACTIVE' is not a
+// synonym for "on": public-tenant-token.js, booking-engine resolvePublicTenant()
+// and the car-sharing marketplace tenant list all match `status: 'ACTIVE'`
+// exactly. So restoring a DEMO tenant to ACTIVE does not merely relabel it — it
+// puts a demo tenant on the public booking surface. That is the failure these
+// tests exist to stop.
+
+test('SUSPEND records what the status WAS, in the same write that switches it off', async () => {
+  const { prisma } = seed({ tenantStatus: 'DEMO' });
+  const { overrides } = overridesFor(prisma);
+
+  await suspendTenantAccess({ tenantId: 't1', reason: 'prueba de Phase 5' }, overrides);
+
+  assert.equal(prisma.tenant.rows[0].status, 'SUSPENDED');
+  assert.equal(prisma.tenant.rows[0].billingPreviousStatus, 'DEMO');
+});
+
+test('RESTORE puts a non-ACTIVE tenant back to what it was, not to ACTIVE', async () => {
+  const { prisma } = seed({
+    tenantStatus: 'SUSPENDED',
+    billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
+    billingPreviousStatus: 'DEMO',
+    subscription: { status: SUBSCRIPTION_STATUS.SUSPENDED, suspendedAt: new Date('2026-09-08T00:00:00.000Z') },
+  });
+  const { overrides } = overridesFor(prisma);
+
+  const out = await restoreTenantAccess({ tenantId: 't1' }, overrides);
+
+  assert.equal(prisma.tenant.rows[0].status, 'DEMO', 'restore promoted a DEMO tenant to ACTIVE');
+  assert.equal(out.status, 'DEMO', 'the response told the panel ACTIVE while the row said otherwise');
+  assert.equal(prisma.tenant.rows[0].billingSuspendedAt, null);
+  // Cleared with the suspension it describes: a value left behind here would be
+  // read by the NEXT restore, long after it stopped being true.
+  assert.equal(prisma.tenant.rows[0].billingPreviousStatus, null);
+});
+
+test('RESTORE falls back to ACTIVE when nothing was recorded', async () => {
+  // A tenant suspended before billingPreviousStatus existed, or by a path that
+  // did not record one. The old behaviour is the fallback, not the default.
+  const { prisma } = seed({
+    tenantStatus: 'SUSPENDED',
+    billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
+    billingPreviousStatus: null,
+    subscription: { status: SUBSCRIPTION_STATUS.SUSPENDED },
+  });
+  const { overrides } = overridesFor(prisma);
+
+  const out = await restoreTenantAccess({ tenantId: 't1' }, overrides);
+
+  assert.equal(prisma.tenant.rows[0].status, 'ACTIVE');
+  assert.equal(out.status, 'ACTIVE');
+});
+
+test('a recorded SUSPENDED is caught whatever its casing', async () => {
+  // Tenant.status is free text. Both writers uppercase it, but a row written by
+  // hand could hold 'suspended', and a case-SENSITIVE guard would let that
+  // through into exactly the state the guard exists to prevent: status off,
+  // billingSuspendedAt cleared, and restore refusing to touch it ever again.
+  const { prisma } = seed({
+    tenantStatus: 'SUSPENDED',
+    billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
+    billingPreviousStatus: 'suspended',
+  });
+  const { overrides } = overridesFor(prisma);
+
+  await restoreTenantAccess({ tenantId: 't1' }, overrides);
+
+  assert.equal(prisma.tenant.rows[0].status, 'ACTIVE');
+});
+
+test('a recorded status is put back VERBATIM, not normalised', async () => {
+  // The casing test above is a COMPARISON, not a rewrite. Restore was asked to
+  // put a value back; uppercasing the output would mean it quietly changed one.
+  const { prisma } = seed({
+    tenantStatus: 'SUSPENDED',
+    billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
+    billingPreviousStatus: 'Demo',
+  });
+  const { overrides } = overridesFor(prisma);
+
+  await restoreTenantAccess({ tenantId: 't1' }, overrides);
+
+  assert.equal(prisma.tenant.rows[0].status, 'Demo');
+});
+
+test('a recorded SUSPENDED is treated as nothing recorded', async () => {
+  // Restoring to SUSPENDED would leave the tenant off with billingSuspendedAt
+  // cleared — the one state this screen can no longer undo, because restore
+  // refuses a suspension billing did not set.
+  const { prisma } = seed({
+    tenantStatus: 'SUSPENDED',
+    billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
+    billingPreviousStatus: 'SUSPENDED',
+  });
+  const { overrides } = overridesFor(prisma);
+
+  await restoreTenantAccess({ tenantId: 't1' }, overrides);
+
+  assert.equal(prisma.tenant.rows[0].status, 'ACTIVE');
+});
+
+test('an EMPTY recorded status is put back as empty, not promoted to ACTIVE', async () => {
+  // Tenant.status is non-nullable, but tenants.service.js updateTenant writes
+  // String(patch.status || '').toUpperCase(), so a tenant CAN sit at ''. Such a
+  // tenant is already off the public surface — nothing matches '' either — and
+  // reading its recorded '' as "nothing was recorded" would publish it. NULL is
+  // the only value that means nothing was recorded.
+  const { prisma } = seed({
+    tenantStatus: 'SUSPENDED',
+    billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
+    billingPreviousStatus: '',
+  });
+  const { overrides } = overridesFor(prisma);
+
+  await restoreTenantAccess({ tenantId: 't1' }, overrides);
+
+  assert.equal(prisma.tenant.rows[0].status, '');
+});
+
+test('a recorded status keeps its exact spacing — restore rewrites nothing', async () => {
+  const { prisma } = seed({
+    tenantStatus: 'SUSPENDED',
+    billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
+    billingPreviousStatus: ' DEMO ',
+  });
+  const { overrides } = overridesFor(prisma);
+
+  await restoreTenantAccess({ tenantId: 't1' }, overrides);
+
+  assert.equal(prisma.tenant.rows[0].status, ' DEMO ');
+});
+
+test('a padded SUSPENDED is still caught by the guard', async () => {
+  const { prisma } = seed({
+    tenantStatus: 'SUSPENDED',
+    billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
+    billingPreviousStatus: '  suspended  ',
+  });
+  const { overrides } = overridesFor(prisma);
+
+  await restoreTenantAccess({ tenantId: 't1' }, overrides);
+
+  assert.equal(prisma.tenant.rows[0].status, 'ACTIVE');
+});
+
+test('a round trip through suspend and restore leaves the status where it started', async () => {
+  const { prisma } = seed({ tenantStatus: 'DEMO' });
+  const { overrides } = overridesFor(prisma);
+
+  await suspendTenantAccess({ tenantId: 't1', reason: 'prueba' }, overrides);
+  await restoreTenantAccess({ tenantId: 't1', reason: 'terminada' }, overrides);
+
+  assert.equal(prisma.tenant.rows[0].status, 'DEMO');
+  assert.equal(prisma.tenant.rows[0].billingSuspendedAt, null);
+  assert.equal(prisma.tenant.rows[0].billingPreviousStatus, null);
+});
+
+test('the restore audit row says what it restored to, and whether it knew', async () => {
+  const { prisma } = seed({
+    tenantStatus: 'SUSPENDED',
+    billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
+    billingPreviousStatus: 'DEMO',
+  });
+  const { audit, overrides } = overridesFor(prisma);
+
+  await restoreTenantAccess({ tenantId: 't1' }, overrides);
+
+  const row = audit.rows.find((r) => r.action === AUDIT_ACTIONS.TENANT_RESTORE);
+  assert.equal(row.metadata.restoredTenantStatus, 'DEMO');
+  assert.equal(row.metadata.previousTenantStatus, 'DEMO');
+});
+
+test('restore takes NO status from the caller — it is a restore button, not a status editor', async () => {
+  const { prisma } = seed({
+    tenantStatus: 'SUSPENDED',
+    billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
+    billingPreviousStatus: 'DEMO',
+  });
+  const { overrides } = overridesFor(prisma);
+
+  await restoreTenantAccess({ tenantId: 't1', status: 'ACTIVE', tenantStatus: 'ACTIVE' }, overrides);
+
+  assert.equal(prisma.tenant.rows[0].status, 'DEMO', 'a caller-supplied status reached the tenant row');
 });
 
 test('restore still refuses to lift a suspension billing did not set', async () => {

@@ -181,9 +181,31 @@ jobs:
         #     and the 409-with-code mapping on the customer route. Being in the
         #     `npm test` chain is NOT enough — nothing in this workflow invokes
         #     `npm test`, which is the trap documented above.
+        #
+        #   test:billing-suspension / test:billing-panel / test:billing-model —
+        #     added 2026-08-28 with the restore-previous-status fix, and the
+        #     FIRST billing suites in this workflow: `grep -n billing` on this
+        #     file returned nothing before this line, so all 14 of them were
+        #     relying on a human remembering to run them.
+        #
+        #     The bug they now guard was live and silent. restoreTenantAccess()
+        #     hardcoded `status: 'ACTIVE'`, and 'ACTIVE' is not a label —
+        #     public-tenant-token.js, booking-engine resolvePublicTenant() and
+        #     the car-sharing marketplace list all match it exactly. So the
+        #     Restore button PUBLISHED any tenant that had been something else
+        #     onto the public booking site. Re-hardcoding that line is a one-word
+        #     regression with no visible symptom until a customer's private
+        #     tenant is serving bookings, which is exactly the shape that needs a
+        #     machine watching it rather than a person.
+        #
+        #     All three are DB-free (billing-test-prisma.mjs) and pass under the
+        #     dummy DATABASE_URL below; billing-model reads prisma/migrations and
+        #     schema.prisma off disk, which is the only pre-production check the
+        #     two 20260828 migrations get — there is no Postgres in this
+        #     workflow.
         env:
           DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_unit_only?schema=public'
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance && npm run test:terms-signing && npm run test:tenant-brand && npm run test:checkout-multisurface && npm run test:checkout-cas && npm run test:presence-boundary
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance && npm run test:terms-signing && npm run test:tenant-brand && npm run test:checkout-multisurface && npm run test:checkout-cas && npm run test:presence-boundary && npm run test:billing-suspension && npm run test:billing-panel && npm run test:billing-model
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:

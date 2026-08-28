@@ -712,6 +712,31 @@ test('the detail carries the consent archive verbatim and the raw ARB handles', 
   assert.equal(out.subscription.customerProfileId, 'cust_1');
 });
 
+test('the detail payload carries what restore will put the tenant back to', async () => {
+  // Serialised for the same reason as suspensionEnforcement: the restore dialog
+  // must name the status it is really going to set. Tenant.status is free text
+  // and 'ACTIVE' is load-bearing (the public booking token resolver, the
+  // booking-engine tenant resolution and the car-sharing marketplace list all
+  // match it exactly), so a panel that says "turns the public booking site back
+  // on" for a DEMO tenant is lying about a customer's public surface.
+  const w = await world();
+  await tenant(w, { status: 'SUSPENDED', billingSuspendedAt: NOW, billingPreviousStatus: 'DEMO' });
+
+  const out = await getTenantBillingDetail('tenant_1', w.deps);
+  assert.equal(out.tenant.billingPreviousStatus, 'DEMO');
+});
+
+test('the detail payload reports a missing previous status as null, not as ACTIVE', async () => {
+  // null is the honest answer for a tenant suspended before the column existed.
+  // The ACTIVE fallback lives in restoreTenantAccess; inventing it here would
+  // hide from the panel that nothing was ever recorded.
+  const w = await world();
+  await tenant(w, { status: 'SUSPENDED', billingSuspendedAt: NOW });
+
+  const out = await getTenantBillingDetail('tenant_1', w.deps);
+  assert.equal(out.tenant.billingPreviousStatus, null);
+});
+
 test('the detail renders the stored charge description, never a recomputation', async () => {
   const w = await world();
   await tenant(w);

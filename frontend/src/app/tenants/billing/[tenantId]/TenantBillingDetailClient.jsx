@@ -477,6 +477,20 @@ function MintedLink({ minted, onDismiss }) {
   );
 }
 
+/**
+ * Render a raw Tenant.status for prose. Tenant.status is FREE TEXT (schema:
+ * `status String`, and tenants.service.js updateTenant only uppercases whatever
+ * it is given), so there is no label map to look it up in the way STATUS_LABEL
+ * covers the subscription's fixed vocabulary. Title-cased to sit beside
+ * "Active" and "Past due" in the same sentence rather than shouting DEMO at the
+ * reader.
+ */
+function titleCaseStatus(raw) {
+  const v = String(raw || '').trim();
+  if (!v) return '';
+  return v.charAt(0).toUpperCase() + v.slice(1).toLowerCase();
+}
+
 const DIALOGS = {
   updateLink: {
     title: 'Send a new-card link',
@@ -541,15 +555,39 @@ const DIALOGS = {
     title: 'Restore access',
     submit: 'Restore this tenant',
     danger: false,
-    body: (
-      <>
-        <p>Turns the public booking site and the integration syncs back on.</p>
-        <p className="label">
-          A subscription that was delinquent returns to <strong>Past due</strong>, not Active — restoring access
-          is not evidence that money moved, and only a settled charge clears a delinquency.
-        </p>
-      </>
-    ),
+    // A FUNCTION, like suspend's, and for the same reason: only the server knows
+    // what this tenant goes back to. Tenant.status is free text and 'ACTIVE' is
+    // load-bearing — the public booking token resolver, the booking-engine tenant
+    // resolution and the car-sharing marketplace list all match it exactly — so
+    // "restore" does NOT mean "put on the public site" for every tenant.
+    //
+    // READS `restoresToStatus`, WHICH THE SERVER RESOLVED. It does NOT re-derive
+    // the rule from `billingPreviousStatus`: that rule has edge cases (a
+    // recorded SUSPENDED falls back to ACTIVE) and a second copy of it here
+    // would drift into a dialog promising one outcome while the write performs
+    // another. resolveRestoredTenantStatus() in billing-admin.service.js owns it.
+    body: ({ tenant }) => {
+      const back = String(tenant?.restoresToStatus || 'ACTIVE').trim();
+      const returnsToActive = back.toUpperCase() === 'ACTIVE';
+      return (
+        <>
+          <p>
+            Returns this tenant to <strong>{titleCaseStatus(back)}</strong>{' '}
+            {tenant?.billingPreviousStatus
+              ? '— the status it held before billing suspended it.'
+              : '— no earlier status was recorded for this suspension, so it falls back to Active.'}{' '}
+            {returnsToActive
+              ? 'Their public booking site and integration syncs come back on.'
+              : 'That is NOT Active, so their public booking site stays dark and they stay out of the '
+                + 'car-sharing marketplace — exactly as before the suspension.'}
+          </p>
+          <p className="label">
+            The subscription carries its own status: a delinquent one comes back <strong>Past due</strong>.
+            Restoring access is not evidence that money moved, and only a settled charge clears a delinquency.
+          </p>
+        </>
+      );
+    },
     fields: [{ name: 'reason', label: 'Reason (optional)', required: false }],
   },
   applyPlan: {
@@ -601,8 +639,9 @@ function ActionDialog({ dialog, tenant, sub, busy, enforcement, onClose, onSubmi
   if (!spec) return null;
 
   // A spec body may be a node (most of them) or a function of the live deploy
-  // context (suspend, whose consequences differ by environment variable).
-  const bodyNode = typeof spec.body === 'function' ? spec.body({ enforcement }) : spec.body;
+  // context (suspend, whose consequences differ by environment variable) or of
+  // the tenant itself (restore, whose outcome differs by recorded status).
+  const bodyNode = typeof spec.body === 'function' ? spec.body({ enforcement, tenant }) : spec.body;
 
   const missing = spec.fields.some((f) => f.required && !String(form[f.name] || '').trim());
 
