@@ -16,6 +16,10 @@ function fakeReservation(overrides = {}) {
   return {
     id: 'res-1',
     signatureToken: 'tok-1',
+    // Scope the fee-rate lookup resolves against. `include` (not `select`)
+    // means Prisma returns these scalars automatically in production.
+    tenantId: 'tenant-1',
+    pickupLocationId: 'loc-1',
     reservationNumber: 'R-1001',
     signatureSignedAt: null,
     signatureSignedBy: null,
@@ -33,6 +37,53 @@ function fakeReservation(overrides = {}) {
   };
 }
 
+// ── FeeRate / Location stubs ────────────────────────────────────────────
+// The key-terms panel resolves LATE_RETURN + EXCESS_MILEAGE through the fee
+// engine and the pickup location's grace window. Stub both so these tests
+// never touch a real database (and so a stale generated client, which can
+// leave prisma.feeRate undefined, doesn't blow the suite up).
+
+const rateStubs = { saved: null };
+
+function stubRateLookups({ rows = [], locationConfig = null, fail = false } = {}) {
+  if (!prisma.feeRate) prisma.feeRate = {};
+  if (!prisma.location) prisma.location = {};
+  rateStubs.saved = {
+    feeRateFindFirst: prisma.feeRate.findFirst,
+    locationFindUnique: prisma.location.findUnique,
+  };
+  prisma.feeRate.findFirst = async ({ where }) => {
+    if (fail) throw new Error('simulated FeeRate lookup failure');
+    return (
+      rows.find(
+        (r) =>
+          r.tenantId === where.tenantId &&
+          (r.locationId ?? null) === (where.locationId ?? null) &&
+          r.feeType === where.feeType,
+      ) || null
+    );
+  };
+  prisma.location.findUnique = async () => ({ locationConfig });
+}
+
+function restoreRateLookups() {
+  if (!rateStubs.saved) return;
+  prisma.feeRate.findFirst = rateStubs.saved.feeRateFindFirst;
+  prisma.location.findUnique = rateStubs.saved.locationFindUnique;
+  rateStubs.saved = null;
+}
+
+const feeRow = (feeType, amount, extra = {}) => ({
+  tenantId: 'tenant-1',
+  locationId: null,
+  feeType,
+  unit: feeType === 'LATE_RETURN' ? 'PER_HOUR' : 'PER_MILE',
+  amount,
+  isActive: true,
+  id: `rate-${feeType}-${extra.locationId ?? 'tenant'}`,
+  ...extra,
+});
+
 describe('publicBookingService.getGuestAgreement — key terms panel', () => {
   let origFindFirst;
   let findFirstArgs;
@@ -46,10 +97,12 @@ describe('publicBookingService.getGuestAgreement — key terms panel', () => {
       findFirstArgs = args;
       return reservation;
     };
+    stubRateLookups();
   });
 
   afterEach(() => {
     prisma.reservation.findFirst = origFindFirst;
+    restoreRateLookups();
   });
 
   const depositTerm = (res) => res.keyTerms.find((t) => t.icon === 'money');
@@ -144,5 +197,140 @@ describe('publicBookingService.getGuestAgreement — key terms panel', () => {
   it('shows the honest generic line when nothing declares a mileage allowance', async () => {
     const res = await publicBookingService.getGuestAgreement('tok-1');
     assert.equal(mileageTerm(res).title, 'Mileage included per listing');
+  });
+});
+
+
+// Regression tests for the fee figures the same panel quotes (2026-08-26).
+// Before the fix the copy hardcoded "$50/hour" late and "$0.45/mi" overage
+// while check-in billed the resolved FeeRate — platform defaults $25.00/hour
+// and $0.50/mi. Customers signed a quote for a late rate 2x what we charge,
+// and any tenant that customized its rates drifted further still.
+describe('publicBookingService.getGuestAgreement — fee rates quoted', () => {
+  let origFindFirst;
+  let reservation;
+
+  const lateTerm = (res) => res.keyTerms.find((t) => t.icon === 'clock');
+  const mileageTerm = (res) => res.keyTerms.find((t) => t.icon === 'road');
+
+  beforeEach(() => {
+    reservation = fakeReservation();
+    origFindFirst = prisma.reservation.findFirst;
+    prisma.reservation.findFirst = async () => reservation;
+  });
+
+  afterEach(() => {
+    prisma.reservation.findFirst = origFindFirst;
+    restoreRateLookups();
+  });
+
+  it('never quotes the old hardcoded literals', async () => {
+    stubRateLookups();
+    const res = await publicBookingService.getGuestAgreement('tok-1');
+    const allCopy = res.keyTerms.map((t) => `${t.title} ${t.detail}`).join(' | ');
+    assert.ok(!/\$50\/hour/.test(allCopy), `late literal survived: ${allCopy}`);
+    assert.ok(!/\$0\.45/.test(allCopy), `mileage literal survived: ${allCopy}`);
+  });
+
+  it('falls back to the platform default rate the engine also falls back to', async () => {
+    stubRateLookups(); // no FeeRate rows at all
+    const res = await publicBookingService.getGuestAgreement('tok-1');
+    assert.equal(
+      lateTerm(res).detail,
+      'Grace window: 30 minutes. After that, a $25/hour late fee applies.',
+    );
+    assert.equal(
+      mileageTerm(res).detail,
+      "Overage billed at $0.50/mi against the Renter's card at return.",
+    );
+  });
+
+  it('quotes the tenant-default FeeRate when one exists', async () => {
+    stubRateLookups({ rows: [feeRow('LATE_RETURN', 40)] });
+    const res = await publicBookingService.getGuestAgreement('tok-1');
+    assert.match(lateTerm(res).detail, /a \$40\/hour late fee applies/);
+  });
+
+  it('lets a location-specific FeeRate win over the tenant default', async () => {
+    stubRateLookups({
+      rows: [
+        feeRow('LATE_RETURN', 40),
+        feeRow('LATE_RETURN', 75, { locationId: 'loc-1' }),
+      ],
+    });
+    const res = await publicBookingService.getGuestAgreement('tok-1');
+    assert.match(lateTerm(res).detail, /a \$75\/hour late fee applies/);
+  });
+
+  it('keeps the cents on a non-whole rate', async () => {
+    stubRateLookups({ rows: [feeRow('LATE_RETURN', 27.5)] });
+    const res = await publicBookingService.getGuestAgreement('tok-1');
+    assert.match(lateTerm(res).detail, /a \$27\.50\/hour late fee applies/);
+  });
+
+  it('converts a Prisma Decimal rate via its string form', async () => {
+    stubRateLookups({
+      rows: [feeRow('LATE_RETURN', { toString: () => '33.00' })],
+    });
+    const res = await publicBookingService.getGuestAgreement('tok-1');
+    assert.match(lateTerm(res).detail, /a \$33\/hour late fee applies/);
+  });
+
+  it('reads the grace window from the pickup location, not a constant', async () => {
+    stubRateLookups({ locationConfig: { gracePeriodMin: 60 } });
+    const res = await publicBookingService.getGuestAgreement('tok-1');
+    assert.match(lateTerm(res).detail, /^Grace window: 1 hour\./);
+  });
+
+  it('drops the grace sentence when the location grace is zero', async () => {
+    stubRateLookups({ locationConfig: { gracePeriodMin: 0 } });
+    const res = await publicBookingService.getGuestAgreement('tok-1');
+    const detail = lateTerm(res).detail;
+    assert.ok(!/Grace window/.test(detail), detail);
+    assert.equal(detail, 'A $25/hour late fee applies after the scheduled return time.');
+  });
+
+  it('promises NO fee when the tenant disabled the late-return fee', async () => {
+    stubRateLookups({ rows: [feeRow('LATE_RETURN', 25, { isActive: false })] });
+    const res = await publicBookingService.getGuestAgreement('tok-1');
+    const detail = lateTerm(res).detail;
+    assert.match(detail, /No late-return fee applies to this rental\./);
+    assert.ok(!/\$/.test(detail), `disabled fee must not quote a figure: ${detail}`);
+  });
+
+  it('promises NO overage when the tenant disabled excess mileage', async () => {
+    stubRateLookups({ rows: [feeRow('EXCESS_MILEAGE', 0.5, { isActive: false })] });
+    const res = await publicBookingService.getGuestAgreement('tok-1');
+    const detail = mileageTerm(res).detail;
+    assert.equal(detail, 'No overage fee applies beyond the included mileage.');
+    assert.ok(!/\$/.test(detail), detail);
+  });
+
+  it('quotes NO figure when the reservation has no tenant', async () => {
+    reservation.tenantId = null;
+    stubRateLookups({ rows: [feeRow('LATE_RETURN', 40)] });
+    const res = await publicBookingService.getGuestAgreement('tok-1');
+    const detail = lateTerm(res).detail;
+    assert.ok(!/\$/.test(detail), `untenanted reservation must not quote: ${detail}`);
+    assert.match(detail, /rate in your rental agreement/);
+  });
+
+  it('quotes NO figure — and still returns — when the rate lookup fails', async () => {
+    stubRateLookups({ fail: true });
+    const res = await publicBookingService.getGuestAgreement('tok-1');
+    const detail = lateTerm(res).detail;
+    assert.ok(!/\$/.test(detail), `failed lookup must not quote: ${detail}`);
+    assert.match(detail, /rate in your rental agreement/);
+    // The screen must still render so the customer can sign.
+    assert.equal(res.keyTerms.length, 4);
+  });
+
+  it('does not threaten an overage rate on an unlimited-mileage rental', async () => {
+    reservation.vehicleType = { label: 'SUV', unlimitedMileage: true, freeMilesPerDay: null };
+    stubRateLookups({ rows: [feeRow('EXCESS_MILEAGE', 0.75)] });
+    const res = await publicBookingService.getGuestAgreement('tok-1');
+    const detail = mileageTerm(res).detail;
+    assert.equal(detail, 'No mileage cap applies to this rental.');
+    assert.ok(!/0\.75/.test(detail), detail);
   });
 });
