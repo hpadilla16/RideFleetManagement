@@ -56,6 +56,17 @@ regexes = [
   '''test-secret-for-two-factor-tests-0123456789''',
   '''test-secret-for-tenant-suspension-gate-0123456789''',
 
+  # ── Authorize.Net webhook signature-key fixture ────────────────────────────
+  # Added 2026-08-28. A 64-character hex string is the real shape of an HMAC
+  # signature key, which is why gitleaks flags it and why the fixture uses it:
+  # the tests verify signature verification against the exact format the
+  # merchant portal issues. Unlike the `sk-ant-` fixtures renamed on the same
+  # day, the SHAPE is load-bearing here, so this is allowlisted rather than
+  # reshaped. The value itself is visibly synthetic — ascending byte pairs
+  # (A1 B2 C3 D4 E5 F6 …) repeated twice — and appears in exactly two test
+  # files and nowhere else.
+  '''A1B2C3D4E5F60718293A4B5C6D7E8F90A1B2C3D4E5F60718293A4B5C6D7E8F90''',
+
   # ── placeholder / rejected-default secrets (never accepted at runtime) ──────
   '''change-this-secret''',
   '''dev-secret-change-me''',
