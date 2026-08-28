@@ -126,3 +126,48 @@ enum InspectionPhase {
     return null;
   }
 }
+
+/// Estado de la RESERVA (`Reservation.status`, schema.prisma:25-34). RideOps
+/// lo lee por una sola razón, y es de honestidad: **el cierre del checkout no
+/// es atómico**. `transition(CLOSED)` marca la sesión como terminal ANTES de
+/// correr la cascada que avanza la reserva a `CHECKED_OUT`
+/// (checkout-session.service.js:417 vs :447-467), y varios tramos de esa
+/// cascada se tragan su error (:526, :533, :557, :571). Consecuencia
+/// verificada: un 200 puede convivir con una reserva que sigue en
+/// `CONFIRMED`, y el 409/422 que sí escapa llega con la sesión ya cerrada.
+///
+/// Con este enum el frame 19B **verifica** en vez de solo reportar: sesión
+/// terminal + reserva sin avanzar es exactamente el estado a medio cerrar.
+///
+/// Lleva el wire EXPLÍCITO (y no `_wire(name)` como sus hermanos) por un solo
+/// valor: `NEW` es palabra reservada de Dart, así que el identificador no
+/// puede llamarse igual y la derivación automática lo partiría en `N_E_W`.
+// mirrors: ReservationStatus
+enum ReservationStatus {
+  newReservation('NEW'), // wire: NEW
+  confirmed('CONFIRMED'),
+  checkedOut('CHECKED_OUT'),
+  checkedIn('CHECKED_IN'),
+  checkedInUnpaid('CHECKED_IN_UNPAID'),
+  cancelled('CANCELLED'),
+  noShow('NO_SHOW'),
+  pendingFranchiseImport('PENDING_FRANCHISE_IMPORT');
+
+  const ReservationStatus(this.wire);
+
+  final String wire;
+
+  static ReservationStatus? tryParse(String? raw) {
+    if (raw == null) return null;
+    for (final v in ReservationStatus.values) {
+      if (v.wire == raw) return v;
+    }
+    return null;
+  }
+
+  /// La reserva ya quedó entregada (o más allá). Espejo EXACTO del guard
+  /// anti-downgrade de `transition()` (checkout-session.service.js:453): si el
+  /// estado está en esa lista, la cascada del finalize no vuelve a tocarla.
+  bool get handoverRecorded =>
+      this == checkedOut || this == checkedIn || this == checkedInUnpaid;
+}

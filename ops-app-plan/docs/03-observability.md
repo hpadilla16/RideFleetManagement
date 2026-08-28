@@ -53,6 +53,12 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 | `checkout.terms_signed_seen` | el poll vio caer `tcCompletedAt` |
 | `checkout.present_mode_shown` | se abrió la pantalla volteada al cliente (10B) |
 | `checkout.present_mode_screen_degraded` | brillo/wakelock no se pudo aplicar o restaurar (tags `what`: brightness/wakelock, `phase`: enter/exit) |
+| `checkout.signature_saved` | `POST /:id/customer-signature` aceptado (tag `replaced`: pisó una firma ya guardada) — M2-H5 |
+| `checkout.close_started` | el agente arrancó el cierre (tag `legs`: 3 con firma por recoger, 2 si ya venía sellada) — M2-H5 |
+| `checkout.close_ok` | el cierre llegó a CLOSED (tag `handover`: recorded/not_recorded/unverified, leído de `Reservation.status`) — M2-H5 |
+| `checkout.close_failed` | un tramo del cierre fue rechazado (tags `leg`, `code`, `terminal`) — M2-H5 |
+| `checkout.close_unknown` | un tramo del cierre murió sin respuesta (tag `leg`) — M2-H5 |
+| `checkout.handover_recheck` | "Volver a comprobar" desde el estado sin confirmar (tag `result`: recorded/not_recorded/unverified) — M2-H5, frame 19A-bis |
 
 Notas de los eventos de M2-H2:
 
@@ -105,7 +111,7 @@ la superficie que lo resolvería es el re-fetch por reserva, no un cambio de cop
 `entry_open` NO lleva tag `resumed` — el backend responde 201 igual al crear que al
 reanudar, y la app no puede afirmar la diferencia sin inventarla.
 
-Detalle de `checkout.reconciled` (M2-H1). Tres valores de `via`, deliberadamente
+Detalle de `checkout.reconciled` (M2-H1). Cuatro valores de `via`, deliberadamente
 separados porque miden cosas distintas:
 
 - `poll` — el poll de 5 s detectó que OTRA superficie movió el paso. Su frecuencia ES la
@@ -114,6 +120,12 @@ separados porque miden cosas distintas:
 - `conflict` — el servidor rechazó una transición con 409 y el re-fetch reconcilió.
 - `preflight` — el re-fetch previo a escribir (>3 s de antigüedad) encontró la sesión ya
   movida y ABORTÓ el POST. No hubo 409: contarlo como tal inflaría las colisiones reales.
+- `rejected` (M2-H5) — el servidor rechazó la transición con un 4xx del SERVICIO que no es
+  409 (400/404/422) y el re-fetch reconcilió. Su caso real es el finalize: `transition`
+  commitea el paso (checkout-session.service.js:417) y la cascada revienta DESPUÉS con 422
+  (`NO_VEHICLE_ASSIGNED`, `PRECHECKIN_REQUIRED`, `AGE_RULES_*`), dejando la sesión cerrada
+  y al cliente creyendo que sigue en FINALIZING. NO se cuenta como `conflict`: no hubo
+  colisión entre superficies, hubo una regla de negocio que falló tarde.
 
 **Un movimiento = un evento.** El emisor deduplica por movimiento (`FROM>TO`): un 409 que
 re-consulta y reconcilia produce UNA línea, no una por cada capa que la detectó. Contarlo
@@ -133,6 +145,8 @@ inventado.
 |---|---|
 | `inspection.photo_captured` | tag `angle`, `bytes_after_compress`, `ms_compress` |
 | `inspection.completed_local` | complete encolado/enviado |
+| `inspection.completed_server` | el poll vio caer `inspectionCompletedAt` (tag `waited_s`: segundos desde que la pantalla vio el complete encolado; sin tag si no hubo espera que medir). Con `completed_local` mide lo que el agente espera de pie junto al coche con el paso sin avanzar — M2-H4 |
+| `inspection.required_angle_dead` | una foto OBLIGATORIA (front/rear) murió en la bandeja (tag `angle`). El dead-letter no bloquea al resto, así que el `complete` sale igual y el servidor lo rechaza con `REQUIRED_ANGLES_MISSING`: su frecuencia mide el callejón sin salida del frame 17E — M2-H4 |
 | `outbox.enqueued` / `outbox.drained_ok` | tag `kind`, `queue_depth` |
 | `outbox.remint_token` | re-emisión del handoff al drenar (tag `reused`) |
 | `outbox.entry_dead` | dead-letter (tag `code` — TOKEN_*, REQUIRED_ANGLES_MISSING…) |

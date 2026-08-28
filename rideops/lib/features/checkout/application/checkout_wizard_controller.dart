@@ -8,6 +8,7 @@ import '../../../core/api/api_error.dart';
 import '../../../core/api/api_providers.dart';
 import '../../../core/api/checkout_api.dart';
 import '../../../core/api/dto/checkout_session.dart';
+import '../../../core/api/dto/reservation_display.dart';
 import '../../../core/api/enums.dart';
 import '../../../core/lifecycle/app_visibility.dart';
 import '../../../core/outbox/network_status.dart';
@@ -347,15 +348,29 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
 
   /// Re-lee display-data. Lo llama el swap: cambió la unidad de la reserva, y
   /// el header + la tarjeta de vehículo tienen que dejar de mostrar la vieja.
-  Future<void> reloadContext() => _loadContext(_generation);
+  Future<void> reloadContext() async => _loadContext(_generation);
+
+  /// Re-lee display-data para VERIFICAR si la entrega quedó registrada (19A/
+  /// 19B). No se usa `state.context` cacheado a propósito: la pregunta es qué
+  /// dice el servidor AHORA, después del cierre.
+  ///
+  /// Devuelve `null` cuando no hay veredicto — display-data no respondió, o
+  /// mandó un estado que esta versión no conoce. **Null no es "no quedó
+  /// registrada"**: es "no lo sé", y la UI lo dice así en vez de acusar a la
+  /// cascada de algo que no vio.
+  Future<bool?> verifyHandover() async {
+    final display = await _loadContext(_generation);
+    return ReservationStatus.tryParse(display?.reservation.status)
+        ?.handoverRecorded;
+  }
 
   /// Contexto de la reserva para el header de sesión y las tarjetas de
   /// verificación (9A/9B) — best-effort, no bloquea el wizard.
-  Future<void> _loadContext(int gen) async {
+  Future<ReservationDisplayData?> _loadContext(int gen) async {
     try {
       final display =
           await ref.read(reservationsApiProvider).getDisplayData(reservationId);
-      if (gen != _generation || !ref.mounted) return;
+      if (gen != _generation || !ref.mounted) return null;
       final reservation = display.reservation;
       state = state.copyWith(
         context: CheckoutReservationContext(
@@ -378,10 +393,15 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
           vehicleStatus: reservation.vehicle?.status,
           vehicleTypeId: reservation.vehicleTypeId,
           branding: display.branding,
+          returnAt: reservation.returnAt,
+          returnLocationName: reservation.returnLocation?.name,
+          reservationStatus: reservation.status,
         ),
       );
+      return display;
     } catch (_) {
       // Sin display-data el wizard sigue: el header muestra menos, nada más.
+      return null;
     }
   }
 
@@ -548,27 +568,34 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
   ///
   /// Guards, en orden: doble-tap → terminal → sin red → re-fetch previo si la
   /// lectura tiene >3 s → POST → matriz 409.
-  Future<CheckoutTransitionOutcome> transitionTo(CheckoutStep toStep) async {
+  Future<CheckoutTransitionOutcome> transitionTo(CheckoutStep toStep) async =>
+      (await attemptTransition(toStep)).outcome;
+
+  /// Igual que [transitionTo] pero devolviendo además el CUERPO del servidor.
+  /// Lo usa el cierre (M2-H5): 19B cita la negativa y necesita distinguir
+  /// "el servidor dijo que no" de "no hubo respuesta".
+  Future<CheckoutTransitionAttempt> attemptTransition(
+    CheckoutStep toStep,
+  ) async {
+    const blocked = CheckoutTransitionAttempt(CheckoutTransitionOutcome.blocked);
     final session = state.session;
-    if (session == null) return CheckoutTransitionOutcome.blocked;
+    if (session == null) return blocked;
     // Anti-doble-tap: el segundo tap NO manda un segundo POST (el backend
     // responde 409 a propósito, pero cobrar dos veces esa carrera en el patio
     // es exactamente lo que no queremos, service:380-391).
-    if (state.transitionInFlight) return CheckoutTransitionOutcome.blocked;
-    if (state.isTerminal) return CheckoutTransitionOutcome.blocked;
-    if (state.offline) return CheckoutTransitionOutcome.blocked;
+    if (state.transitionInFlight) return blocked;
+    if (state.isTerminal) return blocked;
+    if (state.offline) return blocked;
 
     final gen = _generation;
     final renderedStep = session.currentStep;
     state = state.copyWith(transitionInFlight: true, clearConflict: true);
     try {
       final preflight = await _preflight(gen, session, toStep, renderedStep);
-      if (preflight != null) return preflight;
+      if (preflight != null) return CheckoutTransitionAttempt(preflight);
 
       final updated = await _api.transition(id: session.id, toStep: toStep.wire);
-      if (gen != _generation || !ref.mounted) {
-        return CheckoutTransitionOutcome.blocked;
-      }
+      if (gen != _generation || !ref.mounted) return blocked;
       // Nuestro propio avance: se aplica sin detección de avance ajeno y el
       // banner previo se retira (el agente ya interactuó con el paso nuevo).
       _apply(updated, detectForeign: false, isWrite: true);
@@ -577,20 +604,55 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       _unchangedCycles = 0;
       _slowLane = false;
       _backoff = null;
-      return CheckoutTransitionOutcome.ok;
+      return const CheckoutTransitionAttempt(CheckoutTransitionOutcome.ok);
     } on ApiError catch (e) {
-      if (gen != _generation || !ref.mounted) {
-        return CheckoutTransitionOutcome.blocked;
-      }
+      if (gen != _generation || !ref.mounted) return blocked;
       if (e.kind == ApiErrorKind.conflict) {
-        return _resolveConflict(gen, e, toStep);
+        final outcome = await _resolveConflict(gen, e, toStep);
+        return CheckoutTransitionAttempt(
+          outcome,
+          message: e.message.isEmpty ? null : e.message,
+          code: e.code,
+        );
       }
+      // ADR-4 llevado a donde siempre pertenecía (INN MC-1): la regla no es
+      // "todo 409 se reconcilia", es **si el servidor nos rechazó, se vuelve a
+      // leer**. El 409 era el único status que se había visto rechazar una
+      // transición; no es el único que puede.
+      //
+      // El caso que lo obliga no es teórico: `transition` COMMITEA el paso
+      // (checkout-session.service.js:417) y la cascada del finalize corre
+      // DESPUÉS, así que `NO_VEHICLE_ASSIGNED` (:464-468) y los gates
+      // re-evaluados (:473 → PRECHECKIN_REQUIRED / AGE_RULES_*, lanzados con
+      // 422 en :81-98) escapan con la sesión YA cerrada, y la ruta preserva su
+      // status (routes:12-16). Sin esta re-lectura el cliente se queda
+      // creyendo que sigue en FINALIZING y ofrece un "Reintentar el cierre"
+      // que el servidor no puede cumplir nunca (`canTransition` es false desde
+      // terminal, state-machine.js:94): una puerta falsa.
+      //
+      // Se re-lee SOLO en [ApiErrorKind.badRequest] — el 4xx que el SERVICIO
+      // produjo después de mirar la fila (400/404/422). No en 401/403/429/410:
+      // esos ni siquiera llegaron al servicio, un 401 solo puede responder
+      // otro 401, y re-consultar un 429 sería empujar a un backend que ya está
+      // pidiendo aire.
+      if (e.kind == ApiErrorKind.badRequest) {
+        await _refetchQuiet(gen, via: 'rejected');
+        if (gen != _generation || !ref.mounted) return blocked;
+      }
+      // El error se publica DESPUÉS del re-fetch a propósito: `_apply` limpia
+      // `error`, y la negativa del servidor es justo lo que la pantalla tiene
+      // que seguir mostrando.
       state = state.copyWith(
         error: e,
         networkAvailable:
             e.kind == ApiErrorKind.network ? false : state.networkAvailable,
       );
-      return CheckoutTransitionOutcome.failed;
+      return CheckoutTransitionAttempt(
+        CheckoutTransitionOutcome.failed,
+        message: e.message.isEmpty ? null : e.message,
+        code: e.code,
+        network: e.kind == ApiErrorKind.network,
+      );
     } finally {
       if (gen == _generation && ref.mounted) {
         state = state.copyWith(transitionInFlight: false);
@@ -710,15 +772,23 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
     );
   }
 
-  /// Re-fetch de reconciliación. Su fallo NO puede tapar el 409 que se está
-  /// resolviendo: devuelve null y la UI se queda con lo que ya tenía.
-  Future<CheckoutSessionDto?> _refetchQuiet(int gen) async {
+  /// Re-fetch de reconciliación. Su fallo NO puede tapar el rechazo que se
+  /// está resolviendo: devuelve null y la UI se queda con lo que ya tenía.
+  ///
+  /// [via] separa las dos reconciliaciones que llegan aquí: `conflict` (409) y
+  /// `rejected` (el 4xx del servicio, p. ej. el 422 post-commit del finalize).
+  /// Mezclarlas mentiría sobre cuántas colisiones reales produce el patio, que
+  /// es la métrica con la que el épico mide su SHIP.
+  Future<CheckoutSessionDto?> _refetchQuiet(
+    int gen, {
+    String via = 'conflict',
+  }) async {
     final id = state.session?.id;
     if (id == null) return null;
     try {
       final fresh = await _api.getSession(id);
       if (gen != _generation || !ref.mounted) return null;
-      _apply(fresh, detectForeign: true, via: 'conflict');
+      _apply(fresh, detectForeign: true, via: via);
       return fresh;
     } on ApiError catch (_) {
       return null;
@@ -883,6 +953,76 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
         CheckoutSwapOutcome.vehicleRejected,
         message: e.message,
         code: e.code,
+      );
+    } finally {
+      if (gen == _generation && ref.mounted) {
+        state = state.copyWith(clearMutating: true);
+      }
+      _scheduleNext(gen);
+    }
+  }
+
+  // ── escritura del paso CUSTOMER_SIGN_PENDING (M2-H5) ─────────────────────
+
+  /// Guarda la firma que el cliente acaba de dejar en el lienzo del kiosco
+  /// (18B) — `POST /:id/customer-signature`.
+  ///
+  /// NO mueve el paso: estampa `customerSignedAt` y escribe la firma en el
+  /// contrato. Por eso viaja como [CheckoutMutation.customerSignature] y no
+  /// como transición.
+  ///
+  /// **Nunca se encola** (ADR-5 aplicado al cierre): la firma es una escritura
+  /// al contrato que solo el servidor puede confirmar, y una firma guardada
+  /// "para después" es una firma que el cliente creyó dar y el contrato no
+  /// tiene. Sin red se bloquea aquí — y la pantalla lo bloquea antes todavía,
+  /// para no pedirle el trazo al cliente en balde (18A).
+  ///
+  /// [signerName] se sella desde display-data, igual que el complete de la
+  /// inspección: el endpoint acepta la firma sin nombre y la dejaría anónima
+  /// en el contrato.
+  Future<CheckoutTransitionAttempt> saveCustomerSignature({
+    required String signatureDataUrl,
+    String? signerName,
+  }) async {
+    const blocked = CheckoutTransitionAttempt(CheckoutTransitionOutcome.blocked);
+    final session = state.session;
+    if (session == null || state.isMutating || state.transitionInFlight) {
+      return blocked;
+    }
+    if (state.isTerminal || state.offline) return blocked;
+    final gen = _generation;
+    // `replaced` ANTES del POST: lo que se mide es la decisión del agente de
+    // pisar una firma existente, no si el servidor la aceptó.
+    final replacing = session.customerSignedAt != null;
+    state = state.copyWith(
+      mutating: CheckoutMutation.customerSignature,
+      clearConflict: true,
+    );
+    try {
+      final updated = await _api.saveCustomerSignature(
+        id: session.id,
+        signatureDataUrl: signatureDataUrl,
+        signerName: signerName,
+      );
+      if (gen != _generation || !ref.mounted) return blocked;
+      _apply(updated, detectForeign: false, isWrite: true);
+      _logger.log(
+        CheckoutEvents.signatureSaved,
+        data: {'replaced': replacing},
+      );
+      return const CheckoutTransitionAttempt(CheckoutTransitionOutcome.ok);
+    } on ApiError catch (e) {
+      if (gen != _generation || !ref.mounted) return blocked;
+      state = state.copyWith(
+        error: e,
+        networkAvailable:
+            e.kind == ApiErrorKind.network ? false : state.networkAvailable,
+      );
+      return CheckoutTransitionAttempt(
+        CheckoutTransitionOutcome.failed,
+        message: e.message.isEmpty ? null : e.message,
+        code: e.code,
+        network: e.kind == ApiErrorKind.network,
       );
     } finally {
       if (gen == _generation && ref.mounted) {

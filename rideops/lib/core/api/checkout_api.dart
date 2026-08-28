@@ -97,6 +97,46 @@ class CheckoutApi {
     }
   }
 
+  /// `POST /api/checkout-sessions/:id/customer-signature` (routes:125) —
+  /// `{signatureDataUrl, signerName?}`. Escribe la firma en el CONTRATO
+  /// (`tcSignatureDataUrl` / `tcSignedAt` / `tcSignerName` / `tcCustomerIp`)
+  /// y estampa `customerSignedAt` en la sesión, todo en una `$transaction`
+  /// (service:664-694). Devuelve la SESIÓN actualizada.
+  ///
+  /// Tres cosas del servicio que mandan sobre cómo se usa esto:
+  ///  1. **PISA la firma anterior sin condición** (service:668-690): no hay
+  ///     guard de "ya había firma". Por eso la app solo la llama cuando el
+  ///     sello no existe, o cuando el agente aceptó explícitamente el diálogo
+  ///     de "esto SUSTITUYE" (18D).
+  ///  2. `signerName` es opcional para el servidor, pero si no viaja el
+  ///     contrato queda con firma anónima: la app lo sella desde display-data,
+  ///     igual que el complete de la inspección.
+  ///  3. `signatureDataUrl` < 200 chars ⇒ 400 `SIGNATURE_REQUIRED`
+  ///     (service:657-659). El gate local del lienzo es "hay trazo", no "hubo
+  ///     toque", justamente para no chocar con eso.
+  ///
+  /// **Jamás entra a la bandeja de salida**: es una escritura al contrato que
+  /// solo el servidor puede confirmar (ADR-5 aplicado al cierre). Sin red se
+  /// bloquea ANTES de pedirle la firma al cliente.
+  Future<CheckoutSessionDto> saveCustomerSignature({
+    required String id,
+    required String signatureDataUrl,
+    String? signerName,
+  }) async {
+    try {
+      final res = await authedDio.post<Map<String, dynamic>>(
+        '/api/checkout-sessions/$id/customer-signature',
+        data: {
+          'signatureDataUrl': signatureDataUrl,
+          'signerName': ?signerName,
+        },
+      );
+      return CheckoutSessionDto.fromJson(res.data!);
+    } on DioException catch (e) {
+      throw ApiError.fromDio(e);
+    }
+  }
+
   /// `POST /api/checkout-sessions/:id/abandon` (routes:380) — el "Guardar y
   /// pausar" del agente. NO cambia `currentStep`: sella `abandonedAt` +
   /// `abandonedReason` (service:850-868), por eso la sesión se retoma donde

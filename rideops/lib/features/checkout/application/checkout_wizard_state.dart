@@ -40,6 +40,11 @@ enum CheckoutMutation {
 
   /// `POST /:id/vehicle` — el swap de 9E.
   vehicleSwap,
+
+  /// `POST /:id/customer-signature` — la firma que el cliente acaba de dejar
+  /// en el lienzo (18B). Es una escritura del PASO, no una transición: el
+  /// `currentStep` no se mueve, solo cae el sello `customerSignedAt`.
+  customerSignature,
 }
 
 /// Resultado de la matriz 409 (ADR-4). Nunca es un reintento a ciegas: cada
@@ -106,6 +111,9 @@ class CheckoutReservationContext {
     this.vehicleStatus,
     this.vehicleTypeId,
     this.branding,
+    this.returnAt,
+    this.returnLocationName,
+    this.reservationStatus,
   });
 
   final String? reservationNumber;
@@ -159,6 +167,26 @@ class CheckoutReservationContext {
 
   /// Clase reservada: el sheet dice "mismo grupo" comparando con esto.
   final String? vehicleTypeId;
+
+  /// Cuándo y dónde vuelve el coche — las dos filas de "Antes de que se vaya"
+  /// (19A) que el agente dice en voz alta con el cliente todavía enfrente. La
+  /// sede es la de DEVOLUCIÓN de la reserva, no la del selector del agente:
+  /// en un one-way no son la misma y equivocarla manda al cliente al patio
+  /// equivocado.
+  final DateTime? returnAt;
+  final String? returnLocationName;
+
+  /// `Reservation.status` crudo. Lo lee el cierre (19A/19B) para VERIFICAR si
+  /// la entrega quedó registrada, porque la sesión terminal no lo prueba: la
+  /// cascada del finalize corre DESPUÉS del `CLOSED` y se traga varios de sus
+  /// errores (checkout-session.service.js:417, :526, :533, :557, :571).
+  final String? reservationStatus;
+
+  /// Veredicto tipado sobre [reservationStatus]. `null` = el servidor no lo
+  /// dijo (o dijo algo que esta versión no conoce) ⇒ **no se afirma nada**;
+  /// ni "quedó registrada" ni "no quedó".
+  bool? get handoverRecorded =>
+      ReservationStatus.tryParse(reservationStatus)?.handoverRecorded;
 
   /// Branding del tenant tal como lo devuelve display-data. Las superficies
   /// volteadas al cliente (10B) SIEMPRE lo consumen por
@@ -350,6 +378,38 @@ enum CheckoutTransitionOutcome {
 
   /// Falló por red/servidor; el mensaje está en [CheckoutWizardState.error].
   failed,
+}
+
+/// Intento de transición CON el cuerpo del servidor.
+///
+/// Existe por el cierre (M2-H5): `transitionTo` devuelve solo el veredicto, y
+/// eso alcanza para un botón que avanza. No alcanza para 19B, donde la
+/// pantalla tiene que CITAR la negativa del servidor ("La unidad U-112 quedó
+/// tomada por otra renta abierta") y saber si vino con `code` — porque el
+/// mismo POST puede fallar con 409 `VEHICLE_CONFLICT` **o** con 422
+/// `NO_VEHICLE_ASSIGNED`, y los dos dejan la sesión ya cerrada.
+@immutable
+class CheckoutTransitionAttempt {
+  const CheckoutTransitionAttempt(
+    this.outcome, {
+    this.message,
+    this.code,
+    this.network = false,
+  });
+
+  final CheckoutTransitionOutcome outcome;
+
+  /// Mensaje del backend tal cual (DoD #5); null si no hubo negativa o si
+  /// vino vacía.
+  final String? message;
+
+  /// `code` del 409/422 cuando el servidor lo manda.
+  final String? code;
+
+  /// El POST murió SIN respuesta. Es la diferencia entre "el servidor dijo
+  /// que no" y "no sabemos si entró" — la única distinción que separa 19B de
+  /// 19C, y la que decide si se puede reintentar o hay que consultar.
+  final bool network;
 }
 
 /// Resultado de un intento de swap, CON el mensaje del servidor.

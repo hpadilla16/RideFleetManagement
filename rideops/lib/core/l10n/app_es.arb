@@ -934,5 +934,303 @@
   "@coPresentClosingSoon": {
     "description": "Nota 12: al cliente NO se le pone un reloj en la cara; el countdown solo aparece bajo 2 min y con copy tranquilizadora.",
     "placeholders": { "mmss": { "type": "String" } }
-  }
+  },
+
+  "coInspWhatTitle": "Qué se captura aquí",
+  "coInspWhatParts": "3 partes",
+  "coInspRowPhotos": "Fotos",
+  "coInspWhatPhotos": "8 ángulos · Frente y Atrás obligatorios",
+  "coInspRowCondition": "Estado",
+  "coInspWhatMetrics": "Odómetro, combustible, limpieza y notas",
+  "coInspRowSignature": "Firma",
+  "coInspWhatSignature": "El cliente firma la revisión en este teléfono",
+  "coInspOfflineNote": "Las fotos se pueden tomar sin señal: quedan en la bandeja y se envían solas al reconectar. El paso avanza cuando el servidor las recibe.",
+  "@coInspOfflineNote": {
+    "description": "Nota 3 del 17A: la promesa offline y su LÍMITE van en la misma frase; separadas, la primera se lee como 'ya quedó'."
+  },
+  "coInspLastReading": "Última lectura",
+  "coInspPaidPill": "Pagado {time}",
+  "@coInspPaidPill": {
+    "description": "Sello paymentCompletedAt del servidor, no una suposición de la app.",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coInspStartCta": "Comenzar inspección",
+  "coInspStartWhy": "Al comenzar, el servidor marca la inspección en curso. Puedes pausar el checkout en cualquier momento sin perder las fotos.",
+
+  "coInspPhotosStep": "Inspección · fotos",
+  "coInspMetricsStep": "Inspección · estado",
+  "coInspSummaryStep": "Inspección · revisar y enviar",
+  "coInspRequiredWhy": "Frente y Atrás listos. El resto suma evidencia y se puede capturar después de las métricas.",
+  "inspPhotoQueued": "{time} · en bandeja",
+  "@inspPhotoQueued": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "inspPhotoSent": "Enviada al servidor",
+  "@inspPhotoSent": {
+    "description": "Solo se dice cuando la fila SALIÓ de la bandeja tras un 2xx del servidor (el drenado borra la fila únicamente con DrainOk)."
+  },
+  "inspPhotoDead": "No llegó al servidor",
+
+  "coInspLocalDoneTitle": "{count, plural, =0{La inspección está completa en este teléfono. Falta el cierre por enviar; sale solo al reconectar.} one{La inspección está completa en este teléfono. Falta 1 foto y el cierre por enviar; salen solos al reconectar.} other{La inspección está completa en este teléfono. Faltan {count} fotos y el cierre por enviar; salen solos al reconectar.}}",
+  "@coInspLocalDoneTitle": {
+    "description": "Nota 9 del 17D: 'completa en este teléfono' ≠ completa. El sello inspectionCompletedAt lo escribe el servidor al drenar el complete (mobile-inspection.service.js:268); finish() solo ENCOLA.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "coInspLocalDoneSending": "La inspección está completa en este teléfono. El envío está en curso; el paso avanza cuando el servidor lo reciba.",
+  "coInspServerPhotos": "{count} de 8 recibidas",
+  "@coInspServerPhotos": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "coInspRowInspection": "Inspección",
+  "coInspReceivedAt": "Recibida {time}",
+  "@coInspReceivedAt": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coInspContinueSign": "Continuar a firma y cierre",
+  "coInspBlockedWhy": "Este paso lo cierra el servidor cuando reciba la inspección, no esta pantalla. Nada se pierde: puedes pausar el checkout y volver.",
+  "coOpenOutbox": "Ver la bandeja ({count})",
+  "@coOpenOutbox": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "coOpenOutboxDead": "{count, plural, one{Ver la bandeja (1 falla)} other{Ver la bandeja ({count} fallas)}}",
+  "@coOpenOutboxDead": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "coInspRequiredDeadTitle": "La foto de {angle} no se pudo enviar y es obligatoria. Sin ella el servidor rechazará el cierre de la inspección.",
+  "@coInspRequiredDeadTitle": {
+    "description": "Nota 12 del 17E: un dead-letter NO bloquea al resto de la bandeja (drainer.dart), así que el complete sale igual y el servidor lo rechaza con REQUIRED_ANGLES_MISSING (mobile-inspection.service.js:200-205).",
+    "placeholders": { "angle": { "type": "String" } }
+  },
+  "coInspRetakeCta": "Tomar {angle} otra vez",
+  "@coInspRetakeCta": {
+    "placeholders": { "angle": { "type": "String" } }
+  },
+  "coInspRetakeWhy": "Al volver a tomarla se reintenta el cierre de la inspección automáticamente.",
+  "coInspCompleteDeadTitle": "El cierre de la inspección no se pudo enviar. El motivo y la decisión que falta están en la bandeja.",
+  "coInspRequiredAnglesTitle": "Ángulos obligatorios",
+  "coInspRequiredMissingPill": "{count, plural, one{Falta 1} other{Faltan {count}}}",
+  "@coInspRequiredMissingPill": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "coInspAnglesFailedChip": "{count, plural, one{1 falla} other{{count} fallas}}",
+  "@coInspAnglesFailedChip": {
+    "description": "Chip de la stepline cuando un angulo OBLIGATORIO murio en la bandeja: el contador de progreso deja de tener sentido y se cuentan fallas (17E).",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "coInspDoneTitle": "Inspección de salida",
+  "coInspSignatureTitle": "Firma del cliente",
+  "coInspSignedRow": "Firmó",
+  "coSignFromInspection": "{name} · al terminar la inspección",
+  "@coSignFromInspection": {
+    "description": "Solo se afirma cuando customerSignedAt e inspectionCompletedAt son el MISMO instante: el complete de la inspección estampa los dos en un solo write (mobile-inspection.service.js:265-281). Sellos distintos ⇒ la firma vino de otra superficie y no se atribuye.",
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "coSignAlreadyBanner": "El cliente ya firmó, así que no hay que pedirle firma otra vez. Solo falta cerrar la entrega.",
+  "coInspCloseCta": "Continuar al cierre",
+  "coInspCloseWhy": "El servidor ya tiene la inspección y la firma. Este botón avanza al cierre; el contrato se genera cuando la entrega quede cerrada.",
+
+  "coHandoffTitle": "Voltea el teléfono al cliente",
+  "coHandoffBody": "{name} va a firmar la entrega del {vehicle}.",
+  "@coHandoffBody": {
+    "placeholders": { "name": { "type": "String" }, "vehicle": { "type": "String" } }
+  },
+  "coHandoffBodyGeneric": "El cliente va a firmar la entrega del vehículo.",
+  "@coHandoffBodyGeneric": {
+    "description": "Sin nombre o sin unidad no se rellena un hueco: se dice la frase que sí es cierta."
+  },
+  "coHandoffRuleLock": "La app queda bloqueada en la firma: no se puede salir ni ver otra pantalla.",
+  "coHandoffRuleExit": "Para salir sin firma: mantén 3 s la barra de arriba y escribe tu PIN.",
+  "coHandoffRulePin": "Si fallas el PIN 3 veces, la app se bloquea y hay que volver a entrar.",
+  "@coHandoffRulePin": {
+    "description": "Nota 2 del 18A: el límite ya está construido (kiosk_exit_exhausted) y el agente merece saberlo ANTES de soltar el teléfono, no descubrirlo con el aparato en la mano."
+  },
+  "coHandoffRuleBrand": "El cliente ve la pantalla en español o inglés, con la marca de {tenant}.",
+  "@coHandoffRuleBrand": {
+    "placeholders": { "tenant": { "type": "String" } }
+  },
+  "coHandoffRuleBrandNoTenant": "El cliente ve la pantalla en español o inglés, sin la marca de la plataforma.",
+  "@coHandoffRuleBrandNoTenant": {
+    "description": "Sin branding del tenant la fila del nombre se oculta (clientSafeCompanyName): nunca un fallback con marca nuestra frente al cliente."
+  },
+  "coRetainedNote": "El cliente ya firmó en este teléfono, pero el servidor todavía no lo confirmó. El trazo sigue aquí: no hace falta pedírselo otra vez.",
+  "@coRetainedNote": {
+    "description": "INN S-1. La tinta retenida vive solo en memoria y solo hasta el 200; volver a pedirle la firma al cliente sería cobrarle el error de la app."
+  },
+  "coRetryWithSignature": "Reintentar con la firma que ya dio",
+  "coRetryWithSignatureWhy": "Se manda el MISMO trazo que el cliente dejó hace un momento. Vive solo en la memoria de este teléfono y nunca entra a la bandeja de salida.",
+  "coHandoffCta": "Entregar al cliente",
+  "coHandoffWhy": "La firma se guarda en el contrato al confirmarla. Si el cliente se arrepiente, sales con tu PIN y el paso queda igual.",
+  "coHandoffOfflineBlocked": "Sin conexión no se puede recoger la firma: se guarda en el contrato en el momento, no después.",
+  "@coHandoffOfflineBlocked": {
+    "description": "La firma NO tiene camino offline y no debe tenerlo: se bloquea la entrega del teléfono con causa en lugar de encolar una firma."
+  },
+
+  "kioskSignSubtitleCheckout": "Entrega del vehículo · Reserva {reservation}",
+  "@kioskSignSubtitleCheckout": {
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "kioskSignPromptCheckout": "Firme para confirmar que recibe el vehículo y acepta el contrato de renta.",
+  "kioskSignPlate": "Placa {plate}",
+  "@kioskSignPlate": {
+    "description": "Pie del 18B: qué está firmando, al pie y sin jerga. Se arma uniendo lo que existe; lo que falte se omite.",
+    "placeholders": { "plate": { "type": "String" } }
+  },
+
+  "coSignReceived": "Firma recibida. Ya puedes tomar el teléfono.",
+  "@coSignReceived": {
+    "description": "Nota 7 del 18C: es verdad en el instante en que se dice — customer-signature ya respondió 200. Lo que sigue no se afirma todavía."
+  },
+  "coCloseStep1": "Firma guardada en el contrato",
+  "coCloseStep2": "Generando el contrato",
+  "coCloseStep3": "Registrar la entrega",
+  "coCloseLegWaiting": "Paso {index} de {total} · falta",
+  "@coCloseLegWaiting": {
+    "placeholders": { "index": { "type": "int" }, "total": { "type": "int" } }
+  },
+  "coClosingCta": "Cerrando…",
+  "coClosingWhy": "No cierres la app: el cierre son tres confirmaciones del servidor y aquí vas por la segunda.",
+  "@coClosingWhy": {
+    "description": "Nota 8: el backend NO tiene cascada aquí. saveCustomerSignature solo sella y las dos transiciones son dos POST más desde el cliente."
+  },
+  "coCloseRetry": "Reintentar el cierre",
+  "coCloseRetryWhy": "Este tramo se puede volver a intentar: la sesión sigue abierta y nada de lo capturado se perdió.",
+
+  "coAlreadySignedTitle": "El cliente ya firmó",
+  "coAlreadySignedBody": "Firmó al terminar la inspección, a las {time}. No hace falta pedirle el teléfono otra vez.",
+  "@coAlreadySignedBody": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coAlreadySignedBodyOther": "La firma quedó registrada a las {time}. No hace falta pedirle el teléfono otra vez.",
+  "@coAlreadySignedBodyOther": {
+    "description": "Solo se atribuye a la inspección cuando customerSignedAt e inspectionCompletedAt son el MISMO instante (un único write, mobile-inspection.service.js:265-281). Si no, la firma vino de otra superficie y no se inventa dónde.",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coAlreadySignedChip": "Firma en el contrato · {time}",
+  "@coAlreadySignedChip": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coSignedDocTitle": "Lo que se firmó",
+  "coSignedSigner": "Firmante",
+  "coSignedSignerUnknown": "No se registró el nombre",
+  "coSignedDocument": "Documento",
+  "coSignedDocumentValue": "Contrato de renta {number}",
+  "@coSignedDocumentValue": {
+    "placeholders": { "number": { "type": "String" } }
+  },
+  "coSignedDocumentValueNoNumber": "Contrato de renta",
+  "coResignLink": "Volver a pedir la firma",
+  "coResignWarning": "La firma nueva SUSTITUYE a la que ya está en el contrato. Úsalo solo si la anterior no es válida.",
+  "@coResignWarning": {
+    "description": "Verificado: saveCustomerSignature pisa tcSignatureDataUrl/tcSignedAt/tcSignerName sin comprobar si ya había firma (checkout-session.service.js:668-690)."
+  },
+  "coResignTitle": "¿Sustituir la firma guardada?",
+  "coResignConfirm": "Sí, pedirla otra vez",
+  "coCloseCta": "Cerrar la entrega",
+  "coCloseCtaWhy": "Se registra la entrega en la reserva y se genera el contrato.",
+
+  "coClosedTitle": "Entrega cerrada",
+  "coClosedTitleUnverified": "Checkout cerrado",
+  "@coClosedTitleUnverified": {
+    "description": "19A-bis, variantes verifying/unverified: el 200 prueba el CHECKOUT, no la entrega. Mismo verde, misma posición — una palabra que no sobreafirma (vocabulario ya aprobado en coCloseFailedTitle)."
+  },
+  "coRecordHandoverUnverifiedNotice": "El cierre entró, pero no pudimos confirmarlo en la reserva. Compruébalo antes de dar por terminada la entrega.",
+  "@coRecordHandoverUnverifiedNotice": {
+    "description": "Banner ámbar SOLO en unverified. A propósito NO dice \"no entregues las llaves\": esa línea es de 19B, donde hay un rechazo real — aquí solo hay ignorancia (decisión aprobada, nota 10)."
+  },
+  "coBeforeTheyGoTitle": "Antes de que se vaya",
+  "coBeforeKeysLabel": "Llaves",
+  "coBeforeKeys": "Entrega las llaves y la tarjeta de circulación",
+  "coBeforeReturnLabel": "Regreso",
+  "coBeforeScopeNote": "El combustible y el kilometraje de salida quedaron en el registro de la inspección, no en esta pantalla.",
+  "@coBeforeScopeNote": {
+    "description": "SC-1 camino B (aprobado por Hector). Dice \"registro de la inspección\" y NO \"contrato\": la copia al contrato es best-effort dentro de un catch que se traga el error (checkout-session.service.js:551-557, :562). Incondicional: la tarjeta nunca baja de dos renglones."
+  },
+  "coRecordTitle": "Registro",
+  "coRecordPillRecorded": "Registrada",
+  "coRecordPillChecking": "Comprobando",
+  "coRecordPillUnverified": "Sin confirmar",
+  "coRecordRowSession": "Sesión",
+  "coRecordSessionClosedAt": "Cerrada {time}",
+  "@coRecordSessionClosedAt": {
+    "description": "Fila ancla del 19A-bis: el hecho que el 200 SÍ prueba, con la hora del SERVIDOR (finishedAt). Era la pastilla coRecordSessionClosed; se muda a fila y gana la hora, como 17F-bis hizo con la hora de la inspección.",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coRecordSignatureLabel": "Firma",
+  "coRecordContractLabel": "Contrato",
+  "coRecordEmailRequested": "Se pidió enviarlo por correo a las {time}",
+  "@coRecordEmailRequested": {
+    "description": "autoEmailedAt se estampa ANTES de disparar el envío, que es fire-and-forget (checkout-session.service.js:597-612): el sello prueba que se PIDIÓ, no que salió.",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coRecordEmailNotRequested": "No hay registro de envío por correo",
+  "coRecordHandoverLabel": "Entrega",
+  "coRecordHandoverRecorded": "Registrada en la reserva · {time}",
+  "@coRecordHandoverRecorded": {
+    "description": "La única formulación que la app puede firmar: se preguntó y la reserva lo confirma. No dice 'avanzó a CHECKED_OUT' ni 'el vehículo quedó rentado'.",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coRecordHandoverChecking": "Comprobando en la reserva…",
+  "@coRecordHandoverChecking": {
+    "description": "Fila Entrega mientras la consulta viaja (19A-bis). Ningún renglón afirma un resultado antes de que vuelva la llamada que lo produce."
+  },
+  "coRecordHandoverUnconfirmed": "Sin confirmar",
+  "@coRecordHandoverUnconfirmed": {
+    "description": "display-data no respondió o mandó un estado desconocido. Es 'no lo sé', jamás 'no quedó registrada' — el negativo definitivo enruta a 19B."
+  },
+  "coRecordHandoverCheckingWhy": "Nada bloquea: el agente puede salir. La comprobación no se pierde, queda en la sesión.",
+  "coRecordHandoverRecheck": "Volver a comprobar",
+  "coRecordHandoverRecheckWhy": "Es una consulta al servidor, no un reintento del cierre: la sesión ya está cerrada y no puede cerrarse dos veces.",
+  "coBackHome": "Volver al inicio",
+  "coSessionDetail": "Ver el detalle de la sesión",
+  "coBackToOutcome": "Volver al resumen del cierre",
+  "@coBackToOutcome": {
+    "description": "GD-MC-3: el detalle NO puede ser una puerta de un solo sentido — el motivo del rechazo no sobrevive al re-fetch y 'Copiar el detalle' solo existe en el resumen."
+  },
+
+  "coCloseFailedStepline": "Cierre con problema",
+  "coCloseFailedTitle": "El checkout se cerró, pero el servidor no registró la entrega. La reserva necesita que alguien la revise en el mostrador.",
+  "coCloseNotRecordedTitle": "El checkout se cerró, pero la reserva no quedó marcada como entregada. Necesita que alguien la revise en el mostrador.",
+  "@coCloseNotRecordedTitle": {
+    "description": "El caso silencioso: 200 en el cierre y la cascada se tragó su error (:526, :533, :557, :571). Se detecta leyendo Reservation.status DESPUÉS de cerrar."
+  },
+  "coCloseFailedStep": "Rechazado a las {time}",
+  "@coCloseFailedStep": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coCloseReasonTitle": "Motivo",
+  "coServerReasonLabel": "Respuesta del servidor",
+  "coCloseReasonPill": "Del servidor",
+  "coCloseVerifiedPill": "Comprobado en la reserva",
+  "coCloseVerifiedTitle": "Lo que comprobamos",
+  "@coCloseVerifiedTitle": {
+    "description": "Rama SIN motivo del servidor (19B silencioso): la tarjeta no cita a nadie, cuenta lo que la app verificó por su cuenta. Titularla 'Motivo' prometía una cita que no existe."
+  },
+  "coCloseVerifiedLabel": "Estado de la reserva",
+  "coCloseNotRecordedReason": "Se consultó la reserva después de cerrar y sigue sin registrar la entrega. El servidor no dio un motivo.",
+  "coCloseNoRetry": "Esta sesión ya está cerrada, así que no se puede reintentar desde aquí. Nada de lo capturado se perdió.",
+  "@coCloseNoRetry": {
+    "description": "canTransition es false desde un estado terminal (state-machine.js:94): un botón de reintento daría 409 ILLEGAL_TRANSITION para siempre."
+  },
+  "coCopyProblem": "Copiar el detalle para el mostrador",
+  "coCopiedProblem": "Detalle copiado al portapapeles",
+  "coHoldKeys": "No entregues las llaves hasta que el mostrador confirme.",
+
+  "coCloseUnknownStepline": "Cierre sin confirmar",
+  "coCloseUnknownTitle": "Se cortó la conexión mientras se cerraba. No sabemos si el cierre entró o no — hay que preguntárselo al servidor.",
+  "coCloseUnknownStep": "Sin respuesta",
+  "coCloseConfirmedAt": "{time} · confirmado",
+  "@coCloseConfirmedAt": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coWontHappenTitle": "Qué NO va a pasar",
+  "coWontHappenPill": "Regla",
+  "coWontRetryLabel": "Reintento",
+  "coWontRetry": "La app no reintenta el cierre sola.",
+  "coWontQueueLabel": "Bandeja",
+  "coWontQueue": "El cierre no entra a la bandeja de salida.",
+  "coCheckStatus": "Consultar el estado",
+  "coCheckStatusWhy": "Con señal, una consulta dice en qué paso quedó y desde ahí se continúa."
 }

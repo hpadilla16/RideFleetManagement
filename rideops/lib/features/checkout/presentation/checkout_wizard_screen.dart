@@ -12,13 +12,20 @@ import '../../../core/session/active_location.dart';
 import '../../../core/session/session_controller.dart';
 import '../../../core/theme/ride_tokens.dart';
 import '../../../core/widgets/ride_buttons.dart';
+import '../../inspection/application/inspection_controller.dart';
+import '../../inspection/application/inspection_outbox_view.dart';
+import '../../inspection/presentation/widgets/inspection_bodies.dart';
 import '../../shell/location_denied_view.dart';
+import '../application/checkout_close_controller.dart';
 import '../application/checkout_wizard_controller.dart';
 import '../application/checkout_wizard_state.dart';
 import '../domain/checkout_presence.dart';
 import 'checkout_labels.dart';
 import 'steps/confirming_step.dart';
+import 'steps/inspection_step.dart';
+import 'steps/sign_step.dart';
 import 'steps/terms_step.dart';
+import 'widgets/close_outcome_view.dart';
 import 'widgets/pause_sheet.dart';
 import 'widgets/steps_sheet.dart';
 import 'widgets/terminal_view.dart';
@@ -52,10 +59,31 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
 
   CheckoutWizardController get _controller => ref.read(_provider.notifier);
 
+  CheckoutCloseController get _closeController =>
+      ref.read(checkoutCloseProvider(widget.reservationId).notifier);
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final state = ref.watch(_provider);
+    final chrome = _inspectionChrome(l10n, state);
+
+    // Superficie VOLTEADA al cliente (firma de la inspección en modo kiosco):
+    // el cromo del wizard se SUSPENDE del todo — ni wizbar, ni header, ni
+    // rail. Ningún cromo de staff frente al cliente (decisión de cromo
+    // aprobada). El propio paso de firma bloquea el back del sistema y pone
+    // su salida deliberada, así que aquí tampoco va el sheet de pausa.
+    if (chrome.fullBleed) {
+      return Scaffold(
+        backgroundColor: RideTokens.n0,
+        // DOS trámites, el MISMO kiosco: la revisión del vehículo (paso 7) y
+        // la entrega (paso 8). Lo que cambia es el subtítulo, el prompt y el
+        // pie de identidad — no la mecánica del candado.
+        body: state.step == CheckoutStep.customerSignPending
+            ? CheckoutSignatureSurface(reservationId: widget.reservationId)
+            : InspectionSignatureSurface(reservationId: widget.reservationId),
+      );
+    }
 
     // Nunca se sale de un checkout sin decidir explícitamente (nota 1): la
     // flecha —y el back del sistema— abren el mismo sheet de pausa. Cuando no
@@ -63,10 +91,25 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     // es directo: pedir confirmación de algo inexistente sería teatro.
     final needsPauseDecision = state.session != null && !state.isTerminal;
 
+    // "Ver el detalle de la sesión" NO puede ser una puerta de un solo sentido
+    // (GD-MC-3): el motivo del rechazo no sobrevive al re-fetch (el 409 no
+    // queda en `events[]` — pedido P10) y "Copiar el detalle" solo existe en
+    // el resumen. Mientras el detalle está abierto, el back —el del sistema y
+    // la flecha— vuelve al resumen en vez de salir del checkout.
+    final showingDetail = state.session != null &&
+        state.isTerminal &&
+        ref.watch(checkoutCloseProvider(widget.reservationId)
+            .select((c) => c.hasOutcome && c.showDetail));
+
     return PopScope(
-      canPop: !needsPauseDecision,
+      canPop: !needsPauseDecision && !showingDetail,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _openPauseSheet();
+        if (didPop) return;
+        if (showingDetail) {
+          _closeController.hideSessionDetail();
+          return;
+        }
+        _openPauseSheet();
       },
       child: Scaffold(
         backgroundColor: RideTokens.n50,
@@ -79,7 +122,9 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
                     : l10n.coTitle(state.context!.reservationNumber!),
                 subtitle: _scopeLine(),
                 onBack: () {
-                  if (needsPauseDecision) {
+                  if (showingDetail) {
+                    _closeController.hideSessionDetail();
+                  } else if (needsPauseDecision) {
                     _openPauseSheet();
                   } else {
                     _leave();
@@ -87,7 +132,7 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
                 },
                 onPause: needsPauseDecision ? _openPauseSheet : null,
               ),
-              Expanded(child: _body(l10n, state)),
+              Expanded(child: _body(l10n, state, chrome)),
             ],
           ),
         ),
@@ -104,7 +149,56 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     return parts.isEmpty ? null : parts.join(' · ');
   }
 
-  Widget _body(AppLocalizations l10n, CheckoutWizardState state) {
+  /// Cromo que pide el paso de inspección. Se consulta el flujo de captura
+  /// SOLO cuando el servidor dice que estamos en inspección: fuera de ahí, ni
+  /// se monta el controller (que hace su propia lectura de red).
+  InspectionChrome _inspectionChrome(
+    AppLocalizations l10n,
+    CheckoutWizardState state,
+  ) {
+    // Paso 8 con el teléfono en manos del cliente (18B): mismo trato que la
+    // firma de inspección — el cromo de staff se SUSPENDE del todo. Ningún
+    // rastro de la app de empleados frente a quien está firmando un contrato.
+    if (state.step == CheckoutStep.customerSignPending) {
+      final close = ref.watch(checkoutCloseProvider(widget.reservationId));
+      if (close.kioskOpen) return const InspectionChrome(fullBleed: true);
+      // La stepline dice el SUB-estado del cierre; el contador nunca cambia.
+      return InspectionChrome(label: _closeLabel(l10n, close));
+    }
+    if (state.step != CheckoutStep.inspectionInProgress) {
+      return const InspectionChrome();
+    }
+    final flow = ref.watch(inspectionControllerProvider(widget.reservationId));
+    return inspectionChromeOf(
+      l10n: l10n,
+      step: state.step,
+      inspectionCompletedAt: state.session?.inspectionCompletedAt,
+      flow: flow,
+      // El chip de ángulos necesita la BANDEJA, no solo el flujo: "capturada"
+      // incluye la fila que murió, y el cromo no puede decir "listo" en la
+      // pantalla que avisa de que el cierre será rechazado (17E).
+      view: flow.sessionId == null
+          ? const InspectionOutboxView()
+          : ref.watch(inspectionOutboxProvider(flow.sessionId!)),
+    );
+  }
+
+  /// "Cierre con problema" / "Cierre sin confirmar" — el paso sigue siendo el
+  /// 8 y el contador lo dice; lo que cambia es el NOMBRE, porque "Firma del
+  /// cliente" ya no describe lo que hay en pantalla.
+  String? _closeLabel(AppLocalizations l10n, CheckoutCloseState close) {
+    if (close.isUnknown) return l10n.coCloseUnknownStepline;
+    if (close.failureKind == CloseFailureKind.retryable) {
+      return l10n.coCloseFailedStepline;
+    }
+    return null;
+  }
+
+  Widget _body(
+    AppLocalizations l10n,
+    CheckoutWizardState state,
+    InspectionChrome chrome,
+  ) {
     // 8F: skeleton con la geometría real, solo en el primer fetch.
     if (state.firstLoad) return const WizardSkeleton();
 
@@ -147,6 +241,19 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     }
 
     if (session.isTerminal) {
+      // Frames 19A/19B (M2-H5): SOLO cuando esta pantalla participó del
+      // cierre. "Entrega las llaves" tiene sentido con el cliente enfrente;
+      // en una sesión que ya estaba cerrada al entrar sería ruido — y ese
+      // caso sigue siendo 11E.
+      final close = ref.watch(checkoutCloseProvider(widget.reservationId));
+      if (close.hasOutcome && !close.showDetail) {
+        return CheckoutCloseOutcomeView(
+          reservationId: widget.reservationId,
+          session: session,
+          close: close,
+          onExit: _leave,
+        );
+      }
       // Frame 11E (M2-H7): la pantalla terminal vive en su propio widget
       // porque es el destino de DOS caminos — la sesión que ya estaba cerrada
       // al entrar, y el 409 SESSION_TERMINAL al crearla desde la card.
@@ -154,6 +261,9 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
         session: session,
         myUserId: ref.watch(sessionControllerProvider).user?.id,
         onExit: _leave,
+        // Solo cuando se LLEGÓ desde el resumen: en una sesión que ya estaba
+        // cerrada al entrar no hay resumen al que volver.
+        onBack: close.hasOutcome ? _closeController.hideSessionDetail : null,
       );
     }
 
@@ -184,13 +294,27 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
           // ahora mismo no podemos leer.
           offline: state.offline,
         ),
-        PhaseRail(currentPosition: state.position),
+        // Cromo COMPRIMIDO durante la captura: el rail de 5 fases se guarda y
+        // su lugar lo toma la barra de sub-progreso, que es la que de verdad
+        // avanza mientras el agente fotografía. Lo que NO se sacrifica es
+        // "Pausar" ni la unidad en pantalla (decisión de cromo aprobada).
+        if (!chrome.compact) PhaseRail(currentPosition: state.position),
         StepLine(
           rawStep: session.currentStep,
           position: state.position,
           staleAge: state.offline ? age : null,
+          // El nombre puede decir el SUB-estado; el contador jamás cambia:
+          // sigue siendo el paso real del servidor (nunca "paso 6.5").
+          label: chrome.label,
+          trailing: chrome.compact
+              ? _AngleChip(
+                  captured: chrome.captured,
+                  deadRequired: chrome.deadRequired,
+                )
+              : null,
           onTap: _openStepsSheet,
         ),
+        if (chrome.compact) InspectionSubStepBar(step: chrome.subStep!),
         Expanded(child: _stepBody(state, session, age)),
       ],
     );
@@ -199,7 +323,12 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
   /// ¿Este paso ya tiene cuerpo propio construido? Decide la variante del
   /// header y a quién le toca dibujar el cuerpo.
   bool _hasStepBody(CheckoutStep? step) =>
-      step == CheckoutStep.confirming || step == CheckoutStep.tcPending;
+      step == CheckoutStep.confirming ||
+      step == CheckoutStep.tcPending ||
+      step == CheckoutStep.inspectionHandoff ||
+      step == CheckoutStep.inspectionInProgress ||
+      step == CheckoutStep.customerSignPending ||
+      step == CheckoutStep.finalizing;
 
   /// Banners del shell. Viven aquí —no en cada paso— para que la matriz de
   /// errores (offline / avance ajeno / 409 reconciliado) sea una sola, y se
@@ -243,6 +372,23 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
       CheckoutStep.tcPending => TermsStep(
           reservationId: widget.reservationId,
           banners: banners,
+        ),
+      // Los DOS pasos de inspección comparten pantalla: la diferencia (17A
+      // "antes de empezar" vs. la captura viva) la decide el paso mirando
+      // `currentStep`, no el shell.
+      CheckoutStep.inspectionHandoff ||
+      CheckoutStep.inspectionInProgress =>
+        CheckoutInspectionStep(
+          reservationId: widget.reservationId,
+          banners: banners,
+        ),
+      // Los DOS pasos del cierre comparten pantalla. En `FINALIZING` el sello
+      // de firma ya existe por fuerza (es el entry guard del paso), así que el
+      // paso ofrece continuar el ÚLTIMO tramo en vez de volver a pedir nada.
+      CheckoutStep.customerSignPending || CheckoutStep.finalizing => SignStep(
+          reservationId: widget.reservationId,
+          banners: banners,
+          onPause: _openPauseSheet,
         ),
       _ => ListView(
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
@@ -362,6 +508,60 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
 /// Qué hizo el agente en el sheet de pausa. `leave` es la salida honesta sin
 /// POST (INN MC-4): no se pausó nada y se dice así.
 enum _PauseOutcome { paused, stay, leave }
+
+/// Contador de ángulos en la stepline durante la captura (17B). Ocupa el lugar
+/// que deja "Ver todos los pasos": mientras fotografía, lo que el agente
+/// necesita no es el mapa de 10 pasos sino cuántos ángulos le faltan.
+///
+/// --p-800 sobre --p-50 (9.93:1) y cifras tabulares — el número cambia cada
+/// foto y sin esto el chip salta de ancho.
+///
+/// Con un ángulo OBLIGATORIO muerto en la bandeja el chip cambia de tema: deja
+/// de contar progreso y cuenta fallas, en --danger-tx sobre --danger-bg
+/// (7.04:1). El progreso ahí es irrelevante y, peor, mentiría: "8 de 8 ✓" en
+/// verde justo encima del banner que dice que el servidor va a rechazar el
+/// cierre (17E). El estado va con PALABRA, nunca solo con color (DoD #2).
+class _AngleChip extends StatelessWidget {
+  const _AngleChip({required this.captured, this.deadRequired = 0});
+
+  final int captured;
+  final int deadRequired;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final failed = deadRequired > 0;
+    final done = captured >= 8;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: failed
+            ? RideTokens.dangerBg
+            : done
+                ? RideTokens.okBg
+                : RideTokens.p50,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        failed
+            ? l10n.coInspAnglesFailedChip(deadRequired)
+            : done
+                ? l10n.inspProgressDone
+                : l10n.inspProgressChip(captured),
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w900,
+          color: failed
+              ? RideTokens.dangerTx
+              : done
+                  ? RideTokens.okTx
+                  : RideTokens.p800,
+          fontFeatures: const [FontFeature.tabularFigures()],
+        ),
+      ),
+    );
+  }
+}
 
 /// Los 4 sellos de side-effect tal como el servidor los reporta. Es la única
 /// afirmación que el shell puede hacer sin el cuerpo del paso — y es la que

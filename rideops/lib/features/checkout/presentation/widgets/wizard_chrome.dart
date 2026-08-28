@@ -661,6 +661,8 @@ class StepLine extends StatelessWidget {
     required this.position,
     required this.onTap,
     this.staleAge,
+    this.label,
+    this.trailing,
   });
 
   final String rawStep;
@@ -673,77 +675,139 @@ class StepLine extends StatelessWidget {
   /// Edad del dato cuando la lectura ya no está viva (offline / error).
   final Duration? staleAge;
 
+  /// Nombre del SUB-estado cuando el paso tiene vida interna: "Inspección ·
+  /// fotos" (17B) o "Inspección completa" (17F, con el sello del servidor
+  /// puesto). El CONTADOR nunca se toca — sigue diciendo el número real del
+  /// paso del servidor, jamás un "paso 6.5" (nota 1 del mockup 17).
+  final String? label;
+
+  /// Pieza de la derecha. Durante la captura, el mapa de 10 pasos cede su
+  /// lugar al contador de ángulos: lo que el agente necesita mientras
+  /// fotografía no es el mapa, es cuántos le faltan (nota 5). La fila sigue
+  /// siendo tocable — el sheet no desaparece, solo deja de anunciarse.
+  final Widget? trailing;
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final stale = staleAge != null;
-    final label = stepLabel(l10n, rawStep);
-    return Material(
-      color: stale ? RideTokens.n50 : RideTokens.n0,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 48), // target DoD #2
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: const BoxDecoration(
-            border: Border(
-              top: BorderSide(color: RideTokens.n200),
-              bottom: BorderSide(color: RideTokens.n200),
-            ),
-          ),
-          child: Row(
-            children: [
-              if (position != null) ...[
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: RideTokens.p50,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    l10n.coStepOf(position!, kCheckoutLinearStepCount),
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w900,
-                      color: RideTokens.p800,
-                      // Cifras tabulares: el contador cambia cada paso y sin
-                      // esto la etiqueta "salta" de ancho al pasar de 9 a 10.
-                      fontFeatures: [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 9),
-              ],
-              Expanded(
-                child: Text(
-                  stale
-                      ? '$label · ${l10n.coStaleView(checkoutAgeLabel(l10n, staleAge!))}'
-                      : label,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w800,
-                    color: stale ? RideTokens.n700 : RideTokens.n900,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                l10n.coSeeAllSteps,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: RideTokens.p700,
-                ),
-              ),
-              const Icon(Icons.chevron_right_rounded,
-                  size: 18, color: RideTokens.p700),
-            ],
+    final label = this.label ?? stepLabel(l10n, rawStep);
+    final row = InkWell(
+      onTap: onTap,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 48), // target DoD #2
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: const BoxDecoration(
+          border: Border(
+            top: BorderSide(color: RideTokens.n200),
+            bottom: BorderSide(color: RideTokens.n200),
           ),
         ),
-      ),
+            // El tope proporcional de los extremos es lo que impide el
+            // desbordamiento a escala 2.0 en 320 dp (chip ~124 px + "Ver todos
+            // los pasos" ~245 px > los 292 disponibles). NO se usa `Flexible`
+            // aquí: en un Row de hijos flexibles el reparto es por FLEX y no
+            // por necesidad, así que a escala normal el trailing se quedaría
+            // con un tercio —menos de lo que "Ver todos los pasos" mide en un
+            // teléfono de 360 dp— y H1/H2 verían su acceso al mapa de pasos
+            // partido en dos renglones. El tope es LAXO: mientras quepa, cada
+            // extremo mide lo suyo y el layout es idéntico al de antes; solo
+            // muerde cuando de verdad no cabe. 45 % + 45 % + separadores deja
+            // siempre un resto positivo para el nombre del paso.
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final cap = constraints.maxWidth * 0.45;
+                return Row(
+                  children: [
+                    if (position != null) ...[
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: cap),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: RideTokens.p50,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            l10n.coStepOf(position!, kCheckoutLinearStepCount),
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w900,
+                              color: RideTokens.p800,
+                              // Cifras tabulares: el contador cambia cada paso
+                              // y sin esto la etiqueta "salta" de ancho al
+                              // pasar de 9 a 10.
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 9),
+                    ],
+                    Expanded(
+                      child: Text(
+                        stale
+                            ? '$label · ${l10n.coStaleView(checkoutAgeLabel(l10n, staleAge!))}'
+                            : label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          color: stale ? RideTokens.n700 : RideTokens.n900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: cap),
+                      child: trailing ??
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  l10n.coSeeAllSteps,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    color: RideTokens.p700,
+                                  ),
+                                ),
+                              ),
+                              const Icon(Icons.chevron_right_rounded,
+                                  size: 18, color: RideTokens.p700),
+                            ],
+                          ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+
+    return Material(
+      color: stale ? RideTokens.n50 : RideTokens.n0,
+      // Durante la captura el contador de ángulos ocupa el lugar de "Ver todos
+      // los pasos": la fila SIGUE abriendo el mapa de 10 pasos, pero ya no lo
+      // dice ninguna palabra en pantalla, y un lector de pantalla anunciaría un
+      // botón sin decir qué hace. La pista lo dice.
+      //
+      // Va con `MergeSemantics` porque la anotación suelta no se funde con el
+      // nodo que crea el InkWell: dejaría un nodo vacío al lado en vez de
+      // describir la fila. Fundida, la fila se anuncia entera —número de paso,
+      // nombre, contador— y luego la pista.
+      child: trailing == null
+          ? row
+          : MergeSemantics(
+              child: Semantics(
+                button: true,
+                hint: l10n.coSeeAllSteps,
+                child: row,
+              ),
+            ),
     );
   }
 }

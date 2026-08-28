@@ -47,6 +47,12 @@ abstract final class RideTokens {
   static const warnBg = Color(0xFFFDF3E2);
   static const warnBd = Color(0xFFF3DCB5);
   static const warnTx = Color(0xFF8A5606);
+
+  /// `.vcard.warn` del 19A-bis: SUPERFICIE de tarjeta ámbar, no de banner.
+  /// --warn-bg (#FDF3E2) es el fondo de un aviso de 40 px; extendido a una
+  /// tarjeta de media pantalla grita más que 19B, que es donde de verdad hay
+  /// un hecho negativo. Este tinte deja n900 en 17.8:1 y warnTx en 6.05:1.
+  static const warnCard = Color(0xFFFFFDF7);
   static const danger = Color(0xFFC02626);
 
   /// Fondo del badge ámbar (decisión PM del mockup 7): token de SUPERFICIE

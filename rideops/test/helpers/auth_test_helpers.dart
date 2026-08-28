@@ -229,5 +229,15 @@ class CapturingEventLogger implements EventLogger {
 }
 
 /// Errores de API listos para usar en fakes.
-ApiError apiError(ApiErrorKind kind, {String message = 'x', String? code}) =>
-    ApiError(kind: kind, message: message, code: code);
+///
+/// [status] NO es decorativo: el cliente decide por [kind], pero una prueba que
+/// no puede escribir el status acaba inventando pares que el backend jamás
+/// emite (un 409 con `NO_VEHICLE_ASSIGNED`, que en realidad es 422) y probando
+/// una rama distinta de la que dice probar.
+ApiError apiError(
+  ApiErrorKind kind, {
+  String message = 'x',
+  String? code,
+  int? status,
+}) =>
+    ApiError(kind: kind, message: message, code: code, status: status);

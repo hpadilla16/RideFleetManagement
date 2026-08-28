@@ -27,6 +27,21 @@ import 'signature_pad.dart';
 ///    tras el resume (INN MC-1b): la superficie de staff aterriza en /lock
 ///    con los intentos del candado normal, cuyo agotamiento ya purga PIN y
 ///    cierra sesión. Cadena cerrada.
+/// Qué está firmando el cliente. Cambia SOLO el subtítulo y el prompt — la
+/// mecánica del kiosco (candado, salida por PIN, override de idioma) es la
+/// misma, y por eso el paso se reusa en vez de clonarse.
+///
+/// Los textos se resuelven DENTRO del `Localizations.override` de la
+/// superficie del cliente, así que viaja el propósito y no la cadena ya
+/// traducida: pasarla desde fuera la dejaría en el idioma del EMPLEADO.
+enum KioskSignaturePurpose {
+  /// M1-H5 / 6D — el cliente firma la revisión del vehículo.
+  inspection,
+
+  /// M2-H5 / 18B — el cliente firma la ENTREGA y acepta el contrato.
+  checkout,
+}
+
 class KioskSignatureStep extends ConsumerStatefulWidget {
   const KioskSignatureStep({
     super.key,
@@ -35,6 +50,9 @@ class KioskSignatureStep extends ConsumerStatefulWidget {
     required this.reservationLabel,
     required this.onConfirmed,
     required this.onExitToStaff,
+    this.purpose = KioskSignaturePurpose.inspection,
+    this.vehicleLabel,
+    this.plate,
   });
 
   /// Nombre del tenant (display-data). Vacío ⇒ la fila del nombre no se
@@ -49,6 +67,15 @@ class KioskSignatureStep extends ConsumerStatefulWidget {
   /// Salida deliberada sin firmar (PIN correcto o intentos agotados — en el
   /// segundo caso el paso además bloquea la app al desmontarse).
   final VoidCallback onExitToStaff;
+
+  /// Qué trámite se firma (subtítulo + prompt).
+  final KioskSignaturePurpose purpose;
+
+  /// Identidad de lo firmado, al pie del lienzo (18B nota 6): el instante del
+  /// consentimiento es el que tiene que llevar la unidad y la placa. Se arma
+  /// con lo que exista — lo que falte se OMITE, nunca un "—".
+  final String? vehicleLabel;
+  final String? plate;
 
   /// Reintentos de PIN en la salida del kiosco (criterio registrado H5).
   static const maxPinAttempts = 3;
@@ -183,9 +210,19 @@ class _KioskSignatureStepState extends ConsumerState<KioskSignatureStep> {
                     constraints: const BoxConstraints(minHeight: 48),
                     padding: const EdgeInsets.symmetric(
                         horizontal: 14, vertical: 10),
+                    // TINTA NEUTRA, no morado de plataforma (decisión de
+                    // Hector sobre la nota 3 del 18B). Esta barra vive 60
+                    // segundos A LA VISTA DEL CLIENTE mientras firma un
+                    // contrato: la regla de la casa es cero marca de
+                    // plataforma en superficies del cliente, y el gradiente
+                    // p-900→p-800 la rompía aunque no llevara logo. El
+                    // contraste no se sacrifica: blanco sobre n-900→n-800
+                    // mide 18.1:1 / 13.8:1 (peor parada), contra 11.2:1 del
+                    // morado. Alcanza también a la firma de inspección del M1
+                    // — es la misma barra.
                     decoration: const BoxDecoration(
                       gradient: LinearGradient(
-                        colors: [Color(0xFF2E1071), RideTokens.p800],
+                        colors: [RideTokens.n900, RideTokens.n800],
                       ),
                     ),
                     child: Row(
@@ -285,7 +322,14 @@ class _KioskSignatureStepState extends ConsumerState<KioskSignatureStep> {
                         ),
                       ),
                     Text(
-                      l10n.kioskSignSubtitle(widget.reservationLabel),
+                      switch (widget.purpose) {
+                        KioskSignaturePurpose.inspection =>
+                          l10n.kioskSignSubtitle(widget.reservationLabel),
+                        KioskSignaturePurpose.checkout =>
+                          l10n.kioskSignSubtitleCheckout(
+                            widget.reservationLabel,
+                          ),
+                      },
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -315,7 +359,11 @@ class _KioskSignatureStepState extends ConsumerState<KioskSignatureStep> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  l10n.kioskSignPrompt,
+                  switch (widget.purpose) {
+                    KioskSignaturePurpose.inspection => l10n.kioskSignPrompt,
+                    KioskSignaturePurpose.checkout =>
+                      l10n.kioskSignPromptCheckout,
+                  },
                   style: const TextStyle(
                     fontSize: 14.5,
                     fontWeight: FontWeight.w600,
@@ -354,12 +402,43 @@ class _KioskSignatureStepState extends ConsumerState<KioskSignatureStep> {
                     ),
                   ],
                 ),
+                if (_footLine(l10n) case final foot?) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    foot,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      // n700 (9.22:1) y no n600 (5.04:1): esto se lee al sol,
+                      // en el patio, antes de firmar.
+                      color: RideTokens.n700,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
         ),
       ],
     );
+  }
+
+  /// "Autos del Valle · Corolla 2023 · Placa MXA-4471". Se OMITE entera si no
+  /// hay nada que decir; el nombre del tenant ya viene filtrado por
+  /// `clientSafeCompanyName`, así que aquí nunca aparece marca de plataforma.
+  String? _footLine(AppLocalizations l10n) {
+    final vehicle = widget.vehicleLabel ?? '';
+    final plate = widget.plate ?? '';
+    // Sin UNIDAD el pie no existe: el nombre del tenant solo repetiría la
+    // tenantbar que está tres centímetros arriba, y este renglón está aquí
+    // para decir QUÉ se firma, no quién lo emite.
+    if (vehicle.isEmpty && plate.isEmpty) return null;
+    return [
+      widget.tenantName,
+      vehicle,
+      plate.isEmpty ? '' : l10n.kioskSignPlate(plate),
+    ].where((p) => p.isNotEmpty).join(' · ');
   }
 
   static Widget _initialsLogo(String name) {

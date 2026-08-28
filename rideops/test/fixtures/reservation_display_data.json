@@ -10,6 +10,14 @@
     "returnAt": "2026-08-19T17:30:00.000Z",
     "pickupLocationId": "cme9q0l0c0001locctr",
     "returnLocationId": "cme9q0l0c0001locctr",
+    "returnLocation": {
+      "id": "cme9q0l0c0001locctr",
+      "tenantId": "cme8xk3l40000tenantcancun",
+      "code": "CTR",
+      "name": "Patio Centro",
+      "city": "Cancún",
+      "state": "QR"
+    },
     "vehicleId": "cmea77xh20003vehu112",
     "vehicleTypeId": "cme9r1t2b0002vtcompact",
     "customer": {

@@ -31,6 +31,13 @@ Notas de forma que muerden:
   no `select`): además de lo ya declarado trae `pickupAt` y `customerInfoCompletedAt`, que
   el header del wizard de checkout usa para responder "para cuándo" y si el pre-checkin
   está listo (M2-H1). El resto de columnas sigue ignorándose por json_serializable.
+- **M2-H5** (`getById` re-leído en `reservations.service.js:1521-1584`): el mismo `include`
+  trae `status` y `returnAt` —escalares de `Reservation`— y `returnLocation` como fila
+  COMPLETA de `Location` (`include: {returnLocation: true}`). El fixture incorpora
+  `returnLocation` con los campos que el select de `locations-selectable` ya declara
+  reales. `status` es lo único con lo que el cierre puede VERIFICAR si la entrega quedó
+  registrada: la sesión terminal no lo prueba, porque la cascada del finalize corre
+  después del `CLOSED` y se traga varios de sus errores.
 - `reservation_display_data.reservation.rentalAgreement` **no trae**
   `declinedInsurance`: el `select` de `getById` no la incluye (solo el select de LISTA,
   `reservations.service.js:285`). El fixture respeta esa ausencia a propósito — es la
