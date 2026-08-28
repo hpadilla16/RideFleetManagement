@@ -74,7 +74,12 @@ export function buildWheres(spec, ctx) {
       return ctx.tripIds.length ? idIn(m.field, ctx.tripIds) : [];
     case 'tripIncidentRelation':
       return ctx.tripIncidentIds.length ? idIn(m.field, ctx.tripIncidentIds) : [];
+    // Both hang off Citation by `citationId`, in opposite directions:
+    // citationDocument is the OCR intake that PRODUCED a citation,
+    // citationRelation is a supporting document filed AGAINST one. Same
+    // selector; named apart so the map reads honestly at each site.
     case 'citationDocument':
+    case 'citationRelation':
       return ctx.citationIds.length ? idIn('citationId', ctx.citationIds) : [];
     case 'reservationOrAgreement': {
       const w = [];

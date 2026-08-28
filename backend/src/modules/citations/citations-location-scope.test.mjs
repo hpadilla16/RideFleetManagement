@@ -32,6 +32,9 @@ let scopedToA = null;   // caller restricted to location A
 let unrestricted = null; // tenant admin — no location restriction
 
 test.after(async () => {
+  // Attachments first: the FK cascades, but deleting them explicitly keeps the
+  // teardown honest if that cascade is ever loosened.
+  await prisma.citationAttachment.deleteMany({ where: { tenantId: ids.tenant } }).catch(() => {});
   await prisma.citationDocument.deleteMany({ where: { tenantId: ids.tenant } }).catch(() => {});
   await prisma.citation.deleteMany({ where: { tenantId: ids.tenant } }).catch(() => {});
   await prisma.vehicle.deleteMany({ where: { tenantId: ids.tenant } }).catch(() => {});
@@ -258,4 +261,106 @@ test('CARE 7d: affidavitPdfBuffer() cannot render another branch renter PII', as
     (err) => !/not found/i.test(String(err?.message)),
     'the admin gets past the scope gate and fails on the missing renter instead'
   );
+});
+
+// ---------------------------------------------------------------------------
+// CARE 8 — supporting-document ATTACHMENTS and the citation EXPORT (2026-08-28).
+//
+// Two new doors into the same citation, and both carry more renter PII than
+// the citation row itself: an attachment is a scanned dispute letter or a
+// signed acknowledgement, and the export renders the renter's name, address
+// and licence onto a cover page. Everything above about the affidavit applies
+// to them, so they are scoped through the SAME citation lookup rather than a
+// second, weaker rule that could drift.
+// ---------------------------------------------------------------------------
+test('CARE 8a: attachments cannot be listed on another branch citation', async () => {
+  const { citationAttachmentsService } = await import('./citation-attachments.service.js');
+  await assert.rejects(
+    () => citationAttachmentsService.list(ids.citB, scopedToA),
+    /not found/i,
+    'a scoped caller must not list another branch citation\'s documents'
+  );
+  await assert.rejects(
+    () => citationAttachmentsService.list(ids.citOrphan, scopedToA),
+    /not found/i,
+    'nor an unmatched citation\'s — fail-closed, same rule as the list'
+  );
+  // The admin reaches the same id: proves the rejection was the location
+  // filter and not the citation simply being unreachable for everyone.
+  const asAdmin = await citationAttachmentsService.list(ids.citB, unrestricted);
+  assert.equal(asAdmin.total, 0, 'the tenant admin resolves the citation (no documents on it yet)');
+});
+
+test('CARE 8b: a scoped caller cannot ATTACH a document to another branch citation', async () => {
+  const { citationAttachmentsService } = await import('./citation-attachments.service.js');
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  await assert.rejects(
+    () => citationAttachmentsService.upload(
+      ids.citB,
+      { label: 'Should never land', docType: 'DISPUTE_LETTER', file: png },
+      scopedToA,
+      { uploadObject: async () => { throw new Error('storage must not be reached'); } },
+    ),
+    /not found/i,
+    'the write door is scoped exactly like the read door, and refuses BEFORE touching storage'
+  );
+  const still = await citationAttachmentsService.list(ids.citB, unrestricted);
+  assert.equal(still.total, 0, 'nothing was written');
+});
+
+test('CARE 8c: the citation EXPORT cannot bundle another branch citation', async () => {
+  const { gatherBundles, exportCitationPdf } = await import('./citation-export.service.js');
+  // gatherBundles is the scope boundary — it returns nothing rather than
+  // throwing, so pin it directly as well as through the public entry point.
+  assert.deepEqual(await gatherBundles([ids.citB], scopedToA), [],
+    'a scoped caller gathers no bundle for another branch citation');
+  assert.deepEqual(await gatherBundles([ids.citOrphan], scopedToA), [],
+    'nor for an unmatched one');
+
+  await assert.rejects(
+    () => exportCitationPdf(ids.citB, scopedToA),
+    /not found/i,
+    'and the export endpoint refuses rather than rendering a PDF of another branch renter'
+  );
+
+  const asAdmin = await gatherBundles([ids.citB], unrestricted);
+  assert.equal(asAdmin.length, 1, 'the tenant admin gathers it — the rejection above was the scope');
+});
+
+test('CARE 8d: an attachment cannot be read or archived across TENANTS by id', async (t) => {
+  const { citationAttachmentsService } = await import('./citation-attachments.service.js');
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  // The upload path is gated on storage being configured; the object write
+  // itself is stubbed below, so only the flag is needed.
+  const priorStorageFlag = process.env.INSPECTION_PHOTOS_STORAGE_ENABLED;
+  process.env.INSPECTION_PHOTOS_STORAGE_ENABLED = 'true';
+  t.after(() => {
+    if (priorStorageFlag === undefined) delete process.env.INSPECTION_PHOTOS_STORAGE_ENABLED;
+    else process.env.INSPECTION_PHOTOS_STORAGE_ENABLED = priorStorageFlag;
+  });
+  const created = await citationAttachmentsService.upload(
+    ids.citA,
+    { label: 'Branch A dispute letter', docType: 'DISPUTE_LETTER', file: png },
+    unrestricted,
+    { uploadObject: async () => ({ ok: true }) },
+  );
+  assert.ok(created.id);
+
+  const otherTenant = { tenantId: `${ids.tenant}-not-a-real-tenant`, allowedLocationIds: null };
+  await assert.rejects(
+    () => citationAttachmentsService.signedUrl(created.id, otherTenant),
+    /not found/i,
+    'holding the id is not enough — every read is tenant-scoped'
+  );
+  await assert.rejects(
+    () => citationAttachmentsService.remove(created.id, otherTenant),
+    /not found/i,
+    'and so is every write'
+  );
+
+  // A location-scoped caller at Branch A CAN see its own branch's attachment —
+  // proving the rejections above are the scope working, not a blanket refusal.
+  const mine = await citationAttachmentsService.list(ids.citA, scopedToA);
+  assert.equal(mine.total, 1);
+  assert.equal(mine.rows[0].label, 'Branch A dispute letter');
 });

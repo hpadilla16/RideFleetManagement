@@ -47,6 +47,10 @@ const MODELS = [
   'reservationIncident', 'tripIncident', 'vehicleDamageReport',
   'moduleAccessAuditLog', 'endpointLoadObservation', 'endpointLoadObservationDaily',
   'retentionSweepRun',
+  // Citation supporting documents (2026-08-28) — the sweep resolves an
+  // attachment's reservation through its citation to apply the open-claim
+  // freeze, so BOTH delegates have to exist on the fake.
+  'citation', 'citationAttachment',
 ];
 
 const toTime = (v) => (v instanceof Date ? v.getTime() : (typeof v === 'string' ? Date.parse(v) : v));
