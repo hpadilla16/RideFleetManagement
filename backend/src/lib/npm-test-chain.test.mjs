@@ -103,6 +103,9 @@ const CI_GATED = {
     'the no-auth /api/sign payload: whose brand the renter sees while signing',
   'test:tenant-brand':
     'the shared cascade behind that brand, and the counter screen that shows the QR',
+  'test:presence-boundary':
+    'which surfaces may receive the presence array — it carries staff names and, '
+    + 'since M2-H6, employee ids; the customer phone and the lobby kiosk must get neither',
 };
 
 function ciWorkflowRunLines() {
