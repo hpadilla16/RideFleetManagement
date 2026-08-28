@@ -297,3 +297,14 @@ test('the blocked response carries the distinct catchable code', () => {
   assert.equal(body.code, 'TENANT_SUSPENDED');
   assert.match(body.error, /Contact Ride/i);
 });
+
+test('a locked screen can still be unlocked — the third deadlock leg', () => {
+  // Found in a log-mode run on 2026-08-28, not by reading the route table.
+  // The screen lock persists in localStorage and is re-applied on load, so a
+  // 403 here strands an agent on the lock screen permanently: they reach
+  // neither the hold screen nor the page where they could pay.
+  assert.equal(isAllowedWhileSuspended('POST', '/api/auth/lock-pin/verify'), true);
+  assert.equal(isAllowedWhileSuspended('GET', '/api/auth/lock-pin/status'), true);
+  // Setting a NEW pin is not an exit from anything, and stays blocked.
+  assert.equal(isAllowedWhileSuspended('POST', '/api/auth/lock-pin/set'), false);
+});
