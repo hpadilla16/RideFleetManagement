@@ -32,14 +32,28 @@ function applyData(row, data) {
   return row;
 }
 
-// Scalar-equality matcher: every key in `where` must equal the row's value.
-// Enough for the id / reservationId / token / agreementId lookups here.
+// Scalar-equality matcher for the id / reservationId / token / agreementId
+// lookups here, PLUS the operators that actually appear.
+//
+// 2026-08-17: the old fallback was `return true` for every operator object.
+// That was already a trap and H8 moved it one edit closer to firing — the CAS
+// `updateMany` added below has an all-scalar `where` today, but a matcher that
+// waves operators through answers "yes, matched" for a guard that a real
+// database would refuse, which is precisely how a concurrency test reports
+// safety it never checked. Fail loudly on anything unmodelled instead.
 function matches(row, where) {
   return Object.entries(where || {}).every(([key, val]) => {
     if (val === undefined) return true;
+    if (key === 'OR') return val.some((clause) => matches(row, clause));
+    if (key === 'AND') return val.every((clause) => matches(row, clause));
+    if (key === 'NOT') return !matches(row, val);
     if (val === null) return row[key] == null;
     if (val instanceof Date || typeof val !== 'object') return row[key] === val;
-    return true; // ignore operator objects — not needed by these paths
+    if ('not' in val) return val.not === null ? row[key] != null : row[key] !== val.not;
+    if ('in' in val) return val.in.includes(row[key]);
+    if ('gt' in val) return row[key] != null && row[key] > val.gt;
+    if ('lt' in val) return row[key] != null && row[key] < val.lt;
+    throw new Error(`stub matcher: unmodelled operator on "${key}": ${JSON.stringify(val)}`);
   });
 }
 
@@ -52,6 +66,12 @@ function stub(rows) {
       const row = rows().find((r) => matches(r, where));
       if (!row) throw new Error('stub update: no match');
       return applyData(row, data);
+    },
+    // M2-H8: transition() now commits through a conditional updateMany.
+    updateMany: async ({ where, data } = {}) => {
+      const hits = rows().filter((r) => matches(r, where));
+      hits.forEach((r) => applyData(r, data));
+      return { count: hits.length };
     },
   };
 }

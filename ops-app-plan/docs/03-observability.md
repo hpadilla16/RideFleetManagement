@@ -42,8 +42,9 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 | `checkout.entry_blocked` | un guard de creación negó la apertura (tag `code`) — M2-H7 |
 | `checkout.entry_precheckin_link_sent` | salida del guard 11B: el link de pre-checkin salió por correo (M2-H7) |
 | `checkout.step_rendered` | render desde `currentStep` (tag `step`) |
-| `checkout.transition_ok` / `checkout.transition_409` | POST /transition (tag `code`: ILLEGAL_TRANSITION/ENTRY_GUARD/…) |
-| `checkout.reconciled` | UI reconciliada con el servidor (tags `steps_jumped`, `via`) |
+| `checkout.transition_ok` / `checkout.transition_409` | POST /transition (tag `code`: ILLEGAL_TRANSITION/ENTRY_GUARD/STALE_VERSION/CONCURRENT_MODIFICATION/…) |
+| `checkout.transition_noop` | 200 que NO lo movió esta superficie: lo movió otra, o fue doble-submit (M2-H8) |
+| `checkout.reconciled` | UI reconciliada con el servidor — p.ej. 409 → re-fetch (tags `steps_jumped`, `via`) |
 | `checkout.money_attempt` / `checkout.money_ok` / `checkout.money_fail` | rutas de dinero (tag `kind`: charge_sale/hold_deposit/manual_*; NUNCA montos ni PAN) |
 | `checkout.preview_divergence` | cálculo local ≠ preview del servidor (compuerta ADR-6) |
 | `checkout.declined_insurance_set` | `POST /:id/declined-insurance` aceptado (tag `declined`) |
@@ -139,6 +140,40 @@ el pasado.
 `steps_jumped` puede venir ausente: si alguno de los dos pasos no está en el catálogo de
 la app (paso nuevo del backend), el evento viaja sin el tag antes que con un número
 inventado.
+
+> **Ruptura de serie por M2-H8 (2026-08-17) — leer antes de comparar contra histórico.**
+> El caso "otra superficie ya hizo esta transición" **cambió de lado**: antes emitía
+> `checkout.transition_409` (code `ILLEGAL_TRANSITION`) seguido de `checkout.reconciled`;
+> ahora el backend responde 200 y emite `checkout.transition_ok`. Sin este aviso, el
+> despliegue de H8 se lee en los tableros como "los 409 de checkout se desplomaron y las
+> reconciliaciones desaparecieron" — que es exactamente la forma que tendría una regresión
+> de telemetría. Consecuencias:
+>
+> - `checkout.transition_409` baja, `checkout.transition_ok` sube, **misma suma**.
+> - `checkout.reconciled` baja de verdad, porque hay menos que reconciliar.
+> - `STALE_VERSION` y `CONCURRENT_MODIFICATION` son códigos nuevos del tag `code`.
+> - Para no perder la señal de concurrencia, la app emite `checkout.transition_noop`.
+>   **Cómo se detecta (importa, y la primera versión de esta nota lo tenía al revés):**
+>   un noop **NO** es "el paso volvió igual y la versión no cambió". En la carrera entre
+>   superficies —que es justo lo que esta métrica tiene que vigilar— el cliente está en
+>   `FINALIZING`/v0, otra superficie commitea, y la respuesta llega `CLOSED`/v1: el paso
+>   **sí** cambió y la versión **también**. Esa regla sólo dispara en el doble-submit sin
+>   carrera, o sea que sub-reporta exactamente el caso que motivó la métrica.
+>
+>   La regla correcta es la de atribución, la misma que ya usa
+>   `02-flutter-blueprint.md` §2.2: **es noop cuando el último evento `TRANSITION` de la
+>   respuesta no nombra a esta superficie** (comparar su `actorUserId`/`metadata` con los
+>   propios). **Es la única regla.** No hay atajo por `stateVersion`: una versión anterior
+>   de esta nota ofrecía "`stateVersion !== localVersion + 1`" como equivalente y **no lo
+>   es**, precisamente en el caso que la métrica existe para vigilar — el wizard tiene v0
+>   en `FINALIZING`, el kiosco commitea `CLOSED` → v1, y la respuesta idempotente no sube
+>   nada, así que lee v1: `1 !== 0 + 1` es **falso** y no se marca. Subió exactamente uno,
+>   pero lo subió otro, y la versión sola no sabe distinguirlo. Es tentador porque evita
+>   decodificar el JSON; es exactamente el sub-reporte que esta sección vino a arreglar.
+>
+>   Nota de parseo: `events` viaja como **string JSON**, no como arreglo — hay que
+>   `jsonDecode` antes de leer el último `TRANSITION`. Llega así por los dos caminos
+>   (`GET /:id` y la respuesta del propio POST).
 
 ### Inspección y bandeja
 | Evento | Cuándo |

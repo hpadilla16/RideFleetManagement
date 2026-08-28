@@ -136,6 +136,13 @@ jobs:
         #     serializer must NEVER break the session poll, and STALE_VERSION
         #     must stay strictly opt-in — a regression here silently changes
         #     behavior for every pre-M2 client (web wizard, kiosk, precheckin).
+        #   - test:checkout-cas (M2-H8, 2026-08-17): the compare-and-set commit
+        #     in transition(). Two surfaces on the same step must produce ONE
+        #     hop, and the loser must be told the truth instead of a fake
+        #     ILLEGAL_TRANSITION. Both halves are invisible without a forced
+        #     race, so they can only ever be caught here — and one test pins
+        #     the OPPOSITE: a concurrent stamp must NOT start failing
+        #     transitions for clients that never opted into expectedVersion.
         # A DUMMY DATABASE_URL IS REQUIRED HERE, AND NOTHING CONNECTS WITH IT.
         # test:kiosk builds a PrismaClient at import time, and the Prisma
         # constructor THROWS on an undefined datasource url — before any
@@ -165,7 +172,7 @@ jobs:
         #     `npm test`, which is the trap documented above.
         env:
           DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_unit_only?schema=public'
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance && npm run test:terms-signing && npm run test:tenant-brand && npm run test:checkout-multisurface
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance && npm run test:terms-signing && npm run test:tenant-brand && npm run test:checkout-multisurface && npm run test:checkout-cas
   tenant-isolation-suite:
     runs-on: ubuntu-latest
     steps:
