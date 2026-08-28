@@ -246,7 +246,14 @@ class CheckoutJoinView extends StatelessWidget {
     final abandon = lastEventOfKind(events, 'ABANDONED');
     final byOther =
         abandon != null && abandon.actorKind(myUserId) != CheckoutActorKind.you;
-    final reason = session.abandonedReason;
+    // El barrido nocturno también escribe `abandonedAt` (scheduler:70-71), y
+    // ahí NADIE pausó nada: decir "otro agente la pausó" inventaría un culpable
+    // de algo que hizo un cron.
+    final autoStalled = classifyAbandonReason(session.abandonedReason) ==
+        CheckoutAbandonKind.autoStalled;
+    // Y el motivo se TRADUCE o se calla: crudo produce «Motivo: "agent_paused"»
+    // en la cara del agente, que es el pecado que la lámina prohíbe.
+    final reason = abandonReasonLine(l10n, session.abandonedReason);
     return WizardBanner(
       icon: Icons.pause_circle_outline_rounded,
       iconColor: RideTokens.warnTx,
@@ -257,19 +264,21 @@ class CheckoutJoinView extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            byOther
-                ? l10n.coJoinPausedByOther(age)
-                // Sin actor identificable no se afirma "otro agente".
-                : l10n.coJoinPausedBySomeone(age),
+            autoStalled
+                ? l10n.coJoinPausedBySystem(age)
+                : byOther
+                    ? l10n.coJoinPausedByOther(age)
+                    // Sin actor identificable no se afirma "otro agente".
+                    : l10n.coJoinPausedBySomeone(age),
             style: const TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w800,
               color: RideTokens.warnTx,
             ),
           ),
-          if (reason != null && reason.isNotEmpty)
+          if (reason != null)
             Text(
-              l10n.coJoinPausedReason(reason),
+              reason,
               style: const TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w700,

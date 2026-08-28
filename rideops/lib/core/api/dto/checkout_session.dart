@@ -133,15 +133,22 @@ abstract class CheckoutPresenceDto with _$CheckoutPresenceDto {
     @Default('') String displayName,
     @IsoDateTimeConverter() DateTime? lastSeenAt,
 
-    /// Quién late. **El serializer de P1 NO lo emite todavía**
-    /// (`activePresence()` mapea solo `{surface, displayName, lastSeenAt}`):
-    /// aquí queda mapeado y el filtro de "no me listes a mí mismo" ya está
-    /// escrito en `pickPresenceChip`, inerte mientras el campo llegue null.
+    /// Quién late. Lo emite `activePresence()`
+    /// (checkout-presence.service.js:184) desde el PR que aterrizó justo antes
+    /// de H6, y es lo que sostiene dos cosas:
     ///
-    /// **Pedido para H6, ANTES de que RideOps empiece a latir**: sin este id
-    /// el agente se vería a sí mismo en el chip de acompañantes en cuanto la
-    /// app haga su propio heartbeat — y "María G. está en esta sesión" cuando
-    /// María G. eres tú destruye la única señal que el chip aporta.
+    ///  1. el filtro "no me listes a mí mismo" de `pickPresenceChip` — sin él,
+    ///     en cuanto RideOps late el agente se ve a sí mismo, y "María G. está
+    ///     en esta sesión" cuando María G. eres tú destruye la única señal que
+    ///     el chip aporta;
+    ///  2. la atribución con nombre del avance ajeno
+    ///     (`checkout_attribution.dart`, único punto de consumo).
+    ///
+    /// **Null es un valor legítimo, no un fallo**: el kiosco (aparato) y el
+    /// teléfono del cliente (token) laten sin usuario a propósito, y el
+    /// servidor les resuelve el nombre con la etiqueta genérica de la
+    /// superficie. Ese null es justo lo que distingue una persona de un mueble
+    /// en la hoja 20B.
     String? actorUserId,
   }) = _CheckoutPresenceDto;
 

@@ -1577,5 +1577,25 @@
   "coJoinNoStealWhy": "Continuar no le quita nada a nadie: la sesión es una sola y el registro guarda quién hizo qué.",
   "@coJoinNoStealWhy": {
     "description": "Hay una sola CheckoutSession por reserva (reservationId @unique): no existe transferir, reclamar ni desbloquear. Decirlo evita que el agente busque un botón de «tomar el control» que ninguna versión de esta app va a tener."
+  },
+  "coJoinPausedAutoStalled": "El sistema la marcó: lleva más de 4 h detenida. No la pausó nadie.",
+  "@coJoinPausedAutoStalled": {
+    "description": "El barrido nocturno escribe `auto_flagged_stalled_at_<paso>` (scheduler:71). Decir «otro agente la pausó» sería inventar un culpable de algo que hizo un cron."
+  },
+  "coJoinPausedBySystem": "El sistema marcó esta salida hace {age}.",
+  "@coJoinPausedBySystem": {
+    "placeholders": {
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coConflictVehicleKept": "Se conserva: el cliente ya verificado y el paso en el que vas.",
+  "@coConflictVehicleKept": {
+    "description": "«Qué se conserva» es la tercera pregunta de cada cara de la matriz 409 y 22C era la única que se había quedado sin responderla."
+  },
+  "coGuardWhyServer": "Este paso lo cierra el servidor cuando reciba el sello, no esta pantalla. Nada se pierde: puedes pausar y volver.",
+  "@coGuardWhyServer": {
+    "description": "Línea de causa que se muestra SIEMPRE, también con la Bandeja en cero: sin ella el agente que acaba de terminar la inspección lee «falta la inspección completada» y no tiene nada que explique la brecha."
   }
 }

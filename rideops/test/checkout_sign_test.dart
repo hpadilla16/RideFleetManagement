@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/api_providers.dart';
+import 'package:rideops/core/db/outbox_providers.dart';
 import 'package:rideops/core/api/dto/checkout_session.dart';
 import 'package:rideops/core/api/enums.dart';
 import 'package:rideops/core/l10n/app_localizations.dart';
@@ -108,6 +109,10 @@ void main() {
       ProviderScope(
         overrides: [
           checkoutApiProvider.overrideWithValue(api),
+          // M2-H6: la pantalla terminal lee la BANDEJA para poder responder
+          // "¿perdí mi trabajo?" (21D). Sin este override sale el stream real
+          // de drift y deja un timer vivo al desmontar.
+          outboxRowsProvider.overrideWith((ref) => const Stream.empty()),
           reservationsApiProvider.overrideWithValue(reservations),
           eventLoggerProvider.overrideWithValue(logger),
           networkStatusProvider.overrideWithValue(network),
@@ -821,7 +826,11 @@ void main() {
     expect(find.text('No response'), findsNWidgets(2));
     // El tramo confirmado conserva su HORA del servidor y lo dice.
     expect(find.textContaining('· confirmed'), findsOneWidget);
-    // Las dos reglas se DECLARAN.
+    // Las dos reglas se DECLARAN. (Van más abajo en el scroll: el chip de
+    // presencia de M2-H6 se pinta siempre desde H6 y el cuerpo arranca 2 px
+    // más abajo, que en este cuerpo tan largo basta para sacarlas del rango
+    // construido.)
+    await scrollBody(tester, find.text('What will NOT happen'));
     expect(find.text('What will NOT happen'), findsOneWidget);
     expect(find.text("The app won't retry the close on its own."),
         findsOneWidget);

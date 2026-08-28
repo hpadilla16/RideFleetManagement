@@ -122,3 +122,17 @@ String stampLabel(AppLocalizations l10n, CheckoutStampKind kind) =>
       CheckoutStampKind.inspection => l10n.coStampInspection,
       CheckoutStampKind.signature => l10n.coStampSignature,
     };
+
+/// Línea de motivo de la pausa, o null cuando no hay nada honesto que decir.
+///
+/// `agent_paused` devuelve null a propósito: el banner de encima ya dice
+/// "otro agente pausó esta salida", así que repetir el token no agrega nada y
+/// mostrarlo crudo sería enseñar máquina. Un token desconocido también se
+/// suprime — sin traducción es ruido con forma de dato.
+String? abandonReasonLine(AppLocalizations l10n, String? raw) =>
+    switch (classifyAbandonReason(raw)) {
+      CheckoutAbandonKind.freeText => l10n.coJoinPausedReason(raw!.trim()),
+      CheckoutAbandonKind.autoStalled => l10n.coJoinPausedAutoStalled,
+      CheckoutAbandonKind.agentPaused => null,
+      CheckoutAbandonKind.unknownToken => null,
+    };

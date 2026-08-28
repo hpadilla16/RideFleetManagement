@@ -2635,4 +2635,21 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get coJoinNoStealWhy =>
       'Continuing takes nothing away from anyone: there is one session and the log keeps who did what.';
+
+  @override
+  String get coJoinPausedAutoStalled =>
+      'The system flagged it: it\'s been stopped for over 4 h. Nobody paused it.';
+
+  @override
+  String coJoinPausedBySystem(String age) {
+    return 'The system flagged this departure $age ago.';
+  }
+
+  @override
+  String get coConflictVehicleKept =>
+      'Kept: the customer already verified and the step you\'re on.';
+
+  @override
+  String get coGuardWhyServer =>
+      'The server closes this step when the stamp lands, not this screen. Nothing is lost: you can pause and come back.';
 }

@@ -114,19 +114,30 @@ class WhoIsHereSheet extends StatelessWidget {
                     const SizedBox(height: 10),
                   ],
                   if (roster.isEmpty) ...[
-                    // NUNCA "estás solo". Otra superficie puede estar
-                    // avanzando sin aparecer aquí.
+                    // DOS vacíos distintos, dos frases distintas (review de
+                    // GD): con red, "nadie visible" es una lectura del
+                    // servidor; SIN red no se puede afirmar ni eso — lo único
+                    // cierto es que no se puede comprobar. Fundirlas sería más
+                    // barato y exactamente igual de mentiroso en uno de los dos
+                    // casos. En ninguno se dice "estás solo".
                     WizardBanner(
-                      icon: Icons.info_outline_rounded,
-                      iconColor: RideTokens.focus,
-                      background: RideTokens.infoBg,
-                      border: RideTokens.infoBd,
+                      icon: offline
+                          ? Icons.wifi_off_rounded
+                          : Icons.info_outline_rounded,
+                      iconColor:
+                          offline ? RideTokens.warnTx : RideTokens.focus,
+                      background:
+                          offline ? RideTokens.warnBg : RideTokens.infoBg,
+                      border: offline ? RideTokens.warnBd : RideTokens.infoBd,
                       child: Text(
-                        l10n.coPresenceEmpty,
-                        style: const TextStyle(
+                        offline
+                            ? l10n.coPresenceOfflineWhy
+                            : l10n.coPresenceEmpty,
+                        style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
-                          color: RideTokens.n800,
+                          color:
+                              offline ? RideTokens.warnTx : RideTokens.n800,
                         ),
                       ),
                     ),

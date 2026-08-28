@@ -55,12 +55,17 @@ class PresenceChipData {
 /// pinta — un chip que dice "María G. está en esta sesión" cuando María G.
 /// eres tú no informa de nada y destruye la única señal que el chip aporta.
 ///
-/// El filtro está listo pero HOY es inerte: el serializer de P1 no manda
-/// `actorUserId` (ver el WHY en el DTO) y RideOps todavía no late. Cuando H6
-/// encienda el heartbeat, este filtro tiene que estar respaldado por el campo
-/// del backend — si no llega, la alternativa es que la app no pinte presencias
-/// de su propia superficie, que es peor (ocultaría a un compañero en otro
-/// teléfono RideOps).
+/// **El filtro está VIVO desde M2-H6.** Nació inerte en H1 (el serializer de
+/// P1 mapeaba solo `{surface, displayName, lastSeenAt}`) y quedó respaldado
+/// por `activePresence()`, que ya emite `actorUserId` —null a propósito para
+/// el kiosco y el teléfono del cliente, que laten sin usuario—. Se encendió
+/// justo a tiempo: H6 es la historia que hace latir a RideOps, y sin este
+/// campo cada agente se vería a sí mismo en su propio chip.
+///
+/// Contra un backend viejo (`actorUserId` null en TODAS las filas) el filtro
+/// vuelve a ser inerte y el agente se ve. Es la degradación aceptada: la
+/// alternativa —no pintar ninguna presencia de la propia superficie— taparía
+/// a un compañero real en otro teléfono RideOps, que es peor.
 PresenceChipData? pickPresenceChip(
   List<CheckoutPresenceDto>? presence,
   DateTime now, {

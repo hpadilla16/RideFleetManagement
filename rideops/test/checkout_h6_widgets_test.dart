@@ -11,6 +11,7 @@ import 'package:rideops/features/checkout/domain/checkout_event_log.dart';
 import 'package:rideops/features/checkout/domain/checkout_presence.dart';
 import 'package:rideops/features/checkout/presentation/widgets/changed_sheet.dart';
 import 'package:rideops/features/checkout/presentation/widgets/join_view.dart';
+import 'package:rideops/features/checkout/presentation/widgets/terminal_view.dart';
 import 'package:rideops/features/checkout/presentation/widgets/presence_sheet.dart';
 import 'package:rideops/features/checkout/presentation/widgets/wizard_banners.dart';
 import 'package:rideops/features/checkout/presentation/widgets/wizard_chrome.dart';
@@ -568,6 +569,236 @@ void main() {
         find.textContaining('Continuing takes nothing away from anyone'),
         findsOneWidget,
       );
+    });
+  });
+
+  group('review de GD · lo que se había recortado y vuelve', () {
+    testWidgets('21D · la pantalla terminal responde "¿perdí mi trabajo?" — el '
+        'log dice quién movió la SESIÓN, esto dice si lo mío llegó',
+        (tester) async {
+      final session =
+          sessionAt(CheckoutStep.closed, kiosk: true, actorUserId: null);
+
+      await pump(
+        tester,
+        CheckoutTerminalView(
+          session: session,
+          myUserId: kMyUserId,
+          onExit: () {},
+        ),
+      );
+      expect(find.text('Nothing you did was lost.'), findsOneWidget);
+
+      // El escenario del marco: el kiosco cierra mientras el agente captura y
+      // quedan fotos huérfanas. El log NO las menciona —nunca fueron un evento
+      // de la sesión— así que sin esta franja la pantalla se quedaba callada.
+      await pump(
+        tester,
+        CheckoutTerminalView(
+          session: session,
+          myUserId: kMyUserId,
+          pendingUploads: 2,
+          onExit: () {},
+        ),
+      );
+      expect(find.text('Nothing you did was lost.'), findsNothing);
+      expect(
+        find.textContaining('Careful: 2 uploads have not reached the server'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('22D · el motivo de la cancelación se TRADUCE o se calla: '
+        'nunca un token de máquina en la cara del agente', (tester) async {
+      Future<void> withReason(String? reason) async {
+        final raw = rawCheckoutSession();
+        raw['currentStep'] = 'CANCELLED';
+        raw['abandonedAt'] = '2026-08-28T10:58:00.000Z';
+        raw['abandonedReason'] = reason;
+        await pump(
+          tester,
+          CheckoutTerminalView(
+            session: sessionFromRaw(raw),
+            myUserId: kMyUserId,
+            onExit: () {},
+          ),
+        );
+      }
+
+      await withReason('agent_paused');
+      expect(find.textContaining('agent_paused'), findsNothing);
+
+      await withReason('auto_flagged_stalled_at_tc_pending');
+      expect(find.textContaining('auto_flagged'), findsNothing);
+      expect(find.textContaining('The system flagged it'), findsOneWidget);
+
+      await withReason('el cliente no se presentó');
+      expect(find.textContaining('el cliente no se presentó'), findsOneWidget);
+    });
+
+    testWidgets('23C · el barrido nocturno NO se atribuye a "otro agente": '
+        'nadie la pausó, la marcó un cron', (tester) async {
+      Future<void> withReason(String reason) async {
+        final raw = rawCheckoutSession();
+        raw['currentStep'] = 'TC_PENDING';
+        raw['abandonedAt'] = '2026-08-28T05:12:00.000Z';
+        raw['abandonedReason'] = reason;
+        await pump(
+          tester,
+          CheckoutJoinView(
+            session: sessionFromRaw(raw),
+            position: 2,
+            roster: const [],
+            myUserId: kMyUserId,
+            onContinue: () {},
+            onLeave: () {},
+          ),
+        );
+      }
+
+      // `auto_flagged_stalled_at_<paso>` lo escribe el scheduler (:70-71).
+      // Decir "otro agente la pausó" inventaría un culpable de algo que hizo
+      // un cron — y el agente saldría a buscar a un compañero que no existe.
+      await withReason('auto_flagged_stalled_at_tc_pending');
+      expect(find.textContaining('The system flagged this departure'),
+          findsOneWidget);
+      expect(find.textContaining('paused this departure'), findsNothing);
+      expect(find.textContaining('was left paused'), findsNothing);
+      // Y la línea de motivo explica QUÉ pasó, sin enseñar el token.
+      expect(find.textContaining("it's been stopped for over 4 h"),
+          findsOneWidget);
+      expect(find.textContaining('auto_flagged'), findsNothing);
+
+      // Una pausa de verdad sigue diciendo lo suyo.
+      await withReason('el cliente fue por su tarjeta');
+      expect(find.textContaining('The system flagged'), findsNothing);
+      expect(find.textContaining('was left paused'), findsOneWidget);
+    });
+
+    testWidgets('20B · vacío Y sin red se dice "no verificable", que NO es lo '
+        'mismo que "nadie visible"', (tester) async {
+      await pump(
+        tester,
+        WhoIsHereSheet(
+          roster: const [],
+          myName: 'Ana Ruiz',
+          offline: true,
+          onClose: () {},
+        ),
+      );
+      expect(
+        find.textContaining("we can't state that anyone is here right now"),
+        findsWidgets,
+      );
+      expect(find.textContaining('Nobody is visible right now'), findsNothing);
+      // Y en ninguno de los dos casos se dice "estás solo".
+      expect(find.textContaining('alone'), findsNothing);
+    });
+
+    testWidgets('el chip distingue persona de aparato SIN leer el nombre',
+        (tester) async {
+      await pump(
+        tester,
+        Align(
+          alignment: Alignment.topLeft,
+          child: PresenceChip(
+            data: pickPresenceChip(
+              [presence('COUNTER', name: 'Diego Torres')],
+              now,
+            ),
+          ),
+        ),
+      );
+      expect(find.text('DT'), findsOneWidget);
+      expect(find.byIcon(Icons.desktop_windows_outlined), findsNothing);
+
+      await pump(
+        tester,
+        Align(
+          alignment: Alignment.topLeft,
+          child: PresenceChip(
+            data: pickPresenceChip(
+              [presence('KIOSK', name: 'The lobby kiosk')],
+              now,
+            ),
+          ),
+        ),
+      );
+      // Glifo, no iniciales: un círculo con "TL" disfrazaría al mueble de
+      // persona, que es la confusión que la distinción existe para evitar.
+      expect(find.byIcon(Icons.desktop_windows_outlined), findsOneWidget);
+      expect(find.text('TL'), findsNothing);
+    });
+
+    testWidgets('el chip no aplasta al CLIENTE a 360 dp', (tester) async {
+      tester.view.physicalSize = const Size(360, 780);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await pump(
+        tester,
+        SessionHead(
+          context_: const CheckoutReservationContext(
+            customerName: 'Guillermina de la Concepción Villaseñor',
+            vehicleLabel: 'Corolla 2023',
+          ),
+          presence: pickPresenceChip(
+            [presence('COUNTER', name: 'Maximiliano Echeverría Salas')],
+            now,
+          ),
+          mini: true,
+          onPresenceTap: () {},
+        ),
+      );
+      expect(
+        tester.getSize(find.byType(PresenceChip)).width,
+        lessThanOrEqualTo(360 * 0.5),
+        reason: 'el tope proporcional deja sitio al cliente',
+      );
+      expect(find.textContaining('Guillermina'), findsOneWidget);
+    });
+
+    testWidgets('22B · el ENCUADRE se muestra SIEMPRE, también con la Bandeja '
+        'en cero', (tester) async {
+      await pump(
+        tester,
+        ConflictBanner(
+          conflict: const CheckoutConflict(
+            kind: CheckoutConflictKind.entryGuard,
+            message: 'Cannot enter CUSTOMER_SIGN_PENDING: '
+                'inspectionCompletedAt is not stamped yet',
+            code: 'ENTRY_GUARD',
+          ),
+          onDismiss: () {},
+          onOpenOutbox: () {},
+        ),
+      );
+      // Sin esto, el agente que ACABA de terminar la inspección lee "falta la
+      // inspección completada" y no tiene nada que explique la brecha entre lo
+      // que ve en su teléfono y lo que el servidor tiene.
+      expect(
+        find.textContaining('The server closes this step when the stamp lands'),
+        findsOneWidget,
+      );
+      // Y el CTA sigue sin dibujarse: no hay nada que drenar.
+      expect(find.textContaining('Open the Outbox'), findsNothing);
+    });
+
+    testWidgets('22C · responde "qué se conserva", como el resto de la matriz',
+        (tester) async {
+      await pump(
+        tester,
+        ConflictBanner(
+          conflict: const CheckoutConflict(
+            kind: CheckoutConflictKind.vehicleConflict,
+            message: 'Vehicle conflict with reservation RES-2465',
+            code: 'VEHICLE_CONFLICT',
+            swapAvailable: true,
+          ),
+          onDismiss: () {},
+        ),
+      );
+      expect(find.textContaining('Kept: the customer already verified'),
+          findsOneWidget);
     });
   });
 }

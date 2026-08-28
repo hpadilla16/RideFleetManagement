@@ -37,42 +37,70 @@ enum CheckoutStampKind { tc, payment, inspection, signature }
 /// inspección) y ese handler **no escribe en `events[]`**. Sin transición
 /// registrada no se atribuye a nadie — se dice "completado" a secas, que es
 /// todo lo que se puede afirmar.
-CheckoutStep guardedStepOf(CheckoutStampKind kind) => switch (kind) {
+CheckoutStep _guardedStepOf(CheckoutStampKind kind) => switch (kind) {
       CheckoutStampKind.tc => CheckoutStep.tcSigned,
       CheckoutStampKind.payment => CheckoutStep.paid,
       CheckoutStampKind.inspection => CheckoutStep.customerSignPending,
       CheckoutStampKind.signature => CheckoutStep.closed,
     };
 
-String _guardedStepWire(CheckoutStampKind kind) => guardedStepOf(kind).wire;
+String _guardedStepWire(CheckoutStampKind kind) => _guardedStepOf(kind).wire;
+
+/// Pasos que PRODUCEN cada sello: aquellos en los que el agente (o el cliente
+/// del otro lado) está trabajando precisamente para que ese sello caiga.
+///
+/// Es un catálogo EXPLÍCITO y no una inferencia, por la misma razón que
+/// `kCheckoutLinearSteps`: la relación no se puede derivar del grafo sin
+/// equivocarse, y equivocarse aquí no da un error visible — da un banner que
+/// nunca aparece.
+///
+/// **Aquí estuvo el bug que Innovación cazó (INN MC-1).** La primera versión
+/// anclaba al paso que el sello DESBLOQUEA (`ENTRY_REQUIRES`, state-machine.js
+/// :77-82) y suprimía salvo que la sesión estuviera en o pasado ese paso. Pero
+/// estar en o pasado el paso guardado significa que la guarda ya se cumplió, o
+/// sea que **el sello ya estaba puesto** y por definición no puede acabar de
+/// aterrizar: las dos condiciones se excluyen para los cuatro sellos y
+/// [ForeignAdvanceKind.stampLanded] era inalcanzable. El instinto era el
+/// correcto; el ancla, no.
+const Map<CheckoutStampKind, Set<CheckoutStep>> kStampProducers = {
+  // El QR del paso 2 existe justo para que caiga `tcCompletedAt`.
+  CheckoutStampKind.tc: {CheckoutStep.tcPending},
+  CheckoutStampKind.payment: {CheckoutStep.paymentPending},
+  // La inspección se sella al terminar la captura, y el agente está dentro en
+  // los dos pasos del tramo.
+  CheckoutStampKind.inspection: {
+    CheckoutStep.inspectionHandoff,
+    CheckoutStep.inspectionInProgress,
+  },
+  CheckoutStampKind.signature: {CheckoutStep.customerSignPending},
+};
 
 /// ¿Este sello es ASUNTO DEL PASO en el que está la sesión?
 ///
-/// Sirve para una sola decisión, y es la que separa el frame 21C de puro
-/// ruido: **cuándo un sello que cae merece un banner de avance ajeno**.
+/// Decide una sola cosa, y es la que separa el frame 21C de puro ruido:
+/// **cuándo un sello que cae merece un banner de avance ajeno.**
 ///
-/// Un sello es asunto propio cuando abre un paso que todavía está POR DELANTE:
-/// en `TC_PENDING` el agente enseña el QR precisamente para que caiga
-/// `tcCompletedAt`, y anunciárselo como "se registró en otra superficie"
-/// sería contarle como noticia ajena el resultado esperado de lo que está
-/// haciendo — la forma más rápida de enseñarle a ignorar los banners. Ese paso
-/// ya tiene su propio estado de éxito.
+/// Es asunto propio cuando la sesión está en un paso que PRODUCE ese sello: en
+/// `TC_PENDING` el agente enseña el QR precisamente para que caiga
+/// `tcCompletedAt`, y anunciárselo como "se registró en otra superficie" sería
+/// contarle como noticia ajena el resultado esperado de lo que está haciendo —
+/// la forma más rápida de enseñarle a ignorar los banners. Ese paso ya tiene
+/// su propio estado de éxito.
 ///
-/// Es noticia AJENA cuando el sello abre un paso que la sesión ya dejó atrás
-/// (o donde ya está): el mostrador registrando el pago mientras el agente
-/// teclea el odómetro en el paso 7. Eso es exactamente 21C.
+/// Es noticia AJENA en cualquier otro paso, y los casos son reales: el
+/// mostrador cobrando mientras el agente sigue en términos (el 21C del
+/// mockup), o la firma que el cliente deja en el kiosco mientras el wizard ya
+/// pasó a `FINALIZING`.
 ///
-/// Con cualquiera de los dos pasos fuera del catálogo devuelve **true**
-/// (asunto propio ⇒ no se dibuja banner): sin certeza no se le mete un aviso
-/// más a alguien que está capturando.
+/// Con un paso fuera del catálogo devuelve **true** (asunto propio ⇒ no se
+/// dibuja banner): sin certeza no se le mete un aviso más a alguien que está
+/// capturando.
 bool stampIsCurrentStepBusiness({
   required CheckoutStampKind kind,
   required CheckoutStep? currentStep,
 }) {
-  final current = infoFor(currentStep);
-  final guarded = infoFor(guardedStepOf(kind));
-  if (current == null || guarded == null) return true;
-  return guarded.position > current.position;
+  if (currentStep == null) return true;
+  return kStampProducers[kind]?.contains(currentStep) ?? true;
 }
 
 /// Qué le pasó a un sello entre la entrada del agente y ahora.

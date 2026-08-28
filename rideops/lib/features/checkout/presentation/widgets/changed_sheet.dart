@@ -122,37 +122,9 @@ class ChangedSheet extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           // Verde o ámbar, nunca verde "por comodidad": si hay evidencia sin
-          // enviar, se NOMBRA cuánta y se manda a la Bandeja.
-          if (pendingUploads > 0)
-            WizardBanner(
-              icon: Icons.warning_amber_rounded,
-              iconColor: RideTokens.warnTx,
-              background: RideTokens.warnBg,
-              border: RideTokens.warnBd,
-              child: Text(
-                l10n.coChangedSomethingLost(pendingUploads),
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  color: RideTokens.warnTx,
-                ),
-              ),
-            )
-          else
-            WizardBanner(
-              icon: Icons.check_circle_outline_rounded,
-              iconColor: RideTokens.okTx,
-              background: RideTokens.okBg,
-              border: RideTokens.okBd,
-              child: Text(
-                l10n.coChangedNothingLost,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                  color: RideTokens.okTx,
-                ),
-              ),
-            ),
+          // enviar, se NOMBRA cuánta. Misma franja que la pantalla terminal
+          // (21D): la pregunta es la misma, la respuesta tiene que serlo.
+          WorkSafetyBanner(pendingUploads: pendingUploads),
           const SizedBox(height: 12),
           RidePrimaryButton(
             label: currentPosition == null

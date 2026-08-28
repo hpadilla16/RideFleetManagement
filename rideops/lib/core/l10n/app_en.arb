@@ -924,5 +924,16 @@
     }
   },
   "coJoinWhereItStoppedTitle": "Where it stopped",
-  "coJoinNoStealWhy": "Continuing takes nothing away from anyone: there is one session and the log keeps who did what."
+  "coJoinNoStealWhy": "Continuing takes nothing away from anyone: there is one session and the log keeps who did what.",
+  "coJoinPausedAutoStalled": "The system flagged it: it's been stopped for over 4 h. Nobody paused it.",
+  "coJoinPausedBySystem": "The system flagged this departure {age} ago.",
+  "@coJoinPausedBySystem": {
+    "placeholders": {
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coConflictVehicleKept": "Kept: the customer already verified and the step you're on.",
+  "coGuardWhyServer": "The server closes this step when the stamp lands, not this screen. Nothing is lost: you can pause and come back."
 }

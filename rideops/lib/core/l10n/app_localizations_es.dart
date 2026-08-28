@@ -2639,4 +2639,21 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get coJoinNoStealWhy =>
       'Continuar no le quita nada a nadie: la sesión es una sola y el registro guarda quién hizo qué.';
+
+  @override
+  String get coJoinPausedAutoStalled =>
+      'El sistema la marcó: lleva más de 4 h detenida. No la pausó nadie.';
+
+  @override
+  String coJoinPausedBySystem(String age) {
+    return 'El sistema marcó esta salida hace $age.';
+  }
+
+  @override
+  String get coConflictVehicleKept =>
+      'Se conserva: el cliente ya verificado y el paso en el que vas.';
+
+  @override
+  String get coGuardWhyServer =>
+      'Este paso lo cierra el servidor cuando reciba el sello, no esta pantalla. Nada se pierde: puedes pausar y volver.';
 }

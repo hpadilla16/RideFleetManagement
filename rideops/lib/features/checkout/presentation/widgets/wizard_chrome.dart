@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/l10n/app_localizations.dart';
+import '../../../../core/api/enums.dart';
 import '../../../../core/theme/ride_tokens.dart';
 import '../../application/checkout_wizard_state.dart';
 import '../../domain/checkout_presence.dart';
@@ -208,10 +209,19 @@ class SessionHead extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final customer = context_?.customerName;
     final vehicle = context_?.vehicleLabel;
-    final chip = presence == null
+    // El chip se pinta AUNQUE no haya nadie (review de GD, M2-H6). Es la única
+    // puerta a la hoja "Quién está aquí", y ahí vive el reverso del latido:
+    // desde H6 el agente aparece con su nombre en las otras superficies. Con el
+    // chip condicionado a que hubiera compañía, el agente que trabaja solo —el
+    // caso NORMAL en el patio— no se enteraba nunca.
+    //
+    // Sin destino (uso aislado del header) se conserva el comportamiento de H1:
+    // sin presencia, sin chip. Un chip inerte que no lleva a ningún sitio sería
+    // cromo por cromo.
+    final chip = presence == null && onPresenceTap == null
         ? null
         : PresenceChip(
-            data: presence!,
+            data: presence,
             mini: mini,
             offline: offline,
             onTap: onPresenceTap,
@@ -222,30 +232,55 @@ class SessionHead extends StatelessWidget {
           .where((p) => p.isNotEmpty)
           .join(' · ');
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        // El chip TOCABLE mide 48 px de objetivo (DoD #2) y, con el padding
+        // vertical de 7, el header mini pasaría de 46 a 62 px: 16 px robados
+        // al cuerpo del paso en TODAS las pantallas, justo el presupuesto que
+        // la lámina midió a 360 dp. Se paga del padding, no del contenido —
+        // el objetivo real que el pulgar golpea es la fila entera del header.
+        padding: EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: chip == null || onPresenceTap == null ? 7 : 0,
+        ),
         decoration: const BoxDecoration(
           color: RideTokens.tonal,
           border: Border(bottom: BorderSide(color: RideTokens.n200)),
         ),
-        child: Row(
-          children: [
-            const Icon(Icons.person_outline_rounded,
-                size: 16, color: RideTokens.p800),
-            const SizedBox(width: 7),
-            Expanded(
-              child: Text(
-                who.isEmpty ? l10n.coTitleNoNumber : who,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w800,
-                  color: RideTokens.n900,
+        // Tope PROPORCIONAL calculado sobre el ancho REAL de la fila — el
+        // mismo patrón que [StepLine], y por el mismo motivo: un hijo no-flex
+        // de un `Row` se mide con ancho INFINITO, así que un `LayoutBuilder`
+        // metido dentro del Row no sirve para acotar nada.
+        //
+        // Sin este tope, a 360 dp un nombre largo de compañero deja al
+        // CLIENTE —la primera respuesta del patio— en dos letras y puntos
+        // suspensivos. Es laxo: mientras quepa, el chip mide lo suyo.
+        child: LayoutBuilder(
+          builder: (context, constraints) => Row(
+            children: [
+              const Icon(Icons.person_outline_rounded,
+                  size: 16, color: RideTokens.p800),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  who.isEmpty ? l10n.coTitleNoNumber : who,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: RideTokens.n900,
+                  ),
                 ),
               ),
-            ),
-            if (chip != null) ...[const SizedBox(width: 8), chip],
-          ],
+              if (chip != null) ...[
+                const SizedBox(width: 8),
+                ConstrainedBox(
+                  constraints:
+                      BoxConstraints(maxWidth: constraints.maxWidth * 0.5),
+                  child: chip,
+                ),
+              ],
+            ],
+          ),
         ),
       );
     }
@@ -401,7 +436,11 @@ class PresenceChip extends StatelessWidget {
     this.onTap,
   });
 
-  final PresenceChipData data;
+  /// null = nadie visible dentro del TTL. **No es "estás solo"**: el chip lo
+  /// dice con "nadie visible ahora mismo", y sigue siendo la puerta a la hoja
+  /// donde el agente descubre que él sí es visible para los demás.
+  final PresenceChipData? data;
+
   final bool mini;
 
   /// Ver [SessionHead.offline]: sin red el punto no puede seguir verde.
@@ -415,23 +454,33 @@ class PresenceChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final lastSeen = data.entry.lastSeenAt;
+    final entry = data?.entry;
+    final lastSeen = entry?.lastSeenAt;
     final age = lastSeen == null
         ? Duration.zero
         : clock.now().difference(lastSeen);
-    final text = l10n.coPresenceLine(
-      data.entry.displayName,
-      surfaceLabel(l10n, data.entry.surface),
-      checkoutAgeLabel(l10n, age),
-    );
-    final live = !offline && data.freshness == PresenceFreshness.live;
+    final text = entry == null
+        ? l10n.coPresenceEmptyShort
+        : l10n.coPresenceLine(
+            entry.displayName,
+            surfaceLabel(l10n, entry.surface),
+            checkoutAgeLabel(l10n, age),
+          );
+    final live =
+        !offline && data?.freshness == PresenceFreshness.live;
+    // Vacío o sin red ⇒ rampa NEUTRA, no morada: el morado sobre gris cae a
+    // 4,4:1 y, peor, un chip vacío en color de marca se lee como si afirmara
+    // algo. n700 sobre n50 mide 8,9:1.
+    final muted = entry == null || offline;
     final chip = Container(
       constraints: BoxConstraints(minHeight: mini ? 32 : 34),
       padding: EdgeInsets.symmetric(horizontal: mini ? 9 : 10, vertical: 4),
       decoration: BoxDecoration(
-        color: RideTokens.p50,
+        color: muted ? RideTokens.n50 : RideTokens.p50,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: RideTokens.brandA20),
+        border: Border.all(
+          color: muted ? RideTokens.n300 : RideTokens.brandA20,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -446,6 +495,15 @@ class PresenceChip extends StatelessWidget {
               color: live ? RideTokens.ok : RideTokens.n500,
             ),
           ),
+          if (entry != null) ...[
+            const SizedBox(width: 6),
+            // PERSONA vs APARATO también AQUÍ (review de GD): en la hoja la
+            // distinción estaba resuelta, pero el chip es lo que el agente ve
+            // el 99 % del tiempo, y sin avatar "de un vistazo" se convierte en
+            // leer un nombre a 11,5 px al sol. Círculo + iniciales para quien
+            // tiene nombre; cuadrado + glifo para el mueble.
+            _ChipAvatar(surface: entry.surface, name: entry.displayName),
+          ],
           const SizedBox(width: 6),
           Flexible(
             child: Text(
@@ -455,14 +513,14 @@ class PresenceChip extends StatelessWidget {
               style: TextStyle(
                 fontSize: mini ? 11.5 : 12.5,
                 fontWeight: FontWeight.w700,
-                color: RideTokens.p800,
+                color: muted ? RideTokens.n700 : RideTokens.p800,
               ),
             ),
           ),
-          if (data.others > 0) ...[
+          if ((data?.others ?? 0) > 0) ...[
             const SizedBox(width: 6),
             Text(
-              l10n.coPresenceMore(data.others),
+              l10n.coPresenceMore(data!.others),
               style: const TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w900,
@@ -498,6 +556,56 @@ class PresenceChip extends StatelessWidget {
               child: Center(widthFactor: 1, child: chip),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Avatar del chip. Las tres señales cambian a la vez a propósito (forma,
+/// contenido y rampa de color): con guantes y sol de frente, una sola no se
+/// lee. Una superficie DESCONOCIDA no se declara aparato — sin saber qué es,
+/// no se le quita el nombre a quien podría tenerlo.
+class _ChipAvatar extends StatelessWidget {
+  const _ChipAvatar({required this.surface, required this.name});
+
+  final String surface;
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDevice = CheckoutSurface.tryParse(surface)?.isDevice ?? false;
+    if (isDevice) {
+      return Container(
+        width: 18,
+        height: 18,
+        decoration: BoxDecoration(
+          color: RideTokens.n200,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: const Icon(
+          Icons.desktop_windows_outlined,
+          size: 11,
+          color: RideTokens.n800,
+        ),
+      );
+    }
+    return Container(
+      width: 18,
+      height: 18,
+      alignment: Alignment.center,
+      decoration: const BoxDecoration(
+        color: RideTokens.p200,
+        shape: BoxShape.circle,
+      ),
+      child: Text(
+        initialsOf(name),
+        style: const TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w900,
+          // p900 sobre p200: el texto más pequeño del chip necesita el
+          // contraste más alto de la rampa.
+          color: Color(0xFF2E1071),
         ),
       ),
     );

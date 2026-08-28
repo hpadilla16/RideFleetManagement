@@ -278,18 +278,25 @@ void main() {
   });
 
   group('§21C · el sello que cae SIN que el paso se mueva', () {
-    test('el mostrador registra el pago mientras el agente captura el paso 7 '
-        '⇒ aviso "este paso no cambió"', () {
+    // OJO con la forma de estos fixtures (INN MC-1): la primera versión ponía
+    // al agente en el paso 7 con `paymentCompletedAt` en nulo — una fila que
+    // el backend NO PUEDE emitir, porque la guarda de `PAID` la prohíbe. El
+    // test era verde y hueco. Todos los estados de aquí son producibles.
+
+    test('el mostrador cobra mientras el agente sigue en términos ⇒ aviso '
+        '"este paso no cambió"', () {
       fakeAsync((async) {
         final h = harness();
-        h.api.current = sessionAt(CheckoutStep.inspectionInProgress);
+        // TC_PENDING sin sello de pago: alcanzable (el pago no guarda este
+        // paso, y el mostrador puede cobrar antes de que el wizard llegue).
+        h.api.current = sessionAt(CheckoutStep.tcPending);
         h.container.invalidate(checkoutWizardProvider(kReservationId));
         h.container.listen(checkoutWizardProvider(kReservationId), (_, _) {});
         async.flushMicrotasks();
         expect(read(h.container).advance, isNull);
 
         h.api.current = sessionAt(
-          CheckoutStep.inspectionInProgress,
+          CheckoutStep.tcPending,
           payment: DateTime.now(),
         );
         async.elapse(const Duration(seconds: 5));
@@ -298,8 +305,8 @@ void main() {
         final advance = read(h.container).advance!;
         expect(advance.kind, ForeignAdvanceKind.stampLanded);
         expect(advance.stamp, CheckoutStampKind.payment);
-        expect(advance.currentStep, 'INSPECTION_IN_PROGRESS');
-        expect(advance.completedStep, 'INSPECTION_IN_PROGRESS',
+        expect(advance.currentStep, 'TC_PENDING');
+        expect(advance.completedStep, 'TC_PENDING',
             reason: 'el paso NO se movió');
         // No es una reconciliación: nada saltó, y contarlo inflaría la métrica
         // con la que el épico mide cuánto se pisan las superficies.
@@ -310,8 +317,40 @@ void main() {
       });
     });
 
-    test('el sello que ESTE paso está esperando no genera aviso: en TC_PENDING '
-        'el agente enseña el QR justo para que caiga', () {
+    test('la firma que aterriza en FINALIZING también se avisa — el caso que '
+        'el ancla vieja suprimía', () {
+      fakeAsync((async) {
+        final h = harness();
+        // FINALIZING sin `customerSignedAt`: alcanzable, porque ese paso NO
+        // tiene guarda de entrada (la de CLOSED sí es customerSignedAt).
+        h.api.current = sessionAt(
+          CheckoutStep.finalizing,
+          tc: DateTime.now(),
+          payment: DateTime.now(),
+          inspection: DateTime.now(),
+        );
+        h.container.invalidate(checkoutWizardProvider(kReservationId));
+        h.container.listen(checkoutWizardProvider(kReservationId), (_, _) {});
+        async.flushMicrotasks();
+
+        h.api.current = sessionAt(
+          CheckoutStep.finalizing,
+          tc: DateTime.now(),
+          payment: DateTime.now(),
+          inspection: DateTime.now(),
+          signature: DateTime.now(),
+        );
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+
+        final advance = read(h.container).advance!;
+        expect(advance.kind, ForeignAdvanceKind.stampLanded);
+        expect(advance.stamp, CheckoutStampKind.signature);
+      });
+    });
+
+    test('el sello que ESTE paso PRODUCE no genera aviso: en TC_PENDING el '
+        'agente enseña el QR justo para que caiga', () {
       fakeAsync((async) {
         final h = harness();
         h.api.current = sessionAt(CheckoutStep.tcPending);
@@ -329,6 +368,32 @@ void main() {
           h.logger.events.where((e) => e.$1 == CheckoutEvents.termsSignedSeen),
           hasLength(1),
         );
+      });
+    });
+
+    test('y la inspección que se sella durante la captura tampoco: el agente '
+        'está ahí haciéndola', () {
+      fakeAsync((async) {
+        final h = harness();
+        h.api.current = sessionAt(
+          CheckoutStep.inspectionInProgress,
+          tc: DateTime.now(),
+          payment: DateTime.now(),
+        );
+        h.container.invalidate(checkoutWizardProvider(kReservationId));
+        h.container.listen(checkoutWizardProvider(kReservationId), (_, _) {});
+        async.flushMicrotasks();
+
+        h.api.current = sessionAt(
+          CheckoutStep.inspectionInProgress,
+          tc: DateTime.now(),
+          payment: DateTime.now(),
+          inspection: DateTime.now(),
+        );
+        async.elapse(const Duration(seconds: 5));
+        async.flushMicrotasks();
+
+        expect(read(h.container).advance, isNull);
       });
     });
   });

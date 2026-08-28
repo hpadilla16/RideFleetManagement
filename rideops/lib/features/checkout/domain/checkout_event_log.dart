@@ -152,3 +152,46 @@ CheckoutEvent? lastSideEffectFor(List<CheckoutEvent> events, String field) {
   }
   return null;
 }
+
+/// Cómo se pausó la sesión, según `abandonedReason`.
+///
+/// El campo es TEXT libre y lo escriben cosas muy distintas: la app manda
+/// `agent_paused` (checkout-session.service.js:1298 lo pone también como
+/// default), el barrido nocturno escribe
+/// `auto_flagged_stalled_at_<paso>` (scheduler:71), y una superficie puede
+/// meter texto humano ("el cliente fue por su tarjeta").
+///
+/// Existe porque mostrarlo crudo produce «Motivo: "agent_paused"» en la cara
+/// del agente, que es exactamente el pecado que la lámina prohíbe: un token de
+/// máquina no se le enseña a nadie en el patio.
+enum CheckoutAbandonKind {
+  /// Alguien la pausó a mano desde una superficie de staff.
+  agentPaused,
+
+  /// El barrido la marcó por llevar >4 h detenida. **NADIE la pausó** — y esa
+  /// diferencia importa: decir "otro agente la pausó" sería inventar un
+  /// culpable de algo que hizo un cron.
+  autoStalled,
+
+  /// Texto escrito por una persona: se muestra tal cual, entre comillas.
+  freeText,
+
+  /// Un token de máquina que esta versión no conoce. Se SUPRIME: sin
+  /// traducción, enseñarlo es ruido con forma de dato.
+  unknownToken,
+}
+
+/// Snake_case de máquina: minúsculas, dígitos y guiones bajos, sin espacios.
+/// Un motivo humano casi siempre lleva espacios o mayúsculas.
+final _machineToken = RegExp(r'^[a-z0-9]+(?:_[a-z0-9]+)*$');
+
+CheckoutAbandonKind classifyAbandonReason(String? raw) {
+  final value = raw?.trim() ?? '';
+  if (value.isEmpty) return CheckoutAbandonKind.unknownToken;
+  if (value == 'agent_paused') return CheckoutAbandonKind.agentPaused;
+  if (value.startsWith('auto_flagged_stalled_at_')) {
+    return CheckoutAbandonKind.autoStalled;
+  }
+  if (_machineToken.hasMatch(value)) return CheckoutAbandonKind.unknownToken;
+  return CheckoutAbandonKind.freeText;
+}

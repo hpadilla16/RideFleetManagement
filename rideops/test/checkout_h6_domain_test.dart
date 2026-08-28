@@ -7,6 +7,7 @@ import 'package:rideops/features/checkout/domain/checkout_attribution.dart';
 import 'package:rideops/features/checkout/domain/checkout_changes.dart';
 import 'package:rideops/features/checkout/domain/checkout_event_log.dart';
 import 'package:rideops/features/checkout/domain/checkout_presence.dart';
+import 'package:rideops/features/checkout/domain/checkout_step_catalog.dart';
 import 'package:rideops/features/checkout/presentation/checkout_labels.dart';
 
 import 'helpers/checkout_test_helpers.dart';
@@ -187,7 +188,7 @@ void main() {
   });
 
   group('stampIsCurrentStepBusiness — qué sello merece banner (21C)', () {
-    test('el sello que ESTE paso está esperando NO es noticia ajena', () {
+    test('el sello que ESTE paso PRODUCE no es noticia ajena', () {
       // TC_PENDING existe para que caiga tcCompletedAt: anunciárselo al agente
       // como "otra superficie lo registró" sería contarle su propio trabajo.
       expect(
@@ -204,17 +205,57 @@ void main() {
         ),
         isTrue,
       );
+      // Los DOS pasos del tramo de inspección producen su sello.
+      for (final step in [
+        CheckoutStep.inspectionHandoff,
+        CheckoutStep.inspectionInProgress,
+      ]) {
+        expect(
+          stampIsCurrentStepBusiness(
+            kind: CheckoutStampKind.inspection,
+            currentStep: step,
+          ),
+          isTrue,
+          reason: '$step',
+        );
+      }
     });
 
-    test('el sello de un tramo YA PASADO sí lo es — el frame 21C exacto', () {
-      // El mostrador registra el pago mientras el agente teclea el odómetro.
+    test('el sello que cae en CUALQUIER otro paso sí lo es — y estos casos son '
+        'alcanzables, que es lo que el ancla vieja rompía (INN MC-1)', () {
+      // El mostrador cobra mientras el agente sigue en términos: el 21C real.
       expect(
         stampIsCurrentStepBusiness(
           kind: CheckoutStampKind.payment,
-          currentStep: CheckoutStep.inspectionInProgress,
+          currentStep: CheckoutStep.tcPending,
         ),
         isFalse,
       );
+      // La firma que el cliente deja en el kiosco con el wizard ya en
+      // FINALIZING (ese paso no tiene guarda de entrada, así que el estado
+      // "FINALIZING sin customerSignedAt" lo produce el backend de verdad).
+      expect(
+        stampIsCurrentStepBusiness(
+          kind: CheckoutStampKind.signature,
+          currentStep: CheckoutStep.finalizing,
+        ),
+        isFalse,
+      );
+    });
+
+    test('REGRESIÓN INN MC-1: ningún sello puede quedar suprimido en TODA la '
+        'cadena — eso volvería a hacer el banner inalcanzable', () {
+      for (final kind in CheckoutStampKind.values) {
+        final reachable = [
+          for (final info in kCheckoutLinearSteps)
+            if (!stampIsCurrentStepBusiness(
+              kind: kind,
+              currentStep: info.step,
+            ))
+              info.step,
+        ];
+        expect(reachable, isNotEmpty, reason: '$kind no se avisa en ningún paso');
+      }
     });
 
     test('con un paso fuera del catálogo se calla: sin certeza no se le mete '
@@ -310,6 +351,35 @@ void main() {
         isNull,
         reason: 'log ilegible ⇒ "completado" a secas, jamás un culpable',
       );
+    });
+  });
+
+  group('classifyAbandonReason — un token de máquina no se le enseña a nadie',
+      () {
+    test('los DOS productores conocidos se reconocen', () {
+      // La app y el default del servicio (service:1298).
+      expect(classifyAbandonReason('agent_paused'),
+          CheckoutAbandonKind.agentPaused);
+      // El barrido nocturno (scheduler:71) — NADIE la pausó.
+      expect(
+        classifyAbandonReason('auto_flagged_stalled_at_tc_pending'),
+        CheckoutAbandonKind.autoStalled,
+      );
+    });
+
+    test('un motivo humano se distingue de un token, y se conserva', () {
+      expect(classifyAbandonReason('el cliente fue por su tarjeta'),
+          CheckoutAbandonKind.freeText);
+      expect(classifyAbandonReason('La unidad no arranca'),
+          CheckoutAbandonKind.freeText);
+    });
+
+    test('un token que esta versión no conoce se SUPRIME: sin traducción es '
+        'ruido con forma de dato', () {
+      expect(classifyAbandonReason('kiosk_timeout_v2'),
+          CheckoutAbandonKind.unknownToken);
+      expect(classifyAbandonReason(''), CheckoutAbandonKind.unknownToken);
+      expect(classifyAbandonReason(null), CheckoutAbandonKind.unknownToken);
     });
   });
 

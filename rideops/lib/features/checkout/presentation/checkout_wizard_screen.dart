@@ -265,6 +265,11 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
       return CheckoutTerminalView(
         session: session,
         myUserId: ref.watch(sessionControllerProvider).user?.id,
+        // 21D: la pantalla tiene que responder "¿perdí mi trabajo?". El log de
+        // abajo dice quién le hizo qué a la SESIÓN; esto dice si lo del
+        // teléfono llegó — y en el escenario del marco (el kiosco cierra
+        // mientras el agente captura) son cosas distintas.
+        pendingUploads: _pendingUploads(ref, state),
         onExit: _leave,
         // Solo cuando se LLEGÓ desde el resumen: en una sesión que ya estaba
         // cerrada al entrar no hay resumen al que volver.
@@ -325,6 +330,7 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
         ),
         if (chrome.compact) InspectionSubStepBar(step: chrome.subStep!),
         Expanded(child: _stepBody(state, session, age)),
+        ?_anchoredNotice(state),
       ],
     );
   }
@@ -347,9 +353,16 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
           OfflineBanner(age: age, onRetry: _controller.refresh),
           const SizedBox(height: 10),
         ],
-        if (state.advance != null) ...[
+        // El avance ajeno por MOVIMIENTO de paso va en el scroll: el paso ya
+        // cambió debajo del agente, así que el cuerpo se reconstruyó de todas
+        // formas y el banner encabeza lo nuevo.
+        //
+        // El de SELLO (21C) NO: ese llega con el paso intacto y, muchas veces,
+        // con el agente tecleando. Va anclado al pie — ver [_anchoredNotice].
+        if (state.advance case final advance?
+            when advance.kind != ForeignAdvanceKind.stampLanded) ...[
           ForeignAdvanceBanner(
-            notice: state.advance!,
+            notice: advance,
             // M2-H6: "Ver qué cambió" por fin tiene destino propio. Hasta hoy
             // abría la lista de pasos, que responde OTRA pregunta.
             onSeeChanged: _openChangedSheet,
@@ -361,6 +374,44 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
           const SizedBox(height: 10),
         ],
       ];
+
+  /// 21C anclado al pie. **Fuera del scroll del paso, y por eso existe.**
+  ///
+  /// El caso que hace daño en el patio es concreto: el agente teclea el
+  /// odómetro con el teclado abierto, y un aviso inyectado a la CABEZA del
+  /// scroll queda fuera de vista *y* empuja hacia abajo el campo que está
+  /// escribiendo. Aquí el banner es estrictamente aditivo: no toca el árbol
+  /// del paso, no reordena nada y no se lo puede llevar el scroll.
+  ///
+  /// Va DEBAJO del dock del paso, no encima: la lámina lo dibuja flotando
+  /// sobre el contenido en un frame que no tiene dock, y superponerlo donde sí
+  /// lo hay taparía el CTA primario — que es la otra forma de romperle el paso
+  /// al agente. Pegado al pie cumple lo que el frame pide (siempre visible,
+  /// alcanzable con el pulgar) sin cubrir nada.
+  Widget? _anchoredNotice(CheckoutWizardState state) {
+    final advance = state.advance;
+    if (advance == null || advance.kind != ForeignAdvanceKind.stampLanded) {
+      return null;
+    }
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      decoration: const BoxDecoration(
+        color: RideTokens.n0,
+        border: Border(top: BorderSide(color: RideTokens.n200)),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x2E17122B),
+            blurRadius: 16,
+            offset: Offset(0, -6),
+          ),
+        ],
+      ),
+      child: ForeignAdvanceBanner(
+        notice: advance,
+        onSeeChanged: _openChangedSheet,
+      ),
+    );
+  }
 
   /// La matriz 409 con sus acciones, cada una pasada SOLO cuando puede tener
   /// éxito (la última columna de la matriz del mockup, hecha código).

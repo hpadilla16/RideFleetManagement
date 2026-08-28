@@ -4224,6 +4224,30 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Continuar no le quita nada a nadie: la sesión es una sola y el registro guarda quién hizo qué.'**
   String get coJoinNoStealWhy;
+
+  /// El barrido nocturno escribe `auto_flagged_stalled_at_<paso>` (scheduler:71). Decir «otro agente la pausó» sería inventar un culpable de algo que hizo un cron.
+  ///
+  /// In es, this message translates to:
+  /// **'El sistema la marcó: lleva más de 4 h detenida. No la pausó nadie.'**
+  String get coJoinPausedAutoStalled;
+
+  /// No description provided for @coJoinPausedBySystem.
+  ///
+  /// In es, this message translates to:
+  /// **'El sistema marcó esta salida hace {age}.'**
+  String coJoinPausedBySystem(String age);
+
+  /// «Qué se conserva» es la tercera pregunta de cada cara de la matriz 409 y 22C era la única que se había quedado sin responderla.
+  ///
+  /// In es, this message translates to:
+  /// **'Se conserva: el cliente ya verificado y el paso en el que vas.'**
+  String get coConflictVehicleKept;
+
+  /// Línea de causa que se muestra SIEMPRE, también con la Bandeja en cero: sin ella el agente que acaba de terminar la inspección lee «falta la inspección completada» y no tiene nada que explique la brecha.
+  ///
+  /// In es, this message translates to:
+  /// **'Este paso lo cierra el servidor cuando reciba el sello, no esta pantalla. Nada se pierde: puedes pausar y volver.'**
+  String get coGuardWhyServer;
 }
 
 class _AppLocalizationsDelegate

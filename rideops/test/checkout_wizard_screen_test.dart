@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rideops/core/api/api_providers.dart';
+import 'package:rideops/core/db/outbox_providers.dart';
 import 'package:rideops/core/api/dto/checkout_session.dart';
 import 'package:rideops/core/api/enums.dart';
 import 'package:rideops/core/l10n/app_localizations.dart';
@@ -80,6 +81,11 @@ void main() {
       ProviderScope(
         overrides: [
           checkoutApiProvider.overrideWithValue(api),
+          // M2-H6: la pantalla terminal lee la BANDEJA para poder responder
+          // "¿perdí mi trabajo?" (21D). Sin este override sale el stream real
+          // de drift y deja un timer vivo al desmontar — el mismo cableado que
+          // checkout_inspection_test ya hacía.
+          outboxRowsProvider.overrideWith((ref) => const Stream.empty()),
           reservationsApiProvider.overrideWithValue(FakeReservationsApi()),
           eventLoggerProvider.overrideWithValue(CapturingEventLogger()),
           networkStatusProvider
@@ -168,12 +174,64 @@ void main() {
     expect(find.text('María González'), findsOneWidget);
   });
 
-  testWidgets('8A — sin el campo presence (backend sin P1) NO se pinta chip',
-      (tester) async {
+  testWidgets('M2-H6 — sin nadie visible el chip SÍ se pinta, y dice "nadie '
+      'visible": es la única puerta al reverso del latido', (tester) async {
     final f = fakes();
     f.api.current = sessionAt(CheckoutStep.confirming); // presence ausente
     await pumpWizard(tester, api: f.api, network: f.network);
-    expect(find.byType(PresenceChip), findsNothing);
+
+    // Cambio deliberado respecto de H1 (review de GD): entonces el chip era
+    // decorativo y esconderlo sin compañía era correcto. Desde H6 el chip es
+    // la ÚNICA entrada a "Quién está aquí", y ahí vive el aviso de que el
+    // agente empezó a aparecer con su nombre en las otras superficies. Con el
+    // chip condicionado a que hubiera compañía, el agente que trabaja solo —el
+    // caso normal en el patio— no se enteraba nunca.
+    expect(find.byType(PresenceChip), findsOneWidget);
+    expect(find.text('Nobody visible right now'), findsOneWidget);
+    // Y NUNCA "estás solo": lo que se afirma es que no hay nadie VISIBLE.
+    expect(find.textContaining('alone'), findsNothing);
+    // Sigue siendo un objetivo real de 48 px.
+    final target = find.descendant(
+      of: find.byType(PresenceChip),
+      matching: find.byType(InkWell),
+    );
+    expect(tester.getSize(target.first).height, greaterThanOrEqualTo(48));
+  });
+
+  testWidgets('M2-H6 · 21C — el aviso de SELLO va anclado al pie, FUERA del '
+      'scroll del paso: con el teclado abierto no puede empujar el campo que '
+      'el agente está tecleando', (tester) async {
+    final f = fakes();
+    f.api.current = sessionAt(CheckoutStep.tcPending);
+    await pumpWizard(tester, api: f.api, network: f.network);
+    await tester.pumpAndSettle();
+    expect(find.byType(ForeignAdvanceBanner), findsNothing);
+
+    // El mostrador cobra mientras el agente sigue en términos: cae el sello y
+    // el paso NO se mueve.
+    f.api.current = sessionAt(CheckoutStep.tcPending, payment: DateTime.now());
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    final banner = find.byType(ForeignAdvanceBanner);
+    expect(banner, findsOneWidget);
+    expect(
+      find.textContaining('Keep capturing: this step did not change'),
+      findsOneWidget,
+    );
+
+    // LA aserción de la review: el banner NO cuelga de ningún Scrollable. Si
+    // lo hiciera, con el teclado abierto quedaría fuera de vista y además
+    // desplazaría hacia abajo el campo en el que se está escribiendo.
+    expect(
+      find.ancestor(of: banner, matching: find.byType(Scrollable)),
+      findsNothing,
+    );
+
+    // Y está anclado al PIE: por debajo del cuerpo del paso.
+    final bannerTop = tester.getTopLeft(banner).dy;
+    final screenHeight = tester.getSize(find.byType(Scaffold).first).height;
+    expect(bannerTop, greaterThan(screenHeight * 0.5));
   });
 
   testWidgets('un currentStep desconocido no rompe la pantalla: nodo genérico '

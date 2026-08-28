@@ -291,6 +291,10 @@ class ConflictBanner extends StatelessWidget {
       // CTA imposible se NOMBRA el callejón y dónde vive la puerta verdadera.
       CheckoutConflictKind.vehicleConflict when !conflict.swapAvailable =>
         l10n.coConflictSwapLockedBody,
+      // Y antes de la inspección, la tercera pregunta de cada cara de la
+      // matriz: QUÉ SE CONSERVA. Era la única de las cinco que se había
+      // quedado sin responderla (review de GD).
+      CheckoutConflictKind.vehicleConflict => l10n.coConflictVehicleKept,
       _ => conflict.guard == null ? null : guardLabel(l10n, conflict.guard!),
     };
     // `tooEarly` es ámbar: nadie hizo nada mal y nada está bloqueado — solo
@@ -390,10 +394,18 @@ class ConflictBanner extends StatelessWidget {
         ];
 
       case CheckoutConflictKind.entryGuard:
-        // Solo si hay algo REAL que drenar. Un "Ver la Bandeja (0)" mandaría
-        // al agente a una pantalla vacía a resolver un bloqueo que no está
-        // ahí — otra puerta falsa, más educada.
-        if (onOpenOutbox == null || pendingUploads <= 0) return const [];
+        // El ENCUADRE va SIEMPRE (review de GD): con la Bandeja en cero, el
+        // agente que acaba de terminar la inspección leía "falta la inspección
+        // completada" y no tenía nada que explicara la brecha entre lo que ve
+        // en su teléfono y lo que el servidor tiene. Esa línea es la respuesta,
+        // y no depende de que haya algo que drenar.
+        //
+        // El CTA, en cambio, solo si hay algo REAL que drenar: un "Ver la
+        // Bandeja (0)" mandaría al agente a una pantalla vacía a resolver un
+        // bloqueo que no está ahí — otra puerta falsa, más educada.
+        if (onOpenOutbox == null || pendingUploads <= 0) {
+          return [_Why(text: l10n.coGuardWhyServer)];
+        }
         return [
           BannerAction(
             label: l10n.coGuardOutboxCta(pendingUploads),
@@ -458,6 +470,48 @@ class _Why extends StatelessWidget {
           fontWeight: FontWeight.w700,
           color: RideTokens.n700,
           height: 1.35,
+        ),
+      ),
+    );
+  }
+}
+
+/// "¿Perdí mi trabajo?" — la única pregunta que el agente trae cuando algo se
+/// movió por debajo, respondida primero y con color.
+///
+/// Vive aquí, y no dentro de la hoja de cambios, porque la pregunta se hace en
+/// DOS sitios y la respuesta tiene que ser la misma frase: al abrir "Ver qué
+/// cambió" (21B) y al encontrarse la entrega ya cerrada por otra superficie
+/// (21D). La segunda es la que más duele — el kiosco cierra mientras el agente
+/// captura — y hasta la review de GD esa pantalla se quedaba callada.
+///
+/// **Verde solo cuando se puede prometer.** La promesa se hace sobre lo que el
+/// SERVIDOR tiene; si queda evidencia en el teléfono se pone ámbar y se nombra
+/// cuánta, nunca se deja verde por comodidad.
+class WorkSafetyBanner extends StatelessWidget {
+  const WorkSafetyBanner({super.key, required this.pendingUploads});
+
+  final int pendingUploads;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final atRisk = pendingUploads > 0;
+    return WizardBanner(
+      icon: atRisk
+          ? Icons.warning_amber_rounded
+          : Icons.check_circle_outline_rounded,
+      iconColor: atRisk ? RideTokens.warnTx : RideTokens.okTx,
+      background: atRisk ? RideTokens.warnBg : RideTokens.okBg,
+      border: atRisk ? RideTokens.warnBd : RideTokens.okBd,
+      child: Text(
+        atRisk
+            ? l10n.coChangedSomethingLost(pendingUploads)
+            : l10n.coChangedNothingLost,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w800,
+          color: atRisk ? RideTokens.warnTx : RideTokens.okTx,
         ),
       ),
     );

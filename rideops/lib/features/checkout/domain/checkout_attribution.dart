@@ -5,15 +5,15 @@
 /// con tres agentes. Lo que el mockup pide es «lo completó Diego Torres».
 ///
 /// **Este archivo es el ÚNICO punto de consumo de `presence[].actorUserId`.**
-/// El serializer de P1 mapea hoy solo `{surface, displayName, lastSeenAt}`
-/// (checkout-presence.service.js:139-145): el id NO viaja todavía. Se está
-/// añadiendo en paralelo (`feat/presence-actor-id`, una línea en el map de
-/// `activePresence()`), y esta función está escrita CONTRA ese contrato:
+/// `activePresence()` (checkout-presence.service.js:184) ya lo emite: llega
+/// como `actorUserId` junto a `{surface, displayName, lastSeenAt}`, y viene
+/// **null a propósito** para las superficies que laten sin usuario (el kiosco,
+/// el teléfono del cliente). Ese null no es un hueco: es el dato.
 ///
-///  - mientras el campo llegue null ⇒ [resolveActorName] devuelve null y la
-///    UI cae al copy genérico de H1 («otro agente»), que es exactamente lo que
-///    hay hoy: **degradación a lo ya construido, no a un hueco**;
-///  - en cuanto el backend lo emita, los nombres aparecen sin tocar UI.
+/// El camino degradado sigue existiendo y es el RESPALDO, no el estado normal:
+/// con un backend viejo —o con un actor que ya no está presente— el id no se
+/// resuelve, [resolveActorName] devuelve null y la UI cae al copy genérico de
+/// H1 («otro agente»). **Se degrada a lo ya construido, jamás a un hueco.**
 ///
 /// **Lo que a propósito NO se hace: adivinar por nombre.** La tentación es
 /// comparar `displayName` con el `fullName` propio, o mapear "el único agente
