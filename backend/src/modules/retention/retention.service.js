@@ -21,7 +21,9 @@
  *
  * TWO-CLOCK MODEL (product-owner decision, all periods env-configurable):
  *   - Identity clock (RETENTION_IDENTITY_YEARS, default 4) — the claims window.
- *     Counted from the rental close: RentalAgreement.returnedAt ?? closedAt;
+ *     Counted from the rental close: RentalAgreement.returnedAt ?? closedAt,
+ *     and only once closedAt exists at all (an open agreement is on neither
+ *     clock, however long ago the car came back);
  *     LoanerAgreement.closedAt. At this clock the IDENTITY snapshot is erased
  *     but the accounting facts are KEPT.
  *   - Accounting clock (RETENTION_ACCOUNTING_YEARS, default 10) — PR Hacienda.
@@ -168,6 +170,16 @@ async function agreementIdentityCandidates(prisma, model, cutoff) {
   const where = model === 'rentalAgreement'
     ? {
         piiPurgedAt: null,
+        // The clock starts at THE RENTAL CLOSE, so an agreement that was never
+        // closed is not on it. `closedAt: not null` is what says so. Until
+        // 2026-08-26 the shape said it implicitly: returnedAt was written only
+        // on the paid-in-full branch, which stamps closedAt in the same write,
+        // so returnedAt-set-but-never-closed could not exist. Check-in close
+        // now stamps returnedAt on the with-balance branch too (where the
+        // agreement stays OPEN until the money resolves) — without this
+        // guard that silently made every 4-year-old UNSETTLED rental a purge
+        // candidate, destroying the renter identity behind a debt still owed.
+        closedAt: { not: null },
         OR: [
           { returnedAt: { lt: cutoff } },
           { returnedAt: null, closedAt: { lt: cutoff } },
@@ -187,7 +199,9 @@ async function agreementIdentityCandidates(prisma, model, cutoff) {
 
 async function agreementAccountingCandidates(prisma, model, cutoff) {
   const base = model === 'rentalAgreement'
-    ? { OR: [{ returnedAt: { lt: cutoff } }, { returnedAt: null, closedAt: { lt: cutoff } }] }
+    // closedAt: not null — same guard as the identity clock above: an
+    // agreement still open has not started either clock.
+    ? { closedAt: { not: null }, OR: [{ returnedAt: { lt: cutoff } }, { returnedAt: null, closedAt: { lt: cutoff } }] }
     : { closedAt: { lt: cutoff } };
   // Skip rows already anonymised (idempotency): agreementNumber not sentinel-prefixed.
   const where = { AND: [base, { agreementNumber: { not: { startsWith: ACCOUNTING_REDACT_PREFIX } } }] };
