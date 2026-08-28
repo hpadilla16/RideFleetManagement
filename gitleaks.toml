@@ -48,6 +48,13 @@ regexes = [
   '''test-secret-for-mileage-override-tests-0123456789''',
   '''test-secret-for-kiosk-staff-assist-0123456789''',
   '''test-secret-key''',
+  # Added 2026-08-28, after secret-scan went red on main. Each was verified
+  # before listing, per the rule above: every one appears EXACTLY ONCE in the
+  # repo, on a `process.env.JWT_SECRET =` line inside a test file, and in no
+  # .env, ops script or workflow.
+  '''test-secret-for-logout-revocation-tests-0123456789''',
+  '''test-secret-for-two-factor-tests-0123456789''',
+  '''test-secret-for-tenant-suspension-gate-0123456789''',
 
   # ── placeholder / rejected-default secrets (never accepted at runtime) ──────
   '''change-this-secret''',
