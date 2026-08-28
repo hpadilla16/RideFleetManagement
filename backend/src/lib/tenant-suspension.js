@@ -176,10 +176,60 @@ export const SUSPENSION_ALLOWLIST = Object.freeze([
     'The renter standing at the counter. Not the customer list.'),
   rule('GET', '/api/locations',
     'The return screen needs the location list to render at all. Read-only reference data.'),
+  rule('GET', '/api/locations/selectable',
+    'AppShell (components/AppShell.jsx:207) calls this on EVERY page to build the location switcher. '
+    + 'Not a close-flow read — the application chrome does not render without it, so blocking it breaks '
+    + 'the hold screen and the billing page along with everything else.'),
+
+  // Added 2026-08-28 after a log-mode run against a suspended Demo tenant with
+  // seven cars still out. The first four below are called by the check-in
+  // wizard itself; they were missed because the original pass reasoned from the
+  // route table rather than from the close flow's actual calls. Under `enforce`
+  // their absence would have broken the exact workflow this group exists for.
+  rule('GET', '/api/settings/customer-inspection',
+    'The close flow branches on whether customer-led inspection is enabled. `/api/settings` is otherwise '
+    + 'blocked and stays blocked; this is one read, not the module.'),
+  rule('GET', '/api/settings/fee-rates',
+    'Fuel, mileage, late and extra-day charges are computed from these AT return. Without it the wizard '
+    + 'cannot price the close, and a rental closed at the wrong price is worse than one not closed.'),
+  rule('GET', '/api/customer-inspections',
+    'The renter\'s own return inspection, fetched by reservationId. The `:id/*` rule below covers acting '
+    + 'on one; this is finding it.'),
+  rule('GET', '/api/tolls/alerts',
+    'Tolls surface at return and are settled into the final bill.'),
+  rule('GET', '/api/tolls/reservations/:id',
+    'The tolls belonging to the rental being closed.'),
+  rule('GET', '/api/long-term/reservations/:id/plan',
+    'A monthly rental being closed reads its own plan.'),
+  rule('GET', '/api/incident-reports/reservations/:id',
+    'An incident recorded during the rental is part of what the close settles.'),
+
+  // The shuttle: keeping the customer's screen lit is not enough on its own.
+  //
+  // The tracker the renter watches (/api/public/shuttle) and the driver's app
+  // (/api/public/driver) carry no requireAuth, so this gate never reaches them
+  // — that carve-out already works. But the STAFF view of who is waiting sits
+  // behind it, and a request nobody can see is a request nobody dispatches. The
+  // renter would watch a live map of a van that is never coming, which is a
+  // worse outcome than an honest error.
+  rule('GET', '/api/shuttle-requests',
+    'Who is waiting for a pickup right now.'),
+  rule('POST', '/api/shuttle-requests/:id/*',
+    'Acting on a request that already exists: viewing, assigning, dispatching. Creating a NEW request '
+    + '(POST /api/shuttle-requests, no :id) is deliberately NOT here — that is new business, and it is '
+    + 'the same line this group draws everywhere else.'),
+  rule('GET', '/api/shuttle-monitor/*',
+    'The monitor the dispatcher works from, including driver shifts.'),
 
   // WRITES — the return itself.
   rule('POST', '/api/rental-agreements/:id/inspection',
     'The return inspection. Refusing it means the damage found at return is never recorded.'),
+  rule('POST', '/api/rental-agreements/:id/signature',
+    'THE RENTER\'S SIGNATURE ON THE CLOSE. Missed in the first pass and the most damaging omission in it: '
+    + 'without this the wizard captures the return but cannot capture the customer signing for it, which '
+    + 'is the evidence the closed agreement rests on.'),
+  rule('POST', '/api/rental-agreements/:id/email-agreement',
+    'Sending the executed agreement to the renter who just signed it.'),
   rule('POST', '/api/rental-agreements/:id/checkin-close',
     'THE RETURN. This is the single most important write in this group.'),
   rule('POST', '/api/rental-agreements/:id/close',
@@ -205,6 +255,15 @@ export const SUSPENSION_ALLOWLIST = Object.freeze([
   rule('POST', '/api/customer-inspections/:id/*',
     'Reviewing the customer-led return inspection the renter just submitted from their phone.'),
 
+  // DELIBERATELY ABSENT AND VERIFIED SO — `PATCH /api/reservations/:id`.
+  // The check-in wizard calls it, so it appears in a log-mode run and looks
+  // like a gap. It is not. It sends ONE thing: a `[RES_CHECKIN …]` line
+  // appended to `notes` (checkin-wizard/page.js:261), already wrapped in a
+  // try/catch its own comment calls "non-fatal". Blocking it costs a metrics
+  // row in the ops view; allowing it would open a general-purpose PATCH that
+  // can rewrite dates, vehicle and pricing on any reservation. The narrower
+  // `POST /api/reservations/:id/notes` above already covers writing a note.
+  //
   // DELIBERATELY ABSENT, and this is the line the rule above draws:
   //   POST /api/reservations                      — creating a new booking
   //   POST /api/reservations/:id/start-rental     — putting another car out
