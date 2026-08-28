@@ -82,6 +82,11 @@ export const PHOTOS_BUCKET =
   process.env.SUPABASE_STORAGE_PHOTOS_BUCKET || 'inspection-photos';
 export const INVENTORY_PHOTOS_BUCKET =
   process.env.SUPABASE_STORAGE_INVENTORY_BUCKET || 'inventory-photos';
+// Citation notices AND citation attachments share this bucket — kept in sync
+// with citation-attachments.service.js (CITATION_ATTACHMENT_BUCKET) and
+// citations.service.js (CITATION_DOC_BUCKET).
+export const CITATION_DOCS_BUCKET =
+  process.env.SUPABASE_STORAGE_CITATION_DOCS_BUCKET || 'citation-documents';
 
 // Sentinel written into required, non-null identity columns we cannot null.
 export const REDACTION = '[erased]';
@@ -616,6 +621,27 @@ export const CUSTOMER_PII_MAP = Object.freeze({
       null: ['ocrJson'],
       storage: [{ column: 'bucketPath', defaultBucket: INVENTORY_PHOTOS_BUCKET, requiredRedact: true }],
     },
+  },
+  // Supporting documents filed AGAINST a citation (2026-08-28) — agency
+  // correspondence, proof of payment, dispute letters, the renter's signed
+  // acknowledgement. NOT CitationDocument above: that one is the OCR intake
+  // queue and points the other way (document → becomes → citation).
+  //
+  // HARD_DELETE, not ANONYMISE. There is no accounting residual worth keeping
+  // here: unlike Citation itself — a regulatory record whose facts we retain —
+  // an attachment is wholly a document about a person. A dispute letter naming
+  // the renter, quoting their licence and reciting their address is not made
+  // safe by nulling a column, because the personal data is in the FILE, not
+  // the row. So the row goes and the stored object goes with it.
+  //
+  // The 4-YEAR IDENTITY clock, never the 10-year accounting one — see
+  // retention.service.js (citationAttachment candidates).
+  citationAttachment: {
+    model: 'citationAttachment',
+    label: 'CitationAttachment',
+    retention: 'HARD_DELETE',
+    match: { kind: 'citationRelation', field: 'citationId' },
+    storage: [{ column: 'storagePath', defaultBucket: CITATION_DOCS_BUCKET, requiredRedact: true }],
   },
   citation: {
     model: 'citation',
