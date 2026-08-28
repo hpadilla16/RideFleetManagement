@@ -230,7 +230,65 @@ test('every allowlist entry carries a justification', () => {
 test('the allowlist stays small enough for a human to audit in one sitting', () => {
   // Not a style rule. A default-deny list nobody reads is a deny-list with
   // extra steps; if this trips, the growth is the thing to look at.
-  assert.ok(SUSPENSION_ALLOWLIST.length <= 40, `allowlist has grown to ${SUSPENSION_ALLOWLIST.length} entries`);
+  //
+  // Raised 40 → 50 on 2026-08-28, and the growth WAS looked at. A log-mode run
+  // against a suspended tenant with cars still out showed the first pass had
+  // reasoned from the route table instead of from the close flow's real calls:
+  // the check-in wizard's own reads, and the signature it posts, were missing.
+  // Every entry added is a single narrow path. The available consolidations
+  // were rejected deliberately — `/api/settings/*` or `/api/tolls/*` would each
+  // open a whole module to buy back one line here.
+  assert.ok(SUSPENSION_ALLOWLIST.length <= 50, `allowlist has grown to ${SUSPENSION_ALLOWLIST.length} entries`);
+});
+
+test('the close flow this group exists for is allowed end to end', () => {
+  // Every call the check-in wizard actually makes, read off its source rather
+  // than inferred from the route table. This is the test that would have
+  // caught the original gap.
+  for (const [method, path] of [
+    ['GET', '/api/reservations/res1'],
+    ['GET', '/api/rental-agreements/ra1'],
+    ['GET', '/api/rental-agreements/ra1/inspection-report'],
+    ['GET', '/api/settings/customer-inspection'],
+    ['GET', '/api/settings/fee-rates'],
+    ['GET', '/api/customer-inspections'],
+    ['POST', '/api/rental-agreements/ra1/inspection'],
+    ['POST', '/api/rental-agreements/ra1/signature'],
+    ['POST', '/api/rental-agreements/ra1/checkin-close'],
+    ['POST', '/api/rental-agreements/ra1/email-agreement'],
+  ]) {
+    assert.equal(isAllowedWhileSuspended(method, path), true, `the close needs ${method} ${path}`);
+  }
+});
+
+test('opening one setting does not open the settings module', () => {
+  assert.equal(isAllowedWhileSuspended('GET', '/api/settings/fee-rates'), true);
+  assert.equal(isAllowedWhileSuspended('GET', '/api/settings/general'), false);
+  assert.equal(isAllowedWhileSuspended('POST', '/api/settings/fee-rates'), false);
+});
+
+test('a waiting shuttle passenger can be dispatched, but no new request is taken', () => {
+  // Keeping the renter's tracker lit is worthless if nobody on staff can see
+  // that they are standing there.
+  assert.equal(isAllowedWhileSuspended('GET', '/api/shuttle-requests'), true);
+  assert.equal(isAllowedWhileSuspended('POST', '/api/shuttle-requests/req1/assign'), true);
+  assert.equal(isAllowedWhileSuspended('GET', '/api/shuttle-monitor/enabled'), true);
+  // …and the line this group draws everywhere else still holds.
+  assert.equal(isAllowedWhileSuspended('POST', '/api/shuttle-requests'), false);
+});
+
+test('the general-purpose reservation PATCH stays blocked', () => {
+  // It shows up in a log-mode run because the wizard appends a notes line with
+  // it, but that write is non-fatal and `POST /:id/notes` already covers the
+  // need. Allowing PATCH would open date, vehicle and price rewrites.
+  assert.equal(isAllowedWhileSuspended('PATCH', '/api/reservations/res1'), false);
+  assert.equal(isAllowedWhileSuspended('POST', '/api/reservations/res1/notes'), true);
+});
+
+test('the app chrome renders — the location switcher is not blocked', () => {
+  // AppShell calls this on every page; without it the hold screen and the
+  // billing page fail to render along with everything else.
+  assert.equal(isAllowedWhileSuspended('GET', '/api/locations/selectable'), true);
 });
 
 test('the blocked response carries the distinct catchable code', () => {
