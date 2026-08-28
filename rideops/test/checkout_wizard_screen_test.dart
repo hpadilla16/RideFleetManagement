@@ -171,9 +171,19 @@ void main() {
     expect(find.byType(PresenceChip), findsOneWidget);
     expect(find.text('María G. · kiosk'), findsOneWidget);
     // La línea completa no se pierde: viaja entera al lector de pantalla.
+    //
+    // Se afirma hasta el final —incluida la EDAD—, no hasta `· kiosk`: el
+    // componente de antigüedad no lo fijaba ninguna prueba, y es justo el que
+    // distingue la línea completa de la forma corta cuando el punto está
+    // apagado. El `\d+` evita romperse en un borde de segundo.
     expect(
       tester.getSemantics(find.byType(PresenceChip)).label,
-      contains('María G. is in this session · kiosk'),
+      matches(
+        RegExp(
+          r'^María G\. is in this session · kiosk · \d+ s ago'
+          r': see who is in this session$',
+        ),
+      ),
     );
     // Header completo (8A): la fila del cliente del display-data.
     expect(find.text('María González'), findsOneWidget);
@@ -203,13 +213,15 @@ void main() {
     expect(tester.getSize(target.first).height, greaterThanOrEqualTo(48));
   });
 
-  testWidgets('M2-H6 · 21C — el aviso de SELLO va anclado al pie, FUERA del '
-      'scroll del paso: con el teclado abierto no puede empujar el campo que '
-      'el agente está tecleando', (tester) async {
+  testWidgets('M2-H6 · 21C-bis — el aviso de SELLO va DENTRO del pie, encima '
+      'del CTA y fuera del scroll', (tester) async {
     final f = fakes();
     f.api.current = sessionAt(CheckoutStep.tcPending);
     await pumpWizard(tester, api: f.api, network: f.network);
     await tester.pumpAndSettle();
+    // Entrar en el paso 2 abre la antesala de enganche; se cruza, porque lo
+    // que se mide aquí es el PIE del paso.
+    await skipJoinGate(tester);
     expect(find.byType(ForeignAdvanceBanner), findsNothing);
 
     // El mostrador cobra mientras el agente sigue en términos: cae el sello y
@@ -225,18 +237,83 @@ void main() {
       findsOneWidget,
     );
 
-    // LA aserción de la review: el banner NO cuelga de ningún Scrollable. Si
-    // lo hiciera, con el teclado abierto quedaría fuera de vista y además
-    // desplazaría hacia abajo el campo en el que se está escribiendo.
+    // (1) FUERA del scroll. Dentro, con el teclado abierto quedaría fuera de
+    // vista y además desplazaría el campo que se está tecleando.
     expect(
       find.ancestor(of: banner, matching: find.byType(Scrollable)),
       findsNothing,
     );
 
-    // Y está anclado al PIE: por debajo del cuerpo del paso.
-    final bannerTop = tester.getTopLeft(banner).dy;
-    final screenHeight = tester.getSize(find.byType(Scaffold).first).height;
-    expect(bannerTop, greaterThan(screenHeight * 0.5));
+    // (2) DENTRO del pie — no debajo, que era un segundo pie, ni flotando
+    // sobre el CTA, que lo taparía. Decisión de Hector sobre el marco 21C-bis.
+    final dock = find.byType(WizardDock);
+    expect(dock, findsOneWidget);
+    expect(find.ancestor(of: banner, matching: dock), findsOneWidget);
+
+    // (3) ENCIMA del CTA, que es todo el argumento: la franja que el pulgar
+    // alcanza sin recolocar la mano tiene que llevar la acción que continúa el
+    // trabajo, no un aviso cuya única acción es opcional.
+    // Se compara contra el `primary` REAL del pie y no contra un tipo
+    // adivinado: cada paso decide cuál es su acción principal (avanzar,
+    // cambiar de unidad, re-emitir el código), y la regla es la misma para
+    // todos.
+    final cta = find.byWidget(tester.widget<WizardDock>(dock).primary);
+    expect(cta, findsOneWidget);
+    expect(
+      tester.getBottomLeft(banner).dy,
+      lessThanOrEqualTo(tester.getTopLeft(cta).dy),
+      reason: 'el aviso no puede quedar por debajo del primario',
+    );
+
+    // (4) Un solo pie: el aviso no trae filete ni sombra propios (GD-SC-2).
+    // Dos filetes horizontales seguidos son un bug visual, no una jerarquía.
+    // (4) Un solo pie: un filete, ninguna sombra hacia arriba (GD-SC-2).
+    //
+    // Se miran los contenedores ENTRE el aviso y el pie —sus envoltorios— y no
+    // solo sus descendientes: la versión anterior de esta aserción buscaba
+    // dentro del banner, y el `Container` full-bleed que hubo que quitar era
+    // su PADRE. Miraba exactamente donde el defecto no estaba.
+    //
+    // La invariante es de conteo: entre el aviso y el borde del pie puede
+    // haber UN filete superior — el del propio dock — y ni uno más. Dos
+    // filetes horizontales seguidos en 24 px de alto son un bug visual, no una
+    // jerarquía.
+    bool topOnlyRule(BoxDecoration d) {
+      final b = d.border;
+      return b is Border &&
+          b.top.width > 0 &&
+          b.left.width == 0 &&
+          b.right.width == 0;
+    }
+
+    final betweenBannerAndDock = <BoxDecoration>[
+      for (final c in tester.widgetList<Container>(
+        find.ancestor(of: banner, matching: find.descendant(
+          of: dock,
+          matching: find.byType(Container),
+          matchRoot: true,
+        )),
+      ))
+        if (c.decoration case final BoxDecoration d) d,
+      for (final c in tester.widgetList<Container>(
+        find.descendant(of: banner, matching: find.byType(Container)),
+      ))
+        if (c.decoration case final BoxDecoration d) d,
+    ];
+
+    expect(
+      betweenBannerAndDock.where(topOnlyRule).length,
+      1,
+      reason: 'un pie, un filete: el del dock y ninguno más',
+    );
+    expect(
+      betweenBannerAndDock.any(
+        (d) => (d.boxShadow ?? const <BoxShadow>[])
+            .any((sh) => sh.offset.dy < 0),
+      ),
+      isFalse,
+      reason: 'la sombra hacia arriba era la tercera señal de "segundo pie"',
+    );
   });
 
   testWidgets('un currentStep desconocido no rompe la pantalla: nodo genérico '

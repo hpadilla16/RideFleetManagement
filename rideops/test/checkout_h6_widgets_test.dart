@@ -669,6 +669,11 @@ void main() {
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
 
+      // La EDAD la calcula el chip contra `clock.now()`, así que la fila se
+      // ancla al reloj REAL y no al `now` fijo del resto del archivo: con el
+      // `now` fijo el chip mediría horas y la parte de edad de la etiqueta no
+      // probaría nada.
+      final realNow = DateTime.now();
       await pump(
         tester,
         SessionHead(
@@ -677,8 +682,14 @@ void main() {
             vehicleLabel: 'U-112',
           ),
           presence: pickPresenceChip(
-            [presence('COUNTER', name: 'Diego Torres')],
-            now,
+            [
+              CheckoutPresenceDto(
+                surface: 'COUNTER',
+                displayName: 'Diego Torres',
+                lastSeenAt: realNow,
+              ),
+            ],
+            realNow,
           ),
           mini: true,
           onPresenceTap: () {},
@@ -689,15 +700,32 @@ void main() {
       // caminarle al lobby).
       expect(find.text('Diego Torres · counter'), findsOneWidget);
       // Y la línea larga —la que se cortaba en 19 caracteres y se comía justo
-      // la superficie— ya no se pinta en el chip.
+      // la superficie— ya no se PINTA en el chip.
       expect(find.textContaining('is in this session'), findsNothing);
 
       // El lector de pantalla SÍ recibe la línea completa: el recorte es de
       // ancho, no de información.
-      final semantics = tester.getSemantics(find.byType(PresenceChip).first);
-      expect(semantics.label, contains('Diego Torres'));
-      expect(semantics.label, contains('counter'));
-      expect(semantics.label, contains('is in this session'));
+      //
+      // Se afirma la línea ENTERA como UNA cadena contigua, y no en trozos.
+      // Tres `contains` sueltos no podían fallar: el nombre y la superficie los
+      // aporta ya la forma corta, y la frase «is in this session» la regala el
+      // SUFIJO del propio envoltorio (`coPresenceChipSemantics` =
+      // '{line}: see who is in this session'), así que las tres pasaban igual
+      // con `full` que con `text` y la garantía era de mentira.
+      //
+      // La forma contigua «... is in this session · counter · N s ago» solo la
+      // puede producir `coPresenceLine`: ni la forma corta ni el sufijo la
+      // contienen. Y el `\d+` cubre la edad —el componente que ninguna de las
+      // dos pruebas fijaba— sin romperse en un borde de segundo.
+      expect(
+        tester.getSemantics(find.byType(PresenceChip).first).label,
+        matches(
+          RegExp(
+            r'^Diego Torres is in this session · counter · \d+ s ago'
+            r': see who is in this session$',
+          ),
+        ),
+      );
     });
 
     testWidgets('GD-MC-1 · con el punto apagado la noticia es la EDAD',

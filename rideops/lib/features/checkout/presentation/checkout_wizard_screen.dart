@@ -36,6 +36,7 @@ import 'widgets/steps_sheet.dart';
 import 'widgets/terminal_view.dart';
 import 'widgets/wizard_banners.dart';
 import 'widgets/wizard_chrome.dart';
+import 'widgets/wizard_dock.dart';
 import 'widgets/wizard_skeleton.dart';
 
 /// Shell del wizard de checkout (M2-H1, mockup 8A–8F). Ruta
@@ -330,7 +331,6 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
         ),
         if (chrome.compact) InspectionSubStepBar(step: chrome.subStep!),
         Expanded(child: _stepBody(state, session, age)),
-        ?_anchoredNotice(state),
       ],
     );
   }
@@ -375,41 +375,40 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
         ],
       ];
 
-  /// 21C anclado al pie. **Fuera del scroll del paso, y por eso existe.**
+  /// 21C — el aviso de avance ajeno por SELLO. **Fuera del scroll del paso, y
+  /// por eso existe.**
   ///
   /// El caso que hace daño en el patio es concreto: el agente teclea el
   /// odómetro con el teclado abierto, y un aviso inyectado a la CABEZA del
   /// scroll queda fuera de vista *y* empuja hacia abajo el campo que está
-  /// escribiendo. Aquí el banner es estrictamente aditivo: no toca el árbol
-  /// del paso, no reordena nada y no se lo puede llevar el scroll.
+  /// escribiendo. El banner es estrictamente aditivo: no toca el árbol del
+  /// paso, no reordena nada y no se lo puede llevar el scroll.
   ///
-  /// Va DEBAJO del dock del paso, no encima: la lámina lo dibuja flotando
-  /// sobre el contenido en un frame que no tiene dock, y superponerlo donde sí
-  /// lo hay taparía el CTA primario — que es la otra forma de romperle el paso
-  /// al agente. Pegado al pie cumple lo que el frame pide (siempre visible,
-  /// alcanzable con el pulgar) sin cubrir nada.
-  Widget? _anchoredNotice(CheckoutWizardState state) {
+  /// **Dónde cae dentro del pie lo resolvió el marco 21C-bis** (decisión de
+  /// Hector). Sube DENTRO del dock, en flujo, encima del primario. Yo lo había
+  /// puesto debajo leyendo el `.anchored` de la lámina como un overlay —y con
+  /// esa lectura era correcto, un overlay taparía el CTA—, pero el `.anchored`
+  /// es absoluto solo porque aquel frame no tiene dock que lo sostenga. La
+  /// tercera opción no era flotar: era estar en flujo.
+  ///
+  /// Lo que se gana, medido: el CTA primario pasa de 141 px del teclado a 14 —
+  /// de fuera del alcance del pulgar a dentro. Y se acaban los DOS pies: la
+  /// franja más alcanzable deja de estar ocupada por información cuya única
+  /// acción es opcional.
+  ///
+  /// Va PELADO a propósito (GD-SC-2): sin filete y sin sombra propios. El dock
+  /// ya pone el suyo y el paso ya pone el inset; el contenedor full-bleed que
+  /// tenía antes —borde a borde, filete arriba, sombra hacia arriba— era
+  /// literalmente el vocabulario visual del dock, y con sol y guantes se leía
+  /// como un segundo pie.
+  Widget? _dockNotice(CheckoutWizardState state) {
     final advance = state.advance;
     if (advance == null || advance.kind != ForeignAdvanceKind.stampLanded) {
       return null;
     }
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-      decoration: const BoxDecoration(
-        color: RideTokens.n0,
-        border: Border(top: BorderSide(color: RideTokens.n200)),
-        boxShadow: [
-          BoxShadow(
-            color: Color(0x2E17122B),
-            blurRadius: 16,
-            offset: Offset(0, -6),
-          ),
-        ],
-      ),
-      child: ForeignAdvanceBanner(
-        notice: advance,
-        onSeeChanged: _openChangedSheet,
-      ),
+    return ForeignAdvanceBanner(
+      notice: advance,
+      onSeeChanged: _openChangedSheet,
     );
   }
 
@@ -469,6 +468,10 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
     Duration age,
   ) {
     final banners = _banners(state, age);
+    // El aviso del pie viaja por herencia hasta el único widget que dibuja el
+    // dock (ver `WizardDockNotice`): así ninguno de los 14 sitios que
+    // construyen un pie tiene que acordarse de reenviarlo.
+    final dockNotice = _dockNotice(state);
 
     // ── M2-H6 · antesala de enganche (23A/B/C) ──────────────────────────
     //
@@ -492,6 +495,19 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
       );
     }
 
+    return WizardDockNotice(
+      notice: dockNotice,
+      child: _stepBodyFor(state, session, age, banners, dockNotice),
+    );
+  }
+
+  Widget _stepBodyFor(
+    CheckoutWizardState state,
+    CheckoutSessionDto session,
+    Duration age,
+    List<Widget> banners,
+    Widget? dockNotice,
+  ) {
     return switch (state.step) {
       CheckoutStep.confirming => ConfirmingStep(
           reservationId: widget.reservationId,
@@ -518,11 +534,25 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
           banners: banners,
           onPause: _openPauseSheet,
         ),
-      _ => ListView(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
+      // Este paso no construye [WizardDock], así que no hay pie que sostenga
+      // el aviso: vuelve al anclaje de la lámina (21C tal cual), pegado al pie
+      // y fuera del scroll. "El caso sin dock no cambia" — DoD del addendum.
+      _ => Column(
           children: [
-            ...banners,
-            _StampsCard(session: session, dataAge: age),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
+                children: [
+                  ...banners,
+                  _StampsCard(session: session, dataAge: age),
+                ],
+              ),
+            ),
+            if (dockNotice != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                child: dockNotice,
+              ),
           ],
         ),
     };
