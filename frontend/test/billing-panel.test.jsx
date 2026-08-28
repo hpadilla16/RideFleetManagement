@@ -248,16 +248,42 @@ describe('billing detail', () => {
     expect(text).toMatch(/30 days/i);
   });
 
-  it('does NOT promise a staff-app lockout that does not exist yet', async () => {
-    wire();
+  // Phase 5 (2026-08-28): the staff lockout now EXISTS, but is gated on
+  // TENANT_SUSPENSION_ENFORCEMENT — a deploy variable the browser cannot see.
+  // So the dialog is no longer allowed to hard-code either answer, and the
+  // original "does not exist yet" assertion becomes these two.
+  it('with enforcement OFF, it still refuses to promise a lockout', async () => {
+    wire(detail({ suspensionEnforcement: 'off' }));
     render(<TenantBillingDetailClient token="t" tenantId="t1" />);
     fireEvent.click(await screen.findByText('Suspend access'));
     const text = document.body.textContent;
-    expect(text).toMatch(/What does NOT stop yet/i);
+    expect(text).toMatch(/What does NOT stop/i);
     expect(text).toMatch(/staff can still sign in/i);
+    expect(text).toMatch(/switched OFF on this deploy/i);
     // The real, present-tense consequences.
     expect(text).toMatch(/public booking website goes dark/i);
     expect(text).toMatch(/integration syncs/i);
+  });
+
+  it('a payload with no enforcement field is read as OFF, not as a lockout', async () => {
+    // An unknown enforcement state must never be described as a lockout.
+    wire(detail());
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Suspend access'));
+    expect(document.body.textContent).toMatch(/staff can still sign in/i);
+  });
+
+  it('with enforcement ON, it says the staff ARE locked out — and what they keep', async () => {
+    wire(detail({ suspensionEnforcement: 'enforce' }));
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Suspend access'));
+    const text = document.body.textContent;
+    expect(text).toMatch(/staff are locked out/i);
+    expect(text).not.toMatch(/staff can still sign in/i);
+    // The three carve-outs, stated to the operator BEFORE they pull the lever.
+    expect(text).toMatch(/billing page/i);
+    expect(text).toMatch(/close out rentals/i);
+    expect(text).toMatch(/shuttle tracker/i);
   });
 
   it('requires a suspension reason before it can be submitted', async () => {

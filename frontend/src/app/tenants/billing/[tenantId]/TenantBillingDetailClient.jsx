@@ -198,6 +198,10 @@ export function TenantBillingDetailClient({ token, tenantId }) {
           tenant={tenant}
           sub={sub}
           busy={busy}
+          // 'off' when the payload predates Phase 5 or the variable is unset —
+          // the conservative reading, which is also the honest one: an unknown
+          // enforcement state must not be described as a lockout.
+          enforcement={data?.suspensionEnforcement || 'off'}
           onClose={() => setDialog(null)}
           onSubmit={(body) => {
             if (dialog.kind === 'updateLink') {
@@ -496,7 +500,9 @@ const DIALOGS = {
     title: 'Suspend access',
     submit: 'Suspend this tenant',
     danger: true,
-    body: (
+    // A FUNCTION, not a node — this is the one dialog whose true consequences
+    // depend on a deploy variable. See the comment inside.
+    body: ({ enforcement }) => (
       <>
         <p><strong>What stops working immediately:</strong></p>
         <ul>
@@ -504,12 +510,25 @@ const DIALOGS = {
           <li>The booking engine — search, availability, quotes, listings</li>
           <li>Their integration syncs: Economy, NU, booking-source</li>
         </ul>
-        {/* The honest limit. The mockup promised a staff-app lockout that does
-            not exist yet, and promising it here would be a lie about a lever
-            being pulled on a paying customer. */}
-        <p><strong>What does NOT stop yet:</strong> their staff can still sign in and use the app. The
-          request-time lock that turns this into a real lockout ships in a later phase; today this is a
-          commercial lever over their public surfaces, not a freeze.</p>
+        {/* THE HONEST LIMIT, AND IT NOW DEPENDS ON A DEPLOY VARIABLE.
+            The staff lockout shipped in Phase 5 but is gated on
+            TENANT_SUSPENSION_ENFORCEMENT, which the browser cannot see — so the
+            backend tells us (`suspensionEnforcement` on the detail payload) and
+            this paragraph says what is TRUE ON THIS DEPLOY. Hard-coding either
+            answer would be a lie about a lever being pulled on a paying
+            customer, which is the thing this dialog was written to avoid. */}
+        {enforcement === 'enforce' ? (
+          <p><strong>Their staff are locked out of the app immediately.</strong> Signed-in sessions stop
+            working on the next request — no waiting for a token to expire. They keep exactly three things:
+            the billing page where they pay us, the ability to close out rentals that are already on the
+            street, and their own customers&apos; in-flight surfaces (shuttle tracker, signing,
+            pre-check-in), which are never gated.</p>
+        ) : (
+          <p><strong>What does NOT stop:</strong> their staff can still sign in and use the app. The
+            request-time lock exists in this build but is switched OFF on this deploy
+            (<code>TENANT_SUSPENSION_ENFORCEMENT</code>{enforcement === 'log' ? ' is in log-only mode' : ' is not set'}),
+            so today this is a commercial lever over their public surfaces, not a freeze.</p>
+        )}
         <p className="label">
           The Authorize.Net subscription is left alone — it keeps its schedule so a fixed card resumes
           instantly. Nothing here cancels it.
@@ -576,10 +595,14 @@ const DIALOGS = {
   },
 };
 
-function ActionDialog({ dialog, tenant, sub, busy, onClose, onSubmit }) {
+function ActionDialog({ dialog, tenant, sub, busy, enforcement, onClose, onSubmit }) {
   const spec = DIALOGS[dialog.kind];
   const [form, setForm] = useState({});
   if (!spec) return null;
+
+  // A spec body may be a node (most of them) or a function of the live deploy
+  // context (suspend, whose consequences differ by environment variable).
+  const bodyNode = typeof spec.body === 'function' ? spec.body({ enforcement }) : spec.body;
 
   const missing = spec.fields.some((f) => f.required && !String(form[f.name] || '').trim());
 
@@ -592,7 +615,7 @@ function ActionDialog({ dialog, tenant, sub, busy, onClose, onSubmit }) {
         </div>
         <p className="label">{tenant.name}{sub ? ` · ${sub.planName} · ${money(sub.amount, sub.currency)}` : ''}</p>
 
-        <div className={spec.danger ? 'error' : 'surface-note'}>{spec.body}</div>
+        <div className={spec.danger ? 'error' : 'surface-note'}>{bodyNode}</div>
 
         {spec.fields.map((f) => (
           <div key={f.name} className="stack">

@@ -1425,5 +1425,32 @@
     "walkingDirections": "Indicaciones a pie (se muestran al cliente al llegar)",
     "walkingDirectionsEn": "Indicaciones a pie (Inglés)",
     "walkingDirectionsEs": "Instrucciones a pie (Español)"
+  },
+  "tenantSuspended": {
+    "title": "Tu cuenta de Ride Fleet Manager está en pausa",
+    "titleGeneric": "Tu cuenta está en pausa",
+    "body": "Un cobro de tu suscripción no se pudo procesar y el acceso a la aplicación quedó pausado. Actualiza tu método de pago y el acceso vuelve de inmediato.",
+    "bodyGeneric": "El acceso a esta cuenta quedó pausado. Comunícate con Ride y te decimos qué hace falta para reactivarla.",
+    "since": "En pausa desde el {{date}}.",
+    "cardOnFile": "Tarjeta registrada: {{brand}} ····{{last4}}",
+    "card": "tarjeta",
+    "sendLink": "Envíame un enlace para actualizar el pago",
+    "sending": "Enviando…",
+    "linkSent": "Enviado. Revisa {{email}} — el enlace sirve una sola vez y vence.",
+    "contact": "¿Necesitas ayuda? Escríbenos a soporte@ridefleetmanager.com.",
+    "signOut": "Cerrar sesión"
+  },
+  "billingNotice": {
+    "pastDueTitle": "Un cobro de tu suscripción no se pudo procesar",
+    "pastDueBody": "Actualiza tu método de pago para que tu cuenta siga funcionando. Authorize.Net reintenta el cobro automáticamente, pero solo después de que actualices la tarjeta — esperar no lo arregla.",
+    "pastDueDeadline_one": "El acceso se pausará en {{count}} día si sigue sin pagarse.",
+    "pastDueDeadline_other": "El acceso se pausará en {{count}} días si sigue sin pagarse.",
+    "pastDueToday": "El acceso se pausará hoy si sigue sin pagarse.",
+    "suspendedTitle": "Tu cuenta está en pausa por falta de pago",
+    "suspendedBody": "Actualiza tu método de pago para restablecer el acceso completo.",
+    "action": "Envíame un enlace de pago",
+    "sending": "Enviando…",
+    "sent": "Enviado a {{email}}.",
+    "dismiss": "Ocultar"
   }
 }

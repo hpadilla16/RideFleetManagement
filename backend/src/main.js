@@ -105,6 +105,7 @@ import { shuttleTrackerPublicRouter, shuttleTrackerAdminRouter } from './modules
 import { shuttleDriverPublicRouter } from './modules/shuttle/shuttle-driver.routes.js';
 import { billingPublicRouter } from './modules/billing/billing-public.routes.js';
 import { billingWebhookRouter } from './modules/billing/billing-webhook.routes.js';
+import { billingSelfRouter } from './modules/billing/billing-self.routes.js';
 import { shuttleMonitorRouter } from './modules/shuttle/shuttle-monitor.routes.js';
 import { shuttleZonesRouter } from './modules/shuttle/shuttle-zones.routes.js';
 import { tlInternationalRouter } from './modules/integrations/tl-international/tl-international.routes.js';
@@ -294,6 +295,12 @@ app.use('/api/public/billing', billingPublicRouter);
 // reads BILLING_AUTHNET_SIGNATURE_KEY from env. One route holding both
 // credential sets would have to guess which merchant an event belonged to.
 app.use('/api/public/billing', billingWebhookRouter);
+// The TENANT's own billing page (Phase 5) — the one surface a suspended tenant
+// is never locked out of, because it is where they pay. Both of its routes are
+// entries in SUSPENSION_ALLOWLIST (lib/tenant-suspension.js); if this mount
+// path ever changes, those entries must change with it or the suspension gate
+// becomes a trap. Tenant-ADMIN gating lives on the router itself.
+app.use('/api/billing', requireAuth, tenantRateLimit, billingSelfRouter);
 app.use('/api/host-app', requireAuth, tenantRateLimit, requireModuleAccess('hostApp'), hostAppRouter);
 app.use('/api/employee-app', requireAuth, tenantRateLimit, requireModuleAccess('employeeApp'), employeeAppRouter);
 app.use('/api/dealership-loaner', requireAuth, tenantRateLimit, requireModuleAccess('loaner'), dealershipLoanerRouter);
