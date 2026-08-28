@@ -110,6 +110,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    // M2-H6: entrar a media sesión muestra primero la antesala de enganche
+    // (23A). Estos tests prueban el CUERPO del paso, así que la cruzan; la
+    // antesala tiene su propia suite (checkout_join_test.dart).
+    await skipJoinGate(tester);
   }
 
   /// El cuerpo del paso es un scroll: en el lienzo del test (600 px de alto)
@@ -463,8 +467,17 @@ void main() {
           'rental'),
       findsOneWidget,
     );
-    // La cita íntegra del servidor vive donde sí cabe: el banner del paso.
-    expect(find.textContaining('R-2466'), findsOneWidget);
+    // La cita íntegra del servidor vive donde sí cabe: el banner del paso —
+    // que desde M2-H6 además ofrece buscar la otra reserva (22C), así que el
+    // número aparece dos veces a propósito: en la cita y en la acción.
+    expect(
+      find.text(
+        'Vehicle is still out on open rental R-2466 — complete its check-in '
+        '(or swap vehicles) first',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Search R-2466'), findsOneWidget);
   });
 
   /// GD-MC-7 / GD-SC-1 se prueban sobre las primitivas y no sobre el paso
@@ -643,10 +656,22 @@ void main() {
     await tester.pumpAndSettle();
 
     // Mensaje del servidor tal cual (el código de máquina jamás se muestra).
-    expect(find.textContaining('R-2466'), findsOneWidget);
+    expect(
+      find.text(
+        'Vehicle is still out on open rental R-2466 — complete its check-in '
+        '(or swap vehicles) first',
+      ),
+      findsOneWidget,
+    );
     expect(find.textContaining('VEHICLE_CONFLICT'), findsNothing);
     expect(find.text('In conflict'), findsOneWidget);
-    // Una salida primaria, siempre.
+    // M2-H6 (22C): el número de la OTRA reserva se lee del texto del servidor
+    // y se convierte en una acción que sí puede tener éxito — la búsqueda es
+    // una ruta local (`/search?q=`) que ya existe desde H7.
+    expect(find.text('Search R-2466'), findsOneWidget);
+    // Y sigue habiendo UNA sola salida primaria: el CTA de swap vive en el
+    // dock del paso, NO duplicado en el banner (GD-SC-3).
+    expect(find.text('Pick another vehicle'), findsOneWidget);
     expect(
       find.widgetWithText(RidePrimaryButton, 'Pick another vehicle'),
       findsOneWidget,

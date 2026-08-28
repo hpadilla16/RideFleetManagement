@@ -36,6 +36,7 @@ class CheckoutEvent {
     this.kind,
     this.from,
     this.to,
+    this.field,
     this.actorUserId,
     this.at,
     this.kiosk = false,
@@ -48,6 +49,14 @@ class CheckoutEvent {
   final String? kind;
   final String? from;
   final String? to;
+
+  /// Columna sellada por un evento `SIDE_EFFECT` (`tcCompletedAt`,
+  /// `paymentCompletedAt`, …). `stampSideEffect`
+  /// (checkout-session.service.js:1042-1044) escribe `{kind, field, at}` y
+  /// **nada más**: sin `actorUserId` y sin `metadata`. Por eso un sello que
+  /// cae solo puede fecharse, jamás atribuirse a alguien — y el copy de 21C
+  /// dice "otra superficie", que es exactamente lo que se sabe.
+  final String? field;
   final String? actorUserId;
   final DateTime? at;
 
@@ -81,6 +90,7 @@ class CheckoutEvent {
       kind: map['kind'] as String?,
       from: map['from'] as String?,
       to: map['to'] as String?,
+      field: map['field'] as String?,
       actorUserId: map['actorUserId'] as String?,
       at: DateTime.tryParse(map['at'] as String? ?? ''),
       kiosk: metadata is Map && metadata['kiosk'] == true,
@@ -124,6 +134,21 @@ CheckoutEvent? lastTransitionTo(List<CheckoutEvent> events, String toStep) {
 CheckoutEvent? lastEventOfKind(List<CheckoutEvent> events, String kind) {
   for (var i = events.length - 1; i >= 0; i--) {
     if (events[i].kind == kind) return events[i];
+  }
+  return null;
+}
+
+/// Último `SIDE_EFFECT` que selló [field] (`tcCompletedAt`, `paymentCompletedAt`,
+/// `inspectionCompletedAt`, `customerSignedAt`).
+///
+/// Sirve para UNA cosa: fechar el sello que acaba de caer sin que el paso se
+/// moviera (frame 21C, "hace 12 s"). No sirve para atribuirlo — el backend no
+/// escribe actor en esos eventos, y decir "el mostrador" sin saberlo sería
+/// inventar un culpable en el registro de una entrega.
+CheckoutEvent? lastSideEffectFor(List<CheckoutEvent> events, String field) {
+  for (var i = events.length - 1; i >= 0; i--) {
+    final e = events[i];
+    if (e.kind == 'SIDE_EFFECT' && e.field == field) return e;
   }
   return null;
 }

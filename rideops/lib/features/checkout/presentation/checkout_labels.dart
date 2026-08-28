@@ -7,6 +7,7 @@ library;
 
 import '../../../core/api/enums.dart';
 import '../../../core/l10n/app_localizations.dart';
+import '../domain/checkout_changes.dart';
 import '../domain/checkout_event_log.dart';
 import '../domain/checkout_step_catalog.dart';
 
@@ -87,3 +88,37 @@ String doneLabel(
     CheckoutActorKind.otherSurface => l10n.coStepDone(time),
   };
 }
+
+/// Iniciales del avatar de una PERSONA (hoja 20B). Máximo dos, de las dos
+/// primeras palabras: "Diego Torres" → "DT".
+///
+/// Deliberadamente **no** se usa para aparatos — un círculo con "KI" vestiría
+/// al kiosco de persona, que es justo la confusión que 20B existe para evitar.
+/// Nombre vacío ⇒ un punto: mejor un marcador neutro que una letra inventada.
+String initialsOf(String name) {
+  final words = name
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((w) => w.isNotEmpty)
+      .toList();
+  if (words.isEmpty) return '·';
+  final buf = StringBuffer();
+  for (final w in words.take(2)) {
+    // `characters` no hace falta aquí: se toma el primer code unit y se sube
+    // a mayúscula; un nombre que empiece con emoji cae en un glifo raro, no
+    // en un crash.
+    buf.write(w[0].toUpperCase());
+  }
+  return buf.toString();
+}
+
+/// Etiqueta del sello que cayó (banner 21C y hoja 21B). Reusa las mismas
+/// cuatro cadenas que la tarjeta "Lo que el servidor ya tiene": un sello es
+/// un sello, se llame donde se llame.
+String stampLabel(AppLocalizations l10n, CheckoutStampKind kind) =>
+    switch (kind) {
+      CheckoutStampKind.tc => l10n.coStampTc,
+      CheckoutStampKind.payment => l10n.coStampPayment,
+      CheckoutStampKind.inspection => l10n.coStampInspection,
+      CheckoutStampKind.signature => l10n.coStampSignature,
+    };

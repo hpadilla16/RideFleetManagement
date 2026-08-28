@@ -185,11 +185,17 @@ class SessionHead extends StatelessWidget {
     required this.presence,
     this.mini = false,
     this.offline = false,
+    this.onPresenceTap,
   });
 
   final CheckoutReservationContext? context_;
   final PresenceChipData? presence;
   final bool mini;
+
+  /// M2-H6: el chip pasa de decorativo a TOCABLE — abre la hoja "Quién está
+  /// aquí" (20B). El "+1" ya existía en el dominio y por fin tiene destino.
+  /// Null ⇒ chip inerte (pantallas donde la hoja no tendría dónde montarse).
+  final VoidCallback? onPresenceTap;
 
   /// Sin red el punto vivo se degrada a gris: el verde afirma "está AHORA" y
   /// sin conexión no podemos sostener esa afirmación (el heartbeat que la
@@ -204,7 +210,12 @@ class SessionHead extends StatelessWidget {
     final vehicle = context_?.vehicleLabel;
     final chip = presence == null
         ? null
-        : PresenceChip(data: presence!, mini: mini, offline: offline);
+        : PresenceChip(
+            data: presence!,
+            mini: mini,
+            offline: offline,
+            onTap: onPresenceTap,
+          );
 
     if (mini) {
       final who = [customer, vehicle].nonNulls
@@ -387,6 +398,7 @@ class PresenceChip extends StatelessWidget {
     required this.data,
     this.mini = false,
     this.offline = false,
+    this.onTap,
   });
 
   final PresenceChipData data;
@@ -394,6 +406,11 @@ class PresenceChip extends StatelessWidget {
 
   /// Ver [SessionHead.offline]: sin red el punto no puede seguir verde.
   final bool offline;
+
+  /// M2-H6: abre la hoja 20B. El área táctil sube a 48 px REALES aunque el
+  /// chip se dibuje a 32/34 — con guantes, un objetivo del alto del texto se
+  /// falla.
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -408,7 +425,7 @@ class PresenceChip extends StatelessWidget {
       checkoutAgeLabel(l10n, age),
     );
     final live = !offline && data.freshness == PresenceFreshness.live;
-    return Container(
+    final chip = Container(
       constraints: BoxConstraints(minHeight: mini ? 32 : 34),
       padding: EdgeInsets.symmetric(horizontal: mini ? 9 : 10, vertical: 4),
       decoration: BoxDecoration(
@@ -454,6 +471,34 @@ class PresenceChip extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+    final tap = onTap;
+    if (tap == null) return chip;
+    // El chip se dibuja a 32/34 px porque el header no da para más, pero el
+    // OBJETIVO es de 48: se envuelve en un InkWell con `minHeight: 48` en vez
+    // de engordar la placa. Es el mismo truco de [BannerAction] y el motivo es
+    // el mismo — con guantes, un objetivo del alto del texto se falla.
+    //
+    // La semántica recita primero la línea visible y después la acción, para
+    // que TalkBack diga QUÉ hay antes de QUÉ se puede hacer.
+    return Semantics(
+      button: true,
+      label: l10n.coPresenceChipSemantics(text),
+      onTap: tap,
+      child: ExcludeSemantics(
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            onTap: tap,
+            borderRadius: BorderRadius.circular(12),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: Center(widthFactor: 1, child: chip),
+            ),
+          ),
+        ),
       ),
     );
   }
