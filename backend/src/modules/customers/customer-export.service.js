@@ -111,6 +111,7 @@ export const EXPORT_MODEL_CATEGORY = Object.freeze({
   kioskSession: 'kioskSessions',
   externalReservation: 'externalReservations',
   citationDocument: 'citationDocuments',
+  citationAttachment: 'citationAttachments',
   citation: 'citations',
   tollTransaction: 'tolls',
   paymentOpsFlag: 'paymentOpsFlags',

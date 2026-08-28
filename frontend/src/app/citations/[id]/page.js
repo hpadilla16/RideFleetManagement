@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
 import { api, API_BASE } from '../../../lib/client';
+import { CitationDocumentsPanel } from './CitationDocumentsPanel';
 
 const SOURCE_LABELS = {
   CITATION_PROCESSING_CENTER: 'CPC', T2: 'T2', OCSO_COMPTROLLER: 'OCSO',
@@ -257,6 +258,14 @@ function Inner({ token, me, logout }) {
                 )}
               </div>
             </div>
+
+            {/* Supporting documents + the one-PDF export of the whole file. */}
+            <CitationDocumentsPanel
+              citationId={id}
+              citationNo={c.citationNo}
+              token={token}
+              onMessage={setMsg}
+            />
 
             <div className="cd-panel">
               <div className="cd-ph">Vehicle</div>
