@@ -15,6 +15,9 @@
  * 422s, which fell straight through to the toast: confusing, but visible.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { shouldSwallowTransitionConflict, STEP_ORDER } from '@/lib/checkout-session';
 
 const conflict = (code) => ({ status: 409, code, message: 'boom' });
@@ -79,5 +82,70 @@ describe('shouldSwallowTransitionConflict', () => {
     expect(shouldSwallowTransitionConflict({
       err: conflict('ILLEGAL_TRANSITION'), fresh: { currentStep: 'CANCELLED' }, toStep: 'CLOSED',
     })).toBe(false);
+  });
+});
+
+/**
+ * The CALL SITE, pinned (2026-08-28).
+ *
+ * Everything above tests a pure function. Nothing above proves the wizard
+ * actually CALLS it — and that gap is not theoretical. Merging main into this
+ * branch conflicts in page.js, and main still carries the pre-H8 inline
+ * `STEP_ORDER` / `at >= want` version of `advance()`. Resolving that hunk the
+ * natural way — "take the side of the file main kept editing" — silently
+ * restores the unconditional swallow, leaves `shouldSwallowTransitionConflict`
+ * exported-but-unused, and every test above KEEPS PASSING. The exemption would
+ * be gone from the only surface an agent ever looks at, with nothing red.
+ *
+ * So the wiring gets pinned by source, the same way checkout-payment-optional
+ * pins its own wizard branch. Mounting the 2k-line page would need auth, a
+ * router, the api client and QR codes to assert one `if`; this is the smallest
+ * thing that goes red on the bad resolution.
+ */
+describe('the wizard actually delegates the swallow decision', () => {
+  const WIZARD = join(
+    dirname(fileURLToPath(import.meta.url)),
+    '..', 'src', 'app', 'reservations', '[id]', 'checkout-wizard-v2', 'page.js',
+  );
+  const src = () => readFileSync(WIZARD, 'utf8');
+  // advance() is the only place a transition 409 is handled.
+  const advanceBody = () => {
+    const s = src();
+    const start = s.indexOf('const advance = async (toStep, metadata)');
+    expect(start, 'advance() not found in the wizard').toBeGreaterThan(-1);
+    const end = s.indexOf('const pauseAndExit', start);
+    expect(end, 'could not bound advance()').toBeGreaterThan(start);
+    return s.slice(start, end);
+  };
+
+  it('imports shouldSwallowTransitionConflict from the lib', () => {
+    expect(src()).toMatch(/import\s*\{[^}]*\bshouldSwallowTransitionConflict\b[^}]*\}\s*from\s*'[^']*lib\/checkout-session'/s);
+  });
+
+  it('asks the library, passing the error so FINALIZE_INCOMPLETE can be seen', () => {
+    // `err` must be in the payload: the exemption keys off err.code, so a call
+    // that only forwarded { fresh, toStep } would swallow it again.
+    expect(advanceBody()).toMatch(
+      /shouldSwallowTransitionConflict\(\{\s*err,\s*fresh,\s*toStep\s*\}\)/,
+    );
+  });
+
+  it('keeps NO inline step-order comparison of its own', () => {
+    const s = src();
+    // The pre-H8 gate, in any of the shapes it has worn.
+    expect(s).not.toMatch(/const STEP_ORDER\s*=\s*\[/);
+    expect(s).not.toMatch(/at\s*>=\s*want/);
+    expect(s).not.toMatch(/STEP_ORDER\.indexOf/);
+  });
+
+  it('reconciles the screen to server truth before toasting the error', () => {
+    // On FINALIZE_INCOMPLETE the session really IS closed. The agent has to see
+    // the closed session AND the reason the finalize did not finish.
+    const body = advanceBody();
+    const reconcile = body.search(/if\s*\(freshSession\)\s*setSession\(freshSession\)/);
+    const toast = body.search(/setToast\(\{\s*kind:\s*'error'/);
+    expect(reconcile, 'the reconcile-before-toast line is gone').toBeGreaterThan(-1);
+    expect(toast, 'the error toast is gone').toBeGreaterThan(-1);
+    expect(reconcile).toBeLessThan(toast);
   });
 });

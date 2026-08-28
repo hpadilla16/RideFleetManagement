@@ -49,6 +49,26 @@ export PATH="/snap/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/
 : "${REPO_DIR:=/root/RideFleetManagement}"
 : "${DATABASE_URL:=}"   # will try to read from ${REPO_DIR}/backend/.env if empty
 
+# -------- Backup encryption (TL due diligence, 2026-08-22) --------
+# The dump contains all customer PII. Encrypt it with GnuPG BEFORE it leaves the
+# host, so DigitalOcean Spaces only ever holds ciphertext.
+#
+# OFF BY DEFAULT: with no recipient/passphrase set this behaves exactly as
+# before (plaintext upload) so merging this change breaks nothing. Turn it on by
+# setting ONE of:
+#   BACKUP_GPG_RECIPIENT  — a public-key ID/email. Asymmetric: the host can
+#                           encrypt but CANNOT decrypt. The private key lives
+#                           OFF the droplet, so a droplet compromise can't read
+#                           backups. THIS IS THE RECOMMENDED MODE.
+#   BACKUP_GPG_PASSPHRASE — symmetric AES-256. Simpler, but the passphrase can
+#                           decrypt, so guard it as carefully as the data.
+#
+# BEFORE enabling in production: run one backup, then PROVE you can restore it
+# (decrypt + pg_restore into a throwaway database). An encrypted backup you
+# cannot decrypt is worse than no backup.
+: "${BACKUP_GPG_RECIPIENT:=}"
+: "${BACKUP_GPG_PASSPHRASE:=}"
+
 # -------- Helpers --------
 log() { echo "[backup] $(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >&2; }
 fail() { log "FAIL: $*"; exit "${2:-1}"; }
@@ -134,17 +154,57 @@ if [ "$DUMP_SIZE" -lt 1024 ]; then
 fi
 log "pg_dump OK — ${DUMP_SIZE} bytes"
 
+# -------- 1b. Encrypt the dump (only if configured) --------
+# Default: UPLOAD_FILE is the plaintext dump and the key ends in .dump — i.e.
+# unchanged behaviour. If a GPG recipient or passphrase is set, we replace those
+# with the encrypted file and a .dump.gpg key, and remove the plaintext so it
+# never lingers on disk.
+UPLOAD_FILE="$DUMP_FILE"
+S3_SUFFIX="dump"
+if [ -n "$BACKUP_GPG_RECIPIENT" ] || [ -n "$BACKUP_GPG_PASSPHRASE" ]; then
+  command -v gpg >/dev/null 2>&1 || fail "backup encryption is configured but gpg is not installed (apt-get install gnupg)" 1
+  ENC_FILE="${DUMP_FILE}.gpg"
+  log "Encrypting dump → $ENC_FILE"
+  if [ -n "$BACKUP_GPG_RECIPIENT" ]; then
+    # Asymmetric: encrypt to the recipient's public key. --trust-model always
+    # avoids an interactive trust prompt under cron for a key we deliberately
+    # imported for this purpose.
+    if ! gpg --batch --yes --trust-model always --cipher-algo AES256 \
+             --recipient "$BACKUP_GPG_RECIPIENT" --encrypt --output "$ENC_FILE" "$DUMP_FILE"; then
+      fail "gpg encryption (recipient) failed" 1
+    fi
+  else
+    # Symmetric: passphrase-based AES-256.
+    if ! printf '%s' "$BACKUP_GPG_PASSPHRASE" | \
+         gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+             --cipher-algo AES256 --symmetric --output "$ENC_FILE" "$DUMP_FILE"; then
+      fail "gpg encryption (symmetric) failed" 1
+    fi
+  fi
+  ENC_SIZE="$(stat -c%s "$ENC_FILE")"
+  if [ "$ENC_SIZE" -lt 1024 ]; then
+    fail "encrypted file suspiciously small (${ENC_SIZE} bytes) — aborting" 1
+  fi
+  # Plaintext dump must not survive once the ciphertext exists.
+  rm -f "$DUMP_FILE"
+  UPLOAD_FILE="$ENC_FILE"
+  S3_SUFFIX="dump.gpg"
+  DUMP_SIZE="$ENC_SIZE"
+  log "Encrypted OK — ${ENC_SIZE} bytes; plaintext removed"
+fi
+
 # -------- 2. Upload to DO Spaces --------
-S3_KEY="daily/fleet-prod-${TIMESTAMP}.dump"
+S3_KEY="daily/fleet-prod-${TIMESTAMP}.${S3_SUFFIX}"
 log "Uploading → s3://${S3_BUCKET}/${S3_KEY}"
 if ! aws --profile "$AWS_PROFILE" --endpoint-url "$S3_ENDPOINT" \
-     s3 cp "$DUMP_FILE" "s3://${S3_BUCKET}/${S3_KEY}" \
+     s3 cp "$UPLOAD_FILE" "s3://${S3_BUCKET}/${S3_KEY}" \
      --only-show-errors; then
   fail "S3 upload failed" 2
 fi
 
 # Verify the uploaded object matches the local file size; catches
-# silent truncation on the network path.
+# silent truncation on the network path. DUMP_SIZE was updated to the encrypted
+# size above when encryption ran, so this compares like with like either way.
 REMOTE_SIZE="$(aws --profile "$AWS_PROFILE" --endpoint-url "$S3_ENDPOINT" \
                s3api head-object --bucket "$S3_BUCKET" --key "$S3_KEY" \
                --query 'ContentLength' --output text 2>/dev/null || echo "0")"
@@ -179,7 +239,9 @@ else
 fi
 
 # -------- 4. Local cleanup — keep last 3 only --------
-find "$BACKUP_DIR" -maxdepth 1 -name "fleet-prod-*.dump" -type f -printf '%T@ %p\n' 2>/dev/null \
+# Glob matches both plaintext (.dump) and encrypted (.dump.gpg) artefacts so
+# encrypted backups don't pile up on the host.
+find "$BACKUP_DIR" -maxdepth 1 -name "fleet-prod-*.dump*" -type f -printf '%T@ %p\n' 2>/dev/null \
   | sort -n | head -n -3 | awk '{print $2}' | xargs -r rm -f
 
 log "Done (size=${DUMP_SIZE}B, key=${S3_KEY})"

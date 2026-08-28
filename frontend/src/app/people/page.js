@@ -223,6 +223,18 @@ function Inner({ token, me, logout }) {
     }
   };
 
+  // Staff 2FA (2026-08-22): admin reset — clears the user's 2FA. If tenant
+  // policy still requires their role, their next login re-enters enrollment.
+  const resetTwoFactor = async (person) => {
+    if (!window.confirm(`Reset two-factor authentication for ${person.displayName || person.email}? They will be prompted to set it up again on next login if your policy requires it.`)) return;
+    try {
+      await api(`/api/auth/users/${person.userId}/reset-2fa`, { method: 'POST' }, token);
+      setMsg(`Two-factor authentication reset for ${person.displayName || person.email}`);
+    } catch (e) {
+      setMsg(e.message);
+    }
+  };
+
   const visiblePeople = useMemo(() => {
     const base = !isSuper || !activeTenantId
       ? people
@@ -838,6 +850,9 @@ function Inner({ token, me, logout }) {
                         )}
                         {person.hasLogin && person.userId && canEditPersonRecord(person) ? (
                           <button type="button" onClick={() => resetPassword(person)}>Reset Password</button>
+                        ) : null}
+                        {person.hasLogin && person.userId && canManagePeople ? (
+                          <button type="button" className="button-subtle" onClick={() => resetTwoFactor(person)}>Reset 2FA</button>
                         ) : null}
                       </div>
                     </td>

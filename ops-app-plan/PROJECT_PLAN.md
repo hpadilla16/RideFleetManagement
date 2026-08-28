@@ -46,7 +46,15 @@ y números de línea en [00-REGROUND.md](00-REGROUND.md):
 - **ADR-2 · Stack:** Riverpod 3.x · go_router con ShellRoute · **Drift** (no Isar) ·
   retrofit+dio+freezed **escritos a mano** sobre los endpoints que de verdad se usan. Nada
   de codegen desde OpenAPI (rutas sin tipar ⇒ modelos inútiles); se versiona una copia de
-  `openapi.json` solo para diff.
+  `openapi.json` solo para diff. *(Desviación declarada 2026-08, M2-H2: el stack cerrado no
+  cubre APIs de plataforma que el mockup 10B exige, así que entran tres paquetes fuera de él
+  — `qr` (codificador puro; el QR se pinta a mano, y uno mal codificado deja al cliente sin
+  poder firmar), `wakelock_plus` (sin él el teléfono se atenúa y se bloquea a los ~30 s con
+  el QR en la cara del cliente; en Android es `FLAG_KEEP_SCREEN_ON` sobre la ventana de la
+  actividad, sin permiso `WAKE_LOCK`) y `screen_brightness` (brillo por VENTANA, no del
+  sistema: por eso en Android la restauración está garantizada aunque el proceso muera). El
+  WHY largo vive en `rideops/pubspec.yaml` y en `rideops/lib/core/device/presentation_mode.dart`;
+  iOS restaura contra un valor memorizado y no cubre un kill duro — re-evaluar en M4.)*
 - **ADR-3 · Tenancy y alcance:** el tenant es claim del JWT y no se toca. *(Matiz 2026-08:
   el alcance de ubicación ahora viaja en el header `x-view-location`; entra al stack de
   interceptores y la ubicación activa vive en el estado de sesión.)*
@@ -82,17 +90,75 @@ y números de línea en [00-REGROUND.md](00-REGROUND.md):
 2. **Handoff token TTL 15 min vs. bandeja offline.** Si el spike M0-1b no lo resuelve en
    cliente, pasa a bloqueante de MVP: pedir endpoint de fotos autenticado por JWT sin TTL
    corto (§9).
-3. **403 del selector de ubicación sin `code`.** Nice-to-have: que el backend agregue
-   `code: 'VIEW_LOCATION_DENIED'` para distinguirlo por máquina.
+3. **403 del selector de ubicación sin `code`.** ~~Nice-to-have~~ → **EN CURSO**: el
+   PR-tren P1-P3 (feat/checkout-multisurface-p123) agrega `code: 'VIEW_LOCATION_DENIED'`;
+   el cliente H4 ya acepta ambas variantes.
 4. **`idVerifiedAt` vive solo en `KioskSession`.** Si RideOps verifica ID en patio, la
    evidencia no es visible a otras superficies; decidir dónde persiste (probable pedido de
-   columna en `CheckoutSession`).
-5. **Sin versioning optimista en `CheckoutSession`** — la reconciliación multi-superficie
-   depende solo de la state machine (ver §9, pregunta 1).
-6. **El 400 de "contraseña actual incorrecta" no trae `code`** (QA H1, 2026-08-16): el
+   columna en `CheckoutSession`). P4 del M2-PLAN — diferido a M3 por Hector.
+5. **Sin versioning optimista en `CheckoutSession`** — ~~depende solo de la state
+   machine~~ → **EN CURSO**: P2 (`stateVersion`) en el PR-tren; el CAS de `transition()`
+   queda como M2-H8 obligatoria.
+6. **El "hoy" del dashboard corta en TZ del servidor** (Innovation, review H4): el server
+   calcula `startOfToday` en su TZ y el cliente clasifica "hoy" en TZ del dispositivo —
+   divergen si difieren. Pedido de plataforma: cortar en TZ del tenant. No bloquea M1.
+7. **El scope efectivo de programa se espeja en cliente** (tenant-scope.js → tabla Dart
+   con test referenciado): a futuro, que `/me` o el dashboard expongan el scope EFECTIVO
+   calculado por el server y el espejo muera.
+8. **display-data devuelve el default de plataforma como branding** (QA H5):
+   `reservations.routes.js:619` responde `companyName || 'Ride Fleet'` — el cliente
+   neutraliza el centinela, pero el endpoint debería devolver null y dejar el fallback a
+   cada superficie. Pedido chico para el próximo PR de backend.
+9. **Endpoint receptor de auditoría de descartes del outbox** (Innovation H5): la app
+   guarda el rastro local con flag `synced`; falta `POST /api/employee-app/outbox-audit`
+   (batch, idempotente por id, tenant del JWT) para subirlo.
+10. **El 400 de "contraseña actual incorrecta" no trae `code`** (QA H1, 2026-08-16): el
    cliente lo detecta por substring del mensaje (frágil, documentado en
    `change_password_screen.dart`). Pedido: `code: 'CURRENT_PASSWORD_INCORRECT'` en
    `auth.routes.js` — 2 líneas en el próximo PR que toque backend.
+11. **🔴 FUGA DE MARCA EN PRODUCCIÓN — la página pública de términos** (GD, review de
+   mockups M2, 2026-08-17; **verificado en código, afecta clientes HOY**, no es un
+   hallazgo de mockup):
+   - `frontend/src/app/sign/[token]/page.js` renderiza `<Shell title="Terms &
+     Conditions" …>` — **inglés hardcodeado** y **cero identidad del tenant** (ni
+     nombre, ni logo, ni `display-data`), con gris neutro de plataforma.
+   - `frontend/src/app/layout.js:8-16` fija `metadata.title = 'Ride Fleet'` y
+     `appleWebApp.title = 'Ride Fleet'` **sin override en la ruta `/sign`**: el cliente
+     ve "Ride Fleet" en la pestaña del navegador, en el preview del enlace y al añadir
+     a inicio.
+   - Viaje real hoy: pantalla del agente con marca "Autos del Valle" → el cliente abre
+     el QR → pestaña "Ride Fleet · Terms & Conditions" en inglés. Rompe la regla de
+     branding por tenant (REGROUND §4) en la superficie más sensible: la firma legal.
+   - **Es criterio de aceptación BLOQUEANTE de M2-H2** (paso T&C) y merece un PR propio
+     de frontend/backend: `/sign/[token]` debe tomar branding e idioma del tenant.
+12. **El 403 de `requireCapability` llega sin `code` y en inglés** (diseño de la Tanda B
+   del M2, 2026-08-17): el mismo mal patrón del 403 de ubicación (gap #3), pero en una
+   pantalla de DINERO — decide si el agente lee "no tienes esta capacidad, pide a un
+   admin" o un error genérico sobre un cobro. Pedido:
+   `{ error, code: 'MODULE_ACCESS_DENIED', module }`. **Bloqueante de M2-H3.**
+13. **Falta un `previewedAt` del servidor en el preview de la cuenta** (diseño Tanda B):
+   sin marca de cuándo se calculó el total, la pantalla de divergencia que ADR-6 exige
+   —y que es compuerta de release del M2— no puede decir "este número es de hace 4 s" ni
+   detectar que envejeció. **Bloqueante de M2-H3.**
+
+### Política resuelta en H6 (decisión del PM): EL KIOSCO IGNORA LA EXENCIÓN
+- **Modo kiosco vs navegación del sistema**: Flutter puro no puede bloquear home/app-switcher.
+  Resolución (H6): al entrar al modo kiosco se persiste un flag `kiosk_in_progress` en
+  Keystore (`KioskGuardStore`); si sobrevive a un cold start, `LockController._fullSync`
+  fuerza el candado UNA vez AUNQUE el usuario sea `screenLockExempt` (la exención protege
+  al empleado de fricción, no al teléfono en manos del cliente). Exempt SIN PIN ⇒ re-login
+  forzado con contraseña (`onSessionExpired`, sin purga de bandeja). La hidratación tardía
+  de la exención vía /me NO abre ese candado; solo PIN/huella. Salida limpia del kiosco
+  limpia el flag. Implementado en lock_controller.dart + kiosk_guard.dart, con tests.
+
+### Enmiendas de mockup aceptadas por GD en builds (registro para training/M2)
+- **Tanda B nota de motion (dot de frescura)**: latido ≤0.5 Hz sustituido por tick
+  one-shot al refrescar (batería + testabilidad) — bendecido por GD para M1 (review H4).
+- **Buscar (H4)**: pantalla aprobada como extensión del lenguaje sin frame propio;
+  mini-frame a posteriori pendiente para la biblioteca de mockups (con filtros/detalle
+  llega en M3).
+- **Paso "¿Activar huella?" (H2)**: pantalla nueva sin frame propio, aceptada; mini-frame
+  a posteriori pendiente.
 
 ## 5. Milestones
 
@@ -129,15 +195,58 @@ bloqueo por PIN y biometría, shell con RBAC y **selector de ubicación**, home 
 operaciones con las 9 colas del dashboard, captura de inspección nativa (cámara →
 comprimir al tomar → soltar el controlador; pipeline offline vía bandeja).
 
-Criterios transversales heredados de H1 (QA SHIP 2026-08-16):
-- **Sesión degradada**: toda pantalla post-login debe renderizar con
-  `session.user == null` (restore sin red) — skeleton, jamás crash. H3 añade el
-  re-intento de `/me` al reanudar la app.
-- **H4 restaura** la rehabilitación automática del botón de login al volver la señal
-  (connectivity_plus) y revierte el copy honesto temporal de `loginOffline` (TODO en
-  el .arb).
+#### Criterios registrados por revisiones H2/H3 (ciclo de review, 2026-08-16)
+Compromisos que las revisiones de Innovation/GD dejaron para historias futuras — se
+verifican en el DoD de la historia indicada:
+
+- **H4 (home de operaciones):**
+  - El chip de ubicación del shell pasa a estado **danger** mientras el dashboard esté
+    en 403 por `x-view-location` (pantalla 4D): la negativa se ve donde se eligió la sede.
+  - Todo provider de datos *scoped* por sede espera `ActiveLocation.hydrated == true`
+    antes del primer fetch — jamás un fetch con el override a medio hidratar.
+  - ANTES de construir la 4D: pedir al backend un `code: VIEW_LOCATION_DENIED` en el 403
+    de view-location (hoy llega sin code — gap #3). Sin el code, la 4D no puede
+    distinguir "sede negada" de un 403 de RBAC genérico.
+  - *Registrado al construir H4 (2026-08-17):* el gap #3 está EN CURSO vía el PR-tren
+    P1-P3 (ver §4-3); mientras el code aterriza en el backend, la app clasifica
+    con la firma puente `403 + request con header + (code == 'VIEW_LOCATION_DENIED' ||
+    (code == null && mensaje exacto de view-location.js:48))`; cuando el backend agregue
+    el code, el matcheo por mensaje se retira. Y el **cache del dashboard es en memoria**
+    (basta para M1: dato viejo + edad visibles en el 5E); el cache **persistente en Drift**
+    que menciona la nota 8 del mockup pasa a **M2** — sobrevivir reinicios de proceso no
+    aporta a la cuña de captura y sí arrastra el costo de la llave SQLCipher en cada
+    arranque antes de H5.
+- **H5 (captura de inspección / bandeja):**
+  - Sellar el `locationId` activo en **cada fila del outbox al encolar** (REGROUND §1):
+    el header del drenado no puede depender de la sede seleccionada al momento de drenar.
+  - La UI de salida del modo kiosco (mantener 3 s + PIN) **limita reintentos de
+    `checkPin`** — `checkPin` es puro y no cuenta intentos por diseño; el límite vive en
+    la UI que lo llama.
+- **M4 (hardening):**
+  - `FLAG_SECURE`/privacy screen para el task switcher (el candado H2 protege la app
+    viva, no la miniatura de recientes).
+  - Candidato: blocklist de PINs triviales (1234, 0000, fechas) en el setup.
+  - `verifyPin` distingue **error de Keystore vs PIN erróneo**: hoy un Keystore ilegible
+    descuenta un intento como si el PIN fuera incorrecto.
+- **M2 (checkout):**
+  - La tab bar del shell solo adopta glass/`BackdropFilter` tras una señal real de
+    capacidad del dispositivo, con el tope de **máx 1 BackdropFilter por pantalla**
+    (política de blur de la nota 4 del mockup 4A).
+
+#### Criterios transversales heredados de H1 (QA SHIP 2026-08-16) — estado al cerrar el M1
+- **Sesión degradada**: toda pantalla post-login renderiza con `session.user == null`
+  (restore sin red) — skeleton, jamás crash. ✅ CUMPLIDO: H3 añadió el re-intento de
+  `/me` al reanudar y H4 el guard de generación en `_hydrateUser`; verificado en el QA
+  de milestone.
 - **H2 restaura** el hint "Siguiente: crea tu PIN" en el éxito 2C (omitido en H1 para
-  no prometer UI inexistente).
+  no prometer UI inexistente). ✅ CUMPLIDO (`changePasswordNextPin`, verificado por QA
+  de milestone en `change_password_screen.dart`).
+- **H4 restauraba** la rehabilitación automática del botón de login al volver la señal
+  y el copy del mockup 1C. ⚠️ **NO se hizo, y es correcto que no se hiciera**:
+  `connectivity_plus` entró con H5, pero el login sigue con reintento MANUAL, así que
+  el copy honesto de `loginOffline` se queda tal cual (prometer auto-reintento sería
+  mentir). Pasa a backlog como "auto-reintento del login al volver la señal", con la
+  nota re-fechada en el `.arb`.
 
 ### M2 — el épico de checkout
 Wizard server-driven sobre `/api/checkout-sessions/*` (con identidad de usuario, nunca el
@@ -179,23 +288,61 @@ Auth: `POST /api/auth/login` · `POST /api/auth/refresh` · `GET /api/auth/me` �
 Dashboard: `GET /api/employee-app/dashboard[?q=]`.
 Checkout: `POST /api/checkout-sessions` · `GET /:id` · `GET /by-reservation/:rid` ·
 `POST /:id/transition` · `/stamp` · `/customer-signature` · `/terms-token` ·
-`/handoff-token` · `/send-customer-inspection` · `/vehicle` · `/charge` · `/charge-sale` ·
+`/handoff-token` · `/send-customer-inspection` · `/vehicle` · `/charge-sale` ·
 `/hold-deposit` · `/record-manual-payment` · `/record-manual-deposit` ·
 `GET /:id/terminal-status` · `POST /:id/declined-insurance` · `/abandon`
+
+> **`/charge` sale de la superficie de RideOps (aviso entre sesiones, 2026-08-17).** Otra
+> sesión le puso `requireCapability('paymentActions')`, y **AGENT la tiene apagada por
+> defecto** — verificado en `module-access.js:208-211`, donde el default del agente es
+> explícito y no heredado. Construir contra `/charge` daría 403 a todo el mostrador. Se pudo
+> cerrar precisamente porque **no tiene ni un llamador** (verificado: 0 en `frontend/src` y
+> en `rideops/lib`). El flujo vivo y soportado sigue siendo el par de dos toques
+> —`/charge-sale` + `/hold-deposit`— que sigue ABIERTO para AGENT, más los failsafes
+> manuales. Referencia de cliente existente: `checkout-wizard-v2/page.js:1003` y `:1020`.
+>
+> **CORRIGE UNA SUPOSICIÓN NUESTRA SOBRE H3:** veníamos tratando `hold-deposit` como
+> *card-present*. **No lo es por defecto.** Si el contrato ya tiene `cardOnFileToken` —o sea,
+> después de `/charge-sale`— toma la vía CNP tokenizada de iPOSpays Transact: **sin tap y sin
+> terminal**. Solo cae a card-present si no hay token o si `IPOS_FORCE_CARD_PRESENT_DEPOSIT=true`
+> (verificado: `spin-charge.service.js:915-918`). El comentario del código decía lo contrario y
+> estaba mal; ya se corrigió allá. El diseño del paso de pago tiene que reflejar esto: en el
+> camino normal el segundo toque **no** pide la tarjeta física.
+>
+> Y suma un tercer caso al ticket de aislamiento: **ni `/charge-sale` ni `/hold-deposit` están
+> acotados por inquilino** — `loadSessionAndAgreement` hace un `findUnique` pelado por
+> `sessionId`. Es brecha conocida y rastreada allá (`doc/SESSION-HANDOFF.md`, "batch 2"), y es
+> la misma familia que las dos rutas que ya tenemos en ticket propio.
 (`checkout-session.routes.js:33-380`).
 Branding para pantallas volteadas al cliente: `GET /api/reservations/:id/display-data`.
 
 ## 9. Preguntas abiertas — SOLO Hector decide; si el trabajo se topa con una, parar
 
-1. ¿RideOps es el checkout principal o convive con los otros? Con el kiosco son **cuatro**
-   superficies sobre la misma sesión. Si conviven, hace falta historia de reconciliación
-   más allá del 409 (no hay versioning optimista) y el épico M2 cambia de tamaño.
-   **Decidir antes del M2.**
+1. ~~¿RideOps es el checkout principal o convive con los otros?~~
+   **RESUELTA (Hector, 2026-08-17): CONVIVEN LAS CUATRO superficies** (mostrador web,
+   precheckin del cliente, kiosco, RideOps) sobre la misma sesión, en simultáneo.
+   Consecuencias asumidas para el M2:
+   - El épico incluye una **historia de reconciliación multi-superficie** más allá del
+     409→re-fetch: presencia/claim suave por sesión ("la está atendiendo X en Y"),
+     detección de avance ajeno sin esperar al 409 (poll del `currentStep` mientras el
+     wizard está abierto), y UX de "otra superficie completó este paso".
+   - Requiere **pedidos al backend** (diseñar en el plan del M2, aprobar con Hector antes
+     de tocar backend): mínimo un mecanismo de presencia/heartbeat por sesión de checkout
+     y/o versioning optimista ligero; el loop de `sign` del kiosk sin transacción
+     (REGROUND §2) se vuelve riesgo activo y entra a ese diseño.
+   - El PM diseña el épico M2 con esto ANTES de que cierre H6 (orden de Hector
+     2026-08-17: M2 arranca al terminar H6).
 2. Si el spike del token falla, ¿se aprueba pedir al backend un endpoint de fotos
    autenticado por JWT y sin TTL corto?
 3. ¿Se lanza el MVP sin push, solo con polling?
 4. Parque de aparatos: ¿Android de gama media primero, iOS y tablet después?
-5. ¿Se aceptan web views autenticadas para la cola larga?
+5. ~~¿Se aceptan web views autenticadas para la cola larga?~~
+   **RESUELTA (Hector, 2026-08-17): SÍ — y define el M5.** Web views autenticadas dentro
+   de RideOps para editor de tarifas, administración de personal, config de peajes y
+   reportes/PDFs. Sesión compartida vía token (hand-off seguro por diseñar: token de un
+   solo uso o cookie bridge — probable pedido al backend), navegación integrada, la
+   lógica sigue viva en el web sin duplicarse. Hoja de ruta ordenada por Hector:
+   M0→M1→M2→M3→M4→**M5**, cada milestone dispara el siguiente.
 6. ~~Cuando el cliente firma en el aparato del empleado, el bloqueo por inactividad no debe
    saltar a mitad de la firma. ¿Hace falta un modo kiosco?~~
    **RESUELTA (Hector, 2026-08-16): SÍ — Variante A, modo kiosco.** Barra persistente

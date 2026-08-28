@@ -10,7 +10,7 @@ abstract class TokenStore {
 }
 
 /// Keystore/Keychain vía flutter_secure_storage, con las MISMAS AndroidOptions
-/// que aprobó el spike M0-1a (lib/spike/token_probe.dart):
+/// que aprobó el spike M0-1a (token_probe, retirado en H6):
 /// encryptedSharedPreferences y sin auth de usuario requerida — el drenador de
 /// la bandeja necesita leer el token con el teléfono en el bolsillo.
 class SecureTokenStore implements TokenStore {

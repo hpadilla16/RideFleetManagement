@@ -1,6 +1,8 @@
+import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../lib/prisma.js';
 import { authService } from '../auth/auth.service.js';
+import { recordAudit, AUDIT_ACTIONS, AUDIT_OUTCOME } from '../audit/audit.service.js';
 import {
   assertTenantUserCapacity,
   getTenantPlanCatalog,
@@ -8,8 +10,20 @@ import {
   resolveTenantPlanConfig,
   saveTenantPlanCatalog
 } from '../../lib/tenant-plan-limits.js';
+import { summariseTenantBilling } from '../billing/billing.service.js';
 
 const SALT_ROUNDS = 10;
+
+// 2026-08-23: crypto-strong temp password for super-admin-minted secrets
+// (was the hardcoded 'TempPass123!' literal — trivially guessable). Mirrors
+// people.service.js randomTempPassword: same 12-char-plus shape, satisfies the
+// auth password policy (upper, lower, digit, special — see auth.routes.js
+// validatePassword). One-shot secrets — mustChangePassword forces replacement
+// on first login — but they travel to the super-admin, so they must not be
+// guessable. 64 bits of entropy.
+function randomTempPassword() {
+  return `Temp${crypto.randomBytes(8).toString('hex')}!9`;
+}
 
 function normalizePrismaTarget(error) {
   const raw = error?.meta?.target;
@@ -56,13 +70,28 @@ export const tenantsService = {
     );
     const usageByTenantId = new Map(usageEntries);
 
+    // One query for the whole list, not one per row. `NONE` for a tenant with no
+    // subscription at all — the row that matters most, because it is revenue
+    // nobody remembered to collect rather than revenue that is merely late.
+    const billingByTenantId = await summariseTenantBilling(tenants.map((t) => t.id));
+
     return tenants.map((tenant) => {
       const planConfig = resolveTenantPlanConfig(tenant.plan, catalog);
       const planUsage = usageByTenantId.get(tenant.id) || { admins: 0, users: 0, vehicles: 0 };
+      const billing = billingByTenantId.get(tenant.id) || { status: 'NONE' };
       return {
         ...tenant,
         planConfig,
         planUsage,
+        billing: {
+          ...billing,
+          // Tenant.plan is the ENTITLEMENT key; billing.planCode is the BILLING
+          // key. They should normally match, and activating a subscription
+          // deliberately does NOT rewrite entitlements (design open question 9,
+          // answered "by hand"). Billed at PRO while entitled at STARTER is a
+          // revenue leak; the reverse is a freebie. Neither should be invisible.
+          planDiverges: !!billing.planCode && billing.planCode !== tenant.plan,
+        },
         planStatus: {
           overAdmins: planConfig.maxAdmins != null && planUsage.admins > planConfig.maxAdmins,
           overUsers: planConfig.maxUsers != null && planUsage.users > planConfig.maxUsers,
@@ -188,10 +217,13 @@ export const tenantsService = {
     }
   },
 
-  async createTenantAdmin(tenantId, payload = {}) {
+  // Wave 3 (2026-08-24): `actor` (the super-admin req.user from the route) is
+  // threaded through so USER_CREATE is auditable with WHO created the admin —
+  // the SUPER_ADMIN equivalent of people.service.createPerson's audit.
+  async createTenantAdmin(tenantId, payload = {}, { actor } = {}) {
     const email = String(payload.email || '').trim().toLowerCase();
     const fullName = String(payload.fullName || '').trim();
-    const password = String(payload.password || 'TempPass123!');
+    const password = String(payload.password || randomTempPassword());
     if (!email || !fullName) throw new Error('email and fullName are required');
 
     await assertTenantUserCapacity(tenantId, { userDelta: 1, adminDelta: 1 });
@@ -206,8 +238,8 @@ export const tenantsService = {
           role: 'ADMIN',
           passwordHash,
           // First-login onboarding (2026-07-25): the creating SUPER_ADMIN
-          // knows this password (often the TempPass123! literal) — force
-          // the new admin to replace it.
+          // receives this generated temp password (returned as tempPassword) —
+          // force the new admin to replace it on first login.
           mustChangePassword: true,
           tenant: { connect: { id: tenantId } }
         },
@@ -216,6 +248,20 @@ export const tenantsService = {
     } catch (error) {
       mapTenantWriteError(error, 'Unable to create tenant admin');
     }
+
+    // USER_CREATE audit (best-effort, fire-and-forget). Never records the temp
+    // password. actor = the super-admin from the route.
+    recordAudit({
+      tenantId: user?.tenantId || tenantId || null,
+      actorUserId: actor?.id ?? actor?.sub ?? null,
+      actorEmail: actor?.email ?? null,
+      actorRole: actor?.role ?? null,
+      impersonatedByUserId: actor?.imp ?? null,
+      action: AUDIT_ACTIONS.USER_CREATE,
+      targetType: 'USER',
+      targetId: user?.id || null,
+      metadata: { role: user?.role || 'ADMIN' },
+    });
 
     return { ...user, tempPassword: password };
   },
@@ -228,19 +274,42 @@ export const tenantsService = {
     });
   },
 
-  async resetTenantAdminPassword(tenantId, userId, password = 'TempPass123!') {
+  // Wave 3 (2026-08-24): `actor` threaded through for USER_PASSWORD_RESET audit —
+  // the SUPER_ADMIN equivalent of people.service.resetPassword's audit.
+  async resetTenantAdminPassword(tenantId, userId, password, { actor } = {}) {
     const user = await prisma.user.findFirst({ where: { id: userId, tenantId } });
     if (!user) throw new Error('Tenant admin not found');
-    const passwordHash = await bcrypt.hash(String(password), SALT_ROUNDS);
+    // Fall back to a crypto-strong temp password when the super-admin did not
+    // supply one (was the hardcoded 'TempPass123!' literal).
+    const tempPassword = String(password || randomTempPassword());
+    const passwordHash = await bcrypt.hash(tempPassword, SALT_ROUNDS);
     // First-login onboarding (2026-07-25): admin reset = temp password again.
     // Session cache busted so an open session gates immediately on this
     // worker (siblings converge within the 30s TTL).
     await prisma.user.update({ where: { id: user.id }, data: { passwordHash, mustChangePassword: true } });
     authService.invalidateSessionCache(user.id);
-    return { ok: true, userId: user.id, email: user.email, tempPassword: password };
+
+    // USER_PASSWORD_RESET audit (best-effort, fire-and-forget). Never records the
+    // temp password. actor = the super-admin from the route.
+    recordAudit({
+      tenantId: user.tenantId || tenantId || null,
+      actorUserId: actor?.id ?? actor?.sub ?? null,
+      actorEmail: actor?.email ?? null,
+      actorRole: actor?.role ?? null,
+      impersonatedByUserId: actor?.imp ?? null,
+      action: AUDIT_ACTIONS.USER_PASSWORD_RESET,
+      targetType: 'USER',
+      targetId: user.id,
+    });
+
+    return { ok: true, userId: user.id, email: user.email, tempPassword };
   },
 
-  async impersonateTenantAdmin(tenantId, targetUserId) {
+  // Wave 3 (2026-08-24): `actor` (the super-admin req.user from the route) is
+  // threaded through so the minted session carries the impersonation marker AND
+  // the event is auditable with WHO initiated it. Optional/back-compatible: an
+  // absent actor mints a plain token and audits with a null actor.
+  async impersonateTenantAdmin(tenantId, targetUserId, { actor } = {}) {
     let user = null;
     if (targetUserId) {
       user = await prisma.user.findFirst({ where: { id: targetUserId, tenantId, isActive: true } });
@@ -248,9 +317,43 @@ export const tenantsService = {
       user = await prisma.user.findFirst({ where: { tenantId, role: 'ADMIN', isActive: true }, orderBy: { createdAt: 'asc' } });
       if (!user) user = await prisma.user.findFirst({ where: { tenantId, isActive: true }, orderBy: { createdAt: 'asc' } });
     }
-    if (!user) throw new Error('No active tenant user found for impersonation');
+    if (!user) {
+      // FAILURE branch: no target found. Audit the attempt (best-effort) with the
+      // super-admin as actor and the target TENANT, then rethrow unchanged.
+      await recordAudit({
+        tenantId,
+        actorUserId: actor?.id ?? actor?.sub ?? null,
+        actorEmail: actor?.email ?? null,
+        actorRole: actor?.role ?? null,
+        action: AUDIT_ACTIONS.IMPERSONATION_START,
+        targetType: 'TENANT',
+        targetId: tenantId,
+        outcome: AUDIT_OUTCOME.FAILURE,
+        metadata: { requestedUserId: targetUserId || null, reason: 'no active tenant user found' },
+      });
+      throw new Error('No active tenant user found for impersonation');
+    }
 
-    const token = authService.issueTokenForUser(user);
+    const impersonatedBy = actor?.id ?? actor?.sub ?? null;
+    const token = impersonatedBy
+      ? authService.issueImpersonationToken(user, { impersonatedBy })
+      : authService.issueTokenForUser(user);
+
+    // SUCCESS: actor = super-admin; tenantId = the TARGET tenant; target = the
+    // impersonated user. Best-effort — a dropped audit row never blocks the
+    // impersonation itself.
+    await recordAudit({
+      tenantId: user.tenantId || tenantId || null,
+      actorUserId: impersonatedBy,
+      actorEmail: actor?.email ?? null,
+      actorRole: actor?.role ?? null,
+      action: AUDIT_ACTIONS.IMPERSONATION_START,
+      targetType: 'USER',
+      targetId: user.id,
+      outcome: AUDIT_OUTCOME.SUCCESS,
+      metadata: { targetEmail: user.email, targetRole: user.role },
+    });
+
     return {
       token,
       user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role, tenantId: user.tenantId || null }

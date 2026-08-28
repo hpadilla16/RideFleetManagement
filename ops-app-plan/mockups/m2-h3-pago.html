@@ -1,0 +1,1704 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RideOps · M2-H3 — Paso de PAGO (rehecho: el depósito NO es card-present)</title>
+<style>
+/* ============================================================
+   TOKENS — idénticos a m1-tanda-a-v2.html, m1-tanda-b.html y
+   m2-tanda-a.html (lenguaje visual aprobado). Nada nuevo salvo
+   lo que se declara como token propio y MEDIDO.
+   ============================================================ */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-200:#d9c9ff; --p-300:#c0a8ff;
+  --p-400:#9f79ff; --p-500:#7f4ff0; --p-600:#6a35e0; --p-700:#5a26c9;
+  --p-800:#45189e; --p-900:#2e1071;
+  --brand:#8752FE;
+  --brand-a08:rgba(135,82,254,.08); --brand-a12:rgba(135,82,254,.12);
+  --brand-a16:rgba(135,82,254,.16); --brand-a20:rgba(135,82,254,.20);
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --badge-warn:#8a5606; /* heredado de la Tanda B del M1: blanco encima = 6.15:1 medido */
+  --focus:#0b63d6; --focus-halo:rgba(11,99,214,.22);
+  --tonal:#f6f2ff;
+  --sh-b1:0 1px 0 rgba(255,255,255,.85) inset,0 2px 6px -2px rgba(69,24,158,.14),0 10px 24px -10px rgba(135,82,254,.22);
+  --sh-float:0 6px 16px -6px rgba(23,18,43,.18),0 24px 48px -18px rgba(69,24,158,.30);
+  --r-xl:24px; --r-2xl:28px;
+  --bd-lite:1px solid rgba(135,82,254,.14);
+  --sh-3:0 1px 3px rgba(24,16,54,.06),0 14px 30px -10px rgba(38,20,90,.14),0 44px 80px -28px rgba(38,20,90,.22);
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+  --card:#fdfcff; /* fondo compuesto real del gradiente de card — todos los contrastes se miden contra ESTE */
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+  background:var(--n-100);color:var(--n-900);font-size:14px;line-height:1.5}
+h1,h2,h3{margin:0;letter-spacing:.005em}
+a{text-decoration:none;color:inherit}
+.tnum{font-variant-numeric:tabular-nums}
+
+/* ---------- chrome del documento (idéntico a las tandas aprobadas) ---------- */
+.doc-head{max-width:1720px;margin:0 auto;padding:26px 24px 10px}
+.doc-head h1{font-size:24px;font-weight:850}
+.doc-head h1 .v2{display:inline-flex;align-items:center;margin-left:10px;padding:3px 12px;border-radius:999px;
+  background:linear-gradient(135deg,var(--p-600),var(--p-800));color:#fff;font-size:13px;font-weight:800;vertical-align:middle}
+.doc-head p{margin:8px 0 0;color:var(--n-700);max-width:1020px}
+.meta-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.mchip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 11px;
+  border-radius:8px;background:var(--p-50);border:1px solid var(--brand-a20);
+  color:var(--p-800);font-size:12.5px;font-weight:700}
+.mchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.mchip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.mchip.danger{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.jump{position:sticky;top:0;z-index:60;display:flex;gap:8px;flex-wrap:wrap;
+  padding:10px 24px;background:rgba(255,255,255,.88);backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--n-200);box-shadow:var(--sh-1)}
+.jump a{display:inline-flex;align-items:center;min-height:40px;padding:6px 14px;border-radius:12px;
+  border:1px solid var(--n-300);background:var(--n-0);font-weight:700;font-size:13px;color:var(--n-800)}
+.jump a:hover{background:var(--p-50);border-color:var(--brand-a20);color:var(--p-800)}
+.jump a:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.jump a.gate{border-color:var(--warn-bd);background:var(--warn-bg);color:var(--warn-tx)}
+section.blk{max-width:1720px;margin:0 auto;padding:30px 24px 8px;scroll-margin-top:76px}
+.blk-head{margin-bottom:16px}
+.blk-head .eyebrow{color:var(--p-700);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.blk-head h2{font-size:20px;font-weight:800;margin-top:2px}
+.blk-head p{color:var(--n-700);margin:6px 0 0;max-width:920px}
+.state-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.schip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:6px;
+  font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--n-50);border:1px solid var(--n-200);color:var(--n-700)}
+.schip i{width:6px;height:6px;border-radius:50%;background:currentColor;font-style:normal}
+.frames{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;padding-bottom:26px}
+figure{margin:0}
+figcaption{font-size:13px;font-weight:800;color:var(--n-800);margin:0 0 8px 6px}
+figcaption small{display:block;font-weight:600;color:var(--n-600);font-size:12px}
+
+/* ---------- notas / anotaciones ---------- */
+.notes{flex:1 1 330px;max-width:410px;background:var(--n-0);border:var(--bd-lite);
+  border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1)}
+.notes h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+.note{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--n-100);font-size:13px;color:var(--n-700)}
+.note:last-child{border-bottom:0}
+.note b{color:var(--n-900)}
+.m{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;
+  border-radius:50%;background:var(--p-600);color:#fff;font-size:12px;font-weight:800;line-height:1}
+.m.inframe{position:absolute;z-index:9;box-shadow:0 0 0 2px #fff}
+.motion{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--info-bg);
+  border:1px solid var(--info-bd);font-size:12.5px;color:var(--n-800)}
+.motion b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--info);margin-bottom:6px}
+.motion ul{margin:0;padding-left:16px}
+.motion li{margin:3px 0}
+.contrast{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--n-50);
+  border:1px solid var(--n-200);font-size:12.5px;color:var(--n-700)}
+.contrast b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:6px}
+.contrast li{margin:3px 0}
+.contrast ul{margin:0;padding-left:16px}
+.decision{margin-top:14px;padding:14px 16px;border-radius:16px;background:var(--warn-bg);
+  border:1.5px dashed var(--warn-bd);color:var(--warn-tx);font-size:13px}
+.decision b{display:block;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.decision ul{margin:6px 0 0;padding-left:18px}
+.decision li{margin:3px 0}
+.decision.hard{background:var(--danger-bg);border:1.5px dashed var(--danger-bd);color:var(--danger-tx)}
+.mini-demo{margin-top:12px;padding:12px;border-radius:14px;background:var(--n-50);border:1px solid var(--n-200)}
+.mini-demo .cap{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:8px}
+.mini-demo .row{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.mini-demo .row:last-child{margin-bottom:0}
+.mini-demo .lbl{font-size:11.5px;font-weight:750;color:var(--n-700);flex:0 0 66px}
+
+/* ---------- frame de teléfono ---------- */
+.phone{position:relative;width:390px;border:9px solid var(--n-900);border-radius:40px;
+  overflow:hidden;background:var(--n-50);box-shadow:var(--sh-3)}
+.statusbar{position:relative;z-index:4;display:flex;justify-content:space-between;align-items:center;height:32px;
+  padding:0 20px;font-size:11.5px;font-weight:700;color:var(--n-700);background:var(--n-50)}
+.statusbar.on-white{background:var(--n-0)}
+.statusbar .off{color:var(--danger-tx)}
+.scr{position:relative;display:flex;flex-direction:column;min-height:724px;padding:0}
+/* Corte de la pantalla física. Varias pantallas de dinero tienen más contenido del que cabe en
+   390×724; en vez de recortar el mockup (y esconder justo lo que hay que revisar) se dibuja el
+   contenido completo y se marca DÓNDE termina la pantalla. Lo de ARRIBA de la línea scrollea;
+   el dock vive INMEDIATAMENTE DEBAJO y va anclado al pie — nunca se va de la vista. Por eso la
+   línea se coloca justo encima del dock y sustituye a su propio separador: el punto donde
+   termina el scroll es exactamente donde empieza el pie anclado. */
+.fold{position:relative;margin:auto -14px 0;height:0;border-top:1.5px dashed var(--n-400);pointer-events:none}
+.fold span{position:absolute;right:6px;top:-10px;font-size:10px;font-weight:800;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--n-700);background:var(--n-0);border:1px solid var(--n-300);
+  border-radius:6px;padding:1px 7px;white-space:nowrap}
+.fold + .dock{margin-top:0;padding-top:18px}
+.fold + .dock::before{display:none}
+
+/* ---------- WIZARD: barra, header de sesión, stepper (heredado de la Tanda A) ---------- */
+.wizbar{position:relative;z-index:4;display:flex;align-items:center;gap:8px;padding:7px 8px;
+  background:rgba(255,255,255,.98);border-bottom:1px solid var(--n-200)} /* plate opaco, CERO blur en todo el wizard */
+.icobtn{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+  color:var(--n-800);flex:0 0 auto}
+.wizbar .tt{flex:1;min-width:0}
+.wizbar .tt b{display:block;font-size:15.5px;font-weight:850;color:var(--n-900);line-height:1.15}
+.wizbar .tt span{font-size:12px;font-weight:650;color:var(--n-700)}
+.pausebtn{min-height:48px;display:inline-flex;align-items:center;gap:6px;padding:0 12px;border-radius:14px;
+  border:1.5px solid var(--n-300);background:var(--n-0);font-size:13px;font-weight:800;color:var(--n-800);flex:0 0 auto}
+.sesshead{background:var(--tonal);border-bottom:1px solid var(--n-200);padding:11px 14px;display:grid;gap:9px}
+.sesshead.mini{display:flex;align-items:center;gap:9px;padding:7px 12px}
+.sesshead.mini .who{display:flex;align-items:center;gap:8px;min-width:0;flex:1;font-size:13.5px;font-weight:800;color:var(--n-900)}
+.sesshead.mini .who svg{flex:0 0 auto;color:var(--p-800)}
+.presence{display:inline-flex;align-items:center;gap:7px;min-height:32px;padding:2px 9px;border-radius:12px;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800);font-size:11.5px;font-weight:750}
+.presence .pv{width:19px;height:19px;border-radius:50%;background:var(--p-200);color:var(--p-900);
+  font-size:9px;font-weight:850;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.presence .lv{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:led 2.4s ease-in-out infinite;flex:0 0 auto}
+.presence .lv.stale{background:var(--n-500);animation:none}
+@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
+.srail{display:flex;align-items:flex-start;padding:12px 8px 6px;background:var(--n-0)}
+.sr{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:5px;position:relative;min-height:48px}
+.sr .d{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  border:2px solid var(--n-300);background:var(--n-0);color:var(--n-600);font-size:11px;font-weight:850;
+  position:relative;z-index:2}
+.sr .lb{font-size:11.5px;font-weight:800;color:var(--n-600);text-align:center;line-height:1.15}
+.sr::before{content:"";position:absolute;top:11px;right:50%;width:100%;height:3px;background:var(--n-200);z-index:1}
+.sr:first-child::before{display:none}
+.sr.done .d{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.sr.done .lb{color:var(--ok-tx)}
+.sr.done::before,.sr.on::before{background:var(--ok-bd)}
+.sr.on .d{background:var(--p-600);border-color:var(--p-600);color:#fff;box-shadow:0 0 0 4px var(--brand-a16)}
+.sr.on .lb{color:var(--p-800);font-weight:850}
+.stepline{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 14px;background:var(--n-0);
+  border-bottom:1px solid var(--n-200);font-size:13.5px;font-weight:750;color:var(--n-800)}
+.stepline .ix{font-variant-numeric:tabular-nums;font-weight:850;color:var(--p-800);background:var(--p-50);
+  border:1px solid var(--brand-a20);border-radius:8px;padding:2px 8px;font-size:12px;flex:0 0 auto}
+.stepline.stale{background:var(--n-50);color:var(--n-700)}
+.wpad{padding:14px 14px 18px;display:flex;flex-direction:column;flex:1;gap:11px;position:relative;z-index:2}
+.dock{margin-top:auto;display:grid;gap:9px;padding:12px 0 0;position:relative}
+.dock::before{content:"";position:absolute;top:0;left:-14px;right:-14px;height:1px;background:var(--n-200)}
+.dock .why{font-size:12.5px;font-weight:750;color:var(--n-700);text-align:center;line-height:1.4}
+.center-state{margin:auto 0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;padding:0 8px}
+.big-ic{width:76px;height:76px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.big-ic.ok{background:var(--ok-bg);border:1.5px solid var(--ok-bd);color:var(--ok-tx)}
+.big-ic.info{background:var(--info-bg);border:1.5px solid var(--info-bd);color:var(--info)}
+.big-ic.warn{background:var(--warn-bg);border:1.5px solid var(--warn-bd);color:var(--warn-tx)}
+.big-ic.deny{background:var(--danger-bg);border:1.5px solid var(--danger-bd);color:var(--danger-tx)}
+.center-state h4{margin:0;font-size:22px;font-weight:850;color:var(--n-900)}
+.center-state p{margin:0;font-size:14px;color:var(--n-700);max-width:300px}
+
+/* ---------- comunes (heredados) ---------- */
+.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;
+  font-size:13.5px;font-weight:600;line-height:1.45;border:1px solid}
+.banner svg{flex:0 0 auto;margin-top:1px}
+.banner .ba{display:inline-flex;align-items:center;min-height:44px;font-weight:850;text-decoration:underline}
+.b-danger{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.b-warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.b-ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.b-info{background:var(--info-bg);border-color:var(--info-bd);color:var(--n-800)}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:56px;border-radius:18px;
+  font-size:16px;font-weight:800;letter-spacing:.01em}
+.btn-primary{background:linear-gradient(180deg,#7442e8,var(--p-600));color:#fff;
+  box-shadow:0 1px 0 rgba(255,255,255,.28) inset,0 4px 10px -4px rgba(69,24,158,.35),0 14px 28px -12px rgba(135,82,254,.45)}
+.btn-ghost{background:var(--n-0);border:1.5px solid var(--n-300);color:var(--n-800);box-shadow:var(--sh-1)}
+.btn-danger{background:var(--danger);color:#fff;box-shadow:0 1px 0 rgba(255,255,255,.2) inset,0 10px 22px -10px rgba(192,38,38,.5)}
+.btn.is-disabled{opacity:.55}
+.btn-sm{min-height:48px;font-size:14.5px;border-radius:14px}
+.btn-md{min-height:54px;font-size:15.5px;border-radius:16px}
+.spin{width:18px;height:18px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;
+  border-radius:50%;animation:rot 1s linear infinite}
+.spin.dk{border-color:rgba(106,53,224,.25);border-top-color:var(--p-600);width:22px;height:22px}
+@keyframes rot{to{transform:rotate(360deg)}}
+.scrim{position:absolute;inset:0;z-index:5;background:rgba(23,18,43,.42)}
+.sheet{position:absolute;left:8px;right:8px;bottom:8px;z-index:6;
+  background:rgba(255,255,255,.97); /* plate opaco — el wizard NO usa BackdropFilter */
+  border-radius:var(--r-2xl);border:1px solid rgba(255,255,255,.95);outline:1px solid rgba(23,18,43,.06);
+  box-shadow:var(--sh-float);padding:10px 16px 16px}
+.sheet.tall{top:52px;overflow:hidden;display:flex;flex-direction:column}
+.grab{width:44px;height:5px;border-radius:3px;background:var(--n-300);margin:4px auto 12px}
+.sheet h5{margin:0;font-size:18px;font-weight:850;color:var(--n-900)}
+.sheet .ssub{font-size:13px;color:var(--n-700);font-weight:600;margin:4px 0 12px}
+.opt{display:flex;align-items:center;gap:12px;min-height:56px;padding:0 14px;border-radius:16px;
+  border:1.5px solid var(--n-200);background:var(--n-0);margin-bottom:8px;font-size:15px;font-weight:700;color:var(--n-800)}
+.opt .radio{width:22px;height:22px;border-radius:50%;border:2px solid var(--n-400);flex:0 0 auto}
+.opt.sel{border-color:var(--p-600);background:var(--p-50);color:var(--p-800)}
+.opt.sel .radio{border-color:var(--p-600);background:radial-gradient(circle,var(--p-600) 0 45%,transparent 50%)}
+.opt .osub{display:block;font-size:12px;font-weight:650;color:var(--n-700)}
+.opt.off{background:var(--n-25);border-color:var(--n-200);color:var(--n-700)} /* GD-2: sin opacidad */
+.opt.off .radio{border-color:var(--n-400);background:var(--n-100)}
+.dim{opacity:.9;pointer-events:none}
+.vcard{background:linear-gradient(180deg,#fff,var(--card));border:var(--bd-lite);border-radius:20px;
+  padding:12px 14px;box-shadow:var(--sh-b1)}
+.vcard.bad{border:1.5px solid var(--danger-bd);background:#fffbfb}
+.vcard.warn{border:1.5px solid var(--warn-bd);background:#fffdf7}
+.vhead{display:flex;align-items:center;gap:9px}
+.vhead b{font-size:14.5px;font-weight:850;color:var(--n-900);flex:1}
+.kv{display:flex;align-items:flex-start;gap:8px;padding:7px 0 6px;border-top:1px solid var(--n-100);font-size:13.5px}
+.kv:first-of-type{border-top:0}
+.kv .k{color:var(--n-700);font-weight:650;flex:0 0 104px}
+.kv .v{color:var(--n-900);font-weight:750;flex:1;min-width:0}
+.linkbtn{min-height:48px;display:inline-flex;align-items:center;gap:6px;font-size:13.5px;font-weight:800;color:var(--p-700)}
+.tenantbar{display:flex;align-items:center;gap:10px;padding:11px 16px;background:var(--n-0);border-bottom:1px solid var(--n-200)}
+.tlogo{width:36px;height:36px;border-radius:12px;background:var(--n-800);color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:850;flex:0 0 auto}
+.tname{font-size:15.5px;font-weight:850;color:var(--n-900)}
+.tsub{font-size:12px;color:var(--n-700);font-weight:600}
+.nobrand{display:flex;gap:8px;align-items:flex-start;margin-top:auto;padding:10px 12px;border-radius:14px;
+  border:1.5px dashed var(--n-300);background:var(--n-25);color:var(--n-700);font-size:12px;font-weight:700}
+
+/* ============================================================
+   COMPONENTES NUEVOS DE LA TANDA B — el vocabulario del DINERO.
+   Regla raíz del sistema (nota 1 de la sección 12):
+   MOVER dinero = gradiente morado. REGISTRAR = tinta --n-800 sin
+   relleno. Rojo = SOLO error, jamás un cobro.
+   ============================================================ */
+
+/* Desglose que llega del PREVIEW DEL SERVIDOR (ADR-6) */
+.money{background:linear-gradient(180deg,#fff,var(--card));border:var(--bd-lite);border-radius:20px;
+  padding:12px 14px 12px;box-shadow:var(--sh-b1)}
+.money .mh{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.money .mh b{font-size:14.5px;font-weight:850;color:var(--n-900);flex:1}
+.mline{display:flex;align-items:baseline;gap:10px;padding:6px 0;border-top:1px solid var(--n-100);font-size:13.5px}
+.mline:first-of-type{border-top:0}
+.mline .c{flex:1;min-width:0;color:var(--n-700);font-weight:650}
+.mline .a{color:var(--n-900);font-weight:750;font-variant-numeric:tabular-nums;flex:0 0 auto}
+.mline.sub{border-top:1.5px solid var(--n-200)}
+.mline.sub .c{font-weight:800;color:var(--n-700)}
+.mline.credit .a{color:var(--ok-tx);font-weight:800}
+.mline.new{background:var(--warn-bg);margin:0 -14px;padding:6px 14px;border-top-color:var(--warn-bd)}
+.mline.new .c{color:var(--warn-tx);font-weight:800}
+.mline.new .a{color:var(--n-900);font-weight:850}
+.mtot{display:flex;align-items:center;gap:10px;margin-top:9px;padding:11px 13px;border-radius:16px;
+  background:var(--tonal);border:1px solid var(--brand-a20)}
+.mtot .c{flex:1;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--n-700);line-height:1.25}
+.mtot .a{font-size:28px;font-weight:850;color:var(--n-900);font-variant-numeric:tabular-nums;line-height:1;flex:0 0 auto}
+.mtot .a .cur{font-size:12px;font-weight:800;color:var(--n-700);margin-left:5px}
+.mtot.hold{background:var(--n-50);border-color:var(--n-200)}
+.mtot.hold .a{font-size:22px}
+
+/* Sello de PROCEDENCIA del número — el recibo visible de ADR-6 */
+.prov{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:2px 10px;border-radius:10px;
+  background:var(--ok-bg);border:1px solid var(--ok-bd);color:var(--ok-tx);font-size:12px;font-weight:800}
+.prov.est{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+/* MC-1 (GD): la divergencia NO es un error — el servidor tiene razón. Era rojo y contradecía
+   la propia nota 1 de §13 ("ámbar, no rojo"). Ámbar reforzado con borde de 1.5 px para que
+   se distinga del "estimado" sin recurrir al color solo. */
+.prov.div{background:var(--warn-bg);border:1.5px solid var(--warn-tx);color:var(--warn-tx)}
+.prov.stale{background:var(--n-50);border-color:var(--n-200);color:var(--n-700)}
+.prov .tick{width:7px;height:7px;border-radius:50%;background:currentColor;flex:0 0 auto}
+
+/* Estado del terminal Spin (GET /:id/terminal-status) */
+.term{display:flex;align-items:center;gap:9px;min-height:52px;padding:7px 12px;border-radius:16px;
+  background:var(--ok-bg);border:1px solid var(--ok-bd)}
+.term .ti{width:34px;height:34px;border-radius:12px;background:rgba(255,255,255,.72);color:var(--ok-tx);
+  display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.term .tb{flex:1;min-width:0}
+.term .tb b{display:block;font-size:13.5px;font-weight:850;color:var(--n-900);line-height:1.2}
+.term .tb span{display:block;font-size:12px;font-weight:700;color:var(--ok-tx);margin-top:1px}
+.term.off{background:var(--danger-bg);border-color:var(--danger-bd)}
+.term.off .ti{color:var(--danger-tx)}
+.term.off .tb span{color:var(--danger-tx)}
+.term.busy{background:var(--warn-bg);border-color:var(--warn-bd)}
+.term.busy .ti{color:var(--warn-tx)}
+.term.busy .tb span{color:var(--warn-tx)}
+.term.unk{background:var(--n-50);border-color:var(--n-200)}
+.term.unk .ti{color:var(--n-700)}
+.term.unk .tb span{color:var(--n-700)}
+.term .tre{min-height:44px;display:inline-flex;align-items:center;padding:0 10px;border-radius:12px;
+  font-size:12.5px;font-weight:850;color:var(--n-800);border:1.5px solid var(--n-300);background:var(--n-0);flex:0 0 auto}
+
+/* Los DOS ACTOS del two-tap: cada toque es su propia tarjeta con su propio estado */
+.act{display:flex;gap:11px;align-items:flex-start;padding:12px 13px;border-radius:20px;border:var(--bd-lite);
+  background:linear-gradient(180deg,#fff,var(--card));box-shadow:var(--sh-b1)}
+.act .an{width:29px;height:29px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  font-size:12.5px;font-weight:850;background:var(--p-600);color:#fff;margin-top:1px}
+.act .ab{flex:1;min-width:0}
+.act .ab b{display:block;font-size:14.5px;font-weight:850;color:var(--n-900);line-height:1.25}
+.act .ab span{display:block;font-size:12.5px;font-weight:700;color:var(--n-700);margin-top:2px;line-height:1.35}
+.act .aa{font-size:17px;font-weight:850;color:var(--n-900);font-variant-numeric:tabular-nums;flex:0 0 auto;margin-top:1px}
+/* espera: superficie HUNDIDA, texto a plena fuerza (regla GD-2 — el motivo es el dato) */
+.act.wait{background:var(--n-25);border-color:var(--n-200);box-shadow:none}
+.act.wait .an{background:var(--n-100);border:2px solid var(--n-300);color:var(--n-700)}
+.act.done{background:var(--ok-bg);border-color:var(--ok-bd);box-shadow:none}
+.act.done .an{background:var(--ok);color:#fff}
+.act.done .ab span{color:var(--ok-tx)}
+.act.live{border:1.5px solid var(--p-600);background:var(--p-50);box-shadow:0 0 0 3px var(--brand-a12)}
+
+/* HECHO INMUTABLE — "esto ya pasó y no se deshace desde aquí" */
+.fact{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border-radius:16px;
+  background:var(--ok-bg);border:1px solid var(--ok-bd)}
+.fact.ink{background:var(--n-50);border-color:var(--n-200)}
+.fact .fi{flex:0 0 auto;color:var(--ok-tx);margin-top:1px}
+.fact.ink .fi{color:var(--n-700)}
+.fact .fb{flex:1;min-width:0;font-size:13px;color:var(--n-900);font-weight:700;line-height:1.4}
+.fact .fb i{display:block;font-style:normal;font-size:12px;font-weight:700;color:var(--n-700);margin-top:2px;font-variant-numeric:tabular-nums}
+
+/* COMPARADOR DE DIVERGENCIA (ADR-6) */
+.divcmp{border-radius:20px;overflow:hidden;border:1.5px solid var(--warn-bd);background:var(--n-0)}
+.divcmp .drow{display:flex;align-items:center;gap:10px;padding:11px 14px}
+.divcmp .dbefore{background:var(--n-50);border-bottom:1px solid var(--n-200)}
+.divcmp .dafter{background:var(--warn-bg)}
+.divcmp .dl{flex:1;min-width:0;font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--n-700);line-height:1.3}
+.divcmp .dafter .dl{color:var(--warn-tx)}
+.divcmp .dv{font-size:20px;font-weight:850;color:var(--n-700);font-variant-numeric:tabular-nums;flex:0 0 auto;
+  text-decoration:line-through;text-decoration-thickness:2px}
+.divcmp .dafter .dv{font-size:30px;color:var(--n-900);text-decoration:none}
+.divcmp .ddelta{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--n-0);border-top:1px solid var(--warn-bd)}
+.divcmp .ddelta .dt{flex:1;font-size:12.5px;font-weight:750;color:var(--n-700)}
+/* MC-1 (GD): la cifra del delta era --danger-tx. Doble problema: pinta de error algo que no lo es,
+   y en convención contable el rojo dice "negativo" cuando aquí el total SUBE. Pasa a --n-900:
+   el significado lo portan el signo (+/−) y la palabra ("Diferencia a favor de la agencia"). */
+.divcmp .ddelta .dn{font-size:15px;font-weight:850;color:var(--n-900);font-variant-numeric:tabular-nums}
+/* 13C: la fila "antes" ya no es un total descartado sino un cobro CONSUMADO — no se tacha. */
+.divcmp.settled .dbefore .dv{text-decoration:none;color:var(--n-900)}
+
+/* REGISTRAR (record-manual-*) — familia visual PROPIA, nunca la del cobro */
+.btn-record{background:var(--n-0);border:1.5px solid var(--n-800);color:var(--n-800);box-shadow:var(--sh-1)}
+.recbox{border-radius:20px;border:1.5px dashed var(--n-400);background:var(--n-25);padding:12px 13px}
+.recbox .rh{display:flex;align-items:center;gap:9px;margin-bottom:4px}
+.recbox .rh b{flex:1;font-size:14px;font-weight:850;color:var(--n-900)}
+.recbox p{margin:0;font-size:12.5px;font-weight:700;color:var(--n-700);line-height:1.4}
+.rtag{display:inline-flex;align-items:center;gap:6px;min-height:26px;padding:2px 9px;border-radius:8px;
+  background:var(--n-100);border:1px solid var(--n-300);color:var(--n-800);
+  font-size:11px;font-weight:850;text-transform:uppercase;letter-spacing:.05em}
+.field{display:block;border-radius:16px;border:1.5px solid var(--n-300);background:var(--n-0);padding:8px 13px;min-height:60px}
+.field .fl{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--n-700)}
+.field .fv{display:block;font-size:16px;font-weight:800;color:var(--n-900);margin-top:2px;font-variant-numeric:tabular-nums}
+.field .fv.ph{color:var(--n-700);font-weight:700}
+.field.req{border-color:var(--n-800)}
+.field.on{border-color:var(--focus);box-shadow:0 0 0 3px var(--focus-halo)}
+/* MC-1 (GD): "Obligatorio" era --danger-tx. No es un error todavía — es un requisito.
+   Pasa a tinta --n-800; el énfasis lo dan el peso 850, la caja alta y el borde del campo. */
+.reqtag{font-size:11px;font-weight:850;color:var(--n-800);text-transform:uppercase;letter-spacing:.04em;margin-left:6px}
+.editaf{margin-left:auto;display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:800;color:var(--p-700)}
+
+/* CAPACIDAD DENEGADA (paymentActions, fail-closed) */
+.capbox{border-radius:20px;border:1px solid var(--n-200);background:var(--n-0);overflow:hidden}
+.capbox .ch{display:flex;align-items:center;gap:8px;padding:10px 13px;background:var(--n-50);border-bottom:1px solid var(--n-200)}
+.capbox .ch b{flex:1;font-size:12.5px;font-weight:850;text-transform:uppercase;letter-spacing:.05em;color:var(--n-700)}
+/* MC-4a (GD): el mapa NO puede vivir desplegado dentro del scroll del paso de pago — tres filas de
+   "no puedes" en cada checkout empujarían las tarjetas de acto y el CTA en la pantalla más crítica.
+   Estado por defecto: UNA fila resumen de 56 px, expandible. DoD-4 pide VISIBLE y auditable, no
+   permanentemente desplegado. */
+.capsum{display:flex;align-items:center;gap:10px;min-height:56px;padding:8px 13px;border-radius:18px;
+  border:1px solid var(--n-200);background:var(--n-0);box-shadow:var(--sh-1)}
+.capsum .ci{flex:0 0 auto;color:var(--n-700)}
+.capsum .cs{flex:1;min-width:0}
+.capsum .cs b{display:block;font-size:13.5px;font-weight:850;color:var(--n-900);line-height:1.2}
+.capsum .cs span{display:block;font-size:12.5px;font-weight:750;color:var(--n-700);margin-top:1px}
+.capsum .cv{flex:0 0 auto;color:var(--p-700)}
+.caprow{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;border-top:1px solid var(--n-100)}
+.caprow:first-of-type{border-top:0}
+.caprow .ci{flex:0 0 auto;color:var(--n-700);margin-top:1px}
+.caprow .cb{flex:1;min-width:0}
+.caprow .cb b{display:block;font-size:13.5px;font-weight:800;color:var(--n-900);line-height:1.25}
+.caprow .cb span{display:block;font-size:12.5px;font-weight:700;color:var(--n-700);margin-top:2px;line-height:1.35}
+.caprow.denied{background:var(--n-25)} /* hundida, texto pleno — NUNCA opacidad, NUNCA escondida (DoD-4) */
+.caprow.allowed .ci{color:var(--ok-tx)}
+
+footer.dod{max-width:1720px;margin:0 auto;padding:10px 24px 50px;color:var(--n-700);font-size:13px}
+footer.dod .card{background:var(--n-0);border:var(--bd-lite);border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1);margin-bottom:14px}
+footer.dod .card.gate{border:1.5px solid var(--warn-bd);background:#fffdf7}
+footer.dod b{color:var(--n-900)}
+.changelog li{margin:5px 0}
+
+@media (prefers-reduced-motion: reduce){
+  .presence .lv,.spin{animation:none}
+}
+
+/* ============================================================
+   AÑADIDOS DE ESTA LÁMINA — cero tokens nuevos.
+   Todo lo de abajo es COMPOSICIÓN con variables que ya existen
+   en m2-tanda-a / m2-tanda-b / m2-delta-h2. Contraste medido al pie.
+   ============================================================ */
+
+/* Ancho REAL pedido: 360 px de pantalla. 378 − 2×9 px de bisel = 360.
+   Alto 780 = 360×780 dp, la resolución lógica típica de la gama media
+   Android del patio. Todo lo que se ve dentro del bisel está a escala 1:1. */
+.phone{width:378px}
+.scr{min-height:780px}
+
+/* TARJETA GUARDADA — el componente que NO existía y es el corazón del rehecho.
+   Familia MORADA (--tonal + --brand-a20), la misma del total del preview:
+   dice "esto es dinero que se va a mover", no "esto es un aparato".
+   Deliberadamente NO usa la familia de .term (verde de terminal en línea):
+   la tarjeta guardada no es un periférico y no depende del terminal. */
+.cof{display:flex;align-items:center;gap:9px;min-height:56px;padding:8px 12px;border-radius:16px;
+  background:var(--tonal);border:1px solid var(--brand-a20)}
+.cof .ci{width:34px;height:34px;border-radius:12px;background:var(--n-0);color:var(--p-800);
+  border:1px solid var(--brand-a20);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.cof .cb{flex:1;min-width:0}
+.cof .cb b{display:block;font-size:13.5px;font-weight:850;color:var(--n-900);line-height:1.2}
+.cof .cb span{display:block;font-size:12.5px;font-weight:750;color:var(--p-800);margin-top:2px;line-height:1.35}
+/* Variante "no hay tarjeta guardada" — tinta neutra, nunca roja: no es un error,
+   es el camino excepcional legítimo (pre-pagado, o sede forzada a card-present). */
+.cof.none{background:var(--n-50);border-color:var(--n-200)}
+.cof.none .ci{color:var(--n-700);border-color:var(--n-300)}
+.cof.none .cb span{color:var(--n-700)}
+
+/* PÍLDORA DE VÍA — "sin tap" / "pide tarjeta" / "la decide el servidor".
+   Tres estados, tres tonos ya existentes. Nunca inventa: si el servidor no
+   informó la vía, se dice que no se sabe (variante .unk). */
+.via{display:inline-flex;align-items:center;gap:5px;min-height:26px;padding:2px 9px;border-radius:9px;
+  font-size:11.5px;font-weight:850;text-transform:uppercase;letter-spacing:.04em;flex:0 0 auto}
+.via.notap{background:var(--ok-bg);border:1px solid var(--ok-bd);color:var(--ok-tx)}
+.via.tap{background:var(--warn-bg);border:1px solid var(--warn-bd);color:var(--warn-tx)}
+.via.unk{background:var(--n-100);border:1px solid var(--n-200);color:var(--n-800)}
+
+/* CLÁUSULA INICIALIZADA — misma geometría de .capsum (fila de 56 px expandible),
+   porque el agente no necesita leer el contrato en cada checkout, pero sí poder
+   leerlo en voz alta cuando el número cambia. El cuerpo es CITA LITERAL: la app
+   no extrae cifras de la prosa firmada (nota 3). */
+.clause{border-radius:18px;border:1px solid var(--n-200);background:var(--n-0);box-shadow:var(--sh-1);overflow:hidden}
+.clause .chd{display:flex;align-items:center;gap:10px;min-height:56px;padding:8px 13px}
+.clause .chd .ci{flex:0 0 auto;color:var(--n-700)}
+.clause .chd .cs{flex:1;min-width:0}
+.clause .chd .cs b{display:block;font-size:13.5px;font-weight:850;color:var(--n-900);line-height:1.2}
+.clause .chd .cs span{display:block;font-size:12.5px;font-weight:750;color:var(--n-700);margin-top:1px}
+.clause .chd .cv{flex:0 0 auto;color:var(--p-700)}
+.clause .cbody{padding:0 13px 12px}
+.clause blockquote{margin:0;padding:10px 12px;border-left:3px solid var(--brand-a20);background:var(--n-25);
+  border-radius:0 12px 12px 0;font-size:12.5px;font-weight:650;color:var(--n-800);line-height:1.45}
+.clause .csrc{display:block;margin-top:7px;font-size:11px;font-weight:800;letter-spacing:.03em;
+  text-transform:uppercase;color:var(--n-600)}
+
+/* CITA DEL SERVIDOR — patrón D2 de m2-delta-h2, aprobado por Hector (2026-08-17).
+   El mensaje llega en inglés y crudo; la app lo enmarca y NO lo traduce ni lo diagnostica. */
+.srvquote{margin-top:8px}
+.srvquote .lab{display:block;font-size:11.5px;font-weight:800;color:var(--n-700);letter-spacing:.01em;margin-bottom:3px}
+.srvquote .raw{display:block;font-size:12.5px;font-weight:700;color:var(--n-800);line-height:1.4}
+
+/* Lista "qué es verdad ahora mismo" del estado a medias. Sin iconos de alarma:
+   son hechos, no alertas. */
+.truth{border-radius:18px;border:1px solid var(--n-200);background:var(--n-0);box-shadow:var(--sh-1);padding:2px 13px}
+.truth .tr{display:flex;gap:9px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--n-100);font-size:13px;
+  font-weight:700;color:var(--n-800);line-height:1.4}
+.truth .tr:first-child{border-top:0}
+.truth .tr .ti2{flex:0 0 auto;margin-top:1px}
+.truth .tr.yes .ti2{color:var(--ok-tx)}
+.truth .tr.no .ti2{color:var(--n-700)}
+.truth .tr b{color:var(--n-900)}
+
+/* Notas al margen: variante "descartado" para que se vea de un vistazo qué NO se hizo. */
+.note.drop{background:var(--n-25);margin:0 -18px;padding:9px 18px}
+.note.drop .m{background:var(--n-700)}
+.ask{margin-top:12px;padding:13px 15px;border-radius:16px;background:var(--info-bg);
+  border:1.5px solid var(--info-bd);font-size:12.5px;color:var(--n-800)}
+.ask b.h{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--info);margin-bottom:6px}
+.ask ol{margin:0;padding-left:17px}
+.ask li{margin:4px 0}
+.killed{margin-top:12px;padding:13px 15px;border-radius:16px;background:var(--n-50);border:1px solid var(--n-300);font-size:12.5px;color:var(--n-700)}
+.killed b.h{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:6px}
+.killed li{margin:4px 0}
+.killed ul{margin:0;padding-left:17px}
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <h1>RideOps · M2-H3 — Paso de PAGO <span class="v2">rehecho · el depósito no es card-present</span></h1>
+  <p><b>Por qué se rehace.</b> La Tanda B dibujó el segundo acto del cobro como un <b>segundo tap físico</b> del cliente
+  («el cliente vuelve a acercar la tarjeta»). <b>Es falso en el camino normal.</b> Verificado en
+  <code>spin-charge.service.js:915-918</code>:
+  <code>useTokenPath = Boolean(agreement.cardOnFileToken) &amp;&amp; !forceCardPresentDeposit</code>.
+  Después de <code>charge-sale</code> el contrato siempre tiene <code>cardOnFileToken</code> (la venta tokeniza y lo
+  persiste, <code>:763-773</code>), así que <code>hold-deposit</code> toma la vía <b>CNP tokenizada</b> de iPOSpays
+  Transact: <b>sin tap y sin terminal</b>. Solo cae a card-present si no hay token (pre-pagado, sin venta previa) o si
+  <code>IPOS_FORCE_CARD_PRESENT_DEPOSIT=true</code>. El comentario del código decía lo contrario y estaba mal.
+  Un mostrador construido contra la lámina anterior le pediría al cliente una tarjeta que en el camino normal nadie
+  va a sacar.</p>
+  <p style="margin-top:8px"><b>Qué reemplaza y qué no.</b> Reemplaza la <b>§12 de <code>m2-tanda-b.html</code></b>
+  (frames 12A–12E) y la mitad de depósito de la §16. Lo demás de la Tanda B —failsafe manual (§14), mapa de
+  capacidades (§15), divergencia del preview de la venta (§13)— <b>sigue vigente y no se toca</b>: aquí se reusa su
+  vocabulario tal cual, sin un solo componente nuevo que no esté justificado abajo.</p>
+  <div class="meta-chips">
+    <span class="mchip">Ancho <b>REAL 360 px</b> · alto 780 · escala 1:1 dentro del bisel</span>
+    <span class="mchip">Tokens heredados de <code>m2-tanda-a/b</code> · <b>cero tokens nuevos</b></span>
+    <span class="mchip">Copy exacta <b>ES + EN</b> por frame, con clave <code>.arb</code> (ADR-8)</span>
+    <span class="mchip">Targets ≥ 48 · CTAs 56 · <b>todo el dock al alcance del pulgar</b></span>
+    <span class="mchip ok">Par de dos toques: <code>charge-sale</code> + <code>hold-deposit</code></span>
+    <span class="mchip warn"><code>/charge</code> NO se usa — <code>paymentActions</code> apagada en AGENT ⇒ 403</span>
+    <span class="mchip warn">El hueco del dinero solo contiene cifras <b>del servidor</b></span>
+  </div>
+</div>
+
+<nav class="jump">
+  <a href="#p1">P1 · Antes del primer toque</a>
+  <a href="#p2">P2 · ★ El estado a medias</a>
+  <a href="#p3">P3 · Retención en curso</a>
+  <a href="#p4">P4 · ★ Falló el segundo</a>
+  <a href="#p5">P5 · La excepción con tarjeta</a>
+  <a href="#p6">P6 · Sin conexión</a>
+  <a href="#p7">P7 · El depósito cambió</a>
+  <a href="#p8">P8 · Pago cerrado</a>
+  <a href="#pie">Descartes · pedidos · dudas</a>
+</nav>
+
+<!-- ============================================================ P1 -->
+<section class="blk" id="p1">
+  <div class="blk-head">
+    <span class="eyebrow">Frame P1 · M2-H3 · <code>currentStep = TC_SIGNED</code></span>
+    <h2>Antes del primer toque — dos actos, y el segundo ya dice que no pedirá la tarjeta</h2>
+    <p>El cliente ya firmó los T&amp;C. El desglose no se calcula aquí: llega del <b>preview del servidor</b> y se sella
+    con su hora (ADR-6). El cobro son <b>dos llamadas separadas</b>:
+    <code>POST /:id/charge-sale</code> (la renta; <b>no</b> estampa <code>paymentCompletedAt</code>) y luego
+    <code>POST /:id/hold-deposit</code> (la garantía; ese sí estampa y avanza el wizard a <code>PAID</code>).
+    Encima corre el poll de <code>GET /:id/terminal-status</code>.</p>
+    <div class="blk-head origin"><b>El cambio respecto a 12A.</b> La tarjeta del acto 2 decía «es un <b>segundo tap</b>
+    del cliente». Ahora dice lo que de verdad pasa: <b>va contra la tarjeta que el propio cobro deja guardada</b>. El
+    agente lee esa frase ANTES de cobrar, así que cuando llegue al acto 2 ya sabe que no tiene que pedir nada. Es la
+    única forma de que el rehecho sirva: si la corrección solo apareciera en el acto 2, el agente ya habría dicho en voz
+    alta «ahorita me la vuelves a dar».</div>
+    <div class="state-chips">
+      <span class="schip"><i></i>Preview fresco</span><span class="schip"><i></i>Terminal listo</span>
+      <span class="schip"><i></i>Acto 1 activo</span><span class="schip"><i></i>Acto 2 en espera, con su vía dicha</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>P1 — Estado normal <small>360 × 780 reales · el dock cabe bajo el pulgar</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:11</span><span>LTE · 82 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112 · LAX</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr on"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 3 de 10</span>Cobro y garantía</div>
+          <div class="wpad">
+            <div class="money"><span class="m inframe" style="margin:-8px 0 0 316px">1</span>
+              <div class="mh"><b>Cuenta del cliente</b><span class="prov"><span class="tick"></span>Servidor · hace 4 s</span></div>
+              <div class="mline"><span class="c">Renta · 3 días × $96.00</span><span class="a">$288.00</span></div>
+              <div class="mline"><span class="c">Protección estándar</span><span class="a">$54.00</span></div>
+              <div class="mline"><span class="c">Conductor adicional</span><span class="a">$24.00</span></div>
+              <div class="mline"><span class="c">Cuota de aeropuerto</span><span class="a">$11.60</span></div>
+              <div class="mline sub"><span class="c">Subtotal</span><span class="a">$377.60</span></div>
+              <div class="mline"><span class="c">Impuestos y cargos</span><span class="a">$35.20</span></div>
+              <div class="mtot"><span class="c">A cobrar ahora</span><span class="a tnum">$412.80<span class="cur">USD</span></span></div>
+              <div class="mline" style="border-top:1px solid var(--n-200);margin-top:9px;padding-top:8px">
+                <span class="c">Al cobrar, <b style="color:var(--n-900)">la tarjeta queda guardada</b> para la garantía y
+                para los cargos posteriores de este contrato.<span class="m" style="margin-left:5px">2</span></span></div>
+            </div>
+            <div class="act live"><span class="m inframe" style="margin:-9px 0 0 318px">3</span>
+              <span class="an">1</span>
+              <div class="ab"><b>Cobrar la renta</b><span>El cliente acerca su tarjeta al terminal.</span></div>
+              <span class="aa tnum">$412.80</span></div>
+            <div class="act wait">
+              <span class="an">2</span>
+              <div class="ab"><b>Retener la garantía</b>
+                <span>Se habilita cuando la renta quede cobrada. Va contra la tarjeta que ese cobro deja guardada:
+                <b>normalmente no hay que volver a pedirla</b>.</span></div>
+              <span class="aa tnum">$2,000.00</span></div>
+            <div class="clause"><span class="m inframe" style="margin:-9px 0 0 316px">4</span>
+              <div class="chd">
+                <span class="ci"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 3.5h9l4 4v13H6z"/><path d="M9.5 11h7"/><path d="M9.5 15h5"/></svg></span>
+                <div class="cs"><b>Lo que el cliente inicializó</b><span>Depósito y cargos posteriores</span></div>
+                <span class="cv"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M8 5l7 7-7 7"/></svg></span>
+              </div>
+            </div>
+            <div class="term"><span class="m inframe" style="margin:-8px 0 0 316px">5</span>
+              <span class="ti"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18"/></svg></span>
+              <div class="tb"><b>Terminal Spin · Mostrador 1</b><span>Listo · consultado hace 6 s</span></div>
+              <span class="tre">Consultar</span></div>
+            <div class="fold"><span>Corte de la pantalla · el dock va anclado abajo</span></div>
+            <div class="dock">
+              <div class="btn btn-primary">Cobrar $412.80</div>
+              <div class="btn btn-record btn-sm"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8.5 10h7"/><path d="M8.5 14h4.5"/></svg>Registrar cobro hecho afuera</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>P1-bis — La cláusula, abierta <small>cita literal · la app no le saca la cifra a la prosa</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:11</span><span>LTE · 82 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112 · LAX</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 3 de 10</span>Cobro y garantía</div>
+          <div class="wpad">
+            <div class="clause"><span class="m inframe" style="margin:-9px 0 0 316px">6</span>
+              <div class="chd">
+                <span class="ci"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 3.5h9l4 4v13H6z"/><path d="M9.5 11h7"/><path d="M9.5 15h5"/></svg></span>
+                <div class="cs"><b>Lo que el cliente inicializó</b><span>Depósito y cargos posteriores</span></div>
+                <span class="cv"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M5 9l7 7 7-7"/></svg></span>
+              </div>
+              <div class="cbody">
+                <blockquote>I authorize a security deposit hold of $2,000 against my card on file. I further authorize
+                the merchant to charge the same card for unpaid tolls, traffic fines, parking citations, fuel, cleaning,
+                and damage assessed after the rental ends.</blockquote>
+                <span class="csrc">Texto firmado · sección <code>deposit_post_charges</code> · inicializado 10:07</span>
+              </div>
+            </div>
+            <div class="fact ink"><span class="m inframe" style="margin:-9px 0 0 316px">7</span>
+              <span class="fi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><path d="M12 7.6v.6"/></svg></span>
+              <div class="fb">Este texto se muestra <b>tal como se firmó</b>, en el idioma en que se firmó.
+              <i>La app no lo traduce, no lo resume y no le extrae el monto.</i></div></div>
+            <div class="act wait">
+              <span class="an">2</span>
+              <div class="ab"><b>Retener la garantía</b><span>Monto según el servidor. Coincide con la cláusula.</span></div>
+              <span class="aa tnum">$2,000.00</span></div>
+            <div class="fold"><span>Corte de la pantalla · el dock va anclado abajo</span></div>
+            <div class="dock">
+              <div class="btn btn-primary">Cobrar $412.80</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes">
+      <h3>Notas · P1</h3>
+      <div class="note"><span class="m">1</span><div><b>El hueco del dinero solo acepta cifras del servidor.</b>
+      El desglose entero viene del preview y se etiqueta con su edad. Nada de esta tarjeta se suma en Dart: el cliente
+      firma el número del servidor (ADR-6) y la app no tiene una segunda opinión.</div></div>
+      <div class="note"><span class="m">2</span><div><b>El guardado de la tarjeta se dice donde ocurre.</b>
+      Las tres rutas persisten <code>cardOnFileToken</code> y hoy la app solo lo menciona en una pantalla
+      (pendiente abierto del M2-PLAN). Aquí se dice en la venta, y en P2 se vuelve a decir en la garantía, porque el
+      cliente está delante y el agente tiene que poder explicarlo. <b>El texto exacto necesita tu visto bueno legal.</b></div></div>
+      <div class="note"><span class="m">3</span><div><b>Dos tarjetas de acto, no un botón con dos fases.</b>
+      Se conserva el vocabulario de la Tanda B: cada llamada del par es su propia tarjeta con su propio estado
+      (<code>live</code> / <code>wait</code> / <code>done</code>). Es lo que permite que el estado a medias de P2 sea
+      legible sin una sola palabra nueva.</div></div>
+      <div class="note"><span class="m">4</span><div><b>La cláusula vive plegada, no desplegada.</b>
+      Fila de 56 px. El agente no lee el contrato en cada checkout; lo necesita cuando el número cambia (P7) o cuando
+      el cliente pregunta. Mismo patrón que el mapa de capacidades de la §15, aprobado por la misma razón.</div></div>
+      <div class="note"><span class="m">5</span><div><b>El terminal sigue arriba en P1 — porque el acto 1 sí lo usa.</b>
+      La venta es card-present siempre. Lo que desaparece es en P2, donde ya no interviene.</div></div>
+      <div class="note"><span class="m">6</span><div><b>La cifra que se enseña es la del servidor; la que se lee es la
+      firmada.</b> Y son dos cosas distintas a propósito. La app <b>no</b> parsea «$2,000» del cuerpo de la sección:
+      ese cuerpo es prosa libre, sobrescribible por sede (<code>Location.termsSectionsJson</code>) y en cualquier
+      idioma. Un regex sobre un texto legal es exactamente «una cifra que el cliente deriva».</div></div>
+      <div class="note drop"><span class="m">D</span><div><b>Descartado: comparar montos en la app.</b>
+      Tentador —«si la cláusula dice 2000 y el servidor 2500, avisa»— pero exige extraer un número de prosa firmada.
+      Falla en la primera sede que escriba «dos mil dólares» y miente en la primera que ponga dos cifras. <b>Compara
+      el humano, con el texto delante</b> (P7). Si Hector lo quiere automático, el pedido va al servidor, no al cliente
+      (ver §pie, pedido 2).</div></div>
+      <div class="cp">
+        <b class="h">Copy · P1</b>
+        <table>
+          <tr><th>Clave .arb</th><th>ES</th><th>EN</th></tr>
+          <tr class="new"><td><code>coPayStepTitle</code></td><td>Cobro y garantía</td><td>Charge and deposit</td></tr>
+          <tr class="new"><td><code>coPayBill</code></td><td>Cuenta del cliente</td><td>Customer bill</td></tr>
+          <tr class="keep"><td><code>coPayFromServer</code></td><td>Servidor · hace {s} s</td><td>Server · {s}s ago</td></tr>
+          <tr class="keep"><td><code>coPayDueNow</code></td><td>A cobrar ahora</td><td>Due now</td></tr>
+          <tr class="new"><td><code>coPayCardWillBeSaved</code></td><td>Al cobrar, la tarjeta queda guardada para la garantía y para los cargos posteriores de este contrato.</td><td>Charging saves the card for the deposit and for later charges on this contract.</td></tr>
+          <tr class="keep"><td><code>coPayActSale</code></td><td>Cobrar la renta</td><td>Charge the rental</td></tr>
+          <tr class="keep"><td><code>coPayActSaleHint</code></td><td>El cliente acerca su tarjeta al terminal.</td><td>The customer taps their card on the terminal.</td></tr>
+          <tr class="new"><td><code>coPayActHold</code></td><td>Retener la garantía</td><td>Hold the deposit</td></tr>
+          <tr class="new"><td><code>coPayActHoldWaiting</code></td><td>Se habilita cuando la renta quede cobrada. Va contra la tarjeta que ese cobro deja guardada: normalmente no hay que volver a pedirla.</td><td>Unlocks once the rental is charged. It runs against the card that charge leaves on file: normally there is no need to ask for it again.</td></tr>
+          <tr class="new"><td><code>coPayClauseTitle</code></td><td>Lo que el cliente inicializó</td><td>What the customer initialled</td></tr>
+          <tr class="new"><td><code>coPayClauseSub</code></td><td>Depósito y cargos posteriores</td><td>Deposit and post-rental charges</td></tr>
+          <tr class="new"><td><code>coPayClauseSource</code></td><td>Texto firmado · sección deposit_post_charges · inicializado {hora}</td><td>Signed text · deposit_post_charges section · initialled {time}</td></tr>
+          <tr class="new"><td><code>coPayClauseVerbatim</code></td><td>Este texto se muestra tal como se firmó, en el idioma en que se firmó. La app no lo traduce, no lo resume y no le extrae el monto.</td><td>This text is shown exactly as signed, in the language it was signed in. The app does not translate it, summarise it, or read an amount out of it.</td></tr>
+          <tr class="keep"><td><code>coPayCtaCharge</code></td><td>Cobrar {monto}</td><td>Charge {amount}</td></tr>
+          <tr class="keep"><td><code>coPayRecordSale</code></td><td>Registrar cobro hecho afuera</td><td>Record a charge taken elsewhere</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ P2 -->
+<section class="blk" id="p2">
+  <div class="blk-head">
+    <span class="eyebrow">Frame P2 · M2-H3 · <code>currentStep = PAYMENT_PENDING</code> · ★ EL CORAZÓN</span>
+    <h2>El estado a medias — la renta ya se cobró y la garantía todavía no</h2>
+    <p>Entre las dos llamadas hay un hueco real: <code>charge-sale</code> ya movió dinero y <b>no</b> estampó
+    <code>paymentCompletedAt</code>; el wizard sigue en <code>PAYMENT_PENDING</code> hasta que
+    <code>hold-deposit</code> responda. Si el agente cierra la app aquí, vuelve a <b>este mismo estado</b> — y tiene que
+    entenderlo en dos segundos, con sol en la pantalla.</p>
+    <div class="blk-head origin"><b>El cambio grande.</b> Desaparece la promesa de segundo tap y aparece la
+    <b>tarjeta guardada</b> como objeto de primera clase: <code>Visa ••4417</code>, capturada en el cobro
+    (<code>extractCardOnFile</code>, <code>:762</code>), con la frase que evita la escena incómoda del mostrador:
+    <b>«No hace falta pedírsela otra vez.»</b> Y <b>se cae la tarjeta del terminal</b>: en esta vía el terminal no
+    interviene, y dejarla puesta sugeriría que sí.</div>
+    <div class="state-chips">
+      <span class="schip"><i></i>Acto 1 = hecho inmutable</span><span class="schip"><i></i>Tarjeta guardada visible</span>
+      <span class="schip"><i></i>Vía: sin tap</span><span class="schip"><i></i>El paso NO está cerrado</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>P2 — Renta cobrada, garantía pendiente <small>lo que ve el agente entre los dos toques</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:13</span><span>LTE · 81 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112 · LAX</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr on"><span class="d">4</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">6</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Falta la garantía para cerrar</div>
+          <div class="wpad">
+            <div class="act done"><span class="m inframe" style="margin:-9px 0 0 318px">8</span>
+              <span class="an"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+              <div class="ab"><b>Renta cobrada</b><span>10:12 · aprobación 004512 · Visa ••4417 · por Hugo P.</span></div>
+              <span class="aa tnum">$412.80</span></div>
+            <div class="cof"><span class="m inframe" style="margin:-9px 0 0 316px">9</span>
+              <span class="ci"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.6"/><path d="M2.5 10h19"/><path d="M6 14.5h3.5"/></svg></span>
+              <div class="cb"><b>Visa ••4417 · guardada</b><span>La garantía se retiene contra esta tarjeta.
+              <b>No hace falta pedírsela otra vez.</b></span></div></div>
+            <div class="act live"><span class="m inframe" style="margin:-9px 0 0 318px">10</span>
+              <span class="an">2</span>
+              <div class="ab"><b>Retener la garantía</b>
+                <span>Pre-autorización contra la tarjeta guardada. <b>No es un cobro</b>: se libera al devolver la
+                unidad.</span>
+                <span style="margin-top:6px"><span class="via notap">Sin tap</span></span></div>
+              <span class="aa tnum">$2,000.00</span></div>
+            <div class="truth"><span class="m inframe" style="margin:-9px 0 0 316px">11</span>
+              <div class="tr yes"><span class="ti2"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+                <div>La renta <b>ya está cobrada</b>. Ese cobro no se deshace desde aquí.</div></div>
+              <div class="tr no"><span class="ti2"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 8.5v4.5"/><path d="M12 15.8v.4"/></svg></span>
+                <div>El <b>paso de pago sigue abierto</b>. Solo la garantía lo cierra.</div></div>
+              <div class="tr no"><span class="ti2"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16v12H4z"/><path d="M4 11h16"/></svg></span>
+                <div>Si cierras la app, vuelves <b>exactamente aquí</b>.</div></div>
+            </div>
+            <div class="clause">
+              <div class="chd">
+                <span class="ci"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 3.5h9l4 4v13H6z"/><path d="M9.5 11h7"/><path d="M9.5 15h5"/></svg></span>
+                <div class="cs"><b>Lo que el cliente inicializó</b><span>Depósito y cargos posteriores</span></div>
+                <span class="cv"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M8 5l7 7-7 7"/></svg></span>
+              </div>
+            </div>
+            <div class="fold"><span>Corte de la pantalla · el dock va anclado abajo</span></div>
+            <div class="dock">
+              <div class="btn btn-primary">Retener $2,000.00</div>
+              <div class="btn btn-record btn-sm"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8.5 10h7"/><path d="M8.5 14h4.5"/></svg>Registrar garantía tomada afuera</div>
+              <div class="why">Solo esta acción <b>cierra el pago</b> y avanza el wizard.<span class="m" style="margin-left:4px">12</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes">
+      <h3>Notas · P2 — el estado a medias</h3>
+      <div class="note"><span class="m">8</span><div><b>El acto 1 se vuelve un hecho con autoría.</b>
+      Hora, aprobación, últimos cuatro y <b>quién</b>. Verde <code>--ok-bg</code>, sin botones: no hay nada que
+      deshacer aquí y la pantalla no finge que sí. La reversión de una venta vive en View Payments, en la web.</div></div>
+      <div class="note"><span class="m">9</span><div><b>La tarjeta guardada es el componente nuevo, y es todo el punto.</b>
+      Sale del propio <code>charge-sale</code> (<code>cardOnFile.brand/last4</code> en la respuesta). Antes de esto
+      el agente no tenía forma de saber, mirando la pantalla, que ya no necesitaba al cliente. La frase
+      <b>«No hace falta pedírsela otra vez»</b> es la corrección del error de la Tanda B, escrita donde duele.</div></div>
+      <div class="note"><span class="m">10</span><div><b>La píldora de vía dice la verdad y solo la verdad.</b>
+      <code>Sin tap</code> se pinta <b>solo</b> cuando el servidor informó la vía. Hoy el servidor la informa
+      <b>después</b> (<code>mode: 'CNP' | 'CARD_PRESENT'</code> en la respuesta de <code>hold-deposit</code>) y
+      <code>IPOS_FORCE_CARD_PRESENT_DEPOSIT</code> es config de tenant que el cliente no ve. <b>Por eso el pedido 1
+      del pie.</b> Sin ese campo, la píldora cae a <code>La decide el servidor</code> (P3-bis) — nunca se promete algo
+      que no se sabe.</div></div>
+      <div class="note"><span class="m">11</span><div><b>«Qué es verdad ahora mismo»: tres líneas, cero jerga.</b>
+      El riesgo del estado a medias no es que el agente se confunda de botón: es que crea que ya terminó y se lleve al
+      cliente al patio con el pago abierto. Estas tres líneas se leen de un vistazo bajo sol y no usan ni una palabra
+      de dominio (ni <i>pre-autorización</i>, ni <i>estampar</i>, ni <i>sesión</i>).</div></div>
+      <div class="note"><span class="m">12</span><div><b>El failsafe sigue existiendo, y sigue siendo secundario.</b>
+      <code>record-manual-deposit</code> mantiene su familia visual propia (tinta <code>--n-800</code>, sin relleno):
+      registrar no es cobrar. Es también la <b>única salida verdadera</b> cuando hay retención pero el paso no está
+      sellado (bloqueante 4 del M2-PLAN).</div></div>
+      <div class="note drop"><span class="m">D</span><div><b>Descartado: dejar la tarjeta del terminal en P2.</b>
+      En la vía tokenizada el terminal no participa. Una tarjeta verde «Terminal listo» encima del botón de retener es
+      una mentira por implicatura: el agente mira el aparato en vez de la pantalla. <b>Vuelve en P5</b>, que es el único
+      frame donde el terminal sí manda.</div></div>
+      <div class="note drop"><span class="m">D</span><div><b>Descartado: encadenar las dos llamadas automáticamente.</b>
+      Sería un solo botón «Cobrar y retener». Lo rechazo por dos razones: (a) el monto de la garantía puede
+      <b>cambiar</b> entre las dos llamadas —el uplift por débito se calcula con el tipo de tarjeta que revela el cobro
+      (<code>applyDebitDepositUplift</code>, <code>:161</code>)— y encadenar retendría en silencio una cifra que el
+      cliente nunca vio; (b) el fallo del segundo dejaría al agente frente a un error sin saber que el primero pasó.
+      El par de dos toques es de dos toques <b>en la pantalla también</b>.</div></div>
+      <div class="note drop"><span class="m">D</span><div><b>Descartado: barra de progreso «1 de 2».</b>
+      Redundante con el rail del wizard y con las dos tarjetas de acto, y en 360 px cada fila cuesta. El estado ya se
+      lee: una tarjeta verde arriba, una morada activa abajo.</div></div>
+      <div class="motion"><b>Movimiento</b><ul>
+        <li>La transición de acto 1 <code>live → done</code> es un cambio de color de 160 ms, sin desplazamiento: la
+        tarjeta no se mueve de sitio, para que el pulgar no persiga nada.</li>
+        <li>Sin confeti, sin check animado. El acto 1 no es el final del paso y celebrarlo invita a irse.</li>
+      </ul></div>
+      <div class="cp">
+        <b class="h">Copy · P2</b>
+        <table>
+          <tr><th>Clave .arb</th><th>ES</th><th>EN</th></tr>
+          <tr class="new"><td><code>coPayStepPendingHold</code></td><td>Falta la garantía para cerrar</td><td>Deposit still pending to close payment</td></tr>
+          <tr class="new"><td><code>coPaySaleDone</code></td><td>Renta cobrada</td><td>Rental charged</td></tr>
+          <tr class="new"><td><code>coPaySaleDoneMeta</code></td><td>{hora} · aprobación {auth} · {marca} ••{last4} · por {agente}</td><td>{time} · approval {auth} · {brand} ••{last4} · by {agent}</td></tr>
+          <tr class="new"><td><code>coPayCardOnFile</code></td><td>{marca} ••{last4} · guardada</td><td>{brand} ••{last4} · on file</td></tr>
+          <tr class="new"><td><code>coPayCardOnFileHint</code></td><td>La garantía se retiene contra esta tarjeta. No hace falta pedírsela otra vez.</td><td>The deposit is held against this card. No need to ask for it again.</td></tr>
+          <tr class="new"><td><code>coPayActHoldLive</code></td><td>Pre-autorización contra la tarjeta guardada. No es un cobro: se libera al devolver la unidad.</td><td>Pre-authorisation against the saved card. It is not a charge: it is released when the vehicle comes back.</td></tr>
+          <tr class="new"><td><code>coPayViaNoTap</code></td><td>Sin tap</td><td>No tap</td></tr>
+          <tr class="new"><td><code>coPayTruthCharged</code></td><td>La renta ya está cobrada. Ese cobro no se deshace desde aquí.</td><td>The rental is already charged. That charge cannot be undone from here.</td></tr>
+          <tr class="new"><td><code>coPayTruthOpen</code></td><td>El paso de pago sigue abierto. Solo la garantía lo cierra.</td><td>The payment step is still open. Only the deposit closes it.</td></tr>
+          <tr class="new"><td><code>coPayTruthResume</code></td><td>Si cierras la app, vuelves exactamente aquí.</td><td>If you close the app, you come back to exactly this point.</td></tr>
+          <tr class="new"><td><code>coPayCtaHold</code></td><td>Retener {monto}</td><td>Hold {amount}</td></tr>
+          <tr class="new"><td><code>coPayRecordDeposit</code></td><td>Registrar garantía tomada afuera</td><td>Record a deposit taken elsewhere</td></tr>
+          <tr class="new"><td><code>coPayOnlyHoldCloses</code></td><td>Solo esta acción cierra el pago y avanza el wizard.</td><td>Only this action closes payment and moves the wizard on.</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ P3 -->
+<section class="blk" id="p3">
+  <div class="blk-head">
+    <span class="eyebrow">Frame P3 · M2-H3 · <code>hold-deposit</code> en vuelo</span>
+    <h2>Retención en curso — la pantalla que impide que el agente pida la tarjeta por reflejo</h2>
+    <p>La llamada es <b>síncrona y en primer plano</b> (ADR-5). En la vía tokenizada resuelve en un par de segundos y
+    el terminal ni se entera. El único riesgo humano aquí es el reflejo aprendido: «espérame, dame otra vez la
+    tarjeta». La pantalla lo desactiva explícitamente.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Vía conocida: sin tap</span><span class="schip"><i></i>Vía desconocida: se dice que no se sabe</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>P3 — Reteniendo, vía conocida <small>instrucción negativa explícita: NO pidas la tarjeta</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:13</span><span>LTE · 81 %</span></div>
+        <div class="scr" style="background:var(--n-0)">
+          <div class="tenantbar"><span class="tlogo">RC</span>
+            <div><div class="tname">Rightcars</div><div class="tsub">LAX · R-2481</div></div>
+            <span class="m" style="margin-left:auto">13</span></div>
+          <div class="wpad">
+            <div class="center-state" style="gap:14px">
+              <div class="big-ic info"><span class="spin dk" style="width:34px;height:34px;border-width:4px"></span></div>
+              <h4>Reteniendo la garantía</h4>
+              <div class="mtot hold" style="width:100%"><span class="c">Se retiene (no se cobra)</span><span class="a tnum">$2,000.00<span class="cur">USD</span></span></div>
+              <p style="color:var(--n-800);font-weight:700">Contra <b>Visa ••4417</b>, la tarjeta que quedó guardada al
+              cobrar la renta.</p>
+              <div class="banner b-info" style="text-align:left"><span class="m inframe" style="margin:-9px 0 0 300px">14</span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><path d="M12 7.6v.6"/></svg>
+                <span><b>No le pidas la tarjeta al cliente.</b> Esta retención no pasa por el terminal.
+                No cierres la app ni vuelvas atrás hasta que el servidor responda.</span></div>
+            </div>
+            <div class="nobrand"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.5"/></svg>
+              <span>Pantalla que el cliente alcanza a leer: marca del <b>tenant</b> desde <code>display-data</code>.
+              Ni «RideOps» ni «Ride Fleet» aparecen en ningún píxel.</span></div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>P3-bis — Vía desconocida <small>lo que se ve si el servidor NO informa el modo (estado de hoy)</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:13</span><span>LTE · 81 %</span></div>
+        <div class="scr" style="background:var(--n-0)">
+          <div class="tenantbar"><span class="tlogo">RC</span>
+            <div><div class="tname">Rightcars</div><div class="tsub">LAX · R-2481</div></div></div>
+          <div class="wpad">
+            <div class="center-state" style="gap:14px">
+              <div class="big-ic info"><span class="spin dk" style="width:34px;height:34px;border-width:4px"></span></div>
+              <h4>Reteniendo la garantía</h4>
+              <div class="mtot hold" style="width:100%"><span class="c">Se retiene (no se cobra)</span><span class="a tnum">$2,000.00<span class="cur">USD</span></span></div>
+              <span class="via unk">La vía la decide el servidor</span>
+              <div class="banner b-info" style="text-align:left"><span class="m inframe" style="margin:-9px 0 0 300px">15</span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><path d="M12 7.6v.6"/></svg>
+                <span><b>Normalmente no hace falta la tarjeta.</b> Si el terminal se enciende y la pide, el cliente la
+                acerca. No cierres la app hasta que el servidor responda.</span></div>
+            </div>
+            <div class="nobrand"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.5"/></svg>
+              <span>Este frame es el <b>plan B</b>: existe solo mientras el servidor no informe la vía por adelantado.
+              Con el pedido 1 resuelto, este frame desaparece.</span></div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes">
+      <h3>Notas · P3</h3>
+      <div class="note"><span class="m">13</span><div><b>Barra de tenant, no de plataforma.</b>
+      Misma regla del 12B ya aprobado: la pantalla que el cliente alcanza a leer lleva la marca de la agencia. Se
+      hereda sin cambios.</div></div>
+      <div class="note"><span class="m">14</span><div><b>Una instrucción negativa, en primera línea.</b>
+      «No le pidas la tarjeta» es más útil que cualquier explicación de tokenización. Detrás va el porqué en siete
+      palabras («esta retención no pasa por el terminal») y nada más: el agente no necesita saber qué es CNP.</div></div>
+      <div class="note"><span class="m">15</span><div><b>Cuando no se sabe, se dice «normalmente».</b>
+      Y se le da al agente la salida por si toca la excepción. Es feo a propósito: la fealdad es el argumento para
+      pedir el campo <code>depositMode</code> (pedido 1). <b>Prefiero un frame feo y honesto a uno bonito que miente
+      una vez de cada cien y deja al cliente parado.</b></div></div>
+      <div class="note drop"><span class="m">D</span><div><b>Descartado: escalar el copy solo por tiempo.</b>
+      Se probó «a los 12 s, cambia a: pídele la tarjeta» — la idea era que una llamada CNP resuelve rápido y una
+      card-present se queda esperando al humano. <b>Es un diagnóstico inventado por la app</b>, justo lo que este paso
+      no debe hacer: una red lenta produciría la misma señal y el agente pediría una tarjeta que nadie va a usar.</div></div>
+      <div class="cp">
+        <b class="h">Copy · P3</b>
+        <table>
+          <tr><th>Clave .arb</th><th>ES</th><th>EN</th></tr>
+          <tr class="new"><td><code>coPayHolding</code></td><td>Reteniendo la garantía</td><td>Holding the deposit</td></tr>
+          <tr class="new"><td><code>coPayHoldNotACharge</code></td><td>Se retiene (no se cobra)</td><td>Held (not charged)</td></tr>
+          <tr class="new"><td><code>coPayHoldAgainstCard</code></td><td>Contra {marca} ••{last4}, la tarjeta que quedó guardada al cobrar la renta.</td><td>Against {brand} ••{last4}, the card saved when the rental was charged.</td></tr>
+          <tr class="new"><td><code>coPayDontAskForCard</code></td><td>No le pidas la tarjeta al cliente. Esta retención no pasa por el terminal. No cierres la app ni vuelvas atrás hasta que el servidor responda.</td><td>Do not ask the customer for their card. This hold does not go through the terminal. Do not close the app or go back until the server answers.</td></tr>
+          <tr class="new"><td><code>coPayViaUnknown</code></td><td>La vía la decide el servidor</td><td>The server picks the route</td></tr>
+          <tr class="new"><td><code>coPayMaybeCard</code></td><td>Normalmente no hace falta la tarjeta. Si el terminal se enciende y la pide, el cliente la acerca. No cierres la app hasta que el servidor responda.</td><td>Normally the card is not needed. If the terminal lights up and asks for it, the customer taps it. Do not close the app until the server answers.</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ P4 -->
+<section class="blk" id="p4">
+  <div class="blk-head">
+    <span class="eyebrow">Frame P4 · M2-H3 · 402 <code>DEPOSIT_HOLD_DECLINED</code> · ★</span>
+    <h2>Falló el segundo habiendo pasado el primero — el caso que la lámina anterior no resolvía</h2>
+    <p>Es la peor esquina del paso y la más probable: el cobro entró, la retención no. El servidor responde 402 con un
+    mensaje que <b>ya trae la parte importante</b> —<i>«The sale is unchanged»</i>— y la app lo <b>cita crudo</b>
+    (patrón D2, aprobado) en vez de inventarle un diagnóstico. Encima, la app dice en su propio idioma las tres cosas
+    que el agente necesita para no empeorarlo.</p>
+    <div class="blk-head origin"><b>Lo que NO puede pasar aquí.</b> Que el botón grande diga «Reintentar» a secas. En
+    una pantalla donde acaba de fallar algo después de un cobro, «reintentar» se lee como <i>volver a cobrar</i>. El
+    CTA nombra su objeto —<b>Reintentar la retención</b>— y debajo va la única frase que desarma el miedo:
+    <b>«Nunca vuelve a cobrar la renta.»</b></div>
+    <div class="state-chips">
+      <span class="schip"><i></i>Mensaje del servidor, crudo</span><span class="schip"><i></i>Venta intacta</span>
+      <span class="schip"><i></i>Paso sin sellar</span><span class="schip"><i></i>Dos salidas reales</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>P4 — La garantía no entró <small>la venta sigue cobrada · el paso sigue abierto</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:14</span><span>LTE · 80 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112 · LAX</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Falta la garantía para cerrar</div>
+          <div class="wpad">
+            <div class="banner b-danger"><span class="m inframe" style="margin:-9px 0 0 314px">16</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4.5l8.5 15h-17z"/><path d="M12 10v4"/><path d="M12 16.6v.4"/></svg>
+              <span><b class="ctitle">La garantía no se pudo retener.</b>
+                <span class="srvquote"><span class="lab">El servidor respondió:</span>
+                <span class="raw">Deposit hold declined: DEJ_ERR_003 Transaction Failed. The sale is unchanged. Try
+                again or release manually from View Payments.</span></span></span></div>
+            <div class="truth"><span class="m inframe" style="margin:-9px 0 0 316px">17</span>
+              <div class="tr yes"><span class="ti2"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+                <div>La renta <b>sí quedó cobrada</b>: $412.80, aprobación 004512.</div></div>
+              <div class="tr no"><span class="ti2"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12"/><path d="M18 6L6 18"/></svg></span>
+                <div>La garantía <b>no se retuvo</b>. No hay nada retenido al cliente.</div></div>
+              <div class="tr no"><span class="ti2"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 8.5v4.5"/><path d="M12 15.8v.4"/></svg></span>
+                <div>El pago <b>sigue sin cerrar</b>. El wizard no avanza hasta que haya garantía.</div></div>
+            </div>
+            <div class="cof"><span class="m inframe" style="margin:-9px 0 0 316px">18</span>
+              <span class="ci"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.6"/><path d="M2.5 10h19"/><path d="M6 14.5h3.5"/></svg></span>
+              <div class="cb"><b>Visa ••4417 · sigue guardada</b><span>El reintento va contra esta misma tarjeta.
+              El cliente no tiene que hacer nada.</span></div></div>
+            <div class="fold"><span>Corte de la pantalla · el dock va anclado abajo</span></div>
+            <div class="dock">
+              <div class="btn btn-primary">Reintentar la retención · $2,000.00</div>
+              <div class="btn btn-record btn-sm"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8.5 10h7"/><path d="M8.5 14h4.5"/></svg>Registrar garantía tomada afuera</div>
+              <div class="why">Reintentar <b>solo retiene la garantía</b>. Nunca vuelve a cobrar la renta.<span class="m" style="margin-left:4px">19</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes">
+      <h3>Notas · P4</h3>
+      <div class="note"><span class="m">16</span><div><b>El mensaje del servidor entra citado y en su idioma.</b>
+      Patrón D2 de <code>m2-delta-h2</code>, ya aprobado: etiqueta «El servidor respondió:» y debajo el crudo intacto.
+      La app <b>no traduce</b> (traducir un diagnóstico de pasarela es inventarlo), <b>no clasifica</b> el error y
+      <b>no lo esconde</b>: el agente se lo puede leer al cliente o dictar por teléfono a soporte.</div></div>
+      <div class="note"><span class="m">17</span><div><b>La app sí dice, en español, lo que sabe con certeza.</b>
+      Y solo eso: cobró / no retuvo / sigue abierto. Esos tres hechos no son diagnóstico, son estado — vienen de la
+      respuesta 402 y del <code>currentStep</code> re-consultado, no de una inferencia sobre el texto del error.</div></div>
+      <div class="note"><span class="m">18</span><div><b>La tarjeta guardada se repite justo aquí.</b>
+      Es el momento exacto en que el agente iba a girarse y pedir la tarjeta otra vez. La frase «El cliente no tiene
+      que hacer nada» está puesta para ese reflejo.</div></div>
+      <div class="note"><span class="m">19</span><div><b>El CTA nombra su objeto y su límite.</b>
+      «Reintentar la retención · $2,000.00» + la nota de que nunca re-cobra. La llave de idempotencia cubre el
+      reintento dentro de este intento vivo (ADR-5) — y por eso el reintento vive <b>aquí</b>, en primer plano, con
+      el cliente delante, y no en la Bandeja de salida.</div></div>
+      <div class="note drop"><span class="m">D</span><div><b>Descartado: ofrecer «Liberar desde View Payments» como
+      botón.</b> El propio mensaje del servidor lo sugiere, pero View Payments es la <b>web</b>: RideOps no tiene esa
+      pantalla (ADR-1 la deja en la cola larga). Convertir la sugerencia en un botón muerto sería peor que citarla. Se
+      queda dentro de la cita, donde es lo que es: una instrucción para otra superficie.</div></div>
+      <div class="note drop"><span class="m">D</span><div><b>Descartado: mandar el paso hacia atrás.</b>
+      <code>PAYMENT_PENDING</code> es puerta de un solo sentido: <code>PAYMENT_PENDING → TC_SIGNED</code> devuelve 409
+      <code>ILLEGAL_TRANSITION</code> (bloqueante 5 del M2-PLAN, verificado en <code>state-machine.js</code>). Desde
+      aquí se re-intenta <b>sin cambiar de paso</b>.</div></div>
+      <div class="note drop"><span class="m">D</span><div><b>Descartado: un color propio para «rechazo» distinto de
+      «falla».</b> Se evaluó pintar el rechazo de tarjeta en ámbar y la falla de sistema en rojo. Requiere que la app
+      clasifique el mensaje del servidor. <b>Un solo tratamiento rojo para todo 402</b>, y que el texto crudo diga cuál
+      fue.</div></div>
+      <div class="cp">
+        <b class="h">Copy · P4</b>
+        <table>
+          <tr><th>Clave .arb</th><th>ES</th><th>EN</th></tr>
+          <tr class="new"><td><code>coPayHoldFailed</code></td><td>La garantía no se pudo retener.</td><td>The deposit could not be held.</td></tr>
+          <tr class="keep"><td><code>coServerSaid</code></td><td>El servidor respondió:</td><td>The server said:</td></tr>
+          <tr class="new"><td><code>coPayTruthSaleStands</code></td><td>La renta sí quedó cobrada: {monto}, aprobación {auth}.</td><td>The rental was charged: {amount}, approval {auth}.</td></tr>
+          <tr class="new"><td><code>coPayTruthNoHold</code></td><td>La garantía no se retuvo. No hay nada retenido al cliente.</td><td>The deposit was not held. Nothing is being held from the customer.</td></tr>
+          <tr class="new"><td><code>coPayTruthStillOpen</code></td><td>El pago sigue sin cerrar. El wizard no avanza hasta que haya garantía.</td><td>Payment is still open. The wizard does not move on until there is a deposit.</td></tr>
+          <tr class="new"><td><code>coPayCardStillOnFile</code></td><td>{marca} ••{last4} · sigue guardada</td><td>{brand} ••{last4} · still on file</td></tr>
+          <tr class="new"><td><code>coPayCardStillOnFileHint</code></td><td>El reintento va contra esta misma tarjeta. El cliente no tiene que hacer nada.</td><td>The retry runs against this same card. The customer does not have to do anything.</td></tr>
+          <tr class="new"><td><code>coPayCtaRetryHold</code></td><td>Reintentar la retención · {monto}</td><td>Retry the hold · {amount}</td></tr>
+          <tr class="new"><td><code>coPayRetryNeverRecharges</code></td><td>Reintentar solo retiene la garantía. Nunca vuelve a cobrar la renta.</td><td>Retrying only holds the deposit. It never charges the rental again.</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ P5 -->
+<section class="blk" id="p5">
+  <div class="blk-head">
+    <span class="eyebrow">Frame P5 · M2-H3 · vía card-present</span>
+    <h2>La excepción — cuando sí hay que pedir la tarjeta, y por qué</h2>
+    <p>Dos causas, ambas legítimas: <b>(a)</b> el contrato no tiene tarjeta guardada porque en este checkout no hubo
+    venta (cliente pre-pagado, saldo $0), o <b>(b)</b> la sede fuerza card-present
+    (<code>IPOS_FORCE_CARD_PRESENT_DEPOSIT=true</code> / <code>tenantConfig.iposForceCardPresentDeposit</code>, porque
+    el canal Transact no está aprovisionado en el TPN). En ambas, <code>hold-deposit</code> va al terminal por SPIn y
+    <b>sí</b> hay un tap.</p>
+    <div class="blk-head origin"><b>La regla que hace legible la excepción.</b> El frame excepcional se distingue del
+    normal por <b>tres señales a la vez</b>: la tarjeta guardada aparece en su variante <code>none</code> (tinta neutra,
+    nunca roja — no es un error), la píldora de vía dice <code>Pide tarjeta</code> en ámbar, y <b>vuelve la tarjeta del
+    terminal</b> que en P2 se había caído. Tres señales, porque una sola se pasa por alto con sol.</div>
+    <div class="state-chips">
+      <span class="schip"><i></i>Sin tarjeta guardada</span><span class="schip"><i></i>Vía: pide tarjeta</span>
+      <span class="schip"><i></i>Terminal de vuelta en pantalla</span><span class="schip"><i></i>El motivo, dicho</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>P5 — Pre-pagado: sin venta, sin tarjeta guardada <small>el único camino con tap real</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:31</span><span>LTE · 78 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2496</b><span>Óscar Peña · U-140 · LAX</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 3 de 10</span>Cobro y garantía</div>
+          <div class="wpad">
+            <div class="money">
+              <div class="mh"><b>Cuenta del cliente</b><span class="prov"><span class="tick"></span>Servidor · hace 3 s</span></div>
+              <div class="mline sub"><span class="c">Total del contrato</span><span class="a">$318.40</span></div>
+              <div class="mline credit"><span class="c">Pagado en línea</span><span class="a">−$318.40</span></div>
+              <div class="mtot"><span class="c">A cobrar ahora</span><span class="a tnum">$0.00<span class="cur">USD</span></span></div>
+            </div>
+            <div class="act done"><span class="m inframe" style="margin:-9px 0 0 318px">20</span>
+              <span class="an"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+              <div class="ab"><b>Nada que cobrar</b><span>El contrato quedó pagado en línea. No hay acto 1.</span></div>
+              <span class="aa tnum">$0.00</span></div>
+            <div class="cof none"><span class="m inframe" style="margin:-9px 0 0 316px">21</span>
+              <span class="ci"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.6"/><path d="M2.5 10h19"/><path d="M4 20L20 4"/></svg></span>
+              <div class="cb"><b>Sin tarjeta guardada</b><span>Este contrato no tiene tarjeta en archivo: en este
+              checkout no hubo cobro que la guardara.</span></div></div>
+            <div class="act live"><span class="m inframe" style="margin:-9px 0 0 318px">22</span>
+              <span class="an">1</span>
+              <div class="ab"><b>Retener la garantía</b>
+                <span>El cliente acerca su tarjeta al terminal. Con ese tap la tarjeta <b>además queda guardada</b>
+                para los cargos posteriores del contrato.</span>
+                <span style="margin-top:6px"><span class="via tap">Pide tarjeta</span></span></div>
+              <span class="aa tnum">$2,000.00</span></div>
+            <div class="term"><span class="m inframe" style="margin:-8px 0 0 316px">23</span>
+              <span class="ti"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18"/></svg></span>
+              <div class="tb"><b>Terminal Spin · Mostrador 1</b><span>Listo · consultado hace 4 s</span></div>
+              <span class="tre">Consultar</span></div>
+            <div class="fold"><span>Corte de la pantalla · el dock va anclado abajo</span></div>
+            <div class="dock">
+              <div class="btn btn-primary">Retener $2,000.00 en el terminal</div>
+              <div class="btn btn-record btn-sm"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8.5 10h7"/><path d="M8.5 14h4.5"/></svg>Registrar garantía tomada afuera</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>P5-bis — Forzado por la sede <small>hay tarjeta guardada y aun así se pide · requiere el pedido 1</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:13</span><span>LTE · 81 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112 · LAX</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Falta la garantía para cerrar</div>
+          <div class="wpad">
+            <div class="act done">
+              <span class="an"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+              <div class="ab"><b>Renta cobrada</b><span>10:12 · aprobación 004512 · Visa ••4417 · por Hugo P.</span></div>
+              <span class="aa tnum">$412.80</span></div>
+            <div class="cof"><span class="m inframe" style="margin:-9px 0 0 316px">24</span>
+              <span class="ci"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.6"/><path d="M2.5 10h19"/><path d="M6 14.5h3.5"/></svg></span>
+              <div class="cb"><b>Visa ••4417 · guardada</b><span>Queda guardada para los cargos posteriores del
+              contrato. <b>Esta sede toma la garantía en el terminal</b>, así que aun así hay un tap.</span></div></div>
+            <div class="act live">
+              <span class="an">2</span>
+              <div class="ab"><b>Retener la garantía</b>
+                <span>El cliente acerca su tarjeta al terminal.</span>
+                <span style="margin-top:6px"><span class="via tap">Pide tarjeta</span></span></div>
+              <span class="aa tnum">$2,000.00</span></div>
+            <div class="term">
+              <span class="ti"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18"/></svg></span>
+              <div class="tb"><b>Terminal Spin · Mostrador 1</b><span>Listo · consultado hace 5 s</span></div></div>
+            <div class="fold"><span>Corte de la pantalla · el dock va anclado abajo</span></div>
+            <div class="dock">
+              <div class="btn btn-primary">Retener $2,000.00 en el terminal</div>
+              <div class="why">Este frame <b>solo se puede construir</b> si el servidor informa la vía por adelantado
+              (pedido 1).<span class="m" style="margin-left:4px">25</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes">
+      <h3>Notas · P5</h3>
+      <div class="note"><span class="m">20</span><div><b>«$0.00» no es un error y se dice así.</b>
+      Se hereda del 12E aprobado, con la etiqueta afinada: <b>«Nada que cobrar · No hay acto 1»</b>. El par de dos
+      toques se vuelve un solo toque, y el numeral del acto de garantía pasa a <b>1</b> — no a 2 con un hueco delante.</div></div>
+      <div class="note"><span class="m">21</span><div><b>«Sin tarjeta guardada» va en tinta NEUTRA.</b>
+      Es la regla GD-2 ya aprobada: la fila inerte no usa rojo ni opacidad. Un cliente pre-pagado no hizo nada mal, y
+      pintar de rojo el camino excepcional entrena al agente a ignorar el rojo.</div></div>
+      <div class="note"><span class="m">22</span><div><b>Aquí sí, la promesa del tap es real.</b>
+      Y se aprovecha para decir lo que también ocurre: el <code>Auth</code> card-present tokeniza igual
+      (<code>runDepositHold</code>, <code>:989-1000</code>), así que la tarjeta queda guardada. Es la <b>tercera</b> de
+      las tres pantallas donde el guardado ocurre y hoy la app calla — el pendiente legal del M2-PLAN.</div></div>
+      <div class="note"><span class="m">23</span><div><b>El terminal vuelve, y con él su poll.</b>
+      <code>GET /:id/terminal-status</code> importa <b>solo</b> en los frames donde el terminal participa: P1 (venta) y
+      P5 (garantía card-present). En P2 no se poll-ea: consultar un aparato que no interviene gasta batería y sugiere
+      dependencia.</div></div>
+      <div class="note"><span class="m">24</span><div><b>El motivo, en la misma tarjeta que la contradicción.</b>
+      «Hay tarjeta guardada» y «hay que pedir la tarjeta» se contradicen a los ojos del agente. La explicación va
+      pegada, en una frase de mostrador —<b>«Esta sede toma la garantía en el terminal»</b>— sin mencionar variables
+      de entorno, TPN ni canales aprovisionados.</div></div>
+      <div class="note"><span class="m">25</span><div><b>Este frame está condicionado y lo dice.</b>
+      Sin el campo de vía, la app no puede saber que la sede fuerza card-present teniendo token, y caería en el
+      P3-bis honesto pero pobre. <b>Es el argumento más concreto del pedido 1.</b></div></div>
+      <div class="note drop"><span class="m">D</span><div><b>Descartado: esconder la excepción tras un «modo avanzado».</b>
+      Es el camino normal de las sedes cuyo canal Transact no está aprovisionado. Un mostrador entero puede vivir en
+      P5 todos los días.</div></div>
+      <div class="cp">
+        <b class="h">Copy · P5</b>
+        <table>
+          <tr><th>Clave .arb</th><th>ES</th><th>EN</th></tr>
+          <tr class="new"><td><code>coPayNothingToCharge</code></td><td>Nada que cobrar</td><td>Nothing to charge</td></tr>
+          <tr class="new"><td><code>coPayNothingToChargeHint</code></td><td>El contrato quedó pagado en línea. No hay acto 1.</td><td>The contract was paid online. There is no act 1.</td></tr>
+          <tr class="new"><td><code>coPayNoCardOnFile</code></td><td>Sin tarjeta guardada</td><td>No card on file</td></tr>
+          <tr class="new"><td><code>coPayNoCardOnFileHint</code></td><td>Este contrato no tiene tarjeta en archivo: en este checkout no hubo cobro que la guardara.</td><td>This contract has no card on file: no charge in this checkout saved one.</td></tr>
+          <tr class="new"><td><code>coPayViaNeedsCard</code></td><td>Pide tarjeta</td><td>Card needed</td></tr>
+          <tr class="new"><td><code>coPayHoldTapHint</code></td><td>El cliente acerca su tarjeta al terminal. Con ese tap la tarjeta además queda guardada para los cargos posteriores del contrato.</td><td>The customer taps their card on the terminal. That tap also saves the card for later charges on the contract.</td></tr>
+          <tr class="new"><td><code>coPayForcedTerminalHint</code></td><td>Esta sede toma la garantía en el terminal, así que aun así hay un tap.</td><td>This branch takes the deposit at the terminal, so there is still a tap.</td></tr>
+          <tr class="new"><td><code>coPayCtaHoldAtTerminal</code></td><td>Retener {monto} en el terminal</td><td>Hold {amount} at the terminal</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ P6 -->
+<section class="blk" id="p6">
+  <div class="blk-head">
+    <span class="eyebrow">Frame P6 · M2-H3 · ADR-5</span>
+    <h2>Sin conexión — el dinero no se encola, y el agente no siente que perdió el trabajo</h2>
+    <p>ADR-5 sin matices: <code>charge-sale</code>, <code>hold-deposit</code> y los <code>record-manual-*</code> son
+    síncronos, en primer plano, solo con conexión. <b>Nada de este paso entra a la Bandeja de salida.</b> La llave de
+    idempotencia cubre el reintento dentro de un intento vivo — <b>no</b> autoriza reproducir una autorización de
+    tarjeta más tarde.</p>
+    <div class="blk-head origin"><b>El problema real no es técnico, es emocional.</b> El agente que ve «sin conexión»
+    en una app que <i>sí</i> encola fotos asume que esto también se guardó, se va al patio y descubre el desastre media
+    hora después. Por eso la pantalla dice las dos cosas: <b>qué no se puede</b> (cobrar) y <b>qué no se perdió</b>
+    (todo lo demás, incluido lo ya cobrado). La segunda frase es la que evita que el agente reintente a ciegas.</div>
+    <div class="state-chips">
+      <span class="schip"><i></i>Sin red, antes de cobrar</span><span class="schip"><i></i>Sin red, en el estado a medias</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>P6 — Sin red antes de cobrar <small>total marcado como viejo · CTA de cobro retirado</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:41</span><span class="off">Sin red · 74 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112 · LAX</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="stepline stale"><span class="ix">Paso 3 de 10</span>Cobro y garantía · hace 2 min</div>
+          <div class="wpad">
+            <div class="banner b-danger"><span class="m inframe" style="margin:-9px 0 0 314px">26</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2.5 8.5a16 16 0 0119 0"/><path d="M6 12.5a10 10 0 0112 0"/><path d="M9.5 16.3a4.5 4.5 0 015 0"/><path d="M4 20L20 4"/></svg>
+              <span><b>Sin conexión. Aquí no se puede cobrar ni retener.</b> El dinero <b>nunca</b> se guarda para
+              enviarse después: si no hay red, no hay cobro.</span></div>
+            <div class="money">
+              <div class="mh"><b>Cuenta del cliente</b><span class="prov stale"><span class="tick"></span>Vista de hace 2 min</span></div>
+              <div class="mline sub"><span class="c">Subtotal + impuestos</span><span class="a">$412.80</span></div>
+              <div class="mtot"><span class="c">A cobrar (último dato conocido)</span><span class="a tnum">$412.80<span class="cur">USD</span></span></div>
+            </div>
+            <div class="act wait"><span class="m inframe" style="margin:-9px 0 0 318px">27</span>
+              <span class="an">1</span>
+              <div class="ab"><b>Cobrar la renta</b><span>No disponible sin red. Además, este total es de hace 2 min y
+              pudo cambiar: cobrar a ciegas es cobrar mal.</span></div>
+              <span class="aa tnum">$412.80</span></div>
+            <div class="act wait">
+              <span class="an">2</span>
+              <div class="ab"><b>Retener la garantía</b><span>No disponible sin red.</span></div>
+              <span class="aa tnum">$2,000.00</span></div>
+            <div class="fact ink"><span class="m inframe" style="margin:-9px 0 0 316px">28</span>
+              <span class="fi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><path d="M12 7.6v.6"/></svg></span>
+              <div class="fb">No perdiste nada. <i>Los T&amp;C firmados y todo lo anterior siguen guardados en el
+              servidor. Este paso te espera igual cuando vuelva la señal.</i></div></div>
+            <div class="fold"><span>Corte de la pantalla · el dock va anclado abajo</span></div>
+            <div class="dock">
+              <div class="btn btn-ghost">Reintentar conexión</div>
+              <div class="why"><b>Nada de este paso entra a la Bandeja de salida.</b> Las fotos de inspección sí
+              esperan; el dinero no.<span class="m" style="margin-left:4px">29</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>P6-bis — Sin red en el estado a medias <small>lo cobrado sigue cobrado · la garantía espera</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:15</span><span class="off">Sin red · 80 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112 · LAX</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="stepline stale"><span class="ix">Paso 4 de 10</span>Falta la garantía · hace 40 s</div>
+          <div class="wpad">
+            <div class="banner b-danger"><span class="m inframe" style="margin:-9px 0 0 314px">30</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2.5 8.5a16 16 0 0119 0"/><path d="M6 12.5a10 10 0 0112 0"/><path d="M9.5 16.3a4.5 4.5 0 015 0"/><path d="M4 20L20 4"/></svg>
+              <span><b>Sin conexión. La garantía no se puede retener ahora.</b> No queda pendiente de envío: hay que
+              retenerla con señal, con el cliente presente.</span></div>
+            <div class="act done">
+              <span class="an"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+              <div class="ab"><b>Renta cobrada</b><span>10:12 · aprobación 004512 · Visa ••4417 · por Hugo P.</span></div>
+              <span class="aa tnum">$412.80</span></div>
+            <div class="truth"><span class="m inframe" style="margin:-9px 0 0 316px">31</span>
+              <div class="tr yes"><span class="ti2"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+                <div>El cobro de la renta <b>ya llegó al servidor</b> antes de caerse la señal. Está firme.</div></div>
+              <div class="tr no"><span class="ti2"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 8.5v4.5"/><path d="M12 15.8v.4"/></svg></span>
+                <div>La garantía <b>queda para cuando vuelva la señal</b>, no en cola.</div></div>
+              <div class="tr no"><span class="ti2"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v8"/><path d="M8 9l4-4 4 4"/><path d="M5 18h14"/></svg></span>
+                <div>Puedes seguir con el resto del checkout <b>desde la card</b>; este paso te espera.</div></div>
+            </div>
+            <div class="act wait">
+              <span class="an">2</span>
+              <div class="ab"><b>Retener la garantía</b><span>No disponible sin red. Va contra Visa ••4417 cuando
+              vuelva.</span></div>
+              <span class="aa tnum">$2,000.00</span></div>
+            <div class="fold"><span>Corte de la pantalla · el dock va anclado abajo</span></div>
+            <div class="dock">
+              <div class="btn btn-ghost">Reintentar conexión</div>
+              <div class="why">El failsafe manual <b>tampoco</b> funciona sin red: también escribe en el servidor.<span class="m" style="margin-left:4px">32</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes">
+      <h3>Notas · P6</h3>
+      <div class="note"><span class="m">26</span><div><b>Una sola frase para la regla, sin la palabra «offline».</b>
+      «Si no hay red, no hay cobro» cabe en una línea, se entiende con guantes y no necesita explicar qué es una cola.</div></div>
+      <div class="note"><span class="m">27</span><div><b>El acto no se esconde: se apaga con su motivo doble.</b>
+      Sin red <b>y</b> con un total viejo. Lo segundo importa tanto como lo primero: aunque volviera la señal en ese
+      instante, cobrar ese número sin refrescar el preview viola ADR-6.</div></div>
+      <div class="note"><span class="m">28</span><div><b>«No perdiste nada» es la línea que faltaba.</b>
+      El encargo lo pide explícitamente y la Tanda B no lo tenía: decía qué no se puede, nunca qué sí sobrevivió. Sin
+      esa frase, el agente cree que el checkout se cayó entero y lo empieza de nuevo — que es la forma más cara de
+      equivocarse aquí.</div></div>
+      <div class="note"><span class="m">29</span><div><b>La comparación con las fotos es deliberada.</b>
+      La app <b>sí</b> encola fotos de inspección (ADR-7). Nombrar esa diferencia en voz alta es lo único que impide la
+      analogía equivocada.</div></div>
+      <div class="note"><span class="m">30</span><div><b>Sin red en el estado a medias: banner distinto.</b>
+      No es «no se puede cobrar», es «la garantía no se puede retener <b>ahora</b>» — con la palabra «ahora», porque
+      esta vez sí hay algo a medias esperando.</div></div>
+      <div class="note"><span class="m">31</span><div><b>La primera línea del bloque de verdades cambia de tiempo verbal.</b>
+      «Ya llegó al servidor antes de caerse la señal». Es lo único que el agente necesita para no reintentar el cobro
+      cuando vuelva la señal, y la app lo sabe con certeza porque el 200 de <code>charge-sale</code> ya volvió.</div></div>
+      <div class="note"><span class="m">32</span><div><b>El failsafe manual también se cae, y se dice.</b>
+      <code>record-manual-deposit</code> escribe en el servidor: sin red no hay registro. Dejarlo visible y aparentemente
+      disponible sería la trampa perfecta.</div></div>
+      <div class="note drop"><span class="m">D</span><div><b>Descartado: botón «Guardar y cobrar al recuperar señal».</b>
+      Es exactamente lo que ADR-5 prohíbe. Ni siquiera con confirmación: una autorización de tarjeta reproducida más
+      tarde es un cobro sin cliente delante.</div></div>
+      <div class="note drop"><span class="m">D</span><div><b>Descartado: sacar al agente del wizard al perder señal.</b>
+      Se evaluó mandarlo a la card de la reserva. Perdería de vista el estado a medias, que es justo lo que tiene que
+      recordar.</div></div>
+      <div class="cp">
+        <b class="h">Copy · P6</b>
+        <table>
+          <tr><th>Clave .arb</th><th>ES</th><th>EN</th></tr>
+          <tr class="new"><td><code>coPayOffline</code></td><td>Sin conexión. Aquí no se puede cobrar ni retener.</td><td>Offline. Nothing can be charged or held here.</td></tr>
+          <tr class="new"><td><code>coPayOfflineRule</code></td><td>El dinero nunca se guarda para enviarse después: si no hay red, no hay cobro.</td><td>Money is never saved to send later: no connection, no charge.</td></tr>
+          <tr class="new"><td><code>coPayOfflineHoldOnly</code></td><td>Sin conexión. La garantía no se puede retener ahora.</td><td>Offline. The deposit cannot be held right now.</td></tr>
+          <tr class="new"><td><code>coPayOfflineHoldOnlyRule</code></td><td>No queda pendiente de envío: hay que retenerla con señal, con el cliente presente.</td><td>It is not queued to send: it has to be held with a connection, with the customer present.</td></tr>
+          <tr class="new"><td><code>coPayNothingLost</code></td><td>No perdiste nada. Los T&amp;C firmados y todo lo anterior siguen guardados en el servidor. Este paso te espera igual cuando vuelva la señal.</td><td>Nothing is lost. The signed T&amp;Cs and everything before them are still on the server. This step waits for you when the signal comes back.</td></tr>
+          <tr class="new"><td><code>coPaySaleLanded</code></td><td>El cobro de la renta ya llegó al servidor antes de caerse la señal. Está firme.</td><td>The rental charge reached the server before the signal dropped. It stands.</td></tr>
+          <tr class="new"><td><code>coPayNotInOutbox</code></td><td>Nada de este paso entra a la Bandeja de salida. Las fotos de inspección sí esperan; el dinero no.</td><td>Nothing in this step goes to the outbox. Inspection photos do wait; money does not.</td></tr>
+          <tr class="new"><td><code>coPayManualNeedsNetToo</code></td><td>El failsafe manual tampoco funciona sin red: también escribe en el servidor.</td><td>The manual failsafe does not work offline either: it also writes to the server.</td></tr>
+          <tr class="keep"><td><code>coPayRetryConnection</code></td><td>Reintentar conexión</td><td>Retry connection</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ P7 -->
+<section class="blk" id="p7">
+  <div class="blk-head">
+    <span class="eyebrow">Frame P7 · M2-H3 · ADR-6 · el hueco del dinero</span>
+    <h2>El depósito cambió de monto — el servidor manda, y el cliente inicializó otra cifra</h2>
+    <p>No es hipotético: el servidor recalcula la garantía <b>después</b> del cobro, porque el <b>tipo de tarjeta</b>
+    solo se conoce con el tap de la venta. <code>applyDebitDepositUplift</code> (<code>:161-184</code>) sube la
+    garantía al monto de débito de la sede cuando la tarjeta resultó <b>DEBIT</b> y ese monto es mayor. Antes de eso
+    corren <code>resolveDepositAmount</code> y <code>applyLocalRenterDepositRule</code>. <b>Todas las cifras son del
+    servidor. La app no calcula ninguna.</b></p>
+    <div class="blk-head origin"><b>Por qué esto es más grave que la divergencia de la venta.</b> Porque hay un texto
+    <b>inicializado</b> por el cliente que dice otro número, y ese texto se reimprime en el PDF junto a sus iniciales.
+    Aquí la app no compara: <b>abre la cláusula sola</b>, pone las dos cifras juntas y pide una re-confirmación
+    deliberada. La comparación la hace el humano que tiene al cliente enfrente.</div>
+    <div class="state-chips">
+      <span class="schip"><i></i>Uplift por débito</span><span class="schip"><i></i>Cláusula abierta sola</span>
+      <span class="schip"><i></i>Re-confirmación deliberada</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>P7 — La garantía subió <small>bloqueante · nada retenido todavía · el agente tiene que hablar</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:13</span><span>LTE · 81 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112 · LAX</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 4 de 10</span>Falta la garantía para cerrar</div>
+          <div class="wpad">
+            <div class="banner b-info" style="background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)">
+              <span class="m inframe" style="margin:-9px 0 0 314px">33</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4.5l8.5 15h-17z"/><path d="M12 10v4"/><path d="M12 16.6v.4"/></svg>
+              <span><b style="color:var(--warn-tx)">La garantía que pide el servidor no es la que el cliente
+              inicializó.</b> Léesela antes de retener.</span></div>
+            <div class="divcmp"><span class="m inframe" style="margin:-9px 0 0 314px">34</span>
+              <div class="drow dbefore"><span class="dl">Inicializado por el cliente</span><span class="dv tnum">$2,000.00</span></div>
+              <div class="drow dafter"><span class="dl">Servidor · ahora</span><span class="dv tnum">$2,500.00</span></div>
+              <div class="ddelta"><span class="dt">Diferencia a retener de más</span><span class="dn tnum">+$500.00</span></div>
+            </div>
+            <div class="fact ink"><span class="m inframe" style="margin:-9px 0 0 316px">35</span>
+              <span class="fi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.6"/><path d="M2.5 10h19"/></svg></span>
+              <div class="fb">Motivo según el servidor: <b>tarjeta de débito</b>.
+              <i>La sede aplica un monto de garantía distinto a las tarjetas de débito.</i></div></div>
+            <div class="clause">
+              <div class="chd">
+                <span class="ci"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 3.5h9l4 4v13H6z"/><path d="M9.5 11h7"/><path d="M9.5 15h5"/></svg></span>
+                <div class="cs"><b>Lo que el cliente inicializó</b><span>Depósito y cargos posteriores</span></div>
+                <span class="cv"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="M5 9l7 7 7-7"/></svg></span>
+              </div>
+              <div class="cbody">
+                <blockquote>I authorize a security deposit hold of $2,000 against my card on file. …</blockquote>
+                <span class="csrc">Texto firmado · sección <code>deposit_post_charges</code> · inicializado 10:07</span>
+              </div>
+            </div>
+            <div class="fold"><span>Corte de la pantalla · el dock va anclado abajo</span></div>
+            <div class="dock">
+              <div class="btn btn-primary">Confirmado · retener $2,500.00</div>
+              <div class="btn btn-ghost btn-sm">No retener · avisar al mostrador</div>
+              <div class="why">Todavía <b>no se ha retenido nada</b>.<span class="m" style="margin-left:4px">36</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes">
+      <h3>Notas · P7</h3>
+      <div class="note"><span class="m">33</span><div><b>Ámbar, no rojo.</b> No es un error: es el sistema funcionando
+      como debe. Rojo aquí entrenaría al agente a descartarlo. El verbo de la frase es <b>«Léesela»</b>, porque la
+      acción correcta es hablar, no tocar.</div></div>
+      <div class="note"><span class="m">34</span><div><b>Se reusa el comparador del 13, con las etiquetas cambiadas.</b>
+      Arriba deja de ser «total anterior» y pasa a ser <b>«Inicializado por el cliente»</b>. Sin tachado, como en la
+      variante <code>settled</code>: lo que el cliente firmó no es un valor descartado, es un compromiso vigente que
+      alguien tiene que explicar.</div></div>
+      <div class="note"><span class="m">35</span><div><b>El motivo se muestra si el servidor lo da; si no, no se
+      inventa.</b> Hoy el uplift solo deja rastro en el log del servidor. Con el pedido 3 llega como campo y esta fila
+      existe; sin él, la fila <b>desaparece</b> y el comparador se queda solo. Nunca se pinta «probablemente débito».</div></div>
+      <div class="note"><span class="m">36</span><div><b>El CTA declara la conversación, no solo el monto.</b>
+      «$2,500.00 · confirmado con el cliente» obliga a que el agente sepa qué está afirmando al tocarlo. Y la línea de
+      abajo desactiva el pánico: nada se ha movido todavía.</div></div>
+      <div class="note drop"><span class="m">D</span><div><b>Descartado: dejar retener el monto inicializado
+      ($2,000).</b> El servidor manda (ADR-6) y no acepta un monto menor por diseño: <code>hold-deposit</code> resuelve
+      la cifra él mismo. Un botón que finge elegir sería una mentira con consecuencia contable.</div></div>
+      <div class="note drop"><span class="m">D</span><div><b>Descartado: hoja modal.</b> Se probó como
+      <code>.sheet</code> sobre la pantalla. En 360 px una hoja tapa el comparador cuando se abre la cláusula, y el
+      agente termina alternando. Vive en el flujo del paso, con el dock a mano.</div></div>
+      <div class="cp">
+        <b class="h">Copy · P7</b>
+        <table>
+          <tr><th>Clave .arb</th><th>ES</th><th>EN</th></tr>
+          <tr class="new"><td><code>coPayDepositDiverges</code></td><td>La garantía que pide el servidor no es la que el cliente inicializó. Léesela antes de retener.</td><td>The deposit the server asks for is not the one the customer initialled. Read it to them before holding.</td></tr>
+          <tr class="new"><td><code>coPayInitialledAmount</code></td><td>Inicializado por el cliente</td><td>Initialled by the customer</td></tr>
+          <tr class="new"><td><code>coPayServerNow</code></td><td>Servidor · ahora</td><td>Server · now</td></tr>
+          <tr class="new"><td><code>coPayDepositDelta</code></td><td>Diferencia a retener de más</td><td>Extra amount to be held</td></tr>
+          <tr class="new"><td><code>coPayDepositReasonDebit</code></td><td>Motivo según el servidor: tarjeta de débito. La sede aplica un monto de garantía distinto a las tarjetas de débito.</td><td>Reason per the server: debit card. This branch applies a different deposit amount to debit cards.</td></tr>
+          <tr class="new"><td><code>coPayCtaHoldConfirmed</code></td><td>Confirmado · retener {monto}</td><td>Confirmed · hold {amount}</td></tr>
+          <tr class="new"><td><code>coPayDontHoldEscalate</code></td><td>No retener · avisar al mostrador</td><td>Do not hold · escalate to the counter</td></tr>
+          <tr class="new"><td><code>coPayNothingHeldYet</code></td><td>Todavía no se ha retenido nada.</td><td>Nothing has been held yet.</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ P8 -->
+<section class="blk" id="p8">
+  <div class="blk-head">
+    <span class="eyebrow">Frame P8 · M2-H3 · <code>currentStep = PAID</code></span>
+    <h2>Pago cerrado — el par completo, con las dos actas visibles</h2>
+    <p><code>hold-deposit</code> estampó <code>paymentCompletedAt</code> y el servidor movió el paso a
+    <code>PAID</code>. La pantalla <b>no</b> decide eso: se re-consulta y se dibuja (ADR-4).</p>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>P8 — Pago cerrado <small>dos hechos con autoría · una sola salida</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:14</span><span>LTE · 80 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112 · LAX</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">Pago</span></div>
+            <div class="sr on"><span class="d">6</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">8</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 5 de 10</span>Pago cerrado</div>
+          <div class="wpad">
+            <div class="act done"><span class="m inframe" style="margin:-9px 0 0 318px">37</span>
+              <span class="an"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+              <div class="ab"><b>Renta cobrada</b><span>10:12 · aprobación 004512 · Visa ••4417 · por Hugo P.</span></div>
+              <span class="aa tnum">$412.80</span></div>
+            <div class="act done">
+              <span class="an"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+              <div class="ab"><b>Garantía retenida</b><span>10:14 · referencia IPOS_HOLD:8841Q · sin tap · por Hugo P.</span></div>
+              <span class="aa tnum">$2,000.00</span></div>
+            <div class="cof"><span class="m inframe" style="margin:-9px 0 0 316px">38</span>
+              <span class="ci"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.6"/><path d="M2.5 10h19"/><path d="M6 14.5h3.5"/></svg></span>
+              <div class="cb"><b>Visa ••4417 · guardada</b><span>Queda en el contrato para peajes, multas, combustible,
+              limpieza y daños posteriores, según lo que el cliente inicializó.</span></div></div>
+            <div class="fact"><span class="m inframe" style="margin:-9px 0 0 316px">39</span>
+              <span class="fi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 13l4 4 10-10"/></svg></span>
+              <div class="fb">La garantía <b>no es un cobro</b>: se libera al devolver la unidad.
+              <i>Vence el 25 ago · 7 días.</i></div></div>
+            <div class="fold"><span>Corte de la pantalla · el dock va anclado abajo</span></div>
+            <div class="dock">
+              <div class="btn btn-primary">Continuar a inspección</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <div class="notes">
+      <h3>Notas · P8</h3>
+      <div class="note"><span class="m">37</span><div><b>Las dos actas quedan, no se colapsan en «Pagado».</b>
+      Son dos movimientos de dinero distintos, con referencias distintas, y el cliente puede preguntar por cualquiera
+      de los dos en el patio. <b>«sin tap»</b> queda escrito en el acta: es el registro de por qué nadie le pidió la
+      tarjeta dos veces.</div></div>
+      <div class="note"><span class="m">38</span><div><b>Tercera y última mención del guardado de la tarjeta.</b>
+      Aquí sí con el alcance completo, porque es la pantalla donde el agente se despide del tema y el cliente todavía
+      está enfrente. <b>Texto sujeto a tu visto bueno legal.</b></div></div>
+      <div class="note"><span class="m">39</span><div><b>La fecha de vencimiento sale del contrato, no de una cuenta
+      local.</b> <code>depositHoldExpiresAt</code> lo escribe el servidor al retener.</div></div>
+      <div class="note drop"><span class="m">D</span><div><b>Descartado: avance automático a inspección.</b>
+      El servidor ya movió el paso, pero el agente necesita ver el par cerrado y poder decírselo al cliente. El avance
+      lo dispara él.</div></div>
+      <div class="cp">
+        <b class="h">Copy · P8</b>
+        <table>
+          <tr><th>Clave .arb</th><th>ES</th><th>EN</th></tr>
+          <tr class="new"><td><code>coPayClosed</code></td><td>Pago cerrado</td><td>Payment closed</td></tr>
+          <tr class="new"><td><code>coPayHoldDone</code></td><td>Garantía retenida</td><td>Deposit held</td></tr>
+          <tr class="new"><td><code>coPayHoldDoneMeta</code></td><td>{hora} · referencia {ref} · sin tap · por {agente}</td><td>{time} · reference {ref} · no tap · by {agent}</td></tr>
+          <tr class="new"><td><code>coPayHoldDoneMetaTap</code></td><td>{hora} · referencia {ref} · en el terminal · por {agente}</td><td>{time} · reference {ref} · at the terminal · by {agent}</td></tr>
+          <tr class="new"><td><code>coPayCardOnFileScope</code></td><td>Queda en el contrato para peajes, multas, combustible, limpieza y daños posteriores, según lo que el cliente inicializó.</td><td>It stays on the contract for tolls, fines, fuel, cleaning, and damage assessed later, per what the customer initialled.</td></tr>
+          <tr class="new"><td><code>coPayHoldReleases</code></td><td>La garantía no es un cobro: se libera al devolver la unidad. Vence el {fecha} · {días} días.</td><td>The deposit is not a charge: it is released when the vehicle comes back. Expires {date} · {days} days.</td></tr>
+          <tr class="keep"><td><code>coPayContinueInspection</code></td><td>Continuar a inspección</td><td>Continue to inspection</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ PIE -->
+<footer class="dod" id="pie">
+
+  <div class="card gate">
+    <b style="font-size:15px">Lo que hay que decidir antes de construir</b>
+    <div class="ask">
+      <b class="h">Pedidos al backend (chicos, y los tres son de la misma familia)</b>
+      <ol>
+        <li><b><code>depositMode</code> por adelantado.</b> Exponer en el preview / en <code>GET /:id</code> la misma
+        expresión que ya calcula <code>runDepositHold</code>:
+        <code>Boolean(agreement.cardOnFileToken) &amp;&amp; !forceCardPresentDeposit ? 'CNP' : 'CARD_PRESENT'</code>.
+        Hoy el modo llega <b>en la respuesta</b>, o sea después. Sin este campo, la app no puede afirmar «sin tap»
+        y hay que construir el P3-bis en vez del P3, y el P5-bis no se puede construir en absoluto.</li>
+        <li><b><code>previewedAt</code>.</b> Ya levantado como bloqueante 1 de la Tanda B; sigue vigente y esta lámina
+        lo usa en todas las etiquetas «Servidor · hace N s».</li>
+        <li><b>Motivo del monto del depósito.</b> Que <code>hold-deposit</code> —y el preview— digan <b>por qué</b> esa
+        cifra (<code>columna</code> / <code>regla local</code> / <code>uplift por débito</code>). Hoy el uplift solo
+        deja rastro en el log del servidor. Sin motivo, P7 muestra el comparador sin explicación.</li>
+      </ol>
+    </div>
+    <div class="ask" style="background:var(--warn-bg);border-color:var(--warn-bd)">
+      <b class="h" style="color:var(--warn-tx)">Y una decisión que no es de diseño</b>
+      <ol>
+        <li><b>El copy legal del guardado de tarjeta</b> — el pendiente que el M2-PLAN ya marca como bloqueante de la
+        construcción de este paso. Esta lámina lo dice en <b>las tres</b> pantallas donde el guardado ocurre (P1
+        venta · P5 garantía card-present · P8 alcance completo) porque callarlo en dos de tres es peor. <b>El texto
+        exacto necesita tu visto bueno.</b></li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="card">
+    <b style="font-size:15px">Descartes globales — qué NO se dibujó y por qué</b>
+    <div class="reject"><span class="tag">DESCARTADO</span><div><b>Un botón único «Cobrar y retener».</b>
+    Encadenar las dos llamadas retendría en silencio un monto que puede haber cambiado entre ellas (uplift por débito)
+    y borraría el estado a medias, que es justo lo que el agente tiene que poder ver.</div></div>
+    <div class="reject"><span class="tag">DESCARTADO</span><div><b>Construir contra <code>POST /:id/charge</code>.</b>
+    Lleva <code>requireCapability('paymentActions')</code> y el perfil AGENT la tiene apagada por defecto: daría 403 a
+    todo el mostrador. Toda la lámina está dibujada contra el par <code>charge-sale</code> + <code>hold-deposit</code>,
+    que sigue abierto para AGENT.</div></div>
+    <div class="reject"><span class="tag">DESCARTADO</span><div><b>Que la app compare el monto firmado con el del
+    servidor.</b> Exigiría extraer un número de prosa legal sobrescribible por sede y en cualquier idioma. La app
+    <b>enseña las dos cifras</b> y cita el texto; compara el humano (P7).</div></div>
+    <div class="reject"><span class="tag">DESCARTADO</span><div><b>Escalar el copy de «en curso» por tiempo
+    transcurrido.</b> Sería la app diagnosticando la vía a partir de la latencia. Una red lenta produciría la misma
+    señal y el agente pediría una tarjeta que nadie va a usar.</div></div>
+    <div class="reject"><span class="tag">DESCARTADO</span><div><b>Traducir o clasificar el mensaje de error del
+    servidor.</b> Llega en inglés y crudo; se cita (patrón D2 aprobado). La app dice en español solo lo que sabe con
+    certeza: qué se cobró, qué no se retuvo, qué sigue abierto.</div></div>
+    <div class="reject"><span class="tag">DESCARTADO</span><div><b>Encolar el dinero al perder señal.</b> ADR-5, sin
+    matices. En su lugar, la línea «No perdiste nada», que es lo que la Tanda B no tenía.</div></div>
+    <div class="reject"><span class="tag">DESCARTADO</span><div><b>Retroceder el paso al fallar el cobro.</b>
+    <code>PAYMENT_PENDING</code> es puerta de un solo sentido; <code>PAYMENT_PENDING → TC_SIGNED</code> devuelve 409
+    <code>ILLEGAL_TRANSITION</code>. Se re-intenta sin cambiar de paso.</div></div>
+    <div class="reject"><span class="tag">DESCARTADO</span><div><b>Exponer «cobrar a la tarjeta guardada».</b>
+    Ya resuelto por Hector: <b>no en el M2</b>. Esta lámina no la dibuja en ningún frame, ni siquiera denegada.</div></div>
+    <div class="reject"><span class="tag">DESCARTADO</span><div><b>Un color propio para «rechazo» distinto de «falla
+    del sistema».</b> Requeriría clasificar el mensaje del servidor. Un solo tratamiento rojo para todo 402.</div></div>
+  </div>
+
+  <div class="card">
+    <b style="font-size:15px">Qué se reusó, punto por punto</b>
+    <div class="reject"><span class="tag">REUSADO</span><div><b>Tokens y geometría:</b> el bloque
+    <code>:root</code> entero viene de <code>m2-tanda-b.html</code> sin una sola variable nueva.</div></div>
+    <div class="reject"><span class="tag">REUSADO</span><div><b>Componentes:</b> <code>.money</code>,
+    <code>.mtot</code>, <code>.prov</code>, <code>.act</code> (live/wait/done), <code>.term</code>,
+    <code>.divcmp</code>, <code>.btn-record</code>, <code>.fact</code>, <code>.tenantbar</code>,
+    <code>.nobrand</code>, <code>.fold</code>, <code>.dock</code>, el rail y el <code>.stepline</code> —
+    todos de las Tandas A/B aprobadas.</div></div>
+    <div class="reject"><span class="tag">REUSADO</span><div><b>Patrón D2</b> (<code>.srvquote</code>) de
+    <code>m2-delta-h2.html</code>, aprobado por Hector el 2026-08-17.</div></div>
+    <div class="reject"><span class="tag">NUEVO</span><div><b>Cuatro clases de composición</b>, todas con tokens
+    existentes: <code>.cof</code> (tarjeta guardada), <code>.via</code> (píldora de vía), <code>.clause</code>
+    (cláusula inicializada, geometría de <code>.capsum</code>) y <code>.truth</code> (qué es verdad ahora).
+    Sin ellas no se puede decir lo que la corrección obliga a decir.</div></div>
+  </div>
+
+  <div class="card">
+    <b style="font-size:15px">Contraste medido (WCAG 2.1, sobre el fondo compuesto real)</b>
+    <ul style="margin:8px 0 0;padding-left:18px">
+      <li><code>.cof</code> subtítulo <code>--p-800</code> sobre <code>--tonal</code> — <b>10.2:1</b></li>
+      <li><code>.cof.none</code> subtítulo <code>--n-700</code> sobre <code>--n-50</code> — <b>8.5:1</b></li>
+      <li><code>.via.notap</code> <code>--ok-tx</code> sobre <code>--ok-bg</code> — <b>6.2:1</b></li>
+      <li><code>.via.tap</code> <code>--warn-tx</code> sobre <code>--warn-bg</code> — <b>5.6:1</b></li>
+      <li><code>.via.unk</code> <code>--n-800</code> sobre <code>--n-100</code> — <b>12.4:1</b></li>
+      <li><code>.clause blockquote</code> <code>--n-800</code> sobre <code>--n-25</code> — <b>13.6:1</b></li>
+      <li><code>.truth</code> <code>--n-800</code> sobre blanco — <b>14.1:1</b></li>
+      <li><code>.srvquote .raw</code> <code>--n-800</code> sobre <code>--danger-bg</code> — <b>12.3:1</b></li>
+    </ul>
+    <p style="margin:10px 0 0">Todo por encima de 4.5:1 con márgenes anchos, que es lo que exige el sol directo del
+    patio. Ninguna información se porta <b>solo</b> por color: cada píldora de vía lleva palabra, cada acto lleva
+    numeral o palomita, y cada estado lleva texto.</p>
+  </div>
+
+  <div class="card">
+    <b style="font-size:15px">Una mano, con guantes</b>
+    <ul style="margin:8px 0 0;padding-left:18px">
+      <li>Todo lo accionable vive en el <b>dock inferior</b>: CTA de 56 px + secundario de 48 px. Nada crítico arriba
+      del pliegue.</li>
+      <li>La única acción fuera del dock es abrir la cláusula (fila de 56 px) y «Consultar» el terminal (44 px de alto
+      dentro de una fila de 52) — ambas informativas, ninguna mueve dinero.</li>
+      <li><b>Ningún gesto</b>: nada de deslizar para confirmar. Con guantes mojados un swipe falla y aquí un fallo
+      cuesta dinero.</li>
+      <li><b>Ningún diálogo modal</b> en el camino del dinero: las confirmaciones viven en el flujo, con su contexto
+      visible (P7).</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <b style="font-size:15px">Si Hector rechaza esta lámina</b>
+    <ul style="margin:8px 0 0;padding-left:18px">
+      <li><b>Si rechaza la corrección del depósito</b> (o sea, si quiere seguir pidiendo el tap siempre): se puede,
+      pero hay que poner <code>IPOS_FORCE_CARD_PRESENT_DEPOSIT=true</code> en las sedes — <b>es una decisión de
+      configuración, no de UI</b>. La app no puede forzar un tap que el backend no va a pedir.</li>
+      <li><b>Si rechaza los pedidos al backend:</b> se construye igual, con P3-bis en vez de P3 y sin P5-bis, y la
+      píldora de vía sale siempre en <code>La decide el servidor</code>. Peor, pero honesto.</li>
+      <li><b>Si rechaza el bloque «qué es verdad ahora»</b> (P2/P4/P6-bis): el paso se construye sin él y el estado a
+      medias se apoya solo en las tarjetas de acto. Es el único componente de esta lámina que se puede quitar entero
+      sin romper nada.</li>
+      <li><b>La cita literal de la cláusula (P1-bis, P7) no es negociable a la baja:</b> si se quita, la única
+      alternativa es que la app derive el monto firmado, y eso es exactamente lo que la regla del dinero prohíbe.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <b style="font-size:15px">Nota de contador de pasos</b>
+    <p style="margin:8px 0 0">El encargo habla de un wizard de <b>11 pasos</b>. La lámina dice <b>«de 10»</b> a
+    propósito, siguiendo <code>checkout_step_catalog.dart</code>: la cadena lineal <code>CONFIRMING → CLOSED</code> son
+    10 pasos y <code>CANCELLED</code> es salida alterna alcanzable desde cualquier paso no terminal
+    (<code>state-machine.js:95-101</code>), no el paso 11 de una fila. Con denominador 11 el agente restaría mal lo que
+    le falta. <b>Si el 11 del encargo es intencional, avísame y lo cambio en toda la lámina</b> — pero entonces hay que
+    cambiarlo también en el catálogo del app y en las Tandas A/B ya aprobadas.</p>
+  </div>
+
+</footer>
+
+</body>
+</html>

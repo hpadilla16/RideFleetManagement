@@ -36,6 +36,8 @@ function makePrisma({ vehicleTypes = [], reservations = [], throwOn = {} } = {})
             if (vehicleWhere.status?.not && v.status === vehicleWhere.status.not) return false;
             if (vehicleWhere.status?.notIn && vehicleWhere.status.notIn.includes(v.status)) return false;
             if (vehicleWhere.homeLocationId && v.homeLocationId !== vehicleWhere.homeLocationId) return false;
+            // programCategory allowlist — rows default to BOTH like the DB column.
+            if (vehicleWhere.programCategory?.in && !vehicleWhere.programCategory.in.includes(v.programCategory || 'BOTH')) return false;
             return true;
           }).map((v) => ({ id: v.id })),
         }));
@@ -194,6 +196,33 @@ test('computeData returns shape with all hybrid sections', async () => {
 
   // Capacity is summed across types
   assert.equal(out.fleet.capacity, 6);
+});
+
+test('computeData: LOANER_ONLY and SHUTTLE_ONLY units are not forecast capacity (2026-08-24)', async () => {
+  // 3 Economy units on paper, but one is a dedicated loaner and one is a
+  // dedicated shuttle — only 1 unit can actually satisfy a rental booking.
+  // Before the rental-program filter, capacity read 3 and the grid always
+  // looked 2 cars rosier than the bookable fleet.
+  const eco = vt({ id: 'T1', code: 'ECO', name: 'Economy', tenantId: 't1', capacity: 3 });
+  eco.vehicles[1].programCategory = 'LOANER_ONLY';
+  eco.vehicles[2].programCategory = 'SHUTTLE_ONLY';
+  const prisma = makePrisma({
+    vehicleTypes: [eco],
+    reservations: [
+      res({ id: 'a', typeId: 'T1', tenantId: 't1', pickup: '2026-06-02', ret: '2026-06-04' }),
+    ],
+  });
+  const out = await computeData({
+    tenantId: 't1', from: '2026-06-01', to: '2026-06-05', query: {},
+  }, { prisma });
+
+  assert.equal(out.fleet.capacity, 1);
+  assert.equal(out.types[0].capacity, 1);
+  // The single rentable unit is out for its 2 reserved (tenant-TZ) days —
+  // those days are sold out; the phantom loaner/shuttle units may not paper
+  // over real scarcity.
+  assert.equal(out.types[0].reservedByDay.reduce((a, b) => a + b, 0), 2);
+  assert.equal(out.types[0].availableByDay.filter((n) => n === 0).length, 2);
 });
 
 test('computeData: peakRisk surfaces sold-out SUV days', async () => {

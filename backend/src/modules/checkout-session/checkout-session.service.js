@@ -14,17 +14,54 @@ import {
   appendEvent,
   isTerminal,
 } from './state-machine.js';
+import { assertInsuranceSelectionEditable, messageFor, INSURANCE_LOCK } from './insurance-selection-gate.js';
+import { isCheckoutPaymentRequired } from '../settings/checkout-payment-policy.js';
+import { CheckoutSessionError } from './checkout-session.errors.js';
 
-export class CheckoutSessionError extends Error {
-  constructor(message, status = 400, code = null) {
-    super(message);
-    this.name = 'CheckoutSessionError';
-    this.status = status;
-    this.code = code;
-  }
-}
+// Re-exported so the 13 modules that import CheckoutSessionError from here keep
+// working. The class itself moved to a leaf module so helpers this service
+// depends on can throw it without forming an import cycle — see that file.
+export { CheckoutSessionError };
 
 const HANDOFF_TOKEN_TTL_MIN = 15;
+
+/**
+ * Absolute base for the customer-facing /sign/:token page.
+ *
+ * ORDER MATTERS, and it is deliberately NOT the CUSTOMER_PORTAL_BASE_URL-first
+ * chain used by the ~11 other link builders in this codebase. /sign/[token] is
+ * a route of the MAIN Next app — the same deployment that serves the agent's
+ * checkout wizard (frontend/src/app/sign/[token]/page.js sits beside
+ * frontend/src/app/reservations/...). CUSTOMER_PORTAL_BASE_URL names the
+ * customer portal, which today is just another route tree in that same app
+ * (frontend/src/app/customer) but is exactly the thing a tenant would peel off
+ * onto its own hostname. Reading it first would then hand customers a URL on a
+ * deployment that does not serve /sign at all.
+ *
+ * So: prefer the vars that name the app itself, and keep CUSTOMER_PORTAL_BASE_URL
+ * as the LAST fallback — it is the var most tenants actually set today, and
+ * while the two are the same origin it still yields a correct link.
+ */
+function signingBaseUrl() {
+  return (
+    process.env.APP_BASE_URL
+    || process.env.FRONTEND_BASE_URL
+    || process.env.CUSTOMER_PORTAL_BASE_URL
+    || 'http://localhost:3000'
+  ).replace(/\/+$/, '');
+}
+
+/**
+ * Absolute link for a minted token, or null for kinds with no verified public
+ * page. Only TERMS_SIGNING is mapped: MOBILE_INSPECTION has no frontend route
+ * that builds a URL from the token (it is exchanged through
+ * /api/public/checkout-handoff), and CUSTOMER_INSPECTION already gets its
+ * /inspect/:token link built by customer-inspection.service.js. Guessing a
+ * path for either would be worse than omitting the field.
+ */
+function publicUrlForToken(kind, token) {
+  return kind === 'TERMS_SIGNING' ? `${signingBaseUrl()}/sign/${token}` : null;
+}
 
 /**
  * M2 P2 (2026-08-17) — lightweight optimistic versioning, OPT-IN.
@@ -139,6 +176,25 @@ async function ensureCheckoutGates(reservationId) {
 }
 
 /**
+ * Why (if at all) this session starts with the payment step already satisfied.
+ * Returns a reason string to stamp into the log, or null for "collect payment
+ * in the wizard, exactly as before".
+ *
+ * Split out of createForReservation so the decision is testable on its own: the
+ * creation path touches a dozen Prisma models, and the thing that actually
+ * matters on the money path is this three-line rule.
+ *
+ * ORDER IS LOAD-BEARING. DEALERSHIP_LOANER is checked FIRST and short-circuits,
+ * so a loaner check-out neither reads nor depends on the tenant setting — the
+ * loaner behavior shipped in beta and must keep working on its own.
+ */
+export async function resolvePaymentPrestampReason({ workflowMode, tenantId } = {}) {
+  if (String(workflowMode) === 'DEALERSHIP_LOANER') return 'DEALERSHIP_LOANER';
+  if (!(await isCheckoutPaymentRequired(tenantId || null))) return 'TENANT_PAYMENT_NOT_REQUIRED';
+  return null;
+}
+
+/**
  * Create a CheckoutSession for the given reservation. Idempotent: if
  * one already exists and is non-terminal, return it. If it's terminal
  * (CLOSED/CANCELLED), refuse — the caller has to explicitly start a
@@ -246,14 +302,39 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
     },
   });
 
-  // Loaner checkout has no online payment (billing is COURTESY/WARRANTY/etc. on the reservation,
-  // or the CUSTOMER_PAY upgrade differential the advisor collects). Pre-stamp paymentCompletedAt
-  // so the PAID entry guard passes and the wizard skips the Spin payment step.
+  // Two reasons a session starts with the payment step already satisfied. Both
+  // pre-stamp paymentCompletedAt so the PAID entry guard passes and the wizard
+  // skips the Spin payment step — a DATA-level skip; state-machine.js is
+  // untouched by either.
+  //
+  //  1. DEALERSHIP_LOANER — loaner checkout has no online payment (billing is
+  //     COURTESY/WARRANTY/etc. on the reservation, or the CUSTOMER_PAY upgrade
+  //     differential the advisor collects).
+  //  2. Tenant policy `checkoutPaymentRequired === false` (2026-08-26) — the
+  //     tenant does not collect payment during check-out at all (Rent & Go by
+  //     VPH Motors). Defaults to TRUE, so a tenant that never touches the
+  //     switch behaves exactly as before. See settings/checkout-payment-policy.js.
+  //
+  // Loaner is evaluated FIRST and short-circuits: it needs no settings read, and
+  // the wizard still owes the advisor the loaner-specific differential screen.
+  //
+  // NEITHER reason disables taking money elsewhere. View Payments, manual
+  // sale/deposit and the post-rental charge paths are all unaffected — the only
+  // thing that changes is whether the wizard BLOCKS on step 3.
   let finalSession = session;
-  if (String(resv?.workflowMode) === 'DEALERSHIP_LOANER') {
+  const paymentPolicyTenantId = resv?.tenantId || tenantId || null;
+  const prestampReason = await resolvePaymentPrestampReason({
+    workflowMode: resv?.workflowMode,
+    tenantId: paymentPolicyTenantId,
+  });
+  if (prestampReason) {
     finalSession = await prisma.checkoutSession.update({
       where: { id: session.id },
       data: { paymentCompletedAt: new Date() },
+    });
+    logger.info('[checkout-session] payment step pre-stamped', {
+      sessionId: session.id, reservationId, reason: prestampReason,
+      tenantId: paymentPolicyTenantId,
     });
   }
 
@@ -552,23 +633,23 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // This is a PARTIAL close of the events lost-update, and the honest
       // count is FOURTEEN other writers of this TEXT column, all still doing
       // an unguarded read-modify-write (read → write, this file):
-      //   stampSideEffect        :953 → :961
-      //   saveCustomerSignature  :983 → :1004  (read is OUTSIDE the
-      //                                         $transaction that starts :989)
-      //   mintHandoffToken      :1027 → :1078
-      //   setDeclinedInsurance  :1149 → :1163
-      //   markAbandoned         :1173 → :1187
+      //   stampSideEffect       :1034 → :1042
+      //   saveCustomerSignature :1064 → :1085  (read is OUTSIDE the
+      //                                         $transaction that starts :1070)
+      //   mintHandoffToken      :1108 → :1168
+      //   setDeclinedInsurance  :1247 → :1279
+      //   markAbandoned         :1289 → :1303
       //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
-      //   spin-charge.service.js:574, :606, :884, :1038, :1229 (five)
+      //   spin-charge.service.js:613, :645, :926, :1083, :1274 (five)
       //   mobile-inspection.service.js:276
       //   vehicle-swap.service.js:130
-      //   terms-signing.service.js:175
+      //   terms-signing.service.js:275
       // Any of them can still drop an entry written between its own read and
       // its own write. saveCustomerSignature is the sharpest of the fourteen:
       // its $transaction makes the two WRITES atomic but leaves the READ
       // outside it, and what it writes is customerSignedAt — an
       // ENTRY_REQUIRES field for CLOSED. See the note on stampSideEffect.
-      // (Those are ALL the appendEvent callers in the tree; :241 here is the
+      // (Those are ALL the appendEvent callers in the tree; :297 here is the
       // fourteenth-plus-one and does not count — it builds a fresh row on
       // create, with nothing to lose. The kiosk's similarly-named
       // appendEvents(sessionId, device, rawEvents) is a different function
@@ -1052,13 +1133,22 @@ async function mintHandoffToken({ sessionId, kind, actorUserId }) {
       expiresAt: existing.expiresAt,
       kind: existing.kind,
       reused: true,
+      // Additive (2026-08-17). Every caller used to assemble this itself —
+      // the web wizard from window.location.origin, RideOps from a COMPILED
+      // dart-define, which forced a fresh app build per custom-domain tenant.
+      // The server knows its own public origin; hand it over. Existing fields
+      // are untouched, so old clients keep working.
+      signUrl: publicUrlForToken(existing.kind, existing.token),
     };
   }
 
   // CUSTOMER_INSPECTION links travel by email and the customer may inspect
-  // hours later (decision 2026-06-11: 24h TTL, re-sendable). QR handoffs
-  // stay short-lived.
-  const ttlMin = kind === 'CUSTOMER_INSPECTION' ? 24 * 60 : HANDOFF_TOKEN_TTL_MIN;
+  // hours later. TTL is configurable (2026-08-22 security redesign): default 72h
+  // for the checkout link, env CUSTOMER_INSPECTION_CHECKOUT_TTL_HOURS. QR handoffs
+  // (TERMS_SIGNING / MOBILE_INSPECTION) stay short-lived.
+  const checkoutTtlH = Number(process.env.CUSTOMER_INSPECTION_CHECKOUT_TTL_HOURS);
+  const ciTtlMin = (Number.isFinite(checkoutTtlH) && checkoutTtlH > 0 ? checkoutTtlH : 72) * 60;
+  const ttlMin = kind === 'CUSTOMER_INSPECTION' ? ciTtlMin : HANDOFF_TOKEN_TTL_MIN;
   const expiresAt = new Date(Date.now() + ttlMin * 60_000);
   const token = tokenBytes();
 
@@ -1089,6 +1179,7 @@ async function mintHandoffToken({ sessionId, kind, actorUserId }) {
     token: row.token,
     expiresAt: row.expiresAt,
     kind: row.kind,
+    signUrl: publicUrlForToken(row.kind, row.token),
   };
 }
 
@@ -1143,6 +1234,13 @@ async function exchangeHandoffToken(token) {
  * AND record it in the session event log. Used by step 1 of the wizard.
  * Phase 3 (T&C signing) reads agreement.declinedInsurance to decide
  * whether to inject the addendum section into the customer's signing UI.
+ *
+ * STEP GUARD (2026-08-17). The rule about WHEN this flag may still be written
+ * lives in insurance-selection-gate.js, shared with the pre-check-in portal —
+ * the other surface that writes the column. It refuses with 409 and a code
+ * (TC_ALREADY_COMPLETED / TC_SIGNING_IN_PROGRESS) so the agent UI can tell
+ * "already signed" apart from "signing right now". See that module for the
+ * reasoning and the full writer inventory.
  */
 async function setDeclinedInsurance({ id, declined, actorUserId }) {
   if (!id) throw new CheckoutSessionError('sessionId required', 400);
@@ -1151,11 +1249,29 @@ async function setDeclinedInsurance({ id, declined, actorUserId }) {
   if (!session.agreementId) {
     throw new CheckoutSessionError('No agreement linked to this session', 409);
   }
+  await assertInsuranceSelectionEditable({
+    agreementId: session.agreementId,
+    reservationId: session.reservationId,
+    nextValue: !!declined,
+    audience: 'staff',
+  });
 
-  await prisma.rentalAgreement.update({
-    where: { id: session.agreementId },
+  // Optimistic concurrency on the read-then-write above. The gate's checks and
+  // this write are not in one transaction, so the customer can finish signing
+  // in between and the agent's edit would land on a sealed contract. Folding
+  // `tcSignedAt: null` into the WHERE makes the database settle it: if the
+  // signature landed first, count is 0 and nobody wrote. Cheaper than wrapping
+  // the whole thing in a transaction, and it closes the window rather than
+  // narrowing it.
+  const written = await prisma.rentalAgreement.updateMany({
+    where: { id: session.agreementId, tcSignedAt: null },
     data: { declinedInsurance: !!declined },
   });
+  if (written.count === 0) {
+    throw new CheckoutSessionError(
+      messageFor(INSURANCE_LOCK.SIGNED, 'staff'), 409, INSURANCE_LOCK.SIGNED,
+    );
+  }
 
   return prisma.checkoutSession.update({
     where: { id },

@@ -14,7 +14,7 @@
  */
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
@@ -51,6 +51,13 @@ function Wizard({ token, me, logout }) {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [busy, setBusy] = useState(false);
+  // Synchronous in-flight guard. `busy` disables the button, but `disabled`
+  // only takes effect after React re-renders — a rapid double/triple-click
+  // fires submit() again before that, with a stale `busy` closure, POSTing the
+  // same reservation 2-4x (the bug: each submit mints a fresh reservationNumber
+  // so the unique index never catches it). This ref flips synchronously on the
+  // first call, so every repeat submit returns immediately.
+  const submittingRef = useRef(false);
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
 
@@ -232,8 +239,11 @@ function Wizard({ token, me, logout }) {
   };
 
   const submit = async () => {
+    // In-flight guard: ignore repeat submits until this one resolves or errors.
+    if (submittingRef.current) return;
     const blocked = blockedReason();
     if (blocked) { setErr(blocked); return; }
+    submittingRef.current = true;
     setBusy(true); setErr('');
     try {
       const reservationNumber = form.reservationNumber || `RES-${Date.now().toString().slice(-6)}`;
@@ -280,12 +290,15 @@ function Wizard({ token, me, logout }) {
         } catch (planErr) {
           setErr(`Reservation ${reservationNumber} was created, but the monthly plan did not attach: ${planErr?.message || 'unknown error'}. Open the reservation and activate the monthly plan there.`);
           setBusy(false);
+          submittingRef.current = false;
           return;
         }
       }
 
+      // Success — navigating away; leave the guard engaged so a late click on
+      // the still-mounted button cannot fire a second create mid-navigation.
       router.push(`/reservations/${created.id}`);
-    } catch (e) { setErr(e?.message || 'Failed to create reservation'); setBusy(false); }
+    } catch (e) { setErr(e?.message || 'Failed to create reservation'); setBusy(false); submittingRef.current = false; }
   };
 
   const returnMin = useMemo(() => {

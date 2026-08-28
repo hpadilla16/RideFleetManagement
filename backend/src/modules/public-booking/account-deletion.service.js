@@ -193,8 +193,15 @@ export const accountDeletionService = {
     // row but keep the row itself, preserving audit + accounting integrity
     // on Reservations / Trips / Conversations.
     //
-    // Sprint 9 follow-up: call Authorize.Net's deleteCustomerProfile API
-    // for full upstream PII removal. For now we just null the local IDs.
+    // TODO (GDPR Wave 2 go-live): migrate this to the shared
+    // customer-erasure.service.js `eraseCustomer({ actor: 'self-service',
+    // reason: 'account-deletion', dryRun: false })` so self-service deletion
+    // covers the SAME complete surface as the admin erasure endpoint (denorm
+    // agreement/driver/quote PII, KYC Storage bytes, AuthNet profile). That
+    // path is gated by GDPR_ERASURE_ENABLED, which ships OFF — so we keep this
+    // original in-place anonymiser live for now rather than break a real user's
+    // deletion request while the erasure engine is dark. Flip the flag on, then
+    // delegate here and delete this block.
     await prisma.$transaction(async (tx) => {
       // Anonymize reviewer name on any host reviews written by this guest.
       await tx.hostReview.updateMany({

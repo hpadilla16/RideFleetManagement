@@ -57,16 +57,22 @@ export async function bootEmbeddedPg() {
   process.env.DATABASE_URL = databaseUrl;
 
   // Apply schema + generate client against this DB.
-  execFileSync(
-    'npx',
-    ['prisma', 'db', 'push', '--skip-generate', '--accept-data-loss'],
-    { cwd: BACKEND_DIR, env: { ...process.env, DATABASE_URL: databaseUrl }, stdio: 'inherit' }
-  );
-  execFileSync('npx', ['prisma', 'generate'], {
+  //
+  // Windows portability (2026-08-17): `npx` is npx.cmd there, which
+  // execFileSync will not resolve via PATHEXT (ENOENT) and — since the Node 20
+  // batch-injection fix — refuses to spawn at all without a shell (EINVAL).
+  // Every embedded suite was therefore unrunnable on a Windows dev machine.
+  // The argv is all fixed literals, so the shell adds no injection surface.
+  const IS_WIN = process.platform === 'win32';
+  const NPX = IS_WIN ? 'npx.cmd' : 'npx';
+  const execOpts = {
     cwd: BACKEND_DIR,
     env: { ...process.env, DATABASE_URL: databaseUrl },
-    stdio: 'inherit'
-  });
+    stdio: 'inherit',
+    shell: IS_WIN,
+  };
+  execFileSync(NPX, ['prisma', 'db', 'push', '--skip-generate', '--accept-data-loss'], execOpts);
+  execFileSync(NPX, ['prisma', 'generate'], execOpts);
 
   const mod = await import('@prisma/client');
   const prisma = new mod.PrismaClient({ datasources: { db: { url: databaseUrl } } });

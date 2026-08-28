@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
 import { AuthGate } from '../components/AuthGate';
 import { AppShell } from '../components/AppShell';
+import { BillingNoticeBanner } from '../components/BillingNoticeBanner';
 import MarketIntelligenceCard from '../components/MarketIntelligenceCard';
 import { api } from '../lib/client';
 import { DEFAULT_TENANT_TIMEZONE, tenantDayKey } from '../lib/tenant-time';
@@ -708,6 +709,11 @@ function DashboardInner({ token, me, logout }) {
 
   return (
     <AppShell me={me} logout={logout}>
+      {/* Day 0 of the dunning timeline (Phase 5): the first thing an account
+          owner sees after a declined subscription payment, above everything
+          else, while the app still works normally underneath. Renders nothing
+          at all when there is nothing wrong — see the component. */}
+      <BillingNoticeBanner />
       <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
         <div className="app-banner">
           <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>

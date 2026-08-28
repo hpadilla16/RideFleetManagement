@@ -25,6 +25,16 @@ function makeFakePrisma({ payments = [], reservations = [], vehicles = [], vehic
     return true;
   }
 
+  function matchVehicle(v, where) {
+    if (where.tenantId && v.tenantId !== where.tenantId) return false;
+    if (where.status?.not && v.status === where.status.not) return false;
+    if (where.status?.notIn && where.status.notIn.includes(v.status)) return false;
+    if (typeof where.status === 'string' && v.status !== where.status) return false;
+    // programCategory allowlist — rows default to BOTH like the DB column.
+    if (where.programCategory?.in && !where.programCategory.in.includes(v.programCategory || 'BOTH')) return false;
+    return true;
+  }
+
   return {
     rentalAgreementPayment: {
       async findMany({ where }) {
@@ -54,13 +64,15 @@ function makeFakePrisma({ payments = [], reservations = [], vehicles = [], vehic
     },
     vehicle: {
       async count({ where }) {
-        return vehicles.filter((v) => {
-          if (where.tenantId && v.tenantId !== where.tenantId) return false;
-          if (where.status?.not && v.status === where.status.not) return false;
-          if (where.status?.notIn && where.status.notIn.includes(v.status)) return false;
-          if (typeof where.status === 'string' && v.status !== where.status) return false;
-          return true;
-        }).length;
+        return vehicles.filter((v) => matchVehicle(v, where)).length;
+      },
+      async findMany({ where, select }) {
+        return vehicles.filter((v) => matchVehicle(v, where)).map((v) => {
+          if (!select) return v;
+          const out = {};
+          for (const k of Object.keys(select)) if (select[k]) out[k] = v[k];
+          return out;
+        });
       },
     },
     vehicleAvailabilityBlock: {
@@ -98,10 +110,13 @@ test('listReports refuses without tenantId', async () => {
 
 test('listReports returns directory with the current registry length', async () => {
   const out = await listReports({ tenantId: 't1' });
-  // 17 AVAILABLE + 3 coming-soon slugs (upcoming-vehicle-sales, damage,
+  // 20 AVAILABLE + 3 coming-soon slugs (upcoming-vehicle-sales, damage,
   // chargeback). 2026-07-25: +1 — 'commission' (Commission Payouts)
   // resurrected for the LAX #5 approve workflow + review tiers.
-  assert.equal(out.reports.length, 20);
+  // 2026-08-24: re-pinned 20→23 — cash-flow, airport-lawa and daily-business
+  // had landed in the registry without this pin moving (found stale while
+  // shipping SHUTTLE_ONLY).
+  assert.equal(out.reports.length, 23);
   assert.deepEqual(out.categories, ['MANAGEMENT', 'FLEET', 'OPERATIONS', 'REVENUE']);
 });
 
@@ -112,10 +127,13 @@ test('listReports marks the AVAILABLE reports correctly (rest COMING_SOON)', asy
     available.sort(),
     [
       'agent-track-record',
+      'airport-lawa',
       'availability',
       'availability-forecast',
+      'cash-flow',
       'commission',
       'commission-sales-performance',
+      'daily-business',
       'fleet-status',
       'fleet-value',
       'payments-by-day',
@@ -162,13 +180,16 @@ test('getSnapshot — revenue, reservations checked out, and available count', a
       { tenantId: 't2', amount: 500, method: 'CARD', status: 'PAID', paidAt: new Date('2026-05-12T10:00:00Z') }, // wrong tenant
     ],
     reservations: [
-      // Picked up in window — count
-      { tenantId: 't1', status: 'CHECKED_OUT',         pickupAt: new Date('2026-05-10T14:00:00Z'), returnAt: new Date('2026-05-30T14:00:00Z'), vehicleId: 'v1' },
-      { tenantId: 't1', status: 'CHECKED_IN_UNPAID',   pickupAt: new Date('2026-05-05T14:00:00Z'), returnAt: new Date('2026-05-15T14:00:00Z'), vehicleId: 'v2' },
+      // Picked up in window — count. 2026-08-24: reservation vehicleIds now
+      // reference REAL fleet rows — the snapshot intersects rented/blocked
+      // ids with the rental fleet (SHUTTLE_ONLY work), so a phantom id would
+      // silently drop out.
+      { tenantId: 't1', status: 'CHECKED_OUT',         pickupAt: new Date('2026-05-10T14:00:00Z'), returnAt: new Date('2026-05-30T14:00:00Z'), vehicleId: 'veh-C' },
+      { tenantId: 't1', status: 'CHECKED_IN_UNPAID',   pickupAt: new Date('2026-05-05T14:00:00Z'), returnAt: new Date('2026-05-15T14:00:00Z'), vehicleId: 'veh-D' },
       // Picked up but later returned (still picked up in window) — count
-      { tenantId: 't1', status: 'CHECKED_IN',          pickupAt: new Date('2026-05-03T14:00:00Z'), returnAt: new Date('2026-05-08T14:00:00Z'), vehicleId: 'v3' },
+      { tenantId: 't1', status: 'CHECKED_IN',          pickupAt: new Date('2026-05-03T14:00:00Z'), returnAt: new Date('2026-05-08T14:00:00Z'), vehicleId: 'veh-A' },
       // NEW / not yet checked out — don't count
-      { tenantId: 't1', status: 'NEW',                 pickupAt: new Date('2026-05-25T14:00:00Z'), returnAt: new Date('2026-05-28T14:00:00Z'), vehicleId: 'v4' },
+      { tenantId: 't1', status: 'NEW',                 pickupAt: new Date('2026-05-25T14:00:00Z'), returnAt: new Date('2026-05-28T14:00:00Z'), vehicleId: 'veh-A' },
       // Other tenant — don't count
       { tenantId: 't2', status: 'CHECKED_OUT',         pickupAt: new Date('2026-05-12T14:00:00Z'), returnAt: new Date('2026-05-22T14:00:00Z'), vehicleId: 'vX' },
     ],
@@ -196,11 +217,42 @@ test('getSnapshot — revenue, reservations checked out, and available count', a
   assert.equal(out.reservationsCheckedOut, 3);
   // totalFleet excludes OUT_OF_SERVICE → 4 vehicles
   assert.equal(out.totalFleet, 4);
-  // v1 (CHECKED_OUT, returnAt 5/30) is within 14d grace from now (5/22) → counts.
-  // v2/v3 returned (CHECKED_IN_UNPAID/CHECKED_IN) → don't count.
+  // veh-C (CHECKED_OUT, returnAt 5/30) is within 14d grace from now (5/22) → counts.
+  // veh-D/veh-A returned (CHECKED_IN_UNPAID/CHECKED_IN) → don't count.
   assert.equal(out.currentlyRented, 1);
   assert.equal(out.blockedForMaintenance, 1);
   // available = totalFleet (4) − currentlyRented (1) − blocked (1) = 2
+  assert.equal(out.availableVehicles, 2);
+});
+
+test('getSnapshot — LOANER_ONLY and SHUTTLE_ONLY units are not rentable fleet (2026-08-24)', async () => {
+  const now = new Date('2026-05-22T16:00:00Z');
+  const prisma = makeFakePrisma({
+    vehicles: [
+      { tenantId: 't1', id: 'veh-A', status: 'AVAILABLE' },                                   // BOTH (default)
+      { tenantId: 't1', id: 'veh-B', status: 'AVAILABLE', programCategory: 'RENTAL_ONLY' },
+      { tenantId: 't1', id: 'veh-L', status: 'AVAILABLE', programCategory: 'LOANER_ONLY' },   // courtesy car
+      { tenantId: 't1', id: 'veh-S', status: 'AVAILABLE', programCategory: 'SHUTTLE_ONLY' },  // airport shuttle
+    ],
+    reservations: [
+      // The shuttle never has rental reservations; the loaner may be CHECKED_OUT
+      // under the loaner workflow — it must not count as "currently rented"
+      // against a fleet total it is not part of.
+      { tenantId: 't1', status: 'CHECKED_OUT', pickupAt: new Date('2026-05-20T14:00:00Z'), returnAt: new Date('2026-05-30T14:00:00Z'), vehicleId: 'veh-L' },
+    ],
+    vehicleBlocks: [
+      // The shuttle sits in the wash bay — its block must not be subtracted
+      // from a fleet total that excludes it (would understate availability).
+      { tenantId: 't1', vehicleId: 'veh-S', blockType: 'WASH_HOLD', releasedAt: null },
+    ],
+  });
+  const out = await getSnapshot({
+    tenantId: 't1', from: '2026-05-01', to: '2026-05-22',
+    deps: { prisma, now, tenantTz: 'America/Puerto_Rico' },
+  });
+  assert.equal(out.totalFleet, 2, 'only BOTH + RENTAL_ONLY are rentable fleet');
+  assert.equal(out.currentlyRented, 0, 'the checked-out loaner is not rental fleet');
+  assert.equal(out.blockedForMaintenance, 0, 'the shuttle wash-hold is outside the rental fleet');
   assert.equal(out.availableVehicles, 2);
 });
 
@@ -237,7 +289,10 @@ test('getSnapshot survives prisma errors gracefully (returns zeros)', async () =
       count: async () => { throw new Error('table missing'); },
       findMany: async () => { throw new Error('table missing'); },
     },
-    vehicle: { count: async () => { throw new Error('table missing'); } },
+    vehicle: {
+      count: async () => { throw new Error('table missing'); },
+      findMany: async () => { throw new Error('table missing'); },
+    },
     vehicleAvailabilityBlock: { findMany: async () => { throw new Error('table missing'); } },
     maintenanceJob: { findMany: async () => { throw new Error('table missing'); } },
   };

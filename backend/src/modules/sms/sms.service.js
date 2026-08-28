@@ -147,3 +147,8 @@ export const smsService = {
     };
   },
 };
+
+// Test-only surface (same convention as incident-report.service.js). Exposed so
+// the Tenant.settingsJson drift guard can call the resolver directly instead of
+// reaching it through a send path that needs a provider.
+export const __test = { getTenantSmsConfig };

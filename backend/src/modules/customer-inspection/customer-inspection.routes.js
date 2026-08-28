@@ -11,6 +11,7 @@ import express from 'express';
 import { customerInspectionService } from './customer-inspection.service.js';
 import { CheckoutSessionError } from '../checkout-session/checkout-session.service.js';
 import { crossTenantScopeFor as scopeFor } from '../../lib/tenant-scope.js';
+import { createPublicRateLimitGuard, attachPublicRequestMeta } from '../../middleware/public-endpoint-guards.js';
 import logger from '../../lib/logger.js';
 
 export const customerInspectionPublicRouter = Router();
@@ -18,6 +19,19 @@ export const customerInspectionPublicRouter = Router();
 // Damage photos arrive as data URLs (~300KB-2MB) — bump this router's body
 // limit only, like the mobile-inspection router does.
 customerInspectionPublicRouter.use(express.json({ limit: '15mb' }));
+
+// Per-IP rate limiting (2026-08-22). This router is unauthenticated — the token
+// (or the printed QR) is the only credential — so without a guard it had no
+// brute-force or abuse ceiling at all. Mirrors terms-signing's tiers: a tight
+// cap on the QR resolve (it mints a token) and the write, looser on reads.
+// attachPublicRequestMeta is a FACTORY — it must be CALLED with a name to get
+// the middleware. Passing the factory itself to .use() made Express run it as
+// (req,res,next), which never calls next() and hung every route on this router
+// (hotfix 2026-08-22).
+customerInspectionPublicRouter.use(attachPublicRequestMeta('customer-inspection'));
+const qrResolveLimit = createPublicRateLimitGuard({ name: 'customer-inspection-qr', maxRequests: 10, windowMs: 60 * 1000 });
+const readLimit = createPublicRateLimitGuard({ name: 'customer-inspection-read', maxRequests: 60, windowMs: 60 * 1000 });
+const writeLimit = createPublicRateLimitGuard({ name: 'customer-inspection-write', maxRequests: 30, windowMs: 60 * 1000 });
 
 function handleError(res, err) {
   if (err instanceof CheckoutSessionError) {
@@ -34,7 +48,7 @@ function clientIp(req) {
 // GET /api/customer-inspection/v/:payload — resolve a scanned printed per-vehicle QR
 // (payload = "vehicleId.sig") to a CHECK-IN inspection token for the active rental.
 // Defined BEFORE /:token so the two-segment static route wins.
-customerInspectionPublicRouter.get('/v/:payload', async (req, res) => {
+customerInspectionPublicRouter.get('/v/:payload', qrResolveLimit, async (req, res) => {
   try {
     res.json(await customerInspectionService.startCheckinByVehicleQr({ payload: req.params.payload }));
   } catch (err) {
@@ -42,9 +56,22 @@ customerInspectionPublicRouter.get('/v/:payload', async (req, res) => {
   }
 });
 
+// GET /api/customer-inspection/r/:payload — resolve a scanned RESERVATION-bound QR
+// (payload = "reservationId.expMs.sig", printed on the rental agreement) to a
+// CHECK-IN inspection token for that reservation. Signed + expiring; supersedes
+// the static per-vehicle sticker as the primary QR. Defined BEFORE /:token so the
+// two-segment static route wins.
+customerInspectionPublicRouter.get('/r/:payload', qrResolveLimit, async (req, res) => {
+  try {
+    res.json(await customerInspectionService.startInspectionByReservationQr({ payload: req.params.payload }));
+  } catch (err) {
+    handleError(res, err);
+  }
+});
+
 // GET /api/customer-inspection/:token — step 1 context (identity + vehicle +
 // diagram type + views).
-customerInspectionPublicRouter.get('/:token', async (req, res) => {
+customerInspectionPublicRouter.get('/:token', readLimit, async (req, res) => {
   try {
     res.json(await customerInspectionService.loadByToken(req.params.token));
   } catch (err) {
@@ -54,7 +81,7 @@ customerInspectionPublicRouter.get('/:token', async (req, res) => {
 
 // POST /api/customer-inspection/:token/damage
 // body: { view, xPct, yPct, description?, photoDataUrl }
-customerInspectionPublicRouter.post('/:token/damage', async (req, res) => {
+customerInspectionPublicRouter.post('/:token/damage', writeLimit, async (req, res) => {
   try {
     const { view, xPct, yPct, description, photoDataUrl } = req.body || {};
     res.json(await customerInspectionService.reportDamage({

@@ -4,12 +4,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/app.dart';
 import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/api_providers.dart';
+import 'package:rideops/core/db/outbox_providers.dart';
+import 'package:rideops/core/outbox/network_status.dart';
+import 'package:rideops/core/session/active_location.dart';
+import 'package:rideops/core/session/kiosk_guard.dart';
+import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/token_store.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
 import 'package:rideops/features/auth/presentation/login_screen.dart';
-import 'package:rideops/features/dashboard/presentation/home_placeholder_screen.dart';
+import 'package:rideops/features/dashboard/presentation/home_screen.dart';
 
 import 'helpers/auth_test_helpers.dart';
+import 'helpers/outbox_test_helpers.dart';
+import 'helpers/shell_test_helpers.dart';
 
 /// Widget tests del login (mockup 1A-1C) montando la app COMPLETA con router:
 /// así se prueba también el redirect (splash → login → home) y no solo la
@@ -28,8 +35,26 @@ void main() {
   Widget app() => ProviderScope(
         overrides: [
           tokenStoreProvider.overrideWithValue(store),
+          // PIN ya configurado (H2): estos tests ejercitan el LOGIN — el
+          // gate de setup del PIN tiene los suyos en pin_setup_screen_test.
+          pinStoreProvider.overrideWithValue(
+            InMemoryPinStore.configured(userId: kFixtureUserId),
+          ),
+          kioskGuardStoreProvider.overrideWithValue(InMemoryKioskGuardStore()),
           authApiProvider.overrideWithValue(api),
+          // H4: la home real fetchea el dashboard — stub con el fixture para
+          // que el fetch resuelva y la pantalla asiente (ver FakeDashboardApi).
+          dashboardApiProvider.overrideWithValue(FakeDashboardApi()),
+          // …y la sede activa hidrata de memoria: el Keystore real hace IO async
+          // que jamás resuelve dentro de testWidgets — la home (gate hydrated)
+          // quedaría en skeleton hasta disparar el lock de inactividad.
+          activeLocationStoreProvider.overrideWithValue(InMemoryActiveLocationStore()),
           eventLoggerProvider.overrideWithValue(logger),
+          // H5: bandeja silenciada — ver helpers/outbox_test_helpers.dart.
+          outboxDbProvider.overrideWith(buildMemoryOutboxDb),
+          photoVaultProvider.overrideWith(buildQuietVault),
+          networkStatusProvider.overrideWithValue(FakeNetworkStatus()),
+          outboxRowsProvider.overrideWith((ref) => Stream.value(const [])),
         ],
         child: const RideOpsApp(),
       );
@@ -59,7 +84,7 @@ void main() {
     await pumpToLogin(tester);
     await fillAndSubmit(tester);
 
-    expect(find.byType(HomePlaceholderScreen), findsOneWidget);
+    expect(find.byType(HomeScreen), findsOneWidget);
     expect(store.value, token, reason: 'token persistido en el store seguro');
     expect(logger.has(AuthEvents.loginOk), isTrue);
   });
@@ -109,6 +134,6 @@ void main() {
     await tester.tap(find.text('Retry now'));
     await tester.pumpAndSettle();
     expect(calls, 2);
-    expect(find.byType(HomePlaceholderScreen), findsOneWidget);
+    expect(find.byType(HomeScreen), findsOneWidget);
   });
 }

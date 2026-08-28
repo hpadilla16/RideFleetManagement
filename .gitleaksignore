@@ -1,0 +1,31 @@
+# Historical false positives — dummy TEST fixtures ('shift_/tok_' + sequential hex)
+# that matched generic-api-key. The live files were renamed to non-key-shaped
+# constants in d349c751; these fingerprints silence ONLY the two historical
+# commits (full-history scan). Never ignore a finding here without verifying
+# the string is not a real credential.
+d7a58467d138f581d4f35233d0a9a2c5365dfb06:frontend/test/shuttle-driver-mode.test.jsx:generic-api-key:30
+540c3c5cba6d3e854a30ef3ca66ec5d0e01c8979:frontend/test/shuttle-tracker-phase3.test.jsx:generic-api-key:26
+
+# ── Historical findings triaged 2026-08-25 (CI run #62): each VERIFIED harmless
+#    before ignoring — test dummies/fixtures, plus a June smoke token confirmed
+#    ABSENT from every production token table (HandoffToken, LoanerAgreement,
+#    Customer, Conversation, ShuttleTrackerLink, *Communication, HostReview,
+#    Tenant, AppSetting). Never add an entry here without that verification.
+# dummy 'sekret-api-key-123'
+03b4dcfee4da7e9e2574d065af44f449779ba639:frontend/test/onestepgps-connector.test.jsx:generic-api-key:114
+# dummy 'volt-hunter2-secret'
+c9b0561051a3e8f03f4be80830d289b03b284c55:backend/src/modules/settings/telematics-credential-encryption.test.mjs:generic-api-key:30
+# fixture 'tok_handoff_fixture_0001'
+0eee8766f14730de0f1bb3597d3b69c212e2e987:rideops/test/helpers/checkout_test_helpers.dart:generic-api-key:226
+# test fixture hex
+29a331604ae697bfd1a25d470ad88c1d2b529362:rideops/test/fixtures/handoff_token.json:generic-api-key:2
+# fake JWT ('FIXTURE.FIXTURE')
+29a331604ae697bfd1a25d470ad88c1d2b529362:rideops/test/fixtures/login_response.json:generic-api-key:2
+# June-2026 smoke token — VERIFIED DEAD in prod 2026-08-25 (absent from every token store)
+9cce84d68a917b3d291ce6b59c03ff08ee6ed994:.deploy-notes/2026-06-25-ship-public-addons-insurance-beta230.sh:generic-api-key:34
+# same dead June smoke token
+6200072347d320dcd2553db6517bc4aeda25bed9:.deploy-notes/2026-06-25-ship-public-loaner-selfservice-beta229.sh:generic-api-key:36
+# same dead June smoke token
+2462f43acd692a0346d4d56f09303efc047ac593:.deploy-notes/2026-06-25-ship-vehicle-profile-public-api-beta228.sh:generic-api-key:38
+# dummy 'tok_saved_abc123'
+43f49d716fa2060ba88a1fe81db496c703d8c8a9:backend/src/modules/payment-gateway/card-on-file.test.mjs:generic-api-key:65

@@ -35,6 +35,7 @@ import {
   dayLabelInTz,
 } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
+import { RENTAL_PROGRAM_FILTER } from '../../lib/program-category.js';
 import { cache } from '../../lib/cache.js';
 import { tenantKey } from '../../lib/cache/tenantKey.js';
 
@@ -260,7 +261,13 @@ async function computeDataInner({ tenantId, from, to, query }, deps = {}) {
   // by units that aren't actually rentable capacity. SOLD = terminal (vehicle
   // is gone); OUT_OF_SERVICE = retired/totaled. Same exclusion the dashboard
   // fleetTotal uses.
-  const vehicleWhere = { status: { notIn: ['SOLD', 'OUT_OF_SERVICE'] } };
+  // Program filter (2026-08-24): utilization divides rental-days by this
+  // capacity — LOANER_ONLY and SHUTTLE_ONLY units are not rentable capacity,
+  // so counting them deflated every utilization percentage.
+  const vehicleWhere = {
+    status: { notIn: ['SOLD', 'OUT_OF_SERVICE'] },
+    programCategory: RENTAL_PROGRAM_FILTER,
+  };
   if (locationId) vehicleWhere.homeLocationId = locationId;
 
   const vehicleTypes = await prisma.vehicleType.findMany({

@@ -66,7 +66,11 @@ export const DEFAULT_PAYMENT_GATEWAY_CONFIG = {
   spin: {
     enabled: false,
     environment: 'sandbox',
+    // The Auth Key is encrypted at rest and NEVER returned by the API
+    // (2026-08-26). The field is always blank on load; `hasAuthKey` says
+    // whether one is on file, and saving it blank keeps the stored key.
     authKey: '',
+    hasAuthKey: false,
     tpn: '',
     merchantNumber: '1',
     callbackUrl: '',

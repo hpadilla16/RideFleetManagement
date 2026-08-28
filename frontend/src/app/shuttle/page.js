@@ -21,6 +21,8 @@ import { useTranslation } from 'react-i18next';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api } from '../../lib/client';
+import { AssignControl } from '../shuttles/WaitingPanel';
+import { vehicleOptionsAt, modeAt } from '../../lib/shuttle-staff';
 
 function minutesSince(value) {
   const t = new Date(value).getTime();
@@ -118,10 +120,20 @@ function ShuttleInner({ me, token, logout }) {
   const [from, setFrom] = useState(todayISO());
   const [to, setTo] = useState(todayISO());
   const [locations, setLocations] = useState([]);
-  const [locationId, setLocationId] = useState('');
+  // Deep-linkable location filter (2026-08-24): the Shuttle Monitor's "View
+  // requests" lands here as /shuttle?locationId=… . Read once at mount from
+  // the URL — no useSearchParams to keep the page statically prerenderable.
+  const [locationId, setLocationId] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try { return new URLSearchParams(window.location.search).get('locationId') || ''; } catch { return ''; }
+  });
   const [pickupSpots, setPickupSpots] = useState({});
   const [delayRow, setDelayRow] = useState(null);
   const [msg, setMsg] = useState('');
+  // Phase 3 (Screen 10/8a): the assignment picker's vehicle options come from
+  // the monitor payload the /shuttles page already reads — one best-effort
+  // fetch; if it fails the queue simply shows no picker.
+  const [monitorShuttles, setMonitorShuttles] = useState([]);
 
   const isLive = tab === 'open';
 
@@ -167,6 +179,9 @@ function ShuttleInner({ me, token, logout }) {
         setPickupSpots(map);
       });
     }).catch(() => {});
+    api('/api/shuttle-monitor/positions', { bypassCache: true }, token)
+      .then((d) => setMonitorShuttles(Array.isArray(d?.shuttles) ? d.shuttles : []))
+      .catch(() => setMonitorShuttles([]));
   }, [token]);
 
   const act = async (id, action) => {
@@ -282,7 +297,17 @@ function ShuttleInner({ me, token, logout }) {
                     ) : null}
                   </span>
                   {isLive ? (
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                      {/* Phase 3: pin one configured shuttle onto the request
+                          (ON_DEMAND locations only — hidden in loop mode). */}
+                      <AssignControl
+                        requestId={r.id}
+                        assignedVehicle={r.assignedVehicle}
+                        vehicles={vehicleOptionsAt(monitorShuttles, r.locationId)}
+                        mode={modeAt(monitorShuttles, r.locationId)}
+                        token={token}
+                        onChanged={() => load()}
+                      />
                       <button type="button" onClick={() => act(r.id, 'complete')} style={{ fontWeight: 800 }}>
                         {t('shuttle.complete', 'Picked up ✓')}
                       </button>

@@ -1,13 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/core/api/api_error.dart';
 import 'package:rideops/core/api/api_providers.dart';
+import 'package:rideops/core/api/dto/session_user.dart';
+import 'package:rideops/core/db/outbox_providers.dart';
 import 'package:rideops/core/session/session_controller.dart';
 import 'package:rideops/core/session/session_state.dart';
 import 'package:rideops/core/session/token_store.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
 
 import 'helpers/auth_test_helpers.dart';
+import 'helpers/outbox_test_helpers.dart';
 
 /// Unit tests del estado de sesión (H1): hidratación al arrancar, login,
 /// cambio de contraseña con intercambio de token, expiración y gate.
@@ -22,6 +27,9 @@ void main() {
         tokenStoreProvider.overrideWithValue(store),
         authApiProvider.overrideWithValue(api),
         eventLoggerProvider.overrideWithValue(logger),
+        // H5: login/logout purgan la bandeja — en memoria, sin plugins.
+        outboxDbProvider.overrideWith(buildMemoryOutboxDb),
+        photoVaultProvider.overrideWith(buildQuietVault),
       ],
     );
     addTearDown(container.dispose);
@@ -170,6 +178,28 @@ void main() {
           .length,
       1,
     );
+    // GD MC-3: la expulsión involuntaria viaja con razón — el login la
+    // pinta como aviso (default: sesión vencida).
+    expect(
+      c.read(sessionControllerProvider).signOutReason,
+      SignOutReason.sessionExpired,
+    );
+  });
+
+  test('onSessionExpired con razón kioskRecovery la publica para el login '
+      '(política H6)', () async {
+    store.value = fakeJwt(exp: DateTime.now().add(const Duration(hours: 8)));
+    api.onMe = () async => authResponseFromFixture().user;
+    final c = makeContainer();
+    await settle();
+    c
+        .read(sessionControllerProvider.notifier)
+        .onSessionExpired(reason: SignOutReason.kioskRecovery);
+    await settle();
+    expect(
+      c.read(sessionControllerProvider).signOutReason,
+      SignOutReason.kioskRecovery,
+    );
   });
 
   test('notePasswordChangeRequired levanta el flag local (403 observado)',
@@ -222,6 +252,48 @@ void main() {
     final s = c.read(sessionControllerProvider);
     expect(s.status, SessionStatus.authenticated);
     expect(s.user, isNull);
+  });
+
+  test(
+      'herencia QA-H3: un /me EN VUELO de la identidad anterior no pisa al '
+      'usuario nuevo (guard de generación en _hydrateUser)', () async {
+    // Escenario exacto: restore del usuario A con /me lento → logout →
+    // login del usuario B → la respuesta VIEJA de /me llega al final. Sin el
+    // guard, `state.isAuthenticated` es true (la sesión de B) y el user de A
+    // sobreescribiría al de B.
+    final meOfUserA = Completer<SessionUser>();
+    store.value = fakeJwt(
+      exp: DateTime.now().add(const Duration(hours: 8)),
+      sub: 'user-a',
+    );
+    api.onMe = () => meOfUserA.future;
+    final c = makeContainer();
+    await settle();
+    expect(c.read(sessionControllerProvider).user, isNull,
+        reason: '/me de A sigue en vuelo');
+
+    await c.read(sessionControllerProvider.notifier).logout();
+    final tokenB = fakeJwt(
+      exp: DateTime.now().add(const Duration(hours: 8)),
+      sub: 'user-b',
+    );
+    api.onLogin = (_, _) async {
+      final raw = readAuthFixture();
+      (raw['user'] as Map<String, dynamic>)['id'] = 'user-b';
+      raw['token'] = tokenB;
+      return AuthResponse.fromJson(raw);
+    };
+    await c
+        .read(sessionControllerProvider.notifier)
+        .login(email: 'b@ridefleet.example', password: 'x');
+    expect(c.read(sessionControllerProvider).user?.id, 'user-b');
+
+    // Llega la respuesta rezagada de A: se DESCARTA.
+    final userA = authResponseFromFixture().user; // id del fixture ≠ user-b
+    meOfUserA.complete(userA);
+    await settle();
+    expect(c.read(sessionControllerProvider).user?.id, 'user-b',
+        reason: 'la identidad vieja jamás resucita sobre la nueva');
   });
 
   test('logout limpia token y estado', () async {

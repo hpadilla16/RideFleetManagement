@@ -1,0 +1,65 @@
+# Zero-downtime blue-green overlay (2026-08-22).
+#
+# Used ONLY transiently by ops/deploy.sh during a deploy. Steady state is
+# unchanged: between deploys these "green" containers do not exist and nginx
+# points at the normal prod containers (fleet-backend-prod:4000,
+# fleet-frontend-prod:3000).
+#
+# During a deploy the script brings these up on ALTERNATE host ports from the
+# freshly-built image, health-gates them, flips nginx to them, recreates the
+# prod (blue) containers with the new image, flips nginx back, then stops these.
+# That gives a seamless cut-over with no window where nginx has no upstream.
+#
+# IMAGE NAMES: compose tags built images `<project>-<service>`. The project is
+# the repo dir (ridefleetmanagement), so the images are
+# `ridefleetmanagement-backend` / `-frontend`. deploy.sh builds them via the
+# prod compose file first; these services just RUN those images on alt ports.
+#
+# CONNECTION BUDGET: for the brief window where green AND blue backends both run,
+# green uses a DELIBERATELY SMALL pool (2 workers × 8 = 16 conns) so blue's 96 +
+# green's 16 + worker's 12 = 124 stays under the Supabase pooler's 160 cap.
+# Green only serves the trickle of traffic during the cut-over, so 16 is ample.
+
+services:
+  backend-green:
+    image: ridefleetmanagement-backend
+    container_name: fleet-backend-green
+    restart: "no"
+    env_file:
+      - ./backend/.env
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      PUPPETEER_EXECUTABLE_PATH: /usr/local/bin/chrome
+      PUPPETEER_MAX_CONCURRENT_PAGES: "2"
+      # Small footprint — this instance only serves traffic during the cut-over.
+      CLUSTER_WORKERS: "2"
+      DATABASE_POOL_SIZE: "8"
+    ports:
+      - "127.0.0.1:4010:4000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  frontend-green:
+    image: ridefleetmanagement-frontend
+    container_name: fleet-frontend-green
+    restart: "no"
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:4000}
+      NEXT_PUBLIC_GOOGLE_MAPS_KEY: ${NEXT_PUBLIC_GOOGLE_MAPS_KEY:-}
+      NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+      NEXT_PUBLIC_SENTRY_ENV: ${NEXT_PUBLIC_SENTRY_ENV:-production}
+      NEXT_PUBLIC_SENTRY_RELEASE: ${NEXT_PUBLIC_SENTRY_RELEASE:-}
+      NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: ${NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE:-0.1}
+      NEXT_TELEMETRY_DISABLED: "1"
+    ports:
+      - "127.0.0.1:3010:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20

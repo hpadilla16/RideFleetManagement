@@ -33,6 +33,12 @@ const KNOWN_OUT = {
   'test:module-access-audit': 'DB-backed (.db.test.mjs)',
   'test:customer-inspection': 'DB-backed',
   'test:customer-docs-backfill': 'DB-backed (storage backfill script)',
+  // Boots its own throwaway Postgres, but only after `npm install --no-save
+  // embedded-postgres` — which `npm ci` does not provide. In the chain it
+  // would wedge `npm test` for everyone on a fresh checkout. Its DB-free half
+  // (the query shape, the step guard, the signUrl chain) IS chained, as
+  // test:declined-insurance.
+  'test:declined-insurance-embedded': 'embedded-postgres (npm install --no-save)',
   // Landed on main in the 194 commits between this branch and prod, already
   // orphaned when this guard arrived. Grandfathered UNAUDITED — wiring another
   // session's suite into CI sight-unseen is how the chain gets wedged. Each
@@ -81,6 +87,51 @@ test('KNOWN_OUT does not outlive the scripts it excuses', () => {
   assert.deepEqual(wired, [], `KNOWN_OUT names script(s) that ARE in the chain now: ${wired.join(', ')}`);
 });
 
+// ---------------------------------------------------------------------------
+// Third way a suite reports safety it never checked: it IS in `npm test`, and
+// `npm test` is not what CI runs. beta-ci.yml's own comment says the chain
+// hangs at an early suite and "cannot be relied on as the automatic gate", so
+// the workflow runs an explicit list of scripts instead. A suite wired only
+// into the chain is therefore still dark. That is exactly what happened to
+// test:terms-signing between 2026-08-17's build and its review.
+//
+// This is a RATCHET like the two above: names listed here must appear in the
+// explicit CI list, and the check fails loudly if the workflow, the step or
+// the script disappears from under it.
+const CI_GATED = {
+  'test:terms-signing':
+    'the no-auth /api/sign payload: whose brand the renter sees while signing',
+  'test:tenant-brand':
+    'the shared cascade behind that brand, and the counter screen that shows the QR',
+};
+
+function ciWorkflowRunLines() {
+  const yml = readFileSync(new URL('../../../.github/workflows/beta-ci.yml', import.meta.url), 'utf8');
+  // Every `run:` body in the file, joined. Deliberately not a YAML parse: the
+  // question is only "does this command line invoke the script", and adding a
+  // yaml dependency to a guard is how guards stop being cheap to keep.
+  return yml;
+}
+
+test('CI-gated suites are in beta-ci.yml, not only in `npm test`', () => {
+  const yml = ciWorkflowRunLines();
+  const chain = chainScripts();
+  const missing = [];
+  for (const [script, why] of Object.entries(CI_GATED)) {
+    if (!(script in pkg.scripts)) { missing.push(`${script} (no such script) — ${why}`); continue; }
+    // Tokenized for the same reason chainScripts() is: `npm run test:terms`
+    // is a prefix of `npm run test:terms-signing`.
+    const invoked = new RegExp(`npm run ${script.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w:-])`).test(yml);
+    if (!invoked) missing.push(`${script} — ${why}`);
+    if (!chain.has(script)) missing.push(`${script} (dropped from \`npm test\`) — ${why}`);
+  }
+  assert.deepEqual(
+    missing,
+    [],
+    `Suite(s) that must run in CI's explicit list AND in \`npm test\`: ${missing.join('; ')}`,
+  );
+});
+
 /**
  * Test files named by no script, as of 2026-08-06. NOT an approval — a
  * high-water mark. Deleting an entry (by wiring the file into a script) is
@@ -100,9 +151,10 @@ const UNRUN_FILES_BASELINE = new Set([
   'src/modules/booking-engine/car-sharing-discovery.test.mjs',
   'src/modules/checkout-session/age-rules-gate.test.mjs',
   'src/modules/checkout-session/checkout-session.scheduler.test.mjs',
-  'src/modules/checkout-session/spin-charge.test.mjs',
+  // spin-charge.test.mjs left this list 2026-08-26: per-tenant terminal config
+  // made it a load-bearing money-path suite, so it got an env bootstrap, DB
+  // fakes for the new AppSetting read, and a script (test:spin-charge).
   'src/modules/checkout-session/state-machine.test.mjs',
-  'src/modules/checkout-session/terms-signing.test.mjs',
   'src/modules/citations/citations-archive.test.mjs',
   'src/modules/customer-portal/customer-portal-rate-limit.test.mjs',
   'src/modules/customers/customer-doc-endpoints.embedded.test.mjs',

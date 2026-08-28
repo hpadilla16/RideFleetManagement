@@ -6,6 +6,7 @@ import '../../../core/api/api_error.dart';
 import '../../../core/config/app_config.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/session/session_controller.dart';
+import '../../../core/session/session_state.dart';
 import '../../../core/theme/ride_tokens.dart';
 import 'widgets/auth_widgets.dart';
 
@@ -72,6 +73,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final l10n = AppLocalizations.of(context)!;
     final offline = _error?.kind == ApiErrorKind.network;
     final credsError = _error?.kind == ApiErrorKind.unauthorized;
+    // GD MC-3: aterrizar aquí por una expulsión INVOLUNTARIA (401, política
+    // de kiosco) sin explicación parece crash — el estado trae la razón y
+    // se pinta como aviso mientras no haya un error de intento más reciente.
+    final signOutReason = ref.watch(
+      sessionControllerProvider.select(
+        (s) => s.status == SessionStatus.unauthenticated
+            ? s.signOutReason
+            : null,
+      ),
+    );
 
     // Status bar en claro: los iconos del sistema viven sobre la aurora
     // oscura (GD MUST-3).
@@ -154,6 +165,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ),
                             ),
                             const SizedBox(height: 14),
+                            if (_error == null && signOutReason != null)
+                              RideBanner(
+                                kind: RideBannerKind.warn,
+                                text: switch (signOutReason) {
+                                  SignOutReason.kioskRecovery =>
+                                    l10n.loginKioskRelogin,
+                                  SignOutReason.sessionExpired =>
+                                    l10n.sessionExpired,
+                                },
+                              ),
                             if (credsError)
                               RideBanner(
                                 kind: RideBannerKind.danger,

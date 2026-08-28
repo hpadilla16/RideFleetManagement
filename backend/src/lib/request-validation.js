@@ -3,11 +3,22 @@ function toTrimmedString(value) {
   return String(value).trim();
 }
 
+// Bad-input errors carry a 400 so the global error handler returns 400 (not an
+// opaque 500) for every endpoint that uses these shared validators (DAST
+// 2026-08-23: e.g. /public/booking/vehicle-classes with a junk `limit` 500'd
+// because the plain Error had no status). The message is caller-safe (it names
+// the request field, never anything internal).
+function badRequest(message) {
+  const e = new Error(message);
+  e.status = 400;
+  return e;
+}
+
 export function requireString(value, label, options = {}) {
   const minLength = Number.isFinite(options?.minLength) ? options.minLength : 1;
   const normalized = toTrimmedString(value);
   if (!normalized || normalized.length < minLength) {
-    throw new Error(`${label} is required`);
+    throw badRequest(`${label} is required`);
   }
   return normalized;
 }
@@ -24,16 +35,16 @@ export function optionalBoolean(value, fallback = null) {
   const normalized = String(value).trim().toLowerCase();
   if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) return true;
   if (['false', '0', 'no', 'n', 'off'].includes(normalized)) return false;
-  throw new Error('boolean value is invalid');
+  throw badRequest('boolean value is invalid');
 }
 
 export function optionalNumber(value, label = 'number', options = {}) {
   if (value == null || value === '') return options?.fallback ?? null;
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) throw new Error(`${label} must be a valid number`);
-  if (options?.integer && !Number.isInteger(parsed)) throw new Error(`${label} must be a whole number`);
-  if (Number.isFinite(options?.min) && parsed < options.min) throw new Error(`${label} must be at least ${options.min}`);
-  if (Number.isFinite(options?.max) && parsed > options.max) throw new Error(`${label} must be at most ${options.max}`);
+  if (!Number.isFinite(parsed)) throw badRequest(`${label} must be a valid number`);
+  if (options?.integer && !Number.isInteger(parsed)) throw badRequest(`${label} must be a whole number`);
+  if (Number.isFinite(options?.min) && parsed < options.min) throw badRequest(`${label} must be at least ${options.min}`);
+  if (Number.isFinite(options?.max) && parsed > options.max) throw badRequest(`${label} must be at most ${options.max}`);
   return parsed;
 }
 
@@ -41,14 +52,14 @@ export function assertEnum(value, label, allowedValues = []) {
   const normalized = requireString(value, label).toUpperCase();
   const allowed = new Set((allowedValues || []).map((item) => String(item).trim().toUpperCase()).filter(Boolean));
   if (!allowed.has(normalized)) {
-    throw new Error(`${label} is invalid`);
+    throw badRequest(`${label} is invalid`);
   }
   return normalized;
 }
 
 export function assertPlainObject(value, label = 'payload') {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`${label} must be an object`);
+    throw badRequest(`${label} must be an object`);
   }
   return value;
 }

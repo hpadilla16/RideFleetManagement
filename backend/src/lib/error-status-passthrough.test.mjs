@@ -22,8 +22,15 @@ const MAIN = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'm
 
 /** The handler's decision, extracted so it can be exercised without Express. */
 function decide(err) {
-  const status = Number(err?.status || err?.statusCode) || 500;
+  const status = Number(err?.status || err?.statusCode || err?.httpStatus) || 500;
   if (status >= 400 && status < 500) return { status, body: { error: err?.message || 'Request failed' } };
+  // Malformed CLIENT input reaches Prisma as a known error — mapped to a GENERIC
+  // 4xx (never the Prisma message: it names columns/types = schema leak).
+  const prismaCode = err?.code;
+  if (err?.name === 'PrismaClientValidationError' || prismaCode === 'P2023' || prismaCode === 'P2009' || prismaCode === 'P2000') {
+    return { status: 400, body: { error: 'Invalid request' } };
+  }
+  if (prismaCode === 'P2025') return { status: 404, body: { error: 'Not found' } };
   return { status: 500, body: { error: 'Internal server error' } };
 }
 
@@ -46,6 +53,21 @@ test('hand-rolled e.status throws are honored too', () => {
   assert.deepEqual(decide(e), { status: 404, body: { error: 'Shuttle request not found' } });
 });
 
+test('e.httpStatus throws are honored too (the settings/market-pricing convention)', () => {
+  const e = new Error('locationCode is required');
+  e.httpStatus = 400;
+  assert.deepEqual(decide(e), { status: 400, body: { error: 'locationCode is required' } });
+});
+
+test('malformed-input Prisma errors become a generic 4xx, not a 500', () => {
+  const badId = Object.assign(new Error('Inconsistent column data: Malformed ObjectID'), { code: 'P2023' });
+  const badArg = Object.assign(new Error('Argument where: ... Unknown field `zzz` on model `Vehicle`'), { name: 'PrismaClientValidationError' });
+  const missing = Object.assign(new Error('depends on records that were required but not found'), { code: 'P2025' });
+  assert.deepEqual(decide(badId), { status: 400, body: { error: 'Invalid request' } });
+  assert.deepEqual(decide(badArg), { status: 400, body: { error: 'Invalid request' } }, 'must NOT echo the Prisma message (schema leak)');
+  assert.deepEqual(decide(missing), { status: 404, body: { error: 'Not found' } });
+});
+
 test('unexpected errors stay opaque at 500', () => {
   for (const err of [new Error('connect ECONNREFUSED 10.0.0.1:5432'), new AppError('boom', 500), null]) {
     const out = decide(err);
@@ -59,9 +81,11 @@ test('main.js still routes 5xx to Sentry and only 5xx', () => {
   // or every validation error becomes an alert.
   const handlerAt = MAIN.indexOf('app.use((err, req, res, _next)');
   assert.ok(handlerAt > 0, 'global error handler not found');
-  const handler = MAIN.slice(handlerAt, handlerAt + 1800);
+  const handler = MAIN.slice(handlerAt, handlerAt + 3400);
   const earlyReturn = handler.indexOf('status >= 400 && status < 500');
   const capture = handler.indexOf('captureBackendException');
+  const prismaMap = handler.indexOf("prismaCode === 'P2023'");
   assert.ok(earlyReturn > 0, 'the 4xx passthrough is gone');
-  assert.ok(capture > earlyReturn, 'Sentry capture must come after the 4xx return');
+  assert.ok(prismaMap > earlyReturn, 'the Prisma client-input 4xx mapping must sit after the typed-4xx return');
+  assert.ok(capture > prismaMap, 'Sentry capture must come after BOTH the 4xx return and the Prisma client-input mapping');
 });

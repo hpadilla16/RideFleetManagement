@@ -46,6 +46,31 @@ function customerBaseUrl() {
   return (process.env.CUSTOMER_PORTAL_BASE_URL || process.env.APP_BASE_URL || process.env.FRONTEND_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
 }
 
+// Configurable link windows (2026-08-22 security redesign). All env-overridable
+// so a tenant can tighten/loosen without a redeploy. Defaults are the product
+// owner decision: checkout & check-in emailed links live 72h; the contract QR
+// resolver lives until returnAt + a 48h grace (capped absolutely, below).
+function positiveHoursEnv(name, defHours) {
+  const h = Number(process.env[name]);
+  return (Number.isFinite(h) && h > 0 ? h : defHours);
+}
+function checkoutTtlHours() { return positiveHoursEnv('CUSTOMER_INSPECTION_CHECKOUT_TTL_HOURS', 72); }
+function checkinTtlHours() { return positiveHoursEnv('CUSTOMER_INSPECTION_CHECKIN_TTL_HOURS', 72); }
+function resolverGraceHours() { return positiveHoursEnv('CUSTOMER_INSPECTION_RESOLVER_GRACE_HOURS', 48); }
+// Absolute ceiling on a contract-QR resolver's life, measured from when the
+// contract is rendered — so an accidental far-future returnAt (or a never-closed
+// rental) can't mint a link that resolves for years. 30 days is comfortably past
+// any real rental + grace.
+const RESOLVER_MAX_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
+// Human phrase for email copy ("72 hours" / "3 days").
+function describeWindow(hours) {
+  if (hours % 24 === 0) {
+    const d = hours / 24;
+    return d === 1 ? '1 day' : `${d} days`;
+  }
+  return hours === 1 ? '1 hour' : `${hours} hours`;
+}
+
 /**
  * Map a vehicle type name/code to one of the diagram asset families.
  * Pure — unit-tested. Default: 'sedan'.
@@ -137,14 +162,15 @@ async function sendCustomerInspection({ sessionId, actorUserId, closedSession = 
   const vehicleLabel = [resv.vehicle.year, resv.vehicle.make, resv.vehicle.model].filter(Boolean).join(' ');
   const customerName = [resv.customer?.firstName, resv.customer?.lastName].filter(Boolean).join(' ') || 'Customer';
 
-  const inspectText1 = `Hi ${customerName},\n\nPlease complete the vehicle inspection for your rental (${vehicleLabel}${resv.vehicle.plate ? ` · ${resv.vehicle.plate}` : ''}).\n\nOpen this link on your phone: ${link}\n\nThe link expires in 24 hours.\n\nIMPORTANT: the inspection is your responsibility. Walk around the vehicle and report any damage you see (photo + short note). Any damage we detect upon return that was not reported and pertains to your rental period will be your responsibility.\n`;
+  const checkoutWindowText = describeWindow(checkoutTtlHours());
+  const inspectText1 = `Hi ${customerName},\n\nPlease complete the vehicle inspection for your rental (${vehicleLabel}${resv.vehicle.plate ? ` · ${resv.vehicle.plate}` : ''}).\n\nOpen this link on your phone: ${link}\n\nThe link expires in ${checkoutWindowText}.\n\nIMPORTANT: the inspection is your responsibility. Walk around the vehicle and report any damage you see (photo + short note). Any damage we detect upon return that was not reported and pertains to your rental period will be your responsibility.\n`;
   let inspectBrand1;
   try { inspectBrand1 = await resolveEmailBrand({ tenantId: session.tenantId || resv.tenantId || null }); } catch { inspectBrand1 = undefined; }
   const inspectBodyHtml1 = `
         <p>Hi ${escHtml(customerName)},</p>
         <p>Please complete the vehicle inspection for your rental:</p>
         <p style="background:#f4f2fd;border-radius:8px;padding:12px"><strong>${escHtml(vehicleLabel)}</strong>${resv.vehicle.plate ? ` · Plate ${escHtml(resv.vehicle.plate)}` : ''}${resv.reservationNumber ? `<br/>Reservation #${escHtml(resv.reservationNumber)}` : ''}</p>
-        <p style="font-size:12px;color:#666">The link expires in 24 hours. It takes about 2 minutes: confirm your vehicle, then tap the diagram wherever you see damage and add a photo.</p>
+        <p style="font-size:12px;color:#666">The link expires in ${escHtml(checkoutWindowText)}. It takes about 2 minutes: confirm your vehicle, then tap the diagram wherever you see damage and add a photo.</p>
         <p style="font-size:12px;color:#666"><strong>Important:</strong> the inspection is your responsibility. Any damage we detect upon return that was not reported and pertains to your rental period will be your responsibility.</p>`;
   const inspectRendered1 = renderBrandedEmail({
     brand: inspectBrand1,
@@ -249,10 +275,11 @@ async function sendCheckinInspection({ reservationId, actorUserId = null, force 
     },
   });
 
-  // Mint the token directly on the reservation (no checkout-session at return time). 24h TTL,
-  // same as the checkout link (decision 2026-06-11).
+  // Mint the token directly on the reservation (no checkout-session at return time).
+  // Configurable TTL (default 72h, env CUSTOMER_INSPECTION_CHECKIN_TTL_HOURS).
+  const checkinHours = checkinTtlHours();
   const token = randomBytes(24).toString('hex');
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const expiresAt = new Date(Date.now() + checkinHours * 60 * 60 * 1000);
   await prisma.handoffToken.create({
     data: { reservationId: resv.id, kind: 'CUSTOMER_INSPECTION', token, expiresAt, createdByUserId: actorUserId },
   });
@@ -261,14 +288,15 @@ async function sendCheckinInspection({ reservationId, actorUserId = null, force 
   const vehicleLabel = [resv.vehicle.year, resv.vehicle.make, resv.vehicle.model].filter(Boolean).join(' ');
   const customerName = [resv.customer?.firstName, resv.customer?.lastName].filter(Boolean).join(' ') || 'Customer';
 
-  const inspectText2 = `Hi ${customerName},\n\nYour rental (${vehicleLabel}${resv.vehicle.plate ? ` · ${resv.vehicle.plate}` : ''}) is due back soon. Before you return it, please do a quick self-inspection so check-in is fast and there are no surprises.\n\nOpen this link on your phone: ${link}\n\nThe link expires in 24 hours. Walk around the vehicle and report any damage (photo + short note).\n`;
+  const checkinWindowText = describeWindow(checkinHours);
+  const inspectText2 = `Hi ${customerName},\n\nYour rental (${vehicleLabel}${resv.vehicle.plate ? ` · ${resv.vehicle.plate}` : ''}) is due back soon. Before you return it, please do a quick self-inspection so check-in is fast and there are no surprises.\n\nOpen this link on your phone: ${link}\n\nThe link expires in ${checkinWindowText}. Walk around the vehicle and report any damage (photo + short note).\n`;
   let inspectBrand2;
   try { inspectBrand2 = await resolveEmailBrand({ tenantId: resv.tenantId || null }); } catch { inspectBrand2 = undefined; }
   const inspectBodyHtml2 = `
         <p>Hi ${escHtml(customerName)},</p>
         <p>Your rental is due back soon. Do a quick self-inspection before you return it — it makes check-in faster:</p>
         <p style="background:#f4f2fd;border-radius:8px;padding:12px"><strong>${escHtml(vehicleLabel)}</strong>${resv.vehicle.plate ? ` · Plate ${escHtml(resv.vehicle.plate)}` : ''}${resv.reservationNumber ? `<br/>Reservation #${escHtml(resv.reservationNumber)}` : ''}</p>
-        <p style="font-size:12px;color:#666">The link expires in 24 hours. It takes about 2 minutes: confirm your vehicle, then tap the diagram wherever you see damage and add a photo.</p>
+        <p style="font-size:12px;color:#666">The link expires in ${escHtml(checkinWindowText)}. It takes about 2 minutes: confirm your vehicle, then tap the diagram wherever you see damage and add a photo.</p>
         <p style="font-size:12px;color:#666"><strong>Important:</strong> reporting existing damage protects you. Any new damage found at return that pertains to your rental period may be your responsibility.</p>`;
   const inspectRendered2 = renderBrandedEmail({
     brand: inspectBrand2,
@@ -285,7 +313,7 @@ async function sendCheckinInspection({ reservationId, actorUserId = null, force 
     html: inspectRendered2.html,
   });
 
-  logger.info('[customer-inspection] check-in (D-1) link sent', {
+  logger.info('[customer-inspection] check-in link sent', {
     inspectionId: inspection.id, reservationId: resv.id, emailTo,
   });
   return { ok: true, inspectionId: inspection.id, emailTo, expiresAt };
@@ -299,7 +327,17 @@ async function sendCheckinInspection({ reservationId, actorUserId = null, force 
 // only resolves when the vehicle has a CHECKED_OUT reservation.
 // ---------------------------------------------------------------------------
 function vehicleSigSecret() {
-  return process.env.JWT_SECRET || process.env.BACKEND_INTERNAL_TOKEN || 'ride-fleet-qr';
+  // FAIL CLOSED (2026-08-22). This used to fall back to the literal
+  // 'ride-fleet-qr' when no secret was configured — which would make every
+  // vehicle QR signature forgeable and every vehicle id enumerable. There is no
+  // safe default for a signing secret: if neither env var is set, refuse rather
+  // than sign with a public constant. In production JWT_SECRET is always set
+  // (the app hard-fails at boot without it), so this never triggers there.
+  const secret = process.env.JWT_SECRET || process.env.BACKEND_INTERNAL_TOKEN;
+  if (!secret) {
+    throw new CheckoutSessionError('QR signing is not configured', 503, 'QR_NOT_CONFIGURED');
+  }
+  return secret;
 }
 function signVehicle(vehicleId) {
   return createHmac('sha256', vehicleSigSecret()).update(`checkin-qr:${vehicleId}`).digest('hex').slice(0, 24);
@@ -369,6 +407,96 @@ async function startCheckinByVehicleQr({ payload }) {
 }
 
 // ---------------------------------------------------------------------------
+// Fase D (2026-08-22 redesign) — RESERVATION-BOUND signed resolver. Replaces the
+// static per-vehicle sticker as the primary QR (printed on the rental agreement).
+// The signed payload binds to ONE reservation and carries an expiry INSIDE the
+// signed message, so a photographed code stops resolving after returnAt + grace
+// and can NEVER be repointed at whichever rental happens to be on the car. Same
+// fail-closed secret as the vehicle sticker (vehicleSigSecret).
+// ---------------------------------------------------------------------------
+export function signReservation(reservationId, expMs) {
+  return createHmac('sha256', vehicleSigSecret())
+    .update(`checkin-qr:${reservationId}:${expMs}`)
+    .digest('hex')
+    .slice(0, 24);
+}
+export function verifyReservationSig(reservationId, expMs, sig) {
+  const expected = signReservation(reservationId, expMs);
+  const a = Buffer.from(String(sig || ''));
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+// Authed/print-time: the customer-facing URL the contract QR encodes. The signed
+// expiry (expMs) comes from the caller (reservation.returnAt + grace) and is
+// capped to an absolute ceiling so a bad returnAt can't mint a near-immortal link.
+function inspectionResolverUrlForReservation(reservationId, { expiresAt } = {}) {
+  const cap = Date.now() + RESOLVER_MAX_LIFETIME_MS;
+  const want = expiresAt instanceof Date ? expiresAt.getTime() : Number(expiresAt);
+  const expMs = Math.min(Number.isFinite(want) ? want : cap, cap);
+  const sig = signReservation(reservationId, expMs);
+  return `${customerBaseUrl()}/inspect/r/${reservationId}.${expMs}.${sig}`;
+}
+
+// Public: resolve a scanned `reservationId.expMs.sig` → a CHECK-IN inspection
+// token for THAT reservation. Mirrors startCheckinByVehicleQr's live-token reuse
+// + inspection-create, but keyed on the signed reservation id (not "first rental
+// on this vehicle") and gated by the in-signature expiry.
+async function startInspectionByReservationQr({ payload }) {
+  const raw = String(payload || '');
+  const parts = raw.split('.');
+  if (parts.length !== 3) throw new CheckoutSessionError('Invalid code', 400, 'BAD_QR');
+  const [reservationId, expStr, sig] = parts;
+  const expMs = Number(expStr);
+  if (!reservationId || !Number.isFinite(expMs) || !verifyReservationSig(reservationId, expMs, sig)) {
+    throw new CheckoutSessionError('Invalid code', 410, 'BAD_QR');
+  }
+  if (expMs < Date.now()) {
+    throw new CheckoutSessionError('This inspection code has expired — please see the rental office to get a new one', 410, 'RESOLVER_EXPIRED');
+  }
+
+  const resv = await prisma.reservation.findFirst({
+    where: { id: reservationId, status: 'CHECKED_OUT' },
+    select: { id: true, tenantId: true, vehicleId: true, rentalAgreement: { select: { id: true } }, reservationNumber: true },
+  });
+  if (!resv) throw new CheckoutSessionError('No active rental for this code right now', 409, 'NO_ACTIVE_RENTAL');
+
+  const cfg = await settingsService.getCustomerInspectionConfig({ tenantId: resv.tenantId || undefined });
+  if (!cfg?.enabled) throw new CheckoutSessionError('Customer-led inspection is not enabled', 403, 'CUSTOMER_INSPECTION_DISABLED');
+
+  // Reuse a live token if this rental already has a CHECK-IN inspection in flight.
+  const existingTok = await prisma.handoffToken.findFirst({
+    where: { reservationId: resv.id, kind: 'CUSTOMER_INSPECTION', consumedAt: null, expiresAt: { gt: new Date(Date.now() + 60_000) } },
+    orderBy: { expiresAt: 'desc' },
+  });
+  const existingInsp = await prisma.customerInspection.findFirst({
+    where: { reservationId: resv.id, phase: 'CHECKIN' },
+    orderBy: { sentAt: 'desc' },
+  });
+  if (existingTok && existingInsp) return { token: existingTok.token };
+
+  const inspection = existingInsp || await prisma.customerInspection.create({
+    data: {
+      tenantId: resv.tenantId || null,
+      vehicleId: resv.vehicleId,
+      reservationId: resv.id,
+      rentalAgreementId: resv.rentalAgreement?.id || null,
+      reservationNumber: resv.reservationNumber || null,
+      phase: 'CHECKIN',
+      status: 'SENT',
+      emailTo: null, // name stays hidden — same as the sticker path
+    },
+  });
+  const token = randomBytes(24).toString('hex');
+  const expiresAt = new Date(Date.now() + checkinTtlHours() * 60 * 60 * 1000);
+  await prisma.handoffToken.create({
+    data: { reservationId: resv.id, kind: 'CUSTOMER_INSPECTION', token, expiresAt },
+  });
+  logger.info('[customer-inspection] check-in started via reservation QR', { reservationId: resv.id, inspectionId: inspection.id });
+  return { token };
+}
+
+// ---------------------------------------------------------------------------
 // Customer side (token-authed)
 // ---------------------------------------------------------------------------
 
@@ -409,8 +537,16 @@ async function loadByToken(token) {
   }
   const v = row.reservation?.vehicle || {};
   const reportCount = await prisma.vehicleDamageReport.count({ where: { customerInspectionId: inspection.id } });
+  // Only reveal the renter's name on the EMAILED flow, where the link went to
+  // the customer's own inbox (inspection.emailTo is set). The printed-QR flow
+  // creates the inspection with emailTo:null and is reachable by anyone who
+  // photographed the sticker — so it must not disclose who currently has the
+  // car (2026-08-22). The customer confirms the vehicle by plate/colour instead.
+  const nameVisible = Boolean(inspection.emailTo);
   return {
-    customerName: [row.reservation?.customer?.firstName, row.reservation?.customer?.lastName].filter(Boolean).join(' ') || null,
+    customerName: nameVisible
+      ? ([row.reservation?.customer?.firstName, row.reservation?.customer?.lastName].filter(Boolean).join(' ') || null)
+      : null,
     vehicle: {
       label: [v.year, v.make, v.model].filter(Boolean).join(' ') || null,
       plate: v.plate || null,
@@ -797,6 +933,8 @@ export const customerInspectionService = {
   sendCheckinInspection,
   checkinQrUrlForVehicle,
   startCheckinByVehicleQr,
+  inspectionResolverUrlForReservation,
+  startInspectionByReservationQr,
   loadByToken,
   reportDamage,
   completeInspection,

@@ -21,7 +21,15 @@ const isProduction = process.env.NODE_ENV === 'production';
 // Case-insensitive set of meta keys whose VALUES must never be logged in clear.
 const REDACT_KEYS = new Set([
   'firstname', 'lastname', 'phone', 'email', 'dob', 'dateofbirth',
-  'licensenumber', 'license', 'cardonfiletoken', 'ssn', 'password'
+  'licensenumber', 'license', 'cardonfiletoken', 'ssn', 'password',
+  // Wave 3 defense-in-depth (2026-08-23): mask any field literally NAMED a
+  // credential, everywhere the redactor runs (logs, audit metadata, Sentry).
+  // EXACT-key matches only — 'tokenVersion'/'apiKeyId' etc. do NOT match, so no
+  // over-redaction of normal data. Deliberately NOT 'url' (redacts legit URLs).
+  // 'authkey' added 2026-08-26 with per-tenant terminal config: the Dejavoo/
+  // SPIn auth key is a live payment credential and no call site is supposed to
+  // log it. This is the net under that rule, not a substitute for it.
+  'token', 'secret', 'totp', 'otp', 'backupcode', 'apikey', 'privatekey', 'authkey'
 ]);
 
 // 2026-06-10 — `name` used to live in REDACT_KEYS unconditionally, which
@@ -169,6 +177,10 @@ export function requestLogger() {
         userAgent: req.headers['user-agent']?.slice(0, 120),
         userId: req.user?.id || req.user?.sub || undefined,
         tenantId: req.user?.tenantId || undefined,
+        // Wave 3 (2026-08-24): when the session is an impersonation, surface the
+        // super-admin behind it (token `imp` claim → req.user.imp) so a log line
+        // made under impersonation is attributable. Absent on normal sessions.
+        impersonatedBy: req.user?.imp || undefined,
       });
 
       // Drop a Sentry breadcrumb on slow requests so they show up alongside

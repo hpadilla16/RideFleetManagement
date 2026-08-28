@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { api, readStoredToken } from '../../lib/client';
+import { tenantBrandName } from '../../lib/tenant-brand';
 import QRCode from 'qrcode';
 
 // 2026-05-28 — adaptive polling for the kiosk display.
@@ -28,6 +29,28 @@ const STEP_TO_NUMBER = {
   CLOSED: 6,
 };
 
+/**
+ * WHOSE NAME THIS SCREEN CARRIES (2026-08-17)
+ *
+ * This is the screen that shows the QR the renter scans. Thirty seconds later
+ * that renter is looking at /sign on their own phone, which resolves the
+ * tenant's real business name down the cascade in backend/src/lib/
+ * tenant-brand.js. This screen used to hard-code 'Ride Fleet' as its fallback,
+ * so the same customer could be shown two different companies inside one
+ * handoff — and one of them was us, on a contract we are not a party to.
+ *
+ * The reservation payload (/api/reservations/:id/display-data) now resolves
+ * `branding.companyName` through that same shared cascade, and it may come
+ * back null. Null means "no business name is known", and the honest render of
+ * that is NO wordmark — never the platform's. Same rule as the signing page.
+ *
+ * Before a reservation is loaded there is no branch context at all, so the
+ * idle screen falls back to the tenant-wide setting. That setting reads back
+ * the PLATFORM DEFAULT for a tenant who never filled the field in (see
+ * settings.service.js DEFAULTS / tenant-brand.js), so the default is filtered
+ * out here for exactly the same reason the backend filters it — see
+ * lib/tenant-brand.js.
+ */
 function money(n) { return `$${Number(n || 0).toFixed(2)}`; }
 function fmtDate(v) {
   if (!v) return '\u2014';
@@ -128,7 +151,7 @@ function IdleScreen({ branding }) {
   const [time, setTime] = useState(new Date());
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 30000); return () => clearInterval(t); }, []);
   const logo = branding?.companyLogoUrl;
-  const name = branding?.companyName || 'Ride Fleet';
+  const name = tenantBrandName(branding);
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -139,10 +162,10 @@ function IdleScreen({ branding }) {
       <div style={{ position: 'absolute', bottom: '20%', right: '15%', width: 250, height: 250, borderRadius: '50%', background: 'radial-gradient(circle, rgba(31,199,170,.1) 0%, transparent 70%)', filter: 'blur(50px)', pointerEvents: 'none' }} />
       <div style={{ textAlign: 'center', zIndex: 1, padding: 40 }}>
         {logo ? (
-          <img src={logo} alt={name} style={{ maxHeight: 80, maxWidth: 280, objectFit: 'contain', marginBottom: 24, filter: 'drop-shadow(0 4px 20px rgba(110,73,255,.3))' }} />
-        ) : (
+          <img src={logo} alt={name || 'Customer display'} style={{ maxHeight: 80, maxWidth: 280, objectFit: 'contain', marginBottom: 24, filter: 'drop-shadow(0 4px 20px rgba(110,73,255,.3))' }} />
+        ) : name ? (
           <div style={{ fontWeight: 900, fontSize: '2.8rem', color: '#fff', letterSpacing: '-.03em', marginBottom: 8, textShadow: '0 4px 30px rgba(110,73,255,.4)' }}>{name}</div>
-        )}
+        ) : null}
         <div style={{ fontSize: '1.1rem', color: 'rgba(255,255,255,.4)', fontWeight: 600, letterSpacing: '.08em', textTransform: 'uppercase' }}>Customer Display</div>
         <div style={{ marginTop: 48, padding: '20px 36px', borderRadius: 20, background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.08)', backdropFilter: 'blur(12px)' }}>
           <div style={{ fontSize: '2rem', fontWeight: 900, color: 'rgba(255,255,255,.85)' }}>{time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</div>
@@ -482,7 +505,7 @@ function ActiveView({ data, branding }) {
   const depositCharge = charges.find(c => c.source === 'SECURITY_DEPOSIT' && Number(c.total || 0) > 0);
   const chargesTotal = visibleCharges.reduce((s, c) => s + Number(c.total || 0), 0) + taxTotal;
 
-  const companyName = branding?.companyName || 'Ride Fleet';
+  const companyName = tenantBrandName(branding);
 
   const progressSteps = [
     { label: 'Created', done: true, active: false },
@@ -500,10 +523,10 @@ function ActiveView({ data, branding }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           {branding?.companyLogoUrl ? (
-            <img src={branding.companyLogoUrl} alt={companyName} style={{ height: 30, maxWidth: 140, objectFit: 'contain' }} />
-          ) : (
+            <img src={branding.companyLogoUrl} alt={companyName || 'Customer display'} style={{ height: 30, maxWidth: 140, objectFit: 'contain' }} />
+          ) : companyName ? (
             <div style={{ fontWeight: 900, fontSize: '1.15rem', color: '#1a1230' }}>{companyName}</div>
-          )}
+          ) : null}
           <div style={{ width: 1, height: 24, background: 'rgba(110,73,255,.15)' }} />
           <StatusBadge status={status} />
         </div>
@@ -659,7 +682,7 @@ function ActiveView({ data, branding }) {
 
       {/* Footer */}
       <div style={{ textAlign: 'center', padding: '10px 0 8px', fontSize: '0.72rem', color: '#b0a8c8' }}>
-        {companyName} {'\u00B7'} Updates automatically
+        {companyName ? `${companyName} \u00B7 ` : ''}Updates automatically
       </div>
     </div>
   );
@@ -738,8 +761,12 @@ export default function CustomerDisplayPage() {
       try {
         const token = readStoredToken();
         if (!token) return;
+        // Idle boot only — no reservation yet, so no branch to resolve against.
+        // display-data's resolved branding replaces this the moment an agent
+        // loads a reservation. tenantBrandName() strips the platform default, so an
+        // unconfigured tenant gets a wordmark-free idle screen, not ours.
         const settings = await api('/api/settings/rental-agreement', {}, token);
-        setBranding({ companyName: settings?.companyName || 'Ride Fleet', companyLogoUrl: settings?.companyLogoUrl || '', companyPhone: settings?.companyPhone || '' });
+        setBranding({ companyName: settings?.companyName || '', companyLogoUrl: settings?.companyLogoUrl || '', companyPhone: settings?.companyPhone || '' });
       } catch { /* defaults */ }
     })();
   }, []);

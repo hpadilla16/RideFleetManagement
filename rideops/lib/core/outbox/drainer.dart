@@ -168,6 +168,20 @@ class OutboxDrainer {
         if (depStillPending) continue;
         // La dependencia ya no existe (drenó en un run anterior) — seguir.
       }
+      // Review INN S-2: el complete espera a TODAS las fotos de SU sesión,
+      // no solo a la del dependsOn — un ángulo intermedio atorado/fallido
+      // dejaría la inspección "completa" con evidencia faltante. Una foto
+      // dead NO bloquea: ya salió de pending y es decisión del humano (el
+      // servidor re-valida front+rear en el complete de todos modos).
+      if (row.kind == 'inspection_complete') {
+        final sessionId = row.payloadMap['checkoutSessionId'];
+        final photoStillInQueue = rows.any((r) =>
+            r.id != row.id &&
+            r.kind == 'inspection_photo' &&
+            !drained.contains(r.id) &&
+            r.payloadMap['checkoutSessionId'] == sessionId);
+        if (photoStillInQueue) continue;
+      }
 
       await store.markInflight(row.id);
       final outcome = await _drainRow(row);
