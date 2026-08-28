@@ -157,8 +157,10 @@ describe('OneStepGpsConnectorTab — key configured, mapping table', () => {
     expect(screen.queryByText('onestepgps.emptyTitle')).not.toBeInTheDocument();
 
     // Auto-matched badge on the dev_1 row, pre-selected to v1.
+    // The suggestion is seeded by an effect, so it lands one commit AFTER the
+    // rows first paint — await it rather than reading the pre-seed DOM.
     const row1 = (await screen.findByText('Van 12')).closest('tr');
-    expect(within(row1).getByText('onestepgps.autoMatched')).toBeInTheDocument();
+    expect(await within(row1).findByText('onestepgps.autoMatched')).toBeInTheDocument();
     expect(within(row1).getByRole('combobox')).toHaveValue('v1');
     expect(row1.className).toContain('osg-dirty');
 
@@ -194,6 +196,10 @@ describe('OneStepGpsConnectorTab — key configured, mapping table', () => {
     renderTab();
 
     const saveBtn = await screen.findByRole('button', { name: 'onestepgps.saveMappings' });
+    // Wait for the auto-match suggestion to be seeded before saving — it lands
+    // one commit after the rows paint, and without it there is no dirty row to
+    // persist and the click would assert against an empty payload.
+    await screen.findByText('onestepgps.unsavedChanges[count=1]');
     fireEvent.click(saveBtn);
 
     await waitFor(() => expect(posted.length).toBe(1));
