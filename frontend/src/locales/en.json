@@ -1425,5 +1425,32 @@
     "walkingDirections": "Walking directions (shown to the customer on arrival)",
     "walkingDirectionsEn": "Walking directions (English)",
     "walkingDirectionsEs": "Instrucciones a pie (Español)"
+  },
+  "tenantSuspended": {
+    "title": "Your Ride Fleet Manager account is on hold",
+    "titleGeneric": "Your account is on hold",
+    "body": "A payment for your subscription did not go through, and access to the app has been paused. Update your payment method and access comes back right away.",
+    "bodyGeneric": "Access to this account has been paused. Contact Ride and we will tell you what is needed to turn it back on.",
+    "since": "On hold since {{date}}.",
+    "cardOnFile": "Card on file: {{brand}} ····{{last4}}",
+    "card": "card",
+    "sendLink": "Email me a link to update my payment method",
+    "sending": "Sending…",
+    "linkSent": "Sent. Check {{email}} for the link — it works once and expires.",
+    "contact": "Need help? Contact Ride at soporte@ridefleetmanager.com.",
+    "signOut": "Sign out"
+  },
+  "billingNotice": {
+    "pastDueTitle": "A subscription payment did not go through",
+    "pastDueBody": "Update your payment method to keep your account running. Authorize.Net retries the charge automatically once the card is updated — waiting on its own does not fix it.",
+    "pastDueDeadline_one": "Access will be paused in {{count}} day if it stays unpaid.",
+    "pastDueDeadline_other": "Access will be paused in {{count}} days if it stays unpaid.",
+    "pastDueToday": "Access will be paused today if it stays unpaid.",
+    "suspendedTitle": "Your account is on hold for non-payment",
+    "suspendedBody": "Update your payment method to restore full access.",
+    "action": "Email me a payment link",
+    "sending": "Sending…",
+    "sent": "Sent to {{email}}.",
+    "dismiss": "Hide"
   }
 }

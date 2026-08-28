@@ -41,6 +41,8 @@ import {
   buildDisclosureText,
 } from './billing.service.js';
 import { createInvite, revokeInvite } from './autopay-invites.service.js';
+import { authService } from '../auth/auth.service.js';
+import { suspensionMode } from '../../lib/tenant-suspension.js';
 import { todayCalendarDate, addCalendarDays } from './billing-dates.js';
 
 /**
@@ -73,6 +75,13 @@ function deps(overrides = {}) {
     applyDrift: overrides.applyDrift || applyDrift,
     recordAudit: overrides.recordAudit || recordAudit,
     notifyOwner: overrides.notifyOwner || notifyOwner,
+    // Phase 5 (2026-08-28): busting every cached session of the tenant is what
+    // makes suspend and restore take effect NOW rather than at cache expiry.
+    // Injected (not imported inline) so the panel tests can assert it was
+    // called — "the cache was busted" is a behaviour of this feature, not an
+    // implementation detail of it.
+    invalidateTenantSessions: overrides.invalidateTenantSessions
+      || ((tenantId) => authService.invalidateTenantSessions(tenantId)),
     ...overrides,
   };
 }
@@ -366,6 +375,14 @@ export async function getTenantBillingDetail(tenantId, overrides = {}) {
       planName: entitlement.name,
       billingSuspendedAt: tenant.billingSuspendedAt || null,
     },
+    // Phase 5 (2026-08-28): WHAT SUSPENSION ACTUALLY DOES ON THIS DEPLOY.
+    // 'off' | 'log' | 'enforce'. The suspend dialog must describe the lever the
+    // operator is really pulling, and that depends on an environment variable
+    // the frontend cannot see. Without this the panel would either keep saying
+    // "staff can still sign in" after the gate went live, or start promising a
+    // lockout that is switched off — both are lies about a lever being pulled
+    // on a paying customer, which is the failure Phase 4 was careful to avoid.
+    suspensionEnforcement: suspensionMode(),
     subscription: current ? publicSubscriptionView(current, today) : null,
     history: subs.filter((s) => !current || s.id !== current.id).map((s) => publicSubscriptionView(s, today)),
     charges: charges.map(publicChargeView),
@@ -716,11 +733,17 @@ export async function cancelSubscriptionForTenant(input = {}, overrides = {}) {
  *   - `TenantSubscription.status = 'SUSPENDED'` + `suspendedAt`, keeping §2.2's
  *     invariant that our SUSPENDED and `Tenant.status` never disagree.
  *
- * WHAT IT DOES NOT DO: it does not log the tenant's staff out of the staff app.
- * `requireAuth` does not read `Tenant.status` yet — that gate is Phase 5, is the
- * highest-blast-radius change in the module, and is deliberately sequenced after
- * this panel exists to see it with. Anything that tells the operator otherwise
- * would be a lie about a lever they are pulling on a paying customer.
+ * STAFF LOCKOUT — PHASE 5, AND IT DEPENDS ON A SWITCH (updated 2026-08-28).
+ * `requireAuth` now consults `lib/tenant-suspension.js` on every authenticated
+ * request, but ONLY when TENANT_SUSPENSION_ENFORCEMENT is `enforce`. Until that
+ * variable is set, this lever does exactly what it did in Phase 4 and nothing
+ * more, and the panel copy must keep saying so. Whether staff are actually
+ * locked out is a deploy-time fact this function cannot see, so it must not
+ * claim either way — `getBillingHealth` surfaces the mode instead.
+ *
+ * WHAT IT ALWAYS DOES NOW: busts every cached session of this tenant, so that
+ * when enforcement IS on the lockout is immediate rather than arriving as each
+ * user's 30-second session cache happens to lapse.
  *
  * IT DOES NOT CANCEL AT AUTHORIZE.NET EITHER. Design open question 6 — cancel on
  * suspension, or leave it suspended — is UNANSWERED, and the conservative half
@@ -760,6 +783,11 @@ export async function suspendTenantAccess(input = {}, overrides = {}) {
   }
   await d.prisma.$transaction(writes);
 
+  // AFTER the write has committed, never before. Busting first would leave a
+  // window in which a re-hydrating session reloads the OLD status and caches it
+  // again for another 30 seconds — a bust that makes the staleness worse.
+  const bust = await d.invalidateTenantSessions(tenant.id);
+
   await d.recordAudit({
     tenantId: tenant.id,
     actorUserId: input.actorUserId ?? null,
@@ -777,10 +805,23 @@ export async function suspendTenantAccess(input = {}, overrides = {}) {
       // Recorded so the trail says what was and was NOT done: the ARB
       // subscription is deliberately left alone (open question 6).
       arbSubscriptionCancelled: false,
+      // How many staff sessions were dropped, and the enforcement mode in
+      // force at the time. Six months from now "why did the lockout take a
+      // minute" is answerable from the trail instead of from a guess.
+      sessionsInvalidated: bust?.invalidated ?? 0,
+      suspensionEnforcement: suspensionMode(),
     },
   });
 
-  return { tenantId: tenant.id, status: 'SUSPENDED', billingSuspendedAt: now };
+  return {
+    tenantId: tenant.id,
+    status: 'SUSPENDED',
+    billingSuspendedAt: now,
+    sessionsInvalidated: bust?.invalidated ?? 0,
+    // So the panel can say "staff are locked out now" or "staff are NOT locked
+    // out — enforcement is off" rather than overselling the lever.
+    suspensionEnforcement: suspensionMode(),
+  };
 }
 
 /**
@@ -841,6 +882,12 @@ export async function restoreTenantAccess(input = {}, overrides = {}) {
   }
   await d.prisma.$transaction(writes);
 
+  // THE BUST MATTERS MORE ON RESTORE THAN ON SUSPEND. A late suspension costs
+  // us thirty seconds of service we were going to give away anyway; a late
+  // restore leaves a customer who has just paid still staring at a hold screen,
+  // on the phone, being told it is fixed. Same call, much worse failure.
+  const bust = await d.invalidateTenantSessions(tenant.id);
+
   await d.recordAudit({
     tenantId: tenant.id,
     actorUserId: input.actorUserId ?? null,
@@ -854,6 +901,7 @@ export async function restoreTenantAccess(input = {}, overrides = {}) {
       subscriptionId: subscription ? subscription.id : null,
       subscriptionStatus: subscription ? restoredStatus : null,
       suspendedSince: tenant.billingSuspendedAt,
+      sessionsInvalidated: bust?.invalidated ?? 0,
     },
   });
 
@@ -861,6 +909,7 @@ export async function restoreTenantAccess(input = {}, overrides = {}) {
     tenantId: tenant.id,
     status: 'ACTIVE',
     subscriptionStatus: subscription ? restoredStatus : null,
+    sessionsInvalidated: bust?.invalidated ?? 0,
   };
 }
 

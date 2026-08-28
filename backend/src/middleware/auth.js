@@ -4,6 +4,8 @@ import { getJwtSecret } from '../modules/auth/auth.config.js';
 import { authService } from '../modules/auth/auth.service.js';
 import { isAllowedForServiceAccount } from '../lib/service-account-allowlist.js';
 import { MODULE_LABELS, MODULE_DENIED_HINTS } from '../lib/module-access.js';
+import { evaluateTenantSuspension, tenantSuspendedResponse } from '../lib/tenant-suspension.js';
+import logger from '../lib/logger.js';
 
 // First-login onboarding (2026-07-25): while User.mustChangePassword is
 // true (temp password at create, admin reset), a human session may reach
@@ -120,6 +122,55 @@ export async function requireAuth(req, res, next) {
     }
 
     req.user = { ...payload, ...hydrated, sub: hydrated.id, id: hydrated.id };
+
+    // ── TENANT SUSPENSION GATE — Tenant Subscriptions Phase 5 (2026-08-28) ──
+    //
+    // Applied HERE, at the single place every authenticated request passes, for
+    // the same reason the view-location override below is: a per-router list is
+    // a list somebody will forget to add to, and the forgotten route will be the
+    // one that matters. Same reasoning, higher stakes.
+    //
+    // OFF BY DEFAULT. `evaluateTenantSuspension` returns `allow` unless
+    // TENANT_SUSPENSION_ENFORCEMENT is explicitly `log` or `enforce`, so this
+    // block ships INERT: it runs on every request and changes no outcome until
+    // somebody deliberately turns it on. TENANT_SUSPENSION_DISABLED=true is the
+    // kill-switch that forces it back off with no redeploy.
+    //
+    // The decision itself is a PURE function in lib/tenant-suspension.js — no
+    // IO, no clock, no Prisma — so the allowlist can be tested exhaustively and
+    // this middleware stays readable. `tenantStatus` was hydrated by
+    // getSessionUser above; there is no extra query on the request path.
+    //
+    // WHY IT SITS HERE AND NOT EARLIER: after the token-version, password and
+    // 2FA gates, so a revoked or half-authenticated token is rejected on its own
+    // terms first and a suspended tenant never gets a DIFFERENT answer to
+    // "is this token still valid". Before applyViewLocation, so a blocked
+    // request never spends work on scoping it will not use.
+    const suspension = evaluateTenantSuspension({
+      user: req.user,
+      method: req.method,
+      // Strip the query string. `?x=1` left on the value would defeat every
+      // allowlist rule — the exact bug password-gate.test.mjs pins for the
+      // password allowlist.
+      path: String(req.originalUrl || req.url || '').split('?')[0],
+    });
+    if (suspension.action === 'observe') {
+      // LOG-ONLY MODE: this is how the allowlist gets proven complete against
+      // real traffic rather than against somebody's imagination. Every line
+      // here is a route a real suspended-tenant workflow needed and would have
+      // been denied. Read them before switching to `enforce`.
+      logger.warn('[tenant-suspension] WOULD BLOCK (log-only mode)', {
+        tenantId: req.user?.tenantId || null,
+        userId: req.user?.id || null,
+        role: req.user?.role || null,
+        method: req.method,
+        path: String(req.originalUrl || req.url || '').split('?')[0],
+        message: 'Enforcement is in log mode. This request was ALLOWED. If it belongs to a '
+          + 'workflow a suspended tenant must keep, add it to SUSPENSION_ALLOWLIST before enforcing.',
+      });
+    } else if (suspension.action === 'block') {
+      return res.status(403).json(tenantSuspendedResponse());
+    }
 
     // Location switcher (2026-08-11): x-view-location narrows the user's
     // location scope to ONE location for this request, the way a super admin
