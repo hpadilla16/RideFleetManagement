@@ -136,6 +136,22 @@ export const SUSPENSION_ALLOWLIST = Object.freeze([
   rule('POST', '/api/auth/2fa/enroll/verify',
     'Same deadlock, enrollment second leg.'),
 
+  // The third instance of that deadlock, found in a log-mode run on 2026-08-28
+  // and NOT enumerated when this group was written.
+  //
+  // The screen lock persists in localStorage (`ui.screenLocked`, AppShell:409)
+  // and is re-applied on load, so an agent whose screen locked on idle at a
+  // suspended tenant would be stuck on the lock screen permanently: the PIN
+  // 403s, and reloading restores the lock rather than clearing it. They would
+  // reach neither the hold screen explaining the suspension nor the page where
+  // they could pay it — bricked by a control that has nothing to do with money.
+  rule('POST', '/api/auth/lock-pin/verify',
+    'Unlocking a locked screen. The deadlock above, third leg.'),
+  rule('GET', '/api/auth/lock-pin/status',
+    'Whether a PIN exists. Its failure IS caught (AppShell sets hasPin false), so this is not a '
+    + 'deadlock — it is here because AppShell calls it on every page, and a permanent 403 on every '
+    + 'page load is the kind of log noise that trains people to stop reading the log.'),
+
   // ── GROUP B — the page where they pay. THE MOST IMPORTANT ENTRY HERE ────
   //
   // The failure mode this whole allowlist exists to prevent has a name:
