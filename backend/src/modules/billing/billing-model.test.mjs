@@ -200,9 +200,21 @@ test('the migration directory sorts AFTER the last one that shipped', () => {
   // startup-migrate applies directories in sorted order. A name that sorts
   // before an already-applied migration would be skipped forever on a baselined
   // database.
+  //
+  // The guard is "later than what was already deployed", NOT "last of all" —
+  // the original assertion said the latter and went red the moment the next
+  // migration shipped (20260828_citation_attachments), which turned a real
+  // guard into noise. PREDECESSOR is pinned: the migration that was newest when
+  // this one was written, and the name this one has to beat.
+  const PREDECESSOR = '20260826_tenant_settings_json';
   const dirs = readdirSync(join(ROOT, 'prisma', 'migrations'), { withFileTypes: true })
     .filter((d) => d.isDirectory()).map((d) => d.name).sort();
-  assert.equal(dirs[dirs.length - 1], MIGRATION_DIR);
+  assert.ok(dirs.includes(MIGRATION_DIR), `${MIGRATION_DIR} is missing from prisma/migrations`);
+  assert.ok(dirs.includes(PREDECESSOR), `${PREDECESSOR} is missing — repoint PREDECESSOR`);
+  assert.ok(
+    MIGRATION_DIR > PREDECESSOR,
+    `${MIGRATION_DIR} sorts before ${PREDECESSOR} and would be skipped on a baselined database`,
+  );
 });
 
 // ── PCI ────────────────────────────────────────────────────────────────────

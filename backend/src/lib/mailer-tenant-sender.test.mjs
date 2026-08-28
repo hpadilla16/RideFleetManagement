@@ -32,6 +32,11 @@ const EXEMPT = new Map([
   // arrived branded as the customer's own rental company would read as a
   // forgery of their own mail. Same call billing-notify.js makes.
   ['modules/billing/billing-invite-email.js', 'Ride invoicing a tenant: must arrive from the PLATFORM, not the tenant brand'],
+  // Same category, same direction, and red on main since Phase 5 shipped: the
+  // update-payment link is Ride writing to a tenant about Ride's own
+  // subscription. Branding it as the tenant would put the customer's own logo
+  // on a request for the customer's own card.
+  ['modules/billing/billing-self.service.js', 'Ride invoicing a tenant: the update-payment link must arrive from the PLATFORM'],
 ]);
 
 function sourceFiles(dir, out = []) {
