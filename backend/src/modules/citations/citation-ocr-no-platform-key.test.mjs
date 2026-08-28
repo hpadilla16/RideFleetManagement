@@ -26,8 +26,8 @@ import { settingsService } from '../settings/settings.service.js';
 import { runOnce } from './citation-ocr.scheduler.js';
 import { extractCitationFields } from './citation-ocr.extract.js';
 
-const PLATFORM_KEY = 'sk-ant-platform-HOUSEKEY-0001';
-const RENT_AND_GO = { id: 'tenant-rent-and-go', name: 'Rent & Go', key: 'sk-ant-rentandgo-OWNKEY' };
+const PLATFORM_KEY = 'PLATFORM-HOUSE-CREDENTIAL-0001';
+const RENT_AND_GO = { id: 'tenant-rent-and-go', name: 'Rent & Go', key: 'TENANT-OWN-CREDENTIAL-0002' };
 const CORPUSA = { id: 'tenant-corpusa', name: 'Corpusa' };
 
 // ---------------------------------------------------------------------------

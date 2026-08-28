@@ -38,9 +38,9 @@ import {
 // Fixtures — the two real tenants from the incident, plus the platform key.
 // ---------------------------------------------------------------------------
 
-const RENT_AND_GO = { id: 'tenant-rent-and-go', name: 'Rent & Go', key: 'sk-ant-rentandgo-OWNKEY' };
+const RENT_AND_GO = { id: 'tenant-rent-and-go', name: 'Rent & Go', key: 'TENANT-OWN-CREDENTIAL-0002' };
 const CORPUSA = { id: 'tenant-corpusa', name: 'Corpusa' }; // key deliberately removed 2026-08-27
-const PLATFORM_KEY = 'sk-ant-platform-HOUSEKEY-0001';
+const PLATFORM_KEY = 'PLATFORM-HOUSE-CREDENTIAL-0001';
 
 const ALLOWLIST_VARS = Object.keys(PLATFORM_CREDENTIAL_FEATURES).map(allowlistEnvVar);
 
@@ -231,7 +231,11 @@ test('no log line ever carries a credential in the clear', () => {
   const serialized = JSON.stringify(warns);
   assert.ok(!serialized.includes(PLATFORM_KEY), 'the platform key must never be logged');
   assert.equal(warns[0].meta.masked, maskCredential(PLATFORM_KEY));
-  assert.match(warns[0].meta.masked, /^sk-a\*{4}0001$/);
+  // First four and last four, nothing in between. The literal prefix tracks the
+  // fixture, which was renamed off `sk-ant-…` on 2026-08-28: a test value shaped
+  // like a real Anthropic key trips every secret scanner that will ever read
+  // this repo — ours did, in CI, on the commit that introduced it.
+  assert.match(warns[0].meta.masked, /^PLAT\*{4}0001$/);
 });
 
 test('maskCredential never leaks a partial short secret', () => {
