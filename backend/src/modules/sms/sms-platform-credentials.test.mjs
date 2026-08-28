@@ -188,7 +188,7 @@ test('an SMS opt-in does not opt the tenant in to the Anthropic features', async
   process.env.PLATFORM_KEY_ALLOW_SMS = TENANT.id;
   const { resolveTenantProviderCredential } = await import('../../lib/tenant-provider-credential.js');
   const ocr = resolveTenantProviderCredential({
-    tenantId: TENANT.id, feature: 'citation-ocr', platformCredential: 'sk-ant-house',
+    tenantId: TENANT.id, feature: 'citation-ocr', platformCredential: 'PLATFORM-HOUSE-CREDENTIAL-0003',
   });
   assert.equal(ocr.source, 'NONE');
 });
