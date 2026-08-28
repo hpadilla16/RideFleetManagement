@@ -5,12 +5,19 @@
  * RentalAgreement.balance > 0, filtered to non-cancelled agreements, optionally
  * scoped by pickupLocationId.
  *
- *   GET /api/reports/unpaid-balance?locationId=
+ *   GET /api/reports/unpaid-balance?locationId=&sort=age|balance
  *     Returns { asOf, totals, buckets[], filters }
  *
- *   GET /api/reports/unpaid-balance/bucket?bucket=<key>&locationId=<?>
+ *   GET /api/reports/unpaid-balance/bucket?bucket=<key>&locationId=<?>&sort=<?>
  *     Drill-down for one specific aging bucket (in case the UI wants to show
  *     a long list separately from the main payload).
+ *
+ * `sort` orders rows WITHIN each bucket — 'age' (default, oldest first) or
+ * 'balance' (largest owed first). The bucket order is always triage order.
+ *
+ * 2026-08-28: this report is also the destination of the Ops Hub "Unpaid
+ * Balances" tile, which counts the same population (balance > 0, not
+ * CANCELLED) so the tile and the report never disagree.
  *
  * Aging buckets (anchor = RentalAgreement.returnAt):
  *
@@ -108,7 +115,34 @@ function buildAgreementWhere({ tenantId, locationId }) {
  *   - 61..90         → B61_90
  *   - 91+            → B90_PLUS
  */
-function bucketAgreements(agreements, asOf = new Date(), tz = DEFAULT_TENANT_TIMEZONE) {
+// Sort modes for the rows WITHIN each aging bucket. The bucket order itself is
+// always triage order (90+ first) — this only decides what floats to the top of
+// a bucket. 'age' keeps the original oldest-first behaviour and stays the
+// default so existing callers see no change.
+const SORT_MODES = new Set(['age', 'balance']);
+const DEFAULT_SORT = 'age';
+
+function normalizeSort(value) {
+  const v = String(value || '').trim().toLowerCase();
+  return SORT_MODES.has(v) ? v : DEFAULT_SORT;
+}
+
+function sortBucketRows(key, rows, sort) {
+  if (sort === 'balance') {
+    // Biggest money first, ties broken by age so the order is stable and
+    // still meaningful when several accounts owe the same amount.
+    rows.sort((a, b) => (b.balance - a.balance) || (b.daysLate - a.daysLate));
+    return rows;
+  }
+  if (key === 'CURRENT') {
+    rows.sort((a, b) => new Date(a.returnAt) - new Date(b.returnAt));
+  } else {
+    rows.sort((a, b) => b.daysLate - a.daysLate);
+  }
+  return rows;
+}
+
+function bucketAgreements(agreements, asOf = new Date(), tz = DEFAULT_TENANT_TIMEZONE, sort = DEFAULT_SORT) {
   const today = startOfDay(asOf, tz);
   const buckets = {
     CURRENT:  { count: 0, amount: 0, agreements: [] },
@@ -135,14 +169,12 @@ function bucketAgreements(agreements, asOf = new Date(), tz = DEFAULT_TENANT_TIM
     buckets[key].amount = moneyRound(buckets[key].amount + row.balance);
   }
 
-  // Sort agreements within each bucket by daysLate desc (oldest first within
-  // a past-due bucket; for CURRENT, by returnAt asc so nearest-due is first).
+  // Sort agreements within each bucket. Default ('age'): daysLate desc (oldest
+  // first within a past-due bucket; for CURRENT, returnAt asc so nearest-due is
+  // first). 'balance': largest amount owed first.
+  const mode = normalizeSort(sort);
   for (const k of Object.keys(buckets)) {
-    if (k === 'CURRENT') {
-      buckets[k].agreements.sort((a, b) => new Date(a.returnAt) - new Date(b.returnAt));
-    } else {
-      buckets[k].agreements.sort((a, b) => b.daysLate - a.daysLate);
-    }
+    sortBucketRows(k, buckets[k].agreements, mode);
   }
 
   return buckets;
@@ -150,11 +182,22 @@ function bucketAgreements(agreements, asOf = new Date(), tz = DEFAULT_TENANT_TIM
 
 function formatRow(a, daysLate, tz = DEFAULT_TENANT_TIMEZONE) {
   const ret = new Date(a.returnAt);
+  const pick = a.pickupAt ? new Date(a.pickupAt) : null;
+  // total / paid ride along with balance (2026-08-28) so a collector can see
+  // WHY the balance is what it is without opening the agreement — a $40 balance
+  // on a $2,400 rental reads very differently from a $40 balance on a $40 one.
+  const total = moneyRound(num(a.total));
+  const paid = moneyRound(num(a.paidAmount));
   return {
     id: a.id,
     reservationId: a.reservationId || null,
     agreementNumber: a.agreementNumber || null,
     status: a.status,
+    pickupAt: a.pickupAt || null,
+    pickupLabel: pick ? `${dayLabel(pick, tz)} · ${timeLabel(pick, tz)}` : null,
+    pickupIso: pick ? isoDay(pick) : null,
+    total,
+    paid,
     customerName: `${a.customerFirstName || ''} ${a.customerLastName || ''}`.trim() || null,
     customerPhone: a.customerPhone || null,
     customerEmail: a.customerEmail || null,
@@ -183,6 +226,7 @@ async function computeData({ tenantId, query }, deps = {}) {
 
   const tenantTz = deps.tenantTz || (await resolveTenantTimeZone(tenantId));
   const locationId = (query && query.locationId) || null;
+  const sort = normalizeSort(query && query.sort);
   const asOf = (deps && deps.now) || new Date();
 
   const agreements = await prisma.rentalAgreement.findMany({
@@ -192,7 +236,10 @@ async function computeData({ tenantId, query }, deps = {}) {
       reservationId: true,
       agreementNumber: true,
       status: true,
+      pickupAt: true,
       returnAt: true,
+      total: true,
+      paidAmount: true,
       balance: true,
       customerFirstName: true,
       customerLastName: true,
@@ -204,7 +251,7 @@ async function computeData({ tenantId, query }, deps = {}) {
     orderBy: { returnAt: 'asc' },
   });
 
-  const bucketsMap = bucketAgreements(agreements, asOf, tenantTz);
+  const bucketsMap = bucketAgreements(agreements, asOf, tenantTz, sort);
 
   // Build the ordered triage list (90+ first → Current last)
   const buckets = BUCKET_ORDER.map((b) => {
@@ -253,7 +300,7 @@ async function computeData({ tenantId, query }, deps = {}) {
       oldestDaysLate,
     },
     buckets,
-    filters: { locationId },
+    filters: { locationId, sort },
   };
 }
 
@@ -268,7 +315,7 @@ async function bucketDrillDownHandler(req, res, { tenantId }) {
     return res.status(400).json({ error: `bucket must be one of ${Array.from(validBuckets).join(', ')}` });
   }
   const out = await computeData(
-    { tenantId, query: { locationId: req.query?.locationId || null } },
+    { tenantId, query: { locationId: req.query?.locationId || null, sort: req.query?.sort || null } },
     {},
   );
   const bucket = out.buckets.find((b) => b.key === bucketKey);
@@ -331,19 +378,28 @@ function renderHtml(data) {
       <table style="font-size:10px"><thead><tr>
         <th style="text-align:left">Customer</th>
         <th style="text-align:left">Agreement</th>
+        <th style="text-align:left">Status</th>
+        <th style="text-align:left">Location</th>
         <th style="text-align:left">Vehicle</th>
-        <th style="text-align:left">Return</th>
+        <th style="text-align:left">Rental</th>
         <th class="num">Days late</th>
+        <th class="num">Total</th>
+        <th class="num">Paid</th>
         <th class="num">Balance</th>
       </tr></thead><tbody>`;
     for (const r of b.agreements) {
       const vehLabel = r.vehicle?.plate ? `[${r.vehicle.plate}] ${r.vehicle.label || ''}` : (r.vehicle?.label || '');
+      const rental = r.pickupLabel ? `${escapeHtml(r.pickupLabel)} → ${escapeHtml(r.returnLabel)}` : escapeHtml(r.returnLabel);
       body += `<tr>
         <td>${escapeHtml(r.customerName || '—')}${r.customerPhone ? ` · ${escapeHtml(r.customerPhone)}` : ''}</td>
         <td>${escapeHtml(r.agreementNumber || r.id)}</td>
+        <td>${escapeHtml(r.status || '')}</td>
+        <td>${escapeHtml(r.pickupLocation || '—')}</td>
         <td>${escapeHtml(vehLabel)}</td>
-        <td>${escapeHtml(r.returnLabel)}</td>
+        <td>${rental}</td>
         <td class="num">${r.daysLate > 0 ? r.daysLate : '—'}</td>
+        <td class="num">${money(r.total)}</td>
+        <td class="num">${money(r.paid)}</td>
         <td class="num"><strong>${money(r.balance)}</strong></td>
       </tr>`;
     }
@@ -366,17 +422,25 @@ function buildExcelSpec(data) {
   const title = 'Unpaid Balance';
   const subtitle = `As of ${asOfLabel}`;
 
+  // Accounting asked for the money breakdown, not just the balance: Total and
+  // Paid make each row reconcilable on its own, and Status tells them whether
+  // the rental is still running or already closed (a closed one owing money is
+  // the collectable case).
   const columns = [
     { header: 'Bucket',       key: 'bucket',          width: 22 },
     { header: 'Customer',     key: 'customer',        width: 24 },
     { header: 'Phone',        key: 'phone',           width: 16 },
     { header: 'Agreement',    key: 'agreement',       width: 14 },
+    { header: 'Status',       key: 'status',          width: 16 },
+    { header: 'Location',     key: 'location',        width: 18 },
     { header: 'Vehicle plate',key: 'plate',           width: 12 },
     { header: 'Vehicle',      key: 'vehicle',         width: 22 },
+    { header: 'Pickup',       key: 'pickupLabel',     width: 22 },
     { header: 'Return',       key: 'returnLabel',     width: 22 },
     { header: 'Days late',    key: 'daysLate',        width: 10, type: 'integer' },
+    { header: 'Total',        key: 'total',           width: 14, type: 'currency' },
+    { header: 'Paid',         key: 'paid',            width: 14, type: 'currency' },
     { header: 'Balance',      key: 'balance',         width: 14, type: 'currency' },
-    { header: 'Location',     key: 'location',        width: 18 },
   ];
 
   const rows = [];
@@ -387,12 +451,16 @@ function buildExcelSpec(data) {
         customer: r.customerName || '',
         phone: r.customerPhone || '',
         agreement: r.agreementNumber || r.id,
+        status: r.status || '',
+        location: r.pickupLocation || '',
         plate: r.vehicle?.plate || '',
         vehicle: r.vehicle?.label || '',
+        pickupLabel: r.pickupLabel || '',
         returnLabel: r.returnLabel,
         daysLate: r.daysLate > 0 ? r.daysLate : 0,
+        total: r.total,
+        paid: r.paid,
         balance: r.balance,
-        location: r.pickupLocation || '',
       });
     }
   }
@@ -446,6 +514,10 @@ registerReport({
 export const _unpaidBalanceInternal = {
   computeData,
   bucketAgreements,
+  normalizeSort,
+  sortBucketRows,
+  SORT_MODES,
+  DEFAULT_SORT,
   bucketDrillDownHandler,
   formatRow,
   BUCKET_ORDER,
