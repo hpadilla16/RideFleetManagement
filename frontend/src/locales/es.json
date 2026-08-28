@@ -1167,6 +1167,25 @@
           }
         }
       },
+      "shuttle-dispatch": {
+        "title": "Maneja la consola del shuttle",
+        "summary": "El mapa en vivo, quién está manejando, y las zonas que levantan alertas.",
+        "gotcha": "Un link de driver es un TURNO, no una persona. Sacar un segundo link para el mismo driver no lo mueve — deja dos turnos vivos, y el mapa enseña la guagua dos veces. Revoca el viejo cuando el turno cambia de mano.",
+        "steps": {
+          "shuttle-console": {
+            "title": "La consola, en tres tabs",
+            "body": "El mapa en vivo enseña cada guagua que está transmitiendo ahora mismo, filtrada por la sede que escojas. Las posiciones se refrescan solas cada doce segundos — nunca tienes que recargar la página."
+          },
+          "shuttle-drivers-tab": {
+            "title": "Quién está manejando, ahora mismo",
+            "body": "Los turnos de driver se reparten como links, no como logins: sacas uno, el driver lo abre en su celular, y su posición empieza a alimentar el mapa que el cliente ve. Lo revocas y el feed para al instante."
+          },
+          "shuttle-zones-tab": {
+            "title": "Las zonas son lo que le da sentido a las alertas",
+            "body": "Una zona es el área donde se supone que la guagua se mantenga. Dibújalas una vez y el sistema te avisa cuando una guagua se sale de su ruta o deja de moverse — en vez de que tú vigiles un mapa todo el día."
+          }
+        }
+      },
       "shuttle-tracker": {
         "title": "El shuttle tracker en vivo",
         "summary": "El cliente ve la guagua moverse en un mapa en vivo y la solicita con un toque.",
@@ -1200,6 +1219,7 @@
     "waitingForRecord": "Abre cualquier reserva para empezar \"{{name}}\" — la guía sigue ahí.",
     "cancel": "Cancelar",
     "waitingNextScreen": "Sigue — abre la siguiente pantalla y la guía continúa ahí.",
+    "skipThisPart": "Saltar esta parte",
     "restart": "Empezar de nuevo",
     "restartHint": "Borra este módulo y lo tomas desde el principio"
   },

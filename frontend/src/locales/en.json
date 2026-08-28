@@ -1167,6 +1167,25 @@
           }
         }
       },
+      "shuttle-dispatch": {
+        "title": "Run the shuttle console",
+        "summary": "The live map, who is driving, and the zones that raise alerts.",
+        "gotcha": "A driver link is a shift, not a person. Minting a second link for the same driver does not move them — it leaves two live shifts, and the map shows the bus twice. Revoke the old one when a shift changes hands.",
+        "steps": {
+          "shuttle-console": {
+            "title": "The console, in three tabs",
+            "body": "The live map shows every shuttle transmitting right now, filtered to the location you pick. Positions refresh on their own roughly every twelve seconds — you never need to reload the page."
+          },
+          "shuttle-drivers-tab": {
+            "title": "Who is driving, right now",
+            "body": "Driver shifts are handed out as links, not logins: mint one, the driver opens it on their phone, and their position starts feeding the map customers watch. Revoke it and the feed stops immediately."
+          },
+          "shuttle-zones-tab": {
+            "title": "Zones are what make alerts mean something",
+            "body": "A zone is the area a shuttle is supposed to stay inside. Draw them once and the system tells you when a bus leaves its route or stops moving — instead of you watching a map all day."
+          }
+        }
+      },
       "shuttle-tracker": {
         "title": "The live shuttle tracker",
         "summary": "Customers watch the shuttle move on a live map and request it with one tap.",
@@ -1200,6 +1219,7 @@
     "waitingForRecord": "Open any reservation to start \"{{name}}\" — the guide continues there.",
     "cancel": "Cancel",
     "waitingNextScreen": "Keep going — open the next screen and the guide picks up there.",
+    "skipThisPart": "Skip this part",
     "restart": "Start over",
     "restartHint": "Clear this module and take it from the beginning"
   },
