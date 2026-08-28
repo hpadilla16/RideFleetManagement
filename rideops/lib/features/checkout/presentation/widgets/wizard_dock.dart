@@ -17,7 +17,7 @@ import '../../../../core/theme/ride_tokens.dart';
 ///
 /// **Desviación consciente del diff del marco**, que proponía pasarlo por
 /// parámetro desde el shell hasta el paso y de ahí al dock. En el código real
-/// hay **14 sitios** que construyen [WizardDock] —seis solo en la inspección,
+/// hay **15 sitios** que construyen [WizardDock] —seis solo en la inspección,
 /// uno por sub-paso—, así que el enhebrado explícito significaría acertar en
 /// los seis y que ningún paso futuro se olvide. Un aviso que desaparece porque
 /// alguien no lo reenvió es justo el fallo silencioso que M2-H6 existe para no

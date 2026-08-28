@@ -265,8 +265,6 @@ void main() {
       reason: 'el aviso no puede quedar por debajo del primario',
     );
 
-    // (4) Un solo pie: el aviso no trae filete ni sombra propios (GD-SC-2).
-    // Dos filetes horizontales seguidos son un bug visual, no una jerarquía.
     // (4) Un solo pie: un filete, ninguna sombra hacia arriba (GD-SC-2).
     //
     // Se miran los contenedores ENTRE el aviso y el pie —sus envoltorios— y no
@@ -313,6 +311,64 @@ void main() {
       ),
       isFalse,
       reason: 'la sombra hacia arriba era la tercera señal de "segundo pie"',
+    );
+  });
+
+  testWidgets('M2-H6 · 21C sin dock — en un paso que no construye pie, el '
+      'aviso conserva el anclaje de la lámina', (tester) async {
+    // ── Por qué esta prueba existe ────────────────────────────────────────
+    //
+    // QA borró el bloque entero del aviso en la rama `_ =>` y las 701 pruebas
+    // siguieron verdes. El hueco cayó justo en el ÚNICO camino que NO pasa por
+    // `WizardDockNotice`: ahí el aviso se enhebra como parámetro explícito, que
+    // es exactamente el modo de fallo —alguien deja de reenviarlo y desaparece
+    // sin que nadie grite— que el widget heredado existe para evitar en los
+    // otros 15 sitios. El argumento arquitectónico no cubría su propia
+    // excepción; esta prueba sí.
+    //
+    // La rama sirve TC_SIGNED, PAYMENT_PENDING y PAID: tres pasos vivos.
+    final f = fakes();
+    // PAYMENT_PENDING con el sello de T&C ya puesto — es como se llega ahí
+    // (TC_SIGNED lo exige), así que el estado es producible por el backend.
+    f.api.current = sessionAt(CheckoutStep.paymentPending, tc: DateTime.now());
+    await pumpWizard(tester, api: f.api, network: f.network);
+    await tester.pumpAndSettle();
+    await skipJoinGate(tester);
+
+    // Este paso NO tiene pie: es la premisa de la prueba, y se afirma en vez
+    // de suponerse — si algún día gana uno, esta prueba tiene que enterarse.
+    expect(find.byType(WizardDock), findsNothing);
+    expect(find.byType(ForeignAdvanceBanner), findsNothing);
+
+    // La inspección se sella mientras el agente está en el paso de pago: el
+    // escenario canónico del 21C en esta rama.
+    f.api.current = sessionAt(
+      CheckoutStep.paymentPending,
+      tc: DateTime.now(),
+      inspection: DateTime.now(),
+    );
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    final banner = find.byType(ForeignAdvanceBanner);
+    expect(banner, findsOneWidget, reason: 'sin pie el aviso NO puede perderse');
+    expect(
+      find.textContaining('Keep capturing: this step did not change'),
+      findsOneWidget,
+    );
+
+    // Sigue FUERA del scroll: es la regla que no depende de que haya dock.
+    expect(
+      find.ancestor(of: banner, matching: find.byType(Scrollable)),
+      findsNothing,
+    );
+
+    // Y anclado al PIE: por debajo del cuerpo del paso.
+    final list = find.byType(Scrollable).first;
+    expect(
+      tester.getTopLeft(banner).dy,
+      greaterThanOrEqualTo(tester.getBottomLeft(list).dy - 1),
+      reason: 'el aviso va debajo del cuerpo, no encima ni dentro',
     );
   });
 
