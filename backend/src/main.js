@@ -604,12 +604,14 @@ if (process.env.SKIP_LISTEN !== '1') {
       // that renders only when they have NO articles — so article number
       // seven never shipped to anyone and two had to be inserted into
       // production by hand. This tops up the GLOBAL corpus with any article
-      // the release added, matching on slug: it never rewrites a body and
-      // never touches a tenant's own copy. Lazy-loaded and fail-open, like
-      // the audits below — training content is not worth failing a boot for.
+      // the release added, matching on slug, and rewrites one ONLY when the
+      // stored body still hashes to a body we published (see `supersedes`) —
+      // so a correction ships while a tenant's own edit never gets flattened.
+      // Lazy-loaded and fail-open, like the audits below — training content is
+      // not worth failing a boot for.
       import('./modules/knowledge-base/knowledge-base.service.js')
         .then(({ knowledgeBaseService }) => knowledgeBaseService.ensureGlobalArticles())
-        .then((r) => { if (r?.seeded) console.log('[knowledge-base] published new articles', r); })
+        .then((r) => { if (r?.seeded || r?.upgraded) console.log('[knowledge-base] published new articles', r); })
         .catch((e) => console.error('[knowledge-base] article top-up skipped:', e?.message));
       // Same audit for the iPOSpays Transact API (CNP token operations).
       import('./modules/payment-gateway/ipos-transact-client.js')

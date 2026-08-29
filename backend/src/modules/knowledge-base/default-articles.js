@@ -13,27 +13,311 @@
  * writes it, the same way a tour step does.
  *
  * RULES FOR ADDING ONE
- *   - `slug` is the identity and is forever. The top-up matches on it and
- *     will never rewrite a body, so a tenant who edited an article keeps their
- *     edit and a renamed slug silently becomes a second article.
+ *   - `slug` is the identity and is forever. The top-up matches on it, so a
+ *     renamed slug silently becomes a second article.
  *   - `category` must be one of the ten in knowledge-base.service.js.
  *   - Keep it short and practical: what the person does, in order, then the
  *     one mistake that costs money. A manual is not training.
  *   - Bilingual. The counter is in Puerto Rico and the team reads Spanish
  *     first; KnowledgeArticle has no locale column, so both languages live in
- *     one body under their own heading. The original six predate this and are
- *     left exactly as they shipped — rewriting them here would not reach any
- *     tenant that already has them, so it would only create drift.
+ *     one body under their own heading.
+ *
+ * EDITING AN ARTICLE THAT ALREADY SHIPPED — `supersedes` (2026-08-29)
+ *
+ * The top-up creates missing articles and otherwise leaves bodies alone, which
+ * is right: a tenant who rewrote an article must not have it overwritten by a
+ * deploy. But it also meant an EDIT could never ship. Two consequences we were
+ * actually living with:
+ *   - the original six were English-only in production and staying that way;
+ *   - the two citation articles had bilingual bodies IN THIS FILE and
+ *     English-only rows in the database, because they were hand-inserted
+ *     before the corpus was seedable. The file and production had silently
+ *     disagreed for a day.
+ *
+ * So an article may carry `supersedes`: the sha256 of each body we have
+ * previously shipped for that slug. At boot the top-up rewrites a row ONLY if
+ * the hash of what is in the database is one of them — i.e. it is provably
+ * still OUR text, untouched. Anything else is somebody's edit and is left
+ * exactly where it is. The default with no `supersedes` is unchanged: never
+ * rewrite.
+ *
+ * To edit a shipped article: change the body, then append the sha256 of the
+ * PREVIOUS body to `supersedes` (keep the older entries — a tenant may be
+ * several versions behind). The hash is a content fingerprint for change
+ * detection, not a security control.
  */
 
-/** @type {Array<{title: string, slug: string, category: string, sortOrder: number, body: string, tags: string[]}>} */
+import { createHash } from 'node:crypto';
+
+/** @type {Array<{title: string, slug: string, category: string, sortOrder: number, body: string, tags: string[], supersedes?: string[]}>} */
 export const DEFAULT_ARTICLES = [
-  { title: 'How to Check Out a Vehicle', slug: 'how-to-checkout', category: 'CHECKOUT', sortOrder: 1, body: '## Checkout Process\n\n1. Open the reservation in the Reservations page\n2. Click "Start Check-out"\n3. Verify customer ID and payment\n4. Complete the vehicle inspection (take photos)\n5. Hand over the keys and confirm\n\nThe system will automatically:\n- Create the rental agreement\n- Send the customer a confirmation email\n- Update the vehicle status to "Checked Out"\n- Start the billing period', tags: ['checkout', 'process', 'vehicle'] },
-  { title: 'How to Check In a Vehicle', slug: 'how-to-checkin', category: 'CHECKIN', sortOrder: 2, body: '## Check-in Process\n\n1. Open the reservation and click "Check In"\n2. Complete the return inspection (compare with checkout photos)\n3. Note fuel level and mileage\n4. Calculate any additional charges (late return, fuel, damage)\n5. Process final payment\n6. Close the rental agreement\n\nThe system will:\n- Update the vehicle status to "Available"\n- Generate the return receipt\n- Send the customer their receipt via email', tags: ['checkin', 'return', 'vehicle'] },
-  { title: 'Handling Damage Disputes', slug: 'handling-damage-disputes', category: 'DISPUTES', sortOrder: 3, body: '## Dispute Resolution Steps\n\n1. Go to the Issue Center\n2. Find the incident linked to the trip\n3. Review checkout and checkin inspection photos side by side\n4. Check the chat transcript if available\n5. Make a liability decision based on evidence\n6. Process the charge or waive the claim\n\n**Tips:**\n- Always take clear photos at checkout and checkin\n- Inspection photos are your best evidence\n- The chat transcript can show if damage was discussed', tags: ['dispute', 'damage', 'claims'] },
-  { title: 'Processing Toll Charges', slug: 'processing-toll-charges', category: 'TOLLS', sortOrder: 4, body: '## Toll Management\n\n1. Go to the Tolls module\n2. Import toll transactions from your toll provider\n3. The system will auto-match tolls to reservations based on vehicle plate and dates\n4. Review matched and unmatched tolls\n5. Manually assign any unmatched transactions\n6. Bill the customer for toll charges\n\n**Auto-match logic:**\n- Matches by plate number + transaction date within reservation window\n- Handles vehicle swaps during the reservation period', tags: ['tolls', 'billing', 'charges'] },
-  { title: 'Car Sharing Trip Workflow', slug: 'car-sharing-trip-workflow', category: 'CAR_SHARING', sortOrder: 5, body: '## Car Sharing Trip Flow\n\n1. Guest books a listing on the website\n2. Trip is created in PENDING_APPROVAL or CONFIRMED status\n3. Trip chat room is automatically created\n4. Host and guest coordinate pickup via chat\n5. Host confirms vehicle is ready\n6. Guest picks up the vehicle\n7. Trip moves to IN_PROGRESS\n8. Guest returns the vehicle\n9. Trip moves to COMPLETED\n10. Review requests are sent to the guest\n\n**Hot buttons in chat:**\n- Guest: "I\'m at pickup", "I\'m at return", "Running late"\n- Host: "Vehicle ready", "Inspection done"', tags: ['car-sharing', 'trip', 'workflow'] },
-  { title: 'Payment Processing Guide', slug: 'payment-processing', category: 'PAYMENTS', sortOrder: 6, body: '## Payment Methods\n\n### Authorize.Net\n- Primary payment gateway for hosted payments\n- Supports saved cards and security deposit holds\n\n### iPOSPays/SPIn Terminal\n- Physical terminal processing via SPIn REST API\n- Sale, auth/capture, void, refund supported\n- Card-on-file tokenization available\n\n### Payment Flow\n1. Customer receives payment link via email/SMS\n2. Customer enters card details on hosted payment page\n3. Payment is processed and recorded\n4. Receipt is sent automatically\n\n**Security deposits** are held as auth-only transactions and captured or voided at return.', tags: ['payments', 'billing', 'gateway'] },
+  {
+    title: 'How to Check Out a Vehicle',
+    slug: 'how-to-checkout',
+    category: 'CHECKOUT',
+    sortOrder: 1,
+    tags: ['checkout', 'process', 'vehicle'],
+    supersedes: ['9e39a5666e6a8604d1837c0a99994c08fb21dc5229a99cc790120a82a2cdffae'],
+    body: `## Checkout Process
+
+1. Open the reservation in the Reservations page
+2. Click "Start Check-out"
+3. Verify customer ID and payment
+4. Complete the vehicle inspection (take photos)
+5. Hand over the keys and confirm
+
+The system will automatically:
+- Create the rental agreement
+- Send the customer a confirmation email
+- Update the vehicle status to "Checked Out"
+- Start the billing period
+
+---
+
+## Proceso de check-out (Español)
+
+1. Abre la reserva en la página de Reservations
+2. Dale a **Start Check-out**
+3. Verifica la identificación del cliente y el pago
+4. Completa la inspección del vehículo (toma fotos)
+5. Entrega las llaves y confirma
+
+El sistema hace solo:
+- Crea el contrato de renta
+- Le manda al cliente el correo de confirmación
+- Cambia el estado del vehículo a "Checked Out"
+- Arranca el período de facturación
+
+**Las fotos son lo único que te defiende después.** Si sale un daño en el
+check-in, lo que decide quién paga son las fotos del check-out — no lo que
+alguien recuerde.`,
+  },
+  {
+    title: 'How to Check In a Vehicle',
+    slug: 'how-to-checkin',
+    category: 'CHECKIN',
+    sortOrder: 2,
+    tags: ['checkin', 'return', 'vehicle'],
+    supersedes: ['e58bfee282727b4909e4f58e9eec900b32f77243739f09c4516409fb6628a93a'],
+    body: `## Check-in Process
+
+1. Open the reservation and click "Check In"
+2. Complete the return inspection (compare with checkout photos)
+3. Note fuel level and mileage
+4. Calculate any additional charges (late return, fuel, damage)
+5. Process final payment
+6. Close the rental agreement
+
+The system will:
+- Update the vehicle status to "Available"
+- Generate the return receipt
+- Send the customer their receipt via email
+
+---
+
+## Proceso de check-in (Español)
+
+1. Abre la reserva y dale a **Check In**
+2. Haz la inspección de retorno (compárala con las fotos del check-out)
+3. Anota el nivel de gasolina y el millaje
+4. Calcula los cargos adicionales (retorno tarde, gasolina, daños)
+5. Procesa el pago final
+6. Cierra el contrato de renta
+
+El sistema hace solo:
+- Cambia el estado del vehículo a "Available"
+- Genera el recibo de retorno
+- Le manda el recibo al cliente por correo
+
+**Cerrar el contrato no cierra la cuenta.** Los peajes llegan semanas después
+del retorno y se le montan al contrato aunque ya esté cerrado. Por eso hay
+contratos cerrados que siguen apareciendo con balance — no es un error, es un
+peaje que entró tarde.`,
+  },
+  {
+    title: 'Handling Damage Disputes',
+    slug: 'handling-damage-disputes',
+    category: 'DISPUTES',
+    sortOrder: 3,
+    tags: ['dispute', 'damage', 'claims'],
+    supersedes: ['083a091dc79b611132cd5081427b9ba93f29a0f757b5eba53a9cfd73d6a77035'],
+    body: `## Dispute Resolution Steps
+
+1. Go to the Issue Center
+2. Find the incident linked to the trip
+3. Review checkout and checkin inspection photos side by side
+4. Check the chat transcript if available
+5. Make a liability decision based on evidence
+6. Process the charge or waive the claim
+
+**Tips:**
+- Always take clear photos at checkout and checkin
+- Inspection photos are your best evidence
+- The chat transcript can show if damage was discussed
+
+---
+
+## Cómo se resuelve una disputa por daños (Español)
+
+1. Ve al **Issue Center**
+2. Busca el incidente amarrado al viaje
+3. Pon las fotos del check-out y las del check-in una al lado de la otra
+4. Lee el chat si lo hay
+5. Decide la responsabilidad basándote en la evidencia
+6. Aplica el cargo o perdona el reclamo
+
+**Consejos:**
+- Toma fotos claras en el check-out y en el check-in, siempre
+- Las fotos de inspección son tu mejor evidencia
+- El chat puede enseñar si el daño se habló en su momento
+
+**Decide con lo que puedes enseñar.** Si el daño no se ve en la foto del
+check-out y sí se ve en la del check-in, tienes un caso. Si no tienes foto del
+check-out, no tienes caso — y cobrarlo igual es lo que se convierte en un
+contracargo.`,
+  },
+  {
+    title: 'Processing Toll Charges',
+    slug: 'processing-toll-charges',
+    category: 'TOLLS',
+    sortOrder: 4,
+    tags: ['tolls', 'billing', 'charges'],
+    supersedes: ['c012055b4edf0617ccb808ca57c84cc4ca237be55a0b8bcdd07e196f51475c18'],
+    body: `## Toll Management
+
+1. Go to the Tolls module
+2. Import toll transactions from your toll provider
+3. The system will auto-match tolls to reservations based on vehicle plate and dates
+4. Review matched and unmatched tolls
+5. Manually assign any unmatched transactions
+6. Bill the customer for toll charges
+
+**Auto-match logic:**
+- Matches by plate number + transaction date within reservation window
+- Handles vehicle swaps during the reservation period
+
+---
+
+## Manejo de peajes (Español)
+
+1. Ve al módulo de **Tolls**
+2. Importa las transacciones de tu proveedor de peajes
+3. El sistema las parea solo con las reservas, por tablilla y por fecha
+4. Revisa los peajes pareados y los que quedaron sin parear
+5. Asigna a mano los que no parearon
+6. Factúraselos al cliente
+
+**Cómo parea solo:**
+- Por número de tablilla + fecha de la transacción dentro de la ventana de la reserva
+- Aguanta los cambios de vehículo durante la misma reserva
+
+**Los peajes llegan tarde y por eso duelen.** Casi siempre entran después de
+que el carro se devolvió y el contrato se cerró, y se le montan igual. Ese es
+el motivo de la mayoría de los contratos cerrados que aparecen con balance
+pendiente. Revisa la cola de peajes por tu cuenta — si esperas a que alguien
+se queje, ya pasó demasiado tiempo para cobrarle.`,
+  },
+  {
+    title: 'Car Sharing Trip Workflow',
+    slug: 'car-sharing-trip-workflow',
+    category: 'CAR_SHARING',
+    sortOrder: 5,
+    tags: ['car-sharing', 'trip', 'workflow'],
+    supersedes: ['e9e37d7ee314029bae78a5f8cbf1457bfbe3176ab2fdad9ddd915d0ecb0eb9ce'],
+    body: `## Car Sharing Trip Flow
+
+1. Guest books a listing on the website
+2. Trip is created in PENDING_APPROVAL or CONFIRMED status
+3. Trip chat room is automatically created
+4. Host and guest coordinate pickup via chat
+5. Host confirms vehicle is ready
+6. Guest picks up the vehicle
+7. Trip moves to IN_PROGRESS
+8. Guest returns the vehicle
+9. Trip moves to COMPLETED
+10. Review requests are sent to the guest
+
+**Hot buttons in chat:**
+- Guest: "I'm at pickup", "I'm at return", "Running late"
+- Host: "Vehicle ready", "Inspection done"
+
+---
+
+## Flujo de un viaje de car sharing (Español)
+
+1. El huésped reserva un listing desde la página
+2. Se crea el viaje en estado PENDING_APPROVAL o CONFIRMED
+3. El chat del viaje se abre solo
+4. Anfitrión y huésped cuadran el pickup por chat
+5. El anfitrión confirma que el vehículo está listo
+6. El huésped recoge el vehículo
+7. El viaje pasa a IN_PROGRESS
+8. El huésped devuelve el vehículo
+9. El viaje pasa a COMPLETED
+10. Se le manda al huésped la invitación a dejar reseña
+
+**Botones rápidos del chat:**
+- Huésped: "I'm at pickup", "I'm at return", "Running late"
+- Anfitrión: "Vehicle ready", "Inspection done"
+
+**El chat es parte del expediente.** Todo lo que se escriba ahí se puede leer
+después si hay una disputa por daños, y sirve de evidencia igual que las
+fotos. Escríbelo como si lo fueras a leer en voz alta más tarde.`,
+  },
+  {
+    title: 'Payment Processing Guide',
+    slug: 'payment-processing',
+    category: 'PAYMENTS',
+    sortOrder: 6,
+    tags: ['payments', 'billing', 'gateway'],
+    supersedes: ['605e992510e1af8a35602502d676b0bbe24820e01624773a0344d48c5135bb53'],
+    body: `## Payment Methods
+
+### Authorize.Net
+- Primary payment gateway for hosted payments
+- Supports saved cards and security deposit holds
+
+### iPOSPays/SPIn Terminal
+- Physical terminal processing via SPIn REST API
+- Sale, auth/capture, void, refund supported
+- Card-on-file tokenization available
+
+### Payment Flow
+1. Customer receives payment link via email/SMS
+2. Customer enters card details on hosted payment page
+3. Payment is processed and recorded
+4. Receipt is sent automatically
+
+**Security deposits** are held as auth-only transactions and captured or voided at return.
+
+---
+
+## Guía de procesamiento de pagos (Español)
+
+### Authorize.Net
+- Es la pasarela principal para pagos en línea
+- Aguanta tarjetas guardadas y retenciones de depósito
+
+### Terminal iPOSPays/SPIn
+- Terminal física, procesa por el API REST de SPIn
+- Hace venta, autorización/captura, void y reembolso
+- Puede tokenizar la tarjeta para dejarla en archivo
+
+### Cómo corre un pago
+1. El cliente recibe el link de pago por correo o SMS
+2. El cliente entra los datos de la tarjeta en la página de pago
+3. El pago se procesa y queda registrado
+4. El recibo sale solo
+
+**Los depósitos de seguridad** se retienen como autorización nada más, y en el
+retorno se capturan o se liberan.
+
+**Tú nunca ves el número completo de la tarjeta, y así tiene que ser.** El
+número se entra en la página de Authorize.Net o en la terminal; el sistema solo
+guarda un identificador y los últimos cuatro dígitos. Si alguien te pide que
+apuntes un número de tarjeta en una nota o en un correo, la contestación es no
+— eso es justo lo que nos sacaría de cumplimiento con PCI.`,
+  },
   // ---------------------------------------------------------------------
   // Added 2026-08-28. Everything below is bilingual in one body: the counter
   // is in Puerto Rico and KnowledgeArticle has no locale column.
@@ -44,6 +328,10 @@ export const DEFAULT_ARTICLES = [
     category: 'DISPUTES',
     sortOrder: 7,
     tags: ['citations', 'fines', 'disputes'],
+    // The English-only draft that was INSERTED INTO PRODUCTION BY HAND on
+    // 2026-08-28, before the corpus was seedable. The bilingual body below has
+    // existed in this file since the same day and had no way to reach the row.
+    supersedes: ['7d39dee6d2109d38ba88e5179821483cb5a3ef1edf5d40782109b3196d48895b'],
     body: `## Working the citation queue
 
 Citations arrive on their own — scraped from the agencies, or read out of a
@@ -109,6 +397,8 @@ que estaba afuera el día de la violación. Tu trabajo es estar de acuerdo, o no
     category: 'DISPUTES',
     sortOrder: 8,
     tags: ['citations', 'documents', 'export'],
+    // Same story as its sibling above: hand-inserted English, bilingual here.
+    supersedes: ['bfa3c69dfba895c14f8631d9447a8a5b393a8f5fa25b7d6a781c069a1ad3b7f4'],
     body: `## Building the file for a citation
 
 Every citation has a **Supporting documents** panel. This is where the paper
@@ -705,4 +995,44 @@ configuras una vez y entras cuando te llama.
 export function articlesMissingFrom(existingSlugs = []) {
   const have = new Set(existingSlugs);
   return DEFAULT_ARTICLES.filter((a) => !have.has(a.slug));
+}
+
+/** sha256 of a body, as the fingerprint `supersedes` is written in. */
+export function bodyFingerprint(body) {
+  return createHash('sha256').update(String(body ?? ''), 'utf8').digest('hex');
+}
+
+/**
+ * Which existing articles this release is allowed to rewrite.
+ *
+ * The rule, and the whole point of it: an article is upgraded ONLY when the
+ * body sitting in the database hashes to one of the bodies WE shipped for that
+ * slug. That is the proof it was never edited. Everything else — a tenant's
+ * rewrite, a hand-inserted row nobody recorded, a body already at the current
+ * version — is left untouched.
+ *
+ * Pure, like articlesMissingFrom, so the rule is testable without a database.
+ *
+ * @param {Array<{slug: string, body: string}>} existing  rows already in scope
+ * @param {Array<object>} [catalog]  the articles to match against. Only the
+ *   tests pass this — a sha256 has no preimage, so proving "a body we shipped
+ *   IS upgraded" needs a catalog whose predecessor hash the test can compute.
+ * @returns {Array<{slug: string, body: string, from: string}>} rewrites to apply
+ */
+export function articlesToUpgrade(existing = [], catalog = DEFAULT_ARTICLES) {
+  const bySlug = new Map(catalog.map((a) => [a.slug, a]));
+  const out = [];
+  for (const row of existing) {
+    const article = bySlug.get(row?.slug);
+    if (!article) continue;                       // not ours; never touch it
+    const supersedes = article.supersedes || [];
+    if (supersedes.length === 0) continue;        // no upgrade path declared
+    const current = bodyFingerprint(row.body);
+    // Already current. Checked BEFORE the match so a body that is somehow
+    // listed in its own supersedes can never loop.
+    if (current === bodyFingerprint(article.body)) continue;
+    if (!supersedes.includes(current)) continue;  // edited by somebody
+    out.push({ slug: article.slug, body: article.body, from: current });
+  }
+  return out;
 }

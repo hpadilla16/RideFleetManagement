@@ -14,7 +14,7 @@
  *   │ Aging summary — 5 colored cards (Current → 90+)                 │
  *   ├─────────────────────────────────────────────────────────────────┤
  *   │ Triage table grouped by bucket, 90+ first → Current last        │
- *   │   (rows link to /agreements/<id>)                                │
+ *   │   (rows link to /reservations/<reservationId>)                   │
  *   └─────────────────────────────────────────────────────────────────┘
  */
 
@@ -286,8 +286,21 @@ function Row({ r, bucketKey }) {
   return (
     <tr style={{ borderTop: '0.5px solid #d3d1c7' }}>
       <td style={{ padding: '8px 12px', minWidth: 200 }}>
+        {/*
+          Goes to the RESERVATION, which is where the money actually lives —
+          charges, payments, tolls, the agreement itself.
+
+          It used to point at /agreements/<id>. That route is a deprecated stub
+          that throws the id away and router.replace()s to /reservations, so
+          every row in this report landed the operator on the same unfiltered
+          list with no way back to the debt they clicked. A dead link on all
+          282 of IRC's rows.
+
+          Falls back to the old target only when the row has no reservationId,
+          which the report's own select makes nullable.
+        */}
         <Link
-          href={`/agreements/${r.id}`}
+          href={r.reservationId ? `/reservations/${r.reservationId}` : `/agreements/${r.id}`}
           style={{ color: '#211a38', textDecoration: 'none', fontWeight: 500 }}
         >
           {r.customerName || '(no customer)'}

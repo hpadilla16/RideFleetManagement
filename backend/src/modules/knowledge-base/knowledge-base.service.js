@@ -2,7 +2,7 @@ import { prisma } from '../../lib/prisma.js';
 import { ValidationError, NotFoundError } from '../../lib/errors.js';
 import { cache } from '../../lib/cache.js';
 import { tenantKey, globalKey } from '../../lib/cache/tenantKey.js';
-import { DEFAULT_ARTICLES, articlesMissingFrom } from './default-articles.js';
+import { DEFAULT_ARTICLES, articlesMissingFrom, articlesToUpgrade } from './default-articles.js';
 
 function slugify(text) {
   return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 120);
@@ -166,8 +166,7 @@ export const knowledgeBaseService = {
   },
 
   /**
-   * Put the default corpus in place for a scope, WITHOUT touching what is
-   * already there.
+   * Put the default corpus in place for a scope.
    *
    * Per-article, on purpose (2026-08-28). The previous version counted the
    * scope's articles and bailed if there were any, so it could only ever run
@@ -176,25 +175,58 @@ export const knowledgeBaseService = {
    * and an existing one is left alone — including one a tenant has edited,
    * which must never be overwritten by a deploy.
    *
+   * Since 2026-08-29 it can also REWRITE a body, under one narrow condition:
+   * what is in the database still hashes to a body this codebase published
+   * (`supersedes` in default-articles.js). That is what makes a correction to
+   * a shipped article — a translation, a fixed instruction — deployable at
+   * all, without it ever being able to land on top of somebody's edit.
+   *
    * @param {{tenantId: string|null, userId?: string|null}} scope
    */
   async seedDefaults({ tenantId, userId }) {
     const where = tenantId ? { tenantId } : { tenantId: null };
     const present = await prisma.knowledgeArticle.findMany({
-      where, select: { slug: true },
+      where, select: { slug: true, body: true },
     });
     const missing = articlesMissingFrom(present.map((a) => a.slug));
-    if (missing.length === 0) return { seeded: 0 };
+    // An EDIT to an article that already shipped. Only ever rewrites a body
+    // that still hashes to one this codebase published — see `supersedes` in
+    // default-articles.js. A tenant's own edit is never in that set.
+    const upgrades = articlesToUpgrade(present);
+    if (missing.length === 0 && upgrades.length === 0) return { seeded: 0, upgraded: 0 };
 
-    await prisma.knowledgeArticle.createMany({
-      data: missing.map((d) => ({ ...d, tenantId: tenantId || null, createdBy: userId || null })),
-      // Belt and braces: (tenantId, slug) is unique, but Postgres does not
-      // dedupe NULLs, so the GLOBAL corpus has no unique index protecting it.
-      // Two workers booting together would otherwise both insert.
-      skipDuplicates: true,
-    });
+    if (missing.length > 0) {
+      await prisma.knowledgeArticle.createMany({
+        // `supersedes` is release metadata, not a column — strip it or Prisma
+        // rejects the whole batch on an unknown field.
+        data: missing.map(({ supersedes, ...d }) => ({
+          ...d, tenantId: tenantId || null, createdBy: userId || null,
+        })),
+        // Belt and braces: (tenantId, slug) is unique, but Postgres does not
+        // dedupe NULLs, so the GLOBAL corpus has no unique index protecting it.
+        // Two workers booting together would otherwise both insert.
+        skipDuplicates: true,
+      });
+    }
+
+    for (const up of upgrades) {
+      // updateMany, not update: the global corpus (tenantId NULL) has no unique
+      // index to address a row by, for the same Postgres reason as above.
+      await prisma.knowledgeArticle.updateMany({
+        // Re-checking the body here makes the write idempotent under the four
+        // workers that boot together — the second one matches nothing.
+        where: { ...where, slug: up.slug, body: { not: up.body } },
+        data: { body: up.body },
+      });
+    }
+
     cache.invalidate('kb:list:');
-    return { seeded: missing.length, slugs: missing.map((a) => a.slug) };
+    return {
+      seeded: missing.length,
+      slugs: missing.map((a) => a.slug),
+      upgraded: upgrades.length,
+      upgradedSlugs: upgrades.map((a) => a.slug),
+    };
   },
 
   /**
