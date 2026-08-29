@@ -1,9 +1,36 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+// Tolls — "Confidence triage lanes" (redesign A, approved 2026-08-28).
+// Source of truth: design/mockups/tolls-redesign-A.html +
+// design/mockups/tolls-redesign-NOTES.md. The six DB-counted queue views
+// survive intact, regrouped under three confidence lanes; the raw matchReason
+// token string is NEVER rendered (human chips instead — see lib/toll-triage);
+// one primary action per row with Reset/Dispute/Waive in an overflow menu;
+// provider/sync/import tooling lives on its own "Imports & sync" tab.
+
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
-import { api } from '../../lib/client';
+import { api, apiDownload } from '../../lib/client';
+import {
+  TOLL_QUEUE_VIEWS,
+  TOLL_LANE_GROUPS,
+  AUTO_CONFIRM_SCORE,
+  laneForScore,
+  confidenceForRow,
+  inlineChipsForRow,
+  rawReasonForRow,
+  scoreLedgerForRow,
+  filterByQueueView,
+  isUsageOnly,
+  isAutoMatched,
+  isNeedsReview,
+  isUnmatched,
+  isReadyToPost,
+  primaryActionForRow,
+  overflowActionsForRow
+} from '../../lib/toll-triage';
 
 const EMPTY_IMPORT_FORM = {
   transactionAt: '',
@@ -18,8 +45,6 @@ const EMPTY_IMPORT_FORM = {
 
 const ISSUE_EDIT_ID_KEY = 'issues.editId';
 
-const TOLL_QUEUE_VIEWS = ['ALL', 'AUTO_MATCHED', 'NEEDS_REVIEW', 'UNMATCHED', 'DISPATCH_REVIEW', 'USAGE_ONLY', 'READY_TO_POST'];
-
 export default function TollsPage() {
   return <AuthGate>{({ token, me, logout }) => <TollsInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
@@ -28,40 +53,22 @@ function money(value) {
   return `$${Number(Number(value || 0).toFixed(2)).toFixed(2)}`;
 }
 
-function dateTimeLabel(value) {
-  if (!value) return 'Not scheduled yet';
+function shortDateTime(value) {
+  if (!value) return '-';
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+  if (Number.isNaN(date.getTime())) return String(value);
+  return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} · ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 }
 
-function tollReviewLabel(row = {}) {
-  if (row?.coveredByTollPackage || row?.billingMode === 'USAGE_ONLY') {
-    return 'Usage recorded by toll package';
-  }
-  if (row?.dispatchConfirmationRequired || row?.reviewCategory === 'DISPATCH_CONFIRMATION_REQUIRED') {
-    return 'Dispatch confirmation required';
-  }
-  if (row?.needsReview) return 'Needs review';
-  return row?.statusLabel || 'Review updated';
-}
-
-function tollReviewHint(row = {}) {
-  if (row?.coveredByTollPackage || row?.billingMode === 'USAGE_ONLY') {
-    return 'The tenant toll package covers this transaction. Usage is recorded for reporting, but no charge should be added to the reservation.';
-  }
-  if (row?.dispatchConfirmationRequired || row?.reviewCategory === 'DISPATCH_CONFIRMATION_REQUIRED') {
-    return 'This toll landed inside a vehicle responsibility window before formal checkout. Confirm whether the vehicle was actually dispatched to this customer.';
-  }
-  return row?.latestAssignment?.matchReason || row?.reviewNotes || '';
-}
-
-function importRunDiagnostics(run) {
+function importRunDiagnostics(run, t) {
   const autoSync = run?.metadata?.autoSync || {};
   const scrapedCount = Number(autoSync.scrapedCount || run?.metadata?.scrapedCount || 0);
   const duplicateExistingCount = Number(autoSync.duplicateExistingCount || run?.metadata?.duplicateExistingCount || 0);
   const dedupedInRunCount = Number(autoSync.dedupedInRunCount || run?.metadata?.dedupedInRunCount || 0);
   if (!scrapedCount && !duplicateExistingCount && !dedupedInRunCount) return '';
-  return `Scraped ${scrapedCount} | Existing duplicates ${duplicateExistingCount} | Deduped in run ${dedupedInRunCount}`;
+  return t('tolls.imports.runsDiag', 'Scraped {{scraped}} | Existing duplicates {{dup}} | Deduped in run {{deduped}}', {
+    scraped: scrapedCount, dup: duplicateExistingCount, deduped: dedupedInRunCount
+  });
 }
 
 function normalizeHeader(value) {
@@ -103,7 +110,220 @@ function parseBulkImportRows(text) {
   })).filter((row) => row.transactionAt && Number.isFinite(row.amount) && row.amount > 0);
 }
 
+/* Per-action dialog copy (replaces window.prompt — NOTES finding #8). */
+const ACTION_DIALOGS = {
+  MARK_DISPUTED: { title: ['tolls.dialog.disputeTitle', 'Dispute toll'], body: ['tolls.dialog.disputeBody', 'Marks the toll disputed and opens an Issue Center case.'], note: ['tolls.dialog.disputeNote', 'Optional dispute note'], danger: false },
+  MARK_NOT_BILLABLE: { title: ['tolls.dialog.waiveTitle', 'Waive toll — not billable'], body: ['tolls.dialog.waiveBody', 'The toll stays on record but will not be billed to anyone.'], note: ['tolls.dialog.waiveNote', 'Optional waiver note'], danger: true },
+  RESET_MATCH: { title: ['tolls.dialog.resetTitle', 'Reset match'], body: ['tolls.dialog.resetBody', 'Clears the suggestion and returns the toll to the unmatched queue for the next sweep.'], note: ['tolls.dialog.resetNote', 'Optional reset note'], danger: false },
+  CONFIRM_DISPATCHED: { title: ['tolls.dialog.dispatchTitle', 'Confirm dispatch'], body: ['tolls.dialog.dispatchBody', 'Confirms the vehicle was actually dispatched to this customer before formal checkout.'], note: ['tolls.dialog.dispatchNote', 'Optional dispatch confirmation note'], danger: false },
+  MARK_NOT_DISPATCHED: { title: ['tolls.dialog.notDispatchedTitle', 'Not dispatched'], body: ['tolls.dialog.notDispatchedBody', 'Removes the pre-checkout suggestion — the vehicle was not with this customer.'], note: ['tolls.dialog.notDispatchedNote', 'Optional note for why this vehicle was not dispatched'], danger: true }
+};
+
+/** Themed note dialog — the app's modal-backdrop pattern, not window.prompt. */
+function TollNoteDialog({ dialog, busy, onCancel, onApply }) {
+  const { t } = useTranslation();
+  const [note, setNote] = useState('');
+  const cfg = ACTION_DIALOGS[dialog.action] || {};
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="tq-dialog" role="dialog" aria-modal="true">
+        <h3>{t(...(cfg.title || ['tolls.dialog.apply', 'Apply']))}</h3>
+        <p>{cfg.body ? t(...cfg.body) : null}</p>
+        <label className="label">{cfg.note ? t(...cfg.note) : t('tolls.dialog.noteLabel', 'Note (optional)')}</label>
+        <textarea rows={3} value={note} autoFocus onChange={(e) => setNote(e.target.value)} />
+        <div className="row">
+          <button type="button" className="button-subtle" onClick={onCancel} disabled={busy}>{t('tolls.dialog.cancel', 'Cancel')}</button>
+          <button type="button" className={cfg.danger ? 'button-subtle' : ''} style={cfg.danger ? { color: 'var(--danger-tx)', borderColor: 'var(--danger-bd)' } : undefined} onClick={() => onApply(note)} disabled={busy}>
+            {busy ? t('tolls.dialog.working', 'Working…') : t('tolls.dialog.apply', 'Apply')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Themed bulk-confirm dialog (replaces window.confirm — NOTES finding #8). */
+function TollBulkConfirmDialog({ rows, busy, onCancel, onConfirm }) {
+  const { t } = useTranslation();
+  const shown = rows.slice(0, 5);
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="tq-dialog" role="dialog" aria-modal="true">
+        <h3>{t('tolls.dialog.bulkTitle', 'Confirm {{count}} tolls now?', { count: rows.length })}</h3>
+        <p>{t('tolls.dialog.bulkBody', 'This will assign each toll to its suggested reservation (or confirm dispatch where required) and post charges.')}</p>
+        <ul>
+          {shown.map((row) => (
+            <li key={row.id}>
+              #{row.latestAssignment?.reservation?.reservationNumber || row.reservation?.reservationNumber || row.id}
+              {' · '}{money(row.amount)}
+            </li>
+          ))}
+          {rows.length > shown.length ? <li>{t('tolls.dialog.bulkMore', '+{{count}} more', { count: rows.length - shown.length })}</li> : null}
+        </ul>
+        <div className="row">
+          <button type="button" className="button-subtle" onClick={onCancel} disabled={busy}>{t('tolls.dialog.cancel', 'Cancel')}</button>
+          <button type="button" onClick={onConfirm} disabled={busy}>
+            {busy ? t('tolls.toolbar.confirming', 'Confirming…') : t('tolls.dialog.bulkConfirm', 'Confirm all')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Themed waive-selected dialog: one note applied to every selected toll. */
+function TollWaiveSelectedDialog({ rows, busy, onCancel, onApply }) {
+  const { t } = useTranslation();
+  const [note, setNote] = useState('');
+  const total = rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="tq-dialog" role="dialog" aria-modal="true">
+        <h3>{t('tolls.dialog.waiveSelectedTitle', 'Waive {{count}} selected tolls — not billable', { count: rows.length })}</h3>
+        <p>{t('tolls.dialog.waiveSelectedBody', 'Each selected toll will be marked not billable with your note.')} ({money(total)})</p>
+        <label className="label">{t('tolls.dialog.waiveNote', 'Optional waiver note')}</label>
+        <textarea rows={3} value={note} autoFocus onChange={(e) => setNote(e.target.value)} />
+        <div className="row">
+          <button type="button" className="button-subtle" onClick={onCancel} disabled={busy}>{t('tolls.dialog.cancel', 'Cancel')}</button>
+          <button type="button" className="button-subtle" style={{ color: 'var(--danger-tx)', borderColor: 'var(--danger-bd)' }} onClick={() => onApply(note)} disabled={busy}>
+            {busy ? t('tolls.dialog.working', 'Working…') : t('tolls.foot.waiveSelected', 'Waive selected')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const TONE_CLASS = { ok: 'w-ok', warn: 'w-warn', bad: 'w-bad', info: 'w-info' };
+
+function ConfidenceCell({ row, t, onMore, overflow }) {
+  const score = confidenceForRow(row);
+  const lane = laneForScore(score);
+  const { chips } = inlineChipsForRow(row);
+  const laneClass = lane === 'high' ? '' : lane === 'mid' ? ' mid' : lane === 'low' ? ' low' : ' none';
+  return (
+    <>
+      {/* the raw token string survives ONLY as a hover title for support calls */}
+      <span className={`tq-conf${laneClass}`} title={rawReasonForRow(row)}>
+        {score == null ? (
+          <b>{t('tolls.row.noMatch', 'no match')}</b>
+        ) : (
+          <>
+            <span className="bar"><i style={{ width: `${Math.max(0, Math.min(100, Number(score)))}%` }} /></span>
+            <b>{Number(score)}</b>
+          </>
+        )}
+      </span>
+      <div className="tq-why">
+        {chips.map((chip) => (
+          <span key={chip.token} className={TONE_CLASS[chip.tone] || ''}>{t(chip.key)}</span>
+        ))}
+        {overflow > 0 ? (
+          <button type="button" className="more" onClick={onMore}>{t('tolls.row.moreChips', '+{{count}} more', { count: overflow })}</button>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+function EvidenceDrawer({ row, t }) {
+  const score = confidenceForRow(row);
+  const ledger = scoreLedgerForRow(row);
+  const reservation = row.latestAssignment?.reservation || row.reservation || null;
+  const pickupAt = reservation?.pickupAt ? new Date(reservation.pickupAt) : null;
+  const returnAt = reservation?.returnAt ? new Date(reservation.returnAt) : null;
+  const tollAt = row.transactionAt ? new Date(row.transactionAt) : null;
+  let tickPct = null;
+  let winStyle = null;
+  if (pickupAt && returnAt && tollAt && returnAt > pickupAt) {
+    // Plot the rental window on a track padded 12% each side so a toll just
+    // outside the window still lands on the drawing.
+    const span = returnAt.getTime() - pickupAt.getTime();
+    const t0 = pickupAt.getTime() - span * 0.12;
+    const t1 = returnAt.getTime() + span * 0.12;
+    const pct = (ms) => Math.max(0, Math.min(100, ((ms - t0) / (t1 - t0)) * 100));
+    winStyle = { left: `${pct(pickupAt.getTime())}%`, right: `${100 - pct(returnAt.getTime())}%` };
+    tickPct = pct(tollAt.getTime());
+  }
+  const idRows = [
+    { label: t('tolls.evidence.plate', 'Plate'), toll: row.plateRaw, vehicle: row.vehicle?.plate },
+    { label: t('tolls.evidence.tag', 'Tag'), toll: row.tagRaw, vehicle: row.vehicle?.tollTagNumber },
+    { label: t('tolls.evidence.sello', 'Sello'), toll: row.selloRaw, vehicle: row.vehicle?.tollStickerNumber }
+  ];
+  const norm = (v) => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return (
+    <tr className="evidence">
+      <td colSpan={7}>
+        <div className="tq-evi">
+          <div>
+            <h5>{t('tolls.evidence.ledger', 'Score ledger — why {{score}}', { score: score == null ? '—' : score })}</h5>
+            {ledger.length ? (
+              <table className="tq-ledger">
+                <tbody>
+                  {ledger.map((entry) => (
+                    <tr key={entry.token}>
+                      <td>{t(entry.key)}</td>
+                      <td className={`pts${entry.negative ? ' neg' : ''}`}>{entry.pts}</td>
+                    </tr>
+                  ))}
+                  <tr className="total">
+                    <td>
+                      {score != null && Number(score) < AUTO_CONFIRM_SCORE
+                        ? t('tolls.evidence.belowAuto', 'Suggested — below auto-confirm ({{threshold}})', { threshold: AUTO_CONFIRM_SCORE })
+                        : t('tolls.evidence.atAuto', 'At or above auto-confirm ({{threshold}})', { threshold: AUTO_CONFIRM_SCORE })}
+                    </td>
+                    <td className="pts">{score == null ? '—' : Number(score)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            ) : (
+              <p style={{ fontSize: 12, color: 'var(--text-3)' }}>{t('tolls.evidence.noLedger', 'The matcher recorded no scoring tokens for this toll.')}</p>
+            )}
+          </div>
+          <div>
+            <h5>{t('tolls.evidence.identifiers', 'Identifiers · toll vs vehicle')}</h5>
+            <div className="tq-idgrid">
+              {idRows.map((idRow) => {
+                const hit = idRow.toll && idRow.vehicle && norm(idRow.toll) === norm(idRow.vehicle);
+                return (
+                  <span key={idRow.label} style={{ display: 'contents' }}>
+                    <span className="h">{idRow.label}</span>
+                    <span className={`v ${idRow.toll ? (hit ? 'hit' : '') : 'miss'}`}>{idRow.toll || '—'}</span>
+                    <span className={`v ${hit ? 'hit' : idRow.vehicle ? '' : 'miss'}`}>{idRow.vehicle ? `${idRow.vehicle}${hit ? ' ✓' : ''}` : '—'}</span>
+                  </span>
+                );
+              })}
+            </div>
+            <div className="tq-evi-raw">{t('tolls.evidence.raw', 'Matcher tokens (support)')}: {rawReasonForRow(row) || '—'}</div>
+          </div>
+          <div>
+            <h5>{t('tolls.evidence.window', 'Toll vs rental window')}</h5>
+            {winStyle ? (
+              <div className="tq-tline">
+                <div className="track">
+                  <span className="win" style={winStyle} />
+                  {tickPct != null ? <span className="tick" style={{ left: `${tickPct}%` }} /> : null}
+                </div>
+                <div className="lbls">
+                  <span>{t('tolls.evidence.pickup', 'Pickup')} {shortDateTime(reservation.pickupAt)}</span>
+                  <span>{t('tolls.evidence.return', 'Return')} {shortDateTime(reservation.returnAt)}</span>
+                </div>
+                <p style={{ fontSize: 11.5, color: 'var(--text-3)', marginTop: 10, lineHeight: 1.55 }}>
+                  {t('tolls.evidence.tollAt', 'Toll {{when}}', { when: shortDateTime(row.transactionAt) })}
+                </p>
+              </div>
+            ) : (
+              <p style={{ fontSize: 12, color: 'var(--text-3)' }}>—</p>
+            )}
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 function TollsInner({ token, me, logout }) {
+  const { t } = useTranslation();
   const role = String(me?.role || '').toUpperCase();
   const isSuper = role === 'SUPER_ADMIN';
   const [msg, setMsg] = useState('');
@@ -128,6 +348,7 @@ function TollsInner({ token, me, logout }) {
     const v = new URLSearchParams(window.location.search).get('view');
     return v && TOLL_QUEUE_VIEWS.includes(v) ? v : 'ALL';
   });
+  const [activeTab, setActiveTab] = useState('QUEUE');
   const [query, setQuery] = useState('');
   const [bulkImportText, setBulkImportText] = useState('');
   const [importForm, setImportForm] = useState(() => ({
@@ -137,8 +358,14 @@ function TollsInner({ token, me, logout }) {
   const [reservationDrafts, setReservationDrafts] = useState({});
   const [busyId, setBusyId] = useState('');
   // Bandeja "peajes por cobrar" (TollBridge point 9): unacked tolls attached
-  // to contracts, closed contracts first.
+  // to contracts, closed contracts first. Rendered as the alerts tray above
+  // the queue (its UI had been lost — NOTES finding #11).
   const [alerts, setAlerts] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [evidenceId, setEvidenceId] = useState('');
+  // Themed dialogs replace window.prompt/window.confirm (NOTES finding #8):
+  // { kind: 'note', row, action } | { kind: 'bulk-confirm' } | { kind: 'waive-selected' }
+  const [dialog, setDialog] = useState(null);
 
   const scopedTollsPath = (path) => {
     if (!isSuper || !activeTenantId) return path;
@@ -183,6 +410,7 @@ function TollsInner({ token, me, logout }) {
         notes: provider?.settings?.notes || '',
         isActive: provider?.isActive !== false
       }));
+      setSelectedIds(new Set());
       setMsg('');
     } catch (error) {
       setMsg(error.message);
@@ -198,17 +426,6 @@ function TollsInner({ token, me, logout }) {
   }, [token, statusFilter, reviewOnly, activeTenantId, isSuper]);
 
   const transactions = useMemo(() => Array.isArray(dashboard?.transactions) ? dashboard.transactions : [], [dashboard]);
-  // Match-triage buckets (Innovation #3, 2026-07-27): a confidence axis over
-  // the existing billing-workflow tabs, timely for the TollBridge LAX feed
-  // where non-matches will grow. Grounded in serializeTransaction fields:
-  //  - AUTO_MATCHED: confidently attributed to a contract, no human needed.
-  //  - NEEDS_REVIEW: a suggestion exists but a human must confirm/reject.
-  //  - UNMATCHED: nothing to attribute to (no vehicle / wrong sede / no
-  //    reservation window) — the "vehicle-not-found"/"vehicle-outside-location"
-  //    holds from the matcher.
-  const isAutoMatched = (row) => !!row.reservation?.id && !row.needsReview && ['MATCHED', 'BILLED'].includes(String(row.status || '').toUpperCase());
-  const isNeedsReview = (row) => !!row.needsReview && (!!row.reservation?.id || !!row.vehicle?.id || Number(row.matchConfidence || 0) > 0);
-  const isUnmatched = (row) => !isAutoMatched(row) && !isNeedsReview(row) && !row.reservation?.id;
   // The counts come from the DATABASE (dashboard.queueCounts). Counting the
   // loaded page is what made the queue climb from 19 to 21 after staff
   // confirmed 19 rows: the list is capped at 200 over a queue thousands deep,
@@ -220,8 +437,8 @@ function TollsInner({ token, me, logout }) {
     NEEDS_REVIEW: transactions.filter(isNeedsReview).length,
     UNMATCHED: transactions.filter(isUnmatched).length,
     DISPATCH_REVIEW: transactions.filter((row) => row.dispatchConfirmationRequired).length,
-    USAGE_ONLY: transactions.filter((row) => row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY').length,
-    READY_TO_POST: transactions.filter((row) => row.reservation?.id && row.billingStatus === 'PENDING' && !row.needsReview && !(row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY')).length
+    USAGE_ONLY: transactions.filter(isUsageOnly).length,
+    READY_TO_POST: transactions.filter(isReadyToPost).length
   }), [dashboard, transactions]);
   // What this payload actually holds, versus what matches. Saying so beats
   // implying the page is the whole queue.
@@ -230,17 +447,17 @@ function TollsInner({ token, me, logout }) {
     const returned = Number(dashboard?.returnedCount ?? transactions.length);
     return returned < total ? { returned, total } : null;
   }, [dashboard, transactions]);
-  const visibleTransactions = useMemo(() => {
-    if (queueView === 'AUTO_MATCHED') return transactions.filter(isAutoMatched);
-    if (queueView === 'NEEDS_REVIEW') return transactions.filter(isNeedsReview);
-    if (queueView === 'UNMATCHED') return transactions.filter(isUnmatched);
-    if (queueView === 'DISPATCH_REVIEW') return transactions.filter((row) => row.dispatchConfirmationRequired);
-    if (queueView === 'USAGE_ONLY') return transactions.filter((row) => row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY');
-    if (queueView === 'READY_TO_POST') {
-      return transactions.filter((row) => row.reservation?.id && row.billingStatus === 'PENDING' && !row.needsReview && !(row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY'));
-    }
-    return transactions;
-  }, [queueView, transactions]);
+  const visibleTransactions = useMemo(() => filterByQueueView(queueView, transactions), [queueView, transactions]);
+
+  // "Pending to post" in dollars — the number an owner actually asks for.
+  // Computed over the LOADED ready-to-post rows; prefixed ≥ when the window
+  // is truncated so it never overstates certainty.
+  const pendingToPost = useMemo(() => {
+    const rows = transactions.filter(isReadyToPost);
+    const sum = rows.reduce((acc, row) => acc + Number(row.amount || 0), 0);
+    const truncated = !!shownOf && Number(queueCounts.READY_TO_POST || 0) > rows.length;
+    return { sum, truncated };
+  }, [transactions, shownOf, queueCounts]);
 
   const acknowledgeAlert = async (id) => {
     try {
@@ -277,7 +494,7 @@ function TollsInner({ token, me, logout }) {
         ...EMPTY_IMPORT_FORM,
         transactionAt: new Date().toISOString().slice(0, 16)
       });
-      setMsg('Toll transaction imported');
+      setMsg(t('tolls.msg.tollImported', 'Toll transaction imported'));
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -289,7 +506,7 @@ function TollsInner({ token, me, logout }) {
   const saveBulkImport = async () => {
     const rows = parseBulkImportRows(bulkImportText);
     if (!rows.length) {
-      setMsg('Paste CSV rows with transactionAt, amount, location, lane, direction, plate, tag, sello');
+      setMsg(t('tolls.msg.pasteCsv', 'Paste CSV rows with transactionAt, amount, location, lane, direction, plate, tag, sello'));
       return;
     }
     try {
@@ -299,7 +516,7 @@ function TollsInner({ token, me, logout }) {
         body: JSON.stringify({ rows })
       }, token);
       setBulkImportText('');
-      setMsg(`${rows.length} toll transactions imported`);
+      setMsg(t('tolls.msg.bulkImported', '{{count}} toll transactions imported', { count: rows.length }));
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -312,7 +529,7 @@ function TollsInner({ token, me, logout }) {
     const reservationId = row?.latestAssignment?.reservation?.id || '';
     const reservationNumber = reservationDrafts[row.id] || '';
     if (!reservationId && !reservationNumber.trim()) {
-      setMsg('Add a reservation number or use a suggested reservation first');
+      setMsg(t('tolls.msg.addReservationFirst', 'Add a reservation number or use a suggested reservation first'));
       return;
     }
     try {
@@ -324,7 +541,7 @@ function TollsInner({ token, me, logout }) {
           reservationNumber: reservationId ? undefined : reservationNumber.trim()
         })
       }, token);
-      setMsg(`Toll matched to reservation ${row?.latestAssignment?.reservation?.reservationNumber || reservationNumber.trim()}`);
+      setMsg(t('tolls.msg.matchedTo', 'Toll matched to reservation {{number}}', { number: row?.latestAssignment?.reservation?.reservationNumber || reservationNumber.trim() }));
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -340,7 +557,7 @@ function TollsInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify({})
       }, token);
-      setMsg('Toll posted to reservation charges');
+      setMsg(t('tolls.msg.posted', 'Toll posted to reservation charges'));
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -349,17 +566,8 @@ function TollsInner({ token, me, logout }) {
     }
   };
 
-  const runReviewAction = async (row, action) => {
-    const notePrompt = action === 'MARK_DISPUTED'
-      ? 'Optional dispute note'
-      : action === 'CONFIRM_DISPATCHED'
-        ? 'Optional dispatch confirmation note'
-        : action === 'MARK_NOT_DISPATCHED'
-          ? 'Optional note for why this vehicle was not dispatched'
-      : action === 'MARK_NOT_BILLABLE'
-        ? 'Optional waiver note'
-        : 'Optional reset note';
-    const note = window.prompt(notePrompt, '') || '';
+  // The note now arrives from the themed dialog, not window.prompt.
+  const runReviewAction = async (row, action, note = '') => {
     try {
       setBusyId(`${action}-${row.id}`);
       const out = await api(scopedTollsPath(`/api/tolls/transactions/${row.id}/review-action`), {
@@ -367,9 +575,10 @@ function TollsInner({ token, me, logout }) {
         body: JSON.stringify({ action, note })
       }, token);
       const issueMessage = action === 'MARK_DISPUTED' && out?.issueIncident?.id
-        ? ` | Issue Center case ${out.issueIncident.id} ${out?.issueIncident?.title ? `(${out.issueIncident.title})` : ''}`
+        ? t('tolls.msg.issueCase', ' | Issue Center case {{id}}', { id: `${out.issueIncident.id}${out?.issueIncident?.title ? ` (${out.issueIncident.title})` : ''}` })
         : '';
-      setMsg(`Toll ${out?.actionLabel || 'updated'}${issueMessage}`);
+      setMsg(`${t('tolls.msg.updated', 'Toll {{label}}', { label: out?.actionLabel || 'updated' })}${issueMessage}`);
+      setDialog(null);
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -393,7 +602,7 @@ function TollsInner({ token, me, logout }) {
         method: 'PUT',
         body: JSON.stringify(providerForm)
       }, token);
-      setMsg('Toll provider setup saved');
+      setMsg(t('tolls.msg.providerSaved', 'Toll provider setup saved'));
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -409,7 +618,9 @@ function TollsInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify({})
       }, token);
-      setMsg(out?.ready ? 'Provider health check passed' : `Provider is missing: ${(out?.missing || []).join(', ')}`);
+      setMsg(out?.ready
+        ? t('tolls.msg.healthPassed', 'Provider health check passed')
+        : t('tolls.msg.healthMissing', 'Provider is missing: {{missing}}', { missing: (out?.missing || []).join(', ') }));
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -425,7 +636,7 @@ function TollsInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify({})
       }, token);
-      setMsg('Mock sync completed and import history updated');
+      setMsg(t('tolls.msg.mockDone', 'Mock sync completed and import history updated'));
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -441,7 +652,7 @@ function TollsInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify({})
       }, token);
-      setMsg(`AutoExpreso sync completed with ${Number(out?.createdCount || 0)} imported rows`);
+      setMsg(t('tolls.msg.liveDone', 'AutoExpreso sync completed with {{count}} imported rows', { count: Number(out?.createdCount || 0) }));
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -452,7 +663,7 @@ function TollsInner({ token, me, logout }) {
 
   const bulkConfirmCandidates = useMemo(() => {
     return visibleTransactions.filter((row) => {
-      if (row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY') return false;
+      if (isUsageOnly(row)) return false;
       if (!row.needsReview) return false;
       if (row.dispatchConfirmationRequired && row.reservation?.id) return true;
       if (row.latestAssignment?.reservation?.id) return true;
@@ -460,42 +671,39 @@ function TollsInner({ token, me, logout }) {
     });
   }, [visibleTransactions]);
 
-  const runBulkConfirm = async () => {
-    const candidates = bulkConfirmCandidates;
-    if (!candidates.length) {
-      setMsg('No tolls eligible for Confirm All in the current view (need a suggested reservation or dispatch confirmation pending).');
-      return;
-    }
-    const summary = candidates
-      .slice(0, 5)
-      .map((row) => `#${row.latestAssignment?.reservation?.reservationNumber || row.reservation?.reservationNumber || row.id}`)
-      .join(', ');
-    const more = candidates.length > 5 ? `, +${candidates.length - 5} more` : '';
-    const ok = window.confirm(`Confirm ${candidates.length} toll${candidates.length === 1 ? '' : 's'} now?\n\n${summary}${more}\n\nThis will assign each toll to its suggested reservation (or confirm dispatch where required) and post charges.`);
-    if (!ok) return;
+  const runBulkConfirm = async (ids) => {
     try {
       setBusyId('bulk-confirm');
       const out = await api(scopedTollsPath('/api/tolls/transactions/bulk-confirm'), {
         method: 'POST',
-        body: JSON.stringify({ ids: candidates.map((row) => row.id), note: 'Bulk confirm from review queue' })
+        body: JSON.stringify({ ids, note: 'Bulk confirm from review queue' })
       }, token);
       const matched = Number(out?.confirmed || 0);
       const dispatched = Number(out?.dispatchConfirmed || 0);
       const skipped = Number(out?.skipped || 0);
       const failed = Number(out?.failed || 0);
       const parts = [
-        matched ? `${matched} matched` : '',
-        dispatched ? `${dispatched} dispatch-confirmed` : '',
-        skipped ? `${skipped} skipped` : '',
-        failed ? `${failed} failed` : ''
+        matched ? t('tolls.msg.bulkMatched', '{{count}} matched', { count: matched }) : '',
+        dispatched ? t('tolls.msg.bulkDispatched', '{{count}} dispatch-confirmed', { count: dispatched }) : '',
+        skipped ? t('tolls.msg.bulkSkipped', '{{count}} skipped', { count: skipped }) : '',
+        failed ? t('tolls.msg.bulkFailed', '{{count}} failed', { count: failed }) : ''
       ].filter(Boolean);
-      setMsg(`Bulk confirm complete: ${parts.join(', ') || 'no changes'}`);
+      setMsg(t('tolls.msg.bulkConfirmDone', 'Bulk confirm complete: {{parts}}', { parts: parts.join(', ') || t('tolls.msg.bulkNoChanges', 'no changes') }));
+      setDialog(null);
       await load();
     } catch (error) {
       setMsg(error.message);
     } finally {
       setBusyId('');
     }
+  };
+
+  const openBulkConfirm = () => {
+    if (!bulkConfirmCandidates.length) {
+      setMsg(t('tolls.msg.noEligibleConfirm', 'No tolls eligible for Confirm All in the current view (need a suggested reservation or dispatch confirmation pending).'));
+      return;
+    }
+    setDialog({ kind: 'bulk-confirm', rows: bulkConfirmCandidates });
   };
 
   const runBulkAutoMatch = async () => {
@@ -505,10 +713,11 @@ function TollsInner({ token, me, logout }) {
         method: 'POST',
         body: JSON.stringify({ limit: 500 })
       }, token);
-      const confirmed = Number(out?.autoConfirmed || 0);
-      const suggested = Number(out?.suggested || 0);
-      const reviewed = Number(out?.reviewed || 0);
-      setMsg(`Bulk match complete: ${confirmed} auto-confirmed, ${suggested} suggested, ${reviewed} reviewed`);
+      setMsg(t('tolls.msg.bulkMatchDone', 'Bulk match complete: {{confirmed}} auto-confirmed, {{suggested}} suggested, {{reviewed}} reviewed', {
+        confirmed: Number(out?.autoConfirmed || 0),
+        suggested: Number(out?.suggested || 0),
+        reviewed: Number(out?.reviewed || 0)
+      }));
       await load();
     } catch (error) {
       setMsg(error.message);
@@ -517,63 +726,242 @@ function TollsInner({ token, me, logout }) {
     }
   };
 
+  // Export CSV — wires the ACTIVE filters + queue view into the (new) export
+  // endpoint so the spreadsheet always matches the screen.
+  const runExportCsv = async () => {
+    try {
+      setBusyId('export-csv');
+      const params = new URLSearchParams();
+      if (query.trim()) params.set('q', query.trim());
+      if (statusFilter) params.set('status', statusFilter);
+      if (reviewOnly) params.set('needsReview', 'true');
+      if (queueView && queueView !== 'ALL') params.set('view', queueView);
+      const res = await apiDownload(scopedTollsPath(`/api/tolls/transactions/export.csv${params.toString() ? `?${params.toString()}` : ''}`), { cache: 'no-store' }, token);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `${t('tolls.msg.exportFailed', 'CSV export failed')} (${res.status})`);
+      }
+      const disposition = String(res.headers.get('Content-Disposition') || '');
+      const filename = /filename="([^"]+)"/.exec(disposition)?.[1] || `tolls-${queueView.toLowerCase()}.csv`;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setMsg(t('tolls.msg.exported', 'Exported {{filename}}', { filename }));
+    } catch (error) {
+      setMsg(error.message);
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const selectedRows = useMemo(() => visibleTransactions.filter((row) => selectedIds.has(row.id)), [visibleTransactions, selectedIds]);
+  const selectedTotal = useMemo(() => selectedRows.reduce((sum, row) => sum + Number(row.amount || 0), 0), [selectedRows]);
+  const selectableRows = useMemo(() => visibleTransactions.filter((row) => !isUsageOnly(row)), [visibleTransactions]);
+
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const togglePageSelection = () => {
+    setSelectedIds((prev) => {
+      if (prev.size >= selectableRows.length && selectableRows.length) return new Set();
+      return new Set(selectableRows.map((row) => row.id));
+    });
+  };
+
+  const runWaiveSelected = async (note) => {
+    const rows = selectedRows;
+    let done = 0;
+    setBusyId('waive-selected');
+    try {
+      for (const row of rows) {
+        // review-action is per-toll; sequential keeps the audit trail readable.
+        await api(scopedTollsPath(`/api/tolls/transactions/${row.id}/review-action`), {
+          method: 'POST',
+          body: JSON.stringify({ action: 'MARK_NOT_BILLABLE', note })
+        }, token);
+        done += 1;
+      }
+      setMsg(t('tolls.msg.waivedSelected', '{{done}} of {{total}} selected tolls waived', { done, total: rows.length }));
+    } catch (error) {
+      setMsg(`${t('tolls.msg.waivedSelected', '{{done}} of {{total}} selected tolls waived', { done, total: rows.length })} — ${error.message}`);
+    } finally {
+      setDialog(null);
+      setBusyId('');
+      await load();
+    }
+  };
+
+  /* ---------- row action dispatch ---------- */
+  const openNoteDialog = (row, action) => setDialog({ kind: 'note', row, action });
+
+  const primaryButtonFor = (row) => {
+    const hasDraft = !!(reservationDrafts[row.id] || '').trim();
+    const primary = primaryActionForRow(row, { hasDraft });
+    switch (primary) {
+      case 'USAGE':
+        return <span className="status-chip good">{t('tolls.row.usageOnlyChip', 'Usage only — no charge')}</span>;
+      case 'DISPATCHED':
+        return (
+          <button type="button" className="tq-mini-btn tq-btn-primary" onClick={() => openNoteDialog(row, 'CONFIRM_DISPATCHED')} disabled={busyId === `CONFIRM_DISPATCHED-${row.id}`}>
+            {t('tolls.actions.dispatched', 'Dispatched ✓')}
+          </button>
+        );
+      case 'CONFIRM':
+        return (
+          <button type="button" className="tq-mini-btn tq-btn-primary" onClick={() => confirmMatch(row)} disabled={busyId === `confirm-${row.id}`}>
+            {t('tolls.actions.confirm', 'Confirm')}
+          </button>
+        );
+      case 'POST':
+        return (
+          <button type="button" className="tq-mini-btn tq-btn-primary" onClick={() => postToReservation(row)} disabled={busyId === `post-${row.id}`}>
+            {t('tolls.actions.post', 'Post')}
+          </button>
+        );
+      case 'ASSIGN':
+        return (
+          <button type="button" className="tq-mini-btn button-subtle" disabled title={t('tolls.msg.addReservationFirst', 'Add a reservation number or use a suggested reservation first')}>
+            {t('tolls.actions.assign', 'Assign')}
+          </button>
+        );
+      default:
+        return (
+          <button type="button" className="tq-mini-btn button-subtle" onClick={() => setEvidenceId((prev) => prev === row.id ? '' : row.id)}>
+            {t('tolls.actions.review', 'Review')} ▾
+          </button>
+        );
+    }
+  };
+
+  const OVERFLOW_RENDER = {
+    CONFIRM_DISPATCHED: (row) => ({ label: t('tolls.actions.dispatched', 'Dispatched ✓'), onClick: () => openNoteDialog(row, 'CONFIRM_DISPATCHED') }),
+    MARK_NOT_DISPATCHED: (row) => ({ label: t('tolls.actions.notDispatched', 'Not dispatched — remove'), desc: t('tolls.actions.notDispatchedDesc', 'The vehicle was not dispatched to this customer'), onClick: () => openNoteDialog(row, 'MARK_NOT_DISPATCHED') }),
+    CONFIRM_MATCH: (row) => ({ label: t('tolls.actions.confirm', 'Confirm'), onClick: () => confirmMatch(row) }),
+    POST: (row) => ({ label: t('tolls.actions.post', 'Post'), onClick: () => postToReservation(row) }),
+    RESET_MATCH: (row) => ({ label: t('tolls.actions.reset', 'Reset match'), desc: t('tolls.actions.resetDesc', 'Clear suggestion, back to unmatched'), onClick: () => openNoteDialog(row, 'RESET_MATCH') }),
+    MARK_DISPUTED: (row) => ({ label: t('tolls.actions.dispute', 'Dispute…'), desc: t('tolls.actions.disputeDesc', 'Opens an Issue Center case'), onClick: () => openNoteDialog(row, 'MARK_DISPUTED') }),
+    MARK_NOT_BILLABLE: (row) => ({ label: t('tolls.actions.waive', 'Waive — not billable…'), desc: t('tolls.actions.waiveDesc', 'Requires a note'), danger: true, onClick: () => openNoteDialog(row, 'MARK_NOT_BILLABLE') })
+  };
+
+  const rowMenu = (row) => {
+    const hasDraft = !!(reservationDrafts[row.id] || '').trim();
+    const items = overflowActionsForRow(row, { hasDraft });
+    if (!items.length) return null;
+    return (
+      <details className="tq-menu">
+        <summary title={t('tolls.row.moreActions', 'More actions')}>
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" /></svg>
+        </summary>
+        <div className="tq-menu-pop">
+          {items.map((item, index) => {
+            const cfg = OVERFLOW_RENDER[item]?.(row);
+            if (!cfg) return null;
+            const dangerSep = cfg.danger && index > 0 ? <div className="sep" /> : null;
+            return (
+              <Fragment key={item}>
+                {dangerSep}
+                <button
+                  type="button"
+                  className={cfg.danger ? 'danger' : ''}
+                  disabled={busyId === `${item}-${row.id}`}
+                  onClick={(e) => { e.currentTarget.closest('details')?.removeAttribute('open'); cfg.onClick(); }}
+                >
+                  {cfg.label}
+                  {cfg.desc ? <small>{cfg.desc}</small> : null}
+                </button>
+              </Fragment>
+            );
+          })}
+        </div>
+      </details>
+    );
+  };
+
+  /* ---------- render ---------- */
+  const autoSyncOn = !!dashboard?.autoSync?.enabled;
+  const providerName = providerForm.provider === 'SUNPASS' ? 'SunPass' : 'AutoExpreso';
+  const laneLabel = (view) => t(`tolls.views.${view}`, view);
+
   return (
     <AppShell me={me} logout={logout}>
       <section className="glass card-lg stack">
         <div className="app-banner">
           <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
             <div>
-              <span className="eyebrow">Toll Operations</span>
-              <h2 className="page-title" style={{ marginTop: 6 }}>Match tolls against tenant fleet and reservation windows.</h2>
-              <p className="ui-muted">
-                This queue uses the tenant's real vehicles, plate, toll tag, toll sticker, reservation windows, and vehicle swaps to suggest or confirm toll ownership.
-              </p>
+              <span className="eyebrow">{t('tolls.eyebrow', 'Toll Operations')}</span>
+              <h2 className="page-title" style={{ marginTop: 6 }}>{t('tolls.title', 'Tolls')}</h2>
+              <p className="ui-muted">{t('tolls.subtitle', 'Match tolls against the tenant fleet and reservation windows')}</p>
             </div>
-            <span className="status-chip neutral">Review Queue</span>
+            <span className={`tq-sync-led${autoSyncOn ? '' : ' off'}`}>
+              <i />
+              {autoSyncOn
+                ? t('tolls.syncOn', 'Auto-sync on · last sweep {{when}}', { when: shortDateTime(dashboard?.autoSync?.lastAutomaticRunAt) })
+                : t('tolls.syncOff', 'Auto-sync off')}
+            </span>
           </div>
 
           {isSuper ? (
             <div className="inline-actions" style={{ marginTop: 12 }}>
-              <label className="label" style={{ minWidth: 160 }}>Toll Tenant Scope</label>
+              <label className="label" style={{ minWidth: 160 }}>{t('tolls.tenantScopeLabel', 'Toll Tenant Scope')}</label>
               <select value={activeTenantId} onChange={(e) => setActiveTenantId(e.target.value)}>
-                <option value="">Select tenant</option>
+                <option value="">{t('tolls.tenantSelect', 'Select tenant')}</option>
                 {tenantRows.map((tenant) => (
                   <option key={tenant.id} value={tenant.id}>{tenant.name}</option>
                 ))}
               </select>
               <span className="ui-muted">
                 {activeTenantId
-                  ? `${tenantRows.find((tenant) => tenant.id === activeTenantId)?.name || 'Tenant selected'} active`
-                  : 'Choose a tenant before importing or reviewing tolls'}
+                  ? t('tolls.tenantActive', '{{name}} active', { name: tenantRows.find((tenant) => tenant.id === activeTenantId)?.name || '' })
+                  : t('tolls.tenantChoose', 'Choose a tenant before importing or reviewing tolls')}
               </span>
             </div>
           ) : null}
 
-          <div className="app-card-grid compact">
+          <nav className="tq-tabs" aria-label="Tolls sections">
+            <button type="button" className={activeTab === 'QUEUE' ? 'is-on' : ''} onClick={() => setActiveTab('QUEUE')}>
+              {t('tolls.tabQueue', 'Review queue')}
+            </button>
+            <button type="button" className={activeTab === 'IMPORTS' ? 'is-on' : ''} onClick={() => setActiveTab('IMPORTS')}>
+              {t('tolls.tabImports', 'Imports & sync')}
+            </button>
+          </nav>
+
+          <div className="app-card-grid compact" style={{ marginTop: 12 }}>
             <div className="info-tile">
-              <span className="label">Imported Today</span>
+              <span className="label">{t('tolls.kpi.importedToday', 'Imported today')}</span>
               <strong>{dashboard?.metrics?.importedToday || 0}</strong>
             </div>
             <div className="info-tile">
-              <span className="label">Matched</span>
+              <span className="label">{t('tolls.kpi.autoMatched', 'Auto-matched')}</span>
               <strong>{dashboard?.metrics?.matched || 0}</strong>
             </div>
             <div className="info-tile">
-              <span className="label">Needs Review</span>
+              <span className="label">{t('tolls.kpi.needsReview', 'Needs review')}</span>
               <strong>{dashboard?.metrics?.needsReviewActionable ?? dashboard?.metrics?.needsReview ?? 0}</strong>
               {Number(dashboard?.metrics?.needsReviewNoSuggestion || 0) > 0 ? (
                 <span className="label" style={{ display: 'block', marginTop: 2 }}>
-                  + {dashboard.metrics.needsReviewNoSuggestion} with no match candidate
+                  {t('tolls.kpi.noCandidate', '+ {{count}} with no match candidate', { count: dashboard.metrics.needsReviewNoSuggestion })}
                 </span>
               ) : null}
             </div>
-            <div className="info-tile">
-              <span className="label">Posted To Billing</span>
-              <strong>{dashboard?.metrics?.postedToBilling || 0}</strong>
+            <div className="info-tile" title={t('tolls.kpi.pendingLoadedHint', 'Dollar total of the loaded ready-to-post rows')}>
+              <span className="label">{t('tolls.kpi.pendingToPost', 'Pending to post')}</span>
+              <strong style={{ color: 'var(--brand-tx)' }}>{pendingToPost.truncated ? '≥ ' : ''}{money(pendingToPost.sum)}</strong>
             </div>
             <div className="info-tile">
-              <span className="label">Usage Only</span>
-              <strong>{dashboard?.queueCounts?.USAGE_ONLY ?? transactions.filter((row) => row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY').length}</strong>
+              <span className="label">{t('tolls.kpi.postedToBilling', 'Posted to billing')}</span>
+              <strong>{dashboard?.metrics?.postedToBilling || 0}</strong>
             </div>
           </div>
         </div>
@@ -582,411 +970,460 @@ function TollsInner({ token, me, logout }) {
 
         {dashboard && dashboard.tollsEnabled === false ? (
           <div className="glass card section-card">
-            <div className="section-title">Tolls Module Disabled</div>
-            <div className="surface-note">
-              Enable <strong>Tolls</strong> for this tenant in the tenant/module controls before using AutoExpreso sync, imports, or review queue.
-            </div>
+            <div className="section-title">{t('tolls.disabled.title', 'Tolls Module Disabled')}</div>
+            <div className="surface-note">{t('tolls.disabled.body', 'Enable Tolls for this tenant in the tenant/module controls before using AutoExpreso sync, imports, or review queue.')}</div>
           </div>
         ) : null}
 
-        <div className="glass card section-card">
-          <div className="row-between">
-            <div className="section-title">Automatic AutoExpreso Sync</div>
-            <span className={`status-chip ${dashboard?.autoSync?.enabled ? 'good' : 'neutral'}`}>
-              {dashboard?.autoSync?.enabled ? 'Auto Sync Enabled' : 'Auto Sync Disabled'}
-            </span>
-          </div>
-          <div className="app-card-grid compact">
-            <div className="info-tile">
-              <span className="label">Interval</span>
-              <strong>{Number(dashboard?.autoSync?.intervalMinutes || 0) || 0} min</strong>
-            </div>
-            <div className="info-tile">
-              <span className="label">Last Automatic Run</span>
-              <strong style={{ fontSize: '0.95rem' }}>{dateTimeLabel(dashboard?.autoSync?.lastAutomaticRunAt)}</strong>
-            </div>
-            <div className="info-tile">
-              <span className="label">Next Scheduled Run</span>
-              <strong style={{ fontSize: '0.95rem' }}>{dateTimeLabel(dashboard?.autoSync?.nextRunAt)}</strong>
-            </div>
-          </div>
-          {dashboard?.autoSync?.lastSweep ? (
-            <div className="app-card-grid compact" style={{ marginTop: 10 }}>
-              <div className="info-tile">
-                <span className="label">Last Sweep Imported</span>
-                <strong>{Number(dashboard.autoSync.lastSweep.importedCount || 0)}</strong>
-              </div>
-              <div className="info-tile">
-                <span className="label">Last Sweep Auto-Matched</span>
-                <strong>{Number(dashboard.autoSync.lastSweep.autoMatchedCount || 0)}</strong>
-              </div>
-              <div className="info-tile">
-                <span className="label">Last Sweep Suggested</span>
-                <strong>{Number(dashboard.autoSync.lastSweep.suggestedCount || 0)}</strong>
-              </div>
-              <div className="info-tile">
-                <span className="label">Pending Review Now</span>
-                <strong>{Number(dashboard.autoSync.lastSweep.pendingReviewCount || 0)}</strong>
-              </div>
-            </div>
-          ) : null}
-          <div className="surface-note" style={{ marginTop: 10 }}>
-            The backend now runs AutoExpreso sync sweeps automatically for active tenants with tolls enabled, then re-checks pending tolls against the assigned vehicle, swap-aware responsibility window, and dispatch state.
-          </div>
-        </div>
-
-        <div className="glass card section-card">
-          <div className="row-between">
-            <div className="section-title">Toll Provider Setup</div>
-            <span className={`status-chip ${dashboard?.providerAccount?.isActive ? 'good' : 'neutral'}`}>
-              {dashboard?.providerAccount?.isActive ? 'Provider Ready' : 'Not configured'}
-            </span>
-          </div>
-          <div className="surface-note" style={{ marginBottom: 10 }}>
-            Select your toll provider and configure login credentials. The system will scrape toll transactions from the provider portal and match them to your fleet.
-          </div>
-          <div className="grid2">
-            <div className="stack">
-              <label className="label">Toll Provider</label>
-              <select value={providerForm.provider} onChange={(e) => setProviderForm((prev) => ({ ...prev, provider: e.target.value }))}>
-                <option value="AUTOEXPRESO">AutoExpreso (Puerto Rico)</option>
-                <option value="SUNPASS">SunPass (Florida)</option>
-              </select>
-            </div>
-            <input placeholder={`${providerForm.provider === 'SUNPASS' ? 'SunPass' : 'AutoExpreso'} username`} value={providerForm.username} onChange={(e) => setProviderForm((prev) => ({ ...prev, username: e.target.value }))} />
-            <input placeholder={dashboard?.providerAccount?.hasPassword ? 'Leave blank to keep current password' : `${providerForm.provider === 'SUNPASS' ? 'SunPass' : 'AutoExpreso'} password`} type="password" value={providerForm.password} onChange={(e) => setProviderForm((prev) => ({ ...prev, password: e.target.value }))} />
-            <input placeholder="Login URL (optional override)" value={providerForm.loginUrl} onChange={(e) => setProviderForm((prev) => ({ ...prev, loginUrl: e.target.value }))} />
-          </div>
-          <textarea rows={3} placeholder="Provider notes or login behavior notes" value={providerForm.notes} onChange={(e) => setProviderForm((prev) => ({ ...prev, notes: e.target.value }))} />
-          <div className="inline-actions" style={{ marginTop: 10 }}>
-            <label className="label"><input type="checkbox" checked={providerForm.isActive} onChange={(e) => setProviderForm((prev) => ({ ...prev, isActive: e.target.checked }))} /> Active provider account</label>
-            <button type="button" disabled={busyId === 'provider-save' || (isSuper && !activeTenantId)} onClick={saveProviderAccount}>
-              {busyId === 'provider-save' ? 'Saving...' : 'Save Provider Setup'}
-            </button>
-            <button type="button" className="button-subtle" disabled={busyId === 'provider-health' || (isSuper && !activeTenantId)} onClick={runProviderHealthCheck}>
-              {busyId === 'provider-health' ? 'Checking...' : 'Run Health Check'}
-            </button>
-            <button type="button" className="button-subtle" disabled={busyId === 'provider-sync' || (isSuper && !activeTenantId)} onClick={runMockSync}>
-              {busyId === 'provider-sync' ? 'Running...' : 'Run Mock Sync'}
-            </button>
-            <button type="button" className="button-subtle" disabled={busyId === 'provider-live-sync' || (isSuper && !activeTenantId)} onClick={runLiveSync}>
-              {busyId === 'provider-live-sync' ? 'Syncing...' : `Run ${providerForm.provider === 'SUNPASS' ? 'SunPass' : 'AutoExpreso'} Sync`}
-            </button>
-          </div>
-          {dashboard?.providerAccount?.lastSyncStatus || dashboard?.providerAccount?.lastSyncMessage ? (
-            <div className="surface-note" style={{ marginTop: 10 }}>
-              Last sync status: {dashboard?.providerAccount?.lastSyncStatus || 'N/A'}{dashboard?.providerAccount?.lastSyncMessage ? ` | ${dashboard.providerAccount.lastSyncMessage}` : ''}
-            </div>
-          ) : null}
-        </div>
-
-        <div className="glass card section-card">
-          <div className="section-title">Manual Toll Import</div>
-          {isSuper && !activeTenantId ? (
-            <div className="surface-note" style={{ marginBottom: 10 }}>
-              Choose the tenant above first so the toll import uses that tenant's fleet, toll tags, toll stickers, and reservation windows.
-            </div>
-          ) : null}
-          <form className="stack" onSubmit={saveManualImport}>
-            <div className="grid2">
-              <input type="datetime-local" required value={importForm.transactionAt} onChange={(e) => setImportForm((prev) => ({ ...prev, transactionAt: e.target.value }))} />
-              <input type="number" step="0.01" min="0.01" required placeholder="Toll amount" value={importForm.amount} onChange={(e) => setImportForm((prev) => ({ ...prev, amount: e.target.value }))} />
-            </div>
-            <div className="grid2">
-              <input placeholder="Location / Plaza" value={importForm.location} onChange={(e) => setImportForm((prev) => ({ ...prev, location: e.target.value }))} />
-              <input placeholder="Lane / Direction" value={importForm.lane} onChange={(e) => setImportForm((prev) => ({ ...prev, lane: e.target.value }))} />
-            </div>
-            <div className="grid3">
-              <input placeholder="Plate" value={importForm.plate} onChange={(e) => setImportForm((prev) => ({ ...prev, plate: e.target.value }))} />
-              <input placeholder="Toll Tag Number" value={importForm.tag} onChange={(e) => setImportForm((prev) => ({ ...prev, tag: e.target.value }))} />
-              <input placeholder="Toll Sticker Number" value={importForm.sello} onChange={(e) => setImportForm((prev) => ({ ...prev, sello: e.target.value }))} />
-            </div>
-            <div className="inline-actions">
-              <button type="submit" disabled={busyId === 'manual-import' || (isSuper && !activeTenantId)}>{busyId === 'manual-import' ? 'Importing...' : 'Import Toll'}</button>
-            </div>
-          </form>
-        </div>
-
-        <div className="glass card section-card">
-          <div className="section-title">Bulk CSV Import</div>
-          <div className="surface-note" style={{ marginBottom: 10 }}>
-            Paste CSV or tab-separated rows in this order:
-            <br />
-            <code>transactionAt, amount, location, lane, direction, plate, tag, sello</code>
-          </div>
-          <textarea
-            rows={7}
-            placeholder={'transactionAt,amount,location,lane,direction,plate,tag,sello\n2026-03-26T00:41,5.00,Plaza Norte,Lane 1,North,BBTB1,0202,0202'}
-            value={bulkImportText}
-            onChange={(e) => setBulkImportText(e.target.value)}
-          />
-          <div className="inline-actions" style={{ marginTop: 10 }}>
-            <button type="button" disabled={busyId === 'bulk-import' || (isSuper && !activeTenantId)} onClick={saveBulkImport}>
-              {busyId === 'bulk-import' ? 'Importing...' : 'Import CSV Rows'}
-            </button>
-          </div>
-        </div>
-
-        <div className="glass card section-card">
-          <div className="row-between" style={{ flexWrap: 'wrap', gap: 8 }}>
-            <div className="section-title">Review Queue</div>
+        {activeTab === 'QUEUE' ? (
+          <>
+            {/* toolbar: every existing control, one row */}
             <div className="inline-actions" style={{ flexWrap: 'wrap', gap: 6 }}>
-              <input placeholder="Search plate, tag, location, reservation" style={{ minWidth: 200 }} value={query} onChange={(e) => setQuery(e.target.value)} />
-              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-                <option value="">All statuses</option>
-                <option value="IMPORTED">Imported</option>
-                <option value="MATCHED">Matched</option>
-                <option value="NEEDS_REVIEW">Needs Review</option>
-                <option value="BILLED">Billed</option>
-                <option value="DISPUTED">Disputed</option>
-                <option value="VOID">Void / Not Billable</option>
+              <input
+                placeholder={t('tolls.toolbar.searchPlaceholder', 'Search plate, tag, location, reservation')}
+                style={{ minWidth: 220, flex: '0 1 280px' }}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') load(); }}
+              />
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} aria-label={t('tolls.toolbar.allStatuses', 'All statuses')}>
+                <option value="">{t('tolls.toolbar.allStatuses', 'All statuses')}</option>
+                <option value="IMPORTED">{t('tolls.toolbar.statusImported', 'Imported')}</option>
+                <option value="MATCHED">{t('tolls.toolbar.statusMatched', 'Matched')}</option>
+                <option value="NEEDS_REVIEW">{t('tolls.toolbar.statusNeedsReview', 'Needs Review')}</option>
+                <option value="BILLED">{t('tolls.toolbar.statusBilled', 'Billed')}</option>
+                <option value="DISPUTED">{t('tolls.toolbar.statusDisputed', 'Disputed')}</option>
+                <option value="VOID">{t('tolls.toolbar.statusVoid', 'Void / Not Billable')}</option>
               </select>
-              <label className="label"><input type="checkbox" checked={reviewOnly} onChange={(e) => setReviewOnly(e.target.checked)} /> Review only</label>
-              <button type="button" onClick={load}>Refresh</button>
-              <button type="button" style={{ background: '#166534', color: '#fff', fontWeight: 700 }} onClick={runBulkAutoMatch} disabled={busyId === 'bulk-auto-match' || (isSuper && !activeTenantId)}>
-                {busyId === 'bulk-auto-match' ? 'Matching...' : 'Auto-Match All'}
+              <label className="label"><input type="checkbox" checked={reviewOnly} onChange={(e) => setReviewOnly(e.target.checked)} /> {t('tolls.toolbar.reviewOnly', 'Review only')}</label>
+              <button type="button" className="button-subtle" onClick={load}>{t('tolls.toolbar.refresh', 'Refresh')}</button>
+              <button type="button" className="button-subtle" onClick={runExportCsv} disabled={busyId === 'export-csv' || (isSuper && !activeTenantId)}>
+                {busyId === 'export-csv' ? t('tolls.toolbar.exporting', 'Exporting…') : t('tolls.toolbar.exportCsv', 'Export CSV')}
+              </button>
+              <span style={{ marginLeft: 'auto' }} />
+              <button type="button" className="button-subtle" onClick={runBulkAutoMatch} disabled={busyId === 'bulk-auto-match' || (isSuper && !activeTenantId)}>
+                {busyId === 'bulk-auto-match' ? t('tolls.toolbar.matching', 'Matching…') : t('tolls.toolbar.autoMatchAll', 'Auto-match all')}
               </button>
               <button
                 type="button"
-                style={{ background: '#1d4ed8', color: '#fff', fontWeight: 700 }}
-                onClick={runBulkConfirm}
+                className="tq-btn-primary"
+                onClick={openBulkConfirm}
                 disabled={busyId === 'bulk-confirm' || (isSuper && !activeTenantId) || !bulkConfirmCandidates.length}
-                title={bulkConfirmCandidates.length ? `${bulkConfirmCandidates.length} toll${bulkConfirmCandidates.length === 1 ? '' : 's'} ready to confirm` : 'No eligible tolls in this view'}
+                title={bulkConfirmCandidates.length
+                  ? t('tolls.toolbar.eligibleCount', '{{count}} tolls ready to confirm', { count: bulkConfirmCandidates.length })
+                  : t('tolls.toolbar.noEligible', 'No eligible tolls in this view')}
               >
-                {busyId === 'bulk-confirm' ? 'Confirming...' : `Confirm All${bulkConfirmCandidates.length ? ` (${bulkConfirmCandidates.length})` : ''}`}
+                {busyId === 'bulk-confirm' ? t('tolls.toolbar.confirming', 'Confirming…') : t('tolls.toolbar.confirmAll', 'Confirm all')}
+                {bulkConfirmCandidates.length ? <span className="tq-btn-count">{bulkConfirmCandidates.length}</span> : null}
               </button>
             </div>
-          </div>
-          <div className="inline-actions" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
-            <button type="button" className={queueView === 'ALL' ? '' : 'button-subtle'} onClick={() => setQueueView('ALL')}>
-              All ({queueCounts.ALL})
-            </button>
-            <button type="button" className={queueView === 'AUTO_MATCHED' ? '' : 'button-subtle'} onClick={() => setQueueView('AUTO_MATCHED')}>
-              Auto-matched ({queueCounts.AUTO_MATCHED})
-            </button>
-            <button type="button" className={queueView === 'NEEDS_REVIEW' ? '' : 'button-subtle'} onClick={() => setQueueView('NEEDS_REVIEW')}>
-              Needs review ({queueCounts.NEEDS_REVIEW})
-            </button>
-            <button type="button" className={queueView === 'UNMATCHED' ? '' : 'button-subtle'} onClick={() => setQueueView('UNMATCHED')}>
-              Unmatched ({queueCounts.UNMATCHED})
-            </button>
-            <button type="button" className={queueView === 'DISPATCH_REVIEW' ? '' : 'button-subtle'} onClick={() => setQueueView('DISPATCH_REVIEW')}>
-              Dispatch Review ({queueCounts.DISPATCH_REVIEW})
-            </button>
-            <button type="button" className={queueView === 'USAGE_ONLY' ? '' : 'button-subtle'} onClick={() => setQueueView('USAGE_ONLY')}>
-              Usage Only ({queueCounts.USAGE_ONLY})
-            </button>
-            <button type="button" className={queueView === 'READY_TO_POST' ? '' : 'button-subtle'} onClick={() => setQueueView('READY_TO_POST')}>
-              Ready To Post ({queueCounts.READY_TO_POST})
-            </button>
-          </div>
-          {shownOf && visibleTransactions.length < Number(queueCounts[queueView] || 0) ? (
-            <div className="surface-note" style={{ marginBottom: 10 }}>
-              Showing <strong>{visibleTransactions.length}</strong> of <strong>{queueCounts[queueView]}</strong> in this view.
-              The tab counts come from the database; the list loads the {shownOf.returned} most recent of {shownOf.total} tolls.
-              Narrow it with the filters above to reach the rest.
-            </div>
-          ) : null}
-          {queueView === 'AUTO_MATCHED' ? (
-            <div className="surface-note" style={{ marginBottom: 10 }}>
-              Confidently attributed to a contract — no action needed. Spot-check as you like.
-            </div>
-          ) : null}
-          {queueView === 'NEEDS_REVIEW' ? (
-            <div className="surface-note" style={{ marginBottom: 10 }}>
-              A match was suggested but needs a human decision. Confirm or reject each toll below.
-            </div>
-          ) : null}
-          {queueView === 'UNMATCHED' ? (
-            <div className="surface-note" style={{ marginBottom: 10 }}>
-              No contract could be attributed (vehicle not found, wrong sede, or no rental window). These bill no one until matched — assign a reservation or leave for the next re-match sweep.
-            </div>
-          ) : null}
-          {queueView === 'DISPATCH_REVIEW' ? (
-            <div className="surface-note" style={{ marginBottom: 10 }}>
-              These tolls need an operations decision because the vehicle is generating toll activity before formal checkout was completed.
-            </div>
-          ) : null}
-          {queueView === 'USAGE_ONLY' ? (
-            <div className="surface-note" style={{ marginBottom: 10 }}>
-              These tolls are being tracked for usage, but tenant rules say not to bill them because a toll package covers the reservation.
-            </div>
-          ) : null}
-          {queueView === 'READY_TO_POST' ? (
-            <div className="surface-note" style={{ marginBottom: 10 }}>
-              These tolls are matched, not under review, and ready to be posted into reservation charges.
-            </div>
-          ) : null}
 
-          <table style={{ fontSize: '0.88rem' }}>
-            <thead>
-              <tr>
-                <th style={{ width: '15%' }}>When / Location</th>
-                <th style={{ width: '12%' }}>Amount</th>
-                <th style={{ width: '18%' }}>Vehicle</th>
-                <th style={{ width: '20%' }}>Reservation</th>
-                <th style={{ width: '12%' }}>Status</th>
-                <th style={{ width: '23%' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleTransactions.map((row) => (
-                <tr key={row.id}>
-                  <td style={{ fontSize: '0.82rem' }}>
-                    <div style={{ fontWeight: 600 }}>{new Date(row.transactionAt).toLocaleDateString()}</div>
-                    <div style={{ color: '#6b7a9a', fontSize: '0.78rem' }}>{new Date(row.transactionAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                    <div style={{ color: '#6b7a9a', fontSize: '0.78rem' }}>{row.location || '-'}</div>
-                  </td>
-                  <td>
-                    <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{money(row.amount)}</div>
-                    <div style={{ color: '#6b7a9a', fontSize: '0.72rem' }}>
-                      {row.plateRaw || '-'}
-                    </div>
-                  </td>
-                  <td style={{ fontSize: '0.82rem' }}>
-                    {row.vehicle ? (
-                      <div>
-                        <div style={{ fontWeight: 600 }}>{row.vehicle.internalNumber}</div>
-                        <div style={{ color: '#6b7a9a', fontSize: '0.75rem' }}>{row.vehicle.plate || '-'}</div>
-                      </div>
-                    ) : (
-                      <span style={{ color: '#b91c1c', fontSize: '0.78rem' }}>Unmatched</span>
-                    )}
-                  </td>
-                  <td style={{ fontSize: '0.82rem' }}>
-                    {row.latestAssignment?.reservation ? (
-                      <div>
-                        <div style={{ fontWeight: 600 }}>{row.latestAssignment.reservation.reservationNumber}</div>
-                        <div style={{ color: '#6b7a9a', fontSize: '0.72rem' }}>
-                          {(() => {
-                            const assignmentStatus = String(row.latestAssignment.status || '').toUpperCase();
-                            const stateLabel = assignmentStatus === 'AUTO_CONFIRMED'
-                              ? 'Auto-paired'
-                              : assignmentStatus === 'CONFIRMED' || assignmentStatus === 'MATCHED'
-                                ? 'Confirmed'
-                                : 'Suggested';
-                            const reason = row.latestAssignment.matchReason ? ` · ${row.latestAssignment.matchReason}` : '';
-                            return `${stateLabel}${reason}`;
-                          })()}
-                        </div>
-                      </div>
-                    ) : row.reservation ? (
-                      <div style={{ fontWeight: 600 }}>{row.reservation.reservationNumber}</div>
-                    ) : (
-                      <input
-                        placeholder="Reservation #"
-                        style={{ fontSize: '0.8rem', padding: '4px 6px', width: '100%' }}
-                        value={reservationDrafts[row.id] || ''}
-                        onChange={(e) => setReservationDrafts((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                      />
-                    )}
-                  </td>
-                  <td>
-                    <span className={`status-chip ${(row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY') ? 'good' : row.needsReview ? 'warn' : row.billingStatus === 'POSTED_TO_RESERVATION' ? 'good' : 'neutral'}`}>
-                      {tollReviewLabel(row)}
-                    </span>
-                    <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>{row.billingStatus}</div>
-                    {tollReviewHint(row) ? (
-                      <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-                        {tollReviewHint(row)}
-                      </div>
-                    ) : null}
-                    {row.issueIncident?.id ? (
-                      <div className="label" style={{ textTransform: 'none', letterSpacing: 0 }}>
-                        Issue {row.issueIncident.id} - {row.issueIncident.status || 'OPEN'}
-                      </div>
-                    ) : null}
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {row.dispatchConfirmationRequired && row.reservation?.id ? (
-                        <>
-                          <button type="button" style={{ fontSize: '0.75rem', padding: '3px 8px' }} onClick={() => runReviewAction(row, 'CONFIRM_DISPATCHED')} disabled={busyId === `CONFIRM_DISPATCHED-${row.id}`}>
-                            Dispatched
-                          </button>
-                          <button type="button" className="button-subtle" style={{ fontSize: '0.75rem', padding: '3px 8px' }} onClick={() => runReviewAction(row, 'MARK_NOT_DISPATCHED')} disabled={busyId === `MARK_NOT_DISPATCHED-${row.id}`}>
-                            Remove
-                          </button>
-                        </>
-                      ) : null}
-                      {(row.latestAssignment?.reservation || reservationDrafts[row.id]) ? (
-                        <button type="button" style={{ fontSize: '0.75rem', padding: '3px 8px' }} onClick={() => confirmMatch(row)} disabled={busyId === `confirm-${row.id}`}>
-                          Confirm
-                        </button>
-                      ) : null}
-                      {row.reservation?.id && row.billingStatus === 'PENDING' && !row.needsReview && !(row.coveredByTollPackage || row.billingMode === 'USAGE_ONLY') ? (
-                        <button type="button" style={{ fontSize: '0.75rem', padding: '3px 8px' }} onClick={() => postToReservation(row)} disabled={busyId === `post-${row.id}`}>
-                          Post
-                        </button>
-                      ) : null}
-                      {(row.latestAssignment?.reservation || row.reservation?.id) ? (
-                        <button type="button" className="button-subtle" style={{ fontSize: '0.75rem', padding: '3px 8px' }} onClick={() => runReviewAction(row, 'RESET_MATCH')} disabled={busyId === `RESET_MATCH-${row.id}`}>
-                          Reset
-                        </button>
-                      ) : null}
-                      {row.billingStatus !== 'DISPUTED' ? (
-                        <button type="button" className="button-subtle" style={{ fontSize: '0.75rem', padding: '3px 8px' }} onClick={() => runReviewAction(row, 'MARK_DISPUTED')} disabled={busyId === `MARK_DISPUTED-${row.id}`}>
-                          Dispute
-                        </button>
-                      ) : null}
-                      {row.billingStatus !== 'WAIVED' ? (
-                        <button type="button" className="button-subtle" style={{ fontSize: '0.75rem', padding: '3px 8px' }} onClick={() => runReviewAction(row, 'MARK_NOT_BILLABLE')} disabled={busyId === `MARK_NOT_BILLABLE-${row.id}`}>
-                          Waive
-                        </button>
-                      ) : null}
-                      {row.reservation?.id ? (
-                        <a href={`/reservations/${row.reservation.id}`} style={{ fontSize: '0.72rem', color: '#6e49ff' }}>View</a>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!visibleTransactions.length ? (
-                <tr>
-                  <td colSpan={6} className="label">No toll transactions matched this queue view yet.</td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="glass card section-card">
-          <div className="section-title">Recent Import Runs</div>
-          {Array.isArray(dashboard?.importRuns) && dashboard.importRuns.length ? (
-            <table>
-              <thead>
-                <tr>
-                  <th>Started</th>
-                  <th>Source</th>
-                  <th>Status</th>
-                  <th>Imported</th>
-                  <th>Matched</th>
-                  <th>Review</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dashboard.importRuns.map((run) => (
-                  <tr key={run.id}>
-                    <td>{new Date(run.startedAt).toLocaleString()}</td>
-                    <td>{run.sourceType || '-'}</td>
-                    <td>
-                      <div>{run.status || '-'}</div>
-                      {importRunDiagnostics(run) ? (
-                        <div className="label" style={{ marginTop: '0.25rem' }}>{importRunDiagnostics(run)}</div>
-                      ) : null}
-                    </td>
-                    <td>{run.importedCount}</td>
-                    <td>{run.matchedCount}</td>
-                    <td>{run.reviewCount}</td>
-                  </tr>
+            <div className="tq-body">
+              {/* lane rail: the 6 existing views, regrouped by confidence */}
+              <aside className="tq-rail" aria-label={t('tolls.tabQueue', 'Review queue')}>
+                {TOLL_LANE_GROUPS.map((group) => (
+                  <Fragment key={group.id}>
+                    <div className={`tq-grp g-${group.tone}`}><i />{t(`tolls.lanes.${group.id}`, group.id)}</div>
+                    {group.views.map((view) => (
+                      <button
+                        key={view}
+                        type="button"
+                        className={`tq-lane${queueView === view ? ' is-on' : ''}`}
+                        onClick={() => { setQueueView(view); setEvidenceId(''); }}
+                      >
+                        {laneLabel(view)}
+                        <span className={`n${view === 'NEEDS_REVIEW' && Number(queueCounts.NEEDS_REVIEW || 0) > 0 ? ' hot' : ''}`}>
+                          {queueCounts[view] ?? 0}
+                        </span>
+                      </button>
+                    ))}
+                  </Fragment>
                 ))}
-              </tbody>
-            </table>
-          ) : (
-            <div className="surface-note">Import run history will appear here once provider sync or bulk imports start logging runs.</div>
-          )}
-        </div>
+                <div className="tq-rail-note">{t('tolls.railNote', 'Counts come from the database, not the loaded page. Lanes group the same six queues the module has always had — nothing was removed.')}</div>
+              </aside>
+
+              <div className="tq-main">
+                {/* Bandeja "peajes por cobrar" — restored TollBridge alerts tray */}
+                {alerts.length ? (
+                  <details className="tq-alerts">
+                    <summary>{t('tolls.alerts.open', '{{count}} toll alerts', { count: alerts.length })} — {t('tolls.alerts.desc', 'Unacknowledged tolls attached to contracts — closed contracts first.')}</summary>
+                    <ul>
+                      {alerts.slice(0, 8).map((alert) => (
+                        <li key={alert.id}>
+                          <b>{money(alert.amount)}</b>
+                          <span>{shortDateTime(alert.transactionAt)}{alert.location ? ` · ${alert.location}` : ''}</span>
+                          <span>{alert.reservationNumber ? `${t('tolls.alerts.reservation', 'Reservation')} ${alert.reservationNumber}` : ''}{alert.customerName ? ` · ${alert.customerName}` : ''}</span>
+                          <button type="button" className="button-subtle" style={{ minHeight: 28, padding: '2px 10px', fontSize: 11.5 }} onClick={() => acknowledgeAlert(alert.id)}>
+                            {t('tolls.alerts.ack', 'Acknowledge')}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+
+                {/* honest truncation notice, compressed to one line */}
+                {shownOf && visibleTransactions.length < Number(queueCounts[queueView] || 0) ? (
+                  <div className="tq-ctx">
+                    <span>
+                      <b>{t('tolls.truncation', '{{shown}} of {{dbCount}} loaded — DB counts, list caps at the {{returned}} most recent of {{total}} tolls.', {
+                        shown: visibleTransactions.length,
+                        dbCount: queueCounts[queueView],
+                        returned: shownOf.returned,
+                        total: shownOf.total
+                      })}</b>
+                    </span>
+                    <span className="next">{t('tolls.truncationNext', 'Narrow with filters to reach the rest →')}</span>
+                  </div>
+                ) : null}
+
+                {t(`tolls.viewHints.${queueView}`, '') ? (
+                  <div className="tq-hint">{t(`tolls.viewHints.${queueView}`)}</div>
+                ) : null}
+
+                <div className="tq-scroll">
+                  <table className="tq-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 30 }}>
+                          <input
+                            type="checkbox"
+                            aria-label={t('tolls.table.selectAll', 'Select page')}
+                            checked={!!selectableRows.length && selectedIds.size >= selectableRows.length}
+                            onChange={togglePageSelection}
+                          />
+                        </th>
+                        <th style={{ width: '15%' }}>{t('tolls.table.toll', 'Toll')}</th>
+                        <th className="right" style={{ width: '8%' }}>{t('tolls.table.amount', 'Amount')}</th>
+                        <th style={{ width: '13%' }}>{t('tolls.table.vehicle', 'Vehicle')}</th>
+                        <th style={{ width: '17%' }}>{t('tolls.table.reservation', 'Reservation')}</th>
+                        <th style={{ width: '27%' }}>{t('tolls.table.match', 'Match confidence · why')}</th>
+                        <th className="right" style={{ width: '20%' }}>{t('tolls.table.action', 'Action')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleTransactions.map((row) => {
+                        const assignmentStatus = String(row.latestAssignment?.status || '').toUpperCase();
+                        const stateLabel = assignmentStatus === 'AUTO_CONFIRMED'
+                          ? t('tolls.row.autoPaired', 'Auto-paired')
+                          : assignmentStatus === 'CONFIRMED' || assignmentStatus === 'MATCHED'
+                            ? t('tolls.row.confirmed', 'Confirmed')
+                            : t('tolls.row.suggested', 'Suggested');
+                        const { overflow } = inlineChipsForRow(row);
+                        const selectable = !isUsageOnly(row);
+                        return (
+                          <Fragment key={row.id}>
+                            <tr className={selectedIds.has(row.id) ? 'is-sel' : ''}>
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  disabled={!selectable}
+                                  checked={selectedIds.has(row.id)}
+                                  onChange={() => toggleSelected(row.id)}
+                                  aria-label={row.id}
+                                />
+                              </td>
+                              <td className="tq-when">
+                                <b>{shortDateTime(row.transactionAt)}</b>
+                                <small>{row.location || '-'}{row.lane ? ` · ${row.lane}` : ''}{row.direction ? ` ${row.direction}` : ''}</small>
+                              </td>
+                              <td className="right"><span className="tq-money">{money(row.amount)}</span></td>
+                              <td className="tq-cell">
+                                {row.vehicle ? (
+                                  <>
+                                    <b>{row.vehicle.internalNumber}</b>
+                                    {row.vehicle.plate ? <span className="tq-plate">{row.vehicle.plate}</span> : null}
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="status-chip danger" style={{ fontSize: 11 }}>{t('tolls.row.notInFleet', 'Not in fleet')}</span>
+                                    {row.plateRaw || row.tagRaw || row.selloRaw ? (
+                                      <small style={{ display: 'block', marginTop: 3 }}>
+                                        {t('tolls.row.read', 'read: {{value}}', { value: row.plateRaw || row.tagRaw || row.selloRaw })}
+                                      </small>
+                                    ) : null}
+                                  </>
+                                )}
+                              </td>
+                              <td className="tq-cell">
+                                {row.latestAssignment?.reservation ? (
+                                  <>
+                                    <b>{row.latestAssignment.reservation.reservationNumber}</b>
+                                    <small>
+                                      {stateLabel}
+                                      {row.reservation?.customer ? ` · ${[row.reservation.customer.firstName, row.reservation.customer.lastName].filter(Boolean).join(' ')}` : ''}
+                                    </small>
+                                  </>
+                                ) : row.reservation ? (
+                                  <>
+                                    <b>{row.reservation.reservationNumber}</b>
+                                    {row.reservation.customer ? (
+                                      <small>{[row.reservation.customer.firstName, row.reservation.customer.lastName].filter(Boolean).join(' ')}</small>
+                                    ) : null}
+                                  </>
+                                ) : (
+                                  <input
+                                    className="tq-res-input"
+                                    placeholder={t('tolls.row.assignPlaceholder', 'Assign reservation #…')}
+                                    value={reservationDrafts[row.id] || ''}
+                                    onChange={(e) => setReservationDrafts((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' && (reservationDrafts[row.id] || '').trim()) confirmMatch(row); }}
+                                  />
+                                )}
+                                {row.issueIncident?.id ? (
+                                  <small style={{ display: 'block' }}>
+                                    <button type="button" className="tq-foot-issue" onClick={() => openIssueCase(row.issueIncident.id)} style={{ background: 'none', border: 0, padding: 0, minHeight: 0, boxShadow: 'none', fontSize: 11, color: 'var(--brand-tx)', cursor: 'pointer' }}>
+                                      {t('tolls.row.issueLink', 'Issue {{id}} — {{status}}', { id: row.issueIncident.id, status: row.issueIncident.status || 'OPEN' })} ↗
+                                    </button>
+                                  </small>
+                                ) : null}
+                              </td>
+                              <td>
+                                {row.billingStatus === 'DISPUTED' ? (
+                                  <span className="status-chip warn" style={{ marginBottom: 3 }}>{t('tolls.toolbar.statusDisputed', 'Disputed')}</span>
+                                ) : row.billingStatus === 'WAIVED' ? (
+                                  <span className="status-chip neutral" style={{ marginBottom: 3 }}>{t('tolls.toolbar.statusVoid', 'Void / Not Billable')}</span>
+                                ) : null}
+                                <ConfidenceCell
+                                  row={row}
+                                  t={t}
+                                  overflow={overflow}
+                                  onMore={() => setEvidenceId((prev) => prev === row.id ? '' : row.id)}
+                                />
+                              </td>
+                              <td>
+                                <div className="tq-act">
+                                  {primaryButtonFor(row)}
+                                  {row.reservation?.id ? (
+                                    <a className="go-res" href={`/reservations/${row.reservation.id}`} title={t('tolls.row.viewReservation', 'View reservation')}>
+                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" /></svg>
+                                    </a>
+                                  ) : null}
+                                  {rowMenu(row)}
+                                </div>
+                              </td>
+                            </tr>
+                            {evidenceId === row.id ? <EvidenceDrawer row={row} t={t} /> : null}
+                          </Fragment>
+                        );
+                      })}
+                      {!visibleTransactions.length ? (
+                        <tr>
+                          <td colSpan={7} className="label">{t('tolls.table.empty', 'No toll transactions matched this queue view yet.')}</td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="tq-foot">
+                  {selectedRows.length ? (
+                    <>
+                      <span>{t('tolls.foot.selected', '{{count}} selected', { count: selectedRows.length })} · <b style={{ color: 'var(--text-1)' }}>{money(selectedTotal)}</b></span>
+                      <button type="button" className="lnk" disabled={busyId === 'bulk-confirm'} onClick={() => setDialog({ kind: 'bulk-confirm', rows: selectedRows, fromSelection: true })}>
+                        {t('tolls.foot.confirmSelected', 'Confirm selected')}
+                      </button>
+                      <button type="button" className="lnk quiet" disabled={busyId === 'waive-selected'} onClick={() => setDialog({ kind: 'waive-selected' })}>
+                        {t('tolls.foot.waiveSelected', 'Waive selected')}
+                      </button>
+                      <button type="button" className="lnk quiet" onClick={() => setSelectedIds(new Set())}>{t('tolls.foot.clear', 'Clear')}</button>
+                    </>
+                  ) : null}
+                  <span className="r">{t('tolls.foot.rows', '{{count}} rows · sorted newest', { count: visibleTransactions.length })}</span>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            {/* ============ Imports & sync tab — everything that used to sit above the queue ============ */}
+            <div className="glass card section-card">
+              <div className="row-between">
+                <div className="section-title">{t('tolls.imports.autoSyncTitle', 'Automatic AutoExpreso Sync')}</div>
+                <span className={`status-chip ${autoSyncOn ? 'good' : 'neutral'}`}>
+                  {autoSyncOn ? t('tolls.imports.autoSyncEnabled', 'Auto Sync Enabled') : t('tolls.imports.autoSyncDisabled', 'Auto Sync Disabled')}
+                </span>
+              </div>
+              <div className="tq-mini-grid">
+                <div className="tq-mini"><span className="klab">{t('tolls.imports.interval', 'Interval')}</span><b>{t('tolls.imports.minutes', '{{count}} min', { count: Number(dashboard?.autoSync?.intervalMinutes || 0) })}</b></div>
+                <div className="tq-mini"><span className="klab">{t('tolls.imports.lastRun', 'Last automatic run')}</span><b>{dashboard?.autoSync?.lastAutomaticRunAt ? shortDateTime(dashboard.autoSync.lastAutomaticRunAt) : t('tolls.imports.notScheduled', 'Not scheduled yet')}</b></div>
+                <div className="tq-mini"><span className="klab">{t('tolls.imports.nextRun', 'Next scheduled run')}</span><b>{dashboard?.autoSync?.nextRunAt ? shortDateTime(dashboard.autoSync.nextRunAt) : t('tolls.imports.notScheduled', 'Not scheduled yet')}</b></div>
+                {dashboard?.autoSync?.lastSweep ? (
+                  <>
+                    <div className="tq-mini"><span className="klab">{t('tolls.imports.lastImported', 'Last sweep imported')}</span><b>{Number(dashboard.autoSync.lastSweep.importedCount || 0)}</b></div>
+                    <div className="tq-mini"><span className="klab">{t('tolls.imports.lastAutoMatched', 'Last sweep auto-matched')}</span><b>{Number(dashboard.autoSync.lastSweep.autoMatchedCount || 0)}</b></div>
+                    <div className="tq-mini"><span className="klab">{t('tolls.imports.lastSuggested', 'Last sweep suggested')}</span><b>{Number(dashboard.autoSync.lastSweep.suggestedCount || 0)}</b></div>
+                    <div className="tq-mini"><span className="klab">{t('tolls.imports.pendingReview', 'Pending review now')}</span><b>{Number(dashboard.autoSync.lastSweep.pendingReviewCount || 0)}</b></div>
+                  </>
+                ) : null}
+              </div>
+              <div className="surface-note" style={{ marginTop: 10 }}>{t('tolls.imports.autoSyncNote', 'The backend runs AutoExpreso sync sweeps automatically for active tenants with tolls enabled, then re-checks pending tolls against the assigned vehicle, swap-aware responsibility window, and dispatch state.')}</div>
+            </div>
+
+            <div className="glass card section-card">
+              <div className="row-between">
+                <div className="section-title">{t('tolls.imports.providerTitle', 'Toll Provider Setup')}</div>
+                <span className={`status-chip ${dashboard?.providerAccount?.isActive ? 'good' : 'neutral'}`}>
+                  {dashboard?.providerAccount?.isActive ? t('tolls.imports.providerReady', 'Provider Ready') : t('tolls.imports.providerNotConfigured', 'Not configured')}
+                </span>
+              </div>
+              <div className="surface-note" style={{ marginBottom: 10 }}>{t('tolls.imports.providerDesc', 'Select your toll provider and configure login credentials. The system will scrape toll transactions from the provider portal and match them to your fleet.')}</div>
+              <div className="grid2">
+                <div className="stack">
+                  <label className="label">{t('tolls.imports.providerLabel', 'Toll Provider')}</label>
+                  <select value={providerForm.provider} onChange={(e) => setProviderForm((prev) => ({ ...prev, provider: e.target.value }))}>
+                    <option value="AUTOEXPRESO">AutoExpreso (Puerto Rico)</option>
+                    <option value="SUNPASS">SunPass (Florida)</option>
+                  </select>
+                </div>
+                <input placeholder={t('tolls.imports.usernamePlaceholder', '{{provider}} username', { provider: providerName })} value={providerForm.username} onChange={(e) => setProviderForm((prev) => ({ ...prev, username: e.target.value }))} />
+                <input
+                  placeholder={dashboard?.providerAccount?.hasPassword
+                    ? t('tolls.imports.passwordKeep', 'Leave blank to keep current password')
+                    : t('tolls.imports.passwordPlaceholder', '{{provider}} password', { provider: providerName })}
+                  type="password"
+                  value={providerForm.password}
+                  onChange={(e) => setProviderForm((prev) => ({ ...prev, password: e.target.value }))}
+                />
+                <input placeholder={t('tolls.imports.loginUrl', 'Login URL (optional override)')} value={providerForm.loginUrl} onChange={(e) => setProviderForm((prev) => ({ ...prev, loginUrl: e.target.value }))} />
+              </div>
+              <textarea rows={3} placeholder={t('tolls.imports.notesPlaceholder', 'Provider notes or login behavior notes')} value={providerForm.notes} onChange={(e) => setProviderForm((prev) => ({ ...prev, notes: e.target.value }))} />
+              <div className="inline-actions" style={{ marginTop: 10 }}>
+                <label className="label"><input type="checkbox" checked={providerForm.isActive} onChange={(e) => setProviderForm((prev) => ({ ...prev, isActive: e.target.checked }))} /> {t('tolls.imports.active', 'Active provider account')}</label>
+                <button type="button" disabled={busyId === 'provider-save' || (isSuper && !activeTenantId)} onClick={saveProviderAccount}>
+                  {busyId === 'provider-save' ? t('tolls.imports.saving', 'Saving…') : t('tolls.imports.save', 'Save Provider Setup')}
+                </button>
+                <button type="button" className="button-subtle" disabled={busyId === 'provider-health' || (isSuper && !activeTenantId)} onClick={runProviderHealthCheck}>
+                  {busyId === 'provider-health' ? t('tolls.imports.checking', 'Checking…') : t('tolls.imports.health', 'Run Health Check')}
+                </button>
+                <button type="button" className="button-subtle" disabled={busyId === 'provider-sync' || (isSuper && !activeTenantId)} onClick={runMockSync}>
+                  {busyId === 'provider-sync' ? t('tolls.imports.running', 'Running…') : t('tolls.imports.mockSync', 'Run Mock Sync')}
+                </button>
+                <button type="button" className="button-subtle" disabled={busyId === 'provider-live-sync' || (isSuper && !activeTenantId)} onClick={runLiveSync}>
+                  {busyId === 'provider-live-sync' ? t('tolls.imports.syncing', 'Syncing…') : t('tolls.imports.liveSync', 'Run {{provider}} Sync', { provider: providerName })}
+                </button>
+              </div>
+              {dashboard?.providerAccount?.lastSyncStatus || dashboard?.providerAccount?.lastSyncMessage ? (
+                <div className="surface-note" style={{ marginTop: 10 }}>
+                  {t('tolls.imports.lastStatus', 'Last sync status: {{status}}', { status: `${dashboard?.providerAccount?.lastSyncStatus || 'N/A'}${dashboard?.providerAccount?.lastSyncMessage ? ` | ${dashboard.providerAccount.lastSyncMessage}` : ''}` })}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="glass card section-card">
+              <div className="section-title">{t('tolls.imports.manualTitle', 'Manual Toll Import')}</div>
+              {isSuper && !activeTenantId ? (
+                <div className="surface-note" style={{ marginBottom: 10 }}>{t('tolls.imports.manualChooseTenant', "Choose the tenant above first so the toll import uses that tenant's fleet, toll tags, toll stickers, and reservation windows.")}</div>
+              ) : null}
+              <form className="stack" onSubmit={saveManualImport}>
+                <div className="grid2">
+                  <input type="datetime-local" required value={importForm.transactionAt} onChange={(e) => setImportForm((prev) => ({ ...prev, transactionAt: e.target.value }))} />
+                  <input type="number" step="0.01" min="0.01" required placeholder={t('tolls.imports.amount', 'Toll amount')} value={importForm.amount} onChange={(e) => setImportForm((prev) => ({ ...prev, amount: e.target.value }))} />
+                </div>
+                <div className="grid2">
+                  <input placeholder={t('tolls.imports.location', 'Location / Plaza')} value={importForm.location} onChange={(e) => setImportForm((prev) => ({ ...prev, location: e.target.value }))} />
+                  <input placeholder={t('tolls.imports.lane', 'Lane / Direction')} value={importForm.lane} onChange={(e) => setImportForm((prev) => ({ ...prev, lane: e.target.value }))} />
+                </div>
+                <div className="grid3">
+                  <input placeholder={t('tolls.imports.plate', 'Plate')} value={importForm.plate} onChange={(e) => setImportForm((prev) => ({ ...prev, plate: e.target.value }))} />
+                  <input placeholder={t('tolls.imports.tag', 'Toll Tag Number')} value={importForm.tag} onChange={(e) => setImportForm((prev) => ({ ...prev, tag: e.target.value }))} />
+                  <input placeholder={t('tolls.imports.sello', 'Toll Sticker Number')} value={importForm.sello} onChange={(e) => setImportForm((prev) => ({ ...prev, sello: e.target.value }))} />
+                </div>
+                <div className="inline-actions">
+                  <button type="submit" disabled={busyId === 'manual-import' || (isSuper && !activeTenantId)}>
+                    {busyId === 'manual-import' ? t('tolls.imports.importing', 'Importing…') : t('tolls.imports.import', 'Import Toll')}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div className="glass card section-card">
+              <div className="section-title">{t('tolls.imports.bulkTitle', 'Bulk CSV Import')}</div>
+              <div className="surface-note" style={{ marginBottom: 10 }}>
+                {t('tolls.imports.bulkDesc', 'Paste CSV or tab-separated rows in this order:')}
+                <br />
+                <code>transactionAt, amount, location, lane, direction, plate, tag, sello</code>
+              </div>
+              <textarea
+                rows={7}
+                placeholder={'transactionAt,amount,location,lane,direction,plate,tag,sello\n2026-03-26T00:41,5.00,Plaza Norte,Lane 1,North,BBTB1,0202,0202'}
+                value={bulkImportText}
+                onChange={(e) => setBulkImportText(e.target.value)}
+              />
+              <div className="inline-actions" style={{ marginTop: 10 }}>
+                <button type="button" disabled={busyId === 'bulk-import' || (isSuper && !activeTenantId)} onClick={saveBulkImport}>
+                  {busyId === 'bulk-import' ? t('tolls.imports.importing', 'Importing…') : t('tolls.imports.bulkImport', 'Import CSV Rows')}
+                </button>
+                <button type="button" className="button-subtle" onClick={runExportCsv} disabled={busyId === 'export-csv' || (isSuper && !activeTenantId)}>
+                  {busyId === 'export-csv' ? t('tolls.toolbar.exporting', 'Exporting…') : t('tolls.toolbar.exportCsv', 'Export CSV')}
+                </button>
+              </div>
+            </div>
+
+            <div className="glass card section-card">
+              <div className="section-title">{t('tolls.imports.runsTitle', 'Recent Import Runs')}</div>
+              {Array.isArray(dashboard?.importRuns) && dashboard.importRuns.length ? (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>{t('tolls.imports.runsStarted', 'Started')}</th>
+                      <th>{t('tolls.imports.runsSource', 'Source')}</th>
+                      <th>{t('tolls.imports.runsStatus', 'Status')}</th>
+                      <th>{t('tolls.imports.runsImported', 'Imported')}</th>
+                      <th>{t('tolls.imports.runsMatched', 'Matched')}</th>
+                      <th>{t('tolls.imports.runsReview', 'Review')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dashboard.importRuns.map((run) => (
+                      <tr key={run.id}>
+                        <td>{new Date(run.startedAt).toLocaleString()}</td>
+                        <td>{run.sourceType || '-'}</td>
+                        <td>
+                          <div>{run.status || '-'}</div>
+                          {importRunDiagnostics(run, t) ? (
+                            <div className="label" style={{ marginTop: '0.25rem' }}>{importRunDiagnostics(run, t)}</div>
+                          ) : null}
+                        </td>
+                        <td>{run.importedCount}</td>
+                        <td>{run.matchedCount}</td>
+                        <td>{run.reviewCount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="surface-note">{t('tolls.imports.runsEmpty', 'Import run history will appear here once provider sync or bulk imports start logging runs.')}</div>
+              )}
+            </div>
+          </>
+        )}
       </section>
+
+      {dialog?.kind === 'note' ? (
+        <TollNoteDialog
+          dialog={dialog}
+          busy={busyId === `${dialog.action}-${dialog.row.id}`}
+          onCancel={() => setDialog(null)}
+          onApply={(note) => runReviewAction(dialog.row, dialog.action, note)}
+        />
+      ) : null}
+      {dialog?.kind === 'bulk-confirm' ? (
+        <TollBulkConfirmDialog
+          rows={dialog.rows || []}
+          busy={busyId === 'bulk-confirm'}
+          onCancel={() => setDialog(null)}
+          onConfirm={() => runBulkConfirm((dialog.rows || []).map((row) => row.id))}
+        />
+      ) : null}
+      {dialog?.kind === 'waive-selected' ? (
+        <TollWaiveSelectedDialog
+          rows={selectedRows}
+          busy={busyId === 'waive-selected'}
+          onCancel={() => setDialog(null)}
+          onApply={runWaiveSelected}
+        />
+      ) : null}
     </AppShell>
   );
 }
