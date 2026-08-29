@@ -6,6 +6,7 @@ import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api, TOKEN_KEY, USER_KEY } from '../../lib/client';
 import { EnrollLinkBanner, enrollLinkMessage } from './EnrollLinkBanner';
+import { TENANT_STATUS_OPTIONS, statusOptionsFor, statusChipTone, isKnownStatus } from '../../lib/tenant-status';
 
 const EMPTY_TENANT = { name: '', slug: '', status: 'ACTIVE', plan: 'BETA', carSharingEnabled: false, dealershipLoanerEnabled: false, tollsEnabled: false, citationsEnabled: false, marketIntelligenceEnabled: false };
 const EMPTY_ADMIN = { email: '', fullName: '', password: 'TempPass123!' };
@@ -369,7 +370,11 @@ function Inner({ token, me, logout }) {
                 Review tenant health, enabled products, and the active support scope before creating admins or changing feature flags.
               </p>
             </div>
-            <span className={`status-chip ${activeTenant?.status === 'ACTIVE' ? 'good' : activeTenant ? 'warn' : 'neutral'}`}>
+            {/* DEMO is a showcase tenant, not a fault: bare .status-chip is the
+                brand slot (globals.css 194/1429), which reads notable rather than
+                alarming. Bucketing every non-ACTIVE status into `warn` would paint
+                a healthy demo amber on a banner headed "Review tenant health". */}
+            <span className={`status-chip ${statusChipTone(activeTenant)}`}>
               {activeTenant ? `${activeTenant.name} focused` : 'Choose tenant'}
             </span>
           </div>
@@ -472,8 +477,9 @@ function Inner({ token, me, logout }) {
             <input placeholder="Name" value={tenantForm.name} onChange={(e) => setTenantForm((f) => ({ ...f, name: e.target.value }))} />
             <input placeholder="Slug (e.g. acme-fleet)" value={tenantForm.slug} onChange={(e) => setTenantForm((f) => ({ ...f, slug: e.target.value }))} />
             <select value={tenantForm.status} onChange={(e) => setTenantForm((f) => ({ ...f, status: e.target.value }))}>
-              <option value="ACTIVE">ACTIVE</option>
-              <option value="SUSPENDED">SUSPENDED</option>
+              {TENANT_STATUS_OPTIONS.map((status) => (
+                <option key={status} value={status}>{status}</option>
+              ))}
             </select>
             <select value={tenantForm.plan} onChange={(e) => setTenantForm((f) => ({ ...f, plan: e.target.value }))}>
               {(activePlanOptions.length ? activePlanOptions : [{ code: 'BETA', name: 'Beta' }]).map((plan) => (
@@ -511,9 +517,12 @@ function Inner({ token, me, logout }) {
                   <td><input value={r.name || ''} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, name: e.target.value } : x))} /></td>
                   <td><input value={r.slug || ''} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, slug: e.target.value } : x))} /></td>
                   <td>
-                    <select value={r.status || 'ACTIVE'} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, status: e.target.value } : x))}>
-                      <option value="ACTIVE">ACTIVE</option>
-                      <option value="SUSPENDED">SUSPENDED</option>
+                    <select aria-label={`Status for ${r.name || r.slug}`} value={r.status || 'ACTIVE'} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, status: e.target.value } : x))}>
+                      {statusOptionsFor(r.status).map((status) => (
+                        <option key={status} value={status}>
+                          {isKnownStatus(status) ? status : `${status} (unrecognized)`}
+                        </option>
+                      ))}
                     </select>
                   </td>
                   <td>

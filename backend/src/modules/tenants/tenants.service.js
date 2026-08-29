@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../../lib/prisma.js';
 import { authService } from '../auth/auth.service.js';
-import { recordAudit, AUDIT_ACTIONS, AUDIT_OUTCOME } from '../audit/audit.service.js';
+import { recordAudit, auditFromReq, AUDIT_ACTIONS, AUDIT_OUTCOME } from '../audit/audit.service.js';
 import {
   assertTenantUserCapacity,
   getTenantPlanCatalog,
@@ -43,6 +43,51 @@ function mapTenantWriteError(error, fallback = 'Unable to save tenant changes') 
     }
   }
   throw new Error(error?.message || fallback);
+}
+
+/**
+ * THE TENANT STATUS VOCABULARY. Closed set — anything else is rejected.
+ *
+ * `Tenant.status` is a free-text String in the schema, but it is a load-bearing
+ * POSITIVE gate: an exact `status: 'ACTIVE'` match is what lets a tenant's
+ * public booking site resolve (middleware/public-tenant-token.js), what puts it
+ * in the car-sharing marketplace and the booking engine
+ * (booking-engine.service.js, public-booking.service.js), and what lets the
+ * booking-source / economy / nu integration schedulers sync it. Nothing
+ * validated writes to it, so a typo like 'ACTIVEE' used to be accepted happily
+ * and would silently darken a paying tenant everywhere at once, with no error
+ * raised anywhere. That is what this list closes.
+ *
+ * DEMO IS NOT OPTIONAL HERE. A production census on 2026-08-28 found the live
+ * vocabulary to be exactly ACTIVE / SUSPENDED / DEMO — one tenant
+ * (cmn6d5ax80002s10izy80l4ei) is DEMO, so omitting it would make that tenant's
+ * status unsettable from the only screen that edits it.
+ *
+ * AND AN OPEN HAZARD THIS LIST DOES NOT CLOSE. On the same day, a real
+ * TENANT_SUSPEND recorded `previousTenantStatus: 'DEMO'` into AdminAuditLog.
+ * NOTHING READS THAT VALUE BACK: billing-admin.service.js restoreTenantAccess
+ * hardcodes `status: 'ACTIVE'`, so restoring that tenant from the billing screen
+ * flips DEMO -> ACTIVE. Because `isDemo` gates no public surface, the only thing
+ * keeping the demo tenant out of the public car-sharing marketplace is
+ * `status !== 'ACTIVE'` — so that restore would publish it. Owned by
+ * fix/billing-restore-previous-status; do not assume it is handled here.
+ */
+export const TENANT_STATUSES = ['ACTIVE', 'SUSPENDED', 'DEMO'];
+
+/**
+ * Reject rather than coerce. A silent fallback would leave the admin looking at
+ * a screen that says the save worked while the tenant sits on the old status —
+ * the same invisible failure this allowlist exists to end. Mirrors normalizeEnum
+ * in issue-center/issue-center-claims-fields.js; the tenants routes already turn
+ * a thrown Error into a 400.
+ */
+export function normalizeTenantStatus(value, fallback = undefined) {
+  if (value == null || value === '') return fallback;
+  const normalized = String(value).trim().toUpperCase();
+  if (!TENANT_STATUSES.includes(normalized)) {
+    throw new Error(`status must be one of ${TENANT_STATUSES.join(', ')}`);
+  }
+  return normalized;
 }
 
 export const tenantsService = {
@@ -113,6 +158,11 @@ export const tenantsService = {
     const name = String(data.name || '').trim();
     const slug = String(data.slug || '').trim().toLowerCase();
     if (!name || !slug) throw new Error('name and slug are required');
+    // Validated OUT here, not inside the try: that catch exists to translate
+    // Prisma write errors (mapTenantWriteError), and routing a plain validation
+    // failure through it only survives because the mapper happens to pass
+    // error.message along. updateTenant already validates outside its try.
+    const status = normalizeTenantStatus(data.status, 'ACTIVE');
     try {
       const pct = data.platformFeePct !== undefined ? Number(data.platformFeePct || 0) : 10;
       const min = data.platformFeeMin !== undefined ? Number(data.platformFeeMin || 0) : 7;
@@ -124,7 +174,7 @@ export const tenantsService = {
         data: {
           name,
           slug,
-          status: String(data.status || 'ACTIVE').toUpperCase(),
+          status,
           plan: String(data.plan || 'BETA').toUpperCase(),
           carSharingEnabled: !!data.carSharingEnabled,
           dealershipLoanerEnabled: !!data.dealershipLoanerEnabled,
@@ -144,11 +194,11 @@ export const tenantsService = {
     }
   },
 
-  async updateTenant(id, patch = {}) {
+  async updateTenant(id, patch = {}, options = {}) {
     const data = {};
     if (patch.name !== undefined) data.name = String(patch.name || '').trim();
     if (patch.slug !== undefined) data.slug = String(patch.slug || '').trim().toLowerCase();
-    if (patch.status !== undefined) data.status = String(patch.status || '').toUpperCase();
+    if (patch.status !== undefined) data.status = normalizeTenantStatus(patch.status);
     if (patch.plan !== undefined) data.plan = String(patch.plan || '').toUpperCase();
     if (patch.carSharingEnabled !== undefined) data.carSharingEnabled = !!patch.carSharingEnabled;
     if (patch.dealershipLoanerEnabled !== undefined) data.dealershipLoanerEnabled = !!patch.dealershipLoanerEnabled;
@@ -187,16 +237,54 @@ export const tenantsService = {
       // We do NOT auto-reactivate on the reverse transition (off → on).
       // The tenant has to flip each MarketScrapeProfile / PricingRule back
       // on themselves so they don't get surprised by old profiles waking up.
-      let shouldCascadeDisable = false;
-      if (patch.marketIntelligenceEnabled === false) {
-        const prior = await prisma.tenant.findUnique({
+
+      // ONE read serves both the cascade check below and the status audit after
+      // the write — the status is only needed to say what it WAS, which is
+      // unrecoverable once the update lands.
+      const needsPrior = patch.marketIntelligenceEnabled === false || data.status !== undefined;
+      const prior = needsPrior
+        ? await prisma.tenant.findUnique({
           where: { id },
-          select: { marketIntelligenceEnabled: true }
-        });
-        if (prior?.marketIntelligenceEnabled === true) shouldCascadeDisable = true;
+          select: { marketIntelligenceEnabled: true, status: true }
+        })
+        : null;
+
+      let shouldCascadeDisable = false;
+      if (patch.marketIntelligenceEnabled === false && prior?.marketIntelligenceEnabled === true) {
+        shouldCascadeDisable = true;
       }
 
       const updated = await prisma.tenant.update({ where: { id }, data });
+
+      // A status change from THIS screen is a lockout lever — auth.service.js
+      // hydrates tenant.status on every request and SUSPENDED locks staff out —
+      // and until now it left no trace at all, while the identical transition
+      // through the billing panel was fully audited. The census that established
+      // the DEMO vocabulary only worked because billing had recorded the previous
+      // status; a flip through here would have been invisible. Best-effort:
+      // recordAudit swallows its own failures, so the trail never blocks the save.
+      if (data.status !== undefined && prior && prior.status !== data.status) {
+        // auditFromReq, not bare recordAudit: it also captures ip, user-agent and
+        // the impersonator (req.user.imp). For a lever that locks a whole tenant's
+        // staff out, "which super-admin, from where, impersonating whom" is the
+        // point of the row. It optional-chains `req` throughout, so a caller that
+        // has no request still gets a valid row with those fields null.
+        //
+        // tenantId is overridden deliberately: auditFromReq defaults it to the
+        // ACTOR's tenant, and the actor here is a super-admin acting on someone
+        // else's tenant. The row must be filed against the TARGET.
+        await auditFromReq(options.req, {
+          tenantId: id,
+          action: AUDIT_ACTIONS.TENANT_STATUS_CHANGE,
+          targetType: 'Tenant',
+          targetId: id,
+          outcome: AUDIT_OUTCOME.SUCCESS,
+          // `previousTenantStatus` is spelled exactly as billing-admin.service.js
+          // spells it, so one query answers "what was this tenant before" across
+          // both paths.
+          metadata: { previousTenantStatus: prior.status, newTenantStatus: data.status },
+        });
+      }
 
       if (shouldCascadeDisable) {
         await prisma.$transaction([
