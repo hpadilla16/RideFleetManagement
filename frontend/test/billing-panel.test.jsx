@@ -343,6 +343,82 @@ describe('billing detail', () => {
     expect(screen.getAllByText(/billed nothing/i).length).toBeGreaterThan(0);
   });
 
+  // RESTORE NAMES THE STATUS IT WILL ACTUALLY SET (2026-08-28).
+  //
+  // Tenant.status is free text and 'ACTIVE' is load-bearing: the public booking
+  // token resolver, the booking-engine tenant resolution and the car-sharing
+  // marketplace list all match `status: 'ACTIVE'` exactly. Restore used to
+  // hardcode ACTIVE, which would have PUBLISHED a demo tenant onto the public
+  // booking site rather than merely relabelling it. The dialog must therefore
+  // never say "turns the public booking site back on" unconditionally.
+
+  it('the restore dialog names a non-ACTIVE status and refuses to promise publication', async () => {
+    wire(detail({
+      tenant: {
+        id: 't1', name: 'Corpusa Fleet', slug: 'c', status: 'SUSPENDED', plan: 'PRO',
+        billingSuspendedAt: '2026-08-28T00:00:00Z', billingPreviousStatus: 'DEMO', restoresToStatus: 'DEMO',
+      },
+    }));
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Restore access'));
+    const text = document.body.textContent;
+    expect(text).toMatch(/Returns this tenant to\s*Demo/i);
+    expect(text).toMatch(/public booking site stays dark/i);
+    // The old copy's promise must not survive for a tenant it is false for.
+    expect(text).not.toMatch(/booking site and integration syncs come back on/i);
+  });
+
+  it('the restore dialog says Active when that is what it will set', async () => {
+    wire(detail({
+      tenant: {
+        id: 't1', name: 'Corpusa Fleet', slug: 'c', status: 'SUSPENDED', plan: 'PRO',
+        billingSuspendedAt: '2026-08-28T00:00:00Z', billingPreviousStatus: 'ACTIVE', restoresToStatus: 'ACTIVE',
+      },
+    }));
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Restore access'));
+    const text = document.body.textContent;
+    expect(text).toMatch(/Returns this tenant to\s*Active/i);
+    expect(text).toMatch(/come back on/i);
+  });
+
+  it('the dialog never re-derives the rule: a recorded SUSPENDED shows ACTIVE, as the server resolved it', async () => {
+    // The one branch where the raw recorded value and the resolved outcome
+    // DISAGREE. A dialog deriving its own answer from billingPreviousStatus
+    // would say "Suspended ... stays dark" while the server publishes them.
+    wire(detail({
+      tenant: {
+        id: 't1', name: 'Corpusa Fleet', slug: 'c', status: 'SUSPENDED', plan: 'PRO',
+        billingSuspendedAt: '2026-08-28T00:00:00Z',
+        billingPreviousStatus: 'SUSPENDED', restoresToStatus: 'ACTIVE',
+      },
+    }));
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Restore access'));
+    const text = document.body.textContent;
+    expect(text).toMatch(/Returns this tenant to\s*Active/i);
+    expect(text).toMatch(/come back on/i);
+    expect(text).not.toMatch(/stays dark/i);
+  });
+
+  it('a payload with no recorded previous status reads as Active, matching the service fallback', async () => {
+    // billingPreviousStatus is null for a tenant suspended before the column
+    // existed. The service falls back to ACTIVE there, and the dialog must say
+    // the same thing rather than hedge about what it does not know.
+    wire(detail({
+      tenant: {
+        id: 't1', name: 'Corpusa Fleet', slug: 'c', status: 'SUSPENDED', plan: 'PRO',
+        billingSuspendedAt: '2026-08-28T00:00:00Z', restoresToStatus: 'ACTIVE',
+      },
+    }));
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Restore access'));
+    const text = document.body.textContent;
+    expect(text).toMatch(/Returns this tenant to\s*Active/i);
+    // And it SAYS the value was missing rather than implying it was read.
+    expect(text).toMatch(/no earlier status was recorded/i);
+  });
+
   it('warns that a hand-set suspension is not billing\'s to lift', async () => {
     wire(detail({
       tenant: { id: 't1', name: 'Corpusa Fleet', slug: 'c', status: 'SUSPENDED', plan: 'PRO', billingSuspendedAt: null },

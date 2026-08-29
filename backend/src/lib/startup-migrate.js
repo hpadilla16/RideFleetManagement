@@ -71,10 +71,17 @@ export async function runStartupMigrations(opts = {}) {
       if (applied.has(n)) { result.alreadyApplied += 1; continue; }
       const sql = fs.readFileSync(path.join(dir, n, 'migration.sql'), 'utf8');
       try {
-        await client.query(sql);
+        // rowCount of the LAST statement in the file. For a pure DDL migration
+        // it is meaningless and null; for one that backfills, it is the only
+        // signal anyone gets that the backfill matched anything at all. A
+        // backfill that silently updates zero rows — wrong key, rows that
+        // predate the field — looks identical in the log to one that worked,
+        // and the bug it was written to fix is still there.
+        const res = await client.query(sql);
+        const rowCount = Array.isArray(res) ? res[res.length - 1]?.rowCount ?? null : res?.rowCount ?? null;
         await client.query('INSERT INTO "_app_migrations"(name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [n]);
         result.applied.push(n);
-        (log.info || console.log)('[startup-migrate] applied migration', { name: n });
+        (log.info || console.log)('[startup-migrate] applied migration', { name: n, rowCount });
       } catch (e) {
         result.failed.push({ name: n, error: e.message });
         (log.error || console.error)('[startup-migrate] migration FAILED (continuing boot)', { name: n, error: e.message });

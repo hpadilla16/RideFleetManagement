@@ -587,6 +587,28 @@ model Tenant {
   // NULL for every existing tenant. Nothing reads it yet: the suspension gate is
   // a later phase.
   billingSuspendedAt        DateTime?
+  // What `status` was the instant billing switched this tenant off, so RESTORE
+  // puts it back instead of assuming ACTIVE (2026-08-28). `status` is free text,
+  // not an enum, and ACTIVE is a LOAD-BEARING value: the public booking token
+  // resolver, the booking-engine tenant resolution and the car-sharing
+  // marketplace listing all filter `status: 'ACTIVE'`. So restoring a tenant
+  // that held any other value to ACTIVE does not merely lose a label — it
+  // PUBLISHES that tenant onto the public surface. Nothing in this repo writes a
+  // value other than ACTIVE or SUSPENDED, but nothing stops one either:
+  // tenants.service.js updateTenant takes the string it is given.
+  //
+  // A COLUMN, not the audit trail, even though suspend already records
+  // `previousTenantStatus` in its audit metadata. recordAudit is best-effort by
+  // contract: it swallows every failure so a dropped audit row can never fail
+  // the request that triggered it. Hanging the correctness of restore off a
+  // writer that is allowed to silently not write reintroduces exactly this bug
+  // on the day the audit insert fails. Operational state that a later write
+  // depends on belongs next to `billingSuspendedAt`, which is already the flag
+  // saying whether billing may lift this suspension at all.
+  //
+  // NULL when not suspended by billing, and NULL for a tenant suspended before
+  // this column existed — restore falls back to ACTIVE there, the old behaviour.
+  billingPreviousStatus     String?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
