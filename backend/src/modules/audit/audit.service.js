@@ -210,6 +210,14 @@ export const AUDIT_ACTIONS = Object.freeze({
   // action that ever reconciles the two. Metadata carries from/to plus the caps
   // the new plan implies, since a downgrade can leave a tenant over them.
   TENANT_PLAN_APPLY: 'TENANT_PLAN_APPLY',
+  // Tenant.status changed by hand from the Tenants screen (PATCH /api/tenants/:id),
+  // NOT from the billing panel. Deliberately distinct from TENANT_SUSPEND /
+  // TENANT_RESTORE above: those two mean "billing cut or restored access" and are
+  // paired with billingSuspendedAt, which is the marker that lets automation know
+  // it may only lift a suspension it set itself. Folding hand edits into them would
+  // blur exactly that line. Metadata carries previousStatus/newStatus so the trail
+  // answers "what was it before" for a screen that can also darken a tenant.
+  TENANT_STATUS_CHANGE: 'TENANT_STATUS_CHANGE',
 });
 
 export const AUDIT_OUTCOME = Object.freeze({

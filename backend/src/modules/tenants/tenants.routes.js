@@ -92,7 +92,7 @@ tenantsRouter.post('/', async (req, res, next) => {
 
 tenantsRouter.patch('/:id', async (req, res, next) => {
   try {
-    const tenant = await tenantsService.updateTenant(req.params.id, req.body || {});
+    const tenant = await tenantsService.updateTenant(req.params.id, req.body || {}, { req });
     res.json(tenant);
   } catch (e) {
     res.status(400).json({ error: e.message });
