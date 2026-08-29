@@ -18,6 +18,7 @@
  */
 import test, { beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { prisma } from '../../lib/prisma.js';
 import { customerPortalRouter } from './customer-portal.routes.js';
 import { INSURANCE_LOCK } from '../checkout-session/insurance-selection-gate.js';
@@ -310,4 +311,53 @@ test('validation still runs before the gate', async () => {
   const { res } = await post(incomplete);
   assert.equal(res.statusCode, 400);
   assert.match(res.body.error, /required pre-check-in items/i);
+});
+
+// ---------------------------------------------------------------------------
+// The WIRE into the fence.
+// ---------------------------------------------------------------------------
+
+test('the pre-check-in handler passes the preflight verdict to applyPrecheckinCharges', async () => {
+  // SOURCE-LEVEL, AND IT HAS TO BE.
+  //
+  // The fence itself lives in precheckin-charges.js and is pinned from both
+  // sides by precheckin-charges.embedded.test.mjs. What nothing covered is the
+  // argument that feeds it. Delete the `agreementSealed:` line from the call
+  // below and: THIS suite stays green, because its updateMany stub simulates
+  // the database half of the fence and the fallback path satisfies the
+  // assertions by name; and the EMBEDDED suite stays green, because it calls
+  // applyPrecheckinCharges() directly and never loads this route. Everything
+  // green, `insuranceVerdict` a dead local again, and the fence off.
+  //
+  // This gap is NEW, and this refactor made it. On main the fence was inline in
+  // this handler and read the verdict from the same scope — there was no
+  // cross-file wire to cut. Extracting the charge sheet into a module created
+  // one, and it is the exact failure that has ALREADY happened once on this
+  // branch: an earlier revision of precheckin-charges.js carried the fence
+  // behind a parameter no caller passed, so it was always false and its only
+  // live effect was dropping legitimate decline signatures.
+  //
+  // WHAT BREAKS IF THIS IS CUT. `signed` is
+  // `agreement.tcSignedAt || session.tcCompletedAt`, and those two can
+  // disagree: the admin rewind in reservation-override.routes.js DELETES the
+  // RentalAgreement and clears the signatures, but never touches the
+  // CheckoutSession, which is created once and never deleted. The rebuilt
+  // contract therefore has tcSignedAt null while the session still carries
+  // tcCompletedAt. The `tcSignedAt: null` WHERE matches such a row, so
+  // agreementSealed is the ONLY thing left holding the line. Cut it and a
+  // customer who re-submits pre-check-in has the decline signature on their
+  // already-signed contract overwritten and re-dated — silently, because the
+  // flag itself never moves and the gate rightly lets the request through.
+  const src = await readFile(new URL('./customer-portal.routes.js', import.meta.url), 'utf8');
+  const start = src.indexOf('await applyPrecheckinCharges({');
+  assert.ok(start !== -1, 'the handler no longer calls applyPrecheckinCharges() by that name');
+  const call = src.slice(start, src.indexOf('});', start));
+  assert.ok(call.length > 0, 'applyPrecheckinCharges() no longer has the shape this guard reads');
+  assert.match(
+    call, /agreementSealed:\s*insuranceVerdict\.signed/,
+    'the applyPrecheckinCharges() call must pass `agreementSealed: insuranceVerdict.signed` '
+    + '— without it the preflight verdict never reaches the decline-signature fence, '
+    + 'the fence is unconditionally off, and a re-submitted pre-check-in overwrites '
+    + 'the decline signature printed on an already-signed contract',
+  );
 });
