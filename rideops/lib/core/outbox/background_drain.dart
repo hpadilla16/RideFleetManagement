@@ -202,6 +202,16 @@ abstract class BackgroundDrainScheduler {
 /// disimulaban (sin implementación / MissingPlugin tragado por el catch), y
 /// por eso el fallo solo salía en el CI de ubuntu.
 ///
+/// POR QUÉ `dart:io Platform` Y NO `defaultTargetPlatform` — no lo "modernices".
+/// No son el mismo oráculo. `defaultTargetPlatform` dice para qué plataforma
+/// PINTAR widgets, y se puede falsear desde una prueba con
+/// `debugDefaultTargetPlatformOverride`. Pero quien elige la implementación del
+/// relevo es `workmanager`, y la elige leyendo `dart:io Platform`. Gatear con el
+/// primero seria consultar un oraculo distinto del que toma la decision real:
+/// un widget test que se declare Android sobre un runner de Linux volveria a
+/// meter `Process.run` por la puerta de atras, con el mismo "Pending timers" que
+/// este archivo existe para evitar — y la prueba de host no lo cazaria.
+///
 /// [operatingSystem] se inyecta SOLO en tests: en runtime es el host real.
 bool backgroundRelayAvailable({String? operatingSystem}) {
   if (kIsWeb) return false;
