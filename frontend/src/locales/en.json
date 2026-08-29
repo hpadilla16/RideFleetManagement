@@ -1812,5 +1812,25 @@
       "dispatch-confirmed": "Confirmed by staff",
       "covered-by-toll-package": "Covered by toll package"
     }
+  },
+  "settingsPayments": {
+    "ipos": {
+      "gatewayOption": "iPOS Payment Links (Dejavoo HPP)",
+      "title": "iPOS Payment Links (Hosted Payment Page)",
+      "enabled": "Enabled",
+      "environment": "Environment",
+      "envSandbox": "Sandbox (UAT)",
+      "envProduction": "Production",
+      "hppToken": "HPP Auth Token",
+      "tokenSavedPlaceholder": "Saved — leave blank to keep",
+      "tokenEmptyPlaceholder": "Paste the Ecom/HPP token from your iPOSpays portal",
+      "tpn": "CloudPOS TPN",
+      "tpnFallbackPlaceholder": "Blank — uses the SPIn TPN ({{tpn}})",
+      "tpnEmptyPlaceholder": "12-digit CloudPOS TPN from Dejavoo",
+      "expiryDays": "Link expiry (days, 1-31)",
+      "note1": "When the Primary Gateway is set to iPOS, customer payment links open the Dejavoo-hosted payment page tied to the CloudPOS TPN above, so link payments settle into THIS tenant's merchant account.",
+      "note2": "If these credentials are missing, payment links refuse with a clear message — they never silently fall back to Authorize.Net.",
+      "note3": "The HPP Auth Token is encrypted at rest and never shown again; leave it blank to keep the saved one. Production credentials come from Dejavoo support."
+    }
   }
 }

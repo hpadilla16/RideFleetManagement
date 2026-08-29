@@ -32,6 +32,12 @@ import {
   materializeDocumentRef,
   maybeUploadCustomerDocument
 } from '../customers/customer-documents.js';
+import {
+  mintHppSession,
+  verifyHppPayment,
+  hppNotConfiguredMessage
+} from '../payment-gateway/ipos-hpp-payment.service.js';
+import { isHppDryRun } from '../payment-gateway/ipos-hpp-client.js';
 
 export const customerPortalRouter = Router();
 
@@ -54,6 +60,17 @@ const portalWebhook = [
 
 function portalBase() {
   return process.env.CUSTOMER_PORTAL_BASE_URL || 'http://localhost:3000';
+}
+
+// Backend's own public origin — where gateways redirect the customer back to
+// (this API then bounces them to the portal frontend). Mirrors
+// public-booking/payment-session.service.js _publicApiBase().
+function publicApiBase() {
+  return (
+    process.env.PUBLIC_API_BASE_URL ||
+    process.env.API_BASE_URL ||
+    'http://localhost:4000'
+  ).replace(/\/$/, '');
 }
 
 async function paymentGatewayConfigForTenant(tenantId = null) {
@@ -86,10 +103,20 @@ function stripeEnabled(config = {}) {
 function squareEnabled(config = {}) {
   return !!(config?.square?.enabled && config?.square?.accessToken && config?.square?.locationId);
 }
+// READ-shaped readiness only (the token itself never reaches this config —
+// see settings.service iposBlockForRead). The mint path re-resolves the
+// decrypted credential from the raw AppSetting row.
+function iposLinkReady(config = {}) {
+  const tpn = String(config?.ipos?.tpn || config?.spin?.tpn || '').trim();
+  return (!!config?.ipos?.hasHppToken && !!tpn) || isHppDryRun();
+}
 
 function currentGateway(config = {}) {
   const gateway = String(config?.gateway || 'authorizenet').toLowerCase();
-  return ['authorizenet', 'stripe', 'square'].includes(gateway) ? gateway : 'authorizenet';
+  // 'ipos' routes customer payment links to the TENANT's iPOSpays hosted
+  // payment page — the whole point is that the tenant's own processor, not
+  // Ride's Authorize.Net, settles their customers' link payments.
+  return ['authorizenet', 'stripe', 'square', 'ipos'].includes(gateway) ? gateway : 'authorizenet';
 }
 
 function extractAuthNetMessage(payload) {
@@ -1795,7 +1822,9 @@ customerPortalRouter.get('/payment/:token', portalRead, async (req, res, next) =
       ? authNetPortalReady(gatewayConfig)
       : gateway === 'stripe'
         ? stripeEnabled(gatewayConfig)
-        : squareEnabled(gatewayConfig);
+        : gateway === 'ipos'
+          ? iposLinkReady(gatewayConfig)
+          : squareEnabled(gatewayConfig);
 
     res.json({
       reservation: {
@@ -1884,6 +1913,43 @@ customerPortalRouter.post('/payment/:token/create-session', portalWrite, async (
       return res.json({ checkoutUrl: url, gateway });
     }
 
+    if (gateway === 'ipos') {
+      // The tenant's own iPOSpays hosted payment page. FAIL CLOSED when the
+      // credentials are absent: minting an Authorize.Net page instead would
+      // settle this tenant's money into the wrong merchant account — the exact
+      // bug gateway:'ipos' exists to end. mintHppSession enforces this and
+      // throws GATEWAY_NOT_CONFIGURED with the operator-facing message.
+      try {
+        const confirmBase = `${publicApiBase()}/api/public/payment/${encodeURIComponent(token)}/confirm`;
+        const { url } = await mintHppSession({
+          reservation,
+          amount: Number(amountDue),
+          buildReturnUrl: (ref) => `${confirmBase}?gateway=ipos&success=1&iposRef=${encodeURIComponent(ref)}`,
+          cancelUrl: `${confirmBase}?canceled=1`,
+          failureUrl: `${confirmBase}?canceled=1&failed=1`,
+          customer: {
+            name: `${reservation.customer?.firstName || ''} ${reservation.customer?.lastName || ''}`.trim(),
+            email: reservation.customer?.email || '',
+            phone: reservation.customer?.phone || ''
+          },
+          description: `Reservation ${reservation.reservationNumber} payment`,
+          origin: 'PORTAL'
+        });
+        return res.json({ checkoutUrl: url, gateway });
+      } catch (err) {
+        if (err?.code === 'GATEWAY_NOT_CONFIGURED') {
+          return res.status(503).json({ error: err.message, code: err.code });
+        }
+        if (err?.code === 'ALREADY_PAID') {
+          return res.status(409).json({ error: err.message, code: err.code });
+        }
+        if (err?.code === 'GATEWAY_ERROR' || err?.iposHppTimeout) {
+          return res.status(502).json({ error: String(err.message || 'iPOSpays checkout creation failed') });
+        }
+        throw err;
+      }
+    }
+
     // Authorize.Net
     if (!authNetEnabled(gatewayConfig)) return res.status(400).json({ error: 'Authorize.Net is not configured for this tenant' });
     const amount = Number(Math.max(0.5, Number(amountDue || 0))).toFixed(2);
@@ -1950,7 +2016,52 @@ customerPortalRouter.post('/payment/:token/confirm', portalWrite, async (req, re
     let paidAmount = 0;
     let reference = String(req.body?.reference || '').trim();
 
-    if (gateway === 'stripe' && req.body?.sessionId) {
+    if (gateway === 'ipos') {
+      // The redirect back from the iPOSpays HPP is UX only. The reference it
+      // carries is verified server-side against (a) the mint audit trail for
+      // THIS reservation and (b) queryPaymentStatus at the gateway, and the
+      // recorded amount is the gateway's — never the redirect's.
+      const iposRef = String(req.body?.iposRef || req.body?.reference || '').trim();
+      if (!iposRef) {
+        return res.status(400).json({ error: 'iPOS payment reference is required' });
+      }
+      let verdict;
+      try {
+        verdict = await verifyHppPayment({ reservation, iposRef });
+      } catch (err) {
+        if (err?.code === 'GATEWAY_NOT_CONFIGURED') {
+          return res.status(503).json({ error: err.message, code: err.code });
+        }
+        if (err?.code === 'VALIDATION' || err?.code === 'UNKNOWN_REFERENCE') {
+          return res.status(400).json({ error: err.message });
+        }
+        if (err?.code === 'PAYMENT_NOT_COMPLETED') {
+          return res.status(400).json({ error: err.message, code: err.code });
+        }
+        if (err?.code === 'GATEWAY_ERROR' || err?.iposHppTimeout) {
+          return res.status(502).json({ error: String(err.message || 'iPOSpays verification failed') });
+        }
+        throw err;
+      }
+      if (verdict.duplicate) {
+        // Idempotent: a re-visited return URL must not double-record.
+        let portal = null;
+        try {
+          const refreshed = await findReservationByToken('payment', token);
+          portal = refreshed ? await buildPortalSummary(refreshed, 'payment', token) : null;
+        } catch {}
+        return res.json({
+          ok: true,
+          paidAmount: Number(verdict.existingAmount || 0),
+          savedCardOnFile: false,
+          duplicate: true,
+          portal,
+          reference: verdict.reference
+        });
+      }
+      paidAmount = Number(verdict.amount || 0);
+      reference = verdict.reference;
+    } else if (gateway === 'stripe' && req.body?.sessionId) {
       if (!stripeEnabled(gatewayConfig)) return res.status(400).json({ error: 'Stripe not configured for this tenant' });
       const stripe = new Stripe(gatewayConfig.stripe.secretKey);
       const session = await stripe.checkout.sessions.retrieve(String(req.body.sessionId));
@@ -2139,6 +2250,11 @@ customerPortalRouter.get('/payment/:token/confirm', portalRead, async (req, res,
       ''
     ).trim();
     if (transId) params.set('transId', transId);
+
+    // iPOSpays HPP return — our own minted reference, carried through so the
+    // pay page can POST it back for server-side verification.
+    const iposRef = String(req.query?.iposRef || '').trim();
+    if (iposRef) params.set('iposRef', iposRef);
 
     return res.redirect(`${portalBase().replace(/\/$/, '')}/customer/pay?${params.toString()}`);
   } catch (e) {

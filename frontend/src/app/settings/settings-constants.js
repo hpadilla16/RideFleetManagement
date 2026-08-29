@@ -75,6 +75,18 @@ export const DEFAULT_PAYMENT_GATEWAY_CONFIG = {
     merchantNumber: '1',
     callbackUrl: '',
     proxyTimeout: '120'
+  },
+  // iPOSpays Hosted Payment Page — customer PAYMENT LINKS settle through the
+  // tenant's own iPOS merchant. The HPP Auth Token follows the same
+  // encrypted-at-rest, never-returned contract as spin.authKey (`hasHppToken`
+  // says one is on file; blank on save keeps it).
+  ipos: {
+    enabled: false,
+    environment: 'production',
+    tpn: '',
+    hppToken: '',
+    hasHppToken: false,
+    expiryDays: 3
   }
 };
 
