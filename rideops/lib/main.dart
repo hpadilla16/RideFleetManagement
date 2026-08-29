@@ -1,7 +1,5 @@
 import 'dart:async';
-import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -34,8 +32,10 @@ Future<void> bootstrap() async {
   // Drenado en background (H6): registrar el dispatcher UNA vez al arrancar.
   // Solo móvil — en desktop/web no hay WorkManager (y los tests no pasan por
   // bootstrap). El spike M0-1a (token_probe) cerró y se retiró: este es su
-  // sucesor de producción.
-  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+  // sucesor de producción. El predicado es el MISMO que decide si el
+  // coordinador agenda el relevo (backgroundDrainSchedulerProvider): si estos
+  // dos divergen, o agendamos sin dispatcher o al revés.
+  if (backgroundRelayAvailable()) {
     unawaited(
       Workmanager()
           .initialize(outboxBackgroundDispatcher)
