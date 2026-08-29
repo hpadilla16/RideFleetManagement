@@ -11,6 +11,7 @@ import {
 } from './tolls-responsibility.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { countQueues } from './tolls-queue-counts.js';
+import { buildTollListWhere, buildTollExportWhere, tollsToCsv, tollExportFilename, TOLL_EXPORT_MAX_ROWS } from './tolls-export.js';
 import { scopeAllowedLocationIds, reservationLocationWhere, systemScope } from '../../lib/tenant-scope.js';
 import { sendEmail } from '../../lib/mailer.js';
 // beta.357 latent fix: the agreement-mirror catch already called logger.error
@@ -1938,31 +1939,14 @@ export const tollsService = {
     }
 
     await ensureTenantAllowsTolls(scope);
-    const search = String(filters.q || '').trim();
-    const searchFilter = search ? {
-      OR: [
-        { location: { contains: search, mode: 'insensitive' } },
-        { plateRaw: { contains: search, mode: 'insensitive' } },
-        { tagRaw: { contains: search, mode: 'insensitive' } },
-        { selloRaw: { contains: search, mode: 'insensitive' } },
-        { reservation: { reservationNumber: { contains: search, mode: 'insensitive' } } },
-        { vehicle: { internalNumber: { contains: search, mode: 'insensitive' } } }
-      ]
-    } : {};
-
     // Location scoping (2026-07-24). Applied to the list AND to every metric
     // count below — the tiles are separate queries, and a scoped list under a
     // tenant-wide tile is exactly the contradiction the maintenance board hit.
     const locWhere = tollLocationWhere(scope);
 
-    const where = {
-      ...tenantWhereForScope(scope),
-      ...locWhere,
-      ...(filters.status ? { status: String(filters.status).toUpperCase() } : {}),
-      ...(filters.needsReview === true ? { needsReview: true } : {}),
-      ...(filters.reservationId ? { reservationId: String(filters.reservationId) } : {}),
-      ...searchFilter
-    };
+    // The list where is built by the SAME pure builder the CSV export uses
+    // (tolls-export.js) so the spreadsheet can never disagree with the screen.
+    const where = buildTollListWhere(scope, filters);
 
     const [transactions, importedToday, matchedCount, reviewCount, billedCount, disputedCount, providerAccount, importRuns] = await Promise.all([
       prisma.tollTransaction.findMany({
@@ -2066,6 +2050,38 @@ export const tollsService = {
       importRuns: (importRuns || []).map(serializeImportRun),
       transactions: transactionsWithIssues.map(serializeTransaction)
     };
+  },
+
+  /**
+   * CSV export of the CURRENT filtered queue view (Tolls redesign A). Honors
+   * the exact same tenant scope, location scope, and filters (q / status /
+   * needsReview / reservationId) as the dashboard list, PLUS the active queue
+   * view (`filters.view` — same keys as queueCounts). Read-only and additive:
+   * no other consumer's contract changes.
+   */
+  async exportTransactionsCsv(scope = {}, filters = {}) {
+    await ensureTenantAllowsTolls(scope);
+    const where = buildTollExportWhere(scope, filters);
+    const rows = await prisma.tollTransaction.findMany({
+      where,
+      include: {
+        vehicle: true,
+        reservation: {
+          include: {
+            customer: { select: { id: true, firstName: true, lastName: true } }
+          }
+        },
+        assignments: {
+          include: {
+            reservation: { select: { id: true, reservationNumber: true, pickupAt: true, returnAt: true } }
+          },
+          orderBy: [{ createdAt: 'desc' }]
+        }
+      },
+      orderBy: [{ needsReview: 'desc' }, { transactionAt: 'desc' }],
+      take: TOLL_EXPORT_MAX_ROWS
+    });
+    return { csv: tollsToCsv(rows), filename: tollExportFilename(filters), rowCount: rows.length };
   },
 
   async getProviderAccount(scope = {}) {
