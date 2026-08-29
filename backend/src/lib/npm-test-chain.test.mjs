@@ -188,7 +188,6 @@ const UNRUN_FILES_BASELINE = new Set([
   'src/modules/reports/fleet-status.report.test.mjs',
   'src/modules/reports/rental-status.report.test.mjs',
   'src/modules/reports/reservations-by-day.report.test.mjs',
-  'src/modules/reports/unpaid-balance.report.test.mjs',
   'src/modules/reports/upcoming-vehicle-sales.report.test.mjs',
   'src/modules/reports/utilization.report.test.mjs',
   'src/modules/reservations/list-page-date-filter.test.mjs',
