@@ -184,6 +184,43 @@ abstract class BackgroundDrainScheduler {
   Future<void> cancel();
 }
 
+/// Plataforma donde el relevo de background EXISTE de verdad: Android (el
+/// aparato del patio) e iOS. RideOps no tiene objetivo de escritorio ni web.
+///
+/// Este es el MISMO predicado que decide en `bootstrap()` si registramos el
+/// dispatcher (`Workmanager().initialize`). Vive aquí, en un solo lugar, para
+/// que agendar y registrar no puedan divergir: agendar trabajo en una
+/// plataforma donde nunca inicializamos el dispatcher no puede funcionar.
+///
+/// Y en Linux no es solo inútil, es DAÑINO: `workmanager` resuelve la
+/// implementación por `Platform.isLinux` (workmanager_impl.dart) a
+/// `workmanager_linux`, que NO es un plugin con MethodChannel — es Dart plano
+/// que escribe un payload en disco y lanza `systemd-run` con `Process.run`.
+/// En un widget test eso deja un temporizador VIVO (el proceso hijo) y la
+/// prueba muere con "Pending timers"; en un escritorio real escribiría
+/// unidades de systemd para una app que ahí no corre. Windows y macOS lo
+/// disimulaban (sin implementación / MissingPlugin tragado por el catch), y
+/// por eso el fallo solo salía en el CI de ubuntu.
+///
+/// POR QUÉ `dart:io Platform` Y NO `defaultTargetPlatform` — no lo "modernices".
+/// No son el mismo oráculo. `defaultTargetPlatform` dice para qué plataforma
+/// PINTAR widgets, y se puede falsear desde una prueba con
+/// `debugDefaultTargetPlatformOverride`. Pero quien elige la implementación del
+/// relevo es `workmanager`, y la elige leyendo `dart:io Platform`. Gatear con el
+/// primero seria consultar un oraculo distinto del que toma la decision real:
+/// un widget test que se declare Android sobre un runner de Linux volveria a
+/// meter `Process.run` por la puerta de atras, con el mismo "Pending timers" que
+/// este archivo existe para evitar — y la prueba de host no lo cazaria.
+///
+/// [operatingSystem] se inyecta SOLO en tests: en runtime es el host real.
+bool backgroundRelayAvailable({String? operatingSystem}) {
+  if (kIsWeb) return false;
+  final os = operatingSystem ?? Platform.operatingSystem;
+  return os == 'android' || os == 'ios';
+}
+
+/// Relevo real vía WorkManager. Se instancia SOLO donde
+/// [backgroundRelayAvailable] — ver [backgroundDrainSchedulerProvider].
 class WorkmanagerDrainScheduler implements BackgroundDrainScheduler {
   const WorkmanagerDrainScheduler();
 
@@ -201,7 +238,29 @@ class WorkmanagerDrainScheduler implements BackgroundDrainScheduler {
   Future<void> cancel() => Workmanager().cancelByUniqueName(outboxDrainTaskName);
 }
 
+/// Escritorio y CI: no hay relevo que agendar. No-op EXPLÍCITO en vez de
+/// dejar que el plugin falle y lo trague el `catch` del coordinador — porque
+/// en Linux no falla: lanza un proceso de verdad (ver
+/// [backgroundRelayAvailable]).
+class NoopDrainScheduler implements BackgroundDrainScheduler {
+  const NoopDrainScheduler();
+
+  @override
+  Future<void> ensureScheduled() async {}
+
+  @override
+  Future<void> cancel() async {}
+}
+
+/// Seam de plataforma. Es un provider (no una constante) para que los tests
+/// puedan ejercer las DOS ramas del cableado de abajo sin falsear `Platform`:
+/// la de Android, que es la que importa para ADR-7, y la del escritorio.
+final Provider<bool> backgroundRelayAvailableProvider =
+    Provider<bool>((ref) => backgroundRelayAvailable());
+
 final Provider<BackgroundDrainScheduler> backgroundDrainSchedulerProvider =
     Provider<BackgroundDrainScheduler>(
-  (ref) => const WorkmanagerDrainScheduler(),
+  (ref) => ref.watch(backgroundRelayAvailableProvider)
+      ? const WorkmanagerDrainScheduler()
+      : const NoopDrainScheduler(),
 );
