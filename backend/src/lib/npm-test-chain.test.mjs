@@ -111,6 +111,14 @@ const CI_GATED = {
   'test:presence-boundary':
     'which surfaces may receive the presence array — it carries staff names and, '
     + 'since M2-H6, employee ids; the customer phone and the lobby kiosk must get neither',
+  'test:billing-suspension':
+    'what a billing RESTORE puts Tenant.status back to. ACTIVE is not a label on that '
+    + 'column, it is the positive gate the public booking surfaces match on, and isDemo '
+    + 'gates nothing — a restore that hardcodes ACTIVE publishes the demo tenant',
+  'test:billing-model':
+    'the two 20260828 migrations against schema.prisma. There is no Postgres in this '
+    + 'workflow, so this file-level comparison is the ONLY pre-production check that '
+    + 'SQL gets before it runs on the live database at boot',
 };
 
 function ciWorkflowRunLines() {

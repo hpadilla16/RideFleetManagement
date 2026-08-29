@@ -255,9 +255,12 @@ test('a recorded SUSPENDED is caught whatever its casing', async () => {
   assert.equal(prisma.tenant.rows[0].status, 'ACTIVE');
 });
 
-test('a recorded status is put back VERBATIM, not normalised', async () => {
-  // The casing test above is a COMPARISON, not a rewrite. Restore was asked to
-  // put a value back; uppercasing the output would mean it quietly changed one.
+test('a recorded status is NORMALISED into the vocabulary, not put back verbatim', async () => {
+  // Restore is the ONE writer of Tenant.status that takes its value from
+  // storage rather than from a human, so it is the one place a value can enter
+  // that column without passing normalizeTenantStatus. Putting it back byte for
+  // byte made restore the path that keeps free text alive in a column the rest
+  // of the codebase treats as a closed vocabulary.
   const { prisma } = seed({
     tenantStatus: 'SUSPENDED',
     billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
@@ -267,7 +270,66 @@ test('a recorded status is put back VERBATIM, not normalised', async () => {
 
   await restoreTenantAccess({ tenantId: 't1' }, overrides);
 
-  assert.equal(prisma.tenant.rows[0].status, 'Demo');
+  assert.equal(prisma.tenant.rows[0].status, 'DEMO');
+});
+
+test('a recorded lower-case ACTIVE comes back as ACTIVE, not left dark', async () => {
+  // THIS is why verbatim was not the conservative choice it looked like. The
+  // public surfaces match `status: 'ACTIVE'` EXACTLY (public-booking.service.js
+  // :85, :1376, :1602), so writing back a recorded 'active' restored a tenant
+  // that was genuinely on into a status nothing matches — the customer pays,
+  // clicks Restore, and their booking site stays dark with the row looking fine.
+  const { prisma } = seed({
+    tenantStatus: 'SUSPENDED',
+    billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
+    billingPreviousStatus: 'active',
+  });
+  const { overrides } = overridesFor(prisma);
+
+  const out = await restoreTenantAccess({ tenantId: 't1' }, overrides);
+
+  assert.equal(prisma.tenant.rows[0].status, 'ACTIVE');
+  assert.equal(out.status, 'ACTIVE');
+});
+
+test('a recorded value OUTSIDE the vocabulary falls back to ACTIVE instead of throwing', async () => {
+  // normalizeTenantStatus THROWS on an unknown value, which is right where a
+  // human is editing a tenant and wrong here: the only human in the room clicked
+  // Restore and has nothing to fix. It is wrapped, never called bare — an
+  // unreadable recorded value must not turn a working restore into a 500 for a
+  // customer who has just paid.
+  const { prisma } = seed({
+    tenantStatus: 'SUSPENDED',
+    billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
+    billingPreviousStatus: 'ARCHIVED',
+  });
+  const { overrides } = overridesFor(prisma);
+
+  const out = await restoreTenantAccess({ tenantId: 't1' }, overrides);
+
+  assert.equal(prisma.tenant.rows[0].status, 'ACTIVE');
+  assert.equal(out.status, 'ACTIVE');
+});
+
+test('a recorded NON-STRING falls back to ACTIVE and never reaches the allowlist', async () => {
+  // THE GUARD THAT A TEST CAUGHT, not one that was reasoned into existence.
+  // normalizeTenantStatus reaches its argument through String(value), under
+  // which ['DEMO'] stringifies to 'DEMO' and sails through the allowlist as if
+  // someone had recorded it. Prisma types this column String?, so the database
+  // cannot hand us an array today — but resolveRestoredTenantStatus is exported
+  // and called with whatever a caller has, and a function whose whole job is to
+  // fail closed must not depend on someone else's type checking to do it.
+  const { prisma } = seed({
+    tenantStatus: 'SUSPENDED',
+    billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
+    billingPreviousStatus: ['DEMO'],
+  });
+  const { overrides } = overridesFor(prisma);
+
+  const out = await restoreTenantAccess({ tenantId: 't1' }, overrides);
+
+  assert.equal(prisma.tenant.rows[0].status, 'ACTIVE');
+  assert.equal(out.status, 'ACTIVE');
 });
 
 test('a recorded SUSPENDED is treated as nothing recorded', async () => {
@@ -286,12 +348,18 @@ test('a recorded SUSPENDED is treated as nothing recorded', async () => {
   assert.equal(prisma.tenant.rows[0].status, 'ACTIVE');
 });
 
-test('an EMPTY recorded status is put back as empty, not promoted to ACTIVE', async () => {
-  // Tenant.status is non-nullable, but tenants.service.js updateTenant writes
-  // String(patch.status || '').toUpperCase(), so a tenant CAN sit at ''. Such a
-  // tenant is already off the public surface — nothing matches '' either — and
-  // reading its recorded '' as "nothing was recorded" would publish it. NULL is
-  // the only value that means nothing was recorded.
+test('an EMPTY recorded status falls back to ACTIVE — the documented regression', async () => {
+  // THE ONE CASE THE VALIDATED VERSION HANDLES WORSE THAN THE VERBATIM ONE, kept
+  // as a test so it stays a decision rather than a discovery. '' used to come
+  // back as '' (off the public surface); normalizeTenantStatus treats '' as
+  // absent, so it now lands on ACTIVE (on it).
+  //
+  // Accepted because '' is unreachable through every writer that exists:
+  // suspend records tenant.status, whose only writers (createTenant and
+  // updateTenant) already run it through this same normaliser, and the backfill
+  // drops blanks with NULLIF(TRIM(...), ''). And because ACTIVE is exactly what
+  // the old hardcode did with that tenant, so this is today's behaviour, not a
+  // new hazard. If a '' ever becomes reachable, this test is where to argue.
   const { prisma } = seed({
     tenantStatus: 'SUSPENDED',
     billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
@@ -301,10 +369,12 @@ test('an EMPTY recorded status is put back as empty, not promoted to ACTIVE', as
 
   await restoreTenantAccess({ tenantId: 't1' }, overrides);
 
-  assert.equal(prisma.tenant.rows[0].status, '');
+  assert.equal(prisma.tenant.rows[0].status, 'ACTIVE');
 });
 
-test('a recorded status keeps its exact spacing — restore rewrites nothing', async () => {
+test('a recorded status is trimmed, so padding cannot land a tenant dark', async () => {
+  // ' DEMO ' is not a status any surface matches. Putting it back with its
+  // spacing intact preserved a typo into the column instead of resolving it.
   const { prisma } = seed({
     tenantStatus: 'SUSPENDED',
     billingSuspendedAt: new Date('2026-09-08T00:00:00.000Z'),
@@ -314,7 +384,7 @@ test('a recorded status keeps its exact spacing — restore rewrites nothing', a
 
   await restoreTenantAccess({ tenantId: 't1' }, overrides);
 
-  assert.equal(prisma.tenant.rows[0].status, ' DEMO ');
+  assert.equal(prisma.tenant.rows[0].status, 'DEMO');
 });
 
 test('a padded SUSPENDED is still caught by the guard', async () => {

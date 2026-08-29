@@ -478,12 +478,16 @@ function MintedLink({ minted, onDismiss }) {
 }
 
 /**
- * Render a raw Tenant.status for prose. Tenant.status is FREE TEXT (schema:
- * `status String`, and tenants.service.js updateTenant only uppercases whatever
- * it is given), so there is no label map to look it up in the way STATUS_LABEL
- * covers the subscription's fixed vocabulary. Title-cased to sit beside
- * "Active" and "Past due" in the same sentence rather than shouting DEMO at the
- * reader.
+ * Render a Tenant.status for prose. Title-cased to sit beside "Active" and
+ * "Past due" in the same sentence rather than shouting DEMO at the reader.
+ *
+ * STILL A FUNCTION AND NOT A LABEL MAP, even though `restoresToStatus` is now
+ * guaranteed to be one of ACTIVE / SUSPENDED / DEMO — the server resolves it
+ * through normalizeTenantStatus and falls back to ACTIVE rather than passing a
+ * value through. The other caller is `billingPreviousStatus`, which is the RAW
+ * recorded column: Prisma types it `String?` with no enum behind it, so a row
+ * written before the vocabulary closed can still hold anything, and a map would
+ * render that as blank. Formatting whatever arrives is the safe shape here.
  */
 function titleCaseStatus(raw) {
   const v = String(raw || '').trim();

@@ -63,14 +63,23 @@ function mapTenantWriteError(error, fallback = 'Unable to save tenant changes') 
  * (cmn6d5ax80002s10izy80l4ei) is DEMO, so omitting it would make that tenant's
  * status unsettable from the only screen that edits it.
  *
- * AND AN OPEN HAZARD THIS LIST DOES NOT CLOSE. On the same day, a real
- * TENANT_SUSPEND recorded `previousTenantStatus: 'DEMO'` into AdminAuditLog.
- * NOTHING READS THAT VALUE BACK: billing-admin.service.js restoreTenantAccess
- * hardcodes `status: 'ACTIVE'`, so restoring that tenant from the billing screen
- * flips DEMO -> ACTIVE. Because `isDemo` gates no public surface, the only thing
- * keeping the demo tenant out of the public car-sharing marketplace is
- * `status !== 'ACTIVE'` — so that restore would publish it. Owned by
- * fix/billing-restore-previous-status; do not assume it is handled here.
+ * AND A HAZARD THIS LIST DID NOT CLOSE, NOW CLOSED ELSEWHERE. On the same day, a
+ * real TENANT_SUSPEND recorded `previousTenantStatus: 'DEMO'` into AdminAuditLog
+ * and nothing read it back: billing-admin.service.js restoreTenantAccess
+ * hardcoded `status: 'ACTIVE'`, so restoring that tenant from the billing screen
+ * flipped DEMO -> ACTIVE. Because `isDemo` gates no public surface (it does not
+ * appear once under backend/src), the only thing keeping the demo tenant out of
+ * the public car-sharing marketplace is `status !== 'ACTIVE'` — so that restore
+ * would have published it.
+ *
+ * Suspend now records the value in `Tenant.billingPreviousStatus`, a COLUMN
+ * rather than the audit trail, because `recordAudit` is best-effort BY CONTRACT
+ * and a suspension whose audit row was dropped would have fallen back to the old
+ * bug with nothing going red. Restore reads that column back THROUGH
+ * `normalizeTenantStatus` below, falling back to ACTIVE when it is missing or
+ * outside this list. That is the one consumer of this function that must NOT see
+ * the throw — a restore cannot 500 over a stored value the operator has no way
+ * to fix — so it wraps the call. See resolveRestoredTenantStatus there.
  */
 export const TENANT_STATUSES = ['ACTIVE', 'SUSPENDED', 'DEMO'];
 

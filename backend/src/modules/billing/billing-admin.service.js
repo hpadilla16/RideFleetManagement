@@ -42,6 +42,7 @@ import {
 } from './billing.service.js';
 import { createInvite, revokeInvite } from './autopay-invites.service.js';
 import { authService } from '../auth/auth.service.js';
+import { normalizeTenantStatus } from '../tenants/tenants.service.js';
 import { suspensionMode } from '../../lib/tenant-suspension.js';
 import { todayCalendarDate, addCalendarDays } from './billing-dates.js';
 
@@ -314,35 +315,70 @@ const SEVERITY_ORDER = [
  * which on this screen means lying about a paying customer's public surface.
  *
  * Rules, in order:
- *   - NOTHING RECORDED (null) -> ACTIVE. A tenant suspended before
- *     `billingPreviousStatus` existed, or by a path that did not record one.
- *     This is the old behaviour, kept deliberately as the fallback.
+ *   - NOT A STRING (null, undefined, or any other JSON type) -> ACTIVE. Nothing
+ *     was recorded, or nothing legible was. This is the old behaviour, kept
+ *     deliberately as the fallback.
+ *   - OUTSIDE THE VOCABULARY -> ACTIVE. Same reasoning: a value this codebase
+ *     cannot name is a value it does not know.
  *   - a recorded SUSPENDED -> ACTIVE. Restoring to SUSPENDED would clear
  *     `billingSuspendedAt` while leaving the tenant off, and restore refuses a
  *     suspension billing did not set — so that combination is the one state
  *     this screen could never undo again.
- *   - anything else -> itself, VERBATIM. Untrimmed, unchanged, byte for byte.
+ *   - anything else -> its NORMALISED form ('demo' comes back as 'DEMO').
  *
- * NULL AND EMPTY STRING ARE NOT THE SAME THING, and collapsing them was a bug.
- * `Tenant.status` is non-nullable but tenants.service.js updateTenant writes
- * `String(patch.status || '').toUpperCase()`, so a tenant CAN sit at ''. That
- * tenant is already off the public surface (nothing matches '' either), and
- * treating its recorded '' as "nothing was recorded" would promote it to ACTIVE
- * and publish it — the exact defect this function exists to prevent, surviving
- * in the one branch nobody looks at. Only a NULL column means nothing was
- * recorded; '' means '' was.
+ * THE FALLBACK IS ALWAYS 'ACTIVE', WHICH IS EXACTLY TODAY'S BEHAVIOUR, because
+ * today every restore hardcodes ACTIVE. That asymmetry is the whole safety
+ * argument: this change may only improve the case we can see, and must never
+ * make the case we cannot see worse than the day before it shipped.
  *
- * The SUSPENDED test is case-insensitive but the returned value keeps its
- * original casing and spacing. Both writers uppercase, but a row written by
- * hand could hold 'suspended', and a case-sensitive test would let it through
- * into the unrecoverable state above. Normalising the OUTPUT instead would mean
- * restore silently rewriting a value it was only asked to put back.
+ * WHY NORMALISE AT ALL, when the column already holds what suspend wrote. Two
+ * reasons, and the second is a live defect in the verbatim version this
+ * replaced. First, `Tenant.status` is free text in Prisma but a CLOSED
+ * vocabulary everywhere else (TENANT_STATUSES), and restore is the one writer
+ * that takes its value from storage rather than from a human — returning a
+ * recorded 'garbage' byte-for-byte would let restore be the path that puts junk
+ * into that column. Second, and worse: a recorded 'active' (lower case, which
+ * free text permits) came back verbatim as 'active', and the public surfaces
+ * match `status: 'ACTIVE'` EXACTLY — so restoring a genuinely-active tenant
+ * left it dark. Verbatim was not the conservative choice it looked like.
+ *
+ * `normalizeTenantStatus` THROWS on a value outside the vocabulary. That is
+ * correct where it is normally used — a human editing a tenant must be told
+ * their typo was refused, not have it silently coerced — and wrong here, where
+ * the only human in the room clicked "Restore" and has nothing to fix. So it is
+ * WRAPPED, never called bare: an unreadable recorded value degrades this to the
+ * old hardcoded behaviour instead of turning a working restore into a 500.
+ *
+ * THE `typeof` GUARD IS LOAD-BEARING, not belt-and-braces. `normalizeTenantStatus`
+ * reaches its argument through `String(value)`, under which `['DEMO']`
+ * stringifies to 'DEMO' and sails through the allowlist. Prisma types this
+ * column `String?`, so the DB cannot hand us an array today — but this function
+ * is EXPORTED on the `billingAdmin` surface and is called with whatever a caller
+ * has, and a function whose entire purpose is to fail closed should not depend
+ * on someone else's type checking to do it. Honouring a shape suspend never
+ * writes is honouring a value nobody recorded.
+ *
+ * ONE DELIBERATE REGRESSION AGAINST THE VERBATIM VERSION: a recorded '' used to
+ * come back as '' (unpublished) and now falls to ACTIVE (published), because
+ * `normalizeTenantStatus` treats '' as absent. It is accepted because '' is
+ * unreachable through every writer that exists — suspend records `tenant.status`
+ * from a row whose only writers (createTenant/updateTenant) already run it
+ * through this same normaliser, and the backfill drops blanks with
+ * `NULLIF(TRIM(...), '')` — and because ACTIVE is, once again, exactly what
+ * today's hardcode does with that tenant.
  */
 export function resolveRestoredTenantStatus(billingPreviousStatus) {
-  if (billingPreviousStatus == null) return 'ACTIVE';
-  const previous = String(billingPreviousStatus);
-  if (previous.trim().toUpperCase() === 'SUSPENDED') return 'ACTIVE';
-  return previous;
+  if (typeof billingPreviousStatus !== 'string') return 'ACTIVE';
+  let normalized;
+  try {
+    normalized = normalizeTenantStatus(billingPreviousStatus, 'ACTIVE');
+  } catch {
+    return 'ACTIVE';
+  }
+  // After normalisation, so 'suspended' and '  SUSPENDED  ' are the same rule
+  // rather than a second hand-rolled case-insensitive test that could drift.
+  if (normalized === 'SUSPENDED') return 'ACTIVE';
+  return normalized;
 }
 
 export function severityRank(status) {
@@ -1327,6 +1363,7 @@ export const billingAdmin = {
   cancelSubscriptionForTenant,
   suspendTenantAccess,
   restoreTenantAccess,
+  resolveRestoredTenantStatus,
   applyPlanToEntitlements,
   sendUpdatePaymentLink,
   revokeOutstandingInvites,
