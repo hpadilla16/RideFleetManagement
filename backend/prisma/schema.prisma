@@ -218,10 +218,17 @@ enum VehicleFleetMode {
 // LOANER_ONLY tagging so their loaner units don't surface in the public
 // booking search; their service rentals stay RENTAL_ONLY. Existing
 // vehicles default to BOTH for backward compatibility.
+//
+// SHUTTLE_ONLY (2026-08-24): dedicated airport-shuttle units. Excluded from
+// BOTH consumption sides — never rentable inventory (search / availability /
+// utilization denominators) and never loaner-pool candidates. Dual-use
+// vehicles that merely also run shuttle duty keep RENTAL_ONLY/BOTH; the tag
+// is only for vehicles that exist solely to move customers.
 enum VehicleProgramCategory {
   RENTAL_ONLY
   LOANER_ONLY
   BOTH
+  SHUTTLE_ONLY
 }
 
 // EmployeeProgramScope (2026-07-02): per-employee program visibility. Mirrors
@@ -559,6 +566,27 @@ model Tenant {
   // rental-agreement renderer (see getEffectiveTermsHtmlForTenant).
   // When null/empty, the system continues to render the canonical T&C.
   termsHtml                 String?  @db.Text
+  // Free-form per-tenant integration settings (jsonb). The column has existed in
+  // production since before the migration runner and was NEVER declared here —
+  // so every `select: { settingsJson: true }` on Tenant was a Prisma validation
+  // error at runtime, and the per-tenant config it holds has never applied:
+  //   - sms.service.js getTenantSmsConfig      -> smsProvider/smsFromNumber/creds
+  //   - payment-gateway.service.js getTenantSpinConfig -> spinAuthKey/spinTpn/...
+  //   - incident-report.service.js reportingWindowHours -> incidentReportingWindowHours
+  // Both readers accept the jsonb object OR a legacy JSON string, so declaring it
+  // Json? is safe either way. Nothing in the app WRITES it yet — today it is set
+  // by SQL only. See migration 20260826_tenant_settings_json (additive, no-op in prod).
+  settingsJson              Json?
+  // Distinguishes "suspended because they did not pay" from "suspended by a
+  // human for some other reason" (tenant subscriptions, 2026-08-27). Tenant.status
+  // stays THE enforcement primitive — it already darkens the public booking site
+  // and stops integration syncs — and this column only records who set it, so
+  // automation may ONLY clear a suspension it set itself. Without it, a dunning
+  // job that later sees a payment land would happily reactivate a tenant somebody
+  // had deliberately switched off.
+  // NULL for every existing tenant. Nothing reads it yet: the suspension gate is
+  // a later phase.
+  billingSuspendedAt        DateTime?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
@@ -601,6 +629,7 @@ model Tenant {
   citationSourceAccounts      CitationSourceAccount[]
   citations                   Citation[]
   citationAssignments         CitationAssignment[]
+  citationAttachments         CitationAttachment[]
   citationImportRuns          CitationImportRun[]
   telematicsDevices           VehicleTelematicsDevice[]
   telematicsEvents            VehicleTelematicsEvent[]
@@ -644,6 +673,7 @@ model Tenant {
   loanerAgreements         LoanerAgreement[]
   longTermPlans            LongTermPlan[]
   customReports            CustomReport[]
+  subscriptions            TenantSubscription[]
 }
 
 model Location {
@@ -1302,6 +1332,7 @@ model Customer {
   licenseNumber            String?
   licenseState             String?
   dateOfBirth              DateTime?
+  dateOfBirthEnc           String?   @db.Text // encrypted DOB (field-crypto encf:v1 format); when set, dateOfBirth is null
   insurancePolicyNumber    String?
   // 2026-07-28 (LAX #5) — insurance policy expiration ("Exp Date" on the
   // pre-check-in forms). Named after LoanerAgreement.insuranceExpiry.
@@ -1899,6 +1930,16 @@ model User {
   lockPinHash        String?
   lockPinUpdatedAt   DateTime?
   screenLockExempt   Boolean              @default(false)
+  // Staff 2FA (TOTP) — 2026-08-22. All columns nullable/defaulted so the
+  // migration is additive and existing rows stay valid (zero behavior change
+  // until a policy exists or a user enrolls). twoFactorSecret is the ACTIVE
+  // TOTP secret (AES-256-GCM via integration-crypto); twoFactorPendingSecret
+  // holds an unverified secret mid-enrollment and is promoted on first valid
+  // code. Independent of lockPin* (screen lock) — do not conflate.
+  twoFactorEnabled       Boolean          @default(false)
+  twoFactorSecret        String?
+  twoFactorPendingSecret String?
+  twoFactorEnrolledAt    DateTime?
   fullName           String
   role               UserRole             @default(AGENT)
   isActive           Boolean              @default(true)
@@ -1941,10 +1982,25 @@ model User {
   createdHostProfiles              HostProfile[]           @relation("HostProfileCreatedBy")
   approvedHostVehicleSubmissions   HostVehicleSubmission[]
   ownedTripIncidents               TripIncident[]          @relation("TripIncidentOwner")
+  twoFactorBackupCodes             TwoFactorBackupCode[]
 
   @@index([tenantId, role, isActive])
   @@index([commissionPlanId])
   @@index([createdByUserId])
+}
+
+// Staff 2FA (TOTP) recovery codes — 2026-08-22. bcrypt-hashed (cost 10),
+// single-use: consuming a code stamps usedAt. Regenerating replaces the whole
+// set. onDelete: Cascade so removing a user cleans up their codes.
+model TwoFactorBackupCode {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 model HostProfile {
@@ -2128,6 +2184,64 @@ model AuditLog {
   @@index([action, createdAt])
 }
 
+/// Administrative / security audit trail (Wave 3, 2026-08-24).
+///
+/// WHY A NEW TABLE (not AuditLog): `AuditLog.reservationId` is a REQUIRED
+/// String with a required `reservation` relation — it is reservation-scoped by
+/// construction. The events recorded here (logins, password changes, 2FA
+/// mutations, role changes, DSAR export/erase, sensitive-record reads,
+/// impersonation) have NO reservation to attach to. Routing them into AuditLog
+/// is impossible, not merely awkward: every insert would throw
+/// PrismaClientValidationError into recordAudit's best-effort catch and produce
+/// zero rows — the same trap ModuleAccessAuditLog documents. This table is
+/// modelled on FeeRateAuditLog / ModuleAccessAuditLog (standalone, PII-light).
+///
+/// SURVIVES ERASURE: `actorUserId` / `tenantId` are PLAIN STRINGS with NO
+/// foreign key. An audit row must outlive the tenant or user it describes — a
+/// GDPR erasure or tenant teardown must NOT cascade away the record that the
+/// erasure happened. (Contrast AuditLog, whose actorUser/tenant FKs would.)
+///
+/// `action` is a String, NOT a Prisma enum: new event types must not require a
+/// schema migration. The known values live in AUDIT_ACTIONS (audit.service.js).
+///
+/// RETENTION: rows are aged out by the Wave 2 retention sweep at ~24 months
+/// (RETENTION_AUDIT_MONTHS, counsel-confirmable). That sweep is NOT wired here —
+/// it lives on the unmerged Wave 2 branch; deferring avoids a cross-branch
+/// dependency. See migration 20260824_admin_audit_log for the documented intent.
+model AdminAuditLog {
+  id                   String   @id @default(cuid())
+  at                   DateTime @default(now())
+
+  // Tenant context, PLAIN STRING (no FK) so the row survives tenant deletion.
+  tenantId             String?
+
+  // Actor identity captured at write time. actorUserId is a plain string (no FK)
+  // so the row survives the actor's erasure; email/role are snapshotted because
+  // a join target may no longer exist when the trail is read.
+  actorUserId          String?
+  actorEmail           String?
+  actorRole            String?
+
+  // Set ONLY when the actor is operating under an impersonation token — the
+  // super-admin behind the impersonated session (req.user.imp). Indexed so
+  // "everything done while impersonating" is answerable.
+  impersonatedByUserId String?
+
+  action               String
+  targetType           String?
+  targetId             String?
+
+  ip                   String?
+  userAgent            String?
+  metadata             Json?
+  outcome              String   @default("SUCCESS")
+
+  @@index([tenantId, at])
+  @@index([actorUserId, at])
+  @@index([action, at])
+  @@index([impersonatedByUserId, at])
+}
+
 model RentalAgreement {
   id              String                @id @default(cuid())
   tenantId        String?
@@ -2161,6 +2275,7 @@ model RentalAgreement {
   customerZip           String?
   customerCountry       String?
   dateOfBirth           DateTime?
+  dateOfBirthEnc        String?   @db.Text // encrypted DOB (field-crypto encf:v1 format); when set, dateOfBirth is null
   licenseNumber         String?
   licenseState          String?
   licenseExpiry         DateTime?
@@ -2246,6 +2361,12 @@ model RentalAgreement {
   locked           Boolean   @default(false)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  // GDPR Wave 2 Phase C — retention-sweep idempotency marker. Stamped when the
+  // automatic sweep has stripped the IDENTITY snapshot on THIS record (past the
+  // identity/claims clock). NULL = never swept; a set value makes re-runs skip
+  // it. Distinct from customer-level erasure; accounting-residual removal (the
+  // accounting clock) is tracked separately via agreementNumber anonymisation.
+  piiPurgedAt      DateTime?
 
   drivers          AgreementDriver[]
   charges          RentalAgreementCharge[]
@@ -2437,6 +2558,7 @@ model AgreementDriver {
   licenseState  String?
   licenseExpiry DateTime?
   dateOfBirth   DateTime?
+  dateOfBirthEnc String?   @db.Text // encrypted DOB (field-crypto encf:v1 format); when set, dateOfBirth is null
   isPrimary     Boolean   @default(false)
 
   createdAt DateTime @default(now())
@@ -2937,6 +3059,7 @@ model ReservationAdditionalDriver {
   lastName             String
   address              String?
   dateOfBirth          DateTime?
+  dateOfBirthEnc       String?   @db.Text // encrypted DOB (field-crypto encf:v1 format); when set, dateOfBirth is null
   licenseNumber        String?
   licenseImageUploaded Boolean   @default(false)
   notes                String?
@@ -3205,6 +3328,17 @@ model ShuttleRequest {
   customerName   String
   customerPhone  String?
   partySize      Int                  @default(1)
+  // Phase 3 intake (2026-08-25, mockup Screen 7): "how many bags?". NULL =
+  // intake disabled at the sede or the row predates the column.
+  bags           Int?
+  // Manual staff assignment (Phase 3, Screen 8a). Plain String ref, NO
+  // relation — same style as ShuttleAlert.vehicleId: a sold (hard-deleted)
+  // vehicle must never cascade into or block on a request row. Ownership and
+  // shuttle-configured-ness are re-verified at assign time and on every read.
+  assignedVehicleId String?
+  // Which pickup spot (ShuttleZone.isPickupSpot) intake directed the customer
+  // to. Plain ref for the same no-cascade reason.
+  pickupSpotZoneId  String?
   pickupNote     String?
   status         ShuttleRequestStatus @default(READY)
   callCount      Int                  @default(1)
@@ -3221,12 +3355,18 @@ model ShuttleRequest {
   // PUBLIC_LINK (the customer's tracker page). Null = created before this
   // column existed. Reporting and abuse triage both want the distinction.
   source         String?
+  // Phase 2 arrival notification (2026-08-24, approved #21 / mockup Screen
+  // 16): the customer said "text me when it arrives". Default false — the
+  // arrival SMS is strictly opt-in; the tracker-page banner needs no opt-in.
+  smsOptIn       Boolean              @default(false)
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
   // The global banner polls this every few seconds.
   @@index([tenantId, locationId, status])
   @@index([reservationId, status])
+  // Mode-aware tracker read + future driver surface ("which pickups are mine").
+  @@index([assignedVehicleId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3255,6 +3395,19 @@ model ShuttleTrackerConfig {
   // NON_STOP: "runs every ~N minutes" — tenant-stated, shown verbatim.
   headwayMinutes Int @default(10)
 
+  // Phase 2 (2026-08-24, approved mockup Screen 4): per-location staff alert
+  // recipients — JSON array of { name, email?, phone?, channels: ['EMAIL'|'SMS'] }.
+  // Lives here (not a table) because the tracker config is already the
+  // per-location shuttle anchor and the list is tiny; parseAlertRecipients in
+  // shuttle-zone-alerts.js is the single validator both sides use.
+  alertRecipientsJson Json?
+
+  // Phase 3 intake knobs (2026-08-25, Screen 7) — { enabled, partySizeCap,
+  // bagsCap }. NULL = intake OFF, server defaults (50/20) apply; the flag
+  // keeps every existing tenant byte-for-byte unchanged until a sede opts in.
+  // parseIntakeConfig in shuttle-intake.js is the single reader/validator.
+  intakeJson Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -3279,6 +3432,144 @@ model ShuttleTrackerLink {
 
   @@index([reservationId])
   @@index([tenantId, expiresAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shuttle zones + alerts (Phase 2, 2026-08-24 — approved mockup Screens 4/5/16).
+// Detection is PROVIDER-SIDE (approved decision #9): zones are synced to the
+// GPS provider (OneStepGPS Zone API) and enter/exit events come back through
+// its Alerts endpoint — no in-house point-in-polygon engine. These models
+// follow the tracker-substrate style: plain String refs, no Prisma relations,
+// keyed lookups at read time (same as ShuttleTrackerConfig/Link).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A staff-defined named area (pickup spot, base lot) or route corridor.
+// We are the source of truth for name/type/notify prefs; the provider holds
+// the live geometry copy under providerZoneId.
+model ShuttleZone {
+  id         String @id @default(cuid())
+  tenantId   String
+  locationId String
+
+  name String
+  // ZONE (rectangle/polygon) | ROUTE (polyline + corridor tolerance).
+  kind String @default("ZONE")
+  // A zone the customer waits in. ENTER here fires the arrival notification
+  // (mockup Screen 16) for open shuttle requests at the location.
+  isPickupSpot Boolean @default(false)
+  // Sede-written "go to sign B-4" text shown with the arrival notification.
+  walkingDirections String?
+  // Spanish variant (2026-08-25, owner-approved per-language directions).
+  // NULL = not written yet; readers fall back to the English text.
+  walkingDirectionsEs String?
+
+  // ZONE:  { type: 'polygon'|'rectangle', points: [{lat,lng}, ...] }  (>= 3 points)
+  // ROUTE: { type: 'polyline', points: [{lat,lng}, ...] }             (>= 2 points)
+  geometryJson Json
+  // ROUTE corridor half-width in meters (default 300). Null for ZONE.
+  toleranceM Int?
+
+  // Provider sync state. PENDING → the scheduler retries; SYNCED carries
+  // providerZoneId; ERROR keeps the (redacted) message; UNSUPPORTED = the
+  // provider has no API for this kind (ROUTE today — see shuttle-zones.service).
+  providerZoneId     String?
+  providerSyncStatus String  @default("PENDING")
+  providerSyncError  String?
+
+  notifyOnEnter    Boolean @default(false)
+  notifyOnExit     Boolean @default(false)
+  notifyOnOffRoute Boolean @default(false)
+
+  active Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, locationId, active])
+  @@index([tenantId, providerZoneId])
+}
+
+// One normalized provider alert (ENTER | EXIT | OFF_ROUTE). providerRef is
+// the idempotency anchor: the poller re-reads a lookback window every tick
+// and the unique (tenantId, providerRef) turns re-seen alerts into no-ops.
+model ShuttleAlert {
+  id       String @id @default(cuid())
+  tenantId String
+  // Our ShuttleZone id (resolved from the provider's zone ref). Null when the
+  // alert carries no zone we know (e.g. a provider-side rule staff made by
+  // hand) — still recorded for the feed, but never fans out.
+  zoneId    String?
+  vehicleId String?
+
+  type       String // ENTER | EXIT | OFF_ROUTE
+  occurredAt DateTime
+  // Provider's alert id when it has one; otherwise a stable hash of
+  // (device, zone, type, time) — see alertDedupeRef in shuttle-zone-alerts.js.
+  providerRef String
+  rawJson     String?
+
+  // Stamped after the staff email/SMS fan-out attempt (best-effort record).
+  staffNotifiedAt DateTime?
+  // Stamped after the customer arrival fan-out. One row = one arrival = one
+  // notification — the dedupe on providerRef IS the debounce.
+  arrivalNotifiedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, providerRef])
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, zoneId, type, occurredAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shuttle driver mode (Phase 3 driver surface, 2026-08-25 — approved mockup
+// Screens 12–15 + 17a). Driver auth is a TOKENIZED PER-SHIFT LINK, no user
+// account — same public-token idiom as ShuttleTrackerLink (192-bit random,
+// expiring, revocable, bare-404 on anything unusable). Tracker-substrate
+// style: plain String refs, no Prisma relations, ownership re-verified on
+// every read.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// One driver, one shuttle, one shift. Minted by staff from the monitor;
+// expires end-of-day by default (24h hard max) and dies instantly on revoke.
+model ShuttleDriverShift {
+  id         String @id @default(cuid())
+  tenantId   String
+  locationId String
+  // The shuttle this driver drives. Plain ref, NO relation — same style as
+  // ShuttleAlert.vehicleId: a sold (hard-deleted) vehicle must never cascade
+  // into a shift row. Shuttle-configured-ness is re-verified on every read.
+  vehicleId  String
+  // Free text — drivers have no user account (approved decision).
+  driverName String
+
+  token     String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Monitor's active-shift list + token resolution cleanup.
+  @@index([tenantId, locationId, expiresAt])
+  @@index([tenantId, vehicleId])
+}
+
+// Store→driver messages ("Recoge también en Terminal B"). A dedicated tiny
+// table rather than ShuttleAlert reuse: messages are scoped to ONE shift and
+// read by shiftId on every driver poll — ShuttleAlert's rawJson is a String
+// (no keyed shiftId lookup without scanning) and its feed is the geofence
+// surface staff watch; mixing chat into it would pollute both.
+model ShuttleDriverMessage {
+  id              String   @id @default(cuid())
+  tenantId        String
+  shiftId         String   // plain ref — dies with the shift's relevance, no cascade needed
+  message         String
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId, shiftId, createdAt])
 }
 
 model PlannerScenario {
@@ -3597,6 +3888,7 @@ model Citation {
   updatedAt         DateTime               @updatedAt
 
   assignments CitationAssignment[]
+  attachments CitationAttachment[]
 
   @@unique([tenantId, source, citationNo])
   @@index([tenantId, plateNormalized, plateState, issuedAt])
@@ -3646,6 +3938,63 @@ model CitationDocument {
   updatedAt        DateTime @updatedAt
 
   @@index([tenantId, status, createdAt])
+}
+
+// ============================================================================
+// Supporting documents attached TO a citation (2026-08-28).
+//
+// READ THIS BEFORE REUSING CitationDocument ABOVE. The two models point in
+// OPPOSITE directions and conflating them is a live incident:
+//
+//   CitationDocument   document → BECOMES → citation   (OCR intake)
+//   CitationAttachment citation → HAS MANY → documents (evidence, after the fact)
+//
+// CitationDocument is a work QUEUE: citation-ocr.scheduler.js claims rows by
+// `status: 'PENDING'` and ships their bytes to an AI provider for extraction.
+// Filing a payment receipt or a dispute letter there would hand the renter's
+// name, licence and address to that provider and try to parse the receipt as
+// a new citation. Corpusa's citation OCR was deliberately switched off on
+// 2026-08-27 for the TL International data-protection disclosure, and we have
+// stated in writing that AI-assisted processing is off for that tenant.
+//
+// Hence a SEPARATE table with no `status: 'PENDING'` and no OCR columns: rows
+// here are structurally unreachable from the scheduler's query. Pinned by
+// citation-attachments-ocr-isolation.test.mjs.
+//
+// The file lives in a private Supabase bucket; only "<bucket>:<path>" is
+// stored here, matching CitationDocument.bucketPath so one parser serves both.
+// ============================================================================
+model CitationAttachment {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  citationId String
+  citation   Citation @relation(fields: [citationId], references: [id], onDelete: Cascade)
+
+  // AGENCY_NOTICE | PROOF_OF_PAYMENT | DISPUTE_LETTER | AGENCY_RESPONSE |
+  // CUSTOMER_CORRESPONDENCE | RENTAL_DOCUMENT | OTHER. A controlled list on
+  // purpose — free text here is unfixable once operators have typed a hundred
+  // variants of "receipt".
+  docType String
+  label   String // what the operator calls it, e.g. "Reply from City of Orlando"
+  notes   String?
+
+  // Storage reference: "<bucket>:<path>" (private bucket; reads are signed on
+  // demand and never persisted).
+  storagePath String
+  fileName    String?
+  mimeType    String?
+  sizeBytes   Int?
+
+  // ACTIVE | ARCHIVED. Archive supersedes; the export only carries ACTIVE.
+  status String @default("ACTIVE")
+
+  uploadedByUserId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantId, citationId, status])
+  @@index([tenantId, createdAt])
 }
 
 model Conversation {
@@ -4425,6 +4774,26 @@ model ModuleAccessAuditLog {
   @@index([changedAt])
 }
 
+// GDPR Wave 2 Phase C — automatic retention-sweep run history.
+// One row per sweep tick. AuditLog cannot hold this (its reservationId is a
+// required non-null FK, and a sweep spans many/zero reservations), so run
+// history gets its own table. `perCategoryCounts` is the per-category
+// {total, processed, aborted} breakdown; `aborted` is true when ANY category
+// tripped the safety threshold. `mode` is PREVIEW (logs only, mutates nothing)
+// or APPLY (purged).
+model RetentionSweepRun {
+  id                String    @id @default(cuid())
+  startedAt         DateTime  @default(now())
+  finishedAt        DateTime?
+  mode              String // 'PREVIEW' | 'APPLY'
+  perCategoryCounts Json
+  aborted           Boolean   @default(false)
+  notes             String?
+  createdAt         DateTime  @default(now())
+
+  @@index([startedAt])
+}
+
 // PR-5 — Endpoint-level performance telemetry (PERF pillar).
 // Distinct from `LoadObservation` (business volume): this table captures raw
 // per-request samples (HTTP method, normalized route, status, duration, db
@@ -5073,6 +5442,29 @@ model CheckoutSession {
   tenantId      String?
   currentStep   CheckoutStep     @default(CONFIRMING)
 
+  // M2 P2 (2026-08-17) — lightweight optimistic versioning. Clients MAY send
+  // `expectedVersion` on transition/stamp/customer-signature POSTs to get a
+  // 409 STALE_VERSION (with the fresh row) instead of acting on a state
+  // another surface already moved. Opt-in on purpose: web wizard, kiosk and
+  // precheckin never send it, so their behavior is byte-for-byte identical
+  // to before this column existed.
+  //
+  // SEMANTICS (PM decision, Innovation review 2026-08-17): version = MATERIAL
+  // change of the session — anything another surface would render differently.
+  // BUMPS: every transition; every writer of the four side-effect stamps
+  // (checkoutSessionService.stampSideEffect/saveCustomerSignature AND the
+  // direct writers: terms-signing, mobile-inspection, spin-charge x4);
+  // markAbandoned AND the nightly stuck-session sweep (both write the pause
+  // banner state — same semantics via either path); vehicle swap (contract's
+  // car changed).
+  // DOES NOT BUMP: tenantId/agreementId backfills and self-heals,
+  // autoEmailedAt, mintHandoffToken — events/metadata only, no material
+  // state a snapshot could go stale against; and the DEALERSHIP_LOANER
+  // paymentCompletedAt pre-stamp in createForReservation — exempt by
+  // construction: it happens AT session create, before any client can hold
+  // an expectedVersion snapshot to go stale.
+  stateVersion Int @default(0)
+
   // JSON array of { from, to, actorUserId, at, metadata } — full transition
   // log. Used by the stuck-checkouts dashboard tile.
   events String @db.Text
@@ -5108,6 +5500,46 @@ model CheckoutSession {
   @@index([currentStep])
   @@index([tenantId, currentStep])
   @@index([abandonedAt])
+}
+
+// M2 P1 (2026-08-17) — which of the four coexisting checkout surfaces is
+// touching a session. RIDEOPS = the staff yard app, COUNTER = the desktop web
+// wizard, KIOSK = the lobby tablet, CUSTOMER = the customer's own phone
+// (terms-signing / customer-inspection pages). Deliberately NOT mirrored in
+// rideops/lib/core/api/enums.dart yet — the Dart mirror lands with M2-H6.
+enum CheckoutSurface {
+  RIDEOPS
+  COUNTER
+  KIOSK
+  CUSTOMER
+}
+
+// M2 P1 (2026-08-17) — soft presence/claim on a checkout session. PURELY
+// INFORMATIVE: nothing anywhere may gate on these rows (Hector-approved plan,
+// ops-app-plan/M2-PLAN.md §1.2 — "informativa, nunca bloquea"). Each surface
+// heartbeats POST /api/checkout-sessions/:id/presence; readers get only the
+// rows fresh within the 45 s logical TTL (filtered at read time — no cron, no
+// deletes needed for correctness). `sessionId` is a LOOSE reference like
+// KioskSession.checkoutSessionId — no FK, so presence writes can never break
+// or block the money path, and stale rows are harmless noise.
+model CheckoutPresence {
+  id        String          @id @default(cuid())
+  sessionId String
+  surface   CheckoutSurface
+
+  // Staff surfaces send the authenticated user; the kiosk (device, no user)
+  // and the customer's phone (token, no user) leave it null. NOTE: Postgres
+  // treats NULLs as distinct in the compound unique below, so the migration
+  // adds a partial unique index on (sessionId, surface) WHERE actorUserId IS
+  // NULL to keep the null-actor rows singleton too.
+  actorUserId  String?
+  displayLabel String?
+  lastSeenAt   DateTime @default(now())
+
+  createdAt DateTime @default(now())
+
+  @@unique([sessionId, surface, actorUserId])
+  @@index([sessionId, lastSeenAt])
 }
 
 enum HandoffTokenKind {
@@ -5361,6 +5793,7 @@ model LoanerAgreement {
   customerEmail     String?
   customerPhone     String?
   dateOfBirth       DateTime?
+  dateOfBirthEnc    String?   @db.Text // encrypted DOB (field-crypto encf:v1 format); when set, dateOfBirth is null
   licenseNumber     String?
   licenseState      String?
   licenseExpiry     DateTime?
@@ -5415,6 +5848,10 @@ model LoanerAgreement {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  // GDPR Wave 2 Phase C — retention-sweep idempotency marker (see the same
+  // field on RentalAgreement). Loaner records anchor the identity clock on
+  // closedAt (they have no separate returnedAt).
+  piiPurgedAt DateTime?
 
   photos       LoanerPhoto[]
   damagePoints LoanerDamagePoint[]
@@ -5830,6 +6267,19 @@ model Quote {
   revenuePricingApplied Boolean @default(false)
   engineSnapshotJson    String?
 
+  // Staff rate override (2026-08-24). NULL on every quote the engine priced
+  // untouched — the non-override path writes none of these. When an ADMIN/OPS
+  // agent overrides the daily rate, dailyRate/subtotal/fees/taxes/total above
+  // hold the RECOMPUTED numbers, pricingSource becomes MANUAL_OVERRIDE, and
+  // engineSnapshotJson still holds the ENGINE's original row, so the
+  // pre-override price is always recoverable. rateOverrideOriginalDaily is that
+  // original per-day rate denormalized for reporting. A reason is REQUIRED by
+  // the service — an override with no stated reason is rejected, never stored.
+  rateOverrideOriginalDaily Decimal?  @db.Decimal(10, 2)
+  rateOverrideReason        String?   @db.Text
+  rateOverrideByUserId      String?
+  rateOverrideAt            DateTime?
+
   status                 QuoteStatus @default(ACTIVE)
   expiresAt              DateTime
   convertedReservationId String?
@@ -5855,4 +6305,296 @@ model Quote {
   @@index([tenantId, status])
   @@index([tenantId, customerId])
   @@index([tenantId, createdAt])
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// TENANT SUBSCRIPTIONS — Ride billing its OWN tenants for Ride Fleet Manager
+// (2026-08-27, Phase 1). NOT the rental gateway that bills a renter on a
+// tenant's merchant account. Money direction, merchant account and credential
+// set are all different; see modules/billing/authorize-net.js.
+//
+// CALENDAR DATES ARE VARCHAR(10) 'YYYY-MM-DD', NOT DateTime. ARB bills on a
+// calendar DAY in the merchant's own time, not at an instant. Puerto Rico is
+// UTC-4, so a DateTime rendered without an explicit UTC zone shows the day
+// BEFORE the one Authorize.Net actually charges — the customer consents to one
+// date and their card moves on another. Storing text makes the value we send,
+// the value we store and the value we render byte-identical and removes the
+// bug class at the schema. Genuine instants (authorizedAt, cancelledAt,
+// receivedAt, …) stay DateTime.
+//
+// NEVER A PAN. Only customerProfileId, customerPaymentProfileId, brand and
+// last4 are persisted. The platform is PCI SAQ C certified; a card number in
+// one of these tables moves it to SAQ D.
+// ───────────────────────────────────────────────────────────────────────────
+
+/// Ride's own subscription revenue from ONE tenant. There may be several rows
+/// per tenant over time (a cycle change is cancel+create — ARB cannot change an
+/// interval), but at most ONE live row. That invariant is enforced by a PARTIAL
+/// unique index declared in raw SQL (Prisma cannot express one) plus a service
+/// guard. See migration 20260827_tenant_subscriptions.
+model TenantSubscription {
+  id                       String   @id @default(cuid())
+  tenantId                 String
+  /// Restrict is a FEATURE: you cannot delete a tenant that still has billing
+  /// history. Cancel first. (Contrast AdminAuditLog.tenantId, a plain String
+  /// with no FK precisely so the trail SURVIVES deletion — different
+  /// requirement, different choice.)
+  tenant                   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  /// planCode matches a `code` in the EXISTING catalog (AppSetting
+  /// 'tenantPlanCatalog', lib/tenant-plan-limits.js). name + amount are
+  /// SNAPSHOTS: the catalog is editable at any time via PUT
+  /// /api/tenants/plan-catalog, and a price edit must never retroactively
+  /// change what an existing subscriber is charged or what their history says.
+  planCode                 String
+  planNameSnapshot         String
+  amount                   Decimal  @db.Decimal(10, 2)
+  currency                 String   @default("USD")
+  /// ARB's own vocabulary, stored verbatim so nothing translates at call time.
+  intervalUnit             String
+  intervalLength           Int
+
+  status                   String   @default("PENDING_AUTHORIZATION")
+
+  // ── Authorize.Net handles. NEVER a PAN. ────────────────────────────────
+  arbSubscriptionId        String?  @unique
+  customerProfileId        String?
+  customerPaymentProfileId String?
+  cardBrand                String?
+  cardLast4                String?  @db.VarChar(4)
+  cardExpMonth             Int?
+  cardExpYear              Int?
+
+  trialOccurrences         Int      @default(0)
+  trialAmount              Decimal? @db.Decimal(10, 2)
+  trialEndsAt              String?  @db.VarChar(10)
+
+  startDate                String   @db.VarChar(10)
+  nextChargeDate           String?  @db.VarChar(10)
+  currentPeriodStart       String?  @db.VarChar(10)
+  currentPeriodEnd         String?  @db.VarChar(10)
+
+  /// Scheduled change — downgrades and cycle moves land at period end.
+  pendingPlanCode          String?
+  pendingAmount            Decimal? @db.Decimal(10, 2)
+  pendingEffectiveDate     String?  @db.VarChar(10)
+
+  // ── Dunning ────────────────────────────────────────────────────────────
+  failedAttempts             Int       @default(0)
+  lastFailureCode            String?
+  lastFailureText            String?
+  lastFailureAt              DateTime?
+  pastDueSince               DateTime?
+  suspendedAt                DateTime?
+  cancelledAt                DateTime?
+  cancelReason               String?
+  cancelRequestedByUserId    String?
+  supersededBySubscriptionId String?
+
+  /// Consent archive — sits NEXT TO the customerProfileId on purpose: "here is
+  /// the token we charge, here is the exact text they agreed to, at this
+  /// instant, from this IP." Copied off the invite at activation so it survives
+  /// invite pruning. disclosureText is stored VERBATIM, not a template id:
+  /// templates get edited, and a dispute is about what THEY saw.
+  authorizedAt             DateTime?
+  authorizedIp             String?
+  authorizedUserAgent      String?  @db.VarChar(120)
+  authorizedEmail          String?
+  authorizedName           String?
+  authorizedDisclosureText String?  @db.Text
+  authorizedDisclosureHash String?
+  authorizedInviteId       String?
+
+  lastWebhookAt            DateTime?
+  lastReconciledAt         DateTime?
+  /// Last value ARB itself reported for this subscription.
+  arbStatusSnapshot        String?
+
+  notes                    String?  @db.Text
+  createdByUserId          String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  charges                  TenantSubscriptionCharge[]
+  events                   TenantSubscriptionEvent[]
+  invites                  AutopayInvite[]
+
+  @@index([tenantId, createdAt])
+  @@index([status, nextChargeDate])
+  @@index([customerProfileId])
+  @@index([cardExpYear, cardExpMonth])
+}
+
+/// THE LEDGER. This table, not AdminAuditLog, is the record of money.
+/// recordAudit is best-effort by design and never throws into its caller — right
+/// for an audit trail, wrong for a ledger. Charge rows are hard writes, in the
+/// same transaction as the state change they explain.
+model TenantSubscriptionCharge {
+  id                  String   @id @default(cuid())
+  subscriptionId      String
+  subscription        TenantSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  /// Denormalised plain string for cheap tenant reads.
+  tenantId            String
+
+  /// RECURRING | TRIAL | PRORATION | CREDIT_APPLIED | SETUP | MANUAL | REFUND | CHARGEBACK
+  kind                String
+  /// PENDING | SETTLED | DECLINED | VOIDED | REFUNDED | ERROR
+  status              String
+  amount              Decimal  @db.Decimal(10, 2)
+  currency            String   @default("USD")
+
+  /// transId is THE idempotency key. A webhook and the reconciler both upsert on
+  /// it, so a duplicated event physically cannot double-count revenue.
+  transId             String?  @unique
+  /// Our own reference, sent on chargeCustomerProfileRequest, so a call whose
+  /// response we never saw is still FINDABLE by getTransactionDetails. This is
+  /// what makes a timed-out charge recoverable by QUERY instead of by retry.
+  refId               String?  @unique
+  arbSubscriptionId   String?
+  arbPaymentNum       Int?
+  authCode            String?
+  responseCode        String?
+  responseReasonCode  String?
+  responseReasonText  String?
+  avsResponse         String?
+
+  cardBrand           String?
+  cardLast4           String?  @db.VarChar(4)
+
+  chargeDate          String   @db.VarChar(10)
+  settledAt           DateTime?
+
+  /// EXPLAINABILITY. Unexplained charges are the #1 dispute cause, so the
+  /// explanation is a STORED COLUMN written once at charge time — never a view
+  /// computed later from a catalog that has since been edited. When the tenant
+  /// calls about the odd $59.94 in September, the answer is a stored sentence,
+  /// not a reconstruction.
+  description         String   @db.Text
+  periodStart         String?  @db.VarChar(10)
+  periodEnd           String?  @db.VarChar(10)
+  prorationDays       Int?
+  prorationDailyDelta Decimal? @db.Decimal(10, 4)
+  fromPlanCode        String?
+  toPlanCode          String?
+  fromAmount          Decimal? @db.Decimal(10, 2)
+  toAmount            Decimal? @db.Decimal(10, 2)
+
+  /// ENROLLMENT | WEBHOOK | RECONCILE | DIRECT_CHARGE | ADMIN
+  source              String
+  sourceEventId       String?
+  /// Set for ADMIN-initiated charges and refunds only.
+  actorUserId         String?
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([subscriptionId, chargeDate])
+  @@index([tenantId, createdAt])
+  @@index([status, chargeDate])
+  @@index([arbSubscriptionId, arbPaymentNum])
+}
+
+/// The webhook ledger. Created in Phase 1 and deliberately left EMPTY: the
+/// receiver that fills it is Phase 2. The table lands now so the migration is
+/// one additive change rather than two, and so the reconciler's shape is
+/// already decided when the endpoint arrives.
+model TenantSubscriptionEvent {
+  id                String   @id @default(cuid())
+  /// Authorize.Net's own envelope id — THE idempotency key for replay safety.
+  /// INSERT ... ON CONFLICT DO NOTHING against this is how a redelivered
+  /// webhook becomes a no-op instead of a second charge row.
+  notificationId    String   @unique
+  eventType         String
+  eventDate         DateTime?
+  arbSubscriptionId String?
+  transId           String?
+  subscriptionId    String?
+  subscription      TenantSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  payload           Json
+  /// Only signature-verified bodies are stored at all — an endpoint that
+  /// persisted unverified bodies would be a free write primitive for anyone who
+  /// found the URL.
+  signatureOk       Boolean  @default(true)
+  receivedAt        DateTime @default(now())
+  processedAt       DateTime?
+  processingError   String?  @db.Text
+  attempts          Int      @default(0)
+
+  @@index([eventType, receivedAt])
+  @@index([arbSubscriptionId, receivedAt])
+  @@index([processedAt])
+}
+
+/// The long-lived half of the two-token enrollment link. Authorize.Net's own
+/// hosted-page token dies in ~15 minutes and can never be the thing we email;
+/// this one is what goes in the email, and the short one is minted when the
+/// customer clicks.
+model AutopayInvite {
+  id                       String   @id @default(cuid())
+
+  /// WE STORE THE HASH, NEVER THE TOKEN. Precedent: Tenant.websiteTokenHash.
+  /// A leaked DB dump of plaintext autopay tokens would hand an attacker the
+  /// ability to enroll a card against a tenant and to read that tenant's plan
+  /// and price. (ShuttleTrackerLink stores plaintext — that token reveals a
+  /// van's position; this one reveals a billing relationship.)
+  /// Cost, and it is real: a sent link can never be shown again. tokenPrefix
+  /// exists so support can answer "is this the link I sent?", and a resend
+  /// means minting a NEW invite.
+  tokenHash                String   @unique
+  tokenPrefix              String   @db.VarChar(8)
+
+  /// enroll = first card. update = repoint an existing subscription.
+  mode                     String   @default("enroll")
+
+  tenantId                 String
+  subscriptionId           String?
+  subscription             TenantSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  /// 20 chars, matching the cap ensureCustomerProfile already truncates to.
+  /// Declared at the column so the truncation is a schema fact, not a runtime
+  /// hope — Authorize.Net rejects the whole request on an overflow.
+  merchantCustomerId       String   @db.VarChar(20)
+  email                    String
+  companyName              String
+  planCode                 String
+  planName                 String
+  amount                   Decimal  @db.Decimal(10, 2)
+  intervalUnit             String   @default("months")
+  intervalLength           Int      @default(1)
+  startDate                String   @db.VarChar(10)
+  /// Rendered by the update page as "Próximo cargo".
+  nextChargeDate           String?  @db.VarChar(10)
+  trialOccurrences         Int      @default(0)
+  trialAmount              Decimal? @db.Decimal(10, 2)
+
+  customerProfileId        String?
+  customerPaymentProfileId String?
+  arbSubscriptionId        String?
+  /// brand + last4, not a masked number: every surface renders brand + last 4,
+  /// so store what we render.
+  cardBrand                String?
+  cardLast4                String?  @db.VarChar(4)
+
+  /// The consent artefact, frozen at SEND time and hashed. Copied onto the
+  /// subscription at activation.
+  disclosureText           String   @db.Text
+  disclosureHash           String
+
+  expiresAt                DateTime
+  /// Single use. Set by an atomic claim guarded on `usedAt IS NULL`, which is
+  /// what stops a double-click creating two ARB subscriptions.
+  usedAt                   DateTime?
+  /// A link emailed to the wrong address must be killable without waiting 14 days.
+  revokedAt                DateTime?
+  openedAt                 DateTime?
+  attempts                 Int      @default(0)
+
+  createdByUserId          String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([tenantId, createdAt])
+  @@index([subscriptionId])
+  @@index([expiresAt])
 }

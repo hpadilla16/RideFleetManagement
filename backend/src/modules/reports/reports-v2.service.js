@@ -198,6 +198,16 @@ const REPORT_REGISTRY = [
     status: 'AVAILABLE',
   },
   {
+    // 2026-08-17 — the report Rent & Go's accounting department consumed from
+    // their previous software. The GL journal at the end is the half they post.
+    slug: 'daily-business',
+    title: 'Daily Business Report with Posting',
+    category: 'REVENUE',
+    icon: 'book',
+    description: 'Daily detail, summary and the general-ledger journal',
+    status: 'AVAILABLE',
+  },
+  {
     slug: 'taxes',
     title: 'Taxes',
     category: 'REVENUE',
@@ -211,6 +221,7 @@ const REPORT_REGISTRY = [
 import { startOfDayInTz, startOfMonthInTz, addDaysInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 import { COLLECTED_PAYMENT_WHERE } from './collected-payments.js';
+import { rentalProgramWhere } from '../../lib/program-category.js';
 import logger from '../../lib/logger.js';
 
 let _defaultPrisma = null;
@@ -336,17 +347,32 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
 
   // 3. Available vehicles right now — computed from reservations + blocks,
   //    not from Vehicle.status (which drifts heavily in production).
-  //    totalFleet counts every vehicle that isn't OUT_OF_SERVICE.
+  //    totalFleet counts every RENTAL-program vehicle that isn't
+  //    OUT_OF_SERVICE (2026-08-24: LOANER_ONLY and SHUTTLE_ONLY units are
+  //    never rentable, so they inflated both totalFleet and availableVehicles
+  //    on the landing snapshot).
   //    Available = totalFleet − (currentlyRented ∪ blocked)
   //    where blocked = vehicles with an active maintenance job OR a
   //    MAINTENANCE_HOLD / OUT_OF_SERVICE_HOLD / WASH_HOLD block.
   let totalFleet = 0;
+  // Rental-fleet id set — the rented/blocked sets below are intersected with
+  // it so a shuttle in the wash bay (or a loaner checked out to a service
+  // customer) can't be subtracted from a fleet total it isn't part of.
+  // null = fleet query failed (fail-open like every block in this section).
+  let rentalFleetIds = null;
   const rentedVehicleIds = new Set();
   const blockedVehicleIds = new Set();
   try {
-    totalFleet = await prisma.vehicle.count({
-      where: { tenantId, status: { notIn: ['OUT_OF_SERVICE', 'SOLD'] } },
+    const fleetRows = await prisma.vehicle.findMany({
+      where: {
+        tenantId,
+        status: { notIn: ['OUT_OF_SERVICE', 'SOLD'] },
+        ...rentalProgramWhere(),
+      },
+      select: { id: true },
     });
+    rentalFleetIds = new Set(fleetRows.map((v) => v.id));
+    totalFleet = rentalFleetIds.size;
   } catch { /* ignore */ }
   try {
     // Hybrid grace period: count CHECKED_OUT rows whose returnAt is in the
@@ -371,7 +397,9 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
       select: { vehicleId: true },
     });
     for (const r of activeReservations) {
-      if (r.vehicleId) rentedVehicleIds.add(r.vehicleId);
+      if (!r.vehicleId) continue;
+      if (rentalFleetIds && !rentalFleetIds.has(r.vehicleId)) continue;
+      rentedVehicleIds.add(r.vehicleId);
     }
   } catch { /* ignore */ }
   try {
@@ -398,8 +426,9 @@ export async function getSnapshot({ tenantId, from, to, deps = {} } = {}) {
         select: { vehicleId: true },
       }),
     ]);
-    for (const b of activeBlocks)        if (b.vehicleId) blockedVehicleIds.add(b.vehicleId);
-    for (const j of openMaintenanceJobs) if (j.vehicleId) blockedVehicleIds.add(j.vehicleId);
+    const inRentalFleet = (id) => !!id && (!rentalFleetIds || rentalFleetIds.has(id));
+    for (const b of activeBlocks)        if (inRentalFleet(b.vehicleId)) blockedVehicleIds.add(b.vehicleId);
+    for (const j of openMaintenanceJobs) if (inRentalFleet(j.vehicleId)) blockedVehicleIds.add(j.vehicleId);
   } catch { /* ignore */ }
   // Union rented + blocked, dedup, that's the not-available count.
   const notAvailable = new Set([...rentedVehicleIds, ...blockedVehicleIds]);

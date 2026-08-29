@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/api/api_error.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../../../core/router/app_router.dart';
+import '../../../core/session/lock_controller.dart';
 import '../../../core/session/session_controller.dart';
 import '../../../core/telemetry/event_logger.dart';
 import '../../../core/theme/ride_tokens.dart';
@@ -220,9 +221,13 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
     );
   }
 
-  /// Frame 2C: éxito centrado. El "siguiente paso: PIN" del mockup se omite
-  /// hasta que exista el PIN (H2) — no se promete UI que no existe.
+  /// Frame 2C: éxito centrado. El hint "Siguiente: crea tu PIN" (omitido en
+  /// H1 cuando la UI no existía) solo se muestra si el setup de verdad sigue:
+  /// con PIN ya configurado o usuario exento sería una promesa falsa.
   Widget _buildSuccess(AppLocalizations l10n) {
+    final nextIsPinSetup = ref
+        .watch(lockControllerProvider)
+        .needsSetupFor(ref.watch(sessionControllerProvider).user);
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 14, 18, 22),
       child: Column(
@@ -259,6 +264,14 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 14, color: RideTokens.n700),
           ),
+          if (nextIsPinSetup) ...[
+            const SizedBox(height: 8),
+            Text(
+              l10n.changePasswordNextPin,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 13, color: RideTokens.n600),
+            ),
+          ],
           const Spacer(),
           RidePrimaryButton(
             label: l10n.continueButton,

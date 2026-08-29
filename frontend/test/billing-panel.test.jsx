@@ -1,0 +1,353 @@
+/**
+ * The SUPER_ADMIN billing panel — Phase 4.
+ *
+ * Pinned here, in order of cost-of-being-wrong:
+ *
+ *  1. THE PANEL NEVER CLAIMS A RETRY IT DID NOT PERFORM. Verified behaviour:
+ *     a declined ARB payment suspends the subscription and Authorize.Net retries
+ *     nightly ONLY once the payment method is updated — no fixed attempt count,
+ *     no predictable next-retry date. The approved mockup drew "Reintentar cobro
+ *     ahora" and "Intento 2 de 3"; both are fiction and neither may reach the
+ *     screen. This is asserted on the rendered output, not on intent.
+ *  2. SUSPEND DOES NOT OVERSELL ITSELF. The staff-app lockout does not exist yet
+ *     (it is a later phase), so the dialog must say so rather than promise it.
+ *  3. Billing dates render in UTC. A YYYY-MM-DD rendered locally shows the day
+ *     BEFORE the one Authorize.Net charges.
+ *  4. Cancel is gated on a typed phrase AND a reason before it can be submitted.
+ *  5. A tenant with no subscription is a visible row, not an omission.
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+
+const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }));
+vi.mock('../src/lib/client', () => ({
+  API_BASE: 'http://test',
+  api: (...args) => apiMock(...args),
+}));
+
+const { BillingOverviewClient, billingDate, money, applyFilter, applySearch, sortBySeverity } =
+  await import('../src/app/tenants/billing/BillingOverviewClient');
+const { TenantBillingDetailClient, CANCEL_CONFIRMATION } =
+  await import('../src/app/tenants/billing/[tenantId]/TenantBillingDetailClient');
+
+function row(over = {}) {
+  return {
+    tenantId: 't1',
+    tenantName: 'Corpusa Fleet',
+    tenantSlug: 'corpusa-fleet',
+    tenantStatus: 'ACTIVE',
+    entitlementPlan: 'PRO',
+    status: 'ACTIVE',
+    subscriptionId: 's1',
+    planCode: 'PRO',
+    planName: 'RFM Pro',
+    amount: '199',
+    currency: 'USD',
+    intervalUnit: 'months',
+    intervalLength: 1,
+    startDate: '2026-04-19',
+    nextChargeDate: '2026-09-19',
+    cardBrand: 'Visa',
+    cardLast4: '1881',
+    cardExpiry: null,
+    planDiverges: false,
+    lastCharge: null,
+    monthlyValue: 199,
+    ...over,
+  };
+}
+
+const TOTALS = {
+  mrr: 199, active: 1, trialing: 0, pastDue: 0, suspended: 0,
+  pendingAuthorization: 0, neverEnrolled: 0, planDiverges: 0, cardExpiring: 0,
+};
+
+const HEALTH = {
+  lastEventAt: '2026-08-26T09:27:00Z', hoursSinceLastEvent: 0.2, eventsLast24h: 38,
+  unprocessed: 0, unprocessedStuck: 0, liveSubscriptions: 1, silenceAlarm: false, recentEvents: [],
+};
+
+function detail(over = {}) {
+  return {
+    tenant: { id: 't1', name: 'Corpusa Fleet', slug: 'corpusa-fleet', status: 'ACTIVE', plan: 'PRO' },
+    subscription: {
+      id: 's1', status: 'PAST_DUE', planCode: 'PRO', planName: 'RFM Pro', amount: '199', currency: 'USD',
+      intervalUnit: 'months', intervalLength: 1, startDate: '2026-04-19', nextChargeDate: '2026-09-19',
+      currentPeriodStart: '2026-08-19', currentPeriodEnd: '2026-09-18', trialEndsAt: null,
+      cardBrand: 'Visa', cardLast4: '1881', cardExpMonth: 11, cardExpYear: 2027, cardExpiry: null,
+      arbSubscriptionId: '9471226', customerProfileId: '1928374650',
+      failedAttempts: 2, pastDueSince: '2026-08-19T00:00:00Z',
+      authorizedAt: '2026-04-19T18:22:00Z', authorizedIp: '24.55.18.203',
+      authorizedEmail: 'rmarrero@corpusafleet.test',
+      authorizedDisclosureText: 'Corpusa Fleet autoriza a Ride Car Sharing LLC…',
+      authorizedDisclosureHash: '4f2b9ac1deadbeef',
+    },
+    history: [],
+    charges: [{
+      id: 'c1', kind: 'RECURRING', status: 'DECLINED', amount: '199', currency: 'USD',
+      chargeDate: '2026-08-19', periodStart: '2026-08-19', periodEnd: '2026-09-18',
+      description: 'Suscripción RFM Pro — mensualidad del 19 de agosto al 18 de septiembre de 2026.',
+      transId: null, responseCode: '2', responseReasonText: 'This transaction has been declined.',
+    }],
+    events: [],
+    invites: [],
+    planDiverges: false,
+    ...over,
+  };
+}
+
+beforeEach(() => {
+  apiMock.mockReset();
+});
+
+describe('billing overview', () => {
+  const wire = (rows, totals = TOTALS) => apiMock.mockImplementation((path) => {
+    if (path.includes('/health')) return Promise.resolve(HEALTH);
+    return Promise.resolve({ rows, totals, asOf: '2026-08-26' });
+  });
+
+  it('shows a never-enrolled tenant as a row rather than omitting it', async () => {
+    wire([row({ status: 'NONE', planCode: null, amount: null, subscriptionId: null, nextChargeDate: null, cardLast4: null })],
+      { ...TOTALS, active: 0, neverEnrolled: 1, mrr: 0 });
+    render(<BillingOverviewClient token="t" />);
+    expect(await screen.findByText('Corpusa Fleet')).toBeInTheDocument();
+    // Appears as the KPI label, the filter tab and the row's own chip.
+    expect(screen.getAllByText('Never enrolled').length).toBeGreaterThan(0);
+    // The gap must be legible as a gap: they use the product and pay nothing.
+    expect(screen.getAllByText(/billed nothing/i).length).toBeGreaterThan(0);
+  });
+
+  it('states the past-due truth and offers the card path — never an attempt count', async () => {
+    wire([row({ status: 'PAST_DUE' })], { ...TOTALS, active: 0, pastDue: 1 });
+    render(<BillingOverviewClient token="t" />);
+    await screen.findByText('Past due');
+    expect(screen.getByText(/Suspended at Authorize\.Net — needs a new card/i)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/attempt \d+ of \d+/i);
+    expect(document.body.textContent).not.toMatch(/intento \d+ de \d+/i);
+  });
+
+  it('badges a plan divergence, because a silent one is a revenue leak', async () => {
+    wire([row({ planDiverges: true, entitlementPlan: 'STARTER' })], { ...TOTALS, planDiverges: 1 });
+    render(<BillingOverviewClient token="t" />);
+    expect(await screen.findByText('≠ STARTER')).toBeInTheDocument();
+  });
+
+  it('warns on an expiring card without calling a still-valid one expired', async () => {
+    wire([row({ cardExpiry: { cardExpMonth: 9, cardExpYear: 2026, expired: false } })], { ...TOTALS, cardExpiring: 1 });
+    render(<BillingOverviewClient token="t" />);
+    expect(await screen.findByText(/expires 09\/26/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/EXPIRED/);
+  });
+
+  it('raises the silence alarm when the endpoint has gone quiet', async () => {
+    apiMock.mockImplementation((path) => {
+      if (path.includes('/health')) return Promise.resolve({ ...HEALTH, silenceAlarm: true, liveSubscriptions: 3 });
+      return Promise.resolve({ rows: [row()], totals: TOTALS, asOf: '2026-08-26' });
+    });
+    render(<BillingOverviewClient token="t" />);
+    expect(await screen.findByText(/No verified Authorize\.Net webhook has arrived in 72 hours/i)).toBeInTheDocument();
+  });
+
+  it('asks the server not to serve a cached list', async () => {
+    wire([row()]);
+    render(<BillingOverviewClient token="t" />);
+    await screen.findByText('Corpusa Fleet');
+    expect(apiMock).toHaveBeenCalledWith('/api/tenants/billing/overview', { cacheTtlMs: 0 }, 't');
+  });
+});
+
+describe('overview pure helpers', () => {
+  it('renders billing dates in UTC, so the day matches what ARB will charge', () => {
+    expect(billingDate('2026-09-01')).toBe('Sep 1, 2026');
+    expect(billingDate('2026-01-01')).toBe('Jan 1, 2026');
+    expect(billingDate('')).toBe('—');
+  });
+
+  it('formats money and an absent amount distinctly', () => {
+    expect(money('1650')).toBe('$1,650.00 USD');
+    expect(money(null)).toBe('—');
+  });
+
+  it('sorts trouble to the top rather than the alphabet', () => {
+    const out = sortBySeverity([
+      row({ tenantName: 'Aaa', status: 'ACTIVE' }),
+      row({ tenantName: 'Zzz', status: 'PAST_DUE' }),
+      row({ tenantName: 'Mmm', status: 'NONE' }),
+    ]);
+    expect(out.map((r) => r.status)).toEqual(['PAST_DUE', 'NONE', 'ACTIVE']);
+  });
+
+  it('filters and searches on what an operator would actually type', () => {
+    const rows = [row({ status: 'PAST_DUE' }), row({ tenantId: 't2', tenantName: 'Isla Verde', status: 'ACTIVE' })];
+    expect(applyFilter(rows, 'pastDue')).toHaveLength(1);
+    expect(applySearch(rows, 'isla')).toHaveLength(1);
+    expect(applySearch(rows, '1881')).toHaveLength(2);
+    expect(applySearch(rows, '')).toHaveLength(2);
+  });
+});
+
+describe('billing detail', () => {
+  const wire = (d = detail()) => apiMock.mockImplementation(() => Promise.resolve(d));
+
+  it('never shows a retry countdown or a predicted next-retry date', async () => {
+    wire();
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    await screen.findByText(/Past due since 2026-08-19/i);
+    const text = document.body.textContent;
+    expect(text).not.toMatch(/attempt \d+ of \d+/i);
+    expect(text).not.toMatch(/intento \d+ de \d+/i);
+    // No PREDICTED retry date. Scoped to a date-shaped claim so it does not
+    // trip on the honest sentence "retries only once the method is updated".
+    expect(text).not.toMatch(/retr(y|ies) on \w+ \d/i);
+    expect(text).not.toMatch(/next retry|next attempt/i);
+    // …and it does say the thing that is actually true.
+    expect(text).toMatch(/only once the payment method is updated/i);
+    expect(text).toMatch(/no fixed number of attempts/i);
+  });
+
+  it('offers the new-card link and a read-only re-check, not a force-a-charge button', async () => {
+    wire();
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    await screen.findAllByText('Send new-card link');
+    expect(screen.getAllByText('Re-check at Authorize.Net').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/retry charge|retry now|charge now/i)).toBeNull();
+  });
+
+  it('renders the stored charge description verbatim', async () => {
+    wire();
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    expect(
+      await screen.findByText('Suscripción RFM Pro — mensualidad del 19 de agosto al 18 de septiembre de 2026.'),
+    ).toBeInTheDocument();
+  });
+
+  it('holds cancel behind a typed phrase AND a reason', async () => {
+    wire();
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Cancel subscription'));
+
+    const submit = await screen.findByText('Cancel at Authorize.Net');
+    expect(submit).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/Reason \(required\)/), { target: { value: '30 days notice.' } });
+    expect(screen.getByText('Cancel at Authorize.Net')).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(new RegExp(`Type ${CANCEL_CONFIRMATION}`)), {
+      target: { value: CANCEL_CONFIRMATION },
+    });
+    expect(screen.getByText('Cancel at Authorize.Net')).not.toBeDisabled();
+  });
+
+  it('tells the truth in the cancel dialog about the ARB-first ordering', async () => {
+    wire();
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Cancel subscription'));
+    const text = document.body.textContent;
+    expect(text).toMatch(/calls Authorize\.Net first/i);
+    expect(text).toMatch(/nothing changes on this screen/i);
+    expect(text).toMatch(/30 days/i);
+  });
+
+  // Phase 5 (2026-08-28): the staff lockout now EXISTS, but is gated on
+  // TENANT_SUSPENSION_ENFORCEMENT — a deploy variable the browser cannot see.
+  // So the dialog is no longer allowed to hard-code either answer, and the
+  // original "does not exist yet" assertion becomes these two.
+  it('with enforcement OFF, it still refuses to promise a lockout', async () => {
+    wire(detail({ suspensionEnforcement: 'off' }));
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Suspend access'));
+    const text = document.body.textContent;
+    expect(text).toMatch(/What does NOT stop/i);
+    expect(text).toMatch(/staff can still sign in/i);
+    expect(text).toMatch(/switched OFF on this deploy/i);
+    // The real, present-tense consequences.
+    expect(text).toMatch(/public booking website goes dark/i);
+    expect(text).toMatch(/integration syncs/i);
+  });
+
+  it('a payload with no enforcement field is read as OFF, not as a lockout', async () => {
+    // An unknown enforcement state must never be described as a lockout.
+    wire(detail());
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Suspend access'));
+    expect(document.body.textContent).toMatch(/staff can still sign in/i);
+  });
+
+  it('with enforcement ON, it says the staff ARE locked out — and what they keep', async () => {
+    wire(detail({ suspensionEnforcement: 'enforce' }));
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Suspend access'));
+    const text = document.body.textContent;
+    expect(text).toMatch(/staff are locked out/i);
+    expect(text).not.toMatch(/staff can still sign in/i);
+    // The three carve-outs, stated to the operator BEFORE they pull the lever.
+    expect(text).toMatch(/billing page/i);
+    expect(text).toMatch(/close out rentals/i);
+    expect(text).toMatch(/shuttle tracker/i);
+  });
+
+  it('requires a suspension reason before it can be submitted', async () => {
+    wire();
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Suspend access'));
+    expect(screen.getByText('Suspend this tenant')).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Impago 7 días.' } });
+    expect(screen.getByText('Suspend this tenant')).not.toBeDisabled();
+  });
+
+  it('posts the cancel with the phrase and reason the operator typed', async () => {
+    wire();
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Cancel subscription'));
+    fireEvent.change(screen.getByLabelText(/Reason \(required\)/), { target: { value: '30 days notice.' } });
+    fireEvent.change(screen.getByLabelText(new RegExp(`Type ${CANCEL_CONFIRMATION}`)), {
+      target: { value: CANCEL_CONFIRMATION },
+    });
+    fireEvent.click(screen.getByText('Cancel at Authorize.Net'));
+
+    await waitFor(() => {
+      expect(apiMock).toHaveBeenCalledWith(
+        '/api/tenants/billing/subscriptions/s1/cancel',
+        { method: 'POST', body: JSON.stringify({ reason: '30 days notice.', confirm: CANCEL_CONFIRMATION }) },
+        't',
+      );
+    });
+  });
+
+  it('surfaces the archived consent, expandable, verbatim', async () => {
+    wire();
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText(/Show the exact text they agreed to/i));
+    expect(screen.getByText('Corpusa Fleet autoriza a Ride Car Sharing LLC…')).toBeInTheDocument();
+  });
+
+  it('offers apply-plan only when billing and entitlement actually disagree', async () => {
+    wire();
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    await screen.findByText('Actions');
+    expect(screen.queryByText('Apply billing plan to entitlements')).toBeNull();
+
+    apiMock.mockReset();
+    apiMock.mockImplementation(() => Promise.resolve(detail({
+      planDiverges: true,
+      tenant: { id: 't1', name: 'Corpusa Fleet', slug: 'c', status: 'ACTIVE', plan: 'STARTER' },
+    })));
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    expect(await screen.findByText('Apply billing plan to entitlements')).toBeInTheDocument();
+  });
+
+  it('says a never-enrolled tenant is billed nothing and points at Tenants', async () => {
+    wire(detail({ subscription: null, charges: [] }));
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    expect(await screen.findByText(/has no subscription/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/billed nothing/i).length).toBeGreaterThan(0);
+  });
+
+  it('warns that a hand-set suspension is not billing\'s to lift', async () => {
+    wire(detail({
+      tenant: { id: 't1', name: 'Corpusa Fleet', slug: 'c', status: 'SUSPENDED', plan: 'PRO', billingSuspendedAt: null },
+    }));
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    expect(await screen.findByText(/NOT set by billing/i)).toBeInTheDocument();
+  });
+});

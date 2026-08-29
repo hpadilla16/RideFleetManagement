@@ -107,8 +107,10 @@ function DashboardV2Inner({ token, me, logout }) {
       if (me?.moduleAccess?.settings !== false) {
         soft(api('/api/locations/documents/expiring', { bypassCache: true }, token), setDocAlert, (d) => (d && (d.expiringCount || d.expiredCount) ? d : null));
       }
-      // The recent-reservations list feeds three v1 blocks at once: the
-      // fee-advisory note scan, the grid4 row and the operations timeline.
+      // The recent-reservations list feeds two v1 blocks at once: the grid4
+      // row and the operations timeline. (It also used to back the
+      // fee-advisory note scan, which the Unpaid balances tile replaced with
+      // a backend count — see unpaidBalanceCount below.)
       soft(api('/api/reservations?limit=500', {}, token), setReservations, (val) =>
         (Array.isArray(val) ? val : (Array.isArray(val?.items) ? val.items : [])));
       soft(api('/api/reservations/summary', {}, token), setResSummary);
@@ -173,9 +175,13 @@ function DashboardV2Inner({ token, me, logout }) {
     } catch (e) { setBoardMsg(e.message); }
   };
 
-  const feeAdvisoryCount = reservations == null
+  // Agreements still owing money. Backend-canonical (summary.unpaidBalances)
+  // — no client-side scan, so it is not capped by the limit-500 list the way
+  // the Fee Advisories tile this replaced was. null until the summary lands,
+  // which keeps the tile out of the wall rather than flashing a wrong 0.
+  const unpaidBalanceCount = resSummary == null || resSummary.unpaidBalances == null
     ? null
-    : reservations.filter((r) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(r.notes || ''))).length;
+    : Number(resSummary.unpaidBalances || 0);
 
   const tr = kpis?.turnReady || null;
   const util = kpis?.utilization || null;
@@ -282,7 +288,7 @@ function DashboardV2Inner({ token, me, logout }) {
           citSummary={citSummary}
           maintSummary={maintSummary}
           docAlert={docAlert}
-          feeAdvisoryCount={feeAdvisoryCount}
+          unpaidBalanceCount={unpaidBalanceCount}
         />
       ) : null}
 
@@ -322,7 +328,7 @@ function DashboardV2Inner({ token, me, logout }) {
           <div className="glass card"><div className="label">{t('dashboard.availableVehicles')}</div><div className="value">{Number(overviewKpis.availableFleet || 0)}</div></div>
           <div className="glass card"><div className="label">{t('dashboard.reservations')}</div><div className="value">{Number.isFinite(Number(resSummary?.totalReservations)) ? Number(resSummary.totalReservations).toLocaleString() : (reservations?.length ?? 0)}</div></div>
           <div className="glass card"><div className="label">{t('dashboard.active')}</div><div className="value">{Number(overviewKpis.activeReservations || 0)}</div></div>
-          <div className="glass card"><div className="label">{t('dashboard.tileFeeAdvisories')}</div><div className="value">{feeAdvisoryCount ?? 0}</div></div>
+          <div className="glass card"><div className="label">{t('dashboard.tileUnpaidBalances')}</div><div className="value">{unpaidBalanceCount ?? 0}</div></div>
         </section>
       ) : null}
 
@@ -479,7 +485,7 @@ function FleetTable({ fleet, router, t }) {
  * their v1 conditions: citations/maintenance/docs render only when their
  * module answers, red tints fire on the same thresholds.
  */
-function OpsTiles({ router, t, overviewKpis, todayKpis, mismatchCount, citSummary, maintSummary, docAlert, feeAdvisoryCount }) {
+function OpsTiles({ router, t, overviewKpis, todayKpis, mismatchCount, citSummary, maintSummary, docAlert, unpaidBalanceCount }) {
   const k = overviewKpis || {};
   const totalVehicles = Number(k.fleetTotal || 0);
   const available = Number(k.availableFleet || 0);
@@ -543,13 +549,9 @@ function OpsTiles({ router, t, overviewKpis, todayKpis, mismatchCount, citSummar
         {mismatchCount != null ? tile('mismatch', () => router.push('/vehicles/reconciliation'), t('dashboard.tileStatusMismatches'), mismatchCount, t('dashboard.tileStatusMismatchesDesc'), mismatchCount > 0 ? 'danger' : null) : null}
         {overviewKpis ? tile('active', () => router.push('/reservations?filter=active'), t('dashboard.tileActiveReservations'), activeReservations, t('dashboard.tileActiveReservationsDesc')) : null}
         {overviewKpis ? tile('overdue', () => router.push('/reservations?filter=overdue'), t('dashboard.tileOverdueReturns'), overdueReservations, t('dashboard.tileOverdueReturnsDesc'), overdueReservations > 0 ? 'danger' : null) : null}
-        {feeAdvisoryCount != null ? (
-          <div className="info-tile" key="feeAdv">
-            <span className="label">{t('dashboard.tileFeeAdvisories')}</span>
-            <strong>{feeAdvisoryCount}</strong>
-            <span className="ui-muted">{t('dashboard.tileFeeAdvisoriesDesc')}</span>
-          </div>
-        ) : null}
+        {unpaidBalanceCount != null ? tile('unpaidBalances', () => router.push('/reports-v2/unpaid-balance'),
+          t('dashboard.tileUnpaidBalances'), unpaidBalanceCount, t('dashboard.tileUnpaidBalancesDesc'),
+          unpaidBalanceCount > 0 ? 'warn' : 'ok') : null}
         {citSummary ? tile('citations', () => router.push('/citations'), t('dashboard.tileCitations'), Number(citSummary.needsReview || 0), t('dashboard.tileCitationsDesc', { outstanding: Number(citSummary.outstanding || 0).toFixed(2) })) : null}
       </div>
     </section>

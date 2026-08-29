@@ -1,13 +1,17 @@
 /**
  * citation-ocr.scheduler — Fase B worker. Picks up CitationDocument(PENDING),
  * runs the vision-LLM extractor with the TENANT'S OWN AI credentials (from
- * Settings; env ANTHROPIC_API_KEY is a fallback), and feeds the fields into the
- * existing ingestBatch (source MAIL_OCR) so plate→vehicle→reservation matching
- * runs. No money, no scraping. Plan: doc/citations-ocr-mail-intake-plan-2026-06-15.md
+ * Settings), and feeds the fields into the existing ingestBatch (source
+ * MAIL_OCR) so plate→vehicle→reservation matching runs. No money, no scraping.
+ * Plan: doc/citations-ocr-mail-intake-plan-2026-06-15.md
  *
- * Gating: runs when storage is enabled; per tenant it only processes docs if that
- * tenant has citationsEnabled AND a resolvable AI key (tenant Settings or env).
- * Tenants without a key are skipped (their docs stay PENDING until a key is set).
+ * Gating: runs when storage is enabled; per tenant it only processes docs if
+ * that tenant has citationsEnabled AND a credential it is ENTITLED to use —
+ * its own key, or the platform key when that tenant has been deliberately
+ * opted in (see lib/tenant-provider-credential.js). A tenant that configured
+ * nothing is skipped and its documents stay PENDING; the platform key is NOT
+ * a fallback here any more. That sentence used to read the other way round,
+ * and it is why Corpusa's citations reached api.anthropic.com (2026-08-27).
  * PII: never logs OCR JSON or document contents — counts/ids only.
  */
 import { prisma } from '../../lib/prisma.js';
@@ -118,18 +122,37 @@ async function processDoc(doc, cfg) {
   }
 }
 
-async function runOnce() {
+/** Exported for tests: one sweep, synchronously awaitable. */
+export async function runOnce() {
   if (running) return;
   if (!isStorageEnabled()) return;
   running = true;
   try {
     const tenants = await prisma.tenant.findMany({ where: { citationsEnabled: true }, select: { id: true } });
     let ok = 0; let review = 0; let failed = 0; let processed = 0;
+    const skippedTenantIds = [];
     for (const t of tenants) {
+      // 2026-08-27. This loop is where the Corpusa incident happened: it
+      // selects EVERY tenant with citationsEnabled and used to finish with
+      // `cfg.apiKey || process.env.ANTHROPIC_API_KEY`, so a tenant that had
+      // configured nothing had its citation documents — driver name, licence
+      // details, vehicle, location — sent to the provider under the PLATFORM
+      // account, silently, on a timer. A scheduler is the worst possible place
+      // for an implicit fallback: there is no request, no user and no response
+      // for anyone to notice it in.
+      //
       // eslint-disable-next-line no-await-in-loop
-      const cfg = await settingsService.getCitationOcrResolved({ tenantId: t.id }).catch(() => ({ apiKey: null }));
-      const apiKey = cfg.apiKey || process.env.ANTHROPIC_API_KEY || null;
-      if (!apiKey) continue; // no key for this tenant → leave its docs PENDING
+      const cfg = await settingsService
+        .resolveCitationOcrCredential({ tenantId: t.id }, { feature: 'citation-ocr' })
+        .catch(() => null);
+      const apiKey = cfg?.credential?.source === 'NONE' ? null : (cfg?.credential?.credential || null);
+      if (!apiKey) {
+        // No credential this tenant is entitled to use → no provider call, and
+        // its documents stay PENDING (not FAILED): nothing is lost, and they
+        // process on the next sweep the moment a key is configured.
+        skippedTenantIds.push(t.id);
+        continue;
+      }
       // eslint-disable-next-line no-await-in-loop
       const docs = await prisma.citationDocument.findMany({
         where: { status: 'PENDING', tenantId: t.id },
@@ -148,6 +171,25 @@ async function runOnce() {
       }
     }
     if (processed) logger.info('[citation-ocr] batch done', { processed, ingested: ok, review, failed });
+
+    // Make the fail-closed state VISIBLE. A tenant with no credential is meant
+    // to process nothing — but silence is exactly what hid the original bug, so
+    // a tenant whose documents are piling up unread gets named every sweep.
+    // One grouped count for all skipped tenants, not one query each.
+    if (skippedTenantIds.length) {
+      const waiting = await prisma.citationDocument.groupBy({
+        by: ['tenantId'],
+        where: { status: 'PENDING', tenantId: { in: skippedTenantIds } },
+        _count: { _all: true },
+      }).catch(() => []);
+      const backlog = waiting.filter((w) => (w?._count?._all || 0) > 0);
+      if (backlog.length) {
+        logger.warn('[citation-ocr] documents are WAITING for tenants with no OCR credential — no provider call was made', {
+          tenants: backlog.map((w) => ({ tenantId: w.tenantId, pending: w._count._all })),
+          action: 'Add that tenant’s own Anthropic key in Settings → Citations → OCR, or opt them in to the platform key deliberately.',
+        });
+      }
+    }
   } catch (err) {
     logger.warn('[citation-ocr] sweep failed', { message: String(err?.message || err) });
   } finally {

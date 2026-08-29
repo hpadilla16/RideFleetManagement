@@ -22,6 +22,7 @@ class DioFactory {
     required String? Function() readViewLocation,
     required void Function() onSessionExpired,
     void Function()? onPasswordChangeRequired,
+    void Function()? onViewLocationDenied,
   }) {
     final dio = Dio(_baseOptions());
     dio.interceptors.addAll([
@@ -30,6 +31,7 @@ class DioFactory {
         readViewLocation: readViewLocation,
         onSessionExpired: onSessionExpired,
         onPasswordChangeRequired: onPasswordChangeRequired,
+        onViewLocationDenied: onViewLocationDenied,
       ),
       RateLimitRetryInterceptor(dio),
     ]);

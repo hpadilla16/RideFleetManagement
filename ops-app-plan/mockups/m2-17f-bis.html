@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RideOps · M2 — Frame 17F-bis (la tarjeta de la inspección sellada + las dos ramas del CTA)</title>
+<style>
+/* ============================================================
+   TOKENS — copiados VERBATIM de m2-tanda-c.html. Este frame no
+   introduce lenguaje nuevo: solo un modificador de fila (.kv.note)
+   y dos andamios de documento (.detail) que NO son UI.
+   ============================================================ */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-200:#d9c9ff; --p-300:#c0a8ff;
+  --p-400:#9f79ff; --p-500:#7f4ff0; --p-600:#6a35e0; --p-700:#5a26c9;
+  --p-800:#45189e; --p-900:#2e1071;
+  --brand:#8752FE;
+  --brand-a08:rgba(135,82,254,.08); --brand-a12:rgba(135,82,254,.12);
+  --brand-a16:rgba(135,82,254,.16); --brand-a20:rgba(135,82,254,.20);
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --focus:#0b63d6; --focus-halo:rgba(11,99,214,.22);
+  --tonal:#f6f2ff;
+  --sh-b1:0 1px 0 rgba(255,255,255,.85) inset,0 2px 6px -2px rgba(69,24,158,.14),0 10px 24px -10px rgba(135,82,254,.22);
+  --r-xl:24px; --r-2xl:28px;
+  --bd-lite:1px solid rgba(135,82,254,.14);
+  --sh-3:0 1px 3px rgba(24,16,54,.06),0 14px 30px -10px rgba(38,20,90,.14),0 44px 80px -28px rgba(38,20,90,.22);
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+  background:var(--n-100);color:var(--n-900);font-size:14px;line-height:1.5}
+h1,h2,h3{margin:0;letter-spacing:.005em}
+.tnum{font-variant-numeric:tabular-nums}
+code{background:var(--n-100);border-radius:5px;padding:0 4px;font-size:.92em}
+
+/* ---------- chrome del documento ---------- */
+.doc-head{max-width:1720px;margin:0 auto;padding:26px 24px 10px}
+.doc-head h1{font-size:24px;font-weight:850}
+.doc-head h1 .v2{display:inline-flex;align-items:center;margin-left:10px;padding:3px 12px;border-radius:999px;
+  background:linear-gradient(135deg,var(--p-600),var(--p-800));color:#fff;font-size:13px;font-weight:800;vertical-align:middle}
+.doc-head p{margin:8px 0 0;color:var(--n-700);max-width:1020px}
+.meta-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.mchip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 11px;
+  border-radius:8px;background:var(--p-50);border:1px solid var(--brand-a20);
+  color:var(--p-800);font-size:12.5px;font-weight:700}
+.mchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.mchip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.mchip.dang{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+section.blk{max-width:1720px;margin:0 auto;padding:24px 24px 8px}
+.blk-head{margin-bottom:16px}
+.blk-head .eyebrow{color:var(--p-700);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.blk-head h2{font-size:20px;font-weight:800;margin-top:2px}
+.blk-head p{color:var(--n-700);margin:6px 0 0;max-width:1000px}
+.state-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.schip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:6px;
+  font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--n-50);border:1px solid var(--n-200);color:var(--n-700)}
+.schip i{width:6px;height:6px;border-radius:50%;background:currentColor;font-style:normal}
+.frames{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;padding-bottom:26px}
+figure{margin:0}
+figcaption{font-size:13px;font-weight:800;color:var(--n-800);margin:0 0 8px 6px;max-width:400px}
+figcaption small{display:block;font-weight:600;color:var(--n-600);font-size:12px}
+.tag{display:inline-flex;align-items:center;min-height:20px;padding:1px 8px;border-radius:6px;
+  font-size:10.5px;font-weight:850;letter-spacing:.06em;text-transform:uppercase;margin-right:7px;vertical-align:2px}
+.tag.cont{background:var(--ok-bg);border:1px solid var(--ok-bd);color:var(--ok-tx)}
+.tag.prop{background:var(--info-bg);border:1px solid var(--info-bd);color:#0a4c9e}
+.tag.corr{background:var(--warn-bg);border:1px solid var(--warn-bd);color:var(--warn-tx)}
+
+/* ---------- notas / anotaciones ---------- */
+.notes{flex:1 1 340px;max-width:430px;background:var(--n-0);border:var(--bd-lite);
+  border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1)}
+.notes h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+.note{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--n-100);font-size:13px;color:var(--n-700)}
+.note:last-child{border-bottom:0}
+.note b{color:var(--n-900)}
+.m{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;
+  border-radius:50%;background:var(--p-600);color:#fff;font-size:12px;font-weight:800;line-height:1}
+.m.inframe{position:absolute;z-index:9;box-shadow:0 0 0 2px #fff}
+.contrast{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--n-50);
+  border:1px solid var(--n-200);font-size:12.5px;color:var(--n-700)}
+.contrast b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:6px}
+.contrast ul{margin:0;padding-left:16px}
+.contrast li{margin:3px 0}
+.decision{margin-top:14px;padding:14px 16px;border-radius:16px;background:var(--warn-bg);
+  border:1.5px dashed var(--warn-bd);color:var(--warn-tx);font-size:13px}
+.decision b{display:block;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.decision ul{margin:6px 0 0;padding-left:18px}
+.decision li{margin:4px 0}
+
+/* ---------- tabla de copy es/en ---------- */
+.copy{flex:1 1 460px;max-width:700px;background:var(--n-0);border:var(--bd-lite);border-radius:20px;
+  padding:16px 18px;box-shadow:var(--sh-b1)}
+.copy h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+table.ct{width:100%;border-collapse:collapse;font-size:12.5px}
+table.ct th{text-align:left;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--n-600);
+  border-bottom:1.5px solid var(--n-200);padding:6px 8px 6px 0}
+table.ct td{border-bottom:1px solid var(--n-100);padding:7px 8px 7px 0;vertical-align:top;color:var(--n-800)}
+table.ct td.k{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--p-800);white-space:nowrap}
+table.ct td.fr{font-weight:850;color:var(--n-900);white-space:nowrap}
+table.ct td.st{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+table.ct td.st.new{color:var(--p-800)}
+table.ct td.st.reuse{color:var(--ok-tx)}
+table.ct td.st.old{color:var(--n-600)}
+
+/* ---------- frame de teléfono ---------- */
+.phone{position:relative;width:390px;border:9px solid var(--n-900);border-radius:40px;
+  overflow:hidden;background:var(--n-50);box-shadow:var(--sh-3)}
+.statusbar{position:relative;z-index:4;display:flex;justify-content:space-between;align-items:center;height:32px;
+  padding:0 20px;font-size:11.5px;font-weight:700;color:var(--n-700);background:var(--n-50)}
+.statusbar.on-white{background:var(--n-0)}
+.scr{position:relative;display:flex;flex-direction:column;min-height:724px;padding:0}
+.wizbar{position:relative;z-index:4;display:flex;align-items:center;gap:8px;padding:7px 8px;
+  background:rgba(255,255,255,.98);border-bottom:1px solid var(--n-200)}
+.icobtn{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+  color:var(--n-800);flex:0 0 auto;border:1.5px solid var(--n-300);background:var(--n-0)}
+.wizbar .tt{flex:1;min-width:0}
+.wizbar .tt b{display:block;font-size:15.5px;font-weight:850;color:var(--n-900);line-height:1.15}
+.wizbar .tt span{font-size:12px;font-weight:650;color:var(--n-700)}
+.pausebtn{min-height:48px;display:inline-flex;align-items:center;gap:6px;padding:0 12px;border-radius:14px;
+  border:1.5px solid var(--n-300);background:var(--n-0);font-size:13px;font-weight:800;color:var(--n-800);flex:0 0 auto}
+.sesshead{background:var(--tonal);border-bottom:1px solid var(--n-200);padding:11px 14px;display:grid;gap:9px}
+.sesshead.mini{display:flex;align-items:center;gap:9px;padding:7px 12px}
+.sesshead.mini .who{display:flex;align-items:center;gap:8px;min-width:0;flex:1;font-size:13.5px;font-weight:800;color:var(--n-900)}
+.sesshead.mini .who svg{flex:0 0 auto;color:var(--p-800)}
+.presence{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:3px 11px;border-radius:12px;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800);font-size:12.5px;font-weight:750}
+.sesshead.mini .presence{min-height:32px;padding:2px 9px;font-size:11.5px;gap:6px}
+.presence .pv{width:22px;height:22px;border-radius:50%;background:var(--p-200);color:var(--p-900);
+  font-size:10px;font-weight:850;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.sesshead.mini .presence .pv{width:19px;height:19px;font-size:9px}
+.presence .lv{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:led 2.4s ease-in-out infinite;flex:0 0 auto}
+@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
+.srail{display:flex;align-items:flex-start;padding:12px 8px 6px;background:var(--n-0)}
+.sr{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:5px;position:relative;min-height:48px}
+.sr .d{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  border:2px solid var(--n-300);background:var(--n-0);color:var(--n-600);font-size:11px;font-weight:850;
+  position:relative;z-index:2}
+.sr .lb{font-size:11.5px;font-weight:800;color:var(--n-600);text-align:center;line-height:1.15}
+.sr::before{content:"";position:absolute;top:11px;right:50%;width:100%;height:3px;background:var(--n-200);z-index:1}
+.sr:first-child::before{display:none}
+.sr.done .d{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.sr.done .lb{color:var(--ok-tx)}
+.sr.done::before,.sr.on::before{background:var(--ok-bd)}
+.sr.on .d{background:var(--p-600);border-color:var(--p-600);color:#fff;box-shadow:0 0 0 4px var(--brand-a16)}
+.sr.on .lb{color:var(--p-800);font-weight:850}
+.stepline{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 14px;background:var(--n-0);
+  border-top:1px solid var(--n-200);border-bottom:1px solid var(--n-200);font-size:13.5px;font-weight:750;color:var(--n-800)}
+.stepline .ix{font-variant-numeric:tabular-nums;font-weight:850;color:var(--p-800);background:var(--p-50);
+  border:1px solid var(--brand-a20);border-radius:8px;padding:2px 8px;font-size:12px;flex:0 0 auto}
+.stepline .more{margin-left:auto;font-size:12.5px;font-weight:800;color:var(--p-700);
+  display:inline-flex;align-items:center;gap:4px;min-height:48px;flex:0 0 auto}
+
+/* ---------- tarjetas ---------- */
+.vcard{background:linear-gradient(180deg,#fff,#fdfcff);border:var(--bd-lite);border-radius:20px;
+  padding:12px 14px;box-shadow:var(--sh-b1)}
+.vcard.okc{border:1.5px solid var(--ok-bd);background:#fbfffd}
+.vhead{display:flex;align-items:center;gap:9px}
+.vhead b{font-size:14.5px;font-weight:850;color:var(--n-900);flex:1}
+.vpill{display:inline-flex;align-items:center;gap:5px;min-height:26px;padding:2px 9px;border-radius:8px;
+  font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.vpill.ok{background:var(--ok-bg);border:1px solid var(--ok-bd);color:var(--ok-tx)}
+.vpill.mut{background:var(--n-50);border:1px solid var(--n-200);color:var(--n-700)}
+.kv{display:flex;align-items:flex-start;gap:8px;padding:7px 0 6px;border-top:1px solid var(--n-100);font-size:13.5px}
+.kv:first-of-type{border-top:0}
+.kv .k{color:var(--n-700);font-weight:650;flex:0 0 104px}
+.kv .v{color:var(--n-900);font-weight:750;flex:1;min-width:0}
+.kv .v.okv{color:var(--ok-tx);font-weight:800}
+.kv .v.pend{color:var(--n-700);font-weight:700}
+/* MODIFICADOR NUEVO — no es un componente: es .kv sin columna de clave.
+   Mismo border-top, mismo ritmo vertical, texto en --n-700 a 12.5px. */
+.kv.note{display:block;color:var(--n-700);font-weight:600;font-size:12.5px;line-height:1.42;padding-top:8px}
+
+/* ---------- comunes ---------- */
+.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;
+  font-size:13.5px;font-weight:600;line-height:1.45;border:1px solid}
+.banner svg{flex:0 0 auto;margin-top:1px}
+.b-info{background:var(--info-bg);border-color:var(--info-bd);color:var(--n-800)}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:56px;border-radius:18px;
+  font-size:16px;font-weight:800;letter-spacing:.01em}
+.btn-primary{background:linear-gradient(180deg,#7442e8,var(--p-600));color:#fff;
+  box-shadow:0 1px 0 rgba(255,255,255,.28) inset,0 4px 10px -4px rgba(69,24,158,.35),0 14px 28px -12px rgba(135,82,254,.45)}
+.wpad{padding:14px 14px 18px;display:flex;flex-direction:column;flex:1;gap:11px;position:relative;z-index:2}
+.dock{margin-top:auto;display:grid;gap:9px;padding:12px 0 0;position:relative}
+.dock::before{content:"";position:absolute;top:0;left:-14px;right:-14px;height:1px;background:var(--n-200)}
+.dock .why{font-size:12.5px;font-weight:750;color:var(--n-700);text-align:center;line-height:1.4}
+
+/* ---------- andamio de documento (NO es UI) ---------- */
+.detail{width:408px;border-radius:22px;border:1.5px dashed var(--n-300);background:var(--n-25);padding:16px 18px}
+.detail + .detail{margin-top:16px}
+.detail .dl{font-size:11px;font-weight:850;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:9px}
+.detail .dw{width:344px}
+.detail .dn{margin-top:10px;font-size:12.5px;color:var(--n-700);font-weight:650;line-height:1.45;max-width:344px}
+
+footer.dod{max-width:1720px;margin:0 auto;padding:10px 24px 50px;color:var(--n-700);font-size:13px}
+footer.dod .card{background:var(--n-0);border:var(--bd-lite);border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1);margin-bottom:14px}
+footer.dod b{color:var(--n-900)}
+footer.dod h3{font-size:15px;font-weight:850;margin-bottom:8px;color:var(--n-900)}
+footer.dod li{margin:5px 0}
+.rejtbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.rejtbl th{text-align:left;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--n-600);
+  border-bottom:1.5px solid var(--n-200);padding:6px 10px 6px 0}
+.rejtbl td{border-bottom:1px solid var(--n-100);padding:8px 10px 8px 0;vertical-align:top;color:var(--n-800)}
+.rejtbl td.fr{font-weight:850;color:var(--n-900);white-space:nowrap;max-width:210px}
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <h1>RideOps · Frame 17F-bis <span class="v2">un solo frame · 2 ramas del CTA</span></h1>
+  <p><b>De dónde sale.</b> De la revisión de Graphic Design al build de <b>M2-H4</b>. El frame aprobado
+  <b>17F</b> vive en <code>m2-tanda-c.html</code> (sección 17); esta lámina <b>lo sustituye</b> y no cambia nada más de
+  esa tanda. Se puede leer sola.</p>
+  <p style="margin-top:8px"><b>Qué corrige.</b> (1) La tarjeta <i>Inspección de salida</i> puede quedarse
+  <b>sin una sola fila</b>: su único hijo es condicional al conteo de fotos
+  (<code>inspection_step.dart:762</code>) y ese conteo se calcula del estado local de la app
+  (<code>_onServerCount</code>, <code>:173-175</code>), que vale <b>0</b> al entrar en frío a una sesión ya sellada.
+  El agente ve un encabezado, una pastilla verde y nada — en una pantalla de <b>evidencia</b> eso se lee como
+  "las fotos no están". (2) El CTA es uno solo y su <code>why</code> se anula cuando no hay firma
+  (<code>:816</code>): el agente lee "cierre", toca, y le aparece una pantalla de firma para el cliente.</p>
+  <div class="meta-chips">
+    <span class="mchip ok">Verificado en el build <code>m2-h4-inspection</code> y en
+      <code>mobile-inspection.service.js:265-281</code></span>
+    <span class="mchip">Mismos tokens, mismo cromo, mismos componentes que la Tanda C</span>
+    <span class="mchip">Targets ≥ 48 · CTA 56 · una mano · legible al sol</span>
+    <span class="mchip">Copy es/en completa · contraste medido de todo par nuevo</span>
+    <span class="mchip warn">Nada de lo que la tarjeta afirme sale de este teléfono: todo sale de la sesión</span>
+    <span class="mchip dang">Prohibido que una tarjeta de evidencia se quede sin filas</span>
+  </div>
+  <div class="meta-chips" style="margin-top:6px">
+    <span class="tag corr">Corrección</span><span style="font-size:12.5px;color:var(--n-700);margin-right:14px">arregla algo verificado en código; rechazarlo deja un hueco real</span>
+    <span class="tag prop">Propuesta</span><span style="font-size:12.5px;color:var(--n-700)">Hector puede rechazarlo sin que se caiga nada</span>
+  </div>
+</div>
+
+<section class="blk">
+  <div class="blk-head">
+    <span class="eyebrow">Frame 17F-bis · M2-H4 · sustituye a 17F</span>
+    <h2>La inspección sellada por el servidor — con datos firmes y con las dos salidas que de verdad existen</h2>
+    <p>El disparador es el mismo de siempre: <code>session.inspectionCompletedAt != null</code>
+    (<code>inspection_step.dart:118</code>). Lo que cambia es <b>de dónde salen los datos</b> —del evento
+    <code>INSPECTION_COMPLETED_VIA_MOBILE</code> que el servidor escribe en el mismo write que el sello
+    (<code>mobile-inspection.service.js:273-279</code>: <code>photoCount</code>, <code>hasSignature</code>,
+    <code>signerName</code>)— y <b>cuántas salidas tiene el paso</b>: dos, porque el sello de la inspección y el de la
+    firma son independientes. Arriba de las tarjetas <b>no cambia un píxel</b>: mismo wizbar, mismo mini header, mismo
+    rail y misma stepline en las dos ramas.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Sellada + firmada (camino normal)</span>
+      <span class="schip"><i></i>Sellada sin firma</span>
+      <span class="schip"><i></i>Sellada sin conteo (sin evento)</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption><span class="tag corr">Corrección</span>17F-bis · rama A — sellada <b>y firmada</b>
+        <small>el camino normal de RideOps: el <code>complete</code> lleva firma, así que el paso 8 llega cumplido</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:55</span><span>LTE · 71 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></svg>Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span>
+            <span class="presence"><span class="lv"></span><span class="pv">MG</span>María G. · kiosco · hace 5 s</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">Pago</span></div>
+            <div class="sr on"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+            <span class="m inframe" style="margin:44px 0 0 236px">1</span>
+          </div>
+          <div class="stepline"><span class="ix">Paso 7 de 10</span>Inspección completa
+            <span class="more">Ver todos los pasos <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+          <div class="wpad">
+            <div class="vcard okc">
+              <div class="vhead"><b>Inspección de salida</b><span class="vpill ok">En el servidor</span><span class="m">2</span></div>
+              <div class="kv"><span class="k">Inspección</span><span class="v okv">Recibida 10:54</span></div>
+              <div class="kv"><span class="k">Fotos</span><span class="v">8 de 8 recibidas<span class="m" style="margin-left:6px">3</span></span></div>
+              <div class="kv note">El odómetro, el combustible y las notas quedaron en el registro de la inspección;
+                esta pantalla solo muestra lo que el servidor confirma del checkout.<span class="m" style="margin-left:6px">4</span></div>
+            </div>
+            <div class="vcard okc">
+              <div class="vhead"><b>Firma del cliente</b><span class="vpill ok">En el servidor</span><span class="m">5</span></div>
+              <div class="kv"><span class="k">Firmó</span><span class="v">Laura Méndez</span></div>
+              <div class="kv"><span class="k">Recibida</span><span class="v okv">10:54 · al terminar la inspección</span></div>
+            </div>
+            <div class="banner b-info">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8v.5"/></svg>
+              <span>El cliente ya firmó, así que <b>no hay que pedirle firma otra vez</b>. Solo falta cerrar la
+                entrega.</span></div>
+            <div class="dock">
+              <div class="btn btn-primary">Continuar al cierre</div>
+              <div class="why">El servidor ya tiene la inspección y la firma. Este botón avanza al cierre; el contrato
+                se genera cuando la entrega quede cerrada.<span class="m" style="margin-left:4px">6</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption><span class="tag corr">Corrección</span>17F-bis · rama B — sellada <b>sin firma</b>
+        <small>la rama que hoy pierde el <code>why</code>: el siguiente paso pide firmar al cliente y hay que decirlo</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>10:55</span><span>LTE · 71 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Autos del Valle · Patio Centro</span></div>
+            <div class="pausebtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></svg>Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span>
+            <span class="presence"><span class="lv"></span><span class="pv">MG</span>María G. · kiosco · hace 5 s</span></div>
+          <div class="srail">
+            <div class="sr done"><span class="d">✓</span><span class="lb">Confirmar</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">T&amp;C</span></div>
+            <div class="sr done"><span class="d">✓</span><span class="lb">Pago</span></div>
+            <div class="sr on"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 7 de 10</span>Inspección completa
+            <span class="more">Ver todos los pasos <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
+          <div class="wpad">
+            <div class="vcard okc">
+              <div class="vhead"><b>Inspección de salida</b><span class="vpill ok">En el servidor</span></div>
+              <div class="kv"><span class="k">Inspección</span><span class="v okv">Recibida 10:54</span></div>
+              <div class="kv"><span class="k">Fotos</span><span class="v">8 de 8 recibidas</span></div>
+              <div class="kv note">El odómetro, el combustible y las notas quedaron en el registro de la inspección;
+                esta pantalla solo muestra lo que el servidor confirma del checkout.</div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Continuar a firma y cierre</div>
+              <div class="why">El servidor ya tiene la inspección, pero no la firma del cliente. El siguiente paso le
+                pide firmar en este teléfono.<span class="m" style="margin-left:4px">7</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>Detalles — <b>no son pantallas nuevas</b>
+        <small>variantes de la misma tarjeta; el resto del frame es idéntico</small></figcaption>
+
+      <div class="detail">
+        <div class="dl">Variante · sellada sin conteo</div>
+        <div class="dw">
+          <div class="vcard okc">
+            <div class="vhead"><b>Inspección de salida</b><span class="vpill ok">En el servidor</span><span class="m">8</span></div>
+            <div class="kv"><span class="k">Inspección</span><span class="v okv">Recibida 10:54</span></div>
+            <div class="kv note">El odómetro, el combustible y las notas quedaron en el registro de la inspección;
+              esta pantalla solo muestra lo que el servidor confirma del checkout.</div>
+          </div>
+        </div>
+        <div class="dn"><b>La fila de fotos se omite; jamás se pinta "0 de 8".</b> Solo ocurre si la sesión la selló una
+          superficie que no dejó el evento <code>INSPECTION_COMPLETED_VIA_MOBILE</code>. La tarjeta <b>sigue teniendo
+          fila</b>, que es lo único que este frame no puede negociar.</div>
+      </div>
+
+      <div class="detail">
+        <div class="dl">Lo que HOY pinta el build en frío (el defecto)</div>
+        <div class="dw">
+          <div class="vcard okc" style="opacity:.92">
+            <div class="vhead"><b>Inspección de salida</b><span class="vpill ok">Recibida 10:54</span></div>
+          </div>
+        </div>
+        <div class="dn">Encabezado, pastilla verde y <b>ninguna fila</b>. El mismo estado del servidor pinta esto o la
+          tarjeta completa según si la app estaba abierta cuando drenó la bandeja: <b>no-determinismo visible para el
+          agente</b>. En una pantalla de evidencia, el vacío no se lee como "no hay dato": se lee como "no hay
+          fotos".</div>
+      </div>
+
+      <div class="detail">
+        <div class="dl">Variante · firma de otra superficie</div>
+        <div class="dw">
+          <div class="vcard okc">
+            <div class="vhead"><b>Firma del cliente</b><span class="vpill ok">En el servidor</span></div>
+            <div class="kv"><span class="k">Recibida</span><span class="v okv">11:02</span></div>
+          </div>
+        </div>
+        <div class="dn">Si <code>customerSignedAt ≠ inspectionCompletedAt</code>, la firma <b>no</b> vino con la
+          inspección: se cae "· al terminar la inspección" y, sin <code>signerName</code> del evento, se cae también la
+          fila <b>Firmó</b>. No se rellena con el titular de la reserva.</div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · 17F-bis</h3>
+      <div class="note"><span class="m">1</span><span><b>El rail y la stepline se dibujan como el build los deriva de
+        la posición, y eso corrige MI lámina.</b> A <code>currentStep = INSPECTION_IN_PROGRESS</code> la fase 4 está
+        <b>en curso</b>, no terminada: el que la cierra es el CTA (<code>TransitionButton toStep:
+        customerSignPending</code>, <code>inspection_step.dart:811-814</code>). El 17F original pintaba
+        <i>Inspección</i> ✓ y <i>Cierre</i> en curso — es decir, el resultado de tocar el botón. Aquí no se toca nada
+        del rail: se dibuja lo construido.</span></div>
+      <div class="note"><span class="m">2</span><span><b>La fila ancla es incondicional.</b> Si la tarjeta se pinta es
+        porque <code>inspectionCompletedAt != null</code>; entonces la fila <i>Inspección · Recibida {hora}</i>
+        <b>siempre</b> tiene dato, por construcción. Esa es la regla que faltaba: <i>toda tarjeta de evidencia declara
+        una fila que existe por el mismo motivo por el que la tarjeta existe</i>. Las demás filas pueden faltar; ésta
+        no. La hora es del servidor (<code>session.inspectionCompletedAt</code>), nunca del reloj de la app.</span></div>
+      <div class="note"><span class="m">3</span><span><b>El conteo es un hecho del servidor y ya viaja.</b>
+        <code>photoCount</code> va en el evento <code>INSPECTION_COMPLETED_VIA_MOBILE</code>, escrito en la MISMA
+        transacción que el sello (<code>mobile-inspection.service.js:273-279</code>): mismo mecanismo que ya alimenta
+        el estado del seguro y el banner de avance ajeno, cero peticiones extra, y <b>funciona al entrar en frío</b>.
+        Hoy el conteo sale de <code>_onServerCount(flow)</code> (<code>:173-175</code>), que mira los ángulos locales
+        y da 0 en frío. Se cambia la fuente, no el componente. Copy reutilizada de 17D:
+        <code>coInspServerPhotos</code>.</span></div>
+      <div class="note"><span class="m">4</span><span><b>El pie de alcance convierte una ausencia en un límite
+        declarado.</b> Odómetro, combustible y notas se copian al contrato <b>al finalizar</b>
+        (<code>checkout-session.service.js:498-521</code>), así que en el paso 7 y por la vía móvil siguen nulos: el
+        servidor no los expone y el teléfono no tiene derecho a afirmarlos. Sin este pie, un agente que capturó
+        24 131 km y no los ve aquí concluye que se perdieron. Va como <b>fila de la propia tarjeta</b>
+        (<code>.kv.note</code>: mismo separador, mismo ritmo, texto en --n-700), no como banner: es alcance, no
+        aviso.</span></div>
+      <div class="note"><span class="m">5</span><span><b>El nombre sale del sello, no de display-data.</b> El evento
+        trae <code>signerName</code> — <b>quien de verdad firmó</b>. Hoy la fila usa
+        <code>wizard.context.customer.fullName</code> (<code>inspection_step.dart:737-741</code>), que es el titular de
+        la reserva: si firma un conductor adicional, la pantalla nombra a la persona equivocada <b>en la evidencia de
+        una firma</b>. Regla: con <code>signerName</code>, fila <i>Firmó</i>; sin él, se omite la fila y se deja la de
+        <i>Recibida</i> — nunca se infiere un firmante.</span></div>
+      <div class="note"><span class="m">6</span><span><b>Rama A: CTA y <code>why</code> tal como están construidos</b>
+        (<code>coInspCloseCta</code> / <code>coInspCloseWhy</code>). No se tocan: ya dicen que el botón
+        <i>avanza</i> y que el contrato llega al cerrar. El banner azul tampoco se toca (es el que impide pedir la
+        firma dos veces y <b>sobrescribir</b> la guardada, <code>checkout-session.service.js:668-690</code>).</span></div>
+      <div class="note"><span class="m">7</span><span><b>Rama B: el defecto es el silencio, no la etiqueta.</b> Hoy
+        <code>why: signedAt == null ? null : …</code> (<code>:816</code>) apaga la explicación justo cuando más falta
+        hace, y la etiqueta genérica "Continuar al cierre" hace que el agente toque esperando un cierre y reciba una
+        pantalla de firma <b>para el cliente</b>, con el cliente delante. Se nombra el destino en el botón y se dice
+        por qué debajo. <b>Sin banner y sin tarjeta de "firma pendiente" a propósito</b>: el <code>why</code> ya lo
+        dice y una tarjeta gris pondría atención de alarma sobre algo que no es un problema.</span></div>
+      <div class="note"><span class="m">8</span><span><b>"Nunca cero" es una regla escrita, no un estado dibujado…
+        casi.</b> Se dibuja la variante porque es barata y porque deja constancia de que la tarjeta <b>conserva fila</b>
+        en el peor caso. Lo prohibido es lo contrario: pintar "0 de 8 recibidas" con un sello del servidor delante — el
+        servidor rechaza el <code>complete</code> sin Frente y Atrás
+        (<code>mobile-inspection.service.js:200-207</code>), así que un sello con 0 fotos es imposible por la vía
+        móvil y sería una falsa alarma inventada por el cliente.</span></div>
+      <div class="note"><span class="m">9</span><span><b>Estados de carga / vacío / error (DoD-10).</b> Cargando: no
+        aplica — la tarjeta se pinta de la sesión que el poll ya trajo. Vacío: <b>no existe</b>, ése es el punto del
+        frame. Error: si el poll falla, manda el banner de sesión vieja de la Tanda A y esta tarjeta se queda con lo
+        último confirmado; no se blanquea.</span></div>
+      <div class="contrast"><b>Contraste medido</b>
+        <ul>
+          <li><b>PAR NUEVO</b> — pie de alcance (<code>.kv.note</code>) --n-700 <code>#4b4362</code> sobre el fondo de
+            la tarjeta ok <code>#fbfffd</code>: <b>9.14:1</b> (AAA para texto normal). Sobre la tarjeta neutra
+            <code>#fff→#fdfcff</code>: <b>9.22:1</b>.</li>
+          <li><b>PAR NUEVO</b> — pastilla <i>En el servidor</i>, --ok-tx <code>#08674e</code> sobre --ok-bg
+            <code>#e6f7f1</code>: <b>6.19:1</b> (mismo par que la pastilla anterior; cambia la palabra, no el color).</li>
+          <li>Valor <i>Recibida 10:54</i> (<code>.v.okv</code>) --ok-tx sobre <code>#fbfffd</code>: <b>6.81:1</b>.
+            Clave (<code>.k</code>) --n-700 sobre el mismo fondo: <b>9.14:1</b>. Valor normal --n-900 sobre el mismo
+            fondo: <b>17.98:1</b>. Pares ya en uso en 17D/17E.</li>
+          <li>Sin cambio: <code>why</code> del dock --n-700 sobre --n-50 <b>8.53:1</b>; CTA primario blanco sobre el
+            gradiente <b>5.70:1</b> en su parada peor; chip "Paso 7 de 10" --p-800 sobre --p-50 <b>9.93:1</b>; banner
+            azul --n-800 sobre --info-bg <b>12.1:1</b>.</li>
+          <li>Ningún color fuera del tema: verde de estado, azul de información y morado de marca son los tokens
+            existentes. La pastilla verde <b>ya no es el único portador del estado</b>, así que la tarjeta deja de
+            depender del color para decir algo (WCAG 1.4.1).</li>
+        </ul></div>
+      <div class="decision"><b>Decisión pedida: ¿la hora vive en la pastilla o en la fila?</b>
+        <b style="text-transform:none;font-size:13px;margin-top:2px">Recomendación: <u>en la fila</u>; la pastilla se
+        queda con la palabra de estado.</b>
+        <ul>
+          <li>La fila ancla debe llevar la hora del servidor, y con la pastilla actual (<i>Recibida 10:54</i>) el mismo
+            texto aparecería <b>dos veces</b> en una tarjeta de dos filas — y un lector de pantalla lo leería dos
+            veces.</li>
+          <li>Además la hora gana: pasa de una pastilla de 11.5 px en mayúsculas a una fila de 13.5 px alineada a la
+            izquierda, junto al conteo. Es la que se lee con guantes y con sol.</li>
+          <li><b>Si Hector prefiere cero cambios de copy aprobada:</b> se deja la pastilla
+            <code>coInspReceivedAt</code> tal cual y la fila ancla dice <i>Inspección · Sellada por el servidor</i>
+            (sin hora). Se resuelve igual el vacío; se pierde la hora legible y la tarjeta queda con una fila menos
+            informativa. Es la única parte de este frame que es <b>preferencia</b>, no defecto.</li>
+        </ul>
+      </div>
+    </aside>
+
+    <div class="copy">
+      <h3>Copy exacta · 17F-bis (es / en)</h3>
+      <table class="ct">
+        <tr><th>Ubicación</th><th>Clave l10n</th><th>ES</th><th>EN</th><th>Estado</th></tr>
+        <tr><td class="fr">Tarjeta 1 · título</td><td class="k">coInspDoneTitle</td><td>Inspección de salida</td><td>Check-out inspection</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Tarjeta 1 · pastilla</td><td class="k">coInspOnServerPill</td><td>En el servidor</td><td>On the server</td><td class="st new">nueva</td></tr>
+        <tr><td class="fr">Tarjeta 1 · fila ancla</td><td class="k">coInspRowInspection</td><td>Inspección</td><td>Inspection</td><td class="st reuse">reusada</td></tr>
+        <tr><td class="fr">Tarjeta 1 · fila ancla</td><td class="k">coInspReceivedAt</td><td>Recibida {hora}</td><td>Received {time}</td><td class="st reuse">reusada (era la pastilla)</td></tr>
+        <tr><td class="fr">Tarjeta 1 · fotos</td><td class="k">coInspRowPhotos</td><td>Fotos</td><td>Photos</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Tarjeta 1 · fotos</td><td class="k">coInspServerPhotos</td><td>{n} de 8 recibidas</td><td>{n} of 8 received</td><td class="st old">sin cambio (nueva fuente)</td></tr>
+        <tr><td class="fr">Tarjeta 1 · pie</td><td class="k">coInspScopeNote</td><td>El odómetro, el combustible y las notas quedaron en el registro de la inspección; esta pantalla solo muestra lo que el servidor confirma del checkout.</td><td>The odometer, fuel and notes are stored in the inspection record; this screen only shows what the server confirms for the checkout.</td><td class="st new">nueva</td></tr>
+        <tr><td class="fr">Tarjeta 2 · título</td><td class="k">coInspSignatureTitle</td><td>Firma del cliente</td><td>Customer signature</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Tarjeta 2 · pastilla</td><td class="k">coInspOnServerPill</td><td>En el servidor</td><td>On the server</td><td class="st new">nueva</td></tr>
+        <tr><td class="fr">Tarjeta 2 · quién</td><td class="k">coInspSignedRow</td><td>Firmó</td><td>Signed by</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Tarjeta 2 · cuándo</td><td class="k">coInspRowReceived</td><td>Recibida</td><td>Received</td><td class="st new">nueva (etiqueta)</td></tr>
+        <tr><td class="fr">Tarjeta 2 · cuándo</td><td class="k">coSignReceivedWithInspection</td><td>{hora} · al terminar la inspección</td><td>{time} · at the end of the inspection</td><td class="st new">nueva (sustituye a coSignFromInspection)</td></tr>
+        <tr><td class="fr">Tarjeta 2 · otra superficie</td><td class="k">—</td><td>{hora}</td><td>{time}</td><td class="st old">solo formato</td></tr>
+        <tr><td class="fr">Rama A · banner</td><td class="k">coSignAlreadyBanner</td><td>El cliente ya firmó, así que no hay que pedirle firma otra vez. Solo falta cerrar la entrega.</td><td>The customer already signed, so there's no need to ask again. All that's left is closing the handover.</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Rama A · CTA</td><td class="k">coInspCloseCta</td><td>Continuar al cierre</td><td>Continue to closing</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Rama A · why</td><td class="k">coInspCloseWhy</td><td>El servidor ya tiene la inspección y la firma. Este botón avanza al cierre; el contrato se genera cuando la entrega quede cerrada.</td><td>The server already has the inspection and the signature. This button moves on to closing; the contract is generated once the hand-over is closed.</td><td class="st old">sin cambio</td></tr>
+        <tr><td class="fr">Rama B · CTA</td><td class="k">coInspContinueSign</td><td>Continuar a firma y cierre</td><td>Continue to signature and close</td><td class="st reuse">reusada (17D)</td></tr>
+        <tr><td class="fr">Rama B · why</td><td class="k">coInspCloseUnsignedWhy</td><td>El servidor ya tiene la inspección, pero no la firma del cliente. El siguiente paso le pide firmar en este teléfono.</td><td>The server has the inspection but not the customer's signature. The next step asks them to sign on this phone.</td><td class="st new">nueva</td></tr>
+      </table>
+      <p style="margin:12px 0 0;font-size:12.5px;color:var(--n-700)"><b>Retiradas:</b>
+        <code>coSignFromInspection({nombre})</code> — la fila se parte en <i>quién</i> y <i>cuándo</i>, así que el
+        nombre y la hora dejan de compartir string (mejor para traducir y para leer). La clave de pastilla
+        <code>coInspReceivedAt</code> <b>no</b> se retira: se muda a la fila.</p>
+    </div>
+  </div>
+</section>
+
+<footer class="dod">
+  <div class="card">
+    <h3>Qué de este frame corrige un error de mi propia lámina (17F)</h3>
+    <ul>
+      <li><b>Error mío 1 — inventé filas que el servidor no expone.</b> 17F pintaba <i>Odómetro 24 131 km</i>,
+        <i>Combustible 7/8 · Limpieza 4 de 5</i> y <i>Notas</i>. Esas columnas se copian al contrato <b>al
+        finalizar</b> (<code>checkout-session.service.js:498-521</code>) y por la vía móvil siguen nulas en el paso 7:
+        el desarrollador tenía razón al omitirlas. <b>Corregido</b>: fuera las filas, dentro el pie de alcance, que era
+        lo que faltaba para que la ausencia se leyera como límite y no como pérdida.</li>
+      <li><b>Error mío 2 — di una regla sin dar el ancla.</b> Mi nota 14 decía "si un dato no llega, se omite la fila
+        en lugar de poner un guion". La regla es buena; aplicada a una tarjeta cuyas filas eran <b>todas</b>
+        condicionales, produce la tarjeta vacía. <b>Corregido</b>: la regla se completa con "toda tarjeta declara una
+        fila incondicional". El defecto nació de mi lámina, no del build.</li>
+      <li><b>Error mío 3 — el rail adelantado.</b> 17F dibujaba <i>Inspección</i> ✓ y <i>Cierre</i> en curso: el estado
+        <b>posterior</b> a tocar el CTA. El build lo deriva de la posición y tiene razón. <b>Corregido</b>: fase 4 en
+        curso, paso 7 de 10, en las dos ramas.</li>
+      <li><b>Error mío 4 — atribuí la firma al titular.</b> 17F escribió <i>Firmó · Laura Méndez</i> sin decir de dónde
+        salía el nombre; el build lo tomó de display-data, que es el titular de la reserva, no el firmante.
+        <b>Corregido</b>: <code>signerName</code> del sello, y si no está, no hay nombre.</li>
+      <li><b>Error mío 5 (de la revisión, no de la lámina) — di por imposible el conteo.</b> Al revisar M2-H4 dije que
+        el número de fotos no se podía saber en frío y propuse una fila "conocido / desconocido". Es falso: el conteo
+        viaja en el evento del propio sello. <b>Corregido</b>: dato firme. Y me deja una lección de proceso: la
+        pregunta "¿el servidor ya lo manda?" va <b>antes</b> de diseñar un estado de incertidumbre.</li>
+      <li><b>Lo que sí era defecto del build y sigue siéndolo:</b> la tarjeta que se queda sin filas y el
+        <code>why</code> apagado en la rama sin firma. Son los dos únicos motivos por los que esta lámina existe.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Lo que este frame NO toca (Innovation ya lo dictaminó a favor del desarrollador)</h3>
+    <ul>
+      <li><b>Odómetro, combustible y notas siguen fuera.</b> No se re-litiga: no están en el servidor en este paso.</li>
+      <li><b>El rail derivado de la posición se queda como está construido.</b> No se re-litiga.</li>
+      <li><b>El chip verde falso y el desbordamiento del botón primario no llevan lámina.</b> Son correcciones a
+        intención ya aprobada; se arreglan en el build sin pasar por aquí.</li>
+      <li><b>La pastilla verde sigue siendo verde y el CTA sigue siendo morado de marca.</b> Cero color nuevo.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Si Hector rechaza — qué pasa exactamente, cambio por cambio</h3>
+    <table class="rejtbl">
+      <tr><th>Cambio</th><th>Tipo</th><th>Si se rechaza</th></tr>
+      <tr><td class="fr">Fila ancla incondicional<br>(<i>Inspección · Recibida {hora}</i>)</td><td><span class="tag corr">Corrección</span></td><td><b>El más caro de rechazar.</b> La tarjeta sigue pudiendo quedarse en encabezado + pastilla, y el mismo estado del servidor se ve distinto según si la app estaba abierta. En la pantalla que sirve de evidencia de la entrega, el vacío se lee como "las fotos no están". <b>Recomiendo no rechazarlo.</b></td></tr>
+      <tr><td class="fr">Conteo desde el evento del servidor</td><td><span class="tag corr">Corrección</span></td><td>La fila de fotos sigue apareciendo y desapareciendo sola. Con la fila ancla ya no habría tarjeta vacía, pero un agente que entra en frío no sabría cuántas fotos tiene el servidor — justo el dato que le piden cuando hay disputa. Coste de construirlo: leer un campo que ya viaja.</td></tr>
+      <tr><td class="fr">Omitir la fila si no hay conteo<br>(regla "nunca cero")</td><td><span class="tag corr">Corrección</span></td><td>Si en su lugar se pinta "0 de 8", el frame crea la falsa alarma que vino a matar. Si no se escribe la regla, cualquiera la reintroducirá al refactorizar. Es una línea de código y una línea de test.</td></tr>
+      <tr><td class="fr">Pie de alcance</td><td><span class="tag prop">Propuesta</span></td><td>Nada se rompe. El agente que capturó el odómetro no lo ve aquí y concluye que se perdió; el siguiente reporte es "la app borró mis datos". Es barato y evita una clase entera de tickets.</td></tr>
+      <tr><td class="fr">Hora a la fila / pastilla con palabra de estado</td><td><span class="tag prop">Propuesta</span></td><td>Es preferencia. Alternativa declarada: pastilla <code>coInspReceivedAt</code> intacta y fila ancla <i>Sellada por el servidor</i>. El vacío se resuelve igual; se pierde la hora en tamaño legible y se conserva copy ya aprobada.</td></tr>
+      <tr><td class="fr">Rama B del CTA<br>(etiqueta + <code>why</code>)</td><td><span class="tag corr">Corrección</span></td><td>El agente toca "Continuar al cierre" sin ninguna explicación debajo y aterriza en una pantalla de firma que hay que poner en manos del cliente, sin avisarle a nadie. Es el mismo defecto que 17D y 18D corrigen en otro punto del flujo. <b>Recomiendo no rechazarlo.</b></td></tr>
+      <tr><td class="fr">Nombre desde <code>signerName</code></td><td><span class="tag corr">Corrección</span></td><td>La pantalla sigue nombrando al titular de la reserva como firmante aunque haya firmado un conductor adicional. Es evidencia contractual con el nombre equivocado; el dato correcto ya viaja en el mismo evento.</td></tr>
+      <tr><td class="fr">Sin tarjeta de "firma pendiente" en la rama B</td><td><span class="tag prop">Propuesta</span></td><td>Si Hector la quiere, cabe: tarjeta <i>Firma del cliente</i> con pastilla neutra <i>Pendiente</i>, como las filas pendientes de 17D. Mi lectura es que duplica el <code>why</code> y pone atención de alarma sobre un estado normal.</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Para el PM — lo que hay que mandar construir con esto</h3>
+    <ul>
+      <li><b>Fuente del conteo:</b> parsear <code>photoCount</code> del evento
+        <code>INSPECTION_COMPLETED_VIA_MOBILE</code> y pasarlo a <code>_CompletedView</code> en lugar de
+        <code>_onServerCount(flow)</code>. Es el mismo registro que la app ya lee para el estado del seguro y el
+        avance ajeno; no hay petición nueva ni cambio de backend.</li>
+      <li><b>Fuente del firmante:</b> del mismo evento, <code>signerName</code>. Sustituye a
+        <code>wizard.context.customer.fullName</code>. La condición <code>signedWithInspection</code> ya existe en el
+        build (<code>:746</code>) y se conserva para decidir el sufijo "· al terminar la inspección".</li>
+      <li><b>Rama B:</b> etiqueta y <code>why</code> propios cuando <code>customerSignedAt == null</code>. La rama la
+        decide el <b>sello</b>, no <code>hasSignature</code> del evento ni <code>currentStep</code>: es el sello el que
+        gobierna el guard del paso 8 y el riesgo de sobrescritura.</li>
+      <li><b>Tests que este frame pide:</b> (a) sesión sellada, entrada en frío, sin estado local ⇒ la tarjeta tiene
+        al menos una fila; (b) evento sin <code>photoCount</code> ⇒ no se renderiza "0 de 8"; (c)
+        <code>customerSignedAt == null</code> ⇒ el CTA dice "Continuar a firma y cierre" y el <code>why</code>
+        <b>no</b> es nulo; (d) <code>signerName</code> ausente ⇒ no aparece la fila <i>Firmó</i>.</li>
+      <li><b>Fuera de alcance de esta lámina:</b> el chip verde falso y el desbordamiento del botón primario — van
+        directo al build.</li>
+    </ul>
+  </div>
+</footer>
+
+</body>
+</html>

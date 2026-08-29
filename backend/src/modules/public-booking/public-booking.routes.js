@@ -632,6 +632,13 @@ publicBookingRouter.get(
   (req, res) => {
     res.set('Cache-Control', 'no-store');
     res.set('Content-Type', 'text/html; charset=utf-8');
+    // Anti-clickjacking (DAST 2026-08-23): a static terminal "you can close
+    // this page" response with no embedded third-party content and no legit
+    // reason to be framed. The WebView loads it top-level (navigation), so
+    // DENY doesn't affect it. Unlike payarc-bridge/accept-hosted below, this
+    // page embeds nothing, so frame-ancestors 'none' is safe here.
+    res.set('X-Frame-Options', 'DENY');
+    res.set('Content-Security-Policy', "frame-ancestors 'none'");
     res.send(renderReturnPage({ status: 'success' }));
   },
 );
@@ -642,6 +649,10 @@ publicBookingRouter.get(
   (req, res) => {
     res.set('Cache-Control', 'no-store');
     res.set('Content-Type', 'text/html; charset=utf-8');
+    // Anti-clickjacking (DAST 2026-08-23): terminal page, embeds nothing —
+    // same rationale as payment-return above.
+    res.set('X-Frame-Options', 'DENY');
+    res.set('Content-Security-Policy', "frame-ancestors 'none'");
     res.send(renderReturnPage({ status: 'cancel' }));
   },
 );

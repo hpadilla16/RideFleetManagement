@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RideOps · Mockups M2 — Lámina delta H2 (MC-8 · MC-4 · pill Actual)</title>
+<style>
+/* ============================================================
+   TOKENS — idénticos a m2-tanda-a.html (y por herencia a
+   m1-tanda-a-v2.html / m1-tanda-b.html). Cero tokens nuevos.
+   Lo único declarado aparte son 4 clases de composición
+   (.v.unread, .vpill.neutral, .srvquote, .cpill), todas hechas
+   con tokens que ya existen y con su contraste MEDIDO al pie.
+   ============================================================ */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-200:#d9c9ff; --p-300:#c0a8ff;
+  --p-400:#9f79ff; --p-500:#7f4ff0; --p-600:#6a35e0; --p-700:#5a26c9;
+  --p-800:#45189e; --p-900:#2e1071;
+  --brand:#8752FE;
+  --brand-a08:rgba(135,82,254,.08); --brand-a12:rgba(135,82,254,.12);
+  --brand-a16:rgba(135,82,254,.16); --brand-a20:rgba(135,82,254,.20);
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --focus:#0b63d6; --focus-halo:rgba(11,99,214,.22);
+  --tonal:#f6f2ff;
+  --sh-b1:0 1px 0 rgba(255,255,255,.85) inset,0 2px 6px -2px rgba(69,24,158,.14),0 10px 24px -10px rgba(135,82,254,.22);
+  --sh-float:0 6px 16px -6px rgba(23,18,43,.18),0 24px 48px -18px rgba(69,24,158,.30);
+  --r-xl:24px; --r-2xl:28px;
+  --bd-lite:1px solid rgba(135,82,254,.14);
+  --sh-3:0 1px 3px rgba(24,16,54,.06),0 14px 30px -10px rgba(38,20,90,.14),0 44px 80px -28px rgba(38,20,90,.22);
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+  background:var(--n-100);color:var(--n-900);font-size:14px;line-height:1.5}
+h1,h2,h3{margin:0;letter-spacing:.005em}
+a{text-decoration:none;color:inherit}
+.tnum{font-variant-numeric:tabular-nums}
+
+/* ---------- chrome del documento (idéntico a las tandas aprobadas) ---------- */
+.doc-head{max-width:1720px;margin:0 auto;padding:26px 24px 10px}
+.doc-head h1{font-size:24px;font-weight:850}
+.doc-head h1 .v2{display:inline-flex;align-items:center;margin-left:10px;padding:3px 12px;border-radius:999px;
+  background:linear-gradient(135deg,var(--p-600),var(--p-800));color:#fff;font-size:13px;font-weight:800;vertical-align:middle}
+.doc-head p{margin:8px 0 0;color:var(--n-700);max-width:1020px}
+.meta-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.mchip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 11px;
+  border-radius:8px;background:var(--p-50);border:1px solid var(--brand-a20);
+  color:var(--p-800);font-size:12.5px;font-weight:700}
+.mchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.mchip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.jump{position:sticky;top:0;z-index:60;display:flex;gap:8px;flex-wrap:wrap;
+  padding:10px 24px;background:rgba(255,255,255,.88);backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--n-200);box-shadow:var(--sh-1)}
+.jump a{display:inline-flex;align-items:center;min-height:40px;padding:6px 14px;border-radius:12px;
+  border:1px solid var(--n-300);background:var(--n-0);font-weight:700;font-size:13px;color:var(--n-800)}
+.jump a:hover{background:var(--p-50);border-color:var(--brand-a20);color:var(--p-800)}
+.jump a:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+section.blk{max-width:1720px;margin:0 auto;padding:30px 24px 8px;scroll-margin-top:76px}
+.blk-head{margin-bottom:16px}
+.blk-head .eyebrow{color:var(--p-700);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.blk-head h2{font-size:20px;font-weight:800;margin-top:2px}
+.blk-head p{color:var(--n-700);margin:6px 0 0;max-width:920px}
+.blk-head .origin{margin-top:10px;padding:11px 14px;border-radius:14px;background:var(--n-0);
+  border:var(--bd-lite);box-shadow:var(--sh-1);font-size:12.5px;color:var(--n-700);max-width:920px}
+.blk-head .origin b{color:var(--n-900)}
+.state-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.schip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:6px;
+  font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--n-50);border:1px solid var(--n-200);color:var(--n-700)}
+.schip i{width:6px;height:6px;border-radius:50%;background:currentColor;font-style:normal}
+.schip.prop{background:var(--p-50);border-color:var(--brand-a20);color:var(--p-800)}
+.frames{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;padding-bottom:26px}
+figure{margin:0}
+figcaption{font-size:13px;font-weight:800;color:var(--n-800);margin:0 0 8px 6px}
+figcaption small{display:block;font-weight:600;color:var(--n-600);font-size:12px}
+
+/* ---------- notas / anotaciones ---------- */
+.notes{flex:1 1 380px;max-width:520px;background:var(--n-0);border:var(--bd-lite);
+  border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1)}
+.notes h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+.note{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--n-100);font-size:13px;color:var(--n-700)}
+.note:last-child{border-bottom:0}
+.note b{color:var(--n-900)}
+.m{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;
+  border-radius:50%;background:var(--p-600);color:#fff;font-size:12px;font-weight:800;line-height:1}
+.m.inframe{position:absolute;z-index:9;box-shadow:0 0 0 2px #fff}
+.motion{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--info-bg);
+  border:1px solid var(--info-bd);font-size:12.5px;color:var(--n-800)}
+.motion b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--info);margin-bottom:6px}
+.motion ul{margin:0;padding-left:16px}
+.motion li{margin:3px 0}
+.contrast{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--n-50);
+  border:1px solid var(--n-200);font-size:12.5px;color:var(--n-700)}
+.contrast b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:6px}
+.contrast li{margin:3px 0}
+.contrast ul{margin:0;padding-left:16px}
+.decision{margin-top:14px;padding:14px 16px;border-radius:16px;background:var(--warn-bg);
+  border:1.5px dashed var(--warn-bd);color:var(--warn-tx);font-size:13px}
+.decision b{display:block;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.decision ul{margin:6px 0 0;padding-left:18px}
+.decision li{margin:3px 0}
+.mini-demo{margin-top:12px;padding:12px;border-radius:14px;background:var(--n-50);border:1px solid var(--n-200)}
+.mini-demo .cap{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:8px}
+.mini-demo .pair{display:flex;gap:10px;flex-wrap:wrap}
+.mini-demo .pair > div{flex:1 1 190px;min-width:0}
+.mini-demo .lbl{font-size:11px;font-weight:800;color:var(--n-700);margin-bottom:5px}
+
+/* ---------- tabla de copy ES/EN (todo string va a app_es.arb / app_en.arb, ADR-8) ---------- */
+.cp{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--n-25);border:1px solid var(--n-200)}
+.cp b.h{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:8px}
+.cp table{width:100%;border-collapse:collapse;font-size:12px}
+.cp th{text-align:left;color:var(--n-600);font-size:10.5px;font-weight:800;text-transform:uppercase;
+  letter-spacing:.06em;padding:0 8px 5px 0;border-bottom:1px solid var(--n-200);white-space:nowrap}
+.cp td{padding:6px 8px 6px 0;border-bottom:1px solid var(--n-100);vertical-align:top;color:var(--n-800);line-height:1.4}
+.cp tr:last-child td{border-bottom:0}
+.cp code{font-size:11px;color:var(--p-800);font-weight:800;word-break:break-word}
+.cp .new code::after{content:" · NUEVA";color:var(--p-600);font-weight:800;font-size:9.5px;letter-spacing:.05em}
+.cp .keep code::after{content:" · YA EXISTE";color:var(--n-600);font-weight:800;font-size:9.5px;letter-spacing:.05em}
+.cp .raw{font-family:ui-monospace,'Cascadia Mono',Consolas,monospace;font-size:11px;color:var(--n-900)}
+
+/* ---------- frame de teléfono ---------- */
+.phone{position:relative;width:390px;border:9px solid var(--n-900);border-radius:40px;
+  overflow:hidden;background:var(--n-50);box-shadow:var(--sh-3)}
+.statusbar{position:relative;z-index:4;display:flex;justify-content:space-between;align-items:center;height:32px;
+  padding:0 20px;font-size:11.5px;font-weight:700;color:var(--n-700);background:var(--n-50)}
+.statusbar.on-white{background:var(--n-0)}
+.scr{position:relative;display:flex;flex-direction:column;min-height:724px;padding:0}
+
+/* ---------- WIZARD: barra, header de sesión, presencia ---------- */
+.wizbar{position:relative;z-index:4;display:flex;align-items:center;gap:8px;padding:7px 8px;
+  background:rgba(255,255,255,.98);border-bottom:1px solid var(--n-200)} /* plate opaco, CERO blur en todo el wizard */
+.icobtn{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+  color:var(--n-800);flex:0 0 auto}
+.wizbar .tt{flex:1;min-width:0}
+.wizbar .tt b{display:block;font-size:15.5px;font-weight:850;color:var(--n-900);line-height:1.15}
+.wizbar .tt span{font-size:12px;font-weight:650;color:var(--n-700)}
+.pausebtn{min-height:48px;display:inline-flex;align-items:center;gap:6px;padding:0 12px;border-radius:14px;
+  border:1.5px solid var(--n-300);background:var(--n-0);font-size:13px;font-weight:800;color:var(--n-800);flex:0 0 auto}
+.sesshead{background:var(--tonal);border-bottom:1px solid var(--n-200);padding:11px 14px;display:grid;gap:9px}
+.sesshead.mini{display:flex;align-items:center;gap:9px;padding:7px 12px}
+.sesshead.mini .who{display:flex;align-items:center;gap:8px;min-width:0;flex:1;font-size:13.5px;font-weight:800;color:var(--n-900)}
+.sesshead.mini .who svg{flex:0 0 auto;color:var(--p-800)}
+.sesshead.mini .who .unread{font-weight:750;color:var(--n-700)} /* mismo tratamiento que la fila: se dice "sin leer", no se finge vacío */
+.presence{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:3px 11px;border-radius:12px;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800);font-size:12.5px;font-weight:750}
+.presence .pv{width:22px;height:22px;border-radius:50%;background:var(--p-200);color:var(--p-900);
+  font-size:10px;font-weight:850;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.presence .lv{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:led 2.4s ease-in-out infinite;flex:0 0 auto}
+.sesshead.mini .presence{min-height:32px;padding:2px 9px;font-size:11.5px;gap:6px}
+.sesshead.mini .presence .pv{width:19px;height:19px;font-size:9px}
+@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
+
+/* ---------- STEPPER server-driven ---------- */
+.srail{display:flex;align-items:flex-start;padding:12px 8px 6px;background:var(--n-0)}
+.sr{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:5px;position:relative;min-height:48px}
+.sr .d{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  border:2px solid var(--n-300);background:var(--n-0);color:var(--n-600);font-size:11px;font-weight:850;
+  position:relative;z-index:2}
+.sr .lb{font-size:11.5px;font-weight:800;color:var(--n-600);text-align:center;line-height:1.15}
+.sr::before{content:"";position:absolute;top:11px;right:50%;width:100%;height:3px;background:var(--n-200);z-index:1}
+.sr:first-child::before{display:none}
+.sr.done .d{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.sr.done .lb{color:var(--ok-tx)}
+.sr.done::before,.sr.on::before{background:var(--ok-bd)}
+.sr.on .d{background:var(--p-600);border-color:var(--p-600);color:#fff;box-shadow:0 0 0 4px var(--brand-a16)}
+.sr.on .lb{color:var(--p-800);font-weight:850}
+.stepline{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 14px;background:var(--n-0);
+  border-bottom:1px solid var(--n-200);font-size:13.5px;font-weight:750;color:var(--n-800)}
+.stepline .ix{font-variant-numeric:tabular-nums;font-weight:850;color:var(--p-800);background:var(--p-50);
+  border:1px solid var(--brand-a20);border-radius:8px;padding:2px 8px;font-size:12px;flex:0 0 auto}
+.stepline .more{margin-left:auto;font-size:12.5px;font-weight:800;color:var(--p-700);
+  display:inline-flex;align-items:center;gap:4px;min-height:48px;flex:0 0 auto}
+
+/* ---------- tarjetas de verificación ---------- */
+.vcard{background:linear-gradient(180deg,#fff,#fdfcff);border:var(--bd-lite);border-radius:20px;
+  padding:12px 14px;box-shadow:var(--sh-b1)}
+.vcard.bad{border:1.5px solid var(--danger-bd);background:#fffbfb}
+.vhead{display:flex;align-items:center;gap:9px}
+.vhead b{font-size:14.5px;font-weight:850;color:var(--n-900);flex:1}
+.vpill{display:inline-flex;align-items:center;gap:5px;min-height:26px;padding:2px 9px;border-radius:9px;
+  font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+.vpill.ok{background:var(--ok-bg);border:1px solid var(--ok-bd);color:var(--ok-tx)}
+.vpill.bad{background:var(--danger-bg);border:1px solid var(--danger-bd);color:var(--danger-tx)}
+/* NUEVO (composición, no token): VerifyTone.neutral que YA existe en verify_cards.dart
+   (n100 + n800). Aquí solo se le nombra un label propio: "Sin leer". 12.5:1 medido. */
+.vpill.neutral{background:var(--n-100);border:1px solid var(--n-200);color:var(--n-800)}
+.kv{display:flex;align-items:flex-start;gap:8px;padding:7px 0 6px;border-top:1px solid var(--n-100);font-size:13.5px}
+.kv:first-of-type{border-top:0}
+.kv .k{color:var(--n-700);font-weight:650;flex:0 0 92px}
+.kv .v{color:var(--n-900);font-weight:750;flex:1;min-width:0}
+.kv .v.miss{color:var(--danger-tx);font-weight:800}           /* "Sin capturar" — el servidor SÍ respondió */
+.kv .v.unread{color:var(--n-700);font-weight:750}             /* "No se pudo leer" — el servidor NO respondió */
+.linkbtn{min-height:48px;display:inline-flex;align-items:center;gap:6px;font-size:13.5px;font-weight:800;color:var(--p-700)}
+
+/* ---------- comunes ---------- */
+.banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;
+  font-size:13.5px;font-weight:600;line-height:1.45;border:1px solid}
+.banner svg{flex:0 0 auto;margin-top:1px}
+.banner .ba{display:inline-flex;align-items:center;min-height:44px;font-weight:850;text-decoration:underline}
+.b-danger{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+.b-info{background:var(--info-bg);border-color:var(--info-bd);color:var(--n-800)}
+/* NUEVO (composición): el mensaje del servidor pasa a ser una CITA.
+   Etiqueta 11.5/800 en --n-700 (8.06:1 sobre --danger-bg) + el crudo intacto en --n-800. */
+.srvquote{margin-top:7px}
+.srvquote .lab{display:block;font-size:11.5px;font-weight:800;color:var(--n-700);letter-spacing:.01em;margin-bottom:2px}
+.srvquote .raw{display:block;font-size:12.5px;font-weight:700;color:var(--n-800);line-height:1.4}
+.ctitle{font-size:14px;font-weight:900;color:var(--danger-tx);line-height:1.25}  /* subido de 13 → 14 */
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:56px;border-radius:18px;
+  font-size:16px;font-weight:800;letter-spacing:.01em}
+.btn-primary{background:linear-gradient(180deg,#7442e8,var(--p-600));color:#fff;
+  box-shadow:0 1px 0 rgba(255,255,255,.28) inset,0 4px 10px -4px rgba(69,24,158,.35),0 14px 28px -12px rgba(135,82,254,.45)}
+.btn-ghost{background:var(--n-0);border:1.5px solid var(--n-300);color:var(--n-800);box-shadow:var(--sh-1)}
+.btn.is-disabled{opacity:.55}
+.btn-sm{min-height:48px;font-size:14.5px;border-radius:14px}
+.btn-md{min-height:54px;font-size:15.5px;border-radius:16px}
+.wpad{padding:14px 14px 18px;display:flex;flex-direction:column;flex:1;gap:11px;position:relative;z-index:2}
+.dock{margin-top:auto;display:grid;gap:9px;padding:12px 0 0;position:relative}
+.dock::before{content:"";position:absolute;top:0;left:-14px;right:-14px;height:1px;background:var(--n-200)}
+.dock .why{font-size:12.5px;font-weight:750;color:var(--n-700);text-align:center;line-height:1.4}
+.scrim{position:absolute;inset:0;z-index:5;background:rgba(23,18,43,.42)}
+.sheet{position:absolute;left:8px;right:8px;bottom:8px;z-index:6;
+  background:rgba(255,255,255,.96); /* plate opaco — el wizard NO usa BackdropFilter */
+  border-radius:var(--r-2xl);border:1px solid rgba(255,255,255,.95);outline:1px solid rgba(23,18,43,.06);
+  box-shadow:var(--sh-float);padding:10px 16px 16px}
+.grab{width:44px;height:5px;border-radius:3px;background:var(--n-300);margin:4px auto 12px}
+.sheet h5{margin:0;font-size:18px;font-weight:850;color:var(--n-900)}
+.sheet .ssub{font-size:13px;color:var(--n-700);font-weight:600;margin:4px 0 12px}
+.opt{display:flex;align-items:center;gap:10px;min-height:56px;padding:0 12px;border-radius:14px;
+  border:1px solid var(--n-200);background:var(--n-0);margin-bottom:8px;font-size:14px;font-weight:800;color:var(--n-900)}
+.opt .radio{width:22px;height:22px;border-radius:50%;border:2px solid var(--n-500);flex:0 0 auto}
+.opt.sel{border-color:var(--p-600);border-width:1.6px;background:var(--p-50);color:var(--p-800)}
+.opt.sel .radio{border-color:var(--p-600);background:radial-gradient(circle,var(--p-600) 0 45%,transparent 50%)}
+.opt .osub{display:block;font-size:12.5px;font-weight:700;color:var(--n-700)}
+/* GD-2 (aprobada en 9E): la fila inerte NO usa opacidad — el texto crítico ES el motivo. */
+.opt.off{background:var(--n-50);border-color:var(--n-200);color:var(--n-800);font-weight:800}
+.opt.off .osub{color:var(--n-700)}
+.opt .slot{width:22px;flex:0 0 auto}   /* hueco del radio: mantiene la alineación de la columna */
+.opt .ico{width:22px;flex:0 0 auto;color:var(--n-600);display:flex;align-items:center;justify-content:center}
+.opt .body{flex:1;min-width:0}
+/* NUEVO (composición): VerifyPill neutro dentro de la fila. Mismo par n100/n800 del
+   VerifyPill que ya existe + hairline --n-200, que el original no necesita porque
+   siempre vive sobre blanco y aquí vive sobre --n-50. */
+.cpill{display:inline-flex;align-items:center;min-height:26px;padding:2px 10px;border-radius:9px;
+  background:var(--n-100);border:1px solid var(--n-200);color:var(--n-800);
+  font-size:11.5px;font-weight:900;letter-spacing:.03em;text-transform:uppercase;flex:0 0 auto;margin-left:auto}
+.dim{opacity:.9;pointer-events:none}
+
+footer.dod{max-width:1720px;margin:0 auto;padding:10px 24px 50px;color:var(--n-700);font-size:13px}
+footer.dod .card{background:var(--n-0);border:var(--bd-lite);border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1);margin-bottom:14px}
+footer.dod b{color:var(--n-900)}
+footer.dod .reject{display:flex;gap:11px;padding:10px 0;border-bottom:1px solid var(--n-100)}
+footer.dod .reject:last-child{border-bottom:0}
+footer.dod .reject .tag{flex:0 0 auto;display:inline-flex;align-items:center;min-height:26px;padding:2px 10px;
+  border-radius:8px;background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800);
+  font-size:11.5px;font-weight:850;letter-spacing:.03em}
+.changelog li{margin:5px 0}
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <h1>RideOps · Mockups M2 — Lámina delta H2 <span class="v2">mismo lenguaje · 3 estados nuevos</span></h1>
+  <p><b>De dónde sale esta lámina:</b> de la revisión de Graphic Design del <b>build de M2-H2</b> (paso CONFIRMING +
+  paso T&amp;C). Tres de los hallazgos de esa revisión —<b>MC-8</b>, <b>MC-4</b> y la propuesta del pill
+  <code>Actual</code>— describen estados que <b>no existen en el mockup aprobado §9/§10 de la Tanda A</b>: no son
+  variantes de algo ya aprobado, son pantallas que Hector nunca vio. Por la regla del repo (UI nueva ⇒ mockup aprobado
+  ANTES de construir), se dibujan aquí y no se construye nada hasta que Hector diga sí. <b>Nada de lo aprobado se
+  toca:</b> <code>m2-tanda-a.html</code> queda intacto y esta lámina solo añade.</p>
+  <div class="meta-chips">
+    <span class="mchip">Mismos tokens, misma geometría y mismos frames que <code>m2-tanda-a.html</code></span>
+    <span class="mchip">Cero tokens nuevos · 4 clases de composición, todas con contraste MEDIDO al pie</span>
+    <span class="mchip">Copy exacta en <b>ES y EN</b> por frame — tal como iría a app_es.arb / app_en.arb (ADR-8)</span>
+    <span class="mchip">Targets ≥ 48 pt · CTAs 54–56 · filas 56</span>
+    <span class="mchip warn">D1 y D2 son <b>correcciones</b> (MUST-CHANGE de la revisión)</span>
+    <span class="mchip ok">D3 es <b>propuesta</b>: se puede rechazar y no se cae nada</span>
+    <span class="mchip warn">Ninguna capacidad nueva: los 3 frames se pintan con datos y acciones que la app YA tiene</span>
+  </div>
+</div>
+
+<nav class="jump">
+  <a href="#d1">D1 · MC-8 · Cliente sin leer</a>
+  <a href="#d2">D2 · MC-4 · El servidor, citado</a>
+  <a href="#d3">D3 · Pill «Actual» (propuesta)</a>
+  <a href="#pie">Si Hector rechaza…</a>
+</nav>
+
+<!-- ============================================================ D1 · MC-8 -->
+<section class="blk" id="d1">
+  <div class="blk-head">
+    <span class="eyebrow">Frame D1 · MC-8 · corrección</span>
+    <h2>Tarjeta de cliente cuando NO se pudo leer — la app deja de afirmar algo que no sabe</h2>
+    <p>Hoy, un <code>GET</code> de display-data caído se disfraza de «el cliente no tiene datos»:
+    <code>_loadContext</code> se traga el error en silencio (<code>checkout_wizard_controller.dart</code>, el
+    <code>catch (_)</code> del final del método) y deja <code>state.context == null</code>, que es exactamente el mismo
+    valor que produce un cliente realmente incompleto. Con eso, <code>ConfirmingStep</code> pinta tarjeta roja, pill
+    <b>Faltan datos</b>, tres filas <b>Sin capturar</b> en <code>dangerTx</code> y un CTA bloqueado que nombra el
+    nombre, la licencia y el teléfono. <b>La app afirma algo que no sabe, y encima detiene la entrega.</b></p>
+    <div class="blk-head origin"><b>Qué cambia y qué no.</b> El estado legítimo (9B, ya aprobado) se queda tal cual:
+    tarjeta <code>bad</code>, «Faltan datos», «Sin capturar» en rojo. Lo que se añade es un <b>segundo estado, neutro y
+    distinto</b>, para el caso en que la lectura falló. Misma tarjeta, mismo <code>VerifyCard</code>, mismo
+    <code>VerifyPill</code> (tono <code>neutral</code>, que ya existe en <code>verify_cards.dart</code> y hoy no se usa
+    en esta pantalla) y el mismo botón de salida.</div>
+    <div class="state-chips">
+      <span class="schip"><i></i>Lectura fallida (estado nuevo)</span>
+      <span class="schip"><i></i>CTA bloqueado con causa honesta</span>
+      <span class="schip"><i></i>Salida: actualizar datos</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>D1 — «Sin leer» <small>tono neutro, pill con palabra, CTA bloqueado sin acusar al cliente</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>11:10</span><span>LTE · 84 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout</b><span>Datos de la reserva sin leer</span><span class="m inframe" style="margin:-34px 0 0 236px">4</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg><span class="unread">Cliente y unidad sin leer</span></span></div>
+          <div class="srail">
+            <div class="sr on"><span class="d">1</span><span class="lb">Confirmar</span></div>
+            <div class="sr"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+            <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 1 de 10</span>Confirmar cliente y vehículo</div>
+          <div class="wpad">
+            <div class="vcard"><span class="m inframe" style="margin:-8px 0 0 328px">1</span>
+              <div class="vhead"><b>Cliente</b><span class="vpill neutral">Sin leer</span></div>
+              <div class="kv"><span class="k">Nombre</span><span class="v unread">No se pudo leer</span></div>
+              <div class="kv"><span class="k">Licencia</span><span class="v unread">No se pudo leer</span><span class="m inframe" style="margin:-2px 0 0 300px">2</span></div>
+              <div class="kv"><span class="k">Teléfono</span><span class="v unread">No se pudo leer</span></div>
+              <div class="kv"><span class="k">Pre-checkin</span><span class="v unread">No se pudo leer</span></div>
+            </div>
+            <div class="vcard">
+              <div class="vhead"><b>Vehículo</b><span class="vpill neutral">Sin leer</span></div>
+              <div class="kv"><span class="k">Unidad</span><span class="v unread">No se pudo leer</span></div>
+              <span class="m inframe" style="margin:-46px 0 0 328px">5</span>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary is-disabled">Continuar a T&amp;C</div>
+              <div class="btn btn-ghost btn-sm">Actualizar datos del cliente<span class="m" style="margin-left:6px">3</span></div>
+              <div class="why">No se pudieron leer los datos del cliente. Actualízalos antes de avanzar.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · D1 (MC-8)</h3>
+      <div class="note"><span class="m">1</span><span><b>Tono neutro, no <code>bad</code>.</b> La tarjeta se queda con
+      su borde de 1 px <code>--n-200</code> y el pill usa <code>VerifyTone.neutral</code> —el que ya existe en
+      <code>verify_cards.dart</code> y hoy solo usa la tarjeta de vehículo— con la palabra <b>Sin leer</b>. El rojo del
+      sistema significa «hay un problema con este cliente»; aquí el problema es de la app, no del cliente, y teñir de
+      rojo a un cliente que quizá esté perfecto es exactamente la mentira que MC-8 denuncia.</span></div>
+      <div class="note"><span class="m">2</span><span><b>El valor de la fila dice qué pasó, no finge un hueco.</b>
+      <code>No se pudo leer</code> en <code>--n-700</code> peso 750 — mismo tamaño de 13.5 px que cualquier valor, pero
+      ni el <code>--n-900</code>/800 de un dato real ni el <code>--danger-tx</code>/800 de un dato ausente. Se lee de
+      un vistazo que esa fila no es un dato. <b>Regla que se conserva:</b> un hueco en blanco está prohibido (la razón
+      original de <code>KvRow.missing</code>), y esto la respeta con una tercera palabra, no con un vacío.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Bloquea, pero con una salida que existe de verdad.</b> La
+      captura de datos del cliente <b>no vive en esta app</b> (ADR-1: mostrador web / pre-checkin), así que el botón no
+      abre un editor: vuelve a preguntarle al servidor — <code>controller.refresh()</code> +
+      <code>controller.reloadContext()</code>, exactamente lo que el dock ya hace hoy con «Volver a consultar». Orden
+      del dock idéntico al del build: primario → secundario → <code>.why</code>
+      (<code>TransitionButton</code>). <b>El CTA no se esconde, se bloquea diciendo por qué</b>: un botón ausente no se
+      puede preguntar.</span></div>
+      <div class="note"><span class="m">4</span><span><b>El mismo fallo degrada el cromo, y también ahí se dice.</b>
+      <code>_loadContext</code> alimenta el subtítulo del wizbar y el header de sesión (nombre, unidad, placa,
+      odómetro, pre-checkin). Si no se pudo leer, esas líneas <b>no se dejan en blanco ni se inventan</b>: se dicen «sin
+      leer» con el mismo <code>--n-700</code>/750. El chip de presencia sí puede seguir vivo — viene del poll de la
+      sesión, que es otra petición y esa sí respondió.</span></div>
+      <div class="note"><span class="m">5</span><span><b>La tarjeta de vehículo cae en el mismo estado, porque es la
+      misma lectura.</b> Unidad, placa y odómetro salen de display-data igual que el cliente. Dejarla en «Sin capturar»
+      mientras la de cliente dice «Sin leer» sería contar dos historias distintas del mismo fallo. El pill de vehículo
+      es el mismo neutro; <b>«Disponible» no se afirma</b> cuando no se leyó nada.</span></div>
+      <div class="note"><span class="m">6</span><span><b>Prerrequisito de build (no es UI nueva, es dejar de tragarse
+      el error).</b> Hoy «falló la lectura» y «el servidor no lo tiene» colapsan en <code>context == null</code>. Hace
+      falta que el controlador distinga los dos casos (una bandera del tipo <code>contextUnread</code> puesta en ese
+      <code>catch</code>) para que la pantalla pueda elegir estado. Sin ese cambio este frame no se puede pintar
+      honestamente, y con él no hace falta nada más: ni endpoint, ni permiso, ni campo nuevo del backend.</span></div>
+
+      <div class="mini-demo">
+        <div class="cap">Nota 1 · en qué se diferencian de un vistazo (comparativa dentro de la nota — no es un cuarto frame)</div>
+        <div class="pair">
+          <div>
+            <div class="lbl">9B · YA APROBADO — el servidor respondió y no tiene el dato</div>
+            <div class="vcard bad" style="padding:10px 12px">
+              <div class="vhead"><b style="font-size:13.5px">Cliente</b><span class="vpill bad">Faltan datos</span></div>
+              <div class="kv" style="font-size:12.5px"><span class="k" style="flex:0 0 70px">Licencia</span><span class="v miss">Sin capturar</span></div>
+            </div>
+          </div>
+          <div>
+            <div class="lbl">D1 · NUEVO — no se pudo leer</div>
+            <div class="vcard" style="padding:10px 12px">
+              <div class="vhead"><b style="font-size:13.5px">Cliente</b><span class="vpill neutral">Sin leer</span></div>
+              <div class="kv" style="font-size:12.5px"><span class="k" style="flex:0 0 70px">Licencia</span><span class="v unread">No se pudo leer</span></div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:9px;font-size:12.5px;color:var(--n-700)">
+          <b style="color:var(--n-900)">Cuatro señales cambian a la vez</b>, y ninguna es solo el color:
+          <b>borde</b> 1.5 px <code>--danger-bd</code> → 1 px <code>--n-200</code> ·
+          <b>fondo</b> <code>#fffbfb</code> → blanco de tarjeta ·
+          <b>pill</b> «Faltan datos» rojo → «Sin leer» neutro ·
+          <b>valor</b> «Sin capturar» en rojo/800 → «No se pudo leer» en <code>--n-700</code>/750.
+          A un metro de distancia la diferencia que se ve primero es <b>rojo vs. gris</b>; a la distancia de lectura,
+          la palabra del pill lo cierra. Para quien no ve el gris, el <code>Semantics</code> del CTA lee la causa
+          completa (regla ya viva en <code>TransitionButton</code>).
+        </div>
+      </div>
+
+      <div class="cp"><b class="h">Copy exacta · app_es.arb / app_en.arb</b>
+        <table>
+          <tr><th>Clave</th><th>ES</th><th>EN</th></tr>
+          <tr class="new"><td><code>coConfirmUnreadPill</code></td><td>Sin leer</td><td>Not read</td></tr>
+          <tr class="new"><td><code>coConfirmUnreadValue</code></td><td>No se pudo leer</td><td>Could not be read</td></tr>
+          <tr class="new"><td><code>coConfirmUnreadBlockedWhy</code></td><td>No se pudieron leer los datos del cliente. Actualízalos antes de avanzar.</td><td>The customer's data could not be read. Refresh it before continuing.</td></tr>
+          <tr class="new"><td><code>coConfirmRecheck</code> <span style="color:var(--n-600);font-weight:700">(retitulada)</span></td><td>Actualizar datos del cliente</td><td>Refresh customer data</td></tr>
+          <tr class="new"><td><code>coConfirmUnreadHeader</code></td><td>Cliente y unidad sin leer</td><td>Customer and unit not read</td></tr>
+          <tr class="new"><td><code>coConfirmUnreadSubtitle</code></td><td>Datos de la reserva sin leer</td><td>Reservation data not read</td></tr>
+          <tr class="keep"><td><code>coConfirmMissingPill</code></td><td>Faltan datos</td><td>Missing data</td></tr>
+          <tr class="keep"><td><code>coConfirmMissingValue</code></td><td>Sin capturar</td><td>Not captured</td></tr>
+          <tr class="keep"><td><code>coConfirmCta</code></td><td>Continuar a T&amp;C</td><td>Continue to T&amp;C</td></tr>
+        </table>
+      </div>
+
+      <div class="contrast"><b>Contraste MEDIDO (D1)</b>
+        <ul>
+          <li>Pill neutro <code>--n-800</code> sobre <code>--n-100</code>: <b>12.5:1</b> (el par ya vive en
+          <code>VerifyTone.neutral</code>; aquí solo se le añade el hairline <code>--n-200</code> del resto de pills).</li>
+          <li>Valor «No se pudo leer» <code>--n-700</code> sobre la tarjeta <code>#fdfcff</code>: <b>9.02:1</b> — el
+          mismo par ya publicado para la clave de fila en 9A–9E.</li>
+          <li>Clave de fila <code>--n-700</code> <b>9.02:1</b> · valor real <code>--n-900</code> <b>17.74:1</b>
+          (ambos sin cambio).</li>
+          <li><code>.why</code> del dock <code>--n-700</code> sobre <code>--n-50</code>: <b>8.53:1</b> (sin cambio).</li>
+          <li>CTA bloqueado: opacidad .55 sobre el gradiente — <b>no</b> es el portador del estado; lo porta el
+          <code>.why</code> a contraste pleno y el <code>hint</code> de <code>Semantics</code>.</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>Al fallar la lectura no hay sacudida ni haptic de error: el fallo no es del agente ni del cliente. Las
+          filas hacen cross-fade 200 ms a su estado «sin leer».</li>
+          <li>«Actualizar datos del cliente» colapsa a spinner sin cambiar de tamaño (regla del dock ya viva).</li>
+          <li>Si el reintento sale bien, las filas hacen cross-fade a los valores reales, sin desplazar el CTA.</li>
+          <li>Reduced-motion ⇒ cambio de estado directo.</li>
+        </ul></div>
+      <div class="decision"><b>Una decisión de copy para Hector</b>
+        <b>«Actualizar datos del cliente»</b> es la etiqueta que pidió la revisión y es la que está dibujada. Riesgo
+        honesto: puede leerse como «aquí edito los datos», y esta app <b>no captura datos de cliente</b> (ADR-1) — el
+        botón vuelve a consultar al servidor. Si en el patio esa lectura confunde, la alternativa que no promete de
+        más es <b>«Volver a consultar al servidor»</b> / <i>«Ask the server again»</i>. Es cambio de una línea de arb
+        en cualquiera de los dos sentidos; decide Hector, no se construye hasta entonces.</div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ D2 · MC-4 -->
+<section class="blk" id="d2">
+  <div class="blk-head">
+    <span class="eyebrow">Frame D2 · MC-4 · corrección</span>
+    <h2>El mensaje del servidor como CITA, no como copy de la app</h2>
+    <p>Situación real, verificada en el backend: el guard de renta abierta lanza un 409 cuyo mensaje es
+    <code>Vehicle is still out on open rental R-2466 — complete its check-in (or swap vehicles) first</code>
+    (<code>backend/src/modules/reservations/reservations.service.js</code>). El banner de <code>ConflictBanner</code>
+    lo pinta debajo de su título en español, con 13/900 arriba y 12.5/700 abajo: dos frases pegadas, una en cada
+    idioma, con casi el mismo peso. El agente no puede saber que la segunda no la escribió la app.</p>
+    <div class="blk-head origin"><b>El mensaje crudo NO se traduce y NO se esconde.</b> Es la regla del DoD #5 y de
+    ADR-4: la app no reescribe lo que dijo el servidor, porque el servidor es la fuente de verdad y porque cualquier
+    traducción del cliente envejece el día que el backend cambie el texto. Lo que cambia es el <b>encuadre</b>: se
+    etiqueta como cita y se sube el título para que la jerarquía sea española-primero.</div>
+    <div class="state-chips">
+      <span class="schip"><i></i>409 VEHICLE_CONFLICT</span>
+      <span class="schip"><i></i>Título 14/900</span>
+      <span class="schip"><i></i>Cita etiquetada 11.5/800</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>D2 — Conflicto de vehículo, con el servidor citado <small>título español-primero + etiqueta de cita + crudo intacto</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:42</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="wizbar">
+            <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+          <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span><span class="presence"><span class="lv"></span><span class="pv">MG</span>María G. · kiosco · hace 12 s</span></div>
+          <div class="srail">
+            <div class="sr on"><span class="d">1</span><span class="lb">Confirmar</span></div>
+            <div class="sr"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+            <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+            <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+            <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+          </div>
+          <div class="stepline"><span class="ix">Paso 1 de 10</span>Confirmar cliente y vehículo</div>
+          <div class="wpad">
+            <div class="banner b-danger">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16.5v.5"/></svg>
+              <span style="flex:1;min-width:0">
+                <span class="ctitle">El vehículo ya no está libre</span><span class="m inframe" style="margin:-4px 0 0 292px">1</span>
+                <span class="srvquote">
+                  <span class="lab">Respuesta del servidor (en inglés):</span><span class="m inframe" style="margin:-24px 0 0 292px">2</span>
+                  <span class="raw">Vehicle is still out on open rental R-2466 — complete its check-in (or swap vehicles) first</span>
+                </span>
+                <span class="ba" style="display:inline-flex;margin-top:2px">Entendido</span>
+              </span></div>
+            <div class="vcard bad">
+              <div class="vhead"><b>Vehículo</b><span class="vpill bad">En conflicto</span></div>
+              <div class="kv"><span class="k">Unidad</span><span class="v">U-112 · Corolla 2023</span></div>
+              <div class="kv"><span class="k">Odómetro</span><span class="v tnum">24 108 km</span></div>
+              <span class="m inframe" style="margin:-72px 0 0 328px">3</span>
+            </div>
+            <div class="vcard">
+              <div class="vhead"><b>Cliente</b><span class="vpill ok">Verificado</span></div>
+              <div class="kv"><span class="k">Nombre</span><span class="v">Laura Méndez Ortiz</span></div>
+            </div>
+            <div class="dock">
+              <div class="btn btn-primary">Elegir otro vehículo</div>
+              <div class="why">Nada se perdió: al cambiar la unidad sigues en el paso 1 con el cliente ya verificado.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · D2 (MC-4)</h3>
+      <div class="note"><span class="m">1</span><span><b>Título a 14/900 — jerarquía española-primero.</b> Subir 1 px
+      y mantener el peso 900 basta para que el ojo caiga primero en la frase que el agente sí puede leer y actuar
+      («El vehículo ya no está libre») y luego, si quiere el detalle, en la cita. Hoy los dos bloques compiten
+      (13/900 contra 12.5/700) y la mirada aterriza en el párrafo largo, que además está en otro idioma.</span></div>
+      <div class="note"><span class="m">2</span><span><b>La etiqueta convierte ruido en evidencia.</b>
+      <code>Respuesta del servidor (en inglés):</code> a 11.5/800 en <code>--n-700</code> hace tres trabajos de una
+      vez: dice <b>quién habla</b> (no la app), <b>por qué está en inglés</b> (no es un bug de traducción) y
+      <b>que se puede citar</b> tal cual por teléfono a soporte o al otro mostrador. En la app en inglés la etiqueta
+      es solo <code>Server response:</code> — el paréntesis desaparece porque ahí ya no explica nada.</span></div>
+      <div class="note"><span class="m">3</span><span><b>Y es el único sitio donde vive el número de la otra renta.</b>
+      <code>R-2466</code> no está en ningún campo estructurado de la respuesta: viene interpolado dentro de la frase
+      del backend (<code>reservations.service.js</code>). Traducir el mensaje, resumirlo o sustituirlo por copy propia
+      <b>borraría el único dato accionable del error</b> — el agente no podría ir a cerrar esa renta ni nombrarla por
+      radio. Esa es la razón concreta, y no un principio abstracto, por la que el crudo se queda (DoD #5).</span></div>
+      <div class="note"><span class="m">4</span><span><b>Lo que NO cambia.</b> El cuerpo del mensaje se queda en
+      12.5/700 <code>--n-800</code> (12.4:1) — deliberadamente <b>no</b> en <code>--danger-tx</code>: en rojo, un
+      párrafo largo se lee peor y grita más que el título. Y el dock se queda como en 9D: una salida primaria
+      siempre, con su <code>.why</code> intacto.</span></div>
+      <div class="note"><span class="m">5</span><span><b>Regla general, no parche para este 409.</b> El mismo encuadre
+      aplica a todo mensaje crudo del backend que la app muestre: <code>ENTRY_GUARD</code>, <code>ILLEGAL_TRANSITION</code>,
+      el genérico, la negativa del sheet de swap (<code>_SheetNotice</code>) y el error de carga de la lista de
+      unidades. Un solo widget con la etiqueta, usado en todos ellos: si el backend algún día responde en español, la
+      etiqueta se calla sola y nada más cambia.</span></div>
+
+      <div class="cp"><b class="h">Copy exacta · app_es.arb / app_en.arb</b>
+        <table>
+          <tr><th>Clave</th><th>ES</th><th>EN</th></tr>
+          <tr class="new"><td><code>coServerResponseLabel</code></td><td>Respuesta del servidor (en inglés):</td><td>Server response:</td></tr>
+          <tr class="keep"><td><code>coConflictVehicleTitle</code></td><td>El vehículo ya no está libre</td><td>The vehicle is no longer free</td></tr>
+          <tr class="keep"><td><code>coConflictDismiss</code></td><td>Entendido</td><td>Got it</td></tr>
+          <tr class="keep"><td><code>coConflictSwapCta</code></td><td>Elegir otro vehículo</td><td>Pick another vehicle</td></tr>
+          <tr class="keep"><td><code>coConflictSwapWhy</code></td><td>Nada se perdió: al cambiar la unidad sigues en el paso 1 con el cliente ya verificado.</td><td>Nothing was lost: after changing the unit you are still on step 1 with the customer already verified.</td></tr>
+          <tr><td><code>—</code> <span style="color:var(--n-600);font-weight:700">(backend, NO se traduce)</span></td><td colspan="2" class="raw">Vehicle is still out on open rental R-2466 — complete its check-in (or swap vehicles) first</td></tr>
+        </table>
+      </div>
+
+      <div class="contrast"><b>Contraste MEDIDO (D2)</b>
+        <ul>
+          <li>Título <code>--danger-tx</code> sobre <code>--danger-bg</code>: <b>7.04:1</b> (ya publicado; solo cambia
+          el tamaño, 13 → 14 px).</li>
+          <li>Etiqueta de cita <code>--n-700</code> sobre <code>--danger-bg</code>: <b>8.06:1</b> — par nuevo, medido.
+          Se descartó <code>--n-600</code> (4.9:1): pasa AA raspando y esta línea se lee al sol.</li>
+          <li>Mensaje crudo <code>--n-800</code> sobre <code>--danger-bg</code>: <b>12.4:1</b> (sin cambio).</li>
+          <li>«Entendido» <code>--danger-tx</code> subrayado, 44 px de alto real: <b>7.04:1</b> (sin cambio).</li>
+          <li>El rojo del banner es refuerzo, no portador: el estado lo dicen el título, la palabra del pill de la
+          tarjeta y la cita.</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>El banner entra con fade 300 ms + haptic error una sola vez. Sin shake: el error no es del agente
+          (regla ya aprobada en 9D).</li>
+          <li>El cuerpo vuelve al principio con 220 ms ease-out al llegar un conflicto nuevo — comportamiento ya vivo
+          en <code>ConfirmingStep</code>; se conserva tal cual.</li>
+          <li>Reduced-motion ⇒ aparición directa, sin desplazamiento del scroll.</li>
+        </ul></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============================================================ D3 · PILL «ACTUAL» -->
+<section class="blk" id="d3">
+  <div class="blk-head">
+    <span class="eyebrow">Frame D3 · PROPUESTA — se puede rechazar y no se cae nada</span>
+    <h2>La unidad actual del sheet 9E, dicha con un chip en vez de con un glifo de «prohibido»</h2>
+    <p>En el sheet de cambio de vehículo, la fila de la unidad actual es inerte y ya trae su motivo escrito a
+    contraste pleno (esa parte está aprobada y funciona). Lo que carga hoy toda la diferenciación visual es
+    <code>Icons.block_rounded</code>, el glifo universal de «deshabilitado», colocado justo en el hueco donde las
+    demás filas tienen su radio. Resultado: la única fila sin radio es también la única con un símbolo de prohibición,
+    y el estado se cuenta con un icono en vez de con una palabra.</p>
+    <div class="blk-head origin"><b>Esto es propuesta, no corrección.</b> Nada de lo que hay hoy está mal medido ni
+    incumple el DoD: el motivo se lee al 100 %, no hay opacidad y el contraste cumple. La propuesta solo cambia
+    <i>cómo</i> se cuenta el estado, para usar el lenguaje de chips que la app ya tiene en todas partes
+    (<code>VerifyPill</code>, <code>tchip</code>, chips de la cola). Hector puede decir que no y el sheet se queda
+    exactamente como está.</div>
+    <div class="state-chips">
+      <span class="schip prop"><i></i>Propuesta</span>
+      <span class="schip"><i></i>Sheet 9E · plate opaco</span>
+      <span class="schip"><i></i>Fila inerte junto a fila seleccionable</span>
+    </div>
+  </div>
+  <div class="frames">
+
+    <figure>
+      <figcaption>D3 — Sheet de swap con el pill «Actual» <small>la fila inerte y las seleccionables, una al lado de la otra</small></figcaption>
+      <div class="phone">
+        <div class="statusbar on-white"><span>9:42</span><span>LTE · 87 %</span></div>
+        <div class="scr" style="background:var(--n-50)">
+          <div class="dim">
+            <div class="wizbar">
+              <div class="icobtn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+              <div class="tt"><b>Checkout · R-2481</b><span>Laura Méndez · U-112</span></div>
+              <div class="pausebtn">Pausar</div>
+            </div>
+            <div class="sesshead mini"><span class="who"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c1.4-3.4 3.8-5 6.5-5s5.1 1.6 6.5 5"/></svg>Laura Méndez · U-112</span></div>
+            <div class="srail">
+              <div class="sr on"><span class="d">1</span><span class="lb">Confirmar</span></div>
+              <div class="sr"><span class="d">2</span><span class="lb">T&amp;C</span></div>
+              <div class="sr"><span class="d">3</span><span class="lb">Pago</span></div>
+              <div class="sr"><span class="d">4</span><span class="lb">Inspección</span></div>
+              <div class="sr"><span class="d">5</span><span class="lb">Cierre</span></div>
+            </div>
+            <div class="wpad"><div class="vcard"><div class="vhead"><b>Vehículo</b><span class="vpill ok">Disponible</span></div></div></div>
+          </div>
+          <div class="scrim"></div>
+          <div class="sheet">
+            <div class="grab"></div>
+            <h5>Cambiar vehículo</h5>
+            <div class="ssub">Disponibles según el servidor · hace 4 s</div>
+            <div class="opt sel"><span class="radio"></span><span class="body">U-118 · Corolla 2023<span class="osub">Mismo grupo · 19 402 km</span></span><span class="m inframe" style="margin:-16px 0 0 300px">3</span></div>
+            <div class="opt"><span class="radio"></span><span class="body">U-121 · Sentra 2023<span class="osub">Mismo grupo · 31 980 km</span></span></div>
+            <div class="opt off"><span class="slot"></span><span class="body">U-112 · Corolla 2023<span class="osub">Unidad actual · una unidad no se cambia por sí misma</span></span><span class="cpill">Actual</span><span class="m inframe" style="margin:-18px 0 0 302px">1</span></div>
+            <div class="btn btn-primary btn-md" style="margin-top:4px">Cambiar a U-118</div>
+            <div class="btn btn-ghost btn-sm" style="margin-top:9px">Cancelar</div>
+          </div>
+        </div>
+      </div>
+    </figure>
+
+    <aside class="notes">
+      <h3>Anotaciones · D3 (propuesta)</h3>
+      <div class="note"><span class="m">1</span><span><b>El chip dice lo que el icono insinuaba.</b>
+      <code>VerifyPill</code> con tono <code>neutral</code> —el par <code>--n-100</code>/<code>--n-800</code> que ya
+      existe— y la palabra <b>Actual</b>. «Actual» es información positiva y verdadera (es la unidad que el agente
+      tiene en la mano); <code>Icons.block_rounded</code> comunica «prohibido», que es más duro y más vago:
+      el agente no sabe si es que está bloqueada, averiada o vetada para él. <b>Un único añadido al widget:</b> el
+      hairline <code>--n-200</code>, porque el <code>VerifyPill</code> original siempre vive sobre blanco y esta fila
+      es <code>--n-50</code>.</span></div>
+      <div class="note"><span class="m">2</span><span><b>El hueco del radio se queda vacío, y eso ya es la señal.</b>
+      Quitar el glifo y conservar los 22 px mantiene alineada la columna de etiquetas con las filas seleccionables —
+      si se colapsa, la fila inerte se desalinea y parece de otra lista. Y una fila sin ningún control donde todas las
+      demás tienen uno se lee como no-elegible sin necesidad de un símbolo de prohibición.
+      <b>Variante si Hector prefiere no perder el glifo:</b> se conserva el icono y se añade igualmente el chip; el
+      chip sigue aportando la palabra y no estorba. Las dos versiones son aceptables — la del frame es la más
+      limpia.</span></div>
+      <div class="note"><span class="m">3</span><span><b>El contraste se ve porque están juntas.</b> Fila
+      seleccionable: fondo blanco, radio visible, etiqueta <code>--n-900</code>/900, y en la elegida borde 1.6 px
+      <code>--p-600</code> sobre <code>--p-50</code>. Fila inerte: fondo <code>--n-50</code>, sin control, chip a la
+      derecha. <b>Sigue sin haber opacidad</b> — la regla GD-2 aprobada en 9E se respeta entera: el motivo escrito es
+      lo más importante de esa fila y se lee al 100 %.</span></div>
+      <div class="note"><span class="m">4</span><span><b>Accesibilidad: sin cambios de comportamiento.</b> La fila
+      conserva su <code>Semantics(enabled:false, label:…, hint: motivo)</code>. El chip es decorativo para el lector
+      de pantalla —su palabra ya viaja en el <code>label</code>—, así que no añade verbosidad ni un segundo foco. La
+      fila sigue midiendo 56 px, aunque no sea tocable, para no romper el ritmo de la lista.</span></div>
+      <div class="note"><span class="m">5</span><span><b>El motivo sigue siendo del servidor cuando lo hay.</b> Si
+      existe un 409 de vehículo vivo, el subtítulo es el mensaje del backend (y entonces le aplica también el encuadre
+      de cita del frame D2); si no, es <code>coSwapCurrentReason</code>. El chip <b>Actual</b> no sustituye a ninguno
+      de los dos: es la etiqueta de la fila, no la explicación.</span></div>
+
+      <div class="cp"><b class="h">Copy exacta · app_es.arb / app_en.arb</b>
+        <table>
+          <tr><th>Clave</th><th>ES</th><th>EN</th></tr>
+          <tr class="new"><td><code>coSwapCurrentPill</code></td><td>Actual</td><td>Current</td></tr>
+          <tr class="keep"><td><code>coSwapCurrentReason</code></td><td>Unidad actual · una unidad no se cambia por sí misma</td><td>Current unit · a unit cannot be swapped for itself</td></tr>
+          <tr class="keep"><td><code>coSwapTitle</code></td><td>Cambiar vehículo</td><td>Change vehicle</td></tr>
+          <tr class="keep"><td><code>coSwapSub</code></td><td>Disponibles según el servidor · hace {age}</td><td>Available per the server · {age} ago</td></tr>
+          <tr class="keep"><td><code>coSwapSameGroup</code></td><td>Mismo grupo</td><td>Same class</td></tr>
+          <tr class="keep"><td><code>coSwapConfirm</code></td><td>Cambiar a {unit}</td><td>Switch to {unit}</td></tr>
+          <tr class="keep"><td><code>coSwapCancel</code></td><td>Cancelar</td><td>Cancel</td></tr>
+        </table>
+      </div>
+
+      <div class="contrast"><b>Contraste MEDIDO (D3)</b>
+        <ul>
+          <li>Chip «Actual» <code>--n-800</code> sobre <code>--n-100</code>: <b>12.5:1</b> · el hairline
+          <code>--n-200</code> contra la fila <code>--n-50</code> es no-texto (solo delimita el chip).</li>
+          <li>Etiqueta de la fila inerte <code>--n-800</code> sobre <code>--n-50</code>: <b>13.0:1</b> ·
+          motivo <code>--n-700</code> sobre <code>--n-50</code>: <b>8.53:1</b> (par ya publicado).</li>
+          <li>Fila seleccionable: etiqueta <code>--n-900</code> sobre blanco <b>18.14:1</b> · subtítulo
+          <code>--n-700</code> <b>9.22:1</b> · seleccionada <code>--p-800</code> sobre <code>--p-50</code>
+          <b>9.93:1</b> (sin cambio).</li>
+          <li>La fila inerte usa <code>--n-50</code>, que es lo que shipeó el build; el mockup 9E decía
+          <code>--n-25</code>. Diferencia imperceptible y ambas cumplen — <b>no se toca</b>, para no abrir un cambio
+          que nadie pidió.</li>
+        </ul></div>
+      <div class="motion"><b>Motion</b>
+        <ul>
+          <li>Ninguno nuevo. El chip aparece con la lista, no se anima aparte: un chip que entra con retardo parece
+          un estado que acaba de cambiar, y este no cambia nunca dentro del sheet.</li>
+        </ul></div>
+      <div class="decision"><b>Si Hector dice que no</b>
+        No hay dependencia: el sheet se queda con <code>Icons.block_rounded</code> y su motivo escrito, que ya cumple
+        DoD #2 y GD-2. Ningún otro frame de esta lámina ni del mockup aprobado depende de esta decisión.</div>
+    </aside>
+  </div>
+</section>
+
+<footer class="dod" id="pie">
+  <div class="card">
+    <b>Qué pasa si Hector rechaza cada frame</b>
+    <div class="reject"><span class="tag">D1 · MC-8</span><span>El estado deshonesto se queda vivo: una lectura caída
+    de display-data seguirá pintando tarjeta roja, pill «Faltan datos», tres «Sin capturar» y un bloqueo que nombra
+    campos que nadie llegó a verificar. <b>No se rompe nada del build de H2</b> —hoy funciona así— pero MC-8 queda
+    abierto y el agente sigue deteniendo entregas legítimas por un fallo de red, con el
+    <code>catch (_)</code> de <code>_loadContext</code> tal cual. La alternativa mínima, si el estado completo no
+    convence, es al menos no teñir de rojo: tarjeta neutra y un aviso de «no se pudo leer», sin las tres filas.</span></div>
+    <div class="reject"><span class="tag">D2 · MC-4</span><span>El banner se queda como hoy: título en español a
+    13/900 y, pegado debajo, un párrafo en inglés a 12.5/700 sin decir de quién es. <b>Nada se cae</b> y el número de
+    la otra renta sigue estando ahí —es lo único accionable del error— solo que sin encuadre, así que el agente puede
+    leerlo como copy rota de la app en vez de como evidencia citable. El coste de este «no» es soporte, no
+    funcionalidad.</span></div>
+    <div class="reject"><span class="tag">D3 · pill Actual</span><span>Cero consecuencias. Es propuesta pura: la fila
+    inerte ya tiene su motivo legible, sin opacidad y con contraste medido. Se pierde solo la lectura de un vistazo
+    y la coherencia con el lenguaje de chips del resto de la app. <b>Ningún otro frame depende de este.</b></span></div>
+  </div>
+  <div class="card">
+    <b>Trazabilidad DoD (PROJECT_PLAN §10) para los 3 frames:</b>
+    <b>#1</b> todo string mostrado va a <code>app_es.arb</code> / <code>app_en.arb</code>, con la copy exacta ES y EN
+    listada por frame (8 claves nuevas, el resto ya existentes); el <b>mensaje crudo del backend queda fuera de l10n
+    a propósito</b> ·
+    <b>#2</b> targets sin cambio (CTA 56, filas del sheet 56, «Entendido» 44 de alto real) y contraste ≥ 4.5:1 sobre
+    el fondo REAL, con los pares nuevos medidos y listados: <code>--n-700</code>/<code>--danger-bg</code> 8.06:1,
+    <code>--n-800</code>/<code>--n-100</code> 12.5:1, <code>--n-800</code>/<code>--n-50</code> 13.0:1 ·
+    <b>#5</b> D1 cubre un estado de error que hoy NO tenía representación propia (fallo de lectura del contexto,
+    distinto del dato ausente) y D2 mejora la presentación del 409 <code>VEHICLE_CONFLICT</code> ya cubierto por 9D ·
+    <b>#10</b> D1 es, en rigor, el estado de <b>error de carga</b> que le faltaba a la pantalla 9.
+    <br><br>
+    <b>Prerrequisito único de build (D1):</b> que <code>_loadContext</code> deje de colapsar «falló la lectura» y
+    «el servidor no lo tiene» en el mismo <code>context == null</code>. Es un cambio interno del controlador —una
+    bandera puesta en el <code>catch</code>—; <b>no requiere endpoint, campo, permiso ni migración</b>. Sin él, D1 no
+    se puede pintar sin mentir.
+    <br><br>
+    <b>Nada de esta lámina se construye hasta que Hector apruebe.</b> D1 y D2 vuelven al Project Manager como
+    MUST-CHANGE de la revisión de M2-H2; D3 vuelve como OPTIONAL.
+  </div>
+</footer>
+
+</body>
+</html>

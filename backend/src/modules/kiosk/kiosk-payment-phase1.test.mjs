@@ -42,7 +42,15 @@ function matches(row, where) {
       if ('not' in val) return val.not === null ? row[key] != null : row[key] !== val.not;
       if ('in' in val) return val.in.includes(row[key]);
       if ('has' in val) return Array.isArray(row[key]) && row[key].includes(val.has);
-      return true;
+      if ('gt' in val) return row[key] != null && row[key] > val.gt;
+      if ('gte' in val) return row[key] != null && row[key] >= val.gte;
+      if ('lt' in val) return row[key] != null && row[key] < val.lt;
+      if ('lte' in val) return row[key] != null && row[key] <= val.lte;
+      // 2026-08-17: was `return true`, i.e. "any operator I don't model
+      // matches". In a PAYMENTS suite that means a guard the database would
+      // refuse reads here as satisfied. Fail loudly instead — an unmodelled
+      // operator is a gap in the stub, not a pass.
+      throw new Error(`stub matcher: unmodelled operator on "${key}": ${JSON.stringify(val)}`);
     }
     return row[key] === val;
   });

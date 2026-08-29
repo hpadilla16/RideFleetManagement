@@ -30,6 +30,8 @@ import {
   createSession, getSessionByReservation, transition,
   mintTermsToken, mintHandoffToken, abandon,
   stepNumber, isTerminal, STEP_INFO,
+  shouldSwallowTransitionConflict,
+  paymentStepMode, PAYMENT_STEP_MODES,
 } from '../../../../lib/checkout-session';
 import QRCode from 'qrcode';
 
@@ -237,14 +239,6 @@ function CheckoutWizardV2({ token, me, logout }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.currentStep, session?.tcCompletedAt, session?.paymentCompletedAt, session?.inspectionCompletedAt, session?.customerSignedAt]);
 
-  // Forward order of CheckoutStep — used only to decide whether a 409 means
-  // "already there / already past it" (benign, swallow) vs a real error.
-  const STEP_ORDER = [
-    'CONFIRMING', 'TC_PENDING', 'TC_SIGNED', 'PAYMENT_PENDING', 'PAID',
-    'INSPECTION_HANDOFF', 'INSPECTION_IN_PROGRESS', 'CUSTOMER_SIGN_PENDING',
-    'FINALIZING', 'CLOSED',
-  ];
-
   const advance = async (toStep, metadata) => {
     if (transitionInFlightRef.current) return; // drop concurrent/double fires
     transitionInFlightRef.current = true;
@@ -254,18 +248,24 @@ function CheckoutWizardV2({ token, me, logout }) {
     } catch (err) {
       // 409 = state conflict. If the session is already in (or past) the
       // requested step — the classic double-fire — refetch and treat as a
-      // success-noop instead of toasting an error at the agent.
+      // success-noop instead of toasting an error at the agent. The decision
+      // lives in shouldSwallowTransitionConflict (lib/checkout-session.js) so
+      // it can be tested; FINALIZE_INCOMPLETE is exempt there on purpose.
+      let freshSession = null;
       if (err?.status === 409) {
         try {
           const fresh = await api(`/api/checkout-sessions/${session.id}`, { bypassCache: true }, token);
-          const at = STEP_ORDER.indexOf(fresh?.currentStep);
-          const want = STEP_ORDER.indexOf(toStep);
-          if (at !== -1 && want !== -1 && at >= want) {
+          freshSession = fresh;
+          if (shouldSwallowTransitionConflict({ err, fresh, toStep })) {
             setSession(fresh);
             return;
           }
         } catch { /* fall through to the toast */ }
       }
+      // Reconcile the screen to server truth BEFORE complaining: on
+      // FINALIZE_INCOMPLETE the session really is closed, and the agent needs
+      // to see that AND the reason the finalize did not finish.
+      if (freshSession) setSession(freshSession);
       setToast({ kind: 'error', message: err?.message || 'Cannot advance' });
     } finally {
       transitionInFlightRef.current = false;
@@ -546,17 +546,27 @@ function StepRenderer({ session, reservation, token, onAdvance }) {
     case 'TC_PENDING':
       return <Step2TermsPending session={session} reservation={reservation} token={token} onSigned={() => onAdvance('TC_SIGNED')} />;
     case 'TC_SIGNED':
-      return <StepBridge label="Terms signed" onNext={() => onAdvance('PAYMENT_PENDING')} />;
-    case 'PAYMENT_PENDING':
-      // Loaners have no online payment (billing is on the reservation; backend pre-stamps
-      // paymentCompletedAt). Skip the Spin payment step entirely.
-      return reservation.workflowMode === 'DEALERSHIP_LOANER'
-        ? <LoanerPaymentBridge reservation={reservation} onNext={() => onAdvance('PAID')} />
-        : <Step3PaymentPending session={session} reservation={reservation} token={token} onPaid={() => onAdvance('PAID')} />;
+      return <StepBridge key="TC_SIGNED" label="Terms signed" onNext={() => onAdvance('PAYMENT_PENDING')} />;
+    case 'PAYMENT_PENDING': {
+      // Which of the three payment screens this session gets — see
+      // paymentStepMode() in lib/checkout-session.js for the ordering rule.
+      // LOANER keeps its own bridge (billing is on the reservation); SKIP is a
+      // session the backend already stamped paymentCompletedAt on, either
+      // because the tenant does not collect payment during check-out
+      // (`checkoutPaymentRequired=false`) or because a charge already landed.
+      const mode = paymentStepMode(session, reservation);
+      if (mode === PAYMENT_STEP_MODES.LOANER) {
+        return <LoanerPaymentBridge reservation={reservation} onNext={() => onAdvance('PAID')} />;
+      }
+      if (mode === PAYMENT_STEP_MODES.SKIP) {
+        return <StepBridge key="PAYMENT_SKIPPED" label="No payment required at check-out" onNext={() => onAdvance('PAID')} />;
+      }
+      return <Step3PaymentPending session={session} reservation={reservation} token={token} onPaid={() => onAdvance('PAID')} />;
+    }
     case 'PAID':
-      return <StepBridge label="Payment captured" onNext={() => onAdvance('INSPECTION_HANDOFF')} />;
+      return <StepBridge key="PAID" label="Payment captured" onNext={() => onAdvance('INSPECTION_HANDOFF')} />;
     case 'INSPECTION_HANDOFF':
-      return <Step4Handoff session={session} token={token} onContinue={() => onAdvance('INSPECTION_IN_PROGRESS')} />;
+      return <Step4Handoff session={session} token={token} reservationId={reservation?.id} onContinue={() => onAdvance('INSPECTION_IN_PROGRESS')} />;
     case 'INSPECTION_IN_PROGRESS':
       return <Step5Metrics
         session={session}
@@ -571,7 +581,7 @@ function StepRenderer({ session, reservation, token, onAdvance }) {
         onSigned={() => onAdvance('FINALIZING')}
       />;
     case 'FINALIZING':
-      return <StepBridge label="Building agreement…" onNext={() => onAdvance('CLOSED')} />;
+      return <StepBridge key="FINALIZING" label="Building agreement…" onNext={() => onAdvance('CLOSED')} />;
     case 'CLOSED':
       return <StepClosed reservation={reservation} />;
     case 'CANCELLED':
@@ -751,9 +761,12 @@ function Step1Confirm({ reservation, session, token, onNext }) {
     !!reservation.rentalAgreement?.declinedInsurance,
   );
   const [savingDecline, setSavingDecline] = useState(false);
+  const [declineError, setDeclineError] = useState(null);
 
   const persistDecline = async (next) => {
+    const previous = declinedInsurance;
     setDeclinedInsurance(next);
+    setDeclineError(null);
     if (!session?.id) return;
     setSavingDecline(true);
     try {
@@ -761,7 +774,19 @@ function Step1Confirm({ reservation, session, token, onNext }) {
         method: 'POST',
         body: JSON.stringify({ declined: next }),
       }, token);
-    } catch { /* non-fatal; re-toggle to retry */ } finally {
+    } catch (err) {
+      // The backend refuses this write once the customer has signed, or while
+      // they are signing (409 TC_ALREADY_COMPLETED / TC_SIGNING_IN_PROGRESS).
+      // Swallowing that left the switch showing the OPPOSITE of what is stored
+      // with no message — the agent believes they changed a legal flag they did
+      // not. Roll the optimistic set back and say why.
+      //
+      // The sentence comes from the server (messageFor() in
+      // insurance-selection-gate.js), so the wording lives next to the rule
+      // instead of being restated here and drifting from it.
+      setDeclinedInsurance(previous);
+      setDeclineError(err?.message || 'Could not save the insurance selection. Please try again.');
+    } finally {
       setSavingDecline(false);
     }
   };
@@ -858,6 +883,18 @@ function Step1Confirm({ reservation, session, token, onNext }) {
             <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>
               Adds a Declined Insurance acknowledgement section to T&amp;C — customer initials it on their phone in step 2.
             </div>
+            {declineError && (
+              <div
+                role="alert"
+                style={{
+                  fontSize: 11, color: '#991B1B', background: '#FEF2F2',
+                  border: '0.5px solid #FCA5A5', borderRadius: 6,
+                  padding: '6px 8px', marginTop: 6,
+                }}
+              >
+                {declineError}
+              </div>
+            )}
           </div>
         </label>
       </div>
@@ -1533,7 +1570,7 @@ function ManualDepositModal({ suggestedAmount, onClose, onSubmit }) {
   );
 }
 
-function Step4Handoff({ session, token, onContinue }) {
+function Step4Handoff({ session, token, onContinue, reservationId }) {
   const [tokenInfo, setTokenInfo] = useState(null);
   // 2026-06-11 — customer-led inspection (plan: doc/customer-inspection-plan).
   // When the tenant setting is ON, step 4 offers TWO exits: delegate the
@@ -1642,6 +1679,25 @@ function Step4Handoff({ session, token, onContinue }) {
           <div style={{ color: '#6B7280' }}>Minting handoff token…</div>
         )}
       </div>
+      {/* Doing the whole checkout on the tablet means there is no second
+          device left to scan with (Hector, 2026-08-19) — the QR is unusable
+          precisely when the agent is working alone. Same destination, opened
+          directly, with a return path so the wizard is one tap away after. */}
+      <button
+        style={{ ...primaryBtn, width: '100%', marginTop: 16 }}
+        onClick={() => {
+          const back = reservationId ? `/reservations/${reservationId}/checkout-wizard-v2` : '';
+          const qs = back ? `?return=${encodeURIComponent(back)}` : '';
+          window.location.href = `/checkout/mobile/${tokenInfo.token}${qs}`;
+        }}
+        disabled={!tokenInfo}
+      >
+        Do the inspection on this device →
+      </button>
+      <div style={{ fontSize: 12, color: '#6B7280', textAlign: 'center', marginTop: 8 }}>
+        Use this when the tablet in your hand is the only device.
+      </div>
+
       <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
         {customerLed ? (
           <button style={ghostBtn} onClick={() => setMode('choose')}>← Back to options</button>

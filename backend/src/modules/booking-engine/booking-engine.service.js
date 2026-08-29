@@ -13,6 +13,7 @@ import { computeMarketplaceTripPricing, tenantPlatformFeeConfig } from '../car-s
 import { serializePublicTripFulfillmentPlan } from '../car-sharing/car-sharing-handoff.js';
 import { resolveDeliveryAreaHints } from '../car-sharing/car-sharing-fulfillment.js';
 import { money } from '../../lib/money.js';
+import { composeRentalMoney } from '../../lib/rental-money.js';
 import { startOfUtcDay, addUtcDays, ceilTripDays } from '../../lib/date-utils.js';
 import { activeVehicleBlockOverlapWhere } from '../vehicles/vehicle-blocks.js';
 import { RENTAL_PROGRAM_FILTER } from '../../lib/program-category.js';
@@ -991,6 +992,47 @@ export const bookingEngineService = {
     return { services, insurancePlans };
   },
 
+  // Staff rate override recompute (2026-08-24). Given ONE overridden per-day
+  // rate, rebuild the whole money block with the SAME arithmetic searchRental
+  // uses — including re-running the location's mandatory fees against the NEW
+  // subtotal, so a PERCENTAGE fee moves with the discount instead of staying
+  // pinned to the price the engine originally quoted.
+  //
+  // NOTE on subtotal: searchRental's baseTotal is the SUM of the per-day rates
+  // (which can differ per day under seasonal/revenue pricing). An override is a
+  // single flat per-day number by definition, so here subtotal = rate x days.
+  // That is the intended semantics of "set the daily rate to X", not a drift.
+  //
+  // bookingChannel defaults to WEBSITE to match listMandatoryFeesForLocation's
+  // default inside searchRental — the override must not silently change WHICH
+  // fees apply, only what they are computed against.
+  async recomputeRentalQuoteMoney({ tenantId, locationId, days, dailyRate, bookingChannel = 'WEBSITE' } = {}) {
+    if (!tenantId || !locationId) throw new Error('tenantId and locationId are required');
+    const rate = Number(dailyRate);
+    if (!Number.isFinite(rate) || rate <= 0) throw new Error('dailyRate must be a positive number');
+    const dayCount = Math.max(1, Number(days || 1));
+    const location = await prisma.location.findFirst({
+      where: { id: String(locationId), tenantId: String(tenantId) },
+      select: { taxRate: true }
+    });
+    const baseTotal = money(rate * dayCount);
+    const mandatoryFees = await listMandatoryFeesForLocation({
+      tenantId, locationId, baseAmount: baseTotal, days: dayCount, bookingChannel
+    });
+    const composed = composeRentalMoney({
+      baseTotal,
+      taxRate: location?.taxRate || 0,
+      mandatoryFees
+    });
+    return {
+      days: dayCount,
+      dailyRate: money(rate),
+      taxRate: Number(location?.taxRate || 0),
+      mandatoryFees,
+      ...composed
+    };
+  },
+
   // Public add-ons for a vehicle type (website "Add extras"). Tenant-scoped; only
   // isActive + displayOnline. days=1 so per-day lines report the per-day rate (the site
   // multiplies by days). locationId null → global (non-location-specific) add-ons.
@@ -1271,9 +1313,20 @@ export const bookingEngineService = {
             days: rentalDays
           })
         ]);
-        const taxes = money(Number(quote.baseTotal || 0) * (Number(location.taxRate || 0) / 100));
-        const mandatoryFeesTotal = money((mandatoryFees || []).reduce((sum, fee) => sum + Number(fee.total || 0), 0));
-        const total = money(Number(quote.baseTotal || 0) + taxes + mandatoryFeesTotal);
+        // Single source of the rental money formula (src/lib/rental-money.js).
+        // Lifted verbatim from here so the staff rate override recomputes with
+        // the SAME arithmetic instead of a hand-rolled copy — see
+        // recomputeRentalQuoteMoney below.
+        const {
+          subtotal: quoteSubtotal,
+          fees: mandatoryFeesTotal,
+          taxes,
+          total
+        } = composeRentalMoney({
+          baseTotal: quote.baseTotal,
+          taxRate: location.taxRate,
+          mandatoryFees
+        });
         return {
           location: {
             id: location.id,
@@ -1307,7 +1360,7 @@ export const bookingEngineService = {
           quote: {
             days: Number(quote.days || 0),
             dailyRate: money(quote.dailyRate),
-            subtotal: money(quote.baseTotal),
+            subtotal: quoteSubtotal,
             baseDailyRate: money(revenueRecommendation.baseQuote?.dailyRate),
             baseSubtotal: money(revenueRecommendation.baseQuote?.baseTotal),
             fees: mandatoryFeesTotal,

@@ -1,32 +1,26 @@
 import { ValidationError } from '../../lib/errors.js';
-import { prisma } from '../../lib/prisma.js';
 import { spinClient } from './spin-client.js';
 import logger from '../../lib/logger.js';
-import { cache } from '../../lib/cache.js';
-import { tenantKey } from '../../lib/cache/tenantKey.js';
+import { resolveTenantTerminalConfig, toSpinClientConfig } from './tenant-terminal-config.js';
 
 /**
- * Resolve SPIn config for a tenant (cached 3 min).
+ * Resolve SPIn config for a tenant.
+ *
+ * 2026-08-26 — this used to read `spinAuthKey` / `spinTpn` off
+ * Tenant.settingsJson, a home NOTHING has ever written to. It was a second,
+ * divergent answer to "which terminal does this tenant charge through", which
+ * is precisely how the wrong-merchant bug comes back. It now delegates to the
+ * shared resolver (AppSetting `tenant:<id>:paymentGatewayConfig`, the one the
+ * Settings page actually writes), so this module and the checkout wizard can
+ * never disagree about whose merchant account gets the money.
+ *
+ * These routes have no frontend caller today, so no fail-closed gate is added
+ * here — that belongs to the live charge path (spin-charge.service). The
+ * resolver's own precedence and its loud env-fallback warning still apply.
  */
 async function getTenantSpinConfig(tenantId) {
   if (!tenantId) return {};
-  return cache.getOrSet(tenantKey(tenantId, 'spin', 'config'), async () => {
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-    select: { id: true, name: true, settingsJson: true }
-  });
-  if (!tenant) return {};
-  let settings = {};
-  try { settings = typeof tenant.settingsJson === 'string' ? JSON.parse(tenant.settingsJson) : (tenant.settingsJson || {}); } catch {}
-  return {
-    spinAuthKey: settings?.spinAuthKey || '',
-    spinTpn: settings?.spinTpn || '',
-    spinMerchantNumber: settings?.spinMerchantNumber || 1,
-    spinCallbackUrl: settings?.spinCallbackUrl || '',
-    spinProxyTimeout: settings?.spinProxyTimeout || 120,
-    spinSandbox: settings?.spinSandbox !== false,
-  };
-  }, 3 * 60 * 1000); // cache 3 min
+  return toSpinClientConfig(await resolveTenantTerminalConfig(tenantId));
 }
 
 export const paymentGatewayService = {
@@ -165,3 +159,8 @@ export const paymentGatewayService = {
     return spinClient.summaryReport(config);
   },
 };
+
+// Test-only surface (same convention as incident-report.service.js). Exposed so
+// the Tenant.settingsJson drift guard can call the resolver directly instead of
+// reaching it through a charge path that needs a terminal.
+export const __test = { getTenantSpinConfig };

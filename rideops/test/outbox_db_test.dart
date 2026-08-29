@@ -199,6 +199,51 @@ void main() {
         reason: 'las filas ajenas no se tocan (se purgan al cambiar cuenta)');
   });
 
+  test('watchAllFor emite con cada escritura (el badge del shell vive de él)',
+      () async {
+    final snapshots = <int>[];
+    final sub = db
+        .watchAllFor(userId: 'u1', tenantId: 't1')
+        .listen((rows) => snapshots.add(rows.length));
+    await pumpEventQueue();
+    await db.into(db.outboxEntries).insert(entry('a'));
+    await pumpEventQueue();
+    await db.into(db.outboxEntries).insert(entry('b', userId: 'u2'));
+    await pumpEventQueue();
+    expect(snapshots.first, 0);
+    expect(snapshots.last, 1,
+        reason: 'las filas de OTRO dueño no aparecen en el stream');
+    await sub.cancel();
+  });
+
+  test('pruneAudit: corta por edad Y por tope, conservando lo más nuevo',
+      () async {
+    final now = DateTime.now();
+    Future<void> audit(String id, int daysAgo) =>
+        db.insertAudit(OutboxAuditEntriesCompanion.insert(
+          id: id,
+          userId: 'u1',
+          tenantId: 't1',
+          rowId: 'row-$id',
+          rowKind: 'inspection_photo',
+          summary: '{}',
+          discardedAt: now.subtract(Duration(days: daysAgo)),
+        ));
+
+    await audit('muy-viejo', 120); // cae por edad (90 días)
+    await audit('viejo', 40);
+    await audit('reciente', 5);
+    await audit('nuevo', 1);
+
+    await db.pruneAudit(
+      olderThan: now.subtract(const Duration(days: 90)),
+      keepMax: 2,
+    );
+    final rows = await db.auditRows();
+    expect(rows.map((r) => r.id).toSet(), {'reciente', 'nuevo'},
+        reason: 'primero la edad, luego el tope — sobreviven los más nuevos');
+  });
+
   test('purgeNotOwnedBy devuelve las filas borradas con sus payloads',
       () async {
     await db.into(db.outboxEntries).insert(entry('a', userId: 'saliente'));

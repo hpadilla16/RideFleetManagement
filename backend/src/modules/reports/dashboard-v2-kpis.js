@@ -19,6 +19,7 @@
  * same posture as the planner.
  */
 import { prisma } from '../../lib/prisma.js';
+import { rentalProgramWhere } from '../../lib/program-category.js';
 import { buildVehicleOperationalSignalsMap } from '../vehicles/vehicle-intelligence.service.js';
 import { startOfDayInTz, addDaysInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
@@ -71,7 +72,13 @@ export async function computeDashboardV2Kpis(tenantId, { allowedLocationIds = nu
   const vehicles = await db.vehicle.findMany({
     // SOLD is the only terminal status in the enum (there is no RETIRED) —
     // sold units are excluded from totalFleet everywhere else too.
-    where: { tenantId, status: { not: 'SOLD' }, ...locationFilter },
+    // Program filter (2026-08-24): these KPIs describe the RENTAL fleet —
+    // utilization divides by this list's length, and Turn-Ready scores
+    // readiness for the next renter. LOANER_ONLY and SHUTTLE_ONLY units are
+    // never rentable, so counting them deflated utilization and polluted the
+    // Turn-Ready mix (the owner's complaint). rentalProgramWhere() is the
+    // canonical allowlist — BOTH/RENTAL_ONLY only.
+    where: { tenantId, status: { not: 'SOLD' }, ...locationFilter, ...rentalProgramWhere() },
     select: {
       id: true,
       availabilityBlocks: {

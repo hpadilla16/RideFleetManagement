@@ -342,6 +342,10 @@ export async function applyPrecheckinCharges({
   insurancePlans = [],
   discount = null,
   completedAt = new Date(),
+  // Set by the caller from the insurance preflight's verdict: true when
+  // the rental agreement is already signed. Gates the decline-signature
+  // columns only; the declinedInsurance flag itself is always written.
+  agreementSealed = false,
   auditMetadata = {}
 }) {
   const applyDiscount = discountApplier(discount);
@@ -418,27 +422,45 @@ export async function applyPrecheckinCharges({
           where: { reservationId: reservation.id }, select: { id: true }
         });
         if (declAg) {
-          // UNCHANGED from the inline original, deliberately. A `tcSignedAt`
-          // fence belongs here — writing these columns after the contract is
-          // signed replaces the signature buildDeclinedInsuranceBlock prints on
-          // the addendum and re-dates it to after the signing — but the fence
-          // needs the signed/unsigned verdict, which arrives with the insurance
-          // gate on fix/insurance-flag-and-terms-url and does not exist on this
-          // branch. An earlier revision of this file carried the fence anyway,
-          // guarded by a parameter no caller passed; that is not a control, and
-          // its only real effect was to silently drop a legitimate decline
-          // signature whenever staff signed at the counter first. See
-          // doc/precheckin-atomicity-merge-notes-2026-08-17.md — the fence lands
-          // with that merge, where the verdict it needs is on hand.
-          await tx.rentalAgreement.update({
-            where: { id: declAg.id },
-            data: {
-              declinedInsurance: true,
-              ...(declineSig && String(declineSig).length > 200
-                ? { declinedInsuranceSignatureDataUrl: declineSig, declinedInsuranceSignedAt: new Date() }
-                : {}),
-            },
-          });
+          // THE FENCE, LANDED (2026-08-28, merging main into this branch).
+          //
+          // The signature columns are NOT covered by the flag's no-flip rule.
+          // buildDeclinedInsuranceBlock prints declinedInsuranceSignatureDataUrl
+          // on the contract, so re-submitting pre-check-in after the agreement
+          // was signed would replace the addendum's signature and re-date it to
+          // after the signing — silently, since the flag itself did not move and
+          // the gate rightly let the request through. Once the contract is
+          // sealed the flag write is a no-op anyway; these two stay frozen.
+          //
+          // `agreementSealed` is the caller's preflight verdict, computed
+          // BEFORE this transaction opened, so the contract can still be signed
+          // in the gap. The `tcSignedAt: null` WHERE makes the database decide:
+          // if the signature landed first, count is 0 and the columns the PDF
+          // prints are left alone. Both halves are needed; neither alone is.
+          const sealed = agreementSealed;
+          const canWriteDeclineSignature =
+            !sealed && declineSig && String(declineSig).length > 200;
+          if (canWriteDeclineSignature) {
+            const fenced = await tx.rentalAgreement.updateMany({
+              where: { id: declAg.id, tcSignedAt: null },
+              data: {
+                declinedInsurance: true,
+                declinedInsuranceSignatureDataUrl: declineSig,
+                declinedInsuranceSignedAt: new Date(),
+              },
+            });
+            if (fenced.count === 0) {
+              await tx.rentalAgreement.update({
+                where: { id: declAg.id },
+                data: { declinedInsurance: true },
+              });
+            }
+          } else {
+            await tx.rentalAgreement.update({
+              where: { id: declAg.id },
+              data: { declinedInsurance: true },
+            });
+          }
         }
       }
     }

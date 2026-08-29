@@ -15,6 +15,7 @@ import {
 // ({ tenantId: '__no_tenant__' }) for that case, and gives super-admins {}
 // or the explicit ?tenantId narrowing.
 import { scopeFor } from '../../lib/tenant-scope.js';
+import { auditFromReq, AUDIT_ACTIONS } from '../audit/audit.service.js';
 
 export const customersRouter = Router();
 
@@ -40,6 +41,15 @@ customersRouter.post('/bulk/import', async (req, res) => {
 customersRouter.get('/:id', async (req, res) => {
   const row = await customersService.getById(req.params.id, scopeFor(req));
   if (!row) return res.status(404).json({ error: 'Customer not found' });
+  // Sensitive-read audit (Wave 3): ONE identified customer's full record was
+  // disclosed. Audited only on a FOUND record (a 404 discloses nothing), and
+  // only here — the list endpoint above is deliberately NOT audited (threshold
+  // rule in audit.service.js). Best-effort; never blocks the read.
+  auditFromReq(req, {
+    action: AUDIT_ACTIONS.CUSTOMER_RECORD_READ,
+    targetType: 'CUSTOMER',
+    targetId: req.params.id,
+  });
   res.json(row);
 });
 
@@ -51,6 +61,16 @@ customersRouter.get('/:id', async (req, res) => {
 async function serveCustomerDocument(kind, req, res) {
   const doc = await customersService.getDocument(req.params.id, kind, scopeFor(req));
   if (!doc) return res.status(404).json({ error: 'Document not found' });
+  // Sensitive-read audit (Wave 3): a KYC document (ID photo / insurance /
+  // license) was disclosed for ONE customer. Instrumented once here so all
+  // three doc endpoints are covered; metadata records which kind. Audited only
+  // on a FOUND doc. Best-effort.
+  auditFromReq(req, {
+    action: AUDIT_ACTIONS.CUSTOMER_DOCUMENT_READ,
+    targetType: 'CUSTOMER',
+    targetId: req.params.id,
+    metadata: { kind },
+  });
   res.json(doc);
 }
 
@@ -136,8 +156,29 @@ customersRouter.delete('/:id', async (req, res) => {
   try {
     await customersService.remove(req.params.id, scopeFor(req));
     res.status(204).send();
-  } catch {
-    res.status(404).json({ error: 'Customer not found' });
+  } catch (err) {
+    // Honest errors (2026-08-22). This used to answer 404 "Customer not found"
+    // for EVERY failure — including the common one where the customer has a
+    // reservation and a database referential-integrity rule blocks the delete.
+    // Someone trying to honour an erasure request was told the record didn't
+    // exist while it sat there intact. Distinguish the cases:
+    //   P2025 — record genuinely not found            → 404
+    //   P2003/P2014 — blocked by a related record     → 409, and say so
+    // The proper erasure path (anonymisation that keeps legally-required rows)
+    // is tracked separately; this stops the delete from lying in the meantime.
+    // remove() pre-checks existence and throws a plain Error('Customer not
+    // found') with no .code for a missing/out-of-scope customer; P2025 only
+    // fires on a delete-time race. Match both so a genuine miss stays 404.
+    if (err?.code === 'P2025' || err?.message === 'Customer not found') {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+    if (err?.code === 'P2003' || err?.code === 'P2014') {
+      return res.status(409).json({
+        error: 'This customer has reservations or other linked records and cannot be hard-deleted. Use the erasure/anonymisation flow instead.',
+        code: 'CUSTOMER_HAS_LINKED_RECORDS'
+      });
+    }
+    return res.status(500).json({ error: 'Failed to delete customer' });
   }
 });
 

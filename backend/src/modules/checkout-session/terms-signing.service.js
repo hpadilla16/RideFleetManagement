@@ -17,6 +17,7 @@ import { CheckoutSessionError } from './checkout-session.service.js';
 import { sectionsForAgreement } from './terms-content.js';
 import { appendEvent } from './state-machine.js';
 import { analyzeSignatureInk } from '../../lib/signature-ink.js';
+import { resolveCustomerFacingBrand, resolveBrandLocation } from '../../lib/tenant-brand.js';
 
 async function loadToken(token) {
   if (!token) throw new CheckoutSessionError('token required', 400);
@@ -25,9 +26,23 @@ async function loadToken(token) {
     include: {
       reservation: {
         include: {
+          // The signer's own language preference. This page renders on the
+          // CUSTOMER's phone, so the staff device's stored UI language is
+          // meaningless here — see the frontend's useSignLang().
+          customer: { select: { locale: true } },
+          // BRAND FALLBACK ONLY (lib/tenant-brand.js resolveBrandLocation).
+          // The agreement's own pickupLocation stays the primary source; this
+          // one is read solely so an agreement whose location relation is empty
+          // still names a business instead of nothing. Precedent:
+          // rental-agreements.service.js:5848 does the same for locationConfig.
+          // Loading it here is also what lets resolveBrandLocation answer for
+          // this caller without a single extra query.
+          pickupLocation: { select: { id: true, name: true, locationConfig: true } },
           rentalAgreement: {
             select: {
               id: true, declinedInsurance: true, agreementNumber: true,
+              tenantId: true,
+              tenant: { select: { id: true, name: true } },
               // Per-branch acknowledgement text (2026-07-24). Read off the
               // AGREEMENT, not the reservation, even though both carry a
               // pickupLocationId: reservationsService.update can move
@@ -38,7 +53,7 @@ async function loadToken(token) {
               // would let one signed document show two branches' wording.
               // The agreement is the document of record and its
               // pickupLocationId is non-null.
-              pickupLocation: { select: { id: true, termsSectionsJson: true } },
+              pickupLocation: { select: { id: true, termsSectionsJson: true, name: true, locationConfig: true } },
             },
           },
         },
@@ -55,9 +70,87 @@ async function loadToken(token) {
   return row;
 }
 
+/**
+ * Whose business name does the customer see while they sign?
+ *
+ * The customer scans a QR off the agent's screen and lands on this page on
+ * their OWN phone, with no other context. Before this resolver the page said
+ * "Ride Fleet · Terms & Conditions" — the PLATFORM's brand — on the screen
+ * where the renter signs a legal contract with, say, Autos del Valle. That is
+ * a brand leak from the platform onto another business's customer, at the
+ * worst possible moment.
+ *
+ * Both halves live in lib/tenant-brand.js and are shared with the counter
+ * display that shows the QR (reservations.routes.js display-data): the same
+ * cascade AND the same choice of branch (resolveBrandLocation — the
+ * agreement's pickup location, falling back to the reservation's). Those two
+ * screens are thirty seconds apart in the same handoff; sharing the cascade
+ * alone would not have stopped them naming two different branches.
+ *
+ * WHY THE AGREEMENT'S BRANCH — and where the PDF still legitimately differs
+ * ---------------------------------------------------------------------------
+ * The agreement's pickupLocation is the same row that supplies the section
+ * text being initialed (see loadToken's comment), so identity and clauses
+ * always name the same place.
+ *
+ * The printed PDF resolves its header from `agreement.reservation.
+ * pickupLocation` instead (rental-agreements.service.js:3539,3552). So if
+ * someone moves `Reservation.pickupLocationId` AFTER the agreement is created
+ * — which reservationsService.update permits, with no sync back to the
+ * agreement — the phone and the PDF CAN print different business names. That
+ * is a real, known divergence and this resolver does not paper over it: the
+ * phone deliberately stays with the branch whose clauses the renter is
+ * actually signing. Making those two agree means fixing the move to sync (or
+ * the PDF to read the agreement), which is not this change.
+ *
+ * Scope that claim honestly: it is the one remaining pair that can disagree
+ * AMONG THE SURFACES THIS CASCADE COVERS — the phone and the counter cannot.
+ * It is not the last brand divergence in the product. tenant-brand.js:30-36
+ * lists three surfaces deliberately left unmigrated, and one of them still
+ * leaks the PLATFORM outright: the agreement email the customer receives
+ * minutes after signing on this very screen resolves its brand through
+ * resolveEmailBrand, which falls back to RFM_DEFAULT_BRAND.companyName —
+ * 'Ride Fleet' — for any tenant that never filled in Settings → Rental
+ * agreement (lib/email-template.js:16,50). That is the same leak this file
+ * closed, one surface downstream, and it is still open.
+ */
+async function resolveSigningBrand(reservation) {
+  const ag = reservation?.rentalAgreement;
+  return resolveCustomerFacingBrand({
+    tenantId: ag?.tenantId ?? null,
+    franchiseId: reservation?.franchiseId ?? null,
+    location: await resolveBrandLocation(reservation),
+    // Already loaded on the token row — never make the resolver re-read it.
+    tenantName: ag?.tenant?.name ?? null,
+  });
+}
+
+/**
+ * Narrow the signer's stored locale to a language this page actually ships
+ * strings for. Anything unknown returns null so the frontend can fall back to
+ * the customer's own browser language instead of guessing wrong.
+ *
+ * HONEST STATE OF THIS FIELD: `Customer.locale` is read by
+ * precheckin-invite.scheduler.js and shuttle-link-invite.js to pick an email
+ * language, but NOTHING in backend/src ever writes it — no API, no portal
+ * form, no kiosk field. So in practice it is null for every customer who was
+ * not seeded or hand-edited, and this returns null with them. Wiring it up
+ * here is what makes populating that column pay off later; it is not, today,
+ * a working "the contract knows its language" answer. There is no language
+ * field on Tenant, Location or RentalAgreement at all.
+ */
+function normalizeSignerLocale(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s) return null;
+  if (s.startsWith('es')) return 'es';
+  if (s.startsWith('en')) return 'en';
+  return null;
+}
+
 async function loadSession(token) {
   const row = await loadToken(token);
   const ag = row.reservation.rentalAgreement;
+  const brand = await resolveSigningBrand(row.reservation);
   const sections = sectionsForAgreement({ declinedInsurance: !!ag.declinedInsurance, sectionOverrides: ag.pickupLocation?.termsSectionsJson });
 
   // Pull already-completed initials so the UI can show what's left.
@@ -70,7 +163,14 @@ async function loadSession(token) {
   return {
     reservationNumber: row.reservation.reservationNumber,
     agreementNumber: ag.agreementNumber,
-    customer: { firstName: row.reservation.customerId },
+    // Who the customer is signing WITH. Business identity only — this is a
+    // no-auth payload, so nothing about the signer, the vehicle or the money
+    // belongs in it (and the frontend puts companyName in the <title>, which
+    // is public and cacheable).
+    brand: { companyName: brand.companyName },
+    // Preferred language of the SIGNER, not of the staff device. null = the
+    // frontend should fall back to the customer's browser language.
+    signerLocale: normalizeSignerLocale(row.reservation.customer?.locale),
     sections: sections.map((s) => ({
       key: s.key, label: s.label, body: s.body,
       signed: completedKeys.has(s.key),
@@ -166,6 +266,12 @@ async function complete({ token, signatureDataUrl, signerName, customerIp }) {
       where: { id: session.id },
       data: {
         tcCompletedAt: new Date(),
+        // M2 P2 review MUST-1 (2026-08-17): every REAL writer of a versioned
+        // field bumps stateVersion, not just checkoutSessionService — this is
+        // the customer's phone signing T&C while an H6 client holds an
+        // expectedVersion snapshot; without the bump its guard would pass
+        // believing nothing changed.
+        stateVersion: { increment: 1 },
         events: appendEvent(session.events, {
           kind: 'TC_SIGNED_BY_CUSTOMER',
           signerName: signerName || null,

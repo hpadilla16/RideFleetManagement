@@ -1,0 +1,81 @@
+version: 2
+
+# Automated dependency updates (Phase 1 of the security-scan initiative).
+# Pairs with .github/workflows/security-scan.yml: dependency-audit REPORTS known
+# vulnerabilities, Dependabot proposes the PRs that fix them. Minor/patch bumps
+# are grouped so reviewers see one PR per ecosystem instead of a flood; majors
+# stay ungrouped so a breaking bump is reviewed on its own. See
+# doc/security-scanning-2026-08-22.md.
+
+updates:
+  # ── backend/ (Express / Prisma, type:module) ──────────────────────────────
+  - package-ecosystem: npm
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: sunday
+      time: '06:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - backend
+    groups:
+      backend-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # ── frontend/ (Next 14) ───────────────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: sunday
+      time: '06:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - frontend
+    groups:
+      frontend-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # ── root / (near-empty shell — low value, kept for completeness) ───────────
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: sunday
+      time: '06:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - root
+    groups:
+      root-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # ── GitHub Actions used by the workflows (incl. security-scan.yml) ─────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: sunday
+      time: '06:00'
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      actions-minor-patch:
+        update-types:
+          - minor
+          - patch

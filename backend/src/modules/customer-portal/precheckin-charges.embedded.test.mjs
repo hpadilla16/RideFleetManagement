@@ -372,15 +372,23 @@ describe('the submission it is meant to apply still applies', () => {
     assert.equal(await prisma.auditLog.count({ where: { reservationId: reservation.id } }), 1);
   });
 
+  // THE DECLINE SIGNATURE, EITHER SIDE OF THE FENCE (split 2026-08-28).
+  //
+  // This was ONE case on the branch, and it created the agreement with
+  // tcSignedAt SET while asserting the signature was written. That was right
+  // while the module had no fence: staff signing at the counter first is legal
+  // (requirePrecheckinBeforeCheckout is off by default), and dropping the
+  // signature there made buildDeclinedInsuranceBlock print "(no signature on
+  // file)" on the contract's decline addendum.
+  //
+  // Merging main landed the fence and the verdict it needs, so that fixture no
+  // longer describes anything a customer can do: the route's preflight refuses
+  // that submission with a 409 before applyPrecheckinCharges is reached. Rather
+  // than delete a case that went red, it is split along the fence.
+
   it('records a decline WITH its signature on the agreement', async () => {
-    // The counterpart to the rollback case above, and the reason this exists at
-    // all: an earlier revision of the module carried a `tcSignedAt` fence from
-    // another branch, guarded by a parameter no caller passed. Its only live
-    // effect was to DROP this signature whenever staff had signed the T&C at the
-    // counter first — which is legal, since requirePrecheckinBeforeCheckout is
-    // off by default. buildDeclinedInsuranceBlock prints this column on the
-    // contract's decline addendum; without it the PDF says "(no signature on
-    // file)". This case pins that the signature is written.
+    // The unsigned agreement — the ordinary order, and the one the signature
+    // exists for. Pre-check-in is where it is legitimately captured.
     const reservation = await makeReservation({
       charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
     });
@@ -395,8 +403,6 @@ describe('the submission it is meant to apply still applies', () => {
         returnAt: reservation.returnAt,
         customerFirstName: 'Ana',
         customerLastName: 'P',
-        // Signed at the counter BEFORE the customer finished pre-check-in.
-        tcSignedAt: new Date(),
       },
     });
     const signature = `data:image/png;base64,${'A'.repeat(400)}`;
@@ -406,6 +412,7 @@ describe('the submission it is meant to apply still applies', () => {
       reservation,
       insuranceSelection: { declinedCoverage: true, signatureDataUrl: signature },
       insurancePlans: PLANS,
+      agreementSealed: false,
     });
 
     const ag = await prisma.rentalAgreement.findUnique({
@@ -415,6 +422,61 @@ describe('the submission it is meant to apply still applies', () => {
     assert.equal(ag.declinedInsurance, true);
     assert.equal(ag.declinedInsuranceSignatureDataUrl, signature);
     assert.notEqual(ag.declinedInsuranceSignedAt, null);
+  });
+
+  it('a sealed contract keeps the decline signature already printed on it', async () => {
+    // Both halves of the fence, against a real row.
+    //
+    // `agreementSealed` is the caller's preflight verdict. The `tcSignedAt:
+    // null` WHERE is the backstop for the gap between that preflight and BEGIN,
+    // where the contract can still be signed — so the second call passes
+    // agreementSealed:false, the verdict a racing request would have carried,
+    // and the database is left to refuse it.
+    const signature = `data:image/png;base64,${'A'.repeat(400)}`;
+    const original = `data:image/png;base64,${'B'.repeat(400)}`;
+
+    for (const [label, sealed] of [['verdict', true], ['race', false]]) {
+      const reservation = await makeReservation({
+        charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+      });
+      const signedAt = new Date('2026-08-01T12:00:00.000Z');
+      await prisma.rentalAgreement.create({
+        data: {
+          agreementNumber: `AG-SEALED-${label}-${TAG}-${resSeq}`,
+          reservationId: reservation.id,
+          tenantId: ids.tenant,
+          pickupLocationId: ids.location,
+          returnLocationId: ids.location,
+          pickupAt: reservation.pickupAt,
+          returnAt: reservation.returnAt,
+          customerFirstName: 'Ana',
+          customerLastName: 'P',
+          // Signed at the counter, carrying the addendum's own signature.
+          tcSignedAt: new Date(),
+          declinedInsurance: true,
+          declinedInsuranceSignatureDataUrl: original,
+          declinedInsuranceSignedAt: signedAt,
+        },
+      });
+
+      await applyPrecheckinCharges({
+        client: prisma,
+        reservation,
+        insuranceSelection: { declinedCoverage: true, signatureDataUrl: signature },
+        insurancePlans: PLANS,
+        agreementSealed: sealed,
+      });
+
+      const ag = await prisma.rentalAgreement.findUnique({
+        where: { reservationId: reservation.id },
+        select: { declinedInsurance: true, declinedInsuranceSignatureDataUrl: true, declinedInsuranceSignedAt: true },
+      });
+      assert.equal(ag.declinedInsurance, true, `${label}: the flag is still written`);
+      assert.equal(ag.declinedInsuranceSignatureDataUrl, original,
+        `${label}: the signature printed on the signed contract must survive`);
+      assert.equal(Number(ag.declinedInsuranceSignedAt), Number(signedAt),
+        `${label}: the acknowledgement must not be re-dated to after the signing`);
+    }
   });
 
   it('does not write the signature columns for a blank-ish signature', async () => {

@@ -10,6 +10,11 @@ import {
 } from '../../lib/module-access.js';
 import { getTenantPlanCatalog, resolveTenantPlanConfig } from '../../lib/tenant-plan-limits.js';
 import { encrypt, decrypt, isEncryptionConfigured } from '../../lib/integration-crypto.js';
+import { encryptSettingSecret, carrySettingSecret, decryptSettingSecret } from '../../lib/setting-secret-crypto.js';
+import { invalidateTenantTerminalConfig } from '../payment-gateway/tenant-terminal-config.js';
+import { resolveTenantProviderCredential } from '../../lib/tenant-provider-credential.js';
+import { normalizePolicy as normalizeTwoFactorPolicy, VALID_TWO_FACTOR_ROLES } from '../../lib/two-factor-policy.js';
+import { isCheckoutPaymentRequired, setCheckoutPaymentRequired } from './checkout-payment-policy.js';
 
 const DEFAULTS = {
   companyName: 'Ride Fleet',
@@ -416,8 +421,12 @@ function normalizeTelematicsConfig(raw = {}, options = {}) {
 
   // Voltswitch GPS
   const allowVoltswitchConnector = raw?.allowVoltswitchConnector == null ? !!DEFAULT_TELEMATICS_CONFIG.allowVoltswitchConnector : !!raw?.allowVoltswitchConnector;
-  const voltswitchApiEmail = String(raw?.voltswitchApiEmail || '').trim();
-  const voltswitchApiPassword = String(raw?.voltswitchApiPassword || '').trim();
+  // Dual-read: stored values may be `enci:` ciphertext (2026-08-24) or legacy
+  // plaintext; decryptSettingSecret passes plaintext through and yields '' on
+  // a failed decrypt, so a missing key reads as "no credentials", never as
+  // ciphertext leaking into the UI or a Voltswitch login attempt.
+  const voltswitchApiEmail = String(decryptSettingSecret(raw?.voltswitchApiEmail) || '').trim();
+  const voltswitchApiPassword = String(decryptSettingSecret(raw?.voltswitchApiPassword) || '').trim();
   const voltswitchSyncIntervalMinutes = Math.max(1, Math.min(60, Number(raw?.voltswitchSyncIntervalMinutes) || DEFAULT_TELEMATICS_CONFIG.voltswitchSyncIntervalMinutes));
   const voltswitchConnectorReady = provider === 'VOLTSWITCH' && allowVoltswitchConnector && !!voltswitchApiEmail && !!voltswitchApiPassword;
 
@@ -537,13 +546,29 @@ function defaultPaymentGatewayConfig() {
       // longer has a sandbox code path (SPIN_ENV / SPIN_SANDBOX removed);
       // exposing those fields here would be misleading. environment is
       // pinned to 'production' for the admin panel display.
-      enabled: !!process.env.SPIN_AUTH_KEY,
+      //
+      // 2026-08-26 — the PLATFORM env terminal is no longer used as this
+      // tenant's default. Two reasons, both money-safety:
+      //   1. SPIN_AUTH_KEY is a live payment credential; pre-filling it into
+      //      every tenant admin's Settings form handed the platform merchant's
+      //      key to anyone with tenant ADMIN.
+      //   2. Worse, the form round-trips: a tenant admin who opened the page
+      //      and pressed Save would have COPIED the platform TPN into their own
+      //      config, permanently pinning their charges to somebody else's
+      //      merchant account. That is the wrong-merchant bug, self-inflicted
+      //      through the UI.
+      // An unconfigured tenant now reads as empty here, and the charge path
+      // decides what to do about it (modules/payment-gateway/tenant-terminal-config).
+      enabled: false,
       environment: 'production',
-      authKey: String(process.env.SPIN_AUTH_KEY || ''),
-      tpn: String(process.env.SPIN_TPN || ''),
-      merchantNumber: String(process.env.SPIN_MERCHANT_NUMBER || '1'),
-      callbackUrl: String(process.env.SPIN_CALLBACK_URL || ''),
-      proxyTimeout: String(process.env.SPIN_PROXY_TIMEOUT || '120')
+      // NEVER populated on read — see getPaymentGatewayConfig. `hasAuthKey`
+      // is what tells the UI a key is on file.
+      authKey: '',
+      hasAuthKey: false,
+      tpn: '',
+      merchantNumber: '1',
+      callbackUrl: '',
+      proxyTimeout: '120'
     },
     // PayArc — used for US-mainland car-sharing pickups. Puerto Rico
     // pickups stay on Authorize.Net regardless. Selector lives in
@@ -565,6 +590,25 @@ function defaultPaymentGatewayConfig() {
       merchantEmail: String(process.env.PAYARC_MERCHANT_EMAIL || '')
     }
   };
+}
+
+/**
+ * Shape the stored `spin` block for a READ.
+ *
+ * The Dejavoo/SPIn authKey is a live payment credential. Since 2026-08-26 it is
+ * stored as `enci:` ciphertext (lib/setting-secret-crypto) and is NEVER handed
+ * back to the client — not the ciphertext (useless and leaky) and not the
+ * plaintext (the settings page is not a credential vault). The UI gets a
+ * boolean instead and follows blank-means-keep on save, exactly like the
+ * VoltSwitch credentials do.
+ *
+ * `clearAuthKey` is a write-only command flag; it must never echo back.
+ */
+function spinBlockForRead(spin = {}) {
+  const stored = typeof spin?.authKey === 'string' ? spin.authKey.trim() : '';
+  const out = { ...spin, authKey: '', hasAuthKey: !!stored };
+  delete out.clearAuthKey;
+  return out;
 }
 
 function scopedKey(baseKey, scope = {}) {
@@ -812,6 +856,34 @@ export const settingsService = {
   // checkinModel (Fase D, 2026-06-18): 'AGENT' = the agent does the return inspection (today's
   // behavior) · 'CUSTOMER' = the customer self-inspects at return, so the agent can skip the
   // inspection step and close (agent can still view/add). Only takes effect when enabled=true.
+  /**
+   * Per-tenant "is the wizard's payment step mandatory?" switch (2026-08-26).
+   *
+   * Storage / fail-safe rules live in checkout-payment-policy.js — this is the
+   * API-shaped wrapper. FAIL-CLOSED ON TENANT: without a tenantId we throw
+   * rather than read or write the unscoped key, because the unscoped key would
+   * be a GLOBAL default that could turn payment off for every tenant at once.
+   * (A SUPER_ADMIN who has not picked a tenant hits this and gets a 400.)
+   */
+  async getCheckoutPaymentPolicy(scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    return { checkoutPaymentRequired: await isCheckoutPaymentRequired(scope.tenantId) };
+  },
+
+  async updateCheckoutPaymentPolicy(payload = {}, scope = {}) {
+    if (!scope?.tenantId) throw new Error('tenantId is required');
+    const raw = payload?.checkoutPaymentRequired;
+    // Strict boolean on the WRITE path so a client that sends "false"/0/null
+    // gets a clear 400 instead of silently landing on the safe default and
+    // leaving the admin staring at a switch that snapped back. The storage
+    // layer normalizes again anyway (defense in depth).
+    if (typeof raw !== 'boolean') {
+      throw new Error('checkoutPaymentRequired must be a boolean');
+    }
+    const value = await setCheckoutPaymentRequired(scope.tenantId, raw);
+    return { checkoutPaymentRequired: value };
+  },
+
   async getCustomerInspectionConfig(scope = {}) {
     const row = await prisma.appSetting.findUnique({ where: { key: scopedKey('customerInspectionConfig', scope) } });
     const fallback = { enabled: false, checkinModel: 'AGENT' };
@@ -876,6 +948,12 @@ export const settingsService = {
       model: cfg?.model || '',
       confidenceMin: Number.isFinite(Number(cfg?.confidenceMin)) ? Number(cfg.confidenceMin) : 70,
       hasKey: !!cfg?.apiKeyEncrypted,
+      // 2026-08-27. The opt-in that has to be TRUE before this tenant's
+      // documents may be sent to the provider under the PLATFORM account.
+      // Defaults false for every tenant, including ones that pre-date this
+      // field — an absent key in an old AppSetting row reads as "no", which is
+      // exactly the posture the Corpusa incident should have had.
+      allowPlatformKeyFallback: !!cfg?.allowPlatformKeyFallback,
     };
   },
 
@@ -896,11 +974,24 @@ export const settingsService = {
       if (!isEncryptionConfigured()) throw new Error('Encryption key (INTEGRATION_ENC_KEY) is not configured');
       apiKeyEncrypted = encrypt(payload.apiKey.trim());
     }
-    await writeJsonSetting(key, { provider, model, confidenceMin, apiKeyEncrypted });
-    return { provider, model, confidenceMin, hasKey: !!apiKeyEncrypted };
+    // Opt-in to the PLATFORM key. Only an explicit boolean in the payload
+    // moves it; anything else preserves what is on file, so a partial PUT from
+    // the Settings page (provider/model only) can never silently turn it on.
+    let allowPlatformKeyFallback = !!current.allowPlatformKeyFallback;
+    if (typeof payload?.allowPlatformKeyFallback === 'boolean') {
+      allowPlatformKeyFallback = payload.allowPlatformKeyFallback;
+    }
+    await writeJsonSetting(key, { provider, model, confidenceMin, apiKeyEncrypted, allowPlatformKeyFallback });
+    return { provider, model, confidenceMin, hasKey: !!apiKeyEncrypted, allowPlatformKeyFallback };
   },
 
-  // Internal — decrypts the key for the OCR worker. Returns { provider, model, confidenceMin, apiKey|null }.
+  // Internal — decrypts the key for the OCR worker. Returns
+  // { provider, model, confidenceMin, apiKey|null, allowPlatformKeyFallback }.
+  //
+  // NOTE: `apiKey` here is the TENANT'S OWN key and nothing else. It has never
+  // meant "the key to call with" — every caller used to finish the job with
+  // `cfg.apiKey || process.env.ANTHROPIC_API_KEY`, which is the bug. Callers
+  // must now go through resolveCitationOcrCredential() below.
   async getCitationOcrResolved(scope = {}) {
     const cfg = await readJsonSetting(scopedKey('citationOcrConfig', scope), null);
     let apiKey = null;
@@ -912,7 +1003,95 @@ export const settingsService = {
       model: cfg?.model || '',
       confidenceMin: Number.isFinite(Number(cfg?.confidenceMin)) ? Number(cfg.confidenceMin) : null,
       apiKey,
+      allowPlatformKeyFallback: !!cfg?.allowPlatformKeyFallback,
     };
+  },
+
+  /**
+   * The ONE credential read for every Anthropic-backed, tenant-scoped feature
+   * that shares the citationOcrConfig block: citation mail OCR, kiosk ID photo
+   * reading and commission review-proof validation.
+   *
+   * Returns the tenant's provider/model/threshold PLUS a `credential` decision
+   * from lib/tenant-provider-credential.js — `{ credential, source, reason }`,
+   * where source is TENANT / PLATFORM / NONE and a PLATFORM resolution has
+   * already WARNed by tenant and feature. A NONE result carries an empty
+   * credential; callers must fail closed on it rather than reaching for env.
+   *
+   * `feature` distinguishes the three consumers so the opt-in allowlist and the
+   * log line name which one is calling out — the citation scheduler and the
+   * kiosk are very different data-protection stories even though they read the
+   * same key.
+   */
+  async resolveCitationOcrCredential(scope = {}, { feature = 'citation-ocr' } = {}) {
+    const cfg = await this.getCitationOcrResolved(scope);
+    const tenantId = scope?.tenantId || null;
+    let tenantName = '';
+    if (tenantId) {
+      // Cosmetic — only used to make the WARN readable. A failed lookup must
+      // never change the decision, so it degrades to ''.
+      try {
+        const t = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true } });
+        tenantName = String(t?.name || '');
+      } catch { tenantName = ''; }
+    }
+    const credential = resolveTenantProviderCredential({
+      tenantId,
+      feature,
+      tenantCredential: cfg.apiKey || '',
+      platformCredential: process.env.ANTHROPIC_API_KEY || '',
+      tenantOptIn: cfg.allowPlatformKeyFallback,
+      tenantName,
+    });
+    return { ...cfg, credential };
+  },
+
+  // Staff 2FA policy (2026-08-22). Stored as AppSetting JSON under
+  // scopedKey('twoFactorPolicy', scope): unscoped = the global default a
+  // SUPER_ADMIN sets, `tenant:<id>:twoFactorPolicy` = a tenant override. There
+  // is NO secret here, so read is unmasked. resolveTwoFactorPolicy (in
+  // lib/two-factor-policy) merges global+tenant at login time.
+  async getTwoFactorPolicy(scope = {}) {
+    const cfg = await readJsonSetting(scopedKey('twoFactorPolicy', scope), null);
+    return {
+      ...normalizeTwoFactorPolicy(cfg),
+      isSet: cfg !== null,
+      availableRoles: VALID_TWO_FACTOR_ROLES
+    };
+  },
+
+  async updateTwoFactorPolicy(payload = {}, scope = {}) {
+    const enabled = !!payload?.enabled;
+    // Guard against an un-enrollable state (QA, 2026-08-22): 2FA secrets are
+    // AES-256-GCM encrypted, so enrollment 503s when INTEGRATION_ENC_KEY is
+    // unset. Enabling a policy in that state would compel required users to
+    // enroll while enrollment is impossible — nobody can get in. Refuse the
+    // flip instead of bricking the tenant. Disabling is always allowed.
+    if (enabled && !isEncryptionConfigured()) {
+      const err = new Error('Cannot enable two-factor authentication: encryption key (INTEGRATION_ENC_KEY) is not configured');
+      err.code = 'ENCRYPTION_NOT_CONFIGURED';
+      throw err;
+    }
+    const requiredRoles = Array.isArray(payload?.requiredRoles)
+      ? Array.from(new Set(payload.requiredRoles.map((r) => String(r || '').toUpperCase())))
+      : [];
+    for (const role of requiredRoles) {
+      if (!VALID_TWO_FACTOR_ROLES.includes(role)) {
+        throw new Error(`Invalid role in requiredRoles: ${role}`);
+      }
+    }
+    let graceUntil = null;
+    if (payload?.graceUntil) {
+      const d = new Date(payload.graceUntil);
+      if (Number.isNaN(d.getTime())) throw new Error('graceUntil must be a valid date');
+      graceUntil = d.toISOString();
+    }
+    if (enabled && !requiredRoles.length) {
+      throw new Error('Enable at least one required role, or leave the policy disabled');
+    }
+    const value = { enabled, requiredRoles, graceUntil };
+    await writeJsonSetting(scopedKey('twoFactorPolicy', scope), value);
+    return { ...value, isSet: true, availableRoles: VALID_TWO_FACTOR_ROLES };
   },
 
   async getPaymentGatewayConfig(scope = {}) {
@@ -936,10 +1115,10 @@ export const settingsService = {
           ...defaults.square,
           ...(parsed?.square || {})
         },
-        spin: {
+        spin: spinBlockForRead({
           ...defaults.spin,
           ...(parsed?.spin || {})
-        },
+        }),
         payarc: {
           ...defaults.payarc,
           ...(parsed?.payarc || {})
@@ -956,6 +1135,22 @@ export const settingsService = {
 
   async updatePaymentGatewayConfig(payload = {}, scope = {}) {
     const defaults = defaultPaymentGatewayConfig();
+    const key = scopedKey('paymentGatewayConfig', scope);
+
+    // Blank-means-keep for the SPIn authKey must carry the STORED BYTES, never
+    // a decrypt→re-encrypt round trip: if INTEGRATION_ENC_KEY were missing or
+    // wrong for one request, the decrypted value would read '' and the save
+    // would silently ERASE a live terminal credential — the 2026-08-13
+    // VoltSwitch bug, on the money path this time. So read the raw row.
+    let storedRaw = {};
+    try {
+      const rawRow = await prisma.appSetting.findUnique({ where: { key } });
+      storedRaw = rawRow?.value ? (JSON.parse(rawRow.value) || {}) : {};
+    } catch {
+      storedRaw = {};
+    }
+    const newSpinAuthKey = String(payload?.spin?.authKey || '').trim();
+
     const next = {
       ...defaults,
       ...(payload || {}),
@@ -1003,11 +1198,23 @@ export const settingsService = {
         ...(payload?.spin || {}),
         enabled: !!payload?.spin?.enabled,
         environment: String(payload?.spin?.environment || defaults.spin.environment).trim().toLowerCase(),
-        authKey: String(payload?.spin?.authKey || '').trim(),
+        // ENCRYPTED AT REST (2026-08-26). Blank in the payload means KEEP —
+        // the read path never gives the UI the key back, so a plain form
+        // round-trip must not wipe it. Only `clearAuthKey: true` erases.
+        // encryptSettingSecret THROWS (code ENCRYPTION_NOT_CONFIGURED) rather
+        // than storing a new live credential in plaintext.
+        authKey: payload?.spin?.clearAuthKey
+          ? ''
+          : (newSpinAuthKey
+            ? encryptSettingSecret(newSpinAuthKey)
+            : carrySettingSecret(storedRaw?.spin?.authKey)),
         tpn: String(payload?.spin?.tpn || '').trim(),
         merchantNumber: String(payload?.spin?.merchantNumber || '1').trim(),
         callbackUrl: String(payload?.spin?.callbackUrl || '').trim(),
-        proxyTimeout: String(payload?.spin?.proxyTimeout || '120').trim()
+        proxyTimeout: String(payload?.spin?.proxyTimeout || '120').trim(),
+        // Read-shape / command-only fields never belong in the stored blob.
+        hasAuthKey: undefined,
+        clearAuthKey: undefined
       },
       payarc: {
         ...defaults.payarc,
@@ -1021,13 +1228,19 @@ export const settingsService = {
         merchantEmail: String(payload?.payarc?.merchantEmail || '').trim()
       }
     };
-    const key = scopedKey('paymentGatewayConfig', scope);
     await prisma.appSetting.upsert({
       where: { key },
       create: { key, value: JSON.stringify(next) },
       update: { value: JSON.stringify(next) }
     });
-    return next;
+    // The live charge path caches this row (60s TTL). Invalidate HERE, in the
+    // service, so every writer of this key invalidates — not just the one route
+    // we happen to know about today. Cross-worker fan-out rides the cache's
+    // Redis pub/sub.
+    invalidateTenantTerminalConfig(scope?.tenantId);
+    // Re-read rather than returning `next`: `next.spin.authKey` is CIPHERTEXT
+    // at this point and must not go back over the wire.
+    return this.getPaymentGatewayConfig(scope);
   },
 
   async getPlannerCopilotConfig(scope = {}, options = {}) {
@@ -1305,6 +1518,23 @@ export const settingsService = {
   async updateTelematicsConfig(payload = {}, scope = {}) {
     if (!scope?.tenantId) throw new Error('tenantId is required');
     const existing = await this.getTelematicsConfig(scope, { includeSecret: true });
+    // Blank-means-keep must carry the STORED credential bytes verbatim, never
+    // a decrypt→re-encrypt round trip through `existing`: if the encryption
+    // key were missing/wrong for one request, the decrypted value would read
+    // '' and the save would silently erase the creds — the pre-2026-08-13 bug
+    // in a new costume. So the carry reads the raw row. carrySettingSecret
+    // keeps ciphertext as-is and lazily encrypts legacy plaintext (that IS the
+    // migration: any save upgrades the blob).
+    const key = scopedKey('telematicsConfig', scope);
+    let stored = {};
+    try {
+      const rawRow = await prisma.appSetting.findUnique({ where: { key } });
+      stored = rawRow?.value ? (JSON.parse(rawRow.value) || {}) : {};
+    } catch {
+      stored = {};
+    }
+    const newVoltswitchEmail = payload?.voltswitchApiEmail == null ? null : String(payload.voltswitchApiEmail).trim();
+    const newVoltswitchPassword = String(payload?.voltswitchApiPassword || '').trim();
     const next = {
       enabled: !!payload?.enabled,
       provider: String(payload?.provider || DEFAULT_TELEMATICS_CONFIG.provider).trim().toUpperCase() || DEFAULT_TELEMATICS_CONFIG.provider,
@@ -1318,18 +1548,23 @@ export const settingsService = {
       // here, so any save from the UI erased the connector's config — that is
       // why the connector never went live. The password follows the
       // zubieWebhookSecret rule: blank in the payload means "keep what is
-      // saved"; only the explicit clear flag erases.
+      // saved"; only the explicit clear flag erases. Since 2026-08-24 both
+      // credential fields are stored as `enci:` ciphertext (setting-secret-
+      // crypto); a kept value carries the stored bytes verbatim.
       allowVoltswitchConnector: !!payload?.allowVoltswitchConnector,
       voltswitchApiEmail: payload?.clearVoltswitchCredentials
         ? ''
-        : String(payload?.voltswitchApiEmail ?? existing?.voltswitchApiEmail ?? '').trim(),
+        : (newVoltswitchEmail == null
+          ? carrySettingSecret(stored?.voltswitchApiEmail)
+          : encryptSettingSecret(newVoltswitchEmail)),
       voltswitchApiPassword: payload?.clearVoltswitchCredentials
         ? ''
-        : String(payload?.voltswitchApiPassword || '').trim() || String(existing?.voltswitchApiPassword || '').trim(),
+        : (newVoltswitchPassword
+          ? encryptSettingSecret(newVoltswitchPassword)
+          : carrySettingSecret(stored?.voltswitchApiPassword)),
       voltswitchSyncIntervalMinutes: Math.max(1, Math.min(60,
         Number(payload?.voltswitchSyncIntervalMinutes) || Number(existing?.voltswitchSyncIntervalMinutes) || DEFAULT_TELEMATICS_CONFIG.voltswitchSyncIntervalMinutes))
     };
-    const key = scopedKey('telematicsConfig', scope);
     await prisma.appSetting.upsert({
       where: { key },
       create: { key, value: JSON.stringify(next) },

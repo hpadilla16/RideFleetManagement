@@ -1,12 +1,15 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
+
+import '../config/app_config.dart';
 
 /// Telemetría (M0-4 / docs/03-observability.md).
 ///
-/// Por ahora la app NO tiene DSN de Sentry (lo da Hector); esta interfaz es el
-/// punto de enchufe: cuando llegue, se agrega un `SentryEventLogger` que
-/// traduce cada evento a breadcrumb/transaction y se cambia UNA línea en
-/// [eventLoggerProvider]. Nada más de la app se entera.
+/// Con DSN configurado los eventos viajan como breadcrumbs de Sentry (el
+/// contexto que acompaña a un crash: qué hizo el empleado antes de que
+/// tronara); sin DSN la app no reporta a nadie. La decisión es una sola
+/// función pura, [pickEventLogger] — el resto de la app solo ve la interfaz.
 ///
 /// Reglas de PII del doc: jamás pasar tokens, contraseñas, nombres de
 /// clientes ni bodies de request en [data]. Identidad = userId del EMPLEADO y
@@ -46,9 +49,233 @@ abstract final class AuthEvents {
   static const sessionExpiredRelogin = 'auth.session_expired_relogin';
 }
 
-/// Punto de enchufe de Sentry: cuando haya DSN, aquí se decide
-/// `SentryEventLogger` en prod y debug en dev. Hoy: debug print en debug,
-/// silencio en release.
+/// Eventos de sesión fuera de auth (03-observability.md §Sesión): el candado
+/// por PIN/biometría (H2, `method` en el unlock: pin | biometric) y el
+/// selector de ubicación activa (H3).
+abstract final class SessionEvents {
+  static const pinLock = 'session.pin_lock';
+  static const pinUnlock = 'session.pin_unlock';
+  static const viewLocationSet = 'session.view_location_set';
+  static const viewLocationDenied = 'session.view_location_denied';
+}
+
+/// Eventos del dashboard (03-observability.md §Salud). `poll_tick` es SOLO
+/// métrica de frecuencia — el callsite lo samplea al 1% antes de loguear.
+abstract final class DashboardEvents {
+  static const pollTick = 'dashboard.poll_tick';
+}
+
+/// Salud de red (03-observability.md §Salud): el poller del dashboard entró
+/// en backoff por 429/503 (tag `route`).
+abstract final class NetEvents {
+  static const request429Backoff = 'net.request_429_backoff';
+}
+
+/// Eventos de inspección (03-observability.md §Inspección y bandeja) y de
+/// salud de cámara (§Salud) — historia H5.
+abstract final class InspectionEvents {
+  static const photoCaptured = 'inspection.photo_captured';
+  static const completedLocal = 'inspection.completed_local';
+
+  // ── M2-H4 (la inspección como paso 4 del wizard) ─────────────────────────
+
+  /// El SERVIDOR selló `inspectionCompletedAt` y el paso lo vio caer. Es la
+  /// otra mitad de `completed_local`: la distancia entre los dos mide lo que
+  /// el agente espera de pie junto al coche con el paso sin avanzar.
+  ///
+  /// Tag `waited_s`: segundos desde que ESTA pantalla vio el complete
+  /// encolado. Viaja sin el tag cuando no hubo espera que medir (se entró con
+  /// la inspección ya cerrada por otra superficie).
+  static const completedServer = 'inspection.completed_server';
+
+  /// Una foto OBLIGATORIA (front/rear) murió en la bandeja. Tag `angle`.
+  ///
+  /// Es el callejón sin salida de la cadena offline: el dead-letter no
+  /// bloquea al resto, el `complete` sale igual y el servidor lo rechaza con
+  /// `REQUIRED_ANGLES_MISSING`. Su frecuencia mide cuánto pesa el frame 17E.
+  static const requiredAngleDead = 'inspection.required_angle_dead';
+}
+
+/// Eventos del checkout (03-observability.md §Checkout (M2)) — historia H1
+/// del épico. Los de dinero (`checkout.money_*`, `checkout.preview_divergence`)
+/// llegan con M2-H3: se declaran cuando existe el callsite, no antes.
+abstract final class CheckoutEvents {
+  /// Render desde `currentStep` (tag `step`). Se emite cuando el paso
+  /// RENDERIZADO cambia, no por frame ni por tick del poll.
+  static const stepRendered = 'checkout.step_rendered';
+
+  static const transitionOk = 'checkout.transition_ok';
+
+  /// Tag `code`: ILLEGAL_TRANSITION | ENTRY_GUARD | SESSION_TERMINAL |
+  /// CHECKOUT_TERMINAL | VEHICLE_CONFLICT | none (409 sin code del abandon).
+  static const transition409 = 'checkout.transition_409';
+
+  /// Entrada desde la card de la cola (M2-H7): `POST /api/checkout-sessions`
+  /// devolvió la sesión y se abre el wizard. Sin tag `resumed`: el backend
+  /// responde 201 tanto al crear como al reanudar (routes:42) y la app no
+  /// tiene forma HONESTA de distinguirlo — inventar el tag sería peor que no
+  /// tenerlo. Su relación con `checkout.step_rendered` ya dice si entró en
+  /// CONFIRMING o a media sesión.
+  static const entryOpen = 'checkout.entry_open';
+
+  /// Un guard de creación negó la apertura (M2-H7). Tag `code`: el del
+  /// servidor (NO_VEHICLE_ASSIGNED | VEHICLE_CONFLICT | PRECHECKIN_REQUIRED |
+  /// AGE_RULES_* | SESSION_TERMINAL) o el motivo local con el que se cortó
+  /// (offline | locationNotReady | forbidden | unknown…).
+  static const entryBlocked = 'checkout.entry_blocked';
+
+  /// Salida del guard 11B: el link de pre-checkin salió por correo al cliente
+  /// (solo cuando el backend confirma `emailSent`, no por el 200 pelado).
+  static const entryPrecheckinLinkSent = 'checkout.entry_precheckin_link_sent';
+
+  /// El POST devolvió **200 que NO movimos nosotros** (M2-H6 consumiendo
+  /// M2-H8). Tag `to`.
+  ///
+  /// Desde H8 el backend trata como idempotente la transición que otra
+  /// superficie ya hizo: responde 200 y **no escribe evento**, para que
+  /// `events[]` siga nombrando a quien de verdad la movió
+  /// (checkout-session.service.js:508-518). Sin este evento, ese caso se
+  /// contaba como `transition_ok` propio y la señal de concurrencia se perdía
+  /// entera.
+  ///
+  /// **Detección: la regla de atribución, y es la única** (03-observability.md).
+  /// Es noop cuando el último `TRANSITION` hacia el destino no nos nombra. No
+  /// hay atajo por `stateVersion`: sub-reporta justo el caso que la métrica
+  /// vigila (v0 en FINALIZING, el kiosco commitea CLOSED → v1).
+  static const transitionNoop = 'checkout.transition_noop';
+
+  /// UI reconciliada contra el servidor. Tags: `steps_jumped` y `via`
+  /// (`conflict` = tras un 409, `poll` = otra superficie avanzó y el poll lo
+  /// vio). El tag `via` es dato NUEVO de H1 — documentado en la tabla de
+  /// 03-observability.md en el mismo cambio.
+  static const reconciled = 'checkout.reconciled';
+
+  // ── M2-H2 (CONFIRMING + T&C) ──────────────────────────────────────────────
+
+  /// `POST /:id/declined-insurance` aceptado. Tag `declined` (bool).
+  static const declinedInsuranceSet = 'checkout.declined_insurance_set';
+
+  /// `POST /:id/vehicle` aceptado. Sin tags: el id de la unidad es dato de
+  /// operación, no de telemetría, y el volumen ya dice lo que interesa
+  /// (cuántas entregas empiezan con la unidad equivocada).
+  static const vehicleSwapped = 'checkout.vehicle_swapped';
+
+  /// `POST /:id/terms-token` aceptado. Tag `reused` (bool) — mide cuántas
+  /// re-emisiones caen dentro de la ventana de re-uso del backend, que es lo
+  /// que decide si la copy dice "sigue siendo el mismo código".
+  static const termsTokenMinted = 'checkout.terms_token_minted';
+
+  /// El countdown llegó a cero con el paso abierto. Es la medida directa del
+  /// riesgo §5 del plan (TTL de 15 min corto para un cliente que lee).
+  static const termsTokenExpired = 'checkout.terms_token_expired';
+
+  /// El poll vio caer `tcCompletedAt` (el cliente firmó en su teléfono, o
+  /// firmó otra superficie). Una vez por sesión de pantalla.
+  static const termsSignedSeen = 'checkout.terms_signed_seen';
+
+  /// Se abrió el modo presentación (10B), la pantalla volteada al cliente.
+  static const presentModeShown = 'checkout.present_mode_shown';
+
+  /// El modo presentación no pudo ajustar (o restaurar) brillo o wakelock.
+  /// Tags: `what` (brightness | wakelock) y `phase` (enter | exit).
+  ///
+  /// `phase:exit` es el que importa vigilar: es la señal de que el teléfono
+  /// pudo quedarse con el brillo forzado después de salir (riesgo real solo en
+  /// iOS — en Android el override es de la VENTANA y muere con ella).
+  static const presentModeScreenDegraded =
+      'checkout.present_mode_screen_degraded';
+
+  // ── M2-H5 (firma del cliente + cierre) ───────────────────────────────────
+
+  /// `POST /:id/customer-signature` aceptado. Tag `replaced` (bool): la firma
+  /// SUSTITUYÓ a una que el contrato ya tenía (el endpoint pisa
+  /// `tcSignature*` sin condición, checkout-session.service.js:668-690).
+  /// Es el tag que importa vigilar: una tasa alta significa que el paso está
+  /// pidiendo firmar dos veces la misma entrega.
+  static const signatureSaved = 'checkout.signature_saved';
+
+  /// El agente arrancó el cierre. Tag `legs` (2 | 3): 3 cuando además hay que
+  /// recoger la firma, 2 cuando ya venía sellada desde la inspección — o sea,
+  /// la medida directa de cuál de los dos caminos de la pantalla 18 es el
+  /// normal en el patio.
+  static const closeStarted = 'checkout.close_started';
+
+  /// El cierre llegó a `CLOSED`. Tag `handover`: `recorded` |
+  /// `not_recorded` | `unverified`, según lo que diga `Reservation.status`
+  /// DESPUÉS del cierre. `not_recorded` con un 200 es el bug de la cascada
+  /// silenciosa (:526, :533, :557, :571) medido de frente.
+  static const closeOk = 'checkout.close_ok';
+
+  /// Un tramo del cierre fue RECHAZADO por el servidor. Tags: `leg`
+  /// (signature | finalizing | closing), `code` (el del servidor o `none`) y
+  /// `terminal` (bool: la sesión quedó cerrada igual ⇒ frame 19B, sin
+  /// reintento posible).
+  static const closeFailed = 'checkout.close_failed';
+
+  /// "Volver a comprobar" (19A-bis): el agente re-consultó la entrega desde
+  /// el estado sin confirmar. Tag `result` (recorded | not_recorded |
+  /// unverified). Su frecuencia mide cuántas veces la verificación automática
+  /// llega sin respuesta en el patio — y `not_recorded` aquí es la cascada
+  /// silenciosa descubierta a mano.
+  static const handoverRecheck = 'checkout.handover_recheck';
+
+  /// Un tramo del cierre murió SIN respuesta (19C). Tag `leg`. No es lo
+  /// mismo que [closeFailed]: aquí no se sabe si entró, y la app consulta en
+  /// vez de reintentar.
+  static const closeUnknown = 'checkout.close_unknown';
+}
+
+/// Eventos de la bandeja de salida (03-observability.md §Inspección y
+/// bandeja). `entry_dead` con un `code` desconocido es compuerta de release
+/// (bug de manejo de errores, no ruido).
+abstract final class OutboxEvents {
+  static const enqueued = 'outbox.enqueued';
+  static const drainedOk = 'outbox.drained_ok';
+  static const remintToken = 'outbox.remint_token';
+  static const entryDead = 'outbox.entry_dead';
+  static const purgedAccountSwitch = 'outbox.purged_account_switch';
+}
+
+/// Salud de cámara (03-observability.md §Salud): presión de memoria durante
+/// la captura — el guard del OOM de gama media (DoD #8).
+abstract final class CameraEvents {
+  static const oomGuard = 'camera.oom_guard';
+}
+
+/// Con DSN: cada evento de la taxonomía entra como breadcrumb, de modo que un
+/// crash llegue con el rastro de lo que el empleado venía haciendo.
+///
+/// [data] ya viene saneado por contrato (la taxonomía prohíbe tokens, fotos y
+/// nombres de clientes); esto NO vuelve a filtrarlo — el filtro real vive en
+/// los callsites y en el `beforeSend` de sentry_setup.dart.
+class SentryEventLogger implements EventLogger {
+  const SentryEventLogger();
+
+  @override
+  void log(String event, {Map<String, Object?> data = const {}}) {
+    Sentry.addBreadcrumb(
+      Breadcrumb(
+        message: event,
+        category: 'rideops',
+        data: data.isEmpty ? null : Map<String, Object?>.from(data),
+      ),
+    );
+  }
+}
+
+/// Qué logger corresponde. Pura y sin Riverpod para poder probar la matriz
+/// completa (con/sin DSN × debug/release) sin levantar la app.
+EventLogger pickEventLogger({
+  required bool sentryEnabled,
+  required bool debugMode,
+}) {
+  if (sentryEnabled) return const SentryEventLogger();
+  return debugMode ? const DebugEventLogger() : const NoopEventLogger();
+}
+
 final eventLoggerProvider = Provider<EventLogger>((ref) {
-  return kDebugMode ? const DebugEventLogger() : const NoopEventLogger();
+  return pickEventLogger(
+    sentryEnabled: AppConfig.current.sentryEnabled,
+    debugMode: kDebugMode,
+  );
 });

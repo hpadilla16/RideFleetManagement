@@ -18,7 +18,9 @@
     "mobile:sync": "npx cap sync",
     "mobile:open:android": "npx cap open android",
     "mobile:open:ios": "npx cap open ios",
-    "lint:i18n": "next lint --config .eslintrc.i18n.cjs || eslint 'src/**/*.{js,jsx}' -c .eslintrc.i18n.cjs"
+    "lint:i18n": "next lint --config .eslintrc.i18n.cjs || eslint 'src/**/*.{js,jsx}' -c .eslintrc.i18n.cjs",
+    "prebuild": "node scripts/stamp-build.mjs",
+    "predev": "node scripts/stamp-build.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.2.0",

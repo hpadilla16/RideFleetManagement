@@ -995,12 +995,13 @@ function VehiclesInner({ token, me, logout }) {
             <select
               value={programCategoryFilter}
               onChange={(e) => setProgramCategoryFilter(e.target.value)}
-              title="Filter by rental vs loaner program category"
+              title="Filter by rental / loaner / shuttle program category"
               style={{ minWidth: 140 }}
             >
               <option value="ALL">All programs</option>
               <option value="RENTAL_ONLY">Rental only</option>
               <option value="LOANER_ONLY">Loaner only</option>
+              <option value="SHUTTLE_ONLY">Shuttle only</option>
               <option value="BOTH">Flexible (both)</option>
             </select>
             {canManageVehicleSetup ? <button onClick={() => setShowAddVehicle(true)} disabled={isSuper && !activeTenantId}>Add Vehicle</button> : null}
@@ -1042,6 +1043,7 @@ function VehiclesInner({ token, me, logout }) {
                 disabled={bulkApplying}
               >
                 <option value="LOANER_ONLY">Loaner only</option>
+                <option value="SHUTTLE_ONLY">Shuttle only</option>
                 <option value="RENTAL_ONLY">Rental only</option>
                 <option value="BOTH">Flexible (both)</option>
               </select>
@@ -1122,16 +1124,19 @@ function VehiclesInner({ token, me, logout }) {
                     className="badge"
                     style={{
                       background:
-                        (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'rgba(255,140,0,0.18)'
+                        (v.programCategory || 'BOTH') === 'SHUTTLE_ONLY' ? 'rgba(147,51,234,0.18)'
+                        : (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'rgba(255,140,0,0.18)'
                         : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? 'rgba(73,140,255,0.18)'
                         : 'rgba(160,160,160,0.18)',
                       color:
-                        (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? '#b56300'
+                        (v.programCategory || 'BOTH') === 'SHUTTLE_ONLY' ? '#7e22ce'
+                        : (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? '#b56300'
                         : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? '#1d4ed8'
                         : '#444'
                     }}
                   >
-                    {(v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'Loaner'
+                    {(v.programCategory || 'BOTH') === 'SHUTTLE_ONLY' ? 'Shuttle'
+                     : (v.programCategory || 'BOTH') === 'LOANER_ONLY' ? 'Loaner'
                      : (v.programCategory || 'BOTH') === 'RENTAL_ONLY' ? 'Rental'
                      : 'Flex'}
                   </span>
@@ -1280,6 +1285,7 @@ function VehiclesInner({ token, me, logout }) {
                 <option value="BOTH">Flexible (rental and loaner)</option>
                 <option value="RENTAL_ONLY">Rental only</option>
                 <option value="LOANER_ONLY">Loaner only</option>
+                <option value="SHUTTLE_ONLY">Shuttle only</option>
               </select>
               <div className="row-between"><button type="button" onClick={() => setShowAddVehicle(false)}>Cancel</button><button type="submit">Save Vehicle</button></div>
             </form>
@@ -1348,6 +1354,7 @@ function VehiclesInner({ token, me, logout }) {
                 <option value="BOTH">Flexible (rental and loaner)</option>
                 <option value="RENTAL_ONLY">Rental only</option>
                 <option value="LOANER_ONLY">Loaner only</option>
+                <option value="SHUTTLE_ONLY">Shuttle only</option>
               </select>
               <label className="label" style={{ marginBottom: 0 }}>Status</label>
               <select value={editVehicleForm.status} onChange={(e) => setEditVehicleForm({ ...editVehicleForm, status: e.target.value })}>

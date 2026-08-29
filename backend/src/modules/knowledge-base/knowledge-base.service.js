@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma.js';
 import { ValidationError, NotFoundError } from '../../lib/errors.js';
 import { cache } from '../../lib/cache.js';
 import { tenantKey, globalKey } from '../../lib/cache/tenantKey.js';
+import { DEFAULT_ARTICLES, articlesMissingFrom, articlesToUpgrade } from './default-articles.js';
 
 function slugify(text) {
   return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 120);
@@ -165,27 +166,80 @@ export const knowledgeBaseService = {
   },
 
   /**
-   * Seed default articles for a tenant (first-time setup).
+   * Put the default corpus in place for a scope.
+   *
+   * Per-article, on purpose (2026-08-28). The previous version counted the
+   * scope's articles and bailed if there were any, so it could only ever run
+   * once: every article added afterwards reached nobody who had already
+   * seeded. Matching on slug instead means a new article lands for everyone
+   * and an existing one is left alone — including one a tenant has edited,
+   * which must never be overwritten by a deploy.
+   *
+   * Since 2026-08-29 it can also REWRITE a body, under one narrow condition:
+   * what is in the database still hashes to a body this codebase published
+   * (`supersedes` in default-articles.js). That is what makes a correction to
+   * a shipped article — a translation, a fixed instruction — deployable at
+   * all, without it ever being able to land on top of somebody's edit.
+   *
+   * @param {{tenantId: string|null, userId?: string|null}} scope
    */
   async seedDefaults({ tenantId, userId }) {
-    const existing = await prisma.knowledgeArticle.count({
-      where: tenantId ? { tenantId } : { tenantId: null }
+    const where = tenantId ? { tenantId } : { tenantId: null };
+    const present = await prisma.knowledgeArticle.findMany({
+      where, select: { slug: true, body: true },
     });
-    if (existing > 0) return { seeded: 0 };
+    const missing = articlesMissingFrom(present.map((a) => a.slug));
+    // An EDIT to an article that already shipped. Only ever rewrites a body
+    // that still hashes to one this codebase published — see `supersedes` in
+    // default-articles.js. A tenant's own edit is never in that set.
+    const upgrades = articlesToUpgrade(present);
+    if (missing.length === 0 && upgrades.length === 0) return { seeded: 0, upgraded: 0 };
 
-    const defaults = [
-      { title: 'How to Check Out a Vehicle', slug: 'how-to-checkout', category: 'CHECKOUT', sortOrder: 1, body: '## Checkout Process\n\n1. Open the reservation in the Reservations page\n2. Click "Start Check-out"\n3. Verify customer ID and payment\n4. Complete the vehicle inspection (take photos)\n5. Hand over the keys and confirm\n\nThe system will automatically:\n- Create the rental agreement\n- Send the customer a confirmation email\n- Update the vehicle status to "Checked Out"\n- Start the billing period', tags: ['checkout', 'process', 'vehicle'] },
-      { title: 'How to Check In a Vehicle', slug: 'how-to-checkin', category: 'CHECKIN', sortOrder: 2, body: '## Check-in Process\n\n1. Open the reservation and click "Check In"\n2. Complete the return inspection (compare with checkout photos)\n3. Note fuel level and mileage\n4. Calculate any additional charges (late return, fuel, damage)\n5. Process final payment\n6. Close the rental agreement\n\nThe system will:\n- Update the vehicle status to "Available"\n- Generate the return receipt\n- Send the customer their receipt via email', tags: ['checkin', 'return', 'vehicle'] },
-      { title: 'Handling Damage Disputes', slug: 'handling-damage-disputes', category: 'DISPUTES', sortOrder: 3, body: '## Dispute Resolution Steps\n\n1. Go to the Issue Center\n2. Find the incident linked to the trip\n3. Review checkout and checkin inspection photos side by side\n4. Check the chat transcript if available\n5. Make a liability decision based on evidence\n6. Process the charge or waive the claim\n\n**Tips:**\n- Always take clear photos at checkout and checkin\n- Inspection photos are your best evidence\n- The chat transcript can show if damage was discussed', tags: ['dispute', 'damage', 'claims'] },
-      { title: 'Processing Toll Charges', slug: 'processing-toll-charges', category: 'TOLLS', sortOrder: 4, body: '## Toll Management\n\n1. Go to the Tolls module\n2. Import toll transactions from your toll provider\n3. The system will auto-match tolls to reservations based on vehicle plate and dates\n4. Review matched and unmatched tolls\n5. Manually assign any unmatched transactions\n6. Bill the customer for toll charges\n\n**Auto-match logic:**\n- Matches by plate number + transaction date within reservation window\n- Handles vehicle swaps during the reservation period', tags: ['tolls', 'billing', 'charges'] },
-      { title: 'Car Sharing Trip Workflow', slug: 'car-sharing-trip-workflow', category: 'CAR_SHARING', sortOrder: 5, body: '## Car Sharing Trip Flow\n\n1. Guest books a listing on the website\n2. Trip is created in PENDING_APPROVAL or CONFIRMED status\n3. Trip chat room is automatically created\n4. Host and guest coordinate pickup via chat\n5. Host confirms vehicle is ready\n6. Guest picks up the vehicle\n7. Trip moves to IN_PROGRESS\n8. Guest returns the vehicle\n9. Trip moves to COMPLETED\n10. Review requests are sent to the guest\n\n**Hot buttons in chat:**\n- Guest: "I\'m at pickup", "I\'m at return", "Running late"\n- Host: "Vehicle ready", "Inspection done"', tags: ['car-sharing', 'trip', 'workflow'] },
-      { title: 'Payment Processing Guide', slug: 'payment-processing', category: 'PAYMENTS', sortOrder: 6, body: '## Payment Methods\n\n### Authorize.Net\n- Primary payment gateway for hosted payments\n- Supports saved cards and security deposit holds\n\n### iPOSPays/SPIn Terminal\n- Physical terminal processing via SPIn REST API\n- Sale, auth/capture, void, refund supported\n- Card-on-file tokenization available\n\n### Payment Flow\n1. Customer receives payment link via email/SMS\n2. Customer enters card details on hosted payment page\n3. Payment is processed and recorded\n4. Receipt is sent automatically\n\n**Security deposits** are held as auth-only transactions and captured or voided at return.', tags: ['payments', 'billing', 'gateway'] },
-    ];
+    if (missing.length > 0) {
+      await prisma.knowledgeArticle.createMany({
+        // `supersedes` is release metadata, not a column — strip it or Prisma
+        // rejects the whole batch on an unknown field.
+        data: missing.map(({ supersedes, ...d }) => ({
+          ...d, tenantId: tenantId || null, createdBy: userId || null,
+        })),
+        // Belt and braces: (tenantId, slug) is unique, but Postgres does not
+        // dedupe NULLs, so the GLOBAL corpus has no unique index protecting it.
+        // Two workers booting together would otherwise both insert.
+        skipDuplicates: true,
+      });
+    }
 
-    await prisma.knowledgeArticle.createMany({
-      data: defaults.map((d) => ({ ...d, tenantId: tenantId || null, createdBy: userId || null }))
-    });
+    for (const up of upgrades) {
+      // updateMany, not update: the global corpus (tenantId NULL) has no unique
+      // index to address a row by, for the same Postgres reason as above.
+      await prisma.knowledgeArticle.updateMany({
+        // Re-checking the body here makes the write idempotent under the four
+        // workers that boot together — the second one matches nothing.
+        where: { ...where, slug: up.slug, body: { not: up.body } },
+        data: { body: up.body },
+      });
+    }
 
-    return { seeded: defaults.length };
+    cache.invalidate('kb:list:');
+    return {
+      seeded: missing.length,
+      slugs: missing.map((a) => a.slug),
+      upgraded: upgrades.length,
+      upgradedSlugs: upgrades.map((a) => a.slug),
+    };
+  },
+
+  /**
+   * Top up the platform-wide corpus at boot.
+   *
+   * This is what makes a written article deploy like a tour step instead of
+   * waiting for somebody to press a button they will never see — the "Seed
+   * defaults" button only renders for a scope with zero articles.
+   *
+   * Global (tenantId = null) only. Tenant overrides are somebody's deliberate
+   * copy and are never created behind their back.
+   */
+  async ensureGlobalArticles() {
+    return this.seedDefaults({ tenantId: null, userId: null });
   }
 };

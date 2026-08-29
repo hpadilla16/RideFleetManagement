@@ -417,8 +417,8 @@ vehiclesRouter.post('/bulk-program-category', async (req, res, next) => {
     const ids = Array.isArray(req.body.vehicleIds) ? req.body.vehicleIds.map(String).filter(Boolean) : [];
     const programCategory = String(req.body.programCategory || '').toUpperCase();
     if (!ids.length) return res.status(400).json({ error: 'vehicleIds must be a non-empty array' });
-    if (!['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH'].includes(programCategory)) {
-      return res.status(400).json({ error: 'programCategory must be RENTAL_ONLY, LOANER_ONLY, or BOTH' });
+    if (!['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH', 'SHUTTLE_ONLY'].includes(programCategory)) {
+      return res.status(400).json({ error: 'programCategory must be RENTAL_ONLY, LOANER_ONLY, BOTH, or SHUTTLE_ONLY' });
     }
     const result = await vehiclesService.bulkSetProgramCategory(ids, programCategory, scopeFor(req));
     res.json(result);

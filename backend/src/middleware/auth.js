@@ -4,6 +4,8 @@ import { getJwtSecret } from '../modules/auth/auth.config.js';
 import { authService } from '../modules/auth/auth.service.js';
 import { isAllowedForServiceAccount } from '../lib/service-account-allowlist.js';
 import { MODULE_LABELS, MODULE_DENIED_HINTS } from '../lib/module-access.js';
+import { evaluateTenantSuspension, tenantSuspendedResponse } from '../lib/tenant-suspension.js';
+import logger from '../lib/logger.js';
 
 // First-login onboarding (2026-07-25): while User.mustChangePassword is
 // true (temp password at create, admin reset), a human session may reach
@@ -12,10 +14,35 @@ import { MODULE_LABELS, MODULE_DENIED_HINTS } from '../lib/module-access.js';
 // is deliberately tiny: change-password (the way out), me (session
 // hydration), refresh (token keep-alive so the forced screen doesn't expire
 // mid-typing). Default-deny, mirroring the service-account allowlist.
+//
+// Staff 2FA deadlock fix (2026-08-22, QA): 2FA is SEQUENCED BEFORE the forced
+// password change. When a user is BOTH mustChangePassword AND holding a pending
+// 2FA token (an enrolled user gets an admin password reset, or a temp-password
+// user whose role requires enrollment), this password gate runs first — so the
+// 2FA second-leg endpoints MUST be reachable here too, or the two gates would
+// each 403 the other's only way out and brick the account. After 2FA issues
+// the full token (no mfa claim), this gate then forces change-password
+// normally. The pending gate below still restricts every OTHER route.
 const PASSWORD_GATE_ALLOWLIST = new Set([
   'POST /api/auth/change-password',
   'GET /api/auth/me',
-  'POST /api/auth/refresh'
+  'POST /api/auth/refresh',
+  'POST /api/auth/2fa/verify-login',
+  'POST /api/auth/2fa/enroll/start',
+  'POST /api/auth/2fa/enroll/verify'
+]);
+
+// Staff 2FA (2026-08-22): a PENDING challenge token (carries the `mfa` claim,
+// minted by signPendingToken between the password and TOTP steps) is NOT a
+// full session. It may reach ONLY the second-leg endpoints — verify-login and
+// the enrollment pair — plus /me for hydration. Everything else 403s with
+// TWO_FACTOR_REQUIRED. Default-deny, mirroring PASSWORD_GATE_ALLOWLIST. Per-mode
+// tightening (a VERIFY token cannot drive enrollment) lives at the routes.
+const TWO_FACTOR_PENDING_ALLOWLIST = new Set([
+  'POST /api/auth/2fa/verify-login',
+  'POST /api/auth/2fa/enroll/start',
+  'POST /api/auth/2fa/enroll/verify',
+  'GET /api/auth/me'
 ]);
 
 export async function requireAuth(req, res, next) {
@@ -46,6 +73,28 @@ export async function requireAuth(req, res, next) {
       }
     }
 
+    // Wave 1 (2026-08-23): HUMAN token-version revocation. logout /
+    // change-password / admin 2FA-reset bump User.tokenVersion; a token minted
+    // with an older tv is dead. Mirrors the service-account tv check above, but
+    // ONLY for full human sessions — the three short-lived token classes are
+    // EXEMPT because they legitimately carry no tv and must not be judged
+    // against the user row's tokenVersion:
+    //   - payload.mfa  : pending-2FA challenge token (mid-login) — a false 401
+    //                    here would break the 2FA second leg. Boxed by the
+    //                    TWO_FACTOR_PENDING_ALLOWLIST gate below instead.
+    //   - payload.prac : Ride University practice token (4h demo session).
+    //   - role GUEST   : magic-link customer token (public-booking only).
+    // MISSING-TV-MEANS-0: a legacy human token from before this deploy has no
+    // tv claim; (payload.tv ?? 0) is then 0, which equals a fresh user's default
+    // tokenVersion of 0 — so the deploy does NOT mass-log-out existing sessions.
+    // Placed BEFORE the mustChangePassword and payload.mfa gates so the
+    // exemptions above hold and a revoked token can't slip through either gate.
+    if (!hydrated.isServiceAccount && !payload?.mfa && !payload?.prac && hydrated.role !== 'GUEST') {
+      if ((payload?.tv ?? 0) !== (hydrated.tokenVersion ?? 0)) {
+        return res.status(401).json({ error: 'Token revoked' });
+      }
+    }
+
     // First-login onboarding (2026-07-25): humans with a temp password are
     // boxed into the change-password allowlist. Service accounts are exempt
     // (no interactive login; their own default-deny allowlist governs them).
@@ -59,7 +108,69 @@ export async function requireAuth(req, res, next) {
       }
     }
 
+    // Staff 2FA (2026-08-22): a pending challenge token (payload.mfa set) is
+    // boxed into the two-factor allowlist. The claim lives on the JWT payload,
+    // not the hydrated session, so we read it from `payload`.
+    if (payload?.mfa) {
+      const gatePath = String(req.originalUrl || req.url || '').split('?')[0];
+      if (!TWO_FACTOR_PENDING_ALLOWLIST.has(`${req.method} ${gatePath}`)) {
+        return res.status(403).json({
+          error: 'Two-factor authentication is required to complete sign-in',
+          code: 'TWO_FACTOR_REQUIRED'
+        });
+      }
+    }
+
     req.user = { ...payload, ...hydrated, sub: hydrated.id, id: hydrated.id };
+
+    // ── TENANT SUSPENSION GATE — Tenant Subscriptions Phase 5 (2026-08-28) ──
+    //
+    // Applied HERE, at the single place every authenticated request passes, for
+    // the same reason the view-location override below is: a per-router list is
+    // a list somebody will forget to add to, and the forgotten route will be the
+    // one that matters. Same reasoning, higher stakes.
+    //
+    // OFF BY DEFAULT. `evaluateTenantSuspension` returns `allow` unless
+    // TENANT_SUSPENSION_ENFORCEMENT is explicitly `log` or `enforce`, so this
+    // block ships INERT: it runs on every request and changes no outcome until
+    // somebody deliberately turns it on. TENANT_SUSPENSION_DISABLED=true is the
+    // kill-switch that forces it back off with no redeploy.
+    //
+    // The decision itself is a PURE function in lib/tenant-suspension.js — no
+    // IO, no clock, no Prisma — so the allowlist can be tested exhaustively and
+    // this middleware stays readable. `tenantStatus` was hydrated by
+    // getSessionUser above; there is no extra query on the request path.
+    //
+    // WHY IT SITS HERE AND NOT EARLIER: after the token-version, password and
+    // 2FA gates, so a revoked or half-authenticated token is rejected on its own
+    // terms first and a suspended tenant never gets a DIFFERENT answer to
+    // "is this token still valid". Before applyViewLocation, so a blocked
+    // request never spends work on scoping it will not use.
+    const suspension = evaluateTenantSuspension({
+      user: req.user,
+      method: req.method,
+      // Strip the query string. `?x=1` left on the value would defeat every
+      // allowlist rule — the exact bug password-gate.test.mjs pins for the
+      // password allowlist.
+      path: String(req.originalUrl || req.url || '').split('?')[0],
+    });
+    if (suspension.action === 'observe') {
+      // LOG-ONLY MODE: this is how the allowlist gets proven complete against
+      // real traffic rather than against somebody's imagination. Every line
+      // here is a route a real suspended-tenant workflow needed and would have
+      // been denied. Read them before switching to `enforce`.
+      logger.warn('[tenant-suspension] WOULD BLOCK (log-only mode)', {
+        tenantId: req.user?.tenantId || null,
+        userId: req.user?.id || null,
+        role: req.user?.role || null,
+        method: req.method,
+        path: String(req.originalUrl || req.url || '').split('?')[0],
+        message: 'Enforcement is in log mode. This request was ALLOWED. If it belongs to a '
+          + 'workflow a suspended tenant must keep, add it to SUSPENSION_ALLOWLIST before enforcing.',
+      });
+    } else if (suspension.action === 'block') {
+      return res.status(403).json(tenantSuspendedResponse());
+    }
 
     // Location switcher (2026-08-11): x-view-location narrows the user's
     // location scope to ONE location for this request, the way a super admin
@@ -72,7 +183,15 @@ export async function requireAuth(req, res, next) {
       user: req.user,
       requested: req.headers[VIEW_LOCATION_HEADER],
     });
-    if (!viewResult.ok) return res.status(403).json({ error: viewResult.error });
+    // RideOps gap #3 (2026-08-17): machine-readable code, like the password
+    // gate's PASSWORD_CHANGE_REQUIRED. Without it, a mobile client seeing a
+    // bare 403 on a request that carried x-view-location cannot distinguish
+    // "your picked location was revoked → offer the switcher" from any other
+    // Forbidden. Additive — the web frontend keys off the message/status and
+    // ignores unknown fields.
+    if (!viewResult.ok) {
+      return res.status(403).json({ error: viewResult.error, code: 'VIEW_LOCATION_DENIED' });
+    }
     if (viewResult.locationIds !== undefined) {
       req.user = { ...req.user, locationIds: viewResult.locationIds, viewLocationId: viewResult.locationIds[0] };
     }

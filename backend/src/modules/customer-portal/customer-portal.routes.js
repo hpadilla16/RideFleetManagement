@@ -20,6 +20,11 @@ import { getEffectiveTermsHtml } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 import { analyzeSignatureInk } from '../../lib/signature-ink.js';
 import {
+  authnetSignatureKeyHex,
+  verifyAuthnetWebhookSignature
+} from '../../lib/authnet-webhook-signature.js';
+import { assertInsuranceSelectionEditable } from '../checkout-session/insurance-selection-gate.js';
+import {
   attachPublicRequestMeta,
   createPublicRateLimitGuard
 } from '../../middleware/public-endpoint-guards.js';
@@ -506,57 +511,13 @@ function authNetCompactObject(obj = {}) {
   );
 }
 
-function authNetSignatureKeyHex(value = '') {
-  return String(value || '').replace(/[^a-fA-F0-9]/g, '').trim();
-}
-
-function authNetSafeHexEqual(expectedHex = '', actualHex = '') {
-  if (!expectedHex || !actualHex || expectedHex.length !== actualHex.length) return false;
-  try {
-    return crypto.timingSafeEqual(Buffer.from(expectedHex, 'hex'), Buffer.from(actualHex, 'hex'));
-  } catch {
-    return false;
-  }
-}
-
-function authNetVerifyWebhookSignature(rawBody = '', header = '', signatureKey = '') {
-  const payloadBuffer = Buffer.isBuffer(rawBody)
-    ? rawBody
-    : Buffer.from(String(rawBody || ''), 'utf8');
-  const signatureHex = authNetSignatureKeyHex(signatureKey);
-  const signatureText = String(signatureKey || '').trim();
-  const rawHeader = String(header || '').trim();
-  if (!payloadBuffer.length || !signatureHex || !rawHeader) return { ok: false, expectedHex: '', actualHex: '' };
-
-  const actualHex = String(rawHeader.toLowerCase().startsWith('sha512=') ? rawHeader.slice(7) : rawHeader)
-    .trim()
-    .toLowerCase();
-  if (!actualHex || actualHex.length % 2 !== 0) return { ok: false, expectedHex: '', actualHex };
-
-  try {
-    const expectedHexBinary = crypto
-      .createHmac('sha512', Buffer.from(signatureHex, 'hex'))
-      .update(payloadBuffer)
-      .digest('hex')
-      .toLowerCase();
-    const expectedHexLatin1 = signatureText
-      ? crypto.createHmac('sha512', Buffer.from(signatureText, 'latin1')).update(payloadBuffer).digest('hex').toLowerCase()
-      : '';
-
-    const matchesBinary = authNetSafeHexEqual(expectedHexBinary, actualHex);
-    const matchesLatin1 = authNetSafeHexEqual(expectedHexLatin1, actualHex);
-
-    return {
-      ok: matchesBinary || matchesLatin1,
-      expectedHex: expectedHexBinary,
-      expectedHexAlt: expectedHexLatin1,
-      actualHex,
-      method: matchesBinary ? 'hex-bytes' : matchesLatin1 ? 'latin1-text' : ''
-    };
-  } catch {
-    return { ok: false, expectedHex: '', actualHex };
-  }
-}
+// EXTRACTED 2026-08-27 (billing Phase 2) to src/lib/authnet-webhook-signature.js.
+// The billing receiver needs the same verifier — including the both-encodings
+// fallback this endpoint's history paid for — and two copies of a money-path
+// signature check are two copies that can drift. Behaviour is unchanged; the
+// aliases below keep this file's call sites and its debug logging identical.
+const authNetSignatureKeyHex = authnetSignatureKeyHex;
+const authNetVerifyWebhookSignature = verifyAuthnetWebhookSignature;
 
 async function authNetWebhookConfigs() {
   const rows = await prisma.appSetting.findMany({
@@ -1355,6 +1316,67 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
       return res.status(400).json({ error: `Complete the required pre-check-in items first: ${missing.join(', ')}` });
     }
 
+    // PREFLIGHT (2026-08-17) — the same gate the agent's wizard goes through,
+    // because RentalAgreement.declinedInsurance decides which sections the
+    // customer must initial and whether the contract carries the decline
+    // addendum. A lock on only the staff writer is not a control.
+    //
+    // It runs HERE, before the first mutation, and not down beside the update
+    // at the declinedCoverage branch: that branch is already past a
+    // deleteMany() of the reservation's INSURANCE charges and none of this
+    // handler is wrapped in a transaction, so a late refusal would reject the
+    // request only after destroying the charges it meant to protect.
+    //
+    // The gate no-ops unless the flag would actually flip, so a customer who
+    // declined earlier and is re-submitting pre-check-in for some other reason
+    // is not refused over a field they did not touch.
+    //
+    // It covers the two branches that WRITE, not `insuranceSelection` being
+    // present. The block below has THREE branches — plan, decline, and neither
+    // — and the third writes no insurance flag at all.
+    //
+    // That third branch is the one real customers hit. The pre-check-in page
+    // always sends insuranceSelection (customer/precheckin/page.js), its
+    // default is { selectedPlanCode: '', declinedCoverage: false, ... }, and on
+    // load it rehydrates ONLY selectedPlanCode from existing charges —
+    // declinedCoverage is never restored. So a customer who declined earlier
+    // and comes back to fix a phone number posts
+    // { selectedPlanCode: '', declinedCoverage: false }. Deriving a next value
+    // from that reads as a flip to `false` and refused their whole
+    // pre-check-in — name, licence, documents and services included — for a
+    // field they never touched and a write that was never going to happen.
+    //
+    // Gating on "will a write actually follow?" keeps the protection where it
+    // belongs: picking a plan is the mirror image of declining and is where the
+    // silent damage lives (declined + signed + later buys coverage yields a
+    // contract whose decline addendum contradicts its insurance charge), while
+    // plan-on-a-normal-agreement stays false-vs-false and no-ops.
+    let insuranceVerdict = { locked: false, signed: false };
+    const writesInsuranceFlag = !!(
+      insuranceSelection?.selectedPlanCode || insuranceSelection?.declinedCoverage
+    );
+    if (writesInsuranceFlag) {
+      // Mirrors the branch precedence below: selectedPlanCode wins over
+      // declinedCoverage.
+      const nextDeclined = insuranceSelection.selectedPlanCode
+        ? false
+        : !!insuranceSelection.declinedCoverage;
+      try {
+        insuranceVerdict = await assertInsuranceSelectionEditable({
+          reservationId: reservation.id,
+          nextValue: nextDeclined,
+          // Nobody is standing next to the customer to interpret a 409, so the
+          // sentence has to be self-contained and tell them what to do next.
+          audience: 'customer',
+        });
+      } catch (err) {
+        if (err?.status === 409 && err?.code) {
+          return res.status(409).json({ error: err.message, code: err.code });
+        }
+        throw err;
+      }
+    }
+
     // Blob -> Storage (Phase 1): when the flag is ON, route inline base64 doc
     // values to Storage and persist the returned PATH. Fail-safe -- on any
     // upload error the original base64 is kept (KYC docs are never lost). Flag
@@ -1503,6 +1525,11 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
       insurancePlans,
       discount,
       completedAt,
+      // The preflight's verdict, threaded in so the decline-signature
+      // fence can see whether the contract is already sealed. Without
+      // this line insuranceVerdict is a dead local and the fence is
+      // unconditionally off.
+      agreementSealed: insuranceVerdict.signed,
       auditMetadata: { ip: req.ip || null }
     });
 

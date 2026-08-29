@@ -145,6 +145,23 @@ async function main() {
     process.exit(1);
   }
 
+  // Resolve the field-encryption DEK BEFORE any handler/scheduler runs — this
+  // worker reads/writes encrypted models (customers, reservations, loaner
+  // agreements, …) through the field-crypto prisma extension. Mirrors main.js:
+  // unwrap from AWS KMS when enabled, else use the plaintext FIELD_ENC_KEY;
+  // FAIL LOUD so the worker never runs with a missing/broken key (which would
+  // silently null-out encrypted reads or throw on encrypted writes). Without
+  // this, removing the plaintext FIELD_ENC_KEY once KMS is on would break the
+  // worker even though the API is fine. (2026-08-24)
+  try {
+    const { resolveFieldKey, isKmsEnabled } = await import('./lib/kms-key-provider.js');
+    const r = await resolveFieldKey();
+    if (isKmsEnabled()) logger.info('[field-key] DEK resolved via AWS KMS', { source: r.source });
+  } catch (e) {
+    logger.error('[field-key] FATAL: could not resolve field-encryption key', { message: e?.message });
+    process.exit(1);
+  }
+
   // Register handlers BEFORE startWorkers — otherwise handlers map is empty
   // when startWorkers reads it and no Worker instances are created.
   await registerAllHandlers();
@@ -244,6 +261,23 @@ async function main() {
     });
   }
 
+  // Tenant subscriptions — RIDE billing its own tenants (Phase 2, 2026-08-27).
+  // Daily backstop for the Authorize.Net webhook path: retries events that
+  // failed to apply, polls ARB for status drift, hunts charges that should
+  // have happened and did not, and alarms if NO verified webhook has arrived
+  // platform-wide in 72 hours. Makes zero external calls while no tenant is
+  // enrolled, so it is safe to run before the module carries any real money.
+  // BILLING_AUTHNET_* credentials only — never the per-tenant rental gateway.
+  try {
+    const billingReconcileMod = await import('./modules/billing/billing-reconcile.scheduler.js');
+    billingReconcileMod.startBillingReconcileScheduler();
+    logger.info('[worker] started: billing reconcile scheduler');
+  } catch (err) {
+    logger.warn('[worker] billing reconcile scheduler not started', {
+      message: err.message,
+    });
+  }
+
   // Shuttle fast poll (2026-08-15) — demand-driven: fast only while a
   // customer tracker page is open or a shuttle request is pending. The only
   // consumer of the VoltSwitch client above the tenant sync.
@@ -264,6 +298,18 @@ async function main() {
     logger.info('[worker] started: shuttle link-invite scheduler');
   } catch (err) {
     logger.warn('[worker] shuttle link-invite scheduler not started', { message: err.message });
+  }
+
+  // Shuttle geofence alert poll (Phase 2, 2026-08-24) — ingests the
+  // provider's zone enter/exit alerts and fans out staff + arrival
+  // notifications. Gentle 60s cadence; only tenants with an API key AND at
+  // least one active zone are ever polled, so it is naturally inert today.
+  try {
+    const shuttleAlertsMod = await import('./modules/shuttle/shuttle-alerts.scheduler.js');
+    shuttleAlertsMod.startShuttleAlertScheduler();
+    logger.info('[worker] started: shuttle alert scheduler');
+  } catch (err) {
+    logger.warn('[worker] shuttle alert scheduler not started', { message: err.message });
   }
 
   // Voltswitch GPS periodic pull (2026-08-13). Per-tenant interval from
@@ -422,6 +468,10 @@ async function main() {
     try {
       const rpMod = await import('./modules/integrations/economy/economy-rate-push.scheduler.js');
       rpMod.stopEconomyRatePushScheduler();
+    } catch {}
+    try {
+      const billingReconcileMod = await import('./modules/billing/billing-reconcile.scheduler.js');
+      billingReconcileMod.stopBillingReconcileScheduler();
     } catch {}
     try {
       const ocrMod = await import('./modules/citations/citation-ocr.scheduler.js');

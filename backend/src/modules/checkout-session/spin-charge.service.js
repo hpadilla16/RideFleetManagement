@@ -35,6 +35,11 @@ import logger from '../../lib/logger.js';
 import { parseDepositRules, evaluateDepositRule } from '../../lib/deposit-rules.js';
 import { spinClient } from '../payment-gateway/spin-client.js';
 import { iposTransactClient } from '../payment-gateway/ipos-transact-client.js';
+import {
+  resolveTenantTerminalConfig,
+  toSpinClientConfig,
+  isSpinDryRun,
+} from '../payment-gateway/tenant-terminal-config.js';
 import { appendEvent } from './state-machine.js';
 import { CheckoutSessionError } from './checkout-session.service.js';
 
@@ -250,18 +255,49 @@ async function applyLocalRenterDepositRule({ baseAmount, reservationId, sessionI
   return baseAmount;
 }
 
-function loadTenantSpinConfig(tenantId) {
-  // We don't currently expose tenant.spin* fields via a service helper
-  // so we fetch directly. Only the fields the Spin client cares about.
-  return prisma.tenant.findUnique({
-    where: { id: tenantId },
-    select: {
-      id: true,
-      // These columns don't exist on the Tenant model today — the
-      // existing spin-client falls back to env vars when tenant config
-      // is missing. Returning an empty object keeps both paths working.
-    },
+/**
+ * Resolve WHICH terminal this tenant charges through — the single entry point
+ * from the live charge path into modules/payment-gateway/tenant-terminal-config.
+ *
+ * 2026-08-26 — this function used to `select: { id: true }` off Tenant and its
+ * own comment admitted the columns didn't exist, so it returned effectively
+ * `{}` and spin-client fell through to the PLATFORM env vars for every tenant
+ * on every charge. One live merchant hid it; a second merchant would have made
+ * it a wrong-merchant charge. It now delegates to the shared resolver.
+ *
+ * FAIL CLOSED: a NONE resolution throws BEFORE any provider call, so a tenant
+ * without a terminal gets an actionable 409 at the counter instead of somebody
+ * else's merchant account getting the money. The one exception is SPIN_DRY_RUN,
+ * where the client short-circuits to synthetic approvals and never touches
+ * credentials at all — gating that would just break local dev.
+ *
+ * Every resolution logs the source (TENANT vs ENV), the tenant id and a MASKED
+ * TPN. The authKey is never logged, here or anywhere else.
+ */
+async function loadTenantSpinConfig(tenantId, { sessionId = null } = {}) {
+  const resolved = await resolveTenantTerminalConfig(tenantId);
+
+  if (resolved.source === 'NONE' && !isSpinDryRun()) {
+    logger.error('[spin-charge] refusing to charge — no payment terminal resolved for this tenant', {
+      sessionId, tenantId, reason: resolved.reason,
+    });
+    throw new CheckoutSessionError(
+      resolved.reason === 'INCOMPLETE_TENANT_CONFIG'
+        ? 'This tenant\'s payment terminal is only half configured (Auth Key and TPN must BOTH be set). Finish it in Settings → Payment Gateway → SPIn Terminal before taking a payment.'
+        : 'This tenant has no payment terminal configured. Add the SPIn Auth Key and TPN in Settings → Payment Gateway → SPIn Terminal before taking a payment.',
+      409, 'TERMINAL_NOT_CONFIGURED',
+    );
+  }
+
+  logger.info('[spin-charge] terminal config resolved', {
+    sessionId,
+    tenantId,
+    source: resolved.source,
+    reason: resolved.reason,
+    tpn: resolved.maskedTpn,
   });
+
+  return toSpinClientConfig(resolved);
 }
 
 async function runChargeSequence({
@@ -356,7 +392,10 @@ async function runChargeSequence({
     sessionId, agreementDepositCol, agreementDepositChargesSum, hintDeposit, depositAmount,
   });
 
-  const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId).catch(() => ({}));
+  // No .catch() here on purpose. Swallowing this into {} is exactly how the
+  // charge used to fall through to the platform terminal; TERMINAL_NOT_CONFIGURED
+  // must reach the wizard.
+  const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId, { sessionId });
   const refId = `${session.reservation.reservationNumber}-${Date.now().toString(36)}`;
 
   // Track the events we add so we can persist them in one update at the
@@ -568,6 +607,9 @@ async function runChargeSequence({
     where: { id: sessionId },
     data: {
       paymentCompletedAt: new Date(),
+      // M2 P2 review MUST-1 (2026-08-17): direct writer of a versioned
+      // field → bump stateVersion (see schema.prisma invariant).
+      stateVersion: { increment: 1 },
       events: appendEvents(session.events, events, {
         kind: 'CHARGE_SEQUENCE_COMPLETE',
         actorUserId: actorUserId || null,
@@ -711,7 +753,10 @@ async function runSale({ sessionId, amount, actorUserId }) {
   }
 
   const session = await loadSessionAndAgreement(sessionId, ['TC_SIGNED', 'PAYMENT_PENDING']);
-  const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId).catch(() => ({}));
+  // No .catch() here on purpose. Swallowing this into {} is exactly how the
+  // charge used to fall through to the platform terminal; TERMINAL_NOT_CONFIGURED
+  // must reach the wizard.
+  const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId, { sessionId });
   const refId = `${session.reservation.reservationNumber}-SALE-${Date.now().toString(36)}`;
 
   // The SALE is the rental owed, NOT the security deposit (a separate pre-auth
@@ -875,6 +920,9 @@ async function runDepositHold({ sessionId, depositAmount: depositAmountHint, act
       where: { id: sessionId },
       data: {
         paymentCompletedAt: new Date(),
+        // M2 P2 review MUST-1 (2026-08-17): direct writer of a versioned
+        // field → bump stateVersion (see schema.prisma invariant).
+        stateVersion: { increment: 1 },
         events: appendEvents(session.events, [{
           kind: 'DEPOSIT_SKIPPED_ZERO', actorUserId: actorUserId || null, at: new Date().toISOString(),
         }]),
@@ -883,7 +931,10 @@ async function runDepositHold({ sessionId, depositAmount: depositAmountHint, act
     return { sessionId, skipped: true, reason: 'zero-deposit' };
   }
 
-  const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId).catch(() => ({}));
+  // No .catch() here on purpose. Swallowing this into {} is exactly how the
+  // charge used to fall through to the platform terminal; TERMINAL_NOT_CONFIGURED
+  // must reach the wizard.
+  const tenantConfig = await loadTenantSpinConfig(session.reservation.tenantId, { sessionId });
   const depositRefId = `${session.reservation.reservationNumber}-DEP-${Date.now().toString(36)}`;
   const events = [];
   const log = (kind, payload) => events.push({ kind, ...payload, at: new Date().toISOString() });
@@ -1026,6 +1077,9 @@ async function runDepositHold({ sessionId, depositAmount: depositAmountHint, act
     where: { id: sessionId },
     data: {
       paymentCompletedAt: new Date(),
+      // M2 P2 review MUST-1 (2026-08-17): direct writer of a versioned
+      // field → bump stateVersion (see schema.prisma invariant).
+      stateVersion: { increment: 1 },
       events: appendEvents(session.events, events, {
         kind: 'DEPOSIT_HOLD_COMPLETE', actorUserId: actorUserId || null,
       }),
@@ -1214,6 +1268,9 @@ async function recordManualDeposit({
     where: { id: sessionId },
     data: {
       paymentCompletedAt: new Date(),
+      // M2 P2 review MUST-1 (2026-08-17): direct writer of a versioned
+      // field → bump stateVersion (see schema.prisma invariant).
+      stateVersion: { increment: 1 },
       events: appendEvents(session.events, [{
         kind: 'MANUAL_DEPOSIT_RECORDED',
         amount: requestedAmount,

@@ -2,6 +2,8 @@
 import { Router } from 'express';
 import { checkRentalSpan, rentalSpanMessage } from '../rates/rental-minimum.js';
 import { previewLocationMandatoryFees } from './reservation-pricing.service.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
+import { parseDateTimeInTz } from '../../lib/date-utils.js';
 import { reservationsService } from './reservations.service.js';
 import { looksLikeXlsx, parseReservationImportWorkbook } from './reservation-import-parse.js';
 import { validateReservationCreate, validateReservationPatch } from './reservations.rules.js';
@@ -26,6 +28,7 @@ import { franchiseService } from '../settings/franchise.service.js';
 import { crossTenantScopeFor as scopeFor, scopeVisibilityCacheSegment } from '../../lib/tenant-scope.js';
 import { vehicleProgramWhereForScope } from '../../lib/program-category.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
+import { resolveCustomerFacingBrand, resolveBrandLocation } from '../../lib/tenant-brand.js';
 import { missingRequiredCustomerFields } from '../../lib/precheckin-fields.js';
 import { parseDepositRules, evaluateDepositRule } from '../../lib/deposit-rules.js';
 import { cache } from '../../lib/cache.js';
@@ -597,7 +600,7 @@ reservationsRouter.get('/:id/display-data', async (req, res, next) => {
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }]
     }));
     row.charges = reservationCharges;
-    const [insurancePlans, additionalServices, rentalSettings] = await Promise.all([
+    const [insurancePlans, additionalServices, rentalSettings, franchiseCfg, brandLocation] = await Promise.all([
       tenantId ? settingsService.getInsurancePlans({ tenantId }) : [],
       tenantId ? withTenantSchema(req.user.tenantId, (db) => db.additionalService.findMany({
         where: { tenantId, isActive: true, displayOnline: true },
@@ -609,14 +612,42 @@ reservationsRouter.get('/:id/display-data', async (req, res, next) => {
           linkedFee: { select: { id: true, name: true, amount: true, description: true, mode: true } }
         }
       })) : [],
-      tenantId ? settingsService.getRentalAgreementConfig({ tenantId }) : {}
+      tenantId ? settingsService.getRentalAgreementConfig({ tenantId }) : {},
+      // WHOSE NAME IS ON THE COUNTER SCREEN (2026-08-17)
+      // This payload drives customer-display — the screen that shows the QR the
+      // renter scans, and that keeps showing a name while they sign on their
+      // phone. It used to fall back to 'Ride Fleet' whenever the tenant had not
+      // filled in Settings → Rental agreement, so the counter said OUR name and
+      // the phone (which resolves a real cascade) said the tenant's, thirty
+      // seconds apart, to the same customer.
+      //
+      // Both sides now resolve the same BRANCH (resolveBrandLocation: the
+      // agreement's, falling back to the reservation's) through the same
+      // cascade (lib/tenant-brand.js). companyName may come back null when a
+      // tenant has configured nothing AND has no name; the display renders no
+      // wordmark rather than ours.
+      //
+      // Everything the cascade needs is gathered HERE, in the same fan-out, and
+      // injected below. This endpoint is polled every 1.5s per open till, so a
+      // resolver left to fetch its own settings would re-run an unmemoised
+      // appSetting.findMany + tenant.findUnique ~40 times a minute per screen,
+      // on top of a sequential round trip before the response could render.
+      tenantId ? franchiseService.getAgreementConfig(row?.franchiseId ?? null, { tenantId }) : null,
+      resolveBrandLocation(row)
     ]);
+    const brand = await resolveCustomerFacingBrand({
+      tenantId,
+      franchiseId: row?.franchiseId ?? null,
+      location: brandLocation,
+      globalConfig: rentalSettings,
+      franchiseConfig: franchiseCfg
+    });
     res.json({
       reservation: row,
       insurancePlans: (insurancePlans || []).filter(p => p.isActive !== false),
       additionalServices,
       branding: {
-        companyName: rentalSettings?.companyName || 'Ride Fleet',
+        companyName: brand.companyName,
         companyLogoUrl: rentalSettings?.companyLogoUrl || '',
         companyPhone: rentalSettings?.companyPhone || ''
       }
@@ -1231,6 +1262,47 @@ reservationsRouter.post('/', async (req, res, next) => {
       .replace(/\n?\[RES_DEPOSIT_META\]\{[^\n]*\}/g, '')
       .replace(/\n?\[SECURITY_DEPOSIT_META\]\{[^\n]*\}/g, '')
       .trim();
+
+    // Short-window content dedup (2026-08-24). A rapid double/triple-click or a
+    // client retry submits the SAME reservation two-to-four times within ~1s;
+    // the frontend mints a fresh reservationNumber per submit, so the UNIQUE
+    // index on reservationNumber never catches these — production saw one renter
+    // produce 3-4 identical reservations inside 0.9-1.3s. Guard: if THIS agent
+    // (createdByUserId) already created a reservation for the same customer +
+    // pickup + return + vehicle type in the last 10s, return THAT one instead of
+    // minting a duplicate. Scoped strictly to the tenant; the single-submit path
+    // is behaviorally unchanged (the lookup simply finds nothing). Frontend
+    // in-flight guard removes the trigger; this 10s window is the backstop.
+    const dedupCreatedByUserId = req.user?.sub || req.user?.id || null;
+    const dedupTz = await resolveTenantTimeZone(req.user?.tenantId);
+    const dedupPickupAt = parseDateTimeInTz(String(req.body.pickupAt), dedupTz);
+    const dedupReturnAt = parseDateTimeInTz(String(req.body.returnAt), dedupTz);
+    if (dedupCreatedByUserId && dedupPickupAt && dedupReturnAt) {
+      const dedupTenantId = scopeFor(req).tenantId;
+      const existingDuplicate = await withTenantSchema(req.user.tenantId, (db) => db.reservation.findFirst({
+        where: {
+          ...(dedupTenantId ? { tenantId: dedupTenantId } : {}),
+          createdByUserId: dedupCreatedByUserId,
+          customerId: String(req.body.customerId),
+          vehicleTypeId: String(req.body.vehicleTypeId),
+          pickupAt: dedupPickupAt,
+          returnAt: dedupReturnAt,
+          createdAt: { gt: new Date(Date.now() - 10_000) }
+        },
+        orderBy: { createdAt: 'desc' },
+        include: { customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } }
+      }));
+      if (existingDuplicate) {
+        logger.info('[reservation-create] deduped rapid duplicate submit', {
+          reservationId: existingDuplicate.id,
+          reservationNumber: existingDuplicate.reservationNumber,
+          customerId: existingDuplicate.customerId,
+          createdByUserId: dedupCreatedByUserId,
+          tenantId: existingDuplicate.tenantId || dedupTenantId || null
+        });
+        return res.status(201).json(existingDuplicate);
+      }
+    }
 
     const row = await reservationsService.create({
       ...(req.body || {}),

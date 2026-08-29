@@ -8,6 +8,15 @@
  * pricing) and SNAPSHOTS the result. Reading a quote never recomputes; expiresAt
  * is the business protection against stale rates.
  *
+ * PRICING RULE, AMENDED (2026-08-24 — staff rate override, owner-approved): the
+ * ONE exception is an explicit ADMIN/OPS override at CREATE time. Even then this
+ * service still does not invent arithmetic: it hands the overridden per-day rate
+ * back to the engine (bookingEngineService.recomputeRentalQuoteMoney) and
+ * snapshots THAT, so subtotal/fees/taxes/total line up and percentage fees move
+ * with the new subtotal. The engine's ORIGINAL row stays in engineSnapshotJson,
+ * so the pre-override price is always recoverable. Without the override field in
+ * the payload this module behaves exactly as before — same reads, same writes.
+ *
  * MONEY RULE: a quote moves no money and holds no inventory. convert() creates a
  * plain reservation (status NEW, no vehicle hold beyond the normal availability
  * path, no payment) via reservationsService.create — the same validations staff
@@ -26,6 +35,36 @@ import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 import { isQuoteNumber, normalizeQuoteNumber, quoteNumberCandidate } from './quote-number.js';
 
 const DEFAULT_TTL_HOURS = 72;
+
+/**
+ * Who may override the engine's daily rate (owner decision, 2026-08-24).
+ * SUPER_ADMIN is included for the same reason middleware/auth.js's requireRole
+ * short-circuits on it everywhere else in this codebase: it is above every
+ * tenant role, not beside them. A plain AGENT is NOT here — an AGENT sending an
+ * override gets a clean 403, never a silently ignored field.
+ *
+ * The VozIA service account's role is AGENT (see lib/service-account-allowlist.js),
+ * so the phone flow is blocked by this list before the source gate even runs.
+ */
+export const RATE_OVERRIDE_ROLES = Object.freeze(['SUPER_ADMIN', 'ADMIN', 'OPS']);
+
+/** pricingSource marker for a manually overridden quote. The engine's own
+ * values are 'GLOBAL' / 'LOCATION' (rates.service.js), so this cannot clash. */
+export const MANUAL_OVERRIDE_PRICING_SOURCE = 'MANUAL_OVERRIDE';
+
+export function canOverrideRate(role) {
+  return RATE_OVERRIDE_ROLES.includes(String(role || '').toUpperCase().trim());
+}
+
+/**
+ * Is this payload asking for an override at all? Deliberately narrow: undefined,
+ * null and '' all mean "no override" so an untouched form field never trips the
+ * gate. Anything else IS an override attempt and must survive validation.
+ */
+export function hasRateOverrideIntent(data = {}) {
+  const raw = data?.dailyRateOverride;
+  return !(raw === undefined || raw === null || (typeof raw === 'string' && raw.trim() === ''));
+}
 
 function ttlHours() {
   const raw = Number.parseInt(process.env.QUOTE_TTL_HOURS || '', 10);
@@ -74,6 +113,14 @@ async function defaultReservations() {
   return mod.reservationsService;
 }
 
+/** Audit writer, lazily imported so the quotes module keeps its light import
+ * graph (and so tests can inject a spy). recordAudit is BEST-EFFORT by
+ * contract — it never throws into us. */
+async function defaultAudit() {
+  const mod = await import('../audit/audit.service.js');
+  return { recordAudit: mod.recordAudit, AUDIT_ACTIONS: mod.AUDIT_ACTIONS };
+}
+
 /** Mirror of booking-engine's generateReservationNumber, RES-prefixed. */
 export function conversionReservationNumber(nowMs, randHex) {
   return `RES-${String(nowMs).slice(-8)}${String(randHex).toUpperCase()}`;
@@ -87,6 +134,7 @@ export function createQuotesService(deps = {}) {
   // as container-UTC and land 4h off — same bug class the staff form fixed.
   const resolveTz = deps.resolveTz || ((scope) => resolveTenantTimeZone(scope?.tenantId));
   const getReservations = deps.reservations ? async () => deps.reservations : defaultReservations;
+  const getAudit = deps.audit ? async () => deps.audit : defaultAudit;
 
   /** Run the live engine for one (location, window); returns per-class rows. */
   async function engineSearch({ pickupLocationId, pickupAt, returnAt }, scope) {
@@ -179,6 +227,42 @@ export function createQuotesService(deps = {}) {
     return Array.isArray(rows) ? list.map(stamp) : stamp(rows);
   }
 
+  /**
+   * Best-effort audit of a rate override. recordAudit never throws (its own
+   * contract), and the whole call is additionally wrapped so a broken audit
+   * import can never fail a quote that is already committed.
+   */
+  async function auditRateOverride({ created, row, overrideRate, overrideReason, scope, actor }) {
+    try {
+      const { recordAudit, AUDIT_ACTIONS } = await getAudit();
+      await recordAudit({
+        tenantId: scope?.tenantId || null,
+        actorUserId: actor?.userId || null,
+        actorEmail: actor?.email || null,
+        actorRole: actor?.role || null,
+        action: AUDIT_ACTIONS.QUOTE_RATE_OVERRIDE,
+        targetType: 'Quote',
+        targetId: created?.id || null,
+        ip: actor?.ip || null,
+        userAgent: actor?.userAgent || null,
+        metadata: {
+          quoteNumber: created?.quoteNumber || null,
+          vehicleTypeId: created?.vehicleTypeId || null,
+          pickupLocationId: created?.pickupLocationId || null,
+          days: Number(row?.days || 0),
+          originalDailyRate: Number(row?.dailyRate || 0),
+          newDailyRate: Number(overrideRate),
+          originalTotal: Number(row?.total || 0),
+          newTotal: Number(created?.total || 0),
+          reason: overrideReason
+        }
+      });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[quotes] rate-override audit failed', created?.id, e?.message);
+    }
+  }
+
   const service = {
     /**
      * Compute WITHOUT saving. vehicleTypeId optional — omitted returns every
@@ -208,10 +292,66 @@ export function createQuotesService(deps = {}) {
       };
     },
 
-    /** Compute AND save → the speakable Quote (Q-1042). */
+    /**
+     * Compute AND save → the speakable Quote (Q-1042).
+     *
+     * Optional staff rate override (2026-08-24): `dailyRateOverride` +
+     * `rateOverrideReason`. Every gate below runs BEFORE the engine is called
+     * and before anything is written, so a rejected override leaves no trace.
+     */
     async create(data = {}, scope = {}, actor = {}) {
       const { pickupLocationId, returnLocationId, vehicleTypeId, pickupAt, returnAt } = data;
       if (!vehicleTypeId) throw err('vehicleTypeId is required', 'VALIDATION', 400);
+
+      // Source is decided here (not inline in `base`) because the override gate
+      // needs it: only a STAFF-sourced quote may carry a manual rate.
+      const source = data.source === 'VOZIA' || data.source === 'PORTAL' ? data.source : 'STAFF';
+
+      // ── Rate override gates (fail BEFORE any engine call / any write) ──
+      const wantsOverride = hasRateOverrideIntent(data);
+      let overrideRate = null;
+      let overrideReason = null;
+      if (wantsOverride) {
+        // 1. Source: the phone/portal flows quote the engine's price, full stop.
+        if (source !== 'STAFF') {
+          throw err(
+            'Only staff-created quotes may override the daily rate',
+            'RATE_OVERRIDE_SOURCE_FORBIDDEN',
+            403
+          );
+        }
+        // 2. Role: ADMIN / OPS (SUPER_ADMIN above them). Fails CLOSED — an
+        //    actor with no role cannot override.
+        if (!canOverrideRate(actor?.role)) {
+          throw err(
+            'Your role cannot override the quoted daily rate',
+            'RATE_OVERRIDE_FORBIDDEN',
+            403
+          );
+        }
+        // 3. Value: finite and strictly positive. 0, negative and NaN are all
+        //    rejected — a free or negative rental is not a discount.
+        const parsed = Number(data.dailyRateOverride);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          throw err(
+            'dailyRateOverride must be a number greater than 0',
+            'RATE_OVERRIDE_INVALID',
+            400
+          );
+        }
+        // 4. Reason: REQUIRED, no cap on the discount itself (owner decision).
+        const reason = String(data.rateOverrideReason ?? '').trim();
+        if (!reason) {
+          throw err(
+            'rateOverrideReason is required when overriding the daily rate',
+            'RATE_OVERRIDE_REASON_REQUIRED',
+            400
+          );
+        }
+        overrideRate = round2(parsed);
+        overrideReason = reason;
+      }
+
       const previewOut = await service.preview(
         { pickupLocationId, returnLocationId, vehicleTypeId, pickupAt, returnAt },
         scope
@@ -223,6 +363,49 @@ export function createQuotesService(deps = {}) {
 
       const createdAt = now();
       const expiresAt = new Date(createdAt.getTime() + ttlHours() * 3600 * 1000);
+
+      // The money block that actually gets stored. Non-override path: the
+      // engine's row, byte-for-byte, exactly as before. Override path: the
+      // engine recomputing ITSELF from the new per-day rate (percentage fees
+      // move with the new subtotal; taxes follow the same location tax rate).
+      let moneyBlock = {
+        dailyRate: row.dailyRate,
+        subtotal: row.subtotal,
+        fees: row.fees,
+        taxes: row.taxes,
+        total: row.total,
+        pricingSource: row.pricingSource,
+        revenuePricingApplied: row.revenuePricingApplied
+      };
+      let overrideColumns = {};
+      if (overrideRate !== null) {
+        const engine = await getEngine();
+        const recomputed = await engine.recomputeRentalQuoteMoney({
+          tenantId: scope.tenantId,
+          locationId: pickupLocationId,
+          days: row.days,
+          dailyRate: overrideRate
+        });
+        moneyBlock = {
+          dailyRate: recomputed.dailyRate,
+          subtotal: recomputed.subtotal,
+          fees: recomputed.fees,
+          taxes: recomputed.taxes,
+          total: recomputed.total,
+          pricingSource: MANUAL_OVERRIDE_PRICING_SOURCE,
+          // The price on this quote is no longer what the revenue engine
+          // produced, so claiming otherwise would mis-report it. The engine's
+          // original flag survives inside engineSnapshotJson.
+          revenuePricingApplied: false
+        };
+        overrideColumns = {
+          rateOverrideOriginalDaily: row.dailyRate,
+          rateOverrideReason: overrideReason,
+          rateOverrideByUserId: actor?.userId || null,
+          rateOverrideAt: createdAt
+        };
+      }
+
       const base = {
         tenantId: scope.tenantId,
         customerId: data.customerId || null,
@@ -235,17 +418,14 @@ export function createQuotesService(deps = {}) {
         pickupAt: previewOut.pickupAt,
         returnAt: previewOut.returnAt,
         days: row.days,
-        dailyRate: row.dailyRate,
-        subtotal: row.subtotal,
-        fees: row.fees,
-        taxes: row.taxes,
-        total: row.total,
+        ...moneyBlock,
         currency: 'USD',
-        pricingSource: row.pricingSource,
-        revenuePricingApplied: row.revenuePricingApplied,
+        // ALWAYS the ENGINE's row, never the overridden numbers — this is what
+        // makes the pre-override price recoverable forever.
         engineSnapshotJson: JSON.stringify(row),
+        ...overrideColumns,
         expiresAt,
-        source: data.source === 'VOZIA' || data.source === 'PORTAL' ? data.source : 'STAFF',
+        source,
         createdByUserId: actor?.userId || null,
         author: (data.author || '').trim() || null,
         ticketId: (data.ticketId || '').trim() || null
@@ -258,6 +438,7 @@ export function createQuotesService(deps = {}) {
           const created = await db.quote.create({
             data: { ...base, quoteNumber: quoteNumberCandidate(count, attempt) }
           });
+          if (overrideRate !== null) await auditRateOverride({ created, row, overrideRate, overrideReason, scope, actor });
           return withVehicleTypeNames(created);
         } catch (e) {
           if (e?.code !== 'P2002' || attempt === 4) throw e;
