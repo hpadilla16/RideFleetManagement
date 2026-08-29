@@ -200,7 +200,7 @@ jobs:
     # WHY ITS OWN JOB. Every case in this suite is money a customer is charged:
     # atomicity of the charge-sheet rewrite, the 409 on a double-tapped Submit,
     # which tax rate an OTA booking pays, and what a PERCENTAGE insurance plan
-    # prices against. All 20 of them ran NOWHERE until 2026-08-18 — the script is
+    # prices against. All 21 of them ran NOWHERE until 2026-08-18 — the script is
     # deliberately out of the `npm test` chain (npm-test-chain.test.mjs KNOWN_OUT,
     # "DB-backed (embedded-postgres)", so the chain stays runnable on a laptop
     # with no Postgres), and nothing in this workflow invoked it. Two branches'

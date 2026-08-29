@@ -425,17 +425,39 @@ describe('the submission it is meant to apply still applies', () => {
   });
 
   it('a sealed contract keeps the decline signature already printed on it', async () => {
-    // Both halves of the fence, against a real row.
+    // ONE HALF OF THE FENCE PER FIXTURE, AND THAT IS THE POINT.
     //
-    // `agreementSealed` is the caller's preflight verdict. The `tcSignedAt:
-    // null` WHERE is the backstop for the gap between that preflight and BEGIN,
-    // where the contract can still be signed — so the second call passes
-    // agreementSealed:false, the verdict a racing request would have carried,
-    // and the database is left to refuse it.
+    // An earlier version of this case ran both iterations with tcSignedAt SET.
+    // That read as "both halves against a real row" and was not: the
+    // `WHERE tcSignedAt: null` half satisfied every assertion on its own, so
+    // `agreementSealed` was never exercised at all. Deleting the parameter
+    // outright left this suite green — the wire this merge existed to save
+    // could be cut back out in silence, and insuranceVerdict would quietly go
+    // back to being a dead local. Each fixture now puts the OTHER half out of
+    // reach, so each one can only pass if its own half works:
+    //
+    //   verdict — tcSignedAt NULL, agreementSealed TRUE. The WHERE matches,
+    //     so only the parameter can refuse the write. This row is NOT a
+    //     contrivance: insurance-selection-gate.js computes
+    //     `signed = !!agreement.tcSignedAt || !!session?.tcCompletedAt`, so a
+    //     checkout session that completed the T&C leaves the agreement's own
+    //     column null while the preflight verdict is already sealed. Here
+    //     agreementSealed is the ONLY thing between a re-submitted
+    //     pre-check-in and the signature printed on the contract.
+    //
+    //   race — tcSignedAt SET, agreementSealed FALSE. The verdict says go
+    //     ahead, so only the database can refuse: the contract got signed in
+    //     the gap between the preflight and BEGIN, which is the gap the WHERE
+    //     exists for.
+    //
+    // Neutralise either half and exactly one of these two goes red.
     const signature = `data:image/png;base64,${'A'.repeat(400)}`;
     const original = `data:image/png;base64,${'B'.repeat(400)}`;
 
-    for (const [label, sealed] of [['verdict', true], ['race', false]]) {
+    for (const [label, sealed, tcSignedAt] of [
+      ['verdict', true, null],
+      ['race', false, new Date()],
+    ]) {
       const reservation = await makeReservation({
         charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
       });
@@ -451,8 +473,8 @@ describe('the submission it is meant to apply still applies', () => {
           returnAt: reservation.returnAt,
           customerFirstName: 'Ana',
           customerLastName: 'P',
-          // Signed at the counter, carrying the addendum's own signature.
-          tcSignedAt: new Date(),
+          // Already carrying the addendum's own signature either way.
+          tcSignedAt,
           declinedInsurance: true,
           declinedInsuranceSignatureDataUrl: original,
           declinedInsuranceSignedAt: signedAt,
@@ -473,7 +495,8 @@ describe('the submission it is meant to apply still applies', () => {
       });
       assert.equal(ag.declinedInsurance, true, `${label}: the flag is still written`);
       assert.equal(ag.declinedInsuranceSignatureDataUrl, original,
-        `${label}: the signature printed on the signed contract must survive`);
+        `${label}: the signature printed on the sealed contract must survive; `
+        + `only the ${label === 'verdict' ? 'agreementSealed parameter' : 'tcSignedAt WHERE'} can refuse this write`);
       assert.equal(Number(ag.declinedInsuranceSignedAt), Number(signedAt),
         `${label}: the acknowledgement must not be re-dated to after the signing`);
     }

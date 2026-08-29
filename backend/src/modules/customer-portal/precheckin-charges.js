@@ -190,7 +190,7 @@ export function insuranceBaseFrom(charges) {
  * purpose — see the note about the zero below.
  *
  * A STORED ZERO IS A RATE, NOT A MISSING VALUE. The snapshot column is nullable
- * (schema.prisma:2823), so "unset" already has its own representation, and
+ * (schema.prisma:2945), so "unset" already has its own representation, and
  * car-sharing.service.js:253 stores a literal 0 for a trip it does not tax — on
  * a reservation whose pickup location DOES have a rate. Falling back on falsy
  * would quietly start taxing those trips, and would let the location beat the
@@ -342,9 +342,20 @@ export async function applyPrecheckinCharges({
   insurancePlans = [],
   discount = null,
   completedAt = new Date(),
-  // Set by the caller from the insurance preflight's verdict: true when
-  // the rental agreement is already signed. Gates the decline-signature
+  // Set by the caller from the insurance preflight's verdict: true when the
+  // rental agreement is already sealed — and note that is
+  // `agreement.tcSignedAt || session.tcCompletedAt`, so it can be true while
+  // the agreement's own column is still null, which is precisely the state the
+  // `tcSignedAt: null` WHERE below cannot see. Gates the decline-signature
   // columns only; the declinedInsurance flag itself is always written.
+  //
+  // THIS MODULE WRITES declinedInsurance AND NEVER CALLS THE GATE ITSELF.
+  // It is gated entirely by its ONE caller, POST /customer-info/:token, which
+  // runs assertInsuranceSelectionEditable() as a preflight and passes the
+  // verdict down here. A SECOND caller would be ungated, and silently so: the
+  // ratchet in declined-insurance-and-sign-url.test.mjs matches on the NAME of
+  // the column, and this file is already in its inventory, so it would keep
+  // passing. Any new call site must run the preflight first.
   agreementSealed = false,
   auditMetadata = {}
 }) {
