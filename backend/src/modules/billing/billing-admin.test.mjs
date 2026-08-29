@@ -724,6 +724,16 @@ test('the detail payload carries what restore will put the tenant back to', asyn
 
   const out = await getTenantBillingDetail('tenant_1', w.deps);
   assert.equal(out.tenant.billingPreviousStatus, 'DEMO');
+  // THE RESOLVED ANSWER, asserted end to end. The panel renders THIS field, not
+  // the raw one, and the four frontend cases feed it to a mock payload by hand —
+  // so without this line nothing checks that the server emits it at all.
+  // Deleting the field from getTenantBillingDetail, or pinning it to 'ACTIVE',
+  // left the whole billing suite green: the restore dialog would promise
+  // "returns this tenant to Active — their booking site comes back on" for a
+  // DEMO tenant while the write correctly restored DEMO. A dialog promising one
+  // outcome while the write performs another is the exact drift the field exists
+  // to prevent.
+  assert.equal(out.tenant.restoresToStatus, 'DEMO');
 });
 
 test('the detail payload reports a missing previous status as null, not as ACTIVE', async () => {
@@ -735,6 +745,10 @@ test('the detail payload reports a missing previous status as null, not as ACTIV
 
   const out = await getTenantBillingDetail('tenant_1', w.deps);
   assert.equal(out.tenant.billingPreviousStatus, null);
+  // The two fields DISAGREE here, which is the point of carrying both: nothing
+  // was recorded (null), and the resolved answer is still the ACTIVE fallback.
+  // Asserting only the raw field would let the resolved one be anything at all.
+  assert.equal(out.tenant.restoresToStatus, 'ACTIVE');
 });
 
 test('the detail renders the stored charge description, never a recomputation', async () => {

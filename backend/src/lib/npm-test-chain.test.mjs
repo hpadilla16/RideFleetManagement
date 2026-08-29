@@ -123,10 +123,25 @@ const CI_GATED = {
 
 function ciWorkflowRunLines() {
   const yml = readFileSync(new URL('../../../.github/workflows/beta-ci.yml', import.meta.url), 'utf8');
-  // Every `run:` body in the file, joined. Deliberately not a YAML parse: the
-  // question is only "does this command line invoke the script", and adding a
-  // yaml dependency to a guard is how guards stop being cheap to keep.
-  return yml;
+  // Deliberately not a YAML parse: the question is only "does a command line in
+  // this file invoke the script", and adding a yaml dependency to a guard is how
+  // guards stop being cheap to keep.
+  //
+  // BUT COMMENT LINES ARE STRIPPED FIRST, because without that this guard reads
+  // the whole file and a suite MENTIONED in a comment counts as a suite that
+  // RUNS. That is not hypothetical: the money-path step now carries a comment
+  // block naming these very suites, and it only failed to fool this check
+  // because it happens to write them without the `npm run` prefix. The next
+  // person to write `npm run test:x` inside a comment while deleting it from the
+  // run line would get a GREEN ratchet over a suite CI never executes — which is
+  // exactly the darkness this guard exists to end.
+  //
+  // Full-line comments only. A trailing `#` inside a run: body is shell, not
+  // YAML, and stripping from there would cut a real command short.
+  return yml
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
 }
 
 test('CI-gated suites are in beta-ci.yml, not only in `npm test`', () => {

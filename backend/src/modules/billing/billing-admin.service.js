@@ -324,6 +324,14 @@ const SEVERITY_ORDER = [
  *     `billingSuspendedAt` while leaving the tenant off, and restore refuses a
  *     suspension billing did not set — so that combination is the one state
  *     this screen could never undo again.
+ *
+ *     NOT REACHABLE TODAY, and worth saying so rather than implying a live
+ *     scenario: `suspendTenantAccess` throws `already suspended` when
+ *     `tenant.status === 'SUSPENDED'`, and it records `tenant.status` in that
+ *     same call — so no writer can put 'SUSPENDED' in this column. The backfill
+ *     independently refuses it (`UPPER(src.prev) <> 'SUSPENDED'`). This branch
+ *     is defence against a hand-written row and against that guard being
+ *     loosened later, not a case anyone can produce from the UI now.
  *   - anything else -> its NORMALISED form ('demo' comes back as 'DEMO').
  *
  * THE FALLBACK IS ALWAYS 'ACTIVE', WHICH IS EXACTLY TODAY'S BEHAVIOUR, because
@@ -349,14 +357,23 @@ const SEVERITY_ORDER = [
  * WRAPPED, never called bare: an unreadable recorded value degrades this to the
  * old hardcoded behaviour instead of turning a working restore into a 500.
  *
- * THE `typeof` GUARD IS LOAD-BEARING, not belt-and-braces. `normalizeTenantStatus`
- * reaches its argument through `String(value)`, under which `['DEMO']`
- * stringifies to 'DEMO' and sails through the allowlist. Prisma types this
- * column `String?`, so the DB cannot hand us an array today — but this function
- * is EXPORTED on the `billingAdmin` surface and is called with whatever a caller
- * has, and a function whose entire purpose is to fail closed should not depend
- * on someone else's type checking to do it. Honouring a shape suspend never
- * writes is honouring a value nobody recorded.
+ * THE `typeof` GUARD IS NARROW, AND WORTH BEING HONEST ABOUT. For almost every
+ * non-string it changes NOTHING: null and undefined already hit
+ * `normalizeTenantStatus`'s own fallback, and numbers, booleans, `{}` and `[]`
+ * already stringify to something outside the vocabulary and are caught by the
+ * try/catch below. All of those land on ACTIVE with or without it.
+ *
+ * It bites on exactly one shape — a non-string whose `String(value)` IS a
+ * vocabulary word, which in practice means `['DEMO']` or an object with a
+ * custom `toString`. `normalizeTenantStatus` reaches its argument through
+ * `String(value)`, so those sail through the allowlist and would restore a
+ * tenant to DEMO on the strength of a value nobody recorded. (Measured, not
+ * assumed: those two are the only inputs whose answer the guard changes.)
+ *
+ * Prisma types this column `String?`, so the DB cannot hand us either one today.
+ * Kept anyway because the function is EXPORTED on the `billingAdmin` surface and
+ * is called with whatever a caller has, and because it is one line standing
+ * between a JSON-shaped value and a status write. Cheap, narrow, and it stays.
  *
  * ONE DELIBERATE REGRESSION AGAINST THE VERBATIM VERSION: a recorded '' used to
  * come back as '' (unpublished) and now falls to ACTIVE (published), because
