@@ -116,8 +116,15 @@ async function main() {
     },
   });
 
+  // Every row here owes money (the query says balance > 0), so a marker line
+  // is NOT a reason to skip — it means a previous run credited the STORED
+  // balance and the recompute exposed drift between that number and what the
+  // charge lines actually sum to (found live 2026-08-29: five agreements,
+  // $83.40, one of which went UP). Those get a top-up credit for the honest
+  // remainder. Fully written-off agreements are at zero and never make the
+  // query at all, which is what keeps a re-run from double-crediting.
   const targets = agreements.filter((a) => a.charges.length === 0);
-  const already = agreements.length - targets.length;
+  const topUps = agreements.filter((a) => a.charges.length > 0);
 
   console.log(`[writeoff] tenant=${tenant.name}`);
   console.log(`[writeoff] mode=${APPLY ? 'APPLY' : 'DRY-RUN'} days>${DAYS} cutoff=${cutoff.toISOString().slice(0, 10)}`);
@@ -133,10 +140,14 @@ async function main() {
   for (const [status, v] of byStatus) console.log(`[writeoff]   ${status}: ${v.n} agreements, ${money(v.amount)}`);
   const total = targets.reduce((s, a) => s + Number(a.balance || 0), 0);
   console.log(`[writeoff] TOTAL to credit: ${targets.length} agreements, ${money(total)}`);
-  if (already) console.log(`[writeoff] already written off on a previous run: ${already}`);
+  if (topUps.length) {
+    const residue = topUps.reduce((s, a) => s + Number(a.balance || 0), 0);
+    console.log(`[writeoff] residue from a previous run (stored-vs-lines drift), to top up: ${topUps.length} agreements, ${money(residue)}`);
+  }
 
-  const queue = LIMIT ? targets.slice(0, LIMIT) : targets;
-  if (LIMIT) console.log(`[writeoff] --limit ${LIMIT}: processing ${queue.length} of ${targets.length}`);
+  const all = [...targets, ...topUps];
+  const queue = LIMIT ? all.slice(0, LIMIT) : all;
+  if (LIMIT) console.log(`[writeoff] --limit ${LIMIT}: processing ${queue.length} of ${all.length}`);
 
   if (!APPLY) {
     console.log('[writeoff] dry run — nothing written. Re-run with --apply to write.');
@@ -151,27 +162,39 @@ async function main() {
   let failed = 0;
   let credited = 0;
   for (const a of queue) {
-    const amount = -Number(a.balance);
     try {
-      await reservationPricingService.addManualCharge(
-        a.reservationId,
-        { name: MARKER, amount },
-        { reason: REASON, actorUserId: actor.id },
-        { tenantId: tenant.id },
-      );
-      // Read the balance back rather than assuming. If the recompute did not
-      // land on zero, that agreement needs a human, and silence would hide it.
-      const after = await prisma.rentalAgreement.findUnique({
-        where: { id: a.id }, select: { balance: true },
-      });
-      const left = Number(after?.balance ?? NaN);
+      // Up to two credits per agreement. The first credits the stored balance;
+      // when stored and line-sum disagree, the recompute lands somewhere other
+      // than zero, and the second credits that honest remainder. Two, not a
+      // loop: each pass credits exactly what the recompute itself reported, so
+      // a third pass could only mean the recompute is not idempotent — which
+      // is a bug to look at, not to spend down with credits.
+      let wrote = 0;
+      let left = Number(a.balance);
+      for (const label of [MARKER, `${MARKER} — remainder after recompute`]) {
+        // A top-up row enters the queue already carrying a marker line; its
+        // first pass IS the remainder pass in all but name.
+        await reservationPricingService.addManualCharge(
+          a.reservationId,
+          { name: label, amount: -left },
+          { reason: REASON, actorUserId: actor.id },
+          { tenantId: tenant.id },
+        );
+        wrote += left;
+        const after = await prisma.rentalAgreement.findUnique({
+          where: { id: a.id }, select: { balance: true },
+        });
+        left = Number(after?.balance ?? NaN);
+        if (left === 0) break;
+        if (!Number.isFinite(left) || left < 0) break; // negative = overshoot; report, never "fix"
+      }
       if (left !== 0) {
         failed += 1;
-        console.error(`[writeoff] NOT ZERO after credit: ${a.agreementNumber || a.id} balance=${money(left)}`);
+        console.error(`[writeoff] NOT ZERO after crediting ${money(wrote)}: ${a.agreementNumber || a.id} balance=${money(left)} — needs a human`);
         continue;
       }
       done += 1;
-      credited += Number(a.balance);
+      credited += wrote;
     } catch (e) {
       failed += 1;
       console.error(`[writeoff] FAILED ${a.agreementNumber || a.id}: ${e?.message || e}`);
@@ -179,7 +202,9 @@ async function main() {
   }
 
   console.log(`[writeoff] done=${done} credited=${money(credited)} failed=${failed}`);
-  if (failed) console.log('[writeoff] re-running is safe: the ones that succeeded are skipped by their marker line.');
+  if (failed) {
+    console.log('[writeoff] the failures above are still owed. Re-running retries them (anything at zero left the population), but twice-failed agreements need a person, not a third run.');
+  }
 }
 
 main()
