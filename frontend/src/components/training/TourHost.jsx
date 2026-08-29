@@ -52,6 +52,9 @@ const SETTLE_MS = 700;
  * took over.
  */
 const SHOWCASE_STEP_MS = 9000;
+// How long the showcase lingers on a parked stretch before skipping it —
+// long enough to read the bar once, far shorter than a step.
+const SHOWCASE_PARKED_SKIP_MS = 2500;
 /** How often a parked tour checks whether its record is finally open. */
 const WAIT_POLL_MS = 700;
 const CARD_WIDTH = 340;
@@ -355,6 +358,24 @@ export function TourHost({ viewer }) {
     const timer = setTimeout(goNext, SHOWCASE_STEP_MS);
     return () => clearTimeout(timer);
   }, [autoPlay, step?.anchor, goNext]);
+
+  // A PARKED stretch would strand the showcase forever: parking waits for a
+  // person to open a record, and in attract mode there is no person. Found
+  // live 2026-08-29 — the parking fix (d459928d) taught record-scoped modules
+  // to wait instead of dying, which onboarding needed, but the showcase then
+  // sat on the "open any reservation" bar until the end of time (currentStep
+  // returns null while waiting, so the step-autoplay above never arms). While
+  // autoplay is driving, a parked run is skipped the way a person would press
+  // "Skip this part" — after a beat, so the bar reads as a transition rather
+  // than a flicker. Any manual move has already set autoPlay=false, so a real
+  // person's parked tour still waits for their record.
+  useEffect(() => {
+    if (!autoPlay || !state?.waiting) return undefined;
+    if (typeof window !== 'undefined'
+      && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return undefined;
+    const timer = setTimeout(skipParked, SHOWCASE_PARKED_SKIP_MS);
+    return () => clearTimeout(timer);
+  }, [autoPlay, state?.waiting, skipParked]);
 
   // ── keyboard: Escape closes, arrows drive the showcase ────────────────────
   useEffect(() => {
