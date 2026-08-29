@@ -11,6 +11,14 @@
  * authoritative list; add new sale paths HERE, not inline.
  */
 
+/**
+ * SECOND CONSUMER, and it is not a commission one (2026-08-17):
+ * precheckin-charges.js#insuranceBaseFrom uses this list as the EXCLUSION set
+ * for the PERCENTAGE insurance base. Adding a source here therefore takes it
+ * out of that base and LOWERS live insurance quotes on a customer-facing route,
+ * as well as changing commissions. Both are money; neither is obvious from the
+ * name.
+ */
 export const SERVICE_CHARGE_SOURCES = [
   'ADDITIONAL_SERVICE',            // staff UI / additional-services module
   'SERVICE',                       // booking engine (website)

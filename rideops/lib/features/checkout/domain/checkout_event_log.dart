@@ -36,6 +36,7 @@ class CheckoutEvent {
     this.kind,
     this.from,
     this.to,
+    this.field,
     this.actorUserId,
     this.at,
     this.kiosk = false,
@@ -48,6 +49,14 @@ class CheckoutEvent {
   final String? kind;
   final String? from;
   final String? to;
+
+  /// Columna sellada por un evento `SIDE_EFFECT` (`tcCompletedAt`,
+  /// `paymentCompletedAt`, …). `stampSideEffect`
+  /// (checkout-session.service.js:1042-1044) escribe `{kind, field, at}` y
+  /// **nada más**: sin `actorUserId` y sin `metadata`. Por eso un sello que
+  /// cae solo puede fecharse, jamás atribuirse a alguien — y el copy de 21C
+  /// dice "otra superficie", que es exactamente lo que se sabe.
+  final String? field;
   final String? actorUserId;
   final DateTime? at;
 
@@ -81,6 +90,7 @@ class CheckoutEvent {
       kind: map['kind'] as String?,
       from: map['from'] as String?,
       to: map['to'] as String?,
+      field: map['field'] as String?,
       actorUserId: map['actorUserId'] as String?,
       at: DateTime.tryParse(map['at'] as String? ?? ''),
       kiosk: metadata is Map && metadata['kiosk'] == true,
@@ -126,4 +136,62 @@ CheckoutEvent? lastEventOfKind(List<CheckoutEvent> events, String kind) {
     if (events[i].kind == kind) return events[i];
   }
   return null;
+}
+
+/// Último `SIDE_EFFECT` que selló [field] (`tcCompletedAt`, `paymentCompletedAt`,
+/// `inspectionCompletedAt`, `customerSignedAt`).
+///
+/// Sirve para UNA cosa: fechar el sello que acaba de caer sin que el paso se
+/// moviera (frame 21C, "hace 12 s"). No sirve para atribuirlo — el backend no
+/// escribe actor en esos eventos, y decir "el mostrador" sin saberlo sería
+/// inventar un culpable en el registro de una entrega.
+CheckoutEvent? lastSideEffectFor(List<CheckoutEvent> events, String field) {
+  for (var i = events.length - 1; i >= 0; i--) {
+    final e = events[i];
+    if (e.kind == 'SIDE_EFFECT' && e.field == field) return e;
+  }
+  return null;
+}
+
+/// Cómo se pausó la sesión, según `abandonedReason`.
+///
+/// El campo es TEXT libre y lo escriben cosas muy distintas: la app manda
+/// `agent_paused` (checkout-session.service.js:1298 lo pone también como
+/// default), el barrido nocturno escribe
+/// `auto_flagged_stalled_at_<paso>` (scheduler:71), y una superficie puede
+/// meter texto humano ("el cliente fue por su tarjeta").
+///
+/// Existe porque mostrarlo crudo produce «Motivo: "agent_paused"» en la cara
+/// del agente, que es exactamente el pecado que la lámina prohíbe: un token de
+/// máquina no se le enseña a nadie en el patio.
+enum CheckoutAbandonKind {
+  /// Alguien la pausó a mano desde una superficie de staff.
+  agentPaused,
+
+  /// El barrido la marcó por llevar >4 h detenida. **NADIE la pausó** — y esa
+  /// diferencia importa: decir "otro agente la pausó" sería inventar un
+  /// culpable de algo que hizo un cron.
+  autoStalled,
+
+  /// Texto escrito por una persona: se muestra tal cual, entre comillas.
+  freeText,
+
+  /// Un token de máquina que esta versión no conoce. Se SUPRIME: sin
+  /// traducción, enseñarlo es ruido con forma de dato.
+  unknownToken,
+}
+
+/// Snake_case de máquina: minúsculas, dígitos y guiones bajos, sin espacios.
+/// Un motivo humano casi siempre lleva espacios o mayúsculas.
+final _machineToken = RegExp(r'^[a-z0-9]+(?:_[a-z0-9]+)*$');
+
+CheckoutAbandonKind classifyAbandonReason(String? raw) {
+  final value = raw?.trim() ?? '';
+  if (value.isEmpty) return CheckoutAbandonKind.unknownToken;
+  if (value == 'agent_paused') return CheckoutAbandonKind.agentPaused;
+  if (value.startsWith('auto_flagged_stalled_at_')) {
+    return CheckoutAbandonKind.autoStalled;
+  }
+  if (_machineToken.hasMatch(value)) return CheckoutAbandonKind.unknownToken;
+  return CheckoutAbandonKind.freeText;
 }

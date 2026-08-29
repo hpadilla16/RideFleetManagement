@@ -111,6 +111,46 @@ enum ReservationWorkflowMode {
   }
 }
 
+/// Superficie que late sobre una `CheckoutSession` (`CheckoutSurface`,
+/// schema.prisma:5451-5456 y `CHECKOUT_SURFACES` de
+/// checkout-presence.service.js:36). Cuatro superficies operan la MISMA fila.
+///
+/// El espejo aterriza aquí en M2-H6 porque es la historia en la que RideOps
+/// deja de ser solo lector y **empieza a latir**: [rideops] es el valor que
+/// la app ENVÍA en `POST /:id/presence`, y un typo ahí es un 400
+/// `UNKNOWN_SURFACE` que solo se ve en el patio. Con el espejo, el parity
+/// check truena en CI si el backend agrega una quinta superficie.
+///
+/// La LECTURA sigue tolerando lo desconocido (`tryParse` → null ⇒ etiqueta
+/// genérica): una superficie nueva del servidor no puede romper el chip de
+/// una app vieja.
+// mirrors: CheckoutSurface
+enum CheckoutSurface {
+  rideops,
+  counter,
+  kiosk,
+  customer;
+
+  String get wire => _wire(name);
+
+  static CheckoutSurface? tryParse(String? raw) {
+    if (raw == null) return null;
+    for (final v in CheckoutSurface.values) {
+      if (v.wire == raw) return v;
+    }
+    return null;
+  }
+
+  /// ¿Detrás de esta superficie hay una PERSONA con nombre, o un mueble?
+  ///
+  /// No es cosmética: el kiosco del lobby y el teléfono del cliente laten con
+  /// `actorUserId` null **a propósito** (el aparato no tiene usuario), y el
+  /// backend resuelve su nombre con la etiqueta genérica de la superficie. A
+  /// "Diego Torres · mostrador" se le grita desde la otra punta del patio; al
+  /// kiosco hay que caminarle al lobby.
+  bool get isDevice => this == kiosk || this == customer;
+}
+
 // mirrors: InspectionPhase
 enum InspectionPhase {
   checkout,

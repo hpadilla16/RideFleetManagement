@@ -337,17 +337,23 @@ function ShuttleMonitorInner({ me, token, logout }) {
           ) : null}
         </div>
 
-        <div style={{ display: 'flex', gap: 2, marginTop: 12, borderBottom: '1px solid var(--border, #e9e4f4)' }} role="tablist">
+        {/* data-tour anchors sit on the TAB BUTTONS, which render whatever tab
+            is open — anchoring to a tab's CONTENT would put the tour on an
+            element that only exists once that tab is selected, and a required
+            anchor that is absent stops the tour dead. `shuttle-zones-tab` is
+            the one exception and is marked optional in the curriculum, because
+            non-admins genuinely do not have it. */}
+        <div style={{ display: 'flex', gap: 2, marginTop: 12, borderBottom: '1px solid var(--border, #e9e4f4)' }} role="tablist" data-tour="shuttle-console">
           <button type="button" role="tab" aria-selected={tab === 'monitor'} style={tabBtnStyle(tab === 'monitor')} onClick={() => setTab('monitor')}>
             {t('shuttleMonitor.tabMonitor', 'Live map')}
           </button>
           {/* Driver shifts share the monitor's staff gate — every monitor
               viewer can mint/revoke/notify (server enforces scope). */}
-          <button type="button" role="tab" aria-selected={tab === 'drivers'} style={tabBtnStyle(tab === 'drivers')} onClick={() => setTab('drivers')}>
+          <button type="button" role="tab" aria-selected={tab === 'drivers'} style={tabBtnStyle(tab === 'drivers')} onClick={() => setTab('drivers')} data-tour="shuttle-drivers-tab">
             {t('shuttleMonitor.tabDrivers', 'Driver shifts')}
           </button>
           {canManageZones ? (
-            <button type="button" role="tab" aria-selected={tab === 'zones'} style={tabBtnStyle(tab === 'zones')} onClick={() => setTab('zones')}>
+            <button type="button" role="tab" aria-selected={tab === 'zones'} style={tabBtnStyle(tab === 'zones')} onClick={() => setTab('zones')} data-tour="shuttle-zones-tab">
               {t('shuttleMonitor.tabZones', 'Zones & Routes')}
             </button>
           ) : null}

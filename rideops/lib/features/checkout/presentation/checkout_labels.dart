@@ -7,6 +7,7 @@ library;
 
 import '../../../core/api/enums.dart';
 import '../../../core/l10n/app_localizations.dart';
+import '../domain/checkout_changes.dart';
 import '../domain/checkout_event_log.dart';
 import '../domain/checkout_step_catalog.dart';
 
@@ -50,9 +51,11 @@ String guardLabel(AppLocalizations l10n, CheckoutEntryGuard guard) =>
       CheckoutEntryGuard.signature => l10n.coGuardSignature,
     };
 
-/// Superficie de una presencia. El enum `CheckoutSurface` NO está espejado en
-/// Dart todavía (aterriza con M2-H6), así que esto compara el wire crudo y
-/// cae a "otra superficie" ante cualquier valor nuevo.
+/// Superficie de una presencia. `CheckoutSurface` YA está espejado en
+/// `enums.dart` (aterrizó en M2-H6, con su marcador `// mirrors:`), pero esto
+/// sigue comparando el WIRE CRUDO a propósito: la etiqueta tiene que existir
+/// también para una superficie que esta versión no conoce, y ahí el enum
+/// devuelve null. Cae a "otra superficie" y la app sigue viva.
 String surfaceLabel(AppLocalizations l10n, String surface) =>
     switch (surface) {
       'KIOSK' => l10n.coSurfaceKiosk,
@@ -87,3 +90,51 @@ String doneLabel(
     CheckoutActorKind.otherSurface => l10n.coStepDone(time),
   };
 }
+
+/// Iniciales del avatar de una PERSONA (hoja 20B). Máximo dos, de las dos
+/// primeras palabras: "Diego Torres" → "DT".
+///
+/// Deliberadamente **no** se usa para aparatos — un círculo con "KI" vestiría
+/// al kiosco de persona, que es justo la confusión que 20B existe para evitar.
+/// Nombre vacío ⇒ un punto: mejor un marcador neutro que una letra inventada.
+String initialsOf(String name) {
+  final words = name
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((w) => w.isNotEmpty)
+      .toList();
+  if (words.isEmpty) return '·';
+  final buf = StringBuffer();
+  for (final w in words.take(2)) {
+    // `characters` no hace falta aquí: se toma el primer code unit y se sube
+    // a mayúscula; un nombre que empiece con emoji cae en un glifo raro, no
+    // en un crash.
+    buf.write(w[0].toUpperCase());
+  }
+  return buf.toString();
+}
+
+/// Etiqueta del sello que cayó (banner 21C y hoja 21B). Reusa las mismas
+/// cuatro cadenas que la tarjeta "Lo que el servidor ya tiene": un sello es
+/// un sello, se llame donde se llame.
+String stampLabel(AppLocalizations l10n, CheckoutStampKind kind) =>
+    switch (kind) {
+      CheckoutStampKind.tc => l10n.coStampTc,
+      CheckoutStampKind.payment => l10n.coStampPayment,
+      CheckoutStampKind.inspection => l10n.coStampInspection,
+      CheckoutStampKind.signature => l10n.coStampSignature,
+    };
+
+/// Línea de motivo de la pausa, o null cuando no hay nada honesto que decir.
+///
+/// `agent_paused` devuelve null a propósito: el banner de encima ya dice
+/// "otro agente pausó esta salida", así que repetir el token no agrega nada y
+/// mostrarlo crudo sería enseñar máquina. Un token desconocido también se
+/// suprime — sin traducción es ruido con forma de dato.
+String? abandonReasonLine(AppLocalizations l10n, String? raw) =>
+    switch (classifyAbandonReason(raw)) {
+      CheckoutAbandonKind.freeText => l10n.coJoinPausedReason(raw!.trim()),
+      CheckoutAbandonKind.autoStalled => l10n.coJoinPausedAutoStalled,
+      CheckoutAbandonKind.agentPaused => null,
+      CheckoutAbandonKind.unknownToken => null,
+    };

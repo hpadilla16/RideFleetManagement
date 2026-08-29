@@ -33,6 +33,11 @@ const KNOWN_OUT = {
   'test:module-access-audit': 'DB-backed (.db.test.mjs)',
   'test:customer-inspection': 'DB-backed',
   'test:customer-docs-backfill': 'DB-backed (storage backfill script)',
+  // Boots embedded-postgres: the pre-check-in atomicity + double-tap cases can
+  // only be shown against a real transaction, and the chain must stay runnable
+  // on a laptop with no Postgres. Run it with `npm run test:precheckin-charges`
+  // after `npm install --no-save embedded-postgres`.
+  'test:precheckin-charges': 'DB-backed (embedded-postgres)',
   // Boots its own throwaway Postgres, but only after `npm install --no-save
   // embedded-postgres` — which `npm ci` does not provide. In the chain it
   // would wedge `npm test` for everyone on a fresh checkout. Its DB-free half
@@ -188,7 +193,6 @@ const UNRUN_FILES_BASELINE = new Set([
   'src/modules/reports/fleet-status.report.test.mjs',
   'src/modules/reports/rental-status.report.test.mjs',
   'src/modules/reports/reservations-by-day.report.test.mjs',
-  'src/modules/reports/unpaid-balance.report.test.mjs',
   'src/modules/reports/upcoming-vehicle-sales.report.test.mjs',
   'src/modules/reports/utilization.report.test.mjs',
   'src/modules/reservations/list-page-date-filter.test.mjs',

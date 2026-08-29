@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RideOps · Addendum M2-H6 — 21C-bis: dónde cae el aviso de avance ajeno cuando el paso SÍ tiene dock</title>
+<style>
+/* ============================================================
+   TOKENS — IDÉNTICOS a m2-h6-reconciliacion.html / m2-tanda-a-b-c.
+   Este addendum no inventa lenguaje: reusa el aprobado y solo
+   MUEVE una pieza. Todo lo nuevo va declarado y medido.
+   ============================================================ */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-200:#d9c9ff; --p-300:#c0a8ff;
+  --p-400:#9f79ff; --p-500:#7f4ff0; --p-600:#6a35e0; --p-700:#5a26c9;
+  --p-800:#45189e; --p-900:#2e1071;
+  --brand:#8752FE;
+  --brand-a08:rgba(135,82,254,.08); --brand-a12:rgba(135,82,254,.12);
+  --brand-a16:rgba(135,82,254,.16); --brand-a20:rgba(135,82,254,.20);
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+  --focus:#0b63d6; --focus-halo:rgba(11,99,214,.22);
+  --tonal:#f6f2ff;
+  --sh-b1:0 1px 0 rgba(255,255,255,.85) inset,0 2px 6px -2px rgba(69,24,158,.14),0 10px 24px -10px rgba(135,82,254,.22);
+  --sh-float:0 6px 16px -6px rgba(23,18,43,.18),0 24px 48px -18px rgba(69,24,158,.30);
+  --r-xl:24px; --r-2xl:28px;
+  --bd-lite:1px solid rgba(135,82,254,.14);
+  --sh-3:0 1px 3px rgba(24,16,54,.06),0 14px 30px -10px rgba(38,20,90,.14),0 44px 80px -28px rgba(38,20,90,.22);
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+  background:var(--n-100);color:var(--n-900);font-size:14px;line-height:1.5}
+h1,h2,h3{margin:0;letter-spacing:.005em}
+a{text-decoration:none;color:inherit}
+.tnum{font-variant-numeric:tabular-nums}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.92em;background:var(--n-50);
+  border:1px solid var(--n-200);border-radius:5px;padding:0 4px}
+
+/* ---------- chrome del documento ---------- */
+.doc-head{max-width:1720px;margin:0 auto;padding:26px 24px 10px}
+.doc-head h1{font-size:24px;font-weight:850}
+.doc-head h1 .v2{display:inline-flex;align-items:center;margin-left:10px;padding:3px 12px;border-radius:999px;
+  background:linear-gradient(135deg,var(--p-600),var(--p-800));color:#fff;font-size:13px;font-weight:800;vertical-align:middle}
+.doc-head p{margin:8px 0 0;color:var(--n-700);max-width:1060px}
+.meta-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.mchip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 11px;
+  border-radius:8px;background:var(--p-50);border:1px solid var(--brand-a20);
+  color:var(--p-800);font-size:12.5px;font-weight:700}
+.mchip.warn{background:var(--warn-bg);border-color:var(--warn-bd);color:var(--warn-tx)}
+.mchip.ok{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+.mchip.info{background:var(--info-bg);border-color:var(--info-bd);color:#0a4c9e}
+section.blk{max-width:1720px;margin:0 auto;padding:26px 24px 8px}
+.blk-head{margin-bottom:16px}
+.blk-head .eyebrow{color:var(--p-700);font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.blk-head h2{font-size:20px;font-weight:800;margin-top:2px}
+.blk-head p{color:var(--n-700);margin:6px 0 0;max-width:1040px}
+.state-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.schip{display:inline-flex;align-items:center;gap:6px;min-height:24px;padding:3px 9px;border-radius:6px;
+  font-size:12px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+  background:var(--n-50);border:1px solid var(--n-200);color:var(--n-700)}
+.schip i{width:6px;height:6px;border-radius:50%;background:currentColor;font-style:normal}
+.frames{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;padding-bottom:26px}
+figure{margin:0}
+figcaption{font-size:13px;font-weight:800;color:var(--n-800);margin:0 0 8px 6px;max-width:440px}
+figcaption small{display:block;font-weight:600;color:var(--n-600);font-size:12px}
+.tag{display:inline-flex;align-items:center;min-height:20px;padding:1px 8px;border-radius:6px;
+  font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;margin-right:6px;vertical-align:2px}
+.tag.cont{background:var(--ok-bg);border:1px solid var(--ok-bd);color:var(--ok-tx)}
+.tag.prop{background:var(--info-bg);border:1px solid var(--info-bd);color:#0a4c9e}
+.tag.corr{background:var(--warn-bg);border:1px solid var(--warn-bd);color:var(--warn-tx)}
+.tag.hoy{background:var(--n-100);border:1px solid var(--n-300);color:var(--n-700)}
+
+/* ---------- notas ---------- */
+.notes{flex:1 1 340px;max-width:460px;background:var(--n-0);border:var(--bd-lite);
+  border-radius:20px;padding:16px 18px;box-shadow:var(--sh-b1)}
+.notes h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+.note{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--n-100);font-size:13px;color:var(--n-700)}
+.note:last-child{border-bottom:0}
+.note b{color:var(--n-900)}
+.m{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;
+  border-radius:50%;background:var(--p-600);color:#fff;font-size:12px;font-weight:800;line-height:1}
+.m.inframe{position:absolute;z-index:12;box-shadow:0 0 0 2px #fff}
+.m.gris{background:var(--n-600)}
+.drop{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--n-50);border:1px solid var(--n-300);
+  border-left:4px solid var(--n-500);font-size:12.5px;color:var(--n-800)}
+/* `> b` y no `b`: el título del panel es block+versalitas, pero un <b> DENTRO
+   de un <li> tiene que seguir siendo énfasis en línea. */
+.drop > b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:6px}
+.drop li b{color:var(--n-900)}
+.drop ul{margin:0;padding-left:16px}
+.drop li{margin:5px 0}
+.decision{margin-top:14px;padding:14px 16px;border-radius:16px;background:var(--ok-bg);
+  border:1.5px dashed var(--ok-bd);color:var(--ok-tx);font-size:13px}
+.decision > b{display:block;font-size:12.5px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px}
+.decision ul{margin:6px 0 0;padding-left:18px}
+.decision li{margin:3px 0}
+.contrast{margin-top:12px;padding:12px 14px;border-radius:14px;background:var(--n-50);
+  border:1px solid var(--n-200);font-size:12.5px;color:var(--n-700)}
+.contrast > b{display:block;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--n-600);margin-bottom:6px}
+.contrast li b{color:var(--n-900)}
+.contrast ul{margin:0;padding-left:16px}
+.contrast li{margin:3px 0}
+
+/* ---------- tabla de copy es/en ---------- */
+.copy{flex:1 1 480px;max-width:760px;background:var(--n-0);border:var(--bd-lite);border-radius:20px;
+  padding:16px 18px;box-shadow:var(--sh-b1)}
+.copy h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+table.ct{width:100%;border-collapse:collapse;font-size:12.5px}
+table.ct th{text-align:left;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--n-600);
+  border-bottom:1.5px solid var(--n-200);padding:6px 8px 6px 0}
+table.ct td{border-bottom:1px solid var(--n-100);padding:7px 8px 7px 0;vertical-align:top;color:var(--n-800)}
+table.ct td.k{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--p-800);white-space:nowrap}
+table.ct td.fr{font-weight:850;color:var(--n-900);white-space:nowrap}
+table.ct td.st{white-space:nowrap;font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ok-tx)}
+
+.card{flex:1 1 420px;max-width:760px;background:var(--n-0);border:var(--bd-lite);border-radius:20px;
+  padding:16px 18px;box-shadow:var(--sh-b1)}
+.card h3{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--n-600);margin-bottom:10px}
+.card ul{margin:0;padding-left:18px;font-size:13px;color:var(--n-700)}
+.card li{margin:6px 0}
+.card b{color:var(--n-900)}
+pre.code{margin:10px 0 0;padding:12px 14px;border-radius:14px;background:var(--n-900);color:#efeaff;
+  font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.55;overflow-x:auto}
+pre.code .cm{color:#9f92c4}
+pre.code .kw{color:#c0a8ff;font-weight:700}
+pre.code .add{color:#8ce0bd;font-weight:700}
+pre.code .del{color:#f6a8a2;font-weight:700}
+
+/* ============================================================
+   FRAME DE TELÉFONO — 360 dp de SUPERFICIE REAL, idéntico a
+   m2-h6-reconciliacion.html (378 px con marco de 9). Altura de
+   pantalla FIJA a 740 px, la misma que declara la lámina, para
+   que las dos columnas se puedan medir una contra otra.
+   ============================================================ */
+.phone{position:relative;width:378px;border:9px solid var(--n-900);border-radius:40px;
+  overflow:hidden;background:var(--n-50);box-shadow:var(--sh-3)}
+.statusbar{position:relative;z-index:4;display:flex;justify-content:space-between;align-items:center;height:32px;
+  padding:0 18px;font-size:11.5px;font-weight:700;color:var(--n-700);background:var(--n-0)}
+.scr{position:relative;display:flex;flex-direction:column;height:740px;padding:0;background:var(--n-50)}
+
+/* ---------- cromo del wizard ---------- */
+.wizbar{position:relative;z-index:4;display:flex;align-items:center;gap:8px;padding:7px 8px;
+  background:rgba(255,255,255,.98);border-bottom:1px solid var(--n-200);flex:0 0 auto}
+.icobtn{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+  color:var(--n-800);flex:0 0 auto;border:1.5px solid var(--n-300);background:var(--n-0)}
+.wizbar .tt{flex:1;min-width:0}
+.wizbar .tt b{display:block;font-size:15.5px;font-weight:850;color:var(--n-900);line-height:1.15}
+.wizbar .tt span{font-size:12px;font-weight:650;color:var(--n-700)}
+.pausebtn{min-height:48px;display:inline-flex;align-items:center;gap:6px;padding:0 11px;border-radius:14px;
+  border:1.5px solid var(--n-300);background:var(--n-0);font-size:13px;font-weight:800;color:var(--n-800);flex:0 0 auto}
+.sesshead{background:var(--tonal);border-bottom:1px solid var(--n-200);flex:0 0 auto}
+.sesshead.mini{display:flex;align-items:center;gap:8px;padding:7px 11px}
+.sesshead.mini .who{display:flex;align-items:center;gap:7px;min-width:0;flex:1;font-size:13.5px;font-weight:800;color:var(--n-900)}
+.presence{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:2px 8px;border-radius:12px;
+  background:var(--p-50);border:1px solid var(--brand-a20);color:var(--p-800);font-size:11.5px;font-weight:750;gap:5px}
+.presence .pv{width:19px;height:19px;border-radius:50%;background:var(--p-200);color:var(--p-900);
+  font-size:9px;font-weight:850;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+.presence .lv{width:7px;height:7px;border-radius:50%;background:var(--ok);animation:led 2.4s ease-in-out infinite;flex:0 0 auto}
+@keyframes led{0%,100%{opacity:1}50%{opacity:.35}}
+.stepline{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 13px;background:var(--n-0);
+  border-top:1px solid var(--n-200);border-bottom:1px solid var(--n-200);font-size:13.5px;font-weight:750;color:var(--n-800);flex:0 0 auto}
+.stepline .ix{font-variant-numeric:tabular-nums;font-weight:850;color:var(--p-800);background:var(--p-50);
+  border:1px solid var(--brand-a20);border-radius:8px;padding:2px 7px;font-size:12px;flex:0 0 auto}
+.stepline.nb{border-bottom:0}
+
+/* ---------- viewport de scroll REAL (lo que queda con el teclado abierto) ---------- */
+.vp{flex:1 1 auto;min-height:0;overflow:hidden;position:relative;
+  padding:13px 12px 0;display:flex;flex-direction:column;gap:0;background:var(--n-50)}
+.vp::after{content:"";position:absolute;left:0;right:0;bottom:0;height:16px;pointer-events:none;
+  background:linear-gradient(180deg,rgba(247,245,253,0),var(--n-50))}
+.f-label{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--n-600);margin:0 0 6px}
+.inp{position:relative;display:flex;align-items:center;min-height:54px;border:1.5px solid var(--n-300);
+  border-radius:16px;background:var(--n-0);padding:0 14px;font-size:15.5px;color:var(--n-900);font-weight:600;
+  box-shadow:0 1px 0 rgba(255,255,255,.8) inset,0 1px 2px rgba(24,16,54,.04);flex:0 0 auto}
+.inp.focus{border-color:var(--focus);box-shadow:0 0 0 4px var(--focus-halo)}
+.inp .unit{margin-left:auto;font-size:13px;font-weight:750;color:var(--n-600)}
+.inp.big{min-height:60px;font-size:24px;font-weight:850;font-variant-numeric:tabular-nums}
+.caret{display:inline-block;width:2px;height:24px;background:var(--focus);margin-left:2px;animation:led 1.1s steps(1) infinite}
+.lastread{font-size:12.5px;font-weight:700;color:var(--n-700);margin-top:8px}
+
+/* ---------- comunes: banner ---------- */
+.banner{display:flex;gap:9px;align-items:flex-start;padding:11px 12px;border-radius:14px;
+  font-size:13px;font-weight:600;line-height:1.45;border:1px solid}
+.banner svg{flex:0 0 auto;margin-top:1px}
+.banner .ba{display:inline-flex;align-items:center;min-height:44px;font-weight:850;text-decoration:underline}
+.b-info{background:var(--info-bg);border-color:var(--info-bd);color:var(--n-800)}
+.b-info .ba{color:var(--p-700)}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;min-height:56px;border-radius:18px;
+  font-size:16px;font-weight:800;letter-spacing:.01em}
+.btn-primary{background:linear-gradient(180deg,#7442e8,var(--p-600));color:#fff;
+  box-shadow:0 1px 0 rgba(255,255,255,.28) inset,0 4px 10px -4px rgba(69,24,158,.35),0 14px 28px -12px rgba(135,82,254,.45)}
+
+/* ============================================================
+   EL PIE — las dos variantes, medidas.
+   ============================================================ */
+
+/* PROPUESTA 21C-bis: UN solo pie. WizardDock gana una ranura
+   `leading`; el aviso entra ahí, DEBAJO del único filete y con el
+   inset de 14 px que ya trae el paso. Sin franja full-bleed, sin
+   filete propio y sin sombra hacia arriba. */
+.dock{flex:0 0 auto;background:var(--n-0);border-top:1px solid var(--n-200);
+  padding:12px 14px 14px;display:flex;flex-direction:column;position:relative;z-index:3}
+.dock .gap9{height:9px;flex:0 0 auto}
+
+/* HOY (lo construido): el dock del paso + una SEGUNDA franja debajo,
+   full-bleed, con su propio filete arriba y sombra hacia arriba. */
+.dock.hoy{padding:12px 14px 14px}
+.anchored-strip{flex:0 0 auto;background:var(--n-0);border-top:1px solid var(--n-200);
+  padding:8px 12px 12px;position:relative;z-index:4;
+  box-shadow:0 -6px 16px rgba(23,18,43,.18)}
+
+/* ---------- teclado numérico de Android (odómetro) ---------- */
+.kbd{flex:0 0 auto;height:248px;background:#dfdce6;border-top:1px solid var(--n-400);
+  padding:8px 6px 14px;display:grid;grid-template-rows:repeat(4,52px);gap:6px;position:relative;z-index:5}
+.kbd .row{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.kbd .key{background:var(--n-0);border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-size:21px;font-weight:650;color:var(--n-900);box-shadow:0 1px 0 rgba(24,16,54,.22)}
+.kbd .key.fn{background:#cfcbd9;font-size:16px;font-weight:800;color:var(--n-800)}
+
+/* ============================================================
+   CAPA DE MEDICIÓN — las alturas reales, sobre el frame.
+   ============================================================ */
+/* DENTRO del frame solo van marcas que NO tapan texto: la banda del
+   pulgar (tinte translúcido) y el contorno del CTA. Todas las cifras
+   viven FUERA, en la canaleta, y se explican en la leyenda de abajo. */
+.meas{position:absolute;inset:0;z-index:20;pointer-events:none}
+.band{position:absolute;left:0;right:0}
+.band.thumb{background:rgba(15,138,104,.10);border-top:1.5px dashed var(--ok);border-bottom:1.5px dashed var(--ok)}
+.ctahl{position:absolute;left:14px;right:14px;border-radius:18px;
+  outline:2.5px solid var(--warn);outline-offset:3px}
+.ctahl.ok{outline-color:var(--ok)}
+
+/* canaleta de medición, FUERA del teléfono. El origen (top:41px) es el
+   borde de 9 px del marco + los 32 px de la barra de estado: así la
+   canaleta comparte el sistema de coordenadas de `.scr`. */
+.fwrap{position:relative;width:523px}
+.gut{position:absolute;left:378px;top:41px;width:145px;height:740px;pointer-events:none}
+.tk{position:absolute;border-left:2px solid var(--p-700)}
+.tk::before,.tk::after{content:"";position:absolute;left:-1px;width:10px;height:2px;background:var(--p-700)}
+.tk::before{top:0} .tk::after{bottom:0}
+.tk span{position:absolute;left:13px;top:50%;transform:translateY(-50%);
+  font-size:10.5px;font-weight:850;color:var(--p-800);background:var(--n-0);
+  border:1px solid var(--brand-a20);border-radius:6px;padding:1px 5px;white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+.tk.a{left:6px} .tk.b{left:72px}
+.tk.gris{border-left-color:var(--n-600)}
+.tk.gris::before,.tk.gris::after{background:var(--n-600)}
+.tk.gris span{color:var(--n-800);border-color:var(--n-300)}
+.tk.warnt{border-left-color:var(--warn)}
+.tk.warnt::before,.tk.warnt::after{background:var(--warn)}
+.tk.warnt span{color:var(--warn-tx);border-color:var(--warn-bd);background:var(--warn-bg)}
+.tk.okt{border-left-color:var(--ok)}
+.tk.okt::before,.tk.okt::after{background:var(--ok)}
+.tk.okt span{color:var(--ok-tx);border-color:var(--ok-bd);background:var(--ok-bg)}
+
+/* leyenda bajo cada frame */
+.fmeta{margin-top:10px;max-width:523px;font-size:12px;color:var(--n-700);
+  background:var(--n-0);border:1px solid var(--n-200);border-radius:14px;padding:10px 12px}
+.fmeta b{color:var(--n-900)}
+.fmeta .row{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid var(--n-100)}
+.fmeta .row:last-child{border-bottom:0}
+.fmeta .row i{font-style:normal;font-variant-numeric:tabular-nums;font-weight:800;color:var(--n-900)}
+.fmeta .row i.good{color:var(--ok-tx)} .fmeta .row i.bad{color:var(--warn-tx)}
+.foot{max-width:1720px;margin:0 auto;padding:10px 24px 40px;color:var(--n-600);font-size:12.5px}
+</style>
+</head>
+<body>
+
+<div class="doc-head">
+  <h1>Addendum M2-H6 · 21C-bis<span class="v2">1 marco</span></h1>
+  <p>No es una lámina nueva. Es <b>un marco</b> que resuelve una ambigüedad de la lámina aprobada
+  <code>m2-h6-reconciliacion.html</code>: el marco <b>21C</b> dibuja el aviso de avance ajeno como <code>.anchored</code>
+  —flotando sobre el contenido— <b>en un frame que no tiene dock</b>. Al construirlo apareció la pregunta que la lámina
+  no contesta: <b>¿dónde cae el aviso cuando el paso SÍ tiene dock?</b> Aquí van las dos respuestas, a tamaño real y con
+  las alturas medidas.</p>
+  <div class="meta-chips">
+    <span class="mchip">360 dp de superficie real · 378 px con marco</span>
+    <span class="mchip">Superficie de app 740 px (la que declara la lámina, bajo la barra de estado)</span>
+    <span class="mchip">Teclado numérico abierto · 248 px</span>
+    <span class="mchip ok">Cero claves l10n nuevas</span>
+    <span class="mchip ok">Cero cambios de contrato / backend</span>
+    <span class="mchip info">Tema Ride · <b>#8752FE</b></span>
+    <span class="mchip warn">Requiere aprobación de Hector antes de tocar código</span>
+  </div>
+  <p style="font-size:12.5px;color:var(--n-600)">
+    <b style="color:var(--n-800)">Cómo leer los frames:</b> la banda verde translúcida es la franja que el pulgar
+    alcanza <b>sin recolocar la mano</b> con el teclado abierto — los 152 px justo encima del teclado. El contorno
+    alrededor del botón marca el CTA primario: <b style="color:var(--ok-tx)">verde</b> si cae dentro de la banda,
+    <b style="color:var(--warn-tx)">ámbar</b> si se sale. Las cifras van en la canaleta de la derecha, <b>fuera</b> del
+    teléfono, para no tapar ni un pixel de pantalla; la leyenda bajo cada frame las desglosa.</p>
+</div>
+
+<section class="blk">
+  <div class="blk-head">
+    <div class="eyebrow">21C-bis · la ambigüedad, resuelta</div>
+    <h2>Inspección · métricas, con el odómetro a medio escribir y un avance ajeno entrando</h2>
+    <p>El escenario es el propio de 21C: el agente teclea el odómetro, el teclado está abierto, y llega el aviso de que
+    el mostrador registró el pago. La diferencia entre las dos columnas es <b>una sola</b>: dónde cae ese aviso respecto
+    del dock del paso. Todo lo demás —el cromo, el campo, el foco, lo tecleado, el texto del aviso— es idéntico.</p>
+    <div class="state-chips">
+      <span class="schip"><i></i>Avance ajeno (no bloqueante)</span>
+      <span class="schip"><i></i>Teclado abierto</span>
+      <span class="schip"><i></i>Una sola mano</span>
+      <span class="schip"><i></i>Sol directo · guantes</span>
+    </div>
+  </div>
+
+  <div class="frames">
+
+    <!-- ============================ 21C-bis · PROPUESTA ============================ -->
+    <figure>
+      <figcaption><span class="tag prop">Propuesta</span>21C-bis — El aviso, <b>encima</b> del dock y dentro de él
+        <small>un solo pie · CTA primario en la franja del pulgar · el aviso vuelve a ser tarjeta con inset</small></figcaption>
+      <div class="fwrap">
+      <div class="phone">
+        <div class="statusbar"><span>10:44</span><span>LTE · 71 %</span></div>
+        <div class="scr">
+
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Inspección · R-2481</b><span>Corolla 2023 · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+
+          <div class="sesshead mini"><span class="who">Laura Méndez · U-112</span>
+            <span class="presence"><span class="lv"></span><span class="pv">DT</span>Diego Torres · mostrador</span></div>
+
+          <div class="stepline nb"><span class="ix">Paso 7 de 10</span>Inspección · métricas</div>
+
+          <!-- viewport de scroll: 103 px reales -->
+          <div class="vp">
+            <div class="f-label">Odómetro</div>
+            <div class="inp big focus"><span class="tnum">41 3</span><span class="caret"></span><span class="unit">mi</span>
+              <span class="m inframe" style="margin:-46px 0 0 296px">1</span></div>
+            <div class="lastread">Última lectura registrada: 41 250 mi</div>
+          </div>
+
+          <!-- EL PIE, uno solo: aviso (ranura leading) + CTA -->
+          <div class="dock">
+            <div class="banner b-info">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8v.5"/></svg>
+              <span>El mostrador registró el <b>pago</b> hace 12 s. Sigue capturando: <b>este paso no cambió</b>.
+                <br><span class="ba">Ver qué cambió</span><span class="m" style="margin-left:6px">3</span></span></div>
+            <div class="gap9"></div>
+            <div class="btn btn-primary">Continuar a firma<span class="m" style="margin-left:2px">2</span></div>
+          </div>
+
+          <div class="kbd">
+            <div class="row"><div class="key">1</div><div class="key">2</div><div class="key">3</div></div>
+            <div class="row"><div class="key">4</div><div class="key">5</div><div class="key">6</div></div>
+            <div class="row"><div class="key">7</div><div class="key">8</div><div class="key">9</div></div>
+            <div class="row"><div class="key fn">,</div><div class="key">0</div><div class="key fn">&#9003;</div></div>
+          </div>
+
+          <!-- dentro del frame: solo lo que no tapa texto -->
+          <div class="meas">
+            <div class="band thumb" style="top:340px;height:152px"></div>
+            <div class="ctahl ok" style="top:422px;height:56px"></div>
+          </div>
+
+        </div>
+      </div>
+      <!-- fuera del frame: las cifras -->
+      <div class="gut">
+        <div class="tk a" style="top:159px;height:135px"><span>scroll 135</span></div>
+        <div class="tk a" style="top:294px;height:198px"><span>pie 198</span></div>
+        <div class="tk b okt" style="top:340px;height:152px"><span>pulgar</span></div>
+        <div class="tk b okt" style="top:422px;height:70px"><span>CTA 14</span></div>
+      </div>
+      </div>
+      <div class="fmeta">
+        <div class="row"><span>Cromo del wizard (wizbar + sesión + paso)</span><i>159 px</i></div>
+        <div class="row"><span>Viewport de scroll visible</span><i class="good">135 px</i></div>
+        <div class="row"><span>Pie completo (1 filete + 12 + aviso 106 + 9 + CTA 56 + 14)</span><i>198 px</i></div>
+        <div class="row"><span>Teclado numérico</span><i>248 px</i></div>
+        <div class="row"><span><b>Borde inferior del CTA respecto al teclado</b></span><i class="good">14 px</i></div>
+        <div class="row"><span>Filetes horizontales en el pie</span><i class="good">1</i></div>
+      </div>
+    </figure>
+
+    <!-- ============================ HOY · LO CONSTRUIDO ============================ -->
+    <figure>
+      <figcaption><span class="tag hoy">Hoy</span>Lo construido — El aviso, <b>debajo</b> del dock
+        <small><code>checkout_wizard_screen.dart:333</code> · franja full-bleed con filete arriba y sombra hacia arriba</small></figcaption>
+      <div class="fwrap">
+      <div class="phone">
+        <div class="statusbar"><span>10:44</span><span>LTE · 71 %</span></div>
+        <div class="scr">
+
+          <div class="wizbar">
+            <div class="icobtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M15 5l-7 7 7 7"/></svg></div>
+            <div class="tt"><b>Inspección · R-2481</b><span>Corolla 2023 · U-112</span></div>
+            <div class="pausebtn">Pausar</div>
+          </div>
+
+          <div class="sesshead mini"><span class="who">Laura Méndez · U-112</span>
+            <span class="presence"><span class="lv"></span><span class="pv">DT</span>Diego Torres · mostrador</span></div>
+
+          <div class="stepline nb"><span class="ix">Paso 7 de 10</span>Inspección · métricas</div>
+
+          <!-- viewport de scroll: 91 px reales -->
+          <div class="vp">
+            <div class="f-label">Odómetro</div>
+            <div class="inp big focus"><span class="tnum">41 3</span><span class="caret"></span><span class="unit">mi</span></div>
+            <div class="lastread">Última lectura registrada: 41 250 mi</div>
+          </div>
+
+          <!-- el dock del paso, solo -->
+          <div class="dock hoy">
+            <div class="btn btn-primary">Continuar a firma</div>
+          </div>
+
+          <!-- y una SEGUNDA franja debajo: el aviso -->
+          <div class="anchored-strip">
+            <div class="banner b-info">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--info)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8v.5"/></svg>
+              <span>El mostrador registró el <b>pago</b> hace 12 s. Sigue capturando: <b>este paso no cambió</b>.
+                <br><span class="ba">Ver qué cambió</span><span class="m gris" style="margin-left:6px">4</span></span></div>
+          </div>
+
+          <div class="kbd">
+            <div class="row"><div class="key">1</div><div class="key">2</div><div class="key">3</div></div>
+            <div class="row"><div class="key">4</div><div class="key">5</div><div class="key">6</div></div>
+            <div class="row"><div class="key">7</div><div class="key">8</div><div class="key">9</div></div>
+            <div class="row"><div class="key fn">,</div><div class="key">0</div><div class="key fn">&#9003;</div></div>
+          </div>
+
+          <div class="meas">
+            <div class="band thumb" style="top:340px;height:152px"></div>
+            <div class="ctahl" style="top:295px;height:56px"></div>
+          </div>
+
+        </div>
+      </div>
+      <div class="gut">
+        <div class="tk a gris" style="top:159px;height:123px"><span>scroll 123</span></div>
+        <div class="tk a gris" style="top:282px;height:83px"><span>dock 83</span></div>
+        <div class="tk a gris" style="top:365px;height:127px"><span>aviso 127</span></div>
+        <div class="tk b okt" style="top:340px;height:152px"><span>pulgar</span></div>
+        <div class="tk b warnt" style="top:295px;height:197px"><span>CTA 141</span></div>
+      </div>
+      </div>
+      <div class="fmeta">
+        <div class="row"><span>Cromo del wizard (idéntico)</span><i>159 px</i></div>
+        <div class="row"><span>Viewport de scroll visible</span><i class="bad">123 px</i></div>
+        <div class="row"><span>Dock del paso (1 filete + 12 + CTA 56 + 14)</span><i>83 px</i></div>
+        <div class="row"><span>Franja del aviso (1 filete + 8 + aviso 106 + 12)</span><i>127 px</i></div>
+        <div class="row"><span>Teclado numérico</span><i>248 px</i></div>
+        <div class="row"><span><b>Borde inferior del CTA respecto al teclado</b></span><i class="bad">141 px</i></div>
+        <div class="row"><span>Filetes horizontales en el pie</span><i class="bad">2 + sombra hacia arriba</i></div>
+      </div>
+    </figure>
+
+    <!-- ============================ NOTAS ============================ -->
+    <div class="notes">
+      <h3>Notas · la decisión y lo que se descarta</h3>
+
+      <div class="note"><span class="m">1</span><span><b>Lo tecleado sigue intocable</b> (nota 12 de la lámina, sin
+        cambios). El «41 3» a medio escribir, el foco y el teclado son los mismos en las dos columnas. Este addendum
+        <b>no</b> discute eso: discute únicamente la posición del aviso. El banner sigue siendo estrictamente aditivo y
+        el cuerpo del paso no se reconstruye.</span></div>
+
+      <div class="note"><span class="m">2</span><span><b>La decisión: el aviso sube DENTRO del pie, no encima de él.</b>
+        No es un overlay. Entra como una ranura <code>leading</code> del <code>WizardDock</code>, en flujo, antes del
+        primario y con el mismo gap de 9 px que ya usan <code>secondary</code> y <code>why</code>. Resultado medido: el
+        CTA primario <b>baja 127 px</b> y queda a 14 px del borde del teclado, dentro de la franja que el pulgar alcanza
+        sin recolocar la mano. Diseño estimó «unos 110 px»; el número real, con la geometría del dock construido, es
+        <b>127</b>.</span></div>
+
+      <div class="note"><span class="m">3</span><span><b>Vuelve a ser tarjeta flotante con el inset del
+        <code>.banner</code>.</b> Si el aviso está encima del CTA ya no necesita anunciarse como superficie propia:
+        hereda el filete del dock y el inset de 14 px que <code>inspection_step.dart</code> ya le pone al pie. Se van la
+        franja full-bleed, el segundo filete y la sombra hacia arriba. Un pie, un filete, una sombra.</span></div>
+
+      <div class="note"><span class="m gris">4</span><span><b>Por qué lo de hoy se lee como un segundo pie.</b>
+        <code>_anchoredNotice</code> dibuja un contenedor full-bleed <code>n-0</code> con
+        <code>Border(top: n-200)</code> y <code>BoxShadow(offset: 0,-6)</code>. Esas tres señales —borde a borde, filete
+        superior y sombra hacia arriba— son exactamente el vocabulario del dock. Con sol y guantes el agente ve <b>dos
+        pies</b> y el de abajo, el más alcanzable, no lleva la acción que necesita.</span></div>
+
+      <div class="note"><span class="m">5</span><span><b>El argumento no es «el CTA queda fuera de alcance»; es que la
+        prioridad está invertida.</b> Seamos exactos: hoy el CTA sigue siendo tocable. Lo que ocupa la franja más
+        alcanzable es un aviso <b>informativo</b> cuya única acción («Ver qué cambió») es <b>secundaria</b> y opcional
+        por diseño. El pulgar más cómodo debería caer sobre la acción que continúa el trabajo, no sobre la que abre una
+        hoja de consulta.</span></div>
+
+      <div class="note"><span class="m">6</span><span><b>Lo que este cambio NO arregla, dicho de frente.</b> El
+        apilamiento dock + aviso + teclado sobre el campo <b>existe en las dos columnas</b>: mover el aviso arriba
+        recupera 12 px de viewport (123 → 135), no 127. Y 12 px no salvan a nadie: en las dos columnas el campo del
+        odómetro entra justo y no sobra casi nada. Los 127 px son de <b>reubicación del CTA</b>, no de espacio
+        recuperado — que quede claro para no vender el cambio por lo que no es. Si lo que molesta es el campo
+        estrangulado, el arreglo es otro y va aparte: <b>colapsar el aviso a una línea mientras el teclado esté
+        abierto</b> (–44 px del enlace) y devolverle las dos líneas al cerrarse.
+        Queda como seguimiento declarado, fuera de este marco.</span></div>
+
+      <div class="note"><span class="m">7</span><span><b>El constructor contestó bien a la pregunta equivocada.</b> Su
+        objeción —«superponerlo taparía el CTA primario»— es <b>correcta</b> para un overlay. Pero el
+        <code>.anchored</code> de la lámina es <code>position:absolute</code> <i>solo porque ese frame no tiene dock
+        sobre el que apoyarse</i>: no hay nada debajo que sostener. La tercera opción nunca fue «flotar sobre el CTA»,
+        sino «estar en flujo, encima del CTA, fuera del scroll». Esa no tapa nada.</span></div>
+
+      <div class="note"><span class="m">8</span><span><b>Coherente con la nota 13 de la lámina, no en contra.</b> La
+        nota 13 dice «anclado al pie, no arriba», y el DoD añade «alcanzable con el pulgar en la mitad inferior». Las
+        dos columnas cumplen «anclado al pie». Este addendum solo desempata <b>dentro</b> del pie, y lo hace del lado
+        del DoD: el CTA a 14 px del teclado cumple mejor «alcanzable con el pulgar» que a 141 px.</span></div>
+
+      <div class="note"><span class="m">9</span><span><b>Sitio natural en código, ya existente.</b>
+        <code>wizard_dock.dart</code> se creó (review GD-SC-3) precisamente para que el pie del wizard se escribiera
+        <b>una vez</b>. Una ranura <code>leading</code> ahí es aditiva, opcional y la heredan los otros pies (9D, 10D)
+        sin tocarlos. La alternativa —que cada paso dibuje su propio aviso— sería la cuarta copia del hairline que ese
+        archivo existe para impedir.</span></div>
+
+      <div class="note"><span class="m">10</span><span><b>Contraste y targets, sin cambios.</b> Texto
+        <code>--n-800</code> sobre <code>--info-bg</code> = <b>12.48:1</b>, el azul <code>--info</code> reservado al
+        icono (la regla de la Tanda A). «Ver qué cambió» conserva sus 44 px de alto; el CTA, sus 56 px. Nada baja de los
+        mínimos aprobados: el marco solo reordena.</span></div>
+
+      <div class="drop">
+        <b>Descartado</b>
+        <ul>
+          <li><b>Overlay flotando sobre el dock</b> (la lectura literal de <code>.anchored</code>): tapa el CTA
+            primario. La objeción del constructor se sostiene y esta propuesta <b>no</b> la contradice.</li>
+          <li><b>El aviso debajo del dock</b> (lo construido hoy): dos pies, y la franja más alcanzable ocupada por
+            información en vez de por la acción.</li>
+          <li><b>El aviso a la cabeza del scroll</b>: ya descartado por las notas 12 y 13 — se lo lleva el scroll y
+            empuja hacia abajo el campo que se está escribiendo.</li>
+          <li><b>Toast / snackbar</b>: se va solo. Este aviso debe persistir hasta que el agente interactúe con el paso.</li>
+          <li><b>Modal</b>: descartado por la nota 14 — el paso que el agente estaba haciendo <b>sigue existiendo</b>,
+            así que es banner. La pantalla se reserva para 21D.</li>
+          <li><b>Cambiar el texto del aviso</b>: no se toca. La frase «este paso no cambió» es la que desarma la alarma
+            y ya está aprobada.</li>
+        </ul>
+      </div>
+
+      <div class="contrast">
+        <b>Seguimiento (fuera de este marco)</b>
+        <ul>
+          <li>Aviso a <b>una línea</b> mientras el teclado esté abierto: –44 px, viewport 135 → 179. Necesita su propio
+            marco y su propia decisión.</li>
+        </ul>
+      </div>
+
+      <div class="decision">
+        <b>Qué se pide aprobar</b>
+        <ul>
+          <li>El aviso de avance ajeno pasa a la <b>ranura <code>leading</code> del dock</b>: fuera del scroll, encima
+            del CTA, en flujo.</li>
+          <li>El contenedor deja de ser franja full-bleed con filete y sombra propios y vuelve a ser <b>tarjeta con el
+            inset del <code>.banner</code></b>.</li>
+          <li>Cuando el paso <b>no</b> tiene dock (el caso que dibuja 21C tal cual), el aviso sigue anclado al pie como
+            está en la lámina. Nada cambia ahí.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="blk">
+  <div class="blk-head">
+    <div class="eyebrow">Copy · sin claves nuevas</div>
+    <h2>Español e inglés</h2>
+    <p>Este marco <b>mueve</b> una pieza; no escribe una. Las tres claves que usa ya existen en la lámina aprobada, y
+    <code>coAdvancedSeeChanged</code> ya está además en <code>app_es.arb</code> / <code>app_en.arb</code>.</p>
+  </div>
+  <div class="frames">
+    <div class="copy">
+      <h3>Claves usadas por 21C-bis</h3>
+      <table class="ct">
+        <tr><th>Clave l10n</th><th>ES</th><th>EN</th><th>Estado</th></tr>
+        <tr><td class="k">coAdvancedElsewherePayment</td><td>El mostrador registró el pago</td><td>The counter recorded the payment</td><td class="st">Ya en la lámina</td></tr>
+        <tr><td class="k">coAdvancedElsewhere</td><td>{surfaceLine} hace {age}. Sigue capturando: este paso no cambió.</td><td>{surfaceLine} {age} ago. Keep capturing: this step did not change.</td><td class="st">Ya en la lámina</td></tr>
+        <tr><td class="k">coAdvancedSeeChanged</td><td>Ver qué cambió</td><td>See what changed</td><td class="st">Ya en el .arb</td></tr>
+        <tr><td class="k">inspContinueSignature</td><td>Continuar a firma</td><td>Continue to signature</td><td class="st">Ya en el .arb</td></tr>
+      </table>
+      <div class="contrast" style="margin-top:14px">
+        <b>Nota de longitud</b>
+        <ul>
+          <li>A 360 dp, con el inset del <code>.banner</code> (332 px de tarjeta), el cuerpo del aviso mide <b>2 líneas
+            en ES y 2 en EN</b>. Es la misma altura de 106 px en los dos idiomas, así que las medidas de este marco no
+            cambian al traducir.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Dónde cae en código (para el constructor, no para aprobar aquí)</h3>
+      <ul>
+        <li><b><code>wizard_dock.dart</code></b> — una ranura opcional <code>leading</code>, antes de
+          <code>primary</code>, con el gap de 9 px del resto. Es el único archivo que gana geometría.</li>
+        <li><b><code>checkout_wizard_screen.dart:396-408</code></b> — el <code>Container</code> full-bleed con
+          <code>Border(top:)</code> y <code>BoxShadow(0,-6)</code> desaparece; queda el <code>ForeignAdvanceBanner</code> pelado.</li>
+        <li><b><code>checkout_wizard_screen.dart:333</code></b> — <code>?_anchoredNotice(state)</code> deja de ser
+          hermano del cuerpo del paso y se pasa al paso, que lo entrega al dock.</li>
+        <li><b><code>inspection_step.dart:502-512</code></b> — el <code>Padding(14,0,14,14)</code> del
+          <code>_CaptureDock</code> ya da el inset; no hace falta inset nuevo.</li>
+        <li><b>Fallback</b>: si el paso no construye <code>WizardDock</code> (firma, por ejemplo, que devuelve
+          <code>SizedBox.shrink()</code>), el aviso vuelve al anclaje de la lámina. Un paso sin pie sigue siendo el caso
+          que 21C dibuja.</li>
+      </ul>
+      <pre class="code"><span class="cm">// wizard_dock.dart — ranura aditiva, opcional, sin tocar a nadie</span>
+ <span class="kw">class</span> WizardDock <span class="kw">extends</span> StatelessWidget {
+   <span class="kw">const</span> WizardDock({
+     <span class="kw">super</span>.key,
+<span class="add">+    this.leading,</span>
+     <span class="kw">required</span> <span class="kw">this</span>.primary,
+     <span class="kw">this</span>.secondary,
+     <span class="kw">this</span>.why,
+   });
+<span class="add">+</span>
+<span class="add">+  /// Aviso NO accionable que debe estar siempre visible sin tapar el</span>
+<span class="add">+  /// primario. Va ARRIBA del CTA, dentro del único filete del pie.</span>
+<span class="add">+  final Widget? leading;</span>
+ ...
+       child: Column(
+         children: [
+<span class="add">+          if (leading != null) ...[leading!, const SizedBox(height: 9)],</span>
+           primary,</pre>
+    </div>
+  </div>
+</section>
+
+<section class="blk">
+  <div class="blk-head">
+    <div class="eyebrow">DoD del addendum</div>
+    <h2>Qué tiene que seguir siendo cierto</h2>
+  </div>
+  <div class="frames">
+    <div class="card" style="max-width:1100px;flex:1 1 900px">
+      <ul>
+        <li><b>Superficie real 360 dp</b> (378 px con marco), superficie de app 740 px —bajo la barra de estado, como
+          declara la lámina— y teclado numérico 248 px: las mismas cifras en las dos columnas, por eso los 127 px son
+          comparables y no una impresión.</li>
+        <li><b>Targets sin tocar</b>: CTA 56 px, «Ver qué cambió» 44 px, todo lo demás igual que en la lámina.</li>
+        <li><b>Cero <code>BackdropFilter</code></b> en todo el wizard: placas opacas, como en las Tandas A–C.</li>
+        <li><b>Cero claves l10n nuevas y cero cambios de contrato</b>: la información y el texto son los aprobados; solo
+          cambia dónde se dibujan.</li>
+        <li><b>El cuerpo del paso sigue intocable</b>: el aviso no entra en el scroll, no reordena nada y no puede
+          borrar el odómetro a medio escribir (nota 12).</li>
+        <li><b>Un solo pie</b>: un filete, una sombra. Dos filetes horizontales seguidos en 24 px de alto son un bug
+          visual, no una jerarquía.</li>
+        <li><b>El caso sin dock no cambia</b>: 21C tal como está aprobado sigue siendo la respuesta cuando el paso no
+          tiene pie.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<div class="foot">
+  RideOps · Addendum a <code>ops-app-plan/mockups/m2-h6-reconciliacion.html</code> (marco 21C) · un solo marco, sin
+  recursos externos · tamaños reales · tema Ride <b>#8752FE</b>
+</div>
+
+</body>
+</html>

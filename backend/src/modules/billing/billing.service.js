@@ -41,6 +41,7 @@ import {
   revokeInvite,
   publicInviteView,
 } from './autopay-invites.service.js';
+import { sendEnrollInviteEmail } from './billing-invite-email.js';
 import {
   todayCalendarDate,
   addCalendarDays,
@@ -484,7 +485,86 @@ export async function issueEnrollInvite(input = {}, overrides = {}) {
     },
   });
 
-  return { subscription, invite, token, url, resent };
+  /**
+   * DELIVERY — Phase 7 (2026-08-28). The platform emails the link to the
+   * billing contact on the invite instead of the operator copying it out of a
+   * banner by hand.
+   *
+   * IT HAPPENS AFTER THE MINT AND IT CANNOT UNDO IT. `sendEnrollInviteEmail`
+   * never throws; a mailer outage comes back as `{ sent: false }` and the URL
+   * is still returned to the caller, which is the whole point. The invite is
+   * already stored hashed by now — letting a failed send propagate as an error
+   * would leave the operator with a live subscription row, a revoked
+   * predecessor, and a link that exists nowhere retrievable. The email is the
+   * least important thing on this path; the link is the artefact.
+   *
+   * The URL still comes back either way, and the banner still shows it. That
+   * is not belt-and-braces, it is the recovery path: the address is typed by
+   * hand at this moment, and a typo sends the link somewhere nobody will ever
+   * read it. Re-issuing (the resend above) corrects a typo the operator
+   * NOTICED; the visible URL is what covers the one they did not.
+   */
+  const emailResult = await sendEnrollInviteEmail({
+    to: email,
+    token,
+    url,
+    tokenPrefix: invite.tokenPrefix,
+    inviteId: invite.id,
+    tenantId: tenant.id,
+    companyName,
+    planName: offer.planName,
+    amount,
+    currency: offer.currency,
+    intervalUnit: offer.intervalUnit,
+    intervalLength: offer.intervalLength,
+    firstChargeDate: startDate,
+    expiresAt: invite.expiresAt,
+    issuedAt: now,
+    resent,
+  }, overrides);
+
+  // Delivery is an action on a billing relationship, so it is as traceable as
+  // minting one — including when it FAILED, which is the case a trail that only
+  // recorded successes would render invisible.
+  await d.recordAudit({
+    tenantId: tenant.id,
+    actorUserId: input.actorUserId ?? null,
+    actorEmail: input.actorEmail ?? null,
+    actorRole: input.actorRole ?? null,
+    action: AUDIT_ACTIONS.AUTOPAY_INVITE_EMAIL,
+    targetType: 'AutopayInvite',
+    targetId: invite.id,
+    outcome: emailResult.sent ? AUDIT_OUTCOME.SUCCESS : AUDIT_OUTCOME.FAILURE,
+    metadata: {
+      inviteId: invite.id,
+      tokenPrefix: invite.tokenPrefix,
+      mode: 'enroll',
+      subscriptionId: subscription.id,
+      // WHERE IT WENT. See the AUTOPAY_INVITE_EMAIL comment in audit.service.js
+      // for why this one address is in the metadata when the general rule says
+      // ids and amounts only.
+      recipient: email,
+      // Our own coarse code, never the mail provider's free text — that echoes
+      // the offending value back, and the offending value is the body, and the
+      // body has the link in it.
+      result: emailResult.reason,
+      // Both languages ship in one message; nothing on the tenant, the
+      // subscription or the invite says which one they read.
+      language: 'en+es',
+      resent,
+    },
+  });
+
+  return {
+    subscription,
+    invite,
+    token,
+    url,
+    resent,
+    emailed: !!emailResult.sent,
+    emailTo: email,
+    emailResult: emailResult.reason,
+  };
 }
 
 /**

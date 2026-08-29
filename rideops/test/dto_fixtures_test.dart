@@ -13,6 +13,8 @@ import 'package:rideops/core/api/dto/staff_location.dart';
 import 'package:rideops/core/api/enums.dart';
 import 'package:rideops/features/checkout/domain/checkout_presence.dart';
 
+import 'helpers/auth_test_helpers.dart';
+
 /// Los 6 DTOs calientes contra fixtures de JSON real (M0-5). Cada fixture
 /// está derivado del serializer del backend — ver test/fixtures/README.md.
 Map<String, dynamic> readFixture(String name) {
@@ -85,17 +87,37 @@ void main() {
     expect(pickPresenceChip(cs.presence, DateTime.now()), isNull);
   });
 
-  test('checkout_session_presence.json (P1 desplegado) → presence tipada', () {
+  test('checkout_session_presence.json (P1 desplegado) → presence tipada, con '
+      'el `actorUserId` que el serializer ya emite', () {
     final cs =
         CheckoutSessionDto.fromJson(readFixture('checkout_session_presence.json'));
-    expect(cs.presence, hasLength(2));
+    expect(cs.presence, hasLength(3));
     expect(cs.presence!.first.surface, 'KIOSK');
     expect(cs.presence!.first.displayName, 'María G.');
     expect(cs.presence!.first.lastSeenAt, isNotNull);
+    // El kiosco es un APARATO: late sin usuario a propósito. Ese null no es un
+    // hueco del serializer — es lo que distingue una persona de un mueble.
+    expect(cs.presence!.first.actorUserId, isNull);
+    expect(cs.presence![1].actorUserId, 'cmdusr002fixture0000000002');
     expect(cs.step, CheckoutStep.tcPending);
     // `stateVersion` (columna de P2) se lee para el FENCING de respuestas
-    // tardías; NO se envía como `expectedVersion` todavía (eso es H6).
+    // tardías; NO se envía como `expectedVersion` (STALE_VERSION quedó fuera
+    // del alcance de M2-H6).
     expect(cs.stateVersion, 3);
+  });
+
+  test('M2-H6 · el filtro de auto-supresión, contra el payload REAL: la fila '
+      'RIDEOPS del propio agente no se pinta', () {
+    final cs =
+        CheckoutSessionDto.fromJson(readFixture('checkout_session_presence.json'));
+    final now = DateTime.parse('2026-08-16T14:04:00.000Z');
+    // Sin `myUserId` (o contra un backend viejo sin el campo) el agente SE VE:
+    // ese es el defecto que el campo existe para cerrar.
+    expect(pickPresenceChip(cs.presence, now)!.entry.surface, 'RIDEOPS');
+    // Con él, la cabeza del chip pasa a ser el compañero de verdad.
+    final chip = pickPresenceChip(cs.presence, now, myUserId: kFixtureUserId);
+    expect(chip!.entry.surface, 'KIOSK');
+    expect(chip.others, 1, reason: 'el mostrador, no uno mismo');
   });
 
   test('presence con una superficie DESCONOCIDA no rompe el parseo', () {
@@ -106,7 +128,7 @@ void main() {
       'lastSeenAt': '2026-08-16T14:03:55.000Z',
     });
     final cs = CheckoutSessionDto.fromJson(raw);
-    expect(cs.presence, hasLength(3));
+    expect(cs.presence, hasLength(4));
     expect(cs.presence!.last.surface, 'SUPERFICIE_DEL_FUTURO');
   });
 

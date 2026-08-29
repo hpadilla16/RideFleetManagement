@@ -2371,4 +2371,310 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get coCheckStatusWhy =>
       'Con señal, una consulta dice en qué paso quedó y desde ahí se continúa.';
+
+  @override
+  String coPresenceChipSemantics(String line) {
+    return '$line: ver quién está en esta sesión';
+  }
+
+  @override
+  String get coPresenceNeverAlone =>
+      'El chip solo afirma quién está. Que no aparezca nadie no significa que estés solo.';
+
+  @override
+  String get coWhoIsHereTitle => 'Quién está en esta sesión';
+
+  @override
+  String get coWhoIsHereSub =>
+      'Ventana de 45 s del servidor · se actualiza con cada lectura';
+
+  @override
+  String get coWhoIsHereNow => 'ahora';
+
+  @override
+  String coWhoIsHereAge(String age) {
+    return 'hace $age';
+  }
+
+  @override
+  String get coWhoIsHereDeviceSub => 'Aparato · sin persona identificada';
+
+  @override
+  String get coWhoIsHereYou => 'Tú · RideOps';
+
+  @override
+  String coWhoIsHereYouSeenAs(String name) {
+    return 'Los demás te ven como $name';
+  }
+
+  @override
+  String get coWhoIsHereYouSeenAsUnknown =>
+      'Los demás te ven con tu nombre completo';
+
+  @override
+  String get coWhoIsHereDisclosure =>
+      'Apareces con tu nombre mientras esta pantalla esté abierta. Al salir o pausar dejas de aparecer en menos de un minuto. Esto no reserva nada: nadie queda bloqueado por estar aquí.';
+
+  @override
+  String get coPresenceEmpty =>
+      'No hay nadie visible ahora mismo. Otra superficie puede estar avanzando sin aparecer aquí.';
+
+  @override
+  String get coPresenceEmptyShort => 'Nadie visible ahora mismo';
+
+  @override
+  String get coPresenceOfflineWhy =>
+      'Sin red no se puede afirmar que alguien esté ahora. El punto verde se apaga; el chip no desaparece.';
+
+  @override
+  String coAdvancedOtherAgentNamed(String step, String name, String age) {
+    return '«$step» lo completó $name hace $age.';
+  }
+
+  @override
+  String coAdvancedStampLanded(String stamp, String age) {
+    return '$stamp se registró en otra superficie hace $age.';
+  }
+
+  @override
+  String get coAdvancedStepUnchanged =>
+      'Sigue capturando: este paso no cambió.';
+
+  @override
+  String get coChangedTitle => 'Qué cambió desde que entraste';
+
+  @override
+  String coChangedSub(String time) {
+    return 'Estado reportado por el servidor · $time';
+  }
+
+  @override
+  String get coChangedStepMoved => 'El paso se movió';
+
+  @override
+  String coChangedStepMovedDetail(String from, String to) {
+    return '$from → $to';
+  }
+
+  @override
+  String coChangedByKiosk(String time) {
+    return 'Completado en el kiosco · $time';
+  }
+
+  @override
+  String coChangedByOtherAgent(String name, String time) {
+    return 'Lo completó $name · $time';
+  }
+
+  @override
+  String coChangedByOtherSurface(String time) {
+    return 'Completado en otra superficie · $time';
+  }
+
+  @override
+  String coChangedByYou(String time) {
+    return 'Lo hiciste tú · $time · sin cambios';
+  }
+
+  @override
+  String get coChangedUntouched => 'Pendiente · no lo ha tocado nadie';
+
+  @override
+  String get coChangedNothingLost => 'Nada de lo que hiciste se perdió.';
+
+  @override
+  String coChangedSomethingLost(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'Ojo: $count envíos no han llegado al servidor. Revisa la Bandeja antes de seguir.',
+      one:
+          'Ojo: 1 envío no ha llegado al servidor. Revisa la Bandeja antes de seguir.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get coChangedNoChanges => 'Nadie ha tocado nada desde que entraste.';
+
+  @override
+  String coChangedStayCta(int index) {
+    return 'Seguir en el paso $index';
+  }
+
+  @override
+  String get coConflictTooEarlyTitle => 'Ese paso todavía no toca';
+
+  @override
+  String coConflictTooEarlyBody(
+    String current,
+    int index,
+    String target,
+    int targetIndex,
+  ) {
+    return 'La sesión está en $current (paso $index) y $target es el paso $targetIndex. El servidor solo deja avanzar de uno en uno.';
+  }
+
+  @override
+  String get coConflictTooEarlyBodyShort =>
+      'El servidor solo deja avanzar de uno en uno, y este no es el paso que sigue.';
+
+  @override
+  String coGoToStepCta(int index, String step) {
+    return 'Ir al paso $index · $step';
+  }
+
+  @override
+  String coGoToStepWhy(int index) {
+    return 'Ir al paso $index es navegación dentro de esta app: siempre funciona.';
+  }
+
+  @override
+  String coGuardOutboxCta(int n) {
+    return 'Ver la Bandeja ($n)';
+  }
+
+  @override
+  String get coGuardOutboxWhy =>
+      'La Bandeja drena sola al recuperar señal; el paso avanza cuando el sello llegue.';
+
+  @override
+  String get coConflictSwapLockedBody =>
+      'Esta unidad ya no se puede cambiar desde aquí: la inspección ya empezó. Se resuelve en el mostrador.';
+
+  @override
+  String coJoinBannerStarted(int index, int total) {
+    return 'Esta salida ya empezó: va por el paso $index de $total.';
+  }
+
+  @override
+  String coJoinBannerStartedAt(String time, int index, int total) {
+    return 'Esta salida ya empezó. Se abrió a las $time y va por el paso $index de $total.';
+  }
+
+  @override
+  String coJoinBannerStartedByOther(int index, int total) {
+    return 'Esta salida la abrió otro agente y va por el paso $index de $total.';
+  }
+
+  @override
+  String get coJoinDoneTitle => 'Lo que ya está hecho';
+
+  @override
+  String coJoinDonePill(int done, int total) {
+    return '$done de $total fases';
+  }
+
+  @override
+  String get coJoinPendingTitle => 'Lo que falta';
+
+  @override
+  String get coJoinPendingPill => 'Tuyo';
+
+  @override
+  String coJoinContinueCta(int index) {
+    return 'Continuar desde el paso $index';
+  }
+
+  @override
+  String get coJoinContinueCtaUnknownStep => 'Continuar';
+
+  @override
+  String get coJoinContinueWhy =>
+      'Entras al paso que reporta el servidor, no al que dejó nadie. Nada se re-hace.';
+
+  @override
+  String get coJoinKioskActiveTitle =>
+      'El cliente está usando el kiosco ahora mismo.';
+
+  @override
+  String get coJoinKioskActiveBody =>
+      'Si avanzas desde aquí puedes interrumpir lo que está haciendo.';
+
+  @override
+  String get coJoinAdviceTitle => 'Qué conviene hacer';
+
+  @override
+  String get coJoinAdvicePill => 'Consejo';
+
+  @override
+  String get coJoinAdviceWaitKey => 'Esperar';
+
+  @override
+  String get coJoinAdviceWait =>
+      'Esta pantalla se actualiza sola cuando el kiosco termine';
+
+  @override
+  String get coJoinAdviceLeaveKey => 'O irte';
+
+  @override
+  String get coJoinAdviceLeave => 'Nada se pierde: la sesión sigue igual';
+
+  @override
+  String get coJoinNotABlock =>
+      'No es un bloqueo. Puedes avanzar igual — el servidor decide, no este aviso. Solo te decimos lo que está pasando del otro lado.';
+
+  @override
+  String get coJoinProceedAnyway => 'Avanzar de todas formas';
+
+  @override
+  String coJoinPausedByOther(String age) {
+    return 'Otro agente pausó esta salida hace $age.';
+  }
+
+  @override
+  String coJoinPausedBySomeone(String age) {
+    return 'Esta salida quedó pausada hace $age.';
+  }
+
+  @override
+  String coJoinPausedReason(String reason) {
+    return 'Motivo: «$reason»';
+  }
+
+  @override
+  String get coJoinWhereItStoppedTitle => 'Dónde quedó';
+
+  @override
+  String get coJoinNoStealWhy =>
+      'Continuar no le quita nada a nadie: la sesión es una sola y el registro guarda quién hizo qué.';
+
+  @override
+  String get coJoinPausedAutoStalled =>
+      'El sistema la marcó: lleva más de 4 h detenida. No la pausó nadie.';
+
+  @override
+  String coJoinPausedBySystem(String age) {
+    return 'El sistema marcó esta salida hace $age.';
+  }
+
+  @override
+  String get coConflictVehicleKept =>
+      'Se conserva: el cliente ya verificado y el paso en el que vas.';
+
+  @override
+  String get coGuardWhyServer =>
+      'Este paso lo cierra el servidor cuando reciba el sello, no esta pantalla. Nada se pierde: puedes pausar y volver.';
+
+  @override
+  String coPresenceChipLive(String name, String surface) {
+    return '$name · $surface';
+  }
+
+  @override
+  String coPresenceChipAged(String name, String age) {
+    return '$name · hace $age';
+  }
+
+  @override
+  String get coWhoIsHereYouOffline => 'Sin conexión';
+
+  @override
+  String get coWhoIsHereDisclosureOffline =>
+      'Sin conexión tu latido no está llegando: en menos de un minuto dejas de aparecer para las demás superficies. Vuelves a aparecer solo al recuperar señal. Esto nunca reserva nada.';
+
+  @override
+  String get coPresenceEmptyUnverifiable =>
+      'Y tampoco se puede leer como «no hay nadie»: otra superficie puede estar avanzando sin que lo veamos.';
 }

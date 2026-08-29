@@ -128,6 +128,22 @@ abstract final class CheckoutEvents {
   /// (solo cuando el backend confirma `emailSent`, no por el 200 pelado).
   static const entryPrecheckinLinkSent = 'checkout.entry_precheckin_link_sent';
 
+  /// El POST devolvió **200 que NO movimos nosotros** (M2-H6 consumiendo
+  /// M2-H8). Tag `to`.
+  ///
+  /// Desde H8 el backend trata como idempotente la transición que otra
+  /// superficie ya hizo: responde 200 y **no escribe evento**, para que
+  /// `events[]` siga nombrando a quien de verdad la movió
+  /// (checkout-session.service.js:508-518). Sin este evento, ese caso se
+  /// contaba como `transition_ok` propio y la señal de concurrencia se perdía
+  /// entera.
+  ///
+  /// **Detección: la regla de atribución, y es la única** (03-observability.md).
+  /// Es noop cuando el último `TRANSITION` hacia el destino no nos nombra. No
+  /// hay atajo por `stateVersion`: sub-reporta justo el caso que la métrica
+  /// vigila (v0 en FINALIZING, el kiosco commitea CLOSED → v1).
+  static const transitionNoop = 'checkout.transition_noop';
+
   /// UI reconciliada contra el servidor. Tags: `steps_jumped` y `via`
   /// (`conflict` = tras un 409, `poll` = otra superficie avanzó y el poll lo
   /// vio). El tag `via` es dato NUEVO de H1 — documentado en la tabla de

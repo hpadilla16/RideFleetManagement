@@ -4,10 +4,25 @@ import '../../../core/api/api_error.dart';
 import '../../../core/api/dto/checkout_session.dart';
 import '../../../core/api/dto/reservation_display.dart';
 import '../../../core/api/enums.dart';
+import '../domain/checkout_changes.dart';
 import '../domain/checkout_event_log.dart';
 import '../domain/checkout_step_catalog.dart';
 
-/// Aviso NO bloqueante de que otra superficie movió el paso (mockup 8C).
+/// Qué clase de avance ajeno hubo. La distinción decide el COPY, y el copy
+/// decide si el agente suelta lo que está haciendo (mockup 21A vs. 21C).
+enum ForeignAdvanceKind {
+  /// El `currentStep` se movió: el paso que el agente miraba lo cerró otro.
+  stepMoved,
+
+  /// Cayó un SELLO sin que el paso se moviera (M2-H6, frame 21C). Pasa de
+  /// verdad y es el caso que más daño hace en el patio: el mostrador registra
+  /// el pago mientras el agente teclea el odómetro en el paso 7. El banner
+  /// dice "este paso no cambió" justamente para que **no** suelte el
+  /// formulario — y por eso es aditivo y jamás reconstruye el cuerpo del paso.
+  stampLanded,
+}
+
+/// Aviso NO bloqueante de que otra superficie movió la sesión (mockup 8C/21).
 ///
 /// Persiste hasta que el agente interactúa con el paso nuevo: con 4
 /// superficies conviviendo, un modal por avance ajeno sería un bloqueo cada
@@ -18,6 +33,9 @@ class ForeignAdvanceNotice {
     required this.completedStep,
     required this.currentStep,
     required this.actor,
+    this.kind = ForeignAdvanceKind.stepMoved,
+    this.stamp,
+    this.actorName,
     this.at,
   });
 
@@ -28,6 +46,17 @@ class ForeignAdvanceNotice {
   /// Paso al que saltó el servidor.
   final String currentStep;
   final CheckoutActorKind actor;
+  final ForeignAdvanceKind kind;
+
+  /// Solo en [ForeignAdvanceKind.stampLanded]: cuál sello cayó.
+  final CheckoutStampKind? stamp;
+
+  /// Nombre propio del agente ajeno cuando la presencia lo resuelve. Null ⇒
+  /// el banner cae al copy genérico de H1 («otro agente»), que es lo que hay
+  /// hoy: la degradación es a lo ya construido, no a un hueco. Ver
+  /// `checkout_attribution.dart` — es el único punto que consume
+  /// `presence[].actorUserId`.
+  final String? actorName;
 
   /// Cuándo lo registró el log — alimenta el "hace 40 s" del banner.
   final DateTime? at;
@@ -50,6 +79,16 @@ enum CheckoutMutation {
 /// Resultado de la matriz 409 (ADR-4). Nunca es un reintento a ciegas: cada
 /// caso ya viene DESPUÉS del re-fetch de reconciliación.
 enum CheckoutConflictKind {
+  /// 409 `ILLEGAL_TRANSITION` cuya reconciliación dejó la sesión **antes** del
+  /// destino: no es "ya lo hicieron", es "ese paso todavía no toca" (M2-H6,
+  /// frame 22A). Hasta H6 caía en [generic], que le daba al agente un cartel
+  /// sin salida; la salida real es NAVEGAR al paso que sí toca.
+  ///
+  /// La puerta falsa que este kind existe para NO dibujar es "Reintentar":
+  /// `FORWARD` es estrictamente lineal y dirigido (state-machine.js:59-71),
+  /// así que ese reintento da 409 para siempre.
+  tooEarly,
+
   /// 409 `ENTRY_GUARD` — falta un sello previo. Se muestra QUÉ falta.
   entryGuard,
 
@@ -78,6 +117,10 @@ class CheckoutConflict {
     required this.message,
     this.code,
     this.guard,
+    this.attemptedStep,
+    this.currentStep,
+    this.swapAvailable = false,
+    this.conflictReservationRef,
   });
 
   final CheckoutConflictKind kind;
@@ -88,6 +131,35 @@ class CheckoutConflict {
 
   /// Solo en [CheckoutConflictKind.entryGuard]: qué sello falta.
   final CheckoutEntryGuard? guard;
+
+  /// Paso que el agente PIDIÓ y el servidor negó. Con él, 22A puede nombrar
+  /// el callejón ("el cobro es el paso 4") sin que la app deduzca nada de la
+  /// máquina de estados: los dos números salen del catálogo de presentación.
+  final CheckoutStep? attemptedStep;
+
+  /// Paso en el que la sesión quedó DESPUÉS de reconciliar. Es el destino del
+  /// CTA "Ir al paso N", que es navegación local y por eso no puede fallar.
+  final CheckoutStep? currentStep;
+
+  /// Solo en [CheckoutConflictKind.vehicleConflict]: ¿el swap todavía es legal
+  /// en el paso en que quedó la sesión?
+  ///
+  /// **La regla de las puertas falsas de esta historia vive aquí.**
+  /// `vehicle-swap.service.js:46-51` cierra el swap a partir de
+  /// `INSPECTION_IN_PROGRESS` (409 `SWAP_LOCKED`), así que dibujar "Elegir
+  /// otro vehículo" pasado ese punto sería un botón que da 409 para siempre.
+  /// Con `false` la pantalla NOMBRA el callejón (se resuelve en el mostrador)
+  /// en vez de ofrecer una acción imposible.
+  final bool swapAvailable;
+
+  /// Número de la reserva que se llevó la unidad, **leído del texto** del
+  /// mensaje del servidor (puente documentado; el pedido que lo cierra de
+  /// verdad es `conflictReservationId` en el cuerpo del 409).
+  ///
+  /// Null cuando no se pudo leer ⇒ el botón "Buscar R-…" **no se dibuja** y el
+  /// resto de la pantalla queda igual. La degradación es a "sin botón", jamás
+  /// a un botón que busca una reserva inventada.
+  final String? conflictReservationRef;
 }
 
 /// Contexto de la reserva para el header de sesión (8A). Best-effort: el
@@ -215,6 +287,8 @@ class CheckoutWizardState {
     this.conflict,
     this.context,
     this.pending = false,
+    this.baseline,
+    this.joinAcknowledged = false,
   });
 
   /// Esperando el gate de arranque (sesión/sede sin hidratar): no hubo fetch
@@ -265,6 +339,52 @@ class CheckoutWizardState {
   final CheckoutConflict? conflict;
   final CheckoutReservationContext? context;
   final bool pending;
+
+  /// PRIMERA lectura de esta visita, congelada. Es el "desde que entraste" del
+  /// diff de 21B: si se moviera con cada poll, la hoja diría "no cambió nada"
+  /// treinta segundos después de que cambiara todo.
+  ///
+  /// Se congela una sola vez y NO se reinicia al reconciliar — reconciliar es
+  /// justo lo que el agente quiere ver reflejado ahí.
+  final CheckoutSessionDto? baseline;
+
+  /// El agente ya vio la antesala de enganche (23A) y decidió continuar. Vive
+  /// en el estado y no en la pantalla porque tiene que sobrevivir a un
+  /// re-render del poll: una antesala que reaparece cada 5 s sería una puerta
+  /// que se cierra sola en la cara.
+  final bool joinAcknowledged;
+
+  /// ¿Hay que enseñar la antesala (23A/B/C) antes de empujar al agente a
+  /// trabajar?
+  ///
+  /// Regla del mockup (nota 25): **solo cuando hay algo que contar** — la
+  /// sesión no estaba en el paso 1 al llegar, o la abrió otra persona. Una
+  /// sesión que el propio agente acaba de crear entra directo, como hoy:
+  /// meterle una antesala a un checkout recién abierto es un toque de más por
+  /// cada salida del día.
+  ///
+  /// **Se decide sobre [baseline], NO sobre la lectura viva**, y esa
+  /// diferencia es la historia entera. Con la sesión viva, un avance ajeno que
+  /// mueve el paso de 1 a 2 mientras el agente trabaja volvería a abrir la
+  /// antesala y lo sacaría de su formulario — o sea, la puerta que se cierra
+  /// en la cara justo cuando H6 existe para evitarlo. La antesala responde
+  /// "¿con qué me encontré al llegar?"; lo que pasa DESPUÉS es avance ajeno y
+  /// se cuenta con un banner.
+  ///
+  /// [myUserId] null (sesión degradada sin `/me`) ⇒ no se afirma que la abrió
+  /// otro; solo decide la posición.
+  bool showJoinGate(String? myUserId) {
+    final entry = baseline;
+    if (entry == null || joinAcknowledged) return false;
+    if (entry.isTerminal || isTerminal) return false;
+    final startedBy = entry.startedByUserId;
+    final byOther =
+        myUserId != null && startedBy != null && startedBy != myUserId;
+    // `position != 1` y no `step != confirming`: un paso que esta versión no
+    // conoce da posición null, y ahí SÍ conviene la antesala (el agente
+    // aterriza en algo que la app no sabe nombrar).
+    return byOther || infoFor(entry.step)?.position != 1;
+  }
 
   /// Primer load: sin datos y sin veredicto — skeleton 8F.
   bool get firstLoad =>
@@ -331,6 +451,8 @@ class CheckoutWizardState {
     bool clearConflict = false,
     CheckoutReservationContext? context,
     bool? pending,
+    CheckoutSessionDto? baseline,
+    bool? joinAcknowledged,
   }) {
     return CheckoutWizardState(
       session: session ?? this.session,
@@ -350,6 +472,8 @@ class CheckoutWizardState {
       // lo apagaba en silencio (hoy lo enmascaran las otras condiciones de
       // [firstLoad], pero es una trampa puesta para H2-H7).
       pending: pending ?? this.pending,
+      baseline: baseline ?? this.baseline,
+      joinAcknowledged: joinAcknowledged ?? this.joinAcknowledged,
     );
   }
 }

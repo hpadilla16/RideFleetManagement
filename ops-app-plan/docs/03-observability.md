@@ -112,7 +112,7 @@ la superficie que lo resolvería es el re-fetch por reserva, no un cambio de cop
 `entry_open` NO lleva tag `resumed` — el backend responde 201 igual al crear que al
 reanudar, y la app no puede afirmar la diferencia sin inventarla.
 
-Detalle de `checkout.reconciled` (M2-H1). Cuatro valores de `via`, deliberadamente
+Detalle de `checkout.reconciled` (M2-H1). Cinco valores de `via`, deliberadamente
 separados porque miden cosas distintas:
 
 - `poll` — el poll de 5 s detectó que OTRA superficie movió el paso. Su frecuencia ES la
@@ -121,6 +121,11 @@ separados porque miden cosas distintas:
 - `conflict` — el servidor rechazó una transición con 409 y el re-fetch reconcilió.
 - `preflight` — el re-fetch previo a escribir (>3 s de antigüedad) encontró la sesión ya
   movida y ABORTÓ el POST. No hubo 409: contarlo como tal inflaría las colisiones reales.
+- `noop` (M2-H6) — el POST volvió **200 y no lo movimos nosotros**: desde M2-H8 el backend
+  responde idempotente cuando otra superficie ya hizo esa transición. No hubo 409 ni
+  rechazo, pero el paso SÍ saltó por debajo del agente, así que la reconciliación existe y
+  se cuenta. Va con su `checkout.transition_noop`. Separado de `conflict` a propósito:
+  contarlo ahí volvería a inflar las colisiones que H8 justamente dejó de producir.
 - `rejected` (M2-H5) — el servidor rechazó la transición con un 4xx del SERVICIO que no es
   409 (400/404/422) y el re-fetch reconcilió. Su caso real es el finalize: `transition`
   commitea el paso (checkout-session.service.js:417) y la cascada revienta DESPUÉS con 422

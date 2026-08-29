@@ -11,9 +11,14 @@
  * enforced in one of them is not a control, and the same rule pasted into both
  * is a rule that will drift. It lives here, once.
  *
- * WRITER INVENTORY as of 2026-08-17:
+ * WRITER INVENTORY as of 2026-08-28:
  *   1. checkout-session.service.js  setDeclinedInsurance()  — agent, wizard step 1
- *   2. customer-portal.routes.js    POST /customer-info/:token — customer, pre-check-in
+ *   2. precheckin-charges.js        applyPrecheckinCharges() — customer, pre-check-in
+ * Writer #2 moved out of customer-portal.routes.js on 2026-08-17, when the
+ * charge-sheet rewrite became one transaction. The ROUTE still owns the gate
+ * call: it runs the preflight before opening the transaction and passes the
+ * verdict down as `agreementSealed`, which is what fences the signature
+ * columns. customer-portal.routes.js now only names the column in that note.
  * Everything else that names the column only READS it: kiosk-checkout.service.js
  * (2 selects + 2 response mappings), rental-agreements.service.js (select, PDF
  * addendum, buildDeclinedInsuranceBlock), reservations.service.js (list + detail

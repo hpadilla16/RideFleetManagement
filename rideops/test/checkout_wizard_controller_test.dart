@@ -911,8 +911,9 @@ void main() {
       });
     });
 
-    test('ILLEGAL_TRANSITION sin haber llegado al destino ⇒ negativa visible',
-        () {
+    test(
+        'M2-H6 · ILLEGAL_TRANSITION sin haber llegado al destino ⇒ '
+        '`tooEarly` con los dos pasos, no el cartel genérico', () {
       fakeAsync((async) {
         final h = conflictHarness(
           async,
@@ -925,8 +926,18 @@ void main() {
             .then((o) => outcome = o));
         async.flushMicrotasks();
         expect(outcome, CheckoutTransitionOutcome.conflict);
-        expect(read(h.container).conflict!.kind, CheckoutConflictKind.generic);
-        expect(read(h.container).conflict!.message, 'Illegal transition');
+        final c = read(h.container).conflict!;
+        // El MISMO code que "ya lo hicieron", la situación opuesta: tras
+        // reconciliar la sesión sigue ANTES del destino. Hasta H6 esto caía en
+        // `generic`, que dejaba al agente con un cartel sin salida.
+        expect(c.kind, CheckoutConflictKind.tooEarly);
+        // Y con los dos pasos, que es lo que permite nombrar el callejón
+        // ("estás en el 1, el cobro es el 5") y ofrecer NAVEGACIÓN — la única
+        // acción que aquí puede tener éxito.
+        expect(c.attemptedStep, CheckoutStep.paid);
+        expect(c.currentStep, CheckoutStep.confirming);
+        // El mensaje del servidor se enmarca, no se sustituye (DoD #5).
+        expect(c.message, 'Illegal transition');
       });
     });
 
