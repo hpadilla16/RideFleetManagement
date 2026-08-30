@@ -156,9 +156,14 @@ export async function verifyHppPayment({ reservation, iposRef }, deps = {}) {
       reservationId: reservation.id,
       metadata: { contains: `"${AUDIT_MARKER}":"${ref}"` },
     },
-    select: { id: true },
+    select: { id: true, metadata: true },
   });
   if (!minted) throw codedError('Unknown iPOS payment reference for this reservation', 'UNKNOWN_REFERENCE');
+
+  // The amount THIS reference was minted for — the anchor the gateway's echo
+  // is reconciled against below.
+  let mintedAmount = 0;
+  try { mintedAmount = Number(JSON.parse(minted.metadata || '{}')?.amount || 0); } catch { mintedAmount = 0; }
 
   const resolved = await resolveConfig(reservation.tenantId || null);
   const status = await query({ transactionReferenceId: ref }, resolved, deps);
@@ -170,8 +175,29 @@ export async function verifyHppPayment({ reservation, iposRef }, deps = {}) {
       'PAYMENT_NOT_COMPLETED',
     );
   }
-  const amount = Number(status.amount || 0);
-  if (!(amount > 0)) throw codedError('iPOS payment amount is missing', 'PAYMENT_NOT_COMPLETED');
+  // AMOUNT RECONCILIATION — the first live recording booked $112.00 for a
+  // $1.12 charge (2026-08-30): the live rail's totalAmount is in CENTS while
+  // the UAT documentation shows dollars. Units are decided by AGREEMENT with
+  // the minted amount, never by guessing: the gateway echo is accepted as
+  // dollars or as cents only when it reconciles, to the cent, with what this
+  // reference was minted for. An echo matching NEITHER reading is refused —
+  // recording a number the gateway and the mint cannot agree on is how books
+  // diverge from banks.
+  const rawEcho = Number(status.amount || 0);
+  if (!(rawEcho > 0)) throw codedError('iPOS payment amount is missing', 'PAYMENT_NOT_COMPLETED');
+  const asDollars = Number(rawEcho.toFixed(2));
+  const asCentsToDollars = Number((rawEcho / 100).toFixed(2));
+  let amount;
+  if (mintedAmount > 0 && asDollars === Number(mintedAmount.toFixed(2))) {
+    amount = asDollars;
+  } else if (mintedAmount > 0 && asCentsToDollars === Number(mintedAmount.toFixed(2))) {
+    amount = asCentsToDollars;
+  } else {
+    throw codedError(
+      `iPOS amount mismatch: gateway echoed ${rawEcho}, reference was minted for ${mintedAmount || 'unknown'}`,
+      'AMOUNT_MISMATCH',
+    );
+  }
 
   const reference = buildGatewayReference('IPOS', status.transactionId || ref);
   const existing = await db.reservationPayment.findFirst({

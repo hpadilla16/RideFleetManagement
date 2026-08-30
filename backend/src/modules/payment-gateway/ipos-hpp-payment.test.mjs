@@ -168,6 +168,34 @@ describe('ipos-hpp-payment: verifyHppPayment', () => {
     assert.equal(verdict.duplicate, false);
   });
 
+  it('a CENTS echo reconciles against the minted amount — the first live charge booked 100x', async () => {
+    // 2026-08-30: the live rail echoed 112 (cents) for a $1.12 mint and the
+    // recording booked $112.00. Units are decided by agreement with the mint.
+    const { referenceId, deps } = await mintedSetup({
+      queryResponse: {
+        found: true, approved: true, responseCode: 0, responseMessage: 'APPROVED',
+        errMessage: '', transactionId: 'tx123abc', amount: 12050, // cents for $120.50
+        cardType: 'VISA', cardLast4: '1111',
+      },
+    });
+    const verdict = await verifyHppPayment({ reservation, iposRef: referenceId }, deps);
+    assert.equal(verdict.amount, 120.5, 'cents echo must record as dollars');
+  });
+
+  it('an echo matching NEITHER dollars nor cents is refused, never recorded', async () => {
+    const { referenceId, deps } = await mintedSetup({
+      queryResponse: {
+        found: true, approved: true, responseCode: 200, responseMessage: 'APPROVED',
+        errMessage: '', transactionId: 'tx123abc', amount: 999.99,
+        cardType: 'VISA', cardLast4: '1111',
+      },
+    });
+    await assert.rejects(
+      () => verifyHppPayment({ reservation, iposRef: referenceId }, deps),
+      (err) => err.code === 'AMOUNT_MISMATCH',
+    );
+  });
+
   it('refuses a reference that was never minted for this reservation (replay guard)', async () => {
     const { deps } = await mintedSetup();
     await assert.rejects(
