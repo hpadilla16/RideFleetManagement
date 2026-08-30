@@ -331,9 +331,14 @@ const APPROVED_STATUS_BODY = {
 };
 
 describe('ipos-hpp-client: queryPaymentStatus', () => {
-  it('exchanges apiKey+secretKey for a JWT, then GETs the documented URL', async () => {
+  // The probe order, pinned: the official queryPaymentStatus page says
+  // `Authorization: <token generated in the ipospays portal>` (the per-TPN
+  // ecom token), while the API-explorer material says a generateAuthToken JWT
+  // in a bare `token` header. Ecom-in-Authorization goes first — the one
+  // spelling never tried in the live 401 streak of 2026-08-30 — then the
+  // scopeless-JWT chain, then the Transact-style scoped one.
+  it('tries the ecom token in Authorization first, per the official page', async () => {
     const { impl, calls } = sequencedFetchStub([
-      { body: { responseCode: '00', responseMessage: 'Success', token: DUMMY_JWT } },
       { body: APPROVED_STATUS_BODY },
     ]);
     const status = await queryHppPaymentStatus(
@@ -341,60 +346,54 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
       resolvedConfig(),
       { fetchImpl: impl },
     );
-    // THREE credentials in this integration, each with its own door: the ecom
-    // token mints pages, and apiKey+secretKey mint the JWT the status API
-    // accepts. Probed live 2026-08-30: the status API 401s the ecom token AND
-    // the bare API key in every header spelling. Do not resurrect either.
-    assert.equal(calls[0].url, 'https://auth.ipospays.tech/v1/authenticate-token');
-    // Credentials must ride in the HEADERS (body-only gets AUTH_ERR_001 "API
-    // Key is required" — probed live 2026-08-30, and ipos-auth.js had already
-    // learned the same for Transact). The HPP mint is SCOPELESS with an empty
-    // body, per HPP's own generateAuthToken spec — a scoped token
-    // authenticates but is then 401'd by queryPaymentStatus.
-    assert.equal(calls[0].options.headers.apiKey, DUMMY_API_KEY);
-    assert.equal(calls[0].options.headers.secretKey, DUMMY_SECRET_KEY);
-    assert.equal(calls[0].options.headers.TokenExpiryMinutes, '30');
-    assert.equal(calls[0].options.headers.scope, undefined, 'HPP mint must not send a scope');
-    assert.equal(calls[0].options.body, '{}');
-    assert.equal(calls[1].url, `https://api.ipospays.tech/v1/queryPaymentStatus?tpn=${DUMMY_TPN}&transactionReferenceId=PLRES1X2Y3`);
-    assert.equal(calls[1].options.method, 'GET');
-    // Documented header: bare `token`, no Bearer, no Authorization.
-    assert.equal(calls[1].options.headers.token, DUMMY_JWT);
-    assert.equal(calls[1].options.headers.Authorization, undefined);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, `https://api.ipospays.tech/v1/queryPaymentStatus?tpn=${DUMMY_TPN}&transactionReferenceId=PLRES1X2Y3`);
+    assert.equal(calls[0].options.method, 'GET');
+    assert.equal(calls[0].options.headers.Authorization, DUMMY_TOKEN);
     assert.equal(status.approved, true);
     assert.equal(status.amount, 251.5);
     assert.equal(status.transactionId, '11112222333344445555');
     assert.equal(status.cardLast4, '1111');
   });
 
-  it('walks the header chain on 401s and STOPS at the first acceptance', async () => {
-    // Chain per mint: token → Bearer → raw Authorization. Here Bearer is the
-    // winner, so raw Authorization is never sent.
+  it('falls through ecom spellings to a SCOPELESS JWT mint with the bare token header', async () => {
     const { impl, calls } = sequencedFetchStub([
-      { body: { token: DUMMY_JWT } },
-      { ok: false, status: 401, body: { message: 'unauthorized' } },
-      { body: APPROVED_STATUS_BODY },
+      { ok: false, status: 401, body: {} },   // ecom raw Authorization
+      { ok: false, status: 401, body: {} },   // ecom Bearer
+      { body: { responseCode: '00', token: DUMMY_JWT } }, // auth mint
+      { body: APPROVED_STATUS_BODY },          // query, token: jwt
     ]);
     const status = await queryHppPaymentStatus(
       { transactionReferenceId: 'PLRES1X2Y3' },
       resolvedConfig(),
       { fetchImpl: impl },
     );
-    assert.equal(calls.length, 3);
-    assert.equal(calls[1].options.headers.token, DUMMY_JWT);
-    assert.equal(calls[2].options.headers.Authorization, `Bearer ${DUMMY_JWT}`);
+    assert.equal(calls.length, 4);
+    assert.equal(calls[1].options.headers.Authorization, `Bearer ${DUMMY_TOKEN}`);
+    // The HPP mint is SCOPELESS with an empty body, per HPP's own
+    // generateAuthToken spec: exactly apiKey/secretKey/TokenExpiryMinutes
+    // headers. Credentials in HEADERS (body-only gets AUTH_ERR_001 — probed
+    // live, and ipos-auth.js had already learned it for Transact).
+    assert.equal(calls[2].url, 'https://auth.ipospays.tech/v1/authenticate-token');
+    assert.equal(calls[2].options.headers.apiKey, DUMMY_API_KEY);
+    assert.equal(calls[2].options.headers.secretKey, DUMMY_SECRET_KEY);
+    assert.equal(calls[2].options.headers.TokenExpiryMinutes, '30');
+    assert.equal(calls[2].options.headers.scope, undefined, 'HPP mint must not send a scope');
+    assert.equal(calls[2].options.body, '{}');
+    assert.equal(calls[3].options.headers.token, DUMMY_JWT);
+    assert.equal(calls[3].options.headers.Authorization, undefined);
     assert.equal(status.approved, true);
   });
 
   it('exhausting the scopeless mint re-mints Transact-style before giving up', async () => {
-    // All three spellings 401 under the scopeless HPP token → a SECOND mint
-    // (call 5) with scope ExternalApi, whose first spelling succeeds.
     const { impl, calls } = sequencedFetchStub([
-      { body: { token: DUMMY_JWT } },
+      { ok: false, status: 401, body: {} },   // ecom raw
+      { ok: false, status: 401, body: {} },   // ecom bearer
+      { body: { token: DUMMY_JWT } },          // scopeless mint
       { ok: false, status: 401, body: {} },
       { ok: false, status: 401, body: {} },
       { ok: false, status: 401, body: {} },
-      { body: { token: DUMMY_JWT } },
+      { body: { token: DUMMY_JWT } },          // ExternalApi mint
       { body: APPROVED_STATUS_BODY },
     ]);
     const status = await queryHppPaymentStatus(
@@ -402,15 +401,17 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
       resolvedConfig(),
       { fetchImpl: impl },
     );
-    assert.equal(calls.length, 6);
-    assert.equal(calls[0].options.body, '{}');
-    assert.equal(JSON.parse(calls[4].options.body).scope, 'ExternalApi');
+    assert.equal(calls.length, 8);
+    assert.equal(calls[2].options.body, '{}');
+    assert.equal(JSON.parse(calls[6].options.body).scope, 'ExternalApi');
     assert.equal(status.approved, true);
   });
 
-  it('an auth-mint failure surfaces as GATEWAY_ERROR without touching the query', async () => {
+  it('an auth-mint failure surfaces as GATEWAY_ERROR', async () => {
     const { impl, calls } = sequencedFetchStub([
-      { ok: false, status: 401, body: { responseMessage: 'bad credentials' } },
+      { ok: false, status: 401, body: {} },   // ecom raw
+      { ok: false, status: 401, body: {} },   // ecom bearer
+      { ok: false, status: 401, body: { responseMessage: 'bad credentials' } }, // mint fails
     ]);
     await assert.rejects(
       () => queryHppPaymentStatus(
@@ -418,7 +419,7 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
       ),
       (err) => err.code === 'GATEWAY_ERROR' && /auth token/i.test(err.message),
     );
-    assert.equal(calls.length, 1);
+    assert.equal(calls.length, 3);
   });
 
   it('accepts the live-API lowercase envelope (iposhpresponse)', () => {

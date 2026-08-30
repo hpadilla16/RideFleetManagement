@@ -527,29 +527,40 @@ export async function queryHppPaymentStatus({ transactionReferenceId }, resolved
   // case is six short requests, once, on a path exercised one time per
   // payment confirmation.
   const url = `${hppEndpoints(resolved).query}?tpn=${encodeURIComponent(resolved.tpn)}&transactionReferenceId=${encodeURIComponent(ref)}`;
-  // Documented contract first (HPP docs: scopeless token, bare `token`
-  // header, no Bearer); the rest of the matrix survives as fallback until a
-  // production log line confirms the winner, then collapses.
+  // The two doc sources CONTRADICT each other: the official
+  // queryPaymentStatus page says `Authorization: <the token generated in the
+  // ipospays portal>` — which reads as the per-TPN ECOM token — while the
+  // API-explorer material says a generateAuthToken JWT in a bare `token`
+  // header. The probe walks both stories, ecom-token-in-Authorization first
+  // (the one spelling never yet tried live), and logs the winner so this
+  // collapses to one line once production has spoken.
   let res; let data;
-  outer:
-  for (const scope of [null, 'ExternalApi']) {
-    const jwt = await mintHppAuthJwt(resolved, deps, { scope });
-    for (const headers of [
-      { token: jwt },
-      { Authorization: `Bearer ${jwt}` },
-      { Authorization: jwt },
-    ]) {
-      ({ res, data } = await hppFetch(url, { method: 'GET', headers }, deps));
-      if (res.status !== 401) {
-        logger.info('[ipos-hpp] status auth accepted', {
-          header: Object.keys(headers)[0],
-          bearer: String(headers.Authorization || '').startsWith('Bearer '),
-          scope: scope || 'none',
-        });
-        break outer;
+  let accepted = null;
+  for (const attempt of [
+    { label: 'ecom-authorization', headers: { Authorization: resolved.hppToken } },
+    { label: 'ecom-bearer', headers: { Authorization: `Bearer ${resolved.hppToken}` } },
+  ]) {
+    ({ res, data } = await hppFetch(url, { method: 'GET', headers: attempt.headers }, deps));
+    if (res.status !== 401) { accepted = attempt.label; break; }
+  }
+  if (!accepted) {
+    outer:
+    for (const scope of [null, 'ExternalApi']) {
+      const jwt = await mintHppAuthJwt(resolved, deps, { scope });
+      for (const headers of [
+        { token: jwt },
+        { Authorization: `Bearer ${jwt}` },
+        { Authorization: jwt },
+      ]) {
+        ({ res, data } = await hppFetch(url, { method: 'GET', headers }, deps));
+        if (res.status !== 401) {
+          accepted = `jwt-${Object.keys(headers)[0]}${String(headers.Authorization || '').startsWith('Bearer ') ? '-bearer' : ''}-scope-${scope || 'none'}`;
+          break outer;
+        }
       }
     }
   }
+  if (accepted) logger.info('[ipos-hpp] status auth accepted', { via: accepted });
 
   const status = normalizeHppStatus(data);
   if (!res.ok && !status.found) {
