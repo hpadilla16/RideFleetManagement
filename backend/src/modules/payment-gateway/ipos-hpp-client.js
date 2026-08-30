@@ -74,20 +74,21 @@ import { maskTpn } from './tenant-terminal-config.js';
  */
 
 const HPP_ENDPOINTS = {
-  // `query` is the Transaction Status Check API — POST, same host as the mint,
-  // same `token` header, body { merchantAuthentication: { merchantId: TPN,
-  // transactionReferenceId } }. The first implementation used a
-  // GET api.ipospays.com/v1/queryPaymentStatus taken from the HPP overview doc;
-  // the live API 401'd it on the owner's first real payment (2026-08-29 —
-  // $1.12 charged at iPOSpays, unrecordable in RFM until this fix). The
-  // authoritative spec is docs.ipospays.com/transaction-status-check/apidocs.
+  // TWO credentials, one per endpoint — learned live on the owner's first real
+  // payment (2026-08-29, $1.12 charged at iPOSpays and stuck unrecordable):
+  //   - the MINT authenticates with the ecom token in a `token` header;
+  //   - queryPaymentStatus authenticates with the merchant API KEY in the
+  //     `Authorization` header. Sending it the token is the 401 we shipped.
+  // A detour through POST /iposTransactStatus (Transaction Status Check API)
+  // got 400 — that API belongs to Transact, not HPP. The HPP's own GET below
+  // is the documented contract (uatdocs.ipospays.tech/hosted-payment-page).
   production: {
     hpp: 'https://payment.ipospays.com/api/v1/external-payment-transaction',
-    query: 'https://payment.ipospays.com/api/v1/iposTransactStatus',
+    query: 'https://api.ipospays.com/v1/queryPaymentStatus',
   },
   sandbox: {
     hpp: 'https://payment.ipospays.tech/api/v1/external-payment-transaction',
-    query: 'https://payment.ipospays.tech/api/v1/iposTransactStatus',
+    query: 'https://api.ipospays.tech/v1/queryPaymentStatus',
   },
 };
 
@@ -182,7 +183,7 @@ export async function resolveTenantHppConfig(tenantId, { prismaClient = prisma }
   const none = (reason) => ({
     source: 'NONE', reason,
     tenantId: tenantId || null,
-    environment: 'production', tpn: '', hppToken: '', expiryDays: 3,
+    environment: 'production', tpn: '', hppToken: '', apiKey: '', expiryDays: 3,
     enabled: false, maskedTpn: maskTpn(''),
   });
   if (!tenantId) return none('NO_TENANT_ID');
@@ -209,6 +210,9 @@ export async function resolveTenantHppConfig(tenantId, { prismaClient = prisma }
   // Dual-read decrypt: `enci:` ciphertext decrypts, legacy plaintext passes
   // through, an undecryptable value collapses to '' (never raw bytes).
   const hppToken = String(decryptSettingSecret(block.hppToken) || '').trim();
+  // The status-check credential (Authorization header). Optional for the MINT
+  // — a tenant without it can still issue links; verification refuses loudly.
+  const apiKey = String(decryptSettingSecret(block.apiKey) || '').trim();
 
   if (!tpn || !hppToken) {
     return {
@@ -225,6 +229,7 @@ export async function resolveTenantHppConfig(tenantId, { prismaClient = prisma }
     environment: String(block.environment || 'production').toLowerCase() === 'sandbox' ? 'sandbox' : 'production',
     tpn,
     hppToken,
+    apiKey,
     expiryDays: clampExpiryDays(block.expiryDays, 3),
     // Informational — resolution does not route on the checkbox (same rule as
     // the terminal resolver: an unchecked box must never reroute money).
@@ -443,15 +448,19 @@ export async function queryHppPaymentStatus({ transactionReferenceId }, resolved
     throw err;
   }
 
-  const { res, data } = await hppFetch(hppEndpoints(resolved).query, {
-    method: 'POST',
-    headers: { token: resolved.hppToken, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      merchantAuthentication: {
-        merchantId: String(resolved.tpn),
-        transactionReferenceId: ref,
-      },
-    }),
+  if (!resolved.apiKey) {
+    // Verification is what stands between a browser redirect and a recorded
+    // payment; without the key it must refuse loudly, not guess.
+    const err = new Error(
+      'iPOSpays status checks need the Merchant API Key — Settings → Payments → iPOS Payment Links → API Key',
+    );
+    err.code = 'GATEWAY_NOT_CONFIGURED';
+    throw err;
+  }
+  const url = `${hppEndpoints(resolved).query}?tpn=${encodeURIComponent(resolved.tpn)}&transactionReferenceId=${encodeURIComponent(ref)}`;
+  const { res, data } = await hppFetch(url, {
+    method: 'GET',
+    headers: { Authorization: resolved.apiKey },
   }, deps);
 
   const status = normalizeHppStatus(data);

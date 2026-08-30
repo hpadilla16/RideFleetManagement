@@ -591,6 +591,14 @@ function defaultPaymentGatewayConfig() {
       // Stored as `enci:` ciphertext like spin.authKey.
       hppToken: '',
       hasHppToken: false,
+      // The Merchant API Key from the portal's Generate Keys section. A
+      // SECOND credential, not the token: the mint authenticates with the
+      // ecom token in a `token` header, but queryPaymentStatus authenticates
+      // with THIS key in the Authorization header — learned live 2026-08-29
+      // when the status check 401'd the token on the owner's first real
+      // payment. Same never-on-read / ciphertext contract as hppToken.
+      apiKey: '',
+      hasApiKey: false,
       // Hosted-link expiry in days (iPOSpays accepts 1–31).
       expiryDays: 3
     },
@@ -642,8 +650,14 @@ function spinBlockForRead(spin = {}) {
  */
 function iposBlockForRead(ipos = {}) {
   const stored = typeof ipos?.hppToken === 'string' ? ipos.hppToken.trim() : '';
-  const out = { ...ipos, hppToken: '', hasHppToken: !!stored };
+  const storedKey = typeof ipos?.apiKey === 'string' ? ipos.apiKey.trim() : '';
+  const out = {
+    ...ipos,
+    hppToken: '', hasHppToken: !!stored,
+    apiKey: '', hasApiKey: !!storedKey,
+  };
   delete out.clearHppToken;
+  delete out.clearApiKey;
   return out;
 }
 
@@ -1199,6 +1213,7 @@ export const settingsService = {
     }
     const newSpinAuthKey = String(payload?.spin?.authKey || '').trim();
     const newIposHppToken = String(payload?.ipos?.hppToken || '').trim();
+    const newIposApiKey = String(payload?.ipos?.apiKey || '').trim();
 
     const next = {
       ...defaults,
@@ -1279,10 +1294,18 @@ export const settingsService = {
           : (newIposHppToken
             ? encryptSettingSecret(newIposHppToken)
             : carrySettingSecret(storedRaw?.ipos?.hppToken)),
+        // Same contract for the API Key (the status-check credential).
+        apiKey: payload?.ipos?.clearApiKey
+          ? ''
+          : (newIposApiKey
+            ? encryptSettingSecret(newIposApiKey)
+            : carrySettingSecret(storedRaw?.ipos?.apiKey)),
         expiryDays: iposExpiryDaysValue(payload?.ipos?.expiryDays, defaults.ipos.expiryDays),
         // Read-shape / command-only fields never belong in the stored blob.
         hasHppToken: undefined,
-        clearHppToken: undefined
+        clearHppToken: undefined,
+        hasApiKey: undefined,
+        clearApiKey: undefined
       },
       payarc: {
         ...defaults.payarc,

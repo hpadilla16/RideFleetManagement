@@ -3180,6 +3180,17 @@ function SettingsInner({ token, me, logout }) {
                     placeholder={paymentGatewayConfig.ipos?.hasHppToken ? t('settingsPayments.ipos.tokenSavedPlaceholder') : t('settingsPayments.ipos.tokenEmptyPlaceholder')}
                   />
                 </div>
+                <div className="stack">
+                  <label className="label">{t('settingsPayments.ipos.apiKey')}</label>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={paymentGatewayConfig.ipos?.apiKey || ''}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, apiKey: e.target.value } })}
+                    placeholder={paymentGatewayConfig.ipos?.hasApiKey ? t('settingsPayments.ipos.tokenSavedPlaceholder') : t('settingsPayments.ipos.apiKeyEmptyPlaceholder')}
+                  />
+                  <span className="hint">{t('settingsPayments.ipos.apiKeyHint')}</span>
+                </div>
               </div>
               <div className="form-grid-2">
                 <div className="stack">

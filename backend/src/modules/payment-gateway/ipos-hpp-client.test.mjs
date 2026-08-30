@@ -41,12 +41,24 @@ describe('ipos-hpp-client: customer field sanitizing', () => {
     assert.equal(hppSafeMobile('123'), null);
     assert.equal(hppSafeMobile(null), null);
   });
+
+  it('status check without the API Key refuses loudly, never guesses', async () => {
+    await assert.rejects(
+      () => queryHppPaymentStatus(
+        { transactionReferenceId: 'PLRES1X2Y3' },
+        resolvedConfig({ apiKey: '' }),
+        { fetchImpl: () => { throw new Error('must not be called'); } },
+      ),
+      (err) => err.code === 'GATEWAY_NOT_CONFIGURED' && /API Key/.test(err.message),
+    );
+  });
 });
 
 // NOTE (gitleaks): every credential-shaped string in this file is an obvious
 // dummy — never shaped like a real ecom token or TPN in use.
 const DUMMY_TOKEN = 'dummy-hpp-token-not-real';
 const DUMMY_TPN = '000011112222';
+const DUMMY_API_KEY = 'dummy-merchant-api-key-not-real';
 
 function fakePrismaWithConfig(config) {
   return {
@@ -74,12 +86,9 @@ describe('ipos-hpp-client: endpoints', () => {
       hppEndpoints({ environment: 'sandbox' }).hpp,
       'https://payment.ipospays.tech/api/v1/external-payment-transaction',
     );
-    // Status check = the Transaction Status Check API, SAME host as the mint.
-    // The api.ipospays.* GET guessed from the overview doc 401'd in production
-    // on the first real payment — do not resurrect it.
     assert.equal(
       hppEndpoints({ environment: 'sandbox' }).query,
-      'https://payment.ipospays.tech/api/v1/iposTransactStatus',
+      'https://api.ipospays.tech/v1/queryPaymentStatus',
     );
     assert.equal(
       hppEndpoints({ environment: 'production' }).hpp,
@@ -87,7 +96,7 @@ describe('ipos-hpp-client: endpoints', () => {
     );
     assert.equal(
       hppEndpoints({}).query,
-      'https://payment.ipospays.com/api/v1/iposTransactStatus',
+      'https://api.ipospays.com/v1/queryPaymentStatus',
       'unknown/absent environment must default to production',
     );
   });
@@ -184,6 +193,7 @@ function resolvedConfig(overrides = {}) {
   return {
     source: 'TENANT', reason: 'TENANT_CONFIG', tenantId: 't1',
     environment: 'sandbox', tpn: DUMMY_TPN, hppToken: DUMMY_TOKEN,
+    apiKey: DUMMY_API_KEY,
     expiryDays: 3, enabled: true, maskedTpn: '0000****2222',
     ...overrides,
   };
@@ -304,12 +314,15 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
       resolvedConfig(),
       { fetchImpl: impl },
     );
-    assert.equal(calls[0].url, 'https://payment.ipospays.tech/api/v1/iposTransactStatus');
-    assert.equal(calls[0].options.method, 'POST');
-    assert.equal(calls[0].options.headers.token, DUMMY_TOKEN);
-    const statusBody = JSON.parse(calls[0].options.body);
-    assert.equal(statusBody.merchantAuthentication.merchantId, DUMMY_TPN);
-    assert.equal(statusBody.merchantAuthentication.transactionReferenceId, 'PLRES1X2Y3');
+    // TWO credentials, one per endpoint: the mint sends the ecom token in a
+    // `token` header; the status check sends the MERCHANT API KEY in
+    // `Authorization`. Sending the token here is the 401 we shipped on the
+    // first real payment (2026-08-29); a detour through /iposTransactStatus
+    // (Transact's status API, not HPP's) then 400'd. Do not resurrect either.
+    assert.equal(calls[0].url, `https://api.ipospays.tech/v1/queryPaymentStatus?tpn=${DUMMY_TPN}&transactionReferenceId=PLRES1X2Y3`);
+    assert.equal(calls[0].options.method, 'GET');
+    assert.equal(calls[0].options.headers.Authorization, DUMMY_API_KEY);
+    assert.equal(calls[0].options.headers.token, undefined, 'the ecom token must NOT be sent to the status API');
     assert.equal(status.approved, true);
     assert.equal(status.amount, 251.5);
     assert.equal(status.transactionId, '11112222333344445555');
