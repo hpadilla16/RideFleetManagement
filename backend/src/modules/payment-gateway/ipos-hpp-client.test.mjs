@@ -356,12 +356,15 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
     assert.equal(status.cardLast4, '1111');
   });
 
-  it('falls through ecom spellings to a SCOPELESS JWT mint with the bare token header', async () => {
+  it('a soft failure (HTTP 200, unreadable body) does NOT crown a winner', async () => {
+    // The API fails soft: rejected credentials can come back as HTTP 200 with
+    // an AuthenticationError body — which crowned a false winner live on
+    // 2026-08-30. Acceptance is readability, so the probe walks PAST the 200.
     const { impl, calls } = sequencedFetchStub([
-      { ok: false, status: 401, body: {} },   // ecom raw Authorization
-      { ok: false, status: 401, body: {} },   // ecom Bearer
-      { body: { responseCode: '00', token: DUMMY_JWT } }, // auth mint
-      { body: APPROVED_STATUS_BODY },          // query, token: jwt
+      { body: { status: 'AuthenticationError', data: {} } }, // ecom raw: soft fail
+      { ok: false, status: 401, body: {} },                   // ecom Bearer
+      { body: { responseCode: '00', token: DUMMY_JWT } },      // auth mint
+      { body: APPROVED_STATUS_BODY },                          // dual header wins
     ]);
     const status = await queryHppPaymentStatus(
       { transactionReferenceId: 'PLRES1X2Y3' },
@@ -380,8 +383,10 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
     assert.equal(calls[2].options.headers.TokenExpiryMinutes, '30');
     assert.equal(calls[2].options.headers.scope, undefined, 'HPP mint must not send a scope');
     assert.equal(calls[2].options.body, '{}');
+    // First JWT attempt carries BOTH headers: ecom in Authorization + JWT in
+    // token — the merchant-credential-plus-session-token pattern.
     assert.equal(calls[3].options.headers.token, DUMMY_JWT);
-    assert.equal(calls[3].options.headers.Authorization, undefined);
+    assert.equal(calls[3].options.headers.Authorization, DUMMY_TOKEN);
     assert.equal(status.approved, true);
   });
 
@@ -390,9 +395,10 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
       { ok: false, status: 401, body: {} },   // ecom raw
       { ok: false, status: 401, body: {} },   // ecom bearer
       { body: { token: DUMMY_JWT } },          // scopeless mint
-      { ok: false, status: 401, body: {} },
-      { ok: false, status: 401, body: {} },
-      { ok: false, status: 401, body: {} },
+      { ok: false, status: 401, body: {} },   // dual
+      { ok: false, status: 401, body: {} },   // token
+      { ok: false, status: 401, body: {} },   // bearer
+      { ok: false, status: 401, body: {} },   // raw
       { body: { token: DUMMY_JWT } },          // ExternalApi mint
       { body: APPROVED_STATUS_BODY },
     ]);
@@ -401,9 +407,9 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
       resolvedConfig(),
       { fetchImpl: impl },
     );
-    assert.equal(calls.length, 8);
+    assert.equal(calls.length, 9);
     assert.equal(calls[2].options.body, '{}');
-    assert.equal(JSON.parse(calls[6].options.body).scope, 'ExternalApi');
+    assert.equal(JSON.parse(calls[7].options.body).scope, 'ExternalApi');
     assert.equal(status.approved, true);
   });
 

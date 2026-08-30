@@ -538,34 +538,43 @@ export async function queryHppPaymentStatus({ transactionReferenceId }, resolved
   // case is six short requests, once, on a path exercised one time per
   // payment confirmation.
   const url = `${hppEndpoints(resolved).query}?tpn=${encodeURIComponent(resolved.tpn)}&transactionReferenceId=${encodeURIComponent(ref)}`;
-  // The two doc sources CONTRADICT each other: the official
-  // queryPaymentStatus page says `Authorization: <the token generated in the
-  // ipospays portal>` — which reads as the per-TPN ECOM token — while the
-  // API-explorer material says a generateAuthToken JWT in a bare `token`
-  // header. The probe walks both stories, ecom-token-in-Authorization first
-  // (the one spelling never yet tried live), and logs the winner so this
-  // collapses to one line once production has spoken.
+  // The doc sources contradict each other AND the API fails soft: a rejected
+  // credential can come back as HTTP 200 whose body says AuthenticationError
+  // — which is how the first probe crowned a false winner (2026-08-30). So
+  // acceptance is now READABILITY: the parsed body must look like an actual
+  // transaction record (a transactionId, or a numeric responseCode). The
+  // probe walks every plausible auth story, logging the true winner:
+  //   1. ecom token in Authorization (the official page's literal reading)
+  //   2. BOTH headers — ecom in Authorization + JWT in token (Dejavoo APIs
+  //      have been seen wanting a merchant credential and a session token)
+  //   3. the JWT alone in each spelling, scopeless then Transact-style.
+  const looksLikeTransaction = (body) => {
+    const s = normalizeHppStatus(body);
+    return s.found && (s.responseCode > 0 || !!s.transactionId);
+  };
   let res; let data;
   let accepted = null;
+
   for (const attempt of [
     { label: 'ecom-authorization', headers: { Authorization: resolved.hppToken } },
     { label: 'ecom-bearer', headers: { Authorization: `Bearer ${resolved.hppToken}` } },
   ]) {
     ({ res, data } = await hppFetch(url, { method: 'GET', headers: attempt.headers }, deps));
-    if (res.status !== 401) { accepted = attempt.label; break; }
+    if (res.status !== 401 && looksLikeTransaction(data)) { accepted = attempt.label; break; }
   }
   if (!accepted) {
     outer:
     for (const scope of [null, 'ExternalApi']) {
       const jwt = await mintHppAuthJwt(resolved, deps, { scope });
       for (const headers of [
+        { Authorization: resolved.hppToken, token: jwt },
         { token: jwt },
         { Authorization: `Bearer ${jwt}` },
         { Authorization: jwt },
       ]) {
         ({ res, data } = await hppFetch(url, { method: 'GET', headers }, deps));
-        if (res.status !== 401) {
-          accepted = `jwt-${Object.keys(headers)[0]}${String(headers.Authorization || '').startsWith('Bearer ') ? '-bearer' : ''}-scope-${scope || 'none'}`;
+        if (res.status !== 401 && looksLikeTransaction(data)) {
+          accepted = `${headers.Authorization && headers.token ? 'ecom+' : ''}jwt-${Object.keys(headers).pop()}${String(headers.Authorization || '').startsWith('Bearer ') ? '-bearer' : ''}-scope-${scope || 'none'}`;
           break outer;
         }
       }
