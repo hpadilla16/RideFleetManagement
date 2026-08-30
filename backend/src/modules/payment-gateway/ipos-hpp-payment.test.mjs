@@ -196,6 +196,16 @@ describe('ipos-hpp-payment: verifyHppPayment', () => {
     );
   });
 
+  it('a DECORATED reference from the gateway redirect still verifies (live bug, twice)', async () => {
+    const { referenceId, deps } = await mintedSetup();
+    const verdict = await verifyHppPayment(
+      { reservation, iposRef: `${referenceId}?TransactionId=999&code=200` },
+      deps,
+    );
+    assert.equal(verdict.approved, true);
+    assert.equal(verdict.amount, 120.5);
+  });
+
   it('refuses a reference that was never minted for this reservation (replay guard)', async () => {
     const { deps } = await mintedSetup();
     await assert.rejects(

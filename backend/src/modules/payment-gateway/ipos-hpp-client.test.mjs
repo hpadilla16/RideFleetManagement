@@ -11,6 +11,7 @@ import {
   normalizeHppStatus,
   hppSafeCustomerName,
   hppSafeMobile,
+  extractHppReferenceId,
 } from './ipos-hpp-client.js';
 
 // THE FIRST LIVE LINK FAILED ON A NAME. iPOSpays rejected the whole mint with
@@ -40,6 +41,23 @@ describe('ipos-hpp-client: customer field sanitizing', () => {
     assert.equal(hppSafeMobile('+1 (407) 664-4254'), '4076644254');
     assert.equal(hppSafeMobile('123'), null);
     assert.equal(hppSafeMobile(null), null);
+  });
+
+  it('extractHppReferenceId strips the gateway redirect decoration', () => {
+    // Seen live twice (2026-08-30): iPOSpays glues its return parameters onto
+    // the returnUrl with a SECOND `?`, so the query value arrives decorated
+    // and the strict validator rejected customers who had genuinely paid.
+    assert.equal(
+      extractHppReferenceId('PLRES282260mtg15bb7t?TransactionId=999&code=200'),
+      'PLRES282260mtg15bb7t',
+    );
+    assert.equal(extractHppReferenceId('  PLABC123  '), 'PLABC123');
+    assert.equal(extractHppReferenceId('PLCLEAN20CHARREF1234'), 'PLCLEAN20CHARREF1234');
+    assert.equal(extractHppReferenceId('?garbage=first'), '');
+    assert.equal(extractHppReferenceId(''), '');
+    // A 25-char alnum run extracts to 20 — and then fails the audit-binding
+    // gate downstream, which is the real protection.
+    assert.equal(extractHppReferenceId('ABCDEFGHIJKLMNOPQRSTUVWXY').length, 20);
   });
 
   it('status check without the API Key or Secret Key refuses loudly, never guesses', async () => {

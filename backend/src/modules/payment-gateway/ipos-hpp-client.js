@@ -227,6 +227,25 @@ export function isValidHppReferenceId(value = '') {
 }
 
 /**
+ * Pull OUR reference back out of whatever the gateway's redirect did to it.
+ *
+ * iPOSpays appends its own return parameters onto the returnUrl — with a
+ * SECOND `?` — so the iposRef query value arrives as
+ * `PLRES…mtg15bb7t?TransactionId=…` and the strict validator rejects a
+ * customer who genuinely paid (seen live twice, 2026-08-30). The reference is
+ * strictly alphanumeric by construction, so everything from the first
+ * non-alphanumeric character on is the gateway's decoration, not ours.
+ *
+ * SAFE TO EXTRACT, NOT A LOOSENING: the extracted prefix still has to match
+ * an audit-bound mint for the exact reservation before anything is verified
+ * or recorded — this only stops decoration from voiding a real payment.
+ */
+export function extractHppReferenceId(raw = '') {
+  const m = /^[A-Za-z0-9]{1,20}/.exec(String(raw || '').trim());
+  return m ? m[0] : '';
+}
+
+/**
  * Resolve a tenant's HPP configuration from the canonical AppSetting row.
  * NEVER throws — a missing row, dead DB, bad JSON or failed decrypt all
  * degrade to `{ source: 'NONE' }`, which callers turn into an explicit

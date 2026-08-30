@@ -5,6 +5,7 @@ import {
   hppConfigured,
   hppReferenceId,
   isValidHppReferenceId,
+  extractHppReferenceId,
   mintHostedPaymentPage,
   queryHppPaymentStatus,
   resolveTenantHppConfig,
@@ -144,7 +145,11 @@ export async function verifyHppPayment({ reservation, iposRef }, deps = {}) {
   const resolveConfig = deps.resolveConfig || resolveTenantHppConfig;
   const query = deps.query || queryHppPaymentStatus;
 
-  const ref = String(iposRef || '').trim();
+  // The gateway's redirect DECORATES the reference (a second `?` glued onto
+  // the returnUrl — seen live twice, 2026-08-30, rejecting customers who had
+  // genuinely paid). Extract our strictly-alphanumeric prefix; the audit
+  // binding below stays the real gate.
+  const ref = extractHppReferenceId(iposRef);
   if (!reservation?.id) throw codedError('Reservation is required', 'VALIDATION');
   if (!isValidHppReferenceId(ref)) throw codedError('iPOS payment reference is invalid', 'VALIDATION');
 

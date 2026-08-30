@@ -37,7 +37,7 @@ import {
   verifyHppPayment,
   hppNotConfiguredMessage
 } from '../payment-gateway/ipos-hpp-payment.service.js';
-import { isHppDryRun } from '../payment-gateway/ipos-hpp-client.js';
+import { isHppDryRun, extractHppReferenceId } from '../payment-gateway/ipos-hpp-client.js';
 
 export const customerPortalRouter = Router();
 
@@ -2252,8 +2252,11 @@ customerPortalRouter.get('/payment/:token/confirm', portalRead, async (req, res,
     if (transId) params.set('transId', transId);
 
     // iPOSpays HPP return — our own minted reference, carried through so the
-    // pay page can POST it back for server-side verification.
-    const iposRef = String(req.query?.iposRef || '').trim();
+    // pay page can POST it back for server-side verification. The gateway
+    // glues its return parameters on with a second `?`, so strip that
+    // decoration down to our strictly-alphanumeric reference here — the pay
+    // page should receive a value that can actually verify.
+    const iposRef = extractHppReferenceId(req.query?.iposRef);
     if (iposRef) params.set('iposRef', iposRef);
 
     return res.redirect(`${portalBase().replace(/\/$/, '')}/customer/pay?${params.toString()}`);
