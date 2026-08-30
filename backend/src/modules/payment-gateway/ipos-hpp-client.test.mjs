@@ -346,10 +346,16 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
     // accepts. Probed live 2026-08-30: the status API 401s the ecom token AND
     // the bare API key in every header spelling. Do not resurrect either.
     assert.equal(calls[0].url, 'https://auth.ipospays.tech/v1/authenticate-token');
+    // Credentials must ride in the HEADERS (body-only gets AUTH_ERR_001 "API
+    // Key is required" — probed live 2026-08-30, and ipos-auth.js had already
+    // learned the same for Transact). Body carries a duplicate.
+    assert.equal(calls[0].options.headers.apiKey, DUMMY_API_KEY);
+    assert.equal(calls[0].options.headers.secretKey, DUMMY_SECRET_KEY);
     const authBody = JSON.parse(calls[0].options.body);
     assert.equal(authBody.apiKey, DUMMY_API_KEY);
     assert.equal(authBody.secretKey, DUMMY_SECRET_KEY);
     assert.equal(authBody.scope, 'ExternalApi');
+    assert.equal(authBody.jwtTokenExpiryMinutes, 30);
     assert.equal(calls[1].url, `https://api.ipospays.tech/v1/queryPaymentStatus?tpn=${DUMMY_TPN}&transactionReferenceId=PLRES1X2Y3`);
     assert.equal(calls[1].options.method, 'GET');
     assert.equal(calls[1].options.headers.Authorization, `Bearer ${DUMMY_JWT}`);

@@ -164,15 +164,23 @@ const HPP_AUTH_ENDPOINTS = {
 export async function mintHppAuthJwt(resolved = {}, deps = {}) {
   const env = String(resolved?.environment || 'production').toLowerCase();
   const url = env === 'sandbox' ? HPP_AUTH_ENDPOINTS.sandbox : HPP_AUTH_ENDPOINTS.production;
+  // Credentials go in the HEADERS, duplicated in the body — ipos-auth.js
+  // learned this for Transact (body-only returns AUTH_ERR_001 "API Key is
+  // required"), and a live probe on 2026-08-30 confirmed the same for this
+  // endpoint. The expiry field is `jwtTokenExpiryMinutes`, also per that file.
+  const fields = {
+    apiKey: resolved.apiKey,
+    secretKey: resolved.secretKey,
+    scope: 'ExternalApi',
+    jwtTokenExpiryMinutes: 30,
+  };
   const { res, data } = await hppFetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      apiKey: resolved.apiKey,
-      secretKey: resolved.secretKey,
-      scope: 'ExternalApi',
-      TokenExpiryMinutes: 30,
-    }),
+    headers: {
+      'Content-Type': 'application/json',
+      ...Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, String(v)])),
+    },
+    body: JSON.stringify(fields),
   }, deps);
   const token = String(data?.token || '').trim();
   if (!res.ok || !token) {
