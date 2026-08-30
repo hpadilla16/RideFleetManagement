@@ -42,15 +42,17 @@ describe('ipos-hpp-client: customer field sanitizing', () => {
     assert.equal(hppSafeMobile(null), null);
   });
 
-  it('status check without the API Key refuses loudly, never guesses', async () => {
-    await assert.rejects(
-      () => queryHppPaymentStatus(
-        { transactionReferenceId: 'PLRES1X2Y3' },
-        resolvedConfig({ apiKey: '' }),
-        { fetchImpl: () => { throw new Error('must not be called'); } },
-      ),
-      (err) => err.code === 'GATEWAY_NOT_CONFIGURED' && /API Key/.test(err.message),
-    );
+  it('status check without the API Key or Secret Key refuses loudly, never guesses', async () => {
+    for (const missing of [{ apiKey: '' }, { secretKey: '' }]) {
+      await assert.rejects(
+        () => queryHppPaymentStatus(
+          { transactionReferenceId: 'PLRES1X2Y3' },
+          resolvedConfig(missing),
+          { fetchImpl: () => { throw new Error('must not be called'); } },
+        ),
+        (err) => err.code === 'GATEWAY_NOT_CONFIGURED' && /API Key/.test(err.message),
+      );
+    }
   });
 });
 
@@ -59,6 +61,8 @@ describe('ipos-hpp-client: customer field sanitizing', () => {
 const DUMMY_TOKEN = 'dummy-hpp-token-not-real';
 const DUMMY_TPN = '000011112222';
 const DUMMY_API_KEY = 'dummy-merchant-api-key-not-real';
+const DUMMY_SECRET_KEY = 'dummy-merchant-secret-not-real';
+const DUMMY_JWT = 'dummy-minted-jwt-not-real';
 
 function fakePrismaWithConfig(config) {
   return {
@@ -193,7 +197,7 @@ function resolvedConfig(overrides = {}) {
   return {
     source: 'TENANT', reason: 'TENANT_CONFIG', tenantId: 't1',
     environment: 'sandbox', tpn: DUMMY_TPN, hppToken: DUMMY_TOKEN,
-    apiKey: DUMMY_API_KEY,
+    apiKey: DUMMY_API_KEY, secretKey: DUMMY_SECRET_KEY,
     expiryDays: 3, enabled: true, maskedTpn: '0000****2222',
     ...overrides,
   };
@@ -293,40 +297,96 @@ describe('ipos-hpp-client: getHostedPaymentPage', () => {
   });
 });
 
+/**
+ * A stub that answers each call in sequence — the status check is now TWO
+ * requests: authenticate-token first, then the query.
+ */
+function sequencedFetchStub(responses) {
+  const calls = [];
+  const impl = async (url, options) => {
+    const r = responses[Math.min(calls.length, responses.length - 1)];
+    calls.push({ url, options });
+    return {
+      ok: r.ok !== false, status: r.status || 200,
+      text: async () => JSON.stringify(r.body),
+      headers: { get: () => null },
+    };
+  };
+  return { impl, calls };
+}
+
+const APPROVED_STATUS_BODY = {
+  iposHPResponse: {
+    responseCode: 200,
+    responseMessage: 'Successful',
+    transactionReferenceId: 'PLRES1X2Y3',
+    transactionId: '11112222333344445555',
+    amount: 251.5,
+    totalAmount: 251.5,
+    cardType: 'VISA',
+    cardLast4Digit: 1111,
+    responseApprovalCode: 'TAS164',
+    rrn: '000000123456',
+  },
+};
+
 describe('ipos-hpp-client: queryPaymentStatus', () => {
-  it('GETs the documented URL and normalizes an approved response', async () => {
-    const { impl, calls } = fetchStub({
-      iposHPResponse: {
-        responseCode: 200,
-        responseMessage: 'Successful',
-        transactionReferenceId: 'PLRES1X2Y3',
-        transactionId: '11112222333344445555',
-        amount: 251.5,
-        totalAmount: 251.5,
-        cardType: 'VISA',
-        cardLast4Digit: 1111,
-        responseApprovalCode: 'TAS164',
-        rrn: '000000123456',
-      },
-    });
+  it('exchanges apiKey+secretKey for a JWT, then GETs the documented URL', async () => {
+    const { impl, calls } = sequencedFetchStub([
+      { body: { responseCode: '00', responseMessage: 'Success', token: DUMMY_JWT } },
+      { body: APPROVED_STATUS_BODY },
+    ]);
     const status = await queryHppPaymentStatus(
       { transactionReferenceId: 'PLRES1X2Y3' },
       resolvedConfig(),
       { fetchImpl: impl },
     );
-    // TWO credentials, one per endpoint: the mint sends the ecom token in a
-    // `token` header; the status check sends the MERCHANT API KEY in
-    // `Authorization`. Sending the token here is the 401 we shipped on the
-    // first real payment (2026-08-29); a detour through /iposTransactStatus
-    // (Transact's status API, not HPP's) then 400'd. Do not resurrect either.
-    assert.equal(calls[0].url, `https://api.ipospays.tech/v1/queryPaymentStatus?tpn=${DUMMY_TPN}&transactionReferenceId=PLRES1X2Y3`);
-    assert.equal(calls[0].options.method, 'GET');
-    assert.equal(calls[0].options.headers.Authorization, DUMMY_API_KEY);
-    assert.equal(calls[0].options.headers.token, undefined, 'the ecom token must NOT be sent to the status API');
+    // THREE credentials in this integration, each with its own door: the ecom
+    // token mints pages, and apiKey+secretKey mint the JWT the status API
+    // accepts. Probed live 2026-08-30: the status API 401s the ecom token AND
+    // the bare API key in every header spelling. Do not resurrect either.
+    assert.equal(calls[0].url, 'https://auth.ipospays.tech/v1/authenticate-token');
+    const authBody = JSON.parse(calls[0].options.body);
+    assert.equal(authBody.apiKey, DUMMY_API_KEY);
+    assert.equal(authBody.secretKey, DUMMY_SECRET_KEY);
+    assert.equal(authBody.scope, 'ExternalApi');
+    assert.equal(calls[1].url, `https://api.ipospays.tech/v1/queryPaymentStatus?tpn=${DUMMY_TPN}&transactionReferenceId=PLRES1X2Y3`);
+    assert.equal(calls[1].options.method, 'GET');
+    assert.equal(calls[1].options.headers.Authorization, `Bearer ${DUMMY_JWT}`);
+    assert.equal(calls[1].options.headers.token, undefined, 'the ecom token must NOT be sent to the status API');
     assert.equal(status.approved, true);
     assert.equal(status.amount, 251.5);
     assert.equal(status.transactionId, '11112222333344445555');
     assert.equal(status.cardLast4, '1111');
+  });
+
+  it('falls back to the bare token header if Bearer is 401d, and stops there', async () => {
+    const { impl, calls } = sequencedFetchStub([
+      { body: { token: DUMMY_JWT } },
+      { ok: false, status: 401, body: { message: 'unauthorized' } },
+      { body: APPROVED_STATUS_BODY },
+    ]);
+    const status = await queryHppPaymentStatus(
+      { transactionReferenceId: 'PLRES1X2Y3' },
+      resolvedConfig(),
+      { fetchImpl: impl },
+    );
+    assert.equal(calls.length, 3);
+    assert.equal(calls[2].options.headers.token, DUMMY_JWT);
+    assert.equal(status.approved, true);
+  });
+
+  it('an auth-mint failure surfaces as GATEWAY_ERROR without touching the query', async () => {
+    const { impl, calls } = sequencedFetchStub([
+      { ok: false, status: 401, body: { responseMessage: 'bad credentials' } },
+    ]);
+    await assert.rejects(
+      () => queryHppPaymentStatus(
+        { transactionReferenceId: 'PLRES1X2Y3' }, resolvedConfig(), { fetchImpl: impl },
+      ),
+      (err) => err.code === 'GATEWAY_ERROR' && /auth token/i.test(err.message),
+    );
+    assert.equal(calls.length, 1);
   });
 
   it('accepts the live-API lowercase envelope (iposhpresponse)', () => {

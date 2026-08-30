@@ -148,6 +148,43 @@ export function hppSafeMobile(raw) {
   return digits.length >= 10 ? digits.slice(-10) : null;
 }
 
+const HPP_AUTH_ENDPOINTS = {
+  production: 'https://auth.ipospays.com/v1/authenticate-token',
+  sandbox: 'https://auth.ipospays.tech/v1/authenticate-token',
+};
+
+/**
+ * API Key + Secret Key → short-lived JWT (the Authentication Token API).
+ *
+ * Scope `ExternalApi` — the HPP is iPOSpays' "external payment" product and
+ * this is the only listed scope that fits it. If iPOSpays ever rejects the
+ * scope, their error names the valid ones and lands in the log, scrubbed.
+ * The JWT and the secret never appear in any log line.
+ */
+export async function mintHppAuthJwt(resolved = {}, deps = {}) {
+  const env = String(resolved?.environment || 'production').toLowerCase();
+  const url = env === 'sandbox' ? HPP_AUTH_ENDPOINTS.sandbox : HPP_AUTH_ENDPOINTS.production;
+  const { res, data } = await hppFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      apiKey: resolved.apiKey,
+      secretKey: resolved.secretKey,
+      scope: 'ExternalApi',
+      TokenExpiryMinutes: 30,
+    }),
+  }, deps);
+  const token = String(data?.token || '').trim();
+  if (!res.ok || !token) {
+    const err = new Error(
+      `iPOSpays auth token request failed (${res.status}): ${String(data?.responseMessage || data?.message || 'no token returned').slice(0, 120)}`,
+    );
+    err.code = 'GATEWAY_ERROR';
+    throw err;
+  }
+  return token;
+}
+
 /**
  * transactionReferenceId: strictly alphanumeric, ≤20 chars (same 904 FORMAT
  * ERROR history as the Transact client's shortRef — hyphens are echoed to the
@@ -183,7 +220,7 @@ export async function resolveTenantHppConfig(tenantId, { prismaClient = prisma }
   const none = (reason) => ({
     source: 'NONE', reason,
     tenantId: tenantId || null,
-    environment: 'production', tpn: '', hppToken: '', apiKey: '', expiryDays: 3,
+    environment: 'production', tpn: '', hppToken: '', apiKey: '', secretKey: '', expiryDays: 3,
     enabled: false, maskedTpn: maskTpn(''),
   });
   if (!tenantId) return none('NO_TENANT_ID');
@@ -210,9 +247,10 @@ export async function resolveTenantHppConfig(tenantId, { prismaClient = prisma }
   // Dual-read decrypt: `enci:` ciphertext decrypts, legacy plaintext passes
   // through, an undecryptable value collapses to '' (never raw bytes).
   const hppToken = String(decryptSettingSecret(block.hppToken) || '').trim();
-  // The status-check credential (Authorization header). Optional for the MINT
-  // — a tenant without it can still issue links; verification refuses loudly.
+  // The status-check credentials (exchanged for a JWT). Optional for the MINT
+  // — a tenant without them can still issue links; verification refuses loudly.
   const apiKey = String(decryptSettingSecret(block.apiKey) || '').trim();
+  const secretKey = String(decryptSettingSecret(block.secretKey) || '').trim();
 
   if (!tpn || !hppToken) {
     return {
@@ -230,6 +268,7 @@ export async function resolveTenantHppConfig(tenantId, { prismaClient = prisma }
     tpn,
     hppToken,
     apiKey,
+    secretKey,
     expiryDays: clampExpiryDays(block.expiryDays, 3),
     // Informational — resolution does not route on the checkbox (same rule as
     // the terminal resolver: an unchecked box must never reroute money).
@@ -448,20 +487,38 @@ export async function queryHppPaymentStatus({ transactionReferenceId }, resolved
     throw err;
   }
 
-  if (!resolved.apiKey) {
+  if (!resolved.apiKey || !resolved.secretKey) {
     // Verification is what stands between a browser redirect and a recorded
-    // payment; without the key it must refuse loudly, not guess.
+    // payment; without the credentials it must refuse loudly, not guess.
     const err = new Error(
-      'iPOSpays status checks need the Merchant API Key — Settings → Payments → iPOS Payment Links → API Key',
+      'iPOSpays status checks need the Merchant API Key AND Secret Key — Settings → Payments → iPOS Payment Links',
     );
     err.code = 'GATEWAY_NOT_CONFIGURED';
     throw err;
   }
+
+  // Exchange API Key + Secret Key for a short-lived JWT. Probed live
+  // 2026-08-30: the status API 401s the ecom token AND the raw API key in
+  // every header spelling — only the authenticate-token JWT is accepted.
+  // Minted per status check on purpose: checks are rare (one per payment
+  // confirmation), the API's minimum expiry is 30 minutes, and statelessness
+  // beats a cache for a call this infrequent.
+  const jwt = await mintHppAuthJwt(resolved, deps);
+
   const url = `${hppEndpoints(resolved).query}?tpn=${encodeURIComponent(resolved.tpn)}&transactionReferenceId=${encodeURIComponent(ref)}`;
-  const { res, data } = await hppFetch(url, {
-    method: 'GET',
-    headers: { Authorization: resolved.apiKey },
-  }, deps);
+  // The docs never name the header ("the token must be included in the
+  // request header"). Try the two spellings the platform itself uses —
+  // Bearer, then the Transact-style bare `token:` — stopping at the first
+  // that is not a 401. One extra request at worst, and the log records which
+  // spelling won so this probe can be collapsed once reality is known.
+  let res; let data;
+  for (const headers of [{ Authorization: `Bearer ${jwt}` }, { token: jwt }]) {
+    ({ res, data } = await hppFetch(url, { method: 'GET', headers }, deps));
+    if (res.status !== 401) {
+      logger.info('[ipos-hpp] status auth accepted', { header: Object.keys(headers)[0] });
+      break;
+    }
+  }
 
   const status = normalizeHppStatus(data);
   if (!res.ok && !status.found) {

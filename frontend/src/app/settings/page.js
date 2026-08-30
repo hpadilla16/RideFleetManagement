@@ -3191,6 +3191,17 @@ function SettingsInner({ token, me, logout }) {
                   />
                   <span className="hint">{t('settingsPayments.ipos.apiKeyHint')}</span>
                 </div>
+                <div className="stack">
+                  <label className="label">{t('settingsPayments.ipos.secretKey')}</label>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={paymentGatewayConfig.ipos?.secretKey || ''}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, secretKey: e.target.value } })}
+                    placeholder={paymentGatewayConfig.ipos?.hasSecretKey ? t('settingsPayments.ipos.tokenSavedPlaceholder') : t('settingsPayments.ipos.secretKeyEmptyPlaceholder')}
+                  />
+                  <span className="hint">{t('settingsPayments.ipos.secretKeyHint')}</span>
+                </div>
               </div>
               <div className="form-grid-2">
                 <div className="stack">

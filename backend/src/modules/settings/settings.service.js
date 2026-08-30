@@ -591,14 +591,16 @@ function defaultPaymentGatewayConfig() {
       // Stored as `enci:` ciphertext like spin.authKey.
       hppToken: '',
       hasHppToken: false,
-      // The Merchant API Key from the portal's Generate Keys section. A
-      // SECOND credential, not the token: the mint authenticates with the
-      // ecom token in a `token` header, but queryPaymentStatus authenticates
-      // with THIS key in the Authorization header — learned live 2026-08-29
-      // when the status check 401'd the token on the owner's first real
-      // payment. Same never-on-read / ciphertext contract as hppToken.
+      // The Merchant API Key + Secret Key pair from the portal's Generate
+      // Keys section. NOT the ecom token: the mint authenticates with the
+      // token in a `token` header, while the status check exchanges THIS pair
+      // for a short-lived JWT via authenticate-token (probed live 2026-08-30:
+      // the status API 401s the token AND the bare API key in every header
+      // spelling). Same never-on-read / ciphertext contract as hppToken.
       apiKey: '',
       hasApiKey: false,
+      secretKey: '',
+      hasSecretKey: false,
       // Hosted-link expiry in days (iPOSpays accepts 1–31).
       expiryDays: 3
     },
@@ -651,13 +653,16 @@ function spinBlockForRead(spin = {}) {
 function iposBlockForRead(ipos = {}) {
   const stored = typeof ipos?.hppToken === 'string' ? ipos.hppToken.trim() : '';
   const storedKey = typeof ipos?.apiKey === 'string' ? ipos.apiKey.trim() : '';
+  const storedSecret = typeof ipos?.secretKey === 'string' ? ipos.secretKey.trim() : '';
   const out = {
     ...ipos,
     hppToken: '', hasHppToken: !!stored,
     apiKey: '', hasApiKey: !!storedKey,
+    secretKey: '', hasSecretKey: !!storedSecret,
   };
   delete out.clearHppToken;
   delete out.clearApiKey;
+  delete out.clearSecretKey;
   return out;
 }
 
@@ -1214,6 +1219,7 @@ export const settingsService = {
     const newSpinAuthKey = String(payload?.spin?.authKey || '').trim();
     const newIposHppToken = String(payload?.ipos?.hppToken || '').trim();
     const newIposApiKey = String(payload?.ipos?.apiKey || '').trim();
+    const newIposSecretKey = String(payload?.ipos?.secretKey || '').trim();
 
     const next = {
       ...defaults,
@@ -1294,18 +1300,25 @@ export const settingsService = {
           : (newIposHppToken
             ? encryptSettingSecret(newIposHppToken)
             : carrySettingSecret(storedRaw?.ipos?.hppToken)),
-        // Same contract for the API Key (the status-check credential).
+        // Same contract for the status-check credential pair.
         apiKey: payload?.ipos?.clearApiKey
           ? ''
           : (newIposApiKey
             ? encryptSettingSecret(newIposApiKey)
             : carrySettingSecret(storedRaw?.ipos?.apiKey)),
+        secretKey: payload?.ipos?.clearSecretKey
+          ? ''
+          : (newIposSecretKey
+            ? encryptSettingSecret(newIposSecretKey)
+            : carrySettingSecret(storedRaw?.ipos?.secretKey)),
         expiryDays: iposExpiryDaysValue(payload?.ipos?.expiryDays, defaults.ipos.expiryDays),
         // Read-shape / command-only fields never belong in the stored blob.
         hasHppToken: undefined,
         clearHppToken: undefined,
         hasApiKey: undefined,
-        clearApiKey: undefined
+        clearApiKey: undefined,
+        hasSecretKey: undefined,
+        clearSecretKey: undefined
       },
       payarc: {
         ...defaults.payarc,
