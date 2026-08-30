@@ -1,0 +1,903 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RideFleet — View Payments Redesign · Gateway-Aware Collect / Record / History</title>
+<style>
+/* ============================================================
+   Tokens — Design System v2 subset, brand #8752FE unchanged.
+   Flat surfaces, tabular-nums for money, 40px touch targets,
+   11px text floor, ~30% label slack for Spanish.
+   Same visual family as tolls-redesign-A.html.
+   ============================================================ */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+
+  --brand:#8752FE;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-600:#7440ea; --p-700:#5a26c9; --p-800:#45189e;
+
+  --gold-50:#fdf6e8; --gold-100:#fbe9c6; --gold-600:#a3660f; --gold-700:#7d4d08;
+  --teal-50:#e7faf6; --teal-700:#086a5e; --teal-bd:rgba(11,131,117,.26);
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+
+  --border-subtle:var(--n-100); --border:var(--n-200); --border-strong:var(--n-300);
+  --text-1:var(--n-900); --text-2:var(--n-700); --text-3:var(--n-600);
+
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+  --sh-2:0 1px 2px rgba(24,16,54,.05),0 6px 14px -4px rgba(38,20,90,.09),0 14px 28px -12px rgba(38,20,90,.10);
+
+  --r-xs:6px; --r-sm:8px; --r-md:11px; --r-lg:14px; --r-xl:18px; --r-pill:999px;
+  --font-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --focus:#0b63d6;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--n-50)}
+body{
+  font-family:var(--font-sans);font-size:14px;line-height:1.55;color:var(--text-2);
+  background:var(--n-50);-webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{color:var(--text-1);letter-spacing:-.018em;line-height:1.15}
+table{border-collapse:collapse;width:100%}
+button,input,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+.tnum,table,.money,.mono,time{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:var(--r-xs)}
+
+/* ------- mockup page chrome (not part of the product screen) ------- */
+.page-head{max-width:1440px;margin:0 auto;padding:44px 32px 20px}
+.page-head .eyebrow{
+  display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);
+  font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--p-800);background:var(--p-50);border:1px solid rgba(135,82,254,.22);
+  border-radius:var(--r-pill);padding:6px 13px 6px 10px;
+}
+.page-head .eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.page-head h1{margin-top:14px;font-size:clamp(28px,3.4vw,42px);font-weight:700;letter-spacing:-.03em}
+.page-head p{margin-top:10px;max-width:860px;color:var(--text-2);font-size:15px}
+.page-head .note{
+  margin-top:14px;max-width:860px;font-size:12.5px;color:var(--text-3);
+  border-left:3px solid var(--n-300);padding-left:12px;line-height:1.6;
+}
+.mock-wrap{max-width:1440px;margin:20px auto 0;padding:0 32px}
+.mock-label{
+  font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--text-3);margin:40px 0 10px;
+}
+.mock-label b{color:var(--p-800)}
+
+/* ============================================================
+   PRODUCT SCREEN — flat app frame
+   ============================================================ */
+.screen{
+  background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-xl);
+  box-shadow:var(--sh-2);overflow:hidden;
+}
+
+/* --- module header --- */
+.mod-head{padding:16px 22px 14px;border-bottom:1px solid var(--border-subtle);background:var(--n-0)}
+.mod-title-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.backlink{
+  display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:6px 10px 6px 6px;
+  font-size:13px;font-weight:600;color:var(--text-3);border-radius:var(--r-sm);
+}
+.backlink:hover{background:var(--n-100);color:var(--text-1)}
+.backlink svg{width:15px;height:15px}
+.mod-title-row h2{font-size:19px;font-weight:660}
+.mod-title-row .sub{font-size:12.5px;color:var(--text-3)}
+.mod-title-row .right{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+.gwchip{
+  display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:620;color:var(--p-800);
+  background:var(--p-50);border:1px solid rgba(135,82,254,.24);border-radius:var(--r-sm);
+  padding:6px 11px;min-height:32px;
+}
+.gwchip svg{width:14px;height:14px;flex:0 0 auto}
+.gwchip .mono{font-family:var(--font-mono);font-size:10.5px;color:var(--p-700);font-weight:500}
+
+.chip{
+  display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:640;
+  line-height:1.45;padding:4px 9px;border-radius:var(--r-xs);white-space:nowrap;border:1px solid transparent;
+}
+.chip .led{width:6px;height:6px;border-radius:50%;background:currentColor;flex:0 0 auto}
+.chip--ok{color:var(--ok-tx);background:var(--ok-bg);border-color:var(--ok-bd)}
+.chip--warn{color:var(--warn-tx);background:var(--warn-bg);border-color:var(--warn-bd)}
+.chip--danger{color:var(--danger-tx);background:var(--danger-bg);border-color:var(--danger-bd)}
+.chip--info{color:var(--info);background:var(--info-bg);border-color:var(--info-bd)}
+.chip--neutral{color:var(--text-2);background:var(--n-100);border-color:var(--border)}
+.chip--brand{color:var(--p-800);background:var(--p-50);border-color:rgba(135,82,254,.22)}
+
+/* --- snapshot band --- */
+.kpis{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;
+  padding:14px 22px 16px;background:var(--n-25);border-bottom:1px solid var(--border-subtle);
+}
+.kpi{background:var(--n-0);border:1px solid var(--border-subtle);border-radius:var(--r-md);padding:11px 14px;box-shadow:var(--sh-1);min-width:0}
+.kpi .klab{font-family:var(--font-mono);font-size:9.5px;font-weight:500;letter-spacing:.13em;text-transform:uppercase;color:var(--text-3)}
+.kpi .kval{font-size:22px;font-weight:680;letter-spacing:-.03em;color:var(--text-1);margin-top:4px;font-variant-numeric:tabular-nums}
+.kpi .kfoot{display:flex;align-items:center;gap:6px;margin-top:5px;font-size:11px;color:var(--text-3)}
+.kpi--due .kval{color:var(--p-700)}
+.kpi--due{border-color:rgba(135,82,254,.3);background:linear-gradient(180deg,var(--n-0),var(--p-50))}
+
+/* --- work zones --- */
+.zones{display:grid;grid-template-columns:1.15fr 1fr;gap:14px;padding:16px 22px 0}
+.zcard{background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-1);padding:16px 18px;min-width:0}
+.zcard .zhead{display:flex;align-items:center;gap:9px;margin-bottom:4px}
+.zcard .zhead h3{font-size:14.5px;font-weight:660}
+.zcard .zhead .zic{
+  width:26px;height:26px;border-radius:8px;display:grid;place-items:center;flex:0 0 auto;
+  background:var(--p-50);color:var(--p-700);border:1px solid rgba(135,82,254,.2);
+}
+.zcard .zhead .zic svg{width:14px;height:14px}
+.zcard .zhead .chip{margin-left:auto}
+.zcard .zdesc{font-size:12px;color:var(--text-3);line-height:1.55;margin-bottom:13px}
+
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;
+  font-size:13px;font-weight:620;letter-spacing:-.01em;padding:8px 16px;
+  border-radius:var(--r-sm);border:1px solid transparent;cursor:pointer;white-space:nowrap;transition:.15s;
+}
+.btn svg{width:15px;height:15px;flex:0 0 auto}
+.btn--primary{background:var(--brand);color:#fff;box-shadow:0 1px 2px rgba(56,20,130,.28),0 6px 14px -6px rgba(135,82,254,.55)}
+.btn--primary:hover{background:var(--p-600)}
+.btn--secondary{background:var(--n-0);color:var(--text-1);border-color:var(--border-strong);box-shadow:var(--sh-1)}
+.btn--secondary:hover{border-color:#c3b6e8}
+.btn--ghost{background:transparent;color:var(--p-700)}
+.btn--ghost:hover{background:var(--p-50)}
+.btn--danger-ghost{background:transparent;color:var(--danger-tx)}
+.btn--danger-ghost:hover{background:var(--danger-bg)}
+.btn .amt{font-family:var(--font-mono);font-weight:600;font-size:12.5px;background:rgba(255,255,255,.2);border-radius:5px;padding:1px 7px}
+.btn--secondary .amt,.btn--ghost .amt{background:var(--n-100);color:var(--text-2)}
+.btn--icon{min-width:40px;padding:8px;color:var(--text-3)}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+.cof{
+  display:flex;align-items:center;gap:10px;margin-bottom:12px;
+  border:1px solid var(--border-subtle);background:var(--n-25);border-radius:var(--r-md);padding:9px 12px;
+}
+.cof .cardic{
+  width:34px;height:24px;border-radius:5px;flex:0 0 auto;display:grid;place-items:center;color:#fff;
+  background:linear-gradient(135deg,#6b6f8a,#3d415c);font-family:var(--font-mono);font-size:8px;letter-spacing:.08em;
+}
+.cof b{font-size:13px;font-weight:640;color:var(--text-1)}
+.cof .mono{font-family:var(--font-mono);font-size:11.5px;color:var(--text-3)}
+.cof .meta{font-size:11px;color:var(--text-3);margin-left:auto;text-align:right;line-height:1.4}
+
+.watchline{
+  display:flex;align-items:center;gap:9px;margin-top:13px;
+  font-size:12px;color:var(--text-3);border-top:1px dashed var(--border);padding-top:11px;
+}
+.watchline .pulse{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:0 0 auto;
+  box-shadow:0 0 0 0 rgba(15,138,104,.4);animation:pw 2.4s infinite}
+@keyframes pw{0%{box-shadow:0 0 0 0 rgba(15,138,104,.4)}70%{box-shadow:0 0 0 6px rgba(15,138,104,0)}100%{box-shadow:0 0 0 0 rgba(15,138,104,0)}}
+.watchline .mono{font-family:var(--font-mono);font-size:11px}
+
+.disclose{
+  margin-top:12px;border:1px solid var(--border-subtle);border-radius:var(--r-md);background:var(--n-25);
+}
+.disclose summary{
+  list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;min-height:40px;
+  padding:8px 13px;font-size:12.5px;font-weight:600;color:var(--text-2);
+}
+.disclose summary::-webkit-details-marker{display:none}
+.disclose summary svg{width:14px;height:14px;color:var(--n-500);transition:.15s}
+.disclose[open] summary svg{transform:rotate(90deg)}
+.disclose .din{padding:4px 13px 13px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.disclose .dnote{width:100%;font-size:11.5px;color:var(--text-3);line-height:1.5;margin-bottom:2px}
+
+/* --- form controls --- */
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+.fgrid .full{grid-column:1/-1}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field label{font-size:12px;font-weight:640;color:var(--text-1)}
+.field label .req{color:var(--danger-tx)}
+.field .help{font-size:11px;color:var(--text-3);line-height:1.45}
+.input,.select{
+  width:100%;font-size:13.5px;color:var(--text-1);background:var(--n-0);
+  border:1px solid var(--border-strong);border-radius:var(--r-sm);
+  padding:9px 12px;min-height:40px;box-shadow:var(--sh-1);
+}
+.input::placeholder{color:var(--text-3)}
+.select{
+  appearance:none;padding-right:32px;cursor:pointer;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234b4362' stroke-width='1.7' stroke-linecap='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat:no-repeat;background-position:right 10px center;background-size:14px;
+}
+.amount-in{position:relative}
+.amount-in .cur{position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:13px;color:var(--text-3);font-weight:600}
+.amount-in .input{padding-left:26px;font-family:var(--font-mono);font-weight:600}
+
+.methodnote{
+  display:flex;gap:9px;align-items:flex-start;margin-top:2px;
+  font-size:11.5px;color:var(--warn-tx);background:var(--warn-bg);border:1px solid var(--warn-bd);
+  border-radius:var(--r-sm);padding:8px 11px;line-height:1.5;
+}
+.methodnote svg{width:13px;height:13px;flex:0 0 auto;margin-top:2px}
+
+/* --- deposit band --- */
+.depband{
+  margin:14px 22px 0;border:1px solid var(--border);border-radius:var(--r-lg);
+  background:var(--n-0);box-shadow:var(--sh-1);padding:13px 18px;
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+}
+.depband .dic{
+  width:34px;height:34px;border-radius:var(--r-md);display:grid;place-items:center;flex:0 0 auto;
+  background:var(--gold-50);color:var(--gold-700);border:1px solid rgba(232,161,60,.3);
+}
+.depband .dic svg{width:17px;height:17px}
+.depband .dmain b{display:block;font-size:13.5px;font-weight:660;color:var(--text-1)}
+.depband .dmain span{font-size:11.5px;color:var(--text-3)}
+.depband .dmain .mono{font-family:var(--font-mono);font-size:10.5px}
+.depband .dmoney{font-family:var(--font-mono);font-size:17px;font-weight:640;color:var(--text-1);font-variant-numeric:tabular-nums}
+.depband .dactions{margin-left:auto;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.depband .dactions .field{min-width:220px}
+
+/* --- capability lock --- */
+.locknote{
+  margin:14px 22px 0;display:flex;gap:10px;align-items:flex-start;
+  font-size:12.5px;color:var(--text-2);background:var(--n-25);border:1px solid var(--border);
+  border-radius:var(--r-md);padding:11px 14px;line-height:1.55;
+}
+.locknote svg{width:15px;height:15px;flex:0 0 auto;color:var(--text-3);margin-top:2px}
+.lockhint{
+  display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--warn-tx);
+  background:var(--warn-bg);border:1px solid var(--warn-bd);border-radius:var(--r-xs);padding:3px 8px;
+}
+.lockhint svg{width:11px;height:11px}
+
+/* --- history table --- */
+.hist{margin:16px 22px 22px;border:1px solid var(--border-subtle);border-radius:var(--r-lg);overflow:hidden;background:var(--n-0)}
+.hist-head{
+  display:flex;align-items:center;gap:10px;padding:11px 16px;background:var(--n-0);
+  border-bottom:1px solid var(--border-subtle);
+}
+.hist-head h3{font-size:14px;font-weight:660}
+.hist-head .cnt{font-family:var(--font-mono);font-size:11px;color:var(--text-3);background:var(--n-100);border-radius:5px;padding:1px 7px}
+.hist-head .right{margin-left:auto;display:flex;gap:8px}
+table.data{width:100%;min-width:640px}
+.tbl-scroll{overflow-x:auto}
+table.data th{
+  font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--text-3);text-align:left;padding:9px 14px;background:var(--n-50);
+  border-bottom:1px solid var(--border-subtle);white-space:nowrap;
+}
+table.data td{
+  padding:8px 14px;font-size:13px;color:var(--text-2);vertical-align:middle;
+  border-bottom:1px solid var(--border-subtle);height:44px;
+}
+table.data tr:last-child td{border-bottom:0}
+table.data tbody tr:hover{background:var(--n-25)}
+table.data .right{text-align:right}
+td .when b{display:block;font-weight:620;font-size:12.5px;color:var(--text-1);line-height:1.3}
+td .when span{font-size:11px;color:var(--text-3)}
+.mchip{
+  display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:620;color:var(--text-1);
+  background:var(--n-50);border:1px solid var(--border);border-radius:var(--r-xs);padding:3px 8px;white-space:nowrap;
+}
+.mchip svg{width:12px;height:12px;color:var(--n-500)}
+.refcell{display:inline-flex;align-items:center;gap:6px;max-width:100%}
+.refcell .proc{
+  font-family:var(--font-mono);font-size:9px;font-weight:600;letter-spacing:.08em;
+  color:var(--p-800);background:var(--p-50);border:1px solid rgba(135,82,254,.2);
+  border-radius:4px;padding:1px 5px;flex:0 0 auto;
+}
+.refcell .proc--gold{color:var(--gold-700);background:var(--gold-50);border-color:rgba(232,161,60,.3)}
+.refcell .proc--teal{color:var(--teal-700);background:var(--teal-50);border-color:var(--teal-bd)}
+.refcell .rv{
+  font-family:var(--font-mono);font-size:11px;color:var(--text-3);
+  max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.refcell .copy{
+  width:24px;height:24px;border:0;background:transparent;border-radius:5px;display:grid;place-items:center;
+  color:var(--n-400);cursor:pointer;flex:0 0 auto;
+}
+.refcell .copy:hover{background:var(--n-100);color:var(--text-2)}
+.refcell .copy svg{width:12px;height:12px}
+td.money-cell{font-family:var(--font-mono);font-weight:620;font-size:13px;color:var(--text-1);font-variant-numeric:tabular-nums;text-align:right}
+td.money-cell.neg{color:var(--danger-tx)}
+tr.is-void td{opacity:.5}
+tr.is-void td.money-cell{text-decoration:line-through}
+.rowmenu{
+  width:32px;height:32px;border:1px solid var(--border);background:var(--n-0);border-radius:var(--r-xs);
+  display:inline-grid;place-items:center;color:var(--text-3);cursor:pointer;box-shadow:var(--sh-1);
+}
+.rowmenu:hover{border-color:#c3b6e8;color:var(--p-700)}
+.rowmenu svg{width:14px;height:14px}
+.tbl-foot{
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:8px 16px;
+  font-family:var(--font-mono);font-size:10.5px;color:var(--text-3);
+  background:var(--n-50);border-top:1px solid var(--border-subtle);
+}
+.tbl-foot .r{margin-left:auto}
+
+/* --- overflow menu (drawn open once, screen 1) --- */
+.menu-demo{position:relative}
+.menu{
+  position:absolute;right:0;top:38px;z-index:5;width:270px;
+  background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-2);
+  padding:5px;
+}
+.menu button{
+  display:flex;flex-direction:column;align-items:flex-start;gap:1px;width:100%;text-align:left;
+  border:0;background:transparent;border-radius:var(--r-xs);padding:8px 10px;cursor:pointer;min-height:40px;
+}
+.menu button:hover{background:var(--n-50)}
+.menu b{font-size:12.5px;font-weight:620;color:var(--text-1)}
+.menu b.dng{color:var(--danger-tx)}
+.menu span{font-size:11px;color:var(--text-3);line-height:1.4}
+.menu .sep{height:1px;background:var(--border-subtle);margin:4px 6px}
+
+/* --- info note inside collect zone (stripe/square) --- */
+.honest{
+  display:flex;gap:9px;align-items:flex-start;font-size:12px;color:var(--text-3);line-height:1.55;
+  background:var(--n-25);border:1px dashed var(--border-strong);border-radius:var(--r-md);padding:10px 13px;margin-top:12px;
+}
+.honest svg{width:14px;height:14px;flex:0 0 auto;margin-top:1px;color:var(--n-500)}
+
+/* --- annotations --- */
+.notes{max-width:1440px;margin:26px auto 80px;padding:0 32px}
+.notes .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}
+.notes .ncard{background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-lg);padding:18px 20px;box-shadow:var(--sh-1)}
+.notes .ncard h4{font-size:13.5px;font-weight:660;margin-bottom:8px;display:flex;gap:8px;align-items:center}
+.notes .ncard h4 i{width:8px;height:8px;border-radius:2px;background:var(--brand);flex:0 0 auto}
+.notes .ncard p,.notes .ncard li{font-size:12.5px;color:var(--text-2);line-height:1.6}
+.notes .ncard ul{list-style:disc;padding-left:18px;display:grid;gap:4px}
+.notes .ncard code{font-family:var(--font-mono);font-size:11px;background:var(--n-50);border:1px solid var(--border-subtle);border-radius:4px;padding:0 4px}
+
+@media (max-width:1080px){
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .zones{grid-template-columns:1fr}
+  .notes .grid{grid-template-columns:1fr}
+  .depband .dactions{margin-left:0;width:100%}
+}
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <span class="eyebrow"><i></i>View Payments · Gateway-Aware Redesign</span>
+  <h1>Collect / Record / History</h1>
+  <p>
+    The page splits into the two jobs the counter actually does — <strong>make money move</strong>
+    (gateway actions, capability-gated) and <strong>record what happened</strong> (always available) —
+    with history promoted to a first-class audit surface. Every control is conditioned on the tenant's
+    <code style="font-family:var(--font-mono);font-size:12.5px">paymentGatewayConfig</code>: an iPOS+SPIn tenant like IRC
+    sees zero Authorize.Net furniture; an Authorize.Net tenant keeps every current function, reorganized.
+    Nothing is deleted — only conditioned and re-homed.
+  </p>
+  <p class="note">
+    Bilingual note: every label ships with a Spanish string of comparable length (Collect the balance→Cobrar el
+    balance, Send payment link→Enviar enlace de pago, Release hold→Liberar retención, Record a payment→Registrar
+    un pago). Buttons and chips carry ~30% slack; nothing depends on a one-word label. Full EN/ES copy table in
+    <code style="font-family:var(--font-mono);font-size:11.5px">view-payments-NOTES.md</code>.
+  </p>
+</header>
+
+<div class="mock-wrap">
+
+  <!-- ════════════════════════════════════════════════════════════
+       SCREEN 1 — IRC · gateway: ipos + SPIn terminal
+       ════════════════════════════════════════════════════════════ -->
+  <div class="mock-label">Screen 1 / Tenant state A — <b>International Rental Corp · gateway: iPOSpays + SPIn</b> (card on file, active hold, balance due). Zero Auth.Net controls.</div>
+
+  <div class="screen">
+    <div class="mod-head">
+      <div class="mod-title-row">
+        <a class="backlink" href="#">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m15 18-6-6 6-6"/></svg>
+          RES-282260
+        </a>
+        <h2>Payments</h2>
+        <span class="sub">Maria Colón · Toyota Corolla · Aug 26 – Aug 30</span>
+        <div class="right">
+          <span class="gwchip">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+            iPOSpays · SPIn terminal
+            <span class="mono">TPN ···4821</span>
+          </span>
+          <span class="chip chip--warn"><i class="led"></i>Balance due</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- snapshot band -->
+    <div class="kpis">
+      <div class="kpi">
+        <span class="klab">Agreement total</span>
+        <span class="kval">$712.40</span>
+        <span class="kfoot">incl. post-check-in fees</span>
+      </div>
+      <div class="kpi">
+        <span class="klab">Collected</span>
+        <span class="kval">$500.00</span>
+        <span class="kfoot">2 payments · holds excluded</span>
+      </div>
+      <div class="kpi kpi--due">
+        <span class="klab">Balance due</span>
+        <span class="kval">$212.40</span>
+        <span class="kfoot">as of 09:14</span>
+      </div>
+      <div class="kpi">
+        <span class="klab">Deposit hold</span>
+        <span class="kval">$250.00</span>
+        <span class="kfoot"><span class="chip chip--ok" style="padding:2px 7px"><i class="led"></i>Active</span></span>
+      </div>
+    </div>
+
+    <!-- zones: collect + record -->
+    <div class="zones">
+
+      <!-- COLLECT — make money move -->
+      <section class="zcard">
+        <div class="zhead">
+          <span class="zic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></span>
+          <h3>Collect the balance</h3>
+          <span class="chip chip--brand">Payment Actions</span>
+        </div>
+        <p class="zdesc">Card-not-present charge against the token captured at checkout — no second tap on the terminal.</p>
+
+        <div class="cof">
+          <span class="cardic">VISA</span>
+          <div>
+            <b>Visa <span class="mono">···· 4821</span></b>
+            <div class="mono" style="font-size:10.5px;color:var(--text-3)">captured at checkout · Aug 26, 10:32</div>
+          </div>
+          <div class="meta">SPIn card on file<br/>token server-side only</div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn--primary">
+            Charge card on file <span class="amt">$212.40</span>
+          </button>
+          <button class="btn btn--secondary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>
+            Send payment link
+          </button>
+          <button class="btn btn--icon btn--secondary" title="Edit amount / add note">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          </button>
+        </div>
+
+        <div class="watchline">
+          <span class="pulse"></span>
+          Payment link live · sent to maria.colon@… · expires in 2 days.
+          This page posts it automatically when paid. <span class="mono">iPOS hosted page</span>
+        </div>
+      </section>
+
+      <!-- RECORD — write down what happened -->
+      <section class="zcard">
+        <div class="zhead">
+          <span class="zic" style="background:var(--gold-50);color:var(--gold-700);border-color:rgba(232,161,60,.3)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          </span>
+          <h3>Record a payment</h3>
+          <span class="chip chip--neutral">Always available</span>
+        </div>
+        <p class="zdesc">Money that already changed hands — cash, ATH Móvil, a slip from the card terminal. No gateway call.</p>
+
+        <div class="fgrid">
+          <div class="field">
+            <label>Amount</label>
+            <div class="amount-in"><span class="cur">$</span><input class="input" value="212.40" inputmode="decimal"/></div>
+          </div>
+          <div class="field">
+            <label>Method</label>
+            <select class="select">
+              <option>Cash</option><option>Check</option><option selected>Card (terminal)</option>
+              <option>Zelle</option><option>ATH Móvil</option><option>Bank transfer</option>
+              <option>Auth hold (security deposit)</option><option>Other</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Last 4 of card <span class="req">*</span></label>
+            <input class="input mono" placeholder="4242" maxlength="4" inputmode="numeric"/>
+            <span class="help">Required for card · audit trail for counter swipes</span>
+          </div>
+          <div class="field">
+            <label>Reference</label>
+            <input class="input" placeholder="Auth code (optional)"/>
+          </div>
+          <div class="full btn-row" style="justify-content:flex-end">
+            <button class="btn btn--secondary">Record payment</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- deposit band — SPIn hold active -->
+    <div class="depband">
+      <span class="dic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 4 6v6c0 4.4 3.4 8.5 8 9.5 4.6-1 8-5.1 8-9.5V6Z"/></svg></span>
+      <div class="dmain">
+        <b>Security deposit hold <span class="chip chip--ok" style="margin-left:6px;padding:2px 7px"><i class="led"></i>Active</span></b>
+        <span>Authorization on Visa ···· 4821 · <span class="mono">Ref DVJ-88213</span> · placed Aug 26, 10:34</span>
+      </div>
+      <span class="dmoney">$250.00</span>
+      <div class="dactions">
+        <div class="field">
+          <label>Release reason <span class="req">*</span></label>
+          <input class="input" placeholder="e.g. clean return, no damages"/>
+        </div>
+        <button class="btn btn--secondary">Release hold</button>
+        <div class="menu-demo">
+          <button class="rowmenu" style="width:40px;height:40px" title="More deposit actions">
+            <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- history -->
+    <div class="hist">
+      <div class="hist-head">
+        <h3>Payment history</h3><span class="cnt">4</span>
+        <div class="right">
+          <button class="btn btn--ghost" style="min-height:34px;padding:5px 12px;font-size:12.5px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/></svg>
+            Export
+          </button>
+        </div>
+      </div>
+      <div class="tbl-scroll">
+      <table class="data">
+        <thead><tr>
+          <th>When</th><th>Method</th><th>Reference</th><th style="text-align:right">Amount</th><th></th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td><div class="when"><b>Aug 28 · 16:22</b><span>by payment link</span></div></td>
+            <td><span class="mchip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>Card · online</span></td>
+            <td><span class="refcell"><span class="proc">IPOS</span><span class="rv">K1a2b3c4d5e6f7g8</span><button class="copy" title="Copy reference"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></span></td>
+            <td class="money-cell">$300.00</td>
+            <td class="right">
+              <div class="menu-demo">
+                <button class="rowmenu"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button>
+                <!-- overflow drawn open on this row -->
+                <div class="menu">
+                  <button><b>Record refund</b><span>Posts a negative row — no card movement for this processor row</span></button>
+                  <button><b>Copy reference</b><span>IPOS:K1a2b3c4d5e6f7g8</span></button>
+                  <div class="sep"></div>
+                  <button><b class="dng">Void · no refund</b><span>Admin only · bookkeeping correction, money does not move</span></button>
+                </div>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="when"><b>Aug 26 · 10:41</b><span>at counter · C. Rivera</span></div></td>
+            <td><span class="mchip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="7" width="18" height="12" rx="2"/><path d="M7 7V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2"/></svg>Cash</span></td>
+            <td><span class="refcell"><span class="rv" style="max-width:160px">OTC-1756224061</span></span></td>
+            <td class="money-cell">$200.00</td>
+            <td class="right"><button class="rowmenu"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button></td>
+          </tr>
+          <tr>
+            <td><div class="when"><b>Aug 26 · 10:34</b><span>at checkout</span></div></td>
+            <td><span class="mchip" style="color:var(--warn-tx);background:var(--warn-bg);border-color:var(--warn-bd)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 4 6v6c0 4.4 3.4 8.5 8 9.5 4.6-1 8-5.1 8-9.5V6Z"/></svg>Hold · not settled</span></td>
+            <td><span class="refcell"><span class="proc proc--teal">SPIN</span><span class="rv">DVJ-88213</span><button class="copy" title="Copy reference"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></span></td>
+            <td class="money-cell" style="color:var(--text-3)">$250.00</td>
+            <td class="right"><button class="rowmenu"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button></td>
+          </tr>
+          <tr class="is-void">
+            <td><div class="when"><b>Aug 26 · 10:29</b><span>voided by admin · wrong amount</span></div></td>
+            <td><span class="mchip">Cash <span class="chip chip--danger" style="padding:1px 6px;font-size:10px">VOID</span></span></td>
+            <td><span class="refcell"><span class="rv" style="max-width:160px">OTC-1756223390</span></span></td>
+            <td class="money-cell">$20.00</td>
+            <td class="right"></td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="tbl-foot">
+        <span>Holds excluded from Collected · voids excluded from balance</span>
+        <span class="r">4 rows · updated 09:14</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════
+       SCREEN 2 — Authorize.Net tenant, same skeleton
+       ════════════════════════════════════════════════════════════ -->
+  <div class="mock-label">Screen 2 / Tenant state B — <b>gateway: Authorize.Net</b> (WEB reservation, saved CIM profile, deposit not yet authorized). Every current function, reorganized.</div>
+
+  <div class="screen">
+    <div class="mod-head">
+      <div class="mod-title-row">
+        <a class="backlink" href="#">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m15 18-6-6 6-6"/></svg>
+          WEB-118442
+        </a>
+        <h2>Payments</h2>
+        <span class="sub">J. Ortiz · Hyundai Elantra · Sep 2 – Sep 6</span>
+        <div class="right">
+          <span class="gwchip">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+            Authorize.Net
+          </span>
+          <span class="chip chip--warn"><i class="led"></i>Balance due</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><span class="klab">Estimated total</span><span class="kval">$389.00</span><span class="kfoot">no agreement yet</span></div>
+      <div class="kpi"><span class="klab">Collected</span><span class="kval">$244.00</span><span class="kfoot">1 payment</span></div>
+      <div class="kpi kpi--due"><span class="klab">Balance due</span><span class="kval">$145.00</span><span class="kfoot">as of 09:14</span></div>
+      <div class="kpi"><span class="klab">Deposit hold</span><span class="kval">$250.00</span>
+        <span class="kfoot"><span class="chip chip--warn" style="padding:2px 7px"><i class="led"></i>Pending authorization</span></span></div>
+    </div>
+
+    <div class="zones">
+      <section class="zcard">
+        <div class="zhead">
+          <span class="zic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></span>
+          <h3>Collect the balance</h3>
+          <span class="chip chip--brand">Payment Actions</span>
+        </div>
+        <p class="zdesc">Charges the customer's saved Authorize.Net card profile — created from their website payment.</p>
+
+        <div class="cof">
+          <span class="cardic">VISA</span>
+          <div>
+            <b>Visa <span class="mono">···· 9911</span></b>
+            <div class="mono" style="font-size:10.5px;color:var(--text-3)">CIM profile · saved from website payment</div>
+          </div>
+          <div class="meta">Authorize.Net<br/>card on file</div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn--primary">Charge saved card <span class="amt">$145.00</span></button>
+          <button class="btn btn--secondary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>
+            Send payment link
+          </button>
+        </div>
+
+        <div class="watchline">
+          <span class="pulse"></span>
+          Website reservation — checking Authorize.Net for a recent hosted payment while this page is open.
+        </div>
+
+        <!-- the old permanent transId tip, packaged as a disclosure -->
+        <details class="disclose">
+          <summary>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg>
+            Find a missing Authorize.Net payment
+          </summary>
+          <div class="din">
+            <p class="dnote">Customer paid on the hosted page but it isn't listed? Paste the <span class="mono" style="font-family:var(--font-mono);font-size:10.5px">transId</span> from the Authorize.Net receipt, or leave blank to pull their most recent payment.</p>
+            <div class="field" style="flex:1;min-width:200px">
+              <label>Transaction ID <span style="font-weight:500;color:var(--text-3)">(optional)</span></label>
+              <input class="input mono" placeholder="e.g. 120058491022"/>
+            </div>
+            <button class="btn btn--secondary">Reconcile payment</button>
+          </div>
+        </details>
+      </section>
+
+      <section class="zcard">
+        <div class="zhead">
+          <span class="zic" style="background:var(--gold-50);color:var(--gold-700);border-color:rgba(232,161,60,.3)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          </span>
+          <h3>Record a payment</h3>
+          <span class="chip chip--neutral">Always available</span>
+        </div>
+        <p class="zdesc">Money that already changed hands — cash, ATH Móvil, a slip from the card terminal. No gateway call.</p>
+
+        <div class="fgrid">
+          <div class="field">
+            <label>Amount</label>
+            <div class="amount-in"><span class="cur">$</span><input class="input" value="250.00" inputmode="decimal"/></div>
+          </div>
+          <div class="field">
+            <label>Method</label>
+            <select class="select">
+              <option>Cash</option><option>Check</option><option>Card (terminal)</option>
+              <option>Zelle</option><option>ATH Móvil</option><option>Bank transfer</option>
+              <option selected>Auth hold (security deposit)</option><option>Other</option>
+            </select>
+          </div>
+          <div class="field full">
+            <label>Auth code <span class="req">*</span></label>
+            <input class="input" placeholder="Auth code from the merchant slip (required)"/>
+          </div>
+          <div class="full methodnote">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 9v4m0 4h.01M10.3 3.8 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z"/></svg>
+            <span><b>Auth hold:</b> authorization only — funds are <b>not</b> settled and it won't count as Collected. The auth code is the only audit trail.</span>
+          </div>
+          <div class="full btn-row" style="justify-content:flex-end">
+            <button class="btn btn--secondary">Record payment</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- deposit band — AuthNet, not yet authorized -->
+    <div class="depband">
+      <span class="dic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3 4 6v6c0 4.4 3.4 8.5 8 9.5 4.6-1 8-5.1 8-9.5V6Z"/></svg></span>
+      <div class="dmain">
+        <b>Security deposit hold <span class="chip chip--warn" style="margin-left:6px;padding:2px 7px"><i class="led"></i>Pending</span></b>
+        <span>Configured amount $250.00 · places an auth-only hold on the saved card at pickup</span>
+      </div>
+      <span class="dmoney">$250.00</span>
+      <div class="dactions">
+        <div class="field" style="min-width:140px">
+          <label>Amount</label>
+          <div class="amount-in"><span class="cur">$</span><input class="input" value="250.00" inputmode="decimal"/></div>
+        </div>
+        <button class="btn btn--secondary">Authorize hold</button>
+      </div>
+    </div>
+
+    <!-- capability lock, shown on this screen as the state demo -->
+    <div class="locknote">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+      <span>
+        <b style="color:var(--text-1)">If Payment Actions is off for this account:</b> the Collect zone and deposit
+        actions render dimmed with <span class="lockhint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Requires Payment Actions</span>
+        shown once per group (iPad has no hover — no tooltip-only hints). Recording a terminal payment stays fully
+        available and is the page's promise to locked users.
+      </span>
+    </div>
+
+    <div class="hist">
+      <div class="hist-head">
+        <h3>Payment history</h3><span class="cnt">2</span>
+        <div class="right">
+          <button class="btn btn--ghost" style="min-height:34px;padding:5px 12px;font-size:12.5px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/></svg>
+            Export
+          </button>
+        </div>
+      </div>
+      <div class="tbl-scroll">
+      <table class="data">
+        <thead><tr>
+          <th>When</th><th>Method</th><th>Reference</th><th style="text-align:right">Amount</th><th></th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td><div class="when"><b>Aug 24 · 21:07</b><span>website · hosted page</span></div></td>
+            <td><span class="mchip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>Card · online</span></td>
+            <td><span class="refcell"><span class="proc proc--gold">AUTHNET</span><span class="rv">120058491022</span><button class="copy" title="Copy reference"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></span></td>
+            <td class="money-cell">$244.00</td>
+            <td class="right">
+              <div class="menu-demo">
+                <button class="rowmenu"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button>
+                <div class="menu" style="top:38px">
+                  <button><b>Refund to card</b><span>Real refund via Authorize.Net (void if unsettled)</span></button>
+                  <button><b>Save card to file</b><span>Creates the CIM profile from this transaction</span></button>
+                  <button><b>Copy reference</b><span>AUTHNET:120058491022</span></button>
+                  <div class="sep"></div>
+                  <button><b class="dng">Void · no refund</b><span>Admin only · bookkeeping correction, money does not move</span></button>
+                </div>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td><div class="when"><b>Aug 24 · 21:07</b><span>refund · card not charged twice</span></div></td>
+            <td><span class="mchip">Refund</span></td>
+            <td><span class="refcell"><span class="rv" style="max-width:170px">REFUND:pm_8d21…</span><button class="copy" title="Copy reference"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button></span></td>
+            <td class="money-cell neg">−$50.00</td>
+            <td class="right"><button class="rowmenu"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button></td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="tbl-foot">
+        <span>Holds excluded from Collected · voids excluded from balance</span>
+        <span class="r">2 rows · updated 09:14</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════
+       SCREEN 3 — Stripe/Square stub (compact)
+       ════════════════════════════════════════════════════════════ -->
+  <div class="mock-label">Screen 3 / Tenant state C (stub) — <b>gateway: Stripe or Square</b>. Links + recording only; no card-on-file math exists, so no card-on-file buttons.</div>
+
+  <div class="screen">
+    <div class="mod-head">
+      <div class="mod-title-row">
+        <a class="backlink" href="#">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m15 18-6-6 6-6"/></svg>
+          RES-301177
+        </a>
+        <h2>Payments</h2>
+        <span class="sub">D. Meléndez · Kia Soul · Sep 4 – Sep 5</span>
+        <div class="right">
+          <span class="gwchip">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+            Stripe
+          </span>
+          <span class="chip chip--ok"><i class="led"></i>Paid in full</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><span class="klab">Agreement total</span><span class="kval">$96.00</span></div>
+      <div class="kpi"><span class="klab">Collected</span><span class="kval">$96.00</span><span class="kfoot">1 payment</span></div>
+      <div class="kpi"><span class="klab">Balance due</span><span class="kval">$0.00</span></div>
+      <div class="kpi"><span class="klab">Deposit hold</span><span class="kval">$0.00</span><span class="kfoot">not required</span></div>
+    </div>
+
+    <div class="zones" style="padding-bottom:16px">
+      <section class="zcard">
+        <div class="zhead">
+          <span class="zic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg></span>
+          <h3>Collect</h3>
+          <span class="chip chip--brand">Payment Actions</span>
+        </div>
+        <p class="zdesc">Balance is settled. Send a link only for new charges (damage, fuel, late fees) after adding them to the agreement.</p>
+        <div class="btn-row">
+          <button class="btn btn--secondary" disabled style="opacity:.55">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>
+            Send payment link
+          </button>
+        </div>
+        <div class="honest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+          This processor supports payment links only — no card-on-file charges or deposit holds from this page.
+        </div>
+      </section>
+
+      <section class="zcard">
+        <div class="zhead">
+          <span class="zic" style="background:var(--gold-50);color:var(--gold-700);border-color:rgba(232,161,60,.3)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          </span>
+          <h3>Record a payment</h3>
+          <span class="chip chip--neutral">Always available</span>
+        </div>
+        <p class="zdesc">Unchanged in every tenant state — the manual form is the constant.</p>
+        <div class="btn-row">
+          <button class="btn btn--secondary">Open the form</button>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- design annotations -->
+<section class="notes">
+  <div class="mock-label" style="margin-top:0">Design annotations</div>
+  <div class="grid">
+    <div class="ncard">
+      <h4><i></i>Why the split fixes the brief</h4>
+      <ul>
+        <li><b>A (modern):</b> one snapshot band, two labeled zones, one history surface — replacing 9 interleaved blocks and duplicate totals (<code>page.js:530-604</code>).</li>
+        <li><b>B (tenant-aware):</b> every gateway control keys off a new booleans-only <code>GET /api/settings/payment-capabilities</code>. IRC (<code>gateway:'ipos'</code>) renders Screen 1 — zero Auth.Net text, buttons, or background polling.</li>
+        <li>The processor chip in the header tells support staff at a glance why this tenant's page looks the way it does.</li>
+      </ul>
+    </div>
+    <div class="ncard">
+      <h4><i></i>Nothing deleted — conditioned</h4>
+      <ul>
+        <li>All 12 existing functions survive (matrix in NOTES §2): OTC record, list, reconcile, CIM charge/hold/release/save-card, SPIn charge/release/re-auth, refund, void.</li>
+        <li>The AuthNet transId tip becomes a disclosure ("Find a missing payment") instead of a permanent paragraph.</li>
+        <li>Row actions collapse to one ⋯ overflow with consequence copy — "Refund to card" vs "Record refund (no card movement)" mirrors the backend's reference-prefix routing.</li>
+        <li>Spin tools keep their reservation-evidence gate AND gain the tenant gate — legacy reservations stay serviceable.</li>
+      </ul>
+    </div>
+    <div class="ncard">
+      <h4><i></i>Rules carried from the tolls redesign & Hector's standing constraints</h4>
+      <ul>
+        <li>Flat surfaces, brand #8752FE, tabular-nums on all money, 40px touch targets, 11px floor, ~30% ES slack.</li>
+        <li>One primary action per context; destructive actions live behind the overflow with admin labeling.</li>
+        <li>Honest truncation on gateway refs with a copy button; processor chips instead of raw prefixes.</li>
+        <li>Capability locks render once per group with a visible hint (iPad: no hover). Recording a payment is never locked.</li>
+        <li>Themed inline reason/amount fields replace <code>window.prompt/confirm</code> on the money path.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>
