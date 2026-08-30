@@ -430,6 +430,24 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
     assert.equal(status.amount, 10);
   });
 
+  it('reads the REAL production envelope: { status, data: {...} }', () => {
+    // Captured from the live API via the shape log on 2026-08-30 — the
+    // documented field set under a wrapper no documentation names.
+    const status = normalizeHppStatus({
+      status: 'Success',
+      data: {
+        responseCode: 200, responseMessage: 'Successful',
+        transactionReferenceId: 'PLRES1X2Y3', transactionId: 'x9',
+        amount: 1.12, totalAmount: 1.12, cardType: 'VISA', cardLast4Digit: 4242,
+        responseApprovalCode: 'TAS164', rrn: '1', cardPaymentMethod: 'card', consumerId: 'c1',
+      },
+    });
+    assert.equal(status.approved, true);
+    assert.equal(status.amount, 1.12);
+    assert.equal(status.transactionId, 'x9');
+    assert.equal(status.cardLast4, '4242');
+  });
+
   it('accepts a BARE body with status-shaped fields — no wrapper at all', () => {
     const status = normalizeHppStatus({
       responseCode: 200, totalAmount: 1.12, transactionId: 'x2', cardType: 'VISA',

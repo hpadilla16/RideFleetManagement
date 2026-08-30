@@ -450,14 +450,18 @@ export async function mintHostedPaymentPage({
  * learn about the hard way, 2026-06-03).
  */
 export function normalizeHppStatus(data = {}) {
-  // Envelope hunt: the documented wrappers first; failing those, if the body
-  // itself carries status-shaped fields, treat IT as the record (a live 200 on
-  // 2026-08-30 normalized to "code unknown", which means production answers
-  // in a shape none of the documented wrappers cover).
+  // Envelope hunt. What production ACTUALLY returns (captured via the
+  // shape log, 2026-08-30) is `{ status: <string>, data: { responseCode,
+  // transactionId, totalAmount, cardLast4Digit, … } }` — the documented
+  // field set under a wrapper no documentation names. The documented
+  // wrappers stay as fallbacks, and a bare status-shaped body is read as
+  // itself, so a future rename degrades to the shape log instead of a
+  // silent "code unknown".
   const bare = (data && typeof data === 'object'
     && ('responseCode' in data || 'transactionId' in data || 'totalAmount' in data))
     ? data : null;
-  const r = data?.iposHPResponse || data?.iposhpresponse || data?.iposTransactResponse || bare || {};
+  const r = (data?.data && typeof data.data === 'object' ? data.data : null)
+    || data?.iposHPResponse || data?.iposhpresponse || data?.iposTransactResponse || bare || {};
   const responseCode = Number(r?.responseCode);
   const amount = Number(r?.totalAmount ?? r?.amount ?? 0);
   return {
