@@ -348,18 +348,19 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
     assert.equal(calls[0].url, 'https://auth.ipospays.tech/v1/authenticate-token');
     // Credentials must ride in the HEADERS (body-only gets AUTH_ERR_001 "API
     // Key is required" — probed live 2026-08-30, and ipos-auth.js had already
-    // learned the same for Transact). Body carries a duplicate.
+    // learned the same for Transact). The HPP mint is SCOPELESS with an empty
+    // body, per HPP's own generateAuthToken spec — a scoped token
+    // authenticates but is then 401'd by queryPaymentStatus.
     assert.equal(calls[0].options.headers.apiKey, DUMMY_API_KEY);
     assert.equal(calls[0].options.headers.secretKey, DUMMY_SECRET_KEY);
-    const authBody = JSON.parse(calls[0].options.body);
-    assert.equal(authBody.apiKey, DUMMY_API_KEY);
-    assert.equal(authBody.secretKey, DUMMY_SECRET_KEY);
-    assert.equal(authBody.scope, 'ExternalApi');
-    assert.equal(authBody.jwtTokenExpiryMinutes, 30);
+    assert.equal(calls[0].options.headers.TokenExpiryMinutes, '30');
+    assert.equal(calls[0].options.headers.scope, undefined, 'HPP mint must not send a scope');
+    assert.equal(calls[0].options.body, '{}');
     assert.equal(calls[1].url, `https://api.ipospays.tech/v1/queryPaymentStatus?tpn=${DUMMY_TPN}&transactionReferenceId=PLRES1X2Y3`);
     assert.equal(calls[1].options.method, 'GET');
-    assert.equal(calls[1].options.headers.Authorization, `Bearer ${DUMMY_JWT}`);
-    assert.equal(calls[1].options.headers.token, undefined, 'the ecom token must NOT be sent to the status API');
+    // Documented header: bare `token`, no Bearer, no Authorization.
+    assert.equal(calls[1].options.headers.token, DUMMY_JWT);
+    assert.equal(calls[1].options.headers.Authorization, undefined);
     assert.equal(status.approved, true);
     assert.equal(status.amount, 251.5);
     assert.equal(status.transactionId, '11112222333344445555');
@@ -367,8 +368,8 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
   });
 
   it('walks the header chain on 401s and STOPS at the first acceptance', async () => {
-    // Chain per scope: Bearer → raw Authorization → bare token. Here raw
-    // Authorization is the winner, so the bare-token spelling is never sent.
+    // Chain per mint: token → Bearer → raw Authorization. Here Bearer is the
+    // winner, so raw Authorization is never sent.
     const { impl, calls } = sequencedFetchStub([
       { body: { token: DUMMY_JWT } },
       { ok: false, status: 401, body: { message: 'unauthorized' } },
@@ -380,14 +381,14 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
       { fetchImpl: impl },
     );
     assert.equal(calls.length, 3);
-    assert.equal(calls[1].options.headers.Authorization, `Bearer ${DUMMY_JWT}`);
-    assert.equal(calls[2].options.headers.Authorization, DUMMY_JWT);
+    assert.equal(calls[1].options.headers.token, DUMMY_JWT);
+    assert.equal(calls[2].options.headers.Authorization, `Bearer ${DUMMY_JWT}`);
     assert.equal(status.approved, true);
   });
 
-  it('exhausting one scope re-mints under the next scope before giving up', async () => {
-    // All three spellings 401 under ExternalApi → a SECOND auth mint (call 5)
-    // under PaymentTokenization, whose first spelling succeeds.
+  it('exhausting the scopeless mint re-mints Transact-style before giving up', async () => {
+    // All three spellings 401 under the scopeless HPP token → a SECOND mint
+    // (call 5) with scope ExternalApi, whose first spelling succeeds.
     const { impl, calls } = sequencedFetchStub([
       { body: { token: DUMMY_JWT } },
       { ok: false, status: 401, body: {} },
@@ -402,8 +403,8 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
       { fetchImpl: impl },
     );
     assert.equal(calls.length, 6);
-    assert.equal(JSON.parse(calls[0].options.body).scope, 'ExternalApi');
-    assert.equal(JSON.parse(calls[4].options.body).scope, 'PaymentTokenization');
+    assert.equal(calls[0].options.body, '{}');
+    assert.equal(JSON.parse(calls[4].options.body).scope, 'ExternalApi');
     assert.equal(status.approved, true);
   });
 

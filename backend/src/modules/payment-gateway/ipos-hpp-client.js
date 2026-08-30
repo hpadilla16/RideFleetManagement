@@ -161,18 +161,26 @@ const HPP_AUTH_ENDPOINTS = {
  * scope, their error names the valid ones and lands in the log, scrubbed.
  * The JWT and the secret never appear in any log line.
  */
-export async function mintHppAuthJwt(resolved = {}, deps = {}, { scope = 'ExternalApi' } = {}) {
+export async function mintHppAuthJwt(resolved = {}, deps = {}, { scope = null } = {}) {
   const env = String(resolved?.environment || 'production').toLowerCase();
   const url = env === 'sandbox' ? HPP_AUTH_ENDPOINTS.sandbox : HPP_AUTH_ENDPOINTS.production;
-  // Credentials go in the HEADERS, duplicated in the body — ipos-auth.js
-  // learned this for Transact (body-only returns AUTH_ERR_001 "API Key is
-  // required"), and a live probe on 2026-08-30 confirmed the same for this
-  // endpoint. The expiry field is `jwtTokenExpiryMinutes`, also per that file.
+  // Credentials go in the HEADERS — ipos-auth.js learned this for Transact
+  // (body-only returns AUTH_ERR_001 "API Key is required"), and a live probe
+  // on 2026-08-30 confirmed it here.
+  //
+  // DEFAULT IS SCOPELESS, and that is the finding: HPP's own generateAuthToken
+  // spec (docs.ipospays.com/hosted-payment-page/api-docs/generateAuthToken)
+  // declares exactly three headers — apiKey, secretKey, TokenExpiryMinutes —
+  // and NO scope. The scoped tokens minted the Transact way (scope +
+  // jwtTokenExpiryMinutes) authenticate fine but are then 401'd by
+  // queryPaymentStatus in every header spelling. A scope is only sent when a
+  // caller asks for one, Transact-style, as the probe's fallback.
   const fields = {
     apiKey: resolved.apiKey,
     secretKey: resolved.secretKey,
-    scope,
-    jwtTokenExpiryMinutes: 30,
+    ...(scope
+      ? { scope, jwtTokenExpiryMinutes: 30 }
+      : { TokenExpiryMinutes: 30 }),
   };
   const { res, data } = await hppFetch(url, {
     method: 'POST',
@@ -180,7 +188,7 @@ export async function mintHppAuthJwt(resolved = {}, deps = {}, { scope = 'Extern
       'Content-Type': 'application/json',
       ...Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, String(v)])),
     },
-    body: JSON.stringify(fields),
+    body: JSON.stringify(scope ? fields : {}),
   }, deps);
   const token = String(data?.token || '').trim();
   if (!res.ok || !token) {
@@ -519,21 +527,24 @@ export async function queryHppPaymentStatus({ transactionReferenceId }, resolved
   // case is six short requests, once, on a path exercised one time per
   // payment confirmation.
   const url = `${hppEndpoints(resolved).query}?tpn=${encodeURIComponent(resolved.tpn)}&transactionReferenceId=${encodeURIComponent(ref)}`;
+  // Documented contract first (HPP docs: scopeless token, bare `token`
+  // header, no Bearer); the rest of the matrix survives as fallback until a
+  // production log line confirms the winner, then collapses.
   let res; let data;
   outer:
-  for (const scope of ['ExternalApi', 'PaymentTokenization']) {
+  for (const scope of [null, 'ExternalApi']) {
     const jwt = await mintHppAuthJwt(resolved, deps, { scope });
     for (const headers of [
+      { token: jwt },
       { Authorization: `Bearer ${jwt}` },
       { Authorization: jwt },
-      { token: jwt },
     ]) {
       ({ res, data } = await hppFetch(url, { method: 'GET', headers }, deps));
       if (res.status !== 401) {
         logger.info('[ipos-hpp] status auth accepted', {
           header: Object.keys(headers)[0],
           bearer: String(headers.Authorization || '').startsWith('Bearer '),
-          scope,
+          scope: scope || 'none',
         });
         break outer;
       }
