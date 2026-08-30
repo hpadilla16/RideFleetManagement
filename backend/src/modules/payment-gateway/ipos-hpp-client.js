@@ -74,13 +74,20 @@ import { maskTpn } from './tenant-terminal-config.js';
  */
 
 const HPP_ENDPOINTS = {
+  // `query` is the Transaction Status Check API — POST, same host as the mint,
+  // same `token` header, body { merchantAuthentication: { merchantId: TPN,
+  // transactionReferenceId } }. The first implementation used a
+  // GET api.ipospays.com/v1/queryPaymentStatus taken from the HPP overview doc;
+  // the live API 401'd it on the owner's first real payment (2026-08-29 —
+  // $1.12 charged at iPOSpays, unrecordable in RFM until this fix). The
+  // authoritative spec is docs.ipospays.com/transaction-status-check/apidocs.
   production: {
     hpp: 'https://payment.ipospays.com/api/v1/external-payment-transaction',
-    query: 'https://api.ipospays.com/v1/queryPaymentStatus',
+    query: 'https://payment.ipospays.com/api/v1/iposTransactStatus',
   },
   sandbox: {
     hpp: 'https://payment.ipospays.tech/api/v1/external-payment-transaction',
-    query: 'https://api.ipospays.tech/v1/queryPaymentStatus',
+    query: 'https://payment.ipospays.tech/api/v1/iposTransactStatus',
   },
 };
 
@@ -436,10 +443,15 @@ export async function queryHppPaymentStatus({ transactionReferenceId }, resolved
     throw err;
   }
 
-  const url = `${hppEndpoints(resolved).query}?tpn=${encodeURIComponent(resolved.tpn)}&transactionReferenceId=${encodeURIComponent(ref)}`;
-  const { res, data } = await hppFetch(url, {
-    method: 'GET',
-    headers: { token: resolved.hppToken },
+  const { res, data } = await hppFetch(hppEndpoints(resolved).query, {
+    method: 'POST',
+    headers: { token: resolved.hppToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      merchantAuthentication: {
+        merchantId: String(resolved.tpn),
+        transactionReferenceId: ref,
+      },
+    }),
   }, deps);
 
   const status = normalizeHppStatus(data);

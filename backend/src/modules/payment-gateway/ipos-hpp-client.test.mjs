@@ -74,9 +74,12 @@ describe('ipos-hpp-client: endpoints', () => {
       hppEndpoints({ environment: 'sandbox' }).hpp,
       'https://payment.ipospays.tech/api/v1/external-payment-transaction',
     );
+    // Status check = the Transaction Status Check API, SAME host as the mint.
+    // The api.ipospays.* GET guessed from the overview doc 401'd in production
+    // on the first real payment — do not resurrect it.
     assert.equal(
       hppEndpoints({ environment: 'sandbox' }).query,
-      'https://api.ipospays.tech/v1/queryPaymentStatus',
+      'https://payment.ipospays.tech/api/v1/iposTransactStatus',
     );
     assert.equal(
       hppEndpoints({ environment: 'production' }).hpp,
@@ -84,7 +87,7 @@ describe('ipos-hpp-client: endpoints', () => {
     );
     assert.equal(
       hppEndpoints({}).query,
-      'https://api.ipospays.com/v1/queryPaymentStatus',
+      'https://payment.ipospays.com/api/v1/iposTransactStatus',
       'unknown/absent environment must default to production',
     );
   });
@@ -301,9 +304,12 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
       resolvedConfig(),
       { fetchImpl: impl },
     );
-    assert.equal(calls[0].url, `https://api.ipospays.tech/v1/queryPaymentStatus?tpn=${DUMMY_TPN}&transactionReferenceId=PLRES1X2Y3`);
-    assert.equal(calls[0].options.method, 'GET');
+    assert.equal(calls[0].url, 'https://payment.ipospays.tech/api/v1/iposTransactStatus');
+    assert.equal(calls[0].options.method, 'POST');
     assert.equal(calls[0].options.headers.token, DUMMY_TOKEN);
+    const statusBody = JSON.parse(calls[0].options.body);
+    assert.equal(statusBody.merchantAuthentication.merchantId, DUMMY_TPN);
+    assert.equal(statusBody.merchantAuthentication.transactionReferenceId, 'PLRES1X2Y3');
     assert.equal(status.approved, true);
     assert.equal(status.amount, 251.5);
     assert.equal(status.transactionId, '11112222333344445555');
