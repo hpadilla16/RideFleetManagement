@@ -464,9 +464,22 @@ export function normalizeHppStatus(data = {}) {
     || data?.iposHPResponse || data?.iposhpresponse || data?.iposTransactResponse || bare || {};
   const responseCode = Number(r?.responseCode);
   const amount = Number(r?.totalAmount ?? r?.amount ?? 0);
+  // Approval, in the spellings production actually uses. The docs say
+  // responseCode 200; the LIVE rail (first real charge, 2026-08-30) answers
+  // responseMessage "APPROVED" with an ISO-style zero code that Number()
+  // flattens to 0 and the documented predicate discarded. Word-approval only
+  // counts when no error code contradicts it — this is a money predicate, and
+  // a decline with a chatty message must never sneak through.
+  const rawCode = String(r?.responseCode ?? '').trim();
+  const errCode = String(r?.errResponseCode || '').trim();
+  const approvalWord = /^(approved|success|successful)$/i;
+  const approvedByCode = responseCode === 200 || rawCode === '00' || rawCode === '000';
+  const approvedByWord = (approvalWord.test(String(r?.responseMessage || '').trim())
+      || approvalWord.test(String(data?.status || '').trim()))
+    && (!errCode || errCode === '00' || errCode === '000');
   return {
     found: Object.keys(r || {}).length > 0,
-    approved: responseCode === 200,
+    approved: approvedByCode || approvedByWord,
     responseCode: Number.isFinite(responseCode) ? responseCode : 0,
     responseMessage: String(r?.responseMessage || ''),
     errCode: String(r?.errResponseCode || ''),
@@ -588,12 +601,22 @@ export async function queryHppPaymentStatus({ transactionReferenceId }, resolved
   // Values stay out deliberately: this response can carry card metadata.
   if (res?.ok) {
     const early = normalizeHppStatus(data);
-    if (!early.found || (!early.approved && early.responseCode === 0)) {
+    if (!early.found) {
       const shape = Object.fromEntries(
         Object.entries(data && typeof data === 'object' ? data : {})
           .map(([k, v]) => [k, v && typeof v === 'object' ? Object.keys(v) : typeof v]),
       );
       logger.warn('[ipos-hpp] unmapped status envelope', { keys: shape });
+    } else if (!early.approved) {
+      // Status FIELDS only — codes and messages, never amounts or card data —
+      // so a live decline or a new spelling is diagnosable from the log alone.
+      logger.info('[ipos-hpp] status read, not approved', {
+        responseCode: String(data?.data?.responseCode ?? early.responseCode),
+        responseMessage: early.responseMessage,
+        errCode: early.errCode,
+        errMessage: early.errMessage,
+        topStatus: String(data?.status || ''),
+      });
     }
   }
 

@@ -470,6 +470,32 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
     }
   });
 
+  it('the LIVE approval spelling: ISO zero code + the word APPROVED', () => {
+    // First real charge on the live TPN (2026-08-30): responseMessage
+    // "APPROVED" with a zero-style code the documented predicate discarded.
+    const status = normalizeHppStatus({
+      status: 'Success',
+      data: { responseCode: '00', responseMessage: 'APPROVED', transactionId: 'x7', totalAmount: 1.12 },
+    });
+    assert.equal(status.approved, true);
+    assert.equal(status.amount, 1.12);
+  });
+
+  it('an approval WORD with a contradicting error code stays unapproved', () => {
+    // Money predicate: a decline with a chatty message must never sneak through.
+    const status = normalizeHppStatus({
+      data: { responseCode: '05', responseMessage: 'Approved', errResponseCode: '05', errResponseMessage: 'Do not honor', transactionId: 'x8' },
+    });
+    assert.equal(status.approved, false);
+  });
+
+  it('a plain decline message is not approval', () => {
+    const status = normalizeHppStatus({
+      data: { responseCode: '05', responseMessage: 'DECLINED', transactionId: 'x9' },
+    });
+    assert.equal(status.approved, false);
+  });
+
   it('dry-run echoes the amount encoded in a DRY reference', async () => {
     process.env.IPOS_HPP_DRY_RUN = 'true';
     const status = await queryHppPaymentStatus(
