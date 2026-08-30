@@ -666,6 +666,53 @@ function iposBlockForRead(ipos = {}) {
   return out;
 }
 
+/**
+ * View Payments capability derivation (2026-08-30, view-payments redesign).
+ *
+ * The ONLY read of paymentGatewayConfig that is safe at any staff role. Input
+ * is the full gateway config (which, even after spinBlockForRead /
+ * iposBlockForRead, still carries loginId, TPNs, environment names and has*
+ * booleans — admin-panel material, not counter material). Output is the
+ * minimal boolean shape the reservation View Payments screen needs to decide
+ * WHICH controls to draw:
+ *
+ *   { gateway, authorizenet:{enabled}, spin:{enabled}, ipos:{enabled,linkReady},
+ *     stripe:{enabled}, square:{enabled}, payarc:{enabled}, autocharge:{mode} }
+ *
+ * NEVER add credential material, TPNs, key fragments, or has* booleans beyond
+ * `linkReady` here — payment-capabilities.test.mjs asserts the exact key set
+ * and that no configured secret value survives serialization.
+ *
+ * `enabled` means "this processor could actually work", not just the stored
+ * flag: authorizenet additionally requires loginId+transactionKey (mirrors the
+ * health-check's `ready`), stripe requires its secret key. The booleans leak
+ * nothing: "the tenant's gateway is configured" is exactly what the page must
+ * know, and is visible to staff anyway the moment a charge succeeds.
+ */
+export function derivePaymentCapabilities(cfg = {}) {
+  const iposEnabled = cfg?.ipos?.enabled === true;
+  return {
+    gateway: String(cfg?.gateway || 'authorizenet').trim().toLowerCase(),
+    authorizenet: {
+      enabled: !!(cfg?.authorizenet?.enabled && cfg?.authorizenet?.loginId && cfg?.authorizenet?.transactionKey)
+    },
+    spin: { enabled: cfg?.spin?.enabled === true },
+    ipos: {
+      enabled: iposEnabled,
+      // linkReady = the Send-payment-link mint would not fail closed with
+      // GATEWAY_NOT_CONFIGURED for an ipos tenant. hasHppToken is a boolean
+      // computed by iposBlockForRead — no token material is consulted here.
+      linkReady: !!(iposEnabled && cfg?.ipos?.hasHppToken)
+    },
+    stripe: { enabled: !!(cfg?.stripe?.enabled && cfg?.stripe?.secretKey) },
+    square: { enabled: cfg?.square?.enabled === true },
+    payarc: { enabled: cfg?.payarc?.enabled === true },
+    autocharge: {
+      mode: String(cfg?.autocharge?.mode || 'AUTO').trim().toUpperCase() === 'MANUAL' ? 'MANUAL' : 'AUTO'
+    }
+  };
+}
+
 /** Clamp the HPP link expiry to iPOSpays' documented 1–31 day window. */
 function iposExpiryDaysValue(raw, fallback = 3) {
   if (raw === '' || raw == null) return fallback;
@@ -1198,6 +1245,15 @@ export const settingsService = {
     } catch {
       return defaults;
     }
+  },
+
+  /**
+   * Booleans-only capability read for the View Payments screen — safe at any
+   * authenticated staff role (unlike getPaymentGatewayConfig, which is
+   * admin-panel material). See derivePaymentCapabilities for the contract.
+   */
+  async getPaymentCapabilities(scope = {}) {
+    return derivePaymentCapabilities(await this.getPaymentGatewayConfig(scope));
   },
 
   async updatePaymentGatewayConfig(payload = {}, scope = {}) {

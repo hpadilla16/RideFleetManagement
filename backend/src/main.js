@@ -45,7 +45,7 @@ import { kioskAdminRouter } from './modules/kiosk/kiosk-admin.routes.js';
 import { storeBoardRouter } from './modules/store-board/store-board.routes.js';
 import { storeBoardPublicRouter } from './modules/store-board/store-board-public.routes.js';
 import { assertAuthConfig } from './modules/auth/auth.config.js';
-import { settingsRouter } from './modules/settings/settings.routes.js';
+import { settingsRouter, paymentCapabilitiesRouter } from './modules/settings/settings.routes.js';
 import { feeRatesRouter } from './modules/fees/fee-rates.routes.js';
 import { requireAuth, requireRole, requireModuleAccess } from './middleware/auth.js';
 import { tenantRateLimit } from './middleware/tenant-rate-limit.js';
@@ -489,6 +489,13 @@ app.use('/api/people', requireAuth, tenantRateLimit, requireModuleAccess('people
 // inside the router file. DO NOT add requireModuleAccess here — would
 // break the preview hook in /reservations/:id/checkin-wizard.
 app.use('/api/settings/fee-rates', requireAuth, tenantRateLimit, feeRatesRouter);
+// Payment capabilities: GET is open to any authed user (the View Payments
+// screen needs the tenant's gateway booleans even for OPS/AGENT who don't
+// have the 'settings' module — an iPOS tenant must not see Auth.Net buttons).
+// Booleans only, derived server-side; never credentials. DO NOT add
+// requireModuleAccess here — it would 403 exactly the counter staff the
+// endpoint exists for.
+app.use('/api/settings/payment-capabilities', requireAuth, tenantRateLimit, paymentCapabilitiesRouter);
 app.use('/api/settings/loaner-rates', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), loanerRateRouter);
 app.use('/api/settings', requireAuth, tenantRateLimit, requireModuleAccess('settings'), settingsRouter);
 app.use('/api/tenants', requireAuth, tenantRateLimit, requireModuleAccess('tenants'), tenantsRouter);
