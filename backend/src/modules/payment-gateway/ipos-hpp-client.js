@@ -450,7 +450,14 @@ export async function mintHostedPaymentPage({
  * learn about the hard way, 2026-06-03).
  */
 export function normalizeHppStatus(data = {}) {
-  const r = data?.iposHPResponse || data?.iposhpresponse || data?.iposTransactResponse || {};
+  // Envelope hunt: the documented wrappers first; failing those, if the body
+  // itself carries status-shaped fields, treat IT as the record (a live 200 on
+  // 2026-08-30 normalized to "code unknown", which means production answers
+  // in a shape none of the documented wrappers cover).
+  const bare = (data && typeof data === 'object'
+    && ('responseCode' in data || 'transactionId' in data || 'totalAmount' in data))
+    ? data : null;
+  const r = data?.iposHPResponse || data?.iposhpresponse || data?.iposTransactResponse || bare || {};
   const responseCode = Number(r?.responseCode);
   const amount = Number(r?.totalAmount ?? r?.amount ?? 0);
   return {
@@ -561,6 +568,21 @@ export async function queryHppPaymentStatus({ transactionReferenceId }, resolved
     }
   }
   if (accepted) logger.info('[ipos-hpp] status auth accepted', { via: accepted });
+
+  // Envelope discovery: when a 2xx answer still cannot be read, log its SHAPE
+  // — top-level key names and one nested level, never a value — so the real
+  // production envelope can be mapped from the log instead of guessed.
+  // Values stay out deliberately: this response can carry card metadata.
+  if (res?.ok) {
+    const early = normalizeHppStatus(data);
+    if (!early.found || (!early.approved && early.responseCode === 0)) {
+      const shape = Object.fromEntries(
+        Object.entries(data && typeof data === 'object' ? data : {})
+          .map(([k, v]) => [k, v && typeof v === 'object' ? Object.keys(v) : typeof v]),
+      );
+      logger.warn('[ipos-hpp] unmapped status envelope', { keys: shape });
+    }
+  }
 
   const status = normalizeHppStatus(data);
   if (!res.ok && !status.found) {

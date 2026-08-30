@@ -430,6 +430,15 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
     assert.equal(status.amount, 10);
   });
 
+  it('accepts a BARE body with status-shaped fields — no wrapper at all', () => {
+    const status = normalizeHppStatus({
+      responseCode: 200, totalAmount: 1.12, transactionId: 'x2', cardType: 'VISA',
+    });
+    assert.equal(status.approved, true);
+    assert.equal(status.amount, 1.12);
+    assert.equal(status.transactionId, 'x2');
+  });
+
   it('a declined / cancelled payment is NOT approved', () => {
     for (const code of [400, 401, 402]) {
       const status = normalizeHppStatus({ iposHPResponse: { responseCode: code, totalAmount: 10 } });
