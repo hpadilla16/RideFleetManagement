@@ -9,7 +9,39 @@ import {
   mintHostedPaymentPage,
   queryHppPaymentStatus,
   normalizeHppStatus,
+  hppSafeCustomerName,
+  hppSafeMobile,
 } from './ipos-hpp-client.js';
+
+// THE FIRST LIVE LINK FAILED ON A NAME. iPOSpays rejected the whole mint with
+// "preferences.customerName - Invalid Customer Name" because the customer was
+// called Héctor — an accent, in a market where accents are the norm, not the
+// edge. These pin the sanitizer that keeps a name from ever costing a payment.
+describe('ipos-hpp-client: customer field sanitizing', () => {
+  it('strips diacritics instead of rejecting the customer', () => {
+    assert.equal(hppSafeCustomerName('Héctor Padilla'), 'Hector Padilla');
+    assert.equal(hppSafeCustomerName('José Muñoz-Rivera'), 'Jose MunozRivera');
+    assert.equal(hppSafeCustomerName("Mary O'Brien"), 'Mary OBrien');
+  });
+
+  it('omits the field entirely when nothing survives — optional beats invalid', () => {
+    assert.equal(hppSafeCustomerName('李伟'), null);
+    assert.equal(hppSafeCustomerName('   '), null);
+    assert.equal(hppSafeCustomerName(null), null);
+  });
+
+  it('caps at 25 like the Transact client, without a trailing space', () => {
+    const out = hppSafeCustomerName('Maximiliano Buenaventura de los Santos');
+    assert.ok(out.length <= 25);
+    assert.equal(out, out.trim());
+  });
+
+  it('mobile is ten digits or nothing', () => {
+    assert.equal(hppSafeMobile('+1 (407) 664-4254'), '4076644254');
+    assert.equal(hppSafeMobile('123'), null);
+    assert.equal(hppSafeMobile(null), null);
+  });
+});
 
 // NOTE (gitleaks): every credential-shaped string in this file is an obvious
 // dummy — never shaped like a real ecom token or TPN in use.

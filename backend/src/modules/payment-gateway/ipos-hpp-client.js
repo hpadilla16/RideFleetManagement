@@ -110,6 +110,37 @@ function clampExpiryDays(raw, fallback = 3) {
 }
 
 /**
+ * A customer name iPOSpays will accept, or null to omit the field.
+ *
+ * HPP rejects the ENTIRE mint — "preferences.customerName - Invalid Customer
+ * Name" — over characters this market's names are made of. Héctor, José,
+ * Muñoz: found on the first live link (2026-08-29), whose customer was the
+ * owner himself. So: strip diacritics via NFD (é→e, ñ→n), drop everything
+ * that is not an ASCII letter or a space (O'Brien → OBrien, hyphens close
+ * up), collapse whitespace, cap at 25 like the Transact client. If nothing
+ * survives — a name written entirely in another script — return null and
+ * send no name at all: the field is optional, and a missing courtesy label
+ * must never cost a customer the ability to pay.
+ */
+export function hppSafeCustomerName(raw) {
+  const cleaned = String(raw ?? '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^A-Za-z ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 25)
+    .trim();
+  return cleaned || null;
+}
+
+/** Digits only for customerMobile, or null to omit — same defensive posture. */
+export function hppSafeMobile(raw) {
+  const digits = String(raw ?? '').replace(/[^0-9]/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : null;
+}
+
+/**
  * transactionReferenceId: strictly alphanumeric, ≤20 chars (same 904 FORMAT
  * ERROR history as the Transact client's shortRef — hyphens are echoed to the
  * processor host and rejected). `PL` = payment link.
@@ -288,9 +319,19 @@ export async function mintHostedPaymentPage({
       eReceipt: false,
       eReceiptInputPrompt: false,
       requestCardToken: false,
-      ...(customer?.name ? { customerName: String(customer.name).slice(0, 25) } : {}),
+      // Sanitized, and OMITTED rather than sent when nothing survives: the
+      // customer fields are optional, and iPOSpays rejects the whole mint over
+      // an "Invalid Customer Name" — found live 2026-08-29 on the very first
+      // production link, whose customer was named Héctor. The é was the whole
+      // problem; in this market that is not an edge case, it is the customer
+      // base. Their page shows "Hector" — an accent traded for a working link.
+      ...(hppSafeCustomerName(customer?.name)
+        ? { customerName: hppSafeCustomerName(customer.name) }
+        : {}),
       ...(customer?.email ? { customerEmail: String(customer.email) } : {}),
-      ...(customer?.phone ? { customerMobile: String(customer.phone) } : {}),
+      ...(hppSafeMobile(customer?.phone)
+        ? { customerMobile: hppSafeMobile(customer.phone) }
+        : {}),
     },
     ...(merchantName || description
       ? {
