@@ -366,7 +366,9 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
     assert.equal(status.cardLast4, '1111');
   });
 
-  it('falls back to the bare token header if Bearer is 401d, and stops there', async () => {
+  it('walks the header chain on 401s and STOPS at the first acceptance', async () => {
+    // Chain per scope: Bearer → raw Authorization → bare token. Here raw
+    // Authorization is the winner, so the bare-token spelling is never sent.
     const { impl, calls } = sequencedFetchStub([
       { body: { token: DUMMY_JWT } },
       { ok: false, status: 401, body: { message: 'unauthorized' } },
@@ -378,7 +380,30 @@ describe('ipos-hpp-client: queryPaymentStatus', () => {
       { fetchImpl: impl },
     );
     assert.equal(calls.length, 3);
-    assert.equal(calls[2].options.headers.token, DUMMY_JWT);
+    assert.equal(calls[1].options.headers.Authorization, `Bearer ${DUMMY_JWT}`);
+    assert.equal(calls[2].options.headers.Authorization, DUMMY_JWT);
+    assert.equal(status.approved, true);
+  });
+
+  it('exhausting one scope re-mints under the next scope before giving up', async () => {
+    // All three spellings 401 under ExternalApi → a SECOND auth mint (call 5)
+    // under PaymentTokenization, whose first spelling succeeds.
+    const { impl, calls } = sequencedFetchStub([
+      { body: { token: DUMMY_JWT } },
+      { ok: false, status: 401, body: {} },
+      { ok: false, status: 401, body: {} },
+      { ok: false, status: 401, body: {} },
+      { body: { token: DUMMY_JWT } },
+      { body: APPROVED_STATUS_BODY },
+    ]);
+    const status = await queryHppPaymentStatus(
+      { transactionReferenceId: 'PLRES1X2Y3' },
+      resolvedConfig(),
+      { fetchImpl: impl },
+    );
+    assert.equal(calls.length, 6);
+    assert.equal(JSON.parse(calls[0].options.body).scope, 'ExternalApi');
+    assert.equal(JSON.parse(calls[4].options.body).scope, 'PaymentTokenization');
     assert.equal(status.approved, true);
   });
 

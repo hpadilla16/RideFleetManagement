@@ -161,7 +161,7 @@ const HPP_AUTH_ENDPOINTS = {
  * scope, their error names the valid ones and lands in the log, scrubbed.
  * The JWT and the secret never appear in any log line.
  */
-export async function mintHppAuthJwt(resolved = {}, deps = {}) {
+export async function mintHppAuthJwt(resolved = {}, deps = {}, { scope = 'ExternalApi' } = {}) {
   const env = String(resolved?.environment || 'production').toLowerCase();
   const url = env === 'sandbox' ? HPP_AUTH_ENDPOINTS.sandbox : HPP_AUTH_ENDPOINTS.production;
   // Credentials go in the HEADERS, duplicated in the body — ipos-auth.js
@@ -171,7 +171,7 @@ export async function mintHppAuthJwt(resolved = {}, deps = {}) {
   const fields = {
     apiKey: resolved.apiKey,
     secretKey: resolved.secretKey,
-    scope: 'ExternalApi',
+    scope,
     jwtTokenExpiryMinutes: 30,
   };
   const { res, data } = await hppFetch(url, {
@@ -511,20 +511,32 @@ export async function queryHppPaymentStatus({ transactionReferenceId }, resolved
   // Minted per status check on purpose: checks are rare (one per payment
   // confirmation), the API's minimum expiry is 30 minutes, and statelessness
   // beats a cache for a call this infrequent.
-  const jwt = await mintHppAuthJwt(resolved, deps);
-
+  //
+  // Neither the header NAME nor the required SCOPE is documented, so this is
+  // a self-resolving probe: three header spellings per scope, two scopes,
+  // stopping at the first non-401 and LOGGING the winner (header + scope) so
+  // the matrix can be collapsed to one line once reality has spoken. Worst
+  // case is six short requests, once, on a path exercised one time per
+  // payment confirmation.
   const url = `${hppEndpoints(resolved).query}?tpn=${encodeURIComponent(resolved.tpn)}&transactionReferenceId=${encodeURIComponent(ref)}`;
-  // The docs never name the header ("the token must be included in the
-  // request header"). Try the two spellings the platform itself uses —
-  // Bearer, then the Transact-style bare `token:` — stopping at the first
-  // that is not a 401. One extra request at worst, and the log records which
-  // spelling won so this probe can be collapsed once reality is known.
   let res; let data;
-  for (const headers of [{ Authorization: `Bearer ${jwt}` }, { token: jwt }]) {
-    ({ res, data } = await hppFetch(url, { method: 'GET', headers }, deps));
-    if (res.status !== 401) {
-      logger.info('[ipos-hpp] status auth accepted', { header: Object.keys(headers)[0] });
-      break;
+  outer:
+  for (const scope of ['ExternalApi', 'PaymentTokenization']) {
+    const jwt = await mintHppAuthJwt(resolved, deps, { scope });
+    for (const headers of [
+      { Authorization: `Bearer ${jwt}` },
+      { Authorization: jwt },
+      { token: jwt },
+    ]) {
+      ({ res, data } = await hppFetch(url, { method: 'GET', headers }, deps));
+      if (res.status !== 401) {
+        logger.info('[ipos-hpp] status auth accepted', {
+          header: Object.keys(headers)[0],
+          bearer: String(headers.Authorization || '').startsWith('Bearer '),
+          scope,
+        });
+        break outer;
+      }
     }
   }
 
