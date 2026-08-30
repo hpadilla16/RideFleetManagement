@@ -475,6 +475,19 @@ settingsRouter.post('/payment-gateway/health-check', requireRole('ADMIN'), async
           ...(!cfg?.square?.accessToken ? ['Access Token'] : []),
           ...(!cfg?.square?.locationId ? ['Location ID'] : [])
         ]
+      },
+      // iPOSpays Hosted Payment Page — customer payment links. The token
+      // itself never reaches this read shape; `hasHppToken` says one is on
+      // file. The TPN may come from the spin block (same tenant's merchant).
+      ipos: {
+        selected: gateway === 'ipos',
+        enabled: !!cfg?.ipos?.enabled,
+        ready: !!(cfg?.ipos?.hasHppToken && (cfg?.ipos?.tpn || cfg?.spin?.tpn)),
+        environment: cfg?.ipos?.environment || 'production',
+        missing: [
+          ...(!(cfg?.ipos?.tpn || cfg?.spin?.tpn) ? ['CloudPOS TPN'] : []),
+          ...(!cfg?.ipos?.hasHppToken ? ['HPP Auth Token'] : [])
+        ]
       }
     };
     const active = checks[gateway] || checks.authorizenet;

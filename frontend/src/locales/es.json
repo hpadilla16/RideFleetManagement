@@ -1812,5 +1812,25 @@
       "dispatch-confirmed": "Confirmado por el personal",
       "covered-by-toll-package": "Cubierto por paquete de peajes"
     }
+  },
+  "settingsPayments": {
+    "ipos": {
+      "gatewayOption": "iPOS Payment Links (Dejavoo HPP)",
+      "title": "Enlaces de pago iPOS (Hosted Payment Page)",
+      "enabled": "Activado",
+      "environment": "Ambiente",
+      "envSandbox": "Sandbox (UAT)",
+      "envProduction": "Producción",
+      "hppToken": "Token de autenticación HPP",
+      "tokenSavedPlaceholder": "Guardado — deje en blanco para conservarlo",
+      "tokenEmptyPlaceholder": "Pegue el token Ecom/HPP de su portal iPOSpays",
+      "tpn": "TPN de CloudPOS",
+      "tpnFallbackPlaceholder": "En blanco — usa el TPN de SPIn ({{tpn}})",
+      "tpnEmptyPlaceholder": "TPN de CloudPOS de 12 dígitos de Dejavoo",
+      "expiryDays": "Vigencia del enlace (días, 1-31)",
+      "note1": "Cuando la pasarela principal es iPOS, los enlaces de pago del cliente abren la página de pago alojada de Dejavoo ligada al TPN de CloudPOS de arriba, de modo que los pagos por enlace se liquidan en la cuenta de comercio de ESTE tenant.",
+      "note2": "Si faltan estas credenciales, los enlaces de pago se rechazan con un mensaje claro — nunca recurren en silencio a Authorize.Net.",
+      "note3": "El token HPP se cifra en reposo y no vuelve a mostrarse; déjelo en blanco para conservar el guardado. Las credenciales de producción las entrega el soporte de Dejavoo."
+    }
   }
 }

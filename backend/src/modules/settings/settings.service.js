@@ -570,6 +570,30 @@ function defaultPaymentGatewayConfig() {
       callbackUrl: '',
       proxyTimeout: '120'
     },
+    // iPOSpays Hosted Payment Page — customer PAYMENT LINKS for tenants who
+    // transact through iPOS/Dejavoo (gateway: 'ipos'). Distinct from the
+    // `spin` block above (card-present terminal) although the two share a
+    // merchant: the HPP is tied to a CloudPOS TPN and authenticates with an
+    // ecom token generated in the iPOSpays portal.
+    //
+    // DELIBERATELY NO env defaults. Platform env credentials belong to Ride's
+    // merchant accounts; pre-filling them here is how a tenant's payment link
+    // settles into the wrong merchant (see the spin block's 2026-08-26 note).
+    // An unconfigured tenant reads as empty and the link-minting path fails
+    // closed with an operator-facing message.
+    ipos: {
+      enabled: false,
+      environment: 'production',
+      // CloudPOS TPN. Blank falls back to spin.tpn at resolve time (same
+      // tenant, same merchant) — see payment-gateway/ipos-hpp-client.js.
+      tpn: '',
+      // NEVER populated on read — `hasHppToken` tells the UI one is on file.
+      // Stored as `enci:` ciphertext like spin.authKey.
+      hppToken: '',
+      hasHppToken: false,
+      // Hosted-link expiry in days (iPOSpays accepts 1–31).
+      expiryDays: 3
+    },
     // PayArc — used for US-mainland car-sharing pickups. Puerto Rico
     // pickups stay on Authorize.Net regardless. Selector lives in
     // public-booking/payarc-hosted-fields.js → selectPaymentGateway().
@@ -609,6 +633,26 @@ function spinBlockForRead(spin = {}) {
   const out = { ...spin, authKey: '', hasAuthKey: !!stored };
   delete out.clearAuthKey;
   return out;
+}
+
+/**
+ * Shape the stored `ipos` block for a READ. Same rule as spinBlockForRead:
+ * the HPP auth token is a live payment credential — the UI gets a boolean and
+ * blank-means-keep on save, never the ciphertext and never the plaintext.
+ */
+function iposBlockForRead(ipos = {}) {
+  const stored = typeof ipos?.hppToken === 'string' ? ipos.hppToken.trim() : '';
+  const out = { ...ipos, hppToken: '', hasHppToken: !!stored };
+  delete out.clearHppToken;
+  return out;
+}
+
+/** Clamp the HPP link expiry to iPOSpays' documented 1–31 day window. */
+function iposExpiryDaysValue(raw, fallback = 3) {
+  if (raw === '' || raw == null) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(31, Math.max(1, Math.round(n)));
 }
 
 function scopedKey(baseKey, scope = {}) {
@@ -1119,6 +1163,10 @@ export const settingsService = {
           ...defaults.spin,
           ...(parsed?.spin || {})
         }),
+        ipos: iposBlockForRead({
+          ...defaults.ipos,
+          ...(parsed?.ipos || {})
+        }),
         payarc: {
           ...defaults.payarc,
           ...(parsed?.payarc || {})
@@ -1150,6 +1198,7 @@ export const settingsService = {
       storedRaw = {};
     }
     const newSpinAuthKey = String(payload?.spin?.authKey || '').trim();
+    const newIposHppToken = String(payload?.ipos?.hppToken || '').trim();
 
     const next = {
       ...defaults,
@@ -1215,6 +1264,25 @@ export const settingsService = {
         // Read-shape / command-only fields never belong in the stored blob.
         hasAuthKey: undefined,
         clearAuthKey: undefined
+      },
+      ipos: {
+        ...defaults.ipos,
+        ...(payload?.ipos || {}),
+        enabled: !!payload?.ipos?.enabled,
+        environment: String(payload?.ipos?.environment || defaults.ipos.environment).trim().toLowerCase() === 'sandbox' ? 'sandbox' : 'production',
+        tpn: String(payload?.ipos?.tpn || '').trim(),
+        // Same encrypted-at-rest, blank-means-keep contract as spin.authKey:
+        // the read path never returns the token, so a plain form round-trip
+        // must not wipe it. Only `clearHppToken: true` erases.
+        hppToken: payload?.ipos?.clearHppToken
+          ? ''
+          : (newIposHppToken
+            ? encryptSettingSecret(newIposHppToken)
+            : carrySettingSecret(storedRaw?.ipos?.hppToken)),
+        expiryDays: iposExpiryDaysValue(payload?.ipos?.expiryDays, defaults.ipos.expiryDays),
+        // Read-shape / command-only fields never belong in the stored blob.
+        hasHppToken: undefined,
+        clearHppToken: undefined
       },
       payarc: {
         ...defaults.payarc,
