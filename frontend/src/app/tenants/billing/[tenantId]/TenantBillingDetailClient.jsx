@@ -8,6 +8,9 @@
  *          POST /api/tenants/billing/subscriptions/:id/update-link    { email? }
  *          POST /api/tenants/billing/subscriptions/:id/revoke-invites
  *          POST /api/tenants/billing/subscriptions/:id/refresh
+ *          POST /api/tenants/billing/subscriptions/:id/plan-change/preview { planCode?, amount? }
+ *          POST /api/tenants/billing/subscriptions/:id/plan-change    { planCode?, amount?, prorateNow?, expectedProration? }
+ *          POST /api/tenants/billing/subscriptions/:id/plan-change/cancel
  *          POST /api/tenants/billing/:tenantId/suspend                { reason }
  *          POST /api/tenants/billing/:tenantId/restore
  *          POST /api/tenants/billing/:tenantId/apply-plan
@@ -173,6 +176,7 @@ export function TenantBillingDetailClient({ token, tenantId }) {
             planDiverges={planDiverges}
             busy={busy}
             setDialog={setDialog}
+            onCancelPendingChange={() => run(`${subPath}/plan-change/cancel`)}
           />
 
           <ChargeHistory charges={charges} />
@@ -192,7 +196,19 @@ export function TenantBillingDetailClient({ token, tenantId }) {
         </>
       )}
 
-      {dialog ? (
+      {dialog && dialog.kind === 'planChange' && sub ? (
+        <PlanChangeDialog
+          sub={sub}
+          tenant={tenant}
+          token={token}
+          busy={busy}
+          subPath={subPath}
+          onClose={() => setDialog(null)}
+          onSubmit={(body) => run(`${subPath}/plan-change`, body)}
+        />
+      ) : null}
+
+      {dialog && dialog.kind !== 'planChange' ? (
         <ActionDialog
           dialog={dialog}
           tenant={tenant}
@@ -250,6 +266,18 @@ function SubscriptionCard({ sub, tenant, planDiverges }) {
       {/* Only a GENUINE trial puts a date here. A deferred first charge is not a
           trial and must not be labelled as one. */}
       <Kv k="Trial" v={sub.trialEndsAt ? `ends ${billingDate(sub.trialEndsAt)}` : 'none'} />
+      {/* Phase 6: a scheduled plan/amount change. The date the customer FEELS
+          is the charge date, so that is the date this sentence leads with —
+          "applies on the 30th" would invite a support call on the 1st. */}
+      {sub.pendingPlanCode || sub.pendingEffectiveDate ? (
+        <div className="surface-note">
+          <strong>Scheduled change:</strong>{' '}
+          {sub.pendingPlanCode || sub.planCode} at {money(sub.pendingAmount, sub.currency)} — first charged at
+          the new price on {sub.nextChargeDate ? billingDate(sub.nextChargeDate) : billingDate(sub.pendingEffectiveDate)}
+          {' '}(applies {billingDate(sub.pendingEffectiveDate)}). Until then the current price stands; no money
+          moves when it applies.
+        </div>
+      ) : null}
       <Kv k="arbSubscriptionId" v={<Copyable value={sub.arbSubscriptionId} />} />
       <Kv k="customerProfileId" v={<Copyable value={sub.customerProfileId} />} />
       {sub.arbStatusSnapshot ? (
@@ -335,11 +363,23 @@ function PaymentMethodCard({ sub, outstanding, busy, onUpdateLink, onRevoke, onR
   );
 }
 
-function ActionsCard({ sub, tenant, planDiverges, busy, setDialog }) {
+function ActionsCard({ sub, tenant, planDiverges, busy, setDialog, onCancelPendingChange }) {
+  const hasPendingChange = !!(sub.pendingPlanCode || sub.pendingEffectiveDate);
   return (
     <div className="glass card stack">
       <h3 className="section-title">Actions</h3>
       <div className="inline-actions">
+        {hasPendingChange ? (
+          // Undoing a change that has not applied yet is the SAFE direction —
+          // nothing has happened — so it needs no dialog, just a click.
+          <button type="button" className="button-subtle" disabled={busy} onClick={onCancelPendingChange}>
+            Cancel scheduled change
+          </button>
+        ) : (
+          <button type="button" className="button-subtle" disabled={busy} onClick={() => setDialog({ kind: 'planChange' })}>
+            Change plan / amount
+          </button>
+        )}
         {planDiverges ? (
           <button type="button" className="button-subtle" disabled={busy} onClick={() => setDialog({ kind: 'applyPlan' })}>
             Apply billing plan to entitlements
@@ -359,9 +399,9 @@ function ActionsCard({ sub, tenant, planDiverges, busy, setDialog }) {
         </button>
       </div>
       <p className="label">
-        Plan and cycle changes are not here: they compute a prorated amount nobody has agreed to in advance,
-        and they ship in a later phase with a preview of the exact number and the exact sentence that will be
-        stored. Refunds are readable in the history below and issuable in the Authorize.Net portal.
+        Cycle changes (monthly ↔ annual) are still not here: Authorize.Net cannot change an interval after
+        creation, so that shape is a cancel-and-re-enroll done by hand. Refunds are readable in the history
+        below and issuable in the Authorize.Net portal.
       </p>
     </div>
   );
@@ -636,6 +676,155 @@ const DIALOGS = {
     ],
   },
 };
+
+/**
+ * Change plan / amount — Phase 6, and the one dialog with a mandatory PREVIEW.
+ *
+ * The design's rule (§7.2): the operator sees the exact number and the exact
+ * sentence that will be stored BEFORE committing. So the commit button stays
+ * disabled until a preview has been fetched for the values as typed — editing
+ * a field voids the preview — and a prorated commit echoes the previewed
+ * number back (`expectedProration`), which the server refuses if it has gone
+ * stale. The DEFAULT shape is the scheduled one: no money moves today, the
+ * new price starts with the next charge, and the change is undoable until
+ * then. The prorate-now checkbox only appears when the server says an
+ * immediate upgrade charge is possible, and it is never pre-checked.
+ */
+function PlanChangeDialog({ sub, tenant, token, busy, subPath, onClose, onSubmit }) {
+  const [form, setForm] = useState({ planCode: sub.planCode, amount: '' });
+  const [preview, setPreview] = useState(null);
+  const [prorate, setProrate] = useState(false);
+  const [err, setErr] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const edit = (name) => (e) => {
+    setForm((s) => ({ ...s, [name]: e.target.value }));
+    // A preview describes exactly the values it was fetched for. Typing voids it.
+    setPreview(null);
+    setProrate(false);
+  };
+
+  const fetchPreview = async () => {
+    setLoading(true);
+    setErr('');
+    try {
+      const body = { planCode: form.planCode };
+      if (String(form.amount).trim() !== '') body.amount = form.amount;
+      setPreview(await api(`${subPath}/plan-change/preview`, { method: 'POST', body: JSON.stringify(body) }, token));
+    } catch (e) {
+      setErr(e.message);
+      setPreview(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const commit = () => {
+    const body = { planCode: form.planCode };
+    if (String(form.amount).trim() !== '') body.amount = form.amount;
+    if (prorate && preview?.proration) {
+      body.prorateNow = true;
+      body.expectedProration = preview.proration.proration;
+    }
+    return onSubmit(body);
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="rent-modal glass" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <div className="row-between">
+          <h3 className="section-title">Change plan / amount</h3>
+        </div>
+        <p className="label">{tenant.name} · currently {sub.planName} · {money(sub.amount, sub.currency)}</p>
+
+        <div className="surface-note">
+          <p>
+            <strong>By default, no money moves today.</strong> The change is scheduled for the period boundary
+            and the new price starts with the next charge — the same &quot;new price at your next renewal&quot;
+            every SaaS uses. Until it applies, it can be cancelled with one click.
+          </p>
+          <p className="label">
+            Authorize.Net applies amount updates to future charges only, which is why mid-cycle changes do not
+            touch the charge that is already scheduled.
+          </p>
+        </div>
+
+        {err ? <div className="error">{err}</div> : null}
+
+        <div className="stack">
+          <label htmlFor="pc-plan">Plan code</label>
+          <input id="pc-plan" type="text" value={form.planCode} onChange={edit('planCode')} />
+        </div>
+        <div className="stack">
+          <label htmlFor="pc-amount">Amount (blank = the catalog price for this cycle)</label>
+          <input id="pc-amount" type="text" placeholder="e.g. 249.00" value={form.amount} onChange={edit('amount')} />
+        </div>
+
+        {preview ? (
+          preview.noChange ? (
+            <div className="error">That is the current plan at the current price — nothing would change.</div>
+          ) : (
+            <div className="surface-note">
+              <p>
+                <strong>{preview.from.planName} ({money(preview.from.amount, sub.currency)}) →{' '}
+                {preview.to.planName} ({money(preview.to.amount, sub.currency)})</strong>
+              </p>
+              <p>
+                New price first charged on <strong>{preview.firstChargedOn ? billingDate(preview.firstChargedOn) : '—'}</strong>
+                {' '}(applies at the boundary, {preview.effectiveDate ? billingDate(preview.effectiveDate) : '—'}).
+                No proration, no charge today.
+              </p>
+              {preview.prorationAvailable && !preview.proration.belowFloor ? (
+                <>
+                  <label htmlFor="pc-prorate">
+                    <input
+                      id="pc-prorate"
+                      type="checkbox"
+                      checked={prorate}
+                      onChange={(e) => setProrate(e.target.checked)}
+                    />{' '}
+                    Instead, charge the prorated difference of{' '}
+                    <strong>{money(preview.proration.proration, sub.currency)}</strong> to the card on file NOW
+                    and start the new plan today
+                  </label>
+                  {prorate ? (
+                    <blockquote className="label">
+                      {/* The exact sentence the ledger will store — shown before
+                          the money moves, per §7.2. */}
+                      {preview.proration.description}
+                    </blockquote>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+          )
+        ) : null}
+
+        <div className="inline-actions">
+          <button type="button" className="button-subtle" onClick={onClose} disabled={busy}>Close</button>
+          <button
+            type="button"
+            className="button-subtle"
+            disabled={busy || loading || !String(form.planCode).trim()}
+            onClick={fetchPreview}
+          >
+            Preview
+          </button>
+          <button
+            type="button"
+            className="button"
+            // No commit without a preview of these exact values: the number that
+            // charges must be a number the operator has read.
+            disabled={busy || loading || !preview || preview.noChange}
+            onClick={commit}
+          >
+            {prorate ? 'Charge now and change the plan' : 'Schedule the change'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function ActionDialog({ dialog, tenant, sub, busy, enforcement, onClose, onSubmit }) {
   const spec = DIALOGS[dialog.kind];
