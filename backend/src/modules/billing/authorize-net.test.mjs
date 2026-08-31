@@ -304,3 +304,74 @@ test('a hung Authorize.Net call is bounded, and says so', async () => {
     /timed out after 20ms/,
   );
 });
+
+// ── 7. Phase 6: the amount update and the proration charge ─────────────────
+
+const { updateSubscriptionAmount, chargeCustomerProfile } = await import('./authorize-net.js');
+
+test('updateSubscriptionAmount sends ARBUpdateSubscriptionRequest with a 2dp amount', async () => {
+  const fetch = fakeFetch(OK());
+  await updateSubscriptionAmount('arb_9', 199.999, { fetch });
+  const sent = fetch.calls[0].body.ARBUpdateSubscriptionRequest;
+  assert.equal(sent.subscriptionId, 'arb_9');
+  assert.equal(sent.subscription.amount, 200);
+});
+
+test('chargeCustomerProfile: an approval carries the transId out', async () => {
+  const fetch = fakeFetch(OK({
+    transactionResponse: { responseCode: '1', transId: '40098', authCode: 'A7X' },
+  }));
+  const v = await chargeCustomerProfile({
+    customerProfileId: 'c1', customerPaymentProfileId: 'p1', amount: 50, refId: 'pr-abc', description: 'ajuste',
+  }, { fetch });
+  assert.equal(v.approved, true);
+  assert.equal(v.transId, '40098');
+  assert.equal(v.authCode, 'A7X');
+
+  // The request shape: refId travels (it is what makes an unanswered call
+  // findable), the stored profile is charged, and NOTHING card-shaped is sent.
+  const sent = fetch.calls[0].body.createTransactionRequest;
+  assert.equal(sent.refId, 'pr-abc');
+  assert.equal(sent.transactionRequest.transactionType, 'authCaptureTransaction');
+  assert.equal(sent.transactionRequest.profile.customerProfileId, 'c1');
+  assert.equal(sent.transactionRequest.profile.paymentProfile.paymentProfileId, 'p1');
+  assert.ok(!JSON.stringify(sent).match(/cardNumber|creditCard|cardCode/));
+});
+
+test('chargeCustomerProfile: BOTH decline spellings land on declined, never a throw', async () => {
+  // Envelope-level: resultCode Error + E00027.
+  const envelope = JSON.stringify({
+    messages: { resultCode: 'Error', message: [{ code: 'E00027', text: 'The transaction was unsuccessful.' }] },
+  });
+  const v1 = await chargeCustomerProfile({
+    customerProfileId: 'c1', customerPaymentProfileId: 'p1', amount: 50, refId: 'pr-a',
+  }, { fetch: fakeFetch(envelope) });
+  assert.equal(v1.approved, false);
+  assert.equal(v1.declined, true);
+
+  // Transaction-level: Ok envelope, responseCode 2.
+  const v2 = await chargeCustomerProfile({
+    customerProfileId: 'c1', customerPaymentProfileId: 'p1', amount: 50, refId: 'pr-b',
+  }, { fetch: fakeFetch(OK({ transactionResponse: { responseCode: '2', transId: '0' } })) });
+  assert.equal(v2.approved, false);
+  assert.equal(v2.declined, true);
+  assert.equal(v2.transId, null, 'transId "0" is Authorize.Net for "none" and must not be stored as one');
+});
+
+test('chargeCustomerProfile: held-for-review is NOT approved — the money is not ours yet', async () => {
+  const v = await chargeCustomerProfile({
+    customerProfileId: 'c1', customerPaymentProfileId: 'p1', amount: 50, refId: 'pr-c',
+  }, { fetch: fakeFetch(OK({ transactionResponse: { responseCode: '4', transId: '40100' } })) });
+  assert.equal(v.approved, false);
+  assert.equal(v.held, true);
+});
+
+test('chargeCustomerProfile: a timeout STILL THROWS — unknown state is not a decline', async () => {
+  const hang = () => new Promise(() => {});
+  await assert.rejects(
+    () => chargeCustomerProfile({
+      customerProfileId: 'c1', customerPaymentProfileId: 'p1', amount: 50, refId: 'pr-d',
+    }, { fetch: hang, timeoutMs: 20 }),
+    /timed out after 20ms/,
+  );
+});

@@ -19,6 +19,7 @@
 import { Router } from 'express';
 import { isSuperAdmin } from '../../middleware/auth.js';
 import { billingAdmin } from './billing-admin.service.js';
+import { billingPlanChange } from './billing-plan-change.service.js';
 
 export const billingAdminRouter = Router();
 
@@ -140,6 +141,67 @@ billingAdminRouter.post('/subscriptions/:subscriptionId/revoke-invites', require
 billingAdminRouter.post('/subscriptions/:subscriptionId/refresh', requireSuperAdmin, async (req, res, next) => {
   try {
     res.json(await billingAdmin.refreshFromAuthorizeNet({
+      subscriptionId: req.params.subscriptionId,
+      ...actorFrom(req),
+    }));
+  } catch (e) {
+    fail(res, next, e);
+  }
+});
+
+// ── Plan changes (Phase 6) ─────────────────────────────────────────────────
+
+/**
+ * Preview only — nothing written, nothing charged. Returns the exact number
+ * and the exact stored-sentence the commit would produce, which is what the
+ * dialog shows BEFORE the operator commits (§7.2). POST rather than GET
+ * because it carries a body, but it is a pure read.
+ */
+billingAdminRouter.post('/subscriptions/:subscriptionId/plan-change/preview', requireSuperAdmin, async (req, res, next) => {
+  try {
+    res.json(await billingPlanChange.previewPlanChange({
+      subscriptionId: req.params.subscriptionId,
+      planCode: req.body?.planCode,
+      amount: req.body?.amount,
+    }));
+  } catch (e) {
+    fail(res, next, e);
+  }
+});
+
+/**
+ * The plan/amount change. TWO SHAPES, one route:
+ *
+ *   default            → SCHEDULED for the next period boundary (or an explicit
+ *                        effectiveDate). No money moves today; no ARB call is
+ *                        made until the boundary; fully undoable below.
+ *   prorateNow: true   → upgrade-only mid-cycle apply with a proration charge,
+ *                        gated on `expectedProration` echoing the previewed
+ *                        number so a stale preview cannot charge blind.
+ */
+billingAdminRouter.post('/subscriptions/:subscriptionId/plan-change', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const input = {
+      subscriptionId: req.params.subscriptionId,
+      planCode: req.body?.planCode,
+      amount: req.body?.amount,
+      effectiveDate: req.body?.effectiveDate,
+      prorateNow: req.body?.prorateNow === true,
+      expectedProration: req.body?.expectedProration,
+      ...actorFrom(req),
+    };
+    res.json(input.prorateNow
+      ? await billingPlanChange.changePlanWithProrationNow(input)
+      : await billingPlanChange.scheduleSubscriptionPlanChange(input));
+  } catch (e) {
+    fail(res, next, e);
+  }
+});
+
+/** Undo a scheduled change before its boundary. Nothing has happened yet. */
+billingAdminRouter.post('/subscriptions/:subscriptionId/plan-change/cancel', requireSuperAdmin, async (req, res, next) => {
+  try {
+    res.json(await billingPlanChange.cancelPendingPlanChange({
       subscriptionId: req.params.subscriptionId,
       ...actorFrom(req),
     }));

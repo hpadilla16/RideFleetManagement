@@ -8,9 +8,11 @@
  *
  * WHAT THIS FILE DELIBERATELY DOES NOT CONTAIN
  * ---------------------------------------------------------------------------
- * - No plan change, no proration, no novel amount. That is Phase 6, last on
- *   purpose because it is the only part that computes a number nobody agreed to
- *   in advance.
+ * - No plan change, no proration, no novel amount. Phase 6 built those in
+ *   billing-plan-change.service.js — a separate file so THIS one stays the
+ *   reads-and-levers surface and the only novel-amount arithmetic in the
+ *   module lives behind one import. The views here surface the pending-change
+ *   fields; the writes live there.
  * - No dunning, no automatic suspension, no `requireAuth` gate. That is Phase 5.
  *   This file gives a human the lever; Phase 5 automates the decision to pull it.
  * - No refund. Design open question 10 (who may issue one, and the ceiling above
@@ -234,6 +236,9 @@ export async function getBillingOverview(overrides = {}) {
       startDate: sub ? sub.startDate : null,
       nextChargeDate: sub ? sub.nextChargeDate : null,
       trialEndsAt: sub ? sub.trialEndsAt : null,
+      pendingPlanCode: sub ? sub.pendingPlanCode || null : null,
+      pendingAmount: sub && sub.pendingAmount != null ? String(sub.pendingAmount) : null,
+      pendingEffectiveDate: sub ? sub.pendingEffectiveDate || null : null,
       currentPeriodStart: sub ? sub.currentPeriodStart : null,
       currentPeriodEnd: sub ? sub.currentPeriodEnd : null,
       cardBrand: sub ? sub.cardBrand : null,
@@ -519,6 +524,11 @@ function publicSubscriptionView(sub, today) {
     currentPeriodStart: sub.currentPeriodStart,
     currentPeriodEnd: sub.currentPeriodEnd,
     trialEndsAt: sub.trialEndsAt,
+    // Phase 6: a scheduled plan/amount change, visible until the boundary
+    // applies it or an operator cancels it. All three or none.
+    pendingPlanCode: sub.pendingPlanCode || null,
+    pendingAmount: sub.pendingAmount == null ? null : String(sub.pendingAmount),
+    pendingEffectiveDate: sub.pendingEffectiveDate || null,
     cardBrand: sub.cardBrand,
     cardLast4: sub.cardLast4,
     cardExpMonth: sub.cardExpMonth,
@@ -786,6 +796,12 @@ export async function cancelSubscriptionForTenant(input = {}, overrides = {}) {
       // No charge is coming. A stale date would keep feeding detector 3 a charge
       // to hunt for that can never happen.
       nextChargeDate: null,
+      // A scheduled plan change dies with the subscription it would have
+      // re-priced — a pending row on a CANCELLED sub would be a change waiting
+      // for a boundary that can never arrive.
+      pendingPlanCode: null,
+      pendingAmount: null,
+      pendingEffectiveDate: null,
       lastFailureCode: null,
       lastFailureText: null,
     },

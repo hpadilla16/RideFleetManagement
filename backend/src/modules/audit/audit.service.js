@@ -218,6 +218,23 @@ export const AUDIT_ACTIONS = Object.freeze({
   // blur exactly that line. Metadata carries previousStatus/newStatus so the trail
   // answers "what was it before" for a screen that can also darken a tenant.
   TENANT_STATUS_CHANGE: 'TENANT_STATUS_CHANGE',
+  // ── Phase 6 (plan changes + proration), 2026-08-30 ──
+  // A plan change is THREE distinct facts and gets three actions, because each
+  // answers a different dispute question. SCHEDULE: who decided the price would
+  // change, to what, effective when — carries the actor. APPLY: the moment the
+  // change actually took effect — written by the unattended boundary sweep
+  // (no actor, source RECONCILE) or by an immediate admin apply (actor, source
+  // ADMIN). CANCEL: a scheduled change undone before it applied, with what was
+  // discarded and what was kept. Metadata is ids, plan codes and amounts only.
+  SUBSCRIPTION_PLAN_CHANGE_SCHEDULE: 'SUBSCRIPTION_PLAN_CHANGE_SCHEDULE',
+  SUBSCRIPTION_PLAN_CHANGE_APPLY: 'SUBSCRIPTION_PLAN_CHANGE_APPLY',
+  SUBSCRIPTION_PLAN_CHANGE_CANCEL: 'SUBSCRIPTION_PLAN_CHANGE_CANCEL',
+  // The mid-cycle proration charge — the one action in the module that mints a
+  // NOVEL amount and moves money outside the ARB schedule. Written on SUCCESS
+  // and on FAILURE both: a declined or unknown-state attempt is exactly the row
+  // a human most needs to find later, with the refId that makes it findable at
+  // Authorize.Net. Never the transaction key, never more card than brand+last4.
+  SUBSCRIPTION_PRORATION_CHARGE: 'SUBSCRIPTION_PRORATION_CHARGE',
 });
 
 export const AUDIT_OUTCOME = Object.freeze({

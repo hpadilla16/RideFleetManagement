@@ -419,6 +419,168 @@ describe('billing detail', () => {
     expect(text).toMatch(/no earlier status was recorded/i);
   });
 
+  // ── Phase 6: plan changes ────────────────────────────────────────────────
+
+  const ACTIVE_SUB = {
+    ...detail().subscription,
+    status: 'ACTIVE',
+    pastDueSince: null,
+    failedAttempts: 0,
+  };
+
+  it('renders a scheduled change on the card, leading with the date the customer feels', async () => {
+    wire(detail({
+      subscription: {
+        ...ACTIVE_SUB,
+        pendingPlanCode: 'PRO',
+        pendingAmount: '249',
+        pendingEffectiveDate: '2026-09-18',
+      },
+    }));
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    const notes = await screen.findAllByText(/Scheduled change/i);
+    expect(notes.length).toBeGreaterThan(0);
+    const text = document.body.textContent;
+    // The charge date, not only the boundary date — "applies on the 18th" alone
+    // invites a support call on the 19th.
+    expect(text).toMatch(/first charged at the new price on\s*Sep 19, 2026/i);
+    expect(text).toMatch(/\$249\.00 USD/);
+    expect(text).toMatch(/no money\s*moves when it applies/i);
+    // A pending change swaps the action: undo, not a second schedule.
+    expect(screen.getByText('Cancel scheduled change')).toBeInTheDocument();
+    expect(screen.queryByText('Change plan / amount')).toBeNull();
+  });
+
+  it('cancelling the scheduled change posts the undo — no dialog, nothing has happened yet', async () => {
+    wire(detail({
+      subscription: { ...ACTIVE_SUB, pendingPlanCode: 'PRO', pendingAmount: '249', pendingEffectiveDate: '2026-09-18' },
+    }));
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Cancel scheduled change'));
+    await waitFor(() => {
+      expect(apiMock).toHaveBeenCalledWith(
+        '/api/tenants/billing/subscriptions/s1/plan-change/cancel',
+        { method: 'POST', body: JSON.stringify({}) },
+        't',
+      );
+    });
+  });
+
+  it('the plan-change dialog refuses to commit before a preview — the number must be read first', async () => {
+    wire(detail({ subscription: ACTIVE_SUB }));
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Change plan / amount'));
+
+    // The honest default, stated before any field is touched.
+    expect(document.body.textContent).toMatch(/no money moves today/i);
+    expect(screen.getByText('Schedule the change')).toBeDisabled();
+  });
+
+  it('preview then schedule: posts the previewed values, no prorate flag by default', async () => {
+    const previewPayload = {
+      from: { planCode: 'PRO', planName: 'RFM Pro', amount: '199' },
+      to: { planCode: 'PRO', planName: 'RFM Pro', amount: '249' },
+      noChange: false,
+      upgrade: true,
+      effectiveDate: '2026-09-18',
+      firstChargedOn: '2026-09-19',
+      prorationAvailable: true,
+      proration: {
+        periodDays: 31, remainingDays: 3, dailyDelta: 1.6129, proration: 4.84, belowFloor: false, floor: 1,
+        description: 'Ajuste por cambio de plan: 3 día(s) restante(s)…',
+      },
+      hasPendingChange: false,
+    };
+    apiMock.mockImplementation((path) => {
+      if (path.endsWith('/plan-change/preview')) return Promise.resolve(previewPayload);
+      if (path.endsWith('/plan-change')) return Promise.resolve({ ok: true });
+      return Promise.resolve(detail({ subscription: ACTIVE_SUB }));
+    });
+
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Change plan / amount'));
+    fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: '249' } });
+    fireEvent.click(screen.getByText('Preview'));
+
+    // The preview names the charge date and offers — never presumes — proration.
+    await screen.findByText(/first charged on/i);
+    expect(document.body.textContent).toMatch(/Sep 19, 2026/);
+    const check = screen.getByLabelText(/charge the prorated difference/i);
+    expect(check).not.toBeChecked();
+
+    const submit = screen.getByText('Schedule the change');
+    expect(submit).not.toBeDisabled();
+    fireEvent.click(submit);
+    await waitFor(() => {
+      expect(apiMock).toHaveBeenCalledWith(
+        '/api/tenants/billing/subscriptions/s1/plan-change',
+        { method: 'POST', body: JSON.stringify({ planCode: 'PRO', amount: '249' }) },
+        't',
+      );
+    });
+  });
+
+  it('opting into proration shows the exact stored sentence and echoes the previewed number', async () => {
+    const previewPayload = {
+      from: { planCode: 'PRO', planName: 'RFM Pro', amount: '199' },
+      to: { planCode: 'PRO', planName: 'RFM Pro', amount: '249' },
+      noChange: false,
+      upgrade: true,
+      effectiveDate: '2026-09-18',
+      firstChargedOn: '2026-09-19',
+      prorationAvailable: true,
+      proration: {
+        periodDays: 31, remainingDays: 3, dailyDelta: 1.6129, proration: 4.84, belowFloor: false, floor: 1,
+        description: 'Ajuste por cambio de plan: 3 día(s) restante(s) del ciclo…',
+      },
+      hasPendingChange: false,
+    };
+    apiMock.mockImplementation((path) => {
+      if (path.endsWith('/plan-change/preview')) return Promise.resolve(previewPayload);
+      if (path.endsWith('/plan-change')) return Promise.resolve({ ok: true });
+      return Promise.resolve(detail({ subscription: ACTIVE_SUB }));
+    });
+
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Change plan / amount'));
+    fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: '249' } });
+    fireEvent.click(screen.getByText('Preview'));
+    fireEvent.click(await screen.findByLabelText(/charge the prorated difference/i));
+
+    // §7.2: the exact sentence the ledger will store, before the money moves.
+    expect(screen.getByText(/Ajuste por cambio de plan: 3 día/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Charge now and change the plan'));
+    await waitFor(() => {
+      expect(apiMock).toHaveBeenCalledWith(
+        '/api/tenants/billing/subscriptions/s1/plan-change',
+        { method: 'POST', body: JSON.stringify({ planCode: 'PRO', amount: '249', prorateNow: true, expectedProration: 4.84 }) },
+        't',
+      );
+    });
+  });
+
+  it('editing a field voids the preview — a stale number cannot be committed', async () => {
+    const previewPayload = {
+      from: { planCode: 'PRO', planName: 'RFM Pro', amount: '199' },
+      to: { planCode: 'PRO', planName: 'RFM Pro', amount: '249' },
+      noChange: false, upgrade: true, effectiveDate: '2026-09-18', firstChargedOn: '2026-09-19',
+      prorationAvailable: false, proration: null, hasPendingChange: false,
+    };
+    apiMock.mockImplementation((path) => {
+      if (path.endsWith('/plan-change/preview')) return Promise.resolve(previewPayload);
+      return Promise.resolve(detail({ subscription: ACTIVE_SUB }));
+    });
+    render(<TenantBillingDetailClient token="t" tenantId="t1" />);
+    fireEvent.click(await screen.findByText('Change plan / amount'));
+    fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: '249' } });
+    fireEvent.click(screen.getByText('Preview'));
+    await waitFor(() => expect(screen.getByText('Schedule the change')).not.toBeDisabled());
+
+    fireEvent.change(screen.getByLabelText(/Amount/), { target: { value: '299' } });
+    expect(screen.getByText('Schedule the change')).toBeDisabled();
+  });
+
   it('warns that a hand-set suspension is not billing\'s to lift', async () => {
     wire(detail({
       tenant: { id: 't1', name: 'Corpusa Fleet', slug: 'c', status: 'SUSPENDED', plan: 'PRO', billingSuspendedAt: null },
