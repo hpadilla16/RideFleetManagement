@@ -139,6 +139,24 @@ export const AUDIT_ACTIONS = Object.freeze({
   // with the phases that can perform them; a constant for an action nothing
   // can take would just be a promise the trail does not keep.
   AUTOPAY_INVITE_SEND: 'AUTOPAY_INVITE_SEND',
+  // ── Phase 7 (2026-08-28) — the platform DELIVERS the link, so delivery is
+  // its own audited act.
+  //
+  // Separate from AUTOPAY_INVITE_SEND on purpose: minting and delivering are
+  // now two things that can succeed independently, and collapsing them would
+  // make "we sent it" unfalsifiable — the trail would say a link was issued
+  // and leave the far more useful question, whether it ever left the building
+  // and at what address, unanswered. `outcome` is the ordinary FAILURE for a
+  // mailer outage, so a link that was minted but never delivered is visible in
+  // the trail rather than inferred from its absence.
+  //
+  // METADATA EXCEPTION, STATED DELIBERATELY: this row carries the RECIPIENT
+  // ADDRESS, which the ids-and-amounts rule above would otherwise exclude. It
+  // is the one fact the action is about. The recovery path for a mistyped
+  // billing contact is "look at where it actually went", and an address the
+  // invite row already stores is not new exposure. Still never the token, not
+  // one character past tokenPrefix, and never the URL that contains it.
+  AUTOPAY_INVITE_EMAIL: 'AUTOPAY_INVITE_EMAIL',
   AUTOPAY_INVITE_REVOKE: 'AUTOPAY_INVITE_REVOKE',
   // The customer completed the return leg: a card is on file and an ARB
   // subscription now exists. This is the row that answers "who authorised
@@ -192,6 +210,31 @@ export const AUDIT_ACTIONS = Object.freeze({
   // action that ever reconciles the two. Metadata carries from/to plus the caps
   // the new plan implies, since a downgrade can leave a tenant over them.
   TENANT_PLAN_APPLY: 'TENANT_PLAN_APPLY',
+  // Tenant.status changed by hand from the Tenants screen (PATCH /api/tenants/:id),
+  // NOT from the billing panel. Deliberately distinct from TENANT_SUSPEND /
+  // TENANT_RESTORE above: those two mean "billing cut or restored access" and are
+  // paired with billingSuspendedAt, which is the marker that lets automation know
+  // it may only lift a suspension it set itself. Folding hand edits into them would
+  // blur exactly that line. Metadata carries previousStatus/newStatus so the trail
+  // answers "what was it before" for a screen that can also darken a tenant.
+  TENANT_STATUS_CHANGE: 'TENANT_STATUS_CHANGE',
+  // ── Phase 6 (plan changes + proration), 2026-08-30 ──
+  // A plan change is THREE distinct facts and gets three actions, because each
+  // answers a different dispute question. SCHEDULE: who decided the price would
+  // change, to what, effective when — carries the actor. APPLY: the moment the
+  // change actually took effect — written by the unattended boundary sweep
+  // (no actor, source RECONCILE) or by an immediate admin apply (actor, source
+  // ADMIN). CANCEL: a scheduled change undone before it applied, with what was
+  // discarded and what was kept. Metadata is ids, plan codes and amounts only.
+  SUBSCRIPTION_PLAN_CHANGE_SCHEDULE: 'SUBSCRIPTION_PLAN_CHANGE_SCHEDULE',
+  SUBSCRIPTION_PLAN_CHANGE_APPLY: 'SUBSCRIPTION_PLAN_CHANGE_APPLY',
+  SUBSCRIPTION_PLAN_CHANGE_CANCEL: 'SUBSCRIPTION_PLAN_CHANGE_CANCEL',
+  // The mid-cycle proration charge — the one action in the module that mints a
+  // NOVEL amount and moves money outside the ARB schedule. Written on SUCCESS
+  // and on FAILURE both: a declined or unknown-state attempt is exactly the row
+  // a human most needs to find later, with the refId that makes it findable at
+  // Authorize.Net. Never the transaction key, never more card than brand+last4.
+  SUBSCRIPTION_PRORATION_CHARGE: 'SUBSCRIPTION_PRORATION_CHARGE',
 });
 
 export const AUDIT_OUTCOME = Object.freeze({

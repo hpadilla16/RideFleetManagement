@@ -18,6 +18,8 @@ import { Router } from 'express';
 import { scopeFor, userAllowedLocationIds } from '../../lib/tenant-scope.js';
 import { citationsService } from './citations.service.js';
 import { affidavitPdfBuffer } from './citations-affidavit.service.js';
+import { citationAttachmentsService } from './citation-attachments.service.js';
+import { exportCitationPdf } from './citation-export.service.js';
 
 export const citationsRouter = Router();
 export const citationsInternalRouter = Router();
@@ -35,7 +37,18 @@ function handle(err, res) {
   const isPrisma = typeof err?.name === 'string' && err.name.startsWith('Prisma');
   const status = err?.status || (!isPrisma && /required|invalid|must be/i.test(String(err?.message || '')) ? 400 : 500);
   if (status >= 500) return res.status(500).json({ error: 'Internal error' });
-  return res.status(status).json({ error: err.message });
+  // Deliberate app 4xx may carry a machine-readable `code` so the UI can act on
+  // it rather than string-matching the message — used by the attachment
+  // upload's payment-card confirmation (409 CARD_DATA_CONFIRMATION_REQUIRED).
+  const body = { error: err.message };
+  if (err?.code && typeof err.code === 'string' && !isPrisma) body.code = err.code;
+  if (err?.requiresConfirmation) body.requiresConfirmation = true;
+  return res.status(status).json(body);
+}
+
+/** Tenant/location scope plus the acting user, for attachment authorship. */
+function attachmentScope(req) {
+  return { ...scopeFor(req), userId: req.user?.sub || req.user?.id || null };
 }
 
 // ── Authed routes ──────────────────────────────────────────────────────────
@@ -143,6 +156,70 @@ citationsRouter.get('/:id/affidavit/pdf', async (req, res) => {
     const filename = `Affidavit-${safeNo}.pdf`;
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', buffer.byteLength);
+    res.end(buffer);
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
+// ── Supporting documents attached TO a citation (2026-08-28) ────────────────
+// NOT the OCR intake above. These are evidence filed against an existing
+// citation — agency correspondence, proof of payment, a dispute letter — and
+// they are stored and exported, never queued for OCR. See
+// citation-attachments.service.js for why that separation is structural.
+//
+// No `rejectLocationScopedUsers` here, unlike /documents and /manual-import:
+// those two feed `ingestBatch`, which posts money tenant-wide. Attaching a
+// document to a citation you can already open moves no money and creates no
+// rows outside that citation, so the ordinary location scoping that guards
+// GET /:id is the right and sufficient gate.
+citationsRouter.get('/:id/attachments', async (req, res) => {
+  try {
+    res.json(await citationAttachmentsService.list(
+      req.params.id,
+      attachmentScope(req),
+      { includeArchived: String(req.query?.includeArchived || '') === 'true' },
+    ));
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
+citationsRouter.post('/:id/attachments', async (req, res) => {
+  try {
+    const row = await citationAttachmentsService.upload(req.params.id, req.body || {}, attachmentScope(req));
+    res.status(201).json(row);
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
+citationsRouter.get('/attachments/:attachmentId/download', async (req, res) => {
+  try {
+    res.json(await citationAttachmentsService.signedUrl(req.params.attachmentId, attachmentScope(req)));
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
+// Archive, not hard-delete — see the service. The retention sweep removes the
+// row and the bytes on the 4-year identity clock.
+citationsRouter.delete('/attachments/:attachmentId', async (req, res) => {
+  try {
+    res.json(await citationAttachmentsService.remove(req.params.attachmentId, attachmentScope(req)));
+  } catch (err) {
+    handle(err, res);
+  }
+});
+
+// The citation file as one PDF: cover pages + every appendable document.
+citationsRouter.get('/:id/export/pdf', async (req, res) => {
+  try {
+    const { buffer, citationNo } = await exportCitationPdf(req.params.id, attachmentScope(req));
+    const safeNo = String(citationNo || 'citation').replace(/[^A-Za-z0-9_-]+/g, '-');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Citation-${safeNo}.pdf"`);
     res.setHeader('Content-Length', buffer.byteLength);
     res.end(buffer);
   } catch (err) {

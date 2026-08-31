@@ -15,6 +15,7 @@
 
 import net from 'node:net';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -46,7 +47,16 @@ export async function bootEmbeddedPg() {
     user: 'postgres',
     password: 'postgres',
     port,
-    persistent: false
+    persistent: false,
+    // Match production, which is UTF8. Without this, initdb derives the
+    // encoding from the host locale — on a Windows box that is WIN1252, and any
+    // test fixture carrying a character outside it fails with 22P05 ("no
+    // equivalent in encoding WIN1252") against a schema that is fine in prod.
+    // The `×` this repo already writes into charge notes survives WIN1252 by
+    // luck; an arrow or a dash would not. The C locale comes with it because
+    // initdb refuses UTF8 under a WIN1252 locale, and collation order is not
+    // something these suites assert on.
+    initdbFlags: ['--encoding=UTF8', '--locale=C']
   });
 
   await pg.initialise();
@@ -58,21 +68,22 @@ export async function bootEmbeddedPg() {
 
   // Apply schema + generate client against this DB.
   //
-  // Windows portability (2026-08-17): `npx` is npx.cmd there, which
-  // execFileSync will not resolve via PATHEXT (ENOENT) and — since the Node 20
-  // batch-injection fix — refuses to spawn at all without a shell (EINVAL).
-  // Every embedded suite was therefore unrunnable on a Windows dev machine.
-  // The argv is all fixed literals, so the shell adds no injection surface.
-  const IS_WIN = process.platform === 'win32';
-  const NPX = IS_WIN ? 'npx.cmd' : 'npx';
-  const execOpts = {
+  // Prisma's own JS entry point is run with THIS node binary, rather than
+  // shelling out to `npx`. On Windows npx is a .cmd shim: execFileSync does not
+  // apply PATHEXT, so the bare name was ENOENT, and since Node 18.20/20.12/22
+  // (CVE-2024-27980) spawning a .cmd without `shell: true` is EINVAL by design.
+  // Every `.embedded.test.mjs` in the repo therefore died in before() on this
+  // line, on the platform the team develops on. Reaching the entry point
+  // directly avoids both, needs no shell to re-parse these arguments, and drops
+  // npx's registry lookup — see `bin` in prisma/package.json.
+  const prismaCli = createRequire(import.meta.url).resolve('prisma/build/index.js');
+  const runPrisma = (args) => execFileSync(process.execPath, [prismaCli, ...args], {
     cwd: BACKEND_DIR,
     env: { ...process.env, DATABASE_URL: databaseUrl },
-    stdio: 'inherit',
-    shell: IS_WIN,
-  };
-  execFileSync(NPX, ['prisma', 'db', 'push', '--skip-generate', '--accept-data-loss'], execOpts);
-  execFileSync(NPX, ['prisma', 'generate'], execOpts);
+    stdio: 'inherit'
+  });
+  runPrisma(['db', 'push', '--skip-generate', '--accept-data-loss']);
+  runPrisma(['generate']);
 
   const mod = await import('@prisma/client');
   const prisma = new mod.PrismaClient({ datasources: { db: { url: databaseUrl } } });

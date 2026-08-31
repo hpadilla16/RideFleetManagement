@@ -12,6 +12,7 @@ import { getTenantPlanCatalog, resolveTenantPlanConfig } from '../../lib/tenant-
 import { encrypt, decrypt, isEncryptionConfigured } from '../../lib/integration-crypto.js';
 import { encryptSettingSecret, carrySettingSecret, decryptSettingSecret } from '../../lib/setting-secret-crypto.js';
 import { invalidateTenantTerminalConfig } from '../payment-gateway/tenant-terminal-config.js';
+import { resolveTenantProviderCredential } from '../../lib/tenant-provider-credential.js';
 import { normalizePolicy as normalizeTwoFactorPolicy, VALID_TWO_FACTOR_ROLES } from '../../lib/two-factor-policy.js';
 import { isCheckoutPaymentRequired, setCheckoutPaymentRequired } from './checkout-payment-policy.js';
 
@@ -569,6 +570,40 @@ function defaultPaymentGatewayConfig() {
       callbackUrl: '',
       proxyTimeout: '120'
     },
+    // iPOSpays Hosted Payment Page — customer PAYMENT LINKS for tenants who
+    // transact through iPOS/Dejavoo (gateway: 'ipos'). Distinct from the
+    // `spin` block above (card-present terminal) although the two share a
+    // merchant: the HPP is tied to a CloudPOS TPN and authenticates with an
+    // ecom token generated in the iPOSpays portal.
+    //
+    // DELIBERATELY NO env defaults. Platform env credentials belong to Ride's
+    // merchant accounts; pre-filling them here is how a tenant's payment link
+    // settles into the wrong merchant (see the spin block's 2026-08-26 note).
+    // An unconfigured tenant reads as empty and the link-minting path fails
+    // closed with an operator-facing message.
+    ipos: {
+      enabled: false,
+      environment: 'production',
+      // CloudPOS TPN. Blank falls back to spin.tpn at resolve time (same
+      // tenant, same merchant) — see payment-gateway/ipos-hpp-client.js.
+      tpn: '',
+      // NEVER populated on read — `hasHppToken` tells the UI one is on file.
+      // Stored as `enci:` ciphertext like spin.authKey.
+      hppToken: '',
+      hasHppToken: false,
+      // The Merchant API Key + Secret Key pair from the portal's Generate
+      // Keys section. NOT the ecom token: the mint authenticates with the
+      // token in a `token` header, while the status check exchanges THIS pair
+      // for a short-lived JWT via authenticate-token (probed live 2026-08-30:
+      // the status API 401s the token AND the bare API key in every header
+      // spelling). Same never-on-read / ciphertext contract as hppToken.
+      apiKey: '',
+      hasApiKey: false,
+      secretKey: '',
+      hasSecretKey: false,
+      // Hosted-link expiry in days (iPOSpays accepts 1–31).
+      expiryDays: 3
+    },
     // PayArc — used for US-mainland car-sharing pickups. Puerto Rico
     // pickups stay on Authorize.Net regardless. Selector lives in
     // public-booking/payarc-hosted-fields.js → selectPaymentGateway().
@@ -608,6 +643,82 @@ function spinBlockForRead(spin = {}) {
   const out = { ...spin, authKey: '', hasAuthKey: !!stored };
   delete out.clearAuthKey;
   return out;
+}
+
+/**
+ * Shape the stored `ipos` block for a READ. Same rule as spinBlockForRead:
+ * the HPP auth token is a live payment credential — the UI gets a boolean and
+ * blank-means-keep on save, never the ciphertext and never the plaintext.
+ */
+function iposBlockForRead(ipos = {}) {
+  const stored = typeof ipos?.hppToken === 'string' ? ipos.hppToken.trim() : '';
+  const storedKey = typeof ipos?.apiKey === 'string' ? ipos.apiKey.trim() : '';
+  const storedSecret = typeof ipos?.secretKey === 'string' ? ipos.secretKey.trim() : '';
+  const out = {
+    ...ipos,
+    hppToken: '', hasHppToken: !!stored,
+    apiKey: '', hasApiKey: !!storedKey,
+    secretKey: '', hasSecretKey: !!storedSecret,
+  };
+  delete out.clearHppToken;
+  delete out.clearApiKey;
+  delete out.clearSecretKey;
+  return out;
+}
+
+/**
+ * View Payments capability derivation (2026-08-30, view-payments redesign).
+ *
+ * The ONLY read of paymentGatewayConfig that is safe at any staff role. Input
+ * is the full gateway config (which, even after spinBlockForRead /
+ * iposBlockForRead, still carries loginId, TPNs, environment names and has*
+ * booleans — admin-panel material, not counter material). Output is the
+ * minimal boolean shape the reservation View Payments screen needs to decide
+ * WHICH controls to draw:
+ *
+ *   { gateway, authorizenet:{enabled}, spin:{enabled}, ipos:{enabled,linkReady},
+ *     stripe:{enabled}, square:{enabled}, payarc:{enabled}, autocharge:{mode} }
+ *
+ * NEVER add credential material, TPNs, key fragments, or has* booleans beyond
+ * `linkReady` here — payment-capabilities.test.mjs asserts the exact key set
+ * and that no configured secret value survives serialization.
+ *
+ * `enabled` means "this processor could actually work", not just the stored
+ * flag: authorizenet additionally requires loginId+transactionKey (mirrors the
+ * health-check's `ready`), stripe requires its secret key. The booleans leak
+ * nothing: "the tenant's gateway is configured" is exactly what the page must
+ * know, and is visible to staff anyway the moment a charge succeeds.
+ */
+export function derivePaymentCapabilities(cfg = {}) {
+  const iposEnabled = cfg?.ipos?.enabled === true;
+  return {
+    gateway: String(cfg?.gateway || 'authorizenet').trim().toLowerCase(),
+    authorizenet: {
+      enabled: !!(cfg?.authorizenet?.enabled && cfg?.authorizenet?.loginId && cfg?.authorizenet?.transactionKey)
+    },
+    spin: { enabled: cfg?.spin?.enabled === true },
+    ipos: {
+      enabled: iposEnabled,
+      // linkReady = the Send-payment-link mint would not fail closed with
+      // GATEWAY_NOT_CONFIGURED for an ipos tenant. hasHppToken is a boolean
+      // computed by iposBlockForRead — no token material is consulted here.
+      linkReady: !!(iposEnabled && cfg?.ipos?.hasHppToken)
+    },
+    stripe: { enabled: !!(cfg?.stripe?.enabled && cfg?.stripe?.secretKey) },
+    square: { enabled: cfg?.square?.enabled === true },
+    payarc: { enabled: cfg?.payarc?.enabled === true },
+    autocharge: {
+      mode: String(cfg?.autocharge?.mode || 'AUTO').trim().toUpperCase() === 'MANUAL' ? 'MANUAL' : 'AUTO'
+    }
+  };
+}
+
+/** Clamp the HPP link expiry to iPOSpays' documented 1–31 day window. */
+function iposExpiryDaysValue(raw, fallback = 3) {
+  if (raw === '' || raw == null) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(31, Math.max(1, Math.round(n)));
 }
 
 function scopedKey(baseKey, scope = {}) {
@@ -947,6 +1058,12 @@ export const settingsService = {
       model: cfg?.model || '',
       confidenceMin: Number.isFinite(Number(cfg?.confidenceMin)) ? Number(cfg.confidenceMin) : 70,
       hasKey: !!cfg?.apiKeyEncrypted,
+      // 2026-08-27. The opt-in that has to be TRUE before this tenant's
+      // documents may be sent to the provider under the PLATFORM account.
+      // Defaults false for every tenant, including ones that pre-date this
+      // field — an absent key in an old AppSetting row reads as "no", which is
+      // exactly the posture the Corpusa incident should have had.
+      allowPlatformKeyFallback: !!cfg?.allowPlatformKeyFallback,
     };
   },
 
@@ -967,11 +1084,24 @@ export const settingsService = {
       if (!isEncryptionConfigured()) throw new Error('Encryption key (INTEGRATION_ENC_KEY) is not configured');
       apiKeyEncrypted = encrypt(payload.apiKey.trim());
     }
-    await writeJsonSetting(key, { provider, model, confidenceMin, apiKeyEncrypted });
-    return { provider, model, confidenceMin, hasKey: !!apiKeyEncrypted };
+    // Opt-in to the PLATFORM key. Only an explicit boolean in the payload
+    // moves it; anything else preserves what is on file, so a partial PUT from
+    // the Settings page (provider/model only) can never silently turn it on.
+    let allowPlatformKeyFallback = !!current.allowPlatformKeyFallback;
+    if (typeof payload?.allowPlatformKeyFallback === 'boolean') {
+      allowPlatformKeyFallback = payload.allowPlatformKeyFallback;
+    }
+    await writeJsonSetting(key, { provider, model, confidenceMin, apiKeyEncrypted, allowPlatformKeyFallback });
+    return { provider, model, confidenceMin, hasKey: !!apiKeyEncrypted, allowPlatformKeyFallback };
   },
 
-  // Internal — decrypts the key for the OCR worker. Returns { provider, model, confidenceMin, apiKey|null }.
+  // Internal — decrypts the key for the OCR worker. Returns
+  // { provider, model, confidenceMin, apiKey|null, allowPlatformKeyFallback }.
+  //
+  // NOTE: `apiKey` here is the TENANT'S OWN key and nothing else. It has never
+  // meant "the key to call with" — every caller used to finish the job with
+  // `cfg.apiKey || process.env.ANTHROPIC_API_KEY`, which is the bug. Callers
+  // must now go through resolveCitationOcrCredential() below.
   async getCitationOcrResolved(scope = {}) {
     const cfg = await readJsonSetting(scopedKey('citationOcrConfig', scope), null);
     let apiKey = null;
@@ -983,7 +1113,47 @@ export const settingsService = {
       model: cfg?.model || '',
       confidenceMin: Number.isFinite(Number(cfg?.confidenceMin)) ? Number(cfg.confidenceMin) : null,
       apiKey,
+      allowPlatformKeyFallback: !!cfg?.allowPlatformKeyFallback,
     };
+  },
+
+  /**
+   * The ONE credential read for every Anthropic-backed, tenant-scoped feature
+   * that shares the citationOcrConfig block: citation mail OCR, kiosk ID photo
+   * reading and commission review-proof validation.
+   *
+   * Returns the tenant's provider/model/threshold PLUS a `credential` decision
+   * from lib/tenant-provider-credential.js — `{ credential, source, reason }`,
+   * where source is TENANT / PLATFORM / NONE and a PLATFORM resolution has
+   * already WARNed by tenant and feature. A NONE result carries an empty
+   * credential; callers must fail closed on it rather than reaching for env.
+   *
+   * `feature` distinguishes the three consumers so the opt-in allowlist and the
+   * log line name which one is calling out — the citation scheduler and the
+   * kiosk are very different data-protection stories even though they read the
+   * same key.
+   */
+  async resolveCitationOcrCredential(scope = {}, { feature = 'citation-ocr' } = {}) {
+    const cfg = await this.getCitationOcrResolved(scope);
+    const tenantId = scope?.tenantId || null;
+    let tenantName = '';
+    if (tenantId) {
+      // Cosmetic — only used to make the WARN readable. A failed lookup must
+      // never change the decision, so it degrades to ''.
+      try {
+        const t = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true } });
+        tenantName = String(t?.name || '');
+      } catch { tenantName = ''; }
+    }
+    const credential = resolveTenantProviderCredential({
+      tenantId,
+      feature,
+      tenantCredential: cfg.apiKey || '',
+      platformCredential: process.env.ANTHROPIC_API_KEY || '',
+      tenantOptIn: cfg.allowPlatformKeyFallback,
+      tenantName,
+    });
+    return { ...cfg, credential };
   },
 
   // Staff 2FA policy (2026-08-22). Stored as AppSetting JSON under
@@ -1059,6 +1229,10 @@ export const settingsService = {
           ...defaults.spin,
           ...(parsed?.spin || {})
         }),
+        ipos: iposBlockForRead({
+          ...defaults.ipos,
+          ...(parsed?.ipos || {})
+        }),
         payarc: {
           ...defaults.payarc,
           ...(parsed?.payarc || {})
@@ -1071,6 +1245,15 @@ export const settingsService = {
     } catch {
       return defaults;
     }
+  },
+
+  /**
+   * Booleans-only capability read for the View Payments screen — safe at any
+   * authenticated staff role (unlike getPaymentGatewayConfig, which is
+   * admin-panel material). See derivePaymentCapabilities for the contract.
+   */
+  async getPaymentCapabilities(scope = {}) {
+    return derivePaymentCapabilities(await this.getPaymentGatewayConfig(scope));
   },
 
   async updatePaymentGatewayConfig(payload = {}, scope = {}) {
@@ -1090,6 +1273,9 @@ export const settingsService = {
       storedRaw = {};
     }
     const newSpinAuthKey = String(payload?.spin?.authKey || '').trim();
+    const newIposHppToken = String(payload?.ipos?.hppToken || '').trim();
+    const newIposApiKey = String(payload?.ipos?.apiKey || '').trim();
+    const newIposSecretKey = String(payload?.ipos?.secretKey || '').trim();
 
     const next = {
       ...defaults,
@@ -1155,6 +1341,40 @@ export const settingsService = {
         // Read-shape / command-only fields never belong in the stored blob.
         hasAuthKey: undefined,
         clearAuthKey: undefined
+      },
+      ipos: {
+        ...defaults.ipos,
+        ...(payload?.ipos || {}),
+        enabled: !!payload?.ipos?.enabled,
+        environment: String(payload?.ipos?.environment || defaults.ipos.environment).trim().toLowerCase() === 'sandbox' ? 'sandbox' : 'production',
+        tpn: String(payload?.ipos?.tpn || '').trim(),
+        // Same encrypted-at-rest, blank-means-keep contract as spin.authKey:
+        // the read path never returns the token, so a plain form round-trip
+        // must not wipe it. Only `clearHppToken: true` erases.
+        hppToken: payload?.ipos?.clearHppToken
+          ? ''
+          : (newIposHppToken
+            ? encryptSettingSecret(newIposHppToken)
+            : carrySettingSecret(storedRaw?.ipos?.hppToken)),
+        // Same contract for the status-check credential pair.
+        apiKey: payload?.ipos?.clearApiKey
+          ? ''
+          : (newIposApiKey
+            ? encryptSettingSecret(newIposApiKey)
+            : carrySettingSecret(storedRaw?.ipos?.apiKey)),
+        secretKey: payload?.ipos?.clearSecretKey
+          ? ''
+          : (newIposSecretKey
+            ? encryptSettingSecret(newIposSecretKey)
+            : carrySettingSecret(storedRaw?.ipos?.secretKey)),
+        expiryDays: iposExpiryDaysValue(payload?.ipos?.expiryDays, defaults.ipos.expiryDays),
+        // Read-shape / command-only fields never belong in the stored blob.
+        hasHppToken: undefined,
+        clearHppToken: undefined,
+        hasApiKey: undefined,
+        clearApiKey: undefined,
+        hasSecretKey: undefined,
+        clearSecretKey: undefined
       },
       payarc: {
         ...defaults.payarc,

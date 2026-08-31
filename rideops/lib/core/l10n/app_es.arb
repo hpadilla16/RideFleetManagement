@@ -934,5 +934,704 @@
   "@coPresentClosingSoon": {
     "description": "Nota 12: al cliente NO se le pone un reloj en la cara; el countdown solo aparece bajo 2 min y con copy tranquilizadora.",
     "placeholders": { "mmss": { "type": "String" } }
+  },
+
+  "coInspWhatTitle": "Qué se captura aquí",
+  "coInspWhatParts": "3 partes",
+  "coInspRowPhotos": "Fotos",
+  "coInspWhatPhotos": "8 ángulos · Frente y Atrás obligatorios",
+  "coInspRowCondition": "Estado",
+  "coInspWhatMetrics": "Odómetro, combustible, limpieza y notas",
+  "coInspRowSignature": "Firma",
+  "coInspWhatSignature": "El cliente firma la revisión en este teléfono",
+  "coInspOfflineNote": "Las fotos se pueden tomar sin señal: quedan en la bandeja y se envían solas al reconectar. El paso avanza cuando el servidor las recibe.",
+  "@coInspOfflineNote": {
+    "description": "Nota 3 del 17A: la promesa offline y su LÍMITE van en la misma frase; separadas, la primera se lee como 'ya quedó'."
+  },
+  "coInspLastReading": "Última lectura",
+  "coInspPaidPill": "Pagado {time}",
+  "@coInspPaidPill": {
+    "description": "Sello paymentCompletedAt del servidor, no una suposición de la app.",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coInspStartCta": "Comenzar inspección",
+  "coInspStartWhy": "Al comenzar, el servidor marca la inspección en curso. Puedes pausar el checkout en cualquier momento sin perder las fotos.",
+
+  "coInspPhotosStep": "Inspección · fotos",
+  "coInspMetricsStep": "Inspección · estado",
+  "coInspSummaryStep": "Inspección · revisar y enviar",
+  "coInspRequiredWhy": "Frente y Atrás listos. El resto suma evidencia y se puede capturar después de las métricas.",
+  "inspPhotoQueued": "{time} · en bandeja",
+  "@inspPhotoQueued": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "inspPhotoSent": "Enviada al servidor",
+  "@inspPhotoSent": {
+    "description": "Solo se dice cuando la fila SALIÓ de la bandeja tras un 2xx del servidor (el drenado borra la fila únicamente con DrainOk)."
+  },
+  "inspPhotoDead": "No llegó al servidor",
+
+  "coInspLocalDoneTitle": "{count, plural, =0{La inspección está completa en este teléfono. Falta el cierre por enviar; sale solo al reconectar.} one{La inspección está completa en este teléfono. Falta 1 foto y el cierre por enviar; salen solos al reconectar.} other{La inspección está completa en este teléfono. Faltan {count} fotos y el cierre por enviar; salen solos al reconectar.}}",
+  "@coInspLocalDoneTitle": {
+    "description": "Nota 9 del 17D: 'completa en este teléfono' ≠ completa. El sello inspectionCompletedAt lo escribe el servidor al drenar el complete (mobile-inspection.service.js:268); finish() solo ENCOLA.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "coInspLocalDoneSending": "La inspección está completa en este teléfono. El envío está en curso; el paso avanza cuando el servidor lo reciba.",
+  "coInspServerPhotos": "{count} de 8 recibidas",
+  "@coInspServerPhotos": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "coInspRowInspection": "Inspección",
+  "coInspReceivedAt": "Recibida {time}",
+  "@coInspReceivedAt": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coInspContinueSign": "Continuar a firma y cierre",
+  "coInspBlockedWhy": "Este paso lo cierra el servidor cuando reciba la inspección, no esta pantalla. Nada se pierde: puedes pausar el checkout y volver.",
+  "coOpenOutbox": "Ver la bandeja ({count})",
+  "@coOpenOutbox": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "coOpenOutboxDead": "{count, plural, one{Ver la bandeja (1 falla)} other{Ver la bandeja ({count} fallas)}}",
+  "@coOpenOutboxDead": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "coInspRequiredDeadTitle": "La foto de {angle} no se pudo enviar y es obligatoria. Sin ella el servidor rechazará el cierre de la inspección.",
+  "@coInspRequiredDeadTitle": {
+    "description": "Nota 12 del 17E: un dead-letter NO bloquea al resto de la bandeja (drainer.dart), así que el complete sale igual y el servidor lo rechaza con REQUIRED_ANGLES_MISSING (mobile-inspection.service.js:200-205).",
+    "placeholders": { "angle": { "type": "String" } }
+  },
+  "coInspRetakeCta": "Tomar {angle} otra vez",
+  "@coInspRetakeCta": {
+    "placeholders": { "angle": { "type": "String" } }
+  },
+  "coInspRetakeWhy": "Al volver a tomarla se reintenta el cierre de la inspección automáticamente.",
+  "coInspCompleteDeadTitle": "El cierre de la inspección no se pudo enviar. El motivo y la decisión que falta están en la bandeja.",
+  "coInspRequiredAnglesTitle": "Ángulos obligatorios",
+  "coInspRequiredMissingPill": "{count, plural, one{Falta 1} other{Faltan {count}}}",
+  "@coInspRequiredMissingPill": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "coInspAnglesFailedChip": "{count, plural, one{1 falla} other{{count} fallas}}",
+  "@coInspAnglesFailedChip": {
+    "description": "Chip de la stepline cuando un angulo OBLIGATORIO murio en la bandeja: el contador de progreso deja de tener sentido y se cuentan fallas (17E).",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "coInspDoneTitle": "Inspección de salida",
+  "coInspSignatureTitle": "Firma del cliente",
+  "coInspSignedRow": "Firmó",
+  "coSignFromInspection": "{name} · al terminar la inspección",
+  "@coSignFromInspection": {
+    "description": "Solo se afirma cuando customerSignedAt e inspectionCompletedAt son el MISMO instante: el complete de la inspección estampa los dos en un solo write (mobile-inspection.service.js:265-281). Sellos distintos ⇒ la firma vino de otra superficie y no se atribuye.",
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "coSignAlreadyBanner": "El cliente ya firmó, así que no hay que pedirle firma otra vez. Solo falta cerrar la entrega.",
+  "coInspCloseCta": "Continuar al cierre",
+  "coInspCloseWhy": "El servidor ya tiene la inspección y la firma. Este botón avanza al cierre; el contrato se genera cuando la entrega quede cerrada.",
+
+  "coHandoffTitle": "Voltea el teléfono al cliente",
+  "coHandoffBody": "{name} va a firmar la entrega del {vehicle}.",
+  "@coHandoffBody": {
+    "placeholders": { "name": { "type": "String" }, "vehicle": { "type": "String" } }
+  },
+  "coHandoffBodyGeneric": "El cliente va a firmar la entrega del vehículo.",
+  "@coHandoffBodyGeneric": {
+    "description": "Sin nombre o sin unidad no se rellena un hueco: se dice la frase que sí es cierta."
+  },
+  "coHandoffRuleLock": "La app queda bloqueada en la firma: no se puede salir ni ver otra pantalla.",
+  "coHandoffRuleExit": "Para salir sin firma: mantén 3 s la barra de arriba y escribe tu PIN.",
+  "coHandoffRulePin": "Si fallas el PIN 3 veces, la app se bloquea y hay que volver a entrar.",
+  "@coHandoffRulePin": {
+    "description": "Nota 2 del 18A: el límite ya está construido (kiosk_exit_exhausted) y el agente merece saberlo ANTES de soltar el teléfono, no descubrirlo con el aparato en la mano."
+  },
+  "coHandoffRuleBrand": "El cliente ve la pantalla en español o inglés, con la marca de {tenant}.",
+  "@coHandoffRuleBrand": {
+    "placeholders": { "tenant": { "type": "String" } }
+  },
+  "coHandoffRuleBrandNoTenant": "El cliente ve la pantalla en español o inglés, sin la marca de la plataforma.",
+  "@coHandoffRuleBrandNoTenant": {
+    "description": "Sin branding del tenant la fila del nombre se oculta (clientSafeCompanyName): nunca un fallback con marca nuestra frente al cliente."
+  },
+  "coRetainedNote": "El cliente ya firmó en este teléfono, pero el servidor todavía no lo confirmó. El trazo sigue aquí: no hace falta pedírselo otra vez.",
+  "@coRetainedNote": {
+    "description": "INN S-1. La tinta retenida vive solo en memoria y solo hasta el 200; volver a pedirle la firma al cliente sería cobrarle el error de la app."
+  },
+  "coRetryWithSignature": "Reintentar con la firma que ya dio",
+  "coRetryWithSignatureWhy": "Se manda el MISMO trazo que el cliente dejó hace un momento. Vive solo en la memoria de este teléfono y nunca entra a la bandeja de salida.",
+  "coHandoffCta": "Entregar al cliente",
+  "coHandoffWhy": "La firma se guarda en el contrato al confirmarla. Si el cliente se arrepiente, sales con tu PIN y el paso queda igual.",
+  "coHandoffOfflineBlocked": "Sin conexión no se puede recoger la firma: se guarda en el contrato en el momento, no después.",
+  "@coHandoffOfflineBlocked": {
+    "description": "La firma NO tiene camino offline y no debe tenerlo: se bloquea la entrega del teléfono con causa en lugar de encolar una firma."
+  },
+
+  "kioskSignSubtitleCheckout": "Entrega del vehículo · Reserva {reservation}",
+  "@kioskSignSubtitleCheckout": {
+    "placeholders": { "reservation": { "type": "String" } }
+  },
+  "kioskSignPromptCheckout": "Firme para confirmar que recibe el vehículo y acepta el contrato de renta.",
+  "kioskSignPlate": "Placa {plate}",
+  "@kioskSignPlate": {
+    "description": "Pie del 18B: qué está firmando, al pie y sin jerga. Se arma uniendo lo que existe; lo que falte se omite.",
+    "placeholders": { "plate": { "type": "String" } }
+  },
+
+  "coSignReceived": "Firma recibida. Ya puedes tomar el teléfono.",
+  "@coSignReceived": {
+    "description": "Nota 7 del 18C: es verdad en el instante en que se dice — customer-signature ya respondió 200. Lo que sigue no se afirma todavía."
+  },
+  "coCloseStep1": "Firma guardada en el contrato",
+  "coCloseStep2": "Generando el contrato",
+  "coCloseStep3": "Registrar la entrega",
+  "coCloseLegWaiting": "Paso {index} de {total} · falta",
+  "@coCloseLegWaiting": {
+    "placeholders": { "index": { "type": "int" }, "total": { "type": "int" } }
+  },
+  "coClosingCta": "Cerrando…",
+  "coClosingWhy": "No cierres la app: el cierre son tres confirmaciones del servidor y aquí vas por la segunda.",
+  "@coClosingWhy": {
+    "description": "Nota 8: el backend NO tiene cascada aquí. saveCustomerSignature solo sella y las dos transiciones son dos POST más desde el cliente."
+  },
+  "coCloseRetry": "Reintentar el cierre",
+  "coCloseRetryWhy": "Este tramo se puede volver a intentar: la sesión sigue abierta y nada de lo capturado se perdió.",
+
+  "coAlreadySignedTitle": "El cliente ya firmó",
+  "coAlreadySignedBody": "Firmó al terminar la inspección, a las {time}. No hace falta pedirle el teléfono otra vez.",
+  "@coAlreadySignedBody": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coAlreadySignedBodyOther": "La firma quedó registrada a las {time}. No hace falta pedirle el teléfono otra vez.",
+  "@coAlreadySignedBodyOther": {
+    "description": "Solo se atribuye a la inspección cuando customerSignedAt e inspectionCompletedAt son el MISMO instante (un único write, mobile-inspection.service.js:265-281). Si no, la firma vino de otra superficie y no se inventa dónde.",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coAlreadySignedChip": "Firma en el contrato · {time}",
+  "@coAlreadySignedChip": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coSignedDocTitle": "Lo que se firmó",
+  "coSignedSigner": "Firmante",
+  "coSignedSignerUnknown": "No se registró el nombre",
+  "coSignedDocument": "Documento",
+  "coSignedDocumentValue": "Contrato de renta {number}",
+  "@coSignedDocumentValue": {
+    "placeholders": { "number": { "type": "String" } }
+  },
+  "coSignedDocumentValueNoNumber": "Contrato de renta",
+  "coResignLink": "Volver a pedir la firma",
+  "coResignWarning": "La firma nueva SUSTITUYE a la que ya está en el contrato. Úsalo solo si la anterior no es válida.",
+  "@coResignWarning": {
+    "description": "Verificado: saveCustomerSignature pisa tcSignatureDataUrl/tcSignedAt/tcSignerName sin comprobar si ya había firma (checkout-session.service.js:668-690)."
+  },
+  "coResignTitle": "¿Sustituir la firma guardada?",
+  "coResignConfirm": "Sí, pedirla otra vez",
+  "coCloseCta": "Cerrar la entrega",
+  "coCloseCtaWhy": "Se registra la entrega en la reserva y se genera el contrato.",
+
+  "coClosedTitle": "Entrega cerrada",
+  "coClosedTitleUnverified": "Checkout cerrado",
+  "@coClosedTitleUnverified": {
+    "description": "19A-bis, variantes verifying/unverified: el 200 prueba el CHECKOUT, no la entrega. Mismo verde, misma posición — una palabra que no sobreafirma (vocabulario ya aprobado en coCloseFailedTitle)."
+  },
+  "coRecordHandoverUnverifiedNotice": "El cierre entró, pero no pudimos confirmarlo en la reserva. Compruébalo antes de dar por terminada la entrega.",
+  "@coRecordHandoverUnverifiedNotice": {
+    "description": "Banner ámbar SOLO en unverified. A propósito NO dice \"no entregues las llaves\": esa línea es de 19B, donde hay un rechazo real — aquí solo hay ignorancia (decisión aprobada, nota 10)."
+  },
+  "coBeforeTheyGoTitle": "Antes de que se vaya",
+  "coBeforeKeysLabel": "Llaves",
+  "coBeforeKeys": "Entrega las llaves y la tarjeta de circulación",
+  "coBeforeReturnLabel": "Regreso",
+  "coBeforeScopeNote": "El combustible y el kilometraje de salida quedaron en el registro de la inspección, no en esta pantalla.",
+  "@coBeforeScopeNote": {
+    "description": "SC-1 camino B (aprobado por Hector). Dice \"registro de la inspección\" y NO \"contrato\": la copia al contrato es best-effort dentro de un catch que se traga el error (checkout-session.service.js:551-557, :562). Incondicional: la tarjeta nunca baja de dos renglones."
+  },
+  "coRecordTitle": "Registro",
+  "coRecordPillRecorded": "Registrada",
+  "coRecordPillChecking": "Comprobando",
+  "coRecordPillUnverified": "Sin confirmar",
+  "coRecordRowSession": "Sesión",
+  "coRecordSessionClosedAt": "Cerrada {time}",
+  "@coRecordSessionClosedAt": {
+    "description": "Fila ancla del 19A-bis: el hecho que el 200 SÍ prueba, con la hora del SERVIDOR (finishedAt). Era la pastilla coRecordSessionClosed; se muda a fila y gana la hora, como 17F-bis hizo con la hora de la inspección.",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coRecordSignatureLabel": "Firma",
+  "coRecordContractLabel": "Contrato",
+  "coRecordEmailRequested": "Se pidió enviarlo por correo a las {time}",
+  "@coRecordEmailRequested": {
+    "description": "autoEmailedAt se estampa ANTES de disparar el envío, que es fire-and-forget (checkout-session.service.js:597-612): el sello prueba que se PIDIÓ, no que salió.",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coRecordEmailNotRequested": "No hay registro de envío por correo",
+  "coRecordHandoverLabel": "Entrega",
+  "coRecordHandoverRecorded": "Registrada en la reserva · {time}",
+  "@coRecordHandoverRecorded": {
+    "description": "La única formulación que la app puede firmar: se preguntó y la reserva lo confirma. No dice 'avanzó a CHECKED_OUT' ni 'el vehículo quedó rentado'.",
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coRecordHandoverChecking": "Comprobando en la reserva…",
+  "@coRecordHandoverChecking": {
+    "description": "Fila Entrega mientras la consulta viaja (19A-bis). Ningún renglón afirma un resultado antes de que vuelva la llamada que lo produce."
+  },
+  "coRecordHandoverUnconfirmed": "Sin confirmar",
+  "@coRecordHandoverUnconfirmed": {
+    "description": "display-data no respondió o mandó un estado desconocido. Es 'no lo sé', jamás 'no quedó registrada' — el negativo definitivo enruta a 19B."
+  },
+  "coRecordHandoverCheckingWhy": "Nada bloquea: el agente puede salir. La comprobación no se pierde, queda en la sesión.",
+  "coRecordHandoverRecheck": "Volver a comprobar",
+  "coRecordHandoverRecheckWhy": "Es una consulta al servidor, no un reintento del cierre: la sesión ya está cerrada y no puede cerrarse dos veces.",
+  "coBackHome": "Volver al inicio",
+  "coSessionDetail": "Ver el detalle de la sesión",
+  "coBackToOutcome": "Volver al resumen del cierre",
+  "@coBackToOutcome": {
+    "description": "GD-MC-3: el detalle NO puede ser una puerta de un solo sentido — el motivo del rechazo no sobrevive al re-fetch y 'Copiar el detalle' solo existe en el resumen."
+  },
+
+  "coCloseFailedStepline": "Cierre con problema",
+  "coCloseFailedTitle": "El checkout se cerró, pero el servidor no registró la entrega. La reserva necesita que alguien la revise en el mostrador.",
+  "coCloseNotRecordedTitle": "El checkout se cerró, pero la reserva no quedó marcada como entregada. Necesita que alguien la revise en el mostrador.",
+  "@coCloseNotRecordedTitle": {
+    "description": "El caso silencioso: 200 en el cierre y la cascada se tragó su error (:526, :533, :557, :571). Se detecta leyendo Reservation.status DESPUÉS de cerrar."
+  },
+  "coCloseFailedStep": "Rechazado a las {time}",
+  "@coCloseFailedStep": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coCloseReasonTitle": "Motivo",
+  "coServerReasonLabel": "Respuesta del servidor",
+  "coCloseReasonPill": "Del servidor",
+  "coCloseVerifiedPill": "Comprobado en la reserva",
+  "coCloseVerifiedTitle": "Lo que comprobamos",
+  "@coCloseVerifiedTitle": {
+    "description": "Rama SIN motivo del servidor (19B silencioso): la tarjeta no cita a nadie, cuenta lo que la app verificó por su cuenta. Titularla 'Motivo' prometía una cita que no existe."
+  },
+  "coCloseVerifiedLabel": "Estado de la reserva",
+  "coCloseNotRecordedReason": "Se consultó la reserva después de cerrar y sigue sin registrar la entrega. El servidor no dio un motivo.",
+  "coCloseNoRetry": "Esta sesión ya está cerrada, así que no se puede reintentar desde aquí. Nada de lo capturado se perdió.",
+  "@coCloseNoRetry": {
+    "description": "canTransition es false desde un estado terminal (state-machine.js:94): un botón de reintento daría 409 ILLEGAL_TRANSITION para siempre."
+  },
+  "coCopyProblem": "Copiar el detalle para el mostrador",
+  "coCopiedProblem": "Detalle copiado al portapapeles",
+  "coHoldKeys": "No entregues las llaves hasta que el mostrador confirme.",
+
+  "coCloseUnknownStepline": "Cierre sin confirmar",
+  "coCloseUnknownTitle": "Se cortó la conexión mientras se cerraba. No sabemos si el cierre entró o no — hay que preguntárselo al servidor.",
+  "coCloseUnknownStep": "Sin respuesta",
+  "coCloseConfirmedAt": "{time} · confirmado",
+  "@coCloseConfirmedAt": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "coWontHappenTitle": "Qué NO va a pasar",
+  "coWontHappenPill": "Regla",
+  "coWontRetryLabel": "Reintento",
+  "coWontRetry": "La app no reintenta el cierre sola.",
+  "coWontQueueLabel": "Bandeja",
+  "coWontQueue": "El cierre no entra a la bandeja de salida.",
+  "coCheckStatus": "Consultar el estado",
+  "coCheckStatusWhy": "Con señal, una consulta dice en qué paso quedó y desde ahí se continúa.",
+
+  "coPresenceChipSemantics": "{line}: ver quién está en esta sesión",
+  "@coPresenceChipSemantics": {
+    "description": "Semántica del chip de presencia, que en H6 se vuelve TOCABLE (abre la hoja 20B). El label recita primero la línea visible y después la acción: TalkBack lee lo que hay antes de lo que se puede hacer.",
+    "placeholders": {
+      "line": {
+        "type": "String"
+      }
+    }
+  },
+  "coPresenceNeverAlone": "El chip solo afirma quién está. Que no aparezca nadie no significa que estés solo.",
+  "@coPresenceNeverAlone": {
+    "description": "La regla antisoledad, EN PANTALLA y no en un comentario de código: con el latido encendido el agente se acostumbra a confiar en el dato, y el vacío es justo lo que la presencia no puede afirmar."
+  },
+  "coWhoIsHereTitle": "Quién está en esta sesión",
+  "coWhoIsHereSub": "Ventana de 45 s del servidor · se actualiza con cada lectura",
+  "@coWhoIsHereSub": {
+    "description": "El TTL se NOMBRA en vez de esconderse: evita la pregunta de patio «¿por qué desapareció María si sigue ahí?» — tres polls perdidos y te vas."
+  },
+  "coWhoIsHereNow": "ahora",
+  "coWhoIsHereAge": "hace {age}",
+  "@coWhoIsHereAge": {
+    "placeholders": {
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coWhoIsHereDeviceSub": "Aparato · sin persona identificada",
+  "@coWhoIsHereDeviceSub": {
+    "description": "El kiosco y el teléfono del cliente laten con actorUserId null A PROPÓSITO. Ese nulo no es un hueco: es el dato."
+  },
+  "coWhoIsHereYou": "Tú · RideOps",
+  "coWhoIsHereYouSeenAs": "Los demás te ven como {name}",
+  "@coWhoIsHereYouSeenAs": {
+    "description": "El reverso del latido, con nombre completo (decisión de Hector: el usuario se identifica).",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "coWhoIsHereYouSeenAsUnknown": "Los demás te ven con tu nombre completo",
+  "@coWhoIsHereYouSeenAsUnknown": {
+    "description": "Variante sin /me hidratado: se dice QUÉ se anuncia sin fingir saber el nombre exacto que resolverá el servidor."
+  },
+  "coWhoIsHereDisclosure": "Apareces con tu nombre mientras esta pantalla esté abierta. Al salir o pausar dejas de aparecer en menos de un minuto. Esto no reserva nada: nadie queda bloqueado por estar aquí.",
+  "@coWhoIsHereDisclosure": {
+    "description": "Qué se anuncia, a quién y cuánto dura — y el cierre que importa: la presencia NO es un candado. El riesgo real de encender el latido no es la identidad, es que alguien lea la presencia como una reserva y se quede esperando."
+  },
+  "coPresenceEmpty": "No hay nadie visible ahora mismo. Otra superficie puede estar avanzando sin aparecer aquí.",
+  "@coPresenceEmpty": {
+    "description": "Lo que la app dice cuando la lista llega VACÍA con red. Lo que jamás dice: «nadie más está en esta sesión»."
+  },
+  "coPresenceEmptyShort": "Nadie visible ahora mismo",
+  "@coPresenceEmptyShort": {
+    "description": "Versión corta para el chip de la antesala (23C): llegar a una sesión abandonada e inferir «está libre» es la tentación exacta que esta frase corta."
+  },
+  "coPresenceOfflineWhy": "Sin red no se puede afirmar que alguien esté ahora. El punto verde se apaga; el chip no desaparece.",
+  "@coPresenceOfflineWhy": {
+    "description": "Dos vacíos distintos, dos frases distintas: «no verificable» (sin red) y «nadie visible» (con red). Fundirlas sería más barato y exactamente igual de mentiroso en uno de los dos casos."
+  },
+  "coAdvancedOtherAgentNamed": "«{step}» lo completó {name} hace {age}.",
+  "@coAdvancedOtherAgentNamed": {
+    "description": "Atribución CON nombre. Solo se usa cuando la presencia resuelve el actorUserId del evento; si no, cae a coAdvancedOtherAgent («otro agente»).",
+    "placeholders": {
+      "step": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      },
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coAdvancedStampLanded": "{stamp} se registró en otra superficie hace {age}.",
+  "@coAdvancedStampLanded": {
+    "description": "Frame 21C: cayó un SELLO sin que el paso se moviera. No se nombra la superficie porque el backend no la escribe en los eventos SIDE_EFFECT — se dice lo que se sabe.",
+    "placeholders": {
+      "stamp": {
+        "type": "String"
+      },
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coAdvancedStepUnchanged": "Sigue capturando: este paso no cambió.",
+  "@coAdvancedStepUnchanged": {
+    "description": "La frase que desarma la alarma. El avance ajeno ocurrió en OTRO sitio y no exige nada del agente ahora — sobre todo, no exige que suelte el formulario a medio llenar."
+  },
+  "coChangedTitle": "Qué cambió desde que entraste",
+  "coChangedSub": "Estado reportado por el servidor · {time}",
+  "@coChangedSub": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "coChangedStepMoved": "El paso se movió",
+  "coChangedStepMovedDetail": "{from} → {to}",
+  "@coChangedStepMovedDetail": {
+    "placeholders": {
+      "from": {
+        "type": "String"
+      },
+      "to": {
+        "type": "String"
+      }
+    }
+  },
+  "coChangedByKiosk": "Completado en el kiosco · {time}",
+  "@coChangedByKiosk": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "coChangedByOtherAgent": "Lo completó {name} · {time}",
+  "@coChangedByOtherAgent": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "coChangedByOtherSurface": "Completado en otra superficie · {time}",
+  "@coChangedByOtherSurface": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "coChangedByYou": "Lo hiciste tú · {time} · sin cambios",
+  "@coChangedByYou": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "coChangedUntouched": "Pendiente · no lo ha tocado nadie",
+  "coChangedNothingLost": "Nada de lo que hiciste se perdió.",
+  "@coChangedNothingLost": {
+    "description": "La única frase que el agente vino a leer. El miedo real al ver «alguien más avanzó» no es de proceso: es «¿perdí mi trabajo?». Se responde primero y en verde."
+  },
+  "coChangedSomethingLost": "{count, plural, one{Ojo: 1 envío no ha llegado al servidor. Revisa la Bandeja antes de seguir.} other{Ojo: {count} envíos no han llegado al servidor. Revisa la Bandeja antes de seguir.}}",
+  "@coChangedSomethingLost": {
+    "description": "Cuando SÍ hay algo en riesgo la franja verde cambia a ámbar y NOMBRA qué. Nunca se queda en verde por comodidad.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "coChangedNoChanges": "Nadie ha tocado nada desde que entraste.",
+  "@coChangedNoChanges": {
+    "description": "Estado vacío honesto de la hoja: se puede abrir sin que haya avance ajeno."
+  },
+  "coChangedStayCta": "Seguir en el paso {index}",
+  "@coChangedStayCta": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      }
+    }
+  },
+  "coConflictTooEarlyTitle": "Ese paso todavía no toca",
+  "coConflictTooEarlyBody": "La sesión está en {current} (paso {index}) y {target} es el paso {targetIndex}. El servidor solo deja avanzar de uno en uno.",
+  "@coConflictTooEarlyBody": {
+    "description": "El MISMO code ILLEGAL_TRANSITION, la situación opuesta a «ya lo hicieron»: se pidió un paso que la cadena lineal aún no permite.",
+    "placeholders": {
+      "current": {
+        "type": "String"
+      },
+      "index": {
+        "type": "int"
+      },
+      "target": {
+        "type": "String"
+      },
+      "targetIndex": {
+        "type": "int"
+      }
+    }
+  },
+  "coConflictTooEarlyBodyShort": "El servidor solo deja avanzar de uno en uno, y este no es el paso que sigue.",
+  "@coConflictTooEarlyBodyShort": {
+    "description": "Variante para cuando alguno de los dos pasos no está en el catálogo (paso nuevo del backend): se dice la regla sin inventar números."
+  },
+  "coGoToStepCta": "Ir al paso {index} · {step}",
+  "@coGoToStepCta": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "step": {
+        "type": "String"
+      }
+    }
+  },
+  "coGoToStepWhy": "Ir al paso {index} es navegación dentro de esta app: siempre funciona.",
+  "@coGoToStepWhy": {
+    "description": "Por qué esta acción SÍ puede tener éxito: es una pantalla local, no una transición. La puerta falsa que aquí NO se dibuja es «Reintentar», que contra una máquina lineal daría 409 para siempre.",
+    "placeholders": {
+      "index": {
+        "type": "int"
+      }
+    }
+  },
+  "coGuardOutboxCta": "Ver la Bandeja ({n})",
+  "@coGuardOutboxCta": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "coGuardOutboxWhy": "La Bandeja drena sola al recuperar señal; el paso avanza cuando el sello llegue.",
+  "@coGuardOutboxWhy": {
+    "description": "«Ver la Bandeja» sí puede tener éxito; «reintentar el paso» no: el sello lo estampa el servidor al drenar el complete, no esta pantalla."
+  },
+  "coConflictSwapLockedBody": "Esta unidad ya no se puede cambiar desde aquí: la inspección ya empezó. Se resuelve en el mostrador.",
+  "@coConflictSwapLockedBody": {
+    "description": "El callejón se NOMBRA en vez de ofrecer un CTA imposible: pasada INSPECTION_IN_PROGRESS el swap responde 409 SWAP_LOCKED para siempre (vehicle-swap.service.js:46-51)."
+  },
+  "coJoinBannerStarted": "Esta salida ya empezó: va por el paso {index} de {total}.",
+  "@coJoinBannerStarted": {
+    "description": "No se nombra QUIÉN la abrió: startedByUserId viaja como id y el servidor no manda su nombre. Se dice lo que se sabe.",
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "coJoinBannerStartedAt": "Esta salida ya empezó. Se abrió a las {time} y va por el paso {index} de {total}.",
+  "@coJoinBannerStartedAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      },
+      "index": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "coJoinBannerStartedByOther": "Esta salida la abrió otro agente y va por el paso {index} de {total}.",
+  "@coJoinBannerStartedByOther": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "coJoinDoneTitle": "Lo que ya está hecho",
+  "coJoinDonePill": "{done} de {total} fases",
+  "@coJoinDonePill": {
+    "placeholders": {
+      "done": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "coJoinPendingTitle": "Lo que falta",
+  "coJoinPendingPill": "Tuyo",
+  "coJoinContinueCta": "Continuar desde el paso {index}",
+  "@coJoinContinueCta": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      }
+    }
+  },
+  "coJoinContinueCtaUnknownStep": "Continuar",
+  "@coJoinContinueCtaUnknownStep": {
+    "description": "Sin posición en el catálogo (paso nuevo del backend) no se inventa un número."
+  },
+  "coJoinContinueWhy": "Entras al paso que reporta el servidor, no al que dejó nadie. Nada se re-hace.",
+  "@coJoinContinueWhy": {
+    "description": "ADR-4 en idioma de patio. Es la misma promesa que hace la hoja de pausa: se prometió al pausar y se cumple al volver."
+  },
+  "coJoinKioskActiveTitle": "El cliente está usando el kiosco ahora mismo.",
+  "coJoinKioskActiveBody": "Si avanzas desde aquí puedes interrumpir lo que está haciendo.",
+  "coJoinAdviceTitle": "Qué conviene hacer",
+  "coJoinAdvicePill": "Consejo",
+  "coJoinAdviceWaitKey": "Esperar",
+  "coJoinAdviceWait": "Esta pantalla se actualiza sola cuando el kiosco termine",
+  "coJoinAdviceLeaveKey": "O irte",
+  "coJoinAdviceLeave": "Nada se pierde: la sesión sigue igual",
+  "coJoinNotABlock": "No es un bloqueo. Puedes avanzar igual — el servidor decide, no este aviso. Solo te decimos lo que está pasando del otro lado.",
+  "@coJoinNotABlock": {
+    "description": "La presencia viva cambia el CONSEJO, nunca el permiso. Presencia que bloquea es un lease, y un kiosco sin batería a mitad de firma atascaría la salida hasta que expire el TTL."
+  },
+  "coJoinProceedAnyway": "Avanzar de todas formas",
+  "coJoinPausedByOther": "Otro agente pausó esta salida hace {age}.",
+  "@coJoinPausedByOther": {
+    "placeholders": {
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coJoinPausedBySomeone": "Esta salida quedó pausada hace {age}.",
+  "@coJoinPausedBySomeone": {
+    "description": "Sin actor identificable en el log no se afirma «otro agente».",
+    "placeholders": {
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coJoinPausedReason": "Motivo: «{reason}»",
+  "@coJoinPausedReason": {
+    "description": "abandonedReason es el dato que decide: «el cliente fue por su tarjeta» y «la unidad no arranca» llevan a acciones opuestas.",
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "coJoinWhereItStoppedTitle": "Dónde quedó",
+  "coJoinNoStealWhy": "Continuar no le quita nada a nadie: la sesión es una sola y el registro guarda quién hizo qué.",
+  "@coJoinNoStealWhy": {
+    "description": "Hay una sola CheckoutSession por reserva (reservationId @unique): no existe transferir, reclamar ni desbloquear. Decirlo evita que el agente busque un botón de «tomar el control» que ninguna versión de esta app va a tener."
+  },
+  "coJoinPausedAutoStalled": "El sistema la marcó: lleva más de 4 h detenida. No la pausó nadie.",
+  "@coJoinPausedAutoStalled": {
+    "description": "El barrido nocturno escribe `auto_flagged_stalled_at_<paso>` (scheduler:71). Decir «otro agente la pausó» sería inventar un culpable de algo que hizo un cron."
+  },
+  "coJoinPausedBySystem": "El sistema marcó esta salida hace {age}.",
+  "@coJoinPausedBySystem": {
+    "placeholders": {
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coConflictVehicleKept": "Se conserva: el cliente ya verificado y el paso en el que vas.",
+  "@coConflictVehicleKept": {
+    "description": "«Qué se conserva» es la tercera pregunta de cada cara de la matriz 409 y 22C era la única que se había quedado sin responderla."
+  },
+  "coGuardWhyServer": "Este paso lo cierra el servidor cuando reciba el sello, no esta pantalla. Nada se pierde: puedes pausar y volver.",
+  "@coGuardWhyServer": {
+    "description": "Línea de causa que se muestra SIEMPRE, también con la Bandeja en cero: sin ella el agente que acaba de terminar la inspección lee «falta la inspección completada» y no tiene nada que explique la brecha."
+  },
+  "coPresenceChipLive": "{name} · {surface}",
+  "@coPresenceChipLive": {
+    "description": "Forma CORTA del chip, la que dibujan los marcos aprobados (20A). El chip vive con ~111 px utiles a 360 dp: la linea larga de `coPresenceLine` se corta en 19 caracteres y se come justo la SUPERFICIE, que es el proposito declarado del chip (a Diego le gritas desde la otra punta del patio; al kiosco hay que caminarle). Con el punto VIVO la edad es irrelevante —es ahora— asi que los dos datos que caben son nombre y superficie.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "surface": {
+        "type": "String"
+      }
+    }
+  },
+  "coPresenceChipAged": "{name} · hace {age}",
+  "@coPresenceChipAged": {
+    "description": "Forma corta del chip cuando el punto ya NO esta vivo (20C: «El kiosco · hace 38 s»). Ahi la noticia es la EDAD, no la superficie. La linea completa —nombre, superficie y edad— sigue llegando entera al lector de pantalla por `coPresenceChipSemantics`, que no tiene limite de ancho: nada se pierde para accesibilidad.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coWhoIsHereYouOffline": "Sin conexión",
+  "@coWhoIsHereYouOffline": {
+    "description": "Estado de la fila «Tú» sin red. El latido es un POST: sin red no aterriza, y a los 45 s el agente deja de estar visible para las demas superficies."
+  },
+  "coWhoIsHereDisclosureOffline": "Sin conexión tu latido no está llegando: en menos de un minuto dejas de aparecer para las demás superficies. Vuelves a aparecer solo al recuperar señal. Esto nunca reserva nada.",
+  "@coWhoIsHereDisclosureOffline": {
+    "description": "La divulgacion NO puede afirmar «apareces con tu nombre» justo cuando es falso. Es el espejo exacto del defecto del vacio: la unica pantalla construida para explicar el reverso del latido seria, sin red, la unica que no puede sostener lo que dice."
+  },
+  "coPresenceEmptyUnverifiable": "Y tampoco se puede leer como «no hay nadie»: otra superficie puede estar avanzando sin que lo veamos.",
+  "@coPresenceEmptyUnverifiable": {
+    "description": "Complementa el subtitulo de la hoja cuando NO hay red y la lista viene vacia. La causa («sin red no se puede afirmar que alguien este ahora») ya la dice el subtitulo dos lineas mas arriba; repetirla seria la misma frase dos veces a ~100 px. Lo que falta decir es que el vacio tampoco autoriza la lectura contraria."
   }
 }

@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { api, AUTH_EXPIRED_EVENT, PASSWORD_CHANGE_REQUIRED_EVENT, TOKEN_KEY, USER_KEY, clearStoredAuth } from '../lib/client';
+import { api, AUTH_EXPIRED_EVENT, PASSWORD_CHANGE_REQUIRED_EVENT, TENANT_SUSPENDED_EVENT, TOKEN_KEY, USER_KEY, clearStoredAuth } from '../lib/client';
+import { TenantSuspendedHold } from './TenantSuspendedHold';
 
 function parseJwt(token) {
   try {
@@ -61,6 +62,24 @@ export function AuthGate({ children }) {
     };
     window.addEventListener(PASSWORD_CHANGE_REQUIRED_EVENT, handlePasswordChangeRequired);
 
+    // Tenant Subscriptions Phase 5 (2026-08-28): the account went on hold
+    // mid-session — a dunning sweep or an operator pulled the lever while
+    // somebody was working. Re-fetch /me (allowlisted while suspended, exactly
+    // like the password gate's) so `me.tenantStatus` flips and the hold screen
+    // replaces the shell with no manual reload. The catch is deliberate: if
+    // even /me is refused, the 401 path below will take over.
+    const handleTenantSuspended = () => {
+      api('/api/auth/me')
+        .then((out) => {
+          if (out?.user) {
+            localStorage.setItem(USER_KEY, JSON.stringify(out.user));
+            setMe(out.user);
+          }
+        })
+        .catch(() => {});
+    };
+    window.addEventListener(TENANT_SUSPENDED_EVENT, handleTenantSuspended);
+
     const t = localStorage.getItem(TOKEN_KEY) || '';
     const rawUser = localStorage.getItem(USER_KEY);
     setToken(t);
@@ -113,6 +132,7 @@ export function AuthGate({ children }) {
     return () => {
       window.removeEventListener(AUTH_EXPIRED_EVENT, handleAuthExpired);
       window.removeEventListener(PASSWORD_CHANGE_REQUIRED_EVENT, handlePasswordChangeRequired);
+      window.removeEventListener(TENANT_SUSPENDED_EVENT, handleTenantSuspended);
       if (refreshTimer) clearTimeout(refreshTimer);
     };
   }, []);
@@ -461,6 +481,28 @@ export function AuthGate({ children }) {
         </div>
       </main>
     );
+  }
+
+  // Tenant Subscriptions Phase 5 (2026-08-28): the account is on hold. Rendered
+  // LAST of the gates, and that order is the point:
+  //   - the login form comes first, because somebody who is not signed in
+  //     should be offered a sign-in, not a bill;
+  //   - the forced password change comes first, because the backend's password
+  //     gate 403s BEFORE the suspension gate, so showing the hold screen while
+  //     the app is really asking for a password would send the user to fix the
+  //     wrong thing.
+  // KEYED ON `tenantAccessHeld`, NEVER ON `tenantStatus`. The server computes
+  // it from the same environment variable the middleware reads, so with
+  // enforcement off (or in log-only mode) this deploy renders nothing new —
+  // which is what "ships inert" has to mean in the browser too. Keying on
+  // tenantStatus would lock out every already-suspended tenant's staff the
+  // moment the bundle shipped, with the backend switch still off.
+  //
+  // SUPER_ADMIN is excluded here as well as in the backend gate: the platform
+  // owner is never held, and a super-admin looking at a suspended tenant must
+  // keep the app, not inherit its hold screen.
+  if (me?.tenantAccessHeld && String(me?.role || '').toUpperCase() !== 'SUPER_ADMIN') {
+    return <TenantSuspendedHold me={me} logout={logout} />;
   }
 
   return children({ token, me, setMe, logout, setError });

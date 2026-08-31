@@ -371,6 +371,103 @@ export async function cancelSubscription(subscriptionId, deps = {}) {
 }
 
 /**
+ * Change what ARB charges from the NEXT occurrence onward — Phase 6.
+ *
+ * ARBUpdateSubscriptionRequest with an amount applies to FUTURE charges only;
+ * a charge ARB has already scheduled for today cannot be reliably re-priced
+ * (VERIFIED constraint, billing-events.js:20-27 territory). That is why the
+ * whole plan-change design defaults to "effective at the next period boundary"
+ * and why the reconciler applies pending changes the day BEFORE the charge.
+ *
+ * IDEMPOTENT AT ARB: setting the amount to X twice leaves the amount at X.
+ * The boundary-apply sweep leans on that — two workers racing the same pending
+ * change may both make this call, and only the database claim decides who
+ * records the apply.
+ */
+export async function updateSubscriptionAmount(subscriptionId, amount, deps = {}) {
+  await _call('ARBUpdateSubscriptionRequest', {
+    subscriptionId,
+    subscription: { amount: Number(Number(amount).toFixed(2)) },
+  }, deps);
+}
+
+/**
+ * One-off charge against the STORED profile — the proration charge (§6.2).
+ *
+ * No customer re-entry, no PAN anywhere near us: the transaction runs against
+ * the customerProfileId/customerPaymentProfileId pair Authorize.Net already
+ * holds. `refId` is OUR reference, echoed back by Authorize.Net and stored on
+ * the charge row BEFORE this call is made — it is what makes a charge whose
+ * response we never saw findable instead of blindly retryable.
+ *
+ * RETURNS A VERDICT, NEVER THROWS ON A DECLINE. A decline is an answer, not an
+ * error: the card said no, and the caller's compensating behaviour (the plan
+ * change does not happen) needs to run on it. Authorize.Net surfaces declines
+ * two different ways — an envelope-level E00027 with resultCode Error, or an
+ * Ok envelope whose transactionResponse.responseCode is 2 — and both land on
+ * `{ approved:false, declined:true }` here so no caller has to know that.
+ *
+ * A timeout or transport error still THROWS: that is an UNKNOWN state, not a
+ * decline, and per the CALL_TIMEOUT_MS contract the caller must treat it as
+ * "we do not know whether money moved" — never retry blindly.
+ *
+ * Response REASON TEXT is deliberately not carried out of this function
+ * (see logAuthnetFailure): codes only.
+ */
+export async function chargeCustomerProfile({
+  customerProfileId,
+  customerPaymentProfileId,
+  amount,
+  refId,
+  description,
+  invoiceNumber,
+}, deps = {}) {
+  let res;
+  try {
+    // Field order inside the request object is load-bearing: the JSON API is
+    // XML underneath and validates element order. refId must precede
+    // transactionRequest, and _call spreads this body after
+    // merchantAuthentication, which is the required first element.
+    res = await _call('createTransactionRequest', {
+      refId: String(refId).slice(0, 20),
+      transactionRequest: {
+        transactionType: 'authCaptureTransaction',
+        amount: Number(Number(amount).toFixed(2)),
+        profile: {
+          customerProfileId,
+          paymentProfile: { paymentProfileId: customerPaymentProfileId },
+        },
+        order: {
+          invoiceNumber: invoiceNumber ? String(invoiceNumber).slice(0, 20) : undefined,
+          description: description ? String(description).slice(0, 255) : undefined,
+        },
+      },
+    }, deps);
+  } catch (e) {
+    // E00027 — "the transaction was unsuccessful": Authorize.Net's envelope-level
+    // spelling of a decline. The card answered; the answer was no.
+    if (e instanceof AuthorizeNetError && e.code === 'E00027') {
+      return { approved: false, declined: true, held: false, transId: null, authCode: null, responseCode: null, code: e.code };
+    }
+    throw e;
+  }
+
+  const tx = res?.transactionResponse || {};
+  const responseCode = tx.responseCode != null ? String(tx.responseCode) : null;
+  return {
+    approved: responseCode === '1',
+    declined: responseCode === '2',
+    // 4 = held for review — the money is NOT ours yet; callers must not treat
+    // held as settled (same rule the webhook path applies to fraud.held).
+    held: responseCode === '4',
+    transId: tx.transId != null && String(tx.transId) !== '0' ? String(tx.transId) : null,
+    authCode: tx.authCode || null,
+    responseCode,
+    code: null,
+  };
+}
+
+/**
  * ARB's OWN vocabulary for a subscription's state. Stored verbatim in
  * `arbStatusSnapshot` and mapped to ours at exactly one place (billing-events.js
  * ARB_STATUS_TO_SUBSCRIPTION), so nothing translates at call time and a value

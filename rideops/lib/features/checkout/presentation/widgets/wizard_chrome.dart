@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/l10n/app_localizations.dart';
+import '../../../../core/api/enums.dart';
 import '../../../../core/theme/ride_tokens.dart';
 import '../../application/checkout_wizard_state.dart';
 import '../../domain/checkout_presence.dart';
@@ -185,11 +186,17 @@ class SessionHead extends StatelessWidget {
     required this.presence,
     this.mini = false,
     this.offline = false,
+    this.onPresenceTap,
   });
 
   final CheckoutReservationContext? context_;
   final PresenceChipData? presence;
   final bool mini;
+
+  /// M2-H6: el chip pasa de decorativo a TOCABLE — abre la hoja "Quién está
+  /// aquí" (20B). El "+1" ya existía en el dominio y por fin tiene destino.
+  /// Null ⇒ chip inerte (pantallas donde la hoja no tendría dónde montarse).
+  final VoidCallback? onPresenceTap;
 
   /// Sin red el punto vivo se degrada a gris: el verde afirma "está AHORA" y
   /// sin conexión no podemos sostener esa afirmación (el heartbeat que la
@@ -202,39 +209,78 @@ class SessionHead extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     final customer = context_?.customerName;
     final vehicle = context_?.vehicleLabel;
-    final chip = presence == null
+    // El chip se pinta AUNQUE no haya nadie (review de GD, M2-H6). Es la única
+    // puerta a la hoja "Quién está aquí", y ahí vive el reverso del latido:
+    // desde H6 el agente aparece con su nombre en las otras superficies. Con el
+    // chip condicionado a que hubiera compañía, el agente que trabaja solo —el
+    // caso NORMAL en el patio— no se enteraba nunca.
+    //
+    // Sin destino (uso aislado del header) se conserva el comportamiento de H1:
+    // sin presencia, sin chip. Un chip inerte que no lleva a ningún sitio sería
+    // cromo por cromo.
+    final chip = presence == null && onPresenceTap == null
         ? null
-        : PresenceChip(data: presence!, mini: mini, offline: offline);
+        : PresenceChip(
+            data: presence,
+            mini: mini,
+            offline: offline,
+            onTap: onPresenceTap,
+          );
 
     if (mini) {
       final who = [customer, vehicle].nonNulls
           .where((p) => p.isNotEmpty)
           .join(' · ');
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        // El chip TOCABLE mide 48 px de objetivo (DoD #2) y, con el padding
+        // vertical de 7, el header mini pasaría de 46 a 62 px: 16 px robados
+        // al cuerpo del paso en TODAS las pantallas, justo el presupuesto que
+        // la lámina midió a 360 dp. Se paga del padding, no del contenido —
+        // el objetivo real que el pulgar golpea es la fila entera del header.
+        padding: EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: chip == null || onPresenceTap == null ? 7 : 0,
+        ),
         decoration: const BoxDecoration(
           color: RideTokens.tonal,
           border: Border(bottom: BorderSide(color: RideTokens.n200)),
         ),
-        child: Row(
-          children: [
-            const Icon(Icons.person_outline_rounded,
-                size: 16, color: RideTokens.p800),
-            const SizedBox(width: 7),
-            Expanded(
-              child: Text(
-                who.isEmpty ? l10n.coTitleNoNumber : who,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w800,
-                  color: RideTokens.n900,
+        // Tope PROPORCIONAL calculado sobre el ancho REAL de la fila — el
+        // mismo patrón que [StepLine], y por el mismo motivo: un hijo no-flex
+        // de un `Row` se mide con ancho INFINITO, así que un `LayoutBuilder`
+        // metido dentro del Row no sirve para acotar nada.
+        //
+        // Sin este tope, a 360 dp un nombre largo de compañero deja al
+        // CLIENTE —la primera respuesta del patio— en dos letras y puntos
+        // suspensivos. Es laxo: mientras quepa, el chip mide lo suyo.
+        child: LayoutBuilder(
+          builder: (context, constraints) => Row(
+            children: [
+              const Icon(Icons.person_outline_rounded,
+                  size: 16, color: RideTokens.p800),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  who.isEmpty ? l10n.coTitleNoNumber : who,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: RideTokens.n900,
+                  ),
                 ),
               ),
-            ),
-            if (chip != null) ...[const SizedBox(width: 8), chip],
-          ],
+              if (chip != null) ...[
+                const SizedBox(width: 8),
+                ConstrainedBox(
+                  constraints:
+                      BoxConstraints(maxWidth: constraints.maxWidth * 0.5),
+                  child: chip,
+                ),
+              ],
+            ],
+          ),
         ),
       );
     }
@@ -387,34 +433,79 @@ class PresenceChip extends StatelessWidget {
     required this.data,
     this.mini = false,
     this.offline = false,
+    this.onTap,
   });
 
-  final PresenceChipData data;
+  /// null = nadie visible dentro del TTL. **No es "estás solo"**: el chip lo
+  /// dice con "nadie visible ahora mismo", y sigue siendo la puerta a la hoja
+  /// donde el agente descubre que él sí es visible para los demás.
+  final PresenceChipData? data;
+
   final bool mini;
 
   /// Ver [SessionHead.offline]: sin red el punto no puede seguir verde.
   final bool offline;
 
+  /// M2-H6: abre la hoja 20B. El área táctil sube a 48 px REALES aunque el
+  /// chip se dibuje a 32/34 — con guantes, un objetivo del alto del texto se
+  /// falla.
+  final VoidCallback? onTap;
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final lastSeen = data.entry.lastSeenAt;
+    final entry = data?.entry;
+    final lastSeen = entry?.lastSeenAt;
     final age = lastSeen == null
         ? Duration.zero
         : clock.now().difference(lastSeen);
-    final text = l10n.coPresenceLine(
-      data.entry.displayName,
-      surfaceLabel(l10n, data.entry.surface),
-      checkoutAgeLabel(l10n, age),
-    );
-    final live = !offline && data.freshness == PresenceFreshness.live;
-    return Container(
+    final live =
+        !offline && data?.freshness == PresenceFreshness.live;
+    // FORMA CORTA, la de los marcos aprobados (GD-MC-1). El chip vive con
+    // ~111 px útiles a 360 dp una vez descontados el tope de ancho y el
+    // avatar; `coPresenceLine` entera se corta en 19 caracteres y lo primero
+    // que se come es la SUPERFICIE — justo el propósito declarado del chip: a
+    // "Diego Torres · mostrador" le gritas desde la otra punta del patio, al
+    // kiosco hay que caminarle al lobby.
+    //
+    // Cuál de los dos datos acompaña al nombre lo decide el estado, como en la
+    // lámina: con el punto VIVO la edad es irrelevante (es ahora) y manda la
+    // superficie (20A); con el punto apagado la noticia ES la edad (20C).
+    //
+    // No se pierde nada: la línea completa —nombre, superficie y edad— sigue
+    // llegando entera al lector de pantalla por `coPresenceChipSemantics`, que
+    // no tiene límite de ancho.
+    final full = entry == null
+        ? l10n.coPresenceEmptyShort
+        : l10n.coPresenceLine(
+            entry.displayName,
+            surfaceLabel(l10n, entry.surface),
+            checkoutAgeLabel(l10n, age),
+          );
+    final text = entry == null
+        ? l10n.coPresenceEmptyShort
+        : live
+            ? l10n.coPresenceChipLive(
+                entry.displayName,
+                surfaceLabel(l10n, entry.surface),
+              )
+            : l10n.coPresenceChipAged(
+                entry.displayName,
+                checkoutAgeLabel(l10n, age),
+              );
+    // Vacío o sin red ⇒ rampa NEUTRA, no morada: el morado sobre gris cae a
+    // 4,4:1 y, peor, un chip vacío en color de marca se lee como si afirmara
+    // algo. n700 sobre n50 mide 8,9:1.
+    final muted = entry == null || offline;
+    final chip = Container(
       constraints: BoxConstraints(minHeight: mini ? 32 : 34),
       padding: EdgeInsets.symmetric(horizontal: mini ? 9 : 10, vertical: 4),
       decoration: BoxDecoration(
-        color: RideTokens.p50,
+        color: muted ? RideTokens.n50 : RideTokens.p50,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: RideTokens.brandA20),
+        border: Border.all(
+          color: muted ? RideTokens.n300 : RideTokens.brandA20,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -429,6 +520,15 @@ class PresenceChip extends StatelessWidget {
               color: live ? RideTokens.ok : RideTokens.n500,
             ),
           ),
+          if (entry != null) ...[
+            const SizedBox(width: 6),
+            // PERSONA vs APARATO también AQUÍ (review de GD): en la hoja la
+            // distinción estaba resuelta, pero el chip es lo que el agente ve
+            // el 99 % del tiempo, y sin avatar "de un vistazo" se convierte en
+            // leer un nombre a 11,5 px al sol. Círculo + iniciales para quien
+            // tiene nombre; cuadrado + glifo para el mueble.
+            _ChipAvatar(surface: entry.surface, name: entry.displayName),
+          ],
           const SizedBox(width: 6),
           Flexible(
             child: Text(
@@ -438,14 +538,14 @@ class PresenceChip extends StatelessWidget {
               style: TextStyle(
                 fontSize: mini ? 11.5 : 12.5,
                 fontWeight: FontWeight.w700,
-                color: RideTokens.p800,
+                color: muted ? RideTokens.n700 : RideTokens.p800,
               ),
             ),
           ),
-          if (data.others > 0) ...[
+          if ((data?.others ?? 0) > 0) ...[
             const SizedBox(width: 6),
             Text(
-              l10n.coPresenceMore(data.others),
+              l10n.coPresenceMore(data!.others),
               style: const TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w900,
@@ -454,6 +554,84 @@ class PresenceChip extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+    final tap = onTap;
+    if (tap == null) return chip;
+    // El chip se dibuja a 32/34 px porque el header no da para más, pero el
+    // OBJETIVO es de 48: se envuelve en un InkWell con `minHeight: 48` en vez
+    // de engordar la placa. Es el mismo truco de [BannerAction] y el motivo es
+    // el mismo — con guantes, un objetivo del alto del texto se falla.
+    //
+    // La semántica recita primero la línea visible y después la acción, para
+    // que TalkBack diga QUÉ hay antes de QUÉ se puede hacer.
+    return Semantics(
+      button: true,
+      label: l10n.coPresenceChipSemantics(full),
+      onTap: tap,
+      child: ExcludeSemantics(
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            onTap: tap,
+            borderRadius: BorderRadius.circular(12),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: Center(widthFactor: 1, child: chip),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Avatar del chip. Las tres señales cambian a la vez a propósito (forma,
+/// contenido y rampa de color): con guantes y sol de frente, una sola no se
+/// lee. Una superficie DESCONOCIDA no se declara aparato — sin saber qué es,
+/// no se le quita el nombre a quien podría tenerlo.
+class _ChipAvatar extends StatelessWidget {
+  const _ChipAvatar({required this.surface, required this.name});
+
+  final String surface;
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDevice = CheckoutSurface.tryParse(surface)?.isDevice ?? false;
+    if (isDevice) {
+      return Container(
+        width: 18,
+        height: 18,
+        decoration: BoxDecoration(
+          color: RideTokens.n200,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: const Icon(
+          Icons.desktop_windows_outlined,
+          size: 11,
+          color: RideTokens.n800,
+        ),
+      );
+    }
+    return Container(
+      width: 18,
+      height: 18,
+      alignment: Alignment.center,
+      decoration: const BoxDecoration(
+        color: RideTokens.p200,
+        shape: BoxShape.circle,
+      ),
+      child: Text(
+        initialsOf(name),
+        style: const TextStyle(
+          fontSize: 9,
+          fontWeight: FontWeight.w900,
+          // p900 sobre p200: el texto más pequeño del chip necesita el
+          // contraste más alto de la rampa.
+          color: Color(0xFF2E1071),
+        ),
       ),
     );
   }
@@ -661,6 +839,8 @@ class StepLine extends StatelessWidget {
     required this.position,
     required this.onTap,
     this.staleAge,
+    this.label,
+    this.trailing,
   });
 
   final String rawStep;
@@ -673,77 +853,139 @@ class StepLine extends StatelessWidget {
   /// Edad del dato cuando la lectura ya no está viva (offline / error).
   final Duration? staleAge;
 
+  /// Nombre del SUB-estado cuando el paso tiene vida interna: "Inspección ·
+  /// fotos" (17B) o "Inspección completa" (17F, con el sello del servidor
+  /// puesto). El CONTADOR nunca se toca — sigue diciendo el número real del
+  /// paso del servidor, jamás un "paso 6.5" (nota 1 del mockup 17).
+  final String? label;
+
+  /// Pieza de la derecha. Durante la captura, el mapa de 10 pasos cede su
+  /// lugar al contador de ángulos: lo que el agente necesita mientras
+  /// fotografía no es el mapa, es cuántos le faltan (nota 5). La fila sigue
+  /// siendo tocable — el sheet no desaparece, solo deja de anunciarse.
+  final Widget? trailing;
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final stale = staleAge != null;
-    final label = stepLabel(l10n, rawStep);
-    return Material(
-      color: stale ? RideTokens.n50 : RideTokens.n0,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 48), // target DoD #2
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: const BoxDecoration(
-            border: Border(
-              top: BorderSide(color: RideTokens.n200),
-              bottom: BorderSide(color: RideTokens.n200),
-            ),
-          ),
-          child: Row(
-            children: [
-              if (position != null) ...[
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: RideTokens.p50,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    l10n.coStepOf(position!, kCheckoutLinearStepCount),
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w900,
-                      color: RideTokens.p800,
-                      // Cifras tabulares: el contador cambia cada paso y sin
-                      // esto la etiqueta "salta" de ancho al pasar de 9 a 10.
-                      fontFeatures: [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 9),
-              ],
-              Expanded(
-                child: Text(
-                  stale
-                      ? '$label · ${l10n.coStaleView(checkoutAgeLabel(l10n, staleAge!))}'
-                      : label,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w800,
-                    color: stale ? RideTokens.n700 : RideTokens.n900,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                l10n.coSeeAllSteps,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
-                  color: RideTokens.p700,
-                ),
-              ),
-              const Icon(Icons.chevron_right_rounded,
-                  size: 18, color: RideTokens.p700),
-            ],
+    final label = this.label ?? stepLabel(l10n, rawStep);
+    final row = InkWell(
+      onTap: onTap,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 48), // target DoD #2
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: const BoxDecoration(
+          border: Border(
+            top: BorderSide(color: RideTokens.n200),
+            bottom: BorderSide(color: RideTokens.n200),
           ),
         ),
-      ),
+            // El tope proporcional de los extremos es lo que impide el
+            // desbordamiento a escala 2.0 en 320 dp (chip ~124 px + "Ver todos
+            // los pasos" ~245 px > los 292 disponibles). NO se usa `Flexible`
+            // aquí: en un Row de hijos flexibles el reparto es por FLEX y no
+            // por necesidad, así que a escala normal el trailing se quedaría
+            // con un tercio —menos de lo que "Ver todos los pasos" mide en un
+            // teléfono de 360 dp— y H1/H2 verían su acceso al mapa de pasos
+            // partido en dos renglones. El tope es LAXO: mientras quepa, cada
+            // extremo mide lo suyo y el layout es idéntico al de antes; solo
+            // muerde cuando de verdad no cabe. 45 % + 45 % + separadores deja
+            // siempre un resto positivo para el nombre del paso.
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final cap = constraints.maxWidth * 0.45;
+                return Row(
+                  children: [
+                    if (position != null) ...[
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: cap),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: RideTokens.p50,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            l10n.coStepOf(position!, kCheckoutLinearStepCount),
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w900,
+                              color: RideTokens.p800,
+                              // Cifras tabulares: el contador cambia cada paso
+                              // y sin esto la etiqueta "salta" de ancho al
+                              // pasar de 9 a 10.
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 9),
+                    ],
+                    Expanded(
+                      child: Text(
+                        stale
+                            ? '$label · ${l10n.coStaleView(checkoutAgeLabel(l10n, staleAge!))}'
+                            : label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w800,
+                          color: stale ? RideTokens.n700 : RideTokens.n900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: cap),
+                      child: trailing ??
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  l10n.coSeeAllSteps,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    color: RideTokens.p700,
+                                  ),
+                                ),
+                              ),
+                              const Icon(Icons.chevron_right_rounded,
+                                  size: 18, color: RideTokens.p700),
+                            ],
+                          ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        );
+
+    return Material(
+      color: stale ? RideTokens.n50 : RideTokens.n0,
+      // Durante la captura el contador de ángulos ocupa el lugar de "Ver todos
+      // los pasos": la fila SIGUE abriendo el mapa de 10 pasos, pero ya no lo
+      // dice ninguna palabra en pantalla, y un lector de pantalla anunciaría un
+      // botón sin decir qué hace. La pista lo dice.
+      //
+      // Va con `MergeSemantics` porque la anotación suelta no se funde con el
+      // nodo que crea el InkWell: dejaría un nodo vacío al lado en vez de
+      // describir la fila. Fundida, la fila se anuncia entera —número de paso,
+      // nombre, contador— y luego la pista.
+      child: trailing == null
+          ? row
+          : MergeSemantics(
+              child: Semantics(
+                button: true,
+                hint: l10n.coSeeAllSteps,
+                child: row,
+              ),
+            ),
     );
   }
 }

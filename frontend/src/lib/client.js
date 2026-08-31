@@ -58,6 +58,11 @@ export const AUTH_EXPIRED_EVENT = 'ridefleet:auth-expired';
 // session). AuthGate listens and re-fetches /me so the forced-change screen
 // appears without a manual reload.
 export const PASSWORD_CHANGE_REQUIRED_EVENT = 'ridefleet:password-change-required';
+// Tenant Subscriptions Phase 5 (2026-08-28): fired when the backend 403s with
+// code TENANT_SUSPENDED — the tenant's account went on hold for non-payment.
+// Same contract as the line above, for the same reason: a live session must be
+// told WHY the app stopped working, not left with generic failures.
+export const TENANT_SUSPENDED_EVENT = 'ridefleet:tenant-suspended';
 const GET_CACHE_TTL_MS = 15000;
 const getResponseCache = new Map();
 const inflightGetRequests = new Map();
@@ -106,6 +111,15 @@ async function parseApiResponse(res, path) {
     error.code = code;
     if (typeof window !== 'undefined' && res.status === 403 && code === 'PASSWORD_CHANGE_REQUIRED') {
       window.dispatchEvent(new CustomEvent(PASSWORD_CHANGE_REQUIRED_EVENT, { detail: { path } }));
+    }
+    // Tenant Subscriptions Phase 5 (2026-08-28): the account went on hold for
+    // non-payment WHILE somebody was working. Without this the app would show a
+    // wall of "could not load" banners on every panel and nothing would say
+    // why — the same failure mode PASSWORD_CHANGE_REQUIRED gets this treatment
+    // for. AuthGate listens, re-fetches /me (which the backend allowlists), and
+    // swaps the whole shell for the hold screen.
+    if (typeof window !== 'undefined' && res.status === 403 && code === 'TENANT_SUSPENDED') {
+      window.dispatchEvent(new CustomEvent(TENANT_SUSPENDED_EVENT, { detail: { path } }));
     }
     // A stored location the current user does not own 403s EVERY scoped read,
     // so the app looks broken rather than mis-scoped: zeros, empty lists, and

@@ -30,6 +30,7 @@ import {
   createSession, getSessionByReservation, transition,
   mintTermsToken, mintHandoffToken, abandon,
   stepNumber, isTerminal, STEP_INFO,
+  shouldSwallowTransitionConflict,
   paymentStepMode, PAYMENT_STEP_MODES,
 } from '../../../../lib/checkout-session';
 import QRCode from 'qrcode';
@@ -238,14 +239,6 @@ function CheckoutWizardV2({ token, me, logout }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.currentStep, session?.tcCompletedAt, session?.paymentCompletedAt, session?.inspectionCompletedAt, session?.customerSignedAt]);
 
-  // Forward order of CheckoutStep — used only to decide whether a 409 means
-  // "already there / already past it" (benign, swallow) vs a real error.
-  const STEP_ORDER = [
-    'CONFIRMING', 'TC_PENDING', 'TC_SIGNED', 'PAYMENT_PENDING', 'PAID',
-    'INSPECTION_HANDOFF', 'INSPECTION_IN_PROGRESS', 'CUSTOMER_SIGN_PENDING',
-    'FINALIZING', 'CLOSED',
-  ];
-
   const advance = async (toStep, metadata) => {
     if (transitionInFlightRef.current) return; // drop concurrent/double fires
     transitionInFlightRef.current = true;
@@ -255,18 +248,24 @@ function CheckoutWizardV2({ token, me, logout }) {
     } catch (err) {
       // 409 = state conflict. If the session is already in (or past) the
       // requested step — the classic double-fire — refetch and treat as a
-      // success-noop instead of toasting an error at the agent.
+      // success-noop instead of toasting an error at the agent. The decision
+      // lives in shouldSwallowTransitionConflict (lib/checkout-session.js) so
+      // it can be tested; FINALIZE_INCOMPLETE is exempt there on purpose.
+      let freshSession = null;
       if (err?.status === 409) {
         try {
           const fresh = await api(`/api/checkout-sessions/${session.id}`, { bypassCache: true }, token);
-          const at = STEP_ORDER.indexOf(fresh?.currentStep);
-          const want = STEP_ORDER.indexOf(toStep);
-          if (at !== -1 && want !== -1 && at >= want) {
+          freshSession = fresh;
+          if (shouldSwallowTransitionConflict({ err, fresh, toStep })) {
             setSession(fresh);
             return;
           }
         } catch { /* fall through to the toast */ }
       }
+      // Reconcile the screen to server truth BEFORE complaining: on
+      // FINALIZE_INCOMPLETE the session really is closed, and the agent needs
+      // to see that AND the reason the finalize did not finish.
+      if (freshSession) setSession(freshSession);
       setToast({ kind: 'error', message: err?.message || 'Cannot advance' });
     } finally {
       transitionInFlightRef.current = false;

@@ -30,6 +30,7 @@
  */
 import logger from '../../lib/logger.js';
 import { runBillingReconcile } from './billing-reconcile.service.js';
+import { runDunningSweep } from './billing-dunning.service.js';
 
 const DEFAULT_INTERVAL_HOURS = 24;
 const DEFAULT_STARTUP_DELAY_SECONDS = 180;
@@ -69,6 +70,27 @@ async function tick() {
   sweepInProgress = true;
   try {
     await runBillingReconcile();
+    /**
+     * DUNNING RUNS SECOND, AND THE ORDER IS LOAD-BEARING (Phase 5, 2026-08-28).
+     *
+     * The reconciler's third pass is the one that finds a settled payment we
+     * never received a webhook for and clears the delinquency it was hiding
+     * behind. Suspending before that pass has run would switch off a customer
+     * who had already paid, on the strength of a ledger this same tick was
+     * about to correct. There is no more expensive bug available in this
+     * module, so the sequencing is spelled out here rather than left to the
+     * order two imports happen to appear in.
+     *
+     * It is also a SEPARATE try: a reconciler failure must not skip dunning
+     * silently, and a dunning failure must not make the reconciler look broken.
+     * And it is off by default — runDunningSweep returns immediately unless
+     * BILLING_DUNNING_ENABLED=true.
+     */
+    try {
+      await runDunningSweep();
+    } catch (err) {
+      logger.warn('[billing-dunning] sweep error', { message: err?.message || String(err) });
+    }
   } catch (err) {
     // The sweep isolates its own per-subscription failures; reaching here means
     // something structural broke. Warn and let the next tick try: a reconciler

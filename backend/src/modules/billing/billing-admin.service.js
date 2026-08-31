@@ -8,9 +8,11 @@
  *
  * WHAT THIS FILE DELIBERATELY DOES NOT CONTAIN
  * ---------------------------------------------------------------------------
- * - No plan change, no proration, no novel amount. That is Phase 6, last on
- *   purpose because it is the only part that computes a number nobody agreed to
- *   in advance.
+ * - No plan change, no proration, no novel amount. Phase 6 built those in
+ *   billing-plan-change.service.js — a separate file so THIS one stays the
+ *   reads-and-levers surface and the only novel-amount arithmetic in the
+ *   module lives behind one import. The views here surface the pending-change
+ *   fields; the writes live there.
  * - No dunning, no automatic suspension, no `requireAuth` gate. That is Phase 5.
  *   This file gives a human the lever; Phase 5 automates the decision to pull it.
  * - No refund. Design open question 10 (who may issue one, and the ceiling above
@@ -41,6 +43,9 @@ import {
   buildDisclosureText,
 } from './billing.service.js';
 import { createInvite, revokeInvite } from './autopay-invites.service.js';
+import { authService } from '../auth/auth.service.js';
+import { normalizeTenantStatus } from '../tenants/tenants.service.js';
+import { suspensionMode } from '../../lib/tenant-suspension.js';
 import { todayCalendarDate, addCalendarDays } from './billing-dates.js';
 
 /**
@@ -73,6 +78,13 @@ function deps(overrides = {}) {
     applyDrift: overrides.applyDrift || applyDrift,
     recordAudit: overrides.recordAudit || recordAudit,
     notifyOwner: overrides.notifyOwner || notifyOwner,
+    // Phase 5 (2026-08-28): busting every cached session of the tenant is what
+    // makes suspend and restore take effect NOW rather than at cache expiry.
+    // Injected (not imported inline) so the panel tests can assert it was
+    // called — "the cache was busted" is a behaviour of this feature, not an
+    // implementation detail of it.
+    invalidateTenantSessions: overrides.invalidateTenantSessions
+      || ((tenantId) => authService.invalidateTenantSessions(tenantId)),
     ...overrides,
   };
 }
@@ -224,6 +236,9 @@ export async function getBillingOverview(overrides = {}) {
       startDate: sub ? sub.startDate : null,
       nextChargeDate: sub ? sub.nextChargeDate : null,
       trialEndsAt: sub ? sub.trialEndsAt : null,
+      pendingPlanCode: sub ? sub.pendingPlanCode || null : null,
+      pendingAmount: sub && sub.pendingAmount != null ? String(sub.pendingAmount) : null,
+      pendingEffectiveDate: sub ? sub.pendingEffectiveDate || null : null,
       currentPeriodStart: sub ? sub.currentPeriodStart : null,
       currentPeriodEnd: sub ? sub.currentPeriodEnd : null,
       cardBrand: sub ? sub.cardBrand : null,
@@ -295,6 +310,99 @@ const SEVERITY_ORDER = [
   SUBSCRIPTION_STATUS.ACTIVE,
 ];
 
+/**
+ * THE ONE RULE for what a billing restore puts `Tenant.status` back to.
+ *
+ * Exported and shared because the panel has to SAY what the button will do and
+ * the service has to DO it — the same reason `suspensionEnforcement` is
+ * serialised into the detail payload. Two copies of this rule would drift, and
+ * the drift is a dialog promising one outcome while the write performs another,
+ * which on this screen means lying about a paying customer's public surface.
+ *
+ * Rules, in order:
+ *   - NOT A STRING (null, undefined, or any other JSON type) -> ACTIVE. Nothing
+ *     was recorded, or nothing legible was. This is the old behaviour, kept
+ *     deliberately as the fallback.
+ *   - OUTSIDE THE VOCABULARY -> ACTIVE. Same reasoning: a value this codebase
+ *     cannot name is a value it does not know.
+ *   - a recorded SUSPENDED -> ACTIVE. Restoring to SUSPENDED would clear
+ *     `billingSuspendedAt` while leaving the tenant off, and restore refuses a
+ *     suspension billing did not set — so that combination is the one state
+ *     this screen could never undo again.
+ *
+ *     NOT REACHABLE TODAY, and worth saying so rather than implying a live
+ *     scenario: `suspendTenantAccess` throws `already suspended` when
+ *     `tenant.status === 'SUSPENDED'`, and it records `tenant.status` in that
+ *     same call — so no writer can put 'SUSPENDED' in this column. The backfill
+ *     independently refuses it (`UPPER(src.prev) <> 'SUSPENDED'`). This branch
+ *     is defence against a hand-written row and against that guard being
+ *     loosened later, not a case anyone can produce from the UI now.
+ *   - anything else -> its NORMALISED form ('demo' comes back as 'DEMO').
+ *
+ * THE FALLBACK IS ALWAYS 'ACTIVE', WHICH IS EXACTLY TODAY'S BEHAVIOUR, because
+ * today every restore hardcodes ACTIVE. That asymmetry is the whole safety
+ * argument: this change may only improve the case we can see, and must never
+ * make the case we cannot see worse than the day before it shipped.
+ *
+ * WHY NORMALISE AT ALL, when the column already holds what suspend wrote. Two
+ * reasons, and the second is a live defect in the verbatim version this
+ * replaced. First, `Tenant.status` is free text in Prisma but a CLOSED
+ * vocabulary everywhere else (TENANT_STATUSES), and restore is the one writer
+ * that takes its value from storage rather than from a human — returning a
+ * recorded 'garbage' byte-for-byte would let restore be the path that puts junk
+ * into that column. Second, and worse: a recorded 'active' (lower case, which
+ * free text permits) came back verbatim as 'active', and the public surfaces
+ * match `status: 'ACTIVE'` EXACTLY — so restoring a genuinely-active tenant
+ * left it dark. Verbatim was not the conservative choice it looked like.
+ *
+ * `normalizeTenantStatus` THROWS on a value outside the vocabulary. That is
+ * correct where it is normally used — a human editing a tenant must be told
+ * their typo was refused, not have it silently coerced — and wrong here, where
+ * the only human in the room clicked "Restore" and has nothing to fix. So it is
+ * WRAPPED, never called bare: an unreadable recorded value degrades this to the
+ * old hardcoded behaviour instead of turning a working restore into a 500.
+ *
+ * THE `typeof` GUARD IS NARROW, AND WORTH BEING HONEST ABOUT. For almost every
+ * non-string it changes NOTHING: null and undefined already hit
+ * `normalizeTenantStatus`'s own fallback, and numbers, booleans, `{}` and `[]`
+ * already stringify to something outside the vocabulary and are caught by the
+ * try/catch below. All of those land on ACTIVE with or without it.
+ *
+ * It bites on exactly one shape — a non-string whose `String(value)` IS a
+ * vocabulary word, which in practice means `['DEMO']` or an object with a
+ * custom `toString`. `normalizeTenantStatus` reaches its argument through
+ * `String(value)`, so those sail through the allowlist and would restore a
+ * tenant to DEMO on the strength of a value nobody recorded. (Measured, not
+ * assumed: those two are the only inputs whose answer the guard changes.)
+ *
+ * Prisma types this column `String?`, so the DB cannot hand us either one today.
+ * Kept anyway because the function is EXPORTED on the `billingAdmin` surface and
+ * is called with whatever a caller has, and because it is one line standing
+ * between a JSON-shaped value and a status write. Cheap, narrow, and it stays.
+ *
+ * ONE DELIBERATE REGRESSION AGAINST THE VERBATIM VERSION: a recorded '' used to
+ * come back as '' (unpublished) and now falls to ACTIVE (published), because
+ * `normalizeTenantStatus` treats '' as absent. It is accepted because '' is
+ * unreachable through every writer that exists — suspend records `tenant.status`
+ * from a row whose only writers (createTenant/updateTenant) already run it
+ * through this same normaliser, and the backfill drops blanks with
+ * `NULLIF(TRIM(...), '')` — and because ACTIVE is, once again, exactly what
+ * today's hardcode does with that tenant.
+ */
+export function resolveRestoredTenantStatus(billingPreviousStatus) {
+  if (typeof billingPreviousStatus !== 'string') return 'ACTIVE';
+  let normalized;
+  try {
+    normalized = normalizeTenantStatus(billingPreviousStatus, 'ACTIVE');
+  } catch {
+    return 'ACTIVE';
+  }
+  // After normalisation, so 'suspended' and '  SUSPENDED  ' are the same rule
+  // rather than a second hand-rolled case-insensitive test that could drift.
+  if (normalized === 'SUSPENDED') return 'ACTIVE';
+  return normalized;
+}
+
 export function severityRank(status) {
   const i = SEVERITY_ORDER.indexOf(status);
   return i === -1 ? SEVERITY_ORDER.length : i;
@@ -365,7 +473,29 @@ export async function getTenantBillingDetail(tenantId, overrides = {}) {
       plan: tenant.plan,
       planName: entitlement.name,
       billingSuspendedAt: tenant.billingSuspendedAt || null,
+      // What restore will put this tenant BACK to, for the same reason
+      // suspensionEnforcement below is serialised: the dialog must describe the
+      // lever the operator is really pulling, and only the server knows this
+      // value. Without it the restore copy could only generalise ("normally
+      // Active"), which is a hedge on a screen whose whole job is to be exact
+      // about a customer's access.
+      //
+      // TWO fields, not one, because they answer different questions. The raw
+      // value says what was RECORDED (null = nothing was, which is worth seeing
+      // as itself). `restoresToStatus` is the RESOLVED answer, straight out of
+      // the same helper restoreTenantAccess writes with, so the panel cannot
+      // re-derive the rule and drift from it.
+      billingPreviousStatus: tenant.billingPreviousStatus || null,
+      restoresToStatus: resolveRestoredTenantStatus(tenant.billingPreviousStatus),
     },
+    // Phase 5 (2026-08-28): WHAT SUSPENSION ACTUALLY DOES ON THIS DEPLOY.
+    // 'off' | 'log' | 'enforce'. The suspend dialog must describe the lever the
+    // operator is really pulling, and that depends on an environment variable
+    // the frontend cannot see. Without this the panel would either keep saying
+    // "staff can still sign in" after the gate went live, or start promising a
+    // lockout that is switched off — both are lies about a lever being pulled
+    // on a paying customer, which is the failure Phase 4 was careful to avoid.
+    suspensionEnforcement: suspensionMode(),
     subscription: current ? publicSubscriptionView(current, today) : null,
     history: subs.filter((s) => !current || s.id !== current.id).map((s) => publicSubscriptionView(s, today)),
     charges: charges.map(publicChargeView),
@@ -394,6 +524,11 @@ function publicSubscriptionView(sub, today) {
     currentPeriodStart: sub.currentPeriodStart,
     currentPeriodEnd: sub.currentPeriodEnd,
     trialEndsAt: sub.trialEndsAt,
+    // Phase 6: a scheduled plan/amount change, visible until the boundary
+    // applies it or an operator cancels it. All three or none.
+    pendingPlanCode: sub.pendingPlanCode || null,
+    pendingAmount: sub.pendingAmount == null ? null : String(sub.pendingAmount),
+    pendingEffectiveDate: sub.pendingEffectiveDate || null,
     cardBrand: sub.cardBrand,
     cardLast4: sub.cardLast4,
     cardExpMonth: sub.cardExpMonth,
@@ -661,6 +796,12 @@ export async function cancelSubscriptionForTenant(input = {}, overrides = {}) {
       // No charge is coming. A stale date would keep feeding detector 3 a charge
       // to hunt for that can never happen.
       nextChargeDate: null,
+      // A scheduled plan change dies with the subscription it would have
+      // re-priced — a pending row on a CANCELLED sub would be a change waiting
+      // for a boundary that can never arrive.
+      pendingPlanCode: null,
+      pendingAmount: null,
+      pendingEffectiveDate: null,
       lastFailureCode: null,
       lastFailureText: null,
     },
@@ -716,11 +857,17 @@ export async function cancelSubscriptionForTenant(input = {}, overrides = {}) {
  *   - `TenantSubscription.status = 'SUSPENDED'` + `suspendedAt`, keeping §2.2's
  *     invariant that our SUSPENDED and `Tenant.status` never disagree.
  *
- * WHAT IT DOES NOT DO: it does not log the tenant's staff out of the staff app.
- * `requireAuth` does not read `Tenant.status` yet — that gate is Phase 5, is the
- * highest-blast-radius change in the module, and is deliberately sequenced after
- * this panel exists to see it with. Anything that tells the operator otherwise
- * would be a lie about a lever they are pulling on a paying customer.
+ * STAFF LOCKOUT — PHASE 5, AND IT DEPENDS ON A SWITCH (updated 2026-08-28).
+ * `requireAuth` now consults `lib/tenant-suspension.js` on every authenticated
+ * request, but ONLY when TENANT_SUSPENSION_ENFORCEMENT is `enforce`. Until that
+ * variable is set, this lever does exactly what it did in Phase 4 and nothing
+ * more, and the panel copy must keep saying so. Whether staff are actually
+ * locked out is a deploy-time fact this function cannot see, so it must not
+ * claim either way — `getBillingHealth` surfaces the mode instead.
+ *
+ * WHAT IT ALWAYS DOES NOW: busts every cached session of this tenant, so that
+ * when enforcement IS on the lockout is immediate rather than arriving as each
+ * user's 30-second session cache happens to lapse.
  *
  * IT DOES NOT CANCEL AT AUTHORIZE.NET EITHER. Design open question 6 — cancel on
  * suspension, or leave it suspended — is UNANSWERED, and the conservative half
@@ -749,7 +896,10 @@ export async function suspendTenantAccess(input = {}, overrides = {}) {
   const writes = [
     d.prisma.tenant.update({
       where: { id: tenant.id },
-      data: { status: 'SUSPENDED', billingSuspendedAt: now },
+      // billingPreviousStatus is captured in the SAME write that sets
+      // SUSPENDED, so the pair can never disagree: there is no window in which
+      // a tenant is off with no record of what it was.
+      data: { status: 'SUSPENDED', billingSuspendedAt: now, billingPreviousStatus: tenant.status },
     }),
   ];
   if (subscription && subscription.status !== SUBSCRIPTION_STATUS.SUSPENDED) {
@@ -759,6 +909,11 @@ export async function suspendTenantAccess(input = {}, overrides = {}) {
     }));
   }
   await d.prisma.$transaction(writes);
+
+  // AFTER the write has committed, never before. Busting first would leave a
+  // window in which a re-hydrating session reloads the OLD status and caches it
+  // again for another 30 seconds — a bust that makes the staleness worse.
+  const bust = await d.invalidateTenantSessions(tenant.id);
 
   await d.recordAudit({
     tenantId: tenant.id,
@@ -777,10 +932,23 @@ export async function suspendTenantAccess(input = {}, overrides = {}) {
       // Recorded so the trail says what was and was NOT done: the ARB
       // subscription is deliberately left alone (open question 6).
       arbSubscriptionCancelled: false,
+      // How many staff sessions were dropped, and the enforcement mode in
+      // force at the time. Six months from now "why did the lockout take a
+      // minute" is answerable from the trail instead of from a guess.
+      sessionsInvalidated: bust?.invalidated ?? 0,
+      suspensionEnforcement: suspensionMode(),
     },
   });
 
-  return { tenantId: tenant.id, status: 'SUSPENDED', billingSuspendedAt: now };
+  return {
+    tenantId: tenant.id,
+    status: 'SUSPENDED',
+    billingSuspendedAt: now,
+    sessionsInvalidated: bust?.invalidated ?? 0,
+    // So the panel can say "staff are locked out now" or "staff are NOT locked
+    // out — enforcement is off" rather than overselling the lever.
+    suspensionEnforcement: suspensionMode(),
+  };
 }
 
 /**
@@ -827,10 +995,35 @@ export async function restoreTenantAccess(input = {}, overrides = {}) {
     ? SUBSCRIPTION_STATUS.PAST_DUE
     : SUBSCRIPTION_STATUS.ACTIVE;
 
+  /**
+   * WHAT THE TENANT GOES BACK TO — whatever it was, not ACTIVE.
+   *
+   * `Tenant.status` is a free-text String — tenants.service.js updateTenant
+   * accepts any string and only uppercases it — and ACTIVE is not a synonym for
+   * "on": the public booking token resolver, resolvePublicTenant() in the
+   * booking engine and the car-sharing marketplace tenant list all match
+   * `status: 'ACTIVE'` exactly. Restoring a tenant that held ANY other value to
+   * ACTIVE therefore does not just mislabel it, it puts it on the public booking
+   * surface. Suspend recorded the real value; read it back.
+   *
+   * The fallback is ACTIVE, for a tenant suspended before billingPreviousStatus
+   * existed or by a path that did not record one. SUSPENDED is treated as
+   * nothing recorded: restoring to SUSPENDED would leave the tenant off with
+   * billingSuspendedAt cleared, which is the one state this screen can no
+   * longer undo.
+   *
+   * DELIBERATELY NOT AN INPUT. The caller does not get to name the target
+   * status — that would turn a restore button into a status editor. It comes
+   * only from what suspend itself wrote.
+   */
+  const restoredTenantStatus = resolveRestoredTenantStatus(tenant.billingPreviousStatus);
+
   const writes = [
     d.prisma.tenant.update({
       where: { id: tenant.id },
-      data: { status: 'ACTIVE', billingSuspendedAt: null },
+      // Cleared alongside billingSuspendedAt: both describe a suspension that
+      // is over, and a stale value here would be read by the NEXT restore.
+      data: { status: restoredTenantStatus, billingSuspendedAt: null, billingPreviousStatus: null },
     }),
   ];
   if (subscription) {
@@ -840,6 +1033,12 @@ export async function restoreTenantAccess(input = {}, overrides = {}) {
     }));
   }
   await d.prisma.$transaction(writes);
+
+  // THE BUST MATTERS MORE ON RESTORE THAN ON SUSPEND. A late suspension costs
+  // us thirty seconds of service we were going to give away anyway; a late
+  // restore leaves a customer who has just paid still staring at a hold screen,
+  // on the phone, being told it is fixed. Same call, much worse failure.
+  const bust = await d.invalidateTenantSessions(tenant.id);
 
   await d.recordAudit({
     tenantId: tenant.id,
@@ -854,13 +1053,20 @@ export async function restoreTenantAccess(input = {}, overrides = {}) {
       subscriptionId: subscription ? subscription.id : null,
       subscriptionStatus: subscription ? restoredStatus : null,
       suspendedSince: tenant.billingSuspendedAt,
+      // What it went back to, and whether that came from a recorded value or
+      // from the ACTIVE fallback — so a restore that guessed is distinguishable
+      // in the trail from one that knew.
+      restoredTenantStatus,
+      previousTenantStatus: tenant.billingPreviousStatus ?? null,
+      sessionsInvalidated: bust?.invalidated ?? 0,
     },
   });
 
   return {
     tenantId: tenant.id,
-    status: 'ACTIVE',
+    status: restoredTenantStatus,
     subscriptionStatus: subscription ? restoredStatus : null,
+    sessionsInvalidated: bust?.invalidated ?? 0,
   };
 }
 
@@ -1190,6 +1396,7 @@ export const billingAdmin = {
   cancelSubscriptionForTenant,
   suspendTenantAccess,
   restoreTenantAccess,
+  resolveRestoredTenantStatus,
   applyPlanToEntitlements,
   sendUpdatePaymentLink,
   revokeOutstandingInvites,

@@ -587,6 +587,28 @@ model Tenant {
   // NULL for every existing tenant. Nothing reads it yet: the suspension gate is
   // a later phase.
   billingSuspendedAt        DateTime?
+  // What `status` was the instant billing switched this tenant off, so RESTORE
+  // puts it back instead of assuming ACTIVE (2026-08-28). `status` is free text,
+  // not an enum, and ACTIVE is a LOAD-BEARING value: the public booking token
+  // resolver, the booking-engine tenant resolution and the car-sharing
+  // marketplace listing all filter `status: 'ACTIVE'`. So restoring a tenant
+  // that held any other value to ACTIVE does not merely lose a label — it
+  // PUBLISHES that tenant onto the public surface. Nothing in this repo writes a
+  // value other than ACTIVE or SUSPENDED, but nothing stops one either:
+  // tenants.service.js updateTenant takes the string it is given.
+  //
+  // A COLUMN, not the audit trail, even though suspend already records
+  // `previousTenantStatus` in its audit metadata. recordAudit is best-effort by
+  // contract: it swallows every failure so a dropped audit row can never fail
+  // the request that triggered it. Hanging the correctness of restore off a
+  // writer that is allowed to silently not write reintroduces exactly this bug
+  // on the day the audit insert fails. Operational state that a later write
+  // depends on belongs next to `billingSuspendedAt`, which is already the flag
+  // saying whether billing may lift this suspension at all.
+  //
+  // NULL when not suspended by billing, and NULL for a tenant suspended before
+  // this column existed — restore falls back to ACTIVE there, the old behaviour.
+  billingPreviousStatus     String?
   createdAt                 DateTime @default(now())
   updatedAt                 DateTime @updatedAt
 
@@ -629,6 +651,7 @@ model Tenant {
   citationSourceAccounts      CitationSourceAccount[]
   citations                   Citation[]
   citationAssignments         CitationAssignment[]
+  citationAttachments         CitationAttachment[]
   citationImportRuns          CitationImportRun[]
   telematicsDevices           VehicleTelematicsDevice[]
   telematicsEvents            VehicleTelematicsEvent[]
@@ -3887,6 +3910,7 @@ model Citation {
   updatedAt         DateTime               @updatedAt
 
   assignments CitationAssignment[]
+  attachments CitationAttachment[]
 
   @@unique([tenantId, source, citationNo])
   @@index([tenantId, plateNormalized, plateState, issuedAt])
@@ -3936,6 +3960,63 @@ model CitationDocument {
   updatedAt        DateTime @updatedAt
 
   @@index([tenantId, status, createdAt])
+}
+
+// ============================================================================
+// Supporting documents attached TO a citation (2026-08-28).
+//
+// READ THIS BEFORE REUSING CitationDocument ABOVE. The two models point in
+// OPPOSITE directions and conflating them is a live incident:
+//
+//   CitationDocument   document → BECOMES → citation   (OCR intake)
+//   CitationAttachment citation → HAS MANY → documents (evidence, after the fact)
+//
+// CitationDocument is a work QUEUE: citation-ocr.scheduler.js claims rows by
+// `status: 'PENDING'` and ships their bytes to an AI provider for extraction.
+// Filing a payment receipt or a dispute letter there would hand the renter's
+// name, licence and address to that provider and try to parse the receipt as
+// a new citation. Corpusa's citation OCR was deliberately switched off on
+// 2026-08-27 for the TL International data-protection disclosure, and we have
+// stated in writing that AI-assisted processing is off for that tenant.
+//
+// Hence a SEPARATE table with no `status: 'PENDING'` and no OCR columns: rows
+// here are structurally unreachable from the scheduler's query. Pinned by
+// citation-attachments-ocr-isolation.test.mjs.
+//
+// The file lives in a private Supabase bucket; only "<bucket>:<path>" is
+// stored here, matching CitationDocument.bucketPath so one parser serves both.
+// ============================================================================
+model CitationAttachment {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  citationId String
+  citation   Citation @relation(fields: [citationId], references: [id], onDelete: Cascade)
+
+  // AGENCY_NOTICE | PROOF_OF_PAYMENT | DISPUTE_LETTER | AGENCY_RESPONSE |
+  // CUSTOMER_CORRESPONDENCE | RENTAL_DOCUMENT | OTHER. A controlled list on
+  // purpose — free text here is unfixable once operators have typed a hundred
+  // variants of "receipt".
+  docType String
+  label   String // what the operator calls it, e.g. "Reply from City of Orlando"
+  notes   String?
+
+  // Storage reference: "<bucket>:<path>" (private bucket; reads are signed on
+  // demand and never persisted).
+  storagePath String
+  fileName    String?
+  mimeType    String?
+  sizeBytes   Int?
+
+  // ACTIVE | ARCHIVED. Archive supersedes; the export only carries ACTIVE.
+  status String @default("ACTIVE")
+
+  uploadedByUserId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantId, citationId, status])
+  @@index([tenantId, createdAt])
 }
 
 model Conversation {

@@ -712,6 +712,45 @@ test('the detail carries the consent archive verbatim and the raw ARB handles', 
   assert.equal(out.subscription.customerProfileId, 'cust_1');
 });
 
+test('the detail payload carries what restore will put the tenant back to', async () => {
+  // Serialised for the same reason as suspensionEnforcement: the restore dialog
+  // must name the status it is really going to set. Tenant.status is free text
+  // and 'ACTIVE' is load-bearing (the public booking token resolver, the
+  // booking-engine tenant resolution and the car-sharing marketplace list all
+  // match it exactly), so a panel that says "turns the public booking site back
+  // on" for a DEMO tenant is lying about a customer's public surface.
+  const w = await world();
+  await tenant(w, { status: 'SUSPENDED', billingSuspendedAt: NOW, billingPreviousStatus: 'DEMO' });
+
+  const out = await getTenantBillingDetail('tenant_1', w.deps);
+  assert.equal(out.tenant.billingPreviousStatus, 'DEMO');
+  // THE RESOLVED ANSWER, asserted end to end. The panel renders THIS field, not
+  // the raw one, and the four frontend cases feed it to a mock payload by hand —
+  // so without this line nothing checks that the server emits it at all.
+  // Deleting the field from getTenantBillingDetail, or pinning it to 'ACTIVE',
+  // left the whole billing suite green: the restore dialog would promise
+  // "returns this tenant to Active — their booking site comes back on" for a
+  // DEMO tenant while the write correctly restored DEMO. A dialog promising one
+  // outcome while the write performs another is the exact drift the field exists
+  // to prevent.
+  assert.equal(out.tenant.restoresToStatus, 'DEMO');
+});
+
+test('the detail payload reports a missing previous status as null, not as ACTIVE', async () => {
+  // null is the honest answer for a tenant suspended before the column existed.
+  // The ACTIVE fallback lives in restoreTenantAccess; inventing it here would
+  // hide from the panel that nothing was ever recorded.
+  const w = await world();
+  await tenant(w, { status: 'SUSPENDED', billingSuspendedAt: NOW });
+
+  const out = await getTenantBillingDetail('tenant_1', w.deps);
+  assert.equal(out.tenant.billingPreviousStatus, null);
+  // The two fields DISAGREE here, which is the point of carrying both: nothing
+  // was recorded (null), and the resolved answer is still the ACTIVE fallback.
+  // Asserting only the raw field would let the resolved one be anything at all.
+  assert.equal(out.tenant.restoresToStatus, 'ACTIVE');
+});
+
 test('the detail renders the stored charge description, never a recomputation', async () => {
   const w = await world();
   await tenant(w);

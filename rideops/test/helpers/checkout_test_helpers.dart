@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:clock/clock.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/core/api/checkout_api.dart';
 import 'package:rideops/core/api/dto/available_vehicle.dart';
 import 'package:rideops/core/api/dto/checkout_session.dart';
@@ -12,11 +13,13 @@ import 'package:rideops/core/api/dto/reservation_display.dart';
 import 'package:rideops/core/api/enums.dart';
 // PrecheckinLinkResult vive junto a ReservationsApi.
 import 'package:rideops/core/api/reservations_api.dart';
+import 'package:rideops/features/inspection/application/inspection_state.dart';
 import 'package:rideops/core/session/active_location.dart';
 import 'package:rideops/core/session/lock_controller.dart';
 import 'package:rideops/core/session/lock_state.dart';
 import 'package:rideops/core/session/session_controller.dart';
 import 'package:rideops/core/session/session_state.dart';
+import 'package:rideops/features/checkout/presentation/widgets/join_view.dart';
 
 import 'auth_test_helpers.dart';
 
@@ -74,10 +77,15 @@ CheckoutSessionDto sessionAt(
   raw['customerSignedAt'] = signature?.toIso8601String();
   raw['abandonedAt'] = abandonedAt?.toIso8601String();
   if (presence != null) {
+    // `actorUserId` VIAJA. Se le olvidaba a este serializer, y eso dejaba la
+    // auto-supresión inerte en cualquier prueba que pasara presencia por aquí
+    // — sin que la prueba se enterara. Hoy no cuesta nada porque el fixture
+    // real sí lo cubre; mañana es una trampa puesta para el siguiente.
     raw['presence'] = [
       for (final p in presence)
         {
           'surface': p.surface,
+          'actorUserId': p.actorUserId,
           'displayName': p.displayName,
           'lastSeenAt': p.lastSeenAt?.toIso8601String(),
         },
@@ -188,6 +196,30 @@ class FakeCheckoutApi extends CheckoutApi {
     return _maybeGate(current!);
   }
 
+  /// `POST /:id/customer-signature` (M2-H5). Se guardan el dataURL y el
+  /// `signerName` PORQUE son la prueba de dos reglas: que la firma llega
+  /// completa al contrato y que no viaja anónima.
+  int signatureCalls = 0;
+  final signatureDataUrls = <String>[];
+  final signerNames = <String?>[];
+  Future<CheckoutSessionDto> Function(String dataUrl, String? signerName)?
+      onSaveCustomerSignature;
+
+  @override
+  Future<CheckoutSessionDto> saveCustomerSignature({
+    required String id,
+    required String signatureDataUrl,
+    String? signerName,
+  }) async {
+    signatureCalls++;
+    signatureDataUrls.add(signatureDataUrl);
+    signerNames.add(signerName);
+    if (onSaveCustomerSignature != null) {
+      return onSaveCustomerSignature!(signatureDataUrl, signerName);
+    }
+    return _maybeGate(current!);
+  }
+
   @override
   Future<CheckoutSessionDto> abandon({
     required String id,
@@ -207,6 +239,36 @@ class FakeCheckoutApi extends CheckoutApi {
     termsTokenCalls++;
     if (onMintTermsToken != null) return onMintTermsToken!();
     return _maybeGate(termsToken());
+  }
+
+  /// Mint del handoff de inspección + estado de ángulos del servidor. El
+  /// flujo de captura (M2-H4) los pide al cargar, como contexto best-effort:
+  /// sin estos overrides saldrían por el Dio real de `super` y el test
+  /// dependería de que ese fallo caiga en el catch correcto.
+  int handoffTokenCalls = 0;
+  int inspectionStateCalls = 0;
+  Future<HandoffToken> Function()? onMintHandoffToken;
+  Future<MobileInspectionState> Function()? onInspectionState;
+
+  @override
+  Future<HandoffToken> mintHandoffToken(String checkoutSessionId) async {
+    handoffTokenCalls++;
+    if (onMintHandoffToken != null) return onMintHandoffToken!();
+    return _maybeGate(termsToken(token: 'tok_handoff_fixture_0001'));
+  }
+
+  @override
+  Future<MobileInspectionState> getInspectionState(String token) async {
+    inspectionStateCalls++;
+    if (onInspectionState != null) return onInspectionState!();
+    return _maybeGate(
+      MobileInspectionState(
+        angles: [
+          for (final key in kInspectionAngleKeys)
+            InspectionAngle(key: key, label: key),
+        ],
+      ),
+    );
   }
 
   @override
@@ -236,6 +298,32 @@ class FakeCheckoutApi extends CheckoutApi {
         session: current!,
       ),
     );
+  }
+
+  /// `POST /:id/presence` — el LATIDO (M2-H6). Sin este override salía por el
+  /// `Dio()` pelado de `super`, que en un widget test abre un HttpClient real:
+  /// de ahí venían los "A Timer is still pending" que aparecieron al encender
+  /// el latido.
+  ///
+  /// Se cuenta y se guarda la superficie porque las dos cosas son contrato:
+  /// que el latido viaje colgado del poll (no de un temporizador propio) y que
+  /// la app mande `RIDEOPS` y NUNCA un `label` — el nombre lo resuelve el
+  /// servidor con `fullName`, una sola fuente de verdad.
+  int presenceCalls = 0;
+  final presenceSurfaces = <String>[];
+
+  /// Con esto puesto el latido FALLA. Es la prueba de que su fallo no puede
+  /// tocar la pantalla: la presencia es informativa y no bloquea nada.
+  bool presenceFails = false;
+
+  @override
+  Future<void> heartbeatPresence({
+    required String id,
+    CheckoutSurface surface = CheckoutSurface.rideops,
+  }) async {
+    presenceCalls++;
+    presenceSurfaces.add(surface.wire);
+    if (presenceFails) throw StateError('presencia caída');
   }
 
   @override
@@ -279,9 +367,16 @@ class FakeReservationsApi extends ReservationsApi {
   int availableVehiclesCalls = 0;
   Future<List<AvailableVehicle>> Function()? onAvailableVehicles;
 
+  /// Retiene `display-data` en vuelo. Es lo que permite mirar el FRAME de
+  /// "comprobando" del 19A-bis: sin esta compuerta la consulta resuelve en el
+  /// mismo microtask y la prueba nunca ve el estado intermedio que la lámina
+  /// existe para hacer expresable.
+  Completer<void>? displayGate;
+
   @override
   Future<ReservationDisplayData> getDisplayData(String reservationId) async {
     displayDataCalls++;
+    if (displayGate != null) await displayGate!.future;
     if (fail) throw StateError('display-data caído');
     final raw = readJsonFixture('reservation_display_data.json');
     return ReservationDisplayData.fromJson(
@@ -346,4 +441,23 @@ class MutableSessionController extends SessionController {
   SessionState build() => initial;
 
   void emit(SessionState next) => state = next;
+}
+
+/// Salta la antesala de enganche (M2-H6, frames 23A/B/C) cuando el escenario
+/// del test entra a media sesión.
+///
+/// Existe porque la antesala es una pantalla NUEVA en el camino de entrada:
+/// desde H6, abrir una sesión que no está en el paso 1 —o que abrió otra
+/// persona— muestra primero "qué hay hecho / qué falta". Los tests que van a
+/// probar el CUERPO de un paso no deberían tener que saber eso; los que
+/// prueban la antesala la tocan de verdad (`checkout_h6_widgets_test.dart`
+/// para la pantalla, `checkout_h6_controller_test.dart` para cuándo aparece).
+///
+/// No-op cuando la antesala no está: así el mismo helper sirve para escenarios
+/// que arrancan en CONFIRMING.
+Future<void> skipJoinGate(WidgetTester tester) async {
+  final finder = find.byType(CheckoutJoinView);
+  if (finder.evaluate().isEmpty) return;
+  tester.widget<CheckoutJoinView>(finder).onContinue();
+  await tester.pumpAndSettle();
 }

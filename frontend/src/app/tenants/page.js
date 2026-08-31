@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api, TOKEN_KEY, USER_KEY } from '../../lib/client';
+import { EnrollLinkBanner, enrollLinkMessage } from './EnrollLinkBanner';
+import { TENANT_STATUS_OPTIONS, statusOptionsFor, statusChipTone, isKnownStatus } from '../../lib/tenant-status';
 
 const EMPTY_TENANT = { name: '', slug: '', status: 'ACTIVE', plan: 'BETA', carSharingEnabled: false, dealershipLoanerEnabled: false, tollsEnabled: false, citationsEnabled: false, marketIntelligenceEnabled: false };
 const EMPTY_ADMIN = { email: '', fullName: '', password: 'TempPass123!' };
@@ -289,15 +291,24 @@ function Inner({ token, me, logout }) {
   };
 
   /**
-   * Mint the link. The response carries the plaintext token exactly once — it is
-   * stored only as a hash — so it is parked in state and shown until dismissed
-   * rather than flashed in the transient message line. There is no way to ask
-   * for it again; a lost link means minting a new invite.
+   * Mint the link AND have the platform email it to the billing contact.
+   *
+   * The response still carries the plaintext token exactly once — it is stored
+   * only as a hash — so it is parked in state and shown until dismissed rather
+   * than flashed in the transient message line. There is no way to ask for it
+   * again; a lost link means minting a new invite. That is now the fallback
+   * rather than the delivery mechanism, and it is still here because a mistyped
+   * billing address would otherwise leave nobody, anywhere, holding the link.
+   *
+   * A FAILED SEND IS NOT A FAILED REQUEST. The invite exists and is valid; only
+   * the delivery did not happen. Treating it as an error here would tell the
+   * operator nothing happened over a subscription row that very much did, and
+   * he would close the one screen showing the link.
    */
   const sendEnrollLink = async () => {
     if (!enrollFor || !enrollForm) return;
     if (!String(enrollForm.email || '').trim()) {
-      setMsg('A billing contact email is required — it is who the receipts go to.');
+      setMsg('A billing contact email is required — it is where the link is sent and who the receipts go to.');
       return;
     }
     setEnrollBusy(true);
@@ -309,9 +320,7 @@ function Inner({ token, me, logout }) {
       setEnrollLink(out);
       setEnrollFor('');
       setEnrollForm(null);
-      setMsg(out.resent
-        ? 'Previous links revoked and a new one minted.'
-        : 'Enrollment link minted.');
+      setMsg(enrollLinkMessage(out));
       await load();
     } catch (e) {
       setMsg(e.message);
@@ -361,7 +370,11 @@ function Inner({ token, me, logout }) {
                 Review tenant health, enabled products, and the active support scope before creating admins or changing feature flags.
               </p>
             </div>
-            <span className={`status-chip ${activeTenant?.status === 'ACTIVE' ? 'good' : activeTenant ? 'warn' : 'neutral'}`}>
+            {/* DEMO is a showcase tenant, not a fault: bare .status-chip is the
+                brand slot (globals.css 194/1429), which reads notable rather than
+                alarming. Bucketing every non-ACTIVE status into `warn` would paint
+                a healthy demo amber on a banner headed "Review tenant health". */}
+            <span className={`status-chip ${statusChipTone(activeTenant)}`}>
               {activeTenant ? `${activeTenant.name} focused` : 'Choose tenant'}
             </span>
           </div>
@@ -464,8 +477,9 @@ function Inner({ token, me, logout }) {
             <input placeholder="Name" value={tenantForm.name} onChange={(e) => setTenantForm((f) => ({ ...f, name: e.target.value }))} />
             <input placeholder="Slug (e.g. acme-fleet)" value={tenantForm.slug} onChange={(e) => setTenantForm((f) => ({ ...f, slug: e.target.value }))} />
             <select value={tenantForm.status} onChange={(e) => setTenantForm((f) => ({ ...f, status: e.target.value }))}>
-              <option value="ACTIVE">ACTIVE</option>
-              <option value="SUSPENDED">SUSPENDED</option>
+              {TENANT_STATUS_OPTIONS.map((status) => (
+                <option key={status} value={status}>{status}</option>
+              ))}
             </select>
             <select value={tenantForm.plan} onChange={(e) => setTenantForm((f) => ({ ...f, plan: e.target.value }))}>
               {(activePlanOptions.length ? activePlanOptions : [{ code: 'BETA', name: 'Beta' }]).map((plan) => (
@@ -483,35 +497,17 @@ function Inner({ token, me, logout }) {
 
         <div id="tenant-edit-card" className="glass card" style={{ padding: 12 }}>
           <h3 className="section-title">Edit / Suspend Tenants</h3>
-          {/* The link, shown until dismissed. It contains the plaintext invite
-              token, which exists nowhere else — the invite row stores only a
-              sha256 — so this is the single chance to copy it. */}
-          {enrollLink ? (
-            <div className="app-banner" style={{ marginBottom: 10 }}>
-              <div className="stack" style={{ gap: 6 }}>
-                <span className="eyebrow">Enrollment link - copy it now</span>
-                <div className="label">
-                  This is the only time this link is shown. It is stored hashed, so it cannot be
-                  retrieved again — losing it means minting a new one. Send it to the billing
-                  contact; it expires {billingDate(String(enrollLink.expiresAt).slice(0, 10))}.
-                </div>
-                <input readOnly value={enrollLink.url} onFocus={(e) => e.target.select()} />
-                <div className="label">
-                  {enrollLink.subscription.planName} - {money(enrollLink.subscription.amount, enrollLink.subscription.currency)}
-                  {' '}/ {enrollLink.subscription.intervalLength === 12 ? 'year' : 'month'}
-                  {' '}| First charge {billingDate(enrollLink.subscription.startDate)}
-                  {/* trialEndsAt is null for a deferred start. Saying "trial"
-                      here when there is none would be the same error the
-                      customer-facing page is careful to avoid. */}
-                  {enrollLink.subscription.trialEndsAt ? ' | Trial until ' + billingDate(enrollLink.subscription.trialEndsAt) : ' | No trial'}
-                  {' '}| ref {enrollLink.tokenPrefix}...
-                </div>
-              </div>
-              <div className="inline-actions">
-                <button type="button" onClick={() => setEnrollLink(null)}>Done</button>
-              </div>
-            </div>
-          ) : null}
+          {/* The link, shown until dismissed. The platform now EMAILS it to the
+              billing contact (Phase 7), and it is still shown here because the
+              invite row stores only a sha256 — see EnrollLinkBanner for why
+              showing it is the recovery path for a mistyped address rather than
+              a leak. */}
+          <EnrollLinkBanner
+            link={enrollLink}
+            onDismiss={() => setEnrollLink(null)}
+            billingDate={billingDate}
+            money={money}
+          />
           <div className="table-scroll">
           <table className="tenants-table">
             <thead><tr><th>Name</th><th>Slug</th><th>Status</th><th>Plan</th><th>Billing</th><th>Car Sharing</th><th>Loaner</th><th>Tolls</th><th>Citations</th><th>Market Int.</th><th>Counts</th><th>Actions</th></tr></thead>
@@ -521,9 +517,12 @@ function Inner({ token, me, logout }) {
                   <td><input value={r.name || ''} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, name: e.target.value } : x))} /></td>
                   <td><input value={r.slug || ''} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, slug: e.target.value } : x))} /></td>
                   <td>
-                    <select value={r.status || 'ACTIVE'} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, status: e.target.value } : x))}>
-                      <option value="ACTIVE">ACTIVE</option>
-                      <option value="SUSPENDED">SUSPENDED</option>
+                    <select aria-label={`Status for ${r.name || r.slug}`} value={r.status || 'ACTIVE'} onChange={(e) => setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, status: e.target.value } : x))}>
+                      {statusOptionsFor(r.status).map((status) => (
+                        <option key={status} value={status}>
+                          {isKnownStatus(status) ? status : `${status} (unrecognized)`}
+                        </option>
+                      ))}
                     </select>
                   </td>
                   <td>
@@ -575,6 +574,13 @@ function Inner({ token, me, logout }) {
                           value={enrollForm.email}
                           onChange={(e) => setEnrollForm((f) => ({ ...f, email: e.target.value }))}
                         />
+                        {/* The link is EMAILED here (Phase 7), so this field is
+                            no longer just a label on a receipt — a typo sends
+                            the enrollment link into a void. Said before the
+                            press, not only in the banner afterwards. */}
+                        <div className="label">
+                          The enrollment link is emailed to this address. Read it twice.
+                        </div>
                         <select
                           value={enrollForm.planCode}
                           onChange={(e) => setEnrollForm((f) => ({ ...f, planCode: e.target.value }))}
@@ -608,7 +614,7 @@ function Inner({ token, me, logout }) {
                         </div>
                         <div className="inline-actions">
                           <button type="button" onClick={sendEnrollLink} disabled={enrollBusy}>
-                            {enrollBusy ? 'Minting...' : 'Mint link'}
+                            {enrollBusy ? 'Sending...' : 'Send link'}
                           </button>
                           <button
                             type="button"

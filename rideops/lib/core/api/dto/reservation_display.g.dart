@@ -22,30 +22,36 @@ Map<String, dynamic> _$ReservationDisplayDataToJson(
   'branding': instance.branding,
 };
 
-_DisplayReservation _$DisplayReservationFromJson(Map<String, dynamic> json) =>
-    _DisplayReservation(
-      id: json['id'] as String,
-      reservationNumber: json['reservationNumber'] as String?,
-      vehicle: json['vehicle'] == null
-          ? null
-          : DisplayVehicle.fromJson(json['vehicle'] as Map<String, dynamic>),
-      customer: json['customer'] == null
-          ? null
-          : DisplayCustomer.fromJson(json['customer'] as Map<String, dynamic>),
-      vehicleTypeId: json['vehicleTypeId'] as String?,
-      rentalAgreement: json['rentalAgreement'] == null
-          ? null
-          : DisplayAgreement.fromJson(
-              json['rentalAgreement'] as Map<String, dynamic>,
-            ),
-      pickupAt: const IsoDateTimeConverter().fromJson(
-        json['pickupAt'] as String?,
-      ),
-      customerInfoCompletedAt: const IsoDateTimeConverter().fromJson(
-        json['customerInfoCompletedAt'] as String?,
-      ),
-      workflowMode: json['workflowMode'] as String?,
-    );
+_DisplayReservation _$DisplayReservationFromJson(
+  Map<String, dynamic> json,
+) => _DisplayReservation(
+  id: json['id'] as String,
+  reservationNumber: json['reservationNumber'] as String?,
+  vehicle: json['vehicle'] == null
+      ? null
+      : DisplayVehicle.fromJson(json['vehicle'] as Map<String, dynamic>),
+  customer: json['customer'] == null
+      ? null
+      : DisplayCustomer.fromJson(json['customer'] as Map<String, dynamic>),
+  vehicleTypeId: json['vehicleTypeId'] as String?,
+  rentalAgreement: json['rentalAgreement'] == null
+      ? null
+      : DisplayAgreement.fromJson(
+          json['rentalAgreement'] as Map<String, dynamic>,
+        ),
+  pickupAt: const IsoDateTimeConverter().fromJson(json['pickupAt'] as String?),
+  customerInfoCompletedAt: const IsoDateTimeConverter().fromJson(
+    json['customerInfoCompletedAt'] as String?,
+  ),
+  workflowMode: json['workflowMode'] as String?,
+  status: json['status'] as String?,
+  returnAt: const IsoDateTimeConverter().fromJson(json['returnAt'] as String?),
+  returnLocation: json['returnLocation'] == null
+      ? null
+      : DisplayLocation.fromJson(
+          json['returnLocation'] as Map<String, dynamic>,
+        ),
+);
 
 Map<String, dynamic> _$DisplayReservationToJson(_DisplayReservation instance) =>
     <String, dynamic>{
@@ -60,7 +66,16 @@ Map<String, dynamic> _$DisplayReservationToJson(_DisplayReservation instance) =>
         instance.customerInfoCompletedAt,
       ),
       'workflowMode': instance.workflowMode,
+      'status': instance.status,
+      'returnAt': const IsoDateTimeConverter().toJson(instance.returnAt),
+      'returnLocation': instance.returnLocation,
     };
+
+_DisplayLocation _$DisplayLocationFromJson(Map<String, dynamic> json) =>
+    _DisplayLocation(id: json['id'] as String, name: json['name'] as String?);
+
+Map<String, dynamic> _$DisplayLocationToJson(_DisplayLocation instance) =>
+    <String, dynamic>{'id': instance.id, 'name': instance.name};
 
 _DisplayCustomer _$DisplayCustomerFromJson(Map<String, dynamic> json) =>
     _DisplayCustomer(

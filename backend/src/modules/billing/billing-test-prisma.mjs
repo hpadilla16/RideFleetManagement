@@ -53,18 +53,27 @@ function compare(a, b) {
 function matchVal(val, cond) {
   const v = val ?? null;
   if (cond && typeof cond === 'object' && !(cond instanceof Date)) {
-    if ('in' in cond) return cond.in.includes(v);
-    if ('not' in cond) return v !== cond.not;
-    if ('gt' in cond) return v != null && compare(v, cond.gt) > 0;
-    if ('gte' in cond) return v != null && compare(v, cond.gte) >= 0;
-    if ('lt' in cond) return v != null && compare(v, cond.lt) < 0;
-    if ('lte' in cond) return v != null && compare(v, cond.lte) <= 0;
+    // EVERY operator present must hold — Prisma ANDs them (2026-08-28, Phase 5).
+    //
+    // This used to `return` on the first operator it recognised, so a compound
+    // filter like `{ not: null, lte: cutoff }` silently degraded to `not: null`
+    // and the fake answered a question nobody asked. Found by the dunning suite,
+    // where it made a tenant five days into a six-day grace window look overdue.
+    // A fake that quietly widens a predicate is worse than no fake: the suite
+    // goes green on a filter production would have narrowed.
+    let ok = true;
+    if ('in' in cond) ok = ok && cond.in.includes(v);
+    if ('not' in cond) ok = ok && v !== cond.not;
+    if ('gt' in cond) ok = ok && v != null && compare(v, cond.gt) > 0;
+    if ('gte' in cond) ok = ok && v != null && compare(v, cond.gte) >= 0;
+    if ('lt' in cond) ok = ok && v != null && compare(v, cond.lt) < 0;
+    if ('lte' in cond) ok = ok && v != null && compare(v, cond.lte) <= 0;
     // The heartbeat separates real Authorize.Net deliveries (`net.authorize.*`)
     // from the reconciler's own synthetic rows (`reconcile.*`) with a prefix
     // match. Modelled rather than approximated, because counting a synthetic row
     // as a delivery is precisely the bug that filter exists to prevent.
-    if ('startsWith' in cond) return typeof v === 'string' && v.startsWith(cond.startsWith);
-    return true;
+    if ('startsWith' in cond) ok = ok && typeof v === 'string' && v.startsWith(cond.startsWith);
+    return ok;
   }
   if (v instanceof Date || cond instanceof Date) {
     return v != null && cond != null && new Date(v).getTime() === new Date(cond).getTime();

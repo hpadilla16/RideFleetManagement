@@ -92,7 +92,7 @@ tenantsRouter.post('/', async (req, res, next) => {
 
 tenantsRouter.patch('/:id', async (req, res, next) => {
   try {
-    const tenant = await tenantsService.updateTenant(req.params.id, req.body || {});
+    const tenant = await tenantsService.updateTenant(req.params.id, req.body || {}, { req });
     res.json(tenant);
   } catch (e) {
     res.status(400).json({ error: e.message });
@@ -113,13 +113,23 @@ tenantsRouter.patch('/:id', async (req, res, next) => {
  * short-circuits on isSuperAdmin before it checks the list and would therefore
  * let an ADMIN through if the list ever changed (design §8).
  *
- * THE RESPONSE CARRIES THE PLAINTEXT TOKEN, EXACTLY ONCE, INSIDE THE URL. It is
- * stored only as a sha256 hash, so this response is the only chance to capture
- * it and there is no "show me that link again". That is a deliberate cost of
- * hashing (autopay-invites.service.js) and the reason the caller is expected to
- * put it straight into an email. It is never logged and never audited — the
- * audit row carries the 8-character tokenPrefix so support can answer "is this
- * the link I sent?" without the trail itself becoming a way in.
+ * SINCE PHASE 7 THIS ALSO EMAILS THE LINK to the billing contact typed on the
+ * invite, so the operator no longer copies it out of a banner by hand.
+ *
+ * THE RESPONSE STILL CARRIES THE PLAINTEXT TOKEN, EXACTLY ONCE, INSIDE THE URL,
+ * and that is now a decision rather than an inheritance. It is stored only as a
+ * sha256 hash, so this response is the only chance to capture it and there is no
+ * "show me that link again" (autopay-invites.service.js). Dropping the URL once
+ * the email exists would have removed the ONLY way back from a mistyped billing
+ * address — the link would go to an inbox nobody reads and no one could retrieve
+ * it — while buying nothing: hashing defends against a database DUMP, and
+ * handing the plaintext to the authenticated SUPER_ADMIN who just minted it is
+ * not a dump. The re-issue path above corrects a typo somebody NOTICED; the
+ * visible URL is what covers the one they did not.
+ *
+ * The token is still never logged and never audited — the audit rows carry the
+ * 8-character tokenPrefix so support can answer "is this the link I sent?"
+ * without the trail itself becoming a way in.
  *
  * 400, not 500, on a refusal: "this tenant already has a live subscription" and
  * "that plan has no price" are both things the operator can act on, and they
@@ -155,6 +165,23 @@ tenantsRouter.post('/:id/billing/enroll-link', requireSuperAdmin, async (req, re
       url: out.url,
       tokenPrefix: out.invite.tokenPrefix,
       expiresAt: out.invite.expiresAt,
+      // Phase 7: the platform emails the link to the billing contact. The URL
+      // above is returned ANYWAY, and that is deliberate — see below.
+      //
+      // `emailed: false` is NOT an error and does not turn this into a 4xx. The
+      // invite exists, it is valid, and the operator is holding the only copy of
+      // a link that is stored hashed. Failing the request at this point would
+      // read as "nothing happened" over a subscription row that very much did,
+      // and the recoverable situation (send it by hand) would become an
+      // unrecoverable one. The UI says what happened and shows the URL.
+      emailed: !!out.emailed,
+      // Echoed back so a typo is visible at the moment of sending, next to the
+      // link, rather than discovered days later when nobody enrolled.
+      emailTo: out.emailTo,
+      // Our own coarse code — SENT | NO_RECIPIENT | MAILER_NOT_CONFIGURED |
+      // SEND_FAILED. Never the mail provider's free text, which quotes the body
+      // back, and the body carries the link.
+      emailResult: out.emailResult,
       // True when an unauthorised PENDING row was reused and its old links
       // revoked, rather than a new subscription being created.
       resent: !!out.resent,

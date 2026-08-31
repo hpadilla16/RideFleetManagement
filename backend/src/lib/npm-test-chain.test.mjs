@@ -33,6 +33,11 @@ const KNOWN_OUT = {
   'test:module-access-audit': 'DB-backed (.db.test.mjs)',
   'test:customer-inspection': 'DB-backed',
   'test:customer-docs-backfill': 'DB-backed (storage backfill script)',
+  // Boots embedded-postgres: the pre-check-in atomicity + double-tap cases can
+  // only be shown against a real transaction, and the chain must stay runnable
+  // on a laptop with no Postgres. Run it with `npm run test:precheckin-charges`
+  // after `npm install --no-save embedded-postgres`.
+  'test:precheckin-charges': 'DB-backed (embedded-postgres)',
   // Boots its own throwaway Postgres, but only after `npm install --no-save
   // embedded-postgres` — which `npm ci` does not provide. In the chain it
   // would wedge `npm test` for everyone on a fresh checkout. Its DB-free half
@@ -103,14 +108,40 @@ const CI_GATED = {
     'the no-auth /api/sign payload: whose brand the renter sees while signing',
   'test:tenant-brand':
     'the shared cascade behind that brand, and the counter screen that shows the QR',
+  'test:presence-boundary':
+    'which surfaces may receive the presence array — it carries staff names and, '
+    + 'since M2-H6, employee ids; the customer phone and the lobby kiosk must get neither',
+  'test:billing-suspension':
+    'what a billing RESTORE puts Tenant.status back to. ACTIVE is not a label on that '
+    + 'column, it is the positive gate the public booking surfaces match on, and isDemo '
+    + 'gates nothing — a restore that hardcodes ACTIVE publishes the demo tenant',
+  'test:billing-model':
+    'the two 20260828 migrations against schema.prisma. There is no Postgres in this '
+    + 'workflow, so this file-level comparison is the ONLY pre-production check that '
+    + 'SQL gets before it runs on the live database at boot',
 };
 
 function ciWorkflowRunLines() {
   const yml = readFileSync(new URL('../../../.github/workflows/beta-ci.yml', import.meta.url), 'utf8');
-  // Every `run:` body in the file, joined. Deliberately not a YAML parse: the
-  // question is only "does this command line invoke the script", and adding a
-  // yaml dependency to a guard is how guards stop being cheap to keep.
-  return yml;
+  // Deliberately not a YAML parse: the question is only "does a command line in
+  // this file invoke the script", and adding a yaml dependency to a guard is how
+  // guards stop being cheap to keep.
+  //
+  // BUT COMMENT LINES ARE STRIPPED FIRST, because without that this guard reads
+  // the whole file and a suite MENTIONED in a comment counts as a suite that
+  // RUNS. That is not hypothetical: the money-path step now carries a comment
+  // block naming these very suites, and it only failed to fool this check
+  // because it happens to write them without the `npm run` prefix. The next
+  // person to write `npm run test:x` inside a comment while deleting it from the
+  // run line would get a GREEN ratchet over a suite CI never executes — which is
+  // exactly the darkness this guard exists to end.
+  //
+  // Full-line comments only. A trailing `#` inside a run: body is shell, not
+  // YAML, and stripping from there would cut a real command short.
+  return yml
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
 }
 
 test('CI-gated suites are in beta-ci.yml, not only in `npm test`', () => {
@@ -185,7 +216,6 @@ const UNRUN_FILES_BASELINE = new Set([
   'src/modules/reports/fleet-status.report.test.mjs',
   'src/modules/reports/rental-status.report.test.mjs',
   'src/modules/reports/reservations-by-day.report.test.mjs',
-  'src/modules/reports/unpaid-balance.report.test.mjs',
   'src/modules/reports/upcoming-vehicle-sales.report.test.mjs',
   'src/modules/reports/utilization.report.test.mjs',
   'src/modules/reservations/list-page-date-filter.test.mjs',

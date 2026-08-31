@@ -77,6 +77,38 @@ historia de reconciliación "409 → re-fetch GET /:id → reconciliar" sigue si
 pero los códigos a manejar son: `ILLEGAL_TRANSITION`, `ENTRY_GUARD`, `SESSION_TERMINAL`,
 `VEHICLE_CONFLICT`, `CHECKOUT_TERMINAL`.
 
+> **SUPERADO por M2-P2 y M2-H8 (2026-08-17). El párrafo de arriba se conserva como
+> registro de lo que era cierto cuando se escribió; lo que sigue es el contrato vigente.**
+>
+> - **Sí hay versioning optimista**: `CheckoutSession.stateVersion` (P2), **opt-in**. El
+>   cliente que manda `expectedVersion` recibe 409 `STALE_VERSION`; el que no lo manda no
+>   nota nada. No es un ETag, pero cubre la misma necesidad.
+> - **`transition()` ya NO es "intencionalmente no idempotente"** — H8 **revierte esa
+>   decisión deliberada**, y por eso se documenta aquí en vez de dejarlo como efecto
+>   lateral de un PR. La regla nueva, exacta:
+>   - `toStep` == el paso en el que la sesión YA está → **200 con la fila fresca**. No
+>     aparece evento nuevo (la atribución sigue nombrando a quien de verdad la movió) y no
+>     sube `stateVersion`. Cubre tanto la carrera entre superficies como el doble-submit
+>     sin carrera, porque `canTransition(S, S)` es `false` en ambos casos: el endpoint
+>     queda **propiamente idempotente**, no sólo tolerante a carreras.
+>   - `toStep` **más atrás** que el paso actual → sigue siendo 409 `ILLEGAL_TRANSITION`
+>     duro. "Ya estoy ahí" no es "ya pasé de largo".
+>   - Mandar `expectedVersion` **desactiva** la idempotencia: ese llamador pidió enterarse
+>     y recibe `STALE_VERSION` con la fila fresca.
+>   - El money-path no se debilita: `spin-charge` gatea el cobro por `currentStep` de forma
+>     independiente, así que un 200 en `→ PAID` nunca autoriza un segundo cargo.
+> - **El commit es compare-and-set** (`updateMany` condicionado por `currentStep`, y por
+>   `stateVersion` cuando vino `expectedVersion`), así que el TRANSITION duplicado y la
+>   ventana TOCTOU de `assertExpectedVersion` están cerrados.
+> - **Hueco que sigue abierto**: `stampSideEffect` sigue siendo read-then-write sin candado
+>   (H8 no se lo aplica a propósito: no tiene contra qué comparar, y el único guardia
+>   análogo rompería los re-stamps legítimos). Y `events` sigue siendo una columna TEXT con
+>   **14 escritores sin candado**, de los cuales H8 sólo serializa `transition` contra
+>   `transition`.
+> - **Códigos 409 nuevos a manejar**: `STALE_VERSION` (P2) y `CONCURRENT_MODIFICATION`
+>   (H8). Ambos traen la fila fresca en `session`, así que para ELLOS el re-fetch del
+>   contrato "409 → GET /:id" ya no hace falta.
+
 **Device pairing como base para registro de dispositivos de staff: patrón sí, tabla no.**
 - Lo copiable: higiene criptográfica completa y probada — token hash-only (SHA-256, plaintext
   nunca persiste), `timingSafeEqual`, rotate/revoke con `tokenVersion`, heartbeat

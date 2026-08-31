@@ -1055,12 +1055,44 @@ export const reservationsService = {
       ? await readFreshCounters({ tenantId: counterTenantId, day: dayStart, programScope: scope?.programScope })
       : null;
 
+    // Unpaid balances (2026-08-28) — the Ops Hub tile that replaced Fee
+    // Advisories. RentalAgreement.balance is stored (max(0, total - paidAmount)
+    // at close), so `balance > 0` is a direct indexed count rather than a
+    // free-text scan. Deliberately mirrors the `unpaid-balance` Reports v2
+    // report's own filter so the tile and the report it links to agree:
+    // every status except CANCELLED, which by definition owes nothing.
+    // CLOSED/FINALIZED agreements are the point of the tile, not noise —
+    // an open rental carrying a balance is normal, a closed one is money
+    // that left the lot unpaid.
+    //
+    // Scoped the same three ways the reservation counters above are: tenant,
+    // location (pickup OR return, matching listPage semantics) and program
+    // (via the required reservation relation, since workflowMode lives there).
+    // NOT read from the daily counter table — that table stores whole-tenant
+    // reservation counts and would leak across a location-scoped user.
+    const agreementWhere = {
+      ...(scope?.tenantId ? { tenantId: scope.tenantId } : {}),
+      balance: { gt: 0 },
+      status: { notIn: ['CANCELLED'] }
+    };
+    if (summaryLocIds.length) {
+      agreementWhere.OR = [
+        { pickupLocationId: { in: summaryLocIds } },
+        { returnLocationId: { in: summaryLocIds } }
+      ];
+    }
+    const agreementProgramWhere = reservationProgramWhereForScope(scope);
+    if (Object.keys(agreementProgramWhere).length) {
+      agreementWhere.reservation = agreementProgramWhere;
+    }
+
     const [
       pickupsToday,
       returnsToday,
       checkedOut,
       feeAdvisories,
       noShows,
+      unpaidBalances,
       nextPickup,
       nextReturn,
       nextFeeAdvisory,
@@ -1112,6 +1144,10 @@ export const reservationsService = {
               status: 'NO_SHOW'
             }
           }),
+      // .catch(() => 0): this Promise.all fans out the whole Ops Hub. A
+      // rejection here would take the pickups/returns/next-item queries down
+      // with it, so the newest counter degrades to 0 on its own instead.
+      prisma.rentalAgreement.count({ where: agreementWhere }).catch(() => 0),
       prisma.reservation.findFirst({
         where: {
           ...where,
@@ -1252,6 +1288,7 @@ export const reservationsService = {
       checkedOut,
       feeAdvisories,
       noShows,
+      unpaidBalances,
       totalReservations,
       nextItems,
       tenantTimeZone

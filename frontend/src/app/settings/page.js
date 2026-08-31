@@ -24,6 +24,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { TLIntegrationPanel } from '../../components/settings/TLIntegrationPanel';
@@ -116,6 +117,7 @@ export default function SettingsPage() {
 }
 
 function SettingsInner({ token, me, logout }) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState('agreement');
   const [msg, setMsg] = useState('');
 
@@ -339,6 +341,10 @@ function SettingsInner({ token, me, logout }) {
         spin: {
           ...DEFAULT_PAYMENT_GATEWAY_CONFIG.spin,
           ...(value?.spin || {})
+        },
+        ipos: {
+          ...DEFAULT_PAYMENT_GATEWAY_CONFIG.ipos,
+          ...(value?.ipos || {})
         },
         autocharge: {
           ...DEFAULT_PAYMENT_GATEWAY_CONFIG.autocharge,
@@ -759,6 +765,10 @@ function SettingsInner({ token, me, logout }) {
       spin: {
         ...DEFAULT_PAYMENT_GATEWAY_CONFIG.spin,
         ...(out?.spin || {})
+      },
+      ipos: {
+        ...DEFAULT_PAYMENT_GATEWAY_CONFIG.ipos,
+        ...(out?.ipos || {})
       }
     });
     setMsg('Payment gateway settings saved');
@@ -2480,7 +2490,9 @@ function SettingsInner({ token, me, logout }) {
     ? ({
         authorizenet: 'Authorize.Net',
         stripe: 'Stripe',
-        square: 'Square'
+        square: 'Square',
+        spin: 'SPIn',
+        ipos: 'iPOS Payment Links'
       }[String(paymentGatewayConfig?.gateway || '').toLowerCase()] || 'Not set')
     : '—';
   const settingsReadyCount = [
@@ -2956,6 +2968,7 @@ function SettingsInner({ token, me, logout }) {
                   <option value="stripe">Stripe</option>
                   <option value="square">Square</option>
                   <option value="spin">SPIn</option>
+                  <option value="ipos">{t('settingsPayments.ipos.gatewayOption')}</option>
                 </select>
               </div>
               <div className="stack">
@@ -3141,6 +3154,79 @@ function SettingsInner({ token, me, logout }) {
                 These credentials are <strong>per tenant</strong>: checkout charges settle into the merchant account behind the TPN saved here.
                 The Auth Key is encrypted at rest and never shown again — leave it blank to keep the saved one.
                 Auth Key <strong>and</strong> TPN must BOTH be set; a half-filled pair is refused at the counter rather than paired with another terminal.
+              </div>
+            </section>
+
+            <section className="glass card section-card">
+              <div className="row-between">
+                <h3 style={{ margin: 0 }}>{t('settingsPayments.ipos.title')}</h3>
+                <label className="label"><input type="checkbox" checked={!!paymentGatewayConfig.ipos?.enabled} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, enabled: e.target.checked } })} /> {t('settingsPayments.ipos.enabled')}</label>
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">{t('settingsPayments.ipos.environment')}</label>
+                  <select value={paymentGatewayConfig.ipos?.environment || 'production'} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, environment: e.target.value } })}>
+                    <option value="sandbox">{t('settingsPayments.ipos.envSandbox')}</option>
+                    <option value="production">{t('settingsPayments.ipos.envProduction')}</option>
+                  </select>
+                </div>
+                <div className="stack">
+                  <label className="label">{t('settingsPayments.ipos.hppToken')}</label>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={paymentGatewayConfig.ipos?.hppToken || ''}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, hppToken: e.target.value } })}
+                    placeholder={paymentGatewayConfig.ipos?.hasHppToken ? t('settingsPayments.ipos.tokenSavedPlaceholder') : t('settingsPayments.ipos.tokenEmptyPlaceholder')}
+                  />
+                </div>
+                <div className="stack">
+                  <label className="label">{t('settingsPayments.ipos.apiKey')}</label>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={paymentGatewayConfig.ipos?.apiKey || ''}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, apiKey: e.target.value } })}
+                    placeholder={paymentGatewayConfig.ipos?.hasApiKey ? t('settingsPayments.ipos.tokenSavedPlaceholder') : t('settingsPayments.ipos.apiKeyEmptyPlaceholder')}
+                  />
+                  <span className="hint">{t('settingsPayments.ipos.apiKeyHint')}</span>
+                </div>
+                <div className="stack">
+                  <label className="label">{t('settingsPayments.ipos.secretKey')}</label>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={paymentGatewayConfig.ipos?.secretKey || ''}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, secretKey: e.target.value } })}
+                    placeholder={paymentGatewayConfig.ipos?.hasSecretKey ? t('settingsPayments.ipos.tokenSavedPlaceholder') : t('settingsPayments.ipos.secretKeyEmptyPlaceholder')}
+                  />
+                  <span className="hint">{t('settingsPayments.ipos.secretKeyHint')}</span>
+                </div>
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">{t('settingsPayments.ipos.tpn')}</label>
+                  <input
+                    value={paymentGatewayConfig.ipos?.tpn || ''}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, tpn: e.target.value } })}
+                    placeholder={paymentGatewayConfig.spin?.tpn ? t('settingsPayments.ipos.tpnFallbackPlaceholder', { tpn: paymentGatewayConfig.spin.tpn }) : t('settingsPayments.ipos.tpnEmptyPlaceholder')}
+                  />
+                </div>
+                <div className="stack">
+                  <label className="label">{t('settingsPayments.ipos.expiryDays')}</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={paymentGatewayConfig.ipos?.expiryDays ?? 3}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, expiryDays: e.target.value } })}
+                  />
+                </div>
+              </div>
+              <div className="surface-note">
+                {t('settingsPayments.ipos.note1')}{' '}
+                <strong>{t('settingsPayments.ipos.note2')}</strong>{' '}
+                {t('settingsPayments.ipos.note3')}
               </div>
             </section>
 

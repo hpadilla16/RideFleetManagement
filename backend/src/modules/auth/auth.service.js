@@ -12,6 +12,7 @@ import {
   isEnforcementKilled
 } from '../../lib/two-factor-policy.js';
 import { twoFactorService } from './two-factor.service.js';
+import { suspensionMode, SUSPENSION_MODE } from '../../lib/tenant-suspension.js';
 
 // 30s TTL bounds cross-worker staleness: role/module-access invalidations only
 // clear the current worker's cache, so siblings keep stale permissions until TTL expires.
@@ -199,6 +200,33 @@ async function buildSessionUser(user) {
     // /me). The secret itself is never loaded here.
     twoFactorEnabled: !!user.twoFactorEnabled,
     twoFactorEnrolledAt: user.twoFactorEnrolledAt || null,
+    // Tenant Subscriptions Phase 5 (2026-08-28): the tenant's OWN status, so
+    // requireAuth's suspension gate can decide without a second query and the
+    // frontend can render the hold screen on first paint instead of waiting
+    // for a 403. NULL means "not loaded on this path" (register, and any
+    // future caller that forgets the relation) — the gate reads null as NOT
+    // suspended, which is the fail-OPEN direction on purpose: a hydration gap
+    // must never lock a paying tenant out. The 403 code is the backstop, and
+    // getSessionUser — the path every authenticated request takes — always
+    // loads it.
+    tenantStatus: user.tenant?.status ?? null,
+    tenantBillingSuspendedAt: user.tenant?.billingSuspendedAt ?? null,
+    // IS THIS SESSION ACTUALLY HELD RIGHT NOW? The frontend must key its hold
+    // screen off THIS, never off tenantStatus alone.
+    //
+    // Phase 4 already sets Tenant.status='SUSPENDED' on the manual lever, and
+    // today those staff keep the whole app. If the hold screen rendered on
+    // status alone, deploying Phase 5 would lock out every already-suspended
+    // tenant's staff the instant the bundle shipped — enforcing the gate in the
+    // browser while the switch that governs it was still off. That is the exact
+    // opposite of shipping inert.
+    //
+    // So the SERVER decides, from the same env the middleware reads, and says
+    // so. Enforce ⇒ held. Off or log-only ⇒ not held, because in those modes
+    // the request really does go through and a screen saying otherwise would be
+    // lying about what the user can do.
+    tenantAccessHeld: suspensionMode() === SUSPENSION_MODE.ENFORCE
+      && String(user.tenant?.status || '').toUpperCase() === 'SUSPENDED',
     moduleAccess: moduleAccess.effective,
     tenantModuleAccess: moduleAccess.tenantConfig,
     userModuleAccess: moduleAccess.userConfig
@@ -251,7 +279,16 @@ export const authService = {
           // twoFactorSecret / twoFactorPendingSecret into a session.
           twoFactorEnabled: true,
           twoFactorEnrolledAt: true,
-          hostProfile: { select: { id: true } }
+          hostProfile: { select: { id: true } },
+          // Tenant Subscriptions Phase 5 (2026-08-28): the suspension gate in
+          // requireAuth needs the TENANT's status, and this is the only place
+          // every authenticated request already loads a row. Two non-secret
+          // columns on a relation the user row already points at — no extra
+          // query on the hot path, because Prisma folds it into this one.
+          //
+          // A user with no tenantId (a platform account) simply gets null here
+          // and the gate treats that as "no tenant status to judge".
+          tenant: { select: { status: true, billingSuspendedAt: true } }
         }
       });
       if (!user || !user.isActive) return null;
@@ -261,6 +298,48 @@ export const authService = {
 
   invalidateSessionCache(userId) {
     if (userId) cache.del(globalKey('session', userId));
+  },
+
+  /**
+   * Bust the cached session of EVERY user of one tenant.
+   *
+   * Tenant Subscriptions Phase 5 (2026-08-28). This is a FIRST-CLASS PART OF
+   * SUSPENSION, not a detail. `getSessionUser` caches the hydrated row —
+   * tenantStatus included — for SESSION_CACHE_TTL_MS. Without this bust a
+   * suspension would take effect whenever each user's cache happened to expire
+   * and a restore would leave people locked out for the same arbitrary window.
+   * "Your account is on hold" appearing up to half a minute after the operator
+   * clicked, per user, at random, is indefensible on a screen that is telling
+   * a paying customer why their business stopped working.
+   *
+   * CROSS-WORKER: `cache.del` publishes on the Redis invalidation channel when
+   * REDIS_URL is set (lib/cache.js header), so siblings drop the same keys.
+   * With no Redis it is this worker only and siblings converge within the 30s
+   * TTL — the same bound the codebase already accepts for role changes and
+   * human token revocation. Stated here so nobody reads "instant" as a
+   * guarantee it cannot make.
+   *
+   * BEST-EFFORT BY CONSTRUCTION. It is called AFTER the status write has
+   * committed, and it never throws into its caller: a cache miss degrades to
+   * "takes effect within 30s", while a throw here would fail a suspension that
+   * has already happened in the database and leave the operator with an error
+   * message describing an action that did in fact occur.
+   */
+  async invalidateTenantSessions(tenantId, deps = {}) {
+    const db = deps.prisma || prisma;
+    const id = String(tenantId || '');
+    if (!id) return { ok: false, invalidated: 0 };
+    try {
+      const users = await db.user.findMany({ where: { tenantId: id }, select: { id: true } });
+      for (const u of users) cache.del(globalKey('session', u.id));
+      return { ok: true, invalidated: users.length };
+    } catch (e) {
+      logger.warn('[auth] tenant session cache bust failed — sessions will converge on TTL', {
+        tenantId: id,
+        error: e?.message || String(e)
+      });
+      return { ok: false, invalidated: 0 };
+    }
   },
 
   // VozIA Fase 3 (2026-07-03) — mint a long-lived token for a service account
@@ -336,7 +415,13 @@ export const authService = {
     cache.del(globalKey('session', userId));
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      include: { hostProfile: { select: { id: true } } }
+      // `tenant` (Phase 5): so a session minted by login / refresh / change-password
+      // carries tenantStatus exactly like a hydrated one. Without it the hold
+      // screen would drop the moment the token refreshed underneath it.
+      include: {
+        hostProfile: { select: { id: true } },
+        tenant: { select: { status: true, billingSuspendedAt: true } }
+      }
     });
     if (!user || !user.isActive) throw new Error('User not found or inactive');
     const token = signToken(user);
@@ -369,7 +454,13 @@ export const authService = {
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
-      include: { hostProfile: { select: { id: true } } }
+      // `tenant` (Phase 5): so a session minted by login / refresh / change-password
+      // carries tenantStatus exactly like a hydrated one. Without it the hold
+      // screen would drop the moment the token refreshed underneath it.
+      include: {
+        hostProfile: { select: { id: true } },
+        tenant: { select: { status: true, billingSuspendedAt: true } }
+      }
     });
     if (!user || !user.isActive) throw new Error('Invalid credentials');
 
@@ -422,7 +513,13 @@ export const authService = {
   async verifyLogin({ userId, code }) {
     const user = await prisma.user.findUnique({
       where: { id: String(userId || '') },
-      include: { hostProfile: { select: { id: true } } }
+      // `tenant` (Phase 5): so a session minted by login / refresh / change-password
+      // carries tenantStatus exactly like a hydrated one. Without it the hold
+      // screen would drop the moment the token refreshed underneath it.
+      include: {
+        hostProfile: { select: { id: true } },
+        tenant: { select: { status: true, billingSuspendedAt: true } }
+      }
     });
     if (!user || !user.isActive) throw new Error('Invalid credentials');
     if (!user.twoFactorEnabled) throw new Error('Two-factor authentication is not enabled for this account');
@@ -488,7 +585,13 @@ export const authService = {
   async changePassword({ userId, currentPassword, newPassword }) {
     const user = await prisma.user.findUnique({
       where: { id: String(userId || '') },
-      include: { hostProfile: { select: { id: true } } }
+      // `tenant` (Phase 5): so a session minted by login / refresh / change-password
+      // carries tenantStatus exactly like a hydrated one. Without it the hold
+      // screen would drop the moment the token refreshed underneath it.
+      include: {
+        hostProfile: { select: { id: true } },
+        tenant: { select: { status: true, billingSuspendedAt: true } }
+      }
     });
     if (!user || !user.isActive) throw new Error('User not found or inactive');
     if (user.isServiceAccount) throw new Error('Service accounts cannot change passwords');
@@ -515,7 +618,13 @@ export const authService = {
         // sessions" behavior.
         tokenVersion: { increment: 1 }
       },
-      include: { hostProfile: { select: { id: true } } }
+      // `tenant` (Phase 5): so a session minted by login / refresh / change-password
+      // carries tenantStatus exactly like a hydrated one. Without it the hold
+      // screen would drop the moment the token refreshed underneath it.
+      include: {
+        hostProfile: { select: { id: true } },
+        tenant: { select: { status: true, billingSuspendedAt: true } }
+      }
     });
 
     cache.del(globalKey('session', user.id));

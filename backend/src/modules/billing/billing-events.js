@@ -71,6 +71,10 @@ export const BILLING_EVENT = Object.freeze({
   RECONCILE_STATUS_DRIFT: 'reconcile.status-drift',
   RECONCILE_MISSING_CHARGE: 'reconcile.missing-charge',
   RECONCILE_NO_CHARGE_OBSERVED: 'reconcile.no-charge-observed',
+  // Phase 6: a scheduled plan/amount change reached its boundary and the sweep
+  // applied it. The notificationId is deterministic on the EFFECTIVE DATE, so
+  // two workers — or two days — cannot record one apply twice.
+  RECONCILE_PLAN_CHANGE_APPLIED: 'reconcile.plan-change-applied',
 });
 
 /**

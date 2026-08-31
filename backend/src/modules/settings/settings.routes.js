@@ -401,6 +401,28 @@ settingsRouter.put('/long-term-email-templates', requireRole('ADMIN'), async (re
   }
 });
 
+/**
+ * GET /api/settings/payment-capabilities (2026-08-30, View Payments redesign).
+ *
+ * Booleans-only gateway capabilities for the reservation View Payments screen.
+ * Mounted in main.js BEFORE the module-gated settings mount (same precedent as
+ * /api/settings/fee-rates): OPS/AGENT counter staff do not have the 'settings'
+ * module, but the payments screen must know the tenant's gateway to draw the
+ * right controls — an iPOS tenant must never see Authorize.Net furniture.
+ *
+ * DO NOT fold this into GET /payment-gateway: that route is ADMIN-gated
+ * because it returns credential-bearing config. This one returns booleans
+ * derived by derivePaymentCapabilities and nothing else.
+ */
+export const paymentCapabilitiesRouter = Router();
+paymentCapabilitiesRouter.get('/', async (req, res, next) => {
+  try {
+    res.json(await settingsService.getPaymentCapabilities(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
 settingsRouter.get('/payment-gateway', requireRole('ADMIN'), async (_req, res, next) => {
   try {
     const cfg = await settingsService.getPaymentGatewayConfig(scopeFor(_req));
@@ -474,6 +496,19 @@ settingsRouter.post('/payment-gateway/health-check', requireRole('ADMIN'), async
         missing: [
           ...(!cfg?.square?.accessToken ? ['Access Token'] : []),
           ...(!cfg?.square?.locationId ? ['Location ID'] : [])
+        ]
+      },
+      // iPOSpays Hosted Payment Page — customer payment links. The token
+      // itself never reaches this read shape; `hasHppToken` says one is on
+      // file. The TPN may come from the spin block (same tenant's merchant).
+      ipos: {
+        selected: gateway === 'ipos',
+        enabled: !!cfg?.ipos?.enabled,
+        ready: !!(cfg?.ipos?.hasHppToken && (cfg?.ipos?.tpn || cfg?.spin?.tpn)),
+        environment: cfg?.ipos?.environment || 'production',
+        missing: [
+          ...(!(cfg?.ipos?.tpn || cfg?.spin?.tpn) ? ['CloudPOS TPN'] : []),
+          ...(!cfg?.ipos?.hasHppToken ? ['HPP Auth Token'] : [])
         ]
       }
     };

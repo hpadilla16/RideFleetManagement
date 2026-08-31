@@ -21,7 +21,9 @@
  *
  * TWO-CLOCK MODEL (product-owner decision, all periods env-configurable):
  *   - Identity clock (RETENTION_IDENTITY_YEARS, default 4) — the claims window.
- *     Counted from the rental close: RentalAgreement.returnedAt ?? closedAt;
+ *     Counted from the rental close: RentalAgreement.returnedAt ?? closedAt,
+ *     and only once closedAt exists at all (an open agreement is on neither
+ *     clock, however long ago the car came back);
  *     LoanerAgreement.closedAt. At this clock the IDENTITY snapshot is erased
  *     but the accounting facts are KEPT.
  *   - Accounting clock (RETENTION_ACCOUNTING_YEARS, default 10) — PR Hacienda.
@@ -168,6 +170,16 @@ async function agreementIdentityCandidates(prisma, model, cutoff) {
   const where = model === 'rentalAgreement'
     ? {
         piiPurgedAt: null,
+        // The clock starts at THE RENTAL CLOSE, so an agreement that was never
+        // closed is not on it. `closedAt: not null` is what says so. Until
+        // 2026-08-26 the shape said it implicitly: returnedAt was written only
+        // on the paid-in-full branch, which stamps closedAt in the same write,
+        // so returnedAt-set-but-never-closed could not exist. Check-in close
+        // now stamps returnedAt on the with-balance branch too (where the
+        // agreement stays OPEN until the money resolves) — without this
+        // guard that silently made every 4-year-old UNSETTLED rental a purge
+        // candidate, destroying the renter identity behind a debt still owed.
+        closedAt: { not: null },
         OR: [
           { returnedAt: { lt: cutoff } },
           { returnedAt: null, closedAt: { lt: cutoff } },
@@ -187,7 +199,9 @@ async function agreementIdentityCandidates(prisma, model, cutoff) {
 
 async function agreementAccountingCandidates(prisma, model, cutoff) {
   const base = model === 'rentalAgreement'
-    ? { OR: [{ returnedAt: { lt: cutoff } }, { returnedAt: null, closedAt: { lt: cutoff } }] }
+    // closedAt: not null — same guard as the identity clock above: an
+    // agreement still open has not started either clock.
+    ? { closedAt: { not: null }, OR: [{ returnedAt: { lt: cutoff } }, { returnedAt: null, closedAt: { lt: cutoff } }] }
     : { closedAt: { lt: cutoff } };
   // Skip rows already anonymised (idempotency): agreementNumber not sentinel-prefixed.
   const where = { AND: [base, { agreementNumber: { not: { startsWith: ACCOUNTING_REDACT_PREFIX } } }] };
@@ -250,6 +264,65 @@ async function openClaimReservationIds(prisma, reservationIds) {
   return open;
 }
 
+/**
+ * Citation attachments past the IDENTITY clock (2026-08-28).
+ *
+ * These files — agency correspondence, proof of payment, dispute letters,
+ * signed acknowledgements — routinely carry the renter's name, licence details
+ * and address. They are personal data in a FILE, so nulling a column would not
+ * erase them: the row and the stored object both have to go. Hence
+ * CUSTOMER_PII_MAP.citationAttachment is HARD_DELETE and this category exists.
+ *
+ * WHY THE 4-YEAR IDENTITY CLOCK AND NOT THE 10-YEAR ACCOUNTING ONE: a dispute
+ * letter is not an accounting record. The citation itself is a regulatory
+ * record whose facts we retain (RETAIN_STATUTORY); the correspondence about it
+ * is not, and keeping a scan of somebody's licence for a decade because the
+ * fine it relates to is an accounting entry would be exactly the kind of
+ * unpurged pocket the sweep exists to prevent.
+ *
+ * WHY THE ANCHOR IS THE ATTACHMENT'S OWN createdAt, not the rental close:
+ * citations arrive AFTER the rental ends, sometimes years after — a notice
+ * mailed 3 years post-rental would otherwise be purged within months of being
+ * filed, destroying live dispute evidence. Anchoring on when WE received the
+ * document means nothing is held longer than 4 years from the day we obtained
+ * it, and nothing is destroyed before we have had it long enough to be done
+ * with it. Predictable in both directions.
+ *
+ * The open-claim freeze applies as everywhere else: evidence attached to a
+ * citation whose rental still has an open incident, trip incident or damage
+ * report is NOT deleted while that claim is live. Purging the paperwork in the
+ * middle of the dispute it belongs to would be the worst possible time.
+ */
+async function citationAttachmentCandidates(prisma, cutoff) {
+  const rows = await prisma.citationAttachment.findMany({
+    where: { createdAt: { lt: cutoff } },
+    select: { id: true, citationId: true },
+  });
+  if (!rows.length) return [];
+
+  // Resolve each attachment's reservation (via its citation) so the open-claim
+  // freeze can be applied. An attachment on an UNMATCHED citation has no
+  // reservation and therefore no claim to be frozen by — it purges on time.
+  const citationIds = [...new Set(rows.map((r) => r.citationId).filter(Boolean))];
+  const citations = [];
+  for (const c of chunk(citationIds)) {
+    citations.push(...await prisma.citation.findMany({
+      where: { id: { in: c } },
+      select: { id: true, reservationId: true },
+    }));
+  }
+  const reservationByCitation = new Map(citations.map((c) => [c.id, c.reservationId || null]));
+  const reservationIds = [...new Set([...reservationByCitation.values()].filter(Boolean))];
+  const openClaims = await openClaimReservationIds(prisma, reservationIds);
+
+  return rows
+    .filter((r) => {
+      const reservationId = reservationByCitation.get(r.citationId);
+      return !reservationId || !openClaims.has(reservationId);
+    })
+    .map((r) => r.id);
+}
+
 async function hasOpenClaim(prisma, reservationIds) {
   if (!reservationIds.length) return false;
   for (const ids of chunk(reservationIds)) {
@@ -304,6 +377,13 @@ export async function computeCandidates(deps, { now = new Date(), periods = getP
     loanerAgreementAccounting: {
       kind: 'accounting', model: 'loanerAgreement',
       ids: await agreementAccountingCandidates(prisma, 'loanerAgreement', cutoffs.accounting),
+    },
+    // Identity clock, but its own kind: these rows are DELETED (with their
+    // stored files), not anonymised, and they are not a cascade child of any
+    // agreement — see citationAttachmentCandidates for the anchor rationale.
+    citationAttachment: {
+      kind: 'attachment', model: 'citationAttachment',
+      ids: await citationAttachmentCandidates(prisma, cutoffs.identity),
     },
     moduleAccessLog: {
       kind: 'log', model: 'moduleAccessAuditLog',
@@ -386,6 +466,53 @@ async function purgeAccountingBatch(deps, model, ids) {
       await tx[model].update({ where: { id }, data });
     }
   });
+}
+
+/**
+ * HARD-delete a batch of document-attachment rows AND their stored objects.
+ *
+ * Distinct from purgeIdentityBatch on purpose. That one anonymises an
+ * agreement and its cascade CHILDREN, and it collects storage refs only from
+ * the agreement spec — a child spec carrying a storage column would have its
+ * pointer nulled and its BYTES left in the bucket. For a table that is nothing
+ * but pointers to files full of personal data, that failure mode is the whole
+ * risk, so this primitive reaps the objects explicitly.
+ *
+ * Order matters: collect refs → delete rows → delete objects. Refs are read
+ * first because the rows are about to vanish; objects are deleted after the
+ * commit because a storage 500 must not roll back a completed DB purge. A
+ * failed object delete is logged and leaves an orphan blob with no pointer —
+ * strictly better than a live pointer to data we promised to erase.
+ */
+async function purgeAttachmentBatch(deps, model, ids) {
+  const { prisma = defaultPrisma, deleteObject = defaultDeleteObject, logger = defaultLogger } = deps;
+  const spec = Object.values(CUSTOMER_PII_MAP).find((s) => s.model === model);
+
+  let storageRefs = [];
+  if (spec) {
+    for (const c of chunk(ids)) {
+      storageRefs = storageRefs.concat(await collectStorageRefs(prisma, spec, [{ id: { in: c } }]));
+    }
+  }
+
+  let deleted = 0;
+  for (const c of chunk(ids)) {
+    const { count } = await prisma[model].deleteMany({ where: { id: { in: c } } });
+    deleted += count;
+  }
+
+  for (const ref of storageRefs) {
+    try {
+      await deleteObject({ bucket: ref.bucket, path: ref.path });
+    } catch (err) {
+      try {
+        logger.warn('[retention] storage delete failed', {
+          source: ref.source, message: err?.message || String(err),
+        });
+      } catch { /* logging must never throw */ }
+    }
+  }
+  return deleted;
 }
 
 /** Delete a batch of log rows by id (bounded — never an unbounded deleteMany). */
@@ -513,6 +640,9 @@ export async function runSweep(args = {}) {
           break;
         case 'customer':
           processed = await purgeInactiveCustomers(deps, willProcess, { apply });
+          break;
+        case 'attachment':
+          processed = await purgeAttachmentBatch(deps, info.model, willProcess);
           break;
         case 'log':
           processed = await purgeLogBatch(deps, info.model, willProcess);

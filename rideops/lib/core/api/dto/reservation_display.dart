@@ -69,10 +69,54 @@ abstract class DisplayReservation with _$DisplayReservation {
     /// parseo. La comparación tipada la hace
     /// [ReservationWorkflowMode.tryParse], cuya paridad vigila CI.
     String? workflowMode,
+
+    /// `Reservation.status` crudo (NEW | CONFIRMED | CHECKED_OUT | …,
+    /// schema.prisma:25-34). Viaja SIEMPRE en display-data por la misma razón
+    /// que [workflowMode]: `getById` usa un `include` de nivel superior, así
+    /// que todo escalar de `Reservation` llega
+    /// (reservations.service.js:1521-1539) — verificado además en el fixture.
+    ///
+    /// String crudo, no enum, por la regla de resiliencia del resto de los
+    /// DTO: un estado nuevo del backend no puede tumbar el parseo. La
+    /// comparación tipada la hace [ReservationStatus.tryParse], cuya paridad
+    /// vigila CI.
+    ///
+    /// **Para qué se lee (M2-H5)**: el cierre del checkout NO es atómico. La
+    /// sesión se marca `CLOSED` antes de la cascada que avanza la reserva
+    /// (checkout-session.service.js:417 vs :447-467) y varios tramos se tragan
+    /// su error, así que "sesión terminal" no prueba "entrega registrada".
+    /// Este campo es lo que permite que el frame 19B **verifique** en vez de
+    /// solo reportar.
+    String? status,
+
+    /// Cuándo vuelve el coche. Es la fila "Regreso" del bloque "Antes de que
+    /// se vaya" (19A): con el cliente todavía enfrente, la pregunta operativa
+    /// no es qué se guardó sino cuándo y dónde lo devuelve.
+    @IsoDateTimeConverter() DateTime? returnAt,
+
+    /// Sede de DEVOLUCIÓN de la reserva — no la del selector del agente. En un
+    /// one-way son distintas, y decir la del agente sería mandar al cliente al
+    /// patio equivocado. `getById` la trae completa (`include: {returnLocation:
+    /// true}`, reservations.service.js:1580).
+    DisplayLocation? returnLocation,
   }) = _DisplayReservation;
 
   factory DisplayReservation.fromJson(Map<String, dynamic> json) =>
       _$DisplayReservationFromJson(json);
+}
+
+/// Fila de `Location` tal como la incrusta `getById`. Solo se declara lo que
+/// la app dice en voz alta: el nombre. Sin nombre la fila que la usa se OMITE
+/// — nunca un "—" que parece un error de carga.
+@freezed
+abstract class DisplayLocation with _$DisplayLocation {
+  const factory DisplayLocation({
+    required String id,
+    String? name,
+  }) = _DisplayLocation;
+
+  factory DisplayLocation.fromJson(Map<String, dynamic> json) =>
+      _$DisplayLocationFromJson(json);
 }
 
 /// Cliente de la reserva. El nombre se sella como `signerName` del complete

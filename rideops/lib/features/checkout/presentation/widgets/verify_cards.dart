@@ -11,7 +11,12 @@ import '../../../../core/theme/ride_tokens.dart';
 /// servidor reportó.
 
 /// Tono semántico de una tarjeta y de su pill.
-enum VerifyTone { ok, bad, neutral }
+///
+/// [warn] (19A-bis) es el escalón que faltaba entre [neutral] y [bad]: "no
+/// pude confirmarlo" no es un hecho negativo —el rechazo del servidor, que es
+/// [bad] y vive en 19B— pero tampoco puede leerse como el éxito de [ok]. Sin
+/// este escalón, la duda y la certeza negativa se pintan igual.
+enum VerifyTone { ok, bad, neutral, warn }
 
 /// Tarjeta con encabezado + pill de estado.
 class VerifyCard extends StatelessWidget {
@@ -33,17 +38,22 @@ class VerifyCard extends StatelessWidget {
     // El borde rojo de la tarjeta en conflicto es REFUERZO: el estado ya lo
     // dicen el pill y la fila con su motivo. El color nunca es el único
     // portador (DoD #2).
-    final borderColor =
-        tone == VerifyTone.bad ? RideTokens.dangerBd : RideTokens.n200;
+    final (borderColor, background) = switch (tone) {
+      VerifyTone.bad => (RideTokens.dangerBd, RideTokens.n0),
+      // El ámbar de 19A-bis SÍ tiñe la superficie: es una de las CUATRO
+      // señales simultáneas del estado sin confirmar, y ninguna de las cuatro
+      // puede ser la única (el color nunca porta el estado solo — la pastilla
+      // y la fila lo dicen con palabras).
+      VerifyTone.warn => (RideTokens.warnBd, RideTokens.warnCard),
+      _ => (RideTokens.n200, RideTokens.n0),
+    };
+    final thick = tone == VerifyTone.bad || tone == VerifyTone.warn;
     return Container(
       padding: const EdgeInsets.fromLTRB(13, 12, 13, 12),
       decoration: BoxDecoration(
-        color: RideTokens.n0,
+        color: background,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: borderColor,
-          width: tone == VerifyTone.bad ? 1.5 : 1,
-        ),
+        border: Border.all(color: borderColor, width: thick ? 1.5 : 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -92,6 +102,7 @@ class VerifyPill extends StatelessWidget {
       VerifyTone.ok => (RideTokens.okBg, RideTokens.okTx), // 6.19:1
       VerifyTone.bad => (RideTokens.dangerBg, RideTokens.dangerTx), // 7.04:1
       VerifyTone.neutral => (RideTokens.n100, RideTokens.n800),
+      VerifyTone.warn => (RideTokens.warnBg, RideTokens.warnTx), // 5.59:1
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
@@ -121,12 +132,23 @@ class KvRow extends StatelessWidget {
     required this.value,
     this.missing = false,
     this.tabular = false,
+    this.warn = false,
+    this.busy = false,
   });
 
   final String label;
   final String value;
   final bool missing;
   final bool tabular;
+
+  /// `.v.warnv` — el valor "Sin confirmar" del 19A-bis. Hermano ámbar de
+  /// [missing]: la palabra ya dice el estado, el color solo lo refuerza.
+  final bool warn;
+
+  /// `.v.chk` — hay una consulta EN VUELO por este dato. Pinta el spinner en
+  /// línea y baja el valor a n700: un renglón que está preguntando no puede
+  /// tener el peso de uno que ya sabe.
+  final bool busy;
 
   /// Ancho de la columna de claves en la escala base del sistema.
   static const _labelWidth = 104.0;
@@ -146,8 +168,13 @@ class KvRow extends StatelessWidget {
     );
     final valueStyle = TextStyle(
       fontSize: 13.5,
-      fontWeight: FontWeight.w800,
-      color: missing ? RideTokens.dangerTx : RideTokens.n900,
+      fontWeight: busy ? FontWeight.w700 : FontWeight.w800,
+      color: switch ((missing, warn, busy)) {
+        (true, _, _) => RideTokens.dangerTx,
+        (_, true, _) => RideTokens.warnTx, // 6.05:1 sobre la tarjeta ámbar
+        (_, _, true) => RideTokens.n700, // 9.22:1
+        _ => RideTokens.n900,
+      },
       fontFeatures: tabular ? const [FontFeature.tabularFigures()] : null,
     );
     // Escala EFECTIVA del sistema medida sobre el propio tamaño de la fila:
@@ -155,7 +182,26 @@ class KvRow extends StatelessWidget {
     // real depende del tamaño de fuente.
     final scale = MediaQuery.textScalerOf(context).scale(13.5) / 13.5;
     final label_ = Text(label, style: labelStyle);
-    final value_ = Text(value, style: valueStyle);
+    final text_ = Text(value, style: valueStyle);
+    // Con `prefers-reduced-motion` el giro desaparece y queda el texto solo:
+    // la información NUNCA vive en la animación (nota 14 del 19A-bis).
+    final value_ = busy && !MediaQuery.disableAnimationsOf(context)
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: RideTokens.p600,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(child: text_),
+            ],
+          )
+        : text_;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
@@ -175,6 +221,37 @@ class KvRow extends StatelessWidget {
                 Expanded(child: value_),
               ],
             ),
+    );
+  }
+}
+
+/// `.kv.note` — fila SIN columna de clave. Aprobada en 17F-bis y reusada por
+/// el pie de alcance de 19A-bis: es ALCANCE ("esto no vive aquí"), no aviso,
+/// así que va como fila de la tarjeta y no como banner.
+///
+/// Existe además por una razón estructural: "Antes de que se vaya" tiene una
+/// frase constante (las llaves) y una condicional (el regreso). En una reserva
+/// sin fecha de regreso la tarjeta se quedaba con un encabezado y una
+/// constante. Este pie es incondicional, así que la tarjeta nunca baja de dos
+/// renglones útiles.
+class NoteRow extends StatelessWidget {
+  const NoteRow({super.key, required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontSize: 12.5,
+          fontWeight: FontWeight.w600,
+          color: RideTokens.n700, // 9.22:1
+          height: 1.42,
+        ),
+      ),
     );
   }
 }

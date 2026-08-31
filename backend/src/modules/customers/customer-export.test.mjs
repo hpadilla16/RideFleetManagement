@@ -44,7 +44,7 @@ const MODELS = [
   'rentalAgreementPayment', 'agreementCommission', 'reservationCharge', 'reservationPayment',
   'customerInspection', 'reservationIncident', 'vehicleDamageReport', 'reviewProof',
   'tripIncident', 'tripIncidentCommunication', 'shuttleRequest', 'kioskSession',
-  'externalReservation', 'citation', 'citationDocument',
+  'externalReservation', 'citation', 'citationDocument', 'citationAttachment',
   'tollTransaction', 'paymentOpsFlag', 'checkoutSession', 'auditLog', 'overdueVehicleAlert',
   'handoffToken', 'shuttleTrackerLink',
 ];

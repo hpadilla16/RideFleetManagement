@@ -12,6 +12,9 @@ import { PAYARC_JS_URL } from './payarc-hosted-fields.js';
 import { optionalNumber, optionalString, assertPlainObject } from '../../lib/request-validation.js';
 import { attachPublicRequestMeta, createOptionalIdempotencyGuard, createPublicRateLimitGuard } from '../../middleware/public-endpoint-guards.js';
 import { requireAuth } from '../../middleware/auth.js';
+import { verifyAndRecordHppReturn } from '../payment-gateway/ipos-hpp-payment.service.js';
+import { prisma } from '../../lib/prisma.js';
+import logger from '../../lib/logger.js';
 import { guestMessagingRouter } from '../messaging/messaging.routes.js';
 import { tripChatRouter } from '../messaging/trip-chat.routes.js';
 import { aiSearchRouter } from '../ai-search/ai-search.routes.js';
@@ -624,12 +627,42 @@ publicBookingRouter.post(
 // watches for these URLs in its navigation stream and closes before
 // the page actually loads. If a user ever lands here from a browser
 // (e.g. tapped an email receipt link), we serve a tiny "you can close
-// this page" HTML response. No DB writes here — the silent webhook is
-// the source of truth for reservation.paymentStatus.
+// this page" HTML response.
+//
+// Auth.Net/PayArc: no DB writes here — their silent webhooks are the source
+// of truth for reservation.paymentStatus.
+//
+// iPOSpays HPP (2026-08-29): the HPP has NO webhook into us, so an `iposRef`
+// on this return IS the completion signal — but never a trusted one. The
+// service verifies the reference against the mint audit trail and
+// queryPaymentStatus at the gateway before recording (idempotent on the
+// IPOS:<transactionId> reference), and any failure is swallowed: this page
+// must always render, and an unverified redirect must record nothing.
 publicBookingRouter.get(
   '/trips/:tripCode/payment-return',
   bookingReadGuard,
-  (req, res) => {
+  async (req, res) => {
+    const iposRef = String(req.query?.iposRef || '').trim();
+    if (iposRef) {
+      try {
+        const reservationId = String(req.query?.r || '').trim();
+        const reservation = reservationId
+          ? await prisma.reservation.findUnique({
+              where: { id: reservationId },
+              select: { id: true, tenantId: true },
+            })
+          : null;
+        if (reservation) {
+          await verifyAndRecordHppReturn({ reservation, iposRef });
+        }
+      } catch (error) {
+        logger.warn?.('ipos payment-return verification failed (payment NOT recorded)', {
+          tripCode: req.params.tripCode,
+          code: error?.code,
+          message: error?.message,
+        });
+      }
+    }
     res.set('Cache-Control', 'no-store');
     res.set('Content-Type', 'text/html; charset=utf-8');
     // Anti-clickjacking (DAST 2026-08-23): a static terminal "you can close

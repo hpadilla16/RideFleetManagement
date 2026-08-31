@@ -75,6 +75,7 @@ import {
   rollPeriod,
 } from './billing-events.js';
 import { processStoredEvent } from './billing-webhooks.service.js';
+import { applyDuePlanChanges } from './billing-plan-change.service.js';
 import { notifyOwner } from './billing-notify.js';
 import { todayCalendarDate, addCalendarDays } from './billing-dates.js';
 
@@ -137,6 +138,8 @@ export async function runBillingReconcile(overrides = {}) {
     chargesMaterialised: 0,
     declinesFound: 0,
     noChargeObserved: 0,
+    planChangesApplied: 0,
+    planChangeErrors: 0,
     pollErrors: 0,
     heartbeatAlert: 0,
   };
@@ -144,6 +147,15 @@ export async function runBillingReconcile(overrides = {}) {
   await sweepUnprocessedEvents(now, counts, overrides);
   await sweepStatusDrift(now, counts, overrides);
   await sweepMissingCharges(now, counts, overrides);
+  /**
+   * Pass 3½ — SCHEDULED PLAN CHANGES (Phase 6, design §4.5 step 5), and the
+   * position is load-bearing: it runs AFTER the missing-charge pass so a
+   * charge that happened before the boundary is materialised at the amount
+   * that was actually in force, never at the amount that starts tomorrow.
+   * The apply itself is ARB-first and claim-guarded — see
+   * billing-plan-change.service.js for the two-worker argument.
+   */
+  await applyDuePlanChanges(now, counts, overrides);
   await checkWebhookHeartbeat(now, counts, overrides);
 
   d.logger.info('[billing-reconcile] sweep done', counts);

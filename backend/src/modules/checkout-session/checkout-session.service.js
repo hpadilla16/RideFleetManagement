@@ -477,6 +477,10 @@ async function getByReservationId(reservationId, { tenantId, actorUserId } = {})
   return session;
 }
 
+// H8: the CAS retry budget. See the block comment on transition() — the loop
+// exists for CANCELLED, which stays legal from wherever the winner left us.
+const CAS_MAX_ATTEMPTS = 3;
+
 /**
  * Move the session to `toStep`. Validates:
  *   • current step allows this transition (per the state-machine graph)
@@ -486,65 +490,241 @@ async function getByReservationId(reservationId, { tenantId, actorUserId } = {})
  * Stamps any additional timestamp fields based on the destination step
  * (e.g. PAID stamps paymentCompletedAt if not already set). Appends a
  * TRANSITION event to the JSON log.
+ *
+ * ── M2-H8 (2026-08-17) — compare-and-set commit ────────────────────────────
+ *
+ * Until H8 this read the row and then wrote it unconditionally, so with four
+ * surfaces on one session (RideOps, web wizard, kiosk, portal) two callers
+ * sitting on the same step could BOTH commit the same hop: two TRANSITION
+ * events, two stateVersion bumps, two CLOSED cascades. The commit is now a
+ * conditional `updateMany` guarded by the step we actually read (and by
+ * stateVersion too when the caller opted into `expectedVersion`), following
+ * the `maybeSendFinalizeEmail` precedent below (`updateMany` + `count === 0`
+ * → the other writer won).
+ *
+ * `count === 0` means somebody committed between our read and our write. We
+ * re-read and let the next loop pass decide against FRESH state:
+ *
+ *   • fresh step === toStep, no expectedVersion → IDEMPOTENT SUCCESS. The
+ *     transition the caller asked for is a fact; another surface is the one
+ *     who wrote it. Answering ILLEGAL_TRANSITION would tell the yard agent
+ *     that the step he can see on the screen never happened. The web wizard
+ *     already reconstructs this answer client-side (409 → GET → "am I at or
+ *     past toStep?" → swallow), so this only moves an existing truth to the
+ *     server and saves the round-trip. Attribution stays honest: we append NO
+ *     event, so events[] keeps naming the surface that really moved it.
+ *     Because canTransition(S, S) is false, this branch also answers the
+ *     plain double-submit with no race at all — the endpoint is properly
+ *     idempotent, not merely race-tolerant.
+ *   • expectedVersion was sent → STALE_VERSION with the fresh row, even when
+ *     the step matches. Opting in is opting into strictness: that caller
+ *     asked to be told when its snapshot died, and it gets the row back to
+ *     re-render from. (Also keeps P2's "stale beats legality" ordering.)
+ *   • otherwise → ILLEGAL_TRANSITION / ENTRY_GUARD computed against the
+ *     fresh row, so the message names the step the session is REALLY on.
+ *
+ * The loop matters for exactly one case: `toStep === 'CANCELLED'` stays legal
+ * from whatever step the winner left us on, so a cancel that loses the race
+ * still cancels instead of 409ing a lie. Forward hops can only re-enter the
+ * loop to be answered idempotently or refused, never to double-commit.
+ *
+ * NOT in the CAS `where`: the ENTRY_REQUIRES field (tcCompletedAt & co).
+ * Those stamps only ever go null → value, so the read-then-write window can
+ * only turn a FAILING guard into a passing one — never the reverse. Guarding
+ * on them would buy no safety and would add a `count === 0` branch that means
+ * something else. Pre-check is enough; documented so nobody "fixes" it later.
+ *
+ * ISOLATION LEVEL — this is correct ONLY under READ COMMITTED (Postgres's
+ * default, and what every caller here runs under). The loser of the race
+ * blocks on the winner's row lock, RE-EVALUATES the WHERE against the
+ * committed row, finds currentStep no longer matches, and returns count: 0 —
+ * which is the entire mechanism. Wrap transition() in
+ * `$transaction({ isolationLevel: 'Serializable' })` and the loser aborts
+ * with P2034 instead: every branch below `count === 0` becomes unreachable,
+ * idempotency included, and the caller gets a raw serialization error where
+ * it used to get a 200 or a typed 409. If you ever need that isolation
+ * level, the `count === 0` handling has to be duplicated in a P2034 catch.
  */
 async function transition({ id, toStep, actorUserId, metadata, expectedVersion }) {
   if (!id) throw new CheckoutSessionError('session id required', 400);
   if (!CHECKOUT_STEPS.includes(toStep)) {
     throw new CheckoutSessionError(`Unknown step: ${toStep}`, 400);
   }
+  // Opting in is a per-call decision, and it disables the idempotent answer
+  // below on purpose — see the block comment.
+  const versionGuarded = expectedVersion !== undefined && expectedVersion !== null;
 
-  const session = await prisma.checkoutSession.findUnique({ where: { id } });
-  if (!session) throw new CheckoutSessionError('Session not found', 404);
+  let updated = null;
+  let fromStep = null;
+  let alreadyApplied = false;
 
-  // P2: version check FIRST, before the legality check — a stale caller
-  // should learn "your snapshot is old, here's the fresh row" rather than a
-  // coincidental ILLEGAL_TRANSITION computed against state it never saw.
-  assertExpectedVersion(session, expectedVersion);
+  for (let attempt = 1; attempt <= CAS_MAX_ATTEMPTS && !updated; attempt += 1) {
+    const session = await prisma.checkoutSession.findUnique({ where: { id } });
+    if (!session) throw new CheckoutSessionError('Session not found', 404);
 
-  if (!canTransition(session.currentStep, toStep)) {
-    // NOTE (2026-06-05): the wizard used to double-fire this transition on
-    // rapid double-click / auto-advance races, producing benign 409s here.
-    // The frontend now carries an in-flight guard and treats "already at or
-    // past toStep" 409s as a no-op. Intentionally NOT made idempotent
-    // server-side — a hard 409 stays the safety net on this payment path.
-    throw new CheckoutSessionError(
-      `Illegal transition ${session.currentStep} → ${toStep}`,
+    // P2: version check FIRST, before the legality check — a stale caller
+    // should learn "your snapshot is old, here's the fresh row" rather than a
+    // coincidental ILLEGAL_TRANSITION computed against state it never saw.
+    assertExpectedVersion(session, expectedVersion);
+
+    if (!canTransition(session.currentStep, toStep)) {
+      // H8: the session is ALREADY where the caller wanted it. Somebody else
+      // did the work; report the fact, not a fake refusal. Deliberately
+      // narrow — "already at toStep", never "already past toStep": telling an
+      // agent that step 2 just succeeded while the session sits on step 5
+      // would be a different, worse lie. (Pre-H8 this branch always threw;
+      // the wizard's own 409-swallow is what proves the old answer was noise.)
+      if (session.currentStep === toStep && !versionGuarded) {
+        logger.info('[checkout-session] transition already applied by another surface', {
+          sessionId: id, toStep, actorUserId, attempt,
+        });
+        // NOT an early return. We fall through to the CLOSED cascade below,
+        // because "somebody already did it" does not mean "somebody already
+        // FINISHED it". The cascade's own failures are swallowed by a
+        // logger.warn (see the catch at the end of this function), so a
+        // winner whose cascade died half-way leaves the session CLOSED with
+        // the reservation still CONFIRMED, the agreement still DRAFT and the
+        // vehicle unmarked — and nothing ever retries it. Before H8 the
+        // second caller got a 409 that an agent would eventually report;
+        // handing it a clean 200 over a half-finalized checkout would be the
+        // same species of lie the "already past toStep" cut refuses to tell.
+        //
+        // The re-run is NOT unconditionally safe, and the first version of
+        // this said it was. Two steps inside the cascade are not idempotent:
+        // rentalAgreement.update rewrites `finalizedAt` with today's date on
+        // an already-FINALIZED contract (audit-trail loss), and
+        // recordMileageEntry is a bare create with no dedup, so repeats pile
+        // up duplicate mileage rows. What actually contains them is the
+        // status short-circuit — which is why SELF_HEAL_OWNS below has to be
+        // an allow-list and not a wish. The loaner bump (updateMany guarded
+        // by DRAFT) and the email (CAS on autoEmailedAt) are genuinely
+        // idempotent on their own.
+        alreadyApplied = true;
+        updated = session;
+        fromStep = session.currentStep;
+        break;
+      }
+      throw new CheckoutSessionError(
+        `Illegal transition ${session.currentStep} → ${toStep}`,
+        409,
+        'ILLEGAL_TRANSITION',
+      );
+    }
+
+    const requiredField = entryRequirement(toStep);
+    if (requiredField && !session[requiredField]) {
+      throw new CheckoutSessionError(
+        `Cannot enter ${toStep}: ${requiredField} is not stamped yet`,
+        409,
+        'ENTRY_GUARD',
+      );
+    }
+
+    // Auto-stamp finishedAt when entering a terminal state.
+    const data = {
+      currentStep: toStep,
+      // P2: atomic bump — every transition invalidates outstanding
+      // expectedVersion snapshots held by other surfaces.
+      stateVersion: { increment: 1 },
+      // H8: computed from the row we are about to CAS on, so two concurrent
+      // transitions can no longer clobber each other's TRANSITION entry — the
+      // loser never writes.
+      //
+      // This is a PARTIAL close of the events lost-update, and the honest
+      // count is FOURTEEN other writers of this TEXT column, all still doing
+      // an unguarded read-modify-write (read → write, this file):
+      //   stampSideEffect       :1034 → :1042
+      //   saveCustomerSignature :1064 → :1085  (read is OUTSIDE the
+      //                                         $transaction that starts :1070)
+      //   mintHandoffToken      :1108 → :1168
+      //   setDeclinedInsurance  :1247 → :1279
+      //   markAbandoned         :1289 → :1303
+      //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
+      //   spin-charge.service.js:613, :645, :926, :1083, :1274 (five)
+      //   mobile-inspection.service.js:276
+      //   vehicle-swap.service.js:130
+      //   terms-signing.service.js:275
+      // Any of them can still drop an entry written between its own read and
+      // its own write. saveCustomerSignature is the sharpest of the fourteen:
+      // its $transaction makes the two WRITES atomic but leaves the READ
+      // outside it, and what it writes is customerSignedAt — an
+      // ENTRY_REQUIRES field for CLOSED. See the note on stampSideEffect.
+      // (Those are ALL the appendEvent callers in the tree; :297 here is the
+      // fourteenth-plus-one and does not count — it builds a fresh row on
+      // create, with nothing to lose. The kiosk's similarly-named
+      // appendEvents(sessionId, device, rawEvents) is a different function
+      // writing a different column, KioskSession.events.)
+      events: appendEvent(session.events, {
+        kind: 'TRANSITION',
+        from: session.currentStep,
+        to: toStep,
+        actorUserId: actorUserId || null,
+        metadata: metadata || null,
+      }),
+    };
+    if (isTerminal(toStep) && !session.finishedAt) {
+      data.finishedAt = new Date();
+    }
+
+    // The compare half of compare-and-set. currentStep is always in the
+    // where; stateVersion joins it only for opt-in callers, because guarding
+    // every caller on the version would make an unrelated concurrent STAMP
+    // (which bumps the version without moving the step) fail transitions for
+    // clients that never asked for optimistic concurrency. That would be a
+    // regression for the web wizard, the kiosk and precheckin.
+    const casWhere = { id, currentStep: session.currentStep };
+    if (versionGuarded) casWhere.stateVersion = session.stateVersion ?? 0;
+
+    const { count } = await prisma.checkoutSession.updateMany({ where: casWhere, data });
+    if (count > 0) {
+      fromStep = session.currentStep;
+      // updateMany returns a count, not the row. Re-read rather than
+      // reconstruct it locally: the row is what the caller renders, and a
+      // stamp landing right after our commit belongs in that answer.
+      updated = await prisma.checkoutSession.findUnique({ where: { id } });
+      if (!updated) throw new CheckoutSessionError('Session not found', 404);
+      break;
+    }
+
+    logger.info('[checkout-session] transition lost the CAS race — re-reading', {
+      sessionId: id, sawStep: session.currentStep, toStep, attempt,
+    });
+
+    if (versionGuarded) {
+      // No retry for opt-in callers: their snapshot is provably dead now, and
+      // silently re-deciding on state they never saw is the exact thing
+      // expectedVersion exists to prevent.
+      const fresh = await prisma.checkoutSession.findUnique({ where: { id } });
+      if (!fresh) throw new CheckoutSessionError('Session not found', 404);
+      const err = new CheckoutSessionError(
+        `Session moved on while committing: expected version ${Number(expectedVersion)}, is ${fresh.stateVersion ?? 0}`,
+        409,
+        'STALE_VERSION',
+      );
+      err.session = fresh;
+      throw err;
+    }
+  }
+
+  if (!updated) {
+    // Three consecutive losses. Real contention this sustained is a bug or an
+    // attack, not a counter; refuse loudly with the fresh row attached rather
+    // than loop forever.
+    const fresh = await prisma.checkoutSession.findUnique({ where: { id } });
+    const err = new CheckoutSessionError(
+      'Session is being changed by another surface; retry from the fresh state',
       409,
-      'ILLEGAL_TRANSITION',
+      'CONCURRENT_MODIFICATION',
     );
+    if (fresh) err.session = fresh;
+    throw err;
   }
 
-  const requiredField = entryRequirement(toStep);
-  if (requiredField && !session[requiredField]) {
-    throw new CheckoutSessionError(
-      `Cannot enter ${toStep}: ${requiredField} is not stamped yet`,
-      409,
-      'ENTRY_GUARD',
-    );
+  if (!alreadyApplied) {
+    logger.info('[checkout-session] transition', {
+      sessionId: id, from: fromStep, to: toStep, actorUserId,
+    });
   }
-
-  // Auto-stamp finishedAt when entering a terminal state.
-  const data = {
-    currentStep: toStep,
-    // P2: atomic bump — every transition invalidates outstanding
-    // expectedVersion snapshots held by other surfaces.
-    stateVersion: { increment: 1 },
-    events: appendEvent(session.events, {
-      kind: 'TRANSITION',
-      from: session.currentStep,
-      to: toStep,
-      actorUserId: actorUserId || null,
-      metadata: metadata || null,
-    }),
-  };
-  if (isTerminal(toStep) && !session.finishedAt) {
-    data.finishedAt = new Date();
-  }
-
-  const updated = await prisma.checkoutSession.update({ where: { id }, data });
-  logger.info('[checkout-session] transition', {
-    sessionId: id, from: session.currentStep, to: toStep, actorUserId,
-  });
 
   // 2026-05-28 — Phase 3.5 — Email-on-finalize.
   //
@@ -559,9 +739,67 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
   // Guarded by:
   //   - toStep === 'CLOSED' (only fire once on the actual finalize)
   //   - session.agreementId present (no agreement, nothing to email)
+  //   - finalizeOwnsReservation (M2-H8, see below)
   //   - any throw is swallowed — never let an email hiccup break the
   //     transition response that the UI is waiting on
-  if (toStep === 'CLOSED' && updated.agreementId) {
+  //
+  // ── ONE ownership decision, computed BEFORE the email and reused by the
+  // cascade (2026-08-17, QA MAJOR on the blocker fix) ───────────────────────
+  //
+  // The first version of the blocker fix put the guard only on the cascade.
+  // But the email fires FIRST and was gated on nothing but `agreementId`, so
+  // the same request that logged "self-heal declined — finalize does not own
+  // this reservation (CANCELLED)" went straight on to stamp autoEmailedAt and
+  // hand the signed rental contract to scheduleEmailDelivery, for a customer
+  // whose reservation staff had cancelled. A write to the world, and the one
+  // kind that cannot be taken back.
+  //
+  // Reachable only with autoEmailedAt === null on a CLOSED session (closed
+  // before that column existed, or an agreementId attached later) — narrow,
+  // but H8 is what made it reachable at all: before, the repeat POST threw
+  // ILLEGAL_TRANSITION and never got here.
+  let finalizeOwnsReservation = false;
+  let resvRow = null;
+  if (toStep === 'CLOSED' && updated.reservationId) {
+    try {
+      resvRow = await prisma.reservation.findUnique({
+        where: { id: updated.reservationId },
+        select: { id: true, status: true, vehicleId: true, tenantId: true },
+      });
+    } catch (err) {
+      logger.warn('[checkout-session] could not read reservation for finalize', {
+        sessionId: id, reservationId: updated.reservationId, error: err?.message || String(err),
+      });
+    }
+    const resvStatus = String(resvRow?.status ?? '');
+    // Never finalize onto a reservation staff has since CANCELLED or marked
+    // NO_SHOW. New 2026-08-17 (QA blocker): the old list was a DENY-list
+    // naming 3 of the 8 ReservationStatus values, so NEW, CONFIRMED,
+    // CANCELLED, NO_SHOW and PENDING_FRANCHISE_IMPORT all fell through it. A
+    // session parked in FINALIZING while staff cancels could already finalize
+    // onto the cancelled row — pre-existing; H8's self-heal turned it from
+    // "needs a parked session" into "any repeat POST". Marking the car ON_RENT
+    // for a cancelled rental also collides the NEXT real reservation with
+    // "still out on open rental", so the damage does not stay on this row.
+    const cancelledLate = ['CANCELLED', 'NO_SHOW'].includes(resvStatus);
+    // Self-heal is OPPORTUNISTIC work nobody asked for, so it gets an
+    // ALLOW-list instead: only run it on a reservation the finalize
+    // legitimately still owns. A deny-list is what failed above, and the bar
+    // is higher here — the caller does not know this is happening, and the two
+    // non-idempotent steps live inside. PENDING_FRANCHISE_IMPORT is excluded
+    // from self-heal for that reason while the winner path is left untouched
+    // for it: refusing to guess is free, guessing is not.
+    const selfHealOwns = ['NEW', 'CONFIRMED'].includes(resvStatus);
+    finalizeOwnsReservation = !!resvRow && !cancelledLate && (!alreadyApplied || selfHealOwns);
+    if (!finalizeOwnsReservation) {
+      logger.info('[checkout-session] finalize declined — does not own this reservation', {
+        sessionId: id, reservationId: updated.reservationId,
+        reservationStatus: resvRow?.status ?? null, alreadyApplied,
+      });
+    }
+  }
+
+  if (toStep === 'CLOSED' && updated.agreementId && finalizeOwnsReservation) {
     Promise.resolve()
       .then(() => maybeSendFinalizeEmail(updated, actorUserId))
       .catch((err) => {
@@ -576,12 +814,11 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
   // this, so reservations stayed CONFIRMED and cars weren't marked rented.
   if (toStep === 'CLOSED' && updated.reservationId) {
     try {
-      const resv = await prisma.reservation.findUnique({
-        where: { id: updated.reservationId },
-        select: { id: true, status: true, vehicleId: true, tenantId: true },
-      });
-      // Don't downgrade an already checked-in/out reservation.
-      if (resv && !['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(String(resv.status))) {
+      const resv = resvRow;
+      // Ownership above, plus the cascade's own "already done" short-circuit:
+      // don't downgrade a reservation that is already checked in/out.
+      if (finalizeOwnsReservation
+        && !['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(String(resv.status))) {
         // beta.116 — NO-CAR-NO-CHECKOUT guard (defense-in-depth). Never finalize
         // a checkout onto a reservation with no vehicle: that produced FINALIZED
         // agreements with no car on the contract. The session-start gate blocks
@@ -691,9 +928,23 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // agent has to see it at the counter), not be swallowed like the
       // best-effort email/audit failures below.
       if (err?.statusCode === 409 || err instanceof CheckoutSessionError) {
-        throw err instanceof CheckoutSessionError
+        const fail = err instanceof CheckoutSessionError
           ? err
           : new CheckoutSessionError(err.message, 409, 'VEHICLE_CONFLICT');
+        // H8: on the SELF-HEAL path the session is visibly CLOSED, so raising
+        // the raw guard code reads as nonsense to the agent — a 422
+        // PRECHECKIN_REQUIRED on a finished checkout, which the wizard shows
+        // as a red toast because it only swallows 409s. Re-label it as what
+        // it actually is, at a status the existing clients already handle.
+        // The underlying reason is kept in the message, not thrown away.
+        if (alreadyApplied) {
+          throw new CheckoutSessionError(
+            `Checkout is closed but its finalize did not complete: ${fail.message}`,
+            409,
+            'FINALIZE_INCOMPLETE',
+          );
+        }
+        throw fail;
       }
       logger.warn('[checkout-session] failed to advance reservation on finalize', {
         sessionId: id, reservationId: updated.reservationId, error: err?.message || String(err),
@@ -761,6 +1012,25 @@ async function stampSideEffect({ id, field, value, expectedVersion }) {
   // needs stateVersion and, on STALE_VERSION, the whole fresh row travels in
   // the 409 body. This read-then-write is exactly the window gap #5 named;
   // expectedVersion is the opt-in guard that narrows it for new clients.
+  //
+  // M2-H8 (2026-08-17) — deliberately NOT given transition()'s CAS, for two
+  // reasons that only show up with the code in front of you:
+  //
+  //   1. There is nothing sound to compare against. transition() has
+  //      `currentStep`, which is the very thing it changes, so the guard is
+  //      free. A stamp changes a nullable timestamp at ANY step, so the only
+  //      analogous guard is `where: { [field]: null }` — and that turns every
+  //      legitimate RE-stamp into a 409: the Spin webhook retrying, the
+  //      customer-inspection flow restamping with an explicit `value`, an
+  //      agent redoing a payment. Buying concurrency safety by breaking retry
+  //      on the payment path is a bad trade nobody asked H8 to make.
+  //   2. The window P2 named is still narrowed the same way it was: an opt-in
+  //      caller passing expectedVersion gets STALE_VERSION here. What P2 does
+  //      NOT close — and H8 does not either — is check-then-write with no
+  //      lock: two stamps landing together still both commit, and the loser's
+  //      `events` entry is still lost. Closing that needs row locking
+  //      (SELECT … FOR UPDATE inside an interactive transaction) or moving
+  //      `events` out of a TEXT column, which is its own story, not H8.
   const current = await prisma.checkoutSession.findUnique({ where: { id } });
   if (!current) throw new CheckoutSessionError('Session not found', 404);
   assertExpectedVersion(current, expectedVersion);

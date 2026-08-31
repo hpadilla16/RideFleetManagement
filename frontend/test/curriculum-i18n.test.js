@@ -43,7 +43,9 @@ describe('curriculum translations', () => {
   const keys = expectedKeys();
 
   it('derives a key for every translatable string', () => {
-    expect(keys.length).toBe(110);
+    // 110 → 119 when the shuttle console module landed (2026-08-28): three
+    // steps, plus the module's own title, summary and gotcha.
+    expect(keys.length).toBe(119);
     expect(new Set(keys).size, 'two entries derive the same key — one would overwrite the other').toBe(keys.length);
   });
 

@@ -16,6 +16,10 @@ import {
   decideIncludedMilesPerDay,
   UNLIMITED_MILES,
 } from '../../lib/deposit-rules.js';
+import {
+  resolveRate,
+  resolveLateReturnGraceMinutes,
+} from '../fees/fee-engine.service.js';
 import { maybeUploadCustomerDocument } from '../customers/customer-documents.js';
 import crypto from 'node:crypto';
 
@@ -1884,7 +1888,7 @@ function _validateSignatureDataUrl(value) {
   return raw;
 }
 
-function _formatAgreementResponse(reservation) {
+async function _formatAgreementResponse(reservation) {
   const firstName = reservation.customer?.firstName || '';
   const lastName = reservation.customer?.lastName || '';
   const vehicle = reservation.vehicle;
@@ -1907,11 +1911,116 @@ function _formatAgreementResponse(reservation) {
     pdfUrl: null, // PDF generation is served via the admin-side HTML
                   // render today; a public-facing PDF URL lands in a
                   // later sprint when we swap HTML→PDF pipeline.
-    keyTerms: _deriveKeyTerms(reservation),
+    keyTerms: await _deriveKeyTerms(reservation),
   };
 }
 
-function _deriveKeyTerms(reservation) {
+// -----------------------------------------------------------------------
+// Key-terms fee display (money-facing)
+//
+// 2026-08-26 - the figures in the panel below used to be hardcoded in the
+// copy: "$50/hour" late, "$0.45/mi" overage, "30 minutes" grace. None of them
+// was what we bill. Check-in charges the resolved FeeRate for the PICKUP
+// location (platform defaults: $25.00/hour and $0.50/mi) and takes the grace
+// from Location.locationConfig.gracePeriodMin - so a customer signing here was
+// quoted a late rate 2x the real one and an overage rate under it, and any
+// tenant that customized its own rates drifted further still.
+//
+// Same class of bug as the "$300 security deposit for everyone" fix above,
+// one layer down: read what will actually be billed, and when we cannot
+// resolve it, say nothing rather than invent a figure.
+// -----------------------------------------------------------------------
+
+const FEE_UNIT_SUFFIX = {
+  PER_HOUR: '/hour',
+  PER_DAY: '/day',
+  PER_MILE: '/mi',
+  PER_GALLON: '/gal',
+  FLAT: '',
+};
+
+// "$25/hour", "$0.50/mi". Whole dollars drop the cents the way the fee-rates
+// settings screen shows them; anything else keeps two decimals. Returns null
+// for a non-positive or unparseable amount so callers fall back to generic
+// copy instead of printing "$0/hour" or "$NaN/hour".
+function _formatFeeRate(rate) {
+  const amount = Number(rate?.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  const label = Number.isInteger(amount) ? `$${amount}` : `$${amount.toFixed(2)}`;
+  return `${label}${FEE_UNIT_SUFFIX[rate?.unit] ?? ''}`;
+}
+
+// "30 minutes", "1 hour", "2 hours". Null when the window is zero or unset so
+// the copy can drop the grace sentence rather than promise "0 minutes".
+function _formatGraceWindow(minutes) {
+  const n = Number(minutes);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (n % 60 === 0) {
+    const hours = n / 60;
+    return hours === 1 ? '1 hour' : `${hours} hours`;
+  }
+  return `${n} minutes`;
+}
+
+/**
+ * Resolve a fee rate for DISPLAY on the guest agreement.
+ *
+ * Wraps the fee engine's resolveRate() with the three outcomes the copy has
+ * to tell apart:
+ *   { status: 'resolved', rate } - quote it; this is what check-in will bill
+ *   { status: 'disabled' }       - tenant turned the fee off; promise no fee
+ *   { status: 'unknown' }        - no tenant on the reservation, or the lookup
+ *                                  failed; quote NO figure
+ *
+ * Never throws. A rate lookup must not be able to break the signature screen:
+ * the customer still has to be able to sign, just without a quoted number.
+ */
+async function _resolveDisplayRate({ tenantId, locationId, feeType }) {
+  // Reservation.tenantId is nullable in the schema and resolveRate() throws
+  // without one - degrade to generic copy instead of 500-ing the screen.
+  if (!tenantId) return { status: 'unknown' };
+  try {
+    const rate = await resolveRate({ tenantId, locationId, feeType });
+    // resolveRate returns null when a FeeRate row exists with isActive=false.
+    return rate === null ? { status: 'disabled' } : { status: 'resolved', rate };
+  } catch (error) {
+    console.warn('[agreement-key-terms] rate lookup failed', feeType, error);
+    return { status: 'unknown' };
+  }
+}
+
+function _lateReturnDetail(fee, graceMinutes) {
+  const grace = _formatGraceWindow(graceMinutes);
+  const graceSentence = grace ? `Grace window: ${grace}.` : null;
+
+  if (fee?.status === 'disabled') {
+    return graceSentence
+      ? `${graceSentence} No late-return fee applies to this rental.`
+      : 'No late-return fee applies to this rental.';
+  }
+
+  const label = fee?.status === 'resolved' ? _formatFeeRate(fee.rate) : null;
+  if (label) {
+    return graceSentence
+      ? `${graceSentence} After that, a ${label} late fee applies.`
+      : `A ${label} late fee applies after the scheduled return time.`;
+  }
+  return graceSentence
+    ? `${graceSentence} After that, a late fee applies at the rate in your rental agreement.`
+    : 'A late fee applies after the scheduled return time, at the rate in your rental agreement.';
+}
+
+function _mileageOverageDetail(fee) {
+  if (fee?.status === 'disabled') {
+    return 'No overage fee applies beyond the included mileage.';
+  }
+  const label = fee?.status === 'resolved' ? _formatFeeRate(fee.rate) : null;
+  return label
+    ? `Overage billed at ${label} against the Renter's card at return.`
+    : 'Mileage beyond the included allowance is billed at the rate in your rental agreement.';
+}
+
+async function _deriveKeyTerms(reservation) {
   const returnAt = reservation.returnAt;
   const snapshot = reservation.pricingSnapshot;
 
@@ -1939,6 +2048,22 @@ function _deriveKeyTerms(reservation) {
   }
   const isUnlimited = milesPerDay === UNLIMITED_MILES;
 
+  // Quote from the SAME source check-in bills from: the pickup location's
+  // FeeRate (falling back to the tenant default, then the platform default)
+  // and that location's grace window.
+  const tenantId = reservation.tenantId || null;
+  const locationId = reservation.pickupLocationId || null;
+  const [lateFee, graceMinutes, mileageFee] = await Promise.all([
+    _resolveDisplayRate({ tenantId, locationId, feeType: 'LATE_RETURN' }),
+    Promise.resolve()
+      .then(() => resolveLateReturnGraceMinutes({ locationId }))
+      .catch(() => null),
+    // Unlimited mileage never bills overage - don't spend a query on it.
+    isUnlimited
+      ? null
+      : _resolveDisplayRate({ tenantId, locationId, feeType: 'EXCESS_MILEAGE' }),
+  ]);
+
   const returnFmt = returnAt
     ? new Date(returnAt).toLocaleString('en-US', {
         month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
@@ -1949,8 +2074,7 @@ function _deriveKeyTerms(reservation) {
     {
       icon: 'clock',
       title: `Return by ${returnFmt}`,
-      detail:
-        'Grace window: 30 minutes. After that, a $50/hour late fee applies.',
+      detail: _lateReturnDetail(lateFee, graceMinutes),
     },
     {
       icon: 'road',
@@ -1961,7 +2085,7 @@ function _deriveKeyTerms(reservation) {
           : 'Mileage included per listing',
       detail: isUnlimited
         ? 'No mileage cap applies to this rental.'
-        : 'Overage billed at $0.45/mi against the Renter\'s card at return.',
+        : _mileageOverageDetail(mileageFee),
     },
     {
       icon: 'money',
