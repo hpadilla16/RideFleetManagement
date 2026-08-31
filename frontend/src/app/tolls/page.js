@@ -7,6 +7,13 @@
 // token string is NEVER rendered (human chips instead — see lib/toll-triage);
 // one primary action per row with Reset/Dispute/Waive in an overflow menu;
 // provider/sync/import tooling lives on its own "Imports & sync" tab.
+//
+// Phase 2 (Direction B grafts, approved when A shipped — see
+// design/mockups/tolls-redesign-B.html): group-by-reservation batching and
+// the J/K/C/D/W keyboard loop, BOTH behind one per-user toggle persisted in
+// localStorage (default OFF — the counter staff who learned the flat list
+// keep it until they opt in), plus the evidence drawer's losing-candidate
+// card. With the toggle off the phase-1 queue renders unchanged.
 
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -29,7 +36,11 @@ import {
   isUnmatched,
   isReadyToPost,
   primaryActionForRow,
-  overflowActionsForRow
+  overflowActionsForRow,
+  isBulkConfirmEligible,
+  groupRowsByReservation,
+  candidateWindowRelation,
+  UNGROUPED_KEY
 } from '../../lib/toll-triage';
 
 const EMPTY_IMPORT_FORM = {
@@ -44,6 +55,9 @@ const EMPTY_IMPORT_FORM = {
 };
 
 const ISSUE_EDIT_ID_KEY = 'issues.editId';
+// Phase 2: per-user opt-in for grouping + keyboard triage. localStorage so the
+// choice survives reloads without touching any backend contract.
+const GROUP_MODE_KEY = 'tolls.groupByReservation';
 
 export default function TollsPage() {
   return <AuthGate>{({ token, me, logout }) => <TollsInner token={token} me={me} logout={logout} />}</AuthGate>;
@@ -229,6 +243,13 @@ function ConfidenceCell({ row, t, onMore, overflow }) {
 function EvidenceDrawer({ row, t }) {
   const score = confidenceForRow(row);
   const ledger = scoreLedgerForRow(row);
+  // Phase 2 — the losing candidate explained (mockup B). What the backend can
+  // honestly ship: superseded suggestions on OTHER reservations. When the
+  // matcher penalized multipleCandidates but no superseded assignment exists,
+  // say so instead of inventing one.
+  const candidates = Array.isArray(row.candidateAssignments) ? row.candidateAssignments : [];
+  const sawMultipleCandidates = String(row?.latestAssignment?.matchReason || '')
+    .split(',').map((part) => part.trim()).includes('multipleCandidates');
   const reservation = row.latestAssignment?.reservation || row.reservation || null;
   const pickupAt = reservation?.pickupAt ? new Date(reservation.pickupAt) : null;
   const returnAt = reservation?.returnAt ? new Date(reservation.returnAt) : null;
@@ -315,6 +336,31 @@ function EvidenceDrawer({ row, t }) {
             ) : (
               <p style={{ fontSize: 12, color: 'var(--text-3)' }}>—</p>
             )}
+            {candidates.length ? (
+              <div className="tq-cands">
+                <h5>{t('tolls.evidence.otherCandidates', 'Other candidates — superseded suggestions')}</h5>
+                <ul>
+                  {candidates.map((candidate) => {
+                    const rel = candidateWindowRelation(candidate, row.transactionAt);
+                    const vars = {
+                      number: candidate.reservation?.reservationNumber || '—',
+                      score: candidate.confidence == null ? '—' : Number(candidate.confidence),
+                      when: rel.at ? shortDateTime(rel.at) : ''
+                    };
+                    const text = rel.kind === 'endedBefore'
+                      ? t('tolls.evidence.candidateEndedBefore', '{{number}} (score {{score}}) — window ended {{when}}, before this toll', vars)
+                      : rel.kind === 'startsAfter'
+                        ? t('tolls.evidence.candidateStartsAfter', '{{number}} (score {{score}}) — window starts {{when}}, after this toll', vars)
+                        : rel.kind === 'covers'
+                          ? t('tolls.evidence.candidateCovers', '{{number}} (score {{score}}) — window also covers this toll', vars)
+                          : t('tolls.evidence.candidateNoWindow', '{{number}} (score {{score}}) — no rental window on file', vars);
+                    return <li key={candidate.id}>{text}</li>;
+                  })}
+                </ul>
+              </div>
+            ) : sawMultipleCandidates ? (
+              <p className="tq-cands-note">{t('tolls.evidence.candidatesNotStored', 'The matcher saw multiple candidate reservations for this toll; only the winning suggestion is stored.')}</p>
+            ) : null}
           </div>
         </div>
       </td>
@@ -366,6 +412,19 @@ function TollsInner({ token, me, logout }) {
   // Themed dialogs replace window.prompt/window.confirm (NOTES finding #8):
   // { kind: 'note', row, action } | { kind: 'bulk-confirm' } | { kind: 'waive-selected' }
   const [dialog, setDialog] = useState(null);
+  // Phase 2: ONE per-user toggle arms both grouping and the keyboard loop.
+  // Default off — staff who learned the flat list keep it until they opt in.
+  const [groupMode, setGroupMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try { return localStorage.getItem(GROUP_MODE_KEY) === '1'; } catch { return false; }
+  });
+  const [kbFocusId, setKbFocusId] = useState('');
+
+  const setGroupModePersist = (on) => {
+    setGroupMode(on);
+    setKbFocusId('');
+    try { localStorage.setItem(GROUP_MODE_KEY, on ? '1' : '0'); } catch {}
+  };
 
   const scopedTollsPath = (path) => {
     if (!isSuper || !activeTenantId) return path;
@@ -448,6 +507,19 @@ function TollsInner({ token, me, logout }) {
     return returned < total ? { returned, total } : null;
   }, [dashboard, transactions]);
   const visibleTransactions = useMemo(() => filterByQueueView(queueView, transactions), [queueView, transactions]);
+
+  // Phase 2: grouping applies only where it was designed — the Needs-review
+  // lane on the queue tab — and only when the user armed the toggle.
+  const grouping = groupMode && activeTab === 'QUEUE' && queueView === 'NEEDS_REVIEW';
+  const groups = useMemo(() => (grouping ? groupRowsByReservation(visibleTransactions) : null), [grouping, visibleTransactions]);
+  const orderedRows = useMemo(
+    () => (grouping && groups ? groups.flatMap((group) => group.rows) : visibleTransactions),
+    [grouping, groups, visibleTransactions]
+  );
+
+  // Any change of scene drops the keyboard focus — a stale focus id must
+  // never fire an action against a row the reader is no longer looking at.
+  useEffect(() => { setKbFocusId(''); }, [queueView, activeTab, grouping]);
 
   // "Pending to post" in dollars — the number an owner actually asks for.
   // Computed over the LOADED ready-to-post rows; prefixed ≥ when the window
@@ -661,15 +733,12 @@ function TollsInner({ token, me, logout }) {
     }
   };
 
-  const bulkConfirmCandidates = useMemo(() => {
-    return visibleTransactions.filter((row) => {
-      if (isUsageOnly(row)) return false;
-      if (!row.needsReview) return false;
-      if (row.dispatchConfirmationRequired && row.reservation?.id) return true;
-      if (row.latestAssignment?.reservation?.id) return true;
-      return false;
-    });
-  }, [visibleTransactions]);
+  // Same predicate as always — extracted to lib/toll-triage (phase 2) so the
+  // group headers' "Confirm N" can never disagree with the toolbar count.
+  const bulkConfirmCandidates = useMemo(
+    () => visibleTransactions.filter(isBulkConfirmEligible),
+    [visibleTransactions]
+  );
 
   const runBulkConfirm = async (ids) => {
     try {
@@ -805,6 +874,56 @@ function TollsInner({ token, me, logout }) {
   /* ---------- row action dispatch ---------- */
   const openNoteDialog = (row, action) => setDialog({ kind: 'note', row, action });
 
+  // Phase 2 keyboard triage loop — armed ONLY by the grouping toggle.
+  // J/K move the row focus, C confirms (dispatch rows open their themed
+  // dialog), D/W open the dispute/waive dialogs (never instant), Escape
+  // clears. Keys are inert while any dialog is open or while an input,
+  // textarea, select, or contenteditable owns the browser focus.
+  useEffect(() => {
+    if (!grouping) return undefined;
+    const onKeyDown = (event) => {
+      if (dialog) return;
+      const target = event.target;
+      const tag = String(target?.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const key = String(event.key || '').toLowerCase();
+      const index = orderedRows.findIndex((row) => row.id === kbFocusId);
+      const focused = index >= 0 ? orderedRows[index] : null;
+      if (key === 'j' || key === 'k') {
+        event.preventDefault();
+        if (!orderedRows.length) return;
+        const next = key === 'j'
+          ? orderedRows[Math.min(orderedRows.length - 1, index + 1)]
+          : orderedRows[Math.max(0, index < 0 ? 0 : index - 1)];
+        setKbFocusId(next.id);
+        try { document.querySelector(`tr[data-rowid="${next.id}"]`)?.scrollIntoView?.({ block: 'nearest' }); } catch {}
+        return;
+      }
+      if (key === 'escape') { setKbFocusId(''); return; }
+      if (!focused) return;
+      if (key === 'c') {
+        event.preventDefault();
+        if (isUsageOnly(focused)) return;
+        if (focused.dispatchConfirmationRequired && focused.reservation?.id) { openNoteDialog(focused, 'CONFIRM_DISPATCHED'); return; }
+        if (focused.latestAssignment?.reservation?.id || (reservationDrafts[focused.id] || '').trim()) confirmMatch(focused);
+        return;
+      }
+      if (key === 'd') {
+        event.preventDefault();
+        // Same visibility rule as the overflow menu item.
+        if (focused.billingStatus !== 'DISPUTED') openNoteDialog(focused, 'MARK_DISPUTED');
+        return;
+      }
+      if (key === 'w') {
+        event.preventDefault();
+        if (focused.billingStatus !== 'WAIVED') openNoteDialog(focused, 'MARK_NOT_BILLABLE');
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [grouping, dialog, orderedRows, kbFocusId, reservationDrafts, busyId]);
+
   const primaryButtonFor = (row) => {
     const hasDraft = !!(reservationDrafts[row.id] || '').trim();
     const primary = primaryActionForRow(row, { hasDraft });
@@ -887,6 +1006,160 @@ function TollsInner({ token, me, logout }) {
       </details>
     );
   };
+
+  /* ---------- row renderer (shared by the flat list and the grouped view) ----------
+     Extracted VERBATIM from the phase-1 map body so the toggle-off rendering
+     stays what it was; the only additions are data-rowid (keyboard scroll
+     anchor) and the is-kfocus class, which is inert while kbFocusId is ''. */
+  const renderTollRow = (row) => {
+    const assignmentStatus = String(row.latestAssignment?.status || '').toUpperCase();
+    const stateLabel = assignmentStatus === 'AUTO_CONFIRMED'
+      ? t('tolls.row.autoPaired', 'Auto-paired')
+      : assignmentStatus === 'CONFIRMED' || assignmentStatus === 'MATCHED'
+        ? t('tolls.row.confirmed', 'Confirmed')
+        : t('tolls.row.suggested', 'Suggested');
+    const { overflow } = inlineChipsForRow(row);
+    const selectable = !isUsageOnly(row);
+    return (
+      <Fragment key={row.id}>
+        <tr data-rowid={row.id} className={`${selectedIds.has(row.id) ? 'is-sel' : ''}${kbFocusId === row.id ? ' is-kfocus' : ''}`.trim()}>
+          <td>
+            <input
+              type="checkbox"
+              disabled={!selectable}
+              checked={selectedIds.has(row.id)}
+              onChange={() => toggleSelected(row.id)}
+              aria-label={row.id}
+            />
+          </td>
+          <td className="tq-when">
+            <b>{shortDateTime(row.transactionAt)}</b>
+            <small>{row.location || '-'}{row.lane ? ` · ${row.lane}` : ''}{row.direction ? ` ${row.direction}` : ''}</small>
+          </td>
+          <td className="right"><span className="tq-money">{money(row.amount)}</span></td>
+          <td className="tq-cell">
+            {row.vehicle ? (
+              <>
+                <b>{row.vehicle.internalNumber}</b>
+                {row.vehicle.plate ? <span className="tq-plate">{row.vehicle.plate}</span> : null}
+              </>
+            ) : (
+              <>
+                <span className="status-chip danger" style={{ fontSize: 11 }}>{t('tolls.row.notInFleet', 'Not in fleet')}</span>
+                {row.plateRaw || row.tagRaw || row.selloRaw ? (
+                  <small style={{ display: 'block', marginTop: 3 }}>
+                    {t('tolls.row.read', 'read: {{value}}', { value: row.plateRaw || row.tagRaw || row.selloRaw })}
+                  </small>
+                ) : null}
+              </>
+            )}
+          </td>
+          <td className="tq-cell">
+            {row.latestAssignment?.reservation ? (
+              <>
+                <b>{row.latestAssignment.reservation.reservationNumber}</b>
+                <small>
+                  {stateLabel}
+                  {row.reservation?.customer ? ` · ${[row.reservation.customer.firstName, row.reservation.customer.lastName].filter(Boolean).join(' ')}` : ''}
+                </small>
+              </>
+            ) : row.reservation ? (
+              <>
+                <b>{row.reservation.reservationNumber}</b>
+                {row.reservation.customer ? (
+                  <small>{[row.reservation.customer.firstName, row.reservation.customer.lastName].filter(Boolean).join(' ')}</small>
+                ) : null}
+              </>
+            ) : (
+              <input
+                className="tq-res-input"
+                placeholder={t('tolls.row.assignPlaceholder', 'Assign reservation #…')}
+                value={reservationDrafts[row.id] || ''}
+                onChange={(e) => setReservationDrafts((prev) => ({ ...prev, [row.id]: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === 'Enter' && (reservationDrafts[row.id] || '').trim()) confirmMatch(row); }}
+              />
+            )}
+            {row.issueIncident?.id ? (
+              <small style={{ display: 'block' }}>
+                <button type="button" className="tq-foot-issue" onClick={() => openIssueCase(row.issueIncident.id)} style={{ background: 'none', border: 0, padding: 0, minHeight: 0, boxShadow: 'none', fontSize: 11, color: 'var(--brand-tx)', cursor: 'pointer' }}>
+                  {t('tolls.row.issueLink', 'Issue {{id}} — {{status}}', { id: row.issueIncident.id, status: row.issueIncident.status || 'OPEN' })} ↗
+                </button>
+              </small>
+            ) : null}
+          </td>
+          <td>
+            {row.billingStatus === 'DISPUTED' ? (
+              <span className="status-chip warn" style={{ marginBottom: 3 }}>{t('tolls.toolbar.statusDisputed', 'Disputed')}</span>
+            ) : row.billingStatus === 'WAIVED' ? (
+              <span className="status-chip neutral" style={{ marginBottom: 3 }}>{t('tolls.toolbar.statusVoid', 'Void / Not Billable')}</span>
+            ) : null}
+            <ConfidenceCell
+              row={row}
+              t={t}
+              overflow={overflow}
+              onMore={() => setEvidenceId((prev) => prev === row.id ? '' : row.id)}
+            />
+          </td>
+          <td>
+            <div className="tq-act">
+              {primaryButtonFor(row)}
+              {row.reservation?.id ? (
+                <a className="go-res" href={`/reservations/${row.reservation.id}`} title={t('tolls.row.viewReservation', 'View reservation')}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" /></svg>
+                </a>
+              ) : null}
+              {rowMenu(row)}
+            </div>
+          </td>
+        </tr>
+        {evidenceId === row.id ? <EvidenceDrawer row={row} t={t} /> : null}
+      </Fragment>
+    );
+  };
+
+  /* Group header row (phase 2): renter, toll count, dollar total, the batch's
+     MINIMUM confidence, and one "Confirm N" that batches the group's eligible
+     rows through the SAME themed dialog + bulk-confirm ids[] endpoint. */
+  const renderGroupHead = (group) => (
+    <tr className="tq-grouphead" key={`grp-${group.key}`}>
+      <td colSpan={7}>
+        <div className="tq-grp-line">
+          <div className="who">
+            <b>
+              {group.key === UNGROUPED_KEY
+                ? t('tolls.group.noReservation', 'No reservation found')
+                : group.reservation?.reservationNumber || '—'}
+              {group.renterName ? ` · ${group.renterName}` : ''}
+            </b>
+            <small>
+              {group.key === UNGROUPED_KEY
+                ? t('tolls.group.noReservationDesc', 'Tolls the matcher could not attribute — they bill no one until assigned.')
+                : group.reservation?.pickupAt && group.reservation?.returnAt
+                  ? `${shortDateTime(group.reservation.pickupAt)} → ${shortDateTime(group.reservation.returnAt)}`
+                  : ''}
+            </small>
+          </div>
+          <div className="sum">
+            <b>{money(group.total)}</b>
+            <small>
+              {t('tolls.group.count', '{{count}} tolls', { count: group.count })}
+              {group.minConfidence != null ? ` · ${t('tolls.group.minConf', 'min conf {{score}}', { score: group.minConfidence })}` : ''}
+            </small>
+          </div>
+          {group.eligibleRows.length ? (
+            <button
+              type="button"
+              className="tq-mini-btn tq-btn-primary"
+              disabled={busyId === 'bulk-confirm'}
+              onClick={() => setDialog({ kind: 'bulk-confirm', rows: group.eligibleRows, fromGroup: true })}
+            >
+              {t('tolls.group.confirmN', 'Confirm {{count}}', { count: group.eligibleRows.length })}
+            </button>
+          ) : null}
+        </div>
+      </td>
+    </tr>
+  );
 
   /* ---------- render ---------- */
   const autoSyncOn = !!dashboard?.autoSync?.enabled;
@@ -996,6 +1269,11 @@ function TollsInner({ token, me, logout }) {
                 <option value="VOID">{t('tolls.toolbar.statusVoid', 'Void / Not Billable')}</option>
               </select>
               <label className="label"><input type="checkbox" checked={reviewOnly} onChange={(e) => setReviewOnly(e.target.checked)} /> {t('tolls.toolbar.reviewOnly', 'Review only')}</label>
+              {queueView === 'NEEDS_REVIEW' ? (
+                <label className="label" title={t('tolls.group.toggleHint', 'Group Needs-review rows by reservation and arm the J/K/C/D/W keyboard loop')}>
+                  <input type="checkbox" checked={groupMode} onChange={(e) => setGroupModePersist(e.target.checked)} /> {t('tolls.group.toggle', 'Group by reservation')}
+                </label>
+              ) : null}
               <button type="button" className="button-subtle" onClick={load}>{t('tolls.toolbar.refresh', 'Refresh')}</button>
               <button type="button" className="button-subtle" onClick={runExportCsv} disabled={busyId === 'export-csv' || (isSuper && !activeTenantId)}>
                 {busyId === 'export-csv' ? t('tolls.toolbar.exporting', 'Exporting…') : t('tolls.toolbar.exportCsv', 'Export CSV')}
@@ -1073,6 +1351,8 @@ function TollsInner({ token, me, logout }) {
                         total: shownOf.total
                       })}</b>
                     </span>
+                    {/* the honest notice stays honest: grouped counts only see the window */}
+                    {grouping ? <span>{t('tolls.group.truncated', 'Group counts and totals cover only the loaded rows.')}</span> : null}
                     <span className="next">{t('tolls.truncationNext', 'Narrow with filters to reach the rest →')}</span>
                   </div>
                 ) : null}
@@ -1102,111 +1382,16 @@ function TollsInner({ token, me, logout }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {visibleTransactions.map((row) => {
-                        const assignmentStatus = String(row.latestAssignment?.status || '').toUpperCase();
-                        const stateLabel = assignmentStatus === 'AUTO_CONFIRMED'
-                          ? t('tolls.row.autoPaired', 'Auto-paired')
-                          : assignmentStatus === 'CONFIRMED' || assignmentStatus === 'MATCHED'
-                            ? t('tolls.row.confirmed', 'Confirmed')
-                            : t('tolls.row.suggested', 'Suggested');
-                        const { overflow } = inlineChipsForRow(row);
-                        const selectable = !isUsageOnly(row);
-                        return (
-                          <Fragment key={row.id}>
-                            <tr className={selectedIds.has(row.id) ? 'is-sel' : ''}>
-                              <td>
-                                <input
-                                  type="checkbox"
-                                  disabled={!selectable}
-                                  checked={selectedIds.has(row.id)}
-                                  onChange={() => toggleSelected(row.id)}
-                                  aria-label={row.id}
-                                />
-                              </td>
-                              <td className="tq-when">
-                                <b>{shortDateTime(row.transactionAt)}</b>
-                                <small>{row.location || '-'}{row.lane ? ` · ${row.lane}` : ''}{row.direction ? ` ${row.direction}` : ''}</small>
-                              </td>
-                              <td className="right"><span className="tq-money">{money(row.amount)}</span></td>
-                              <td className="tq-cell">
-                                {row.vehicle ? (
-                                  <>
-                                    <b>{row.vehicle.internalNumber}</b>
-                                    {row.vehicle.plate ? <span className="tq-plate">{row.vehicle.plate}</span> : null}
-                                  </>
-                                ) : (
-                                  <>
-                                    <span className="status-chip danger" style={{ fontSize: 11 }}>{t('tolls.row.notInFleet', 'Not in fleet')}</span>
-                                    {row.plateRaw || row.tagRaw || row.selloRaw ? (
-                                      <small style={{ display: 'block', marginTop: 3 }}>
-                                        {t('tolls.row.read', 'read: {{value}}', { value: row.plateRaw || row.tagRaw || row.selloRaw })}
-                                      </small>
-                                    ) : null}
-                                  </>
-                                )}
-                              </td>
-                              <td className="tq-cell">
-                                {row.latestAssignment?.reservation ? (
-                                  <>
-                                    <b>{row.latestAssignment.reservation.reservationNumber}</b>
-                                    <small>
-                                      {stateLabel}
-                                      {row.reservation?.customer ? ` · ${[row.reservation.customer.firstName, row.reservation.customer.lastName].filter(Boolean).join(' ')}` : ''}
-                                    </small>
-                                  </>
-                                ) : row.reservation ? (
-                                  <>
-                                    <b>{row.reservation.reservationNumber}</b>
-                                    {row.reservation.customer ? (
-                                      <small>{[row.reservation.customer.firstName, row.reservation.customer.lastName].filter(Boolean).join(' ')}</small>
-                                    ) : null}
-                                  </>
-                                ) : (
-                                  <input
-                                    className="tq-res-input"
-                                    placeholder={t('tolls.row.assignPlaceholder', 'Assign reservation #…')}
-                                    value={reservationDrafts[row.id] || ''}
-                                    onChange={(e) => setReservationDrafts((prev) => ({ ...prev, [row.id]: e.target.value }))}
-                                    onKeyDown={(e) => { if (e.key === 'Enter' && (reservationDrafts[row.id] || '').trim()) confirmMatch(row); }}
-                                  />
-                                )}
-                                {row.issueIncident?.id ? (
-                                  <small style={{ display: 'block' }}>
-                                    <button type="button" className="tq-foot-issue" onClick={() => openIssueCase(row.issueIncident.id)} style={{ background: 'none', border: 0, padding: 0, minHeight: 0, boxShadow: 'none', fontSize: 11, color: 'var(--brand-tx)', cursor: 'pointer' }}>
-                                      {t('tolls.row.issueLink', 'Issue {{id}} — {{status}}', { id: row.issueIncident.id, status: row.issueIncident.status || 'OPEN' })} ↗
-                                    </button>
-                                  </small>
-                                ) : null}
-                              </td>
-                              <td>
-                                {row.billingStatus === 'DISPUTED' ? (
-                                  <span className="status-chip warn" style={{ marginBottom: 3 }}>{t('tolls.toolbar.statusDisputed', 'Disputed')}</span>
-                                ) : row.billingStatus === 'WAIVED' ? (
-                                  <span className="status-chip neutral" style={{ marginBottom: 3 }}>{t('tolls.toolbar.statusVoid', 'Void / Not Billable')}</span>
-                                ) : null}
-                                <ConfidenceCell
-                                  row={row}
-                                  t={t}
-                                  overflow={overflow}
-                                  onMore={() => setEvidenceId((prev) => prev === row.id ? '' : row.id)}
-                                />
-                              </td>
-                              <td>
-                                <div className="tq-act">
-                                  {primaryButtonFor(row)}
-                                  {row.reservation?.id ? (
-                                    <a className="go-res" href={`/reservations/${row.reservation.id}`} title={t('tolls.row.viewReservation', 'View reservation')}>
-                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" /></svg>
-                                    </a>
-                                  ) : null}
-                                  {rowMenu(row)}
-                                </div>
-                              </td>
-                            </tr>
-                            {evidenceId === row.id ? <EvidenceDrawer row={row} t={t} /> : null}
+                      {grouping && groups ? (
+                        groups.map((group) => (
+                          <Fragment key={`grpwrap-${group.key}`}>
+                            {renderGroupHead(group)}
+                            {group.rows.map(renderTollRow)}
                           </Fragment>
-                        );
-                      })}
+                        ))
+                      ) : (
+                        visibleTransactions.map(renderTollRow)
+                      )}
                       {!visibleTransactions.length ? (
                         <tr>
                           <td colSpan={7} className="label">{t('tolls.table.empty', 'No toll transactions matched this queue view yet.')}</td>
@@ -1229,7 +1414,16 @@ function TollsInner({ token, me, logout }) {
                       <button type="button" className="lnk quiet" onClick={() => setSelectedIds(new Set())}>{t('tolls.foot.clear', 'Clear')}</button>
                     </>
                   ) : null}
-                  <span className="r">{t('tolls.foot.rows', '{{count}} rows · sorted newest', { count: visibleTransactions.length })}</span>
+                  {grouping ? (
+                    <span className="tq-keys" aria-label={t('tolls.kbd.legend', 'Keyboard triage')}>
+                      <kbd>J</kbd>/<kbd>K</kbd> {t('tolls.kbd.move', 'move')} · <kbd>C</kbd> {t('tolls.kbd.confirm', 'confirm')} · <kbd>D</kbd> {t('tolls.kbd.dispute', 'dispute')} · <kbd>W</kbd> {t('tolls.kbd.waive', 'waive')} · <kbd>Esc</kbd> {t('tolls.kbd.clear', 'clear')}
+                    </span>
+                  ) : null}
+                  <span className="r">
+                    {grouping && groups
+                      ? t('tolls.foot.groups', '{{groups}} groups · {{count}} rows · sorted newest', { groups: groups.length, count: visibleTransactions.length })
+                      : t('tolls.foot.rows', '{{count}} rows · sorted newest', { count: visibleTransactions.length })}
+                  </span>
                 </div>
               </div>
             </div>

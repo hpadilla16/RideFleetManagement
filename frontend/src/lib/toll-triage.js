@@ -236,6 +236,93 @@ export function primaryActionForRow(row = {}, { hasDraft = false } = {}) {
   return 'REVIEW';
 }
 
+/* ------------------------------------------------------------------ */
+/* Phase 2 — Direction B grafts (approved as phase 2 when A shipped).  */
+/* Group-by-reservation batching + keyboard triage live behind a       */
+/* per-user toggle; these helpers are pure so the math is testable.    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The rows "Confirm all" / a group's "Confirm N" can actually batch — the
+ * EXACT predicate the toolbar's bulkConfirmCandidates has always used
+ * (extracted, not changed): needs review, not usage-only, and either a
+ * suggested reservation or a dispatch confirmation pending.
+ */
+export function isBulkConfirmEligible(row = {}) {
+  if (isUsageOnly(row)) return false;
+  if (!row.needsReview) return false;
+  if (row.dispatchConfirmationRequired && row.reservation?.id) return true;
+  if (row.latestAssignment?.reservation?.id) return true;
+  return false;
+}
+
+/** Group key for rows the matcher could not attribute to any reservation. */
+export const UNGROUPED_KEY = 'NO_RESERVATION';
+
+/**
+ * Group the LOADED rows by their (suggested or attached) reservation, in
+ * first-appearance order — the list arrives newest-first and stays that way
+ * inside each group. Mockup B rules:
+ *  - header carries count, dollar total, and the group's MINIMUM confidence
+ *    (the honest number to judge a batch by);
+ *  - `eligibleRows` are what "Confirm N" batches via the EXISTING
+ *    bulk-confirm ids[] endpoint;
+ *  - rows with no reservation fall into one UNGROUPED bucket, always last —
+ *    data-entry work, not judgment work.
+ * Counts/totals cover only the rows given (the 200-row window); the caller
+ * owns saying so when the window truncates.
+ */
+export function groupRowsByReservation(rows = []) {
+  const list = Array.isArray(rows) ? rows : [];
+  const byKey = new Map();
+  const order = [];
+  for (const row of list) {
+    const reservation = row?.latestAssignment?.reservation || row?.reservation || null;
+    const key = reservation?.id || UNGROUPED_KEY;
+    if (!byKey.has(key)) {
+      byKey.set(key, { key, reservation: reservation || null, rows: [] });
+      order.push(key);
+    }
+    const group = byKey.get(key);
+    if (!group.reservation && reservation) group.reservation = reservation;
+    group.rows.push(row);
+  }
+  const groups = order.map((key) => byKey.get(key));
+  const ungroupedAt = groups.findIndex((group) => group.key === UNGROUPED_KEY);
+  if (ungroupedAt >= 0) groups.push(groups.splice(ungroupedAt, 1)[0]);
+  for (const group of groups) {
+    group.count = group.rows.length;
+    group.total = group.rows.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+    const scores = group.rows
+      .map((row) => confidenceForRow(row))
+      .filter((score) => score != null && !Number.isNaN(Number(score)))
+      .map(Number);
+    group.minConfidence = scores.length ? Math.min(...scores) : null;
+    group.eligibleRows = group.rows.filter(isBulkConfirmEligible);
+    const withCustomer = group.rows.find((row) => row?.reservation?.customer);
+    group.renterName = withCustomer
+      ? [withCustomer.reservation.customer.firstName, withCustomer.reservation.customer.lastName].filter(Boolean).join(' ')
+      : '';
+  }
+  return groups;
+}
+
+/**
+ * Where a candidate's rental window sits relative to the toll — the losing
+ * candidate explained ("previous renter, window ended before this toll").
+ * Returns { kind: 'endedBefore' | 'startsAfter' | 'covers' | 'noWindow', at }.
+ */
+export function candidateWindowRelation(candidate = {}, tollAtValue) {
+  const tollAt = tollAtValue ? new Date(tollAtValue) : null;
+  const pickupAt = candidate?.reservation?.pickupAt ? new Date(candidate.reservation.pickupAt) : null;
+  const returnAt = candidate?.reservation?.returnAt ? new Date(candidate.reservation.returnAt) : null;
+  const valid = (d) => d && !Number.isNaN(d.getTime());
+  if (!valid(tollAt) || !valid(pickupAt) || !valid(returnAt)) return { kind: 'noWindow', at: null };
+  if (returnAt.getTime() < tollAt.getTime()) return { kind: 'endedBefore', at: candidate.reservation.returnAt };
+  if (pickupAt.getTime() > tollAt.getTime()) return { kind: 'startsAfter', at: candidate.reservation.pickupAt };
+  return { kind: 'covers', at: null };
+}
+
 /**
  * Overflow (⋯) items for a row — the SAME conditions the old stacked buttons
  * used, minus whatever became the primary action. Nothing is dropped:

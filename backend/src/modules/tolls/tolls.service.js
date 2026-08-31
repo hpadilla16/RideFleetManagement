@@ -696,6 +696,45 @@ function serializeIssueIncidentSummary(incident) {
   };
 }
 
+/**
+ * Tolls phase 2 (Direction B evidence pane): the OTHER reservations this toll
+ * was previously suggested against — the superseded/rejected assignments that
+ * replaceSuggestedAssignments left behind when a re-match sweep moved the
+ * suggestion. The current match run's losing candidates are NOT persisted
+ * (buildMatchSuggestion computes them and stores only the winner), so this is
+ * the honest subset we can show without re-running the matcher per row.
+ * Purely additive and DB-free: it reads the `assignments` list the dashboard
+ * query already includes — no new query fanout per row.
+ */
+export function serializeCandidateAssignments(assignments = []) {
+  const list = Array.isArray(assignments) ? assignments : [];
+  if (list.length < 2) return [];
+  const latestReservationId = list[0]?.reservation?.id || list[0]?.reservationId || null;
+  const seen = new Set();
+  const out = [];
+  for (const row of list.slice(1)) {
+    const reservation = row?.reservation || null;
+    if (!reservation?.id) continue;
+    if (latestReservationId && reservation.id === latestReservationId) continue;
+    if (seen.has(reservation.id)) continue;
+    seen.add(reservation.id);
+    out.push({
+      id: row.id,
+      status: row.status,
+      confidence: row.confidence == null ? null : Number(row.confidence),
+      matchReason: row.matchReason || '',
+      reservation: {
+        id: reservation.id,
+        reservationNumber: reservation.reservationNumber,
+        pickupAt: reservation.pickupAt,
+        returnAt: reservation.returnAt
+      }
+    });
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
 function serializeTransaction(row) {
   const latestAssignment = Array.isArray(row.assignments) && row.assignments.length ? row.assignments[0] : null;
   const reviewCategory = inferReviewCategory(row.reviewNotes || latestAssignment?.matchReason || '');
@@ -764,6 +803,9 @@ function serializeTransaction(row) {
         returnAt: latestAssignment.reservation.returnAt
       } : null
     } : null,
+    // Superseded suggestions pointing at OTHER reservations — the evidence
+    // pane's "losing candidate" card (phase 2). See serializeCandidateAssignments.
+    candidateAssignments: serializeCandidateAssignments(row.assignments),
     issueIncident: serializeIssueIncidentSummary(row.issueIncident)
   };
 }
