@@ -121,3 +121,20 @@ test('email: DRAFT reports are blocked with 409', async () => {
     );
   } finally { prisma.reservationIncident.findFirst = orig; }
 });
+
+test('assembleReport reads the plate from Vehicle.plate — the field that exists', async () => {
+  // The Vehicle model has never had `licensePlate`; this read was empty on
+  // every report the module ever produced until 2026-08-31 (found by IRC:
+  // "the license plate section is coming up empty").
+  const report = await __test.assembleReport(
+    { type: 'DAMAGE', reportNumber: 'INC-X', evidence: [], citedClausesJson: null, chargeIdsJson: null },
+    {
+      tenant: { name: 'International Rental Corp' },
+      vehicle: { year: 2024, make: 'Toyota', model: 'Corolla', color: 'White', plate: 'KST788' },
+      rentalAgreement: { charges: [] },
+      customer: { firstName: 'Ana', lastName: 'Test' },
+    },
+  );
+  assert.equal(report.vehicle.plate, 'KST788');
+  assert.equal(report.vehicle.makeModel, '2024 Toyota Corolla');
+});
