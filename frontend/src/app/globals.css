@@ -2564,6 +2564,27 @@ tr.osg-dirty td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
 .tq-foot .lnk.quiet { color: var(--text-3); font-weight: 560; }
 .tq-foot .r { margin-left: auto; }
 
+/* ---- Tolls phase 2: group-by-reservation + keyboard triage (Direction B graft) ---- */
+.tq-grouphead td { height: auto; background: var(--surface-2); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border-subtle); padding: 7px 10px; }
+.tq-table tbody tr.tq-grouphead:hover { background: var(--surface-2); }
+.tq-grp-line { display: flex; align-items: center; gap: 12px; min-height: 34px; }
+.tq-grp-line .who { min-width: 0; }
+.tq-grp-line .who b { display: block; font-size: 12.5px; font-weight: 660; color: var(--text-1); line-height: 1.25; }
+.tq-grp-line .who small { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.tq-grp-line .sum { margin-left: auto; text-align: right; }
+.tq-grp-line .sum b { display: block; font-size: 12.5px; font-weight: 660; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.tq-grp-line .sum small { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.tq-table tr.is-kfocus td { background: var(--p-50); }
+.tq-table tr.is-kfocus td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
+:root[data-theme='dark'] .tq-table tr.is-kfocus td { background: var(--brand-a12); }
+.tq-keys { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.tq-keys kbd { font-family: inherit; font-size: 10px; font-weight: 620; color: var(--text-2); background: var(--surface-card); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; line-height: 1.6; }
+.tq-cands { margin-top: 12px; border-top: 1px dashed var(--border-subtle); padding-top: 10px; }
+.tq-cands h5 { margin-bottom: 6px; }
+.tq-cands ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.tq-cands li { font-size: 11.5px; color: var(--text-2); line-height: 1.5; }
+.tq-cands-note { font-size: 11.5px; color: var(--text-3); margin-top: 10px; line-height: 1.5; }
+
 /* imports tab reuses .glass/.section-card; small stat grid */
 .tq-mini-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
 .tq-mini { background: var(--surface-1); border: 1px solid var(--border-subtle); border-radius: var(--r-sm); padding: 8px 10px; }

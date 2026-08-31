@@ -1648,14 +1648,40 @@
       "return": "Devolución",
       "tollAt": "Peaje {{when}}",
       "raw": "Tokens del matcher (soporte)",
-      "noLedger": "El matcher no registró tokens de puntaje para este peaje."
+      "noLedger": "El matcher no registró tokens de puntaje para este peaje.",
+      "otherCandidates": "Otros candidatos — sugerencias reemplazadas",
+      "candidateEndedBefore": "{{number}} (puntaje {{score}}) — la ventana terminó {{when}}, antes de este peaje",
+      "candidateStartsAfter": "{{number}} (puntaje {{score}}) — la ventana comienza {{when}}, después de este peaje",
+      "candidateCovers": "{{number}} (puntaje {{score}}) — la ventana también cubre este peaje",
+      "candidateNoWindow": "{{number}} (puntaje {{score}}) — sin ventana de renta registrada",
+      "candidatesNotStored": "El matcher vio varias reservas candidatas para este peaje; solo se guarda la sugerencia ganadora."
     },
     "foot": {
       "selected": "{{count}} seleccionados",
       "confirmSelected": "Confirmar seleccionados",
       "waiveSelected": "Exonerar seleccionados",
       "rows": "{{count}} filas · más recientes primero",
+      "groups": "{{groups}} grupos · {{count}} filas · más recientes primero",
       "clear": "Limpiar"
+    },
+    "group": {
+      "toggle": "Agrupar por reserva",
+      "toggleHint": "Agrupa las filas de Requiere revisión por reserva y activa el teclado J/K/C/D/W",
+      "noReservation": "Sin reserva encontrada",
+      "noReservationDesc": "Peajes que el matcher no pudo atribuir — no se cobran a nadie hasta asignarse.",
+      "count": "{{count}} peajes",
+      "count_one": "{{count}} peaje",
+      "minConf": "conf mín {{score}}",
+      "confirmN": "Confirmar {{count}}",
+      "truncated": "Los conteos y totales por grupo cubren solo las filas cargadas."
+    },
+    "kbd": {
+      "legend": "Triage por teclado",
+      "move": "mover",
+      "confirm": "confirmar",
+      "dispute": "disputar",
+      "waive": "exonerar",
+      "clear": "quitar foco"
     },
     "dialog": {
       "cancel": "Cancelar",

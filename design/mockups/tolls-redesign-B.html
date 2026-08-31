@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RideFleet — Tolls Redesign B · Review Workbench</title>
+<style>
+/* ============================================================
+   Tokens — Design System v2 subset. Brand #8752FE unchanged.
+   Flat surfaces, tabular-nums, 40px rows, 11px text floor.
+   ============================================================ */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+
+  --brand:#8752FE;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-600:#7440ea; --p-700:#5a26c9; --p-800:#45189e;
+
+  --gold-600:#a3660f; --gold-700:#7d4d08;
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+
+  --border-subtle:var(--n-100); --border:var(--n-200); --border-strong:var(--n-300);
+  --text-1:var(--n-900); --text-2:var(--n-700); --text-3:var(--n-600);
+
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+  --sh-2:0 1px 2px rgba(24,16,54,.05),0 6px 14px -4px rgba(38,20,90,.09),0 14px 28px -12px rgba(38,20,90,.10);
+
+  --r-xs:6px; --r-sm:8px; --r-md:11px; --r-lg:14px; --r-xl:18px; --r-pill:999px;
+  --font-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --focus:#0b63d6;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--n-50)}
+body{font-family:var(--font-sans);font-size:14px;line-height:1.55;color:var(--text-2);background:var(--n-50);-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4,h5{color:var(--text-1);letter-spacing:-.018em;line-height:1.15}
+table{border-collapse:collapse;width:100%}
+button,input,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+.tnum,table,.money,.mono,time{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:var(--r-xs)}
+
+/* mockup page chrome */
+.page-head{max-width:1440px;margin:0 auto;padding:44px 32px 20px}
+.page-head .eyebrow{
+  display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);
+  font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--p-800);background:var(--p-50);border:1px solid rgba(135,82,254,.22);
+  border-radius:var(--r-pill);padding:6px 13px 6px 10px;
+}
+.page-head .eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.page-head h1{margin-top:14px;font-size:clamp(28px,3.4vw,42px);font-weight:700;letter-spacing:-.03em}
+.page-head p{margin-top:10px;max-width:840px;color:var(--text-2);font-size:15px}
+.page-head .note{margin-top:14px;max-width:840px;font-size:12.5px;color:var(--text-3);border-left:3px solid var(--n-300);padding-left:12px;line-height:1.6}
+.mock-wrap{max-width:1440px;margin:20px auto 72px;padding:0 32px}
+.mock-label{font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);margin:36px 0 10px}
+
+/* ============================================================
+   PRODUCT SCREEN
+   ============================================================ */
+.screen{background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-xl);box-shadow:var(--sh-2);overflow:hidden}
+
+.mod-head{padding:16px 20px 0;border-bottom:1px solid var(--border-subtle)}
+.mod-title-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.mod-title-row h2{font-size:18px;font-weight:660}
+.mod-title-row .right{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tenant-scope{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--text-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 10px;background:var(--n-25)}
+.tenant-scope b{font-weight:640;color:var(--text-1)}
+.mod-tabs{display:flex;gap:2px;margin-top:12px}
+.mod-tabs a{padding:8px 13px;font-size:13px;font-weight:600;color:var(--text-3);border-bottom:2px solid transparent}
+.mod-tabs a:hover{color:var(--text-1)}
+.mod-tabs a.is-on{color:var(--p-700);border-bottom-color:var(--brand)}
+
+/* toolbar: view segmented + all controls */
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:11px 20px;border-bottom:1px solid var(--border-subtle)}
+.seg{display:inline-flex;gap:3px;padding:3px;background:var(--n-100);border:1px solid var(--border);border-radius:var(--r-md);overflow-x:auto;max-width:100%}
+.seg button{
+  border:0;background:transparent;cursor:pointer;padding:6px 11px;border-radius:var(--r-xs);
+  font-size:12px;font-weight:620;color:var(--text-3);white-space:nowrap;display:inline-flex;gap:6px;align-items:center;min-height:32px;
+}
+.seg button b{font-family:var(--font-mono);font-weight:500;font-size:10.5px;color:var(--text-3)}
+.seg button.is-on{background:var(--n-0);color:var(--p-800);box-shadow:var(--sh-1)}
+.seg button.is-on b{color:var(--p-700)}
+.seg button .hot{color:var(--warn-tx);font-weight:700}
+.search{
+  display:flex;align-items:center;gap:7px;min-width:190px;flex:0 1 240px;
+  border:1px solid var(--border-strong);border-radius:var(--r-sm);padding:7px 10px;
+  background:var(--n-0);box-shadow:var(--sh-1);font-size:12.5px;color:var(--text-3);
+}
+.search svg{width:13px;height:13px;color:var(--n-500);flex:0 0 auto}
+.select{
+  appearance:none;border:1px solid var(--border-strong);border-radius:var(--r-sm);
+  padding:7px 28px 7px 10px;font-size:12.5px;background:var(--n-0);color:var(--text-1);box-shadow:var(--sh-1);cursor:pointer;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234b4362' stroke-width='1.7' stroke-linecap='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat:no-repeat;background-position:right 8px center;background-size:13px;
+}
+.toggle{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--text-2);cursor:pointer;user-select:none}
+.toggle .tk{width:30px;height:17px;border-radius:var(--r-pill);background:var(--brand);position:relative;flex:0 0 auto}
+.toggle .tk::after{content:"";position:absolute;top:2px;right:2px;width:13px;height:13px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;
+  font-size:12.5px;font-weight:620;padding:7px 13px;border-radius:var(--r-sm);
+  border:1px solid transparent;cursor:pointer;white-space:nowrap;transition:.15s;
+}
+.btn svg{width:14px;height:14px;flex:0 0 auto}
+.btn--primary{background:var(--brand);color:#fff;box-shadow:0 1px 2px rgba(56,20,130,.28),0 6px 14px -6px rgba(135,82,254,.55)}
+.btn--primary:hover{background:var(--p-600)}
+.btn--secondary{background:var(--n-0);color:var(--text-1);border-color:var(--border-strong);box-shadow:var(--sh-1)}
+.btn--ghost{background:transparent;color:var(--p-700)}
+.btn--ghost:hover{background:var(--p-50)}
+.btn--danger-ghost{background:transparent;color:var(--danger-tx)}
+.btn--danger-ghost:hover{background:var(--danger-bg)}
+.btn .cnt{font-family:var(--font-mono);font-size:10.5px;background:rgba(255,255,255,.22);border-radius:5px;padding:1px 5px}
+.btn--secondary .cnt,.btn--ghost .cnt{background:var(--n-100);color:var(--text-2)}
+.ml-auto{margin-left:auto}
+.tool-sep{width:1px;height:22px;background:var(--border);margin:0 2px}
+.kbd{font-family:var(--font-mono);font-size:10px;background:var(--n-50);border:1px solid var(--border);border-radius:4px;padding:0 5px;color:var(--text-3)}
+
+/* ---- workbench: master list + evidence pane ---- */
+.bench{display:flex;min-height:620px}
+.master{width:46%;flex:0 0 46%;border-right:1px solid var(--border-subtle);display:flex;flex-direction:column;min-width:0}
+.master-scroll{overflow-y:auto;flex:1}
+
+/* reservation group */
+.rgroup{border-bottom:1px solid var(--border)}
+.rg-head{
+  display:flex;align-items:center;gap:10px;padding:8px 14px;min-height:48px;
+  background:var(--n-25);border-bottom:1px solid var(--border-subtle);
+}
+.rg-head .who b{display:block;font-size:12.5px;font-weight:660;color:var(--text-1);line-height:1.25}
+.rg-head .who small{font-size:11px;color:var(--text-3)}
+.rg-head .plate{
+  font-family:var(--font-mono);font-size:10.5px;font-weight:600;letter-spacing:.06em;color:var(--text-1);
+  background:linear-gradient(180deg,var(--n-0),var(--n-100));border:1px solid var(--border-strong);
+  border-radius:var(--r-xs);padding:2px 6px;
+}
+.rg-head .sum{margin-left:auto;text-align:right}
+.rg-head .sum b{display:block;font-size:12.5px;font-weight:660;color:var(--text-1)}
+.rg-head .sum small{font-size:10.5px;color:var(--text-3)}
+.rg-head .btn{min-height:32px;padding:5px 11px;font-size:12px;border-radius:var(--r-xs)}
+
+/* one-line toll rows: 40px */
+.trow{
+  display:flex;align-items:center;gap:10px;padding:0 14px;height:40px;cursor:pointer;
+  border-bottom:1px solid var(--border-subtle);font-size:12px;color:var(--text-2);
+}
+.trow:last-child{border-bottom:0}
+.trow:hover{background:var(--n-25)}
+.trow.is-focus{background:var(--p-50);box-shadow:inset 3px 0 0 var(--brand)}
+.trow .t{font-family:var(--font-mono);font-size:11px;color:var(--text-3);width:86px;flex:0 0 auto}
+.trow .loc{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2)}
+.trow .amt{font-weight:640;color:var(--text-1);font-size:12.5px;width:52px;text-align:right;flex:0 0 auto}
+.trow .cdot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.trow .cdot.hi{background:var(--ok)}
+.trow .cdot.mid{background:var(--gold-600)}
+.trow .cdot.low{background:var(--danger)}
+.trow .cnum{font-family:var(--font-mono);font-size:10.5px;color:var(--text-3);width:26px;text-align:right;flex:0 0 auto}
+.trow .st{flex:0 0 auto}
+.chip{
+  display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:640;line-height:1.3;
+  padding:2px 7px;border-radius:var(--r-xs);white-space:nowrap;border:1px solid transparent;
+}
+.chip i{width:5px;height:5px;border-radius:50%;background:currentColor;flex:0 0 auto}
+.chip--ok{color:var(--ok-tx);background:var(--ok-bg);border-color:var(--ok-bd)}
+.chip--warn{color:var(--warn-tx);background:var(--warn-bg);border-color:var(--warn-bd)}
+.chip--bad{color:var(--danger-tx);background:var(--danger-bg);border-color:var(--danger-bd)}
+.chip--info{color:var(--info);background:var(--info-bg);border-color:var(--info-bd)}
+.chip--neutral{color:var(--text-2);background:var(--n-100);border-color:var(--border)}
+
+.master-foot{
+  display:flex;align-items:center;gap:12px;padding:8px 14px;margin-top:auto;
+  border-top:1px solid var(--border-subtle);background:var(--n-50);
+  font-family:var(--font-mono);font-size:10.5px;color:var(--text-3);
+}
+.master-foot .r{margin-left:auto}
+
+/* ---- evidence pane ---- */
+.pane{flex:1;min-width:0;background:var(--n-25);display:flex;flex-direction:column}
+.pane-scroll{overflow-y:auto;flex:1;padding:16px 18px}
+.ecard{background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--sh-1);padding:14px 16px;margin-bottom:12px}
+.ecard h5{
+  font-family:var(--font-mono);font-size:9.5px;font-weight:500;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--text-3);margin-bottom:10px;
+}
+.e-top{display:flex;align-items:flex-start;gap:14px}
+.e-top .amt{font-size:30px;font-weight:700;letter-spacing:-.04em;color:var(--text-1);line-height:1;font-variant-numeric:tabular-nums}
+.e-top .meta b{display:block;font-size:13px;font-weight:640;color:var(--text-1)}
+.e-top .meta small{display:block;font-size:11.5px;color:var(--text-3);margin-top:2px}
+.e-top .score{margin-left:auto;text-align:right}
+.score .n{font-size:24px;font-weight:700;letter-spacing:-.03em;color:var(--ok-tx);line-height:1;font-variant-numeric:tabular-nums}
+.score .n.mid{color:var(--gold-700)}
+.score .n.low{color:var(--danger-tx)}
+.score .lab{font-family:var(--font-mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-3);margin-top:3px}
+.score .bar{width:88px;height:5px;border-radius:3px;background:var(--n-200);overflow:hidden;margin-top:6px}
+.score .bar i{display:block;height:100%;border-radius:3px;background:var(--ok)}
+.score .bar i.mid{background:var(--gold-600)}
+.score .bar i.low{background:var(--danger)}
+
+.idtable{width:100%;margin-top:2px}
+.idtable th{
+  font-family:var(--font-mono);font-size:9px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text-3);text-align:left;padding:3px 0;
+}
+.idtable td{padding:4px 0;font-family:var(--font-mono);font-size:11.5px;color:var(--text-1);border-top:1px solid var(--border-subtle)}
+.idtable td.ok{color:var(--ok-tx);font-weight:600}
+.idtable td.miss{color:var(--text-3)}
+.idtable td:last-child{text-align:right}
+
+.ledger{width:100%}
+.ledger td{padding:4px 0;font-size:12px;color:var(--text-2);border-bottom:1px dashed var(--border-subtle)}
+.ledger td.pts{text-align:right;font-family:var(--font-mono);font-size:11.5px;color:var(--ok-tx);font-weight:600;width:48px}
+.ledger td.pts.neg{color:var(--danger-tx)}
+.ledger tr:last-child td{border-bottom:0}
+.ledger tr.total td{border-top:1px solid var(--border);font-weight:660;color:var(--text-1);padding-top:7px}
+.ledger tr.total td.pts{color:var(--gold-700)}
+
+.tline .track{position:relative;height:9px;border-radius:5px;background:var(--n-200)}
+.tline .win{position:absolute;top:0;bottom:0;border-radius:5px;background:var(--p-100);border:1px solid rgba(135,82,254,.35)}
+.tline .tick{position:absolute;top:-3px;width:2px;height:15px;border-radius:1px;background:var(--brand)}
+.tline .lbls{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:10px;color:var(--text-3);margin-top:6px}
+
+/* sticky action bar of the pane — 48px touch targets */
+.pane-actions{
+  border-top:1px solid var(--border);background:var(--n-0);padding:12px 18px;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+.pane-actions .btn{min-height:48px;padding:10px 18px;font-size:13.5px;border-radius:var(--r-md)}
+.pane-actions .btn .kbd{margin-left:4px;background:rgba(255,255,255,.2);border-color:transparent;color:#fff}
+.pane-actions .btn--secondary .kbd,.pane-actions .btn--ghost .kbd,.pane-actions .btn--danger-ghost .kbd{background:var(--n-50);border-color:var(--border);color:var(--text-3)}
+.pane-actions .spacer{flex:1}
+
+.kbd-legend{
+  display:flex;gap:16px;flex-wrap:wrap;padding:8px 18px;background:var(--n-50);
+  border-top:1px solid var(--border-subtle);font-size:11px;color:var(--text-3);
+  font-family:var(--font-mono);
+}
+
+/* annotations */
+.notes{max-width:1440px;margin:0 auto 80px;padding:0 32px}
+.notes .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}
+.notes .ncard{background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-lg);padding:18px 20px;box-shadow:var(--sh-1)}
+.notes .ncard h4{font-size:13.5px;font-weight:660;margin-bottom:8px;display:flex;gap:8px;align-items:center}
+.notes .ncard h4 i{width:8px;height:8px;border-radius:2px;background:var(--brand);flex:0 0 auto}
+.notes .ncard p,.notes .ncard li{font-size:12.5px;color:var(--text-2);line-height:1.6}
+.notes .ncard ul{list-style:disc;padding-left:18px;display:grid;gap:4px}
+
+@media (max-width:1080px){
+  .bench{flex-direction:column}
+  .master{width:100%;flex:none;max-height:420px}
+  .notes .grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <span class="eyebrow"><i></i>Tolls Module · Direction B</span>
+  <h1>The review workbench</h1>
+  <p>
+    Direction B optimizes the thing counter staff actually do 200 times a day: <strong>decide one
+    toll, hit one key, move on.</strong> The left pane is an ultra-compact list grouped by
+    reservation — because tolls arrive in runs, and eight $1.40 crossings on the same contract are
+    one decision, not eight. The right pane is the evidence: identifier comparison, the score
+    arithmetic, and the toll plotted against the rental window. Hands never leave the keyboard:
+    <code>J/K</code> to move, <code>C</code> confirm, <code>D</code> dispute, <code>W</code> waive.
+  </p>
+  <p class="note">
+    All existing functions are here: the six views live in the segmented control, search / status /
+    Review-only / Refresh / Export CSV / Auto-Match All / Confirm All in the toolbar, and
+    Confirm / Reset / Dispute / Waive / View as full-size buttons in the evidence pane. Imports &amp;
+    sync and Provider setup use the same secondary-tab pattern as Direction A.
+  </p>
+</header>
+
+<div class="mock-wrap">
+  <div class="mock-label">Screen 1 / Workbench — reviewing toll 2 of 3 in group TL-ZE40848835BA</div>
+
+  <div class="screen">
+    <div class="mod-head">
+      <div class="mod-title-row">
+        <h2>Tolls</h2>
+        <div class="right">
+          <span class="tenant-scope">Tenant <b>International Rental Corp</b> ▾</span>
+          <span class="chip chip--ok"><i></i>Auto-sync · 08:42</span>
+        </div>
+      </div>
+      <nav class="mod-tabs">
+        <a class="is-on" href="#">Review queue</a>
+        <a href="#">Imports &amp; sync</a>
+        <a href="#">Provider setup</a>
+      </nav>
+    </div>
+
+    <!-- toolbar -->
+    <div class="toolbar">
+      <div class="seg" role="tablist" aria-label="Queue view">
+        <button>All <b>203</b></button>
+        <button>Auto-matched <b>38</b></button>
+        <button class="is-on">Needs review <b class="hot">201</b></button>
+        <button>Unmatched <b>9</b></button>
+        <button>Dispatch <b>4</b></button>
+        <button>Usage only <b>11</b></button>
+        <button>Ready to post <b>27</b></button>
+      </div>
+      <span class="tool-sep"></span>
+      <label class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+        Search plate, tag, reservation…
+      </label>
+      <select class="select" aria-label="Status filter"><option>All statuses</option></select>
+      <label class="toggle"><span class="tk"></span>Review only</label>
+      <span class="ml-auto"></span>
+      <button class="btn btn--secondary" title="Refresh">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12a9 9 0 1 1-2.6-6.3M21 3v6h-6"/></svg>
+      </button>
+      <button class="btn btn--ghost">Export CSV</button>
+      <button class="btn btn--secondary">Auto-match all</button>
+      <button class="btn btn--primary">Confirm all <span class="cnt">136</span></button>
+    </div>
+
+    <div class="bench">
+      <!-- MASTER LIST: grouped by reservation -->
+      <div class="master">
+        <div class="master-scroll">
+
+          <!-- group 1: focused -->
+          <div class="rgroup">
+            <div class="rg-head">
+              <div class="who">
+                <b>TL-ZE40848835BA · M. Rivera</b>
+                <small>UNIT-102 · Aug 24 → Aug 29</small>
+              </div>
+              <span class="plate">KST-894</span>
+              <div class="sum"><b>$5.05</b><small>3 tolls · min conf 88</small></div>
+              <button class="btn btn--primary">Confirm 3</button>
+            </div>
+            <div class="trow">
+              <span class="t">Aug 26 07:14</span><span class="loc">Plaza Caguas Norte · L2 N</span>
+              <span class="cdot hi"></span><span class="cnum">92</span><span class="amt">$1.40</span>
+            </div>
+            <div class="trow is-focus" aria-current="true">
+              <span class="t">Aug 25 13:57</span><span class="loc">Plaza Caguas Norte · L1 N</span>
+              <span class="cdot hi"></span><span class="cnum">92</span><span class="amt">$1.40</span>
+            </div>
+            <div class="trow">
+              <span class="t">Aug 25 09:03</span><span class="loc">PR-52 Caguas · L2 S</span>
+              <span class="cdot hi"></span><span class="cnum">88</span><span class="amt">$2.25</span>
+            </div>
+          </div>
+
+          <!-- group 2 -->
+          <div class="rgroup">
+            <div class="rg-head">
+              <div class="who">
+                <b>TL-PW10394857AA · C. Ortiz</b>
+                <small>UNIT-088 · Aug 22 → Aug 26</small>
+              </div>
+              <span class="plate">HYT-441</span>
+              <div class="sum"><b>$2.00</b><small>2 tolls · min conf 58</small></div>
+              <button class="btn btn--secondary">Review 2</button>
+            </div>
+            <div class="trow">
+              <span class="t">Aug 26 06:58</span><span class="loc">Plaza Buchanan · L3 W</span>
+              <span class="cdot mid"></span><span class="cnum">64</span><span class="amt">$1.00</span>
+            </div>
+            <div class="trow">
+              <span class="t">Aug 26 06:31</span><span class="loc">Plaza Buchanan · L1 W</span>
+              <span class="cdot mid"></span><span class="cnum">58</span><span class="amt">$1.00</span>
+            </div>
+          </div>
+
+          <!-- group 3: dispatch -->
+          <div class="rgroup">
+            <div class="rg-head">
+              <div class="who">
+                <b>TL-AB99120467DD · R. Santana</b>
+                <small>UNIT-131 · Aug 26 → Aug 30 · before checkout</small>
+              </div>
+              <span class="plate">JDR-518</span>
+              <div class="sum"><b>$0.75</b><small>1 toll · dispatch hold</small></div>
+              <button class="btn btn--secondary">Dispatched ✓</button>
+            </div>
+            <div class="trow">
+              <span class="t">Aug 26 06:12</span><span class="loc">PR-22 Vega Alta · L1 E</span>
+              <span class="cdot mid"></span><span class="cnum">79</span><span class="amt">$0.75</span>
+              <span class="st chip chip--warn"><i></i>Dispatch</span>
+            </div>
+          </div>
+
+          <!-- group 4 -->
+          <div class="rgroup">
+            <div class="rg-head">
+              <div class="who">
+                <b>TL-DE66301428LL · S. Ayala</b>
+                <small>UNIT-050 · Aug 21 → Aug 27</small>
+              </div>
+              <span class="plate">FBM-617</span>
+              <div class="sum"><b>$4.50</b><small>2 tolls · min conf 94</small></div>
+              <button class="btn btn--primary">Confirm 2</button>
+            </div>
+            <div class="trow">
+              <span class="t">Aug 25 15:08</span><span class="loc">PR-66 Canóvanas · L1 N</span>
+              <span class="cdot hi"></span><span class="cnum">94</span><span class="amt">$2.25</span>
+            </div>
+            <div class="trow">
+              <span class="t">Aug 25 11:47</span><span class="loc">PR-66 Río Grande · L2 S</span>
+              <span class="cdot hi"></span><span class="cnum">94</span><span class="amt">$2.25</span>
+            </div>
+          </div>
+
+          <!-- group 5: usage only -->
+          <div class="rgroup">
+            <div class="rg-head">
+              <div class="who">
+                <b>TL-MN20458812EE · A. Figueroa</b>
+                <small>UNIT-064 · toll package — usage only</small>
+              </div>
+              <span class="plate">GWC-702</span>
+              <div class="sum"><b>$3.40</b><small>3 tolls · no charge</small></div>
+              <span class="chip chip--info"><i></i>Usage only</span>
+            </div>
+            <div class="trow">
+              <span class="t">Aug 26 05:47</span><span class="loc">Plaza Toa Baja · L2 W</span>
+              <span class="cdot hi"></span><span class="cnum">96</span><span class="amt">$1.00</span>
+            </div>
+            <div class="trow">
+              <span class="t">Aug 25 20:15</span><span class="loc">Plaza Toa Baja · L1 E</span>
+              <span class="cdot hi"></span><span class="cnum">96</span><span class="amt">$1.40</span>
+            </div>
+            <div class="trow">
+              <span class="t">Aug 25 08:22</span><span class="loc">Plaza Buchanan · L2 E</span>
+              <span class="cdot hi"></span><span class="cnum">91</span><span class="amt">$1.00</span>
+            </div>
+          </div>
+
+          <!-- group 6: ambiguous multi-candidate -->
+          <div class="rgroup">
+            <div class="rg-head">
+              <div class="who">
+                <b>TL-GH55287310MM · E. Torres</b>
+                <small>UNIT-119 · Aug 25 → Aug 26 · 2 candidates</small>
+              </div>
+              <span class="plate">RKE-473</span>
+              <div class="sum"><b>$0.75</b><small>1 toll · min conf 71</small></div>
+              <button class="btn btn--secondary">Review 1</button>
+            </div>
+            <div class="trow">
+              <span class="t">Aug 25 12:20</span><span class="loc">PR-22 Manatí · L2 W</span>
+              <span class="cdot mid"></span><span class="cnum">71</span><span class="amt">$0.75</span>
+            </div>
+          </div>
+
+          <!-- group 7: unmatched bucket -->
+          <div class="rgroup">
+            <div class="rg-head">
+              <div class="who">
+                <b>No reservation found</b>
+                <small>3 tolls the matcher could not attribute</small>
+              </div>
+              <div class="sum"><b>$5.90</b><small>bills no one until assigned</small></div>
+              <span class="chip chip--bad"><i></i>Unmatched</span>
+            </div>
+            <div class="trow">
+              <span class="t">Aug 25 21:36</span><span class="loc">Plaza Guaynabo · L1 S · read BBT-812</span>
+              <span class="cdot low"></span><span class="cnum">—</span><span class="amt">$1.40</span>
+            </div>
+            <div class="trow">
+              <span class="t">Aug 25 19:44</span><span class="loc">PR-52 Salinas · L2 N · read QQP-108</span>
+              <span class="cdot low"></span><span class="cnum">—</span><span class="amt">$2.25</span>
+            </div>
+            <div class="trow">
+              <span class="t">Aug 25 10:12</span><span class="loc">Plaza Caguas Sur · L1 S · UNIT-045, no window</span>
+              <span class="cdot low"></span><span class="cnum">—</span><span class="amt">$2.25</span>
+            </div>
+          </div>
+
+        </div>
+        <div class="master-foot">
+          7 groups · 15 tolls · $22.35 pending
+          <span class="r">198 of 201 loaded — filter to reach the rest</span>
+        </div>
+      </div>
+
+      <!-- EVIDENCE PANE -->
+      <div class="pane">
+        <div class="pane-scroll">
+
+          <div class="ecard">
+            <div class="e-top">
+              <span class="amt">$1.40</span>
+              <div class="meta">
+                <b>Plaza Caguas Norte · Lane 1 North</b>
+                <small>Mon Aug 25, 2026 · 13:57 · AutoExpreso · ext #AE-88413207</small>
+              </div>
+              <div class="score">
+                <span class="n">92</span>
+                <span class="bar"><i style="width:92%"></i></span>
+                <div class="lab">Match score · auto ≥ 85</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ecard">
+            <h5>Identifiers — toll read vs vehicle on file</h5>
+            <table class="idtable">
+              <tr><th></th><th>Toll read</th><th>UNIT-102</th></tr>
+              <tr><td>Plate</td><td class="ok">KST-894</td><td class="ok">KST-894 ✓ +25</td></tr>
+              <tr><td>Toll tag</td><td class="miss">—</td><td class="miss">0339</td></tr>
+              <tr><td>Sello</td><td class="miss">—</td><td class="miss">220148</td></tr>
+            </table>
+          </div>
+
+          <div class="ecard">
+            <h5>Why 92 — the matcher's arithmetic</h5>
+            <table class="ledger">
+              <tr><td>Vehicle responsibility window</td><td class="pts">+70</td></tr>
+              <tr><td>Plate matches UNIT-102</td><td class="pts">+25</td></tr>
+              <tr><td>Reservation's current vehicle</td><td class="pts">+15</td></tr>
+              <tr><td>Inside rental window</td><td class="pts">+25</td></tr>
+              <tr><td>Trip &amp; responsibility windows agree</td><td class="pts">+20</td></tr>
+              <tr><td>2 candidate reservations that day</td><td class="pts neg">−10</td></tr>
+              <tr class="total"><td>Suggested — held for review by tenant rule</td><td class="pts" style="color:var(--ok-tx)">92</td></tr>
+            </table>
+          </div>
+
+          <div class="ecard">
+            <h5>Toll vs rental window — TL-ZE40848835BA</h5>
+            <div class="tline">
+              <div class="track">
+                <span class="win" style="left:6%;right:10%"></span>
+                <span class="tick" style="left:38%"></span>
+              </div>
+              <div class="lbls"><span>Aug 24 10:00 pickup</span><span>Aug 29 10:00 return</span></div>
+            </div>
+            <p style="font-size:11.5px;color:var(--text-3);margin-top:10px;line-height:1.55">
+              Mid-rental crossing. Second candidate that day (TL-QQ57, score 41) was the previous
+              renter of this unit — window ended Aug 24 09:12, before this toll.
+            </p>
+          </div>
+
+        </div>
+
+        <!-- 48px action bar: every per-row action, full-size -->
+        <div class="pane-actions">
+          <button class="btn btn--primary">Confirm → bill M. Rivera <span class="kbd">C</span></button>
+          <button class="btn btn--secondary">Reset <span class="kbd">R</span></button>
+          <button class="btn btn--ghost">Dispute… <span class="kbd">D</span></button>
+          <button class="btn btn--danger-ghost">Waive… <span class="kbd">W</span></button>
+          <span class="spacer"></span>
+          <button class="btn btn--ghost">View reservation ↗</button>
+        </div>
+        <div class="kbd-legend">
+          <span><span class="kbd">J</span>/<span class="kbd">K</span> next / prev toll</span>
+          <span><span class="kbd">⇧J</span> next group</span>
+          <span><span class="kbd">C</span> confirm</span>
+          <span><span class="kbd">⇧C</span> confirm whole group</span>
+          <span><span class="kbd">E</span> open reservation</span>
+          <span><span class="kbd">/</span> search</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- design annotations -->
+<section class="notes">
+  <div class="mock-label">Direction B — what changed and why</div>
+  <div class="grid">
+    <div class="ncard">
+      <h4><i></i>Group by reservation</h4>
+      <ul>
+        <li>Tolls arrive in runs: one renter crosses the same plazas daily. Grouping turns 201 rows into ~60 decisions; "Confirm 3" on a group is one click that today takes three prompts.</li>
+        <li>The group header carries what staff actually scan for: customer, unit, window, total dollars, and the group's <em>weakest</em> confidence — the honest number to judge a batch by.</li>
+        <li>The unmatched bucket sits at the bottom as its own "group" — the shape tells you it's data-entry work, not judgment work.</li>
+      </ul>
+    </div>
+    <div class="ncard">
+      <h4><i></i>Evidence, not adjectives</h4>
+      <ul>
+        <li>The right pane replaces the raw <code>currentVehicleId,plate,…</code> string with three flat cards: identifier comparison, the score ledger with real points (+70/+25/−10), and the toll plotted on the rental window.</li>
+        <li>Naming the losing candidate ("previous renter, window ended before this toll") answers the exact doubt that makes staff hesitate — it's why RES-119005 got mis-billed.</li>
+        <li>No rings, no animation, no glass: the score is a number, the bar is 5px, the timeline is a rectangle. Theater stays out.</li>
+      </ul>
+    </div>
+    <div class="ncard">
+      <h4><i></i>Throughput mechanics</h4>
+      <ul>
+        <li>J/K/C/D/W keyboard loop — the INNOVATION-REVIEW interaction, made concrete. Action bar buttons are 48px; list rows are 40px; nothing below 11px type.</li>
+        <li>All six views, search, status, Review-only, Refresh, Export CSV, Auto-Match All, Confirm All preserved in the toolbar; Imports &amp; sync + Provider setup as secondary tabs (same pattern as Direction A, screen 2).</li>
+        <li>Dispute/Waive open a proper note dialog (not <code>window.prompt</code>); Dispute still creates the Issue Center case.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+</body>
+</html>

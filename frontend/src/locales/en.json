@@ -1648,14 +1648,40 @@
       "return": "Return",
       "tollAt": "Toll {{when}}",
       "raw": "Matcher tokens (support)",
-      "noLedger": "The matcher recorded no scoring tokens for this toll."
+      "noLedger": "The matcher recorded no scoring tokens for this toll.",
+      "otherCandidates": "Other candidates — superseded suggestions",
+      "candidateEndedBefore": "{{number}} (score {{score}}) — window ended {{when}}, before this toll",
+      "candidateStartsAfter": "{{number}} (score {{score}}) — window starts {{when}}, after this toll",
+      "candidateCovers": "{{number}} (score {{score}}) — window also covers this toll",
+      "candidateNoWindow": "{{number}} (score {{score}}) — no rental window on file",
+      "candidatesNotStored": "The matcher saw multiple candidate reservations for this toll; only the winning suggestion is stored."
     },
     "foot": {
       "selected": "{{count}} selected",
       "confirmSelected": "Confirm selected",
       "waiveSelected": "Waive selected",
       "rows": "{{count}} rows · sorted newest",
+      "groups": "{{groups}} groups · {{count}} rows · sorted newest",
       "clear": "Clear"
+    },
+    "group": {
+      "toggle": "Group by reservation",
+      "toggleHint": "Group Needs-review rows by reservation and arm the J/K/C/D/W keyboard loop",
+      "noReservation": "No reservation found",
+      "noReservationDesc": "Tolls the matcher could not attribute — they bill no one until assigned.",
+      "count": "{{count}} tolls",
+      "count_one": "{{count}} toll",
+      "minConf": "min conf {{score}}",
+      "confirmN": "Confirm {{count}}",
+      "truncated": "Group counts and totals cover only the loaded rows."
+    },
+    "kbd": {
+      "legend": "Keyboard triage",
+      "move": "move",
+      "confirm": "confirm",
+      "dispute": "dispute",
+      "waive": "waive",
+      "clear": "clear"
     },
     "dialog": {
       "cancel": "Cancel",
