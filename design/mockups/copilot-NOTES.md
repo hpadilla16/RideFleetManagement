@@ -151,8 +151,9 @@ below that and **collapses to a chip whenever a tour state exists** (listen for
 the same localStorage key `tour-state.js TOUR_STORAGE_KEY` + the start event).
 
 **The handoff.** Answer card carries up to three CTAs, driven by the map row:
-- `Te enseño` → **pre-flight context check first (§5)** → announce → minimize
-  to chip → dispatch `ride-university:start` `{ track:'MODULE', moduleKey }`.
+- `Te enseño` → **pre-flight context check first (§5)** → ask (record-scoped)
+  or announce (route) → minimize to chip → dispatch `ride-university:start`
+  `{ track:'MODULE', moduleKey }`.
   Everything after the dispatch is TourHost's job — including navigation to
   `step.route` and the **parking bar** when the module `needsRecord` and no
   reservation is open (the bot never re-implements this; mockup section 04
@@ -181,7 +182,16 @@ the real record exists (`curriculum.js:78–89`).
 ## 5. Pre-flight context check — right place before teaching
 
 Owner refinement (2026-09-01, his words translated): *"make sure the agent is
-in the CORRECT PLACE before starting to teach."*
+in the CORRECT PLACE before starting to teach."* And its follow-up, same day:
+*"the chatbot should ASK if they'd like to be guided in the reservation where
+they're having the problem."*
+
+**Why a question and not an announcement:** at the counter, "how do I add an
+additional driver" is almost never an abstract question — it is about the
+customer standing there, i.e. one SPECIFIC reservation. A walkthrough running
+on the wrong record feels like a demo instead of help. One question converts
+the tour from generic training into help-with-THIS-case, and the happy path
+costs exactly one tap.
 
 **The rule:** `Te enseño` never dispatches blind. Before firing the event, the
 copilot compares the current route/context against what the mapped module
@@ -205,20 +215,21 @@ being in the wrong place are already solved by the tour engine:
   step, still needs to open a record" from "inside one, just move to the next
   screen" (`first` boundary logic, `TourHost.jsx:167`).
 
-The **new** part is purely an *announcement layer* in the copilot, run before
-the dispatch, so intent → words → motion, in that order. No TourHost change is
-required for outcomes (a) and (b); (c) reuses the parking bar as-is.
+The **new** part is purely an *ask-first layer* in the copilot, run before the
+dispatch, so intent → question → words → motion, in that order. No TourHost
+change is required for outcomes (a) and (b); (a′) and (c) reuse the parking
+machinery as-is.
 
 **The check** is a pure helper beside the map (`intents.js`), testable like
 `curriculum.js` selectors:
 
 ```js
-// preflightFor(module, pathname) → one of three outcomes
+// preflightFor(module, pathname) → one of four outcomes
 function preflightFor(module, pathname) {
   if (module.needsRecord) {
     const inRecord = /^\/reservations\/[^/]+/.test(pathname);
     return inRecord
-      ? { kind: 'HERE', sameRecord: true }        // outcome (a) + edge case
+      ? { kind: 'ASK_HERE' }                      // outcome (a′) — a QUESTION
       : { kind: 'NEEDS_RECORD', go: module.needsRecord }; // outcome (c)
   }
   const first = module.steps?.[0];
@@ -228,26 +239,31 @@ function preflightFor(module, pathname) {
 }
 ```
 
-**The three outcomes, with copy:**
+**The four outcomes, with copy:**
 
 | Outcome | When | The copilot says (ES / EN) | Then |
 |---|---|---|---|
-| (a) HERE | Current route already satisfies the first step (or a record-scoped module and a reservation is open) | "Empiezo aquí mismo." / "Starting right here." | Dispatch immediately; chip. |
+| (a) HERE | Route-anchored module and we are already on its screen | "Empiezo aquí mismo." / "Starting right here." | Dispatch immediately; chip. |
+| (a′) ASK_HERE | Record-scoped module and a reservation IS open | **A question:** "¿Te guío aquí mismo en **{{ref}}**?" / "Want me to guide you right here on **{{ref}}**?" — with two one-tap replies: **[Sí, aquí]** and **[Es en otra reserva]** | **Sí, aquí** → dispatch on the open record; chip. **Es en otra reserva** → "Abre la reserva donde tienes el problema y sigo ahí." / "Open the reservation where you're having the problem and I'll pick up there." — panel collapses, copilot `router.push(module.needsRecord)`, then dispatches; launch-settle finds no anchors and parks (`:215–219`), the watcher (`:250–260`) resumes on THEIR record. |
 | (b) NAVIGATE | First step carries a `route` and we are elsewhere | "Te llevo a **{{screen}}** primero — la guía empieza allá." / "I'll take you to **{{screen}}** first — the guide starts there." | Announce (~1.2s beat), then dispatch; TourHost's own `step.route` push does the moving (`:265–269`). Announced, never silent. |
-| (c) NEEDS_RECORD | Record-scoped module, no reservation open | "Necesitas tener una reserva abierta — abre cualquiera y sigo ahí." / "You need a reservation open — open any one and I'll pick up there." | Say it up front, then dispatch; the engine's parking bar (`:413–465`) owns the wait, watcher resumes on any record. |
+| (c) NEEDS_RECORD | Record-scoped module, no reservation open | Same question shape, as an offer to follow them: "¿En qué reserva tienes el problema? Ábrela y sigo ahí." / "Which reservation is the problem on? Open it and I'll pick up there." — with a one-tap **[Llévame a Reservations]** | Dispatch; the engine's parking bar (`:413–465`) owns the wait, watcher resumes on whichever reservation they open — theirs. |
 
-**Edge case — mid-task on a different record.** The agent asks about
-additional drivers while inside reservation A but meaning reservation B. The
-copilot cannot know which record the question is "about" and must not guess or
-navigate away from live work: it **teaches on whatever record is open and says
-so** — "Te enseño aquí mismo en **{{ref}}** — los pasos son iguales en
-cualquier reserva." / "I'll show you right here on **{{ref}}** — the steps are
-the same on any reservation." (That sentence is the `sameRecord: true` branch
-of outcome (a); mocked as the teal pre-flight bubble in section 02.) Steps
-taught on the open record generalize because anchors are stable names, not
-records (`curriculum.js:18–20`). If they actually wanted record B, closing the
-tour and opening B costs two clicks — and a parked tour would follow them there
-anyway.
+**Why (a′) must not dispatch blind, mechanically:** if the copilot dispatched
+while reservation A's page is open, `settleStart` would find A's anchors and
+the tour would arm on A immediately (`TourHost.jsx:215–219`) — which is exactly
+right after **Sí, aquí** and exactly wrong if the problem lives on reservation
+B. That is why "Es en otra reserva" navigates to the list FIRST and only then
+dispatches: from `/reservations` the record anchors are absent, the launch
+settle parks instead of arming, and the existing watcher follows the agent into
+whichever reservation they open. The wrong-record case costs the engine
+nothing new — it is the parked-launch path Ride University already exercises.
+
+**Edge case, resolved by the question.** "Mid-task on record A, meaning record
+B" was previously handled by teaching on A and saying so; the question
+dissolves it — the agent tells us which case it is with one tap. Steps taught
+on the open record still generalize (anchors are stable names, not records,
+`curriculum.js:18–20`), which is why **Sí, aquí** is safe even when the agent
+just wants to learn in the abstract.
 
 **Derived, not stored — no `requiresContext` column in the intent map.** The
 context requirement is fully derivable from the curriculum the tour already
@@ -290,8 +306,12 @@ currently mapped module:
 | `copilot.done` | Did you get it done? | ¿Lo lograste? |
 | `copilot.preflight.here` | Starting right here. | Empiezo aquí mismo. |
 | `copilot.preflight.navigate` | I'll take you to {{screen}} first — the guide starts there. | Te llevo a {{screen}} primero — la guía empieza allá. |
-| `copilot.preflight.needsRecord` | You need a reservation open — open any one and I'll pick up there. | Necesitas tener una reserva abierta — abre cualquiera y sigo ahí. |
-| `copilot.preflight.sameRecord` | I'll show you right here on {{ref}} — the steps are the same on any reservation. | Te enseño aquí mismo en {{ref}} — los pasos son iguales en cualquier reserva. |
+| `copilot.preflight.askHere` | Want me to guide you right here on {{ref}}? | ¿Te guío aquí mismo en {{ref}}? |
+| `copilot.preflight.yesHere` | Yes, here | Sí, aquí |
+| `copilot.preflight.notThisOne` | It's a different reservation | Es en otra reserva |
+| `copilot.preflight.followThere` | Open the reservation where you're having the problem and I'll pick up there. | Abre la reserva donde tienes el problema y sigo ahí. |
+| `copilot.preflight.whichReservation` | Which reservation is the problem on? Open it and I'll pick up there. | ¿En qué reserva tienes el problema? Ábrela y sigo ahí. |
+| `copilot.preflight.takeMeList` | Take me to Reservations | Llévame a Reservations |
 | `copilot.adminOnly` | That screen needs an admin — here's what they'll do. | Esa pantalla la maneja un admin — esto es lo que va a hacer. |
 | `copilot.footer` | Explains and guides · never performs actions | Explica y guía · nunca ejecuta acciones |
 

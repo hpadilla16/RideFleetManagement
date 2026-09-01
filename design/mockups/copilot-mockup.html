@@ -199,6 +199,10 @@ button{font-family:inherit}
 .msg--pre{border-left:3px solid var(--teal-400);background:var(--teal-50);color:var(--teal-800)}
 .msg--pre b{color:var(--teal-800)}
 .msg--pre .plab{display:block;font-family:var(--font-mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--teal-600);margin-bottom:3px}
+.pre-replies{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+.reply{font-size:11.5px;font-weight:660;border-radius:var(--r-pill);padding:5px 13px;cursor:pointer;
+  border:1px solid var(--teal-100);background:var(--n-0);color:var(--teal-800)}
+.reply--yes{background:var(--teal-400);border-color:transparent;color:var(--teal-800)}
 .msg--bot ol{margin:8px 0 0 18px;display:flex;flex-direction:column;gap:5px}
 .msg--bot ol li b{font-weight:640}
 .src{
@@ -409,11 +413,12 @@ button{font-family:inherit}
     "¿Cómo añado un conductor adicional?" The copilot answers in the asker's language with the exact steps,
     the source it read them from, and the one mistake that costs money — then offers the two verbs that
     matter: <b>Te enseño</b> (start the guided walkthrough) and <b>Llévame</b> (just navigate me there).
-    It explains and it guides. It never presses the buttons itself.
+    It explains and it guides. It never presses the buttons itself — and before it teaches on a record,
+    <b>it asks which one</b>.
   </p>
 
   <div class="screen">
-    <div class="frame">
+    <div class="frame" style="min-height:700px">
       <div class="side">
         <div class="logo"><i></i>RideFleet</div>
         <div class="nav-it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</div>
@@ -483,7 +488,11 @@ button{font-family:inherit}
           </div>
           <div class="msg msg--bot msg--pre">
             <span class="plab">Pre-flight · antes de enseñar</span>
-            Te enseño aquí mismo en <b>R-20841</b> — los pasos son iguales en cualquier reserva.
+            ¿Te guío aquí mismo en <b>R-20841</b>?
+            <div class="pre-replies">
+              <button class="reply reply--yes">Sí, aquí</button>
+              <button class="reply">Es en otra reserva</button>
+            </div>
           </div>
         </div>
         <div class="cp-foot">
@@ -510,17 +519,19 @@ button{font-family:inherit}
       <b>Te enseño</b> fires <code>ride-university:start</code> with the mapped <code>moduleKey</code>;
       <b>Llévame allí</b> is a plain <code>router.push</code> to the mapped route. The footer line is a
       product commitment, permanently visible: the copilot explains and points — the agent's hands do the work.</div>
-    <div class="anno"><b class="h"><i>·</i>Pre-flight: right place first</b>
-      Before the dispatch, the copilot compares the current route against what the module needs and
-      <em>says</em> what happens next — teal bubble above. Here the agent is already inside a reservation,
-      so it teaches on the open record and says so. Wrong screen → "Te llevo a … primero". Needs a record →
-      "Abre cualquier reserva y sigo ahí". Nobody is ever teleported without being told.</div>
+    <div class="anno"><b class="h"><i>·</i>Pre-flight: it asks, it doesn't assume</b>
+      For anything record-scoped the copilot <em>asks</em> before teaching — teal bubble above. At the
+      counter the question is almost always about a SPECIFIC customer's reservation; guiding on the wrong
+      record turns help into a demo. <b>Sí, aquí</b> (one tap) starts the tour on the open record.
+      <b>Es en otra reserva</b> collapses the panel and parks the tour — "Abre la reserva donde tienes el
+      problema y sigo ahí" — riding the engine's existing parking watcher. Wrong screen still gets
+      "Te llevo a … primero". Nobody is ever teleported, or taught on the wrong case, without being asked.</div>
   </div>
 
   <!-- ================= SECTION 03 — THE HANDOFF ================= -->
   <div class="sec-label">03 · "Te enseño" — the handoff to the tour engine</div>
   <p class="sec-note">
-    After the pre-flight announcement, the panel collapses to a teal chip and the <b>existing</b> TourHost
+    After the agent taps <b>Sí, aquí</b> on the pre-flight question, the panel collapses to a teal chip and the <b>existing</b> TourHost
     takes the screen: scrim with a hole, purple spotlight, step card — pixel-for-pixel the production
     overlay. If the walkthrough lives on another screen, the copilot has already said "Te llevo a …
     primero" — the navigation itself is TourHost's own <code>step.route</code> push; the copilot only adds
@@ -608,10 +619,11 @@ button{font-family:inherit}
   <div class="duo">
     <div>
       <p class="sec-note"><b>Needs a record.</b> "Additional drivers" lives inside one reservation's page, so
-      from Ride University the anchors don't exist yet. The copilot says so <em>before</em> dispatching —
-      "Necesitas tener una reserva abierta — abre cualquiera y sigo ahí" — and only then hands off to the
-      tour engine, which already <em>parks</em> and watches (production bar below, verbatim) until the
-      person opens any reservation, then picks up exactly where the walkthrough begins.</p>
+      from Ride University the anchors don't exist yet. The copilot asks for THEIR case <em>before</em>
+      dispatching — "¿En qué reserva tienes el problema? Ábrela y sigo ahí", with a one-tap
+      [Llévame a Reservations] — and only then hands off to the tour engine, which already <em>parks</em>
+      and watches (production bar below, verbatim) until the person opens their reservation, then picks up
+      exactly where the walkthrough begins. Same path after "Es en otra reserva" in panel 02.</p>
       <div class="screen">
         <div class="frame" style="min-height:330px">
           <div class="main">
