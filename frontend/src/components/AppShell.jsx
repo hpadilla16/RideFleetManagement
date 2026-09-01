@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { setLanguage } from '../lib/i18n';
 import { CommandPalette } from './CommandPalette';
 import { ShuttleBanner } from './ShuttleBanner';
+import { NotificationBell } from './NotificationBell';
 
 /**
  * Sidebar redesign (2026-08-24, approved mockup): the flat NAV_ITEMS list is
@@ -20,6 +21,11 @@ import { ShuttleBanner } from './ShuttleBanner';
 export const NAV_SECTIONS = [
   { key: 'dailyOps', labelKey: 'nav.sectionDailyOps', items: [
     { href: '/dashboard', labelKey: 'nav.dashboard', moduleKey: 'dashboard', tour: 'nav-dashboard', icon: 'gauge' },
+    // Notification Center (2026-09-01, approved mockup): under Dashboard per
+    // the design. NO moduleKey on purpose — the center aggregates whatever the
+    // caller can already see (same reasoning as /knowledge-base); the API
+    // scopes and role-gates server-side.
+    { href: '/notifications', labelKey: 'nav.notifications', icon: 'bell' },
     { href: '/reservations', labelKey: 'nav.reservations', moduleKey: 'reservations', tour: 'nav-reservations', icon: 'calcheck' },
     { href: '/quotes', labelKey: 'nav.quotes', moduleKey: 'quotes', icon: 'quote' },
     { href: '/planner', labelKey: 'nav.planner', moduleKey: 'planner', icon: 'planner' },
@@ -114,7 +120,9 @@ const NAV_ICON_PATHS = {
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/>',
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
-  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  /* Notification Center (2026-09-01) */
+  bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'
 };
 
 function NavIcon({ name, className }) {
@@ -698,6 +706,10 @@ export function AppShell({ me, logout, children }) {
             >
               <NavIcon name="search" className="tb-search-mobile-icon" />
             </button>
+            {/* Notification Center bell (2026-09-01, approved mockup): between
+                search and the location picker — the one slot every staff
+                screen shares. Badge/panel logic lives in NotificationBell. */}
+            <NotificationBell />
             {viewLocations.length > 1 ? (
               <span className="tb-loc" title={t('appShell.viewLocation', 'Which location you are viewing')}>
                 <NavIcon name="pin" className="tb-loc-icon" />

@@ -36,6 +36,7 @@ import {
   locateOnDemand,
 } from './telematics-voltswitch.js';
 import { classifyOverduePosition } from './overdue-geofence.js';
+import { emitNotificationSafe, resolveNotificationSafe } from '../notifications/notifications-emit.js';
 
 /** A fix older than this triggers a best-effort locate_on_demand nudge. */
 const STALE_FIX_MS = 15 * 60 * 1000;
@@ -146,7 +147,7 @@ export async function checkOverdueVehiclesForTenant({ tenantId, config }) {
       if (existing) {
         await prisma.overdueVehicleAlert.update({ where: { id: existing.id }, data });
       } else {
-        await prisma.overdueVehicleAlert.create({
+        const createdAlert = await prisma.overdueVehicleAlert.create({
           data: {
             tenantId,
             reservationId: reservation.id,
@@ -155,12 +156,37 @@ export async function checkOverdueVehiclesForTenant({ tenantId, config }) {
             ...data,
           },
         });
+        // Notification Center emitter (2026-09-01) — ONLY on the create
+        // branch: the update above is a position refresh on an alert staff
+        // already know about, and emitting there would re-notify every tick.
+        // dedupeKey rides the alert id, so a later re-open (new alert row) is
+        // a new event. locationId stays null on purpose: geofence alerts are
+        // tenant-wide by design (nearestLocationId is a geofence, not the
+        // renting sede). Safe emit — never breaks the sweep.
+        await emitNotificationSafe({
+          tenantId,
+          severity: 'CRITICAL',
+          sourceType: 'GEOFENCE',
+          sourceRefId: createdAlert.id,
+          title: `Overdue & outside geofence — ${reservation.reservationNumber || reservation.id}`,
+          body: [
+            reservation.reservationNumber ? `RES ${reservation.reservationNumber}` : null,
+            position.address ? `last seen near ${position.address}` : null,
+            verdict.distanceKm != null ? `${verdict.distanceKm} km from nearest geofence` : null,
+          ].filter(Boolean).join(' · ') || null,
+          deepLink: `/reservations/${reservation.id}`,
+          dedupeKey: `geofence:${createdAlert.id}`,
+          templateKey: 'geofence',
+          paramsJson: { unit: reservation.reservationNumber || reservation.id },
+        });
       }
     } else if (verdict.verdict === 'INSIDE' && existing) {
       await prisma.overdueVehicleAlert.update({
         where: { id: existing.id },
         data: { status: 'RESOLVED', resolvedAt: new Date() },
       });
+      // The condition cleared on its own — mark the envelope "Self-resolved".
+      await resolveNotificationSafe({ tenantId, sourceType: 'GEOFENCE', sourceRefId: existing.id });
       results.resolved++;
     }
     // NO_POSITION / NO_GEOFENCE: leave the world exactly as it is.

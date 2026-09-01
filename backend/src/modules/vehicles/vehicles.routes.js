@@ -247,6 +247,20 @@ vehiclesRouter.post('/overdue-alerts/:id/dismiss', async (req, res, next) => {
       data: { status: 'DISMISSED', resolvedAt: new Date() },
     });
     if (!updated.count) return res.status(404).json({ error: 'Alert not found' });
+    // Notification Center mirror (2026-09-01): the dashboard dismiss IS the
+    // acknowledge for geofence alerts — stamp the envelope so the center
+    // shows who handled it. Dynamic import + safe call: the dismiss must
+    // never fail on a notification write.
+    try {
+      const { ackNotificationBySourceRefSafe } = await import('../notifications/notifications-emit.js');
+      await ackNotificationBySourceRefSafe({
+        tenantId: scope.tenantId,
+        sourceType: 'GEOFENCE',
+        sourceRefId: String(req.params.id),
+        userId: req.user?.id || req.user?.sub || null,
+        userName: req.user?.displayName || req.user?.name || req.user?.email || null,
+      });
+    } catch { /* mirror only */ }
     res.json({ ok: true });
   } catch (e) { next(e); }
 });

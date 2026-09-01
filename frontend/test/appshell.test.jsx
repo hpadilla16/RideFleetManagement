@@ -77,6 +77,9 @@ const mockMe = {
 // survive, with the exact same href and gates, in exactly one section.
 const OLD_FLAT_NAV = [
   { href: '/dashboard', moduleKey: 'dashboard' },
+  // Notification Center (2026-09-01): new page, deliberately ungated (no
+  // moduleKey) — the API scopes and role-gates server-side.
+  { href: '/notifications' },
   { href: '/reservations', moduleKey: 'reservations' },
   { href: '/quotes', moduleKey: 'quotes' },
   { href: '/vehicles', moduleKey: 'vehicles' },
