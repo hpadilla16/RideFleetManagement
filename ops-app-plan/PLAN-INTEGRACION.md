@@ -39,14 +39,48 @@ de fusión de backend no son cuatro merges con sus conflictos de `package.json` 
 
 ## Lo que falta construir
 
-- **M2-H5** (firma y cierre) — en curso.
-- **M2-H6** (reconciliación) — necesita P1-P3 desplegado.
-- **M2-H3** (pago) — bloqueado por el copy legal de la tarjeta, y hay que replantear su
+> **ACTUALIZADO 2026-09-02.** Lo de abajo quedó rancio en una semana de trabajo; el
+> estado real a esta fecha:
+>
+> **En main, con QA SHIP cada una**: M2-H5 (firma y cierre, tres vueltas de compuerta),
+> M2-H6 (reconciliación completa: latido con identidad, banner con atribución, matriz
+> 409, antecámara), M2-H8 (CAS en transition()), P1-P3, el vocabulario cerrado de
+> Tenant.status, el restore que devuelve el estado previo, los dos arreglos de dinero
+> del pre-checkin (impuesto en cero y base del seguro), la cadena completa del
+> incidente de correos (sello = "aceptado", fallo con rastro, y validación en las ~20
+> puertas de captura), la pantalla CLOSED del web honesta, los cuatro defectos del
+> humo (plurales ICU con guardián, transporte decide en la bandeja, marca en
+> icono/splash), el wizard que ya no acusa al servidor (veredicto de cuatro valores
+> con horizonte de 15 min), y el lote round-2 (la evidencia de daños deja de perderse:
+> rescate de inflight en ambos motores, dead-letters que solo borra un humano, esquema
+> v3). **Dos corridas e2e reales contra backend vivo**: el flujo entero funciona,
+> 401/429/dead-letter/kiosko-como-4ª-superficie/swap/antecámara/19A-bis/19B ejercidos
+> en el aparato.
+>
+> **Lo único que falta construir**: M2-H3 (pago) — la lámina está entregada con sus
+> preguntas; el bloqueo real es el párrafo del guardado de tarjeta (borrador entregado
+> a Hector; los términos autorizan COBRAR la tarjeta guardada pero nunca dicen que se
+> GUARDA) y la decisión del campo depositMode. Más dos piezas chicas del round-2 tras
+> la lámina correspondiente (pantalla de cámara sin dock; izado de la tarjeta del
+> vehículo), y la regeneración del icono tras los votos de marca.
+>
+> **En el tejado de Hector**: las dos láminas (marca y round-2), el párrafo legal,
+> la decisión del kiosko (rama claude/nervous-mestorf-a05e2c con 18 commits y su
+> lámina hecha), RIDEOPS_API_BASE en Variables (único rojo de rideops-ci), los PRs
+> de Dependabot, y los dos vistos buenos de producción (limpiar 120 correos
+> inválidos; reenviar los contratos perdidos del incidente).
+
+- ~~**M2-H5** (firma y cierre) — en curso.~~ **HECHO** (main).
+- ~~**M2-H6** (reconciliación) — necesita P1-P3 desplegado.~~ **HECHO** (main).
+- **M2-H3** (pago) — bloqueado por el copy del GUARDADO de la tarjeta (no del cobro:
+  ese ya está firmado en deposit_post_charges), y hay que replantear su
   segunda pantalla: el depósito **no** pide tarjeta física en el camino normal.
 - Los dos estados diferidos de H2 (D1/D2) y los cuatro MUST diferidos de la página de firma.
 
 ## Riesgo principal
 
-Diez de las quince ramas **no han pasado revisión ni QA**, y varias tocan dinero, un
-documento legal o el aislamiento entre inquilinos. Fusionar por volumen sería tirar por la
-borda la disciplina que esta semana atrapó tres bloqueantes.
+~~Diez de las quince ramas **no han pasado revisión ni QA**~~ **Resuelto 2026-09-02:
+todas las ramas de la lista de arriba pasaron revisión y QA antes de fusionar** — la
+disciplina atrapó por el camino tres bloqueantes más (el import ausente del loaner, la
+foto atascada en inflight, y el pin muerto por 0x08) y doce pruebas que pasaban sin
+probar nada. Sigue vigente para lo que quede: nada entra sin compuerta.
