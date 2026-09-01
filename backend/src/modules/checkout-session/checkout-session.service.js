@@ -641,7 +641,7 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       //   markAbandoned         :1289 → :1303
       //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
       //   spin-charge.service.js:613, :645, :926, :1083, :1274 (five)
-      //   mobile-inspection.service.js:276
+      //   mobile-inspection.service.js:284
       //   vehicle-swap.service.js:130
       //   terms-signing.service.js:275
       // Any of them can still drop an entry written between its own read and

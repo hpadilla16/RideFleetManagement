@@ -2044,5 +2044,20 @@
       "copiedSuffix": " y copiado al portapapeles",
       "autoReconciled": "Pago de Authorize.Net detectado y registrado automáticamente."
     }
+  },
+  "vehicleAssign": {
+    "filterNoteType": "Mostrando solo vehículos {{type}} disponibles",
+    "filterNote": "Mostrando solo vehículos disponibles del tipo reservado",
+    "showingAll": "Mostrando todos los vehículos",
+    "showAll": "Ver todos los vehículos",
+    "showMatching": "Ver solo los disponibles del tipo"
+  },
+  "checkinWizard": {
+    "mileagePrefilled": "Prellenado con el último millaje conocido del vehículo — edítalo si el odómetro marca otra cosa.",
+    "mileageWarning": "El millaje ingresado ({{entered}} mi) es menor a la lectura del check-out ({{baseline}} mi). Verifica el odómetro — continúa solo si es una corrección o se cambió el odómetro.",
+    "damageTitle": "¿Daño en el vehículo?",
+    "damageHint": "Registra un daño encontrado en el retorno sin salir del check-in. Documenta el daño, agrega el cargo a este contrato e inicia el borrador de incidente.",
+    "damageCta": "Reportar daño",
+    "damageRecorded": "Reporte de daño registrado — el cargo se agregó a este contrato."
   }
 }

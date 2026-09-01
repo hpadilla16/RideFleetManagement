@@ -18,6 +18,7 @@ import {
   swapPhotoGate,
   swapReadiness
 } from '../../../../lib/swap-photos';
+import { filterAssignableVehicles } from '../../../../lib/vehicle-assignment';
 
 function vehicleLabel(vehicle) {
   if (!vehicle) return '-';
@@ -48,10 +49,21 @@ function Inner({ token, me, logout }) {
   const [note, setNote] = useState('');
   const [currentCheckin, setCurrentCheckin] = useState(emptySwapInspection);
   const [nextCheckout, setNextCheckout] = useState(emptySwapInspection);
+  // Counter-UX Item 1 (2026-08-31): replacement picker defaults to AVAILABLE
+  // units of the reservation's type; "Show all vehicles" is the escape hatch.
+  const [showAllVehicles, setShowAllVehicles] = useState(false);
 
+  const reservationTypeId = row?.vehicleTypeId || row?.vehicleType?.id || null;
   const choices = useMemo(() => {
-    return (Array.isArray(vehicles) ? vehicles : []).filter((vehicle) => String(vehicle?.id || '') !== String(row?.vehicleId || ''));
-  }, [vehicles, row?.vehicleId]);
+    const base = (Array.isArray(vehicles) ? vehicles : []).filter((vehicle) => String(vehicle?.id || '') !== String(row?.vehicleId || ''));
+    // keepIds: the replacement the agent already picked never vanishes from
+    // the list when the filter is toggled back on mid-flow.
+    return filterAssignableVehicles(base, {
+      vehicleTypeId: reservationTypeId,
+      keepIds: [vehicleId],
+      showAll: showAllVehicles
+    });
+  }, [vehicles, row?.vehicleId, reservationTypeId, vehicleId, showAllVehicles]);
 
   const selectedVehicle = choices.find((vehicle) => String(vehicle.id) === String(vehicleId)) || null;
 
@@ -240,6 +252,25 @@ function Inner({ token, me, logout }) {
                   </option>
                 ))}
               </select>
+              {/* Counter-UX Item 1: filter note + escape hatch (only when the
+                  reservation actually has a vehicle type to filter on). */}
+              {reservationTypeId ? (
+                <span className="ui-muted" style={{ fontSize: 12 }}>
+                  {showAllVehicles
+                    ? t('vehicleAssign.showingAll')
+                    : (row?.vehicleType?.name
+                        ? t('vehicleAssign.filterNoteType', { type: row.vehicleType.name })
+                        : t('vehicleAssign.filterNote'))}
+                  {' · '}
+                  <button
+                    type="button"
+                    onClick={() => setShowAllVehicles((v) => !v)}
+                    style={{ background: 'none', border: 'none', padding: 0, color: 'inherit', fontWeight: 700, cursor: 'pointer', textDecoration: 'underline', fontSize: 'inherit' }}
+                  >
+                    {showAllVehicles ? t('vehicleAssign.showMatching') : t('vehicleAssign.showAll')}
+                  </button>
+                </span>
+              ) : null}
             </div>
             <div className="stack">
               <label className="label">{t('vehicleSwap.swapNote')}</label>
