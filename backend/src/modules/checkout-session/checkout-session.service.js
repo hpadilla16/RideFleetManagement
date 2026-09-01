@@ -633,12 +633,12 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // This is a PARTIAL close of the events lost-update, and the honest
       // count is FOURTEEN other writers of this TEXT column, all still doing
       // an unguarded read-modify-write (read → write, this file):
-      //   stampSideEffect       :1143 → :1151
-      //   saveCustomerSignature :1173 → :1194  (read is OUTSIDE the
-      //                                         $transaction that starts :1179)
-      //   mintHandoffToken      :1217 → :1277
-      //   setDeclinedInsurance  :1356 → :1388
-      //   markAbandoned         :1398 → :1412
+      //   stampSideEffect       :1247 → :1255
+      //   saveCustomerSignature :1277 → :1298  (read is OUTSIDE the
+      //                                         $transaction that starts :1283)
+      //   mintHandoffToken      :1321 → :1381
+      //   setDeclinedInsurance  :1460 → :1492
+      //   markAbandoned         :1502 → :1516
       //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
       //   spin-charge.service.js:613, :645, :926, :1083, :1274 (five)
       //   mobile-inspection.service.js:284
@@ -748,7 +748,7 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
   // cascade (2026-08-17, QA MAJOR on the blocker fix) ───────────────────────
   //
   // The first version of the blocker fix put the guard only on the cascade.
-  // But the email fires FIRST and was gated on nothing but `agreementId`, so
+  // But the email fired FIRST and was gated on nothing but `agreementId`, so
   // the same request that logged "self-heal declined — finalize does not own
   // this reservation (CANCELLED)" went straight on to stamp autoEmailedAt and
   // hand the signed rental contract to scheduleEmailDelivery, for a customer
@@ -800,24 +800,21 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
     }
   }
 
-  if (toStep === 'CLOSED' && updated.agreementId && finalizeOwnsReservation) {
-    Promise.resolve()
-      .then(() => maybeSendFinalizeEmail(updated, actorUserId))
-      .catch((err) => {
-        logger.warn('[checkout-session] auto-email-on-finalize failed', {
-          sessionId: id, agreementId: updated.agreementId, error: err?.message || String(err),
-        });
-      });
-  }
-
   // On finalize, advance the reservation to CHECKED_OUT, finalize the agreement,
   // and sync the vehicle to ON_RENT. The redesign reached CLOSED but never did
   // this, so reservations stayed CONFIRMED and cars weren't marked rented.
+  //
+  // Did the cascade actually finish? The customer email below is gated on
+  // this, so it stays false until the whole arm has run.
+  let finalizeCascadeOk = false;
   if (toStep === 'CLOSED' && updated.reservationId) {
     try {
       const resv = resvRow;
       // Ownership above, plus the cascade's own "already done" short-circuit:
       // don't downgrade a reservation that is already checked in/out.
+      // Did the contract actually become FINALIZED? Flipped only by the
+      // rentalAgreement.update below, whose failure is swallowed on purpose.
+      let agreementFinalized = true;
       if (finalizeOwnsReservation
         && !['CHECKED_OUT', 'CHECKED_IN', 'CHECKED_IN_UNPAID'].includes(String(resv.status))) {
         // beta.116 — NO-CAR-NO-CHECKOUT guard (defense-in-depth). Never finalize
@@ -885,10 +882,26 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
             checkoutOdometer = agRow?.odometerOut ?? inspRow?.odometer ?? null;
           } catch { metricsPatch = {}; }
 
+          // 2026-08-17 (Innovation MUST-CHANGE): this is the write that turns a
+          // DRAFT into the legal document, and it used to fail into
+          // `.catch(() => {})` — silently, with the cascade carrying on to mark
+          // the car ON_RENT and mail the customer their "contract". That is the
+          // exact tuple this ticket exists to kill, reached through a different
+          // door. It stays best-effort in the sense that a blip here must not
+          // abort the rest of the cascade (aborting would strand the vehicle
+          // sync, and the self-heal cannot repair it: its short-circuit sees an
+          // already-CHECKED_OUT reservation and declines). But it is no longer
+          // silent, and it no longer lets the email out — see finalizeCascadeOk.
           await prisma.rentalAgreement.update({
             where: { id: updated.agreementId },
             data: { status: 'FINALIZED', finalizedAt: new Date(), ...metricsPatch },
-          }).catch(() => {});
+          }).catch((agErr) => {
+            agreementFinalized = false;
+            logger.error('[checkout-session] agreement did NOT reach FINALIZED on finalize', {
+              sessionId: id, agreementId: updated.agreementId, reservationId: resv.id,
+              error: agErr?.message || String(agErr),
+            });
+          });
           // Loaner companion: advance the borrower's LoanerAgreement to ACTIVE so the portal,
           // due-soon/overdue reminders (status:ACTIVE), and the dashboard badge reflect the
           // checked-out loaner. Harmless for rentals (no LoanerAgreement). (best-effort)
@@ -923,7 +936,23 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
         logger.info('[checkout-session] reservation advanced to CHECKED_OUT on finalize', {
           sessionId: id, reservationId: resv.id,
         });
+        // The cascade ran. It counts as OK only if the contract is really
+        // FINALIZED — mailing a DRAFT is the whole ticket.
+        finalizeCascadeOk = agreementFinalized;
+      } else if (finalizeOwnsReservation) {
+        // The benign short-circuit: a finalize landing on a reservation already
+        // CHECKED_OUT. No work to do, and the world already matches.
+        finalizeCascadeOk = true;
       }
+      // Deliberately NOT set when finalizeOwnsReservation is false. Set once at
+      // the end of the try — as the first version of this did — the flag was
+      // also true for a finalize the ownership guard had just DECLINED, and the
+      // only thing keeping H8's cancelled-customer email from coming back was
+      // the second `finalizeOwnsReservation` conjunct on the email arm. Two
+      // guards where one reads as sufficient is how that regression returns.
+      // Anything that throws — the guards inside, or a DB failure the catch
+      // downgrades to a logger.warn — skips all of this, which is what stops
+      // the email on a half-finished finalize.
     } catch (err) {
       // 2026-06-04 — vehicle conflicts must FAIL the finalize loudly (the
       // agent has to see it at the counter), not be swallowed like the
@@ -932,25 +961,83 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
         const fail = err instanceof CheckoutSessionError
           ? err
           : new CheckoutSessionError(err.message, 409, 'VEHICLE_CONFLICT');
-        // H8: on the SELF-HEAL path the session is visibly CLOSED, so raising
-        // the raw guard code reads as nonsense to the agent — a 422
-        // PRECHECKIN_REQUIRED on a finished checkout, which the wizard shows
-        // as a red toast because it only swallows 409s. Re-label it as what
-        // it actually is, at a status the existing clients already handle.
-        // The underlying reason is kept in the message, not thrown away.
-        if (alreadyApplied) {
-          throw new CheckoutSessionError(
-            `Checkout is closed but its finalize did not complete: ${fail.message}`,
-            409,
-            'FINALIZE_INCOMPLETE',
-          );
-        }
-        throw fail;
+        // H8 gave the SELF-HEAL path this re-label, because raising the raw
+        // guard code on a visibly CLOSED session reads as nonsense to the
+        // agent — a 422 PRECHECKIN_REQUIRED on a finished checkout.
+        //
+        // 2026-08-17: the WINNER path gets it too, and the `alreadyApplied`
+        // branch is gone. The distinction never described anything the agent
+        // or RideOps can observe. transition() commits the step BEFORE this
+        // cascade runs, so by the time we are in this catch the session is
+        // CLOSED either way, and what is left behind is the same either way:
+        // reservation still CONFIRMED, contract still DRAFT, car still
+        // AVAILABLE. Splitting one state across two error codes bought
+        // nothing and cost the wizard its toast — a winner that died on the
+        // double-booking guard threw a bare 409 VEHICLE_CONFLICT, whose step
+        // comparison (`at >= want`, CLOSED vs CLOSED) the wizard's swallow
+        // rule satisfies by construction. The agent saw the finished-checkout
+        // screen over a rental that was never handed over.
+        //
+        // The underlying reason survives twice: in the message, for the human
+        // at the counter, and on `.reason`, which the router serializes so
+        // RideOps can branch on it without parsing prose.
+        const incomplete = new CheckoutSessionError(
+          `Checkout is closed but its finalize did not complete: ${fail.message}`,
+          409,
+          'FINALIZE_INCOMPLETE',
+        );
+        incomplete.reason = fail.code || null;
+        throw incomplete;
       }
       logger.warn('[checkout-session] failed to advance reservation on finalize', {
         sessionId: id, reservationId: updated.reservationId, error: err?.message || String(err),
       });
     }
+  }
+
+  // 2026-05-28 — Phase 3.5 — Email-on-finalize.
+  //
+  // When the wizard reaches CLOSED, the customer has a fully signed, paid,
+  // inspected rental agreement. Fire a fire-and-forget delivery so they get a
+  // PDF copy in their inbox without anyone having to remember to click "Email
+  // Agreement". The send goes through the existing scheduleEmailDelivery path,
+  // which handles Puppeteer + SMTP off the request thread and writes its own
+  // audit-log line on failure.
+  //
+  // ── it runs AFTER the cascade, not before (2026-08-17) ───────────────────
+  //
+  // It used to be the first thing this function did on CLOSED, which put the
+  // one irreversible write in the whole finalize AHEAD of every guard that
+  // decides whether the finalize is allowed to happen: NO_VEHICLE_ASSIGNED,
+  // ensureCheckoutGates (pre-checkin, age rules) and the double-booking
+  // re-check all live in the cascade. A finalize that died on any of them had
+  // already handed the customer a contract for a rental that was never handed
+  // over — and the contract it mailed was still DRAFT, because the FINALIZED
+  // stamp is also in the cascade. The same held for the failures the catch
+  // above downgrades to a logger.warn: the half-finished finalize that H8's
+  // self-heal exists to repair had already emailed its DRAFT.
+  //
+  // Nothing depended on the old ordering. The mail is fire-and-forget in both
+  // positions, so the transition response the UI waits on is unaffected, and
+  // rendering the PDF after the cascade is strictly better: it prints a
+  // FINALIZED agreement carrying the odometer/fuel the cascade just copied.
+  //
+  // Guarded by:
+  //   - toStep === 'CLOSED' (only on the actual finalize)
+  //   - updated.agreementId (no agreement, nothing to email)
+  //   - finalizeOwnsReservation (M2-H8 — never mail a cancelled customer)
+  //   - finalizeCascadeOk (this change — never mail over a broken finalize)
+  //   - the autoEmailedAt CAS inside maybeSendFinalizeEmail (never mail twice)
+  //   - any throw is swallowed — an email hiccup must not break the
+  //     transition response that the UI is waiting on
+  if (toStep === 'CLOSED' && updated.agreementId && finalizeOwnsReservation && finalizeCascadeOk) {
+    Promise.resolve()
+      .then(() => maybeSendFinalizeEmail(updated, actorUserId))
+      .catch((err) => {
+        logger.warn('[checkout-session] auto-email-on-finalize failed', {
+          sessionId: id, agreementId: updated.agreementId, error: err?.message || String(err),
+        });
+      });
   }
 
   return updated;
@@ -1082,6 +1169,23 @@ async function maybeSendFinalizeEmail(session, actorUserId) {
   });
   if (stamped.count === 0) return; // someone else already stamped — skip
 
+  // AWAITED and rethrown, not fired and forgotten (2026-08-17; kept through the
+  // 2026-08-28 release-the-claim rewrite). scheduleEmailDelivery validates
+  // before it schedules anything and returns a REJECTED promise when it cannot
+  // resolve a recipient ("Customer email is required" -- a customer with no
+  // email on file is an ordinary state, not an exotic one). Detached, that
+  // rejection belonged to nobody: the caller's
+  // `Promise.resolve().then(...).catch(...)` only covers the chain it builds,
+  // so it surfaced as an unhandled rejection instead -- which under Node's
+  // default `--unhandled-rejections=throw` takes the process down. It killed
+  // the QA probe that found this. Awaiting it inside this async function and
+  // rethrowing keeps that rejection attached: the caller's `.then(() =>
+  // maybeSendFinalizeEmail(...))` adopts this function's promise, so the
+  // `.catch` right below it logs the failure and lets the finalize response
+  // through untouched.
+  //
+  // This waits on the SCHEDULING, not the delivery: past validation the real
+  // work is handed to setImmediate with its own catch + audit line.
   try {
     await rentalAgreementsService.scheduleEmailDelivery(
       session.agreementId,

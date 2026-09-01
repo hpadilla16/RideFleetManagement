@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkout CLOSED — la pantalla deja de mentir (mockup 2026-08-17)</title>
+<style>
+  :root{
+    --ride:#8752FE;
+    --bg:#f5f6f8; --surface:#ffffff; --line:#e5e7eb;
+    --text:#111827; --muted:#4b5563; --faint:#9ca3af;
+    /* tokens REALES de globals.css :38-39 */
+    --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+    --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+    --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+    /* .swap-alert real (globals.css :284) — colores propios ya auditados AA */
+    --alert-bg:rgba(229,72,77,.08); --alert-bd:rgba(229,72,77,.28); --alert-tx:#b91c1c;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0f1115; --surface:#161922; --line:#2a2f3a;
+      --text:#e5e7eb; --muted:#c3c9d4; --faint:#7c8698;
+      --warn-bg:rgba(232,161,60,.14); --warn-bd:rgba(232,161,60,.30); --warn-tx:#e8a13c;
+      --danger-bg:rgba(224,69,59,.16); --danger-bd:rgba(224,69,59,.34); --danger-tx:#ff9d95;
+      --ok-bg:rgba(16,185,129,.14); --ok-bd:rgba(16,185,129,.32); --ok-tx:#6ee7b7;
+      --alert-bg:rgba(229,72,77,.16); --alert-bd:rgba(248,113,113,.4); --alert-tx:#fca5a5;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 20px 70px;background:var(--bg);color:var(--text);
+       font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1000px;margin:0 auto}
+  h1{font-size:23px;margin:0 0 6px}
+  .sub{color:var(--muted);margin:0 0 8px;max-width:78ch}
+  .meta{color:var(--faint);font-size:12.5px;margin:0 0 30px}
+  h2{font-size:17px;margin:38px 0 4px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .tag{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+       padding:3px 8px;border-radius:999px;border:1px solid}
+  .tag.now{background:var(--danger-bg);border-color:var(--danger-bd);color:var(--danger-tx)}
+  .tag.prop{background:var(--ok-bg);border-color:var(--ok-bd);color:var(--ok-tx)}
+  .lede{color:var(--muted);margin:4px 0 16px;max-width:78ch;font-size:14px}
+
+  /* ── chrome del wizard, replicado del page.js real ── */
+  .wiz{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px}
+  .wizhead{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
+  .wiztitle{font-weight:600;font-size:16px}
+  .wizsub{font-size:13px;color:var(--faint)}
+  .wizbtns{display:flex;gap:8px}
+  .gbtn{padding:8px 12px;background:var(--surface);color:var(--muted);
+        border:1px solid var(--line);border-radius:6px;font:inherit;font-size:12px;cursor:pointer}
+  .gbtn[disabled]{opacity:.4;cursor:not-allowed}
+
+  .track{display:flex;gap:8px}
+  .st{flex:1;padding:8px 12px;border-radius:6px;border:1px solid var(--line);
+      font-size:12px;font-weight:500;display:flex;align-items:center;gap:6px;
+      background:var(--surface);color:var(--faint)}
+  .st .dot{width:18px;height:18px;border-radius:50%;display:inline-flex;
+           align-items:center;justify-content:center;font-size:10px;font-weight:600;
+           background:#F3F4F6;color:#9CA3AF;flex:none}
+  .st.done{background:var(--ok-bg);color:var(--ok-tx);border-color:var(--ok-bd)}
+  .st.done .dot{background:var(--ok);color:#fff}
+  .st.warn{background:var(--warn-bg);color:var(--warn-tx);border-color:var(--warn-bd);font-weight:600}
+  .st.warn .dot{background:var(--warn);color:#fff}
+
+  /* ── tarjeta de paso ── */
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:8px;
+        padding:20px;margin-top:16px}
+  .card.warnvar{border-color:var(--warn-bd);border-left:3px solid var(--warn)}
+  .card h3{margin:0 0 12px;font-size:16px;font-weight:600}
+  .card p{margin:0 0 12px}
+  .card a.back{color:var(--ride);font-size:13.5px}
+
+  .alert{padding:10px 14px;border-radius:12px;font-size:13px;font-weight:600;line-height:1.45;
+         background:var(--alert-bg);border:1px solid var(--alert-bd);color:var(--alert-tx);
+         margin:0 0 14px;max-width:70ch}
+  .alert .at{display:block;font-weight:800;margin-bottom:3px}
+  .alert .ab{display:block;font-weight:500}
+
+  .facts{border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:0 0 16px;max-width:70ch}
+  .facts .f{display:flex;align-items:flex-start;gap:9px;padding:8px 12px;font-size:13px;
+            border-bottom:1px solid var(--line)}
+  .facts .f:last-child{border-bottom:0}
+  .facts .g{flex:none;width:15px;text-align:center;font-weight:700}
+  .facts .f.no{color:var(--muted)} .facts .f.no .g{color:var(--warn-tx)}
+  .facts .f.yes .g{color:var(--ok-tx)}
+  .facts .k{color:var(--faint);margin-left:auto;font-size:11.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+  .acts{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .pbtn{padding:10px 16px;background:#1F2937;color:#fff;border:none;border-radius:6px;
+        font:inherit;font-size:14px;font-weight:500;cursor:pointer}
+  @media (prefers-color-scheme: dark){ .pbtn{background:#374151} }
+
+  .toast{position:relative;margin-top:16px;background:var(--danger-bg);color:var(--danger-tx);
+         border:1px solid var(--danger-bd);
+         padding:10px 14px;border-radius:6px;display:flex;justify-content:space-between;
+         gap:12px;align-items:flex-start;max-width:100%}
+  .toast .tmsg{line-height:1.45;max-width:64ch;font-size:13.5px}
+  .toast .tx{flex:none;width:44px;height:44px;margin:-10px -10px -10px 0;background:none;border:none;
+             color:inherit;cursor:pointer;font-size:18px;line-height:1;
+             display:flex;align-items:center;justify-content:center}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+  code{background:rgba(135,82,254,.10);padding:1px 5px;border-radius:4px;font-size:12px;
+       font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .note{border-left:3px solid var(--ride);background:rgba(135,82,254,.07);
+        padding:11px 14px;border-radius:0 8px 8px 0;font-size:13.5px;color:var(--muted);
+        margin:14px 0;max-width:80ch}
+  .note b{color:var(--text)}
+  .q{border-left:3px solid var(--warn);background:var(--warn-bg);color:var(--warn-tx);
+     padding:11px 14px;border-radius:0 8px 8px 0;font-size:13.5px;margin:14px 0;max-width:80ch}
+  .q b{display:block;margin-bottom:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Checkout · la pantalla de cierre deja de mentir</h1>
+<p class="sub">Cuando el <code>finalize</code> falla, la sesión llega a <code>CLOSED</code> igual —
+la cascada revienta <em>después</em> de que el paso commitea. Hoy la pantalla celebra tres cosas que
+no pasaron. Este mockup es la variante de fallo.</p>
+<p class="meta">Ticket hijo de <code>fix/checkout-finalize-truth</code> · rama
+<code>fix/closed-screen-tells-the-truth</code> · 2026-08-17</p>
+
+<!-- ══════════════ HOY ══════════════ -->
+<h2>Hoy <span class="tag now">miente</span></h2>
+<p class="lede">Reserva <code>CONFIRMED</code>, contrato <code>DRAFT</code>, coche
+<code>AVAILABLE</code>, correo bloqueado — y la pantalla dice lo contrario, más fuerte.</p>
+
+<div class="wiz">
+  <div class="wizhead">
+    <div>
+      <div class="wiztitle">Checkout · #R-10482</div>
+      <div class="wizsub">Marisol Herrera</div>
+    </div>
+    <div class="wizbtns">
+      <button class="gbtn" disabled>Change vehicle</button>
+      <button class="gbtn">Save &amp; pause</button>
+    </div>
+  </div>
+  <div class="track">
+    <div class="st done"><span class="dot">✓</span>Confirm</div>
+    <div class="st done"><span class="dot">✓</span>Terms</div>
+    <div class="st done"><span class="dot">✓</span>Payment</div>
+    <div class="st done"><span class="dot">✓</span>Inspection</div>
+    <div class="st done"><span class="dot">✓</span>Metrics</div>
+    <div class="st done"><span class="dot">✓</span>Sign</div>
+  </div>
+
+  <div class="card">
+    <h3>Checkout complete ✓</h3>
+    <p>Agreement built. Email queued.</p>
+    <a class="back" href="#">Back to reservation</a>
+  </div>
+
+  <div class="toast">
+    <span class="tmsg">Checkout is closed but its finalize did not complete: Vehicle is still out on open rental R-10327 — complete its check-in (or swap vehicles) first</span>
+    <button class="tx">×</button>
+  </div>
+</div>
+
+<div class="note">
+  <b>Las tres afirmaciones son falsas.</b> "Checkout complete" (la reserva sigue CONFIRMED),
+  "Agreement built" (el contrato sigue DRAFT) y "Email queued" — el correo es específicamente lo
+  que <em>no</em> sale: <code>finalizeCascadeOk</code> lo bloquea. El toast que dice la verdad es
+  descartable y no sobrevive un F5. La afirmación falsa sí.
+  <br><br>
+  Y la recuperación que nombra el mensaje del backend — <em>"(or swap vehicles)"</em> — no existe
+  aquí: <code>swapLocked</code> incluye <code>CLOSED</code> (page.js:126) y
+  <code>swapVehicle</code> exige <code>CHECKED_OUT</code> (reservations.service.js:2078).
+  El agente que lo siga llega a un botón gris.
+</div>
+
+<!-- ══════════════ PROPUESTA ══════════════ -->
+<h2>Propuesta <span class="tag prop">variante de fallo</span></h2>
+<p class="lede">Derivada de <b>verdad del servidor</b> —
+<code>session.currentStep === 'CLOSED' &amp;&amp; reservation.status !== 'CHECKED_OUT'</code> — no del
+estado del toast. Sobrevive el F5 y el cambio de turno.</p>
+
+<div class="wiz">
+  <div class="wizhead">
+    <div>
+      <div class="wiztitle">Checkout · #R-10482</div>
+      <div class="wizsub">Marisol Herrera</div>
+    </div>
+    <div class="wizbtns">
+      <button class="gbtn" disabled>Change vehicle</button>
+      <button class="gbtn">Save &amp; pause</button>
+    </div>
+  </div>
+  <div class="track">
+    <div class="st done"><span class="dot">✓</span>Confirm</div>
+    <div class="st done"><span class="dot">✓</span>Terms</div>
+    <div class="st done"><span class="dot">✓</span>Payment</div>
+    <div class="st done"><span class="dot">✓</span>Inspection</div>
+    <div class="st done"><span class="dot">✓</span>Metrics</div>
+    <div class="st warn"><span class="dot">!</span>Sign</div>
+  </div>
+
+  <div class="card warnvar">
+    <h3>Checkout cerrado · el cierre no se completó</h3>
+
+    <div class="alert" role="alert">
+      <span class="at">El vehículo sigue rentado en otra reservación</span>
+      <span class="ab">La unidad asignada no se pudo entregar porque sigue fuera en la reservación
+      R-10327. Completa el check-in de esa renta y vuelve a intentar el cierre.</span>
+    </div>
+
+    <div class="facts">
+      <div class="f no"><span class="g">✗</span><span>La reservación no quedó como entregada</span><span class="k">CONFIRMED</span></div>
+      <div class="f no"><span class="g">✗</span><span>El contrato sigue en borrador</span><span class="k">DRAFT</span></div>
+      <div class="f no"><span class="g">✗</span><span>El vehículo no quedó marcado como rentado</span><span class="k">AVAILABLE</span></div>
+      <div class="f no"><span class="g">✗</span><span>No se envió el contrato al cliente</span><span class="k">—</span></div>
+    </div>
+
+    <div class="acts">
+      <button class="pbtn">Reintentar cierre</button>
+      <button class="gbtn">Ir a la reservación</button>
+    </div>
+  </div>
+
+  <div class="toast" role="alert">
+    <span class="tmsg">Checkout is closed but its finalize did not complete: Vehicle is still out on open rental R-10327 — complete its check-in (or swap vehicles) first</span>
+    <button class="tx" aria-label="Cerrar aviso">×</button>
+  </div>
+</div>
+
+<div class="note">
+  <b>Qué cambia, y por qué cada pieza.</b>
+  <br>· <b>Tracker paso 6 en warn</b> con glifo <code>!</code> — <code>isDone &amp;&amp; !finalizeIssue</code>,
+  tokens <code>--warn-bg/-bd/-tx</code>. Los cinco pasos previos <em>sí</em> pasaron; solo el cierre no.
+  <br>· <b>La lista de hechos</b> reemplaza las tres afirmaciones falsas por las cuatro cosas que
+  concretamente no pasaron, con el estado real del servidor a la derecha. Es lo que el agente le
+  tiene que decir al cliente que está enfrente.
+  <br>· <b>"Reintentar cierre"</b> re-postea <code>CLOSED → CLOSED</code>. No es un botón decorativo:
+  el backend responde ese caso por la rama idempotente y <em>vuelve a correr la cascada</em>
+  (la auto-sanación de H8, cuyo allow-list <code>['NEW','CONFIRMED']</code> cubre exactamente este
+  estado). Si el agente ya arregló el bloqueo, el cierre se completa de verdad y la tarjeta cambia
+  a éxito. Si no, vuelve un <code>reason</code> fresco.
+  <br>· <b>El toast</b> gana <code>role="alert"</code>, <code>aria-label</code> en la ×, blanco de
+  toque de 44px, <code>line-height</code> y <code>max-width</code>. Sigue siendo el mensaje crudo del
+  backend, ahora como detalle técnico secundario — la tarjeta es la que manda.
+  <br>· <b>Nunca se nombra el swap</b> en la copia nueva. El mensaje del backend no se toca
+  (RideOps depende de él); queda contenido en el toast.
+</div>
+
+<!-- ══════════════ COPIA POR REASON ══════════════ -->
+<h2>Copia por <code>reason</code></h2>
+<p class="lede">El backend manda el miembro aditivo <code>reason</code> con la guarda que realmente
+disparó detrás de <code>FINALIZE_INCOMPLETE</code>
+(<code>checkout-session.service.js:890</code> → router <code>:28</code> →
+<code>client.js:115</code> lo expone como <code>error.reason</code>). Toda la copia es española y
+frontend-owned.</p>
+
+<table>
+<tr><th style="width:23%">reason</th><th style="width:30%">Título</th><th>Cuerpo · qué hacer</th></tr>
+
+<tr>
+  <td><code>VEHICLE_CONFLICT</code></td>
+  <td>El vehículo sigue rentado en otra reservación</td>
+  <td>La unidad asignada no se pudo entregar porque sigue fuera en la reservación <b>{N}</b>.
+      Completa el check-in de esa renta y vuelve a intentar el cierre.</td>
+</tr>
+<tr>
+  <td><code>NO_VEHICLE_ASSIGNED</code></td>
+  <td>La reservación se quedó sin vehículo</td>
+  <td>No se puede cerrar un checkout sin unidad asignada. Asigna un vehículo desde la reservación y
+      vuelve a intentar el cierre.</td>
+</tr>
+<tr>
+  <td><code>PRECHECKIN_REQUIRED</code></td>
+  <td>Falta el pre-check-in del cliente</td>
+  <td>Esta sede exige el pre-check-in completo. Complétalo desde la reservación
+      ("llenar por el cliente") o reenvíale el enlace, y vuelve a intentar el cierre.</td>
+</tr>
+<tr>
+  <td><code>AGE_RULES_DOB_REQUIRED</code></td>
+  <td>Falta la fecha de nacimiento del conductor</td>
+  <td>Esta sede exige verificar la edad antes de entregar. Captura la fecha de nacimiento del ID o
+      licencia en la reservación y vuelve a intentar el cierre.</td>
+</tr>
+<tr>
+  <td><code>AGE_RULES_DOB_IMPLAUSIBLE</code></td>
+  <td>La fecha de nacimiento es inválida</td>
+  <td>La fecha registrada es imposible. Corrígela con el ID o licencia del cliente y vuelve a
+      intentar el cierre.</td>
+</tr>
+<tr>
+  <td><code>AGE_RULES_UNDER_MIN</code></td>
+  <td>El conductor no llega a la edad mínima</td>
+  <td>Esta sede no permite entregar a este conductor. El cierre no se puede completar: escala con tu
+      supervisor antes de entregar la unidad.</td>
+</tr>
+<tr>
+  <td><code>AGE_RULES_ABOVE_MAX</code></td>
+  <td>El conductor excede la edad máxima</td>
+  <td>Esta sede no permite entregar a este conductor. El cierre no se puede completar: escala con tu
+      supervisor antes de entregar la unidad.</td>
+</tr>
+<tr>
+  <td><code>reason</code> desconocido<br>o ausente (F5)</td>
+  <td>El cierre no se completó</td>
+  <td><b>Cae al mensaje crudo del backend</b>, tal cual, sin traducir. Es lo que preserva el punto de
+      la lista blanca de <code>checkout-session.js</code>: un fallo imprevisto tiene que llegarle al
+      agente, no desaparecer en un <code>default</code> genérico.</td>
+</tr>
+</table>
+
+<div class="q">
+  <b>Nota de contraste — desviación consciente del ticket.</b>
+  El ticket pide <code>.swap-alert</code> <em>y</em> los tokens <code>--danger-bg/-bd/-tx</code>.
+  Son dos paletas distintas: <code>.swap-alert</code> ya trae sus propios colores auditados WCAG AA
+  (documentado en globals.css:299-303) y su regla de modo oscuro en :346. Pisarlos con
+  <code>--danger-*</code> desharía esa auditoría. Uso <code>.swap-alert</code> tal cual — cumple la
+  intención real (clase compartida, cero hex inline) sin tocar el contraste ya verificado.
+</div>
+
+<div class="q">
+  <b>Pregunta abierta para Hector — el caso del F5.</b>
+  Tras un refresh no hay <code>error.reason</code>: la tarjeta sabe que el cierre falló (verdad del
+  servidor) pero no por qué. Dos salidas:
+  <b>(a)</b> mostrar el título genérico "El cierre no se completó" + "Reintentar cierre", y que el
+  agente recupere el motivo con un clic — <em>mi recomendación</em>, cero efectos secundarios sin
+  pedirlos; o <b>(b)</b> reintentar automáticamente una vez al montar para recuperar el
+  <code>reason</code>, más cómodo pero dispara la cascada sin que nadie lo pida.
+</div>
+
+<div class="q">
+  <b>Segunda pregunta — el caso PRECHECKIN tras F5.</b>
+  Si el bloqueo es <code>PRECHECKIN_REQUIRED</code>, al recargar el efecto de montaje corta antes
+  del wizard y pinta <code>PrecheckinGateBlocker</code> (page.js:~180), así que la sesión
+  <code>CLOSED</code> a medio finalizar queda invisible detrás de esa pantalla. Es preexistente y
+  fuera del alcance de este ticket; lo dejo señalado en vez de cambiarlo por mi cuenta.
+</div>
+
+</div>
+</body>
+</html>

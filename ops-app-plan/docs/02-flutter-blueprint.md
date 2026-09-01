@@ -123,11 +123,24 @@ además `checkoutSessionId` y `reservationId` para poder re-mintear token al dre
   obligatorio — un 409 que no esté en esta lista cae en el manejador genérico
   del cliente y se muestra como error crudo.
   **Y uno más**: `FINALIZE_INCOMPLETE` (M2-H8) — la sesión está CLOSED pero su
-  cascada de finalización no llegó a terminar, y el reintento tampoco pudo
-  completarla; el motivo real va dentro del mensaje. No es un error del paso
-  que pediste: la sesión **sí** está cerrada. Es trabajo de mostrador
-  (reserva sin coche, gate de pre-checkin, conflicto de vehículo) y hay que
-  mostrarlo como aviso accionable, no como "no se pudo avanzar".
+  cascada de finalización no llegó a terminar. No es un error del paso que
+  pediste: la sesión **sí** está cerrada. Es trabajo de mostrador (reserva sin
+  coche, gate de pre-checkin, conflicto de vehículo) y hay que mostrarlo como
+  aviso accionable, no como "no se pudo avanzar".
+  **Corregido 2026-08-17**: lo levantan **las dos** rutas, no sólo el reintento
+  — el finalize ganador commitea el paso ANTES de correr la cascada, así que
+  cuando una guarda falla la sesión ya está CLOSED y el estado que deja es
+  idéntico. Antes esa ruta tiraba el código crudo (`VEHICLE_CONFLICT`) y el
+  wizard web se lo tragaba por comparación de pasos; un solo código para un
+  solo estado es lo que lo hace visible en las dos superficies.
+  Trae además `body.reason` con la guarda que realmente disparó
+  (`VEHICLE_CONFLICT`, `NO_VEHICLE_ASSIGNED`, `PRECHECKIN_REQUIRED`,
+  `AGE_RULES_*`), para enrutar al agente sin parsear el mensaje. El campo es
+  aditivo: sólo aparece en este código, y cuando el motivo no se pudo
+  determinar la **clave no viene** — nunca llega como `null`
+  (`checkout-session.routes.js`, spread condicional). En Dart: leelo como
+  `map['reason'] as String?` y tratá ausente y desconocido igual, cayendo al
+  mensaje de `error`.
 - **200 en `POST /transition`** puede significar "otra superficie ya hizo exactamente
   esta transición" (M2-H8): `transition()` es idempotente cuando la sesión ya está en
   `toStep`, así que un doble-submit o una carrera devuelven la fila fresca en vez de

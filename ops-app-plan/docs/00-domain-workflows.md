@@ -67,21 +67,54 @@ RideOps será la superficie #4-bis usando el router autenticado, nunca el de kio
 Idempotente por `reservationId @unique` (schema.prisma:5069). En orden:
 1. 404 si no existe la reserva; 422 `NO_VEHICLE_ASSIGNED` sin vehículo (:128-134).
 2. 409 `VEHICLE_CONFLICT` si el vehículo está en otro rental abierto (:136-147; re-chequeado
-   en finalize, :474-488, y ahí falla el finalize "loudly", :562-570).
+   en finalize, y ahí falla el finalize "loudly" — pero con OTRO código, ver 1.4-bis).
 3. Gates por ubicación (`ensureCheckoutGates`, :67-101): 422 `PRECHECKIN_REQUIRED` si
    `requirePrecheckinBeforeCheckout` y no hay `customerInfoCompletedAt`; 422 `AGE_RULES_*`
-   si las reglas de edad bloquean. Se re-corren al CLOSED (:473).
+   si las reglas de edad bloquean. Se re-corren al CLOSED (ver 1.4-bis).
+
+### 1.4-bis Los guards del finalize NO devuelven su propio código (2026-08-17)
+
+Los códigos de arriba son los del **arranque de sesión** y siguen igual. Al re-correrse
+en el finalize responden distinto, y esto es contrato para RideOps:
+
+| En `createForReservation` | En el finalize (`toStep: 'CLOSED'`) |
+|---|---|
+| 422 `NO_VEHICLE_ASSIGNED` | 409 `FINALIZE_INCOMPLETE` + `reason: "NO_VEHICLE_ASSIGNED"` |
+| 422 `PRECHECKIN_REQUIRED` | 409 `FINALIZE_INCOMPLETE` + `reason: "PRECHECKIN_REQUIRED"` |
+| 422 `AGE_RULES_*` | 409 `FINALIZE_INCOMPLETE` + `reason: "AGE_RULES_*"` |
+| 409 `VEHICLE_CONFLICT` | 409 `FINALIZE_INCOMPLETE` + `reason: "VEHICLE_CONFLICT"` |
+
+**Por qué uno solo**: `transition()` commitea el paso ANTES de correr la cascada, así que
+cuando cualquiera de esos guards falla la sesión **ya está CLOSED** y el estado que deja es
+el mismo en los cuatro casos — reserva sin avanzar, contrato en DRAFT, coche sin marcar.
+Un estado observable, un código. No es un error del paso que pediste; es trabajo de
+mostrador sobre un checkout que ya cerró.
+
+**El motivo va en `reason`**, miembro aditivo del body (`checkout-session.routes.js`
+`handleError`), junto a `error` y `code`. Sólo aparece en este código; un cliente que no lo
+conoce ve exactamente el body de antes. Enrutá al agente por `reason`, nunca parseando el
+mensaje.
+
+Aplica a las DOS rutas — el finalize ganador y el reintento idempotente. Antes el ganador
+tiraba el código crudo y el wizard web se lo tragaba por comparación de pasos; ese era el
+defecto.
 4. 409 `SESSION_TERMINAL` si ya existe sesión terminal (:155-161).
 5. Auto-crea el `RentalAgreement` si falta (:194, `ensureAgreementExists` :238-274 —
    fallo ⇒ `AGREEMENT_AUTO_CREATE_FAILED`).
 6. Loaner (`DEALERSHIP_LOANER`): pre-estampa `paymentCompletedAt` para saltar el paso de
    pago (:214-220).
 
-Al transicionar a `CLOSED` (service:437-575): email del contrato fire-and-forget
-(`maybeSendFinalizeEmail` :589-613, guard `autoEmailedAt`), reserva → `CHECKED_OUT`,
+Al transicionar a `CLOSED` (service:437-575): reserva → `CHECKED_OUT`,
 agreement → `FINALIZED` (+ copia odómetro/fuel de la inspección a `odometerOut/fuelOut`,
 :498-526), vehículo → ON_RENT (`syncVehicleStatusForReservation` :548), LoanerAgreement
-DRAFT→ACTIVE (:530-533), mileage history (:536-546), audit log (:551-557).
+DRAFT→ACTIVE (:530-533), mileage history (:536-546), audit log (:551-557), y **al final**
+el email del contrato fire-and-forget (`maybeSendFinalizeEmail`, guard `autoEmailedAt`).
+
+El orden importa y cambió el 2026-08-17: el email corría PRIMERO, por delante de todos los
+guards de 1.4-bis, así que un finalize que moría en cualquiera de ellos ya le había mandado
+al cliente un contrato en DRAFT. Ahora sale sólo si la cascada terminó y el contrato quedó
+realmente `FINALIZED`. Sigue siendo fire-and-forget: la respuesta de `POST /:id/transition`
+no espera al mailer.
 
 ### 1.5 Endpoints (`checkout-session.routes.js`; montaje main.js:359 bajo
 `requireAuth + tenantRateLimit + requireModuleAccess('reservations')`)

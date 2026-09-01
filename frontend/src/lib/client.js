@@ -93,6 +93,8 @@ async function parseApiResponse(res, path) {
   if (!res.ok) {
     let msg = `${path} failed (${res.status})`;
     let code = null;
+    let reason = null;
+    let session = null;
     try {
       const text = await res.text();
       if (text) {
@@ -101,6 +103,17 @@ async function parseApiResponse(res, path) {
           if (j?.error) msg = Array.isArray(j.details) && j.details.length ? j.details.join('. ') : j.error;
           else msg = `${msg}: ${text.slice(0, 300)}`;
           if (j?.code) code = String(j.code);
+          // Additive members the checkout router attaches to some 409s
+          // (checkout-session.routes.js:20-36). Lifted here because a caller
+          // that only gets `message` has to parse prose to know what happened:
+          //   reason  — the guard that actually fired behind FINALIZE_INCOMPLETE
+          //   session — the fresh row on STALE_VERSION / CONCURRENT_MODIFICATION,
+          //             which saves the caller a follow-up GET
+          // Both stay OFF the error object on every other response, so nothing
+          // else in the app changes shape. That is a claim about the two lines
+          // below the `new Error`, not about these two — see there.
+          if (j?.reason) reason = String(j.reason);
+          if (j?.session) session = j.session;
         } catch {
           msg = `${msg}: ${text.slice(0, 300)}`;
         }
@@ -109,6 +122,18 @@ async function parseApiResponse(res, path) {
     const error = new Error(msg);
     error.status = res.status;
     error.code = code;
+    // Guarded, like `session` right below and unlike `code` right above. This
+    // is the shared error path for EVERY request in the app, so an unguarded
+    // assignment would hand a `reason: null` to thousands of errors that have
+    // no reason -- turning "the member is absent" into "the member is null" for
+    // callers that check with `in` or `Object.keys`, and making the comment
+    // above ("off the error object on every other response") false. `code` is
+    // unguarded because it has always been part of this object's shape; these
+    // two are additive members of a handful of checkout 409s, and the backend
+    // spreads them the same way (checkout-session.routes.js: `...(err.reason ?
+    // { reason: err.reason } : {})`). Symmetry with the wire is the point.
+    if (reason) error.reason = reason;
+    if (session) error.session = session;
     if (typeof window !== 'undefined' && res.status === 403 && code === 'PASSWORD_CHANGE_REQUIRED') {
       window.dispatchEvent(new CustomEvent(PASSWORD_CHANGE_REQUIRED_EVENT, { detail: { path } }));
     }
