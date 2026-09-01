@@ -25,6 +25,9 @@
  * swallows an ALLOW-list, so an unforeseen 409 is loud by default.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   shouldSwallowTransitionConflict, STEP_ORDER,
   resolveFinalizeFailureCopy, FINALIZE_FAILURE_REASONS, finalizeReasonKeys,
@@ -343,5 +346,95 @@ describe('closedCardState', () => {
     expect(closedCardState({ reservation: resv('CHECKED_OUT', undefined) }).halfFinalized).toBe(false);
     expect(closedCardState({ reservation: resv('CHECKED_OUT', 'FINALIZED') }).halfFinalized).toBe(false);
     expect(closedCardState({ reservation: resv('CONFIRMED', 'DRAFT') }).halfFinalized).toBe(false);
+  });
+});
+
+/**
+ * The CALL SITE, pinned (2026-08-28).
+ *
+ * Everything above tests a pure function. Nothing above proves the wizard
+ * actually CALLS it — and that gap is not theoretical. Merging main into this
+ * branch conflicts in page.js, and main still carries the pre-H8 inline
+ * `STEP_ORDER` / `at >= want` version of `advance()`. Resolving that hunk the
+ * natural way — "take the side of the file main kept editing" — silently
+ * restores the unconditional swallow, leaves `shouldSwallowTransitionConflict`
+ * exported-but-unused, and every test above KEEPS PASSING. The exemption would
+ * be gone from the only surface an agent ever looks at, with nothing red.
+ *
+ * So the wiring gets pinned by source, the same way checkout-payment-optional
+ * pins its own wizard branch. Mounting the 2k-line page would need auth, a
+ * router, the api client and QR codes to assert one `if`; this is the smallest
+ * thing that goes red on the bad resolution.
+ */
+describe('the wizard actually delegates the swallow decision', () => {
+  const WIZARD = join(
+    dirname(fileURLToPath(import.meta.url)),
+    '..', 'src', 'app', 'reservations', '[id]', 'checkout-wizard-v2', 'page.js',
+  );
+  const src = () => readFileSync(WIZARD, 'utf8');
+  // advance() is the only place a transition 409 is handled.
+  const advanceBody = () => {
+    const s = src();
+    const start = s.indexOf('const advance = async (toStep, metadata)');
+    expect(start, 'advance() not found in the wizard').toBeGreaterThan(-1);
+    const end = s.indexOf('const pauseAndExit', start);
+    expect(end, 'could not bound advance()').toBeGreaterThan(start);
+    return s.slice(start, end);
+  };
+
+  it('imports shouldSwallowTransitionConflict from the lib', () => {
+    expect(src()).toMatch(/import\s*\{[^}]*\bshouldSwallowTransitionConflict\b[^}]*\}\s*from\s*'[^']*lib\/checkout-session'/s);
+  });
+
+  it('asks the library, passing the error so FINALIZE_INCOMPLETE can be seen', () => {
+    // `err` must be in the payload: the exemption keys off err.code, so a call
+    // that only forwarded { fresh, toStep } would swallow it again.
+    expect(advanceBody()).toMatch(
+      /shouldSwallowTransitionConflict\(\{\s*err,\s*fresh,\s*toStep\s*\}\)/,
+    );
+  });
+
+  it('keeps NO inline step-order comparison of its own', () => {
+    const s = src();
+    // The pre-H8 gate, in any of the shapes it has worn.
+    expect(s).not.toMatch(/const STEP_ORDER\s*=\s*\[/);
+    expect(s).not.toMatch(/at\s*>=\s*want/);
+    expect(s).not.toMatch(/STEP_ORDER\.indexOf/);
+  });
+
+  // The same hole, for the two rules THIS branch extracted (2026-09-01, merge
+  // of main). A reversion sweep over the merged tree found that swapping
+  // `isFinalizeComplete(r)` back for an inline `r.status === 'CHECKED_OUT'`
+  // -- this ticket's original defect, exactly -- left all 28 tests green: the
+  // pure-function suites above prove the rule is RIGHT, never that the screen
+  // ASKS it. The merge conflicted in the very import statement that binds
+  // them, which is the same accident the block above was written for.
+
+  it('asks the library for the CLOSED verdict instead of reading status inline', () => {
+    const s = src();
+    expect(s).toMatch(/setClosedCheck\(\s*isFinalizeComplete\(/);
+    // The two-clause verdict must not be re-inlined next to the setter. The
+    // one-clause version is the defect the whole ticket exists to remove.
+    expect(s).not.toMatch(/setClosedCheck\([^;]*status[^;]*===[^;]*'CHECKED_OUT'/);
+  });
+
+  it('asks the library what the CLOSED card may offer', () => {
+    const s = src();
+    expect(s).toMatch(/closedCardState\(\{\s*reservation,\s*terminalReason:/);
+    // The retry allow-list mirrors the backend's self-heal list and lives in
+    // ONE place; a copy of it in the component is how the two drift apart.
+    expect(s).not.toMatch(/const\s+retryCanWork\s*=/);
+    expect(s).not.toMatch(/const\s+halfFinalized\s*=/);
+  });
+
+  it('reconciles the screen to server truth before toasting the error', () => {
+    // On FINALIZE_INCOMPLETE the session really IS closed. The agent has to see
+    // the closed session AND the reason the finalize did not finish.
+    const body = advanceBody();
+    const reconcile = body.search(/if\s*\(freshSession\)\s*setSession\(freshSession\)/);
+    const toast = body.search(/setToast\(\{\s*kind:\s*'error'/);
+    expect(reconcile, 'the reconcile-before-toast line is gone').toBeGreaterThan(-1);
+    expect(toast, 'the error toast is gone').toBeGreaterThan(-1);
+    expect(reconcile).toBeLessThan(toast);
   });
 });

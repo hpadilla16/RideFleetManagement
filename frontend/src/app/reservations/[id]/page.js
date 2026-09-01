@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useTranslation } from 'react-i18next';
 import { AuthGate } from '../../../components/AuthGate';
 import { AppShell } from '../../../components/AppShell';
 import { LifecycleRail } from '../../../components/reservations/LifecycleRail';
@@ -16,6 +17,7 @@ import { utcToTenantLocalInput } from '../../../lib/tenant-time';
 import { toCompactUploadPayload } from '../../../lib/upload-compress';
 import { missingRequiredCustomerFields, CUSTOMER_FIELD_LABELS } from '../../../lib/precheckin-fields';
 import { displayNoteLines, hasDisplayNotes, isRecentNote, relativeNoteAge } from '../../../lib/reservation-notes';
+import { filterAssignableVehicles } from '../../../lib/vehicle-assignment';
 import { FuelLevelInput, OdometerInput } from '../../../components/wizard/MetricInputs';
 import {
   makeDiscountFn as makePrecheckinDiscountFn,
@@ -779,6 +781,7 @@ function AdminCorrectionsPanel({ reservationId, token, me, onChanged }) {
 function ReservationDetailInner({ token, me, logout }) {
   const { id } = useParams();
   const router = useRouter();
+  const { t } = useTranslation();
   const role = String(me?.role || '').toUpperCase();
 
   const [row, setRow] = useState(null);
@@ -795,6 +798,10 @@ function ReservationDetailInner({ token, me, logout }) {
   const [locations, setLocations] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [vehicles, setVehicles] = useState([]);
+  // Counter-UX Item 1 (2026-08-31): the vehicle pickers default to AVAILABLE
+  // units of the reservation's type; these flags are the visible escape hatch.
+  const [showAllVehicles, setShowAllVehicles] = useState(false);
+  const [showAllLoanerVehicles, setShowAllLoanerVehicles] = useState(false);
   const [serviceOptions, setServiceOptions] = useState([]);
   const [feeOptions, setFeeOptions] = useState([]);
   const [insurancePlans, setInsurancePlans] = useState([]);
@@ -1754,19 +1761,35 @@ function ReservationDetailInner({ token, me, logout }) {
     );
   }, [loanerPacketForm]);
   const loanerVehicleChoices = useMemo(() => {
-    return (Array.isArray(vehicles) ? vehicles : []).filter((vehicle) => {
+    const base = (Array.isArray(vehicles) ? vehicles : []).filter((vehicle) => {
       const status = String(vehicle?.status || '').toUpperCase();
       if (vehicle?.id === row?.vehicleId) return true;
       return !['IN_MAINTENANCE', 'OUT_OF_SERVICE', 'ON_RENT'].includes(status);
     });
-  }, [vehicles, row?.vehicleId]);
+    // Counter-UX Item 1: default the loaner swap picker to AVAILABLE units of
+    // the reservation's type; "Show all" reverts to the pre-2026-08 behavior.
+    return filterAssignableVehicles(base, {
+      vehicleTypeId: row?.vehicleTypeId || row?.vehicleType?.id || null,
+      keepIds: [row?.vehicleId, loanerOpsForm.vehicleId],
+      showAll: showAllLoanerVehicles
+    });
+  }, [vehicles, row?.vehicleId, row?.vehicleTypeId, row?.vehicleType?.id, loanerOpsForm.vehicleId, showAllLoanerVehicles]);
   const reservationVehicleChoices = useMemo(() => {
     const loaded = Array.isArray(vehicles) ? vehicles : [];
-    const currentVehicle = row?.vehicle && !loaded.some((vehicle) => String(vehicle?.id || '') === String(row.vehicle?.id || ''))
+    // Counter-UX Item 1 (2026-08-31): only AVAILABLE units of the reservation's
+    // vehicle type by default. No type on the reservation → full list (old
+    // behavior). The assigned vehicle and the currently-selected (unsaved)
+    // option always stay listed so the select never renders invalid.
+    const filtered = filterAssignableVehicles(loaded, {
+      vehicleTypeId: row?.vehicleTypeId || row?.vehicleType?.id || null,
+      keepIds: [row?.vehicleId, form.vehicleId],
+      showAll: showAllVehicles
+    });
+    const currentVehicle = row?.vehicle && !filtered.some((vehicle) => String(vehicle?.id || '') === String(row.vehicle?.id || ''))
       ? [row.vehicle]
       : [];
-    return [...currentVehicle, ...loaded];
-  }, [vehicles, row?.vehicle]);
+    return [...currentVehicle, ...filtered];
+  }, [vehicles, row?.vehicle, row?.vehicleId, row?.vehicleTypeId, row?.vehicleType?.id, form.vehicleId, showAllVehicles]);
   const loanerTimeline = useMemo(() => {
     if (!isLoanerWorkflow || !row) return [];
     const events = [];
@@ -2915,7 +2938,7 @@ token
               <span className="label">Vehicle</span>
               <select
                 value={form.vehicleId}
-                onFocus={() => { if (!reservationVehicleChoices.length) loadAvailableVehicles(); }}
+                onFocus={() => { if (!vehicles.length) loadAvailableVehicles(); }}
                 onChange={(e) => setForm({ ...form, vehicleId: e.target.value })}
               >
                 <option value="">No vehicle assigned</option>
@@ -2925,6 +2948,25 @@ token
                   </option>
                 ))}
               </select>
+              {/* Counter-UX Item 1: filter note + "Show all vehicles" escape hatch.
+                  Only rendered when the reservation has a type (no type = no filter). */}
+              {(row?.vehicleTypeId || row?.vehicleType?.id) ? (
+                <div className="label" style={{ marginTop: 4, textTransform: 'none', letterSpacing: 0, color: '#6b7a9a' }}>
+                  {showAllVehicles
+                    ? t('vehicleAssign.showingAll')
+                    : (row?.vehicleType?.name
+                        ? t('vehicleAssign.filterNoteType', { type: row.vehicleType.name })
+                        : t('vehicleAssign.filterNote'))}
+                  {' · '}
+                  <button
+                    type="button"
+                    onClick={() => setShowAllVehicles((v) => !v)}
+                    style={{ background: 'none', border: 'none', padding: 0, color: 'var(--p-700, #4338ca)', fontWeight: 600, cursor: 'pointer', fontSize: 'inherit' }}
+                  >
+                    {showAllVehicles ? t('vehicleAssign.showMatching') : t('vehicleAssign.showAll')}
+                  </button>
+                </div>
+              ) : null}
             </div>
             <div><span className="label">Pickup Date</span><input type="datetime-local" value={form.pickupAt} onChange={(e) => setForm({ ...form, pickupAt: e.target.value })} /></div>
             <div>
@@ -3006,6 +3048,24 @@ token
                       </option>
                     ))}
                   </select>
+                  {/* Counter-UX Item 1: same default-filter + escape hatch as the main picker. */}
+                  {(row?.vehicleTypeId || row?.vehicleType?.id) ? (
+                    <div className="label" style={{ marginTop: 4, textTransform: 'none', letterSpacing: 0, color: '#6b7a9a' }}>
+                      {showAllLoanerVehicles
+                        ? t('vehicleAssign.showingAll')
+                        : (row?.vehicleType?.name
+                            ? t('vehicleAssign.filterNoteType', { type: row.vehicleType.name })
+                            : t('vehicleAssign.filterNote'))}
+                      {' · '}
+                      <button
+                        type="button"
+                        onClick={() => setShowAllLoanerVehicles((v) => !v)}
+                        style={{ background: 'none', border: 'none', padding: 0, color: 'var(--p-700, #4338ca)', fontWeight: 600, cursor: 'pointer', fontSize: 'inherit' }}
+                      >
+                        {showAllLoanerVehicles ? t('vehicleAssign.showMatching') : t('vehicleAssign.showAll')}
+                      </button>
+                    </div>
+                  ) : null}
                   <input type="datetime-local" value={loanerOpsForm.returnAt} onChange={(e) => setLoanerOpsForm({ ...loanerOpsForm, returnAt: e.target.value })} />
                   <input type="datetime-local" value={loanerOpsForm.estimatedServiceCompletionAt} onChange={(e) => setLoanerOpsForm({ ...loanerOpsForm, estimatedServiceCompletionAt: e.target.value })} />
                   <textarea rows={2} value={loanerOpsForm.note} onChange={(e) => setLoanerOpsForm({ ...loanerOpsForm, note: e.target.value })} placeholder="Extension or swap note" />

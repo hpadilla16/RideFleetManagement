@@ -10,6 +10,8 @@ import {
   getStoredUserModuleConfig,
   getTenantModuleConfig
 } from '../../lib/module-access.js';
+import { auditFromReq, AUDIT_ACTIONS } from '../audit/audit.service.js';
+import { buildTerminalAuditMetadata } from '../payment-gateway/tenant-terminal-config.js';
 
 export const settingsRouter = Router();
 
@@ -54,6 +56,15 @@ settingsRouter.put('/tenant-modules', requireRole('ADMIN'), async (req, res, nex
       actor: req.user,
       before,
       after: out?.config || {}
+    });
+
+    // Wave 3: also record on the unified admin trail (ModuleAccessAuditLog stays
+    // the detailed system of record; this gives one place to see all admin acts).
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.USER_MODULE_ACCESS_CHANGE,
+      targetType: 'TENANT',
+      targetId: scope?.tenantId || null,
+      metadata: { scope: 'TENANT' },
     });
 
     res.json(out);
@@ -153,6 +164,14 @@ settingsRouter.put('/users/:userId/module-access', requireRole('ADMIN'), enforce
       after
     });
 
+    // Wave 3: unified admin trail (ModuleAccessAuditLog remains the detailed record).
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.USER_MODULE_ACCESS_CHANGE,
+      targetType: 'USER',
+      targetId: req.targetUser.id,
+      metadata: { scope: 'USER' },
+    });
+
     res.json(out);
   } catch (e) {
     next(e);
@@ -250,6 +269,46 @@ settingsRouter.put('/customer-inspection', requireRole('ADMIN'), async (req, res
   }
 });
 
+// Checkout payment policy (2026-08-26): does this tenant's check-out wizard
+// force the payment step? Default TRUE (unchanged behavior); Rent & Go by VPH
+// Motors runs it OFF. ADMIN-gated; SUPER_ADMIN targets a tenant with ?tenantId
+// through the same scopeFor() super-scoping every other settings route uses.
+// FAIL-CLOSED: no tenantId → 400, never a global write.
+settingsRouter.get('/checkout-payment', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.getCheckoutPaymentPolicy(scopeFor(req)));
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for checkout payment settings' });
+    }
+    next(e);
+  }
+});
+
+settingsRouter.put('/checkout-payment', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const scope = scopeFor(req);
+    const out = await settingsService.updateCheckoutPaymentPolicy(req.body || {}, scope);
+    // Money-path policy change — audited on the unified admin trail. Metadata is
+    // the new boolean + tenantId only; no PII, no amounts.
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.CHECKOUT_PAYMENT_POLICY_CHANGE,
+      targetType: 'TENANT',
+      targetId: scope?.tenantId || null,
+      metadata: { checkoutPaymentRequired: out.checkoutPaymentRequired, tenantId: scope?.tenantId || null },
+    });
+    res.json(out);
+  } catch (e) {
+    if (/tenantId is required/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: 'tenantId is required for checkout payment settings' });
+    }
+    if (/must be a boolean/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
 // Vehicle Profile pack (2026-06-10): fleet rotation rule (TIME | MILEAGE).
 settingsRouter.get('/fleet-rotation', async (_req, res, next) => {
   try {
@@ -288,6 +347,39 @@ settingsRouter.put('/citation-ocr', requireRole('ADMIN'), async (req, res, next)
   }
 });
 
+// Staff 2FA policy (2026-08-22). ADMIN sets the policy for their tenant;
+// SUPER_ADMIN (scopeFor → {}) sets the unscoped GLOBAL default that applies to
+// every tenant without an override. Mirrors the citation-ocr scoping.
+settingsRouter.get('/two-factor-policy', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.getTwoFactorPolicy(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/two-factor-policy', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    const result = await settingsService.updateTwoFactorPolicy(req.body || {}, scopeFor(req));
+    // Wave 3: who changed the tenant (or global) 2FA policy, and when. A
+    // super-admin (scopeFor → {}) is editing the GLOBAL default; targetId null.
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.TWO_FACTOR_POLICY_CHANGE,
+      targetType: 'TENANT',
+      targetId: scopeFor(req)?.tenantId || null,
+    });
+    res.json(result);
+  } catch (e) {
+    if (e?.code === 'ENCRYPTION_NOT_CONFIGURED') {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
+    if (/invalid role|graceUntil|at least one required role/i.test(String(e?.message || ''))) {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
+  }
+});
+
 // Long-term (monthly) billing — email templates + dunning/billing config.
 // Stored in appSetting key 'longTermEmailTemplates' (tenant-scoped).
 // Defaults + normalization live in modules/long-term/long-term-emails.js.
@@ -309,6 +401,28 @@ settingsRouter.put('/long-term-email-templates', requireRole('ADMIN'), async (re
   }
 });
 
+/**
+ * GET /api/settings/payment-capabilities (2026-08-30, View Payments redesign).
+ *
+ * Booleans-only gateway capabilities for the reservation View Payments screen.
+ * Mounted in main.js BEFORE the module-gated settings mount (same precedent as
+ * /api/settings/fee-rates): OPS/AGENT counter staff do not have the 'settings'
+ * module, but the payments screen must know the tenant's gateway to draw the
+ * right controls — an iPOS tenant must never see Authorize.Net furniture.
+ *
+ * DO NOT fold this into GET /payment-gateway: that route is ADMIN-gated
+ * because it returns credential-bearing config. This one returns booleans
+ * derived by derivePaymentCapabilities and nothing else.
+ */
+export const paymentCapabilitiesRouter = Router();
+paymentCapabilitiesRouter.get('/', async (req, res, next) => {
+  try {
+    res.json(await settingsService.getPaymentCapabilities(scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
 settingsRouter.get('/payment-gateway', requireRole('ADMIN'), async (_req, res, next) => {
   try {
     const cfg = await settingsService.getPaymentGatewayConfig(scopeFor(_req));
@@ -320,9 +434,25 @@ settingsRouter.get('/payment-gateway', requireRole('ADMIN'), async (_req, res, n
 
 settingsRouter.put('/payment-gateway', requireRole('ADMIN'), async (req, res, next) => {
   try {
-    const cfg = await settingsService.updatePaymentGatewayConfig(req.body || {}, scopeFor(req));
+    const scope = scopeFor(req);
+    const cfg = await settingsService.updatePaymentGatewayConfig(req.body || {}, scope);
+    // MONEY PATH. This row decides which merchant account a tenant's card
+    // charges settle into, so the change is audited on the unified admin trail.
+    // Metadata is deliberately credential-free: gateway, flags, a MASKED TPN
+    // and booleans. The auth key itself never appears here.
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.PAYMENT_TERMINAL_CONFIG_CHANGE,
+      targetType: 'TENANT',
+      targetId: scope?.tenantId || null,
+      metadata: buildTerminalAuditMetadata(cfg, req.body || {}, scope?.tenantId || null),
+    });
     res.json(cfg);
   } catch (e) {
+    // A new terminal credential cannot be stored without INTEGRATION_ENC_KEY —
+    // refusing the save beats writing a live payment key in plaintext.
+    if (e?.code === 'ENCRYPTION_NOT_CONFIGURED') {
+      return res.status(400).json({ error: e.message, code: e.code });
+    }
     next(e);
   }
 });
@@ -366,6 +496,19 @@ settingsRouter.post('/payment-gateway/health-check', requireRole('ADMIN'), async
         missing: [
           ...(!cfg?.square?.accessToken ? ['Access Token'] : []),
           ...(!cfg?.square?.locationId ? ['Location ID'] : [])
+        ]
+      },
+      // iPOSpays Hosted Payment Page — customer payment links. The token
+      // itself never reaches this read shape; `hasHppToken` says one is on
+      // file. The TPN may come from the spin block (same tenant's merchant).
+      ipos: {
+        selected: gateway === 'ipos',
+        enabled: !!cfg?.ipos?.enabled,
+        ready: !!(cfg?.ipos?.hasHppToken && (cfg?.ipos?.tpn || cfg?.spin?.tpn)),
+        environment: cfg?.ipos?.environment || 'production',
+        missing: [
+          ...(!(cfg?.ipos?.tpn || cfg?.spin?.tpn) ? ['CloudPOS TPN'] : []),
+          ...(!cfg?.ipos?.hasHppToken ? ['HPP Auth Token'] : [])
         ]
       }
     };

@@ -1,0 +1,35 @@
+-- Tenant."billingPreviousStatus" — restore puts a tenant back to what it WAS.
+-- 2026-08-28.
+--
+-- billing-admin.service.js restoreTenantAccess() hardcoded status = 'ACTIVE', so
+-- any tenant whose status was something else lost it silently on restore.
+-- Tenant.status is a free-text String, not a Prisma enum, and 'ACTIVE' is
+-- load-bearing rather than cosmetic: middleware/public-tenant-token.js,
+-- booking-engine resolvePublicTenant() and the car-sharing marketplace tenant
+-- list all filter `status = 'ACTIVE'` exactly. Restoring a tenant that held ANY
+-- other value to ACTIVE therefore PUBLISHES it onto the public booking surface
+-- — it does not merely relabel it. (The case that surfaced this was a demo
+-- tenant reported as status DEMO; no code path in this repo sets that value, so
+-- it was set by hand, which is exactly what free text allows.)
+--
+-- Suspend already recorded the value in AdminAuditLog.metadata, but recordAudit
+-- is best-effort BY CONTRACT: it swallows every failure so a dropped audit row
+-- can never fail the request that triggered it. Restore must not depend on a
+-- writer that is allowed to silently not write, so the value gets a column
+-- beside billingSuspendedAt — which is already the flag deciding whether billing
+-- may lift this suspension at all.
+--
+-- ADDITIVE AND IDEMPOTENT: nullable, no default, no NOT NULL, no type change, no
+-- drop, no backfill. Every existing Tenant row stays valid and re-running is a
+-- no-op. NULL means "nothing recorded", and restore falls back to ACTIVE there —
+-- the old behaviour, kept for a tenant suspended before this column existed.
+--
+-- The BACKFILL of tenants that are already suspended is deliberately a SEPARATE
+-- migration (20260828_tenant_billing_previous_status_backfill). startup-migrate
+-- sends each file as one simple-query batch, which Postgres wraps in an implicit
+-- transaction: bundling the two would mean a failing UPDATE rolls back the
+-- ALTER, the migration is never recorded, and it retries and fails on every
+-- subsequent boot — leaving the column absent while the new code expects it.
+-- Split, the column always lands.
+ALTER TABLE "Tenant"
+  ADD COLUMN IF NOT EXISTS "billingPreviousStatus" TEXT;

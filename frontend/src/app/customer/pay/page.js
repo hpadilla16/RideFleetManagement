@@ -23,6 +23,7 @@ function restorePaymentPortalState(token) {
       canceled: typeof parsed.canceled === 'string' ? parsed.canceled : '',
       sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : '',
       returnTransId: typeof parsed.returnTransId === 'string' ? parsed.returnTransId : '',
+      iposRef: typeof parsed.iposRef === 'string' ? parsed.iposRef : '',
       checkoutStartedAt: Number(parsed.checkoutStartedAt || 0)
     };
   } catch {
@@ -36,6 +37,7 @@ export default function CustomerPayPage() {
   const [canceled, setCanceled] = useState('');
   const [sessionId, setSessionId] = useState('');
   const [returnTransId, setReturnTransId] = useState('');
+  const [iposRef, setIposRef] = useState('');
   const [checkoutStartedAt, setCheckoutStartedAt] = useState(0);
 
   const [loading, setLoading] = useState(true);
@@ -61,34 +63,46 @@ export default function CustomerPayPage() {
     setCanceled(p.get('canceled') || stored?.canceled || '');
     setSessionId(p.get('session_id') || stored?.sessionId || '');
     setReturnTransId(p.get('transId') || p.get('x_trans_id') || p.get('transaction_id') || stored?.returnTransId || '');
+    setIposRef(p.get('iposRef') || stored?.iposRef || '');
     setCheckoutStartedAt(Number(stored?.checkoutStartedAt || 0));
   }, []);
 
   useEffect(() => {
     if (!token) return;
     try {
-      if (success || canceled || sessionId || returnTransId) {
+      if (success || canceled || sessionId || returnTransId || iposRef) {
         sessionStorage.setItem(paymentPortalStateKey(token), JSON.stringify({
           success,
           canceled,
           sessionId,
           returnTransId,
+          iposRef,
           checkoutStartedAt
         }));
       } else {
         sessionStorage.removeItem(paymentPortalStateKey(token));
       }
     } catch {}
-  }, [canceled, checkoutStartedAt, returnTransId, sessionId, success, token]);
+  }, [canceled, checkoutStartedAt, iposRef, returnTransId, sessionId, success, token]);
 
   useEffect(() => {
-    if (!token || !model || String(model.gateway || '').toLowerCase() !== 'authorizenet') return;
-    if (!success || returnTransId) return;
+    if (!token || !model) return;
+    const gw = String(model.gateway || '').toLowerCase();
+    // A bare success flag means nothing without the gateway's return
+    // reference (Auth.Net transId / iPOS reference) — clear it so the page
+    // does not sit in "finalizing" forever.
+    if (gw === 'authorizenet') {
+      if (!success || returnTransId) return;
+    } else if (gw === 'ipos') {
+      if (!success || iposRef) return;
+    } else {
+      return;
+    }
     setSuccess('');
     try {
       sessionStorage.removeItem(paymentPortalStateKey(token));
     } catch {}
-  }, [model, returnTransId, success, token]);
+  }, [iposRef, model, returnTransId, success, token]);
 
   useEffect(() => {
     const run = async () => {
@@ -159,6 +173,25 @@ export default function CustomerPayPage() {
           setOk(`Payment recorded successfully: $${Number(j.paidAmount || 0).toFixed(2)}` + (j?.savedCardOnFile ? ' Card on file saved.' : ''));
           return;
         }
+        if (model.gateway === 'ipos') {
+          if (!iposRef) return;
+          // The reference is verified SERVER-SIDE (mint audit trail +
+          // queryPaymentStatus at the gateway) before anything is recorded —
+          // this POST just hands it over.
+          const res = await fetch(`${API_BASE}/api/public/payment/${encodeURIComponent(token)}/confirm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ iposRef })
+          });
+          const j = await res.json();
+          if (!res.ok) throw new Error(j?.error || 'iPOS payment confirmation failed');
+          await loadModel(token).catch(() => {
+            setModel((prev) => ({ ...(prev || {}), portal: j?.portal || prev?.portal || null }));
+          });
+          setOk(`Payment recorded successfully: $${Number(j.paidAmount || 0).toFixed(2)}`);
+          setError('');
+          return;
+        }
         if (model.gateway === 'authorizenet') {
           if (!returnTransId) {
             return;
@@ -184,7 +217,7 @@ export default function CustomerPayPage() {
       }
     };
     autoConfirmReturn();
-  }, [token, success, sessionId, model, returnTransId]);
+  }, [token, success, sessionId, model, returnTransId, iposRef]);
 
   const startCheckout = async (event) => {
     try {
@@ -196,6 +229,7 @@ export default function CustomerPayPage() {
       setCanceled('');
       setSessionId('');
       setReturnTransId('');
+      setIposRef('');
       setCheckoutStartedAt(Date.now());
       try { sessionStorage.removeItem(paymentPortalStateKey(token)); } catch {}
       try {
@@ -204,6 +238,7 @@ export default function CustomerPayPage() {
           canceled: '',
           sessionId: '',
           returnTransId: '',
+          iposRef: '',
           checkoutStartedAt: Date.now()
         }));
       } catch {}
@@ -417,6 +452,8 @@ export default function CustomerPayPage() {
                 <div style={{ color: '#55456f', lineHeight: 1.6 }}>
                   {String(model.gateway || '').toLowerCase() === 'authorizenet'
                     ? `When you continue, you will be redirected to the secure Authorize.Net payment page to pay the remaining $${balanceDue.toFixed(2)}.`
+                    : String(model.gateway || '').toLowerCase() === 'ipos'
+                    ? `When you continue, you will be redirected to the secure iPOSpays payment page to pay the remaining $${balanceDue.toFixed(2)}.`
                     : balanceDue > 0
                       ? `When you continue, you will be redirected to the secure payment page to pay the remaining $${balanceDue.toFixed(2)}.`
                       : 'When you continue, you will be redirected to the secure payment page configured for this reservation.'}
@@ -433,8 +470,8 @@ export default function CustomerPayPage() {
               <div style={{ display: 'grid', gap: 8, color: '#55456f', lineHeight: 1.6 }}>
                 <div><strong>Payment return detected.</strong></div>
                 <div>
-                  {returnTransId
-                    ? `Return reference detected: ${returnTransId}. Finalizing payment now.`
+                  {(returnTransId || iposRef)
+                    ? `Return reference detected: ${returnTransId || iposRef}. Finalizing payment now.`
                     : 'Waiting for gateway confirmation. This page will refresh automatically as soon as the payment event arrives.'}
                 </div>
               </div>
@@ -444,6 +481,8 @@ export default function CustomerPayPage() {
               <div style={{ ...portalStyles.notice, marginTop: 14, background: 'rgba(245, 158, 11, 0.15)', color: '#92400e' }}>
                 {String(model.gateway || '').toLowerCase() === 'authorizenet'
                   ? 'Authorize.Net portal payments require API Login ID and Transaction Key in tenant payment settings.'
+                  : String(model.gateway || '').toLowerCase() === 'ipos'
+                  ? 'iPOS payment links require the CloudPOS TPN and HPP Auth Token in Settings → Payments → iPOS Payment Links. Payments are NOT redirected to another gateway while this is missing.'
                   : `Gateway not configured for ${String(model.gateway || '').toUpperCase()}. Set the required backend credentials first.`}
               </div>
             ) : null}

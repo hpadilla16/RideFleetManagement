@@ -345,7 +345,11 @@ export default function SignAgreementPage() {
                   ref={canvasRef}
                   width={860}
                   height={220}
-                  style={{ width: '100%', border: '1px solid rgba(102, 79, 177, 0.18)', borderRadius: 20, background: '#fff' }}
+                  // touchAction:none — without it the browser claims the drag as
+                  // a page scroll and the stroke breaks mid-signature. This pad
+                  // does not lock (it reads the canvas at submit, never mid-way),
+                  // so the scroll was the only touch defect here.
+                  style={{ width: '100%', border: '1px solid rgba(102, 79, 177, 0.18)', borderRadius: 20, background: '#fff', touchAction: 'none' }}
                   onMouseDown={start}
                   onMouseMove={move}
                   onMouseUp={end}

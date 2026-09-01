@@ -11,6 +11,7 @@ import {
 } from './tolls-responsibility.service.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { countQueues } from './tolls-queue-counts.js';
+import { buildTollListWhere, buildTollExportWhere, tollsToCsv, tollExportFilename, TOLL_EXPORT_MAX_ROWS } from './tolls-export.js';
 import { scopeAllowedLocationIds, reservationLocationWhere, systemScope } from '../../lib/tenant-scope.js';
 import { sendEmail } from '../../lib/mailer.js';
 // beta.357 latent fix: the agreement-mirror catch already called logger.error
@@ -695,6 +696,45 @@ function serializeIssueIncidentSummary(incident) {
   };
 }
 
+/**
+ * Tolls phase 2 (Direction B evidence pane): the OTHER reservations this toll
+ * was previously suggested against — the superseded/rejected assignments that
+ * replaceSuggestedAssignments left behind when a re-match sweep moved the
+ * suggestion. The current match run's losing candidates are NOT persisted
+ * (buildMatchSuggestion computes them and stores only the winner), so this is
+ * the honest subset we can show without re-running the matcher per row.
+ * Purely additive and DB-free: it reads the `assignments` list the dashboard
+ * query already includes — no new query fanout per row.
+ */
+export function serializeCandidateAssignments(assignments = []) {
+  const list = Array.isArray(assignments) ? assignments : [];
+  if (list.length < 2) return [];
+  const latestReservationId = list[0]?.reservation?.id || list[0]?.reservationId || null;
+  const seen = new Set();
+  const out = [];
+  for (const row of list.slice(1)) {
+    const reservation = row?.reservation || null;
+    if (!reservation?.id) continue;
+    if (latestReservationId && reservation.id === latestReservationId) continue;
+    if (seen.has(reservation.id)) continue;
+    seen.add(reservation.id);
+    out.push({
+      id: row.id,
+      status: row.status,
+      confidence: row.confidence == null ? null : Number(row.confidence),
+      matchReason: row.matchReason || '',
+      reservation: {
+        id: reservation.id,
+        reservationNumber: reservation.reservationNumber,
+        pickupAt: reservation.pickupAt,
+        returnAt: reservation.returnAt
+      }
+    });
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
 function serializeTransaction(row) {
   const latestAssignment = Array.isArray(row.assignments) && row.assignments.length ? row.assignments[0] : null;
   const reviewCategory = inferReviewCategory(row.reviewNotes || latestAssignment?.matchReason || '');
@@ -763,6 +803,9 @@ function serializeTransaction(row) {
         returnAt: latestAssignment.reservation.returnAt
       } : null
     } : null,
+    // Superseded suggestions pointing at OTHER reservations — the evidence
+    // pane's "losing candidate" card (phase 2). See serializeCandidateAssignments.
+    candidateAssignments: serializeCandidateAssignments(row.assignments),
     issueIncident: serializeIssueIncidentSummary(row.issueIncident)
   };
 }
@@ -1938,31 +1981,14 @@ export const tollsService = {
     }
 
     await ensureTenantAllowsTolls(scope);
-    const search = String(filters.q || '').trim();
-    const searchFilter = search ? {
-      OR: [
-        { location: { contains: search, mode: 'insensitive' } },
-        { plateRaw: { contains: search, mode: 'insensitive' } },
-        { tagRaw: { contains: search, mode: 'insensitive' } },
-        { selloRaw: { contains: search, mode: 'insensitive' } },
-        { reservation: { reservationNumber: { contains: search, mode: 'insensitive' } } },
-        { vehicle: { internalNumber: { contains: search, mode: 'insensitive' } } }
-      ]
-    } : {};
-
     // Location scoping (2026-07-24). Applied to the list AND to every metric
     // count below — the tiles are separate queries, and a scoped list under a
     // tenant-wide tile is exactly the contradiction the maintenance board hit.
     const locWhere = tollLocationWhere(scope);
 
-    const where = {
-      ...tenantWhereForScope(scope),
-      ...locWhere,
-      ...(filters.status ? { status: String(filters.status).toUpperCase() } : {}),
-      ...(filters.needsReview === true ? { needsReview: true } : {}),
-      ...(filters.reservationId ? { reservationId: String(filters.reservationId) } : {}),
-      ...searchFilter
-    };
+    // The list where is built by the SAME pure builder the CSV export uses
+    // (tolls-export.js) so the spreadsheet can never disagree with the screen.
+    const where = buildTollListWhere(scope, filters);
 
     const [transactions, importedToday, matchedCount, reviewCount, billedCount, disputedCount, providerAccount, importRuns] = await Promise.all([
       prisma.tollTransaction.findMany({
@@ -2066,6 +2092,38 @@ export const tollsService = {
       importRuns: (importRuns || []).map(serializeImportRun),
       transactions: transactionsWithIssues.map(serializeTransaction)
     };
+  },
+
+  /**
+   * CSV export of the CURRENT filtered queue view (Tolls redesign A). Honors
+   * the exact same tenant scope, location scope, and filters (q / status /
+   * needsReview / reservationId) as the dashboard list, PLUS the active queue
+   * view (`filters.view` — same keys as queueCounts). Read-only and additive:
+   * no other consumer's contract changes.
+   */
+  async exportTransactionsCsv(scope = {}, filters = {}) {
+    await ensureTenantAllowsTolls(scope);
+    const where = buildTollExportWhere(scope, filters);
+    const rows = await prisma.tollTransaction.findMany({
+      where,
+      include: {
+        vehicle: true,
+        reservation: {
+          include: {
+            customer: { select: { id: true, firstName: true, lastName: true } }
+          }
+        },
+        assignments: {
+          include: {
+            reservation: { select: { id: true, reservationNumber: true, pickupAt: true, returnAt: true } }
+          },
+          orderBy: [{ createdAt: 'desc' }]
+        }
+      },
+      orderBy: [{ needsReview: 'desc' }, { transactionAt: 'desc' }],
+      take: TOLL_EXPORT_MAX_ROWS
+    });
+    return { csv: tollsToCsv(rows), filename: tollExportFilename(filters), rowCount: rows.length };
   },
 
   async getProviderAccount(scope = {}) {

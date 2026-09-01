@@ -4,9 +4,20 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/change_password_screen.dart';
 import '../../features/auth/presentation/login_screen.dart';
+import '../../features/auth/presentation/pin_lock_screen.dart';
+import '../../features/auth/presentation/pin_setup_screen.dart';
 import '../../features/auth/presentation/splash_screen.dart';
-import '../../features/dashboard/presentation/home_placeholder_screen.dart';
+import '../../features/checkout/presentation/checkout_wizard_screen.dart';
+import '../../features/dashboard/presentation/home_screen.dart';
+import '../../features/dashboard/presentation/queue_list_screen.dart';
+import '../../features/inspection/presentation/inspection_screen.dart';
+import '../../features/outbox/presentation/outbox_screen.dart';
+import '../../features/search/presentation/search_screen.dart';
 import '../../features/shell/app_shell.dart';
+import '../../features/shell/shell_placeholder_screen.dart';
+import '../l10n/app_localizations.dart';
+import '../session/lock_controller.dart';
+import '../session/lock_state.dart';
 import '../session/session_controller.dart';
 import '../session/session_state.dart';
 
@@ -16,7 +27,42 @@ abstract final class AppRoutes {
   static const splash = '/splash';
   static const login = '/login';
   static const changePassword = '/change-password';
+  static const lock = '/lock';
+  static const pinSetup = '/pin-setup';
   static const home = '/home';
+
+  // Tabs del shell (H3). Incidentes existe como ruta aunque la nav la
+  // esconda por RBAC: esconder no es proteger — el RBAC real lo aplica el
+  // backend y la pantalla maneja su 403 (DoD-4).
+  static const search = '/search';
+  static const incidents = '/incidents';
+  static const outbox = '/outbox';
+  static const profile = '/profile';
+
+  /// Vista de lista de una cola del dashboard (H4): destino de "Ver todo",
+  /// del tile "En renta" y de los chips colapsados. [key] es el name del
+  /// enum DashboardQueue (= llave del JSON del payload).
+  static String queueList(String key) => '$home/queue/$key';
+
+  // Flujo de inspección (H5): pantalla completa FUERA del shell — sin tabs
+  // ni chip de sede (el header propio del flujo manda; el paso de firma es
+  // superficie del cliente).
+  //
+  // Desde M2-H7 la card de la cola de salidas apunta al CHECKOUT (que es su
+  // destino real: la inspección es un PASO del wizard, integrada en M2-H4).
+  // Esta ruta sigue viva y con entrada propia: la bandeja de salida ofrece
+  // "Abrir inspección" en sus filas muertas, y el drenado la necesita.
+  static const inspectionPattern = '/inspection/:reservationId';
+  static String inspection(String reservationId) =>
+      '/inspection/$reservationId';
+
+  // Wizard de checkout (M2-H1): pantalla completa FUERA del shell, por la
+  // misma razón que la inspección — el header del flujo manda y el agente no
+  // debe poder saltar a otra tab a media entrega sin decidir qué hace con la
+  // sesión. La entrada desde la card de la cola de salidas es M2-H7; la ruta
+  // ya queda lista para que esa historia solo tenga que navegar.
+  static const checkoutPattern = '/checkout/:reservationId';
+  static String checkout(String reservationId) => '/checkout/$reservationId';
 }
 
 /// Superficies del flujo de auth: NUNCA se preservan como destino de retorno
@@ -25,17 +71,20 @@ const _authSurfaces = {
   AppRoutes.splash,
   AppRoutes.login,
   AppRoutes.changePassword,
+  AppRoutes.lock,
+  AppRoutes.pinSetup,
 };
 
 /// Redirect top-level (blueprint §3) como FUNCIÓN PURA para testear la tabla
 /// de casos sin montar un router.
 ///
-/// Orden de gates: auth → [PIN-lock, HUECO H2] → password-gate → app.
-/// Regla anti-loop: devolver null cuando [matchedLocation] ya es el destino
-/// del gate activo. Regla de reanudación: el destino original viaja en
-/// `?from=` y se restaura al pasar todos los gates.
+/// Orden de gates (Innovation H1): auth → PIN-lock → password-gate →
+/// PIN-setup → app. Regla anti-loop: devolver null cuando [matchedLocation]
+/// ya es el destino del gate activo. Regla de reanudación: el destino
+/// original viaja en `?from=` y se restaura al pasar todos los gates.
 String? computeAuthRedirect({
   required SessionState session,
+  required LockState lock,
   required Uri uri,
   required String matchedLocation,
 }) {
@@ -60,12 +109,21 @@ String? computeAuthRedirect({
           : withFrom(AppRoutes.login);
 
     case SessionStatus.authenticated:
-      // ── HUECO H2 (PIN-lock) ─────────────────────────────────────────────
-      // Aquí va el gate de bloqueo por PIN/biometría cuando exista:
-      //   if (locked) return matched == AppRoutes.lock ? null : AppRoutes.lock;
-      // Va ANTES del password-gate a propósito: un teléfono desbloqueable no
-      // debe exponer ni la pantalla de cambio de contraseña.
-      // ────────────────────────────────────────────────────────────────────
+      // ── Gate PIN-lock (H2) — ANTES del password-gate a propósito: un
+      // teléfono desbloqueable no debe exponer ni la pantalla de cambio de
+      // contraseña. Mientras el candado hidrata su registro del Keystore
+      // (!ready) se retiene /splash para no flashear contenido protegido en
+      // un cold start bloqueado.
+      if (!lock.ready) {
+        return matchedLocation == AppRoutes.splash
+            ? null
+            : withFrom(AppRoutes.splash);
+      }
+      if (lock.locked) {
+        return matchedLocation == AppRoutes.lock
+            ? null
+            : withFrom(AppRoutes.lock);
+      }
 
       if (session.mustChangePassword) {
         return matchedLocation == AppRoutes.changePassword
@@ -73,23 +131,40 @@ String? computeAuthRedirect({
             : withFrom(AppRoutes.changePassword);
       }
 
-      // Gates pasados: sacar al usuario de splash/login hacia su destino.
-      // /change-password NO se expulsa: ahí vive el frame de éxito post-gate
-      // (mockup 2C) y su botón "Continuar" navega explícitamente.
+      // Setup del PIN (mockup 3A): DESPUÉS del password-gate — el éxito 2C
+      // encadena "Siguiente: crea tu PIN". screenLockExempt salta el gate
+      // completo; user null (restore degradado) no fuerza setup.
+      // /change-password se tolera: ahí vive el frame de éxito 2C (recién
+      // cayó mustChangePassword) y su "Continuar" navega — entonces sí, este
+      // gate atrapa el destino.
+      if (lock.needsSetupFor(session.user) &&
+          matchedLocation != AppRoutes.pinSetup &&
+          matchedLocation != AppRoutes.changePassword) {
+        return withFrom(AppRoutes.pinSetup);
+      }
+
+      // Gates pasados: sacar al usuario de splash/login/lock hacia su
+      // destino. /change-password y /pin-setup NO se expulsan: ahí viven los
+      // frames de éxito/oferta de huella y navegan explícitamente.
       if (matchedLocation == AppRoutes.splash ||
-          matchedLocation == AppRoutes.login) {
+          matchedLocation == AppRoutes.login ||
+          matchedLocation == AppRoutes.lock) {
         return from ?? AppRoutes.home;
       }
       return null;
   }
 }
 
-/// Puente sesión → router: go_router re-evalúa redirect cuando este
-/// Listenable notifica; lo bumpeamos con ref.listen sobre la sesión.
+/// Puente sesión/candado → router: go_router re-evalúa redirect cuando este
+/// Listenable notifica; lo bumpeamos con ref.listen sobre sesión Y candado.
 class _SessionRouterBump extends ChangeNotifier {
   _SessionRouterBump(Ref ref) {
     ref.listen<SessionState>(
       sessionControllerProvider,
+      (_, _) => notifyListeners(),
+    );
+    ref.listen<LockState>(
+      lockControllerProvider,
       (_, _) => notifyListeners(),
     );
   }
@@ -104,6 +179,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     refreshListenable: bump,
     redirect: (context, state) => computeAuthRedirect(
       session: ref.read(sessionControllerProvider),
+      lock: ref.read(lockControllerProvider),
       uri: state.uri,
       matchedLocation: state.matchedLocation,
     ),
@@ -122,14 +198,79 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           resumeTo: state.uri.queryParameters['from'],
         ),
       ),
-      // Shell de la app (blueprint §3): en H1 solo envuelve; el bottom nav +
-      // banner de ubicación activa llegan con H3/H4.
+      // /lock y /pin-setup viven FUERA del ShellRoute a propósito: el candado
+      // no debe mostrar chip de ubicación ni tabs (superficie de auth, no de
+      // app).
+      GoRoute(
+        path: AppRoutes.lock,
+        builder: (context, state) => const PinLockScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.pinSetup,
+        builder: (context, state) => PinSetupScreen(
+          resumeTo: state.uri.queryParameters['from'],
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.inspectionPattern,
+        builder: (context, state) => InspectionScreen(
+          reservationId: state.pathParameters['reservationId']!,
+        ),
+      ),
+      GoRoute(
+        path: AppRoutes.checkoutPattern,
+        builder: (context, state) => CheckoutWizardScreen(
+          reservationId: state.pathParameters['reservationId']!,
+        ),
+      ),
+      // Shell de la app (blueprint §3, H3): appbar con chip de ubicación +
+      // tab bar flotante RBAC. Los destinos sin historia todavía montan
+      // ShellPlaceholderScreen — cada historia reemplaza el suyo.
       ShellRoute(
-        builder: (context, state, child) => AppShell(child: child),
+        builder: (context, state, child) => AppShell(
+          currentPath: state.matchedLocation,
+          child: child,
+        ),
         routes: [
           GoRoute(
             path: AppRoutes.home,
-            builder: (context, state) => const HomePlaceholderScreen(),
+            builder: (context, state) => const HomeScreen(),
+            routes: [
+              GoRoute(
+                path: 'queue/:key',
+                builder: (context, state) => QueueListScreen(
+                  queueKey: state.pathParameters['key'] ?? '',
+                ),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: AppRoutes.search,
+            // `?q=` (M2-H7): destino del guard 11D — buscar la reserva en
+            // conflicto con el término ya puesto.
+            builder: (context, state) => SearchScreen(
+              initialQuery: state.uri.queryParameters['q'],
+            ),
+          ),
+          GoRoute(
+            path: AppRoutes.incidents,
+            builder: (context, state) => ShellPlaceholderScreen(
+              title: AppLocalizations.of(context)!.tabIncidents,
+            ),
+          ),
+          GoRoute(
+            path: AppRoutes.outbox,
+            builder: (context, state) => const OutboxScreen(),
+          ),
+          GoRoute(
+            path: AppRoutes.profile,
+            // showLogout: el logout vivía en el placeholder del home (H1);
+            // con la home real (H4) su casa provisional es Perfil — donde
+            // vivirá el de verdad.
+            builder: (context, state) => ShellPlaceholderScreen(
+              title: AppLocalizations.of(context)!.tabProfile,
+              showLogout: true,
+            ),
           ),
         ],
       ),

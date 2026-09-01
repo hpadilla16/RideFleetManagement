@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { api, API_BASE, apiDownload } from '../../lib/client';
+import { useTranslation } from 'react-i18next';
+import { filterAssignableVehicles } from '../../lib/vehicle-assignment';
 import { LoanerRequestsPanel } from './LoanerRequestsPanel';
 import { CustomerRequestsPanel } from './CustomerRequestsPanel';
 
@@ -211,6 +213,7 @@ export default function LoanerProgramPage() {
 }
 
 function LoanerProgramInner({ token, me, logout }) {
+  const { t } = useTranslation();
   const [dashboard, setDashboard] = useState(null);
   // Command Center: Lookup + Quick Intake collapse into a toggled panel so the
   // page opens on the priority board + queues (action-first), not a wall.
@@ -220,6 +223,9 @@ function LoanerProgramInner({ token, me, logout }) {
   const [locations, setLocations] = useState([]);
   const [vehicleTypes, setVehicleTypes] = useState([]);
   const [vehicles, setVehicles] = useState([]);
+  // Counter-UX Item 1 (2026-08-31): once a Vehicle Type is picked, the loaner
+  // picker defaults to AVAILABLE units of that type; this is the escape hatch.
+  const [showAllVehicles, setShowAllVehicles] = useState(false);
   const [search, setSearch] = useState(() => {
     if (typeof window === 'undefined') return '';
     try { return localStorage.getItem(LOANER_SEARCH_KEY) || ''; } catch { return ''; }
@@ -341,12 +347,20 @@ function LoanerProgramInner({ token, me, logout }) {
   }, [form]);
 
   const visibleVehicles = useMemo(() => {
-    return vehicles.filter((row) => {
+    const base = vehicles.filter((row) => {
       if (!row?.id) return false;
       if (row.status && ['IN_MAINTENANCE', 'OUT_OF_SERVICE'].includes(String(row.status).toUpperCase())) return false;
       return true;
     });
-  }, [vehicles]);
+    // Counter-UX Item 1: the chosen Vehicle Type narrows the picker to
+    // AVAILABLE units of that type; the already-selected vehicle never
+    // disappears, and "Show all" reverts to the full loaner pool.
+    return filterAssignableVehicles(base, {
+      vehicleTypeId: form.vehicleTypeId || null,
+      keepIds: [form.vehicleId],
+      showAll: showAllVehicles
+    });
+  }, [vehicles, form.vehicleTypeId, form.vehicleId, showAllVehicles]);
 
   const serviceLanePriorityItems = useMemo(() => {
     const items = [];
@@ -1023,6 +1037,20 @@ function LoanerProgramInner({ token, me, logout }) {
                     </option>
                   ))}
                 </select>
+                {/* Counter-UX Item 1: type filter note + "Show all vehicles" escape hatch. */}
+                {form.vehicleTypeId ? (
+                  <div className="label" style={{ marginTop: 4, textTransform: 'none', letterSpacing: 0 }}>
+                    {showAllVehicles ? t('vehicleAssign.showingAll') : t('vehicleAssign.filterNote')}
+                    {' · '}
+                    <button
+                      type="button"
+                      onClick={() => setShowAllVehicles((v) => !v)}
+                      style={{ background: 'none', border: 'none', padding: 0, color: 'var(--p-700, #4338ca)', fontWeight: 600, cursor: 'pointer', fontSize: 'inherit' }}
+                    >
+                      {showAllVehicles ? t('vehicleAssign.showMatching') : t('vehicleAssign.showAll')}
+                    </button>
+                  </div>
+                ) : null}
               </div>
               <div>
                 <div className="label">Pickup Location<RequiredMark /></div>

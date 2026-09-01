@@ -14,17 +14,54 @@ import {
   appendEvent,
   isTerminal,
 } from './state-machine.js';
+import { assertInsuranceSelectionEditable, messageFor, INSURANCE_LOCK } from './insurance-selection-gate.js';
+import { isCheckoutPaymentRequired } from '../settings/checkout-payment-policy.js';
+import { CheckoutSessionError } from './checkout-session.errors.js';
 
-export class CheckoutSessionError extends Error {
-  constructor(message, status = 400, code = null) {
-    super(message);
-    this.name = 'CheckoutSessionError';
-    this.status = status;
-    this.code = code;
-  }
-}
+// Re-exported so the 13 modules that import CheckoutSessionError from here keep
+// working. The class itself moved to a leaf module so helpers this service
+// depends on can throw it without forming an import cycle — see that file.
+export { CheckoutSessionError };
 
 const HANDOFF_TOKEN_TTL_MIN = 15;
+
+/**
+ * Absolute base for the customer-facing /sign/:token page.
+ *
+ * ORDER MATTERS, and it is deliberately NOT the CUSTOMER_PORTAL_BASE_URL-first
+ * chain used by the ~11 other link builders in this codebase. /sign/[token] is
+ * a route of the MAIN Next app — the same deployment that serves the agent's
+ * checkout wizard (frontend/src/app/sign/[token]/page.js sits beside
+ * frontend/src/app/reservations/...). CUSTOMER_PORTAL_BASE_URL names the
+ * customer portal, which today is just another route tree in that same app
+ * (frontend/src/app/customer) but is exactly the thing a tenant would peel off
+ * onto its own hostname. Reading it first would then hand customers a URL on a
+ * deployment that does not serve /sign at all.
+ *
+ * So: prefer the vars that name the app itself, and keep CUSTOMER_PORTAL_BASE_URL
+ * as the LAST fallback — it is the var most tenants actually set today, and
+ * while the two are the same origin it still yields a correct link.
+ */
+function signingBaseUrl() {
+  return (
+    process.env.APP_BASE_URL
+    || process.env.FRONTEND_BASE_URL
+    || process.env.CUSTOMER_PORTAL_BASE_URL
+    || 'http://localhost:3000'
+  ).replace(/\/+$/, '');
+}
+
+/**
+ * Absolute link for a minted token, or null for kinds with no verified public
+ * page. Only TERMS_SIGNING is mapped: MOBILE_INSPECTION has no frontend route
+ * that builds a URL from the token (it is exchanged through
+ * /api/public/checkout-handoff), and CUSTOMER_INSPECTION already gets its
+ * /inspect/:token link built by customer-inspection.service.js. Guessing a
+ * path for either would be worse than omitting the field.
+ */
+function publicUrlForToken(kind, token) {
+  return kind === 'TERMS_SIGNING' ? `${signingBaseUrl()}/sign/${token}` : null;
+}
 
 /**
  * M2 P2 (2026-08-17) — lightweight optimistic versioning, OPT-IN.
@@ -139,6 +176,25 @@ async function ensureCheckoutGates(reservationId) {
 }
 
 /**
+ * Why (if at all) this session starts with the payment step already satisfied.
+ * Returns a reason string to stamp into the log, or null for "collect payment
+ * in the wizard, exactly as before".
+ *
+ * Split out of createForReservation so the decision is testable on its own: the
+ * creation path touches a dozen Prisma models, and the thing that actually
+ * matters on the money path is this three-line rule.
+ *
+ * ORDER IS LOAD-BEARING. DEALERSHIP_LOANER is checked FIRST and short-circuits,
+ * so a loaner check-out neither reads nor depends on the tenant setting — the
+ * loaner behavior shipped in beta and must keep working on its own.
+ */
+export async function resolvePaymentPrestampReason({ workflowMode, tenantId } = {}) {
+  if (String(workflowMode) === 'DEALERSHIP_LOANER') return 'DEALERSHIP_LOANER';
+  if (!(await isCheckoutPaymentRequired(tenantId || null))) return 'TENANT_PAYMENT_NOT_REQUIRED';
+  return null;
+}
+
+/**
  * Create a CheckoutSession for the given reservation. Idempotent: if
  * one already exists and is non-terminal, return it. If it's terminal
  * (CLOSED/CANCELLED), refuse — the caller has to explicitly start a
@@ -246,14 +302,39 @@ async function createForReservation({ reservationId, tenantId, actorUserId }) {
     },
   });
 
-  // Loaner checkout has no online payment (billing is COURTESY/WARRANTY/etc. on the reservation,
-  // or the CUSTOMER_PAY upgrade differential the advisor collects). Pre-stamp paymentCompletedAt
-  // so the PAID entry guard passes and the wizard skips the Spin payment step.
+  // Two reasons a session starts with the payment step already satisfied. Both
+  // pre-stamp paymentCompletedAt so the PAID entry guard passes and the wizard
+  // skips the Spin payment step — a DATA-level skip; state-machine.js is
+  // untouched by either.
+  //
+  //  1. DEALERSHIP_LOANER — loaner checkout has no online payment (billing is
+  //     COURTESY/WARRANTY/etc. on the reservation, or the CUSTOMER_PAY upgrade
+  //     differential the advisor collects).
+  //  2. Tenant policy `checkoutPaymentRequired === false` (2026-08-26) — the
+  //     tenant does not collect payment during check-out at all (Rent & Go by
+  //     VPH Motors). Defaults to TRUE, so a tenant that never touches the
+  //     switch behaves exactly as before. See settings/checkout-payment-policy.js.
+  //
+  // Loaner is evaluated FIRST and short-circuits: it needs no settings read, and
+  // the wizard still owes the advisor the loaner-specific differential screen.
+  //
+  // NEITHER reason disables taking money elsewhere. View Payments, manual
+  // sale/deposit and the post-rental charge paths are all unaffected — the only
+  // thing that changes is whether the wizard BLOCKS on step 3.
   let finalSession = session;
-  if (String(resv?.workflowMode) === 'DEALERSHIP_LOANER') {
+  const paymentPolicyTenantId = resv?.tenantId || tenantId || null;
+  const prestampReason = await resolvePaymentPrestampReason({
+    workflowMode: resv?.workflowMode,
+    tenantId: paymentPolicyTenantId,
+  });
+  if (prestampReason) {
     finalSession = await prisma.checkoutSession.update({
       where: { id: session.id },
       data: { paymentCompletedAt: new Date() },
+    });
+    logger.info('[checkout-session] payment step pre-stamped', {
+      sessionId: session.id, reservationId, reason: prestampReason,
+      tenantId: paymentPolicyTenantId,
     });
   }
 
@@ -552,23 +633,23 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
       // This is a PARTIAL close of the events lost-update, and the honest
       // count is FOURTEEN other writers of this TEXT column, all still doing
       // an unguarded read-modify-write (read → write, this file):
-      //   stampSideEffect       :1036 → :1044
-      //   saveCustomerSignature :1066 → :1087  (read is OUTSIDE the
-      //                                         $transaction that starts :1072)
-      //   mintHandoffToken      :1110 → :1161
-      //   setDeclinedInsurance  :1232 → :1246
-      //   markAbandoned         :1256 → :1270
+      //   stampSideEffect       :1247 → :1255
+      //   saveCustomerSignature :1277 → :1298  (read is OUTSIDE the
+      //                                         $transaction that starts :1283)
+      //   mintHandoffToken      :1321 → :1381
+      //   setDeclinedInsurance  :1460 → :1492
+      //   markAbandoned         :1502 → :1516
       //   checkout-session.scheduler.js:78 (nightly stuck-session sweep)
-      //   spin-charge.service.js:574, :606, :884, :1038, :1229 (five)
-      //   mobile-inspection.service.js:276
+      //   spin-charge.service.js:613, :645, :926, :1083, :1274 (five)
+      //   mobile-inspection.service.js:284
       //   vehicle-swap.service.js:130
-      //   terms-signing.service.js:175
+      //   terms-signing.service.js:275
       // Any of them can still drop an entry written between its own read and
       // its own write. saveCustomerSignature is the sharpest of the fourteen:
       // its $transaction makes the two WRITES atomic but leaves the READ
       // outside it, and what it writes is customerSignedAt — an
       // ENTRY_REQUIRES field for CLOSED. See the note on stampSideEffect.
-      // (Those are ALL the appendEvent callers in the tree; :241 here is the
+      // (Those are ALL the appendEvent callers in the tree; :297 here is the
       // fourteenth-plus-one and does not count — it builds a fresh row on
       // create, with nothing to lose. The kiosk's similarly-named
       // appendEvents(sessionId, device, rawEvents) is a different function
@@ -645,8 +726,26 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
     });
   }
 
-  // ── ONE ownership decision, computed once and reused by the cascade AND by
-  // the customer email below (2026-08-17, QA MAJOR on the blocker fix) ──────
+  // 2026-05-28 — Phase 3.5 — Email-on-finalize.
+  //
+  // When the wizard reaches CLOSED, the customer has a fully signed,
+  // paid, inspected rental agreement. Fire a fire-and-forget delivery
+  // so they get a PDF copy in their inbox without anyone having to
+  // remember to click "Email Agreement". The send goes through the
+  // existing scheduleEmailDelivery path which handles Puppeteer +
+  // SMTP off the request thread and writes its own audit-log line when
+  // an ACCEPTED send later fails. A send that is never accepted at all
+  // is traced by maybeSendFinalizeEmail instead — see its header.
+  //
+  // Guarded by:
+  //   - toStep === 'CLOSED' (only fire once on the actual finalize)
+  //   - session.agreementId present (no agreement, nothing to email)
+  //   - finalizeOwnsReservation (M2-H8, see below)
+  //   - any throw is swallowed — never let an email hiccup break the
+  //     transition response that the UI is waiting on
+  //
+  // ── ONE ownership decision, computed BEFORE the email and reused by the
+  // cascade (2026-08-17, QA MAJOR on the blocker fix) ───────────────────────
   //
   // The first version of the blocker fix put the guard only on the cascade.
   // But the email fired FIRST and was gated on nothing but `agreementId`, so
@@ -945,13 +1044,112 @@ async function transition({ id, toStep, actorUserId, metadata, expectedVersion }
 }
 
 /**
+ * Release a finalize-email claim that never became a real send, and leave
+ * a trace where someone can find it.
+ *
+ * Two writes, both best-effort but for different reasons:
+ *
+ *   1. Un-stamp autoEmailedAt, so the row stops asserting a send that was
+ *      never accepted. This is what the kiosk summary reads for
+ *      `contractEmail.sent`, so clearing it also un-lies the UI. The write
+ *      is conditioned on the exact timestamp WE claimed with, so it can
+ *      only ever retract our own claim, never a later legitimate one. If
+ *      that condition somehow fails to match we log loudly rather than
+ *      leave it silent — a release that quietly does nothing is the
+ *      original bug wearing a new hat.
+ *
+ *   2. Write the AuditLog row. Deliberately the SAME shape and the same
+ *      `Agreement email FAILED` prefix that scheduleEmailDelivery's own
+ *      background catch uses, so one search over AuditLog.reason finds
+ *      both kinds of failure instead of two. AuditLog.reservationId is
+ *      NOT nullable in the schema, and CheckoutSession.reservationId is
+ *      required, so the row always has one — but guard anyway rather than
+ *      throw inside an error handler.
+ */
+async function releaseFinalizeEmailClaim(session, claimedAt, err, actorUserId) {
+  const reason = `Agreement email FAILED for finalized checkout ${session.id} `
+    + `(never queued): ${err?.message || 'unknown error'}`;
+
+  try {
+    const released = await prisma.checkoutSession.updateMany({
+      where: { id: session.id, autoEmailedAt: claimedAt },
+      data: { autoEmailedAt: null },
+    });
+    if (released.count === 0) {
+      logger.error('[checkout-session] auto-email claim could not be released', {
+        sessionId: session.id, agreementId: session.agreementId,
+      });
+    }
+  } catch (releaseErr) {
+    logger.error('[checkout-session] auto-email claim release threw', {
+      sessionId: session.id, error: releaseErr?.message || String(releaseErr),
+    });
+  }
+
+  if (!session.reservationId) {
+    logger.error('[checkout-session] auto-email failure has no reservation to audit', {
+      sessionId: session.id, reason,
+    });
+    return;
+  }
+  await prisma.auditLog.create({
+    data: {
+      tenantId: session.tenantId || null,
+      reservationId: session.reservationId,
+      actorUserId: actorUserId || null,
+      action: 'UPDATE',
+      reason,
+    },
+  }).catch((auditErr) => {
+    // Last line of defense: if even the audit write fails, the log line is
+    // the only trace left, so it must carry the original reason with it.
+    logger.error('[checkout-session] auto-email failure audit write failed', {
+      sessionId: session.id, reason, error: auditErr?.message || String(auditErr),
+    });
+  });
+}
+
+/**
  * Best-effort customer email on CheckoutSession finalize. Dynamically
  * imports the rental-agreements service so the checkout module doesn't
  * pull in Puppeteer at boot (it stays a heavy lazy dependency).
  *
- * Marks autoEmailedAt on the session so we know not to fire twice if
- * a future code path re-runs the transition path. The session column
- * is added in the same Phase 3.5 migration that ships this code.
+ * CLAIM AND RELEASE (2026-08-18)
+ * -----------------------------
+ * autoEmailedAt used to be stamped and then abandoned: the scheduler was
+ * called without `await` and without `.catch()`, so the row asserted
+ * "emailed" before anybody had tried to email, and a rejection vanished
+ * into an unhandled promise. 33 closed checkouts across two tenants sat
+ * like that for two months — the marker said sent, no mail existed, and
+ * the only way to find them was hand-joining against AuditLog.
+ *
+ * The stamp cannot simply move to after the send: it is the mutual
+ * exclusion. Two near-simultaneous transitions that both got past it
+ * would mail the customer his contract twice, which is worse than the
+ * silence. So the CAS still CLAIMS first and is unchanged in purpose —
+ * only the winner proceeds — and the claim is RELEASED if the send is
+ * never accepted.
+ *
+ * "Accepted" is the boundary scheduleEmailDelivery itself draws: the
+ * promise it returns settles once the recipient is resolved and the job
+ * is handed to the scheduler; the Puppeteer + SMTP work then runs off
+ * this promise entirely. So awaiting it costs the counter nothing — no
+ * mail-provider latency rides on this await, and the whole function is
+ * already detached from the transition response by its caller.
+ *
+ * That boundary matters because the two failure modes are traced by
+ * different code:
+ *
+ *   - REJECTED BEFORE ACCEPTANCE (no customer email on the agreement, or
+ *     the lookup itself throws). scheduleEmailDelivery rejects before
+ *     startJob, so its background catch never runs and it writes NO audit
+ *     row. This was the invisible case, and it is the one handled here.
+ *
+ *   - FAILED AFTER ACCEPTANCE (PDF render, SMTP). scheduleEmailDelivery's
+ *     own catch already writes an `Agreement email FAILED for <to>` audit
+ *     row. The claim stays stamped in that case: the send WAS accepted,
+ *     which is exactly what the marker now means, and the failure is
+ *     already on the record.
  */
 async function maybeSendFinalizeEmail(session, actorUserId) {
   if (!session?.agreementId) return;
@@ -961,35 +1159,48 @@ async function maybeSendFinalizeEmail(session, actorUserId) {
 
   const { rentalAgreementsService } = await import('../rental-agreements/rental-agreements.service.js');
 
-  // Stamp the marker BEFORE firing the scheduler so two near-simultaneous
-  // transitions (race condition) can't both fire. We use updateMany with
-  // a null guard so only the first one wins.
+  // CLAIM. Stamp the marker BEFORE firing the scheduler so two
+  // near-simultaneous transitions (race condition) can't both fire. We use
+  // updateMany with a null guard so only the first one wins.
+  const claimedAt = new Date();
   const stamped = await prisma.checkoutSession.updateMany({
     where: { id: session.id, autoEmailedAt: null },
-    data: { autoEmailedAt: new Date() },
+    data: { autoEmailedAt: claimedAt },
   });
   if (stamped.count === 0) return; // someone else already stamped — skip
 
-  // RETURNED, not fired and forgotten (2026-08-17). scheduleEmailDelivery
-  // validates before it schedules anything and returns a REJECTED promise when
-  // it cannot resolve a recipient ("Customer email is required" — a customer
-  // with no email on file is an ordinary state, not an exotic one). Detached,
-  // that rejection belonged to nobody: the caller's
+  // AWAITED and rethrown, not fired and forgotten (2026-08-17; kept through the
+  // 2026-08-28 release-the-claim rewrite). scheduleEmailDelivery validates
+  // before it schedules anything and returns a REJECTED promise when it cannot
+  // resolve a recipient ("Customer email is required" -- a customer with no
+  // email on file is an ordinary state, not an exotic one). Detached, that
+  // rejection belonged to nobody: the caller's
   // `Promise.resolve().then(...).catch(...)` only covers the chain it builds,
-  // so it surfaced as an unhandled rejection instead — which under Node's
+  // so it surfaced as an unhandled rejection instead -- which under Node's
   // default `--unhandled-rejections=throw` takes the process down. It killed
-  // the QA probe that found this. Returning it hands it to that catch, which
-  // logs it and lets the finalize response through untouched.
+  // the QA probe that found this. Awaiting it inside this async function and
+  // rethrowing keeps that rejection attached: the caller's `.then(() =>
+  // maybeSendFinalizeEmail(...))` adopts this function's promise, so the
+  // `.catch` right below it logs the failure and lets the finalize response
+  // through untouched.
   //
   // This waits on the SCHEDULING, not the delivery: past validation the real
   // work is handed to setImmediate with its own catch + audit line.
-  return rentalAgreementsService.scheduleEmailDelivery(
-    session.agreementId,
-    {}, // empty payload → default recipient = live customer email
-    actorUserId || null,
-    session.tenantId || null,
-    { logger },
-  );
+  try {
+    await rentalAgreementsService.scheduleEmailDelivery(
+      session.agreementId,
+      {}, // empty payload → default recipient = live customer email
+      actorUserId || null,
+      session.tenantId || null,
+      { logger },
+    );
+  } catch (err) {
+    // RELEASE. Nothing was queued, so nothing may claim to have been sent.
+    await releaseFinalizeEmailClaim(session, claimedAt, err, actorUserId);
+    // Rethrow so the caller's existing warn logs it too. The caller catches;
+    // this can never break the transition.
+    throw err;
+  }
 }
 
 /**
@@ -1135,13 +1346,22 @@ async function mintHandoffToken({ sessionId, kind, actorUserId }) {
       expiresAt: existing.expiresAt,
       kind: existing.kind,
       reused: true,
+      // Additive (2026-08-17). Every caller used to assemble this itself —
+      // the web wizard from window.location.origin, RideOps from a COMPILED
+      // dart-define, which forced a fresh app build per custom-domain tenant.
+      // The server knows its own public origin; hand it over. Existing fields
+      // are untouched, so old clients keep working.
+      signUrl: publicUrlForToken(existing.kind, existing.token),
     };
   }
 
   // CUSTOMER_INSPECTION links travel by email and the customer may inspect
-  // hours later (decision 2026-06-11: 24h TTL, re-sendable). QR handoffs
-  // stay short-lived.
-  const ttlMin = kind === 'CUSTOMER_INSPECTION' ? 24 * 60 : HANDOFF_TOKEN_TTL_MIN;
+  // hours later. TTL is configurable (2026-08-22 security redesign): default 72h
+  // for the checkout link, env CUSTOMER_INSPECTION_CHECKOUT_TTL_HOURS. QR handoffs
+  // (TERMS_SIGNING / MOBILE_INSPECTION) stay short-lived.
+  const checkoutTtlH = Number(process.env.CUSTOMER_INSPECTION_CHECKOUT_TTL_HOURS);
+  const ciTtlMin = (Number.isFinite(checkoutTtlH) && checkoutTtlH > 0 ? checkoutTtlH : 72) * 60;
+  const ttlMin = kind === 'CUSTOMER_INSPECTION' ? ciTtlMin : HANDOFF_TOKEN_TTL_MIN;
   const expiresAt = new Date(Date.now() + ttlMin * 60_000);
   const token = tokenBytes();
 
@@ -1172,6 +1392,7 @@ async function mintHandoffToken({ sessionId, kind, actorUserId }) {
     token: row.token,
     expiresAt: row.expiresAt,
     kind: row.kind,
+    signUrl: publicUrlForToken(row.kind, row.token),
   };
 }
 
@@ -1226,6 +1447,13 @@ async function exchangeHandoffToken(token) {
  * AND record it in the session event log. Used by step 1 of the wizard.
  * Phase 3 (T&C signing) reads agreement.declinedInsurance to decide
  * whether to inject the addendum section into the customer's signing UI.
+ *
+ * STEP GUARD (2026-08-17). The rule about WHEN this flag may still be written
+ * lives in insurance-selection-gate.js, shared with the pre-check-in portal —
+ * the other surface that writes the column. It refuses with 409 and a code
+ * (TC_ALREADY_COMPLETED / TC_SIGNING_IN_PROGRESS) so the agent UI can tell
+ * "already signed" apart from "signing right now". See that module for the
+ * reasoning and the full writer inventory.
  */
 async function setDeclinedInsurance({ id, declined, actorUserId }) {
   if (!id) throw new CheckoutSessionError('sessionId required', 400);
@@ -1234,11 +1462,29 @@ async function setDeclinedInsurance({ id, declined, actorUserId }) {
   if (!session.agreementId) {
     throw new CheckoutSessionError('No agreement linked to this session', 409);
   }
+  await assertInsuranceSelectionEditable({
+    agreementId: session.agreementId,
+    reservationId: session.reservationId,
+    nextValue: !!declined,
+    audience: 'staff',
+  });
 
-  await prisma.rentalAgreement.update({
-    where: { id: session.agreementId },
+  // Optimistic concurrency on the read-then-write above. The gate's checks and
+  // this write are not in one transaction, so the customer can finish signing
+  // in between and the agent's edit would land on a sealed contract. Folding
+  // `tcSignedAt: null` into the WHERE makes the database settle it: if the
+  // signature landed first, count is 0 and nobody wrote. Cheaper than wrapping
+  // the whole thing in a transaction, and it closes the window rather than
+  // narrowing it.
+  const written = await prisma.rentalAgreement.updateMany({
+    where: { id: session.agreementId, tcSignedAt: null },
     data: { declinedInsurance: !!declined },
   });
+  if (written.count === 0) {
+    throw new CheckoutSessionError(
+      messageFor(INSURANCE_LOCK.SIGNED, 'staff'), 409, INSURANCE_LOCK.SIGNED,
+    );
+  }
 
   return prisma.checkoutSession.update({
     where: { id },
@@ -1275,6 +1521,13 @@ async function markAbandoned({ id, reason, actorUserId }) {
     },
   });
 }
+
+// Exported for the finalize-email trace suite. It is reached in production
+// only from transition()'s CLOSED branch, which needs a live Postgres and a
+// full reservation/agreement/session fixture to get to; exporting it lets the
+// claim/release behavior be tested directly and DB-free, which is the only
+// way it runs in CI at all. Not part of the service's public surface.
+export { maybeSendFinalizeEmail };
 
 export const checkoutSessionService = {
   createForReservation,

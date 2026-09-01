@@ -5,9 +5,59 @@ import { getTemplates, getTemplate, renderTemplate, renderCustom } from './sms-t
 import logger from '../../lib/logger.js';
 import { cache } from '../../lib/cache.js';
 import { tenantKey } from '../../lib/cache/tenantKey.js';
+import { resolveTenantProviderCredential } from '../../lib/tenant-provider-credential.js';
+
+/**
+ * The tenant's own SMS credentials for a provider, and the platform's, as two
+ * whole sets. `secret` is the one field that gets masked into the WARN.
+ *
+ * Kept as SETS, not per-field, because that is where the SPIn wrong-merchant
+ * bug lived: mixing a tenant's accountSid with the platform's authToken is not
+ * a partially-working config, it is a request signed by the wrong account.
+ */
+function smsCredentialSets(provider, settings = {}) {
+  if (provider === 'twilio') {
+    return {
+      tenant: { accountSid: settings.smsAccountSid || '', authToken: settings.smsAuthToken || '' },
+      platform: {
+        accountSid: process.env.TWILIO_ACCOUNT_SID || '',
+        authToken: process.env.TWILIO_AUTH_TOKEN || '',
+      },
+      secretField: 'authToken',
+    };
+  }
+  if (provider === 'plivo') {
+    return {
+      tenant: { authId: settings.smsAuthId || '', authToken: settings.smsAuthToken || '' },
+      platform: {
+        authId: process.env.PLIVO_AUTH_ID || '',
+        authToken: process.env.PLIVO_AUTH_TOKEN || '',
+      },
+      secretField: 'authToken',
+    };
+  }
+  // telnyx (the default) — single-field credential.
+  return {
+    tenant: { apiKey: settings.smsApiKey || '' },
+    platform: { apiKey: process.env.TELNYX_API_KEY || '' },
+    secretField: 'apiKey',
+  };
+}
+
+const isComplete = (set) => Object.values(set).every((v) => !!String(v || '').trim());
+const isPartial = (set) => !isComplete(set) && Object.values(set).some((v) => !!String(v || '').trim());
 
 /**
  * Resolve SMS config for a tenant.
+ *
+ * 2026-08-27: this used to be six `settings.x || process.env.Y || ''` lines, so
+ * a tenant that had configured no SMS at all sent its guests' messages through
+ * the PLATFORM's Telnyx/Twilio/Plivo account — the platform's number on the
+ * recipient's phone, the platform's bill, and the guest's phone number handed
+ * to a carrier account that tenant never agreed to. Same defect shape as the
+ * SPIn terminal and the Anthropic OCR key; resolution now goes through
+ * lib/tenant-provider-credential.js, which fails closed by default and WARNs
+ * by name when a tenant is deliberately opted in.
  */
 async function getTenantSmsConfig(tenantId) {
   if (!tenantId) return null;
@@ -21,21 +71,41 @@ async function getTenantSmsConfig(tenantId) {
   try { settings = typeof tenant.settingsJson === 'string' ? JSON.parse(tenant.settingsJson) : (tenant.settingsJson || {}); } catch {}
 
   const provider = settings.smsProvider || process.env.SMS_PROVIDER || 'telnyx';
-  const fromNumber = settings.smsFromNumber || process.env.SMS_FROM_NUMBER || '';
   const companyName = tenant.name || 'Ride Fleet';
 
-  const credentials = {};
-  if (provider === 'telnyx') {
-    credentials.apiKey = settings.smsApiKey || process.env.TELNYX_API_KEY || '';
-  } else if (provider === 'twilio') {
-    credentials.accountSid = settings.smsAccountSid || process.env.TWILIO_ACCOUNT_SID || '';
-    credentials.authToken = settings.smsAuthToken || process.env.TWILIO_AUTH_TOKEN || '';
-  } else if (provider === 'plivo') {
-    credentials.authId = settings.smsAuthId || process.env.PLIVO_AUTH_ID || '';
-    credentials.authToken = settings.smsAuthToken || process.env.PLIVO_AUTH_TOKEN || '';
-  }
+  const sets = smsCredentialSets(provider, settings);
+  const decision = resolveTenantProviderCredential({
+    tenantId,
+    feature: 'sms',
+    tenantName: companyName,
+    // The masked value in the WARN is the real secret of whichever set wins,
+    // so the log line identifies the account without ever printing it.
+    tenantCredential: isComplete(sets.tenant) ? sets.tenant[sets.secretField] : '',
+    platformCredential: isComplete(sets.platform) ? sets.platform[sets.secretField] : '',
+    tenantConfigPartial: isPartial(sets.tenant),
+    tenantOptIn: !!settings.smsAllowPlatformKeyFallback,
+  });
 
-  return { provider, fromNumber, companyName, credentials, enabled: !!fromNumber && Object.values(credentials).some(Boolean) };
+  const credentials = decision.source === 'TENANT' ? sets.tenant
+    : decision.source === 'PLATFORM' ? sets.platform
+      : {};
+
+  // The FROM number follows the credentials it was issued against. A tenant's
+  // own Telnyx key paired with the platform's number was never a working
+  // config — the carrier rejects a number that is not on the account — it just
+  // failed at the provider instead of here.
+  const fromNumber = decision.source === 'PLATFORM'
+    ? (settings.smsFromNumber || process.env.SMS_FROM_NUMBER || '')
+    : (settings.smsFromNumber || '');
+
+  return {
+    provider,
+    fromNumber,
+    companyName,
+    credentials,
+    credentialSource: decision.source,
+    enabled: !!fromNumber && isComplete(credentials) && Object.keys(credentials).length > 0,
+  };
   }, 3 * 60 * 1000); // cache 3 min
 }
 
@@ -147,3 +217,8 @@ export const smsService = {
     };
   },
 };
+
+// Test-only surface (same convention as incident-report.service.js). Exposed so
+// the Tenant.settingsJson drift guard can call the resolver directly instead of
+// reaching it through a send path that needs a provider.
+export const __test = { getTenantSmsConfig };

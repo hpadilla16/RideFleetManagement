@@ -52,6 +52,35 @@ export async function abandon({ id, reason, token }) {
   }, token);
 }
 
+/**
+ * What step 3 (PAYMENT_PENDING) should actually render.
+ *
+ * The wizard is server-driven — the backend owns `currentStep` and stamps
+ * `paymentCompletedAt` — but PAYMENT_PENDING had its own client-side gate that
+ * only knew about loaners. So a session the backend had already satisfied (the
+ * new per-tenant `checkoutPaymentRequired=false` policy, or a Spin webhook that
+ * landed early) still rendered the full two-tap Spin screen, and the agent had
+ * to sit through a payment UI for money nobody was collecting. The auto-advance
+ * effect would eventually fire off the same stamp, so this was a race the agent
+ * could see and click into.
+ *
+ *   LOANER  — loaner check-out. FIRST, and before the stamp check on purpose:
+ *             the backend pre-stamps loaners too, so testing the stamp first
+ *             would swallow the CUSTOMER_PAY upgrade-differential screen the
+ *             advisor still needs.
+ *   SKIP    — payment already satisfied server-side. Confirm and move on.
+ *   COLLECT — today's behavior: run the Spin sale + deposit hold.
+ *
+ * Pure so it can be tested without mounting the 2k-line wizard.
+ */
+export const PAYMENT_STEP_MODES = { LOANER: 'LOANER', SKIP: 'SKIP', COLLECT: 'COLLECT' };
+
+export function paymentStepMode(session, reservation) {
+  if (String(reservation?.workflowMode) === 'DEALERSHIP_LOANER') return PAYMENT_STEP_MODES.LOANER;
+  if (session?.paymentCompletedAt) return PAYMENT_STEP_MODES.SKIP;
+  return PAYMENT_STEP_MODES.COLLECT;
+}
+
 // CheckoutStep → display label + step number for the tracker UI.
 export const STEP_INFO = {
   CONFIRMING:              { number: 1, label: 'Confirm' },

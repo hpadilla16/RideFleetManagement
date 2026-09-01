@@ -24,6 +24,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AuthGate } from '../../components/AuthGate';
 import { AppShell } from '../../components/AppShell';
 import { TLIntegrationPanel } from '../../components/settings/TLIntegrationPanel';
@@ -35,7 +36,9 @@ import { AdvantageIntegrationPanel } from '../../components/settings/AdvantageIn
 import { MexIntegrationPanel } from '../../components/settings/MexIntegrationPanel';
 import { KioskUpsellSettings } from '../../components/settings/KioskUpsellSettings';
 import { ShuttleTrackerSettings } from '../../components/settings/ShuttleTrackerSettings';
+import { TwoFactorPolicySettings } from '../../components/settings/TwoFactorPolicySettings';
 import { LoanerRatesTab } from './LoanerRatesTab';
+import { OneStepGpsConnectorTab } from './OneStepGpsConnectorTab';
 import { API_BASE, api } from '../../lib/client';
 import { MODULE_DEFINITIONS } from '../../lib/moduleAccess';
 
@@ -92,13 +95,44 @@ const SIPP_LABELS = {
   STAR: 'Sports/Convertible', PUAR: 'Pickup'
 };
 
+/**
+ * Every value `tab` may hold. Deep links (`/settings?tab=telematics`) are
+ * validated against this set — an unknown or hand-typed tab silently keeps the
+ * default rather than rendering a blank page.
+ *
+ * Added 2026-08-26: the shuttle Monitor's empty-state buttons and the GPS
+ * connector empty state pushed to a bare `/settings`, so an operator told to
+ * "turn the tracker on" landed on Agreement and had to hunt for the tab.
+ * Keep in sync with the `tab === '…'` render guards below.
+ */
+const SETTINGS_TABS = new Set([
+  'access', 'agreement', 'ai', 'carSharing', 'commissions', 'emails', 'feeRates',
+  'fees', 'franchises', 'insurance', 'integrations', 'kioskUpsell', 'loanerRates',
+  'locations', 'marketIntel', 'payments', 'rates', 'revenue', 'selfService',
+  'services', 'stopSales', 'telematics', 'vehicleTypes',
+]);
+
 export default function SettingsPage() {
   return <AuthGate>{({ token, me, logout }) => <SettingsInner token={token} me={me} logout={logout} />}</AuthGate>;
 }
 
 function SettingsInner({ token, me, logout }) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState('agreement');
   const [msg, setMsg] = useState('');
+
+  // Deep link support: `/settings?tab=telematics` opens that tab on mount.
+  // Read from window.location rather than useSearchParams so this page needs no
+  // Suspense boundary (same idiom as customer/pay, customer/precheckin, …).
+  // Mount-only on purpose — after the first render the tab buttons own `tab`,
+  // and re-applying the query string would fight the operator's clicks.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const wanted = new URLSearchParams(window.location.search).get('tab');
+      if (wanted && SETTINGS_TABS.has(wanted)) setTab(wanted);
+    } catch { /* malformed query string — keep the default tab */ }
+  }, []);
 
   const [cfg, setCfg] = useState(DEFAULTS);
   const [locations, setLocations] = useState([]);
@@ -135,6 +169,10 @@ function SettingsInner({ token, me, logout }) {
   const [customerInspectionEnabled, setCustomerInspectionEnabled] = useState(false);
   // Check-in inspection model (Fase D, 2026-06-18): 'AGENT' (current) vs 'CUSTOMER' (agent-less).
   const [customerInspectionCheckinModel, setCustomerInspectionCheckinModel] = useState('AGENT');
+  // Checkout payment policy (2026-08-26). Seeded TRUE so a failed/slow load
+  // never renders the switch as "payment off" for a tenant that requires it.
+  const [checkoutPaymentRequired, setCheckoutPaymentRequired] = useState(true);
+  const [checkoutPaymentSaving, setCheckoutPaymentSaving] = useState(false);
   // Citations OCR (2026-06-15): per-tenant vision-LLM credentials for mail intake.
   const [ocrCfg, setOcrCfg] = useState({ provider: 'anthropic', model: '', hasKey: false });
   const [ocrKeyInput, setOcrKeyInput] = useState('');
@@ -241,6 +279,12 @@ function SettingsInner({ token, me, logout }) {
     api(scopedSettingsPath('/api/settings/citation-ocr'), {}, token)
       .then((out) => out && setOcrCfg(out))
       .catch(() => {});
+    // Checkout payment policy. `!== false` (not `!!`) so anything the API does
+    // not return as an explicit false leaves the switch ON — same fail-safe
+    // direction the backend resolver uses.
+    api(scopedSettingsPath('/api/settings/checkout-payment'), {}, token)
+      .then((out) => setCheckoutPaymentRequired(out?.checkoutPaymentRequired !== false))
+      .catch(() => {});
     // activeSettingsTenantId in deps (2026-07-26 fix): for a SUPER_ADMIN these
     // three loads are tenant-scoped via scopedSettingsPath, but the effect only
     // ran once on mount — BEFORE a tenant was picked — so the toggles showed
@@ -297,6 +341,10 @@ function SettingsInner({ token, me, logout }) {
         spin: {
           ...DEFAULT_PAYMENT_GATEWAY_CONFIG.spin,
           ...(value?.spin || {})
+        },
+        ipos: {
+          ...DEFAULT_PAYMENT_GATEWAY_CONFIG.ipos,
+          ...(value?.ipos || {})
         },
         autocharge: {
           ...DEFAULT_PAYMENT_GATEWAY_CONFIG.autocharge,
@@ -717,6 +765,10 @@ function SettingsInner({ token, me, logout }) {
       spin: {
         ...DEFAULT_PAYMENT_GATEWAY_CONFIG.spin,
         ...(out?.spin || {})
+      },
+      ipos: {
+        ...DEFAULT_PAYMENT_GATEWAY_CONFIG.ipos,
+        ...(out?.ipos || {})
       }
     });
     setMsg('Payment gateway settings saved');
@@ -2438,7 +2490,9 @@ function SettingsInner({ token, me, logout }) {
     ? ({
         authorizenet: 'Authorize.Net',
         stripe: 'Stripe',
-        square: 'Square'
+        square: 'Square',
+        spin: 'SPIn',
+        ipos: 'iPOS Payment Links'
       }[String(paymentGatewayConfig?.gateway || '').toLowerCase()] || 'Not set')
     : '—';
   const settingsReadyCount = [
@@ -2753,6 +2807,70 @@ function SettingsInner({ token, me, logout }) {
               ) : null}
             </div>
 
+            {/*
+              Checkout payment policy (2026-08-26). Per-TENANT only — no
+              per-location, no per-reservation override. Turning it OFF makes the
+              wizard skip step 3 for this tenant; it does NOT remove any other
+              way to take money (View Payments, manual sale/deposit, post-rental
+              charges all stay exactly as they are).
+            */}
+            <div className="glass card" style={{ padding: 12 }}>
+              <h3 style={{ marginBottom: 8 }}>Check-out Payment · Pago en el check-out</h3>
+              <div className="form-grid-2">
+                <label className="label" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={checkoutPaymentRequired}
+                    disabled={checkoutPaymentSaving}
+                    onChange={async (e) => {
+                      const required = e.target.checked;
+                      const previous = checkoutPaymentRequired;
+                      setCheckoutPaymentRequired(required);
+                      setCheckoutPaymentSaving(true);
+                      try {
+                        const out = await api(
+                          scopedSettingsPath('/api/settings/checkout-payment'),
+                          { method: 'PUT', body: JSON.stringify({ checkoutPaymentRequired: required }) },
+                          token,
+                        );
+                        // Trust the server's answer, not the optimistic flip.
+                        setCheckoutPaymentRequired(out?.checkoutPaymentRequired !== false);
+                        setMsg(required
+                          ? 'Payment is required during check-out · Se exige pago durante el check-out'
+                          : 'Check-out will skip the payment step · El check-out omitirá el paso de pago');
+                      } catch (err) {
+                        // Roll back — leaving the switch showing a state the
+                        // server rejected is how a tenant thinks payment is off
+                        // when it is not.
+                        setCheckoutPaymentRequired(previous);
+                        setMsg(err?.message || 'Failed to save checkout payment setting');
+                      } finally {
+                        setCheckoutPaymentSaving(false);
+                      }
+                    }}
+                  />
+                  Require payment during check-out · Exigir pago durante el check-out
+                </label>
+                <div className="surface-note">
+                  ON (default) keeps today&apos;s flow: the wizard stops at step 3 until the sale and
+                  the deposit hold are taken. When OFF, the wizard skips the payment step for this
+                  tenant — agents can still take payments afterwards from <strong>View Payments</strong>
+                  {' '}(manual sale, deposit, refunds are all unchanged).
+                  <br />
+                  ON (por defecto) mantiene el flujo actual: el wizard se detiene en el paso 3 hasta
+                  cobrar la venta y el depósito. Cuando está OFF, el wizard omite el paso de pago para
+                  este tenant — los agentes pueden cobrar después desde <strong>View Payments</strong>.
+                </div>
+              </div>
+              {!checkoutPaymentRequired ? (
+                <div className="surface-note" style={{ marginTop: 8 }}>
+                  Applies to check-out sessions started from now on. Sessions already in progress keep
+                  the payment step. · Aplica a los check-outs que empiecen desde ahora; los que ya
+                  están en progreso conservan el paso de pago.
+                </div>
+              ) : null}
+            </div>
+
             <div className="glass card" style={{ padding: 12 }}>
               <h3 style={{ marginBottom: 8 }}>Fleet Rotation Rule</h3>
               <div className="form-grid-2">
@@ -2850,6 +2968,7 @@ function SettingsInner({ token, me, logout }) {
                   <option value="stripe">Stripe</option>
                   <option value="square">Square</option>
                   <option value="spin">SPIn</option>
+                  <option value="ipos">{t('settingsPayments.ipos.gatewayOption')}</option>
                 </select>
               </div>
               <div className="stack">
@@ -3001,7 +3120,13 @@ function SettingsInner({ token, me, logout }) {
                 </div>
                 <div className="stack">
                   <label className="label">Auth Key</label>
-                  <input value={paymentGatewayConfig.spin?.authKey || ''} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, spin: { ...paymentGatewayConfig.spin, authKey: e.target.value } })} />
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={paymentGatewayConfig.spin?.authKey || ''}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, spin: { ...paymentGatewayConfig.spin, authKey: e.target.value } })}
+                    placeholder={paymentGatewayConfig.spin?.hasAuthKey ? 'Saved — leave blank to keep' : 'Paste the Auth Key from your iPOS merchant portal'}
+                  />
                 </div>
               </div>
               <div className="form-grid-2">
@@ -3026,6 +3151,82 @@ function SettingsInner({ token, me, logout }) {
               </div>
               <div className="surface-note">
                 SPIn is a card-present terminal gateway for in-person payments. Configure the Auth Key and TPN from your SPIn merchant portal.
+                These credentials are <strong>per tenant</strong>: checkout charges settle into the merchant account behind the TPN saved here.
+                The Auth Key is encrypted at rest and never shown again — leave it blank to keep the saved one.
+                Auth Key <strong>and</strong> TPN must BOTH be set; a half-filled pair is refused at the counter rather than paired with another terminal.
+              </div>
+            </section>
+
+            <section className="glass card section-card">
+              <div className="row-between">
+                <h3 style={{ margin: 0 }}>{t('settingsPayments.ipos.title')}</h3>
+                <label className="label"><input type="checkbox" checked={!!paymentGatewayConfig.ipos?.enabled} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, enabled: e.target.checked } })} /> {t('settingsPayments.ipos.enabled')}</label>
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">{t('settingsPayments.ipos.environment')}</label>
+                  <select value={paymentGatewayConfig.ipos?.environment || 'production'} onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, environment: e.target.value } })}>
+                    <option value="sandbox">{t('settingsPayments.ipos.envSandbox')}</option>
+                    <option value="production">{t('settingsPayments.ipos.envProduction')}</option>
+                  </select>
+                </div>
+                <div className="stack">
+                  <label className="label">{t('settingsPayments.ipos.hppToken')}</label>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={paymentGatewayConfig.ipos?.hppToken || ''}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, hppToken: e.target.value } })}
+                    placeholder={paymentGatewayConfig.ipos?.hasHppToken ? t('settingsPayments.ipos.tokenSavedPlaceholder') : t('settingsPayments.ipos.tokenEmptyPlaceholder')}
+                  />
+                </div>
+                <div className="stack">
+                  <label className="label">{t('settingsPayments.ipos.apiKey')}</label>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={paymentGatewayConfig.ipos?.apiKey || ''}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, apiKey: e.target.value } })}
+                    placeholder={paymentGatewayConfig.ipos?.hasApiKey ? t('settingsPayments.ipos.tokenSavedPlaceholder') : t('settingsPayments.ipos.apiKeyEmptyPlaceholder')}
+                  />
+                  <span className="hint">{t('settingsPayments.ipos.apiKeyHint')}</span>
+                </div>
+                <div className="stack">
+                  <label className="label">{t('settingsPayments.ipos.secretKey')}</label>
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={paymentGatewayConfig.ipos?.secretKey || ''}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, secretKey: e.target.value } })}
+                    placeholder={paymentGatewayConfig.ipos?.hasSecretKey ? t('settingsPayments.ipos.tokenSavedPlaceholder') : t('settingsPayments.ipos.secretKeyEmptyPlaceholder')}
+                  />
+                  <span className="hint">{t('settingsPayments.ipos.secretKeyHint')}</span>
+                </div>
+              </div>
+              <div className="form-grid-2">
+                <div className="stack">
+                  <label className="label">{t('settingsPayments.ipos.tpn')}</label>
+                  <input
+                    value={paymentGatewayConfig.ipos?.tpn || ''}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, tpn: e.target.value } })}
+                    placeholder={paymentGatewayConfig.spin?.tpn ? t('settingsPayments.ipos.tpnFallbackPlaceholder', { tpn: paymentGatewayConfig.spin.tpn }) : t('settingsPayments.ipos.tpnEmptyPlaceholder')}
+                  />
+                </div>
+                <div className="stack">
+                  <label className="label">{t('settingsPayments.ipos.expiryDays')}</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={paymentGatewayConfig.ipos?.expiryDays ?? 3}
+                    onChange={(e) => setPaymentGatewayConfig({ ...paymentGatewayConfig, ipos: { ...paymentGatewayConfig.ipos, expiryDays: e.target.value } })}
+                  />
+                </div>
+              </div>
+              <div className="surface-note">
+                {t('settingsPayments.ipos.note1')}{' '}
+                <strong>{t('settingsPayments.ipos.note2')}</strong>{' '}
+                {t('settingsPayments.ipos.note3')}
               </div>
             </section>
 
@@ -3418,6 +3619,8 @@ function SettingsInner({ token, me, logout }) {
                 Save Tenant Module Access
               </button>
             </div>
+            <hr style={{ opacity: 0.15, width: '100%' }} />
+            <TwoFactorPolicySettings token={token} scopedPath={scopedSettingsPath} />
           </div>
         )}
 
@@ -5519,6 +5722,19 @@ function SettingsInner({ token, me, logout }) {
               </div>
             </section>
 
+            {/* OneStepGPS connector (2026-08-24): API key + device↔vehicle mapping,
+                per the approved mockups. Factored into its own component so this
+                page does not grow — it talks only to
+                /api/admin/integrations/onestepgps. Rendered unconditionally in
+                this tab: the key lives in IntegrationCredential, independent of
+                the telematicsConfig provider dropdown above (which the settings
+                blob save can therefore never erase). */}
+            <OneStepGpsConnectorTab
+              token={token}
+              scopedSettingsPath={scopedSettingsPath}
+              onPageMsg={setMsg}
+            />
+
             <section className="glass card section-card">
               <div className="row-between" style={{ alignItems: 'flex-start', gap: 12 }}>
                 <div className="stack" style={{ gap: 6 }}>
@@ -6527,7 +6743,11 @@ function SettingsInner({ token, me, logout }) {
                   </div>
                   <div className="stack"><label className="label">Pickup Instructions</label><textarea rows={3} value={locationEditor.config?.pickupInstructions || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), pickupInstructions: e.target.value } })} /></div>
                   <div className="stack"><label className="label">Shuttle Pickup Spot (what the voice agent tells a caller who is already waiting — just WHERE to stand; leave empty to reuse Pickup Instructions)</label><textarea rows={2} value={locationEditor.config?.shuttlePickupInstructions || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), shuttlePickupInstructions: e.target.value } })} placeholder="e.g. Wait between columns 4 and 5, outside of baggage claim." /></div>
-                  {locationEditor.id && <ShuttleTrackerSettings locationId={locationEditor.id} />}
+                  {/* Shuttle tracker polish NEW #4 (2026-08-24): static walking directions shown on the customer tracker page under "How to get there". Plain sede-written text, no routing engine. */}
+                  <div className="stack"><label className="label">Shuttle Walking Directions (customer tracker page — HOW to get to the pickup spot, step by step)</label><textarea rows={3} value={locationEditor.config?.shuttleWalkingDirections || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), shuttleWalkingDirections: e.target.value } })} placeholder="e.g. 1. Take the elevator to Level 1 (Arrivals). 2. Cross both crosswalks to the outer island. 3. Wait under sign B-4 — about a 3 minute walk." /></div>
+                  {/* Per-language directions (2026-08-25): Spanish variant of the same text — the tracker page shows it when the customer's ES/EN toggle is on ES, falling back to the English one when empty. */}
+                  <div className="stack"><label className="label">Shuttle Walking Directions (Español) — shown when the customer picks ES on the tracker page</label><textarea rows={3} value={locationEditor.config?.shuttleWalkingDirectionsEs || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), shuttleWalkingDirectionsEs: e.target.value } })} placeholder="ej. 1. Toma el ascensor al Nivel 1 (Llegadas). 2. Cruza ambos cruces peatonales hasta la isleta exterior. 3. Espera bajo el letrero B-4 — unos 3 minutos a pie." /></div>
+                  {locationEditor.id && <ShuttleTrackerSettings locationId={locationEditor.id} scopedSettingsPath={scopedSettingsPath} />}
                   <div className="stack"><label className="label">Drop-off Instructions</label><textarea rows={3} value={locationEditor.config?.dropoffInstructions || ''} onChange={(e) => setLocationEditor({ ...locationEditor, config: { ...(locationEditor.config || {}), dropoffInstructions: e.target.value } })} /></div>
 
                   <div className="label">Self-Service Handoff Overrides</div>

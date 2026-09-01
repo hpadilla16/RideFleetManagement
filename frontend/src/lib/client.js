@@ -58,6 +58,11 @@ export const AUTH_EXPIRED_EVENT = 'ridefleet:auth-expired';
 // session). AuthGate listens and re-fetches /me so the forced-change screen
 // appears without a manual reload.
 export const PASSWORD_CHANGE_REQUIRED_EVENT = 'ridefleet:password-change-required';
+// Tenant Subscriptions Phase 5 (2026-08-28): fired when the backend 403s with
+// code TENANT_SUSPENDED — the tenant's account went on hold for non-payment.
+// Same contract as the line above, for the same reason: a live session must be
+// told WHY the app stopped working, not left with generic failures.
+export const TENANT_SUSPENDED_EVENT = 'ridefleet:tenant-suspended';
 const GET_CACHE_TTL_MS = 15000;
 const getResponseCache = new Map();
 const inflightGetRequests = new Map();
@@ -80,6 +85,9 @@ function clearGetCache() {
 function buildGetCacheKey(url, token) {
   return `${url}::${String(token || '')}`;
 }
+
+// One-shot guard so the recovery reload below can never become a loop.
+const VIEW_LOCATION_RECOVERY_KEY = 'ui.viewLocationRecovered';
 
 async function parseApiResponse(res, path) {
   if (!res.ok) {
@@ -117,6 +125,30 @@ async function parseApiResponse(res, path) {
     if (typeof window !== 'undefined' && res.status === 403 && code === 'PASSWORD_CHANGE_REQUIRED') {
       window.dispatchEvent(new CustomEvent(PASSWORD_CHANGE_REQUIRED_EVENT, { detail: { path } }));
     }
+    // Tenant Subscriptions Phase 5 (2026-08-28): the account went on hold for
+    // non-payment WHILE somebody was working. Without this the app would show a
+    // wall of "could not load" banners on every panel and nothing would say
+    // why — the same failure mode PASSWORD_CHANGE_REQUIRED gets this treatment
+    // for. AuthGate listens, re-fetches /me (which the backend allowlists), and
+    // swaps the whole shell for the hold screen.
+    if (typeof window !== 'undefined' && res.status === 403 && code === 'TENANT_SUSPENDED') {
+      window.dispatchEvent(new CustomEvent(TENANT_SUSPENDED_EVENT, { detail: { path } }));
+    }
+    // A stored location the current user does not own 403s EVERY scoped read,
+    // so the app looks broken rather than mis-scoped: zeros, empty lists, and
+    // "could not load" banners. It happens whenever the stored value outlives
+    // the session it was chosen in — a super-admin impersonating a tenant, or
+    // any user whose location assignment was changed under them. Drop it and
+    // reload once; the retry sends no header and falls back to their own scope.
+    if (typeof window !== 'undefined' && res.status === 403 && code === 'VIEW_LOCATION_DENIED') {
+      try {
+        if (readViewLocation() && !sessionStorage.getItem(VIEW_LOCATION_RECOVERY_KEY)) {
+          sessionStorage.setItem(VIEW_LOCATION_RECOVERY_KEY, '1');
+          writeViewLocation('');
+          window.location.reload();
+        }
+      } catch {}
+    }
     if (
       typeof window !== 'undefined' &&
       res.status === 401 &&
@@ -129,6 +161,11 @@ async function parseApiResponse(res, path) {
       }));
     }
     throw error;
+  }
+  // Whatever location is stored was accepted, so re-arm the recovery guard for
+  // the next time the stored value goes stale.
+  if (typeof window !== 'undefined') {
+    try { sessionStorage.removeItem(VIEW_LOCATION_RECOVERY_KEY); } catch {}
   }
   if (res.status === 204) return null;
   return res.json();
@@ -169,6 +206,30 @@ export function readStoredToken() {
   );
 }
 
+/**
+ * Serialise a request body the way every caller already assumes it is.
+ *
+ * `fetch` turns a plain object into the literal string "[object Object]", so
+ * `api(path, { body: { addOns } })` reached the server as garbage and the
+ * screen showed `"[object Object]" is not valid JSON` — which reads like a
+ * server fault and is not (Rent & Go, quotes add-ons, 2026-08-20). Two call
+ * sites had it; the next one would have had it too, because the correct
+ * spelling (JSON.stringify) is the one you have to remember.
+ *
+ * So the wrapper does it. Strings pass through untouched, and the browser's
+ * own body types (FormData, Blob, files, URLSearchParams) are left alone —
+ * stringifying those would break uploads.
+ */
+export function encodeBody(body) {
+  if (body === undefined || body === null) return body;
+  if (typeof body === 'string') return body;
+  if (typeof FormData !== 'undefined' && body instanceof FormData) return body;
+  if (typeof Blob !== 'undefined' && body instanceof Blob) return body;
+  if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(body)) return body;
+  if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) return body;
+  return JSON.stringify(body);
+}
+
 export async function api(path, opts = {}, token) {
   const { cacheTtlMs, bypassCache, skipViewLocation, ...fetchOpts } = opts || {};
   const method = String(fetchOpts.method || 'GET').toUpperCase();
@@ -186,7 +247,7 @@ export async function api(path, opts = {}, token) {
 
   if (!useGetCache) {
     if (method !== 'GET') clearGetCache();
-    const res = await fetch(url, { ...fetchOpts, method, headers });
+    const res = await fetch(url, { ...fetchOpts, method, headers, body: encodeBody(fetchOpts.body) });
     return parseApiResponse(res, path);
   }
 
@@ -204,7 +265,7 @@ export async function api(path, opts = {}, token) {
   if (inflight) return cloneCachedValue(await inflight);
 
   const requestPromise = (async () => {
-    const res = await fetch(url, { ...fetchOpts, method, headers });
+    const res = await fetch(url, { ...fetchOpts, method, headers, body: encodeBody(fetchOpts.body) });
     const data = await parseApiResponse(res, path);
     getResponseCache.set(cacheKey, { expiresAt: Date.now() + ttlMs, data: cloneCachedValue(data) });
     return data;

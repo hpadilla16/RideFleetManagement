@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiosko · Llaves retenidas — lámina de mockup</title>
+<style>
+  :root{
+    --purple:#8752FE;
+    --violet:#6d3df2;
+    --mint:#1fc7aa;
+    --ink:#211a38;
+    --title:#29223f;
+    --muted:#6f668f;
+    --border:#e6dfff;
+    --border-strong:#d7cbff;
+    --shadow:0 14px 32px rgba(35,21,80,.08);
+    --paper:#f4f1fb;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;background:var(--paper);color:#1f1f28;
+    font-family:Aptos,'Segoe UI Variable','Segoe UI',system-ui,sans-serif;
+    font-size:15px;line-height:1.55;
+  }
+  .wrap{max-width:1620px;margin:0 auto;padding:30px 24px 90px;}
+
+  /* ---------- Encabezado de la lámina ---------- */
+  .sheet-head{max-width:1080px;margin:0 0 26px;}
+  .sheet-head .eyebrow{
+    display:inline-flex;align-items:center;gap:8px;background:rgba(135,82,254,.1);
+    border:1px solid rgba(135,82,254,.2);color:#4c1d95;border-radius:999px;
+    padding:5px 15px;font-size:11.5px;font-weight:850;letter-spacing:.07em;text-transform:uppercase;
+  }
+  .sheet-head h1{font-size:31px;font-weight:850;color:var(--title);margin:14px 0 6px;letter-spacing:-.01em;line-height:1.15;}
+  .sheet-head p{color:#433b63;margin:0 0 10px;font-size:15px;}
+  .sheet-head code{background:#fff;border:1px solid var(--border);border-radius:6px;padding:1px 6px;font-size:12.5px;color:#4c1d95;}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;}
+  .meta span{background:#fff;border:1px solid var(--border);border-radius:10px;padding:6px 12px;font-size:12.5px;color:#433b63;}
+
+  .section{
+    font-size:12px;font-weight:850;letter-spacing:.11em;text-transform:uppercase;color:#7c6bb0;
+    margin:46px 0 14px;padding-bottom:8px;border-bottom:2px solid var(--border);
+  }
+  .screen-tag{
+    display:inline-block;background:#2a2440;color:#fff;border-radius:10px 10px 0 0;
+    padding:8px 16px;font-size:12.5px;font-weight:800;
+  }
+
+  /* ---------- Marco tablet (mismo patrón que doc/kiosk-mockups-2026-07-04.html) ---------- */
+  .tablet{
+    border:10px solid #2a2440;border-radius:28px;overflow:hidden;background:#fff;
+    box-shadow:0 22px 48px rgba(35,21,80,.18);width:1100px;max-width:100%;
+  }
+  .tablet.mini{width:530px;border-width:8px;border-radius:22px;}
+  .kbody{
+    display:flex;flex-direction:column;min-height:790px;
+    background:linear-gradient(180deg,#fdfcff 0%,#f6f2ff 100%);
+  }
+  .tablet.mini .kbody{min-height:410px;}
+
+  .kio-bar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 26px;border-bottom:1px solid var(--border);
+    background:rgba(255,255,255,.85);flex:none;
+  }
+  .kio-brand{display:flex;align-items:center;gap:11px;text-align:left;}
+  .kio-logo{
+    width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#8752FE,#6d3df2);
+    display:flex;align-items:center;justify-content:center;color:#fff;font-weight:850;font-size:19px;
+    box-shadow:0 6px 14px rgba(135,82,254,.35);flex:none;
+  }
+  .kio-brand b{font-size:19px;font-weight:850;color:var(--ink);display:block;line-height:1.2;}
+  .kio-brand small{display:block;color:var(--muted);font-size:12px;}
+  .kio-right{display:flex;align-items:center;gap:10px;}
+  .kio-lang{display:inline-flex;border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+  .kio-lang span{padding:12px 20px;background:#fff;color:#6f668f;font-size:15px;font-weight:750;}
+  .kio-lang span.on{background:var(--purple);color:#fff;}
+  .kio-help{
+    background:rgba(135,82,254,.09);border:1px solid rgba(135,82,254,.18);color:#4c1d95;
+    border-radius:12px;padding:12px 20px;font-weight:750;font-size:15px;
+  }
+  .mini .kio-logo{width:30px;height:30px;font-size:14px;border-radius:9px;}
+  .mini .kio-brand b{font-size:14px;} .mini .kio-brand small{font-size:10px;}
+  .mini .kio-lang span{padding:7px 12px;font-size:11px;}
+  .mini .kio-help{padding:7px 12px;font-size:11px;}
+  .mini .kio-bar{padding:10px 16px;}
+
+  .kio-steps{display:flex;gap:8px;align-items:center;justify-content:center;padding:14px 8px 4px;flex-wrap:wrap;flex:none;}
+  .stp{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:750;color:#6f668f;}
+  .stp .dot{
+    width:26px;height:26px;border-radius:999px;background:#ece6ff;color:#7c6bb0;
+    display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:850;
+  }
+  .stp.on{color:#4c1d95;}
+  .stp.on .dot{background:var(--purple);color:#fff;box-shadow:0 4px 10px rgba(135,82,254,.35);}
+  .stp.done .dot{background:var(--mint);color:#fff;}
+  .ln{width:22px;height:2px;background:#ece6ff;border-radius:2px;}
+  .mini .stp{font-size:10px;} .mini .stp .dot{width:18px;height:18px;font-size:9px;} .mini .ln{width:12px;}
+  .mini .kio-steps{padding:9px 6px 2px;}
+
+  .kio-main{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:22px 40px 30px;text-align:center;width:100%;
+  }
+  .mini .kio-main{padding:14px 20px 18px;justify-content:flex-start;}
+  .kio-h2{font-size:26px;font-weight:850;color:var(--title);margin:0 0 6px;}
+  .kio-sub{font-size:17px;color:var(--muted);margin:0 0 22px;max-width:680px;}
+  .mini .kio-h2{font-size:15px;} .mini .kio-sub{font-size:11px;margin-bottom:10px;}
+
+  .kio-panel{
+    background:rgba(255,255,255,.94);border:1px solid var(--border);border-radius:20px;
+    box-shadow:var(--shadow);padding:20px 24px;width:100%;max-width:680px;text-align:left;
+  }
+  .mini .kio-panel{padding:11px 13px;border-radius:13px;}
+  .kio-kv{
+    display:flex;justify-content:space-between;gap:14px;padding:11px 0;
+    border-bottom:1px solid #f3efff;font-size:15px;align-items:baseline;
+  }
+  .kio-kv:last-child{border-bottom:none;}
+  .kio-kv .l{color:var(--muted);flex:none;}
+  .kio-kv b{color:var(--title);font-weight:800;text-align:right;}
+  .mini .kio-kv{font-size:10.5px;padding:6px 0;}
+
+  .kio-btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:12px;
+    background:linear-gradient(180deg,#9460ff,#8752FE);color:#fff;border:none;border-radius:20px;
+    padding:18px 32px;min-height:60px;font-weight:800;font-size:19px;
+    box-shadow:0 12px 26px rgba(135,82,254,.32);min-width:260px;font-family:inherit;
+  }
+  .kio-btn.ghost{background:#fff;color:#4c1d95;border:2px solid rgba(135,82,254,.28);box-shadow:var(--shadow);}
+  .kio-btn.mint{background:linear-gradient(180deg,#2ad6b6,#1fc7aa);box-shadow:0 12px 26px rgba(31,199,170,.3);}
+  .kio-btn.sm{padding:12px 22px;font-size:16px;border-radius:16px;min-width:0;min-height:48px;}
+  .kio-btn.back{
+    background:#fff;color:#6f668f;border:1.5px solid var(--border);box-shadow:none;
+    font-size:15px;padding:10px 22px;min-width:0;min-height:48px;font-weight:750;
+  }
+  .mini .kio-btn{padding:8px 14px;font-size:11px;min-height:0;min-width:0;border-radius:11px;box-shadow:none;}
+  .kio-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:center;}
+
+  .kio-foot{
+    display:flex;justify-content:space-between;align-items:center;gap:12px;
+    padding:12px 26px;border-top:1px solid var(--border);background:rgba(255,255,255,.7);
+    font-size:13px;color:var(--muted);flex:none;
+  }
+  .mini .kio-foot{padding:8px 14px;font-size:9.5px;}
+
+  .kio-error{color:#be123c;font-size:14.5px;font-weight:700;margin:10px 0;max-width:640px;}
+  .mini .kio-error{font-size:10px;margin:6px 0;}
+  .kio-sig{
+    border:2px dashed var(--border-strong);border-radius:18px;background:#fff;
+    display:flex;align-items:center;justify-content:center;color:#c6bce4;
+    font-size:15px;font-weight:700;width:100%;height:80px;
+  }
+  .mini .kio-sig{height:44px;border-radius:11px;font-size:10px;}
+
+  /* ---------- Piezas nuevas de esta pantalla ---------- */
+  .saved-chip{
+    display:inline-flex;align-items:center;gap:9px;background:rgba(16,185,129,.12);
+    border:1px solid rgba(16,185,129,.22);color:#047857;font-weight:800;font-size:14px;
+    border-radius:999px;padding:9px 18px;margin-bottom:14px;
+  }
+  .refbox{
+    display:flex;align-items:center;justify-content:space-between;gap:18px;
+    background:linear-gradient(180deg,rgba(135,82,254,.09),rgba(135,82,254,.04));
+    border:2px solid rgba(135,82,254,.24);border-radius:18px;padding:16px 22px;
+    width:100%;max-width:680px;margin-top:14px;text-align:left;
+  }
+  .refbox .lbl{font-size:13px;color:#4c1d95;font-weight:800;letter-spacing:.04em;text-transform:uppercase;}
+  .refbox .hint{font-size:13.5px;color:var(--muted);margin-top:3px;}
+  .refbox .val{
+    font-size:34px;font-weight:850;color:#3b1e8f;letter-spacing:.10em;
+    font-variant-numeric:tabular-nums;white-space:nowrap;
+  }
+  .mini .refbox{padding:9px 12px;border-radius:11px;margin-top:8px;}
+  .mini .refbox .lbl{font-size:9px;} .mini .refbox .val{font-size:17px;} .mini .refbox .hint{font-size:9px;}
+
+  /* ---------- Marcadores y notas ---------- */
+  .mk{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:24px;height:24px;border-radius:999px;background:#2a2440;color:#fff;
+    font-size:12.5px;font-weight:850;flex:none;vertical-align:middle;
+    box-shadow:0 3px 8px rgba(35,21,80,.28);
+  }
+  /* Marcador anclado al layout (no a píxeles): vive en el flujo, junto a lo que anota. */
+  .mk.pin{width:21px;height:21px;font-size:11px;margin-right:7px;}
+  .mk.edge{
+    position:absolute;left:-13px;top:50%;transform:translateY(-50%);
+    width:22px;height:22px;font-size:11.5px;
+  }
+  .anchored{position:relative;}
+  .stage{position:relative;}
+
+  .layout{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap;}
+  .notes{
+    flex:1 1 400px;min-width:340px;max-width:460px;background:#fff;border:1px solid var(--border);
+    border-radius:20px;box-shadow:var(--shadow);padding:22px 24px;
+  }
+  .notes h3{margin:0 0 4px;font-size:15px;font-weight:850;color:var(--title);}
+  .notes .lead{font-size:12.5px;color:var(--muted);margin:0 0 16px;}
+  .note{display:flex;gap:11px;padding:12px 0;border-bottom:1px solid #f3efff;font-size:13.5px;color:#33304a;}
+  .note:last-child{border-bottom:none;}
+  .note b{color:var(--title);}
+  .note code{background:#f6f2ff;border-radius:5px;padding:1px 5px;font-size:11.5px;color:#4c1d95;}
+
+  .cols2{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start;}
+
+  /* ---------- Tabla de copy ---------- */
+  .copy{
+    background:#fff;border:1px solid var(--border);border-radius:20px;
+    box-shadow:var(--shadow);overflow:hidden;max-width:1100px;
+  }
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th{
+    background:#faf8ff;text-align:left;padding:12px 16px;font-size:11.5px;font-weight:850;
+    letter-spacing:.06em;text-transform:uppercase;color:#7c6bb0;border-bottom:1px solid var(--border);
+  }
+  td{padding:12px 16px;border-bottom:1px solid #f3efff;vertical-align:top;color:#33304a;}
+  tr:last-child td{border-bottom:none;}
+  td.k{font-family:Consolas,'Cascadia Mono',monospace;font-size:12px;color:#4c1d95;white-space:nowrap;}
+  .tag{
+    display:inline-block;border-radius:999px;padding:2px 9px;font-size:10.5px;font-weight:850;
+    letter-spacing:.05em;text-transform:uppercase;
+  }
+  .tag.new{background:rgba(135,82,254,.13);color:#4c1d95;}
+  .tag.reuse{background:rgba(31,199,170,.16);color:#0f766e;}
+
+  /* ---------- Descartes / preguntas ---------- */
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;max-width:1100px;}
+  .card{
+    background:#fff;border:1px solid var(--border);border-radius:18px;
+    box-shadow:var(--shadow);padding:18px 20px;
+  }
+  .card.warn{border-color:rgba(245,158,11,.35);background:linear-gradient(180deg,rgba(245,158,11,.06),#fff);}
+  .card h4{margin:0 0 6px;font-size:14.5px;font-weight:850;color:var(--title);}
+  .card .why{font-size:13px;color:#433b63;margin:0;}
+  .card .why b{color:#be123c;}
+  .card code{background:#f6f2ff;border-radius:5px;padding:1px 5px;font-size:11.5px;color:#4c1d95;}
+  .strike{text-decoration:line-through;color:var(--muted);}
+
+  .legend{max-width:1100px;color:#433b63;font-size:14px;margin:0 0 18px;}
+  .legend code{background:#fff;border:1px solid var(--border);border-radius:6px;padding:1px 6px;font-size:12.5px;color:#4c1d95;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="sheet-head">
+    <span class="eyebrow">Mockup para aprobación · Fase B3 · Kiosko</span>
+    <h1>Llaves retenidas: lo que ve el cliente cuando el cierre del checkout no aterrizó</h1>
+    <p>
+      La compuerta nueva del backend (<code>assertFinalizeLandedForKeys</code> →
+      <code>CHECKOUT_FINALIZE_INCOMPLETE</code>, 409) retiene las llaves cuando la reserva no quedó
+      <code>CHECKED_OUT</code> o el contrato no quedó <code>FINALIZED</code>. La compuerta es correcta y no se toca.
+      Esta lámina es <b>solo la cara del cliente</b> en ese instante.
+    </p>
+    <div class="meta">
+      <span>🖥️ Viewport: tablet landscape, marco de 1080&nbsp;px del mockup aprobado (<code>doc/kiosk-mockups-2026-07-04.html</code>, <code>.tablet</code>)</span>
+      <span>🎨 Tema Ride · <b style="color:#8752FE">#8752FE</b> · tokens de <code>frontend/src/app/kiosk/kiosk.css</code></span>
+      <span>🌐 ES + EN · claves <code>kiosk.*</code> (hoy 287 en <code>es.json</code>)</span>
+      <span>👆 Todo control táctil ≥48&nbsp;px</span>
+    </div>
+  </div>
+
+  <!-- ============================================================= -->
+  <div class="section">1 · Estado nuevo — tamaño real de kiosko</div>
+  <div class="layout">
+
+    <div>
+      <div class="screen-tag">K-K1 · Llaves retenidas — la firma ya se guardó, el cierre no. Salida real hacia una persona.</div>
+      <div class="stage">
+        <div class="tablet"><div class="kbody">
+
+          <div class="kio-bar">
+            <div class="kio-brand">
+              <div class="kio-logo">R</div>
+              <div>
+                <b>Ride Fleet International</b>
+                <small>Orlando — MCO · Lobby 1</small>
+              </div>
+            </div>
+            <div class="kio-right anchored">
+              <span class="mk edge" style="left:-30px">8</span>
+              <span class="kio-lang"><span>EN</span><span class="on">ES</span></span>
+              <span class="kio-help">🎧 Ayuda</span>
+            </div>
+          </div>
+
+          <div class="kio-steps anchored">
+            <span class="mk edge" style="left:14px">8</span>
+            <span class="stp done"><span class="dot">✓</span> Reservación</span><span class="ln"></span>
+            <span class="stp done"><span class="dot">✓</span> ID</span><span class="ln"></span>
+            <span class="stp done"><span class="dot">✓</span> Protección y extras</span><span class="ln"></span>
+            <span class="stp done"><span class="dot">✓</span> Pago</span><span class="ln"></span>
+            <span class="stp on"><span class="dot">5</span> Firma y llaves</span>
+          </div>
+
+          <div class="kio-main">
+            <span class="saved-chip"><span class="mk pin">2</span> ✓ Tu firma quedó guardada</span>
+
+            <div class="kio-h2"><span class="mk pin">1</span> 🤝 Un miembro del equipo termina tu entrega</div>
+            <p class="kio-sub">
+              Ya firmaste y lo guardamos todo. Solo nos falta confirmar la entrega de nuestro lado,
+              así que las llaves te las da una persona del equipo. Ya los avisamos — no empezarás de cero.
+            </p>
+
+            <div class="kio-panel">
+              <div class="kio-kv anchored">
+                <span class="mk edge">3</span>
+                <span class="l">🔑 Llaves</span>
+                <b>Pasa por el counter — un miembro del equipo te entrega las llaves.</b>
+              </div>
+              <div class="kio-kv anchored">
+                <span class="mk edge">4</span>
+                <span class="l">📍 Estás en</span>
+                <b>Orlando — MCO · Lobby 1</b>
+              </div>
+              <div class="kio-kv">
+                <span class="l">📄 Contrato y recibo</span>
+                <b>Enviados a tu email</b>
+              </div>
+            </div>
+
+            <div class="refbox anchored">
+              <span class="mk edge" style="left:-14px">5</span>
+              <div>
+                <div class="lbl">Muéstrale este número</div>
+                <div class="hint">Con él encuentran tu entrega al momento.</div>
+              </div>
+              <div class="val">ZE4-8213</div>
+            </div>
+
+            <div class="kio-row" style="margin-top:22px">
+              <span class="kio-btn"><span class="mk pin" style="background:rgba(255,255,255,.28);box-shadow:none">6</span> 🎧 Pedir ayuda</span>
+            </div>
+            <div class="kio-row" style="margin-top:14px">
+              <span class="kio-btn back"><span class="mk pin">7</span> Ya me ayudaron — continuar</span>
+              <span class="kio-btn back">🔧 Asistencia del personal</span>
+            </div>
+          </div>
+
+          <div class="kio-foot">
+            <span>English available · Toca 🎧 Ayuda en cualquier momento para hablar con el personal</span>
+            <span>Ride Kiosk · en línea <span style="color:#047857">●</span></span>
+          </div>
+
+        </div></div>
+      </div>
+    </div>
+
+    <div class="notes">
+      <h3>Notas de diseño</h3>
+      <p class="lead">Qué se decidió, por qué, y qué del kiosko ya existente se está reusando.</p>
+
+      <div class="note"><span class="mk">1</span><div>
+        <b>Sin la palabra "error", sin códigos.</b> El título nombra la salida, no la falla, igual que
+        <code>lookupTooManyTitle</code> ("Vamos a conseguirte ayuda") y <code>verifyStuckTitle</code>. El cuerpo dice lo
+        único que el cliente necesita saber: <b>las llaves las entrega una persona</b>, o sea que todavía no se lleva el
+        carro — pero nunca se lo dice como castigo ni como culpa suya.
+      </div></div>
+
+      <div class="note"><span class="mk">2</span><div>
+        <b>La firma se reconoce ANTES que el problema.</b> El chip verde va arriba del título, con el mismo verde
+        <code>#047857</code> que ya usa "✓ Con iniciales" en <code>SignScreen</code>. Es lo primero que lee: su trabajo no
+        se perdió. Lo que falta es nuestro.
+      </div></div>
+
+      <div class="note"><span class="mk">3</span><div>
+        <b>La fila de llaves reusa copy que ya existe.</b> Es literalmente <code>kiosk.doneKeysStaff</code>, la misma frase
+        que la pantalla DONE muestra cuando el handoff es <code>STAFF</code>. Sin clave nueva y sin una voz nueva.
+      </div></div>
+
+      <div class="note"><span class="mk">4</span><div>
+        <b>El mostrador sale del device, no de un campo inventado.</b> <code>device.location.name · device.name</code> —
+        exactamente lo que el header ya pinta en <code>layout.js</code>. No propongo un campo "counter number" nuevo:
+        no existe en el modelo y la ubicación ya identifica el punto físico.
+      </div></div>
+
+      <div class="note"><span class="mk">5</span><div>
+        <b>El identificador es el número de confirmación, no el ID de sesión.</b> Es el que el cliente ya tecleó en
+        LOOKUP, el que el agente busca en Reservaciones, y ya vive en memoria
+        (<code>confirmationNumberRef.current</code>, page.js:478 — ya se le pasa a VozIA como
+        <code>reservationNumber</code>). Un UUID de sesión no lo puede leer nadie en voz alta.
+        Si por alguna ruta viniera vacío, la caja no se pinta y el resto de la pantalla se sostiene sola.
+      </div></div>
+
+      <div class="note"><span class="mk">6</span><div>
+        <b>La escalada se reusa, no se inventa.</b> Al entrar, la pantalla llama al <code>escalate()</code> que ya existe
+        (page.js:415) → la sesión queda <code>ESCALATED</code> y aparece sola en la lista de sesiones del admin y en el KPI
+        <code>kioskEscalations</code> del dashboard. El botón morado es <code>openHelp()</code>: abre el embed de VozIA si el
+        device lo trae, y si no, re-escala. Cero patrón nuevo.
+      </div></div>
+
+      <div class="note"><span class="mk">7</span><div>
+        <b>El reintento baja a terciario y cambia de significado.</b> Hoy "Firmar y terminar" reintenta a ciegas y vuelve a
+        fallar. Aquí es <code>kio-btn back</code> (el peso más bajo del kiosko) y se llama "Ya me ayudaron — continuar":
+        se toca <i>después</i> de que la persona arregló el registro, no antes. Al lado, la entrada discreta de
+        <code>kiosk.assistEntry</code>, copiada tal cual de la pantalla ESCALATED.
+      </div></div>
+
+      <div class="note"><span class="mk">8</span><div>
+        <b>Se conserva el chrome completo.</b> Header con marca del tenant, EN/ES y 🎧 Ayuda; footer con el estado en
+        línea; barra de pasos con "Firma y llaves" todavía en curso (no ✓: la entrega no terminó). El cliente sigue
+        pudiendo cambiar de idioma y pedir ayuda desde arriba, como en cualquier otra pantalla.
+      </div></div>
+
+      <div class="note"><span class="mk">↔</span><div>
+        <b>Hay DOS sitios que hay que enrutar, no uno.</b> <code>CHECKOUT_FINALIZE_INCOMPLETE</code> lo tira
+        <code>complete()</code>, y <code>finishComplete()</code> se llama desde dos lugares del mismo <code>catch</code>:
+        el <code>else</code> catch-all (page.js:865) <b>y</b> el catch interno de <code>CHECKOUT_TERMINAL</code>
+        (page.js:855, <code>setErr(e2.message)</code>). Si solo se arregla el primero, la frase en inglés sobrevive por la
+        segunda puerta.
+      </div></div>
+
+      <div class="note"><span class="mk">⚠</span><div>
+        <b>El <code>else</code> catch-all sigue pintando inglés crudo</b> para cualquier otro código 4xx
+        (<code>e.message</code>). Esta lámina no lo resuelve — pero es exactamente la misma clase de fuga y vale la pena
+        levantarlo aparte.
+      </div></div>
+    </div>
+
+  </div>
+
+  <!-- ============================================================= -->
+  <div class="section">2 · Hoy vs. propuesta — el mismo instante, lado a lado</div>
+  <p class="legend">
+    Ambas reducidas al mismo tamaño para comparar de un vistazo. La de la izquierda es el estado actual:
+    el <code>kio-error</code> de <code>SignScreen</code> (page.js:2527) pintando la frase que el backend escribió a mano.
+  </p>
+  <div class="cols2">
+
+    <div>
+      <div class="screen-tag" style="background:#7f1d3a">HOY · inglés crudo del backend + botón que reintenta y vuelve a fallar</div>
+      <div class="tablet mini"><div class="kbody">
+        <div class="kio-bar">
+          <div class="kio-brand">
+            <div class="kio-logo">R</div>
+            <div><b>Ride Fleet International</b><small>Orlando — MCO · Lobby 1</small></div>
+          </div>
+          <div class="kio-right">
+            <span class="kio-lang"><span>EN</span><span class="on">ES</span></span>
+            <span class="kio-help">🎧 Ayuda</span>
+          </div>
+        </div>
+        <div class="kio-steps">
+          <span class="stp done"><span class="dot">✓</span> Reservación</span><span class="ln"></span>
+          <span class="stp done"><span class="dot">✓</span> ID</span><span class="ln"></span>
+          <span class="stp done"><span class="dot">✓</span> Extras</span><span class="ln"></span>
+          <span class="stp done"><span class="dot">✓</span> Pago</span><span class="ln"></span>
+          <span class="stp on"><span class="dot">5</span> Firma y llaves</span>
+        </div>
+        <div class="kio-main">
+          <div class="kio-h2">¡Tu carro está listo! 🚙</div>
+          <div class="kio-panel" style="margin-bottom:8px">
+            <b style="font-size:11px">Tu firma</b>
+            <div class="kio-sig" style="margin-top:6px">
+              <svg width="120" height="30" viewBox="0 0 220 60"><path d="M10 45 C 40 5, 60 55, 90 30 S 150 10, 210 40" stroke="#6d3df2" stroke-width="4" fill="none" stroke-linecap="round"/></svg>
+            </div>
+          </div>
+          <div class="kio-error">This checkout could not be completed — please see an agent for your keys</div>
+          <div class="kio-row"><span class="kio-btn mint">Firmar y terminar ›</span></div>
+          <div style="font-size:9.5px;color:#be123c;font-weight:750;margin-top:10px;max-width:330px">
+            ↻ Se toca · vuelve a firmar · vuelve a fallar · vuelve aquí. Sin botón de ayuda en toda la pantalla.
+          </div>
+        </div>
+        <div class="kio-foot"><span>English available · Toca 🎧 Ayuda…</span><span>Ride Kiosk · en línea ●</span></div>
+      </div></div>
+      <div style="max-width:530px;margin-top:10px;font-size:12.5px;color:#7f1d3a">
+        <b>Tres fallas a la vez:</b> (a) frase en inglés escrita a mano en
+        <code>kiosk-checkout.service.js</code> sobre una superficie 100% traducida; (b) cae en el <code>else</code>
+        catch-all mientras sus dos hermanos del mismo <code>catch</code> sí tienen copy traducido; (c) la única acción
+        disponible es la que ya falló.
+      </div>
+    </div>
+
+    <div>
+      <div class="screen-tag" style="background:#1f5f52">PROPUESTA · misma pantalla, reducida — la salida es una persona</div>
+      <div class="tablet mini"><div class="kbody">
+        <div class="kio-bar">
+          <div class="kio-brand">
+            <div class="kio-logo">R</div>
+            <div><b>Ride Fleet International</b><small>Orlando — MCO · Lobby 1</small></div>
+          </div>
+          <div class="kio-right">
+            <span class="kio-lang"><span>EN</span><span class="on">ES</span></span>
+            <span class="kio-help">🎧 Ayuda</span>
+          </div>
+        </div>
+        <div class="kio-steps">
+          <span class="stp done"><span class="dot">✓</span> Reservación</span><span class="ln"></span>
+          <span class="stp done"><span class="dot">✓</span> ID</span><span class="ln"></span>
+          <span class="stp done"><span class="dot">✓</span> Extras</span><span class="ln"></span>
+          <span class="stp done"><span class="dot">✓</span> Pago</span><span class="ln"></span>
+          <span class="stp on"><span class="dot">5</span> Firma y llaves</span>
+        </div>
+        <div class="kio-main">
+          <span class="saved-chip" style="font-size:10px;padding:5px 11px;margin-bottom:8px">✓ Tu firma quedó guardada</span>
+          <div class="kio-h2">🤝 Un miembro del equipo termina tu entrega</div>
+          <p class="kio-sub">
+            Ya firmaste y lo guardamos todo. Solo nos falta confirmar la entrega de nuestro lado, así que
+            las llaves te las da una persona del equipo. Ya los avisamos — no empezarás de cero.
+          </p>
+          <div class="kio-panel">
+            <div class="kio-kv"><span class="l">🔑 Llaves</span><b>Pasa por el counter — un miembro del equipo te entrega las llaves.</b></div>
+            <div class="kio-kv"><span class="l">📍 Estás en</span><b>Orlando — MCO · Lobby 1</b></div>
+          </div>
+          <div class="refbox">
+            <div><div class="lbl">Muéstrale este número</div><div class="hint">Con él encuentran tu entrega al momento.</div></div>
+            <div class="val">ZE4-8213</div>
+          </div>
+          <div class="kio-row" style="margin-top:10px"><span class="kio-btn">🎧 Pedir ayuda</span></div>
+          <div class="kio-row" style="margin-top:7px">
+            <span class="kio-btn back" style="font-size:9.5px;padding:5px 11px">Ya me ayudaron — continuar</span>
+            <span class="kio-btn back" style="font-size:9.5px;padding:5px 11px">🔧 Asistencia del personal</span>
+          </div>
+        </div>
+        <div class="kio-foot"><span>English available · Toca 🎧 Ayuda…</span><span>Ride Kiosk · en línea ●</span></div>
+      </div></div>
+      <div style="max-width:530px;margin-top:10px;font-size:12.5px;color:#1f5f52">
+        <b>Tres salidas:</b> (a) copy traducido en las dos lenguas, con la voz que ya tiene el kiosko;
+        (b) la sesión entra sola a <code>ESCALATED</code> — el personal la ve en su lista sin que nadie llame;
+        (c) el cliente sale con un número que el agente puede buscar, no con un botón que repite el fallo.
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============================================================= -->
+  <div class="section">3 · Copy — español e inglés, con los nombres de clave propuestos</div>
+  <p class="legend">
+    Convención tomada del archivo: prefijo de pantalla + rol (<code>lookupLockedTitle</code>/<code>Body</code>,
+    <code>assistSuccessTitle</code>/<code>Body</code>, <code>signPaymentRequired</code>). Pantalla nueva ⇒ prefijo
+    <code>keysHeld</code>. <span class="tag reuse">reusa</span> = ya existe en <code>es.json</code>/<code>en.json</code>, no se crea nada.
+  </p>
+  <div class="copy">
+    <table>
+      <thead>
+        <tr><th style="width:20%">Clave</th><th style="width:9%"></th><th style="width:35.5%">Español</th><th style="width:35.5%">English</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="k">kiosk.keysHeldSaved</td>
+          <td><span class="tag new">nueva</span></td>
+          <td>Tu firma quedó guardada</td>
+          <td>Your signature is saved</td>
+        </tr>
+        <tr>
+          <td class="k">kiosk.keysHeldTitle</td>
+          <td><span class="tag new">nueva</span></td>
+          <td>Un miembro del equipo termina tu entrega</td>
+          <td>A team member will finish your pickup</td>
+        </tr>
+        <tr>
+          <td class="k">kiosk.keysHeldBody</td>
+          <td><span class="tag new">nueva</span></td>
+          <td>Ya firmaste y lo guardamos todo. Solo nos falta confirmar la entrega de nuestro lado, así que las llaves te las da una persona del equipo. Ya los avisamos — no empezarás de cero.</td>
+          <td>You've signed and we saved everything. We just need to confirm the handover on our side, so a team member will hand you the keys. We've already let them know — you won't start over.</td>
+        </tr>
+        <tr>
+          <td class="k">kiosk.doneKeys</td>
+          <td><span class="tag reuse">reusa</span></td>
+          <td>Llaves</td>
+          <td>Keys</td>
+        </tr>
+        <tr>
+          <td class="k">kiosk.doneKeysStaff</td>
+          <td><span class="tag reuse">reusa</span></td>
+          <td>Pasa por el counter — un miembro del equipo te entrega las llaves.</td>
+          <td>Please see a team member at the counter to pick up your keys.</td>
+        </tr>
+        <tr>
+          <td class="k">kiosk.keysHeldWhere</td>
+          <td><span class="tag new">nueva</span></td>
+          <td>Estás en</td>
+          <td>You're at</td>
+        </tr>
+        <tr>
+          <td class="k">kiosk.doneContract</td>
+          <td><span class="tag reuse">reusa</span></td>
+          <td>Contrato y recibo</td>
+          <td>Contract &amp; receipt</td>
+        </tr>
+        <tr>
+          <td class="k">kiosk.doneContractSent</td>
+          <td><span class="tag reuse">reusa</span></td>
+          <td>Enviados a tu email</td>
+          <td>Sent to your email</td>
+        </tr>
+        <tr>
+          <td class="k">kiosk.keysHeldRefLabel</td>
+          <td><span class="tag new">nueva</span></td>
+          <td>Muéstrale este número</td>
+          <td>Show them this number</td>
+        </tr>
+        <tr>
+          <td class="k">kiosk.keysHeldRefHint</td>
+          <td><span class="tag new">nueva</span></td>
+          <td>Con él encuentran tu entrega al momento.</td>
+          <td>It lets them pull up your pickup right away.</td>
+        </tr>
+        <tr>
+          <td class="k">kiosk.getHelp</td>
+          <td><span class="tag reuse">reusa</span></td>
+          <td>Pedir ayuda</td>
+          <td>Get help</td>
+        </tr>
+        <tr>
+          <td class="k">kiosk.keysHeldContinue</td>
+          <td><span class="tag new">nueva</span></td>
+          <td>Ya me ayudaron — continuar</td>
+          <td>I've been helped — continue</td>
+        </tr>
+        <tr>
+          <td class="k">kiosk.assistEntry</td>
+          <td><span class="tag reuse">reusa</span></td>
+          <td>Asistencia del personal</td>
+          <td>Staff assist</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="legend" style="margin-top:14px">
+    <b>Total: 6 claves nuevas, 6 reusadas.</b> La frase inglesa de
+    <code>kiosk-checkout.service.js:1140-1144</code> deja de pintarse: el front enruta por
+    <code>e.code === 'CHECKOUT_FINALIZE_INCOMPLETE'</code>, igual que ya hace con
+    <code>PAYMENT_REQUIRED</code> e <code>ID_VERIFY_REQUIRED</code>. El mensaje del backend se queda donde sirve — en el log
+    y en la respuesta — pero ya no es lo que lee el cliente.
+  </p>
+
+  <!-- ============================================================= -->
+  <div class="section">4 · Lo que descarté, y por qué</div>
+  <div class="cards">
+
+    <div class="card">
+      <h4><span class="strike">Traducir la frase y dejarla en el banner rojo</span></h4>
+      <p class="why">Lo barato: una clave nueva en el <code>else</code> y listo. <b>No resuelve el bucle.</b> El cliente
+      seguiría en <code>SignScreen</code> con firma, iniciales y "Firmar y terminar" como única acción — el mismo callejón,
+      ahora en español. La frase traducida es el 20% del problema.</p>
+    </div>
+
+    <div class="card">
+      <h4><span class="strike">Reusar tal cual la pantalla ESCALATED</span></h4>
+      <p class="why">Ya existe y ya escala bien, pero su copy dice "alguien vendrá a <b>terminar tu check-in</b>", y aquí el
+      check-in ya terminó: lo que falta es la <b>entrega</b>. Reuso el mecanismo (<code>escalate()</code>, outcome
+      <code>ESCALATED</code>, KPI <code>kioskEscalations</code>, entrada discreta de staff) y cambio solo el texto y el
+      panel. Sin pantalla-hermana duplicada.</p>
+    </div>
+
+    <div class="card">
+      <h4><span class="strike">Un botón de reintento prominente</span></h4>
+      <p class="why">La compuerta lee estado real de base de datos: <b>reintentar sin que alguien arregle el registro
+      falla igual</b>, y el cliente firma dos, tres, cuatro veces. Lo bajo a terciario y lo renombro a
+      "Ya me ayudaron — continuar", que es cuándo de verdad funciona.</p>
+    </div>
+
+    <div class="card">
+      <h4><span class="strike">Mostrar el ID de sesión o el código de error</span></h4>
+      <p class="why">Un UUID no se dicta en voz alta y <code>CHECKOUT_FINALIZE_INCOMPLETE</code> no significa nada para
+      quien está parado en el lobby. El número de confirmación ya lo tiene el cliente, ya lo busca el agente, y ya está en
+      memoria.</p>
+    </div>
+
+    <div class="card">
+      <h4><span class="strike">Un "número de mostrador" nuevo</span></h4>
+      <p class="why">Suena bien hasta que hay que inventar un campo que no existe en el modelo de device y pedirle a cada
+      tenant que lo llene. <code>location.name · device.name</code> ya identifica el punto físico y ya se pinta en el header
+      de todas las pantallas.</p>
+    </div>
+
+    <div class="card">
+      <h4><span class="strike">Rojo, iconos de alerta, "Error"</span></h4>
+      <p class="why">El cliente no hizo nada mal y no puede arreglar nada. El kiosko ya tiene una voz para esto
+      ("Tranquilo — pasa a veces", "Vamos a conseguirte ayuda"): morado y verde, cero rojo. El rojo se queda para lo que sí
+      es culpa recuperable del cliente, como el pago rechazado.</p>
+    </div>
+
+    <div class="card">
+      <h4><span class="strike">Ofrecer el lockbox como plan B</span></h4>
+      <p class="why">La compuerta retiene las llaves <b>precisamente</b> porque la entrega no quedó registrada. Ofrecer el
+      código del lockbox aquí sería saltarse la compuerta por la puerta de atrás. El handoff siempre es humano en este
+      estado, sea cual sea el <code>keyHandoff.mode</code> del location.</p>
+    </div>
+
+    <div class="card">
+      <h4><span class="strike">Auto-reintento silencioso con countdown</span></h4>
+      <p class="why">Tentador ("igual se arregla solo"), pero la sesión ya está en el minuto 8 y el cliente ya está de pie.
+      Prefiero avisar al personal <b>de inmediato</b> y dejar el reintento en manos de quien puede arreglarlo.</p>
+    </div>
+
+  </div>
+
+  <!-- ============================================================= -->
+  <div class="section">5 · Preguntas para Hector antes de construir</div>
+  <div class="cards">
+
+    <div class="card warn">
+      <h4>⚠ ¿El reintento exitoso debe des-escalar la sesión?</h4>
+      <p class="why">Si al entrar llamamos <code>escalate()</code>, el outcome pasa a <code>ESCALATED</code>. Después,
+      un <code>complete()</code> que sí pasa la compuerta devuelve <code>ok:true</code> <b>pero</b> el bloque
+      <code>if (session.outcome === 'IN_PROGRESS')</code> no corre: la sesión nunca queda <code>COMPLETED</code> y no se
+      manda el link de inspección al cliente. Hay precedente para arreglarlo
+      (<code>kiosk-staff-assist.service.js:310-312</code> ya limpia <code>escalatedReason</code> y devuelve la sesión al
+      trabajo). <b>Es la única decisión que toca backend</b> y quiero tu OK antes de tocarlo.</p>
+    </div>
+
+    <div class="card">
+      <h4>¿Motivo de escalada nuevo o <code>OTHER</code>?</h4>
+      <p class="why"><code>ESCALATE_REASONS</code> hoy es <code>ID_SCAN_FAILED · ID_MISMATCH · PAYMENT_TROUBLE ·
+      CUSTOMER_REQUEST · LOOKUP_FAILED · OTHER</code>. Con <code>'OTHER'</code> funciona hoy, sin tocar nada. Añadir
+      <code>'KEYS_WITHHELD'</code> cuesta una línea y le dice al equipo de ops, en su propia lista, que esto no es un
+      cliente trancado sino <b>un cierre roto que alguien tiene que reparar</b>. Mi recomendación: añadirlo.</p>
+    </div>
+
+    <div class="card">
+      <h4>¿"counter" o "mostrador"?</h4>
+      <p class="why">El es.json actual dice literalmente "Pasa por el <b>counter</b>" (spanglish de PR/FL, ya aprobado y ya
+      en producción). Lo respeté para no abrir dos voces. Si prefieres "mostrador", es un solo cambio y afecta también a
+      <code>doneKeysStaff</code> y <code>outOfServiceBody</code>.</p>
+    </div>
+
+  </div>
+
+  <p class="legend" style="margin-top:34px;font-size:12.5px;color:var(--muted)">
+    Lámina generada para aprobación previa a la construcción · no se tocó código de la app ·
+    fuentes leídas: <code>frontend/src/app/kiosk/page.js</code>, <code>frontend/src/app/kiosk/kiosk.css</code>,
+    <code>frontend/src/app/kiosk/layout.js</code>, <code>frontend/src/locales/{es,en}.json</code>,
+    <code>backend/src/modules/kiosk/kiosk-checkout.service.js</code>,
+    <code>backend/src/modules/kiosk/kiosk-session.service.js</code>,
+    <code>doc/kiosk-mockups-2026-07-04.html</code> (Rev 2, aprobado).
+  </p>
+
+</div>
+</body>
+</html>

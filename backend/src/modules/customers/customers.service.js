@@ -294,7 +294,10 @@ export const customersService = {
     return prisma.$queryRaw`
       SELECT
         id, "tenantId", "firstName", "lastName", email, phone,
-        "dateOfBirth", "licenseNumber", "licenseState",
+        -- dateOfBirthEnc: field-crypto (2026-08-23) — post-backfill the plain
+        -- DateTime is null; the prisma extension decrypts Enc back onto
+        -- dateOfBirth and strips the Enc key from the row.
+        "dateOfBirth", "dateOfBirthEnc", "licenseNumber", "licenseState",
         city, state,
         "creditBalance", "doNotRent", "doNotRentReason",
         "createdAt", "updatedAt",

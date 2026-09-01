@@ -98,6 +98,11 @@ dealershipLoanerRouter.get('/statement-print', async (req, res, next) => {
       endDate: req.query?.endDate ? String(req.query.endDate) : ''
     });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    // Anti-clickjacking (DAST 2026-08-23): a server-rendered print view with no
+    // embedded third-party content and no reason to be framed — same treatment
+    // as the public-booking payment terminal pages.
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
     res.send(html);
   } catch (error) {
     next(error);

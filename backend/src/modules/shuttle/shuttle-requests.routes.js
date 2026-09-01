@@ -15,6 +15,7 @@ import { Router } from 'express';
 import { scopeFor, userAllowedLocationIds } from '../../lib/tenant-scope.js';
 import { shuttleRequestsService } from './shuttle-requests.service.js';
 import { prisma } from '../../lib/prisma.js';
+import { auditFromReq, AUDIT_ACTIONS } from '../audit/audit.service.js';
 
 export const shuttleRequestsRouter = Router();
 
@@ -172,9 +173,71 @@ shuttleRequestsRouter.post('/:id/cancel', async (req, res, next) => {
   }
 });
 
+// Phase 3 (Screen 17): the same close, now with the fan-out behind it —
+// mode-aware customer SMS, a REQUEST_NO_SHOW row in the alert feed, and the
+// optional staff recipients email. The response keeps the row shape the
+// queue UI already reads (fan-out details stay server-side).
 shuttleRequestsRouter.post('/:id/no-show', async (req, res, next) => {
   try {
-    res.json(await shuttleRequestsService.close(String(req.params.id), 'NO_SHOW', staffScope(req), req.user?.sub || null, req.body?.reason));
+    const out = await shuttleRequestsService.markNoShow(String(req.params.id), {
+      scope: staffScope(req),
+      userId: req.user?.sub || null,
+      reason: req.body?.reason,
+      actorContext: 'staff',
+    });
+    res.json(out.request);
+  } catch (e) {
+    if (e?.status === 404) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+// Alias of /complete in driver vocabulary ("✓ Recogido", Screen 17a) — the
+// Phase-3 driver surface will speak this name; both hit markPickedUp.
+shuttleRequestsRouter.post('/:id/picked-up', async (req, res, next) => {
+  try {
+    res.json(await shuttleRequestsService.markPickedUp(String(req.params.id), staffScope(req), req.user?.sub || null, req.body?.reason));
+  } catch (e) {
+    if (e?.status === 404) return res.status(404).json({ error: e.message });
+    next(e);
+  }
+});
+
+/**
+ * Manual assignment (Phase 3, Screen 8a) — staff pins one configured shuttle
+ * to an open request. Same gate as every queue action (requireAuth + module
+ * access via main.js; scope narrows by User.locationIds). The service is
+ * fail-closed on tenant/config; the audit row records who pinned what —
+ * assignment decides which vehicle's GPS a customer page shows, so it is a
+ * mutation worth a trail (same reasoning as ZONE_*).
+ */
+shuttleRequestsRouter.post('/:id/assign', async (req, res, next) => {
+  try {
+    const row = await shuttleRequestsService.assign(String(req.params.id), req.body?.vehicleId, staffScope(req), req.user?.sub || null);
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.SHUTTLE_ASSIGN,
+      targetType: 'SHUTTLE_REQUEST',
+      targetId: row.id,
+      metadata: { vehicleId: row.assignedVehicleId, locationId: row.locationId },
+    });
+    res.json(row);
+  } catch (e) {
+    if (e?.status === 404) return res.status(404).json({ error: e.message });
+    if (e?.status === 400 || e?.status === 409) return res.status(e.status).json({ error: e.message });
+    next(e);
+  }
+});
+
+shuttleRequestsRouter.delete('/:id/assign', async (req, res, next) => {
+  try {
+    const row = await shuttleRequestsService.unassign(String(req.params.id), staffScope(req), req.user?.sub || null);
+    auditFromReq(req, {
+      action: AUDIT_ACTIONS.SHUTTLE_UNASSIGN,
+      targetType: 'SHUTTLE_REQUEST',
+      targetId: row.id,
+      metadata: { locationId: row.locationId },
+    });
+    res.json(row);
   } catch (e) {
     if (e?.status === 404) return res.status(404).json({ error: e.message });
     next(e);

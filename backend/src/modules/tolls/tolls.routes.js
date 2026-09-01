@@ -133,6 +133,29 @@ tollsRouter.get('/dashboard', async (req, res, next) => {
   }
 });
 
+// CSV export of the CURRENT filtered queue view (Tolls redesign A,
+// 2026-08-28). Same open read posture as /dashboard — the export must show
+// exactly what the caller's screen shows: identical tenant scope, location
+// scope, filters (q / status / needsReview) AND the active queue view. The
+// where is built by the same pure builder the dashboard list uses
+// (tolls-export.js), so the spreadsheet cannot drift from the screen.
+tollsRouter.get('/transactions/export.csv', async (req, res, next) => {
+  try {
+    const out = await tollsService.exportTransactionsCsv(scopeFor(req), {
+      q: req.query?.q ? String(req.query.q) : '',
+      status: req.query?.status ? String(req.query.status) : '',
+      reservationId: req.query?.reservationId ? String(req.query.reservationId) : '',
+      needsReview: String(req.query?.needsReview || '').toLowerCase() === 'true',
+      view: req.query?.view ? String(req.query.view) : 'ALL'
+    });
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${out.filename}"`);
+    res.send(out.csv);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Bandeja "peajes por cobrar" (TollBridge point 9): unacknowledged tolls on
 // contracts, closed ones first. Same open posture as /dashboard — front-desk
 // staff (AGENT) are exactly who must see and work these.

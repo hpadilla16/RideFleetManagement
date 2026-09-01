@@ -77,13 +77,18 @@ export function ShuttleBanner() {
         const out = await api('/api/shuttle-requests?status=open', { bypassCache: true }, token);
         if (cancelled) return;
         const rows = Array.isArray(out?.rows) ? out.rows : [];
-        setReady(rows.filter((r) => r.status === 'READY'));
+        const readyRows = rows.filter((r) => r.status === 'READY');
+        setReady(readyRows);
+        // Feed the AppShell "Shuttles" nav badge from THIS poll — one fetch
+        // serves both surfaces, the shell never adds its own (2026-08-24).
+        try { window.dispatchEvent(new CustomEvent('shuttle:openCount', { detail: readyRows.length })); } catch { /* badge only */ }
         failures = 0;
         schedule(POLL_MS);
       } catch {
         if (cancelled) return;
         failures += 1;
         setReady([]);
+        try { window.dispatchEvent(new CustomEvent('shuttle:openCount', { detail: 0 })); } catch { /* badge only */ }
         // Give up rather than keep consuming a connection every 20s.
         if (failures >= MAX_FAILURES) return;
         schedule(Math.min(POLL_MS * 2 ** failures, MAX_BACKOFF_MS));

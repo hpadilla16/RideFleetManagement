@@ -14,7 +14,7 @@
  *   │ Aging summary — 5 colored cards (Current → 90+)                 │
  *   ├─────────────────────────────────────────────────────────────────┤
  *   │ Triage table grouped by bucket, 90+ first → Current last        │
- *   │   (rows link to /agreements/<id>)                                │
+ *   │   (rows link to /reservations/<reservationId>)                   │
  *   └─────────────────────────────────────────────────────────────────┘
  */
 
@@ -56,6 +56,10 @@ export default function Page() {
 
 function UnpaidBalanceReport({ token, me, logout }) {
   const [locationId, setLocationId] = useState('');
+  // Row order within each aging bucket: 'age' (oldest first) or 'balance'
+  // (largest owed first). Server-side so the PDF/Excel exports match the
+  // screen — see the `sort` param on /api/reports/unpaid-balance.
+  const [sort, setSort] = useState('age');
   const [locations, setLocations] = useState([]);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -85,6 +89,7 @@ function UnpaidBalanceReport({ token, me, logout }) {
     setError('');
     const params = new URLSearchParams();
     if (locationId) params.set('locationId', locationId);
+    if (sort && sort !== 'age') params.set('sort', sort);
     (async () => {
       try {
         const out = await api(`/api/reports/unpaid-balance?${params.toString()}`, { bypassCache: true }, token);
@@ -96,7 +101,7 @@ function UnpaidBalanceReport({ token, me, logout }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [token, locationId, reloadKey]);
+  }, [token, locationId, sort, reloadKey]);
 
   const refresh = useCallback(() => setReloadKey((k) => k + 1), []);
 
@@ -112,6 +117,15 @@ function UnpaidBalanceReport({ token, me, logout }) {
         {locations.map((loc) => (
           <option key={loc.id} value={loc.id}>{loc.name || loc.code || loc.id}</option>
         ))}
+      </select>
+      <span style={{ fontSize: 13, color: '#6f668f' }}>Sort</span>
+      <select
+        value={sort}
+        onChange={(e) => setSort(e.target.value || 'age')}
+        style={{ fontSize: 13, padding: '6px 8px', minWidth: 140, borderRadius: 8, border: '0.5px solid #d3d1c7', background: 'white' }}
+      >
+        <option value="age">Oldest first</option>
+        <option value="balance">Largest balance first</option>
       </select>
       <button
         type="button"
@@ -146,6 +160,10 @@ function UnpaidBalanceReport({ token, me, logout }) {
         hideDateRange
         leftSlot={leftSlot}
         extraFilters={locationFilter}
+        // Without this the PDF/Excel buttons exported the UNFILTERED tenant —
+        // same bug the LAWA report hit in 2026-07-29. The on-screen location
+        // filter and sort order now carry into both exports.
+        extraExportParams={{ locationId, sort }}
       >
         {loading && !data ? (
           <Skeleton />
@@ -226,7 +244,9 @@ function ReportBody({ data }) {
         </div>
       ) : (
         <section>
-          <SectionHeader>Accounts · oldest first</SectionHeader>
+          <SectionHeader>
+            Accounts · {data.filters?.sort === 'balance' ? 'largest balance first' : 'oldest first'}
+          </SectionHeader>
           <div style={{ border: '0.5px solid #d3d1c7', borderRadius: 8, overflow: 'hidden', background: 'white' }}>
             {visibleTriageBuckets.map((b) => <BucketBlock key={b.key} bucket={b} />)}
           </div>
@@ -266,8 +286,21 @@ function Row({ r, bucketKey }) {
   return (
     <tr style={{ borderTop: '0.5px solid #d3d1c7' }}>
       <td style={{ padding: '8px 12px', minWidth: 200 }}>
+        {/*
+          Goes to the RESERVATION, which is where the money actually lives —
+          charges, payments, tolls, the agreement itself.
+
+          It used to point at /agreements/<id>. That route is a deprecated stub
+          that throws the id away and router.replace()s to /reservations, so
+          every row in this report landed the operator on the same unfiltered
+          list with no way back to the debt they clicked. A dead link on all
+          282 of IRC's rows.
+
+          Falls back to the old target only when the row has no reservationId,
+          which the report's own select makes nullable.
+        */}
         <Link
-          href={`/agreements/${r.id}`}
+          href={r.reservationId ? `/reservations/${r.reservationId}` : `/agreements/${r.id}`}
           style={{ color: '#211a38', textDecoration: 'none', fontWeight: 500 }}
         >
           {r.customerName || '(no customer)'}
@@ -285,11 +318,20 @@ function Row({ r, bucketKey }) {
       </td>
       <td style={{ padding: '8px 12px', color: '#211a38' }}>
         Returned {r.returnLabel}
+        {r.pickupLabel ? (
+          <div style={{ fontSize: 10, color: '#6f668f', marginTop: 1 }}>Out {r.pickupLabel}</div>
+        ) : null}
         {isPastDue ? (
           <div style={{ fontSize: 11, fontWeight: 500, marginTop: 1, color: bucketKey === 'B90_PLUS' || bucketKey === 'B61_90' ? '#501313' : '#412402' }}>
             {r.daysLate} day{r.daysLate === 1 ? '' : 's'} late
           </div>
         ) : null}
+      </td>
+      {/* Status earns a column of its own: a CLOSED/FINALIZED agreement still
+          owing money is the collectable case, while an in-progress rental
+          carrying a balance is just a rental that has not been closed yet. */}
+      <td style={{ padding: '8px 12px', color: '#6f668f', fontSize: 11, whiteSpace: 'nowrap' }}>
+        {r.status || '—'}
       </td>
       <td style={{ padding: '8px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
         <div style={{
@@ -297,6 +339,9 @@ function Row({ r, bucketKey }) {
           color: isPastDue ? '#501313' : '#211a38',
         }}>
           {fmtMoney(r.balance)}
+        </div>
+        <div style={{ fontSize: 10, color: '#6f668f', marginTop: 1 }}>
+          {fmtMoney(r.paid)} paid of {fmtMoney(r.total)}
         </div>
       </td>
     </tr>

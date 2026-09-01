@@ -100,6 +100,27 @@ class ApiError implements Exception {
     );
   }
 
+  /// Mensaje EXACTO del 403 de view-location (backend/src/lib/view-location.js:48).
+  /// Puente documentado hasta que el backend agregue `code` (gap #3 del plan):
+  /// si el copy del servidor cambia sin agregar el code, este matcheo deja de
+  /// reconocer la negativa y cae al error genérico — degradación visible, no
+  /// silenciosa (el usuario ve el mensaje del servidor igual).
+  static const viewLocationDeniedMessage =
+      'You do not have access to that location.';
+
+  /// ¿Este error ES la negativa del selector de ubicación (pantalla 4D)?
+  ///
+  /// Firma completa (criterio registrado H4 + NIT de QA-H3): 403 + la request
+  /// LLEVÓ `x-view-location` + (code `VIEW_LOCATION_DENIED` cuando el backend
+  /// lo agregue, o code null con el mensaje exacto de view-location.js). Un
+  /// 403 de módulo/RBAC trae mensaje distinto (moduleDeniedMessage) y NUNCA
+  /// debe montar la 4D — cae al error genérico con el copy del servidor.
+  bool isViewLocationDenied({required bool requestHadHeader}) {
+    if (kind != ApiErrorKind.forbidden || !requestHadHeader) return false;
+    if (code == 'VIEW_LOCATION_DENIED') return true;
+    return code == null && message == viewLocationDeniedMessage;
+  }
+
   @override
   String toString() => 'ApiError($kind, $status, $code, $message)';
 }

@@ -285,7 +285,10 @@ export default function SignAddendumPage() {
                       width: '100%',
                       border: '1px solid rgba(102, 79, 177, 0.18)',
                       borderRadius: 20,
-                      background: '#fff'
+                      background: '#fff',
+                      // See sign-agreement/page.js — same pad, same scroll-steals-
+                      // the-stroke defect on touch. No lock bug here either.
+                      touchAction: 'none'
                     }}
                     onMouseDown={start}
                     onMouseMove={move}

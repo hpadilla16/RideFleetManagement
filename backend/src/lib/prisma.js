@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import logger from './logger.js';
 import { appendPoolParams } from './prisma-url.js';
 import { customerPhoneNormalizeExtension } from './customer-phone-normalize.js';
+import { fieldCryptoExtension } from './field-crypto.js';
 
 export { appendPoolParams };
 
@@ -56,5 +57,12 @@ if (SLOW_QUERY_MS > 0) {
 // VozIA gap #4 (2026-07-15): derive Customer.phoneNormalized on every write. The
 // extension only augments Customer create/update/upsert args — $transaction, $queryRaw,
 // $connect etc. all pass through unchanged, and no code uses $on/$use on this export.
-export const prisma = basePrisma.$extends(customerPhoneNormalizeExtension);
+// Field-level PII encryption (Phase 1, 2026-08-23): fieldCryptoExtension is the
+// single choke point — encrypt mapped columns on write (only when
+// FIELD_ENCRYPTION_ENABLED + FIELD_ENC_KEY are set), dual-read decrypt of the
+// self-identifying `encf:` prefix on every read, including $queryRaw. Inert by
+// default. See lib/field-crypto.js for the field map and contract.
+export const prisma = basePrisma
+  .$extends(customerPhoneNormalizeExtension)
+  .$extends(fieldCryptoExtension);
 

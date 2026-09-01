@@ -114,13 +114,22 @@ async function extractAnthropic({ buffer, contentType, apiKey, model }) {
 
 /**
  * Extract citation fields from a document buffer. Throws only on hard errors.
- * Credentials/provider/model come from the caller (per-tenant Settings), falling
- * back to env (ANTHROPIC_API_KEY / CITATION_OCR_PROVIDER / CITATION_OCR_MODEL).
+ *
+ * The CALLER supplies the credential and it is used verbatim — this function
+ * has no opinion about where a key comes from and no access to one of its own.
+ *
+ * It used to end `apiKey || process.env.ANTHROPIC_API_KEY`, which made the
+ * env fallback reachable from TWO places: the scheduler's own `||` and this
+ * one. That second door is why "the scheduler resolved no key" would not have
+ * been enough to stop the call — passing `apiKey: null` still reached
+ * api.anthropic.com under the platform account. Resolution belongs to
+ * settingsService.resolveCitationOcrCredential(); this layer only calls.
  */
 export async function extractCitationFields({ buffer, contentType, apiKey, provider, model } = {}) {
   if (!buffer || !buffer.length) throw new Error('empty document buffer');
   const prov = String(provider || DEFAULT_PROVIDER).toLowerCase();
-  const key = apiKey || process.env.ANTHROPIC_API_KEY || null;
+  const key = String(apiKey || '').trim();
+  if (!key) throw new Error('no OCR credential supplied — refusing to call the provider');
   if (prov === 'anthropic') return extractAnthropic({ buffer, contentType, apiKey: key, model });
   throw new Error(`unsupported OCR provider: ${prov}`);
 }

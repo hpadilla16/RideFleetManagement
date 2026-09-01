@@ -35,3 +35,7 @@ import './pre-paid-reservations.report.js';
 // 2026-07-29 — LAWA airport-concession compliance export (Hector's ask,
 // matches the RAReporting sample column-for-column).
 import './airport-lawa.report.js';
+// 2026-08-17 — Daily Business Report with Posting. Rent & Go's accounting
+// department consumed this from their previous software; the GL journal at
+// the end is the half they actually post.
+import './daily-business.report.js';

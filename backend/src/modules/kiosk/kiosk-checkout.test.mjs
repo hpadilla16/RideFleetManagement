@@ -1024,8 +1024,15 @@ function jpegPhoto(bytes = 4096) {
 function stubAnthropic(t, payload) {
   const prevFetch = globalThis.fetch;
   const prevKey = process.env.ANTHROPIC_API_KEY;
+  const prevAllow = process.env.PLATFORM_KEY_ALLOW_KIOSK_ID_OCR;
   const calls = [];
   process.env.ANTHROPIC_API_KEY = 'env-test-key';
+  // 2026-08-27: the platform key alone is no longer enough to make a call —
+  // tenant t1 has to be named for this feature. These tests are about the
+  // EXTRACT path, so they opt it in explicitly; the fail-closed default is
+  // asserted in the "no tenant key" test below and in
+  // lib/tenant-provider-credential.test.mjs.
+  process.env.PLATFORM_KEY_ALLOW_KIOSK_ID_OCR = 't1';
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options });
     return {
@@ -1039,6 +1046,8 @@ function stubAnthropic(t, payload) {
     globalThis.fetch = prevFetch;
     if (prevKey === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = prevKey;
+    if (prevAllow === undefined) delete process.env.PLATFORM_KEY_ALLOW_KIOSK_ID_OCR;
+    else process.env.PLATFORM_KEY_ALLOW_KIOSK_ID_OCR = prevAllow;
   });
   return calls;
 }
@@ -1115,15 +1124,24 @@ test('id-photo-extract: cost cap at 5 → 429 EXTRACT_LIMIT + escalateSuggested,
   assert.equal(calls.length, 0, 'no provider call past the cap');
 });
 
-test('id-photo-extract: no tenant key + no env key → 503 OCR_UNAVAILABLE; junk photo → 422; binding 404', async (t) => {
+test('id-photo-extract: no tenant key → 503 OCR_UNAVAILABLE even WITH a platform key in env; junk photo → 422; binding 404', async (t) => {
+  // 2026-08-27, strengthened. This used to delete ANTHROPIC_API_KEY to reach
+  // the 503, which only proved "no key anywhere". The guarantee now is bigger:
+  // the platform key is present and usable, and a tenant nobody opted in STILL
+  // sends no driver's licence photo to a third party. (Same defect class as the
+  // Corpusa citation-OCR incident.)
   const prevKey = process.env.ANTHROPIC_API_KEY;
-  delete process.env.ANTHROPIC_API_KEY;
+  const prevAllow = process.env.PLATFORM_KEY_ALLOW_KIOSK_ID_OCR;
+  process.env.ANTHROPIC_API_KEY = 'env-test-key';
+  delete process.env.PLATFORM_KEY_ALLOW_KIOSK_ID_OCR;
   const prevFetch = globalThis.fetch;
   let called = 0;
   globalThis.fetch = async () => { called += 1; throw new Error('must not be called'); };
   t.after(() => {
     globalThis.fetch = prevFetch;
-    if (prevKey !== undefined) process.env.ANTHROPIC_API_KEY = prevKey;
+    if (prevKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = prevKey;
+    if (prevAllow !== undefined) process.env.PLATFORM_KEY_ALLOW_KIOSK_ID_OCR = prevAllow;
   });
 
   seedKioskSession();
@@ -1159,12 +1177,16 @@ test('id-photo-extract: provider failure burns an attempt and returns 502 with a
   seedWorld();
   const prevFetch = globalThis.fetch;
   const prevKey = process.env.ANTHROPIC_API_KEY;
+  const prevAllow = process.env.PLATFORM_KEY_ALLOW_KIOSK_ID_OCR;
   process.env.ANTHROPIC_API_KEY = 'env-test-key';
+  process.env.PLATFORM_KEY_ALLOW_KIOSK_ID_OCR = 't1'; // opted in — see stubAnthropic
   globalThis.fetch = async () => ({ ok: false, status: 529, json: async () => ({}), text: async () => 'overloaded' });
   t.after(() => {
     globalThis.fetch = prevFetch;
     if (prevKey === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = prevKey;
+    if (prevAllow === undefined) delete process.env.PLATFORM_KEY_ALLOW_KIOSK_ID_OCR;
+    else process.env.PLATFORM_KEY_ALLOW_KIOSK_ID_OCR = prevAllow;
   });
 
   const err = await rejects(

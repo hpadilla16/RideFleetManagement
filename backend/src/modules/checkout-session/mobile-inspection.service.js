@@ -51,7 +51,9 @@ async function loadToken(token) {
       reservation: {
         include: {
           rentalAgreement: { select: { id: true, agreementNumber: true } },
-          vehicle: { select: { id: true, year: true, make: true, model: true, plate: true } },
+          // mileage: Counter-UX Item 2 (2026-08-31) — the phone capture
+          // pre-fills its odometer with the vehicle's last known reading.
+          vehicle: { select: { id: true, year: true, make: true, model: true, plate: true, mileage: true } },
         },
       },
     },
@@ -130,6 +132,12 @@ async function loadSession(token) {
     agreementNumber: ag.agreementNumber,
     vehicle: row.reservation.vehicle
       ? `${row.reservation.vehicle.year} ${row.reservation.vehicle.make} ${row.reservation.vehicle.model} · ${row.reservation.vehicle.plate}`
+      : null,
+    // Last known odometer (Vehicle.mileage — "last odometer wins", mirrored
+    // from VehicleMileageEntry). The phone pre-fills its odometer input with
+    // this; 0/none → null so the input stays empty rather than showing 0.
+    vehicleMileage: Number(row.reservation.vehicle?.mileage || 0) > 0
+      ? Number(row.reservation.vehicle.mileage)
       : null,
     angles: INSPECTION_ANGLES.map((a) => ({
       key: a.key,

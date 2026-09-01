@@ -4,7 +4,7 @@
   "agreementId": "cmdagr001fixture0000000001",
   "tenantId": "cmdten001fixture0000000001",
   "currentStep": "INSPECTION_HANDOFF",
-  "events": "[{\"kind\":\"SESSION_STARTED\",\"actorUserId\":\"cmdusr001fixture0000000001\",\"at\":\"2026-08-16T14:02:11.000Z\"},{\"from\":\"CONFIRMING\",\"to\":\"TC_PENDING\",\"actorUserId\":\"cmdusr001fixture0000000001\",\"at\":\"2026-08-16T14:03:40.000Z\"}]",
+  "events": "[{\"kind\":\"SESSION_STARTED\",\"actorUserId\":\"cmdusr001fixture0000000001\",\"at\":\"2026-08-16T14:02:11.000Z\"},{\"kind\":\"TRANSITION\",\"from\":\"CONFIRMING\",\"to\":\"TC_PENDING\",\"actorUserId\":\"cmdusr001fixture0000000001\",\"metadata\":null,\"at\":\"2026-08-16T14:03:40.000Z\"},{\"from\":\"TC_PENDING\",\"to\":\"TC_SIGNED\",\"actorUserId\":\"cmdusr001fixture0000000001\",\"at\":\"2026-08-16T14:06:10.000Z\"},{\"kind\":\"TRANSITION\",\"from\":\"TC_SIGNED\",\"to\":\"PAYMENT_PENDING\",\"actorUserId\":\"cmdusr001fixture0000000001\",\"metadata\":null,\"at\":\"2026-08-16T14:07:02.000Z\"},{\"kind\":\"TRANSITION\",\"from\":\"PAYMENT_PENDING\",\"to\":\"PAID\",\"actorUserId\":null,\"metadata\":{\"kiosk\":true,\"kioskSessionId\":\"cmdkio001fixture0000000001\",\"deviceId\":\"cmddev001fixture0000000001\"},\"at\":\"2026-08-16T14:09:50.000Z\"},{\"kind\":\"TRANSITION\",\"from\":\"PAID\",\"to\":\"INSPECTION_HANDOFF\",\"actorUserId\":null,\"metadata\":{\"kiosk\":true,\"kioskSessionId\":\"cmdkio001fixture0000000001\",\"deviceId\":\"cmddev001fixture0000000001\"},\"at\":\"2026-08-16T14:10:05.000Z\"}]",
   "tcCompletedAt": "2026-08-16T14:06:02.000Z",
   "paymentCompletedAt": "2026-08-16T14:09:45.000Z",
   "inspectionCompletedAt": null,

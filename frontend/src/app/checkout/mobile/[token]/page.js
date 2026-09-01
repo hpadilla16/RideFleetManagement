@@ -24,12 +24,15 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { api } from '../../../../lib/client';
+import { safeReturnPath } from '../../../../lib/safe-return-path';
 
 export default function Page() {
   const params = useParams();
+  const search = useSearchParams();
   const token = params?.token;
+  const returnTo = safeReturnPath(search?.get('return'));
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -51,7 +54,27 @@ export default function Page() {
 
   if (loading) return <ShellMessage>Loading…</ShellMessage>;
   if (error) return <ShellMessage tone="error">{error}</ShellMessage>;
-  if (completed) return <ShellMessage tone="ok">Thanks! Return to your rental agent.</ShellMessage>;
+  if (completed) {
+    // Two different people can be standing here. Handed a phone, you are the
+    // agent's helper and you hand it back; opened from the wizard on the same
+    // tablet, you ARE the agent and "return to your rental agent" is nonsense.
+    return returnTo ? (
+      <ShellMessage tone="ok">
+        <div>Inspection complete.</div>
+        <button
+          style={{
+            marginTop: 14, padding: '10px 18px', fontSize: 15, fontWeight: 700,
+            border: 'none', borderRadius: 10, background: '#5b3df5', color: '#fff', cursor: 'pointer',
+          }}
+          onClick={() => { window.location.href = returnTo; }}
+        >
+          Back to checkout →
+        </button>
+      </ShellMessage>
+    ) : (
+      <ShellMessage tone="ok">Thanks! Return to your rental agent.</ShellMessage>
+    );
+  }
   if (!data) return null;
 
   return (
@@ -63,7 +86,11 @@ export default function Page() {
 
 function CaptureFlow({ token, data, onComplete, onError }) {
   const [angles, setAngles] = useState(data.angles);
-  const [odometer, setOdometer] = useState('');
+  // Counter-UX Item 2 (2026-08-31): pre-fill with the vehicle's last known
+  // mileage (vehicleMileage from the token payload). Still fully editable.
+  const [odometer, setOdometer] = useState(
+    data?.vehicleMileage != null ? String(data.vehicleMileage) : ''
+  );
   const [fuelLevel, setFuelLevel] = useState('FULL');
   // 2026-06-10 — mobile checkouts left cleanlinessOut blank on the contract
   // ("-") because this page never captured it. Mirrors the desktop wizard's

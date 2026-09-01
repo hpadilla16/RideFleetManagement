@@ -66,11 +66,27 @@ export const DEFAULT_PAYMENT_GATEWAY_CONFIG = {
   spin: {
     enabled: false,
     environment: 'sandbox',
+    // The Auth Key is encrypted at rest and NEVER returned by the API
+    // (2026-08-26). The field is always blank on load; `hasAuthKey` says
+    // whether one is on file, and saving it blank keeps the stored key.
     authKey: '',
+    hasAuthKey: false,
     tpn: '',
     merchantNumber: '1',
     callbackUrl: '',
     proxyTimeout: '120'
+  },
+  // iPOSpays Hosted Payment Page — customer PAYMENT LINKS settle through the
+  // tenant's own iPOS merchant. The HPP Auth Token follows the same
+  // encrypted-at-rest, never-returned contract as spin.authKey (`hasHppToken`
+  // says one is on file; blank on save keeps it).
+  ipos: {
+    enabled: false,
+    environment: 'production',
+    tpn: '',
+    hppToken: '',
+    hasHppToken: false,
+    expiryDays: 3
   }
 };
 

@@ -67,6 +67,23 @@ jobs:
     # secretos y sube el .apk como artifact. La firma se activa sola cuando
     # los 4 secretos existen: RIDEOPS_ANDROID_KEYSTORE_BASE64,
     # RIDEOPS_KEYSTORE_PASSWORD, RIDEOPS_KEY_ALIAS, RIDEOPS_KEY_PASSWORD.
+    #
+    # QUÉ DEBE CARGAR HECTOR ANTES DEL PRIMER BUILD DE DISTRIBUCIÓN:
+    #   - variable de repo  RIDEOPS_API_BASE        = URL https:// real de la API
+    #   - secreto           RIDEOPS_SENTRY_DSN      = DSN del proyecto rideops
+    #   - los 4 secretos de keystore de arriba
+    #
+    # POR QUÉ LOS DART-DEFINE SON OBLIGATORIOS (QA de milestone M1, 2026-08-17):
+    # `--flavor prod` decide el applicationId de Android, NO la config de la
+    # app: `AppConfig.env` sale de RIDEOPS_ENV. Sin defines, el APK "prod"
+    # compilaba verde con env=dev y apiBase=http://10.0.2.2:4000 (el localhost
+    # del emulador), el guard de bootstrap quedaba mudo porque isProd=false, y
+    # el manifest de prod bloquea cleartext ⇒ un APK FIRMADO que no alcanza
+    # ninguna red. Verde en CI, ladrillo en el patio. De ahí el gate de abajo:
+    # preferimos el job rojo y honesto.
+    #
+    # BACKLOG (M4): derivar `env` de FLUTTER_APP_FLAVOR para que flavor y env
+    # no puedan divergir por olvido de un define.
     runs-on: ubuntu-latest
     needs: [ enum-parity ]
     defaults:
@@ -103,8 +120,30 @@ jobs:
           else
             echo "signing=debug" >> "$GITHUB_ENV"
           fi
+      - name: Gate — la API base de prod debe existir y ser https
+        # Falla ANTES de gastar el build. Sin esto el job produciría un APK
+        # instalable pero incapaz de hablar con nadie (ver cabecera del job).
+        env:
+          API_BASE: ${{ vars.RIDEOPS_API_BASE }}
+        run: |
+          if [ -z "$API_BASE" ]; then
+            echo "::error::Falta la variable de repositorio RIDEOPS_API_BASE (URL https:// de la API)."
+            echo "::error::Cárgala en Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+          case "$API_BASE" in
+            https://*) ;;
+            *) echo "::error::RIDEOPS_API_BASE debe ser https:// — recibido: $API_BASE"; exit 1 ;;
+          esac
       - name: Build APK (flavor prod)
-        run: flutter build apk --flavor prod --release
+        env:
+          API_BASE: ${{ vars.RIDEOPS_API_BASE }}
+          SENTRY_DSN: ${{ secrets.RIDEOPS_SENTRY_DSN }}
+        run: |
+          flutter build apk --flavor prod --release \
+            --dart-define=RIDEOPS_ENV=prod \
+            --dart-define=RIDEOPS_API_BASE="$API_BASE" \
+            --dart-define=RIDEOPS_SENTRY_DSN="$SENTRY_DSN"
       - uses: actions/upload-artifact@v4
         with:
           name: rideops-prod-apk-${{ env.signing }}

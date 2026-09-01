@@ -289,15 +289,23 @@ test('§3 a send that rejects is caught, not left unhandled', async () => {
   assert.equal(db.reservations[0].status, 'CHECKED_OUT');
   assert.equal(db.agreements[0].status, 'FINALIZED');
   assert.equal(db.vehicles[0].status, 'ON_RENT');
-  // KNOWN GAP, not a desired property: autoEmailedAt is stamped BEFORE the send
-  // and is not rolled back when the send rejects, so this row now claims a
-  // contract was mailed that never was — and the kiosk DONE screen shows that
-  // claim to the customer (kiosk-checkout.service.js:1076 `contractEmail.sent`).
-  // Left out of this ticket deliberately: the compensating un-stamp is safe but
-  // it is a different defect with a different customer-facing surface. Asserted
-  // here so the behaviour is DOCUMENTED rather than discovered, and so the day
-  // someone fixes it, this line points at what else to check.
-  assert.ok(row.autoEmailedAt instanceof Date, 'KNOWN GAP: the stamp is not rolled back');
+  // THE KNOWN GAP THIS TEST DOCUMENTED IS NOW CLOSED (main, 2026-08-28,
+  // fix/finalize-email-leaves-a-trace). autoEmailedAt is still CLAIMED before
+  // the send -- that is the anti-double-send CAS and it has to stay -- but a
+  // send that never gets queued now RELEASES the claim, instead of leaving the
+  // row asserting a contract it never mailed, which the kiosk DONE screen
+  // reads as `contractEmail.sent`. This branch wrote the gap down; main fixed
+  // it, so the assertion flips rather than disappears.
+  //
+  // Kept, not deleted, because it pins the release on THIS path -- the
+  // finalize's own detached fire-and-forget arm, reached through transition()
+  // -- and not merely the direct maybeSendFinalizeEmail() call that
+  // finalize-email-trace.test.mjs drives. Same fix, two callers.
+  assert.equal(row.autoEmailedAt, null, 'the claim is released, not left claiming a send');
+  assert.ok(
+    db.auditLogs.some((a) => /Agreement email FAILED/.test(a.reason || '')),
+    'and the never-queued send leaves a trace where someone can find it',
+  );
 });
 
 // ── §4. the probe QA ran, as one assertion ─────────────────────────────────

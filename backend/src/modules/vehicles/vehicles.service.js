@@ -53,6 +53,13 @@ const SUPPORTED_TELEMATICS_PROVIDERS = [
     recommended: true,
     integrationStatus: 'ACTIVE',
     notes: 'Pull-based GPS telematics. Periodic sync fetches device positions, speed, odometer, and engine status from Voltswitch API.'
+  },
+  {
+    code: 'ONESTEPGPS',
+    label: 'OneStepGPS',
+    recommended: false,
+    integrationStatus: 'ACTIVE',
+    notes: 'Pull-based GPS via the OneStepGPS public REST API (bulk device-info). API key + device mappings live in Admin > Integrations > OneStepGPS; the shuttle fast poll consumes the positions.'
   }
 ];
 
@@ -301,7 +308,11 @@ export const vehiclesService = {
       // a program-scoped employee can't open a vehicle from the other program.
       where: { id, ...(byTenantWhere(scope) || {}), ...locWhere, ...vehicleProgramWhereForScope(scope) },
       include: {
-        tenant: true,
+        // This row is serialized straight into the API response, so it must never
+        // carry Tenant.settingsJson — that column holds the tenant's live SMS and
+        // SPIn terminal credentials. `omit` keeps the payload byte-identical to
+        // what it was before settingsJson was declared on the model (2026-08-26).
+        tenant: { omit: { settingsJson: true } },
         vehicleType: true,
         homeLocation: true,
         availabilityBlocks: {
