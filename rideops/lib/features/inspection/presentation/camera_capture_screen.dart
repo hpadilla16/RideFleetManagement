@@ -146,8 +146,7 @@ class _CameraCaptureScreenState extends ConsumerState<CameraCaptureScreen>
       // El timeout es la diferencia entre "tarda" y "no va a volver". Sin él
       // un `takePicture()` que nunca resuelve deja `_shooting` en true para
       // siempre: obturador muerto, cero señales, cero salidas.
-      final tempPath =
-          await session.takePicture().timeout(kShutterTimeout);
+      final tempPath = await session.takePicture().timeout(kShutterTimeout);
       _controller.markCompressing(angleKey);
       // La compresión + cifrado + encolado corren SIN bloquear la cámara:
       // el tile del grid muestra el spinner y el agente sigue al siguiente
