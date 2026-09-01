@@ -1,5 +1,85 @@
 {
+  "notifications": {
+    "title": "Notificaciones",
+    "sub": "Todo lo que pidió atención, en un solo feed",
+    "bellAria": "Notificaciones, {{count}} sin leer",
+    "unread": "{{count}} sin leer",
+    "markAll": "Marcar todo leído",
+    "viewAll": "Ver todo en el Centro de Notificaciones",
+    "empty": "Nada requiere tu atención",
+    "open": "Abrir",
+    "today": "Hoy",
+    "yesterday": "Ayer",
+    "scopes": {
+      "all": "Todo",
+      "critical": "Crítico",
+      "needsAction": "Requiere acción",
+      "mySede": "Mi sede"
+    },
+    "tabs": {
+      "inbox": "Bandeja",
+      "acknowledged": "Atendidas",
+      "muted": "Reglas silenciadas",
+      "delivery": "Entrega"
+    },
+    "lanes": {
+      "critical": "Crítico",
+      "needsAction": "Requiere acción",
+      "info": "Informativo",
+      "everything": "Todo",
+      "allCritical": "Todo lo crítico",
+      "geofence": "Vehículos vencidos",
+      "kiosk": "Cliente esperando",
+      "tolls": "Peajes por cobrar",
+      "maintenance": "Mantenimiento",
+      "shuttle": "Shuttle",
+      "documents": "Documentos y marbete",
+      "billing": "Facturación",
+      "allInfo": "Todo informativo",
+      "all": "Todas las notificaciones"
+    },
+    "railNote": "Los carriles son filtros guardados sobre un solo feed, no bandejas separadas. Los conteos son elementos abiertos en tus sedes.",
+    "evt": {
+      "geofence": "Vencido y fuera de geocerca — {{unit}}",
+      "kiosk": "Cliente esperando — sesión de kiosco escalada",
+      "tollClosed": "Peaje facturable en contrato cerrado — {{amt}}",
+      "tollNew": "Peaje facturable nuevo — {{amt}}",
+      "noShow": "No-show de shuttle — {{stop}}",
+      "regExpiring": "Marbete vence en {{days}} días — {{unit}}",
+      "regExpired": "Marbete vencido — {{unit}}",
+      "maintOverdue": "Mantenimiento vencido — {{service}}, {{unit}}",
+      "billingSuspended": "Suscripción suspendida — pago vencido"
+    },
+    "src": {
+      "GEOFENCE": "VoltSwitch",
+      "TOLL": "TollBridge",
+      "SHUTTLE": "Shuttle",
+      "KIOSK": "Kiosco",
+      "BILLING": "Facturación",
+      "MAINTENANCE": "Mantenimiento",
+      "DOCUMENTS": "Documentos"
+    },
+    "ack": {
+      "by": "Atendida por {{name}} · {{time}}",
+      "self": "Resuelta sola",
+      "action": "Atender"
+    },
+    "foot": {
+      "showing": "Mostrando {{a}} de {{b}} en tus sedes",
+      "archive": "lo antiguo se archiva a los 30 días",
+      "loadMore": "Cargar más"
+    },
+    "toolbar": {
+      "allSources": "Todas las fuentes",
+      "refresh": "Actualizar"
+    },
+    "comingSoon": {
+      "muted": "Las reglas silenciadas llegan pronto — silencios por usuario por categoría y sede, nunca para alertas críticas.",
+      "delivery": "La configuración de entrega llega pronto — los envíos actuales de correo y SMS por superficie siguen funcionando igual hasta entonces."
+    }
+  },
   "nav": {
+    "notifications": "Notificaciones",
     "dashboard": "Panel",
     "reservations": "Reservaciones",
     "vehicles": "Vehículos",

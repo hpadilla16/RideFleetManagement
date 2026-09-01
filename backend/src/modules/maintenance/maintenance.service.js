@@ -79,7 +79,9 @@ export const maintenanceService = {
         id: s.id,
         serviceType: s.serviceType,
         vehicleId: s.vehicleId,
-        vehicle: s.vehicle ? { id: s.vehicle.id, plate: s.vehicle.plate, make: s.vehicle.make, model: s.vehicle.model, year: s.vehicle.year, internalNumber: s.vehicle.internalNumber, mileage: s.vehicle.mileage } : null,
+        // homeLocationId added 2026-09-01 (notifications sweep): lets the
+        // daily emitter route per-sede envelopes. Purely additive.
+        vehicle: s.vehicle ? { id: s.vehicle.id, plate: s.vehicle.plate, make: s.vehicle.make, model: s.vehicle.model, year: s.vehicle.year, internalNumber: s.vehicle.internalNumber, mileage: s.vehicle.mileage, homeLocationId: s.vehicle.homeLocationId ?? null } : null,
         intervalMiles: s.intervalMiles, intervalDays: s.intervalDays,
         lastServiceMiles: s.lastServiceMiles, lastServiceAt: s.lastServiceAt,
         ...ev,

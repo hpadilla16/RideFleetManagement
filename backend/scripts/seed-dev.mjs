@@ -34,9 +34,24 @@ const IDS = {
   vehicleType: 'dev-vt-compact',
   vehicle:     'dev-veh-001',
   customer:    'dev-cust-001',
-  reservation: 'dev-res-001',
+  // NO hyphen after a 2-6 letter prefix: reservation-id.js:13 routes any
+  // /^[A-Za-z]{2,6}-/ param to reservationNumber, so 'dev-res-001' made the
+  // backend look up a reservation NUMBERED 'dev-res-001' and 404 every
+  // display-data call — the seeded reservation could never be checked out.
+  // Found by the first real end-to-end run (2026-09-01).
+  reservation: 'devres001',
   agreement:   'dev-agr-001',
 };
+
+// The routing trap above, kept from regressing: real ids are cuids (no
+// hyphen), so only fixture ids can collide with the reservationNumber route.
+const RESERVATION_NUMBER_SHAPE = /^[A-Za-z]{2,6}-/;
+if (RESERVATION_NUMBER_SHAPE.test(IDS.reservation)) {
+  console.error(`seed-dev: IDS.reservation '${IDS.reservation}' matches the ` +
+    'reservationNumber routing pattern (reservation-id.js) and would 404 on ' +
+    'every /api/reservations/:id call. Pick an id without a letter-prefix hyphen.');
+  process.exit(1);
+}
 
 async function ensureTenant() {
   const existing = await prisma.tenant.findUnique({ where: { id: IDS.tenant } });

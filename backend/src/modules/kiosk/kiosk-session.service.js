@@ -17,6 +17,7 @@
 
 import { prisma } from '../../lib/prisma.js';
 import logger from '../../lib/logger.js';
+import { emitNotificationSafe } from '../notifications/notifications-emit.js';
 import { KioskError } from './kiosk-device.service.js';
 import { checkoutSessionService, CheckoutSessionError } from '../checkout-session/checkout-session.service.js';
 import { ensureNoVehicleConflict } from '../reservations/reservations.service.js';
@@ -709,6 +710,28 @@ async function escalate(sessionId, device, { reason } = {}) {
   logger.warn('[kiosk] session escalated', {
     sessionId: session.id, deviceId: device.id, tenantId: device.tenantId,
     locationId: device.locationId, reason: updated.escalatedReason,
+  });
+  // Notification Center emitter (2026-09-01) — a guest is physically waiting,
+  // so this is CRITICAL (badges the bell). requireInProgress above means an
+  // already-escalated session throws before reaching here, and the dedupeKey
+  // on the session id makes any retry a no-op. Safe emit — the guest-facing
+  // escalate must never fail on a notification write. The dashboard Ops-Hub
+  // item and sessions list stay untouched; the center only records.
+  await emitNotificationSafe({
+    tenantId: device.tenantId,
+    locationId: device.locationId || null,
+    severity: 'CRITICAL',
+    sourceType: 'KIOSK',
+    sourceRefId: session.id,
+    title: 'Guest waiting — kiosk session escalated',
+    body: [
+      device.name || null,
+      `reason: ${updated.escalatedReason}`,
+    ].filter(Boolean).join(' · '),
+    deepLink: '/kiosks?outcome=ESCALATED',
+    dedupeKey: `kiosk-escalation:${session.id}`,
+    templateKey: 'kiosk',
+    paramsJson: { reason: updated.escalatedReason },
   });
   return { ok: true, session: sessionView(updated) };
 }

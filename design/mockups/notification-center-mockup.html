@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RideFleet — Notification Center</title>
+<style>
+/* ============================================================
+   Tokens — Design System v2 subset, brand hue #8752FE unchanged.
+   Same token block as tolls-redesign-A.html / the Feature A
+   mockup. Flat, tabular-nums, 40px targets, 11px floor.
+   ============================================================ */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+
+  --brand:#8752FE;
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-600:#7440ea; --p-700:#5a26c9; --p-800:#45189e;
+
+  --gold-50:#fdf6e8; --gold-100:#fbe9c6; --gold-600:#a3660f; --gold-700:#7d4d08;
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+
+  --border-subtle:var(--n-100); --border:var(--n-200); --border-strong:var(--n-300);
+  --text-1:var(--n-900); --text-2:var(--n-700); --text-3:var(--n-600);
+
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+  --sh-2:0 1px 2px rgba(24,16,54,.05),0 6px 14px -4px rgba(38,20,90,.09),0 14px 28px -12px rgba(38,20,90,.10);
+
+  --r-xs:6px; --r-sm:8px; --r-md:11px; --r-lg:14px; --r-xl:18px; --r-pill:999px;
+  --font-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --focus:#0b63d6;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--n-50)}
+body{
+  font-family:var(--font-sans);font-size:14px;line-height:1.55;color:var(--text-2);
+  background:var(--n-50);-webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{color:var(--text-1);letter-spacing:-.018em;line-height:1.15}
+table{border-collapse:collapse;width:100%}
+button,input,select{font:inherit;color:inherit}
+a{color:inherit;text-decoration:none}
+.tnum,table,.money,.mono,time{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:var(--r-xs)}
+
+/* ------- mockup page chrome ------- */
+.page-head{max-width:1440px;margin:0 auto;padding:44px 32px 20px}
+.page-head .eyebrow{
+  display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);
+  font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--p-800);background:var(--p-50);border:1px solid rgba(135,82,254,.22);
+  border-radius:var(--r-pill);padding:6px 13px 6px 10px;
+}
+.page-head .eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.page-head h1{margin-top:14px;font-size:clamp(28px,3.4vw,40px);font-weight:700;letter-spacing:-.03em}
+.page-head p{margin-top:10px;max-width:860px;color:var(--text-2);font-size:15px}
+.page-head .note{
+  margin-top:14px;max-width:860px;font-size:12.5px;color:var(--text-3);
+  border-left:3px solid var(--n-300);padding-left:12px;line-height:1.6;
+}
+.mock-wrap{max-width:1440px;margin:20px auto 72px;padding:0 32px}
+.mock-label{
+  font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--text-3);margin:36px 0 10px;
+}
+.screen{
+  background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-xl);
+  box-shadow:var(--sh-2);overflow:hidden;
+}
+
+/* ============================================================
+   MOCK 1 — topbar with bell + dropdown panel
+   ============================================================ */
+.topbar{
+  display:flex;align-items:center;gap:10px;padding:10px 18px;
+  border-bottom:1px solid var(--border-subtle);background:var(--n-0);min-height:56px;
+}
+.topbar .logo{display:flex;align-items:center;gap:9px;font-weight:700;color:var(--text-1);font-size:14.5px}
+.topbar .logo i{width:24px;height:24px;border-radius:7px;background:var(--brand);display:inline-block}
+.topbar .spacer{flex:1}
+.icon-btn{
+  position:relative;display:inline-grid;place-items:center;width:40px;height:40px;
+  border-radius:var(--r-sm);border:1px solid transparent;background:transparent;color:var(--text-3);cursor:pointer;
+}
+.icon-btn:hover{background:var(--n-50);color:var(--text-1)}
+.icon-btn svg{width:17px;height:17px}
+.icon-btn.is-on{background:var(--p-50);border-color:rgba(135,82,254,.35);color:var(--p-700)}
+.badge{
+  position:absolute;top:4px;right:3px;min-width:16px;height:16px;border-radius:8px;
+  background:var(--danger);color:#fff;font-size:9.5px;font-weight:700;font-family:var(--font-mono);
+  display:grid;place-items:center;padding:0 4px;border:2px solid var(--n-0);
+}
+.loc-pick{
+  display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-2);
+  border:1px solid var(--border);border-radius:var(--r-sm);padding:7px 11px;background:var(--n-25);
+}
+.loc-pick b{font-weight:640;color:var(--text-1)}
+.avatar{width:32px;height:32px;border-radius:50%;background:var(--p-100);color:var(--p-800);
+  display:grid;place-items:center;font-size:12px;font-weight:700}
+
+/* bell panel */
+.panel-stage{position:relative;height:520px;background:
+  repeating-linear-gradient(45deg,var(--n-25) 0 14px,var(--n-50) 14px 28px)}
+.bell-panel{
+  position:absolute;top:10px;right:18px;width:430px;max-width:94%;
+  background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-lg);
+  box-shadow:var(--sh-2);overflow:hidden;
+}
+.bp-head{display:flex;align-items:center;gap:10px;padding:12px 15px;border-bottom:1px solid var(--border-subtle)}
+.bp-head h4{font-size:13.5px;font-weight:680}
+.bp-head .n{
+  font-family:var(--font-mono);font-size:10.5px;font-weight:600;color:var(--danger-tx);
+  background:var(--danger-bg);border:1px solid var(--danger-bd);border-radius:var(--r-pill);padding:1px 8px;
+}
+.bp-head .mark{margin-left:auto;font-size:11.5px;font-weight:640;color:var(--p-700);background:none;border:0;cursor:pointer;min-height:32px}
+.bp-scopes{display:flex;gap:2px;padding:8px 12px;border-bottom:1px solid var(--border-subtle);background:var(--n-25)}
+.bp-scopes button{
+  border:0;background:transparent;font-size:11.5px;font-weight:620;color:var(--text-3);
+  padding:5px 10px;border-radius:var(--r-pill);cursor:pointer;min-height:28px;
+}
+.bp-scopes button.on{background:var(--n-0);color:var(--p-800);box-shadow:var(--sh-1);border:1px solid var(--border)}
+.bp-list{max-height:360px;overflow:auto}
+.n-row{
+  display:flex;gap:11px;padding:10px 15px;border-bottom:1px solid var(--border-subtle);
+  align-items:flex-start;cursor:pointer;min-height:44px;
+}
+.n-row:hover{background:var(--n-25)}
+.n-row.unread{background:var(--p-50)}
+.n-row.unread:hover{background:var(--p-100)}
+.sev{
+  width:26px;height:26px;border-radius:8px;flex:0 0 auto;display:grid;place-items:center;margin-top:1px;
+}
+.sev svg{width:14px;height:14px}
+.sev--bad{background:var(--danger-bg);color:var(--danger-tx);border:1px solid var(--danger-bd)}
+.sev--warn{background:var(--warn-bg);color:var(--warn-tx);border:1px solid var(--warn-bd)}
+.sev--info{background:var(--info-bg);color:var(--info);border:1px solid var(--info-bd)}
+.sev--ok{background:var(--ok-bg);color:var(--ok-tx);border:1px solid var(--ok-bd)}
+.n-body{flex:1;min-width:0}
+.n-body b{display:block;font-size:12.5px;font-weight:640;color:var(--text-1);line-height:1.35}
+.n-body small{display:block;font-size:11.5px;color:var(--text-3);margin-top:1px;line-height:1.45}
+.n-meta{flex:0 0 auto;text-align:right}
+.n-meta time{display:block;font-size:10.5px;color:var(--text-3);font-family:var(--font-mono)}
+.n-meta .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--brand);margin-top:6px}
+.bp-foot{
+  display:flex;align-items:center;justify-content:center;padding:10px;
+  border-top:1px solid var(--border-subtle);background:var(--n-25);
+}
+.bp-foot a{font-size:12.5px;font-weight:640;color:var(--p-700)}
+
+/* ============================================================
+   MOCK 2 — full notification center screen
+   ============================================================ */
+.mod-head{padding:18px 22px 0;border-bottom:1px solid var(--border-subtle);background:var(--n-0)}
+.mod-title-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.mod-title-row h2{font-size:19px;font-weight:660}
+.mod-title-row .sub{font-size:12.5px;color:var(--text-3)}
+.mod-title-row .right{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tenant-scope{
+  display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-2);
+  border:1px solid var(--border);border-radius:var(--r-sm);padding:6px 10px;background:var(--n-25);
+}
+.tenant-scope b{font-weight:640;color:var(--text-1)}
+.mod-tabs{display:flex;gap:2px;margin-top:14px}
+.mod-tabs a{
+  padding:9px 14px;font-size:13px;font-weight:600;color:var(--text-3);
+  border-bottom:2px solid transparent;transition:.15s;
+}
+.mod-tabs a:hover{color:var(--text-1)}
+.mod-tabs a.is-on{color:var(--p-700);border-bottom-color:var(--brand)}
+.mod-tabs a .cnt{
+  font-family:var(--font-mono);font-size:10.5px;background:var(--n-100);color:var(--text-3);
+  border-radius:5px;padding:0 6px;margin-left:5px;
+}
+.mod-tabs a.is-on .cnt{background:var(--p-50);color:var(--p-800)}
+
+.toolbar{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:12px 22px;border-bottom:1px solid var(--border-subtle);background:var(--n-0);
+}
+.select{
+  appearance:none;border:1px solid var(--border-strong);border-radius:var(--r-sm);
+  padding:8px 30px 8px 11px;font-size:13px;background:var(--n-0);color:var(--text-1);box-shadow:var(--sh-1);cursor:pointer;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234b4362' stroke-width='1.7' stroke-linecap='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat:no-repeat;background-position:right 9px center;background-size:14px;min-height:40px;
+}
+.toggle{
+  display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--text-2);
+  cursor:pointer;user-select:none;padding:6px 4px;min-height:40px;
+}
+.toggle .tk{width:32px;height:18px;border-radius:var(--r-pill);background:var(--brand);position:relative;flex:0 0 auto}
+.toggle .tk::after{content:"";position:absolute;top:2px;right:2px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:40px;
+  font-size:13px;font-weight:620;letter-spacing:-.01em;padding:8px 15px;
+  border-radius:var(--r-sm);border:1px solid transparent;cursor:pointer;white-space:nowrap;transition:.15s;
+}
+.btn svg{width:15px;height:15px}
+.btn--secondary{background:var(--n-0);color:var(--text-1);border-color:var(--border-strong);box-shadow:var(--sh-1)}
+.btn--secondary:hover{border-color:#c3b6e8}
+.ml-auto{margin-left:auto}
+
+/* body: rail + feed */
+.q-body{display:flex;min-height:560px}
+.rail{
+  width:224px;flex:0 0 224px;border-right:1px solid var(--border-subtle);
+  background:var(--n-25);padding:14px 10px 18px;
+}
+.rail .grp{
+  display:flex;align-items:center;gap:7px;
+  font-family:var(--font-mono);font-size:9.5px;font-weight:500;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--text-3);padding:12px 10px 6px;
+}
+.rail .grp i{width:7px;height:7px;border-radius:2px;flex:0 0 auto}
+.rail .grp.g-bad i{background:var(--danger)}
+.rail .grp.g-warn i{background:var(--warn)}
+.rail .grp.g-info i{background:var(--info)}
+.rail .grp.g-all i{background:var(--n-400)}
+.lane{
+  display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+  border:1px solid transparent;background:transparent;border-radius:var(--r-sm);
+  padding:8px 10px;font-size:13px;font-weight:560;color:var(--text-2);cursor:pointer;min-height:40px;
+}
+.lane:hover{background:var(--n-100)}
+.lane.is-on{background:var(--n-0);border-color:var(--border);color:var(--p-800);box-shadow:var(--sh-1);font-weight:640}
+.lane .n{
+  margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--text-3);
+  background:var(--n-100);border-radius:5px;padding:1px 7px;
+}
+.lane.is-on .n{background:var(--p-50);color:var(--p-800)}
+.lane .n.hot{background:var(--danger-bg);color:var(--danger-tx);font-weight:600}
+.lane .n.warm{background:var(--warn-bg);color:var(--warn-tx);font-weight:600}
+.rail-note{
+  margin:16px 10px 0;font-size:11px;color:var(--text-3);line-height:1.55;
+  border-top:1px solid var(--border-subtle);padding-top:12px;
+}
+
+.q-main{flex:1;min-width:0}
+.day-head{
+  font-family:var(--font-mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--text-3);padding:12px 18px 6px;background:var(--n-25);border-bottom:1px solid var(--border-subtle);
+}
+.feed-row{
+  display:flex;align-items:center;gap:12px;padding:8px 18px;min-height:52px;
+  border-bottom:1px solid var(--border-subtle);
+}
+.feed-row:hover{background:var(--n-25)}
+.feed-row.unread{box-shadow:inset 3px 0 0 var(--brand)}
+.feed-row .n-body b .chip-inline{margin-left:7px}
+.chip{
+  display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:640;line-height:1.4;
+  padding:2px 8px;border-radius:var(--r-xs);white-space:nowrap;border:1px solid transparent;vertical-align:1px;
+}
+.chip i{width:5px;height:5px;border-radius:50%;background:currentColor;flex:0 0 auto}
+.chip--ok{color:var(--ok-tx);background:var(--ok-bg);border-color:var(--ok-bd)}
+.chip--warn{color:var(--warn-tx);background:var(--warn-bg);border-color:var(--warn-bd)}
+.chip--bad{color:var(--danger-tx);background:var(--danger-bg);border-color:var(--danger-bd)}
+.chip--info{color:var(--info);background:var(--info-bg);border-color:var(--info-bd)}
+.chip--neutral{color:var(--text-2);background:var(--n-100);border-color:var(--border)}
+.src-tag{
+  font-family:var(--font-mono);font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-3);background:var(--n-50);border:1px solid var(--border);border-radius:4px;padding:1px 6px;white-space:nowrap;
+}
+.feed-row .loc{font-size:11px;color:var(--text-3);white-space:nowrap;flex:0 0 auto}
+.feed-row time{font-size:11px;color:var(--text-3);font-family:var(--font-mono);white-space:nowrap;flex:0 0 92px;text-align:right}
+.feed-act{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.feed-act .btn{min-height:32px;padding:4px 12px;font-size:12px;border-radius:var(--r-xs)}
+.feed-act .go{
+  display:inline-grid;place-items:center;width:32px;height:32px;border-radius:var(--r-xs);
+  border:1px solid transparent;color:var(--n-500);cursor:pointer;background:transparent;
+}
+.feed-act .go:hover{color:var(--p-700);background:var(--p-50)}
+.feed-act .go svg{width:14px;height:14px}
+.ack-note{font-size:10.5px;color:var(--text-3);font-style:italic;white-space:nowrap}
+
+.tbl-foot{
+  display:flex;align-items:center;gap:10px;padding:11px 18px;font-size:12px;color:var(--text-3);
+  background:var(--n-25);border-top:1px solid var(--border-subtle);
+}
+.tbl-foot b{font-weight:640;color:var(--text-2)}
+.tbl-foot a{margin-left:auto;font-weight:640;color:var(--p-700)}
+
+/* annotations */
+.callouts{margin-top:14px;border:1px dashed var(--border-strong);border-radius:var(--r-md);padding:14px 18px;background:var(--n-25)}
+.callouts h4{font-family:var(--font-mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-3);margin-bottom:8px}
+.callouts li{font-size:12.5px;color:var(--text-2);margin:5px 0 5px 18px;line-height:1.55}
+.callouts em{font-style:normal;font-family:var(--font-mono);font-size:11px;background:var(--n-100);border-radius:4px;padding:1px 5px}
+@media (max-width:940px){ .q-body{flex-direction:column} .rail{width:100%;flex-basis:auto;display:flex;flex-wrap:wrap;gap:2px} .rail .grp{width:100%} }
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <div class="eyebrow"><i></i>RideFleet · Design mockup · Feature B</div>
+  <h1>Notification center</h1>
+  <p>One bell, one tab, every alert. Today nine surfaces each own a polling loop, a dedupe
+  strategy and a dismissal rule of their own — the center <b>aggregates</b> them into a single
+  severity-ranked feed with per-user read state and team-visible acknowledge, and deep-links
+  back to the surface that owns the work. It replaces nothing in v1.</p>
+  <div class="note">
+    Design only. Sources cited in the NOTES inventory: overdue-geofence alerts, TollBridge
+    staff alerts, shuttle zone/no-show alerts, kiosk escalations, maintenance due, registration
+    &amp; document expiry, billing dunning, issue-center urgency, plus Feature A's check-in
+    maintenance decisions. The envelope table, per-user read state and the bell are NEW.
+  </div>
+</header>
+
+<main class="mock-wrap">
+
+  <!-- ============ MOCK 1 · the bell ============ -->
+  <div class="mock-label">Mock 1 · Topbar bell — slots between search and the location picker in AppShell</div>
+  <section class="screen" aria-label="Topbar with notification bell open">
+    <div class="topbar">
+      <span class="logo"><i></i>RideFleet</span>
+      <span class="spacer"></span>
+      <button class="icon-btn" aria-label="Search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      </button>
+      <button class="icon-btn is-on" aria-label="Notifications, 6 unread">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        <span class="badge">6</span>
+      </button>
+      <span class="loc-pick">Sede: <b>SJU Airport</b>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+      </span>
+      <span class="avatar">JR</span>
+    </div>
+
+    <div class="panel-stage">
+      <div class="bell-panel" role="dialog" aria-label="Notifications panel">
+        <div class="bp-head">
+          <h4>Notifications</h4>
+          <span class="n">6 unread</span>
+          <button class="mark">Mark all read</button>
+        </div>
+        <div class="bp-scopes">
+          <button class="on">All</button>
+          <button>Critical</button>
+          <button>Needs action</button>
+          <button>My sede</button>
+        </div>
+        <div class="bp-list">
+          <div class="n-row unread">
+            <span class="sev sev--bad"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span>
+            <div class="n-body">
+              <b>Overdue &amp; outside geofence — UNIT-014</b>
+              <small>RES-848d · 2h 40m past return · last seen near Bayamón</small>
+            </div>
+            <div class="n-meta"><time>2m</time><span class="dot"></span></div>
+          </div>
+          <div class="n-row unread">
+            <span class="sev sev--bad"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+            <div class="n-body">
+              <b>Guest waiting — kiosk escalated</b>
+              <small>SJU Airport kiosk · session escalated to staff 4 min ago</small>
+            </div>
+            <div class="n-meta"><time>4m</time><span class="dot"></span></div>
+          </div>
+          <div class="n-row unread">
+            <span class="sev sev--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
+            <div class="n-body">
+              <b>Maintenance snoozed at check-in — UNIT-025</b>
+              <small>Oil change 1,230 mi overdue · snoozed by J. Rivera — re-prompts at next rental event</small>
+            </div>
+            <div class="n-meta"><time>18m</time><span class="dot"></span></div>
+          </div>
+          <div class="n-row unread">
+            <span class="sev sev--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+            <div class="n-body">
+              <b>Shuttle request no-show</b>
+              <small>Terminal B pickup · rider unresponsive after 12 min</small>
+            </div>
+            <div class="n-meta"><time>26m</time><span class="dot"></span></div>
+          </div>
+          <div class="n-row">
+            <span class="sev sev--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M2 10h20"/></svg></span>
+            <div class="n-body">
+              <b>New billable toll on a closed contract — $3.20</b>
+              <small>JVX-482 · RES-847211 · Caguas Norte · returned 3 days ago</small>
+            </div>
+            <div class="n-meta"><time>1h</time></div>
+          </div>
+          <div class="n-row">
+            <span class="sev sev--info"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v18"/><path d="M2 22h20"/><path d="M9 6h6M9 10h6M9 14h6"/></svg></span>
+            <div class="n-body">
+              <b>Registration expires in 9 days — UNIT-031</b>
+              <small>Marbete due Sep 9 · renew before next check-out</small>
+            </div>
+            <div class="n-meta"><time>3h</time></div>
+          </div>
+        </div>
+        <div class="bp-foot"><a href="#">View all in Notification Center →</a></div>
+      </div>
+    </div>
+  </section>
+  <div class="callouts">
+    <h4>Behavior notes — bell</h4>
+    <ul>
+      <li>Bell sits in the topbar between search and the location picker — the only spot every staff screen shares. Badge = <b>unread for this user</b> within their location scope, capped at 99+.</li>
+      <li>Panel is a skim surface: newest 15, severity icon + one-line title + one-line context + relative time. Unread rows tint <em>--p-50</em> with a brand dot; click = mark read + deep-link.</li>
+      <li>"Mark all read" clears the personal badge only — it never acknowledges work items on behalf of the team.</li>
+      <li>The shuttle banner (guest physically waiting) keeps its own strip above content — a bell must never be the only path to a human standing at a counter. The center records it; the banner interrupts.</li>
+    </ul>
+  </div>
+
+  <!-- ============ MOCK 2 · the full center ============ -->
+  <div class="mock-label">Mock 2 · Notification Center tab — severity lanes, per-user read, team acknowledge</div>
+  <section class="screen" aria-label="Notification center screen">
+    <div class="mod-head">
+      <div class="mod-title-row">
+        <h2>Notification Center</h2>
+        <span class="sub">Everything that asked for attention, in one feed · aggregates 9 sources</span>
+        <div class="right">
+          <span class="tenant-scope">Tenant: <b>International Rental Corp</b></span>
+          <span class="tenant-scope">Sede: <b>All my locations</b></span>
+        </div>
+      </div>
+      <nav class="mod-tabs">
+        <a class="is-on" href="#">Inbox <span class="cnt">23</span></a>
+        <a href="#">Acknowledged</a>
+        <a href="#">Muted rules</a>
+        <a href="#">Delivery settings</a>
+      </nav>
+    </div>
+
+    <div class="toolbar">
+      <select class="select"><option>All sources</option></select>
+      <select class="select"><option>Last 7 days</option></select>
+      <label class="toggle"><span class="tk"></span>Unread first</label>
+      <span class="ml-auto"></span>
+      <button class="btn btn--secondary">Mark all read</button>
+    </div>
+
+    <div class="q-body">
+      <aside class="rail">
+        <div class="grp g-bad"><i></i>Critical</div>
+        <button class="lane is-on">All critical <span class="n hot">2</span></button>
+        <button class="lane">Vehicles overdue <span class="n hot">1</span></button>
+        <button class="lane">Guest waiting <span class="n hot">1</span></button>
+
+        <div class="grp g-warn"><i></i>Needs action</div>
+        <button class="lane">Tolls to bill <span class="n warm">5</span></button>
+        <button class="lane">Maintenance <span class="n warm">3</span></button>
+        <button class="lane">Shuttle <span class="n warm">1</span></button>
+        <button class="lane">Documents &amp; marbete <span class="n warm">4</span></button>
+        <button class="lane">Issue Center <span class="n warm">2</span></button>
+
+        <div class="grp g-info"><i></i>Informational</div>
+        <button class="lane">Fleet &amp; service <span class="n">3</span></button>
+        <button class="lane">Billing <span class="n">2</span></button>
+
+        <div class="grp g-all"><i></i>Everything</div>
+        <button class="lane">All notifications <span class="n">23</span></button>
+
+        <p class="rail-note">Lanes are saved filters over one feed, not separate inboxes.
+        Counts are open items in your location scope; red = critical, amber = needs action.</p>
+      </aside>
+
+      <div class="q-main">
+        <div class="day-head">Today · Sun, Aug 31</div>
+
+        <div class="feed-row unread">
+          <span class="sev sev--bad"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span>
+          <div class="n-body">
+            <b>Overdue &amp; outside geofence — UNIT-014 <span class="chip chip--bad chip-inline"><i></i>2h 40m overdue</span></b>
+            <small>RES-848d · Carla Meléndez · last position near Bayamón, 0.5 km fence · <span class="src-tag">VoltSwitch</span></small>
+          </div>
+          <span class="loc">SJU Airport</span>
+          <time>2:41 PM</time>
+          <div class="feed-act">
+            <button class="btn btn--secondary">Open reservation</button>
+            <details class="menu" style="display:inline-block"><summary style="list-style:none;cursor:pointer" class="go" aria-label="More">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></summary></details>
+          </div>
+        </div>
+
+        <div class="feed-row unread">
+          <span class="sev sev--bad"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+          <div class="n-body">
+            <b>Guest waiting — kiosk session escalated <span class="chip chip--bad chip-inline"><i></i>4 min</span></b>
+            <small>Kiosk SJU-01 · guest requested staff during license scan · <span class="src-tag">Kiosk</span></small>
+          </div>
+          <span class="loc">SJU Airport</span>
+          <time>2:39 PM</time>
+          <div class="feed-act"><button class="btn btn--secondary">Open kiosk queue</button></div>
+        </div>
+
+        <div class="feed-row unread">
+          <span class="sev sev--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
+          <div class="n-body">
+            <b>Maintenance snoozed at check-in — UNIT-025 <span class="chip chip--warn chip-inline"><i></i>1,230 mi overdue</span></b>
+            <small>Oil change snoozed at return by J. Rivera — re-prompts at UNIT-025's next check-out or check-in · <span class="src-tag">Maintenance</span></small>
+          </div>
+          <span class="loc">SJU Airport</span>
+          <time>2:14 PM</time>
+          <div class="feed-act"><button class="btn btn--secondary">Open due list</button></div>
+        </div>
+
+        <div class="feed-row">
+          <span class="sev sev--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M2 10h20"/></svg></span>
+          <div class="n-body">
+            <b>New billable toll on a closed contract — $3.20 <span class="chip chip--warn chip-inline"><i></i>bill or absorb</span></b>
+            <small>JVX-482 · RES-847211 returned Aug 28 · Caguas Norte gantry · <span class="src-tag">TollBridge</span></small>
+          </div>
+          <span class="loc">Condado</span>
+          <time>1:52 PM</time>
+          <div class="feed-act">
+            <button class="btn btn--secondary">Review toll</button>
+          </div>
+        </div>
+
+        <div class="feed-row">
+          <span class="sev sev--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+          <div class="n-body">
+            <b>Shuttle request no-show — Terminal B <span class="chip chip--warn chip-inline"><i></i>12 min wait</span></b>
+            <small>Rider unresponsive · SMS sent · driver released · <span class="src-tag">Shuttle</span></small>
+          </div>
+          <span class="loc">SJU Airport</span>
+          <time>1:40 PM</time>
+          <div class="feed-act">
+            <span class="ack-note">Acknowledged by M. Ortiz · 1:44 PM</span>
+            <button class="go" aria-label="Open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg></button>
+          </div>
+        </div>
+
+        <div class="feed-row">
+          <span class="sev sev--info"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v18"/><path d="M2 22h20"/><path d="M9 6h6M9 10h6M9 14h6"/></svg></span>
+          <div class="n-body">
+            <b>Registration expires in 9 days — UNIT-031 <span class="chip chip--info chip-inline"><i></i>Sep 9</span></b>
+            <small>Marbete renewal · vehicle has a reservation on Sep 12 · <span class="src-tag">Documents</span></small>
+          </div>
+          <span class="loc">Condado</span>
+          <time>11:05 AM</time>
+          <div class="feed-act"><button class="btn btn--secondary">Open vehicle</button></div>
+        </div>
+
+        <div class="day-head">Yesterday · Sat, Aug 30</div>
+
+        <div class="feed-row">
+          <span class="sev sev--warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></span>
+          <div class="n-body">
+            <b>Issue due in 48h — damage claim CLM-0214 <span class="chip chip--warn chip-inline"><i></i>due Mon</span></b>
+            <small>Evidence request pending customer reply for 6 days · <span class="src-tag">Issue Center</span></small>
+          </div>
+          <span class="loc">Tenant-wide</span>
+          <time>4:20 PM</time>
+          <div class="feed-act"><button class="btn btn--secondary">Open issue</button></div>
+        </div>
+
+        <div class="feed-row">
+          <span class="sev sev--ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+          <div class="n-body">
+            <b>Shuttle S-2 back on route</b>
+            <small>Off-route 6 min near Isla Verde Ave, self-resolved · <span class="src-tag">Shuttle</span></small>
+          </div>
+          <span class="loc">SJU Airport</span>
+          <time>2:12 PM</time>
+          <div class="feed-act">
+            <span class="ack-note">Self-resolved</span>
+          </div>
+        </div>
+
+        <div class="feed-row">
+          <span class="sev sev--info"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M8 2v4M16 2v4"/></svg></span>
+          <div class="n-body">
+            <b>Service due soon — tire rotation, UNIT-025 <span class="chip chip--info chip-inline"><i></i>in 370 mi</span></b>
+            <small>Will be grouped into RO if the car is sent to maintenance · <span class="src-tag">Maintenance</span></small>
+          </div>
+          <span class="loc">SJU Airport</span>
+          <time>9:30 AM</time>
+          <div class="feed-act"><button class="go" aria-label="Open"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M8 7h9v9"/></svg></button></div>
+        </div>
+
+        <div class="tbl-foot">
+          Showing <b>9 of 23</b> in your location scope · older items auto-archive after 30 days
+          <a href="#">Load more ↓</a>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="callouts">
+    <h4>Behavior notes — center</h4>
+    <ul>
+      <li><b>Aggregates, never replaces (v1).</b> Every row deep-links to the surface that owns the work — the tolls tray, the maintenance due list, the kiosk queue, the issue. Acknowledge in the center calls the source's existing endpoint where one exists (geofence dismiss, toll ack); it never invents a parallel resolution state.</li>
+      <li><b>Three severities, fixed meanings.</b> Critical = a human or asset is exposed right now (red, also badges the bell). Needs action = work exists with an owner and a deadline (amber). Informational = awareness only (blue/green, never badges). Sources map into these — severity is in the envelope, not per-surface CSS.</li>
+      <li><b>Read ≠ acknowledged.</b> Read is per-user (clears the bell, tints the row). Acknowledge is per-tenant and shows <i>who</i> ("Acknowledged by M. Ortiz · 1:44 PM") — the same two-plane model the toll tray (staffAckAt) and geofence alerts (DISMISSED) already use separately, unified.</li>
+      <li><b>Scoping:</b> events carry tenantId + locationId; the feed applies the caller's <em>effectiveLocationIds</em> like every other module. Role-gated categories (billing → ADMIN) filter at the API, not in the client.</li>
+      <li><b>Lanes are saved filters</b>, not inboxes — same rail pattern as the tolls redesign, so staff learn it once.</li>
+      <li><b>Muted rules tab</b>: per-user mutes by category + location ("no shuttle info at Condado"), never mutable for critical.</li>
+      <li><b>Delivery settings tab</b> (post-MVP): per-category email/SMS digest — the existing per-surface email fan-outs (toll alertEmail, shuttle recipients) migrate here eventually.</li>
+    </ul>
+  </div>
+
+</main>
+</body>
+</html>

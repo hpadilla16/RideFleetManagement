@@ -1,5 +1,85 @@
 {
+  "notifications": {
+    "title": "Notifications",
+    "sub": "Everything that asked for attention, in one feed",
+    "bellAria": "Notifications, {{count}} unread",
+    "unread": "{{count}} unread",
+    "markAll": "Mark all read",
+    "viewAll": "View all in Notification Center",
+    "empty": "Nothing needs your attention",
+    "open": "Open",
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "scopes": {
+      "all": "All",
+      "critical": "Critical",
+      "needsAction": "Needs action",
+      "mySede": "My sede"
+    },
+    "tabs": {
+      "inbox": "Inbox",
+      "acknowledged": "Acknowledged",
+      "muted": "Muted rules",
+      "delivery": "Delivery settings"
+    },
+    "lanes": {
+      "critical": "Critical",
+      "needsAction": "Needs action",
+      "info": "Informational",
+      "everything": "Everything",
+      "allCritical": "All critical",
+      "geofence": "Vehicles overdue",
+      "kiosk": "Guest waiting",
+      "tolls": "Tolls to bill",
+      "maintenance": "Maintenance",
+      "shuttle": "Shuttle",
+      "documents": "Documents & marbete",
+      "billing": "Billing",
+      "allInfo": "All informational",
+      "all": "All notifications"
+    },
+    "railNote": "Lanes are saved filters over one feed, not separate inboxes. Counts are open items in your location scope.",
+    "evt": {
+      "geofence": "Overdue & outside geofence — {{unit}}",
+      "kiosk": "Guest waiting — kiosk session escalated",
+      "tollClosed": "New billable toll on a closed contract — {{amt}}",
+      "tollNew": "New billable toll — {{amt}}",
+      "noShow": "Shuttle request no-show — {{stop}}",
+      "regExpiring": "Registration expires in {{days}} days — {{unit}}",
+      "regExpired": "Registration expired — {{unit}}",
+      "maintOverdue": "Maintenance overdue — {{service}}, {{unit}}",
+      "billingSuspended": "Subscription suspended — payment past due"
+    },
+    "src": {
+      "GEOFENCE": "VoltSwitch",
+      "TOLL": "TollBridge",
+      "SHUTTLE": "Shuttle",
+      "KIOSK": "Kiosk",
+      "BILLING": "Billing",
+      "MAINTENANCE": "Maintenance",
+      "DOCUMENTS": "Documents"
+    },
+    "ack": {
+      "by": "Acknowledged by {{name}} · {{time}}",
+      "self": "Self-resolved",
+      "action": "Acknowledge"
+    },
+    "foot": {
+      "showing": "Showing {{a}} of {{b}} in your location scope",
+      "archive": "older items auto-archive after 30 days",
+      "loadMore": "Load more"
+    },
+    "toolbar": {
+      "allSources": "All sources",
+      "refresh": "Refresh"
+    },
+    "comingSoon": {
+      "muted": "Muted rules are coming soon — per-user mutes by category and sede, never for critical alerts.",
+      "delivery": "Delivery settings are coming soon — the existing per-surface email and SMS fan-outs keep working unchanged until then."
+    }
+  },
   "nav": {
+    "notifications": "Notifications",
     "dashboard": "Dashboard",
     "reservations": "Reservations",
     "vehicles": "Vehicles",

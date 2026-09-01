@@ -6620,3 +6620,93 @@ model AutopayInvite {
   @@index([subscriptionId])
   @@index([expiresAt])
 }
+
+// ============================================================================
+// NOTIFICATION CENTER (2026-09-01) — the envelope the staff bell + /notifications
+// center aggregate over. Design: design/mockups/notification-center-mockup.html +
+// notifications-NOTES.md (§6 envelope, §9 MVP). The center AGGREGATES the nine
+// existing alert surfaces; it replaces none of them — every emitter is a pure
+// add-on at an existing choke point, deduped by dedupeKey.
+// ============================================================================
+
+// One row per notification EVENT (something happened at a time — standing
+// conditions stay on the dashboards). Plain String ids on purpose (no
+// @relation): a notification is an observation, not part of the reservation
+// graph, and loose ids keep the migration purely additive — same style as
+// OverdueVehicleAlert / ShuttleAlert.
+model NotificationEvent {
+  id       String @id @default(cuid())
+  tenantId String
+  // Sede the event belongs to; null = tenant-wide (e.g. billing dunning).
+  // The feed filters by the caller's effectiveLocationIds; null rows are
+  // visible to every caller of the tenant.
+  locationId String?
+
+  // CRITICAL | NEEDS_ACTION | INFO — fixed severity contract (NOTES §6):
+  // CRITICAL badges the bell, NEEDS_ACTION shows in the panel and counts,
+  // INFO never badges. String + comment per current schema convention.
+  severity String
+
+  // GEOFENCE | TOLL | SHUTTLE | KIOSK | BILLING | MAINTENANCE | DOCUMENTS
+  sourceType  String
+  // Id of the row in the owning module (alert id, toll transaction id, ...).
+  sourceRefId String?
+
+  title String
+  // One context line under the title (mock: "RES-848d · 2h 40m past return").
+  body  String?
+  // App-relative path the row deep-links to (the surface that OWNS the work).
+  deepLink String?
+
+  // Idempotency anchor: emitters upsert on (tenantId, dedupeKey) so the crons
+  // that re-detect the same condition every tick never spam the feed — same
+  // pattern as ShuttleAlert (tenantId, providerRef).
+  dedupeKey String
+
+  // Client-side i18n identity: the frontend renders EN/ES titles from
+  // notifications.evt.{templateKey} + paramsJson; `title`/`body` are the
+  // stored EN fallback for unknown keys.
+  templateKey String?
+  paramsJson  String?
+
+  // Role gate: null = any authenticated staff; 'ADMIN' = tenant admins only
+  // (billing dunning). Filtered at the API, never in the client.
+  audienceRole String?
+
+  // Per-TENANT acknowledge (who + when, team-visible). Read state is per-user
+  // and lives in NotificationRead — the two-plane model from the NOTES.
+  // Acknowledge DELEGATES to the source endpoint where one exists (geofence
+  // dismiss, toll staff-ack); these stamps are display metadata, never a
+  // parallel resolution state.
+  ackByUserId String?
+  // Denormalized at ack time so the feed shows "Acknowledged by M. Ortiz"
+  // without a relation into User (observation-table style).
+  ackByName String?
+  ackAt     DateTime?
+
+  // Set when the underlying condition cleared on its own ("Self-resolved").
+  resolvedAt DateTime?
+  // 30-day auto-archive (honest footer copy): the daily sweep stamps this;
+  // archived rows leave the feed but keep the ack audit trail.
+  archivedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, dedupeKey])
+  // The feed: newest-first within the caller's tenant.
+  @@index([tenantId, createdAt])
+  // The bell badge: unread CRITICAL/NEEDS_ACTION count by severity.
+  @@index([tenantId, severity, createdAt])
+}
+
+// Per-USER read state — one row per (user, notification) actually read.
+// Absence = unread. Loose ids, no @relation (observation style).
+model NotificationRead {
+  id             String   @id @default(cuid())
+  userId         String
+  notificationId String
+  readAt         DateTime @default(now())
+
+  @@unique([userId, notificationId])
+  @@index([notificationId])
+}

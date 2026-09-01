@@ -51,6 +51,7 @@ import logger from '../../lib/logger.js';
 import { SUBSCRIPTION_STATUS } from './billing.service.js';
 import { suspendTenantAccess } from './billing-admin.service.js';
 import { notifyOwner } from './billing-notify.js';
+import { emitNotificationSafe } from '../notifications/notifications-emit.js';
 
 /**
  * How many days a tenant may stay PAST_DUE before access is cut.
@@ -82,6 +83,9 @@ function deps(overrides = {}) {
     now: overrides.now || (() => new Date()),
     suspendTenantAccess: overrides.suspendTenantAccess || suspendTenantAccess,
     notifyOwner: overrides.notifyOwner || notifyOwner,
+    // Notification Center emitter (2026-09-01): injectable like every other
+    // dependency here so the suite can stub and assert it.
+    emitNotification: overrides.emitNotification || emitNotificationSafe,
     env: overrides.env || process.env,
     ...overrides,
   };
@@ -183,6 +187,26 @@ export async function runDunningSweep(overrides = {}) {
       await d.notifyOwner('SUSPENDED', sub, {
         detectedBy: `dunning sweep (${graceDays}-day grace window)`,
         daysPastDue: days,
+      });
+
+      // Notification Center emitter (2026-09-01) — the in-app envelope for
+      // the suspended tenant's own ADMINs (audienceRole gates it at the API;
+      // no other role ever sees billing rows). Severity CRITICAL per the
+      // contract: suspension = access already cut. Tenant-wide (no sede).
+      // Deduped per delinquency episode (pastDueSince clock), so a re-run of
+      // the sweep never duplicates. The owner email above is untouched.
+      await d.emitNotification({
+        tenantId: sub.tenantId,
+        severity: 'CRITICAL',
+        sourceType: 'BILLING',
+        sourceRefId: sub.id,
+        title: 'Subscription suspended — payment past due',
+        body: `${days} day(s) past due, beyond the ${graceDays}-day grace window. Update the payment method to restore access.`,
+        deepLink: '/dashboard',
+        dedupeKey: `dunning-suspended:${sub.id}:${new Date(sub.pastDueSince).toISOString().slice(0, 10)}`,
+        templateKey: 'billingSuspended',
+        paramsJson: { days },
+        audienceRole: 'ADMIN',
       });
     } catch (err) {
       counts.errors += 1;
