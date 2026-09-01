@@ -491,5 +491,474 @@
   "coPresentExit": "Exit presentation",
   "coPresentSubtitle": "Rental terms · Reservation {number}",
   "coPresentSubtitleNoNumber": "Rental terms",
-  "coPresentClosingSoon": "{mmss} left — if it expires, the agent issues another one right away."
+  "coPresentClosingSoon": "{mmss} left — if it expires, the agent issues another one right away.",
+
+  "coInspWhatTitle": "What gets captured here",
+  "coInspWhatParts": "3 parts",
+  "coInspRowPhotos": "Photos",
+  "coInspWhatPhotos": "8 angles · Front and Rear required",
+  "coInspRowCondition": "Condition",
+  "coInspWhatMetrics": "Odometer, fuel, cleanliness and notes",
+  "coInspRowSignature": "Signature",
+  "coInspWhatSignature": "The customer signs the walk-around on this phone",
+  "coInspOfflineNote": "Photos can be taken with no signal: they stay in the outbox and send themselves once you reconnect. The step moves on when the server receives them.",
+  "coInspLastReading": "Last reading",
+  "coInspPaidPill": "Paid {time}",
+  "coInspStartCta": "Start inspection",
+  "coInspStartWhy": "Starting marks the inspection as in progress on the server. You can pause the checkout at any time without losing photos.",
+
+  "coInspPhotosStep": "Inspection · photos",
+  "coInspMetricsStep": "Inspection · details",
+  "coInspSummaryStep": "Inspection · review and send",
+  "coInspRequiredWhy": "Front and Rear are done. The rest adds evidence and can be captured after the details.",
+  "inspPhotoQueued": "{time} · in outbox",
+  "inspPhotoSent": "Sent to the server",
+  "inspPhotoDead": "Didn't reach the server",
+
+  "coInspLocalDoneTitle": "{count, plural, =0{The inspection is complete on this phone. The closing record is still queued; it sends itself once you reconnect.} one{The inspection is complete on this phone. 1 photo and the closing record are still queued; they send themselves once you reconnect.} other{The inspection is complete on this phone. {count} photos and the closing record are still queued; they send themselves once you reconnect.}}",
+  "coInspLocalDoneSending": "The inspection is complete on this phone. It is sending now; the step moves on when the server receives it.",
+  "coInspServerPhotos": "{count} of 8 received",
+  "coInspRowInspection": "Inspection",
+  "coInspReceivedAt": "Received {time}",
+  "coInspContinueSign": "Continue to signature and close",
+  "coInspBlockedWhy": "The server closes this step when it receives the inspection — this screen can't. Nothing is lost: you can pause the checkout and come back.",
+  "coOpenOutbox": "Open outbox ({count})",
+  "coOpenOutboxDead": "{count, plural, one{Open outbox (1 failure)} other{Open outbox ({count} failures)}}",
+
+  "coInspRequiredDeadTitle": "The {angle} photo couldn't be sent and it's required. Without it the server will reject the inspection close.",
+  "coInspRetakeCta": "Retake {angle}",
+  "coInspRetakeWhy": "Retaking it automatically retries the inspection close.",
+  "coInspCompleteDeadTitle": "The inspection close couldn't be sent. The reason and the decision you need are in the outbox.",
+  "coInspRequiredAnglesTitle": "Required angles",
+  "coInspRequiredMissingPill": "{count, plural, one{1 missing} other{{count} missing}}",
+  "coInspAnglesFailedChip": "{count, plural, one{1 failed} other{{count} failed}}",
+
+  "coInspDoneTitle": "Check-out inspection",
+  "coInspSignatureTitle": "Customer signature",
+  "coInspSignedRow": "Signed by",
+  "coSignFromInspection": "{name} · at the end of the inspection",
+  "coSignAlreadyBanner": "The customer already signed, so there's no need to ask again. All that's left is closing the handover.",
+  "coInspCloseCta": "Continue to closing",
+  "coInspCloseWhy": "The server already has the inspection and the signature. This button moves on to closing; the contract is generated once the hand-over is closed.",
+
+  "coHandoffTitle": "Turn the phone to the customer",
+  "coHandoffBody": "{name} is about to sign for the handover of the {vehicle}.",
+  "coHandoffBodyGeneric": "The customer is about to sign for the handover of the vehicle.",
+  "coHandoffRuleLock": "The app locks onto the signature: no exit, no other screen.",
+  "coHandoffRuleExit": "To exit without signing: hold the top bar for 3 s and enter your PIN.",
+  "coHandoffRulePin": "Three wrong PINs and the app locks; you'll have to sign back in.",
+  "coHandoffRuleBrand": "The customer sees the screen in Spanish or English, branded as {tenant}.",
+  "coHandoffRuleBrandNoTenant": "The customer sees the screen in Spanish or English, with no platform branding.",
+  "coRetainedNote": "The customer already signed on this phone, but the server hasn't confirmed it yet. The stroke is still here: you don't have to ask them again.",
+  "coRetryWithSignature": "Retry with the signature they gave",
+  "coRetryWithSignatureWhy": "We send the SAME stroke the customer left a moment ago. It lives only in this phone's memory and never goes into the outbox.",
+  "coHandoffCta": "Hand to the customer",
+  "coHandoffWhy": "The signature is written to the agreement when confirmed. If the customer backs out, exit with your PIN and the step stays as it is.",
+  "coHandoffOfflineBlocked": "The signature can't be collected offline: it's written to the agreement at that moment, not later.",
+
+  "kioskSignSubtitleCheckout": "Vehicle handover · Reservation {reservation}",
+  "kioskSignPromptCheckout": "Sign to confirm you are receiving the vehicle and accept the rental agreement.",
+  "kioskSignPlate": "Plate {plate}",
+
+  "coSignReceived": "Signature received. You can take the phone back.",
+  "coCloseStep1": "Signature saved to the agreement",
+  "coCloseStep2": "Generating the agreement",
+  "coCloseStep3": "Recording the handover",
+  "coCloseLegWaiting": "Step {index} of {total} · pending",
+  "coClosingCta": "Closing…",
+  "coClosingWhy": "Don't close the app: closing takes three server confirmations and you're on the second.",
+  "coCloseRetry": "Retry closing",
+  "coCloseRetryWhy": "This leg can be retried: the session is still open and nothing you captured was lost.",
+
+  "coAlreadySignedTitle": "The customer already signed",
+  "coAlreadySignedBody": "They signed at the end of the inspection, at {time}. No need to hand them the phone again.",
+  "coAlreadySignedBodyOther": "The signature was recorded at {time}. No need to hand them the phone again.",
+  "coAlreadySignedChip": "Signature on the agreement · {time}",
+  "coSignedDocTitle": "What was signed",
+  "coSignedSigner": "Signer",
+  "coSignedSignerUnknown": "No name was recorded",
+  "coSignedDocument": "Document",
+  "coSignedDocumentValue": "Rental agreement {number}",
+  "coSignedDocumentValueNoNumber": "Rental agreement",
+  "coResignLink": "Ask for the signature again",
+  "coResignWarning": "The new signature REPLACES the one already on the agreement. Only use this if the previous one isn't valid.",
+  "coResignTitle": "Replace the saved signature?",
+  "coResignConfirm": "Yes, ask again",
+  "coCloseCta": "Close the handover",
+  "coCloseCtaWhy": "The handover is recorded on the reservation and the agreement is generated.",
+
+  "coClosedTitle": "Handover closed",
+  "coClosedTitleUnverified": "Checkout closed",
+  "coRecordHandoverUnverifiedNotice": "The close went through, but we couldn't confirm it on the reservation. Check it before you call the handover done.",
+  "coBeforeTheyGoTitle": "Before they leave",
+  "coBeforeKeysLabel": "Keys",
+  "coBeforeKeys": "Hand over the keys and the registration card",
+  "coBeforeReturnLabel": "Return",
+  "coBeforeScopeNote": "The departure fuel level and odometer are stored in the inspection record, not on this screen.",
+  "coRecordTitle": "Record",
+  "coRecordPillRecorded": "Recorded",
+  "coRecordPillChecking": "Checking",
+  "coRecordPillUnverified": "Not confirmed",
+  "coRecordRowSession": "Session",
+  "coRecordSessionClosedAt": "Closed {time}",
+  "coRecordSignatureLabel": "Signature",
+  "coRecordContractLabel": "Agreement",
+  "coRecordEmailRequested": "Email delivery was requested at {time}",
+  "coRecordEmailNotRequested": "No email delivery on record",
+  "coRecordHandoverLabel": "Handover",
+  "coRecordHandoverRecorded": "Recorded on the reservation · {time}",
+  "coRecordHandoverChecking": "Checking on the reservation…",
+  "coRecordHandoverUnconfirmed": "Not confirmed",
+  "coRecordHandoverCheckingWhy": "Nothing is blocked: you can leave. The check isn't lost — it stays on the session.",
+  "coRecordHandoverRecheck": "Check again",
+  "coRecordHandoverRecheckWhy": "This is a lookup, not a retry of the close: the session is already closed and can't be closed twice.",
+  "coBackHome": "Back to home",
+  "coSessionDetail": "See session detail",
+  "coBackToOutcome": "Back to the closing summary",
+
+  "coCloseFailedStepline": "Closing hit a problem",
+  "coCloseFailedTitle": "The checkout closed, but the server did not record the handover. Someone at the counter needs to review this reservation.",
+  "coCloseNotRecordedTitle": "The checkout closed, but the reservation was not marked as handed over. Someone at the counter needs to review it.",
+  "coCloseFailedStep": "Rejected at {time}",
+  "coCloseReasonTitle": "Reason",
+  "coServerReasonLabel": "Server response",
+  "coCloseReasonPill": "From the server",
+  "coCloseVerifiedPill": "Checked on the reservation",
+  "coCloseVerifiedTitle": "What we checked",
+  "coCloseVerifiedLabel": "Reservation status",
+  "coCloseNotRecordedReason": "We checked the reservation after closing and it still doesn't record the handover. The server gave no reason.",
+  "coCloseNoRetry": "This session is already closed, so it can't be retried from here. Nothing you captured was lost.",
+  "coCopyProblem": "Copy the details for the counter",
+  "coCopiedProblem": "Details copied to the clipboard",
+  "coHoldKeys": "Don't hand over the keys until the counter confirms.",
+
+  "coCloseUnknownStepline": "Closing unconfirmed",
+  "coCloseUnknownTitle": "The connection dropped mid-close. We don't know whether it went through — we have to ask the server.",
+  "coCloseUnknownStep": "No response",
+  "coCloseConfirmedAt": "{time} · confirmed",
+  "coWontHappenTitle": "What will NOT happen",
+  "coWontHappenPill": "Rule",
+  "coWontRetryLabel": "Retry",
+  "coWontRetry": "The app won't retry the close on its own.",
+  "coWontQueueLabel": "Outbox",
+  "coWontQueue": "Closing never goes into the outbox.",
+  "coCheckStatus": "Check the status",
+  "coCheckStatusWhy": "With signal, one lookup tells you which step it stopped at, and you continue from there.",
+
+  "coPresenceChipSemantics": "{line}: see who is in this session",
+  "@coPresenceChipSemantics": {
+    "placeholders": {
+      "line": {
+        "type": "String"
+      }
+    }
+  },
+  "coPresenceNeverAlone": "The chip can only state who is here. Nobody showing does not mean you are alone.",
+  "coWhoIsHereTitle": "Who is in this session",
+  "coWhoIsHereSub": "The server's 45 s window · refreshed on every read",
+  "coWhoIsHereNow": "now",
+  "coWhoIsHereAge": "{age} ago",
+  "@coWhoIsHereAge": {
+    "placeholders": {
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coWhoIsHereDeviceSub": "Device · no person identified",
+  "coWhoIsHereYou": "You · RideOps",
+  "coWhoIsHereYouSeenAs": "Others see you as {name}",
+  "@coWhoIsHereYouSeenAs": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "coWhoIsHereYouSeenAsUnknown": "Others see you by your full name",
+  "coWhoIsHereDisclosure": "You appear by name while this screen is open. When you leave or pause, you stop appearing in under a minute. This reserves nothing: nobody is blocked by your being here.",
+  "coPresenceEmpty": "Nobody is visible right now. Another surface may be moving ahead without showing here.",
+  "coPresenceEmptyShort": "Nobody visible right now",
+  "coPresenceOfflineWhy": "With no signal we can't state that anyone is here right now. The green dot goes out; the chip does not disappear.",
+  "coAdvancedOtherAgentNamed": "“{step}” was completed by {name} {age} ago.",
+  "@coAdvancedOtherAgentNamed": {
+    "placeholders": {
+      "step": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      },
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coAdvancedStampLanded": "{stamp} was recorded on another surface {age} ago.",
+  "@coAdvancedStampLanded": {
+    "placeholders": {
+      "stamp": {
+        "type": "String"
+      },
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coAdvancedStepUnchanged": "Keep capturing: this step did not change.",
+  "coChangedTitle": "What changed since you came in",
+  "coChangedSub": "State reported by the server · {time}",
+  "@coChangedSub": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "coChangedStepMoved": "The step moved",
+  "coChangedStepMovedDetail": "{from} → {to}",
+  "@coChangedStepMovedDetail": {
+    "placeholders": {
+      "from": {
+        "type": "String"
+      },
+      "to": {
+        "type": "String"
+      }
+    }
+  },
+  "coChangedByKiosk": "Completed on the kiosk · {time}",
+  "@coChangedByKiosk": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "coChangedByOtherAgent": "Completed by {name} · {time}",
+  "@coChangedByOtherAgent": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "coChangedByOtherSurface": "Completed on another surface · {time}",
+  "@coChangedByOtherSurface": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "coChangedByYou": "You did this · {time} · unchanged",
+  "@coChangedByYou": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "coChangedUntouched": "Pending · nobody has touched it",
+  "coChangedNothingLost": "Nothing you did was lost.",
+  "coChangedSomethingLost": "{count, plural, one{Careful: 1 upload has not reached the server. Check the Outbox before moving on.} other{Careful: {count} uploads have not reached the server. Check the Outbox before moving on.}}",
+  "@coChangedSomethingLost": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "coChangedNoChanges": "Nobody has touched anything since you came in.",
+  "coChangedStayCta": "Stay on step {index}",
+  "@coChangedStayCta": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      }
+    }
+  },
+  "coConflictTooEarlyTitle": "That step isn't up yet",
+  "coConflictTooEarlyBody": "The session is on {current} (step {index}) and {target} is step {targetIndex}. The server only lets you move one step at a time.",
+  "@coConflictTooEarlyBody": {
+    "placeholders": {
+      "current": {
+        "type": "String"
+      },
+      "index": {
+        "type": "int"
+      },
+      "target": {
+        "type": "String"
+      },
+      "targetIndex": {
+        "type": "int"
+      }
+    }
+  },
+  "coConflictTooEarlyBodyShort": "The server only lets you move one step at a time, and this is not the next one.",
+  "coGoToStepCta": "Go to step {index} · {step}",
+  "@coGoToStepCta": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "step": {
+        "type": "String"
+      }
+    }
+  },
+  "coGoToStepWhy": "Going to step {index} is navigation inside this app: it always works.",
+  "@coGoToStepWhy": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      }
+    }
+  },
+  "coGuardOutboxCta": "Open the Outbox ({n})",
+  "@coGuardOutboxCta": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "coGuardOutboxWhy": "The Outbox drains itself once you have signal; the step moves on when the stamp lands.",
+  "coConflictSwapLockedBody": "This unit can no longer be swapped from here: the inspection already started. It's handled at the desk.",
+  "coJoinBannerStarted": "This departure already started: it's on step {index} of {total}.",
+  "@coJoinBannerStarted": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "coJoinBannerStartedAt": "This departure already started. It was opened at {time} and it's on step {index} of {total}.",
+  "@coJoinBannerStartedAt": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      },
+      "index": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "coJoinBannerStartedByOther": "Another agent opened this departure and it's on step {index} of {total}.",
+  "@coJoinBannerStartedByOther": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "coJoinDoneTitle": "What's already done",
+  "coJoinDonePill": "{done} of {total} phases",
+  "@coJoinDonePill": {
+    "placeholders": {
+      "done": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "coJoinPendingTitle": "What's left",
+  "coJoinPendingPill": "Yours",
+  "coJoinContinueCta": "Continue from step {index}",
+  "@coJoinContinueCta": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      }
+    }
+  },
+  "coJoinContinueCtaUnknownStep": "Continue",
+  "coJoinContinueWhy": "You enter the step the server reports, not the one anyone left. Nothing is redone.",
+  "coJoinKioskActiveTitle": "The customer is on the kiosk right now.",
+  "coJoinKioskActiveBody": "Moving ahead from here may interrupt what they're doing.",
+  "coJoinAdviceTitle": "What's worth doing",
+  "coJoinAdvicePill": "Advice",
+  "coJoinAdviceWaitKey": "Wait",
+  "coJoinAdviceWait": "This screen updates itself when the kiosk finishes",
+  "coJoinAdviceLeaveKey": "Or leave",
+  "coJoinAdviceLeave": "Nothing is lost: the session stays as it is",
+  "coJoinNotABlock": "This is not a block. You can move ahead — the server decides, not this notice. We're only telling you what's happening on the other side.",
+  "coJoinProceedAnyway": "Move ahead anyway",
+  "coJoinPausedByOther": "Another agent paused this departure {age} ago.",
+  "@coJoinPausedByOther": {
+    "placeholders": {
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coJoinPausedBySomeone": "This departure was left paused {age} ago.",
+  "@coJoinPausedBySomeone": {
+    "placeholders": {
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coJoinPausedReason": "Reason: “{reason}”",
+  "@coJoinPausedReason": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "coJoinWhereItStoppedTitle": "Where it stopped",
+  "coJoinNoStealWhy": "Continuing takes nothing away from anyone: there is one session and the log keeps who did what.",
+  "coJoinPausedAutoStalled": "The system flagged it: it's been stopped for over 4 h. Nobody paused it.",
+  "coJoinPausedBySystem": "The system flagged this departure {age} ago.",
+  "@coJoinPausedBySystem": {
+    "placeholders": {
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coConflictVehicleKept": "Kept: the customer already verified and the step you're on.",
+  "coGuardWhyServer": "The server closes this step when the stamp lands, not this screen. Nothing is lost: you can pause and come back.",
+  "coPresenceChipLive": "{name} · {surface}",
+  "@coPresenceChipLive": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "surface": {
+        "type": "String"
+      }
+    }
+  },
+  "coPresenceChipAged": "{name} · {age} ago",
+  "@coPresenceChipAged": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "age": {
+        "type": "String"
+      }
+    }
+  },
+  "coWhoIsHereYouOffline": "No connection",
+  "coWhoIsHereDisclosureOffline": "With no connection your heartbeat isn't landing: in under a minute you stop appearing to the other surfaces. You reappear on your own once you have signal. This never reserves anything.",
+  "coPresenceEmptyUnverifiable": "And it can't be read as “nobody is here” either: another surface may be moving ahead without us seeing it."
 }

@@ -16,6 +16,7 @@ import {
   signBridgeNonce,
   dollarsToCents,
 } from './payarc-hosted-fields.js';
+import { mintHppSession } from '../payment-gateway/ipos-hpp-payment.service.js';
 
 /**
  * Gateway-agnostic guest payment session minting for the Flutter
@@ -47,7 +48,7 @@ function _publicApiBase() {
   ).replace(/\/$/, '');
 }
 
-async function _findReservationForPayment(tripCode, tenantId) {
+async function _findReservationForPayment(tripCode, tenantId, db = prisma) {
   const clean = String(tripCode || '').trim();
   if (!clean) {
     const err = new Error('tripCode is required');
@@ -55,12 +56,12 @@ async function _findReservationForPayment(tripCode, tenantId) {
     throw err;
   }
   let reservation = null;
-  const trip = await prisma.trip.findUnique({
+  const trip = await db.trip.findUnique({
     where: { tripCode: clean },
     select: { reservationId: true },
   });
   if (trip?.reservationId) {
-    reservation = await prisma.reservation.findUnique({
+    reservation = await db.reservation.findUnique({
       where: { id: trip.reservationId },
       // pickupLocation is needed for the PR/US gateway routing
       // decision in selectPaymentGateway().
@@ -68,7 +69,7 @@ async function _findReservationForPayment(tripCode, tenantId) {
     });
   }
   if (!reservation) {
-    reservation = await prisma.reservation.findFirst({
+    reservation = await db.reservation.findFirst({
       where: { reservationNumber: clean },
       include: { payments: true, pickupLocation: true },
     });
@@ -100,21 +101,29 @@ export async function createGuestPaymentSession({
   tenantId = null,
   deps = {},
 } = {}) {
-  const reservation = await _findReservationForPayment(tripCode, tenantId);
+  const reservation = await _findReservationForPayment(tripCode, tenantId, deps.prisma || prisma);
   const amountDue = assertPayable(reservation);
 
   const settings = deps.settingsService || settingsService;
   const config = await settings.getPaymentGatewayConfig(
     reservation.tenantId ? { tenantId: reservation.tenantId } : {},
   );
-  // Gateway selection is location-driven for car-sharing (PR always
-  // Auth.Net, US uses PayArc when configured). For non-car-sharing
-  // reservations (no pickupLocation loaded, or fleet rentals), fall
-  // back to the tenant-wide gateway config.
+  // Gateway routing (2026-08-29, owner decision): the TENANT's configured
+  // gateway wins. A tenant set to 'ipos' checks out through their own
+  // iPOSpays hosted payment page — website checkout money must settle into
+  // THAT tenant's merchant account, never Ride's.
+  //
+  // For every other tenant, behavior is byte-for-byte what it was:
+  // location-driven selection for car-sharing (PR always Auth.Net, US uses
+  // PayArc when configured), tenant-wide gateway for reservations with no
+  // pickupLocation. Pinned by ipos-payment-session.test.mjs.
+  const tenantGateway = String(config?.gateway || '').toLowerCase();
   const routed = selectPaymentGateway(reservation, config || {});
-  const gateway = reservation?.pickupLocation
-    ? routed
-    : currentGateway(config || {});
+  const gateway = tenantGateway === 'ipos'
+    ? 'ipos'
+    : reservation?.pickupLocation
+      ? routed
+      : currentGateway(config || {});
 
   const apiBase = _publicApiBase();
   const cleanCode = String(tripCode || '').trim();
@@ -127,6 +136,57 @@ export async function createGuestPaymentSession({
 
   const now = deps.now instanceof Date ? deps.now : new Date();
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS).toISOString();
+
+  if (gateway === 'ipos') {
+    // The tenant's own iPOSpays hosted payment page. The response fits the
+    // same gateway-agnostic contract the storefront/Flutter WebView consumes:
+    // it navigates to checkoutUrl (GET, no fields) and closes when the
+    // navigation stream hits successMatchUrl / cancelMatchUrl.
+    //
+    // The HPP redirects success to successMatchUrl + our minted reference;
+    // the /payment-return route verifies it server-side (queryPaymentStatus)
+    // and records the payment idempotently — the redirect itself is never
+    // trusted, and unlike Auth.Net there is no silent webhook for HPP.
+    //
+    // FAIL CLOSED: tenant set to ipos with creds missing throws
+    // GATEWAY_NOT_CONFIGURED (503 at the route). NEVER a fall-through to the
+    // authorizenet block — that settles into the wrong merchant account.
+    try {
+      const mint = deps.mintHppSession || mintHppSession;
+      const { url } = await mint({
+        reservation,
+        amount: amountDue,
+        buildReturnUrl: (ref) => `${successMatchUrl}&iposRef=${encodeURIComponent(ref)}`,
+        cancelUrl: cancelMatchUrl,
+        failureUrl: cancelMatchUrl,
+        description: `Trip ${cleanCode} payment`,
+        origin: 'PUBLIC',
+      }, deps.hppDeps || {});
+      logger.info?.('payment-session minted', {
+        tripCode,
+        reservationId: reservation.id,
+        gateway,
+        amount: amountDue,
+      });
+      return {
+        checkoutUrl: url,
+        checkoutMethod: 'GET',
+        checkoutFields: {},
+        successMatchUrl,
+        cancelMatchUrl,
+        gateway: 'ipos',
+        expiresAt,
+        amountDue,
+        currency: String(reservation.currency || 'USD').toUpperCase(),
+      };
+    } catch (err) {
+      if (err?.code === 'GATEWAY_NOT_CONFIGURED' || err?.code === 'ALREADY_PAID') throw err;
+      const wrapped = new Error(String(err?.message || 'iPOSpays checkout creation failed'));
+      wrapped.code = 'GATEWAY_ERROR';
+      wrapped.gateway = 'ipos';
+      throw wrapped;
+    }
+  }
 
   if (gateway === 'authorizenet') {
     if (!authNetEnabled(config || {})) {

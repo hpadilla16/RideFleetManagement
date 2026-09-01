@@ -10,8 +10,9 @@
  *
  * Flow:
  *   1. Load /api/sign/:token → { brand, signerLocale, sections[], … }
- *   2. For each section: show body text + initial pad, post initial on
- *      tap-away.
+ *   2. For each section: show body text + initial pad, post the initial once
+ *      drawing has settled (see INITIAL_COMMIT_DELAY_MS — an initial is
+ *      several strokes, so a finger-lift is not the end of one).
  *   3. After all sections initialed, customer types name + draws full
  *      signature, taps Complete. Posts to /api/sign/:token/complete
  *      which stamps tcCompletedAt on the CheckoutSession.
@@ -75,6 +76,7 @@ const STRINGS = {
     hint: 'Read each section, initial inside the box at the bottom, then sign at the bottom of this page.',
     sectionOf: 'Section {i} of {n}',
     initialed: '✓ Initialed',
+    savedRedo: 'Saved — draw again to redo',
     initialHere: 'Initial here →',
     typeName: 'Type your full name',
     namePlaceholder: 'First Last',
@@ -98,6 +100,7 @@ const STRINGS = {
     hint: 'Lee cada sección, pon tus iniciales en el recuadro y firma al final de esta página.',
     sectionOf: 'Sección {i} de {n}',
     initialed: '✓ Iniciales puestas',
+    savedRedo: 'Guardado — dibuja de nuevo para rehacer',
     initialHere: 'Tus iniciales aquí →',
     typeName: 'Escribe tu nombre completo',
     namePlaceholder: 'Nombre y Apellido',
@@ -312,8 +315,14 @@ function SignFlow({ token, data, t, onComplete, onError }) {
   const canComplete = allInitialed && signerName.trim().length >= 2 && finalSig.length > 200;
 
   const onInitialChange = async (sectionKey, dataUrl) => {
-    // The initial pad fires this when the customer lifts their finger
-    // with a non-trivial drawing.
+    // Fires once the customer has stopped drawing for INITIAL_COMMIT_DELAY_MS
+    // — after the LAST stroke of a multi-stroke initial, not the first.
+    //
+    // Re-entry is normal and safe: a renter redoing a section posts the same
+    // sectionKey again, and saveInitial upserts on (agreementId, sectionKey).
+    // Clearing the pad calls this with '' and is ignored below — the section
+    // stays as saved as the server actually has it, rather than flipping to
+    // unsigned and blocking Complete over a row that still exists.
     if (!dataUrl || dataUrl.length < 200) return;
     try {
       await api(`/api/sign/${token}/initials`, {
@@ -405,11 +414,19 @@ function TermsSection({ index, total, section, t, onInitial }) {
       </p>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <span style={{ fontSize: 12, color: '#6B7280' }}>
-          {section.signed ? t('initialed') : t('initialHere')}
+          {section.signed ? (
+            <>
+              {/* Still reads as done — but not as CLOSED. A renter who sees only
+                  the ✓ assumes the box is finished with them; the second line is
+                  the whole difference between "saved" and "frozen". */}
+              <span style={{ color: '#047857', fontWeight: 600 }}>{t('initialed')}</span>
+              <span style={{ display: 'block', fontSize: 11, marginTop: 2 }}>{t('savedRedo')}</span>
+            </>
+          ) : t('initialHere')}
         </span>
         <InitialPad
           width={120} height={60}
-          signed={section.signed}
+          saved={section.signed}
           label={t('clear')}
           onChange={onInitial}
         />
@@ -422,20 +439,77 @@ function TermsSection({ index, total, section, t, onInitial }) {
 // Tiny inline initial pad — narrower than SignaturePad, suits a phone
 // in portrait. Reuses the same touch+mouse logic, no name field, no
 // helper text.
+//
+// WHY THIS PAD WAITS AND THE SIGNATURE PAD DOES NOT (2026-08-26)
+// ------------------------------------------------------------------
+// An initial is not one stroke. "H.P." is four: two uprights, a bowl, two
+// dots — with a finger-lift between every one of them. This pad used to
+// commit on the FIRST lift, POST it, and then hand back `signed: true`,
+// which arrived as `disabled` and made the canvas inert. The renter was
+// left looking at half a letter with no Clear button (it rendered only
+// while `!disabled`), no way to continue, and a green ✓ telling them it
+// had gone through. Reported from the counter by the owner.
+//
+// So the commit is debounced past the gap BETWEEN strokes. 1400 ms: the
+// natural pause while repositioning a finger is a few hundred ms, and a
+// deliberate "I'm done" pause runs past a second, so the window sits well
+// clear of the former and is still short enough that the ✓ lands before
+// the renter has scrolled to the next section.
+//
+// The delay is opt-in per usage, not a property of the pad, because it buys
+// nothing on the full signature at the bottom of the page. THAT onChange is
+// `setFinalSig` — local state, no network, overwritten by every later
+// stroke, and read only when Complete is tapped. Debouncing it would only
+// add 1.4 s during which the customer has finished signing and the button
+// is still disabled. The delay is here to defer a SIDE EFFECT; where there
+// is none, commit immediately.
 // ---------------------------------------------------------------------------
 
-function InitialPad({ width = 120, height = 60, signed, label, onChange }) {
-  return <CanvasPad width={width} height={height} disabled={signed} label={label} onChange={onChange} />;
+const INITIAL_COMMIT_DELAY_MS = 1400;
+
+function InitialPad({ width = 120, height = 60, saved, label, onChange }) {
+  return (
+    <CanvasPad
+      width={width}
+      height={height}
+      saved={saved}
+      label={label}
+      onChange={onChange}
+      commitDelayMs={INITIAL_COMMIT_DELAY_MS}
+    />
+  );
 }
 
 function SigPad({ height = 140, label, onChange }) {
   return <CanvasPad height={height} label={label} onChange={onChange} fullWidth />;
 }
 
-function CanvasPad({ width, height, fullWidth = false, disabled = false, label, onChange }) {
+/**
+ * `saved` is PURELY cosmetic. It used to be `disabled` and gate `start()`,
+ * which is what froze the pad; a saved initial must stay redrawable, because
+ * the backend's saveInitial is an upsert keyed on (agreementId, sectionKey)
+ * and a second POST simply overwrites the first.
+ */
+function CanvasPad({ width, height, fullWidth = false, saved = false, label, onChange, commitDelayMs = 0 }) {
   const canvasRef = useRef(null);
   const [drawing, setDrawing] = useState(false);
   const [hasContent, setHasContent] = useState(false);
+  // Mirrors `hasContent` for the handlers to read. State alone is a race on a
+  // quick tap-and-flick, where the pointerup handler can still be the one
+  // built by the render BEFORE the first setHasContent(true) landed — and a
+  // stroke that reads as empty never commits at all.
+  const hasContentRef = useRef(false);
+  const commitTimerRef = useRef(null);
+
+  const cancelPendingCommit = () => {
+    if (commitTimerRef.current) {
+      clearTimeout(commitTimerRef.current);
+      commitTimerRef.current = null;
+    }
+  };
+
+  // A timer that outlives the page would POST for an unmounted section.
+  useEffect(() => cancelPendingCommit, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -471,8 +545,10 @@ function CanvasPad({ width, height, fullWidth = false, disabled = false, label, 
   };
 
   const start = (e) => {
-    if (disabled) return;
     e.preventDefault();
+    // The next stroke of the same initial — whatever was about to be sent is
+    // now a half-drawing. This is the line that makes "H.P." possible.
+    cancelPendingCommit();
     setDrawing(true);
     const ctx = canvasRef.current.getContext('2d');
     const p = pointFromEvent(e);
@@ -480,28 +556,42 @@ function CanvasPad({ width, height, fullWidth = false, disabled = false, label, 
     ctx.moveTo(p.x, p.y);
   };
   const move = (e) => {
-    if (!drawing || disabled) return;
+    if (!drawing) return;
     e.preventDefault();
     const ctx = canvasRef.current.getContext('2d');
     const p = pointFromEvent(e);
     ctx.lineTo(p.x, p.y);
     ctx.stroke();
-    setHasContent(true);
+    if (!hasContentRef.current) {
+      hasContentRef.current = true;
+      setHasContent(true);
+    }
   };
   const end = () => {
     if (!drawing) return;
     setDrawing(false);
-    if (hasContent && onChange) {
-      const dataUrl = canvasRef.current.toDataURL('image/png');
-      onChange(dataUrl);
-    }
+    if (!hasContentRef.current || !onChange) return;
+    // Read the canvas when the timer FIRES, not now: by then it carries every
+    // stroke, and a Clear in the meantime cancels this outright.
+    const commit = () => {
+      commitTimerRef.current = null;
+      onChange(canvasRef.current.toDataURL('image/png'));
+    };
+    if (!commitDelayMs) return commit();
+    cancelPendingCommit();
+    commitTimerRef.current = setTimeout(commit, commitDelayMs);
   };
 
   const clear = () => {
+    // Without this, a pending commit fires a moment later and reads the canvas
+    // it finds — the blank one — POSTing an empty initial over a good saved
+    // one. saveInitial has no ink check; `complete` is the only blank guard.
+    cancelPendingCommit();
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    hasContentRef.current = false;
     setHasContent(false);
     if (onChange) onChange('');
   };
@@ -511,16 +601,20 @@ function CanvasPad({ width, height, fullWidth = false, disabled = false, label, 
       <canvas
         ref={canvasRef}
         style={{
-          border: `0.5px ${disabled ? 'solid #10B981' : 'dashed #9CA3AF'}`,
+          // Green + solid still reads "done". The 0.5 opacity that used to come
+          // with it read "closed", which is the impression the fix removes —
+          // the ink stays as crisp as it was before it saved.
+          border: `0.5px ${saved ? 'solid #10B981' : 'dashed #9CA3AF'}`,
           borderRadius: 6,
           background: '#FFFFFF',
           touchAction: 'none',
-          opacity: disabled ? 0.5 : 1,
         }}
         onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
         onTouchStart={start} onTouchMove={move} onTouchEnd={end}
       />
-      {!disabled && hasContent && (
+      {/* `saved` keeps the button up after a reload, when the section is
+          already initialed server-side but this canvas starts empty. */}
+      {(hasContent || saved) && (
         <button onClick={clear} style={clearBtnStyle}>{label}</button>
       )}
     </div>

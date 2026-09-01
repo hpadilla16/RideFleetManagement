@@ -1836,4 +1836,845 @@ class AppLocalizationsEs extends AppLocalizations {
   String coPresentClosingSoon(String mmss) {
     return 'Quedan $mmss — si se vence, el agente le genera otro al instante.';
   }
+
+  @override
+  String get coInspWhatTitle => 'Qué se captura aquí';
+
+  @override
+  String get coInspWhatParts => '3 partes';
+
+  @override
+  String get coInspRowPhotos => 'Fotos';
+
+  @override
+  String get coInspWhatPhotos => '8 ángulos · Frente y Atrás obligatorios';
+
+  @override
+  String get coInspRowCondition => 'Estado';
+
+  @override
+  String get coInspWhatMetrics => 'Odómetro, combustible, limpieza y notas';
+
+  @override
+  String get coInspRowSignature => 'Firma';
+
+  @override
+  String get coInspWhatSignature =>
+      'El cliente firma la revisión en este teléfono';
+
+  @override
+  String get coInspOfflineNote =>
+      'Las fotos se pueden tomar sin señal: quedan en la bandeja y se envían solas al reconectar. El paso avanza cuando el servidor las recibe.';
+
+  @override
+  String get coInspLastReading => 'Última lectura';
+
+  @override
+  String coInspPaidPill(String time) {
+    return 'Pagado $time';
+  }
+
+  @override
+  String get coInspStartCta => 'Comenzar inspección';
+
+  @override
+  String get coInspStartWhy =>
+      'Al comenzar, el servidor marca la inspección en curso. Puedes pausar el checkout en cualquier momento sin perder las fotos.';
+
+  @override
+  String get coInspPhotosStep => 'Inspección · fotos';
+
+  @override
+  String get coInspMetricsStep => 'Inspección · estado';
+
+  @override
+  String get coInspSummaryStep => 'Inspección · revisar y enviar';
+
+  @override
+  String get coInspRequiredWhy =>
+      'Frente y Atrás listos. El resto suma evidencia y se puede capturar después de las métricas.';
+
+  @override
+  String inspPhotoQueued(String time) {
+    return '$time · en bandeja';
+  }
+
+  @override
+  String get inspPhotoSent => 'Enviada al servidor';
+
+  @override
+  String get inspPhotoDead => 'No llegó al servidor';
+
+  @override
+  String coInspLocalDoneTitle(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'La inspección está completa en este teléfono. Faltan $count fotos y el cierre por enviar; salen solos al reconectar.',
+      one:
+          'La inspección está completa en este teléfono. Falta 1 foto y el cierre por enviar; salen solos al reconectar.',
+      zero:
+          'La inspección está completa en este teléfono. Falta el cierre por enviar; sale solo al reconectar.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get coInspLocalDoneSending =>
+      'La inspección está completa en este teléfono. El envío está en curso; el paso avanza cuando el servidor lo reciba.';
+
+  @override
+  String coInspServerPhotos(int count) {
+    return '$count de 8 recibidas';
+  }
+
+  @override
+  String get coInspRowInspection => 'Inspección';
+
+  @override
+  String coInspReceivedAt(String time) {
+    return 'Recibida $time';
+  }
+
+  @override
+  String get coInspContinueSign => 'Continuar a firma y cierre';
+
+  @override
+  String get coInspBlockedWhy =>
+      'Este paso lo cierra el servidor cuando reciba la inspección, no esta pantalla. Nada se pierde: puedes pausar el checkout y volver.';
+
+  @override
+  String coOpenOutbox(int count) {
+    return 'Ver la bandeja ($count)';
+  }
+
+  @override
+  String coOpenOutboxDead(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Ver la bandeja ($count fallas)',
+      one: 'Ver la bandeja (1 falla)',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String coInspRequiredDeadTitle(String angle) {
+    return 'La foto de $angle no se pudo enviar y es obligatoria. Sin ella el servidor rechazará el cierre de la inspección.';
+  }
+
+  @override
+  String coInspRetakeCta(String angle) {
+    return 'Tomar $angle otra vez';
+  }
+
+  @override
+  String get coInspRetakeWhy =>
+      'Al volver a tomarla se reintenta el cierre de la inspección automáticamente.';
+
+  @override
+  String get coInspCompleteDeadTitle =>
+      'El cierre de la inspección no se pudo enviar. El motivo y la decisión que falta están en la bandeja.';
+
+  @override
+  String get coInspRequiredAnglesTitle => 'Ángulos obligatorios';
+
+  @override
+  String coInspRequiredMissingPill(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Faltan $count',
+      one: 'Falta 1',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String coInspAnglesFailedChip(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count fallas',
+      one: '1 falla',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get coInspDoneTitle => 'Inspección de salida';
+
+  @override
+  String get coInspSignatureTitle => 'Firma del cliente';
+
+  @override
+  String get coInspSignedRow => 'Firmó';
+
+  @override
+  String coSignFromInspection(String name) {
+    return '$name · al terminar la inspección';
+  }
+
+  @override
+  String get coSignAlreadyBanner =>
+      'El cliente ya firmó, así que no hay que pedirle firma otra vez. Solo falta cerrar la entrega.';
+
+  @override
+  String get coInspCloseCta => 'Continuar al cierre';
+
+  @override
+  String get coInspCloseWhy =>
+      'El servidor ya tiene la inspección y la firma. Este botón avanza al cierre; el contrato se genera cuando la entrega quede cerrada.';
+
+  @override
+  String get coHandoffTitle => 'Voltea el teléfono al cliente';
+
+  @override
+  String coHandoffBody(String name, String vehicle) {
+    return '$name va a firmar la entrega del $vehicle.';
+  }
+
+  @override
+  String get coHandoffBodyGeneric =>
+      'El cliente va a firmar la entrega del vehículo.';
+
+  @override
+  String get coHandoffRuleLock =>
+      'La app queda bloqueada en la firma: no se puede salir ni ver otra pantalla.';
+
+  @override
+  String get coHandoffRuleExit =>
+      'Para salir sin firma: mantén 3 s la barra de arriba y escribe tu PIN.';
+
+  @override
+  String get coHandoffRulePin =>
+      'Si fallas el PIN 3 veces, la app se bloquea y hay que volver a entrar.';
+
+  @override
+  String coHandoffRuleBrand(String tenant) {
+    return 'El cliente ve la pantalla en español o inglés, con la marca de $tenant.';
+  }
+
+  @override
+  String get coHandoffRuleBrandNoTenant =>
+      'El cliente ve la pantalla en español o inglés, sin la marca de la plataforma.';
+
+  @override
+  String get coRetainedNote =>
+      'El cliente ya firmó en este teléfono, pero el servidor todavía no lo confirmó. El trazo sigue aquí: no hace falta pedírselo otra vez.';
+
+  @override
+  String get coRetryWithSignature => 'Reintentar con la firma que ya dio';
+
+  @override
+  String get coRetryWithSignatureWhy =>
+      'Se manda el MISMO trazo que el cliente dejó hace un momento. Vive solo en la memoria de este teléfono y nunca entra a la bandeja de salida.';
+
+  @override
+  String get coHandoffCta => 'Entregar al cliente';
+
+  @override
+  String get coHandoffWhy =>
+      'La firma se guarda en el contrato al confirmarla. Si el cliente se arrepiente, sales con tu PIN y el paso queda igual.';
+
+  @override
+  String get coHandoffOfflineBlocked =>
+      'Sin conexión no se puede recoger la firma: se guarda en el contrato en el momento, no después.';
+
+  @override
+  String kioskSignSubtitleCheckout(String reservation) {
+    return 'Entrega del vehículo · Reserva $reservation';
+  }
+
+  @override
+  String get kioskSignPromptCheckout =>
+      'Firme para confirmar que recibe el vehículo y acepta el contrato de renta.';
+
+  @override
+  String kioskSignPlate(String plate) {
+    return 'Placa $plate';
+  }
+
+  @override
+  String get coSignReceived => 'Firma recibida. Ya puedes tomar el teléfono.';
+
+  @override
+  String get coCloseStep1 => 'Firma guardada en el contrato';
+
+  @override
+  String get coCloseStep2 => 'Generando el contrato';
+
+  @override
+  String get coCloseStep3 => 'Registrar la entrega';
+
+  @override
+  String coCloseLegWaiting(int index, int total) {
+    return 'Paso $index de $total · falta';
+  }
+
+  @override
+  String get coClosingCta => 'Cerrando…';
+
+  @override
+  String get coClosingWhy =>
+      'No cierres la app: el cierre son tres confirmaciones del servidor y aquí vas por la segunda.';
+
+  @override
+  String get coCloseRetry => 'Reintentar el cierre';
+
+  @override
+  String get coCloseRetryWhy =>
+      'Este tramo se puede volver a intentar: la sesión sigue abierta y nada de lo capturado se perdió.';
+
+  @override
+  String get coAlreadySignedTitle => 'El cliente ya firmó';
+
+  @override
+  String coAlreadySignedBody(String time) {
+    return 'Firmó al terminar la inspección, a las $time. No hace falta pedirle el teléfono otra vez.';
+  }
+
+  @override
+  String coAlreadySignedBodyOther(String time) {
+    return 'La firma quedó registrada a las $time. No hace falta pedirle el teléfono otra vez.';
+  }
+
+  @override
+  String coAlreadySignedChip(String time) {
+    return 'Firma en el contrato · $time';
+  }
+
+  @override
+  String get coSignedDocTitle => 'Lo que se firmó';
+
+  @override
+  String get coSignedSigner => 'Firmante';
+
+  @override
+  String get coSignedSignerUnknown => 'No se registró el nombre';
+
+  @override
+  String get coSignedDocument => 'Documento';
+
+  @override
+  String coSignedDocumentValue(String number) {
+    return 'Contrato de renta $number';
+  }
+
+  @override
+  String get coSignedDocumentValueNoNumber => 'Contrato de renta';
+
+  @override
+  String get coResignLink => 'Volver a pedir la firma';
+
+  @override
+  String get coResignWarning =>
+      'La firma nueva SUSTITUYE a la que ya está en el contrato. Úsalo solo si la anterior no es válida.';
+
+  @override
+  String get coResignTitle => '¿Sustituir la firma guardada?';
+
+  @override
+  String get coResignConfirm => 'Sí, pedirla otra vez';
+
+  @override
+  String get coCloseCta => 'Cerrar la entrega';
+
+  @override
+  String get coCloseCtaWhy =>
+      'Se registra la entrega en la reserva y se genera el contrato.';
+
+  @override
+  String get coClosedTitle => 'Entrega cerrada';
+
+  @override
+  String get coClosedTitleUnverified => 'Checkout cerrado';
+
+  @override
+  String get coRecordHandoverUnverifiedNotice =>
+      'El cierre entró, pero no pudimos confirmarlo en la reserva. Compruébalo antes de dar por terminada la entrega.';
+
+  @override
+  String get coBeforeTheyGoTitle => 'Antes de que se vaya';
+
+  @override
+  String get coBeforeKeysLabel => 'Llaves';
+
+  @override
+  String get coBeforeKeys => 'Entrega las llaves y la tarjeta de circulación';
+
+  @override
+  String get coBeforeReturnLabel => 'Regreso';
+
+  @override
+  String get coBeforeScopeNote =>
+      'El combustible y el kilometraje de salida quedaron en el registro de la inspección, no en esta pantalla.';
+
+  @override
+  String get coRecordTitle => 'Registro';
+
+  @override
+  String get coRecordPillRecorded => 'Registrada';
+
+  @override
+  String get coRecordPillChecking => 'Comprobando';
+
+  @override
+  String get coRecordPillUnverified => 'Sin confirmar';
+
+  @override
+  String get coRecordRowSession => 'Sesión';
+
+  @override
+  String coRecordSessionClosedAt(String time) {
+    return 'Cerrada $time';
+  }
+
+  @override
+  String get coRecordSignatureLabel => 'Firma';
+
+  @override
+  String get coRecordContractLabel => 'Contrato';
+
+  @override
+  String coRecordEmailRequested(String time) {
+    return 'Se pidió enviarlo por correo a las $time';
+  }
+
+  @override
+  String get coRecordEmailNotRequested => 'No hay registro de envío por correo';
+
+  @override
+  String get coRecordHandoverLabel => 'Entrega';
+
+  @override
+  String coRecordHandoverRecorded(String time) {
+    return 'Registrada en la reserva · $time';
+  }
+
+  @override
+  String get coRecordHandoverChecking => 'Comprobando en la reserva…';
+
+  @override
+  String get coRecordHandoverUnconfirmed => 'Sin confirmar';
+
+  @override
+  String get coRecordHandoverCheckingWhy =>
+      'Nada bloquea: el agente puede salir. La comprobación no se pierde, queda en la sesión.';
+
+  @override
+  String get coRecordHandoverRecheck => 'Volver a comprobar';
+
+  @override
+  String get coRecordHandoverRecheckWhy =>
+      'Es una consulta al servidor, no un reintento del cierre: la sesión ya está cerrada y no puede cerrarse dos veces.';
+
+  @override
+  String get coBackHome => 'Volver al inicio';
+
+  @override
+  String get coSessionDetail => 'Ver el detalle de la sesión';
+
+  @override
+  String get coBackToOutcome => 'Volver al resumen del cierre';
+
+  @override
+  String get coCloseFailedStepline => 'Cierre con problema';
+
+  @override
+  String get coCloseFailedTitle =>
+      'El checkout se cerró, pero el servidor no registró la entrega. La reserva necesita que alguien la revise en el mostrador.';
+
+  @override
+  String get coCloseNotRecordedTitle =>
+      'El checkout se cerró, pero la reserva no quedó marcada como entregada. Necesita que alguien la revise en el mostrador.';
+
+  @override
+  String coCloseFailedStep(String time) {
+    return 'Rechazado a las $time';
+  }
+
+  @override
+  String get coCloseReasonTitle => 'Motivo';
+
+  @override
+  String get coServerReasonLabel => 'Respuesta del servidor';
+
+  @override
+  String get coCloseReasonPill => 'Del servidor';
+
+  @override
+  String get coCloseVerifiedPill => 'Comprobado en la reserva';
+
+  @override
+  String get coCloseVerifiedTitle => 'Lo que comprobamos';
+
+  @override
+  String get coCloseVerifiedLabel => 'Estado de la reserva';
+
+  @override
+  String get coCloseNotRecordedReason =>
+      'Se consultó la reserva después de cerrar y sigue sin registrar la entrega. El servidor no dio un motivo.';
+
+  @override
+  String get coCloseNoRetry =>
+      'Esta sesión ya está cerrada, así que no se puede reintentar desde aquí. Nada de lo capturado se perdió.';
+
+  @override
+  String get coCopyProblem => 'Copiar el detalle para el mostrador';
+
+  @override
+  String get coCopiedProblem => 'Detalle copiado al portapapeles';
+
+  @override
+  String get coHoldKeys =>
+      'No entregues las llaves hasta que el mostrador confirme.';
+
+  @override
+  String get coCloseUnknownStepline => 'Cierre sin confirmar';
+
+  @override
+  String get coCloseUnknownTitle =>
+      'Se cortó la conexión mientras se cerraba. No sabemos si el cierre entró o no — hay que preguntárselo al servidor.';
+
+  @override
+  String get coCloseUnknownStep => 'Sin respuesta';
+
+  @override
+  String coCloseConfirmedAt(String time) {
+    return '$time · confirmado';
+  }
+
+  @override
+  String get coWontHappenTitle => 'Qué NO va a pasar';
+
+  @override
+  String get coWontHappenPill => 'Regla';
+
+  @override
+  String get coWontRetryLabel => 'Reintento';
+
+  @override
+  String get coWontRetry => 'La app no reintenta el cierre sola.';
+
+  @override
+  String get coWontQueueLabel => 'Bandeja';
+
+  @override
+  String get coWontQueue => 'El cierre no entra a la bandeja de salida.';
+
+  @override
+  String get coCheckStatus => 'Consultar el estado';
+
+  @override
+  String get coCheckStatusWhy =>
+      'Con señal, una consulta dice en qué paso quedó y desde ahí se continúa.';
+
+  @override
+  String coPresenceChipSemantics(String line) {
+    return '$line: ver quién está en esta sesión';
+  }
+
+  @override
+  String get coPresenceNeverAlone =>
+      'El chip solo afirma quién está. Que no aparezca nadie no significa que estés solo.';
+
+  @override
+  String get coWhoIsHereTitle => 'Quién está en esta sesión';
+
+  @override
+  String get coWhoIsHereSub =>
+      'Ventana de 45 s del servidor · se actualiza con cada lectura';
+
+  @override
+  String get coWhoIsHereNow => 'ahora';
+
+  @override
+  String coWhoIsHereAge(String age) {
+    return 'hace $age';
+  }
+
+  @override
+  String get coWhoIsHereDeviceSub => 'Aparato · sin persona identificada';
+
+  @override
+  String get coWhoIsHereYou => 'Tú · RideOps';
+
+  @override
+  String coWhoIsHereYouSeenAs(String name) {
+    return 'Los demás te ven como $name';
+  }
+
+  @override
+  String get coWhoIsHereYouSeenAsUnknown =>
+      'Los demás te ven con tu nombre completo';
+
+  @override
+  String get coWhoIsHereDisclosure =>
+      'Apareces con tu nombre mientras esta pantalla esté abierta. Al salir o pausar dejas de aparecer en menos de un minuto. Esto no reserva nada: nadie queda bloqueado por estar aquí.';
+
+  @override
+  String get coPresenceEmpty =>
+      'No hay nadie visible ahora mismo. Otra superficie puede estar avanzando sin aparecer aquí.';
+
+  @override
+  String get coPresenceEmptyShort => 'Nadie visible ahora mismo';
+
+  @override
+  String get coPresenceOfflineWhy =>
+      'Sin red no se puede afirmar que alguien esté ahora. El punto verde se apaga; el chip no desaparece.';
+
+  @override
+  String coAdvancedOtherAgentNamed(String step, String name, String age) {
+    return '«$step» lo completó $name hace $age.';
+  }
+
+  @override
+  String coAdvancedStampLanded(String stamp, String age) {
+    return '$stamp se registró en otra superficie hace $age.';
+  }
+
+  @override
+  String get coAdvancedStepUnchanged =>
+      'Sigue capturando: este paso no cambió.';
+
+  @override
+  String get coChangedTitle => 'Qué cambió desde que entraste';
+
+  @override
+  String coChangedSub(String time) {
+    return 'Estado reportado por el servidor · $time';
+  }
+
+  @override
+  String get coChangedStepMoved => 'El paso se movió';
+
+  @override
+  String coChangedStepMovedDetail(String from, String to) {
+    return '$from → $to';
+  }
+
+  @override
+  String coChangedByKiosk(String time) {
+    return 'Completado en el kiosco · $time';
+  }
+
+  @override
+  String coChangedByOtherAgent(String name, String time) {
+    return 'Lo completó $name · $time';
+  }
+
+  @override
+  String coChangedByOtherSurface(String time) {
+    return 'Completado en otra superficie · $time';
+  }
+
+  @override
+  String coChangedByYou(String time) {
+    return 'Lo hiciste tú · $time · sin cambios';
+  }
+
+  @override
+  String get coChangedUntouched => 'Pendiente · no lo ha tocado nadie';
+
+  @override
+  String get coChangedNothingLost => 'Nada de lo que hiciste se perdió.';
+
+  @override
+  String coChangedSomethingLost(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          'Ojo: $count envíos no han llegado al servidor. Revisa la Bandeja antes de seguir.',
+      one:
+          'Ojo: 1 envío no ha llegado al servidor. Revisa la Bandeja antes de seguir.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get coChangedNoChanges => 'Nadie ha tocado nada desde que entraste.';
+
+  @override
+  String coChangedStayCta(int index) {
+    return 'Seguir en el paso $index';
+  }
+
+  @override
+  String get coConflictTooEarlyTitle => 'Ese paso todavía no toca';
+
+  @override
+  String coConflictTooEarlyBody(
+    String current,
+    int index,
+    String target,
+    int targetIndex,
+  ) {
+    return 'La sesión está en $current (paso $index) y $target es el paso $targetIndex. El servidor solo deja avanzar de uno en uno.';
+  }
+
+  @override
+  String get coConflictTooEarlyBodyShort =>
+      'El servidor solo deja avanzar de uno en uno, y este no es el paso que sigue.';
+
+  @override
+  String coGoToStepCta(int index, String step) {
+    return 'Ir al paso $index · $step';
+  }
+
+  @override
+  String coGoToStepWhy(int index) {
+    return 'Ir al paso $index es navegación dentro de esta app: siempre funciona.';
+  }
+
+  @override
+  String coGuardOutboxCta(int n) {
+    return 'Ver la Bandeja ($n)';
+  }
+
+  @override
+  String get coGuardOutboxWhy =>
+      'La Bandeja drena sola al recuperar señal; el paso avanza cuando el sello llegue.';
+
+  @override
+  String get coConflictSwapLockedBody =>
+      'Esta unidad ya no se puede cambiar desde aquí: la inspección ya empezó. Se resuelve en el mostrador.';
+
+  @override
+  String coJoinBannerStarted(int index, int total) {
+    return 'Esta salida ya empezó: va por el paso $index de $total.';
+  }
+
+  @override
+  String coJoinBannerStartedAt(String time, int index, int total) {
+    return 'Esta salida ya empezó. Se abrió a las $time y va por el paso $index de $total.';
+  }
+
+  @override
+  String coJoinBannerStartedByOther(int index, int total) {
+    return 'Esta salida la abrió otro agente y va por el paso $index de $total.';
+  }
+
+  @override
+  String get coJoinDoneTitle => 'Lo que ya está hecho';
+
+  @override
+  String coJoinDonePill(int done, int total) {
+    return '$done de $total fases';
+  }
+
+  @override
+  String get coJoinPendingTitle => 'Lo que falta';
+
+  @override
+  String get coJoinPendingPill => 'Tuyo';
+
+  @override
+  String coJoinContinueCta(int index) {
+    return 'Continuar desde el paso $index';
+  }
+
+  @override
+  String get coJoinContinueCtaUnknownStep => 'Continuar';
+
+  @override
+  String get coJoinContinueWhy =>
+      'Entras al paso que reporta el servidor, no al que dejó nadie. Nada se re-hace.';
+
+  @override
+  String get coJoinKioskActiveTitle =>
+      'El cliente está usando el kiosco ahora mismo.';
+
+  @override
+  String get coJoinKioskActiveBody =>
+      'Si avanzas desde aquí puedes interrumpir lo que está haciendo.';
+
+  @override
+  String get coJoinAdviceTitle => 'Qué conviene hacer';
+
+  @override
+  String get coJoinAdvicePill => 'Consejo';
+
+  @override
+  String get coJoinAdviceWaitKey => 'Esperar';
+
+  @override
+  String get coJoinAdviceWait =>
+      'Esta pantalla se actualiza sola cuando el kiosco termine';
+
+  @override
+  String get coJoinAdviceLeaveKey => 'O irte';
+
+  @override
+  String get coJoinAdviceLeave => 'Nada se pierde: la sesión sigue igual';
+
+  @override
+  String get coJoinNotABlock =>
+      'No es un bloqueo. Puedes avanzar igual — el servidor decide, no este aviso. Solo te decimos lo que está pasando del otro lado.';
+
+  @override
+  String get coJoinProceedAnyway => 'Avanzar de todas formas';
+
+  @override
+  String coJoinPausedByOther(String age) {
+    return 'Otro agente pausó esta salida hace $age.';
+  }
+
+  @override
+  String coJoinPausedBySomeone(String age) {
+    return 'Esta salida quedó pausada hace $age.';
+  }
+
+  @override
+  String coJoinPausedReason(String reason) {
+    return 'Motivo: «$reason»';
+  }
+
+  @override
+  String get coJoinWhereItStoppedTitle => 'Dónde quedó';
+
+  @override
+  String get coJoinNoStealWhy =>
+      'Continuar no le quita nada a nadie: la sesión es una sola y el registro guarda quién hizo qué.';
+
+  @override
+  String get coJoinPausedAutoStalled =>
+      'El sistema la marcó: lleva más de 4 h detenida. No la pausó nadie.';
+
+  @override
+  String coJoinPausedBySystem(String age) {
+    return 'El sistema marcó esta salida hace $age.';
+  }
+
+  @override
+  String get coConflictVehicleKept =>
+      'Se conserva: el cliente ya verificado y el paso en el que vas.';
+
+  @override
+  String get coGuardWhyServer =>
+      'Este paso lo cierra el servidor cuando reciba el sello, no esta pantalla. Nada se pierde: puedes pausar y volver.';
+
+  @override
+  String coPresenceChipLive(String name, String surface) {
+    return '$name · $surface';
+  }
+
+  @override
+  String coPresenceChipAged(String name, String age) {
+    return '$name · hace $age';
+  }
+
+  @override
+  String get coWhoIsHereYouOffline => 'Sin conexión';
+
+  @override
+  String get coWhoIsHereDisclosureOffline =>
+      'Sin conexión tu latido no está llegando: en menos de un minuto dejas de aparecer para las demás superficies. Vuelves a aparecer solo al recuperar señal. Esto nunca reserva nada.';
+
+  @override
+  String get coPresenceEmptyUnverifiable =>
+      'Y tampoco se puede leer como «no hay nadie»: otra superficie puede estar avanzando sin que lo veamos.';
 }

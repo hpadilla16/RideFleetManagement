@@ -1,0 +1,989 @@
+/**
+ * Pre-check-in charge application — atomicity, against a REAL Postgres.
+ * Run via: npm run test:precheckin-charges  (see the header in
+ * scripts/embedded-pg-boot.mjs for the embedded-postgres install step)
+ *
+ * WHAT THIS DEFENDS
+ * POST /customer-info/:token used to rewrite a reservation's charge sheet with
+ * unwrapped statements: deleteMany({source:'INSURANCE'}) first, and the create()
+ * that put the line back only after a settings lookup and a pricing branch. Any
+ * throw in between and the customer's insurance line was gone for good, with a
+ * 500 on their phone and nobody at a counter to notice. Same shape four times
+ * over (INSURANCE, ADDITIONAL_SERVICE_PRECHECKIN, the OTA daily/fee sweep, the
+ * TAX recalculation).
+ *
+ * HOW THE FAILURE IS INJECTED — and why it is not a mock of the thing under test.
+ * The database, the schema, the transaction and applyPrecheckinCharges() are all
+ * real. The ONLY substitution is a Proxy over the Prisma client that lets the
+ * Nth `reservationCharge.create` throw, standing in for the real ways this has
+ * failed (a settings blob that priced to NaN, a dropped connection, a plan the
+ * catalog no longer carries). The proxy wraps BOTH the client and the
+ * transaction client, so deleting the `$transaction` wrapper from
+ * precheckin-charges.js does not route around the injection — it just makes
+ * these tests go red, which is the point. MEASURED with the wrapper removed:
+ * "insurance charge survives" and "nothing is stamped complete" both fail, the
+ * INSURANCE row is gone and customerInfoCompletedAt is set.
+ *
+ * The concurrency cases cover the OTHER half of the same route's exposure:
+ * portalWrite is a per-IP rate limit with no idempotency, so a double-tapped
+ * Submit runs this twice at once. A transaction alone does not make that safe —
+ * see the advisory-lock comment in precheckin-charges.js.
+ */
+
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+import { bootEmbeddedPg } from '../../../scripts/embedded-pg-boot.mjs';
+// The list the base excludes. Imported rather than re-typed so an edit to the
+// shared taxonomy is caught here instead of silently re-pricing insurance.
+import { SERVICE_CHARGE_SOURCES } from '../../lib/sold-items.js';
+// Imported dynamically in before(), after bootEmbeddedPg has set DATABASE_URL.
+let applyPrecheckinCharges;
+
+let pgHandle;
+let prisma;
+
+const TAG = `PCC-${Date.now()}`;
+const ids = { tenant: null, location: null, customer: null, service: null };
+
+const PLANS = [
+  { code: 'BASIC', name: 'Basic Coverage', chargeBy: 'FIXED', amount: 45 },
+  { code: 'PCT', name: 'Percentage Coverage', chargeBy: 'PERCENTAGE', amount: 10 },
+];
+
+/**
+ * A Prisma client whose `<model>.create` throws on the Nth call.
+ *
+ * Wraps the client AND the transaction client handed to the callback, so the
+ * injection lands whether the module runs inside a transaction or not — remove
+ * the wrapper from the module and these cases go red rather than routing around
+ * the failure.
+ */
+function clientFailingOnCreate({ nth = 1, model = 'reservationCharge' } = {}) {
+  const state = { seen: 0 };
+
+  const inject = (base) => new Proxy(base, {
+    get(target, prop, receiver) {
+      if (prop === '$transaction') {
+        return (arg, opts) => (typeof arg === 'function'
+          ? base.$transaction((tx) => arg(inject(tx)), opts)
+          : base.$transaction(arg, opts));
+      }
+      if (prop === model) {
+        const delegate = target[prop];
+        return new Proxy(delegate, {
+          get(dTarget, dProp) {
+            const value = dTarget[dProp];
+            if (dProp !== 'create') {
+              return typeof value === 'function' ? value.bind(dTarget) : value;
+            }
+            return (...args) => {
+              state.seen += 1;
+              if (state.seen === nth) {
+                throw new Error('INJECTED: charge write failed mid-submission');
+              }
+              return value.apply(dTarget, args);
+            };
+          },
+        });
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+
+  return inject(prisma);
+}
+
+/** A Prisma client that runs `hook()` after every reservationCharge.create. */
+function clientWithCreateHook(hook) {
+  const inject = (base) => new Proxy(base, {
+    get(target, prop, receiver) {
+      if (prop === '$transaction') {
+        return (arg, opts) => (typeof arg === 'function'
+          ? base.$transaction((tx) => arg(inject(tx)), opts)
+          : base.$transaction(arg, opts));
+      }
+      if (prop === 'reservationCharge') {
+        const delegate = target[prop];
+        return new Proxy(delegate, {
+          get(dTarget, dProp) {
+            const value = dTarget[dProp];
+            if (dProp !== 'create') {
+              return typeof value === 'function' ? value.bind(dTarget) : value;
+            }
+            return async (...args) => {
+              const out = await value.apply(dTarget, args);
+              await hook();
+              return out;
+            };
+          },
+        });
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return inject(prisma);
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+let resSeq = 0;
+/** A reservation with a charge sheet, fresh for each case. */
+async function makeReservation({ charges = [], notes = null, snapshot = null } = {}) {
+  resSeq += 1;
+  const reservation = await prisma.reservation.create({
+    data: {
+      reservationNumber: `${TAG}-${resSeq}`,
+      tenantId: ids.tenant,
+      customerId: ids.customer,
+      pickupLocationId: ids.location,
+      returnLocationId: ids.location,
+      pickupAt: new Date('2026-09-01T15:00:00Z'),
+      returnAt: new Date('2026-09-04T15:00:00Z'), // 3 days
+      notes,
+    },
+  });
+  for (const c of charges) {
+    await prisma.reservationCharge.create({ data: { reservationId: reservation.id, ...c } });
+  }
+  if (snapshot) {
+    await prisma.reservationPricingSnapshot.create({
+      data: { reservationId: reservation.id, ...snapshot },
+    });
+  }
+  // Shaped like findReservationByToken('customer-info') hands it over — which
+  // since 2026-08-17 includes pricingSnapshot. Loading it here is not decoration:
+  // the OTA tax bug was invisible for exactly as long as this shape lacked it.
+  return prisma.reservation.findUnique({
+    where: { id: reservation.id },
+    include: { pricingSnapshot: true },
+  });
+}
+
+function chargeSheet(reservationId) {
+  return prisma.reservationCharge.findMany({
+    where: { reservationId },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+  });
+}
+
+before(async () => {
+  pgHandle = await bootEmbeddedPg();
+  prisma = pgHandle.prisma;
+  ({ applyPrecheckinCharges } = await import('./precheckin-charges.js'));
+
+  const tenant = await prisma.tenant.create({
+    data: { name: `T ${TAG}`, slug: `t-${TAG}`.toLowerCase() },
+  });
+  ids.tenant = tenant.id;
+
+  const location = await prisma.location.create({
+    data: { tenantId: tenant.id, code: `L${resSeq}${TAG}`.slice(0, 20), name: `Loc ${TAG}`, taxRate: 10 },
+  });
+  ids.location = location.id;
+
+  const customer = await prisma.customer.create({
+    data: { tenantId: tenant.id, firstName: 'Ana', lastName: `P-${TAG}`, phone: `7870${String(Date.now()).slice(-5)}` },
+  });
+  ids.customer = customer.id;
+
+  const service = await prisma.additionalService.create({
+    data: { tenantId: tenant.id, name: `GPS ${TAG}`, rate: 12, isActive: true, taxable: true },
+  });
+  ids.service = service.id;
+});
+
+after(async () => {
+  try { await pgHandle?.stop(); } catch { /* ignore */ }
+});
+
+describe('a failure mid-submission leaves the charge sheet exactly as it was', () => {
+  it('does not lose the insurance line the delete removed', async () => {
+    const reservation = await makeReservation({
+      charges: [
+        { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+        { source: 'INSURANCE', sourceRefId: 'BASIC', name: 'Basic Coverage', quantity: 1, rate: 45, total: 45 },
+      ],
+    });
+    const before = await chargeSheet(reservation.id);
+
+    await assert.rejects(
+      applyPrecheckinCharges({
+        client: clientFailingOnCreate({ nth: 1 }),
+        reservation,
+        insuranceSelection: { selectedPlanCode: 'BASIC' },
+        insurancePlans: PLANS,
+      }),
+      /INJECTED/,
+    );
+
+    const after = await chargeSheet(reservation.id);
+    assert.deepEqual(
+      after.map((c) => [c.id, c.source, String(c.total)]),
+      before.map((c) => [c.id, c.source, String(c.total)]),
+      'the charge sheet must be byte-for-byte what it was before the failed submission',
+    );
+    // Named separately: the row surviving is the money, and a diff that happened
+    // to match on ids would still be worth reading as "insurance is still here".
+    assert.equal(after.filter((c) => c.source === 'INSURANCE').length, 1);
+  });
+
+  it('does not lose the SERVICE lines either — the same shape, three blocks down', async () => {
+    const reservation = await makeReservation({
+      charges: [
+        { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+        { source: 'ADDITIONAL_SERVICE_PRECHECKIN', sourceRefId: 'old', name: 'GPS', quantity: 1, rate: 12, total: 12 },
+      ],
+    });
+    const before = await chargeSheet(reservation.id);
+
+    // nth: 2 — the first create is the insurance line, the second is the service.
+    await assert.rejects(
+      applyPrecheckinCharges({
+        client: clientFailingOnCreate({ nth: 2 }),
+        reservation,
+        insuranceSelection: { selectedPlanCode: 'BASIC' },
+        insurancePlans: PLANS,
+        selectedServices: [{ serviceId: ids.service, selected: true, quantity: 1 }],
+      }),
+      /INJECTED/,
+    );
+
+    const after = await chargeSheet(reservation.id);
+    assert.deepEqual(
+      after.map((c) => [c.id, c.source, String(c.total)]),
+      before.map((c) => [c.id, c.source, String(c.total)]),
+    );
+  });
+
+  it('un-stamps a submission that fails AFTER the completion marker', async () => {
+    // Deliberately injected on the audit row, the LAST write in the unit, which
+    // lands after `customerInfoCompletedAt` has already been set. Injecting on
+    // an early create would leave this assertion passing whether or not the
+    // work is transactional — the stamp simply would not have been reached yet —
+    // and a case that cannot fail is not covering anything.
+    const reservation = await makeReservation({
+      charges: [{ source: 'INSURANCE', name: 'Basic Coverage', quantity: 1, rate: 45, total: 45 }],
+    });
+
+    await assert.rejects(
+      applyPrecheckinCharges({
+        client: clientFailingOnCreate({ model: 'auditLog', nth: 1 }),
+        reservation,
+        insuranceSelection: { selectedPlanCode: 'BASIC' },
+        insurancePlans: PLANS,
+      }),
+      /INJECTED/,
+    );
+
+    const row = await prisma.reservation.findUnique({
+      where: { id: reservation.id }, select: { customerInfoCompletedAt: true },
+    });
+    assert.equal(
+      row.customerInfoCompletedAt, null,
+      'a rolled-back submission must not look complete — the rest of the app reads this to mean the charge sheet is final',
+    );
+    assert.equal(await prisma.auditLog.count({ where: { reservationId: reservation.id } }), 0);
+  });
+
+  it('does not flip declinedInsurance when the submission fails later on', async () => {
+    const reservation = await makeReservation({
+      charges: [
+        { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+        { source: 'INSURANCE', name: 'Basic Coverage', quantity: 1, rate: 45, total: 45 },
+      ],
+    });
+    await prisma.rentalAgreement.create({
+      data: {
+        agreementNumber: `AG-${TAG}-${resSeq}`,
+        reservationId: reservation.id,
+        tenantId: ids.tenant,
+        pickupLocationId: ids.location,
+        returnLocationId: ids.location,
+        pickupAt: reservation.pickupAt,
+        returnAt: reservation.returnAt,
+        customerFirstName: 'Ana',
+        customerLastName: 'P',
+      },
+    });
+
+    // Decline writes the flag, then the service create blows up after it.
+    await assert.rejects(
+      applyPrecheckinCharges({
+        client: clientFailingOnCreate({ nth: 1 }),
+        reservation,
+        insuranceSelection: { declinedCoverage: true },
+        insurancePlans: PLANS,
+        selectedServices: [{ serviceId: ids.service, selected: true, quantity: 1 }],
+      }),
+      /INJECTED/,
+    );
+
+    const ag = await prisma.rentalAgreement.findUnique({
+      where: { reservationId: reservation.id }, select: { declinedInsurance: true },
+    });
+    assert.equal(
+      ag.declinedInsurance, false,
+      'declinedInsurance decides which sections the customer must initial — it must not survive a rolled-back submission',
+    );
+  });
+});
+
+describe('the submission it is meant to apply still applies', () => {
+  it('replaces the insurance line, adds the service, and stamps completion', async () => {
+    const reservation = await makeReservation({
+      charges: [
+        { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+        { source: 'INSURANCE', sourceRefId: 'OLD', name: 'Stale plan', quantity: 1, rate: 99, total: 99 },
+      ],
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'BASIC' },
+      insurancePlans: PLANS,
+      selectedServices: [{ serviceId: ids.service, selected: true, quantity: 2 }],
+    });
+
+    const sheet = await chargeSheet(reservation.id);
+    const insurance = sheet.filter((c) => c.source === 'INSURANCE');
+    assert.equal(insurance.length, 1);
+    assert.equal(insurance[0].sourceRefId, 'BASIC');
+    assert.equal(Number(insurance[0].total), 45);
+
+    const services = sheet.filter((c) => c.source === 'ADDITIONAL_SERVICE_PRECHECKIN');
+    assert.equal(services.length, 1);
+    assert.equal(Number(services[0].total), 24); // flat 12 × 2 units
+
+    const row = await prisma.reservation.findUnique({
+      where: { id: reservation.id }, select: { customerInfoCompletedAt: true },
+    });
+    assert.notEqual(row.customerInfoCompletedAt, null);
+    assert.equal(await prisma.auditLog.count({ where: { reservationId: reservation.id } }), 1);
+  });
+
+  // THE DECLINE SIGNATURE, EITHER SIDE OF THE FENCE (split 2026-08-28).
+  //
+  // This was ONE case on the branch, and it created the agreement with
+  // tcSignedAt SET while asserting the signature was written. That was right
+  // while the module had no fence: staff signing at the counter first is legal
+  // (requirePrecheckinBeforeCheckout is off by default), and dropping the
+  // signature there made buildDeclinedInsuranceBlock print "(no signature on
+  // file)" on the contract's decline addendum.
+  //
+  // Merging main landed the fence and the verdict it needs, so that fixture no
+  // longer describes anything a customer can do: the route's preflight refuses
+  // that submission with a 409 before applyPrecheckinCharges is reached. Rather
+  // than delete a case that went red, it is split along the fence.
+
+  it('records a decline WITH its signature on the agreement', async () => {
+    // The unsigned agreement — the ordinary order, and the one the signature
+    // exists for. Pre-check-in is where it is legitimately captured.
+    const reservation = await makeReservation({
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+    await prisma.rentalAgreement.create({
+      data: {
+        agreementNumber: `AG-SIG-${TAG}-${resSeq}`,
+        reservationId: reservation.id,
+        tenantId: ids.tenant,
+        pickupLocationId: ids.location,
+        returnLocationId: ids.location,
+        pickupAt: reservation.pickupAt,
+        returnAt: reservation.returnAt,
+        customerFirstName: 'Ana',
+        customerLastName: 'P',
+      },
+    });
+    const signature = `data:image/png;base64,${'A'.repeat(400)}`;
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { declinedCoverage: true, signatureDataUrl: signature },
+      insurancePlans: PLANS,
+      agreementSealed: false,
+    });
+
+    const ag = await prisma.rentalAgreement.findUnique({
+      where: { reservationId: reservation.id },
+      select: { declinedInsurance: true, declinedInsuranceSignatureDataUrl: true, declinedInsuranceSignedAt: true },
+    });
+    assert.equal(ag.declinedInsurance, true);
+    assert.equal(ag.declinedInsuranceSignatureDataUrl, signature);
+    assert.notEqual(ag.declinedInsuranceSignedAt, null);
+  });
+
+  it('a sealed contract keeps the decline signature already printed on it', async () => {
+    // ONE HALF OF THE FENCE PER FIXTURE, AND THAT IS THE POINT.
+    //
+    // An earlier version of this case ran both iterations with tcSignedAt SET.
+    // That read as "both halves against a real row" and was not: the
+    // `WHERE tcSignedAt: null` half satisfied every assertion on its own, so
+    // `agreementSealed` was never exercised at all. Deleting the parameter
+    // outright left this suite green — the wire this merge existed to save
+    // could be cut back out in silence, and insuranceVerdict would quietly go
+    // back to being a dead local. Each fixture now puts the OTHER half out of
+    // reach, so each one can only pass if its own half works:
+    //
+    //   verdict — tcSignedAt NULL, agreementSealed TRUE. The WHERE matches,
+    //     so only the parameter can refuse the write. This row is NOT a
+    //     contrivance: insurance-selection-gate.js computes
+    //     `signed = !!agreement.tcSignedAt || !!session?.tcCompletedAt`, so a
+    //     checkout session that completed the T&C leaves the agreement's own
+    //     column null while the preflight verdict is already sealed. Here
+    //     agreementSealed is the ONLY thing between a re-submitted
+    //     pre-check-in and the signature printed on the contract.
+    //
+    //   race — tcSignedAt SET, agreementSealed FALSE. The verdict says go
+    //     ahead, so only the database can refuse: the contract got signed in
+    //     the gap between the preflight and BEGIN, which is the gap the WHERE
+    //     exists for.
+    //
+    // Neutralise either half and exactly one of these two goes red.
+    const signature = `data:image/png;base64,${'A'.repeat(400)}`;
+    const original = `data:image/png;base64,${'B'.repeat(400)}`;
+
+    for (const [label, sealed, tcSignedAt] of [
+      ['verdict', true, null],
+      ['race', false, new Date()],
+    ]) {
+      const reservation = await makeReservation({
+        charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+      });
+      const signedAt = new Date('2026-08-01T12:00:00.000Z');
+      await prisma.rentalAgreement.create({
+        data: {
+          agreementNumber: `AG-SEALED-${label}-${TAG}-${resSeq}`,
+          reservationId: reservation.id,
+          tenantId: ids.tenant,
+          pickupLocationId: ids.location,
+          returnLocationId: ids.location,
+          pickupAt: reservation.pickupAt,
+          returnAt: reservation.returnAt,
+          customerFirstName: 'Ana',
+          customerLastName: 'P',
+          // Already carrying the addendum's own signature either way.
+          tcSignedAt,
+          declinedInsurance: true,
+          declinedInsuranceSignatureDataUrl: original,
+          declinedInsuranceSignedAt: signedAt,
+        },
+      });
+
+      await applyPrecheckinCharges({
+        client: prisma,
+        reservation,
+        insuranceSelection: { declinedCoverage: true, signatureDataUrl: signature },
+        insurancePlans: PLANS,
+        agreementSealed: sealed,
+      });
+
+      const ag = await prisma.rentalAgreement.findUnique({
+        where: { reservationId: reservation.id },
+        select: { declinedInsurance: true, declinedInsuranceSignatureDataUrl: true, declinedInsuranceSignedAt: true },
+      });
+      assert.equal(ag.declinedInsurance, true, `${label}: the flag is still written`);
+      assert.equal(ag.declinedInsuranceSignatureDataUrl, original,
+        `${label}: the signature printed on the sealed contract must survive; `
+        + `only the ${label === 'verdict' ? 'agreementSealed parameter' : 'tcSignedAt WHERE'} can refuse this write`);
+      assert.equal(Number(ag.declinedInsuranceSignedAt), Number(signedAt),
+        `${label}: the acknowledgement must not be re-dated to after the signing`);
+    }
+  });
+
+  it('does not write the signature columns for a blank-ish signature', async () => {
+    // The length > 200 guard, unchanged. A stub value is not a signature.
+    const reservation = await makeReservation({
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+    await prisma.rentalAgreement.create({
+      data: {
+        agreementNumber: `AG-NOSIG-${TAG}-${resSeq}`,
+        reservationId: reservation.id,
+        tenantId: ids.tenant,
+        pickupLocationId: ids.location,
+        returnLocationId: ids.location,
+        pickupAt: reservation.pickupAt,
+        returnAt: reservation.returnAt,
+        customerFirstName: 'Ana',
+        customerLastName: 'P',
+      },
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { declinedCoverage: true, signatureDataUrl: 'data:image/png;base64,AAAA' },
+      insurancePlans: PLANS,
+    });
+
+    const ag = await prisma.rentalAgreement.findUnique({
+      where: { reservationId: reservation.id },
+      select: { declinedInsurance: true, declinedInsuranceSignatureDataUrl: true },
+    });
+    assert.equal(ag.declinedInsurance, true);
+    assert.equal(ag.declinedInsuranceSignatureDataUrl, null);
+  });
+});
+
+
+describe('the OTA tax recalculation charges the rate the customer was quoted', () => {
+  // MONEY. The pickup location in this suite is taxRate = 10. Every case below
+  // puts a single taxable EQUIPMENT row of 50 on the sheet — it survives the OTA
+  // daily/fee sweep, and the rows this handler writes itself never set `taxable`,
+  // so 50 is the whole taxable base and the tax row is readable by eye:
+  // 10% = 5.00 (location), 7.5% = 3.75 (snapshot).
+  const taxable50 = [
+    { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+    { source: 'EQUIPMENT', name: 'Child seat', quantity: 1, rate: 50, total: 50, taxable: true },
+  ];
+
+  const otaSubmission = (reservation) => applyPrecheckinCharges({
+    client: prisma,
+    reservation,
+    thirdPartyBooking: { isThirdParty: true, voucherUrl: null },
+  });
+
+  const taxRowOf = async (reservationId) => {
+    const sheet = await chargeSheet(reservationId);
+    const rows = sheet.filter((c) => c.source === 'TAX_RECALC');
+    assert.ok(rows.length <= 1, 'the recalculation writes at most one tax row');
+    return rows[0] || null;
+  };
+
+  it('uses the snapshot rate, not the pickup location, when the two disagree', async () => {
+    // THE REGRESSION THIS SUITE EXISTS FOR. Until 2026-08-17 the reservation on
+    // this path arrived without pricingSnapshot, so this case would have billed
+    // 5.00 at the location's 10% while the breakdown the customer is SHOWN
+    // computed 3.75 from the snapshot.
+    const reservation = await makeReservation({
+      charges: taxable50,
+      snapshot: { taxRate: 7.5 },
+    });
+
+    await otaSubmission(reservation);
+
+    const tax = await taxRowOf(reservation.id);
+    assert.ok(tax, 'a taxable sheet must still produce a tax row');
+    assert.equal(Number(tax.total), 3.75, 'taxed at the snapshot’s 7.5%, not the location’s 10%');
+    assert.match(tax.name, /7\.50%/, 'the customer reads the rate off this label — it must name the rate actually applied');
+  });
+
+  it('falls back to the location when the snapshot carries no rate at all', async () => {
+    // A snapshot exists but never had a rate written to it. Unchanged behaviour,
+    // pinned so the fallback is not lost in a later tidy-up.
+    const reservation = await makeReservation({
+      charges: taxable50,
+      snapshot: { dailyRate: 100 },
+    });
+
+    await otaSubmission(reservation);
+
+    const tax = await taxRowOf(reservation.id);
+    assert.ok(tax, 'a null snapshot rate must not leave the rental untaxed');
+    assert.equal(Number(tax.total), 5, "the location's 10% applies when the snapshot has nothing to say");
+  });
+
+  it('writes no tax row when the snapshot rate is a deliberate zero', async () => {
+    // A STORED ZERO IS A RATE, NOT A MISSING VALUE — and this case is the reason
+    // the fallback tests for null rather than for falsy. The column is nullable,
+    // so "unset" already has its own representation; car-sharing.service.js:253
+    // stores a literal 0 for a trip it does not tax, on a reservation whose
+    // pickup location DOES have a rate (10 here). Falling back on falsy would
+    // quietly start charging that customer the location's 10%, and would let the
+    // location beat the snapshot on the one path where the snapshot is meant to
+    // win.
+    const reservation = await makeReservation({
+      charges: taxable50,
+      snapshot: { taxRate: 0 },
+    });
+
+    await otaSubmission(reservation);
+
+    const tax = await taxRowOf(reservation.id);
+    assert.equal(
+      tax, null,
+      'a snapshot that says zero means zero — the location rate must not override it',
+    );
+  });
+
+  it('still taxes at the location rate when the reservation has no snapshot', async () => {
+    // The pre-2026-08-17 production shape, and still the common one. Behaviour
+    // here is unchanged by the fix and must stay that way.
+    const reservation = await makeReservation({ charges: taxable50 });
+    assert.equal(reservation.pricingSnapshot, null, 'fixture sanity: this case really has no snapshot');
+
+    await otaSubmission(reservation);
+
+    const tax = await taxRowOf(reservation.id);
+    assert.ok(tax);
+    assert.equal(Number(tax.total), 5);
+  });
+});
+
+describe("the 'customer-info' token load carries the pricing snapshot", () => {
+  it('includes pricingSnapshot, or the tax cases above silently stop testing anything', async () => {
+    // Source-level on purpose. Every behavioural case above builds its own
+    // reservation shape, so all four would keep passing if someone dropped the
+    // include from findReservationByToken() — and the OTA tax bug would be back,
+    // green suite and all. This is the one assertion that watches the real query.
+    const src = await readFile(new URL('./customer-portal.routes.js', import.meta.url), 'utf8');
+    const branch = src.slice(
+      src.indexOf("if (kind === 'customer-info')"),
+      src.indexOf("if (kind === 'signature')"),
+    );
+    assert.ok(branch.length > 0, 'findReservationByToken() no longer has the shape this guard reads');
+    assert.match(
+      branch, /pricingSnapshot:\s*true/,
+      "the 'customer-info' include must load pricingSnapshot — without it the OTA tax "
+      + 'recalculation reads an undefined rate and taxes at the pickup location instead',
+    );
+  });
+});
+
+describe('a double-tapped Submit', () => {
+  it('refuses the second submission with a 409 and leaves one of everything', async () => {
+    // THE INTERLEAVE IS PINNED, NOT RACED.
+    //
+    // Firing both with a bare Promise.all is not a test, it is a coin flip:
+    // MEASURED, the same pair produced 2 insurance lines on one run and 1 on the
+    // next, because whichever statement happens to touch a row the other already
+    // holds serializes them by accident. So the damaging order is pinned here.
+    //
+    //   A creates its insurance line and then STOPS, transaction still open.
+    //   B starts. Without the lock it cannot see A's uncommitted row, so its own
+    //   deleteMany(source:'INSURANCE') matches nothing and it inserts a SECOND
+    //   line — which is exactly what a customer's second tap did.
+    //
+    // With the lock, B never reaches that: pg_try_advisory_xact_lock returns
+    // false on its first statement and it is refused outright. A's wait for B
+    // then falls through to its timeout and commits.
+    const reservation = await makeReservation({
+      // One row, and deliberately of a source nothing here deletes. With a DAILY
+      // or FEE row on the sheet both runs reach the same
+      // deleteMany({source:{in:[DAILY,FEE…]}}), Postgres takes row locks, and the
+      // second blocks there until the first commits — serialized by accident, so
+      // the case would pass with the lock deleted and prove nothing. EQUIPMENT
+      // survives the OTA sweep untouched, and being taxable it gives the
+      // recalculation something to tax; the rows this handler writes itself never
+      // set `taxable`, so insurance and services alone total zero.
+      charges: [{ source: 'EQUIPMENT', name: 'Child seat', quantity: 1, rate: 50, total: 50, taxable: true }],
+    });
+
+    const aPaused = deferred();
+    const bInserted = deferred();
+    let aHeld = false;
+    let bSeen = false;
+
+    const clientA = clientWithCreateHook(async () => {
+      if (aHeld) return;
+      aHeld = true;
+      aPaused.resolve();
+      // Falls through on the timeout when B is (correctly) refused the lock.
+      await Promise.race([bInserted.promise, delay(500)]);
+    });
+    const clientB = clientWithCreateHook(async () => {
+      if (bSeen) return;
+      bSeen = true;
+      bInserted.resolve();
+    });
+
+    const submission = (client) => applyPrecheckinCharges({
+      client,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'BASIC' },
+      insurancePlans: PLANS,
+      selectedServices: [{ serviceId: ids.service, selected: true, quantity: 1 }],
+      thirdPartyBooking: { isThirdParty: true, voucherUrl: null },
+    });
+
+    const first = submission(clientA);
+    await aPaused.promise;
+    const second = submission(clientB);
+    const [firstResult, secondResult] = await Promise.allSettled([first, second]);
+
+    assert.equal(firstResult.status, 'fulfilled', 'the customer who got there first is served');
+    assert.equal(secondResult.status, 'rejected');
+    assert.equal(
+      secondResult.reason?.status, 409,
+      'the duplicate is refused, not queued — waiting would park a pool connection on an unauthenticated route',
+    );
+    // The copy reaches a customer with nobody beside them to interpret it.
+    assert.match(secondResult.reason.message, /already being submitted/i);
+    assert.ok(
+      !/lock|advisory|transaction|409/i.test(secondResult.reason.message),
+      'no internal vocabulary in customer-facing copy',
+    );
+
+    const sheet = await chargeSheet(reservation.id);
+    const count = (source) => sheet.filter((c) => c.source === source).length;
+    assert.equal(count('INSURANCE'), 1, 'a second tap must not sell the customer two policies');
+    assert.equal(count('OTA_PREPAID_VOUCHER'), 1, 'a second tap must not buy a second voucher marker');
+    assert.equal(count('TAX_RECALC'), 1, 'a second tap must not tax the customer twice');
+    assert.equal(count('ADDITIONAL_SERVICE_PRECHECKIN'), 1);
+
+    const row = await prisma.reservation.findUnique({
+      where: { id: reservation.id }, select: { notes: true },
+    });
+    assert.equal(
+      (row.notes.match(/\[OTA PREPAID\]/g) || []).length, 1,
+      'the prepaid marker is read by eye at the counter — it must be stamped once',
+    );
+  });
+
+  it('does NOT refuse a customer who comes back later and submits again', async () => {
+    // The lock only refuses submissions that OVERLAP. Re-submitting to fix an
+    // address is a normal thing customers do and must keep working, or this
+    // hardening would have broken the route it was protecting.
+    const reservation = await makeReservation({
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+
+    const submission = () => applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'BASIC' },
+      insurancePlans: PLANS,
+      selectedServices: [{ serviceId: ids.service, selected: true, quantity: 1 }],
+    });
+
+    await submission();
+    await submission();
+
+    const sheet = await chargeSheet(reservation.id);
+    assert.equal(sheet.filter((c) => c.source === 'INSURANCE').length, 1);
+    assert.equal(sheet.filter((c) => c.source === 'ADDITIONAL_SERVICE_PRECHECKIN').length, 1);
+    assert.equal(Number(sheet.find((c) => c.source === 'INSURANCE').total), 45);
+  });
+
+  it('a PERCENTAGE plan quotes the SAME on re-submission', async () => {
+    // This case used to pin the opposite. Until 2026-08-17 the base for a
+    // PERCENTAGE policy was every non-tax/deposit/insurance row on the sheet,
+    // add-ons included, and it was read BEFORE this handler wrote its service
+    // rows — so a customer who came back to fix their address was re-priced
+    // upward off the first run's own rows: 30.00, then 31.20. Hector's call was
+    // that the base means the rental and its fees, not what was sold on top
+    // (see insuranceBaseFrom). Rewritten deliberately, and the 31.20 below is
+    // the number that must NOT come back.
+    const reservation = await makeReservation({
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+
+    const submission = () => applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'PCT' },
+      insurancePlans: PLANS,
+      selectedServices: [{ serviceId: ids.service, selected: true, quantity: 1 }],
+    });
+
+    await submission();
+    const first = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    assert.equal(Number(first.total), 30); // 10% of the 300 daily rate
+
+    await submission();
+    const second = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    assert.equal(Number(second.total), 30, 'the 12.00 service row must not be in the base — 31.20 is the old bug');
+
+    // The add-on is still SOLD, and still exactly once. Idempotent pricing must
+    // not be bought by dropping the row the customer actually bought.
+    const services = (await chargeSheet(reservation.id))
+      .filter((c) => c.source === 'ADDITIONAL_SERVICE_PRECHECKIN');
+    assert.equal(services.length, 1);
+    assert.equal(Number(services[0].total), 12);
+  });
+
+  it('leaves an AGENT-added extra out of the base too — the deliberate cost', async () => {
+    // The reason this needed Hector and not a quiet fix. reservation-pricing
+    // .service.js:1037 writes ADDITIONAL_SERVICE_PRECHECKIN when an agent adds
+    // an extra to an already-priced reservation, so such a row can be on the
+    // sheet at the FIRST submission — and this change means it no longer lifts
+    // the premium. Under the old base this reservation quoted 35.00 (10% of
+    // 300 + 50); it now quotes 30.00. That 5.00 is real revenue, given up on
+    // purpose so a percentage plan prices off the rental alone.
+    const reservation = await makeReservation({
+      charges: [
+        { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+        // Shaped exactly as the agent path writes it: same source, sortOrder 10.
+        { source: 'ADDITIONAL_SERVICE_PRECHECKIN', name: 'Roof rack (agent)', quantity: 1, rate: 50, total: 50, sortOrder: 10, taxable: true },
+      ],
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'PCT' },
+      insurancePlans: PLANS,
+    });
+
+    const insurance = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    assert.equal(Number(insurance.total), 30, '10% of the 300 rental only — the 50.00 agent extra is out of the base');
+  });
+
+  it('QUOTES MORE when the excluded row is a CREDIT — the direction that costs the customer', async () => {
+    // THE ONLY CASE THAT GOES THE OTHER WAY, and the only assertion standing
+    // between a customer and a "cleanup" that nets credits back into the base.
+    // The docblock on insuranceBaseFrom describes this; until 2026-08-18 nothing
+    // exercised it, so the file's most expensive claim was untested.
+    //
+    // The shape is real, not hypothetical. addManualCharge() rejects amount === 0
+    // and NOT negatives (reservation-pricing.service.js:964 —
+    // `!Number.isFinite(amount) || amount === 0`), and on the PRE-CHECKOUT branch
+    // it stamps preSource itself, ignoring the `source` the caller asked for and
+    // the one line 960 computed (`:1037` — kind !== 'insurance' means
+    // ADDITIONAL_SERVICE_PRECHECKIN, full stop). So an admin goodwill credit
+    // entered before check-out lands on the sheet AS a pre-check-in add-on row
+    // with a negative total, and the exclusion list drops it.
+    //
+    // RECOMPUTED BY HAND, not read off a green run:
+    //   old base = 300 + (-100)      = 200  ->  10% = $20.00
+    //   new base = 300 (credit is out) = 300  ->  10% = $30.00
+    // The customer is quoted $10.00 MORE. Defensible — a credit against the
+    // rental is not a reason to charge less for the coverage on it — but it is
+    // the reason "this change only ever lowers quotes" would be a lie.
+    const reservation = await makeReservation({
+      charges: [
+        { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+        // Exactly what addManualCharge's pre-checkout branch writes for a -100
+        // goodwill credit: the caller's ADMIN_CORRECTION is discarded for this.
+        { source: 'ADDITIONAL_SERVICE_PRECHECKIN', name: 'Goodwill credit', quantity: 1, rate: -100, total: -100, sortOrder: 10, taxable: true },
+      ],
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'PCT' },
+      insurancePlans: PLANS,
+    });
+
+    const insurance = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    assert.equal(
+      Number(insurance.total), 30,
+      '10% of the 300 rental — 20.00 was the OLD number, when the credit netted off the base',
+    );
+  });
+
+  it('PINS a REMAINING non-idempotency on the OTA path', async () => {
+    // A pin, not a passing grade — the counterpart to the case above, and the
+    // limit of what excluding add-ons bought us.
+    //
+    // insuranceBaseFrom() controls what this handler ADDS to the base. On the
+    // OTA branch the handler also REMOVES from it: the third-party sweep
+    // deletes DAILY / FEE / SERVICE_LINKED_FEE, and it runs AFTER the base has
+    // been read. So a SECOND submission on an OTA reservation reads a sheet
+    // whose rental rows the FIRST run already deleted, and the base collapses
+    // to whatever is left — which the exclusions now empty almost completely.
+    //
+    // NOTE this case does NOT go red if the base change is reverted: the old
+    // filter reaches 0.00 here too. It is a pin on a standing gap, not a guard
+    // on this commit — the three cases around it are the guards.
+    //
+    // The collapse is also not universal: the sweep deletes by source, so a
+    // BASE_RATE rental row (the VozIA converted-quote shape) survives it. This
+    // fixture uses DAILY, which does not.
+    //
+    // This predates the base change and is not caused by it: under the old
+    // "everything on the sheet" rule the same re-submission quoted 10% of the
+    // surviving service row instead. Both numbers are wrong; this one is just
+    // wrong differently. Fixing it means deriving the base from the RENTAL
+    // (pricingSnapshot / isBaseRentalRow) instead of summing the sheet, which
+    // is a second pricing decision — raised for Hector, not taken here.
+    const reservation = await makeReservation({
+      charges: [{ source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true }],
+    });
+
+    const submission = () => applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'PCT' },
+      insurancePlans: PLANS,
+      thirdPartyBooking: { isThirdParty: true, voucherUrl: null },
+    });
+
+    await submission();
+    const first = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    assert.equal(Number(first.total), 30, 'first submission still prices off the rental');
+
+    await submission();
+    const second = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    assert.equal(Number(second.total), 0, 'the OTA sweep already deleted the rental rows the base is made of');
+  });
+
+  it('excludes EVERY spelling of an add-on, and nothing else', async () => {
+    // Table-driven over the shared list rather than over the two spellings the
+    // cases above happen to use. This is the guard on sold-items.js: if someone
+    // edits SERVICE_CHARGE_SOURCES, a base that no longer matches it fails here.
+    // Also covers the shapes the filter has to normalise — a lower-cased source,
+    // a null source (legacy DAILY rows, which must stay IN), and a DEPOSIT row.
+    const addonRows = SERVICE_CHARGE_SOURCES.map((source, i) => ({
+      source: i % 2 === 0 ? source : source.toLowerCase(), // case must not matter
+      name: `Add-on ${source}`,
+      quantity: 1,
+      rate: 10,
+      total: 10,
+      taxable: true,
+    }));
+
+    const reservation = await makeReservation({
+      charges: [
+        { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+        // Legacy row: no source at all. Stays IN the base.
+        { source: null, code: 'DAILY', name: 'Daily', quantity: 1, rate: 20, total: 20, taxable: true },
+        { source: 'SECURITY_DEPOSIT', chargeType: 'DEPOSIT', name: 'Deposit', quantity: 1, rate: 500, total: 500 },
+        ...addonRows,
+      ],
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'PCT' },
+      insurancePlans: PLANS,
+    });
+
+    const insurance = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    // 10% of (300 + 20). Every add-on row is out whatever its spelling or case;
+    // the deposit is out; the source-less legacy rental row is in.
+    assert.equal(Number(insurance.total), 32);
+  });
+
+  it('keeps FEES in the base — "not add-ons" is not "rental only"', async () => {
+    // The other half of the decision, and the easy thing to get wrong when
+    // editing insuranceBaseFrom: it is an EXCLUSION list. Fees are part of what
+    // a percentage plan prices against, and a fee source added tomorrow must
+    // stay in the base rather than silently dropping out of every quote.
+    const reservation = await makeReservation({
+      charges: [
+        { source: 'DAILY', name: 'Daily rate', quantity: 3, rate: 100, total: 300, taxable: true },
+        { source: 'MANDATORY_FEE', name: 'Airport fee', quantity: 1, rate: 25, total: 25, taxable: true },
+        { source: 'SERVICE', name: 'Child seat (website)', quantity: 1, rate: 40, total: 40, taxable: true },
+        { chargeType: 'TAX', source: 'TAX', name: 'Sales tax', quantity: 1, rate: 11, total: 11 },
+      ],
+    });
+
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection: { selectedPlanCode: 'PCT' },
+      insurancePlans: PLANS,
+    });
+
+    const insurance = (await chargeSheet(reservation.id)).find((c) => c.source === 'INSURANCE');
+    // 10% of (300 rental + 25 fee). The website-sold SERVICE add-on and the tax
+    // are both out — the add-on because sold-items.js calls it one, whichever
+    // of the four spellings it arrived under.
+    assert.equal(Number(insurance.total), 32.5);
+  });
+});

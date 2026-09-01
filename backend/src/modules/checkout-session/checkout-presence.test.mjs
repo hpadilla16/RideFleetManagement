@@ -153,6 +153,57 @@ test('activePresence: displayName = label → user fullName → surface fallback
   assert.equal(out[1].displayName, 'Customer', 'no label, no user → generic surface label');
 });
 
+// ── M2-H6 (2026-08-28): the actor id ────────────────────────────────────────
+//
+// A surface has to be able to drop ITSELF from "who else is here". Comparing
+// displayName does not do that: two employees really can share a name, and
+// then each of them stops seeing the other. The row's own actorUserId is the
+// only identity in the payload, so it ships.
+//
+// The privacy half of this change (that presence never reaches the customer's
+// phone or the lobby kiosk) is guarded separately, in presence-boundary
+// .test.mjs — that one is the test that protects a person.
+
+test('activePresence: exposes actorUserId, independent of the displayName cascade', async () => {
+  const now = new Date();
+  // BOTH actors need a user row: the unlabelled row resolves its name through
+  // the lookup, and without a matching user it silently degrades to the generic
+  // surface label — which would make the assertion below pass for the wrong
+  // reason and never exercise the cascade at all.
+  db.users.push({ id: 'u1', fullName: 'Ana Rivera' }, { id: 'u2', fullName: 'Jose Garcia' });
+  db.presences.push(
+    // Labelled row: displayName comes from the label (NOT from u1's real name,
+    // 'Ana Rivera') and the cascade is never consulted — actorUserId must be
+    // present anyway, or a surface that sends a label cannot recognize itself.
+    { id: 'p1', sessionId: 'cs1', surface: 'RIDEOPS', actorUserId: 'u1', displayLabel: 'Jose (patio)', lastSeenAt: now },
+    // Unlabelled staff row: name resolved through the user lookup.
+    { id: 'p2', sessionId: 'cs1', surface: 'COUNTER', actorUserId: 'u2', displayLabel: null, lastSeenAt: new Date(now.getTime() - 1) },
+    // Deliberately actor-less surfaces (kiosk device, customer phone).
+    { id: 'p3', sessionId: 'cs1', surface: 'KIOSK', actorUserId: null, displayLabel: 'Lobby 1', lastSeenAt: new Date(now.getTime() - 2) },
+  );
+
+  const out = await checkoutPresenceService.activePresence('cs1', { now });
+  assert.deepEqual(
+    out.map((p) => [p.surface, p.actorUserId, p.displayName]),
+    [
+      ['RIDEOPS', 'u1', 'Jose (patio)'],
+      ['COUNTER', 'u2', 'Jose Garcia'],
+      ['KIOSK', null, 'Lobby 1'],
+    ],
+    'actorUserId echoes the row; the displayName cascade is unchanged',
+  );
+
+  // Two employees who share a name: the chips are indistinguishable by text,
+  // so identity has to come from the id. This is the whole reason for H6.
+  db.presences.push(
+    { id: 'p4', sessionId: 'cs1', surface: 'COUNTER', actorUserId: 'u3', displayLabel: 'Jose Garcia', lastSeenAt: new Date(now.getTime() - 3) },
+  );
+  const twins = (await checkoutPresenceService.activePresence('cs1', { now }))
+    .filter((p) => p.displayName === 'Jose Garcia');
+  assert.equal(twins.length, 2, 'both namesakes render');
+  assert.deepEqual(twins.map((p) => p.actorUserId), ['u2', 'u3'], 'and stay distinguishable by id');
+});
+
 test('withPresence: attaches additive presence field and NEVER breaks the read', async () => {
   const now = new Date();
   db.presences.push({ id: 'p1', sessionId: 'cs1', surface: 'KIOSK', actorUserId: null, displayLabel: 'Lobby 1', lastSeenAt: now });

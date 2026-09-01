@@ -5,8 +5,17 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { _unpaidBalanceInternal } from './unpaid-balance.report.js';
-import { reportsV2Router } from './reports-v2.routes.js';
+
+// The report module transitively imports lib/prisma.js, which CONSTRUCTS a
+// PrismaClient at import time and throws without a DATABASE_URL. Nothing in
+// this file touches a real DB — every test injects a fake prisma — so a
+// syntactically valid dummy URL is enough. Set before the dynamic imports so
+// it is in place when the chain loads. Same pattern as
+// reports-v2-scope-guard.test.mjs; without it this suite could not run at all,
+// which is why it sat unreferenced by any npm script until 2026-08-28.
+process.env.DATABASE_URL ||= 'postgresql://unused:unused@127.0.0.1:1/unused';
+const { _unpaidBalanceInternal } = await import('./unpaid-balance.report.js');
+const { reportsV2Router } = await import('./reports-v2.routes.js');
 
 const { computeData, bucketAgreements, bucketDrillDownHandler, BUCKET_ORDER, EXCLUDED_AGREEMENT_STATUSES } = _unpaidBalanceInternal;
 
@@ -58,6 +67,16 @@ function agr({ id, balance, returnAt, tenantId = 't1', location = null, status =
 // Fixed "now" — May 23 2026 14:32 UTC
 const NOW = new Date('2026-05-23T14:32:00Z');
 
+// Every fixture date above is a UTC instant, so the aging math has to be run in
+// UTC for the day counts in these assertions to mean what they say. Before the
+// tz-aware refactor (17c615ff) that was automatic; now the tz is an explicit
+// argument defaulting to America/Puerto_Rico, and a UTC midnight read in
+// PR (UTC-4) lands on the PREVIOUS day — which shifted every boundary by one
+// and quietly broke three of these tests. Nobody saw it because this suite was
+// not referenced by any npm script until 2026-08-28. Passing 'UTC' explicitly
+// restores the original intent and also keeps computeData from calling
+// resolveTenantTimeZone, which would reach for a real database.
+
 // ---------------------------------------------------------------------------
 // bucketAgreements — pure
 // ---------------------------------------------------------------------------
@@ -92,7 +111,7 @@ test('bucketAgreements: daysLate boundary mapping', () => {
     agr({ id: '90d',  balance: 100, returnAt: '2026-02-22T00:00:00Z' }),
     // 91 days late → B90_PLUS
     agr({ id: '91d',  balance: 100, returnAt: '2026-02-21T00:00:00Z' }),
-  ], NOW);
+  ], NOW, 'UTC');
   assert.equal(out.CURRENT.count, 2,  'tdy + cur');
   assert.equal(out.B1_30.count, 2,    '1d + 30d');
   assert.equal(out.B31_60.count, 2,   '31d + 60d');
@@ -137,7 +156,7 @@ test('bucketAgreements: daysLate is positive for past-due, 0 or negative for cur
   const out = bucketAgreements([
     agr({ id: 'late', balance: 100, returnAt: '2026-05-15T00:00:00Z' }), // 8 days late
     agr({ id: 'cur',  balance: 100, returnAt: '2026-05-30T00:00:00Z' }), // 7 days early
-  ], NOW);
+  ], NOW, 'UTC');
   assert.equal(out.B1_30.agreements[0].daysLate, 8);
   assert.equal(out.CURRENT.agreements[0].daysLate, -7);
 });
@@ -160,7 +179,7 @@ test('computeData: full hybrid shape with totals + bucket ordering', async () =>
     agr({ balance: 50,  returnAt: '2026-05-28T00:00:00Z' }), // current
     agr({ balance: 75,  returnAt: '2026-01-01T00:00:00Z' }), // 142 days late → B90_PLUS
   ] });
-  const out = await computeData({ tenantId: 't1', query: {} }, { prisma, now: NOW });
+  const out = await computeData({ tenantId: 't1', query: {} }, { prisma, now: NOW, tenantTz: 'UTC' });
 
   assert.equal(out.totals.accountCount, 4);
   assert.equal(out.totals.totalAmount, 425);
@@ -188,7 +207,7 @@ test('computeData: excludes CANCELLED agreements', async () => {
     agr({ balance: 200, returnAt: '2026-05-22T00:00:00Z', status: 'CANCELLED' }), // excluded
     agr({ balance: 50,  returnAt: '2026-05-22T00:00:00Z', status: 'CLOSED' }),
   ] });
-  const out = await computeData({ tenantId: 't1', query: {} }, { prisma, now: NOW });
+  const out = await computeData({ tenantId: 't1', query: {} }, { prisma, now: NOW, tenantTz: 'UTC' });
   assert.equal(out.totals.accountCount, 2);
   assert.equal(out.totals.totalAmount, 150);
   assert.ok(EXCLUDED_AGREEMENT_STATUSES.includes('CANCELLED'));
@@ -202,7 +221,7 @@ test('computeData: excludes balance <= 0', async () => {
     agr({ balance: 0,   returnAt: '2026-05-22T00:00:00Z' }), // excluded
     agr({ balance: -10, returnAt: '2026-05-22T00:00:00Z' }), // refund/credit, also excluded
   ] });
-  const out = await computeData({ tenantId: 't1', query: {} }, { prisma, now: NOW });
+  const out = await computeData({ tenantId: 't1', query: {} }, { prisma, now: NOW, tenantTz: 'UTC' });
   assert.equal(out.totals.accountCount, 1);
   assert.equal(out.totals.totalAmount, 100);
 });
@@ -223,7 +242,7 @@ test('computeData: location filter narrows by pickupLocationId', async () => {
 
 test('computeData: no unpaid balances → all-clear state', async () => {
   const prisma = makePrisma({ agreements: [] });
-  const out = await computeData({ tenantId: 't1', query: {} }, { prisma, now: NOW });
+  const out = await computeData({ tenantId: 't1', query: {} }, { prisma, now: NOW, tenantTz: 'UTC' });
   assert.equal(out.totals.totalAmount, 0);
   assert.equal(out.totals.accountCount, 0);
   assert.equal(out.totals.oldestDaysLate, 0);
@@ -260,4 +279,96 @@ test('registerReport mounts the standard + /bucket routes for unpaid-balance', (
   assert.ok(paths.has('/unpaid-balance/pdf'),    'pdf route');
   assert.ok(paths.has('/unpaid-balance/excel'),  'excel route');
   assert.ok(paths.has('/unpaid-balance/bucket'), '/bucket drill-down sub-route');
+});
+
+// ---------------------------------------------------------------------------
+// Sorting within a bucket (2026-08-28)
+// ---------------------------------------------------------------------------
+
+const { normalizeSort, DEFAULT_SORT } = _unpaidBalanceInternal;
+
+test('normalizeSort: only the two known modes survive; anything else falls back to age', () => {
+  assert.equal(normalizeSort('balance'), 'balance');
+  assert.equal(normalizeSort('BALANCE'), 'balance', 'case-insensitive');
+  assert.equal(normalizeSort('age'), 'age');
+  assert.equal(normalizeSort(''), DEFAULT_SORT);
+  assert.equal(normalizeSort(null), DEFAULT_SORT);
+  assert.equal(normalizeSort('balance; drop table'), DEFAULT_SORT, 'unknown input never reaches the sort');
+});
+
+test('sort=balance orders a bucket by amount owed, not by age', () => {
+  const rows = [
+    agr({ id: 'small-old', balance: 10,   returnAt: '2026-04-28T00:00:00Z' }), // ~25 days late
+    agr({ id: 'big-new',   balance: 900,  returnAt: '2026-05-21T00:00:00Z' }), // ~2 days late
+    agr({ id: 'mid',       balance: 300,  returnAt: '2026-05-13T00:00:00Z' }), // ~10 days late
+  ];
+  const byAge = bucketAgreements(rows, NOW, undefined, 'age');
+  assert.deepEqual(byAge.B1_30.agreements.map((r) => r.id), ['small-old', 'mid', 'big-new'],
+    'default stays oldest-first');
+
+  const byBalance = bucketAgreements(rows, NOW, undefined, 'balance');
+  assert.deepEqual(byBalance.B1_30.agreements.map((r) => r.id), ['big-new', 'mid', 'small-old'],
+    'largest balance first — the collector chasing money, not age');
+});
+
+test('sort=balance breaks ties by age so equal amounts still triage oldest-first', () => {
+  const out = bucketAgreements([
+    agr({ id: 'newer', balance: 100, returnAt: '2026-05-21T00:00:00Z' }), // ~2 days late
+    agr({ id: 'older', balance: 100, returnAt: '2026-04-28T00:00:00Z' }), // ~25 days late
+  ], NOW, undefined, 'balance');
+  assert.deepEqual(out.B1_30.agreements.map((r) => r.id), ['older', 'newer']);
+});
+
+test('an unknown sort does not silently reorder — it behaves exactly like age', async () => {
+  const rows = [
+    agr({ id: 'small-old', balance: 10,  returnAt: '2026-04-28T00:00:00Z' }),
+    agr({ id: 'big-new',   balance: 900, returnAt: '2026-05-21T00:00:00Z' }),
+  ];
+  const out = await computeData(
+    { tenantId: 't1', query: { sort: 'nonsense' } },
+    { prisma: makePrisma({ agreements: rows }), now: NOW, tenantTz: 'UTC' },
+  );
+  assert.equal(out.filters.sort, 'age', 'the response reports the sort actually applied');
+  const b = out.buckets.find((x) => x.key === 'B1_30');
+  assert.deepEqual(b.agreements.map((r) => r.id), ['small-old', 'big-new']);
+});
+
+// ---------------------------------------------------------------------------
+// Money breakdown + closed agreements (2026-08-28)
+// ---------------------------------------------------------------------------
+
+test('rows carry total and paid alongside balance', () => {
+  const row = bucketAgreements([
+    { ...agr({ id: 'm', balance: 40, returnAt: '2026-05-21T00:00:00Z' }), total: 2400, paidAmount: 2360 },
+  ], NOW).B1_30.agreements[0];
+  assert.equal(row.balance, 40);
+  assert.equal(row.total, 2400);
+  assert.equal(row.paid, 2360, '$40 owed on a $2,400 rental reads differently from $40 owed on a $40 one');
+});
+
+test('missing total/paid degrade to 0 rather than NaN', () => {
+  const row = bucketAgreements([
+    agr({ id: 'nomoney', balance: 40, returnAt: '2026-05-21T00:00:00Z' }),
+  ], NOW).B1_30.agreements[0];
+  assert.equal(row.total, 0);
+  assert.equal(row.paid, 0);
+});
+
+test('CLOSED and FINALIZED agreements are counted — a closed rental owing money is the point', async () => {
+  const out = await computeData(
+    { tenantId: 't1', query: {} },
+    {
+      prisma: makePrisma({
+        agreements: [
+          agr({ id: 'closed',    balance: 100, returnAt: '2026-04-01T00:00:00Z', status: 'CLOSED' }),
+          agr({ id: 'finalized', balance: 100, returnAt: '2026-04-01T00:00:00Z', status: 'FINALIZED' }),
+          agr({ id: 'cancelled', balance: 100, returnAt: '2026-04-01T00:00:00Z', status: 'CANCELLED' }),
+        ],
+      }),
+      now: NOW,
+      tenantTz: 'UTC',
+    },
+  );
+  assert.equal(out.totals.accountCount, 2, 'closed + finalized count; cancelled does not');
+  assert.ok(EXCLUDED_AGREEMENT_STATUSES.includes('CANCELLED'));
 });

@@ -3001,6 +3001,1283 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Quedan {mmss} — si se vence, el agente le genera otro al instante.'**
   String coPresentClosingSoon(String mmss);
+
+  /// No description provided for @coInspWhatTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Qué se captura aquí'**
+  String get coInspWhatTitle;
+
+  /// No description provided for @coInspWhatParts.
+  ///
+  /// In es, this message translates to:
+  /// **'3 partes'**
+  String get coInspWhatParts;
+
+  /// No description provided for @coInspRowPhotos.
+  ///
+  /// In es, this message translates to:
+  /// **'Fotos'**
+  String get coInspRowPhotos;
+
+  /// No description provided for @coInspWhatPhotos.
+  ///
+  /// In es, this message translates to:
+  /// **'8 ángulos · Frente y Atrás obligatorios'**
+  String get coInspWhatPhotos;
+
+  /// No description provided for @coInspRowCondition.
+  ///
+  /// In es, this message translates to:
+  /// **'Estado'**
+  String get coInspRowCondition;
+
+  /// No description provided for @coInspWhatMetrics.
+  ///
+  /// In es, this message translates to:
+  /// **'Odómetro, combustible, limpieza y notas'**
+  String get coInspWhatMetrics;
+
+  /// No description provided for @coInspRowSignature.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma'**
+  String get coInspRowSignature;
+
+  /// No description provided for @coInspWhatSignature.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente firma la revisión en este teléfono'**
+  String get coInspWhatSignature;
+
+  /// Nota 3 del 17A: la promesa offline y su LÍMITE van en la misma frase; separadas, la primera se lee como 'ya quedó'.
+  ///
+  /// In es, this message translates to:
+  /// **'Las fotos se pueden tomar sin señal: quedan en la bandeja y se envían solas al reconectar. El paso avanza cuando el servidor las recibe.'**
+  String get coInspOfflineNote;
+
+  /// No description provided for @coInspLastReading.
+  ///
+  /// In es, this message translates to:
+  /// **'Última lectura'**
+  String get coInspLastReading;
+
+  /// Sello paymentCompletedAt del servidor, no una suposición de la app.
+  ///
+  /// In es, this message translates to:
+  /// **'Pagado {time}'**
+  String coInspPaidPill(String time);
+
+  /// No description provided for @coInspStartCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Comenzar inspección'**
+  String get coInspStartCta;
+
+  /// No description provided for @coInspStartWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Al comenzar, el servidor marca la inspección en curso. Puedes pausar el checkout en cualquier momento sin perder las fotos.'**
+  String get coInspStartWhy;
+
+  /// No description provided for @coInspPhotosStep.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección · fotos'**
+  String get coInspPhotosStep;
+
+  /// No description provided for @coInspMetricsStep.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección · estado'**
+  String get coInspMetricsStep;
+
+  /// No description provided for @coInspSummaryStep.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección · revisar y enviar'**
+  String get coInspSummaryStep;
+
+  /// No description provided for @coInspRequiredWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Frente y Atrás listos. El resto suma evidencia y se puede capturar después de las métricas.'**
+  String get coInspRequiredWhy;
+
+  /// No description provided for @inspPhotoQueued.
+  ///
+  /// In es, this message translates to:
+  /// **'{time} · en bandeja'**
+  String inspPhotoQueued(String time);
+
+  /// Solo se dice cuando la fila SALIÓ de la bandeja tras un 2xx del servidor (el drenado borra la fila únicamente con DrainOk).
+  ///
+  /// In es, this message translates to:
+  /// **'Enviada al servidor'**
+  String get inspPhotoSent;
+
+  /// No description provided for @inspPhotoDead.
+  ///
+  /// In es, this message translates to:
+  /// **'No llegó al servidor'**
+  String get inspPhotoDead;
+
+  /// Nota 9 del 17D: 'completa en este teléfono' ≠ completa. El sello inspectionCompletedAt lo escribe el servidor al drenar el complete (mobile-inspection.service.js:268); finish() solo ENCOLA.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, =0{La inspección está completa en este teléfono. Falta el cierre por enviar; sale solo al reconectar.} one{La inspección está completa en este teléfono. Falta 1 foto y el cierre por enviar; salen solos al reconectar.} other{La inspección está completa en este teléfono. Faltan {count} fotos y el cierre por enviar; salen solos al reconectar.}}'**
+  String coInspLocalDoneTitle(int count);
+
+  /// No description provided for @coInspLocalDoneSending.
+  ///
+  /// In es, this message translates to:
+  /// **'La inspección está completa en este teléfono. El envío está en curso; el paso avanza cuando el servidor lo reciba.'**
+  String get coInspLocalDoneSending;
+
+  /// No description provided for @coInspServerPhotos.
+  ///
+  /// In es, this message translates to:
+  /// **'{count} de 8 recibidas'**
+  String coInspServerPhotos(int count);
+
+  /// No description provided for @coInspRowInspection.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección'**
+  String get coInspRowInspection;
+
+  /// No description provided for @coInspReceivedAt.
+  ///
+  /// In es, this message translates to:
+  /// **'Recibida {time}'**
+  String coInspReceivedAt(String time);
+
+  /// No description provided for @coInspContinueSign.
+  ///
+  /// In es, this message translates to:
+  /// **'Continuar a firma y cierre'**
+  String get coInspContinueSign;
+
+  /// No description provided for @coInspBlockedWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Este paso lo cierra el servidor cuando reciba la inspección, no esta pantalla. Nada se pierde: puedes pausar el checkout y volver.'**
+  String get coInspBlockedWhy;
+
+  /// No description provided for @coOpenOutbox.
+  ///
+  /// In es, this message translates to:
+  /// **'Ver la bandeja ({count})'**
+  String coOpenOutbox(int count);
+
+  /// No description provided for @coOpenOutboxDead.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{Ver la bandeja (1 falla)} other{Ver la bandeja ({count} fallas)}}'**
+  String coOpenOutboxDead(int count);
+
+  /// Nota 12 del 17E: un dead-letter NO bloquea al resto de la bandeja (drainer.dart), así que el complete sale igual y el servidor lo rechaza con REQUIRED_ANGLES_MISSING (mobile-inspection.service.js:200-205).
+  ///
+  /// In es, this message translates to:
+  /// **'La foto de {angle} no se pudo enviar y es obligatoria. Sin ella el servidor rechazará el cierre de la inspección.'**
+  String coInspRequiredDeadTitle(String angle);
+
+  /// No description provided for @coInspRetakeCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Tomar {angle} otra vez'**
+  String coInspRetakeCta(String angle);
+
+  /// No description provided for @coInspRetakeWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Al volver a tomarla se reintenta el cierre de la inspección automáticamente.'**
+  String get coInspRetakeWhy;
+
+  /// No description provided for @coInspCompleteDeadTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'El cierre de la inspección no se pudo enviar. El motivo y la decisión que falta están en la bandeja.'**
+  String get coInspCompleteDeadTitle;
+
+  /// No description provided for @coInspRequiredAnglesTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Ángulos obligatorios'**
+  String get coInspRequiredAnglesTitle;
+
+  /// No description provided for @coInspRequiredMissingPill.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{Falta 1} other{Faltan {count}}}'**
+  String coInspRequiredMissingPill(int count);
+
+  /// Chip de la stepline cuando un angulo OBLIGATORIO murio en la bandeja: el contador de progreso deja de tener sentido y se cuentan fallas (17E).
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{1 falla} other{{count} fallas}}'**
+  String coInspAnglesFailedChip(int count);
+
+  /// No description provided for @coInspDoneTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Inspección de salida'**
+  String get coInspDoneTitle;
+
+  /// No description provided for @coInspSignatureTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma del cliente'**
+  String get coInspSignatureTitle;
+
+  /// No description provided for @coInspSignedRow.
+  ///
+  /// In es, this message translates to:
+  /// **'Firmó'**
+  String get coInspSignedRow;
+
+  /// Solo se afirma cuando customerSignedAt e inspectionCompletedAt son el MISMO instante: el complete de la inspección estampa los dos en un solo write (mobile-inspection.service.js:265-281). Sellos distintos ⇒ la firma vino de otra superficie y no se atribuye.
+  ///
+  /// In es, this message translates to:
+  /// **'{name} · al terminar la inspección'**
+  String coSignFromInspection(String name);
+
+  /// No description provided for @coSignAlreadyBanner.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente ya firmó, así que no hay que pedirle firma otra vez. Solo falta cerrar la entrega.'**
+  String get coSignAlreadyBanner;
+
+  /// No description provided for @coInspCloseCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Continuar al cierre'**
+  String get coInspCloseCta;
+
+  /// No description provided for @coInspCloseWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'El servidor ya tiene la inspección y la firma. Este botón avanza al cierre; el contrato se genera cuando la entrega quede cerrada.'**
+  String get coInspCloseWhy;
+
+  /// No description provided for @coHandoffTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Voltea el teléfono al cliente'**
+  String get coHandoffTitle;
+
+  /// No description provided for @coHandoffBody.
+  ///
+  /// In es, this message translates to:
+  /// **'{name} va a firmar la entrega del {vehicle}.'**
+  String coHandoffBody(String name, String vehicle);
+
+  /// Sin nombre o sin unidad no se rellena un hueco: se dice la frase que sí es cierta.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente va a firmar la entrega del vehículo.'**
+  String get coHandoffBodyGeneric;
+
+  /// No description provided for @coHandoffRuleLock.
+  ///
+  /// In es, this message translates to:
+  /// **'La app queda bloqueada en la firma: no se puede salir ni ver otra pantalla.'**
+  String get coHandoffRuleLock;
+
+  /// No description provided for @coHandoffRuleExit.
+  ///
+  /// In es, this message translates to:
+  /// **'Para salir sin firma: mantén 3 s la barra de arriba y escribe tu PIN.'**
+  String get coHandoffRuleExit;
+
+  /// Nota 2 del 18A: el límite ya está construido (kiosk_exit_exhausted) y el agente merece saberlo ANTES de soltar el teléfono, no descubrirlo con el aparato en la mano.
+  ///
+  /// In es, this message translates to:
+  /// **'Si fallas el PIN 3 veces, la app se bloquea y hay que volver a entrar.'**
+  String get coHandoffRulePin;
+
+  /// No description provided for @coHandoffRuleBrand.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente ve la pantalla en español o inglés, con la marca de {tenant}.'**
+  String coHandoffRuleBrand(String tenant);
+
+  /// Sin branding del tenant la fila del nombre se oculta (clientSafeCompanyName): nunca un fallback con marca nuestra frente al cliente.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente ve la pantalla en español o inglés, sin la marca de la plataforma.'**
+  String get coHandoffRuleBrandNoTenant;
+
+  /// INN S-1. La tinta retenida vive solo en memoria y solo hasta el 200; volver a pedirle la firma al cliente sería cobrarle el error de la app.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente ya firmó en este teléfono, pero el servidor todavía no lo confirmó. El trazo sigue aquí: no hace falta pedírselo otra vez.'**
+  String get coRetainedNote;
+
+  /// No description provided for @coRetryWithSignature.
+  ///
+  /// In es, this message translates to:
+  /// **'Reintentar con la firma que ya dio'**
+  String get coRetryWithSignature;
+
+  /// No description provided for @coRetryWithSignatureWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Se manda el MISMO trazo que el cliente dejó hace un momento. Vive solo en la memoria de este teléfono y nunca entra a la bandeja de salida.'**
+  String get coRetryWithSignatureWhy;
+
+  /// No description provided for @coHandoffCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Entregar al cliente'**
+  String get coHandoffCta;
+
+  /// No description provided for @coHandoffWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'La firma se guarda en el contrato al confirmarla. Si el cliente se arrepiente, sales con tu PIN y el paso queda igual.'**
+  String get coHandoffWhy;
+
+  /// La firma NO tiene camino offline y no debe tenerlo: se bloquea la entrega del teléfono con causa en lugar de encolar una firma.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin conexión no se puede recoger la firma: se guarda en el contrato en el momento, no después.'**
+  String get coHandoffOfflineBlocked;
+
+  /// No description provided for @kioskSignSubtitleCheckout.
+  ///
+  /// In es, this message translates to:
+  /// **'Entrega del vehículo · Reserva {reservation}'**
+  String kioskSignSubtitleCheckout(String reservation);
+
+  /// No description provided for @kioskSignPromptCheckout.
+  ///
+  /// In es, this message translates to:
+  /// **'Firme para confirmar que recibe el vehículo y acepta el contrato de renta.'**
+  String get kioskSignPromptCheckout;
+
+  /// Pie del 18B: qué está firmando, al pie y sin jerga. Se arma uniendo lo que existe; lo que falte se omite.
+  ///
+  /// In es, this message translates to:
+  /// **'Placa {plate}'**
+  String kioskSignPlate(String plate);
+
+  /// Nota 7 del 18C: es verdad en el instante en que se dice — customer-signature ya respondió 200. Lo que sigue no se afirma todavía.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma recibida. Ya puedes tomar el teléfono.'**
+  String get coSignReceived;
+
+  /// No description provided for @coCloseStep1.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma guardada en el contrato'**
+  String get coCloseStep1;
+
+  /// No description provided for @coCloseStep2.
+  ///
+  /// In es, this message translates to:
+  /// **'Generando el contrato'**
+  String get coCloseStep2;
+
+  /// No description provided for @coCloseStep3.
+  ///
+  /// In es, this message translates to:
+  /// **'Registrar la entrega'**
+  String get coCloseStep3;
+
+  /// No description provided for @coCloseLegWaiting.
+  ///
+  /// In es, this message translates to:
+  /// **'Paso {index} de {total} · falta'**
+  String coCloseLegWaiting(int index, int total);
+
+  /// No description provided for @coClosingCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Cerrando…'**
+  String get coClosingCta;
+
+  /// Nota 8: el backend NO tiene cascada aquí. saveCustomerSignature solo sella y las dos transiciones son dos POST más desde el cliente.
+  ///
+  /// In es, this message translates to:
+  /// **'No cierres la app: el cierre son tres confirmaciones del servidor y aquí vas por la segunda.'**
+  String get coClosingWhy;
+
+  /// No description provided for @coCloseRetry.
+  ///
+  /// In es, this message translates to:
+  /// **'Reintentar el cierre'**
+  String get coCloseRetry;
+
+  /// No description provided for @coCloseRetryWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Este tramo se puede volver a intentar: la sesión sigue abierta y nada de lo capturado se perdió.'**
+  String get coCloseRetryWhy;
+
+  /// No description provided for @coAlreadySignedTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente ya firmó'**
+  String get coAlreadySignedTitle;
+
+  /// No description provided for @coAlreadySignedBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Firmó al terminar la inspección, a las {time}. No hace falta pedirle el teléfono otra vez.'**
+  String coAlreadySignedBody(String time);
+
+  /// Solo se atribuye a la inspección cuando customerSignedAt e inspectionCompletedAt son el MISMO instante (un único write, mobile-inspection.service.js:265-281). Si no, la firma vino de otra superficie y no se inventa dónde.
+  ///
+  /// In es, this message translates to:
+  /// **'La firma quedó registrada a las {time}. No hace falta pedirle el teléfono otra vez.'**
+  String coAlreadySignedBodyOther(String time);
+
+  /// No description provided for @coAlreadySignedChip.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma en el contrato · {time}'**
+  String coAlreadySignedChip(String time);
+
+  /// No description provided for @coSignedDocTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Lo que se firmó'**
+  String get coSignedDocTitle;
+
+  /// No description provided for @coSignedSigner.
+  ///
+  /// In es, this message translates to:
+  /// **'Firmante'**
+  String get coSignedSigner;
+
+  /// No description provided for @coSignedSignerUnknown.
+  ///
+  /// In es, this message translates to:
+  /// **'No se registró el nombre'**
+  String get coSignedSignerUnknown;
+
+  /// No description provided for @coSignedDocument.
+  ///
+  /// In es, this message translates to:
+  /// **'Documento'**
+  String get coSignedDocument;
+
+  /// No description provided for @coSignedDocumentValue.
+  ///
+  /// In es, this message translates to:
+  /// **'Contrato de renta {number}'**
+  String coSignedDocumentValue(String number);
+
+  /// No description provided for @coSignedDocumentValueNoNumber.
+  ///
+  /// In es, this message translates to:
+  /// **'Contrato de renta'**
+  String get coSignedDocumentValueNoNumber;
+
+  /// No description provided for @coResignLink.
+  ///
+  /// In es, this message translates to:
+  /// **'Volver a pedir la firma'**
+  String get coResignLink;
+
+  /// Verificado: saveCustomerSignature pisa tcSignatureDataUrl/tcSignedAt/tcSignerName sin comprobar si ya había firma (checkout-session.service.js:668-690).
+  ///
+  /// In es, this message translates to:
+  /// **'La firma nueva SUSTITUYE a la que ya está en el contrato. Úsalo solo si la anterior no es válida.'**
+  String get coResignWarning;
+
+  /// No description provided for @coResignTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'¿Sustituir la firma guardada?'**
+  String get coResignTitle;
+
+  /// No description provided for @coResignConfirm.
+  ///
+  /// In es, this message translates to:
+  /// **'Sí, pedirla otra vez'**
+  String get coResignConfirm;
+
+  /// No description provided for @coCloseCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Cerrar la entrega'**
+  String get coCloseCta;
+
+  /// No description provided for @coCloseCtaWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Se registra la entrega en la reserva y se genera el contrato.'**
+  String get coCloseCtaWhy;
+
+  /// No description provided for @coClosedTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Entrega cerrada'**
+  String get coClosedTitle;
+
+  /// 19A-bis, variantes verifying/unverified: el 200 prueba el CHECKOUT, no la entrega. Mismo verde, misma posición — una palabra que no sobreafirma (vocabulario ya aprobado en coCloseFailedTitle).
+  ///
+  /// In es, this message translates to:
+  /// **'Checkout cerrado'**
+  String get coClosedTitleUnverified;
+
+  /// Banner ámbar SOLO en unverified. A propósito NO dice "no entregues las llaves": esa línea es de 19B, donde hay un rechazo real — aquí solo hay ignorancia (decisión aprobada, nota 10).
+  ///
+  /// In es, this message translates to:
+  /// **'El cierre entró, pero no pudimos confirmarlo en la reserva. Compruébalo antes de dar por terminada la entrega.'**
+  String get coRecordHandoverUnverifiedNotice;
+
+  /// No description provided for @coBeforeTheyGoTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Antes de que se vaya'**
+  String get coBeforeTheyGoTitle;
+
+  /// No description provided for @coBeforeKeysLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Llaves'**
+  String get coBeforeKeysLabel;
+
+  /// No description provided for @coBeforeKeys.
+  ///
+  /// In es, this message translates to:
+  /// **'Entrega las llaves y la tarjeta de circulación'**
+  String get coBeforeKeys;
+
+  /// No description provided for @coBeforeReturnLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Regreso'**
+  String get coBeforeReturnLabel;
+
+  /// SC-1 camino B (aprobado por Hector). Dice "registro de la inspección" y NO "contrato": la copia al contrato es best-effort dentro de un catch que se traga el error (checkout-session.service.js:551-557, :562). Incondicional: la tarjeta nunca baja de dos renglones.
+  ///
+  /// In es, this message translates to:
+  /// **'El combustible y el kilometraje de salida quedaron en el registro de la inspección, no en esta pantalla.'**
+  String get coBeforeScopeNote;
+
+  /// No description provided for @coRecordTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Registro'**
+  String get coRecordTitle;
+
+  /// No description provided for @coRecordPillRecorded.
+  ///
+  /// In es, this message translates to:
+  /// **'Registrada'**
+  String get coRecordPillRecorded;
+
+  /// No description provided for @coRecordPillChecking.
+  ///
+  /// In es, this message translates to:
+  /// **'Comprobando'**
+  String get coRecordPillChecking;
+
+  /// No description provided for @coRecordPillUnverified.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin confirmar'**
+  String get coRecordPillUnverified;
+
+  /// No description provided for @coRecordRowSession.
+  ///
+  /// In es, this message translates to:
+  /// **'Sesión'**
+  String get coRecordRowSession;
+
+  /// Fila ancla del 19A-bis: el hecho que el 200 SÍ prueba, con la hora del SERVIDOR (finishedAt). Era la pastilla coRecordSessionClosed; se muda a fila y gana la hora, como 17F-bis hizo con la hora de la inspección.
+  ///
+  /// In es, this message translates to:
+  /// **'Cerrada {time}'**
+  String coRecordSessionClosedAt(String time);
+
+  /// No description provided for @coRecordSignatureLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Firma'**
+  String get coRecordSignatureLabel;
+
+  /// No description provided for @coRecordContractLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Contrato'**
+  String get coRecordContractLabel;
+
+  /// autoEmailedAt se estampa ANTES de disparar el envío, que es fire-and-forget (checkout-session.service.js:597-612): el sello prueba que se PIDIÓ, no que salió.
+  ///
+  /// In es, this message translates to:
+  /// **'Se pidió enviarlo por correo a las {time}'**
+  String coRecordEmailRequested(String time);
+
+  /// No description provided for @coRecordEmailNotRequested.
+  ///
+  /// In es, this message translates to:
+  /// **'No hay registro de envío por correo'**
+  String get coRecordEmailNotRequested;
+
+  /// No description provided for @coRecordHandoverLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Entrega'**
+  String get coRecordHandoverLabel;
+
+  /// La única formulación que la app puede firmar: se preguntó y la reserva lo confirma. No dice 'avanzó a CHECKED_OUT' ni 'el vehículo quedó rentado'.
+  ///
+  /// In es, this message translates to:
+  /// **'Registrada en la reserva · {time}'**
+  String coRecordHandoverRecorded(String time);
+
+  /// Fila Entrega mientras la consulta viaja (19A-bis). Ningún renglón afirma un resultado antes de que vuelva la llamada que lo produce.
+  ///
+  /// In es, this message translates to:
+  /// **'Comprobando en la reserva…'**
+  String get coRecordHandoverChecking;
+
+  /// display-data no respondió o mandó un estado desconocido. Es 'no lo sé', jamás 'no quedó registrada' — el negativo definitivo enruta a 19B.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin confirmar'**
+  String get coRecordHandoverUnconfirmed;
+
+  /// No description provided for @coRecordHandoverCheckingWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Nada bloquea: el agente puede salir. La comprobación no se pierde, queda en la sesión.'**
+  String get coRecordHandoverCheckingWhy;
+
+  /// No description provided for @coRecordHandoverRecheck.
+  ///
+  /// In es, this message translates to:
+  /// **'Volver a comprobar'**
+  String get coRecordHandoverRecheck;
+
+  /// No description provided for @coRecordHandoverRecheckWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Es una consulta al servidor, no un reintento del cierre: la sesión ya está cerrada y no puede cerrarse dos veces.'**
+  String get coRecordHandoverRecheckWhy;
+
+  /// No description provided for @coBackHome.
+  ///
+  /// In es, this message translates to:
+  /// **'Volver al inicio'**
+  String get coBackHome;
+
+  /// No description provided for @coSessionDetail.
+  ///
+  /// In es, this message translates to:
+  /// **'Ver el detalle de la sesión'**
+  String get coSessionDetail;
+
+  /// GD-MC-3: el detalle NO puede ser una puerta de un solo sentido — el motivo del rechazo no sobrevive al re-fetch y 'Copiar el detalle' solo existe en el resumen.
+  ///
+  /// In es, this message translates to:
+  /// **'Volver al resumen del cierre'**
+  String get coBackToOutcome;
+
+  /// No description provided for @coCloseFailedStepline.
+  ///
+  /// In es, this message translates to:
+  /// **'Cierre con problema'**
+  String get coCloseFailedStepline;
+
+  /// No description provided for @coCloseFailedTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'El checkout se cerró, pero el servidor no registró la entrega. La reserva necesita que alguien la revise en el mostrador.'**
+  String get coCloseFailedTitle;
+
+  /// El caso silencioso: 200 en el cierre y la cascada se tragó su error (:526, :533, :557, :571). Se detecta leyendo Reservation.status DESPUÉS de cerrar.
+  ///
+  /// In es, this message translates to:
+  /// **'El checkout se cerró, pero la reserva no quedó marcada como entregada. Necesita que alguien la revise en el mostrador.'**
+  String get coCloseNotRecordedTitle;
+
+  /// No description provided for @coCloseFailedStep.
+  ///
+  /// In es, this message translates to:
+  /// **'Rechazado a las {time}'**
+  String coCloseFailedStep(String time);
+
+  /// No description provided for @coCloseReasonTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Motivo'**
+  String get coCloseReasonTitle;
+
+  /// No description provided for @coServerReasonLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Respuesta del servidor'**
+  String get coServerReasonLabel;
+
+  /// No description provided for @coCloseReasonPill.
+  ///
+  /// In es, this message translates to:
+  /// **'Del servidor'**
+  String get coCloseReasonPill;
+
+  /// No description provided for @coCloseVerifiedPill.
+  ///
+  /// In es, this message translates to:
+  /// **'Comprobado en la reserva'**
+  String get coCloseVerifiedPill;
+
+  /// Rama SIN motivo del servidor (19B silencioso): la tarjeta no cita a nadie, cuenta lo que la app verificó por su cuenta. Titularla 'Motivo' prometía una cita que no existe.
+  ///
+  /// In es, this message translates to:
+  /// **'Lo que comprobamos'**
+  String get coCloseVerifiedTitle;
+
+  /// No description provided for @coCloseVerifiedLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Estado de la reserva'**
+  String get coCloseVerifiedLabel;
+
+  /// No description provided for @coCloseNotRecordedReason.
+  ///
+  /// In es, this message translates to:
+  /// **'Se consultó la reserva después de cerrar y sigue sin registrar la entrega. El servidor no dio un motivo.'**
+  String get coCloseNotRecordedReason;
+
+  /// canTransition es false desde un estado terminal (state-machine.js:94): un botón de reintento daría 409 ILLEGAL_TRANSITION para siempre.
+  ///
+  /// In es, this message translates to:
+  /// **'Esta sesión ya está cerrada, así que no se puede reintentar desde aquí. Nada de lo capturado se perdió.'**
+  String get coCloseNoRetry;
+
+  /// No description provided for @coCopyProblem.
+  ///
+  /// In es, this message translates to:
+  /// **'Copiar el detalle para el mostrador'**
+  String get coCopyProblem;
+
+  /// No description provided for @coCopiedProblem.
+  ///
+  /// In es, this message translates to:
+  /// **'Detalle copiado al portapapeles'**
+  String get coCopiedProblem;
+
+  /// No description provided for @coHoldKeys.
+  ///
+  /// In es, this message translates to:
+  /// **'No entregues las llaves hasta que el mostrador confirme.'**
+  String get coHoldKeys;
+
+  /// No description provided for @coCloseUnknownStepline.
+  ///
+  /// In es, this message translates to:
+  /// **'Cierre sin confirmar'**
+  String get coCloseUnknownStepline;
+
+  /// No description provided for @coCloseUnknownTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Se cortó la conexión mientras se cerraba. No sabemos si el cierre entró o no — hay que preguntárselo al servidor.'**
+  String get coCloseUnknownTitle;
+
+  /// No description provided for @coCloseUnknownStep.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin respuesta'**
+  String get coCloseUnknownStep;
+
+  /// No description provided for @coCloseConfirmedAt.
+  ///
+  /// In es, this message translates to:
+  /// **'{time} · confirmado'**
+  String coCloseConfirmedAt(String time);
+
+  /// No description provided for @coWontHappenTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Qué NO va a pasar'**
+  String get coWontHappenTitle;
+
+  /// No description provided for @coWontHappenPill.
+  ///
+  /// In es, this message translates to:
+  /// **'Regla'**
+  String get coWontHappenPill;
+
+  /// No description provided for @coWontRetryLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Reintento'**
+  String get coWontRetryLabel;
+
+  /// No description provided for @coWontRetry.
+  ///
+  /// In es, this message translates to:
+  /// **'La app no reintenta el cierre sola.'**
+  String get coWontRetry;
+
+  /// No description provided for @coWontQueueLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Bandeja'**
+  String get coWontQueueLabel;
+
+  /// No description provided for @coWontQueue.
+  ///
+  /// In es, this message translates to:
+  /// **'El cierre no entra a la bandeja de salida.'**
+  String get coWontQueue;
+
+  /// No description provided for @coCheckStatus.
+  ///
+  /// In es, this message translates to:
+  /// **'Consultar el estado'**
+  String get coCheckStatus;
+
+  /// No description provided for @coCheckStatusWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Con señal, una consulta dice en qué paso quedó y desde ahí se continúa.'**
+  String get coCheckStatusWhy;
+
+  /// Semántica del chip de presencia, que en H6 se vuelve TOCABLE (abre la hoja 20B). El label recita primero la línea visible y después la acción: TalkBack lee lo que hay antes de lo que se puede hacer.
+  ///
+  /// In es, this message translates to:
+  /// **'{line}: ver quién está en esta sesión'**
+  String coPresenceChipSemantics(String line);
+
+  /// La regla antisoledad, EN PANTALLA y no en un comentario de código: con el latido encendido el agente se acostumbra a confiar en el dato, y el vacío es justo lo que la presencia no puede afirmar.
+  ///
+  /// In es, this message translates to:
+  /// **'El chip solo afirma quién está. Que no aparezca nadie no significa que estés solo.'**
+  String get coPresenceNeverAlone;
+
+  /// No description provided for @coWhoIsHereTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Quién está en esta sesión'**
+  String get coWhoIsHereTitle;
+
+  /// El TTL se NOMBRA en vez de esconderse: evita la pregunta de patio «¿por qué desapareció María si sigue ahí?» — tres polls perdidos y te vas.
+  ///
+  /// In es, this message translates to:
+  /// **'Ventana de 45 s del servidor · se actualiza con cada lectura'**
+  String get coWhoIsHereSub;
+
+  /// No description provided for @coWhoIsHereNow.
+  ///
+  /// In es, this message translates to:
+  /// **'ahora'**
+  String get coWhoIsHereNow;
+
+  /// No description provided for @coWhoIsHereAge.
+  ///
+  /// In es, this message translates to:
+  /// **'hace {age}'**
+  String coWhoIsHereAge(String age);
+
+  /// El kiosco y el teléfono del cliente laten con actorUserId null A PROPÓSITO. Ese nulo no es un hueco: es el dato.
+  ///
+  /// In es, this message translates to:
+  /// **'Aparato · sin persona identificada'**
+  String get coWhoIsHereDeviceSub;
+
+  /// No description provided for @coWhoIsHereYou.
+  ///
+  /// In es, this message translates to:
+  /// **'Tú · RideOps'**
+  String get coWhoIsHereYou;
+
+  /// El reverso del latido, con nombre completo (decisión de Hector: el usuario se identifica).
+  ///
+  /// In es, this message translates to:
+  /// **'Los demás te ven como {name}'**
+  String coWhoIsHereYouSeenAs(String name);
+
+  /// Variante sin /me hidratado: se dice QUÉ se anuncia sin fingir saber el nombre exacto que resolverá el servidor.
+  ///
+  /// In es, this message translates to:
+  /// **'Los demás te ven con tu nombre completo'**
+  String get coWhoIsHereYouSeenAsUnknown;
+
+  /// Qué se anuncia, a quién y cuánto dura — y el cierre que importa: la presencia NO es un candado. El riesgo real de encender el latido no es la identidad, es que alguien lea la presencia como una reserva y se quede esperando.
+  ///
+  /// In es, this message translates to:
+  /// **'Apareces con tu nombre mientras esta pantalla esté abierta. Al salir o pausar dejas de aparecer en menos de un minuto. Esto no reserva nada: nadie queda bloqueado por estar aquí.'**
+  String get coWhoIsHereDisclosure;
+
+  /// Lo que la app dice cuando la lista llega VACÍA con red. Lo que jamás dice: «nadie más está en esta sesión».
+  ///
+  /// In es, this message translates to:
+  /// **'No hay nadie visible ahora mismo. Otra superficie puede estar avanzando sin aparecer aquí.'**
+  String get coPresenceEmpty;
+
+  /// Versión corta para el chip de la antesala (23C): llegar a una sesión abandonada e inferir «está libre» es la tentación exacta que esta frase corta.
+  ///
+  /// In es, this message translates to:
+  /// **'Nadie visible ahora mismo'**
+  String get coPresenceEmptyShort;
+
+  /// Dos vacíos distintos, dos frases distintas: «no verificable» (sin red) y «nadie visible» (con red). Fundirlas sería más barato y exactamente igual de mentiroso en uno de los dos casos.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin red no se puede afirmar que alguien esté ahora. El punto verde se apaga; el chip no desaparece.'**
+  String get coPresenceOfflineWhy;
+
+  /// Atribución CON nombre. Solo se usa cuando la presencia resuelve el actorUserId del evento; si no, cae a coAdvancedOtherAgent («otro agente»).
+  ///
+  /// In es, this message translates to:
+  /// **'«{step}» lo completó {name} hace {age}.'**
+  String coAdvancedOtherAgentNamed(String step, String name, String age);
+
+  /// Frame 21C: cayó un SELLO sin que el paso se moviera. No se nombra la superficie porque el backend no la escribe en los eventos SIDE_EFFECT — se dice lo que se sabe.
+  ///
+  /// In es, this message translates to:
+  /// **'{stamp} se registró en otra superficie hace {age}.'**
+  String coAdvancedStampLanded(String stamp, String age);
+
+  /// La frase que desarma la alarma. El avance ajeno ocurrió en OTRO sitio y no exige nada del agente ahora — sobre todo, no exige que suelte el formulario a medio llenar.
+  ///
+  /// In es, this message translates to:
+  /// **'Sigue capturando: este paso no cambió.'**
+  String get coAdvancedStepUnchanged;
+
+  /// No description provided for @coChangedTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Qué cambió desde que entraste'**
+  String get coChangedTitle;
+
+  /// No description provided for @coChangedSub.
+  ///
+  /// In es, this message translates to:
+  /// **'Estado reportado por el servidor · {time}'**
+  String coChangedSub(String time);
+
+  /// No description provided for @coChangedStepMoved.
+  ///
+  /// In es, this message translates to:
+  /// **'El paso se movió'**
+  String get coChangedStepMoved;
+
+  /// No description provided for @coChangedStepMovedDetail.
+  ///
+  /// In es, this message translates to:
+  /// **'{from} → {to}'**
+  String coChangedStepMovedDetail(String from, String to);
+
+  /// No description provided for @coChangedByKiosk.
+  ///
+  /// In es, this message translates to:
+  /// **'Completado en el kiosco · {time}'**
+  String coChangedByKiosk(String time);
+
+  /// No description provided for @coChangedByOtherAgent.
+  ///
+  /// In es, this message translates to:
+  /// **'Lo completó {name} · {time}'**
+  String coChangedByOtherAgent(String name, String time);
+
+  /// No description provided for @coChangedByOtherSurface.
+  ///
+  /// In es, this message translates to:
+  /// **'Completado en otra superficie · {time}'**
+  String coChangedByOtherSurface(String time);
+
+  /// No description provided for @coChangedByYou.
+  ///
+  /// In es, this message translates to:
+  /// **'Lo hiciste tú · {time} · sin cambios'**
+  String coChangedByYou(String time);
+
+  /// No description provided for @coChangedUntouched.
+  ///
+  /// In es, this message translates to:
+  /// **'Pendiente · no lo ha tocado nadie'**
+  String get coChangedUntouched;
+
+  /// La única frase que el agente vino a leer. El miedo real al ver «alguien más avanzó» no es de proceso: es «¿perdí mi trabajo?». Se responde primero y en verde.
+  ///
+  /// In es, this message translates to:
+  /// **'Nada de lo que hiciste se perdió.'**
+  String get coChangedNothingLost;
+
+  /// Cuando SÍ hay algo en riesgo la franja verde cambia a ámbar y NOMBRA qué. Nunca se queda en verde por comodidad.
+  ///
+  /// In es, this message translates to:
+  /// **'{count, plural, one{Ojo: 1 envío no ha llegado al servidor. Revisa la Bandeja antes de seguir.} other{Ojo: {count} envíos no han llegado al servidor. Revisa la Bandeja antes de seguir.}}'**
+  String coChangedSomethingLost(int count);
+
+  /// Estado vacío honesto de la hoja: se puede abrir sin que haya avance ajeno.
+  ///
+  /// In es, this message translates to:
+  /// **'Nadie ha tocado nada desde que entraste.'**
+  String get coChangedNoChanges;
+
+  /// No description provided for @coChangedStayCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Seguir en el paso {index}'**
+  String coChangedStayCta(int index);
+
+  /// No description provided for @coConflictTooEarlyTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Ese paso todavía no toca'**
+  String get coConflictTooEarlyTitle;
+
+  /// El MISMO code ILLEGAL_TRANSITION, la situación opuesta a «ya lo hicieron»: se pidió un paso que la cadena lineal aún no permite.
+  ///
+  /// In es, this message translates to:
+  /// **'La sesión está en {current} (paso {index}) y {target} es el paso {targetIndex}. El servidor solo deja avanzar de uno en uno.'**
+  String coConflictTooEarlyBody(
+    String current,
+    int index,
+    String target,
+    int targetIndex,
+  );
+
+  /// Variante para cuando alguno de los dos pasos no está en el catálogo (paso nuevo del backend): se dice la regla sin inventar números.
+  ///
+  /// In es, this message translates to:
+  /// **'El servidor solo deja avanzar de uno en uno, y este no es el paso que sigue.'**
+  String get coConflictTooEarlyBodyShort;
+
+  /// No description provided for @coGoToStepCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Ir al paso {index} · {step}'**
+  String coGoToStepCta(int index, String step);
+
+  /// Por qué esta acción SÍ puede tener éxito: es una pantalla local, no una transición. La puerta falsa que aquí NO se dibuja es «Reintentar», que contra una máquina lineal daría 409 para siempre.
+  ///
+  /// In es, this message translates to:
+  /// **'Ir al paso {index} es navegación dentro de esta app: siempre funciona.'**
+  String coGoToStepWhy(int index);
+
+  /// No description provided for @coGuardOutboxCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Ver la Bandeja ({n})'**
+  String coGuardOutboxCta(int n);
+
+  /// «Ver la Bandeja» sí puede tener éxito; «reintentar el paso» no: el sello lo estampa el servidor al drenar el complete, no esta pantalla.
+  ///
+  /// In es, this message translates to:
+  /// **'La Bandeja drena sola al recuperar señal; el paso avanza cuando el sello llegue.'**
+  String get coGuardOutboxWhy;
+
+  /// El callejón se NOMBRA en vez de ofrecer un CTA imposible: pasada INSPECTION_IN_PROGRESS el swap responde 409 SWAP_LOCKED para siempre (vehicle-swap.service.js:46-51).
+  ///
+  /// In es, this message translates to:
+  /// **'Esta unidad ya no se puede cambiar desde aquí: la inspección ya empezó. Se resuelve en el mostrador.'**
+  String get coConflictSwapLockedBody;
+
+  /// No se nombra QUIÉN la abrió: startedByUserId viaja como id y el servidor no manda su nombre. Se dice lo que se sabe.
+  ///
+  /// In es, this message translates to:
+  /// **'Esta salida ya empezó: va por el paso {index} de {total}.'**
+  String coJoinBannerStarted(int index, int total);
+
+  /// No description provided for @coJoinBannerStartedAt.
+  ///
+  /// In es, this message translates to:
+  /// **'Esta salida ya empezó. Se abrió a las {time} y va por el paso {index} de {total}.'**
+  String coJoinBannerStartedAt(String time, int index, int total);
+
+  /// No description provided for @coJoinBannerStartedByOther.
+  ///
+  /// In es, this message translates to:
+  /// **'Esta salida la abrió otro agente y va por el paso {index} de {total}.'**
+  String coJoinBannerStartedByOther(int index, int total);
+
+  /// No description provided for @coJoinDoneTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Lo que ya está hecho'**
+  String get coJoinDoneTitle;
+
+  /// No description provided for @coJoinDonePill.
+  ///
+  /// In es, this message translates to:
+  /// **'{done} de {total} fases'**
+  String coJoinDonePill(int done, int total);
+
+  /// No description provided for @coJoinPendingTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Lo que falta'**
+  String get coJoinPendingTitle;
+
+  /// No description provided for @coJoinPendingPill.
+  ///
+  /// In es, this message translates to:
+  /// **'Tuyo'**
+  String get coJoinPendingPill;
+
+  /// No description provided for @coJoinContinueCta.
+  ///
+  /// In es, this message translates to:
+  /// **'Continuar desde el paso {index}'**
+  String coJoinContinueCta(int index);
+
+  /// Sin posición en el catálogo (paso nuevo del backend) no se inventa un número.
+  ///
+  /// In es, this message translates to:
+  /// **'Continuar'**
+  String get coJoinContinueCtaUnknownStep;
+
+  /// ADR-4 en idioma de patio. Es la misma promesa que hace la hoja de pausa: se prometió al pausar y se cumple al volver.
+  ///
+  /// In es, this message translates to:
+  /// **'Entras al paso que reporta el servidor, no al que dejó nadie. Nada se re-hace.'**
+  String get coJoinContinueWhy;
+
+  /// No description provided for @coJoinKioskActiveTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'El cliente está usando el kiosco ahora mismo.'**
+  String get coJoinKioskActiveTitle;
+
+  /// No description provided for @coJoinKioskActiveBody.
+  ///
+  /// In es, this message translates to:
+  /// **'Si avanzas desde aquí puedes interrumpir lo que está haciendo.'**
+  String get coJoinKioskActiveBody;
+
+  /// No description provided for @coJoinAdviceTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Qué conviene hacer'**
+  String get coJoinAdviceTitle;
+
+  /// No description provided for @coJoinAdvicePill.
+  ///
+  /// In es, this message translates to:
+  /// **'Consejo'**
+  String get coJoinAdvicePill;
+
+  /// No description provided for @coJoinAdviceWaitKey.
+  ///
+  /// In es, this message translates to:
+  /// **'Esperar'**
+  String get coJoinAdviceWaitKey;
+
+  /// No description provided for @coJoinAdviceWait.
+  ///
+  /// In es, this message translates to:
+  /// **'Esta pantalla se actualiza sola cuando el kiosco termine'**
+  String get coJoinAdviceWait;
+
+  /// No description provided for @coJoinAdviceLeaveKey.
+  ///
+  /// In es, this message translates to:
+  /// **'O irte'**
+  String get coJoinAdviceLeaveKey;
+
+  /// No description provided for @coJoinAdviceLeave.
+  ///
+  /// In es, this message translates to:
+  /// **'Nada se pierde: la sesión sigue igual'**
+  String get coJoinAdviceLeave;
+
+  /// La presencia viva cambia el CONSEJO, nunca el permiso. Presencia que bloquea es un lease, y un kiosco sin batería a mitad de firma atascaría la salida hasta que expire el TTL.
+  ///
+  /// In es, this message translates to:
+  /// **'No es un bloqueo. Puedes avanzar igual — el servidor decide, no este aviso. Solo te decimos lo que está pasando del otro lado.'**
+  String get coJoinNotABlock;
+
+  /// No description provided for @coJoinProceedAnyway.
+  ///
+  /// In es, this message translates to:
+  /// **'Avanzar de todas formas'**
+  String get coJoinProceedAnyway;
+
+  /// No description provided for @coJoinPausedByOther.
+  ///
+  /// In es, this message translates to:
+  /// **'Otro agente pausó esta salida hace {age}.'**
+  String coJoinPausedByOther(String age);
+
+  /// Sin actor identificable en el log no se afirma «otro agente».
+  ///
+  /// In es, this message translates to:
+  /// **'Esta salida quedó pausada hace {age}.'**
+  String coJoinPausedBySomeone(String age);
+
+  /// abandonedReason es el dato que decide: «el cliente fue por su tarjeta» y «la unidad no arranca» llevan a acciones opuestas.
+  ///
+  /// In es, this message translates to:
+  /// **'Motivo: «{reason}»'**
+  String coJoinPausedReason(String reason);
+
+  /// No description provided for @coJoinWhereItStoppedTitle.
+  ///
+  /// In es, this message translates to:
+  /// **'Dónde quedó'**
+  String get coJoinWhereItStoppedTitle;
+
+  /// Hay una sola CheckoutSession por reserva (reservationId @unique): no existe transferir, reclamar ni desbloquear. Decirlo evita que el agente busque un botón de «tomar el control» que ninguna versión de esta app va a tener.
+  ///
+  /// In es, this message translates to:
+  /// **'Continuar no le quita nada a nadie: la sesión es una sola y el registro guarda quién hizo qué.'**
+  String get coJoinNoStealWhy;
+
+  /// El barrido nocturno escribe `auto_flagged_stalled_at_<paso>` (scheduler:71). Decir «otro agente la pausó» sería inventar un culpable de algo que hizo un cron.
+  ///
+  /// In es, this message translates to:
+  /// **'El sistema la marcó: lleva más de 4 h detenida. No la pausó nadie.'**
+  String get coJoinPausedAutoStalled;
+
+  /// No description provided for @coJoinPausedBySystem.
+  ///
+  /// In es, this message translates to:
+  /// **'El sistema marcó esta salida hace {age}.'**
+  String coJoinPausedBySystem(String age);
+
+  /// «Qué se conserva» es la tercera pregunta de cada cara de la matriz 409 y 22C era la única que se había quedado sin responderla.
+  ///
+  /// In es, this message translates to:
+  /// **'Se conserva: el cliente ya verificado y el paso en el que vas.'**
+  String get coConflictVehicleKept;
+
+  /// Línea de causa que se muestra SIEMPRE, también con la Bandeja en cero: sin ella el agente que acaba de terminar la inspección lee «falta la inspección completada» y no tiene nada que explique la brecha.
+  ///
+  /// In es, this message translates to:
+  /// **'Este paso lo cierra el servidor cuando reciba el sello, no esta pantalla. Nada se pierde: puedes pausar y volver.'**
+  String get coGuardWhyServer;
+
+  /// Forma CORTA del chip, la que dibujan los marcos aprobados (20A). El chip vive con ~111 px utiles a 360 dp: la linea larga de `coPresenceLine` se corta en 19 caracteres y se come justo la SUPERFICIE, que es el proposito declarado del chip (a Diego le gritas desde la otra punta del patio; al kiosco hay que caminarle). Con el punto VIVO la edad es irrelevante —es ahora— asi que los dos datos que caben son nombre y superficie.
+  ///
+  /// In es, this message translates to:
+  /// **'{name} · {surface}'**
+  String coPresenceChipLive(String name, String surface);
+
+  /// Forma corta del chip cuando el punto ya NO esta vivo (20C: «El kiosco · hace 38 s»). Ahi la noticia es la EDAD, no la superficie. La linea completa —nombre, superficie y edad— sigue llegando entera al lector de pantalla por `coPresenceChipSemantics`, que no tiene limite de ancho: nada se pierde para accesibilidad.
+  ///
+  /// In es, this message translates to:
+  /// **'{name} · hace {age}'**
+  String coPresenceChipAged(String name, String age);
+
+  /// Estado de la fila «Tú» sin red. El latido es un POST: sin red no aterriza, y a los 45 s el agente deja de estar visible para las demas superficies.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin conexión'**
+  String get coWhoIsHereYouOffline;
+
+  /// La divulgacion NO puede afirmar «apareces con tu nombre» justo cuando es falso. Es el espejo exacto del defecto del vacio: la unica pantalla construida para explicar el reverso del latido seria, sin red, la unica que no puede sostener lo que dice.
+  ///
+  /// In es, this message translates to:
+  /// **'Sin conexión tu latido no está llegando: en menos de un minuto dejas de aparecer para las demás superficies. Vuelves a aparecer solo al recuperar señal. Esto nunca reserva nada.'**
+  String get coWhoIsHereDisclosureOffline;
+
+  /// Complementa el subtitulo de la hoja cuando NO hay red y la lista viene vacia. La causa («sin red no se puede afirmar que alguien este ahora») ya la dice el subtitulo dos lineas mas arriba; repetirla seria la misma frase dos veces a ~100 px. Lo que falta decir es que el vacio tampoco autoriza la lectura contraria.
+  ///
+  /// In es, this message translates to:
+  /// **'Y tampoco se puede leer como «no hay nadie»: otra superficie puede estar avanzando sin que lo veamos.'**
+  String get coPresenceEmptyUnverifiable;
 }
 
 class _AppLocalizationsDelegate

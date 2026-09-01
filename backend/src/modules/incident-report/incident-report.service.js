@@ -590,7 +590,15 @@ export const incidentReportService = {
     const row = await findScoped(user, id);
     const reservation = await prisma.reservation.findFirst({
       where: { id: row.reservationId },
-      include: { customer: true, vehicle: true, rentalAgreement: { include: { charges: true } }, tenant: true }
+      // Only `tenant.name` is ever read from this row (assembleReport's
+      // company fields), so omit settingsJson for the same reason as the other
+      // eight sites: nothing here wants the tenant's SMS/SPIn credentials.
+      include: {
+        customer: true,
+        vehicle: true,
+        rentalAgreement: { include: { charges: true } },
+        tenant: { omit: { settingsJson: true } }
+      }
     });
     const report = await assembleReport(row, reservation);
     return buildIncidentReportHtml(report);
@@ -730,7 +738,11 @@ async function assembleReport(row, reservation) {
     vehicle: {
       makeModel: [v?.year, v?.make, v?.model].filter(Boolean).join(' '),
       color: v?.color || '',
-      plate: v?.licensePlate || '',
+      // `plate` — the Vehicle model has never had a `licensePlate` field, so
+      // this read was empty on every report the module ever produced. The
+      // report-NUMBER generator hedges both spellings and always got the
+      // plate; the document body did not.
+      plate: v?.plate || '',
       company: reservation?.tenant?.name || ''
     },
     preRentalCondition: row.preRentalCondition,
@@ -760,4 +772,4 @@ async function assembleReport(row, reservation) {
   };
 }
 
-export const __test = { makeReportNumber, reportingWindowHours, serialize, daysBetween, DEFAULT_CLAUSES, TYPE_META, computeChargeSection };
+export const __test = { makeReportNumber, reportingWindowHours, serialize, daysBetween, DEFAULT_CLAUSES, TYPE_META, computeChargeSection, assembleReport };

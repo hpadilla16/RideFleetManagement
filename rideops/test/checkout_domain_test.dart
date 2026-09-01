@@ -8,6 +8,8 @@ import 'package:rideops/features/checkout/domain/checkout_event_log.dart';
 import 'package:rideops/features/checkout/domain/checkout_presence.dart';
 import 'package:rideops/features/checkout/domain/checkout_step_catalog.dart';
 
+import 'helpers/auth_test_helpers.dart';
+
 /// Reglas de dominio del wizard (M2-H1): catálogo de PRESENTACIÓN de los
 /// pasos, lectura del events log y frescura de la presencia. Todo puro —
 /// ninguna de estas funciones puede decidir un paso.
@@ -218,19 +220,22 @@ void main() {
       expect(pickPresenceChip(null, now), isNull);
     });
 
-    test('MINOR-5: el filtro de "no me listes a mí mismo" está listo — inerte '
-        'mientras el backend no mande actorUserId', () {
+    test('MINOR-5 / M2-H6: el filtro de "no me listes a mí mismo" está VIVO — '
+        'y sin el campo del backend degrada a verse uno mismo', () {
       final rows = [
         p('KIOSK', const Duration(seconds: 6), name: 'María'),
         p('RIDEOPS', const Duration(seconds: 3), name: 'Yo mismo'),
       ];
-      // HOY: el serializer de P1 no manda actorUserId ⇒ el filtro no puede
-      // actuar y se ve todo (comportamiento actual, documentado).
+      // Backend viejo (o superficie que late sin usuario): sin actorUserId el
+      // filtro no puede actuar y el agente se ve. Es la degradación aceptada;
+      // la alternativa —no pintar ninguna presencia de la propia superficie—
+      // taparía a un compañero real en otro teléfono RideOps.
       expect(pickPresenceChip(rows, now, myUserId: 'u-yo')!.entry.displayName,
           'Yo mismo');
 
-      // CUANDO el backend lo mande (pedido para H6, antes de que RideOps
-      // empiece a latir): el propio heartbeat desaparece del chip.
+      // Con el campo que `activePresence()` ya emite (:184), el propio latido
+      // desaparece del chip. Esto es lo que hace publicable a H6: es la
+      // historia que ENCIENDE el heartbeat.
       final withActor = [
         rows.first,
         rows.last.copyWith(actorUserId: 'u-yo'),
@@ -247,6 +252,10 @@ void main() {
       final chip = pickPresenceChip(
         session.presence,
         DateTime.parse('2026-08-16T14:04:00.000Z'),
+        // Desde M2-H6 el fixture incluye la fila que RideOps escribe con el
+        // usuario de ESTE teléfono: sin el filtro, el agente se vería a sí
+        // mismo (y encabezando, porque es la más reciente).
+        myUserId: kFixtureUserId,
       );
       expect(chip!.entry.surface, 'KIOSK');
       expect(chip.freshness, PresenceFreshness.live); // 8 s

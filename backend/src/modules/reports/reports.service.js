@@ -1214,7 +1214,7 @@ export const reportsService = {
     const end = query.end ? endOfDay(query.end) : endOfDay(new Date());
     const whereScope = scopeWhere(scope);
 
-    const programCategoryFilter = query.programCategory && ['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH'].includes(String(query.programCategory))
+    const programCategoryFilter = query.programCategory && ['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH', 'SHUTTLE_ONLY'].includes(String(query.programCategory))
       ? { programCategory: String(query.programCategory) }
       : {};
     // Program scoping (2026-07-02): the employee's restriction ANDs on top of
@@ -1339,7 +1339,7 @@ export const reportsService = {
     const end = query.end ? endOfDay(query.end) : endOfDay(new Date());
     const whereScope = scopeWhere(scope);
 
-    const programCategoryFilter = query.programCategory && ['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH'].includes(String(query.programCategory))
+    const programCategoryFilter = query.programCategory && ['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH', 'SHUTTLE_ONLY'].includes(String(query.programCategory))
       ? { vehicle: { programCategory: String(query.programCategory) } }
       : {};
 
@@ -1529,7 +1529,7 @@ export const reportsService = {
     const whereScope = scopeWhere(scope);
     const windowDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)));
 
-    const programCategoryFilter = query.programCategory && ['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH'].includes(String(query.programCategory))
+    const programCategoryFilter = query.programCategory && ['RENTAL_ONLY', 'LOANER_ONLY', 'BOTH', 'SHUTTLE_ONLY'].includes(String(query.programCategory))
       ? { programCategory: String(query.programCategory) }
       : {};
     // Program scoping (2026-07-02): ANDs on top of the user-selected

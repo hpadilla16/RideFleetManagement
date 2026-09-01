@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:rideops/core/api/api_providers.dart';
+import 'package:rideops/core/db/outbox_providers.dart';
 import 'package:rideops/core/api/dto/checkout_session.dart';
 import 'package:rideops/core/api/enums.dart';
 import 'package:rideops/core/l10n/app_localizations.dart';
@@ -80,6 +81,11 @@ void main() {
       ProviderScope(
         overrides: [
           checkoutApiProvider.overrideWithValue(api),
+          // M2-H6: la pantalla terminal lee la BANDEJA para poder responder
+          // "¿perdí mi trabajo?" (21D). Sin este override sale el stream real
+          // de drift y deja un timer vivo al desmontar — el mismo cableado que
+          // checkout_inspection_test ya hacía.
+          outboxRowsProvider.overrideWith((ref) => const Stream.empty()),
           reservationsApiProvider.overrideWithValue(FakeReservationsApi()),
           eventLoggerProvider.overrideWithValue(CapturingEventLogger()),
           networkStatusProvider
@@ -158,22 +164,212 @@ void main() {
     for (final phase in ['Confirm', 'T&C', 'Payment', 'Inspection', 'Closing']) {
       expect(find.text(phase), findsOneWidget, reason: phase);
     }
-    // Presencia: informativa, con la superficie nombrada.
+    // Presencia: informativa, con la superficie nombrada — que es el propósito
+    // del chip. Desde M2-H6 se dice en la forma CORTA de los marcos: la línea
+    // larga no cabía a 360 dp y lo primero que se cortaba era justo la
+    // superficie (GD-MC-1).
     expect(find.byType(PresenceChip), findsOneWidget);
+    expect(find.text('María G. · kiosk'), findsOneWidget);
+    // La línea completa no se pierde: viaja entera al lector de pantalla.
+    //
+    // Se afirma hasta el final —incluida la EDAD—, no hasta `· kiosk`: el
+    // componente de antigüedad no lo fijaba ninguna prueba, y es justo el que
+    // distingue la línea completa de la forma corta cuando el punto está
+    // apagado. El `\d+` evita romperse en un borde de segundo.
     expect(
-      find.textContaining('María G. is in this session · kiosk'),
-      findsOneWidget,
+      tester.getSemantics(find.byType(PresenceChip)).label,
+      matches(
+        RegExp(
+          r'^María G\. is in this session · kiosk · \d+ s ago'
+          r': see who is in this session$',
+        ),
+      ),
     );
     // Header completo (8A): la fila del cliente del display-data.
     expect(find.text('María González'), findsOneWidget);
   });
 
-  testWidgets('8A — sin el campo presence (backend sin P1) NO se pinta chip',
-      (tester) async {
+  testWidgets('M2-H6 — sin nadie visible el chip SÍ se pinta, y dice "nadie '
+      'visible": es la única puerta al reverso del latido', (tester) async {
     final f = fakes();
     f.api.current = sessionAt(CheckoutStep.confirming); // presence ausente
     await pumpWizard(tester, api: f.api, network: f.network);
-    expect(find.byType(PresenceChip), findsNothing);
+
+    // Cambio deliberado respecto de H1 (review de GD): entonces el chip era
+    // decorativo y esconderlo sin compañía era correcto. Desde H6 el chip es
+    // la ÚNICA entrada a "Quién está aquí", y ahí vive el aviso de que el
+    // agente empezó a aparecer con su nombre en las otras superficies. Con el
+    // chip condicionado a que hubiera compañía, el agente que trabaja solo —el
+    // caso normal en el patio— no se enteraba nunca.
+    expect(find.byType(PresenceChip), findsOneWidget);
+    expect(find.text('Nobody visible right now'), findsOneWidget);
+    // Y NUNCA "estás solo": lo que se afirma es que no hay nadie VISIBLE.
+    expect(find.textContaining('alone'), findsNothing);
+    // Sigue siendo un objetivo real de 48 px.
+    final target = find.descendant(
+      of: find.byType(PresenceChip),
+      matching: find.byType(InkWell),
+    );
+    expect(tester.getSize(target.first).height, greaterThanOrEqualTo(48));
+  });
+
+  testWidgets('M2-H6 · 21C-bis — el aviso de SELLO va DENTRO del pie, encima '
+      'del CTA y fuera del scroll', (tester) async {
+    final f = fakes();
+    f.api.current = sessionAt(CheckoutStep.tcPending);
+    await pumpWizard(tester, api: f.api, network: f.network);
+    await tester.pumpAndSettle();
+    // Entrar en el paso 2 abre la antesala de enganche; se cruza, porque lo
+    // que se mide aquí es el PIE del paso.
+    await skipJoinGate(tester);
+    expect(find.byType(ForeignAdvanceBanner), findsNothing);
+
+    // El mostrador cobra mientras el agente sigue en términos: cae el sello y
+    // el paso NO se mueve.
+    f.api.current = sessionAt(CheckoutStep.tcPending, payment: DateTime.now());
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    final banner = find.byType(ForeignAdvanceBanner);
+    expect(banner, findsOneWidget);
+    expect(
+      find.textContaining('Keep capturing: this step did not change'),
+      findsOneWidget,
+    );
+
+    // (1) FUERA del scroll. Dentro, con el teclado abierto quedaría fuera de
+    // vista y además desplazaría el campo que se está tecleando.
+    expect(
+      find.ancestor(of: banner, matching: find.byType(Scrollable)),
+      findsNothing,
+    );
+
+    // (2) DENTRO del pie — no debajo, que era un segundo pie, ni flotando
+    // sobre el CTA, que lo taparía. Decisión de Hector sobre el marco 21C-bis.
+    final dock = find.byType(WizardDock);
+    expect(dock, findsOneWidget);
+    expect(find.ancestor(of: banner, matching: dock), findsOneWidget);
+
+    // (3) ENCIMA del CTA, que es todo el argumento: la franja que el pulgar
+    // alcanza sin recolocar la mano tiene que llevar la acción que continúa el
+    // trabajo, no un aviso cuya única acción es opcional.
+    // Se compara contra el `primary` REAL del pie y no contra un tipo
+    // adivinado: cada paso decide cuál es su acción principal (avanzar,
+    // cambiar de unidad, re-emitir el código), y la regla es la misma para
+    // todos.
+    final cta = find.byWidget(tester.widget<WizardDock>(dock).primary);
+    expect(cta, findsOneWidget);
+    expect(
+      tester.getBottomLeft(banner).dy,
+      lessThanOrEqualTo(tester.getTopLeft(cta).dy),
+      reason: 'el aviso no puede quedar por debajo del primario',
+    );
+
+    // (4) Un solo pie: un filete, ninguna sombra hacia arriba (GD-SC-2).
+    //
+    // Se miran los contenedores ENTRE el aviso y el pie —sus envoltorios— y no
+    // solo sus descendientes: la versión anterior de esta aserción buscaba
+    // dentro del banner, y el `Container` full-bleed que hubo que quitar era
+    // su PADRE. Miraba exactamente donde el defecto no estaba.
+    //
+    // La invariante es de conteo: entre el aviso y el borde del pie puede
+    // haber UN filete superior — el del propio dock — y ni uno más. Dos
+    // filetes horizontales seguidos en 24 px de alto son un bug visual, no una
+    // jerarquía.
+    bool topOnlyRule(BoxDecoration d) {
+      final b = d.border;
+      return b is Border &&
+          b.top.width > 0 &&
+          b.left.width == 0 &&
+          b.right.width == 0;
+    }
+
+    final betweenBannerAndDock = <BoxDecoration>[
+      for (final c in tester.widgetList<Container>(
+        find.ancestor(of: banner, matching: find.descendant(
+          of: dock,
+          matching: find.byType(Container),
+          matchRoot: true,
+        )),
+      ))
+        if (c.decoration case final BoxDecoration d) d,
+      for (final c in tester.widgetList<Container>(
+        find.descendant(of: banner, matching: find.byType(Container)),
+      ))
+        if (c.decoration case final BoxDecoration d) d,
+    ];
+
+    expect(
+      betweenBannerAndDock.where(topOnlyRule).length,
+      1,
+      reason: 'un pie, un filete: el del dock y ninguno más',
+    );
+    expect(
+      betweenBannerAndDock.any(
+        (d) => (d.boxShadow ?? const <BoxShadow>[])
+            .any((sh) => sh.offset.dy < 0),
+      ),
+      isFalse,
+      reason: 'la sombra hacia arriba era la tercera señal de "segundo pie"',
+    );
+  });
+
+  testWidgets('M2-H6 · 21C sin dock — en un paso que no construye pie, el '
+      'aviso conserva el anclaje de la lámina', (tester) async {
+    // ── Por qué esta prueba existe ────────────────────────────────────────
+    //
+    // QA borró el bloque entero del aviso en la rama `_ =>` y las 701 pruebas
+    // siguieron verdes. El hueco cayó justo en el ÚNICO camino que NO pasa por
+    // `WizardDockNotice`: ahí el aviso se enhebra como parámetro explícito, que
+    // es exactamente el modo de fallo —alguien deja de reenviarlo y desaparece
+    // sin que nadie grite— que el widget heredado existe para evitar en los
+    // otros 15 sitios. El argumento arquitectónico no cubría su propia
+    // excepción; esta prueba sí.
+    //
+    // La rama sirve TC_SIGNED, PAYMENT_PENDING y PAID: tres pasos vivos.
+    final f = fakes();
+    // PAYMENT_PENDING con el sello de T&C ya puesto — es como se llega ahí
+    // (TC_SIGNED lo exige), así que el estado es producible por el backend.
+    f.api.current = sessionAt(CheckoutStep.paymentPending, tc: DateTime.now());
+    await pumpWizard(tester, api: f.api, network: f.network);
+    await tester.pumpAndSettle();
+    await skipJoinGate(tester);
+
+    // Este paso NO tiene pie: es la premisa de la prueba, y se afirma en vez
+    // de suponerse — si algún día gana uno, esta prueba tiene que enterarse.
+    expect(find.byType(WizardDock), findsNothing);
+    expect(find.byType(ForeignAdvanceBanner), findsNothing);
+
+    // La inspección se sella mientras el agente está en el paso de pago: el
+    // escenario canónico del 21C en esta rama.
+    f.api.current = sessionAt(
+      CheckoutStep.paymentPending,
+      tc: DateTime.now(),
+      inspection: DateTime.now(),
+    );
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    final banner = find.byType(ForeignAdvanceBanner);
+    expect(banner, findsOneWidget, reason: 'sin pie el aviso NO puede perderse');
+    expect(
+      find.textContaining('Keep capturing: this step did not change'),
+      findsOneWidget,
+    );
+
+    // Sigue FUERA del scroll: es la regla que no depende de que haya dock.
+    expect(
+      find.ancestor(of: banner, matching: find.byType(Scrollable)),
+      findsNothing,
+    );
+
+    // Y anclado al PIE: por debajo del cuerpo del paso.
+    final list = find.byType(Scrollable).first;
+    expect(
+      tester.getTopLeft(banner).dy,
+      greaterThanOrEqualTo(tester.getBottomLeft(list).dy - 1),
+      reason: 'el aviso va debajo del cuerpo, no encima ni dentro',
+    );
   });
 
   testWidgets('un currentStep desconocido no rompe la pantalla: nodo genérico '

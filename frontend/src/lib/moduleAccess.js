@@ -148,6 +148,10 @@ export function pathnameToModule(pathname = '') {
   if (path.startsWith('/host') || path.startsWith('/host-profile') || path.startsWith('/host-review')) return 'hostApp';
   if (path.startsWith('/employee')) return 'employeeApp';
   if (path.startsWith('/issues') || path.startsWith('/issue-response')) return 'issueCenter';
+  // Staff Shuttle Monitor (2026-08-24) — same module as the shuttle queue and
+  // tracker settings it summarizes. NOTE: '/shuttles' only; the public
+  // tracker at /shuttle/<token> renders outside AppShell and is token-authed.
+  if (path.startsWith('/shuttles')) return 'reservations';
   if (path.startsWith('/loaner')) return 'loaner';
   if (path.startsWith('/tolls')) return 'tolls';
   if (path.startsWith('/citations')) return 'citations';

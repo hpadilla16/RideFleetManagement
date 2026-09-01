@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useTranslation } from 'react-i18next';
 import { AuthGate } from '../components/AuthGate';
 import { AppShell } from '../components/AppShell';
+import { BillingNoticeBanner } from '../components/BillingNoticeBanner';
 import MarketIntelligenceCard from '../components/MarketIntelligenceCard';
 import { api } from '../lib/client';
 import { DEFAULT_TENANT_TIMEZONE, tenantDayKey } from '../lib/tenant-time';
@@ -512,7 +513,11 @@ function DashboardInner({ token, me, logout }) {
       new Date(r.returnAt) <= new Date() && !r.overdueIgnored
     ).length
   );
-  const feeAdvisoryCount = reservations.filter((r) => /\[FEE_ADVISORY_OPEN\s+/i.test(String(r.notes || ''))).length;
+  // Agreements still owing money — the Ops Hub tile that replaced Fee
+  // Advisories (which scanned notes for a marker nothing ever wrote, so it
+  // read 0 forever). Backend-canonical via /api/reservations/summary, so it
+  // is not capped by the limit-500 `reservations` list the old scan used.
+  const unpaidBalanceCount = Number(resSummary?.unpaidBalances || 0);
   // Phase 1.8 — checkout sessions abandoned or stuck > 4h in a
   // non-terminal step. Surfaced as its own tile so the night-shift
   // can sweep them before customers return to wonder why their
@@ -701,13 +706,18 @@ function DashboardInner({ token, me, logout }) {
       serviceHeld,
       activeReservations,
       overdueReservations,
-      feeAdvisoryCount,
+      unpaidBalanceCount,
       nextItems
     };
-  }, [shuttleOpen, pickups, returns, feeAdvisoryCount, registrationsExpiring30d, readyToRotate, rotationRuleLabel, inspectionsToReview, loanerRequestsPending, kioskEscalations, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner, me?.moduleAccess?.kiosk, t]);
+  }, [shuttleOpen, pickups, returns, unpaidBalanceCount, registrationsExpiring30d, readyToRotate, rotationRuleLabel, inspectionsToReview, loanerRequestsPending, kioskEscalations, totalVehicles, available, migrationHeld, serviceHeld, activeReservations, overdueReservations, router, me?.moduleAccess?.loaner, me?.moduleAccess?.kiosk, t]);
 
   return (
     <AppShell me={me} logout={logout}>
+      {/* Day 0 of the dunning timeline (Phase 5): the first thing an account
+          owner sees after a declined subscription payment, above everything
+          else, while the app still works normally underneath. Renders nothing
+          at all when there is nothing wrong — see the component. */}
+      <BillingNoticeBanner />
       <section className="glass card-lg section-card" style={{ marginBottom: 16 }}>
         <div className="app-banner">
           <div className="row-between" style={{ alignItems: 'start', marginBottom: 0 }}>
@@ -886,11 +896,24 @@ function DashboardInner({ token, me, logout }) {
               </strong>
               <span className="ui-muted">{t('dashboard.tileOverdueReturnsDesc')}</span>
             </button>
-            <div className="info-tile">
-              <span className="label">{t('dashboard.tileFeeAdvisories')}</span>
-              <strong>{workspaceOpsHub.feeAdvisoryCount}</strong>
-              <span className="ui-muted">{t('dashboard.tileFeeAdvisoriesDesc')}</span>
-            </div>
+            <button
+              type="button"
+              className="info-tile"
+              onClick={() => router.push('/reports-v2/unpaid-balance')}
+              style={{
+                textAlign: 'left',
+                cursor: 'pointer',
+                background: workspaceOpsHub.unpaidBalanceCount > 0 ? 'var(--warn-bg)' : undefined,
+                borderColor: workspaceOpsHub.unpaidBalanceCount > 0 ? 'var(--warn-bd)' : undefined,
+              }}
+              title={t('dashboard.tileUnpaidBalancesTitle')}
+            >
+              <span className="label">{t('dashboard.tileUnpaidBalances')}</span>
+              <strong style={{ color: workspaceOpsHub.unpaidBalanceCount > 0 ? 'var(--warn-tx)' : undefined }}>
+                {workspaceOpsHub.unpaidBalanceCount}
+              </strong>
+              <span className="ui-muted">{t('dashboard.tileUnpaidBalancesDesc')}</span>
+            </button>
             {citSummary ? (
               <button type="button" className="info-tile" style={{ textAlign: 'left', cursor: 'pointer' }} onClick={() => router.push('/citations')} title={t('dashboard.tileCitationsTitle')}>
                 <span className="label">{t('dashboard.tileCitations')}</span>
@@ -918,7 +941,7 @@ function DashboardInner({ token, me, logout }) {
         <div className="glass card"><div className="label">{t('dashboard.availableVehicles')}</div><div className="value">{num(available)}</div></div>
         <div className="glass card"><div className="label">{t('dashboard.reservations')}</div><div className="value">{num(Number.isFinite(Number(resSummary?.totalReservations)) ? Number(resSummary.totalReservations).toLocaleString() : reservations.length)}</div></div>
         <div className="glass card"><div className="label">{t('dashboard.active')}</div><div className="value">{num(activeReservations)}</div></div>
-        <div className="glass card"><div className="label">{t('dashboard.tileFeeAdvisories')}</div><div className="value">{num(feeAdvisoryCount)}</div></div>
+        <div className="glass card"><div className="label">{t('dashboard.tileUnpaidBalances')}</div><div className="value">{num(unpaidBalanceCount)}</div></div>
       </section>
       {loadFailed
         ? <LoadErrorBanner detail={msg} onRetry={() => load()} />

@@ -27,6 +27,13 @@
  *  4. a location-scoped caller does not trigger a counter-table refresh, while
  *     an unrestricted caller still does (so care 3 can't be satisfied by
  *     breaking the counter table for everyone).
+ *  5. `unpaidBalances` (2026-08-28, the Ops Hub tile that replaced Fee
+ *     Advisories) is scoped the same way — it counts RentalAgreement rows, so
+ *     it could not inherit the reservation `where` and needed its own clause.
+ *     Cancelled agreements are excluded, matching the report the tile links to.
+ *  6. `unpaidBalances` is computed live even on a rollup HIT — it is not a
+ *     column on the counter table, and must not degrade to 0 when the rest of
+ *     the counters are served from it.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -69,6 +76,8 @@ async function waitForCounterRow(present, timeoutMs = 4000) {
 test.after(async () => {
   if (ids.tenant) {
     await prisma.reservationDailyCounter.deleteMany({ where: { tenantId: ids.tenant } }).catch(() => {});
+    // Agreements first — they FK to both reservation and location.
+    await prisma.rentalAgreement.deleteMany({ where: { tenantId: ids.tenant } }).catch(() => {});
     await prisma.reservation.deleteMany({ where: { tenantId: ids.tenant } }).catch(() => {});
     await prisma.customer.deleteMany({ where: { tenantId: ids.tenant } }).catch(() => {});
   }
@@ -171,4 +180,83 @@ test('CARE 3: a location-scoped caller never serves from the whole-tenant counte
   const admin = await reservationsService.summary(unrestricted);
   assert.equal(admin.pickupsToday, 999, 'the rollup is still live for unrestricted callers (fix is not a blanket disable)');
   assert.equal(admin.returnsToday, 888);
+});
+
+// ---------------------------------------------------------------------------
+// Unpaid balances (2026-08-28) — the counter behind the Ops Hub tile that
+// replaced Fee Advisories. It counts RentalAgreement rows, not Reservation
+// rows, so it needed its own scoping rather than inheriting the reservation
+// `where` — which is exactly the class of bug CARE 1 was written for.
+//
+// Runs LAST on purpose: it adds a fourth reservation, which would move the
+// totalReservations numbers CARE 1/2 assert on.
+// ---------------------------------------------------------------------------
+
+test('setup: agreements owing money — one at A, one at B, one crossing B→A, plus a CANCELLED one at A', async () => {
+  const res = await prisma.reservation.findMany({
+    where: { tenantId: ids.tenant },
+    select: { id: true, reservationNumber: true, pickupLocationId: true, returnLocationId: true }
+  });
+  const byNum = new Map(res.map((r) => [r.reservationNumber, r]));
+  const noon = new Date(`${tenantToday()}T12:00:00`);
+
+  const agreement = (r, suffix, balance, status = 'CLOSED') => ({
+    tenantId: ids.tenant,
+    agreementNumber: `AG-${suffix}-${TAG}`,
+    reservationId: r.id,
+    status,
+    pickupAt: noon,
+    returnAt: noon,
+    pickupLocationId: r.pickupLocationId,
+    returnLocationId: r.returnLocationId,
+    customerFirstName: 'Loc',
+    customerLastName: `Scope ${TAG}`,
+    total: 300,
+    paidAmount: 300 - balance,
+    balance
+  });
+
+  // A fourth reservation at A carries the CANCELLED agreement — a cancelled
+  // rental owes nothing by definition, so a balance on one must never count.
+  const rc = await prisma.reservation.create({
+    data: {
+      tenantId: ids.tenant, customerId: ids.customer,
+      reservationNumber: `RC-${TAG}`, pickupAt: noon, returnAt: noon,
+      status: 'CANCELLED', pickupLocationId: ids.locA, returnLocationId: ids.locA
+    }
+  });
+
+  await Promise.all([
+    prisma.rentalAgreement.create({ data: agreement(byNum.get(`RA-${TAG}`), 'A', 100) }),
+    prisma.rentalAgreement.create({ data: agreement(byNum.get(`RB-${TAG}`), 'B', 50) }),
+    prisma.rentalAgreement.create({ data: agreement(byNum.get(`RX-${TAG}`), 'X', 25) }),
+    prisma.rentalAgreement.create({ data: agreement(rc, 'C', 500, 'CANCELLED') })
+  ]);
+
+  // A zero-balance agreement would need a 5th reservation; the `balance > 0`
+  // half of the filter is covered by the unit suite (unpaid-balance.report).
+  const owing = await prisma.rentalAgreement.count({
+    where: { tenantId: ids.tenant, balance: { gt: 0 } }
+  });
+  assert.equal(owing, 4, 'four agreements owe money; one of them is cancelled');
+});
+
+test('CARE 5: unpaidBalances is location-scoped (pickup OR return), and excludes CANCELLED', async () => {
+  const scoped = await reservationsService.summary(scopedToA);
+  // AG-A (both ends at A) and AG-X (returns at A) touch A. AG-B does not, and
+  // AG-C is cancelled — so the $500 cancelled balance must not appear here.
+  assert.equal(scoped.unpaidBalances, 2, 'a branch sees only the money owed on its own agreements');
+
+  const admin = await reservationsService.summary(unrestricted);
+  assert.equal(admin.unpaidBalances, 3, 'the tenant admin sees all three live agreements, still not the cancelled one');
+});
+
+test('CARE 6: unpaidBalances is always live — the whole-tenant rollup never serves it', async () => {
+  // CARE 3 planted pickupsToday=999 in the rollup and it is still fresh, so the
+  // unrestricted read below is a rollup HIT for the reservation counters. The
+  // agreement counter must be computed live anyway: it is not a column on that
+  // table, and silently defaulting it to 0 would be the failure this catches.
+  const admin = await reservationsService.summary(unrestricted);
+  assert.equal(admin.pickupsToday, 999, 'precondition: this read really is serving from the rollup');
+  assert.equal(admin.unpaidBalances, 3, 'and the agreement count is still the live number, not a rollup 0');
 });

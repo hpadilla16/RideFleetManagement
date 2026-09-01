@@ -8,9 +8,12 @@
  * each branch without touching a real terminal.
  */
 
+import '../../lib/_two-factor-test-env.mjs'; // MUST be first — env before prisma.js constructs
+
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '../../lib/prisma.js';
+import { cache } from '../../lib/cache.js';
 import * as spinClientModule from '../payment-gateway/spin-client.js';
 import { spinChargeService } from './spin-charge.service.js';
 
@@ -31,7 +34,24 @@ function setupHappyPathPrisma() {
     reservation: { id: 'r1', reservationNumber: 'RES-1', tenantId: 't1' },
     agreement: { id: 'a1', agreementNumber: 'RA-1', paidAmount: 0 },
   });
-  prisma.tenant.findUnique = async () => ({ id: 't1' });
+  // 2026-08-26 — the orchestrator now resolves the terminal per tenant from
+  // AppSetting `tenant:<id>:paymentGatewayConfig` (see
+  // modules/payment-gateway/tenant-terminal-config.js) and REFUSES to charge
+  // when it resolves to nothing. These orchestration tests are about the
+  // sale/preauth/void branching, so give t1 a terminal of its own and let the
+  // dedicated suite (tenant-terminal-config.test.mjs) own the resolution rules.
+  prisma.tenant.findUnique = async () => ({ id: 't1', name: 'Test Tenant' });
+  prisma.appSetting.findUnique = async ({ where }) => ({
+    key: where?.key,
+    value: JSON.stringify({
+      gateway: 'spin',
+      spin: {
+        enabled: true, environment: 'production',
+        authKey: 'test-auth-key', tpn: '111122223333',
+        merchantNumber: '1', callbackUrl: '', proxyTimeout: '120',
+      },
+    }),
+  });
   prisma.rentalAgreement.update = async ({ where, data }) => {
     calls.agreementUpdates.push({ where, data });
     return {};
@@ -62,6 +82,9 @@ function setupHappyPathPrisma() {
 
 beforeEach(() => {
   reset();
+  // The terminal resolver caches its DB read for 60s — clear it so each test
+  // starts from the fakes below, not from a neighbour's.
+  cache.clear();
   setupHappyPathPrisma();
 });
 

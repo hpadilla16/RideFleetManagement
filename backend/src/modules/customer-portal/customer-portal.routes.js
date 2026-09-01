@@ -11,6 +11,7 @@ import { reservationPricingService } from '../reservations/reservation-pricing.s
 import { settingsService } from '../settings/settings.service.js';
 import { enrichPrecheckinCatalog } from '../../lib/precheckin-catalog.js';
 import { buildSelfServiceSnapshot } from './customer-portal-self-service.js';
+import { applyPrecheckinCharges } from './precheckin-charges.js';
 import { parseLocationConfig } from '../../lib/location-config.js';
 import { parseDepositRules, evaluateDepositRule, parseDepositRuleDecision } from '../../lib/deposit-rules.js';
 import logger from '../../lib/logger.js';
@@ -18,6 +19,10 @@ import { normalizeDob } from '../../lib/dob.js';
 import { getEffectiveTermsHtml } from '../../lib/terms/index.js';
 import { TC_VERSION } from '../../lib/terms/version.js';
 import { analyzeSignatureInk } from '../../lib/signature-ink.js';
+import {
+  authnetSignatureKeyHex,
+  verifyAuthnetWebhookSignature
+} from '../../lib/authnet-webhook-signature.js';
 import { assertInsuranceSelectionEditable } from '../checkout-session/insurance-selection-gate.js';
 import {
   attachPublicRequestMeta,
@@ -27,6 +32,12 @@ import {
   materializeDocumentRef,
   maybeUploadCustomerDocument
 } from '../customers/customer-documents.js';
+import {
+  mintHppSession,
+  verifyHppPayment,
+  hppNotConfiguredMessage
+} from '../payment-gateway/ipos-hpp-payment.service.js';
+import { isHppDryRun, extractHppReferenceId } from '../payment-gateway/ipos-hpp-client.js';
 
 export const customerPortalRouter = Router();
 
@@ -49,6 +60,17 @@ const portalWebhook = [
 
 function portalBase() {
   return process.env.CUSTOMER_PORTAL_BASE_URL || 'http://localhost:3000';
+}
+
+// Backend's own public origin — where gateways redirect the customer back to
+// (this API then bounces them to the portal frontend). Mirrors
+// public-booking/payment-session.service.js _publicApiBase().
+function publicApiBase() {
+  return (
+    process.env.PUBLIC_API_BASE_URL ||
+    process.env.API_BASE_URL ||
+    'http://localhost:4000'
+  ).replace(/\/$/, '');
 }
 
 async function paymentGatewayConfigForTenant(tenantId = null) {
@@ -81,10 +103,20 @@ function stripeEnabled(config = {}) {
 function squareEnabled(config = {}) {
   return !!(config?.square?.enabled && config?.square?.accessToken && config?.square?.locationId);
 }
+// READ-shaped readiness only (the token itself never reaches this config —
+// see settings.service iposBlockForRead). The mint path re-resolves the
+// decrypted credential from the raw AppSetting row.
+function iposLinkReady(config = {}) {
+  const tpn = String(config?.ipos?.tpn || config?.spin?.tpn || '').trim();
+  return (!!config?.ipos?.hasHppToken && !!tpn) || isHppDryRun();
+}
 
 function currentGateway(config = {}) {
   const gateway = String(config?.gateway || 'authorizenet').toLowerCase();
-  return ['authorizenet', 'stripe', 'square'].includes(gateway) ? gateway : 'authorizenet';
+  // 'ipos' routes customer payment links to the TENANT's iPOSpays hosted
+  // payment page — the whole point is that the tenant's own processor, not
+  // Ride's Authorize.Net, settles their customers' link payments.
+  return ['authorizenet', 'stripe', 'square', 'ipos'].includes(gateway) ? gateway : 'authorizenet';
 }
 
 function extractAuthNetMessage(payload) {
@@ -333,6 +365,12 @@ async function findReservationByToken(kind, token) {
         pickupLocation: true,
         returnLocation: true,
         vehicle: true,
+        // 2026-08-17 (MONEY): the 'signature' and 'payment' branches below have
+        // always loaded this; omitting it here meant the OTA tax recalculation in
+        // precheckin-charges.js read `reservation.pricingSnapshot?.taxRate` as
+        // undefined every single time and silently taxed at the pickup location's
+        // rate instead of the rate the customer was quoted at booking.
+        pricingSnapshot: true,
         payments: { orderBy: { paidAt: 'desc' } }
       }
     });
@@ -500,57 +538,13 @@ function authNetCompactObject(obj = {}) {
   );
 }
 
-function authNetSignatureKeyHex(value = '') {
-  return String(value || '').replace(/[^a-fA-F0-9]/g, '').trim();
-}
-
-function authNetSafeHexEqual(expectedHex = '', actualHex = '') {
-  if (!expectedHex || !actualHex || expectedHex.length !== actualHex.length) return false;
-  try {
-    return crypto.timingSafeEqual(Buffer.from(expectedHex, 'hex'), Buffer.from(actualHex, 'hex'));
-  } catch {
-    return false;
-  }
-}
-
-function authNetVerifyWebhookSignature(rawBody = '', header = '', signatureKey = '') {
-  const payloadBuffer = Buffer.isBuffer(rawBody)
-    ? rawBody
-    : Buffer.from(String(rawBody || ''), 'utf8');
-  const signatureHex = authNetSignatureKeyHex(signatureKey);
-  const signatureText = String(signatureKey || '').trim();
-  const rawHeader = String(header || '').trim();
-  if (!payloadBuffer.length || !signatureHex || !rawHeader) return { ok: false, expectedHex: '', actualHex: '' };
-
-  const actualHex = String(rawHeader.toLowerCase().startsWith('sha512=') ? rawHeader.slice(7) : rawHeader)
-    .trim()
-    .toLowerCase();
-  if (!actualHex || actualHex.length % 2 !== 0) return { ok: false, expectedHex: '', actualHex };
-
-  try {
-    const expectedHexBinary = crypto
-      .createHmac('sha512', Buffer.from(signatureHex, 'hex'))
-      .update(payloadBuffer)
-      .digest('hex')
-      .toLowerCase();
-    const expectedHexLatin1 = signatureText
-      ? crypto.createHmac('sha512', Buffer.from(signatureText, 'latin1')).update(payloadBuffer).digest('hex').toLowerCase()
-      : '';
-
-    const matchesBinary = authNetSafeHexEqual(expectedHexBinary, actualHex);
-    const matchesLatin1 = authNetSafeHexEqual(expectedHexLatin1, actualHex);
-
-    return {
-      ok: matchesBinary || matchesLatin1,
-      expectedHex: expectedHexBinary,
-      expectedHexAlt: expectedHexLatin1,
-      actualHex,
-      method: matchesBinary ? 'hex-bytes' : matchesLatin1 ? 'latin1-text' : ''
-    };
-  } catch {
-    return { ok: false, expectedHex: '', actualHex };
-  }
-}
+// EXTRACTED 2026-08-27 (billing Phase 2) to src/lib/authnet-webhook-signature.js.
+// The billing receiver needs the same verifier — including the both-encodings
+// fallback this endpoint's history paid for — and two copies of a money-path
+// signature check are two copies that can drift. Behaviour is unchanged; the
+// aliases below keep this file's call sites and its debug logging identical.
+const authNetSignatureKeyHex = authnetSignatureKeyHex;
+const authNetVerifyWebhookSignature = verifyAuthnetWebhookSignature;
 
 async function authNetWebhookConfigs() {
   const rows = await prisma.appSetting.findMany({
@@ -1520,301 +1514,50 @@ customerPortalRouter.post('/customer-info/:token', portalWrite, async (req, res,
       });
     }
 
-    // Load pre-checkin discount for this tenant
+    // Load the pre-checkin discount + insurance catalog for this tenant.
+    //
+    // Both are settings I/O and both are read HERE, before the transaction
+    // opens. Holding a Postgres transaction open across a settings lookup ties
+    // up a pool connection for nothing — and the insurance catalog read used to
+    // sit BETWEEN the deleteMany that removed the customer's insurance line and
+    // the create that put it back, so a settings failure was itself one of the
+    // ways the line went missing.
     const discount = reservation.tenantId
       ? await settingsService.getPrecheckinDiscount({ tenantId: reservation.tenantId })
       : null;
-    const applyDiscount = (amount) => {
-      if (!discount?.enabled || !amount) return amount;
-      if (discount.type === 'PERCENTAGE') return Number((amount * (1 - discount.value / 100)).toFixed(2));
-      return Number(Math.max(0, amount - discount.value).toFixed(2));
-    };
-    const money = (value) => Number(Number(value || 0).toFixed(2));
+    const insurancePlans = reservation.tenantId && insuranceSelection?.selectedPlanCode
+      ? await settingsService.getInsurancePlans({ tenantId: reservation.tenantId })
+      : [];
 
-    // Rental length in days (mirrors backend/src/modules/reservations/reservation-pricing.service.js#rentalDays)
-    // Used to scale PER_DAY insurance plans and daily-rated additional services correctly.
-    const rentalDays = (() => {
-      const start = new Date(reservation.pickupAt || Date.now());
-      const end = new Date(reservation.returnAt || Date.now());
-      const diffMs = end.getTime() - start.getTime();
-      return Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)) || 1);
-    })();
-
-    // Base amount for PERCENTAGE insurance plans: sum of existing taxable non-tax, non-insurance charges
-    // (daily rate + selected services + mandatory fees) at the time the customer submits the pre-checkin.
-    const chargesForBase = await prisma.reservationCharge.findMany({
-      where: { reservationId: reservation.id, selected: true }
-    });
-    const insuranceBaseAmount = chargesForBase
-      .filter(c => String(c.source || '').toUpperCase() !== 'INSURANCE'
-        && String(c.chargeType || '').toUpperCase() !== 'TAX'
-        && String(c.chargeType || '').toUpperCase() !== 'DEPOSIT')
-      .reduce((sum, c) => sum + Number(c.total || 0), 0);
-
-    // Process insurance selection
-    if (insuranceSelection) {
-      await prisma.reservationCharge.deleteMany({
-        where: { reservationId: reservation.id, source: 'INSURANCE' }
-      });
-
-      if (insuranceSelection.selectedPlanCode) {
-        const plans = reservation.tenantId ? await settingsService.getInsurancePlans({ tenantId: reservation.tenantId }) : [];
-        const plan = plans.find(p => String(p.code).toUpperCase() === String(insuranceSelection.selectedPlanCode).toUpperCase());
-        if (plan) {
-          // Respect the plan's pricing mode. Mirrors computeInsuranceLine() in booking-engine.service.js
-          // so a PER_DAY plan is charged days×rate instead of being collapsed to a single unit.
-          const mode = String(plan.chargeBy || plan.mode || 'FIXED').toUpperCase();
-          const amount = Number(plan.amount || plan.rate || plan.total || 0);
-          const discountedAmount = applyDiscount(amount);
-
-          let chargeQuantity = 1;
-          let chargeRate = money(discountedAmount);
-          let chargeTotal = money(discountedAmount);
-          let counterTotal = money(amount);
-          let counterNote = null;
-
-          if (mode === 'PER_DAY') {
-            chargeQuantity = rentalDays;
-            chargeRate = money(discountedAmount);
-            chargeTotal = money(discountedAmount * rentalDays);
-            counterTotal = money(amount * rentalDays);
-            counterNote = `Counter price: $${amount.toFixed(2)}/day × ${rentalDays} day(s)`;
-          } else if (mode === 'PERCENTAGE') {
-            // Percentage plans are always a single line whose value is the pct of the base.
-            chargeQuantity = 1;
-            chargeRate = money(insuranceBaseAmount * (discountedAmount / 100));
-            chargeTotal = chargeRate;
-            counterTotal = money(insuranceBaseAmount * (amount / 100));
-            counterNote = `Counter price: ${amount.toFixed(2)}% of $${insuranceBaseAmount.toFixed(2)}`;
-          } else {
-            // FIXED
-            counterNote = `Counter price: $${amount.toFixed(2)}`;
-          }
-
-          const discounted = chargeTotal < counterTotal;
-          await prisma.reservationCharge.create({
-            data: {
-              reservationId: reservation.id,
-              source: 'INSURANCE',
-              sourceRefId: plan.code,
-              name: discounted ? `${plan.name} (Pre-checkin rate)` : plan.name,
-              rate: chargeRate,
-              total: chargeTotal,
-              quantity: chargeQuantity,
-              selected: true,
-              sortOrder: 0,
-              notes: discounted ? `${counterNote}, pre-checkin discount applied` : null
-            }
-          });
-        }
-      } else if (insuranceSelection.declinedCoverage) {
-        // Persist the decline signature (captured on the pre-check-in page) onto
-        // the agreement if one exists; initials + signature also live in the
-        // AuditLog insuranceSelection blob the admin slot reads.
-        const declineSig = insuranceSelection.signatureDataUrl;
-        const declAg = await prisma.rentalAgreement.findUnique({ where: { reservationId: reservation.id }, select: { id: true } });
-        if (declAg) {
-          // The signature columns are NOT covered by the flag's no-flip rule.
-          // buildDeclinedInsuranceBlock prints declinedInsuranceSignatureDataUrl
-          // on the contract, so re-submitting pre-check-in after the agreement
-          // was signed would replace the addendum's signature and re-date it to
-          // after the signing — silently, since the flag itself did not move and
-          // the gate rightly let the request through. Once the contract is
-          // sealed the flag write is a no-op anyway; these two stay frozen.
-          const sealed = insuranceVerdict.signed;
-          const canWriteDeclineSignature =
-            !sealed && declineSig && String(declineSig).length > 200;
-          if (canWriteDeclineSignature) {
-            // Fenced like the agent's write. `insuranceVerdict` was computed
-            // back at the preflight, and everything between — the customer
-            // update, the deposit, every charge delete and create — runs before
-            // we get here, so the contract can be signed in the meantime. The
-            // WHERE makes the database decide: if the signature landed first,
-            // count is 0 and the columns the PDF prints are left alone.
-            const fenced = await prisma.rentalAgreement.updateMany({
-              where: { id: declAg.id, tcSignedAt: null },
-              data: {
-                declinedInsurance: true,
-                declinedInsuranceSignatureDataUrl: declineSig,
-                declinedInsuranceSignedAt: new Date(),
-              },
-            });
-            if (fenced.count === 0) {
-              await prisma.rentalAgreement.update({
-                where: { id: declAg.id },
-                data: { declinedInsurance: true },
-              });
-            }
-          } else {
-            await prisma.rentalAgreement.update({
-              where: { id: declAg.id },
-              data: { declinedInsurance: true },
-            });
-          }
-        }
-      }
-    }
-
-    // Process additional services selection
     const selectedServices = body.selectedServices || null;
-    if (selectedServices && Array.isArray(selectedServices)) {
-      await prisma.reservationCharge.deleteMany({
-        where: { reservationId: reservation.id, source: 'ADDITIONAL_SERVICE_PRECHECKIN' }
-      });
-
-      for (const svc of selectedServices) {
-        if (!svc.serviceId || !svc.selected) continue;
-        const service = await prisma.additionalService.findFirst({
-          where: { id: svc.serviceId, tenantId: reservation.tenantId, isActive: true }
-        });
-        if (!service) continue;
-        const qty = Math.max(1, Number(svc.quantity || service.defaultQty || 1));
-
-        // Respect the service's pricing mode. Mirrors computeAdditionalServiceLine() in
-        // booking-engine.service.js: dailyRate (when >0) is the per-day price and total
-        // scales with rental days; otherwise the flat rate applies.
-        const perDay = Number(service.dailyRate || 0);
-        const isPerDay = perDay > 0 || String(service.chargeType || '').toUpperCase() === 'DAILY';
-        const counterRate = isPerDay && perDay > 0 ? perDay : Number(service.rate || 0);
-        const discountedRate = applyDiscount(counterRate);
-
-        const chargeTotal = isPerDay
-          ? money(discountedRate * rentalDays * qty)
-          : money(discountedRate * qty);
-        const counterTotal = isPerDay
-          ? money(counterRate * rentalDays * qty)
-          : money(counterRate * qty);
-        const discounted = discountedRate < counterRate;
-        const counterNote = isPerDay
-          ? `Counter price: $${counterRate.toFixed(2)}/day × ${rentalDays} day(s) × ${qty} unit(s)`
-          : `Counter price: $${counterRate.toFixed(2)}/unit × ${qty} unit(s)`;
-
-        await prisma.reservationCharge.create({
-          data: {
-            reservationId: reservation.id,
-            source: 'ADDITIONAL_SERVICE_PRECHECKIN',
-            sourceRefId: service.id,
-            name: discounted ? `${service.name} (Pre-checkin rate)` : service.name,
-            rate: money(discountedRate),
-            total: chargeTotal,
-            quantity: isPerDay ? rentalDays * qty : qty,
-            selected: true,
-            sortOrder: 10,
-            notes: discounted ? `${counterNote}, pre-checkin discount applied` : null
-          }
-        });
-      }
-    }
-
-    // Process third-party / OTA prepaid voucher
     const thirdPartyBooking = body.thirdPartyBooking || null;
-    if (thirdPartyBooking?.isThirdParty) {
-      // Remove daily-rate related charges only — keep insurance, services, and their taxes
-      await prisma.reservationCharge.deleteMany({
-        where: { reservationId: reservation.id, source: { in: ['DAILY', 'FEE', 'SERVICE_LINKED_FEE'] } }
-      });
-
-      // Recalculate tax on remaining taxable charges (insurance + services)
-      const remainingCharges = await prisma.reservationCharge.findMany({
-        where: { reservationId: reservation.id, selected: true }
-      });
-      // Delete old tax rows (chargeType TAX) so we can recalculate
-      await prisma.reservationCharge.deleteMany({
-        where: { reservationId: reservation.id, chargeType: 'TAX' }
-      });
-      const taxableTotal = remainingCharges
-        .filter(c => c.taxable && String(c.chargeType || '').toUpperCase() !== 'TAX')
-        .reduce((sum, c) => sum + Number(c.total || 0), 0);
-      if (taxableTotal > 0) {
-        // Get tax rate from pricing snapshot or pickup location
-        const loc = reservation.pickupLocationId
-          ? await prisma.location.findUnique({ where: { id: reservation.pickupLocationId }, select: { taxRate: true } })
-          : null;
-        const taxRate = Number(reservation.pricingSnapshot?.taxRate ?? loc?.taxRate ?? 0);
-        if (taxRate > 0) {
-          const taxAmount = Number((taxableTotal * taxRate / 100).toFixed(2));
-          await prisma.reservationCharge.create({
-            data: {
-              reservationId: reservation.id,
-              source: 'TAX_RECALC',
-              name: `Sales Tax (${taxRate.toFixed(2)}%)`,
-              chargeType: 'TAX',
-              quantity: 1,
-              rate: taxAmount,
-              total: taxAmount,
-              taxable: false,
-              selected: true,
-              sortOrder: 999
-            }
-          });
-        }
-      }
-
-      // Store a voucher charge marker so the agreement knows this is prepaid
-      const existingVoucher = await prisma.reservationCharge.findFirst({
-        where: { reservationId: reservation.id, source: 'OTA_PREPAID_VOUCHER' }
-      });
-      if (!existingVoucher) {
-        await prisma.reservationCharge.create({
-          data: {
-            reservationId: reservation.id,
-            source: 'OTA_PREPAID_VOUCHER',
-            sourceRefId: 'third-party-voucher',
-            name: 'Prepaid Third-Party Voucher',
-            chargeType: 'UNIT',
-            quantity: 1,
-            rate: 0,
-            total: 0,
-            taxable: false,
-            selected: true,
-            sortOrder: -1,
-            notes: thirdPartyBooking.voucherUrl ? 'Voucher document attached' : 'No voucher document uploaded'
-          }
-        });
-      }
-
-      // Update reservation notes/pricing snapshot to flag prepaid status
-      const currentNotes = reservation.notes || '';
-      const prepaidNote = '[OTA PREPAID] Customer indicated third-party prepaid booking during pre-check-in.';
-      if (!currentNotes.includes('[OTA PREPAID]')) {
-        await prisma.reservation.update({
-          where: { id: reservation.id },
-          data: { notes: currentNotes ? `${currentNotes}\n${prepaidNote}` : prepaidNote }
-        });
-      }
-
-      // Store voucher URL on the customer record
-      if (thirdPartyBooking.voucherUrl) {
-        await prisma.customer.update({
-          where: { id: reservation.customerId },
-          data: { notes: `[VOUCHER] Third-party voucher uploaded during pre-check-in` }
-        });
-      }
-    }
-
     const completedAt = new Date();
-    await prisma.reservation.update({
-      where: { id: reservation.id },
-      data: {
-        customerInfoCompletedAt: completedAt
-      }
-    });
 
-    await prisma.auditLog.create({
-      data: {
-        tenantId: reservation.tenantId || null,
-        reservationId: reservation.id,
-        action: 'UPDATE',
-        metadata: JSON.stringify({
-          customerInfoCompleted: true,
-          completedAt: completedAt.toISOString(),
-          source: 'PUBLIC_PRECHECKIN',
-          ip: req.ip || null,
-          insuranceSelection: insuranceSelection || null,
-          selectedServices: selectedServices || null,
-          thirdPartyBooking: thirdPartyBooking || null
-        })
-      }
+    // THE MONEY, IN ONE TRANSACTION (2026-08-17).
+    //
+    // What used to live inline here was a run of unwrapped statements that
+    // deleted the reservation's INSURANCE charges and only later re-created
+    // them — four such delete-then-recreate windows in all. A failure in any of
+    // them left the customer with a charge sheet missing a line and a 500 on
+    // their phone. It now commits as one unit, serialized per reservation, in
+    // precheckin-charges.js — which also documents what is deliberately left
+    // OUTSIDE the transaction (the KYC uploads, the PII update, and the
+    // fail-soft deposit re-evaluation above).
+    await applyPrecheckinCharges({
+      client: prisma,
+      reservation,
+      insuranceSelection,
+      selectedServices,
+      thirdPartyBooking,
+      insurancePlans,
+      discount,
+      completedAt,
+      // The preflight's verdict, threaded in so the decline-signature
+      // fence can see whether the contract is already sealed. Without
+      // this line insuranceVerdict is a dead local and the fence is
+      // unconditionally off.
+      agreementSealed: insuranceVerdict.signed,
+      auditMetadata: { ip: req.ip || null }
     });
 
     const refreshed = await findReservationByToken('customer-info', token);
@@ -2079,7 +1822,9 @@ customerPortalRouter.get('/payment/:token', portalRead, async (req, res, next) =
       ? authNetPortalReady(gatewayConfig)
       : gateway === 'stripe'
         ? stripeEnabled(gatewayConfig)
-        : squareEnabled(gatewayConfig);
+        : gateway === 'ipos'
+          ? iposLinkReady(gatewayConfig)
+          : squareEnabled(gatewayConfig);
 
     res.json({
       reservation: {
@@ -2168,6 +1913,43 @@ customerPortalRouter.post('/payment/:token/create-session', portalWrite, async (
       return res.json({ checkoutUrl: url, gateway });
     }
 
+    if (gateway === 'ipos') {
+      // The tenant's own iPOSpays hosted payment page. FAIL CLOSED when the
+      // credentials are absent: minting an Authorize.Net page instead would
+      // settle this tenant's money into the wrong merchant account — the exact
+      // bug gateway:'ipos' exists to end. mintHppSession enforces this and
+      // throws GATEWAY_NOT_CONFIGURED with the operator-facing message.
+      try {
+        const confirmBase = `${publicApiBase()}/api/public/payment/${encodeURIComponent(token)}/confirm`;
+        const { url } = await mintHppSession({
+          reservation,
+          amount: Number(amountDue),
+          buildReturnUrl: (ref) => `${confirmBase}?gateway=ipos&success=1&iposRef=${encodeURIComponent(ref)}`,
+          cancelUrl: `${confirmBase}?canceled=1`,
+          failureUrl: `${confirmBase}?canceled=1&failed=1`,
+          customer: {
+            name: `${reservation.customer?.firstName || ''} ${reservation.customer?.lastName || ''}`.trim(),
+            email: reservation.customer?.email || '',
+            phone: reservation.customer?.phone || ''
+          },
+          description: `Reservation ${reservation.reservationNumber} payment`,
+          origin: 'PORTAL'
+        });
+        return res.json({ checkoutUrl: url, gateway });
+      } catch (err) {
+        if (err?.code === 'GATEWAY_NOT_CONFIGURED') {
+          return res.status(503).json({ error: err.message, code: err.code });
+        }
+        if (err?.code === 'ALREADY_PAID') {
+          return res.status(409).json({ error: err.message, code: err.code });
+        }
+        if (err?.code === 'GATEWAY_ERROR' || err?.iposHppTimeout) {
+          return res.status(502).json({ error: String(err.message || 'iPOSpays checkout creation failed') });
+        }
+        throw err;
+      }
+    }
+
     // Authorize.Net
     if (!authNetEnabled(gatewayConfig)) return res.status(400).json({ error: 'Authorize.Net is not configured for this tenant' });
     const amount = Number(Math.max(0.5, Number(amountDue || 0))).toFixed(2);
@@ -2234,7 +2016,52 @@ customerPortalRouter.post('/payment/:token/confirm', portalWrite, async (req, re
     let paidAmount = 0;
     let reference = String(req.body?.reference || '').trim();
 
-    if (gateway === 'stripe' && req.body?.sessionId) {
+    if (gateway === 'ipos') {
+      // The redirect back from the iPOSpays HPP is UX only. The reference it
+      // carries is verified server-side against (a) the mint audit trail for
+      // THIS reservation and (b) queryPaymentStatus at the gateway, and the
+      // recorded amount is the gateway's — never the redirect's.
+      const iposRef = String(req.body?.iposRef || req.body?.reference || '').trim();
+      if (!iposRef) {
+        return res.status(400).json({ error: 'iPOS payment reference is required' });
+      }
+      let verdict;
+      try {
+        verdict = await verifyHppPayment({ reservation, iposRef });
+      } catch (err) {
+        if (err?.code === 'GATEWAY_NOT_CONFIGURED') {
+          return res.status(503).json({ error: err.message, code: err.code });
+        }
+        if (err?.code === 'VALIDATION' || err?.code === 'UNKNOWN_REFERENCE') {
+          return res.status(400).json({ error: err.message });
+        }
+        if (err?.code === 'PAYMENT_NOT_COMPLETED') {
+          return res.status(400).json({ error: err.message, code: err.code });
+        }
+        if (err?.code === 'GATEWAY_ERROR' || err?.iposHppTimeout) {
+          return res.status(502).json({ error: String(err.message || 'iPOSpays verification failed') });
+        }
+        throw err;
+      }
+      if (verdict.duplicate) {
+        // Idempotent: a re-visited return URL must not double-record.
+        let portal = null;
+        try {
+          const refreshed = await findReservationByToken('payment', token);
+          portal = refreshed ? await buildPortalSummary(refreshed, 'payment', token) : null;
+        } catch {}
+        return res.json({
+          ok: true,
+          paidAmount: Number(verdict.existingAmount || 0),
+          savedCardOnFile: false,
+          duplicate: true,
+          portal,
+          reference: verdict.reference
+        });
+      }
+      paidAmount = Number(verdict.amount || 0);
+      reference = verdict.reference;
+    } else if (gateway === 'stripe' && req.body?.sessionId) {
       if (!stripeEnabled(gatewayConfig)) return res.status(400).json({ error: 'Stripe not configured for this tenant' });
       const stripe = new Stripe(gatewayConfig.stripe.secretKey);
       const session = await stripe.checkout.sessions.retrieve(String(req.body.sessionId));
@@ -2423,6 +2250,14 @@ customerPortalRouter.get('/payment/:token/confirm', portalRead, async (req, res,
       ''
     ).trim();
     if (transId) params.set('transId', transId);
+
+    // iPOSpays HPP return — our own minted reference, carried through so the
+    // pay page can POST it back for server-side verification. The gateway
+    // glues its return parameters on with a second `?`, so strip that
+    // decoration down to our strictly-alphanumeric reference here — the pay
+    // page should receive a value that can actually verify.
+    const iposRef = extractHppReferenceId(req.query?.iposRef);
+    if (iposRef) params.set('iposRef', iposRef);
 
     return res.redirect(`${portalBase().replace(/\/$/, '')}/customer/pay?${params.toString()}`);
   } catch (e) {

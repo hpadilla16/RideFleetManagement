@@ -112,7 +112,7 @@ checkoutSessionRouter.post('/:id/transition', async (req, res) => {
 // POST /api/checkout-sessions/:id/presence
 //   M2 P1 (2026-08-17) — soft presence heartbeat. Body: { surface, label? }.
 //   Surfaces poll this alongside GET /:id; the GETs then expose
-//   presence: [{surface, displayName, lastSeenAt}] filtered by the 45 s
+//   presence: [{surface, actorUserId, displayName, lastSeenAt}] filtered by the 45 s
 //   logical TTL. Informative ONLY — never gates anything (M2-PLAN §1.2).
 // ---------------------------------------------------------------------
 checkoutSessionRouter.post('/:id/presence', async (req, res) => {

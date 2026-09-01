@@ -2,6 +2,8 @@
 import { Router } from 'express';
 import { checkRentalSpan, rentalSpanMessage } from '../rates/rental-minimum.js';
 import { previewLocationMandatoryFees } from './reservation-pricing.service.js';
+import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
+import { parseDateTimeInTz } from '../../lib/date-utils.js';
 import { reservationsService } from './reservations.service.js';
 import { looksLikeXlsx, parseReservationImportWorkbook } from './reservation-import-parse.js';
 import { validateReservationCreate, validateReservationPatch } from './reservations.rules.js';
@@ -1261,6 +1263,47 @@ reservationsRouter.post('/', async (req, res, next) => {
       .replace(/\n?\[SECURITY_DEPOSIT_META\]\{[^\n]*\}/g, '')
       .trim();
 
+    // Short-window content dedup (2026-08-24). A rapid double/triple-click or a
+    // client retry submits the SAME reservation two-to-four times within ~1s;
+    // the frontend mints a fresh reservationNumber per submit, so the UNIQUE
+    // index on reservationNumber never catches these — production saw one renter
+    // produce 3-4 identical reservations inside 0.9-1.3s. Guard: if THIS agent
+    // (createdByUserId) already created a reservation for the same customer +
+    // pickup + return + vehicle type in the last 10s, return THAT one instead of
+    // minting a duplicate. Scoped strictly to the tenant; the single-submit path
+    // is behaviorally unchanged (the lookup simply finds nothing). Frontend
+    // in-flight guard removes the trigger; this 10s window is the backstop.
+    const dedupCreatedByUserId = req.user?.sub || req.user?.id || null;
+    const dedupTz = await resolveTenantTimeZone(req.user?.tenantId);
+    const dedupPickupAt = parseDateTimeInTz(String(req.body.pickupAt), dedupTz);
+    const dedupReturnAt = parseDateTimeInTz(String(req.body.returnAt), dedupTz);
+    if (dedupCreatedByUserId && dedupPickupAt && dedupReturnAt) {
+      const dedupTenantId = scopeFor(req).tenantId;
+      const existingDuplicate = await withTenantSchema(req.user.tenantId, (db) => db.reservation.findFirst({
+        where: {
+          ...(dedupTenantId ? { tenantId: dedupTenantId } : {}),
+          createdByUserId: dedupCreatedByUserId,
+          customerId: String(req.body.customerId),
+          vehicleTypeId: String(req.body.vehicleTypeId),
+          pickupAt: dedupPickupAt,
+          returnAt: dedupReturnAt,
+          createdAt: { gt: new Date(Date.now() - 10_000) }
+        },
+        orderBy: { createdAt: 'desc' },
+        include: { customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } }
+      }));
+      if (existingDuplicate) {
+        logger.info('[reservation-create] deduped rapid duplicate submit', {
+          reservationId: existingDuplicate.id,
+          reservationNumber: existingDuplicate.reservationNumber,
+          customerId: existingDuplicate.customerId,
+          createdByUserId: dedupCreatedByUserId,
+          tenantId: existingDuplicate.tenantId || dedupTenantId || null
+        });
+        return res.status(201).json(existingDuplicate);
+      }
+    }
+
     const row = await reservationsService.create({
       ...(req.body || {}),
       status: requireDeposit ? 'NEW' : (req.body?.status || 'CONFIRMED'),
@@ -1272,12 +1315,30 @@ reservationsRouter.post('/', async (req, res, next) => {
       createdByUserId: req.user?.sub || req.user?.id || null
     }, scopeFor(req));
 
+    // 2026-08-18 (MONEY): `?? null`, not `?? 0`.
+    //
+    // Location.taxRate is non-null with default 0, so whenever pickupLoc
+    // RESOLVED this is byte-for-byte what it always was. The only case that
+    // changes is the one this line used to lie about: pickupLoc is null when
+    // req.body.pickupLocationId does not resolve inside the caller's tenant
+    // scope, and validateLocationWindow() returns silently in that case
+    // (reservations.service.js:873) rather than refusing the create — so the
+    // reservation lands and this writes a snapshot rate of 0 meaning "I never
+    // found the location".
+    //
+    // Under the convention every reader now shares, a stored 0 is a RATE:
+    // precheckin-charges.js#resolveTaxRate, buildReservationBreakdown and
+    // rental-agreements.service.js:2844/3241 all read it with `??`, so that
+    // invented 0 permanently suppresses sales tax on the reservation instead of
+    // falling back to the pickup location. NULL is what "unset" is spelled as
+    // here — the column is nullable and reservations.service.js:2340 already
+    // leaves it that way for imports.
     await withTenantSchema(req.user.tenantId, (db) => db.reservationPricingSnapshot.upsert({
       where: { reservationId: row.id },
       create: {
         reservationId: row.id,
         dailyRate: quote.dailyRate,
-        taxRate: pickupLoc?.taxRate ?? 0,
+        taxRate: pickupLoc?.taxRate ?? null,
         depositRequired: requireDeposit,
         depositMode: requireDeposit ? depositMode : null,
         depositValue: requireDeposit ? depositValue : null,
@@ -1290,7 +1351,8 @@ reservationsRouter.post('/', async (req, res, next) => {
       },
       update: {
         dailyRate: quote.dailyRate,
-        taxRate: pickupLoc?.taxRate ?? 0,
+        // Same reason as the create branch above.
+        taxRate: pickupLoc?.taxRate ?? null,
         depositRequired: requireDeposit,
         depositMode: requireDeposit ? depositMode : null,
         depositValue: requireDeposit ? depositValue : null,

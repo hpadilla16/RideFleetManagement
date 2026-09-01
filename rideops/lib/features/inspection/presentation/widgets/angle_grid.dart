@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/theme/ride_tokens.dart';
@@ -13,10 +14,17 @@ class AngleGrid extends StatelessWidget {
     super.key,
     required this.angles,
     required this.onTapAngle,
+    this.deadAngles = const {},
   });
 
   final Map<String, AngleUi> angles;
   final void Function(String angleKey) onTapAngle;
+
+  /// Ángulos cuya fila MURIÓ en la bandeja (M2-H4, frame 17E). No es un
+  /// estado de captura —la foto se tomó bien— sino de entrega: el tile lo
+  /// dice con palabras ("No llegó al servidor") además del color, porque de
+  /// eso depende que el agente entienda por qué el paso no avanza.
+  final Set<String> deadAngles;
 
   @override
   Widget build(BuildContext context) {
@@ -32,6 +40,7 @@ class AngleGrid extends StatelessWidget {
           _AngleTile(
             angle: angles[key] ?? AngleUi(key: key),
             required: kRequiredAngleKeys.contains(key),
+            dead: deadAngles.contains(key),
             onTap: () => onTapAngle(key),
           ),
       ],
@@ -43,29 +52,49 @@ class _AngleTile extends StatelessWidget {
   const _AngleTile({
     required this.angle,
     required this.required,
+    required this.dead,
     required this.onTap,
   });
 
   final AngleUi angle;
   final bool required;
+  final bool dead;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final label = angleLabel(l10n, angle.key);
-    final captured = angle.countsAsCaptured;
-    final failed = angle.status == AngleStatus.failed;
+    final captured = angle.countsAsCaptured && !dead;
+    final failed = angle.status == AngleStatus.failed || dead;
+    // Hora de CAPTURA (reloj de este teléfono, describiendo un hecho local).
+    // No se usa para "enviada": el instante del envío no lo sabemos — la fila
+    // se borra al drenar — y fecharlo con la captura sería datar mal la
+    // evidencia.
+    final capturedAt = angle.capturedAt;
+    final time = capturedAt == null
+        ? null
+        : DateFormat.Hm(Localizations.localeOf(context).toString())
+            .format(capturedAt.toLocal());
 
-    final subtitle = switch (angle.status) {
-      AngleStatus.pending => l10n.anglePending,
-      AngleStatus.compressing => l10n.angleCompressing,
-      AngleStatus.failed => l10n.angleFailedRetry,
-      AngleStatus.queued => angle.bytes == null
-          ? l10n.angleQueued
-          : '${l10n.angleQueued} · ${formatBytes(angle.bytes!)}',
-      AngleStatus.onServer => l10n.angleOnServer,
-    };
+    final subtitle = dead
+        ? l10n.inspPhotoDead
+        : switch (angle.status) {
+            AngleStatus.pending => l10n.anglePending,
+            AngleStatus.compressing => l10n.angleCompressing,
+            AngleStatus.failed => l10n.angleFailedRetry,
+            // "en bandeja" con su hora (17B); sin hora —fila restaurada de
+            // una corrida anterior— se cae al peso, que es lo que hay.
+            AngleStatus.queued => time != null
+                ? l10n.inspPhotoQueued(time)
+                : angle.bytes == null
+                    ? l10n.angleQueued
+                    : '${l10n.angleQueued} · ${formatBytes(angle.bytes!)}',
+            // Capturada AQUÍ y sin fila = drenó con 2xx ⇒ "enviada al
+            // servidor". Sin captura local, el servidor ya la tenía al entrar.
+            AngleStatus.onServer =>
+              time != null ? l10n.inspPhotoSent : l10n.angleOnServer,
+          };
 
     return Semantics(
       button: true,
@@ -205,7 +234,12 @@ class _AngleTile extends StatelessWidget {
                   Positioned(
                     top: 8,
                     right: 8,
-                    child: _StatusBadge(status: angle.status),
+                    // Muerta en la bandeja: la insignia es la de fallo aunque
+                    // la CAPTURA saliera bien — lo que el agente necesita ver
+                    // es que esa foto no está en el servidor.
+                    child: _StatusBadge(
+                      status: dead ? AngleStatus.failed : angle.status,
+                    ),
                   ),
                 ],
               ),

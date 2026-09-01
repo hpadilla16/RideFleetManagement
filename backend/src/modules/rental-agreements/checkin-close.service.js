@@ -5,8 +5,10 @@
  * for the multi-step checkin wizard flow. Unlike the legacy closeAgreement
  * which requires balance=0 before allowing close, this path:
  *
- *   1. Persists checkin inspection values (odo/fuel/cleanliness) on the
- *      agreement
+ *   1. Persists checkin inspection values (odo/fuel/cleanliness) AND
+ *      returnedAt — the moment the car came back — on the agreement,
+ *      before any branch, so a rental that closes owing money still
+ *      records the timestamp its late fee was computed from
  *   2. Runs the fee engine — computes EXCESS_MILEAGE, FUEL_REFILL,
  *      CLEANING_*, SMOKING fees from deltas; persists each as a
  *      RentalAgreementCharge row with source='FEE_ENGINE_CHECKIN'
@@ -123,6 +125,40 @@ export async function closeAgreementWithCheckinFees(
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Step 0 — Resolve the moment the CAR came back
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // LATE_RETURN inputs. Caller can pass `returnedAt` to backdate a checkin;
+  // default to now (when the wizard fires). `dueBackAt` is the scheduled
+  // return time on the agreement (Step 2). If either is missing the fee
+  // engine silently skips the LATE_RETURN computation.
+  // Parsed in the TENANT's timezone, not the container's (the extension bug of
+  // 2026-08-07: a naive datetime-local read on a UTC clock shifts every typed
+  // time by the tenant offset — here that shift would move late-fee money).
+  // ISO strings with a Z pass through untouched, so the wizard's default
+  // "now" behaves exactly as before.
+  const returnedTz = await resolveTenantTimeZone(agreement.tenantId);
+  const returnedAt = payload.returnedAt
+    ? parseDateTimeInTz(payload.returnedAt, returnedTz)
+    : new Date();
+  // Who may state "the car actually came back earlier", and how far. The
+  // plumbing for payload.returnedAt always existed — ungated. Exposing it in
+  // the UI without this check would make erasing late fees invisible.
+  // Validated BEFORE the first write: a backdate the actor is not allowed
+  // to make must not leave the odometer/fuel readings behind on a close
+  // that then 403s.
+  const backdateCheck = validateBackdatedReturn({
+    returnedAt,
+    role: actorRole,
+    rentalStartAt: agreement.finalizedAt || agreement.pickupAt || null,
+  });
+  if (!backdateCheck.ok) {
+    const err = new Error(backdateCheck.error);
+    err.status = 403;
+    throw err;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Step 1 — Persist checkin metrics on the agreement
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -135,7 +171,16 @@ export async function closeAgreementWithCheckinFees(
     data: {
       odometerIn:    odometerIn   ?? agreement.odometerIn,
       fuelIn:        fuelIn       ?? agreement.fuelIn,
-      cleanlinessIn: cleanlinessIn ?? agreement.cleanlinessIn
+      cleanlinessIn: cleanlinessIn ?? agreement.cleanlinessIn,
+      // The moment the CAR came back — what the contract shows and what
+      // the LATE_RETURN fee is computed from. Written HERE, ahead of the
+      // balance branch, because it is not the zero-balance path's property:
+      // a rental that closes OWING money is exactly the one that just got
+      // charged a late fee, and the timestamp justifying that charge has to
+      // survive to answer a dispute. (Stamped only on the paid-in-full
+      // branch from 2026-08-10 until 2026-08-26.) closedAt stays the
+      // operational record: when STAFF closed it.
+      returnedAt
     }
   });
 
@@ -191,32 +236,6 @@ export async function closeAgreementWithCheckinFees(
   const { gallons: tankCapacity, isFallback: tankCapacityIsFallback } = await resolveTankCapacity(agreement);
   const includedMilesPerDay = await resolveIncludedMilesPerDay(agreement);
 
-  // LATE_RETURN inputs. Caller can pass `returnedAt` to backdate a checkin;
-  // default to now (when the wizard fires). `dueBackAt` is the scheduled
-  // return time on the agreement. If either is missing the fee engine
-  // silently skips the LATE_RETURN computation.
-  // Parsed in the TENANT's timezone, not the container's (the extension bug of
-  // 2026-08-07: a naive datetime-local read on a UTC clock shifts every typed
-  // time by the tenant offset — here that shift would move late-fee money).
-  // ISO strings with a Z pass through untouched, so the wizard's default
-  // "now" behaves exactly as before.
-  const returnedTz = await resolveTenantTimeZone(agreement.tenantId);
-  const returnedAt = payload.returnedAt
-    ? parseDateTimeInTz(payload.returnedAt, returnedTz)
-    : new Date();
-  // Who may state "the car actually came back earlier", and how far. The
-  // plumbing for payload.returnedAt always existed — ungated. Exposing it in
-  // the UI without this check would make erasing late fees invisible.
-  const backdateCheck = validateBackdatedReturn({
-    returnedAt,
-    role: actorRole,
-    rentalStartAt: agreement.finalizedAt || agreement.pickupAt || null,
-  });
-  if (!backdateCheck.ok) {
-    const err = new Error(backdateCheck.error);
-    err.status = 403;
-    throw err;
-  }
   const dueBackAt = agreement.returnAt || null;
 
   // waiveLateFee: agent override. When true the LATE_RETURN computation is
@@ -325,9 +344,6 @@ export async function closeAgreementWithCheckinFees(
         status: 'CLOSED',
         locked: true,
         closedAt: new Date(),
-        // The moment the CAR came back — what the contract shows and what the
-        // late fee was computed from. closedAt stays the operational record.
-        returnedAt,
         closedByUserId: actorUserId || agreement.closedByUserId || null
       }
     });

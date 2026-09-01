@@ -8,6 +8,7 @@ import '../../../../core/theme/ride_tokens.dart';
 import '../../../../core/widgets/ride_buttons.dart';
 import '../../domain/checkout_event_log.dart';
 import '../checkout_labels.dart';
+import 'wizard_banners.dart';
 
 /// Frame 11E — sesión terminal (CLOSED / CANCELLED, y destino del 409
 /// `SESSION_TERMINAL` al intentar crear).
@@ -42,6 +43,8 @@ class CheckoutTerminalView extends StatelessWidget {
     required this.session,
     required this.myUserId,
     required this.onExit,
+    this.onBack,
+    this.pendingUploads = 0,
   });
 
   final CheckoutSessionDto session;
@@ -50,6 +53,24 @@ class CheckoutTerminalView extends StatelessWidget {
   final String? myUserId;
 
   final VoidCallback onExit;
+
+  /// Vuelta al RESUMEN del cierre (19A/19B), cuando esta pantalla se abrió
+  /// desde ahí. Sin esto el detalle era una puerta de un solo sentido
+  /// (GD-MC-3): el resumen es el único sitio donde vive "Copiar el detalle
+  /// para el mostrador", y el motivo del rechazo no sobrevive al re-fetch.
+  /// null = se entró directo a una sesión ya cerrada (11E puro).
+  final VoidCallback? onBack;
+
+  /// Filas de la bandeja de ESTA sesión que aún no llegaron al servidor
+  /// (M2-H6, frame 21D — devuelto por la review de GD).
+  ///
+  /// El registro de abajo y esta franja responden preguntas DISTINTAS, y
+  /// confundirlas fue el recorte que hubo que deshacer: el log dice **quién le
+  /// hizo qué a la sesión**; esto dice **si lo mío llegó**. En el escenario del
+  /// marco —el kiosco cierra la entrega mientras el agente captura— quedan
+  /// fotos huérfanas en el teléfono y el log no las menciona, porque nunca
+  /// fueron un evento de la sesión.
+  final int pendingUploads;
 
   @override
   Widget build(BuildContext context) {
@@ -94,8 +115,18 @@ class CheckoutTerminalView extends StatelessWidget {
                     : l10n.coTerminalContractRequested(
                         format.format(session.autoEmailedAt!.toLocal()),
                       ),
+                // El MOTIVO, cuando lo hay y es legible (M2-H6): en una salida
+                // que no ocurrió, saber si fue "el cliente no se presentó" o
+                // "la unidad no arranca" es lo que decide si el agente va a
+                // discutir con alguien. Se traduce o se calla — nunca se
+                // enseña el token de máquina.
+                reasonLine: abandonReasonLine(l10n, session.abandonedReason),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
+              // "¿Perdí mi trabajo?" antes que "¿quién hizo qué?": es la
+              // pregunta con la que el agente llega a esta pantalla.
+              WorkSafetyBanner(pendingUploads: pendingUploads),
+              const SizedBox(height: 14),
               if (events.isNotEmpty)
                 _EventLog(
                   events: events,
@@ -118,6 +149,10 @@ class CheckoutTerminalView extends StatelessWidget {
                 label: l10n.coTerminalBackToList,
                 onPressed: onExit,
               ),
+              if (onBack case final back?) ...[
+                const SizedBox(height: 9),
+                RideGhostButton(label: l10n.coBackToOutcome, onPressed: back),
+              ],
               const SizedBox(height: 9),
               Text(
                 l10n.coTerminalWhy,
@@ -179,11 +214,16 @@ class _CenterState extends StatelessWidget {
     required this.title,
     required this.body,
     this.contractLine,
+    this.reasonLine,
   });
 
   final bool cancelled;
   final String title;
   final String body;
+
+  /// Motivo YA traducido de `abandonedReason`, o null si no hay nada honesto
+  /// que decir.
+  final String? reasonLine;
 
   /// Línea del contrato (solo con `autoEmailedAt` sellado). Va dentro del hero
   /// porque responde la misma pregunta que el hero contesta.
@@ -245,6 +285,19 @@ class _CenterState extends StatelessWidget {
                   height: 1.4,
                 ),
               ),
+              if (reasonLine != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  reasonLine!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: RideTokens.n800,
+                    height: 1.4,
+                  ),
+                ),
+              ],
               if (contractLine != null) ...[
                 const SizedBox(height: 6),
                 Text(

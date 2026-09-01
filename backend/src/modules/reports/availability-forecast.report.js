@@ -56,6 +56,7 @@
  */
 
 import { registerReport } from './reports-v2.routes.js';
+import { RENTAL_PROGRAM_FILTER } from '../../lib/program-category.js';
 import { cache } from '../../lib/cache.js';
 import { tenantKey } from '../../lib/cache/tenantKey.js';
 import { parseDateTimeInTz, DEFAULT_TENANT_TIMEZONE } from '../../lib/date-utils.js';
@@ -483,7 +484,14 @@ async function computeData({ tenantId, from, to, query }, deps = {}) {
   // rentable, so it must not count as forecast capacity — fleet-status
   // precedent: the OOS KPI already rolls IN_MAINTENANCE + OUT_OF_SERVICE
   // together). All fall out of fleet capacity for forecasting.
-  const vehicleWhere = { status: { notIn: ['OUT_OF_SERVICE', 'SOLD', 'IN_MAINTENANCE'] } };
+  // Program filter (2026-08-24): forecast capacity is RENTAL capacity.
+  // LOANER_ONLY and SHUTTLE_ONLY units can never satisfy a rental booking,
+  // so counting them made every availability/utilization cell look rosier
+  // than the bookable fleet really is.
+  const vehicleWhere = {
+    status: { notIn: ['OUT_OF_SERVICE', 'SOLD', 'IN_MAINTENANCE'] },
+    programCategory: RENTAL_PROGRAM_FILTER,
+  };
   if (locationId) vehicleWhere.homeLocationId = locationId;
   const vehicleTypes = await prisma.vehicleType.findMany({
     where: { tenantId },

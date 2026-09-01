@@ -103,6 +103,142 @@ describe('curriculum anchors resolve to real elements', () => {
   });
 });
 
+/**
+ * PLACED IS NOT THE SAME AS REACHABLE (2026-08-26).
+ *
+ * The tests above all stayed green through a real, shipped breakage. The
+ * 2026-08-25 topbar redesign dropped the duplicate desktop search field and
+ * left `data-tour="global-search"` on `.tb-search-mobile` — a button that
+ * `@media (min-width: 981px) { display: none }` hides on every desktop. The
+ * attribute was still in the source, so the counting ratchet was satisfied;
+ * TourHost's isUsable() correctly refused an invisible element, and the
+ * onboarding tour's second step simply waited forever.
+ *
+ * So the anchor set is now checked against the stylesheet too: an anchor may
+ * not live on an element whose own classes are display:none at desktop widths.
+ * Desktop is the floor because that is where staff are trained and where the
+ * showcase runs; a mobile-only control is never a valid home for a step.
+ */
+const CSS_FILES = [
+  join(SRC, 'app', 'globals.css'),
+  join(SRC, 'app', 'kiosk', 'kiosk.css'),
+];
+
+/** The block a `@media (...)` prelude opens, by brace balance. */
+function blockAfter(css, from) {
+  let depth = 1;
+  let i = from;
+  while (i < css.length && depth > 0) {
+    if (css[i] === '{') depth += 1;
+    else if (css[i] === '}') depth -= 1;
+    i += 1;
+  }
+  return css.slice(from, i - 1);
+}
+
+/**
+ * Class names some `display: none` rule inside a `min-width` media query
+ * applies to. Only the SUBJECT of a selector counts — the last compound —
+ * because `.a .b { display: none }` hides `.b`, not `.a`.
+ */
+function desktopHiddenClasses() {
+  const hidden = new Set();
+  for (const file of CSS_FILES) {
+    const css = readFileSync(file, 'utf8');
+    const media = /@media[^{]*\(\s*min-width\s*:\s*\d+px\s*\)[^{]*\{/gi;
+    let open;
+    while ((open = media.exec(css))) {
+      for (const rule of blockAfter(css, media.lastIndex).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+        if (!/display\s*:\s*none/i.test(rule[2])) continue;
+        for (const selector of rule[1].split(',')) {
+          const subject = selector.trim().split(/[\s>+~]+/).pop() || '';
+          for (const cls of subject.matchAll(/\.([A-Za-z0-9_-]+)/g)) hidden.add(cls[1]);
+        }
+      }
+    }
+  }
+  return hidden;
+}
+
+/** The opening JSX tag containing the index, as raw text. */
+function enclosingTag(text, index) {
+  const start = text.lastIndexOf('<', index);
+  if (start < 0) return '';
+  let depth = 0;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '{') depth += 1;
+    else if (ch === '}') depth -= 1;
+    else if (ch === '>' && depth === 0) return text.slice(start, i + 1);
+  }
+  return text.slice(start);
+}
+
+/** Every anchor placement paired with the classes its element carries. */
+function anchorPlacements() {
+  const placements = [];
+  for (const file of sourceFiles(SRC)) {
+    const text = readFileSync(file, 'utf8');
+    for (const m of text.matchAll(/data-tour=(?:["']([a-z0-9-]+)["']|\{([^}]*)\})/gi)) {
+      const tag = enclosingTag(text, m.index);
+      const className = tag.match(/className=(?:"([^"]*)"|'([^']*)'|\{`([^`]*)`\}|\{"([^"]*)"\}|\{'([^']*)'\})/);
+      const raw = className ? (className[1] ?? className[2] ?? className[3] ?? className[4] ?? className[5]) : '';
+      // Drop `${...}` interpolations — only statically present classes count.
+      const classes = raw.replace(/\$\{[^}]*\}/g, ' ').split(/\s+/).filter(Boolean);
+      // An expression binding covers every `tour:` key in the file (same rule
+      // the counting ratchet uses); a literal names exactly one anchor.
+      const names = m[1]
+        ? [m[1]]
+        : [...(/\.\s*tour\b/.test(m[2] || '') ? text.matchAll(/\btour:\s*['"]([a-z0-9-]+)['"]/gi) : (m[2] || '').matchAll(/['"]([a-z0-9-]+)['"]/gi))].map((x) => x[1]);
+      for (const name of names) placements.push({ name, file, classes });
+    }
+  }
+  return placements;
+}
+
+describe('curriculum anchors are reachable, not just present', () => {
+  it('no anchor lives on an element the stylesheet hides on desktop', () => {
+    const hidden = desktopHiddenClasses();
+    const used = new Set([...allModules()].flatMap((m) => (m.steps || []).map((s) => s.anchor)));
+    const unreachable = anchorPlacements()
+      .filter((p) => used.has(p.name))
+      .flatMap((p) => p.classes.filter((c) => hidden.has(c)).map((c) => `${p.name} (on .${c})`))
+      .sort();
+    expect(
+      unreachable,
+      `Anchor(s) placed on a control that is display:none at desktop widths — the tour will wait forever:\n  ${unreachable.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('global-search sits on the sidebar control, the only desktop entry', () => {
+    const shell = readFileSync(join(SRC, 'components', 'AppShell.jsx'), 'utf8');
+    const tag = enclosingTag(shell, shell.indexOf('data-tour="global-search"'));
+    expect(tag, 'global-search left the sidebar "Go to…" button').toMatch(/className="sb-search"/);
+    expect(shell).not.toMatch(/tb-search-mobile[\s\S]{0,200}data-tour="global-search"/);
+  });
+
+  it('a collapsed sidebar section cannot hide a nav step from the tour', () => {
+    // TourHost stamps the document for the tour's duration and the stylesheet
+    // un-hides collapsed groups; both halves have to be there or `nav-reports`
+    // disappears for anyone who closed "Dinero".
+    const host = readFileSync(join(SRC, 'components', 'training', 'TourHost.jsx'), 'utf8');
+    expect(host).toMatch(/setAttribute\(\s*TOUR_ACTIVE_ATTR/);
+    expect(host).toMatch(/const TOUR_ACTIVE_ATTR = 'data-tour-active'/);
+    const css = readFileSync(join(SRC, 'app', 'globals.css'), 'utf8');
+    expect(css).toMatch(/:root\[data-tour-active\][^{]*\.nav-sec\.closed\s+\.nav-sec-items\s*\{[^}]*display:\s*flex/);
+  });
+
+  it('every nav anchor the curriculum names is still on a NAV_SECTIONS item', () => {
+    // The sectioned-sidebar refactor kept the `tour:` keys; a later regrouping
+    // that drops one would otherwise only show up as a dead tour step.
+    const shell = readFileSync(join(SRC, 'components', 'AppShell.jsx'), 'utf8');
+    const sectionTours = new Set([...shell.matchAll(/\btour:\s*'([a-z0-9-]+)'/gi)].map((m) => m[1]));
+    const navAnchors = [...curriculumAnchors()].filter((a) => a.startsWith('nav-')).sort();
+    const dropped = navAnchors.filter((a) => !sectionTours.has(a));
+    expect(dropped, `nav anchor(s) no longer carried by any NAV_SECTIONS item:\n  ${dropped.join('\n  ')}`).toEqual([]);
+  });
+});
+
 describe('curriculum routes exist as pages', () => {
   const appDir = join(SRC, 'app');
 

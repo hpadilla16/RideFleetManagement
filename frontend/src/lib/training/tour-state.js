@@ -56,14 +56,28 @@ export function currentStep(state, steps) {
  * them from Ride University finds nothing. Rather than fail, the tour waits
  * and springs to life the moment those anchors appear.
  */
-export function waitForRecord(state, { midTour = false } = {}) {
+export function waitForRecord(state, { midTour = false, from = null, through = null, skipThrough = null } = {}) {
   if (!state) return null;
   // `midTour` separates the two moments this happens, because they need
   // different words: before anything has been shown the person must OPEN a
   // reservation, but once the walkthrough is running they are already in one
   // and simply have to move to the next screen (the check-out wizard), where
   // the remaining steps live.
-  return { ...state, endedAs: null, waiting: true, midTour };
+  //
+  // `from`/`through` fence the window the watcher may resume into — see
+  // resumeAt. `skipThrough` is a separate, wider mark: what "Skip this part"
+  // jumps clear of, so a trainee with no live rental leaves all the
+  // record-scoped modules in one press rather than three. The caller owns the
+  // curriculum, so it computes both and this file stays free of it.
+  return {
+    ...state,
+    endedAs: null,
+    waiting: true,
+    midTour,
+    resumeFrom: Number.isInteger(from) ? from : (state.index || 0),
+    resumeThrough: Number.isInteger(through) ? through : null,
+    skipThrough: Number.isInteger(skipThrough) ? skipThrough : null,
+  };
 }
 
 /**
@@ -76,16 +90,31 @@ export function waitForRecord(state, { midTour = false } = {}) {
  * scan that only ever checked step one would wait there forever, watching a
  * page full of its own anchors.
  *
+ * THE SCAN IS FENCED, and must be (2026-08-28). Scanning the whole list from
+ * zero is safe for a one-module tour and catastrophic for the 33-step
+ * ONBOARDING track: `nav-dashboard` is a sidebar link present on every route,
+ * so a tour parked at step 12 resumed instantly at step 1 and walked the same
+ * eleven steps forever. Fencing forward also stops the opposite failure —
+ * `nav-reports`, another permanent sidebar link, sits at step 23 and would
+ * have swallowed check-out, check-in and payments in one jump.
+ *
+ * The window is [resumeFrom, resumeThrough], set when the tour parked. Absent
+ * (an older serialized state, or a module-track tour) it degrades to the whole
+ * list, which is the previous behaviour.
+ *
  * Returns null when nothing is showable yet, which means: keep waiting.
  */
 export function resumeAt(state, steps, isPresent) {
   if (!state || !Array.isArray(steps)) return null;
-  for (let i = 0; i < steps.length; i++) {
+  const from = Number.isInteger(state.resumeFrom) ? Math.max(0, state.resumeFrom) : 0;
+  const through = Number.isInteger(state.resumeThrough)
+    ? Math.min(state.resumeThrough, steps.length - 1)
+    : steps.length - 1;
+  for (let i = from; i <= through; i++) {
     const step = steps[i];
     if (!step) continue;
     if (isPresent(step.anchor)) {
-      const { waiting, ...rest } = state;
-      return { ...rest, index: i, endedAs: null };
+      return { ...stopWaiting(state), index: i, endedAs: null };
     }
   }
   return null;
@@ -94,7 +123,7 @@ export function resumeAt(state, steps, isPresent) {
 /** Resume a parked tour — the host calls this when the route changes. */
 export function stopWaiting(state) {
   if (!state) return null;
-  const { waiting, ...rest } = state;
+  const { waiting, midTour, resumeFrom, resumeThrough, skipThrough, ...rest } = state;
   return rest;
 }
 

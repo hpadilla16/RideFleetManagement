@@ -42,8 +42,9 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 | `checkout.entry_blocked` | un guard de creación negó la apertura (tag `code`) — M2-H7 |
 | `checkout.entry_precheckin_link_sent` | salida del guard 11B: el link de pre-checkin salió por correo (M2-H7) |
 | `checkout.step_rendered` | render desde `currentStep` (tag `step`) |
-| `checkout.transition_ok` / `checkout.transition_409` | POST /transition (tag `code`: ILLEGAL_TRANSITION/ENTRY_GUARD/…) |
-| `checkout.reconciled` | UI reconciliada con el servidor (tags `steps_jumped`, `via`) |
+| `checkout.transition_ok` / `checkout.transition_409` | POST /transition (tag `code`: ILLEGAL_TRANSITION/ENTRY_GUARD/STALE_VERSION/CONCURRENT_MODIFICATION/…) |
+| `checkout.transition_noop` | 200 que NO lo movió esta superficie: lo movió otra, o fue doble-submit (M2-H8) |
+| `checkout.reconciled` | UI reconciliada con el servidor — p.ej. 409 → re-fetch (tags `steps_jumped`, `via`) |
 | `checkout.money_attempt` / `checkout.money_ok` / `checkout.money_fail` | rutas de dinero (tag `kind`: charge_sale/hold_deposit/manual_*; NUNCA montos ni PAN) |
 | `checkout.preview_divergence` | cálculo local ≠ preview del servidor (compuerta ADR-6) |
 | `checkout.declined_insurance_set` | `POST /:id/declined-insurance` aceptado (tag `declined`) |
@@ -53,6 +54,12 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 | `checkout.terms_signed_seen` | el poll vio caer `tcCompletedAt` |
 | `checkout.present_mode_shown` | se abrió la pantalla volteada al cliente (10B) |
 | `checkout.present_mode_screen_degraded` | brillo/wakelock no se pudo aplicar o restaurar (tags `what`: brightness/wakelock, `phase`: enter/exit) |
+| `checkout.signature_saved` | `POST /:id/customer-signature` aceptado (tag `replaced`: pisó una firma ya guardada) — M2-H5 |
+| `checkout.close_started` | el agente arrancó el cierre (tag `legs`: 3 con firma por recoger, 2 si ya venía sellada) — M2-H5 |
+| `checkout.close_ok` | el cierre llegó a CLOSED (tag `handover`: recorded/not_recorded/unverified, leído de `Reservation.status`) — M2-H5 |
+| `checkout.close_failed` | un tramo del cierre fue rechazado (tags `leg`, `code`, `terminal`) — M2-H5 |
+| `checkout.close_unknown` | un tramo del cierre murió sin respuesta (tag `leg`) — M2-H5 |
+| `checkout.handover_recheck` | "Volver a comprobar" desde el estado sin confirmar (tag `result`: recorded/not_recorded/unverified) — M2-H5, frame 19A-bis |
 
 Notas de los eventos de M2-H2:
 
@@ -105,7 +112,7 @@ la superficie que lo resolvería es el re-fetch por reserva, no un cambio de cop
 `entry_open` NO lleva tag `resumed` — el backend responde 201 igual al crear que al
 reanudar, y la app no puede afirmar la diferencia sin inventarla.
 
-Detalle de `checkout.reconciled` (M2-H1). Tres valores de `via`, deliberadamente
+Detalle de `checkout.reconciled` (M2-H1). Cinco valores de `via`, deliberadamente
 separados porque miden cosas distintas:
 
 - `poll` — el poll de 5 s detectó que OTRA superficie movió el paso. Su frecuencia ES la
@@ -114,6 +121,17 @@ separados porque miden cosas distintas:
 - `conflict` — el servidor rechazó una transición con 409 y el re-fetch reconcilió.
 - `preflight` — el re-fetch previo a escribir (>3 s de antigüedad) encontró la sesión ya
   movida y ABORTÓ el POST. No hubo 409: contarlo como tal inflaría las colisiones reales.
+- `noop` (M2-H6) — el POST volvió **200 y no lo movimos nosotros**: desde M2-H8 el backend
+  responde idempotente cuando otra superficie ya hizo esa transición. No hubo 409 ni
+  rechazo, pero el paso SÍ saltó por debajo del agente, así que la reconciliación existe y
+  se cuenta. Va con su `checkout.transition_noop`. Separado de `conflict` a propósito:
+  contarlo ahí volvería a inflar las colisiones que H8 justamente dejó de producir.
+- `rejected` (M2-H5) — el servidor rechazó la transición con un 4xx del SERVICIO que no es
+  409 (400/404/422) y el re-fetch reconcilió. Su caso real es el finalize: `transition`
+  commitea el paso (checkout-session.service.js:417) y la cascada revienta DESPUÉS con 422
+  (`NO_VEHICLE_ASSIGNED`, `PRECHECKIN_REQUIRED`, `AGE_RULES_*`), dejando la sesión cerrada
+  y al cliente creyendo que sigue en FINALIZING. NO se cuenta como `conflict`: no hubo
+  colisión entre superficies, hubo una regla de negocio que falló tarde.
 
 **Un movimiento = un evento.** El emisor deduplica por movimiento (`FROM>TO`): un 409 que
 re-consulta y reconcilia produce UNA línea, no una por cada capa que la detectó. Contarlo
@@ -128,11 +146,47 @@ el pasado.
 la app (paso nuevo del backend), el evento viaja sin el tag antes que con un número
 inventado.
 
+> **Ruptura de serie por M2-H8 (2026-08-17) — leer antes de comparar contra histórico.**
+> El caso "otra superficie ya hizo esta transición" **cambió de lado**: antes emitía
+> `checkout.transition_409` (code `ILLEGAL_TRANSITION`) seguido de `checkout.reconciled`;
+> ahora el backend responde 200 y emite `checkout.transition_ok`. Sin este aviso, el
+> despliegue de H8 se lee en los tableros como "los 409 de checkout se desplomaron y las
+> reconciliaciones desaparecieron" — que es exactamente la forma que tendría una regresión
+> de telemetría. Consecuencias:
+>
+> - `checkout.transition_409` baja, `checkout.transition_ok` sube, **misma suma**.
+> - `checkout.reconciled` baja de verdad, porque hay menos que reconciliar.
+> - `STALE_VERSION` y `CONCURRENT_MODIFICATION` son códigos nuevos del tag `code`.
+> - Para no perder la señal de concurrencia, la app emite `checkout.transition_noop`.
+>   **Cómo se detecta (importa, y la primera versión de esta nota lo tenía al revés):**
+>   un noop **NO** es "el paso volvió igual y la versión no cambió". En la carrera entre
+>   superficies —que es justo lo que esta métrica tiene que vigilar— el cliente está en
+>   `FINALIZING`/v0, otra superficie commitea, y la respuesta llega `CLOSED`/v1: el paso
+>   **sí** cambió y la versión **también**. Esa regla sólo dispara en el doble-submit sin
+>   carrera, o sea que sub-reporta exactamente el caso que motivó la métrica.
+>
+>   La regla correcta es la de atribución, la misma que ya usa
+>   `02-flutter-blueprint.md` §2.2: **es noop cuando el último evento `TRANSITION` de la
+>   respuesta no nombra a esta superficie** (comparar su `actorUserId`/`metadata` con los
+>   propios). **Es la única regla.** No hay atajo por `stateVersion`: una versión anterior
+>   de esta nota ofrecía "`stateVersion !== localVersion + 1`" como equivalente y **no lo
+>   es**, precisamente en el caso que la métrica existe para vigilar — el wizard tiene v0
+>   en `FINALIZING`, el kiosco commitea `CLOSED` → v1, y la respuesta idempotente no sube
+>   nada, así que lee v1: `1 !== 0 + 1` es **falso** y no se marca. Subió exactamente uno,
+>   pero lo subió otro, y la versión sola no sabe distinguirlo. Es tentador porque evita
+>   decodificar el JSON; es exactamente el sub-reporte que esta sección vino a arreglar.
+>
+>   Nota de parseo: `events` viaja como **string JSON**, no como arreglo — hay que
+>   `jsonDecode` antes de leer el último `TRANSITION`. Llega así por los dos caminos
+>   (`GET /:id` y la respuesta del propio POST).
+
 ### Inspección y bandeja
 | Evento | Cuándo |
 |---|---|
 | `inspection.photo_captured` | tag `angle`, `bytes_after_compress`, `ms_compress` |
 | `inspection.completed_local` | complete encolado/enviado |
+| `inspection.completed_server` | el poll vio caer `inspectionCompletedAt` (tag `waited_s`: segundos desde que la pantalla vio el complete encolado; sin tag si no hubo espera que medir). Con `completed_local` mide lo que el agente espera de pie junto al coche con el paso sin avanzar — M2-H4 |
+| `inspection.required_angle_dead` | una foto OBLIGATORIA (front/rear) murió en la bandeja (tag `angle`). El dead-letter no bloquea al resto, así que el `complete` sale igual y el servidor lo rechaza con `REQUIRED_ANGLES_MISSING`: su frecuencia mide el callejón sin salida del frame 17E — M2-H4 |
 | `outbox.enqueued` / `outbox.drained_ok` | tag `kind`, `queue_depth` |
 | `outbox.remint_token` | re-emisión del handoff al drenar (tag `reused`) |
 | `outbox.entry_dead` | dead-letter (tag `code` — TOKEN_*, REQUIRED_ANGLES_MISSING…) |

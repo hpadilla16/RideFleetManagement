@@ -69,7 +69,10 @@ function sendError(res, err) {
     return res.status(err.status).json({ error: err.message, code: err.code || null });
   }
   console.error('[reports-v2] error', err);
-  return res.status(500).json({ error: err?.message || 'Internal error' });
+  // Sanitized (DAST 2026-08-23): an UNEXPECTED 500 must not echo err.message —
+  // the PDF path leaked the puppeteer/Chrome executable path + version. Only
+  // the deliberate ReportsServiceError above (a typed 4xx) shows its message.
+  return res.status(500).json({ error: 'Internal error' });
 }
 
 export const reportsV2Router = Router();

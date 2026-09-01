@@ -416,8 +416,15 @@ test('the set of files naming declinedInsurance is a ratchet', () => {
   const KNOWN = new Set([
     // Writers — both go through assertInsuranceSelectionEditable().
     'src/modules/checkout-session/checkout-session.service.js',
+    // The customer's pre-check-in writer. It used to be inline in
+    // customer-portal.routes.js; the charge-sheet rewrite moved into this
+    // module so it commits as one transaction. Still gated: its only caller
+    // runs the preflight BEFORE opening the transaction and passes the
+    // verdict down as `agreementSealed`, which fences the signature columns.
+    'src/modules/customer-portal/precheckin-charges.js',
+    // Comments only — customer-portal.routes.js names the column in its
+    // PREFLIGHT note; the write it used to do now lives in precheckin-charges.js.
     'src/modules/customer-portal/customer-portal.routes.js',
-    // Route comment only.
     'src/modules/checkout-session/checkout-session.routes.js',
     // The gate itself.
     'src/modules/checkout-session/insurance-selection-gate.js',
@@ -438,9 +445,22 @@ test('the set of files naming declinedInsurance is a ratchet', () => {
     'src/modules/checkout-session/terms-section-overrides.test.mjs',
     'src/modules/checkout-session/terms-signing.test.mjs',
     'src/modules/customer-portal/precheckin-insurance-gate.test.mjs',
+    'src/modules/customer-portal/precheckin-charges.embedded.test.mjs',
     'src/modules/kiosk/kiosk-checkout.test.mjs',
     'src/modules/kiosk/kiosk-staff-assist.test.mjs',
     'src/modules/reservations/declined-insurance-getbyid.embedded.test.mjs',
+    // GDPR erasure (Wave 2). Neither touches the declinedInsurance BOOLEAN the
+    // gate protects — they name only `declinedInsuranceSignatureDataUrl`, the
+    // declined-insurance signature IMAGE, which erasure nulls as PII. The
+    // ratchet matches the substring, so they are listed here; no gate applies
+    // (destroying a signature image is not editing the insurance selection).
+    'src/modules/customers/customer-pii-map.js',
+    'src/modules/customers/customer-erasure.test.mjs',
+    // Field-level PII encryption (2026-08-23). Names only the
+    // declinedInsuranceSignatureDataUrl IMAGE column in its encrypt/decrypt
+    // field map — a crypto passthrough, not a reader or writer of the
+    // declinedInsurance BOOLEAN; no gate applies.
+    'src/lib/field-crypto.js',
   ]);
 
   const found = [];

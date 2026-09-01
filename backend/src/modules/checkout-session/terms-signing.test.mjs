@@ -378,6 +378,35 @@ test('saveInitial upserts the right section', async () => {
   assert.equal(upserts[0].create.customerIp, '1.2.3.4');
 });
 
+/**
+ * The redo path, from the frontend's side of the wire.
+ *
+ * The initials pad no longer freezes after the first finger-lift (see
+ * SignClient.jsx, INITIAL_COMMIT_DELAY_MS), so a renter who dislikes their
+ * "H.P." can clear it and draw again — which POSTs the SAME sectionKey a
+ * second time. That has to be an overwrite, not a 409: there is no delete
+ * endpoint, so an error here would strand them with the bad initial on file
+ * and no way to replace it.
+ */
+test('saveInitial overwrites a section the customer re-does, rather than erroring', async () => {
+  const args = { token: 'TOK', sectionKey: 'rental_period', customerIp: '1.2.3.4' };
+  await termsSigningService.saveInitial({ ...args, initialDataUrl: FAKE_DATA_URL });
+  const second = `${FAKE_DATA_URL}SECONDATTEMPT`;
+  const out = await termsSigningService.saveInitial({ ...args, initialDataUrl: second });
+
+  assert.deepEqual(out, { sectionKey: 'rental_period', signed: true });
+  assert.equal(upserts.length, 2);
+  // Same composite key both times — so the second write lands on the first row.
+  for (const op of upserts) {
+    assert.deepEqual(op.where, {
+      agreementId_sectionKey: { agreementId: upserts[0].where.agreementId_sectionKey.agreementId, sectionKey: 'rental_period' },
+    });
+  }
+  // And the update branch carries the NEW ink, not the old.
+  assert.equal(upserts[1].update.initialDataUrl, second);
+  assert.ok(upserts[1].update.signedAt instanceof Date);
+});
+
 test('saveInitial rejects unknown sectionKey', async () => {
   await assert.rejects(
     () => termsSigningService.saveInitial({ token: 'TOK', sectionKey: 'made_up', initialDataUrl: FAKE_DATA_URL }),

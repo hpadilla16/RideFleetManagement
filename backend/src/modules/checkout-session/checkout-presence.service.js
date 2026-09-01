@@ -107,10 +107,54 @@ async function upsertPresence({ sessionId, surface, actorUserId, displayLabel })
 }
 
 /**
- * Fresh presence for one session: [{ surface, displayName, lastSeenAt }],
- * newest first. displayName resolution: explicit label → actor's fullName →
- * generic surface label. THROWS on infrastructure errors — use withPresence()
- * on read paths that must never fail.
+ * Fresh presence for one session:
+ * [{ surface, actorUserId, displayName, lastSeenAt }], newest first.
+ * displayName resolution: explicit label → actor's fullName → generic surface
+ * label. THROWS on infrastructure errors — use withPresence() on read paths
+ * that must never fail.
+ *
+ * WHY actorUserId IS HERE, AND WHY IT IS SAFE (M2-H6, 2026-08-28)
+ *
+ * H6 makes RideOps visible to the other surfaces, and a surface must be able
+ * to drop ITSELF from the "who else is here" list. Matching on displayName is
+ * not an identity check — two "José García" in one yard collapse into one
+ * chip and each of them stops seeing the other. So the row's own id ships.
+ *
+ * That id is staff PII, so the emit boundary was audited before adding it.
+ * presence is produced in exactly one place — withPresence() — and
+ * withPresence() is called from exactly two routes, both on
+ * checkoutSessionRouter, which main.js mounts behind
+ * requireAuth + requireModuleAccess('reservations'):
+ *     GET /api/checkout-sessions/:id
+ *     GET /api/checkout-sessions/by-reservation/:reservationId
+ * No customer-CREDENTIALED payload receives this array:
+ *   • customer phone (token) — /api/public/checkout-handoff/:token returns
+ *     exchangeHandoffToken()'s { reservation, kind, consumedAt }. No presence.
+ *   • public T&C signing (/api/sign/*) — no presence.
+ *   • kiosk (device token, /api/kiosk/*) — WRITES presence via
+ *     recordPresenceSafe() and never reads it back.
+ * So there is no customer-credentialed payload to redact, and no staff/customer
+ * split to invent: the field is added once, for the staff-authenticated array.
+ *
+ * KNOWN, ACCEPTED EXCEPTION — say it here so nobody reads the list above as
+ * wider than it is. Credentialed-by-staff is NOT the same as unseen-by-the
+ * customer. Two staff second screens fetch the by-reservation route with a
+ * staff JWT and therefore DO receive this array:
+ *     frontend/src/app/customer-display/page.js
+ *     frontend/src/app/reservations/[id]/customer-view/page.js
+ * Neither renders presence today, and customer-display is physically the panel
+ * the renter looks at. Accepted because reaching the field needs devtools on a
+ * dealership-owned workstation, and whoever has that already holds the staff
+ * JWT, the customer PII, and — since M2 P1 — the employees' FULL NAMES in the
+ * same JSON. A cuid beside a name is not a new risk class. The thing worth
+ * fixing there is the names, not this id, and it is tracked separately.
+ * presence-boundary.test.mjs guards the BACKEND routing only: it cannot see
+ * which frontend page calls a staff route, so nothing below tests this
+ * paragraph. It is a statement about the world, kept honest by reading it.
+ *
+ * THAT audit is the actual invariant, not this comment — presence-boundary
+ * .test.mjs re-derives it from the source on every CI run and fails if a
+ * public or device-authed route ever starts emitting presence.
  */
 async function activePresence(sessionId, { now = new Date() } = {}) {
   if (!sessionId) return [];
@@ -134,6 +178,10 @@ async function activePresence(sessionId, { now = new Date() } = {}) {
 
   return rows.map((row) => ({
     surface: row.surface,
+    // Null for the surfaces that heartbeat without an authenticated user
+    // (kiosk device, customer phone) — that null is deliberate upstream, so
+    // it is echoed verbatim and never backfilled from the name cascade below.
+    actorUserId: row.actorUserId || null,
     displayName: row.displayLabel
       || (row.actorUserId ? nameById.get(row.actorUserId) : null)
       || SURFACE_FALLBACK_LABEL[row.surface]

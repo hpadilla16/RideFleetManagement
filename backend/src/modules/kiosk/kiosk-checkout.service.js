@@ -443,8 +443,9 @@ async function verifyId(sessionId, device, { aamvaFields, licensePhoto, selfiePh
  * verify-id (called after the customer confirms, with fields + licensePhoto)
  * remains the only stamper and runs every validation unchanged.
  *
- * Key resolution mirrors the citation OCR worker: tenant Settings key
- * (getCitationOcrResolved) → ANTHROPIC_API_KEY env → 503 OCR_UNAVAILABLE.
+ * Key resolution mirrors the citation OCR worker: tenant Settings key →
+ * (only for a tenant deliberately opted in) the platform key, with a WARN →
+ * 503 OCR_UNAVAILABLE. See lib/tenant-provider-credential.js.
  * Model: KIOSK_ID_OCR_MODEL → tenant model → CITATION_OCR_MODEL → haiku.
  */
 async function idPhotoExtract(sessionId, device, { photo } = {}) {
@@ -477,9 +478,15 @@ async function idPhotoExtract(sessionId, device, { photo } = {}) {
   const nowMs = Date.now();
   if (deviceExtractCount(device.id, nowMs) >= MAX_ID_EXTRACTS_PER_DEVICE_PER_HOUR) throw cappedError();
 
-  const cfg = await settingsService.getCitationOcrResolved({ tenantId: device.tenantId })
-    .catch(() => ({ apiKey: null, model: '' }));
-  const apiKey = cfg.apiKey || process.env.ANTHROPIC_API_KEY || null;
+  const cfg = await settingsService
+    .resolveCitationOcrCredential({ tenantId: device.tenantId }, { feature: 'kiosk-id-ocr' })
+    .catch(() => ({ credential: { source: 'NONE' }, model: '' }));
+  // No `|| process.env.ANTHROPIC_API_KEY` any more: a tenant that has not
+  // configured a key, and has not been deliberately opted in to the platform
+  // one, sends no driver's licence photo anywhere. Same 503 OCR_UNAVAILABLE
+  // the tablet UI already branches on — the posture changed, the contract
+  // did not.
+  const apiKey = cfg?.credential?.source === 'NONE' ? null : (cfg?.credential?.credential || null);
   if (!apiKey) {
     throw new KioskError('ID photo reading is not configured for this tenant', 503, 'OCR_UNAVAILABLE');
   }
