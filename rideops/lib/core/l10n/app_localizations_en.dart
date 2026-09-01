@@ -1506,6 +1506,31 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get coStampsCtaPayment => 'Continue to payment';
+
+  @override
+  String get coStampsCtaPaymentWhy =>
+      'Terms are signed; payment is the next step.';
+
+  @override
+  String get coStampsCtaPaid => 'Confirm payment';
+
+  @override
+  String get coStampsCtaPaidWhy =>
+      'This button only exists because the server already has the payment on record.';
+
+  @override
+  String get coStampsPaidBlockedWhy =>
+      'Payment is taken at the counter or the kiosk. This button unlocks once the server records it.';
+
+  @override
+  String get coStampsCtaInspection => 'Continue to inspection';
+
+  @override
+  String get coStampsCtaInspectionWhy =>
+      'Payment is on record; the vehicle inspection is next.';
+
+  @override
   String get coEntryNoVehicleTitle =>
       'This reservation has no vehicle assigned';
 

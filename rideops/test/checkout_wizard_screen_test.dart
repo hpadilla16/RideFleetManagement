@@ -314,19 +314,19 @@ void main() {
     );
   });
 
-  testWidgets('M2-H6 · 21C sin dock — en un paso que no construye pie, el '
-      'aviso conserva el anclaje de la lámina', (tester) async {
+  testWidgets('M2-H6 · 21C en la rama de sellos — el paso ganó pie '
+      '(E2E Fold 2026-09-01) y el aviso sube al dock, fuera del scroll',
+      (tester) async {
     // ── Por qué esta prueba existe ────────────────────────────────────────
     //
-    // QA borró el bloque entero del aviso en la rama `_ =>` y las 701 pruebas
-    // siguieron verdes. El hueco cayó justo en el ÚNICO camino que NO pasa por
-    // `WizardDockNotice`: ahí el aviso se enhebra como parámetro explícito, que
-    // es exactamente el modo de fallo —alguien deja de reenviarlo y desaparece
-    // sin que nadie grite— que el widget heredado existe para evitar en los
-    // otros 15 sitios. El argumento arquitectónico no cubría su propia
-    // excepción; esta prueba sí.
-    //
-    // La rama sirve TC_SIGNED, PAYMENT_PENDING y PAID: tres pasos vivos.
+    // Su versión anterior fijaba que la rama `_ =>` NO construía pie ("si
+    // algún día gana uno, esta prueba tiene que enterarse"). Ese día llegó: la
+    // corrida E2E del Fold (2026-09-01) encontró que TC_SIGNED/PAYMENT_PENDING/
+    // PAID eran un callejón sin salida — checklist de sellos y ningún CTA. La
+    // rama ahora construye [TransitionButton] (o sea [WizardDock]), así que el
+    // aviso 21C viaja por [WizardDockNotice] como en los otros 15 sitios, y lo
+    // que esta prueba fija es que en el camino no se perdió: dentro del pie,
+    // encima del primario, fuera del scroll.
     final f = fakes();
     // PAYMENT_PENDING con el sello de T&C ya puesto — es como se llega ahí
     // (TC_SIGNED lo exige), así que el estado es producible por el backend.
@@ -335,9 +335,8 @@ void main() {
     await tester.pumpAndSettle();
     await skipJoinGate(tester);
 
-    // Este paso NO tiene pie: es la premisa de la prueba, y se afirma en vez
-    // de suponerse — si algún día gana uno, esta prueba tiene que enterarse.
-    expect(find.byType(WizardDock), findsNothing);
+    // La premisa nueva, afirmada en vez de supuesta: la rama construye pie.
+    expect(find.byType(WizardDock), findsOneWidget);
     expect(find.byType(ForeignAdvanceBanner), findsNothing);
 
     // La inspección se sella mientras el agente está en el paso de pago: el
@@ -351,25 +350,128 @@ void main() {
     await tester.pumpAndSettle();
 
     final banner = find.byType(ForeignAdvanceBanner);
-    expect(banner, findsOneWidget, reason: 'sin pie el aviso NO puede perderse');
+    expect(banner, findsOneWidget, reason: 'el aviso NO puede perderse');
     expect(
       find.textContaining('Keep capturing: this step did not change'),
       findsOneWidget,
     );
 
-    // Sigue FUERA del scroll: es la regla que no depende de que haya dock.
+    // FUERA del scroll: la regla que no depende de la forma del pie.
     expect(
       find.ancestor(of: banner, matching: find.byType(Scrollable)),
       findsNothing,
     );
 
-    // Y anclado al PIE: por debajo del cuerpo del paso.
-    final list = find.byType(Scrollable).first;
+    // DENTRO del pie y ENCIMA del primario (21C-bis, la misma invariante que
+    // ya se fija para los pasos con historia propia).
+    final dock = find.byType(WizardDock);
+    expect(find.ancestor(of: banner, matching: dock), findsOneWidget);
+    final cta = find.byWidget(tester.widget<WizardDock>(dock).primary);
     expect(
-      tester.getTopLeft(banner).dy,
-      greaterThanOrEqualTo(tester.getBottomLeft(list).dy - 1),
-      reason: 'el aviso va debajo del cuerpo, no encima ni dentro',
+      tester.getBottomLeft(banner).dy,
+      lessThanOrEqualTo(tester.getTopLeft(cta).dy),
+      reason: 'el aviso no puede quedar por debajo del primario',
     );
+  });
+
+  testWidgets('E2E Fold 2026-09-01 — TC_SIGNED ya no es callejón sin salida: '
+      'CTA "Continue to payment" que POSTea hacia PAYMENT_PENDING',
+      (tester) async {
+    final f = fakes();
+    f.api.current = sessionAt(CheckoutStep.tcSigned, tc: DateTime.now());
+    await pumpWizard(tester, api: f.api, network: f.network);
+    await tester.pumpAndSettle();
+    await skipJoinGate(tester);
+
+    // La checklist de sellos sigue siendo el cuerpo…
+    expect(find.text('What the server already has'), findsOneWidget);
+    // …pero ahora hay pie con el avance.
+    final cta = find.widgetWithText(RidePrimaryButton, 'Continue to payment');
+    expect(cta, findsOneWidget);
+
+    f.api.current = sessionAt(CheckoutStep.paymentPending, tc: DateTime.now());
+    await tester.tap(cta);
+    await tester.pumpAndSettle();
+
+    expect(f.api.transitions, ['PAYMENT_PENDING']);
+    expect(find.text('Step 4 of 10'), findsOneWidget);
+  });
+
+  testWidgets('PAYMENT_PENDING — sin sello el CTA se bloquea CON CAUSA; con '
+      'el sello del servidor se habilita y POSTea hacia PAID', (tester) async {
+    final f = fakes();
+    f.api.current = sessionAt(CheckoutStep.paymentPending, tc: DateTime.now());
+    await pumpWizard(tester, api: f.api, network: f.network);
+    await tester.pumpAndSettle();
+    await skipJoinGate(tester);
+
+    // Bloqueado, no escondido (regla de TransitionButton): el botón está y la
+    // causa también — el cobro se toma en el mostrador/kiosco, no aquí.
+    final cta = find.widgetWithText(RidePrimaryButton, 'Confirm payment');
+    expect(cta, findsOneWidget);
+    expect(
+      find.textContaining('Payment is taken at the counter or the kiosk'),
+      findsOneWidget,
+    );
+    await tester.tap(cta);
+    await tester.pumpAndSettle();
+    expect(f.api.transitions, isEmpty, reason: 'bloqueado = ningún POST');
+
+    // El mostrador cobra: el poll trae el sello y el MISMO botón se habilita
+    // (ADR-4 hecho visible — el CTA existe porque el servidor ya lo tiene).
+    f.api.current = sessionAt(
+      CheckoutStep.paymentPending,
+      tc: DateTime.now(),
+      payment: DateTime.now(),
+    );
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('the server already has the payment on record'),
+      findsOneWidget,
+    );
+
+    f.api.current = sessionAt(
+      CheckoutStep.paid,
+      tc: DateTime.now(),
+      payment: DateTime.now(),
+    );
+    await tester.tap(cta);
+    await tester.pumpAndSettle();
+    expect(f.api.transitions, ['PAID']);
+  });
+
+  testWidgets('PAID — CTA "Continue to inspection" hacia INSPECTION_HANDOFF; '
+      'un paso desconocido sigue SIN pie (no se inventa el siguiente)',
+      (tester) async {
+    final f = fakes();
+    f.api.current = sessionAt(
+      CheckoutStep.paid,
+      tc: DateTime.now(),
+      payment: DateTime.now(),
+    );
+    await pumpWizard(tester, api: f.api, network: f.network);
+    await tester.pumpAndSettle();
+    await skipJoinGate(tester);
+
+    final cta = find.widgetWithText(RidePrimaryButton, 'Continue to inspection');
+    expect(cta, findsOneWidget);
+    f.api.current = sessionAt(
+      CheckoutStep.inspectionHandoff,
+      tc: DateTime.now(),
+      payment: DateTime.now(),
+    );
+    await tester.tap(cta);
+    await tester.pumpAndSettle();
+    expect(f.api.transitions, ['INSPECTION_HANDOFF']);
+
+    // Forward-compat: con un paso fuera del catálogo no hay certeza del
+    // siguiente paso y NO se dibuja un CTA (fail-visible, jamás inventar).
+    f.api.current =
+        sessionAt(CheckoutStep.confirming, rawStep: 'PASO_DEL_FUTURO');
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.byType(WizardDock), findsNothing);
   });
 
   testWidgets('un currentStep desconocido no rompe la pantalla: nodo genérico '

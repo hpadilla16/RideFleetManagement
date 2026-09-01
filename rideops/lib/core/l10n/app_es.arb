@@ -770,6 +770,13 @@
   "@coSessionAgeLabel": {
     "placeholders": { "age": { "type": "String" } }
   },
+  "coStampsCtaPayment": "Continuar al cobro",
+  "coStampsCtaPaymentWhy": "Los términos están firmados; el cobro es el próximo paso.",
+  "coStampsCtaPaid": "Confirmar el cobro",
+  "coStampsCtaPaidWhy": "Este botón solo existe porque el servidor ya tiene el cobro registrado.",
+  "coStampsPaidBlockedWhy": "El cobro se hace en el mostrador o el kiosco. Este botón se desbloquea cuando el servidor lo registre.",
+  "coStampsCtaInspection": "Continuar a la inspección",
+  "coStampsCtaInspectionWhy": "El cobro está registrado; sigue la inspección del vehículo.",
 
   "coEntryNoVehicleTitle": "Esta reserva no tiene vehículo asignado",
   "@coEntryNoVehicleTitle": {

@@ -1517,6 +1517,31 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String get coStampsCtaPayment => 'Continuar al cobro';
+
+  @override
+  String get coStampsCtaPaymentWhy =>
+      'Los términos están firmados; el cobro es el próximo paso.';
+
+  @override
+  String get coStampsCtaPaid => 'Confirmar el cobro';
+
+  @override
+  String get coStampsCtaPaidWhy =>
+      'Este botón solo existe porque el servidor ya tiene el cobro registrado.';
+
+  @override
+  String get coStampsPaidBlockedWhy =>
+      'El cobro se hace en el mostrador o el kiosco. Este botón se desbloquea cuando el servidor lo registre.';
+
+  @override
+  String get coStampsCtaInspection => 'Continuar a la inspección';
+
+  @override
+  String get coStampsCtaInspectionWhy =>
+      'El cobro está registrado; sigue la inspección del vehículo.';
+
+  @override
   String get coEntryNoVehicleTitle => 'Esta reserva no tiene vehículo asignado';
 
   @override

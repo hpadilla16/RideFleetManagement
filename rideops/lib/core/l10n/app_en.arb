@@ -384,6 +384,13 @@
   "coStampDone": "Done · {time}",
   "coStampPending": "Pending",
   "coSessionAgeLabel": "State from {age} ago",
+  "coStampsCtaPayment": "Continue to payment",
+  "coStampsCtaPaymentWhy": "Terms are signed; payment is the next step.",
+  "coStampsCtaPaid": "Confirm payment",
+  "coStampsCtaPaidWhy": "This button only exists because the server already has the payment on record.",
+  "coStampsPaidBlockedWhy": "Payment is taken at the counter or the kiosk. This button unlocks once the server records it.",
+  "coStampsCtaInspection": "Continue to inspection",
+  "coStampsCtaInspectionWhy": "Payment is on record; the vehicle inspection is next.",
 
   "coEntryNoVehicleTitle": "This reservation has no vehicle assigned",
   "coEntryNoVehicleBody": "You cannot hand over without a unit. Assigning the vehicle to the reservation is still done from the desk; once it is assigned, tap the card again.",

@@ -34,6 +34,7 @@ import 'widgets/pause_sheet.dart';
 import 'widgets/presence_sheet.dart';
 import 'widgets/steps_sheet.dart';
 import 'widgets/terminal_view.dart';
+import 'widgets/transition_button.dart';
 import 'widgets/wizard_banners.dart';
 import 'widgets/wizard_chrome.dart';
 import 'widgets/wizard_dock.dart';
@@ -534,28 +535,84 @@ class _CheckoutWizardScreenState extends ConsumerState<CheckoutWizardScreen> {
           banners: banners,
           onPause: _openPauseSheet,
         ),
-      // Este paso no construye [WizardDock], así que no hay pie que sostenga
-      // el aviso: vuelve al anclaje de la lámina (21C tal cual), pegado al pie
-      // y fuera del scroll. "El caso sin dock no cambia" — DoD del addendum.
-      _ => Column(
-          children: [
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
-                children: [
-                  ...banners,
-                  _StampsCard(session: session, dataAge: age),
-                ],
-              ),
-            ),
-            if (dockNotice != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                child: dockNotice,
-              ),
-          ],
-        ),
+      // TC_SIGNED / PAYMENT_PENDING / PAID y cualquier paso futuro: la
+      // tarjeta de sellos + (cuando el paso es conocido) el CTA de avance.
+      _ => _stampsBody(state, session, age, banners, dockNotice),
     };
+  }
+
+  /// Cuerpo de los pasos que viven de la tarjeta de sellos. Hasta la corrida
+  /// E2E del Fold (2026-09-01) esta rama NO construía pie: el wizard llegaba a
+  /// TC_SIGNED y se quedaba sin salida — la checklist con un hueco vacío
+  /// debajo, en cualquier tamaño de pantalla. El CTA se monta sobre el MISMO
+  /// [TransitionButton] de los demás pasos; el `toStep` de cada uno es diseño
+  /// de producto (ADR-4), no inferencia sobre el catálogo.
+  Widget _stampsBody(
+    CheckoutWizardState state,
+    CheckoutSessionDto session,
+    Duration age,
+    List<Widget> banners,
+    Widget? dockNotice,
+  ) {
+    final l10n = AppLocalizations.of(context)!;
+    final cta = switch (state.step) {
+      CheckoutStep.tcSigned => TransitionButton(
+          reservationId: widget.reservationId,
+          toStep: CheckoutStep.paymentPending,
+          label: l10n.coStampsCtaPayment,
+          why: l10n.coStampsCtaPaymentWhy,
+        ),
+      // El cobro se toma en el mostrador/kiosco, no en RideOps: el CTA espera
+      // el sello del servidor. Bloqueado CON CAUSA, jamás escondido — la regla
+      // que [TransitionButton.blockedWhy] declara. El entry guard del backend
+      // (`PAID ← paymentCompletedAt`) es el mismo predicado.
+      CheckoutStep.paymentPending => TransitionButton(
+          reservationId: widget.reservationId,
+          toStep: CheckoutStep.paid,
+          label: l10n.coStampsCtaPaid,
+          why: l10n.coStampsCtaPaidWhy,
+          blockedWhy: session.paymentCompletedAt == null
+              ? l10n.coStampsPaidBlockedWhy
+              : null,
+        ),
+      CheckoutStep.paid => TransitionButton(
+          reservationId: widget.reservationId,
+          toStep: CheckoutStep.inspectionHandoff,
+          label: l10n.coStampsCtaInspection,
+          why: l10n.coStampsCtaInspectionWhy,
+        ),
+      // Paso fuera del catálogo (forward-compat): sin certeza del siguiente
+      // paso no se inventa un CTA.
+      _ => null,
+    };
+
+    return Column(
+      children: [
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 20),
+            children: [
+              ...banners,
+              _StampsCard(session: session, dataAge: age),
+            ],
+          ),
+        ),
+        if (cta != null)
+          // El aviso 21C llega al pie por [WizardDockNotice]: el dock del
+          // TransitionButton lo hereda solo, como en los demás pasos.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+            child: cta,
+          )
+        else if (dockNotice != null)
+          // Sin dock (paso desconocido) el aviso conserva el anclaje de la
+          // lámina (21C tal cual): pegado al pie y fuera del scroll.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+            child: dockNotice,
+          ),
+      ],
+    );
   }
 
   void _leave() {

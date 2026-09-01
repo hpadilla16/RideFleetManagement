@@ -2384,6 +2384,48 @@ abstract class AppLocalizations {
   /// **'Estado de hace {age}'**
   String coSessionAgeLabel(String age);
 
+  /// No description provided for @coStampsCtaPayment.
+  ///
+  /// In es, this message translates to:
+  /// **'Continuar al cobro'**
+  String get coStampsCtaPayment;
+
+  /// No description provided for @coStampsCtaPaymentWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Los términos están firmados; el cobro es el próximo paso.'**
+  String get coStampsCtaPaymentWhy;
+
+  /// No description provided for @coStampsCtaPaid.
+  ///
+  /// In es, this message translates to:
+  /// **'Confirmar el cobro'**
+  String get coStampsCtaPaid;
+
+  /// No description provided for @coStampsCtaPaidWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'Este botón solo existe porque el servidor ya tiene el cobro registrado.'**
+  String get coStampsCtaPaidWhy;
+
+  /// No description provided for @coStampsPaidBlockedWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'El cobro se hace en el mostrador o el kiosco. Este botón se desbloquea cuando el servidor lo registre.'**
+  String get coStampsPaidBlockedWhy;
+
+  /// No description provided for @coStampsCtaInspection.
+  ///
+  /// In es, this message translates to:
+  /// **'Continuar a la inspección'**
+  String get coStampsCtaInspection;
+
+  /// No description provided for @coStampsCtaInspectionWhy.
+  ///
+  /// In es, this message translates to:
+  /// **'El cobro está registrado; sigue la inspección del vehículo.'**
+  String get coStampsCtaInspectionWhy;
+
   /// Frame 11C — 422 NO_VEHICLE_ASSIGNED: sin unidad no hay entrega
   ///
   /// In es, this message translates to:
