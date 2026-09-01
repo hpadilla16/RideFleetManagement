@@ -196,6 +196,9 @@ button{font-family:inherit}
 .msg--bot{align-self:flex-start;background:var(--n-0);color:var(--text-2);border:1px solid var(--border);
   border-radius:14px 14px 14px 4px;padding:11px 13px;box-shadow:var(--sh-1)}
 .msg--bot b{color:var(--text-1);font-weight:660}
+.msg--pre{border-left:3px solid var(--teal-400);background:var(--teal-50);color:var(--teal-800)}
+.msg--pre b{color:var(--teal-800)}
+.msg--pre .plab{display:block;font-family:var(--font-mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--teal-600);margin-bottom:3px}
 .msg--bot ol{margin:8px 0 0 18px;display:flex;flex-direction:column;gap:5px}
 .msg--bot ol li b{font-weight:640}
 .src{
@@ -271,7 +274,8 @@ button{font-family:inherit}
   background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-md);
   padding:11px 13px;font-size:12.5px;line-height:1.55;color:var(--text-2);box-shadow:var(--sh-1);
 }
-.anno b{display:flex;align-items:center;gap:7px;color:var(--text-1);font-weight:660;margin-bottom:4px;font-size:12.5px}
+.anno b{color:var(--text-1);font-weight:640}
+.anno b.h{display:flex;align-items:center;gap:7px;font-weight:660;margin-bottom:4px;font-size:12.5px}
 .anno b i{
   width:18px;height:18px;border-radius:50%;background:var(--p-50);color:var(--p-800);
   display:inline-flex;align-items:center;justify-content:center;font-style:normal;
@@ -387,14 +391,14 @@ button{font-family:inherit}
     </div>
   </div>
   <div class="annos">
-    <div class="anno"><b><i>1</i>One pill, one promise</b>
+    <div class="anno"><b class="h"><i>1</i>One pill, one promise</b>
       The label is the question it answers — "¿Cómo se hace…?" / "How do I…?" (follows the app language).
       Teal dot = the assistant voice, the accent the design system already reserves for Voz AI; the product
       itself stays purple.</div>
-    <div class="anno"><b><i>·</i>Where it never appears</b>
+    <div class="anno"><b class="h"><i>·</i>Where it never appears</b>
       Kiosk and customer pages (no cached staff user → renders <code>null</code>), the screen-lock overlay,
       and print views. While a tour is running the pill yields to the tour — see 03.</div>
-    <div class="anno"><b><i>·</i>Why not the sidebar</b>
+    <div class="anno"><b class="h"><i>·</i>Why not the sidebar</b>
       Ride University in the nav is the <em>library</em>. The copilot is the <em>counter question</em> —
       three seconds, mid-task, customer waiting. It has to be on every screen and closer than navigation.</div>
   </div>
@@ -455,11 +459,9 @@ button{font-family:inherit}
           <button class="x" aria-label="Close">×</button>
         </div>
         <div class="cp-body">
-          <div class="cp-hello">Pregúntame cómo se hace cualquier cosa en RideFleet. Te explico — y si quieres, te enseño en la pantalla misma.</div>
           <div class="quick">
             <button>¿Cómo hago un check-out?</button>
             <button>¿Cómo cobro un pago?</button>
-            <button>¿Cómo bajo un carro a mantenimiento?</button>
           </div>
           <div class="msg msg--user">¿Cómo añado un conductor adicional?</div>
           <div class="msg msg--bot">
@@ -479,6 +481,10 @@ button{font-family:inherit}
               <button class="cta cta--ghost">Ver artículo</button>
             </div>
           </div>
+          <div class="msg msg--bot msg--pre">
+            <span class="plab">Pre-flight · antes de enseñar</span>
+            Te enseño aquí mismo en <b>R-20841</b> — los pasos son iguales en cualquier reserva.
+          </div>
         </div>
         <div class="cp-foot">
           <div class="cp-input">Escribe tu pregunta…
@@ -493,26 +499,33 @@ button{font-family:inherit}
     </div>
   </div>
   <div class="annos">
-    <div class="anno"><b><i>1</i>Steps, then the gotcha</b>
+    <div class="anno"><b class="h"><i>1</i>Steps, then the gotcha</b>
       The answer is the article's step list — short, numbered, in the asker's language (the bilingual body
       splits on its own <code>## … (Español)</code> heading, so no translation layer is needed). The gold
       box reuses the tour's "Where people trip" pattern: the one mistake that costs money, surfaced every time.</div>
-    <div class="anno"><b><i>2</i>Source chip = no inventing</b>
+    <div class="anno"><b class="h"><i>2</i>Source chip = no inventing</b>
       Every answer names the article or playbook it came from and links to it. An answer the copilot cannot
       source is an answer it does not give — see 04.</div>
-    <div class="anno"><b><i>3</i>Two verbs, one guardrail</b>
+    <div class="anno"><b class="h"><i>3</i>Two verbs, one guardrail</b>
       <b>Te enseño</b> fires <code>ride-university:start</code> with the mapped <code>moduleKey</code>;
       <b>Llévame allí</b> is a plain <code>router.push</code> to the mapped route. The footer line is a
       product commitment, permanently visible: the copilot explains and points — the agent's hands do the work.</div>
+    <div class="anno"><b class="h"><i>·</i>Pre-flight: right place first</b>
+      Before the dispatch, the copilot compares the current route against what the module needs and
+      <em>says</em> what happens next — teal bubble above. Here the agent is already inside a reservation,
+      so it teaches on the open record and says so. Wrong screen → "Te llevo a … primero". Needs a record →
+      "Abre cualquier reserva y sigo ahí". Nobody is ever teleported without being told.</div>
   </div>
 
   <!-- ================= SECTION 03 — THE HANDOFF ================= -->
   <div class="sec-label">03 · "Te enseño" — the handoff to the tour engine</div>
   <p class="sec-note">
-    The panel collapses to a teal chip and the <b>existing</b> TourHost takes the screen: scrim with a hole,
-    purple spotlight, step card — pixel-for-pixel the production overlay. The copilot added nothing to this
-    machinery; it only chose the module. When the walkthrough ends, <code>ride-university:module-walked</code>
-    fires and the chip re-opens with "¿Lo lograste?".
+    After the pre-flight announcement, the panel collapses to a teal chip and the <b>existing</b> TourHost
+    takes the screen: scrim with a hole, purple spotlight, step card — pixel-for-pixel the production
+    overlay. If the walkthrough lives on another screen, the copilot has already said "Te llevo a …
+    primero" — the navigation itself is TourHost's own <code>step.route</code> push; the copilot only adds
+    the warning. When the walkthrough ends, <code>ride-university:module-walked</code> fires and the chip
+    re-opens with "¿Lo lograste?".
   </p>
 
   <div class="screen">
@@ -577,15 +590,15 @@ button{font-family:inherit}
     </div>
   </div>
   <div class="annos">
-    <div class="anno"><b><i>1</i>This overlay already ships</b>
+    <div class="anno"><b class="h"><i>1</i>This overlay already ships</b>
       Scrim-with-a-hole, purple ring, 340px card, gotcha on the last step — this is <code>TourHost.jsx</code>
       exactly as it runs in production today, launched by one <code>CustomEvent</code>. The copilot's entire
       "guide me" feature is a dispatch call plus an intent→module map.</div>
-    <div class="anno"><b><i>2</i>The copilot steps aside</b>
+    <div class="anno"><b class="h"><i>2</i>The copilot steps aside</b>
       While the tour owns the screen the panel is a chip. Clicking it re-opens the conversation
       <em>without</em> killing the tour — the tour's state lives in <code>localStorage</code>
       (<code>tour-state.js</code>) and survives everything, including navigation and refresh.</div>
-    <div class="anno"><b><i>·</i>Asked from the wrong screen?</b>
+    <div class="anno"><b class="h"><i>·</i>Asked from the wrong screen?</b>
       Same flow. The tour engine navigates first (<code>step.route</code>), then spotlights. Ask "how do I
       add a driver" from the Dashboard and Te enseño still lands you on the reservation list, parked — next panel.</div>
   </div>
@@ -595,9 +608,10 @@ button{font-family:inherit}
   <div class="duo">
     <div>
       <p class="sec-note"><b>Needs a record.</b> "Additional drivers" lives inside one reservation's page, so
-      from Ride University the anchors don't exist yet. The tour engine already solves this: it <em>parks</em>
-      and watches (production bar below, verbatim) until the person opens any reservation — then picks up
-      exactly where the walkthrough begins.</p>
+      from Ride University the anchors don't exist yet. The copilot says so <em>before</em> dispatching —
+      "Necesitas tener una reserva abierta — abre cualquiera y sigo ahí" — and only then hands off to the
+      tour engine, which already <em>parks</em> and watches (production bar below, verbatim) until the
+      person opens any reservation, then picks up exactly where the walkthrough begins.</p>
       <div class="screen">
         <div class="frame" style="min-height:330px">
           <div class="main">

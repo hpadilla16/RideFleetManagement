@@ -132,6 +132,10 @@ way (`frontend/test/curriculum*.test.js` precedent). Rule going forward: a new
 KB article ships with its `tourModuleKey` (or an explicit `route`) the way it
 ships with a `sortOrder`.
 
+The map deliberately carries **no `requiresContext` column**: what a module
+needs before teaching (a route, or an open record) is derived at ask-time from
+the curriculum itself — see the pre-flight check in §5.
+
 ---
 
 ## 4. UX decisions (as mocked)
@@ -147,11 +151,12 @@ below that and **collapses to a chip whenever a tour state exists** (listen for
 the same localStorage key `tour-state.js TOUR_STORAGE_KEY` + the start event).
 
 **The handoff.** Answer card carries up to three CTAs, driven by the map row:
-- `Te enseño` → minimize to chip → dispatch `ride-university:start`
-  `{ track:'MODULE', moduleKey }`. Everything after that is TourHost's job —
-  including navigation to `step.route` and the **parking bar** when the module
-  `needsRecord` and no reservation is open (the bot never re-implements this;
-  mockup section 04 shows the production bar verbatim).
+- `Te enseño` → **pre-flight context check first (§5)** → announce → minimize
+  to chip → dispatch `ride-university:start` `{ track:'MODULE', moduleKey }`.
+  Everything after the dispatch is TourHost's job — including navigation to
+  `step.route` and the **parking bar** when the module `needsRecord` and no
+  reservation is open (the bot never re-implements this; mockup section 04
+  shows the production bar verbatim).
 - `Llévame allí` → `router.push(route)` only.
 - `Ver artículo` → `/knowledge-base` deep link to the slug.
 On `ride-university:module-walked`, the chip re-opens with a completion
@@ -173,7 +178,98 @@ the real record exists (`curriculum.js:78–89`).
 
 ---
 
-## 5. EN/ES copy (namespaced `copilot.*`, same i18n pattern as `training.*`)
+## 5. Pre-flight context check — right place before teaching
+
+Owner refinement (2026-09-01, his words translated): *"make sure the agent is
+in the CORRECT PLACE before starting to teach."*
+
+**The rule:** `Te enseño` never dispatches blind. Before firing the event, the
+copilot compares the current route/context against what the mapped module
+needs — its first step's `route`, and whether the module is record-scoped
+(`needsRecord`, `curriculum.js:35–40`) — and **says what happens next** before
+anything moves. The person is never teleported, and never watches a spotlight
+arm on the wrong screen.
+
+**What already exists vs. what is new — the honest split.** The *mechanics* of
+being in the wrong place are already solved by the tour engine:
+
+- Wrong screen → TourHost itself navigates: when `step.route && pathname !==
+  step.route` it calls `router.push(step.route)` before locating the anchor
+  (`TourHost.jsx:265–269`). Today that navigation is **silent**.
+- No record open → TourHost parks: `parkIfRecordScoped` (`TourHost.jsx:155–177`)
+  is applied to the very first settle at launch (`:215–219`), the persistent
+  waiting bar renders (`:413–465`), and a watcher polls until the person opens
+  a reservation (`resumeAt`, `:250–260`). Today the person *discovers* the bar
+  after pressing the button.
+- Already mid-record → the engine already distinguishes "on the module's first
+  step, still needs to open a record" from "inside one, just move to the next
+  screen" (`first` boundary logic, `TourHost.jsx:167`).
+
+The **new** part is purely an *announcement layer* in the copilot, run before
+the dispatch, so intent → words → motion, in that order. No TourHost change is
+required for outcomes (a) and (b); (c) reuses the parking bar as-is.
+
+**The check** is a pure helper beside the map (`intents.js`), testable like
+`curriculum.js` selectors:
+
+```js
+// preflightFor(module, pathname) → one of three outcomes
+function preflightFor(module, pathname) {
+  if (module.needsRecord) {
+    const inRecord = /^\/reservations\/[^/]+/.test(pathname);
+    return inRecord
+      ? { kind: 'HERE', sameRecord: true }        // outcome (a) + edge case
+      : { kind: 'NEEDS_RECORD', go: module.needsRecord }; // outcome (c)
+  }
+  const first = module.steps?.[0];
+  if (first?.route && pathname !== first.route)
+    return { kind: 'NAVIGATE', to: first.route }; // outcome (b)
+  return { kind: 'HERE' };                        // outcome (a)
+}
+```
+
+**The three outcomes, with copy:**
+
+| Outcome | When | The copilot says (ES / EN) | Then |
+|---|---|---|---|
+| (a) HERE | Current route already satisfies the first step (or a record-scoped module and a reservation is open) | "Empiezo aquí mismo." / "Starting right here." | Dispatch immediately; chip. |
+| (b) NAVIGATE | First step carries a `route` and we are elsewhere | "Te llevo a **{{screen}}** primero — la guía empieza allá." / "I'll take you to **{{screen}}** first — the guide starts there." | Announce (~1.2s beat), then dispatch; TourHost's own `step.route` push does the moving (`:265–269`). Announced, never silent. |
+| (c) NEEDS_RECORD | Record-scoped module, no reservation open | "Necesitas tener una reserva abierta — abre cualquiera y sigo ahí." / "You need a reservation open — open any one and I'll pick up there." | Say it up front, then dispatch; the engine's parking bar (`:413–465`) owns the wait, watcher resumes on any record. |
+
+**Edge case — mid-task on a different record.** The agent asks about
+additional drivers while inside reservation A but meaning reservation B. The
+copilot cannot know which record the question is "about" and must not guess or
+navigate away from live work: it **teaches on whatever record is open and says
+so** — "Te enseño aquí mismo en **{{ref}}** — los pasos son iguales en
+cualquier reserva." / "I'll show you right here on **{{ref}}** — the steps are
+the same on any reservation." (That sentence is the `sameRecord: true` branch
+of outcome (a); mocked as the teal pre-flight bubble in section 02.) Steps
+taught on the open record generalize because anchors are stable names, not
+records (`curriculum.js:18–20`). If they actually wanted record B, closing the
+tour and opening B costs two clicks — and a parked tour would follow them there
+anyway.
+
+**Derived, not stored — no `requiresContext` column in the intent map.** The
+context requirement is fully derivable from the curriculum the tour already
+obeys: `module.needsRecord` and `module.steps[0].route`. Storing it again in
+`intents.js` would recreate the drift the curriculum's one-file rule exists to
+kill (`curriculum.js:1–15`). For reference, the derived values for every
+currently mapped module:
+
+| Module | Derived pre-flight context | Source |
+|---|---|---|
+| `check-out` | record:reservation | `needsRecord:'/reservations'`, `curriculum.js:224` |
+| `check-in` | record:reservation | `curriculum.js:259` |
+| `take-payment` | record:reservation | `curriculum.js:290` |
+| `create-reservation` | route `/reservations` | first step route, `curriculum.js:189` |
+| `shuttle-dispatch` | route `/shuttles` | `curriculum.js:393` |
+| `shuttle-tracker` | route `/shuttle` | `curriculum.js:323` |
+| `users-and-locations` | route `/people` | `curriculum.js:463` |
+| (future `additional-drivers` micro-module) | record:reservation | would set `needsRecord:'/reservations'` |
+
+---
+
+## 6. EN/ES copy (namespaced `copilot.*`, same i18n pattern as `training.*`)
 
 | Key | EN | ES |
 |---|---|---|
@@ -192,15 +288,20 @@ the real record exists (`curriculum.js:78–89`).
 | `copilot.tellAdmin` | Tell an admin | Avisar a un admin |
 | `copilot.touring` | Copilot · guide running | Copiloto · guía en curso |
 | `copilot.done` | Did you get it done? | ¿Lo lograste? |
+| `copilot.preflight.here` | Starting right here. | Empiezo aquí mismo. |
+| `copilot.preflight.navigate` | I'll take you to {{screen}} first — the guide starts there. | Te llevo a {{screen}} primero — la guía empieza allá. |
+| `copilot.preflight.needsRecord` | You need a reservation open — open any one and I'll pick up there. | Necesitas tener una reserva abierta — abre cualquiera y sigo ahí. |
+| `copilot.preflight.sameRecord` | I'll show you right here on {{ref}} — the steps are the same on any reservation. | Te enseño aquí mismo en {{ref}} — los pasos son iguales en cualquier reserva. |
 | `copilot.adminOnly` | That screen needs an admin — here's what they'll do. | Esa pantalla la maneja un admin — esto es lo que va a hacer. |
 | `copilot.footer` | Explains and guides · never performs actions | Explica y guía · nunca ejecuta acciones |
 
 ---
 
-## 6. Smallest shippable Phase 1 (one branch)
+## 7. Smallest shippable Phase 1 (one branch)
 
-1. `frontend/src/lib/training/intents.js` — the map in §3 + a scorer over
-   titles/tags/aliases (pure, unit-tested like curriculum).
+1. `frontend/src/lib/training/intents.js` — the map in §3, a scorer over
+   titles/tags/aliases, and the pure `preflightFor()` helper from §5 (all
+   unit-tested like curriculum).
 2. `frontend/src/components/copilot/CopilotMount.jsx` + panel — mounted in
    `app/layout.js` beside `TourMount`; renders null without a staff user or
    while locked; collapses to chip during tours.
