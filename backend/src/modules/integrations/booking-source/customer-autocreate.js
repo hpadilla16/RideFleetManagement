@@ -8,10 +8,16 @@
  * flag is on, create a lightweight Customer from the staged row and let the
  * worker re-evaluate.
  *
- * NOT wired into economy/nu yet — R0 ships the shared code + tests only.
+ * WIRED (2026-09-01 audit): advantage, flexways and mex call this shared
+ * helper; economy, nu and tl-international still keep their own copies of the
+ * same function. All four hold the customer-email gate (writers #11-#14 in
+ * lib/customer-email.js) and booking-source.test.mjs asserts they stay in
+ * parity. The R0 note that used to sit here said none of them were wired,
+ * which had been false for long enough that nobody trusted the header.
  */
 
 import logger from '../../../lib/logger.js';
+import { importCustomerEmailOrNull } from '../../../lib/customer-email.js';
 
 // Same placeholder both sources use when the row has a name but no phone —
 // Customer.phone is required, and the counter fixes it at the desk.
@@ -48,7 +54,19 @@ export async function maybeCreateCustomerFromSource(prismaClient, extRes, opts =
 
   const firstName = (extRes.customerFirstName || '').trim();
   const lastName = (extRes.customerLastName || '').trim();
-  const email = (extRes.customerEmail || '').trim().toLowerCase();
+  // Writer #11 of the customer-email inventory (lib/customer-email.js) — the
+  // shared OTA path (advantage, flexways, mex). IMPORT policy: a scraped row
+  // that carries junk in the email column must NOT cost us the reservation, so
+  // the address is dropped to null and a warning names the tenant and the
+  // external ref. Without that warning this is indistinguishable from a source
+  // that simply had no email, and the cleanup has nothing to work from.
+  const email = importCustomerEmailOrNull(extRes.customerEmail, {
+    log: logger,
+    source: sourceName,
+    tenantId: extRes.tenantId,
+    externalRef: extRes.externalRef,
+    reservationId: extRes.promotedToReservationId ?? null,
+  }) || '';
   const phone = (extRes.customerPhone || '').trim();
 
   if (!firstName || !lastName) return null;

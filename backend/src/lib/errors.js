@@ -67,7 +67,14 @@ export function appErrorHandler(err, req, res, next) {
     return res.status(503).json({ error: err.message, retryAfterSeconds: err.retryAfterSeconds });
   }
   if (err instanceof AppError) {
-    return res.status(err.status).json({ error: err.message });
+    // Additive (2026-09-01): subclasses that carry a machine code (e.g.
+    // CustomerEmailError -> CUSTOMER_EMAIL_INVALID) surface it so the UI can
+    // highlight the offending field instead of parsing English. Errors without
+    // a `code` produce the exact same body as before.
+    return res.status(err.status).json({
+      error: err.message,
+      ...(err.code ? { code: err.code } : {})
+    });
   }
   if (isPoolTimeoutError(err)) {
     res.set('Retry-After', '5');

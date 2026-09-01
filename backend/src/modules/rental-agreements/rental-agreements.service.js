@@ -15,6 +15,7 @@ import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync
 import { recordMileageEntry } from '../vehicles/mileage-history.service.js';
 import { recordFuelReadingSafe } from '../vehicles/fuel-history.service.js';
 import { normalizeDob, isImplausibleAge } from '../../lib/dob.js';
+import { assertCustomerEmail } from '../../lib/customer-email.js';
 import {
   isStorageEnabled as inspectionPhotosStorageEnabled,
   uploadInspectionPhotosDetailed,
@@ -4173,12 +4174,23 @@ export const rentalAgreementsService = {
   },
 
   updateCustomer(id, patch) {
+    // Writer #5 of the customer-email inventory (lib/customer-email.js), and the
+    // ONLY one that writes RentalAgreement.customerEmail from a keyboard instead
+    // of snapshotting Customer.email. This is the exact column the contract
+    // mailer addresses, so a bad string here IS the 2026-08-31 incident. STAFF
+    // capture -> 400. `undefined` is passed straight through, because that is
+    // Prisma's "leave this column alone" and every other field in this patch
+    // depends on it — validating an absent value would turn "don't touch the
+    // email" into "erase the email".
+    const customerEmail = patch.customerEmail === undefined
+      ? undefined
+      : assertCustomerEmail(patch.customerEmail, { audience: 'staff' });
     return prisma.rentalAgreement.update({
       where: { id },
       data: {
         customerFirstName: patch.customerFirstName,
         customerLastName: patch.customerLastName,
-        customerEmail: patch.customerEmail,
+        customerEmail,
         customerPhone: patch.customerPhone,
         customerAddress1: patch.customerAddress1,
         customerAddress2: patch.customerAddress2,
@@ -4220,6 +4232,14 @@ export const rentalAgreementsService = {
     });
   },
 
+  // OUT OF SCOPE, DECLARED (2026-09-01). This writes AgreementDriver.email — a
+  // FOURTH email column, captured from a keyboard, ungated. It is genuinely the
+  // same failure mode, and it is genuinely not this change: no send path
+  // addresses an additional driver today (grep for agreementDriver + sendEmail
+  // returns nothing), so it cannot produce the incident this branch closes, and
+  // pulling in a fourth column mid-review is how a fix stops being reviewable.
+  // Named here rather than left silent, because an undeclared gap reads as an
+  // overlooked one. Next batch: same lib/customer-email.js, STAFF policy.
   addDriver(id, input) {
     return prisma.agreementDriver.create({
       data: {

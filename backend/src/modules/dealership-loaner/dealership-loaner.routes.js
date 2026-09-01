@@ -228,7 +228,21 @@ dealershipLoanerRouter.post('/intake', async (req, res, next) => {
     const row = await dealershipLoanerService.intake(req.user, req.body || {});
     res.status(201).json(row);
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    // Pass a MACHINE code through when the error carries one. Intake is the one
+    // capture surface where the counter never saw CUSTOMER_EMAIL_INVALID: this
+    // handler flattens everything to a bare 400, so the form could not tell
+    // "that email is not an address" from "that vehicle is already out" and had
+    // no field to highlight. Errors without a code are unchanged.
+    //
+    // The STATUS deliberately stays a hard 400. Honouring error.status would
+    // also re-route every OTHER typed failure this handler currently flattens,
+    // and re-statusing an endpoint the counter UI already reads is a separate
+    // change with its own blast radius. The email refusal is a 400 either way,
+    // so nothing is lost by leaving that alone.
+    res.status(400).json({
+      error: error.message,
+      ...(error.code ? { code: error.code } : {})
+    });
   }
 });
 

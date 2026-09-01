@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { prisma } from '../../lib/prisma.js';
 import { reservationsService } from '../reservations/reservations.service.js';
 import { LOANER_PROGRAM_FILTER } from '../../lib/program-category.js';
+import { assertCustomerEmail } from '../../lib/customer-email.js';
 // Mandatory swap photos (2026-07-16) — the SAME gate as the main swap path.
 // QA 2026-07-17: this path is a second, live, UI-driven mid-rental swap and it
 // had NO photo gate, which made the "hard block" not actually authoritative.
@@ -628,10 +629,19 @@ async function resolveCustomer(payload = {}, scope = {}) {
   const firstName = String(payload.firstName || '').trim();
   const lastName = String(payload.lastName || '').trim();
   const phone = String(payload.phone || '').trim();
-  const email = String(payload.email || '').trim().toLowerCase() || null;
   if (!firstName || !lastName || !phone) {
     throw new Error('Customer first name, last name, and phone are required');
   }
+
+  // Writer #6 of the customer-email inventory (lib/customer-email.js). STAFF
+  // capture at the dealership counter -> 400. Note the dedupe below is an EXACT
+  // `where: { email }` match, which is why the shared normalizer lowercases the
+  // whole address rather than only the domain.
+  //
+  // AFTER the required-name check, not before: a blank intake form should say
+  // what is actually missing, and complaining about the email of a request that
+  // has no name on it yet is the less useful of the two sentences.
+  const email = assertCustomerEmail(payload.email, { audience: 'staff' });
 
   if (email) {
     const existingByEmail = await prisma.customer.findFirst({

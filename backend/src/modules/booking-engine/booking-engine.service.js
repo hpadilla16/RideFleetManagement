@@ -7,6 +7,7 @@ import { reservationsService } from '../reservations/reservations.service.js';
 import { firePublicBookingConfirmationEmail } from '../reservations/reservation-confirmation-email.js';
 import { carSharingService } from '../car-sharing/car-sharing.service.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { assertCustomerEmail } from '../../lib/customer-email.js';
 import { renderBrandedEmail, resolveEmailBrand } from '../../lib/email-template.js';
 import { settingsService } from '../settings/settings.service.js';
 import { computeMarketplaceTripPricing, tenantPlatformFeeConfig } from '../car-sharing/car-sharing-pricing.js';
@@ -434,7 +435,12 @@ function customerName(customer) {
 }
 
 async function upsertPublicCustomer(tenantId, input = {}) {
-  const email = String(input?.email || '').trim().toLowerCase();
+  // Writer #10 of the customer-email inventory (lib/customer-email.js). Public
+  // storefront booking: the CUSTOMER is typing their own address, and the
+  // existing-row lookup below is an EXACT `where: { tenantId, email }` match, so
+  // it has to be the normalized form or the same person gets a second row.
+  // '' rather than null, so the required-fields check right below still speaks.
+  const email = assertCustomerEmail(input?.email, { audience: 'customer' }) || '';
   const phone = String(input?.phone || '').trim();
   const firstName = String(input?.firstName || '').trim();
   const lastName = String(input?.lastName || '').trim();

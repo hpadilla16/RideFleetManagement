@@ -15,6 +15,7 @@ import {
 // ({ tenantId: '__no_tenant__' }) for that case, and gives super-admins {}
 // or the explicit ?tenantId narrowing.
 import { scopeFor } from '../../lib/tenant-scope.js';
+import { AppError } from '../../lib/errors.js';
 import { auditFromReq, AUDIT_ACTIONS } from '../audit/audit.service.js';
 
 export const customersRouter = Router();
@@ -86,13 +87,21 @@ customersRouter.get('/:id/license-back', async (req, res) => {
   await serveCustomerDocument('license-back', req, res);
 });
 
-customersRouter.post('/', async (req, res) => {
+customersRouter.post('/', async (req, res, next) => {
   const required = ['firstName', 'lastName', 'phone'];
   const missing = required.filter((k) => !req.body?.[k]);
   if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
 
-  const row = await customersService.create(req.body, scopeFor(req));
-  res.status(201).json(row);
+  // `next` + try/catch, because this is Express 4: a rejected promise from an
+  // async handler is NOT routed to appErrorHandler on its own, it becomes an
+  // unhandled rejection and the request hangs. The email gate throws a
+  // ValidationError, so it has to be handed over explicitly.
+  try {
+    const row = await customersService.create(req.body, scopeFor(req));
+    res.status(201).json(row);
+  } catch (e) {
+    next(e);
+  }
 });
 
 customersRouter.patch('/:id', idempotency({ kind: 'vozia-customer' }), async (req, res) => {
@@ -137,7 +146,14 @@ customersRouter.patch('/:id', idempotency({ kind: 'vozia-customer' }), async (re
     }
     const row = await customersService.update(req.params.id, req.body || {}, scopeFor(req));
     res.json(row);
-  } catch {
+  } catch (e) {
+    // This handler's catch-all answers 404 for anything that goes wrong, which
+    // would turn "you typed GERENTE VOLVO into the email box" into "customer not
+    // found" — the counter would retry the same string forever. Surface the
+    // validation verdict with its own status and code first.
+    if (e instanceof AppError) {
+      return res.status(e.status).json({ error: e.message, ...(e.code ? { code: e.code } : {}) });
+    }
     res.status(404).json({ error: 'Customer not found' });
   }
 });
