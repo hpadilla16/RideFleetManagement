@@ -34,6 +34,8 @@ import { formatTenantWallClock } from '../../../../lib/tenant-time';
 import { displayNoteLines, hasDisplayNotes, isRecentNote, relativeNoteAge } from '../../../../lib/reservation-notes';
 import { useFeePreview } from '../../../../components/wizard/useFeePreview';
 import { FeePreviewPanel } from '../../../../components/wizard/FeePreviewPanel';
+import { MaintenanceCheckinBanner } from '../../../../components/wizard/MaintenanceCheckinBanner';
+import { buildDueItems, maintenanceGateBlocked } from '../../../../lib/maintenance-eval';
 import {
   OdometerInput, FuelLevelInput, CleanlinessInput, SmokingToggle
 } from '../../../../components/wizard/MetricInputs';
@@ -108,6 +110,19 @@ function CheckinWizard({ token, me, logout }) {
   const [manualPayment, setManualPayment] = useState({ amount: '', method: 'card', last4: '', reference: '' });
   const [signerName, setSignerName] = useState('');
   const [signatureDataUrl, setSignatureDataUrl] = useState('');
+  // Maintenance detection at check-in (Feature A, 2026-09-01). The vehicle's
+  // service schedules are fetched ONCE per wizard; the Step-3 banner
+  // re-evaluates them client-side against the TYPED odometer on every
+  // keystroke (lib/maintenance-eval.js mirrors the backend evalSchedule).
+  // The decision is ARMED here and FIRED at check-in close — nothing is
+  // written until the close payload carries it. Undo = flipping back to
+  // PENDING any time before the signature step submits.
+  const [maintSchedules, setMaintSchedules] = useState(null);
+  // A snooze marker consumed on wizard open (this IS the "re-surfaces at the
+  // next rental event" contract — cleared server-side, re-evaluated fresh).
+  const [maintPrevSnooze, setMaintPrevSnooze] = useState(null);
+  // { status: 'PENDING' | 'ARMED' | 'SNOOZED', note }
+  const [maintDecision, setMaintDecision] = useState({ status: 'PENDING', note: null });
 
   // Load reservation + agreement + tenant fee rates (for live preview)
   useEffect(() => {
@@ -164,6 +179,24 @@ function CheckinWizard({ token, me, logout }) {
             .catch((err) => {
               console.warn('[checkin-wizard] no checkout photos to compare against', err);
             });
+        }
+
+        // Maintenance detection (Feature A): consume the per-vehicle snooze
+        // marker (wizard open = the vehicle's next rental event) and fetch
+        // the service schedules the Step-3 banner evaluates against the typed
+        // odometer. Both fail-soft — a maintenance read must never stand
+        // between an agent and a check-in.
+        const maintVehicleId = res?.vehicle?.id || res?.rentalAgreement?.vehicleId || null;
+        if (maintVehicleId) {
+          api(`/api/maintenance/vehicles/${maintVehicleId}/snooze/consume`, {
+            method: 'POST',
+            body: JSON.stringify({ event: 'CHECKIN' })
+          }, token)
+            .then((r) => { if (r?.snoozed) setMaintPrevSnooze(r.stamp || {}); })
+            .catch(() => {});
+          api(`/api/maintenance/vehicles/${maintVehicleId}/schedules`, { bypassCache: true }, token)
+            .then((r) => setMaintSchedules(Array.isArray(r?.schedules) ? r.schedules : []))
+            .catch(() => setMaintSchedules([]));
         }
 
         // Fetch tenant-configured fee rates so Step 3 preview matches what
@@ -242,6 +275,19 @@ function CheckinWizard({ token, me, logout }) {
 
   const photosCaptured = Object.keys(photos).length;
   const photosRequired = STANDARD_ANGLES.length;
+
+  // Maintenance banner rows at the TYPED reading — re-evaluated per keystroke.
+  const maintItems = useMemo(
+    () => buildDueItems(maintSchedules || [], odometerIn ? Number(odometerIn) : null, Date.now()),
+    [maintSchedules, odometerIn]
+  );
+  // A corrected odometer can lift every row out of due — a decision armed
+  // against rows that no longer exist must not ride the close payload.
+  useEffect(() => {
+    if (maintItems.length === 0 && maintDecision.status !== 'PENDING') {
+      setMaintDecision({ status: 'PENDING', note: null });
+    }
+  }, [maintItems.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load the tenant's check-in inspection model + whether the customer already self-inspected
   // at return. When both say "customer", the agent photo step is optional.
@@ -339,6 +385,17 @@ function CheckinWizard({ token, me, logout }) {
         // timezone (the 2026-08-07 extension lesson). Omitted entirely when
         // untouched so the default "now" path is byte-identical to before.
         ...(canBackdate && actualReturnAt ? { returnedAt: actualReturnAt } : {}),
+        // Feature A: the ARMED maintenance decision fires at close — the
+        // backend opens the RO (or records the snooze marker + stamp) AFTER
+        // its own status sync. Omitted when nothing was due or no decision
+        // was made (due-soon-only path), so the legacy payload is unchanged.
+        ...(maintItems.length && maintDecision.status !== 'PENDING' ? {
+          maintenanceDecision: {
+            action: maintDecision.status === 'ARMED' ? 'SEND' : 'SNOOZE',
+            serviceTypes: maintItems.map((i) => i.serviceType),
+            note: maintDecision.note || null,
+          }
+        } : {}),
         signerName,
         signatureDataUrl,
         manualPayment: paymentMode === 'manual' && Number(manualPayment.amount) > 0
@@ -380,7 +437,10 @@ function CheckinWizard({ token, me, logout }) {
       // Counter-UX Item 2 (2026-08-31): a reading BELOW the check-out odometer
       // no longer blocks — it warns inline instead (odometer swaps and
       // corrections are real; the Admin Corrections module is the precedent).
-      case 2: return Number(odometerIn) > 0;
+      // Feature A (2026-09-01): Continue is ALSO gated while an OVERDUE
+      // maintenance row is pending a decision — the agent must arm
+      // send-to-maintenance or snooze. Due-soon rows never gate.
+      case 2: return Number(odometerIn) > 0 && !maintenanceGateBlocked(maintItems, maintDecision.status);
       case 3: return paymentMode === 'autocharge' || (paymentMode === 'manual' && Number(manualPayment.amount) > 0);
       // 2026-07-28 (LAX #9): the customer signature at check-IN is OPTIONAL —
       // it must never block completion (Hector). The pad stays available and
@@ -406,7 +466,11 @@ function CheckinWizard({ token, me, logout }) {
         return 'Captura al menos 1 foto del return';
       case 2:
         // Below-checkout readings WARN inline in Step3Metrics but never block
-        // (Counter-UX Item 2), so the only hard requirement left is > 0.
+        // (Counter-UX Item 2), so the hard requirements are > 0 plus the
+        // Feature A maintenance decision when something is overdue.
+        if (Number(odometerIn) > 0 && maintenanceGateBlocked(maintItems, maintDecision.status)) {
+          return t('maintCheckin.gateHint');
+        }
         return 'Ingresa el odómetro de regreso (mayor a 0)';
       case 3:
         return 'En pago manual, ingresa un monto mayor a $0.00 (o elige auto-cobro en 24h)';
@@ -513,6 +577,18 @@ function CheckinWizard({ token, me, logout }) {
               canBackdate={canBackdate}
               actualReturnAt={actualReturnAt} onActualReturnAt={setActualReturnAt}
               feePreview={feePreview}
+              maintItems={maintItems}
+              maintDecision={maintDecision}
+              maintPrevSnooze={maintPrevSnooze}
+              maintUnit={reservation?.vehicle?.internalNumber || reservation?.vehicle?.plate || 'vehicle'}
+              maintStampPreview={{
+                who: me?.fullName || me?.name || me?.email || '—',
+                res: reservation?.reservationNumber || '—',
+                when: new Date().toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
+              }}
+              onMaintArm={() => setMaintDecision({ status: 'ARMED', note: null })}
+              onMaintUndo={() => setMaintDecision({ status: 'PENDING', note: null })}
+              onMaintSnooze={(note) => setMaintDecision({ status: 'SNOOZED', note })}
             />
           )}
           {step === 3 && (
@@ -805,7 +881,9 @@ function Step3Metrics({
   smokingDetected, onSmokingDetected,
   waiveLateFee, onWaiveLateFee,
   canBackdate, actualReturnAt, onActualReturnAt,
-  feePreview
+  feePreview,
+  maintItems, maintDecision, maintPrevSnooze, maintUnit, maintStampPreview,
+  onMaintArm, onMaintUndo, onMaintSnooze
 }) {
   const { t } = useTranslation();
   const odoOut = Number(agreement?.odometerOut || 0);
@@ -849,6 +927,21 @@ function Step3Metrics({
             })}
           </div>
         ) : null}
+        {/* Feature A (2026-09-01): the maintenance banner lives DIRECTLY
+            under the odometer field it reacts to — cause above effect. It
+            re-evaluates on every keystroke; the decision is armed here and
+            fires at check-in close. */}
+        <MaintenanceCheckinBanner
+          items={maintItems}
+          unit={maintUnit}
+          typedOdometer={odometerIn ? Number(odometerIn) : null}
+          decision={maintDecision}
+          onArm={onMaintArm}
+          onUndo={onMaintUndo}
+          onSnooze={onMaintSnooze}
+          stampPreview={maintStampPreview}
+          prevSnooze={maintPrevSnooze}
+        />
         <FuelLevelInput
           value={fuelIn}
           onChange={onFuelIn}
@@ -1168,6 +1261,11 @@ function Step6Success({ result, reservation, agreement, token, onDone }) {
   const isUnpaid = result?.reservationStatus === 'CHECKED_IN_UNPAID';
   const [emailing, setEmailing] = useState(false);
   const [emailMsg, setEmailMsg] = useState('');
+  // Feature A: the close's maintenance outcome. FAILED keeps a retry that
+  // re-attempts the RO-open (the check-in itself already completed — money
+  // first; the car just needs its manual push into the maintenance pool).
+  const [maint, setMaint] = useState(result?.maintenance || null);
+  const [maintRetrying, setMaintRetrying] = useState(false);
   const handleResendEmail = async () => {
     if (!agreement?.id) return;
     setEmailing(true);
@@ -1182,6 +1280,23 @@ function Step6Success({ result, reservation, agreement, token, onDone }) {
       setEmailMsg('Failed: ' + (err.message || 'unknown'));
     } finally {
       setEmailing(false);
+    }
+  };
+  const { t } = useTranslation();
+  const unit = reservation?.vehicle?.internalNumber || reservation?.vehicle?.plate || 'vehicle';
+  const handleMaintRetry = async () => {
+    if (!maint?.decisionId || maintRetrying) return;
+    setMaintRetrying(true);
+    try {
+      const out = await api(`/api/maintenance/checkin-decisions/${maint.decisionId}/retry`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      }, token);
+      setMaint({ ...maint, ...out });
+    } catch (err) {
+      setMaint({ ...maint, status: 'FAILED', error: err?.message || 'Retry failed' });
+    } finally {
+      setMaintRetrying(false);
     }
   };
   return (
@@ -1220,6 +1335,56 @@ function Step6Success({ result, reservation, agreement, token, onDone }) {
         </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Feature A — pool hand-off / snooze / failure strip (mockup state 3) */}
+        {maint?.status === 'SENT' && (
+          <div data-testid="maint-success-sent" style={{
+            ...sectionBox, background: 'rgba(239,68,68,.05)', border: '0.5px solid #FCA5A5',
+          }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
+              <span style={{ ...pillBase, background: '#F3F4F6', color: '#9CA3AF', textDecoration: 'line-through' }}>Rentable</span>
+              <span aria-hidden="true" style={{ color: '#9CA3AF' }}>→</span>
+              <span style={{ ...pillBase, background: '#FEE2E2', color: '#991B1B' }}>{t('maintCheckin.poolMaintenance')}</span>
+            </div>
+            <div style={{ fontSize: 13, color: '#374151' }}>
+              {t('maintCheckin.success.handoff', { unit, ro: maint.roLabel || maint.repairOrderId || 'RO' })}
+            </div>
+            <a href="/maintenance" style={{ display: 'inline-block', marginTop: 6, fontSize: 12, fontWeight: 600, color: '#991B1B', textDecoration: 'underline' }}>
+              {t('maintCheckin.success.openRo', { ro: maint.roLabel || 'RO' })}
+            </a>
+          </div>
+        )}
+        {maint?.status === 'SNOOZED' && (
+          <div data-testid="maint-success-snoozed" style={{ ...sectionBox }}>
+            <div style={{ fontSize: 13, color: '#374151' }}>
+              😴 {t('maintCheckin.success.snoozed', { unit })}
+            </div>
+          </div>
+        )}
+        {maint?.status === 'FAILED' && (
+          <div data-testid="maint-success-failed" style={{
+            ...sectionBox, background: 'rgba(245,158,11,.08)', border: '0.5px solid rgba(245,158,11,.4)',
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#92400E' }}>
+              ⚠ {t('maintCheckin.success.failed', { unit })}
+            </div>
+            {maint?.error ? (
+              <div style={{ fontSize: 11, color: '#92400E', opacity: 0.85, marginTop: 4 }}>{maint.error}</div>
+            ) : null}
+            <div style={{ display: 'flex', gap: 10, marginTop: 8, alignItems: 'center' }}>
+              {maint?.decisionId ? (
+                <button type="button" onClick={handleMaintRetry} disabled={maintRetrying} style={{
+                  padding: '6px 12px', background: '#92400E', color: '#fff', border: 'none',
+                  borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: maintRetrying ? 'wait' : 'pointer',
+                }}>
+                  {maintRetrying ? '…' : t('maintCheckin.success.retry')}
+                </button>
+              ) : null}
+              <a href="/maintenance" style={{ fontSize: 12, fontWeight: 600, color: '#92400E', textDecoration: 'underline' }}>
+                {t('maintCheckin.success.openManually')}
+              </a>
+            </div>
+          </div>
+        )}
         {result?.feesTotal > 0 && (
           <div style={{
             ...sectionBox,

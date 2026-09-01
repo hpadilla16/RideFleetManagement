@@ -48,6 +48,8 @@
       "regExpiring": "Marbete vence en {{days}} días — {{unit}}",
       "regExpired": "Marbete vencido — {{unit}}",
       "maintOverdue": "Mantenimiento vencido — {{service}}, {{unit}}",
+      "maintSnoozed": "Mantenimiento pospuesto en el check-in — {{unit}}",
+      "maintCheckinSent": "Enviado a mantenimiento en el check-in — {{unit}} · {{ro}}",
       "billingSuspended": "Suscripción suspendida — pago vencido"
     },
     "src": {
@@ -2189,6 +2191,66 @@
     "showingAll": "Mostrando todos los vehículos",
     "showAll": "Ver todos los vehículos",
     "showMatching": "Ver solo los disponibles del tipo"
+  },
+  "maintCheckin": {
+    "title": "Mantenimiento pendiente con este odómetro",
+    "sub": "Recalculado con la lectura que acabas de entrar — {{odo}} mi",
+    "src": "Reglas de servicio · {{unit}}",
+    "prevSnooze": "Pospuesto en el último evento de renta por {{who}} · {{when}} — reevaluado con esta lectura",
+    "chip": {
+      "overdueMi": "{{n}} mi vencido",
+      "overdueDays": "{{n}} días vencido",
+      "dueSoonMi": "vence en {{n}} mi",
+      "dueSoonDays": "vence en {{n}} días"
+    },
+    "svc": {
+      "LOF": "Cambio de aceite",
+      "TIRE_ROTATION": "Rotación de gomas",
+      "BRAKES": "Frenos",
+      "INSPECTION": "Marbete / inspección",
+      "OTHER": "Servicio"
+    },
+    "metaMiles": "último a {{last}} · vence a {{due}} · ahora {{now}}",
+    "metaDays": "último {{last}} · vence {{due}}",
+    "intervalMiles": "cada {{n}} mi",
+    "intervalDays": "cada {{n}} días",
+    "action": {
+      "send": "Enviar a mantenimiento",
+      "snooze": "Continuar sin acción…"
+    },
+    "consequence": "Al completar esta devolución, {{unit}} sale del pool rentable (estatus → Mantenimiento) y se abre una orden de reparación con los renglones listados. No aparecerá en disponibilidad ni en el planner hasta completar la RO.",
+    "armed": {
+      "msg": "Se enviará a mantenimiento al completar la devolución.",
+      "sub": "El cambio de estatus y la orden de reparación ocurren al cierre — nada se mueve mientras el cliente sigue en el counter."
+    },
+    "snoozed": {
+      "msg": "Pospuesto — reaparece en el próximo check-out o check-in de {{unit}}."
+    },
+    "undo": "Deshacer",
+    "gateHint": "Hay mantenimiento vencido con esta lectura — elige Enviar a mantenimiento o posponer para continuar.",
+    "snooze": {
+      "title": "Posponer hasta el próximo evento de renta de {{unit}}",
+      "body": "Este recordatorio reaparece automáticamente en el próximo check-out o check-in del vehículo — lo que ocurra primero — recalculado con el odómetro de ese momento. La lista de Mantenimiento Pendiente no cambia; nunca se pospone.",
+      "note": "Añade una nota para el taller (opcional)",
+      "notePlaceholder": "ej. taller a capacidad, se agenda esta semana…",
+      "stamp": "El posponer se registra automáticamente — {{who}} · {{res}} · {{odo}} mi · {{when}} — sin clics extra.",
+      "back": "Volver",
+      "confirm": "Continuar — recuérdame en el próximo check-out o check-in"
+    },
+    "poolMaintenance": "Mantenimiento",
+    "success": {
+      "handoff": "{{unit}} salió del pool rentable. Se abrió {{ro}}.",
+      "openRo": "Abrir {{ro}} →",
+      "snoozed": "Mantenimiento pospuesto — reaparece en el próximo evento de renta de {{unit}}.",
+      "failed": "No se pudo mover {{unit}} a mantenimiento — el check-in se completó; abre la orden de reparación manualmente.",
+      "retry": "Reintentar",
+      "openManually": "Abrir Mantenimiento →"
+    },
+    "reprompt": {
+      "title": "Recordatorio de mantenimiento — pospuesto en el último check-in",
+      "body": "{{who}} lo pospuso el {{when}} ({{res}}). Sigue pendiente con el odómetro actual:",
+      "open": "Abrir Mantenimiento →"
+    }
   },
   "checkinWizard": {
     "mileagePrefilled": "Prellenado con el último millaje conocido del vehículo — edítalo si el odómetro marca otra cosa.",

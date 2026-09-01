@@ -6710,3 +6710,53 @@ model NotificationRead {
   @@unique([userId, notificationId])
   @@index([notificationId])
 }
+
+// Maintenance detection at check-in (Feature A, 2026-09-01) — the decision
+// stamp + snooze marker in ONE table (NOTES §3 gap A1, "a row in the stamp
+// table flagged active"). Each row records what the agent chose in the
+// check-in wizard's Step 3 (SEND to maintenance / SNOOZE until the next
+// rental event) with the silent audit stamp: who, reservation, odometer,
+// when. The per-vehicle snooze MARKER is the latest SNOOZE row with
+// clearedAt IS NULL — both wizards consume it on open (clear + re-evaluate
+// fresh), so no timer exists anywhere. Loose ids, no @relation (observation
+// style, same reasoning as NotificationEvent): a deleted vehicle or
+// reservation must never cascade into the audit trail.
+model MaintenanceCheckinDecision {
+  id                String  @id @default(cuid())
+  tenantId          String
+  vehicleId         String
+  reservationId     String?
+  rentalAgreementId String?
+  // Denormalized for the stamp line ("J. Rivera · RES-849112 · 48,730 mi").
+  reservationNumber String?
+
+  // SEND | SNOOZE — string + comment per current schema convention.
+  decision String
+  // The typed return odometer the decision was made against.
+  odometer Int?
+  // Optional collapsed note for the maintenance board (snooze path).
+  note String?
+  // The service types listed in the banner at decision time (overdue +
+  // due-soon riders), JSON array of ServiceType strings.
+  serviceTypesJson String?
+
+  // SEND execution trail: set when the queued RO opened at check-in close;
+  // lastError keeps the most recent failure so the retry has context.
+  repairOrderId String?
+  lastError     String?
+
+  // The silent stamp — byName denormalized at write time (observation style).
+  byUserId String?
+  byName   String?
+
+  createdAt DateTime @default(now())
+  // Snooze marker lifecycle: cleared by the vehicle's next wizard open
+  // (CHECKOUT | CHECKIN — whichever comes first) or superseded by a newer
+  // decision at close. Null on a SNOOZE row = marker is ACTIVE.
+  clearedAt    DateTime?
+  clearedEvent String?
+
+  @@index([tenantId, vehicleId, createdAt])
+  // The marker lookup: active snoozes for one vehicle.
+  @@index([vehicleId, decision, clearedAt])
+}

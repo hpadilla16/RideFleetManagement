@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { scopeFor } from '../../lib/tenant-scope.js';
 import { repairOrdersService } from './repair-orders.service.js';
 import { maintenanceService } from './maintenance.service.js';
+import { maintenanceCheckinService } from './maintenance-checkin.service.js';
 
 export const repairOrdersRouter = Router();
 export const maintenanceRouter = Router();
@@ -40,3 +41,12 @@ maintenanceRouter.put('/vehicles/:vehicleId/schedules', ok((req) => maintenanceS
 // "Log service": rolls the baseline to the vehicle's current odometer + now (server-side read).
 maintenanceRouter.post('/vehicles/:vehicleId/schedules/:serviceType/log-service', ok((req) => maintenanceService.logService(req.params.vehicleId, req.params.serviceType, scopeFor(req), { actorUserId: req.user?.id || null })));
 maintenanceRouter.delete('/vehicles/:vehicleId/schedules/:serviceType', ok((req) => maintenanceService.deleteSchedule(req.params.vehicleId, req.params.serviceType, scopeFor(req))));
+
+// ── Maintenance detection at check-in (Feature A, 2026-09-01) ──
+// Consume the per-vehicle snooze marker on wizard open (check-out AND
+// check-in call this): marker present → cleared + stamp returned so the
+// wizard re-prompts fresh against the current odometer; absent → {snoozed:false}.
+maintenanceRouter.post('/vehicles/:vehicleId/snooze/consume', ok((req) => maintenanceCheckinService.consumeSnooze(req.params.vehicleId, req.body?.event, scopeFor(req))));
+// Retry a send-to-maintenance whose RO-open failed at check-in close
+// ("couldn't move to maintenance — open manually" → this endpoint).
+maintenanceRouter.post('/checkin-decisions/:id/retry', ok((req) => maintenanceCheckinService.retryCheckinDecision(req.params.id, scopeFor(req))));

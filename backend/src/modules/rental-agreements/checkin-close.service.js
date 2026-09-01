@@ -34,6 +34,7 @@ import logger from '../../lib/logger.js';
 import { recordMileageEntrySafe } from '../vehicles/mileage-history.service.js';
 import { recordFuelReadingSafe } from '../vehicles/fuel-history.service.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
+import { executeCheckinMaintenanceDecisionSafe } from '../maintenance/maintenance-checkin.service.js';
 import { feeEngineService } from '../fees/fee-engine.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { sendInvoiceAfterCheckin, sendReceiptPaidInFull } from './checkin-emails.service.js';
@@ -481,6 +482,34 @@ export async function closeAgreementWithCheckinFees(
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Step 6b — Maintenance detection at check-in (Feature A, 2026-09-01)
+  // ─────────────────────────────────────────────────────────────────────────
+  // The Step-3 decision was ARMED in the wizard and FIRES here — deliberately
+  // AFTER both balance branches' syncVehicleStatusForReservation calls above:
+  // the sync sets the returned car AVAILABLE, which is exactly the state the
+  // RO-open transition (setVehicleInMaintenance) can flip to the locked
+  // IN_MAINTENANCE. Fail-open by contract: the executor never throws, so a
+  // failed RO-open cannot block the check-in that already settled the money —
+  // the wizard surfaces "couldn't move to maintenance — open manually" from
+  // the FAILED outcome, with a retry that hits the maintenance router.
+  let maintenance = null;
+  if (payload.maintenanceDecision && agreement.vehicleId) {
+    maintenance = await executeCheckinMaintenanceDecisionSafe({
+      tenantId: agreement.tenantId,
+      vehicleId: agreement.vehicleId,
+      reservationId: agreement.reservationId,
+      rentalAgreementId: agreement.id,
+      reservationNumber: agreement.reservation?.reservationNumber || null,
+      locationId: agreement.returnLocationId || agreement.pickupLocationId || null,
+      action: payload.maintenanceDecision.action,
+      serviceTypes: payload.maintenanceDecision.serviceTypes,
+      note: payload.maintenanceDecision.note,
+      odometer: odometerIn ?? agreement.odometerIn,
+      actorUserId: actorUserId || null,
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Step 7 — Audit logs
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -510,6 +539,13 @@ export async function closeAgreementWithCheckinFees(
         newBalance,
         autochargeJobId,
         waiveLateFee,
+        // Feature A: the maintenance decision outcome rides the same audit
+        // row every close already writes (SENT/SNOOZED/FAILED + RO id).
+        ...(maintenance ? {
+          maintenanceDecision: String(payload.maintenanceDecision?.action || '').toUpperCase(),
+          maintenanceOutcome: maintenance.status,
+          maintenanceRepairOrderId: maintenance.repairOrderId || null,
+        } : {}),
         ip: actorIp || null
       })
     }
@@ -527,7 +563,10 @@ export async function closeAgreementWithCheckinFees(
     reservationStatus: newReservationStatus,
     agreementStatus: newStatus,
     autochargeJobId,
-    autochargeAt
+    autochargeAt,
+    // Feature A outcome for the wizard's success step: SENT (hand-off strip
+    // naming the RO), SNOOZED, or FAILED (retry link). Null = no decision.
+    maintenance
   };
 }
 
