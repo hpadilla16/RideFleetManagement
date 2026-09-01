@@ -15,6 +15,9 @@ import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/token_store.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
 import 'package:rideops/features/dashboard/application/dashboard_controller.dart';
+import 'package:rideops/core/l10n/app_localizations_en.dart';
+import 'package:rideops/features/dashboard/domain/dashboard_queues.dart';
+import 'package:rideops/features/dashboard/presentation/widgets/queue_cards.dart';
 import 'package:rideops/features/dashboard/presentation/home_screen.dart';
 import 'package:rideops/features/dashboard/presentation/home_skeleton.dart';
 import 'package:rideops/features/checkout/presentation/checkout_wizard_screen.dart';
@@ -287,8 +290,14 @@ void main() {
     await pumpHome(tester);
 
     expect(find.text('Yard at ease'), findsOneWidget);
-    expect(find.text('All 9 queues at zero'), findsOneWidget,
-        reason: 'programa BOTH: 8 secciones + En renta');
+    expect(find.text('All queues at zero'), findsOneWidget);
+    for (final q in DashboardQueue.values) {
+      expect(
+        find.text(queueNameOf(AppLocalizationsEn(), q)),
+        findsWidgets,
+        reason: 'programa BOTH: las 9 colas se listan como chips ($q)',
+      );
+    }
     // En renta tiene su camino también en este estado (chip tocable).
     expect(find.text('On rent'), findsOneWidget);
   });

@@ -9,44 +9,63 @@ import 'package:rideops/core/l10n/app_localizations_es.dart';
 ///
 /// La app mostraba "intentado 1 veces", "1 envíos esperando" y — peor, porque
 /// lo LEE el lector de pantalla — "1 pendientes de envío". Todas eran claves
-/// que interpolaban `{count}` en una frase cuyo sustantivo/verbo flexiona,
-/// sin `{count, plural, ...}`. El patrón correcto ya existía al lado
+/// que interpolaban un número en una frase cuyo sustantivo/verbo flexiona,
+/// sin `{n, plural, ...}`. El patrón correcto ya existía al lado
 /// (`outboxDeadBanner`), así que el defecto no fue no saber: fue que nada
 /// impedía escribir la forma mala.
 ///
 /// Este archivo es ese impedimento. Un comentario en el .arb no se sostiene
-/// solo — una prueba sí. Regla: TODA clave cuyo mensaje interpole `{count}`
-/// usa ICU plural, o está en [_sinPluralJustificado] con un motivo escrito.
-/// Agregar una clave nueva con `{count}` y sin plural rompe la suite; la
-/// salida dice exactamente qué hacer.
+/// solo — una prueba sí.
 ///
-/// Ojo con la exención: NO es una lista de "pendientes". Es la lista de
-/// lugares donde `{count}` no flexiona nada (abreviaturas de unidad, formas
-/// "X de Y", contadores tope "N+"). Si una entrada de ahí deja de aplicar,
-/// la prueba de higiene la delata en vez de dejarla pudrirse.
+/// ALCANCE (review GD-S6): no solo `{count}`. La primera versión de este
+/// guardián miraba esa única variable y dejó vivo un contraejemplo en el
+/// mismo archivo: `coStepsSheetTitle` usa `{total}` y gobierna concordancia.
+/// Ahora se mira TODO placeholder declarado `"type": "int"` en la metadata
+/// `@` de la plantilla — el dato ya estaba en el .arb, nadie lo leía.
+/// Ampliarlo destapó cuatro concordancias rotas más (summaryQueueTitle,
+/// outboxDrainProgress, coJoinDonePill y el propio coStepsSheetTitle).
+///
+/// LA EXENCIÓN NO ES UNA LISTA DE PENDIENTES. Es la lista de lugares donde
+/// el número no flexiona nada, y — regla que costó una revisión — el motivo
+/// tiene que ser una propiedad de LA CADENA, nunca un invariante del que
+/// llama. "El llamador solo pasa el tope" no vale: ni la cadena ni esta
+/// prueba pueden sostenerlo, y el día que el llamador cambie, el texto se
+/// rompe en silencio. Motivos válidos: abreviatura de unidad, forma "X de Y"
+/// donde el sustantivo concuerda con el Y LITERAL, el "+" que hace plural la
+/// frase por construcción, o que no haya sustantivo que concordar.
 void main() {
-  final es = _leerArb('es');
-  final en = _leerArb('en');
+  final plantilla = _leerArb('es');
+  final es = plantilla.mensajes;
+  final en = _leerArb('en').mensajes;
 
   group('plurales ICU en los .arb', () {
-    test('es: toda clave con {count} usa plural o está justificada', () {
-      _exigirPlural(es, 'app_es.arb');
+    test('es: todo placeholder int usa plural o está justificado', () {
+      _exigirPlural(es, plantilla.intsPorClave, 'app_es.arb');
     });
 
-    test('en: toda clave con {count} usa plural o está justificada', () {
-      _exigirPlural(en, 'app_en.arb');
+    test('en: todo placeholder int usa plural o está justificado', () {
+      // app_en.arb no lleva metadata `@` (no es la plantilla): los tipos
+      // salen de app_es.arb, lo que de paso obliga a que las dos traigan
+      // los mismos huecos.
+      _exigirPlural(en, plantilla.intsPorClave, 'app_en.arb');
     });
 
     test('la lista de exentas no se pudre (sin entradas obsoletas)', () {
       final obsoletas = <String, String>{};
-      for (final clave in _sinPluralJustificado.keys) {
+      for (final entrada in _sinPluralJustificado.keys) {
+        final partes = entrada.split('.');
+        final clave = partes[0];
+        final hueco = partes[1];
         final mensaje = es[clave];
         if (mensaje == null) {
-          obsoletas[clave] = 'la clave ya no existe en app_es.arb';
-        } else if (!_usaCount(mensaje)) {
-          obsoletas[clave] = 'la clave ya no interpola {count}';
-        } else if (_usaPlural(mensaje)) {
-          obsoletas[clave] = 'la clave YA usa plural — sácala de la exención';
+          obsoletas[entrada] = 'la clave ya no existe en app_es.arb';
+        } else if (!(plantilla.intsPorClave[clave] ?? const <String>{})
+            .contains(hueco)) {
+          obsoletas[entrada] = 'ya no hay un placeholder int llamado $hueco';
+        } else if (!_usa(mensaje, hueco)) {
+          obsoletas[entrada] = 'el mensaje ya no interpola ese hueco';
+        } else if (_esPlural(mensaje, hueco)) {
+          obsoletas[entrada] = 'YA usa plural — sácala de la exención';
         }
       }
       expect(
@@ -57,32 +76,42 @@ void main() {
       );
     });
 
-    test('paridad es/en: mismas claves con {count} y mismo uso de plural', () {
-      final clavesEs = es.keys.where((k) => _usaCount(es[k]!)).toSet();
-      final clavesEn = en.keys.where((k) => _usaCount(en[k]!)).toSet();
-      expect(
-        clavesEs.difference(clavesEn),
-        isEmpty,
-        reason: 'claves con {count} que existen en es pero no en en',
-      );
-      expect(
-        clavesEn.difference(clavesEs),
-        isEmpty,
-        reason: 'claves con {count} que existen en en pero no en es',
-      );
-
-      // Un idioma con plural y el otro sin él es el bug de origen visto por
-      // la mitad: el emulador en español decía "1 envíos" mientras el inglés
-      // hubiera podido estar bien (o al revés).
-      final desparejas = <String>[
-        for (final k in clavesEs)
-          if (_usaPlural(es[k]!) != _usaPlural(en[k]!)) k,
-      ];
+    test('paridad es/en: mismo uso de plural, o asimetría justificada', () {
+      final desparejas = <String>[];
+      for (final entrada in plantilla.intsPorClave.entries) {
+        final clave = entrada.key;
+        final mes = es[clave];
+        final men = en[clave];
+        if (mes == null || men == null) continue;
+        for (final hueco in entrada.value) {
+          if (_esPlural(mes, hueco) == _esPlural(men, hueco)) continue;
+          if (_asimetriaJustificada.containsKey('$clave.$hueco')) continue;
+          desparejas.add('$clave.$hueco');
+        }
+      }
       expect(
         desparejas,
         isEmpty,
-        reason: 'plural en un idioma y no en el otro: $desparejas',
+        reason: 'Plural en un idioma y no en el otro: $desparejas.\n'
+            'Casi siempre es "arreglé uno y olvidé el otro". Si de verdad un '
+            'idioma no flexiona ahí (el inglés a menudo no), agrégalo a '
+            '_asimetriaJustificada CON el motivo.',
       );
+    });
+
+    test('la lista de asimetrías tampoco se pudre', () {
+      final obsoletas = <String>[];
+      for (final entrada in _asimetriaJustificada.keys) {
+        final partes = entrada.split('.');
+        final mes = es[partes[0]];
+        final men = en[partes[0]];
+        if (mes == null || men == null) {
+          obsoletas.add('$entrada: la clave ya no existe');
+        } else if (_esPlural(mes, partes[1]) == _esPlural(men, partes[1])) {
+          obsoletas.add('$entrada: ya no hay asimetría que justificar');
+        }
+      }
+      expect(obsoletas, isEmpty, reason: obsoletas.join('\n'));
     });
   });
 
@@ -95,7 +124,10 @@ void main() {
     final enL10n = AppLocalizationsEn();
 
     test('outboxAttempts: 1 → "vez"/"once", 2 → "veces"/"times"', () {
-      expect(esL10n.outboxAttempts(1, '10:30'), 'intentado 1 vez · último 10:30');
+      expect(
+        esL10n.outboxAttempts(1, '10:30'),
+        'intentado 1 vez · último 10:30',
+      );
       expect(
         esL10n.outboxAttempts(3, '10:30'),
         'intentado 3 veces · último 10:30',
@@ -124,69 +156,199 @@ void main() {
       expect(enL10n.policyRuleMinLength(1), 'At least 1 character');
       expect(enL10n.policyRuleMinLength(8), 'At least 8 characters');
     });
+
+    // Las dos exenciones que Diseño desautorizó (review GD-M4).
+    test('queueListShowingFirst: nunca "los primeros 1"', () {
+      expect(
+        esL10n.queueListShowingFirst(1),
+        'Mostrando el primero — puede haber más',
+      );
+      expect(
+        esL10n.queueListShowingFirst(8),
+        'Mostrando los primeros 8 — puede haber más',
+      );
+      expect(
+        enL10n.queueListShowingFirst(1),
+        'Showing the first one — there may be more',
+      );
+      expect(
+        enL10n.queueListShowingFirst(8),
+        'Showing the first 8 — there may be more',
+      );
+    });
+
+    test('emptyAllQueuesLabel perdió el placeholder (era "Las 1 colas")', () {
+      expect(esL10n.emptyAllQueuesLabel, 'Todas las colas, en cero');
+      expect(enL10n.emptyAllQueuesLabel, 'All queues at zero');
+    });
+
+    // Lo que destapó ampliar el guardián más allá de {count} (review GD-S6).
+    test('coStepsSheetTitle: nunca "1 pasos"', () {
+      expect(esL10n.coStepsSheetTitle(1), '1 paso + salida alterna');
+      expect(esL10n.coStepsSheetTitle(11), '11 pasos + salida alterna');
+      expect(enL10n.coStepsSheetTitle(1), '1 step + alternate exit');
+    });
+
+    test('summaryQueueTitle: nunca "1 fotos"', () {
+      expect(esL10n.summaryQueueTitle(1), '1 foto · métricas · firma');
+      expect(esL10n.summaryQueueTitle(8), '8 fotos · métricas · firma');
+      expect(enL10n.summaryQueueTitle(1), '1 photo · metrics · signature');
+    });
+
+    test('outboxDrainProgress: nunca "1 de 1 enviados"', () {
+      expect(esL10n.outboxDrainProgress(1, 1), '1 de 1 enviado');
+      expect(esL10n.outboxDrainProgress(3, 8), '3 de 8 enviados');
+    });
+
+    test('coJoinDonePill: nunca "1 de 1 fases"', () {
+      expect(esL10n.coJoinDonePill(1, 1), '1 de 1 fase');
+      expect(esL10n.coJoinDonePill(1, 2), '1 de 2 fases');
+      expect(enL10n.coJoinDonePill(1, 1), '1 of 1 phase');
+    });
   });
 }
 
-/// Claves donde `{count}` NO flexiona la frase. Cada una con su motivo: la
-/// exención se gana explicándola, no marcándola.
+/// `clave.placeholder` → por qué ese número NO flexiona la frase.
+/// El motivo describe LA CADENA, nunca al que llama (ver el doc de arriba).
 const _sinPluralJustificado = <String, String>{
-  'pinDigitsProgress':
-      'forma "X de 4": el sustantivo concuerda con el 4, no con {count}',
-  'inspProgressChip': 'forma "X de 8" — igual que pinDigitsProgress',
-  'coInspServerPhotos': 'forma "X de 8 recibidas" — el 8 manda',
-  'outboxFullChip': 'forma "X de {max}" — el sustantivo va con {max}',
-  'ageMinutes': 'abreviatura de unidad (min) — invariable en es y en',
-  'ageHours': 'abreviatura de unidad (h) — invariable',
-  'ageSeconds': 'abreviatura de unidad (s) — invariable',
-  'cardOverdueMinutes': 'abreviatura de unidad (min) — invariable',
-  'queueCountCapped': 'solo el número y un "+" — no hay frase que flexione',
-  'coPresenceMore': 'solo "+N" sobre los avatares — no hay frase',
-  'heroPartDeparturesCapped':
-      'contador TOPADO: solo se pinta con {count} == el tope, jamás 1',
-  'tileLoanerFootCapped': 'contador TOPADO — idem heroPartDeparturesCapped',
-  'queueListShowingFirst':
-      'solo se pinta cuando queueCapped(count) es true (count == el tope, 8)',
-  'tileActiveSemantics':
-      'el número va tras dos puntos ("En renta: N.") — no concuerda con nada',
-  'emptyAllQueuesLabel':
-      'el {count} es cuántas colas tiene el tablero (constante ≥ 2), no un dato',
-  'coOpenOutbox': 'el número va entre paréntesis en el botón — no concuerda',
+  // Forma "X de Y": el sustantivo concuerda con el Y LITERAL de la cadena.
+  'pinDigitsProgress.count': 'sustantivo pegado al 4 literal: "N de 4 dígitos"',
+  'inspProgressChip.count': '"N de 8" — el 8 es literal y no hay sustantivo',
+  'coInspServerPhotos.count': '"N de 8 recibidas": concuerda con el 8 literal',
+  'camAnglePill.n': '"{angle} · N de 8" — el 8 es literal',
+  // Forma "X de Y <sustantivo>": manda el TOTAL, no el numerador — el
+  // guardian pregunta por los dos y este es el que no flexiona nada.
+  'outboxDrainProgress.done':
+      'numerador de "N de M enviados": el participio concuerda con M',
+  'coJoinDonePill.done':
+      'numerador de "N de M fases": el sustantivo concuerda con M',
+  // Forma "X de Y" sin ningún sustantivo que concordar.
+  'queueListShowingOf.shown': '"Mostrando N de M": no hay sustantivo',
+  'queueListShowingOf.total': '"Mostrando N de M": no hay sustantivo',
+  'outboxFullChip.count':
+      '"N de M · ~tamaño en espera": "en espera" es invariable',
+  'outboxFullChip.max':
+      '"N de M · ~tamaño en espera": "en espera" es invariable',
+  // "Paso N (de M)": "paso" es etiqueta fija en singular, no concuerda con
+  // el ordinal que la sigue.
+  'pinSetupStep.step': '"Paso N de 2": "Paso" es etiqueta fija en singular',
+  'coStepOf.index': '"Paso N de M": "Paso" es etiqueta fija en singular',
+  'coStepOf.total': '"Paso N de M": "Paso" es etiqueta fija en singular',
+  'coPauseSub.index': 'ordinal dentro de "el paso N de M"',
+  'coPauseSub.total': 'ordinal dentro de "el paso N de M"',
+  'coCloseLegWaiting.index': 'ordinal dentro de "Paso N de M · falta"',
+  'coCloseLegWaiting.total': 'ordinal dentro de "Paso N de M · falta"',
+  'coChangedStayCta.index': 'ordinal: "Seguir en el paso N"',
+  'coGoToStepCta.index': 'ordinal: "Ir al paso N · {step}"',
+  'coGoToStepWhy.index': 'ordinal: "Ir al paso N es navegación…"',
+  'coJoinContinueCta.index': 'ordinal: "Continuar desde el paso N"',
+  'coJoinBannerStarted.index': 'ordinal dentro de "el paso N de M"',
+  'coJoinBannerStarted.total': 'ordinal dentro de "el paso N de M"',
+  'coJoinBannerStartedAt.index': 'ordinal dentro de "el paso N de M"',
+  'coJoinBannerStartedAt.total': 'ordinal dentro de "el paso N de M"',
+  'coJoinBannerStartedByOther.index': 'ordinal dentro de "el paso N de M"',
+  'coJoinBannerStartedByOther.total': 'ordinal dentro de "el paso N de M"',
+  'coConflictTooEarlyBody.index': 'ordinal: "(paso N)"',
+  'coConflictTooEarlyBody.targetIndex': 'ordinal: "es el paso N"',
+  // Abreviaturas de unidad: invariables en es y en.
+  'ageMinutes.count': 'abreviatura de unidad (min)',
+  'ageHours.count': 'abreviatura de unidad (h)',
+  'ageSeconds.count': 'abreviatura de unidad (s)',
+  'cardOverdueMinutes.count': 'abreviatura de unidad (min)',
+  // El "+" hace plural la frase POR CONSTRUCCIÓN (review GD-S5): "N+ salidas"
+  // se lee plural con cualquier número, incluido el 1 — "1+ salidas" es
+  // correcto. No depende de que el llamador solo pase el tope.
+  'heroPartDeparturesCapped.count': 'el "+" pluraliza la frase: "N+ salidas"',
+  'tileLoanerFootCapped.count':
+      'el "+" pluraliza la frase: "N+ piden seguimiento"',
+  // Sin sustantivo que concordar.
+  'queueCountCapped.count': 'solo el número y un "+"',
+  'coPresenceMore.count': 'solo "+N" sobre los avatares',
+  'outboxTechnicalHttp.status': '"HTTP N" — código de transporte, sin frase',
+  'tileActiveSemantics.count': 'el número va tras dos puntos: "En renta: N."',
+  'coOpenOutbox.count': 'el número va entre paréntesis en el botón',
+  'coGuardOutboxCta.n': 'el número va entre paréntesis en el botón',
 };
 
-final _reCount = RegExp(r'\{\s*count\s*[,}]');
-final _rePlural = RegExp(r'\{\s*count\s*,\s*plural\s*,');
+/// `clave.placeholder` → por qué un idioma lleva plural y el otro no.
+const _asimetriaJustificada = <String, String>{
+  'outboxDrainProgress.total':
+      'en español el participio concuerda ("1 de 1 enviado" / "3 de 8 '
+          'enviados"); en inglés "sent" no flexiona y un plural ahí serían '
+          'dos ramas idénticas',
+};
 
-bool _usaCount(String mensaje) => _reCount.hasMatch(mensaje);
-bool _usaPlural(String mensaje) => _rePlural.hasMatch(mensaje);
+/// Mensajes + los placeholders int declarados por clave, leídos de la
+/// metadata `@` de la plantilla: el .arb ya trae el tipo, nadie lo usaba.
+class _Arb {
+  const _Arb(this.mensajes, this.intsPorClave);
+  final Map<String, String> mensajes;
+  final Map<String, Set<String>> intsPorClave;
+}
 
-void _exigirPlural(Map<String, String> arb, String archivo) {
+bool _usa(String mensaje, String hueco) =>
+    RegExp('\\{\\s*$hueco\\s*[,}]').hasMatch(mensaje);
+
+bool _esPlural(String mensaje, String hueco) =>
+    RegExp('\\{\\s*$hueco\\s*,\\s*plural\\s*,').hasMatch(mensaje);
+
+void _exigirPlural(
+  Map<String, String> arb,
+  Map<String, Set<String>> intsPorClave,
+  String archivo,
+) {
   final infractoras = <String>[];
-  for (final entrada in arb.entries) {
-    if (!_usaCount(entrada.value)) continue;
-    if (_usaPlural(entrada.value)) continue;
-    if (_sinPluralJustificado.containsKey(entrada.key)) continue;
-    infractoras.add('  ${entrada.key}: "${entrada.value}"');
+  for (final entrada in intsPorClave.entries) {
+    final mensaje = arb[entrada.key];
+    if (mensaje == null) continue;
+    for (final hueco in entrada.value) {
+      if (!_usa(mensaje, hueco)) continue;
+      if (_esPlural(mensaje, hueco)) continue;
+      final id = '${entrada.key}.$hueco';
+      if (_sinPluralJustificado.containsKey(id)) continue;
+      // Asimetría declarada: un idioma flexiona y el otro no. No se puede
+      // colar un "olvidé los dos" por aquí — la prueba de rot exige que
+      // sigan DIFIRIENDO para que la entrada siga viva.
+      if (_asimetriaJustificada.containsKey(id)) continue;
+      infractoras.add('  ${entrada.key} / $hueco: "$mensaje"');
+    }
   }
+  infractoras.sort();
   expect(
     infractoras,
     isEmpty,
-    reason:
-        'En $archivo hay claves que interpolan {count} sin ICU plural.\n'
+    reason: 'En $archivo hay números interpolados sin ICU plural.\n'
         '${infractoras.join('\n')}\n\n'
-        'Arréglalas con {count, plural, one{...} other{{count} ...}} en LOS DOS\n'
-        'idiomas (mira outboxDeadBanner), o — si {count} de verdad no flexiona\n'
-        'nada ahí — agrégalas a _sinPluralJustificado en test/l10n_plural_guard_test.dart\n'
-        'CON el motivo escrito.',
+        'Arréglalos con ICU plural en LOS DOS idiomas (mira\n'
+        'outboxDeadBanner), o — si ese número de verdad no flexiona nada\n'
+        'ahí — agrégalos a _sinPluralJustificado en\n'
+        'test/l10n_plural_guard_test.dart CON el motivo escrito, y que el\n'
+        'motivo hable de la CADENA, no de quién la llama.',
   );
 }
 
 /// Solo las claves de mensaje: los bloques `@clave` son metadatos y sus
-/// descripciones sí pueden hablar de "count" sin ser texto de pantalla.
-Map<String, String> _leerArb(String locale) {
+/// descripciones sí pueden hablar de números sin ser texto de pantalla.
+_Arb _leerArb(String locale) {
   final crudo = File('lib/core/l10n/app_$locale.arb').readAsStringSync();
   final json = jsonDecode(crudo) as Map<String, dynamic>;
-  return {
-    for (final e in json.entries)
-      if (!e.key.startsWith('@') && e.value is String) e.key: e.value as String,
-  };
+
+  final mensajes = <String, String>{};
+  final ints = <String, Set<String>>{};
+  for (final e in json.entries) {
+    if (!e.key.startsWith('@')) {
+      if (e.value is String) mensajes[e.key] = e.value as String;
+      continue;
+    }
+    if (e.value is! Map) continue;
+    final huecos = (e.value as Map)['placeholders'];
+    if (huecos is! Map) continue;
+    final deTipoInt = <String>{
+      for (final p in huecos.entries)
+        if (p.value is Map && (p.value as Map)['type'] == 'int')
+          p.key as String,
+    };
+    if (deTipoInt.isNotEmpty) ints[e.key.substring(1)] = deTipoInt;
+  }
+  return _Arb(mensajes, ints);
 }

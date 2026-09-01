@@ -279,16 +279,24 @@ class _DeadRow extends ConsumerWidget {
     // drenado re-mintea con la sesión y el pre-check evita duplicados);
     // PHOTO_LOST / SESSION_GONE → solo descartar.
     //
-    // Sin `code` NO se puede concluir "no hubo señal": el backend no manda
-    // `code` en todos los 4xx y la prueba de humo pescó un 404 así, con
-    // cobertura perfecta y la bandeja diciendo "reintenta cuando haya
-    // señal" — mandando al empleado a caminar hacia la ventana por un
-    // problema que no estaba en el teléfono. Quien decide es el TRANSPORTE
-    // (`lastErrorStatus`), no el hueco del code:
-    //   status null  → nunca llegó respuesta ⇒ es la red.
-    //   status ≥ 500 / 429 → el servidor contestó pero no pudo con esto;
-    //                        se agotaron los reintentos, no es un rechazo.
-    //   resto (4xx)  → hubo respuesta y fue un rechazo.
+    // Agotados los codes CONOCIDOS de arriba, quien decide es el TRANSPORTE
+    // (`lastErrorStatus`) y NADA MÁS. El hueco del code no significa "no
+    // hubo señal": el backend no lo manda en todos los 4xx y la prueba de
+    // humo pescó un 404 así, con cobertura perfecta y la bandeja diciendo
+    // "reintenta cuando haya señal" — mandando al empleado a caminar hacia
+    // la ventana por un problema que no estaba en el teléfono.
+    //   status null + sin code → nunca llegó respuesta ⇒ es la red.
+    //   status ≥ 500 / 429     → el servidor contestó pero no pudo con esto;
+    //                            se agotaron los reintentos, no es un rechazo.
+    //   resto (4xx)            → hubo respuesta y fue un rechazo.
+    //
+    // Review GD-M1: estos dos brazos NO pueden colgar de `code == null`. Un
+    // 5xx/429 que SÍ traiga code (los 429 lo traen de rutina) caería al
+    // genérico "El servidor rechazó este envío" — exactamente la culpa mal
+    // repartida que este arreglo existe para matar, solo que por la otra
+    // puerta. `markFailed` acepta code y status por separado, así que la
+    // combinación es escribible aunque hoy el drenador no la produzca.
+    //
     // En ningún caso se traduce ni se clasifica el cuerpo del error: el
     // detalle crudo del servidor sigue intacto tras el chevron.
     final (reason, canRetry, retryIsPrimary, canOpenInspection) =
@@ -307,13 +315,13 @@ class _DeadRow extends ConsumerWidget {
         ),
       'PHOTO_LOST' => (l10n.outboxReasonPhotoLost, false, false, false),
       'SESSION_GONE' => (l10n.outboxReasonSessionGone, false, false, false),
-      null when status == null => (
+      _ when code == null && status == null => (
           l10n.outboxReasonNetwork,
           true,
           false,
           false
         ),
-      null when _servidorNoPudo(status!) => (
+      _ when status != null && _servidorNoPudo(status) => (
           l10n.outboxReasonServerUnavailable,
           true,
           false,

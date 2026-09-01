@@ -19,6 +19,6 @@
     </style>
 
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
-        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:windowBackground">@color/ride_aurora_center</item>
     </style>
 </resources>

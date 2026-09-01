@@ -509,9 +509,7 @@ class AppLocalizationsEs extends AppLocalizations {
       'No hay nada pendiente en ninguna cola ahora mismo. Desliza hacia abajo para actualizar cuando quieras.';
 
   @override
-  String emptyAllQueuesLabel(int count) {
-    return 'Las $count colas, en cero';
-  }
+  String get emptyAllQueuesLabel => 'Todas las colas, en cero';
 
   @override
   String cardToday(String time) {
@@ -575,7 +573,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String queueListShowingFirst(int count) {
-    return 'Mostrando los primeros $count — puede haber más';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Mostrando los primeros $count — puede haber más',
+      one: 'Mostrando el primero — puede haber más',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -823,7 +827,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String summaryQueueTitle(int photos) {
-    return '$photos fotos · métricas · firma';
+    String _temp0 = intl.Intl.pluralLogic(
+      photos,
+      locale: localeName,
+      other: '$photos fotos · métricas · firma',
+      one: '1 foto · métricas · firma',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -873,7 +883,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String outboxDrainProgress(int done, int total) {
-    return '$done de $total enviados';
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: '$done de $total enviados',
+      one: '$done de 1 enviado',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -944,10 +960,11 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get outboxReasonServerUnavailable =>
-      'El servidor contestó con un error y no pudo recibir este envío tras varios intentos. No es tu señal: vuelve a intentarlo más tarde.';
+      'No es tu señal: el servidor falló y no pudo recibir este envío. Reintenta más tarde.';
 
   @override
-  String get outboxReasonGeneric => 'El servidor rechazó este envío.';
+  String get outboxReasonGeneric =>
+      'El servidor rechazó este envío. Abre el detalle técnico y pásaselo a soporte antes de descartarlo.';
 
   @override
   String outboxTechnicalDetail(String detail) {
@@ -1082,7 +1099,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String coStepsSheetTitle(int total) {
-    return '$total pasos + salida alterna';
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: '$total pasos + salida alterna',
+      one: '1 paso + salida alterna',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2601,7 +2624,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String coJoinDonePill(int done, int total) {
-    return '$done de $total fases';
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: '$done de $total fases',
+      one: '$done de 1 fase',
+    );
+    return '$_temp0';
   }
 
   @override

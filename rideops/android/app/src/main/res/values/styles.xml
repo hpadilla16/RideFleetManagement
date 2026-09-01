@@ -13,12 +13,22 @@
         <item name="android:statusBarColor">@color/ride_aurora_start</item>
     </style>
 
-    <!-- Tema de la ventana YA con el proceso vivo: es lo que queda DETRÁS de
-         la UI de Flutter (overscroll, transiciones). La app no tiene tema
-         oscuro (app.dart declara `theme:` y nada más), así que aquí se fija
-         blanco en vez de `?android:colorBackground` para que no dependa del
-         ajuste del sistema. Ver values-night/styles.xml. -->
+    <!-- Tema de la ventana YA con el proceso vivo. FlutterActivity cambia a
+         este tema en onCreate, o sea ANTES del primer frame de Flutter: lo
+         que se ponga aquí es lo que se ve en ese hueco.
+
+         Honestidad sobre la evidencia (review GD-S8): en API 36 este hueco
+         NO se ve, porque el splash del sistema lo tapa hasta que Flutter
+         dibuja — se comprobó en el AVD y con blanco aquí tampoco hubo
+         destello. Se pone el morado igual por los aparatos API 24-30, donde
+         no hay splash del sistema y este color SÍ queda a la vista entre el
+         cambio de tema y el primer frame; ahí blanco sí parpadearía contra
+         la aurora. Eso NO está verificado en aparato: no hay AVD viejo en
+         esta máquina, y va anotado como tal en el reporte.
+
+         Después del primer frame no se ve en ninguna versión: la vista de
+         Flutter es opaca y cubre la ventana entera. -->
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
-        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:windowBackground">@color/ride_aurora_center</item>
     </style>
 </resources>

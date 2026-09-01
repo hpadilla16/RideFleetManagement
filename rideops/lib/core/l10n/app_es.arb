@@ -225,10 +225,7 @@
   },
   "emptyAllTitle": "Patio en calma",
   "emptyAllBody": "No hay nada pendiente en ninguna cola ahora mismo. Desliza hacia abajo para actualizar cuando quieras.",
-  "emptyAllQueuesLabel": "Las {count} colas, en cero",
-  "@emptyAllQueuesLabel": {
-    "placeholders": { "count": { "type": "int" } }
-  },
+  "emptyAllQueuesLabel": "Todas las colas, en cero",
   "cardToday": "Hoy {time}",
   "@cardToday": {
     "placeholders": { "time": { "type": "String" } }
@@ -261,7 +258,7 @@
   "@advisorLabel": {
     "placeholders": { "name": { "type": "String" } }
   },
-  "queueListShowingFirst": "Mostrando los primeros {count} — puede haber más",
+  "queueListShowingFirst": "{count, plural, one{Mostrando el primero — puede haber más} other{Mostrando los primeros {count} — puede haber más}}",
   "@queueListShowingFirst": {
     "placeholders": { "count": { "type": "int" } }
   },
@@ -370,7 +367,7 @@
   "kioskSignHint": "Firme aquí con el dedo",
   "kioskSignClear": "Borrar",
   "kioskSignConfirm": "Confirmar firma",
-  "summaryQueueTitle": "{photos} fotos · métricas · firma",
+  "summaryQueueTitle": "{photos, plural, one{1 foto · métricas · firma} other{{photos} fotos · métricas · firma}}",
   "@summaryQueueTitle": {
     "placeholders": { "photos": { "type": "int" } }
   },
@@ -394,7 +391,7 @@
 
   "outboxTitle": "Bandeja de salida",
   "outboxDraining": "Enviando…",
-  "outboxDrainProgress": "{done} de {total} enviados",
+  "outboxDrainProgress": "{total, plural, one{{done} de 1 enviado} other{{done} de {total} enviados}}",
   "@outboxDrainProgress": {
     "placeholders": { "done": { "type": "int" }, "total": { "type": "int" } }
   },
@@ -431,11 +428,11 @@
   "@outboxReasonNetwork": {
     "description": "SOLO cuando nunca llegó respuesta (lastErrorStatus null). Mandar a alguien a buscar señal por un rechazo del servidor es el defecto que arregló este texto."
   },
-  "outboxReasonServerUnavailable": "El servidor contestó con un error y no pudo recibir este envío tras varios intentos. No es tu señal: vuelve a intentarlo más tarde.",
+  "outboxReasonServerUnavailable": "No es tu señal: el servidor falló y no pudo recibir este envío. Reintenta más tarde.",
   "@outboxReasonServerUnavailable": {
     "description": "5xx/429 que agotó reintentos: hubo respuesta, pero no fue un rechazo de lo que se envió."
   },
-  "outboxReasonGeneric": "El servidor rechazó este envío.",
+  "outboxReasonGeneric": "El servidor rechazó este envío. Abre el detalle técnico y pásaselo a soporte antes de descartarlo.",
   "outboxTechnicalDetail": "Detalle técnico: {detail}",
   "@outboxTechnicalDetail": {
     "description": "El hueco lo arma la pantalla con el code del backend y/o el status HTTP unidos por ' · ' — solo con lo que de verdad existe.",
@@ -508,7 +505,7 @@
     }
   },
   "coSeeAllSteps": "Ver todos los pasos",
-  "coStepsSheetTitle": "{total} pasos + salida alterna",
+  "coStepsSheetTitle": "{total, plural, one{1 paso + salida alterna} other{{total} pasos + salida alterna}}",
   "@coStepsSheetTitle": {
     "placeholders": { "total": { "type": "int" } }
   },
@@ -1522,7 +1519,7 @@
     }
   },
   "coJoinDoneTitle": "Lo que ya está hecho",
-  "coJoinDonePill": "{done} de {total} fases",
+  "coJoinDonePill": "{total, plural, one{{done} de 1 fase} other{{done} de {total} fases}}",
   "@coJoinDonePill": {
     "placeholders": {
       "done": {

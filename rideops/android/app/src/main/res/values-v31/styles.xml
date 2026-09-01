@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ (API 31): la PLATAFORMA pinta su propio splash y lo dibuja
+  ENCIMA de todo lo nuestro. targetSdk es 36, así que en aparatos modernos
+  esto rige SIEMPRE y `@drawable/launch_background` no se ve hasta que el
+  splash del sistema se retira.
+
+  Lo que se midió de verdad (AVD Medium_Phone_API_36.1, arranque en frío,
+  ráfaga de capturas — review GD-M2). El resultado NO fue el que se predijo:
+  no hubo destello blanco. La plataforma, a falta de
+  `windowSplashScreenBackground`, no cae al `colorBackground` del tema:
+  APLANA el `windowBackground` a un color representativo. Medido en el
+  centro de la pantalla, quitando un pin a la vez:
+    con este archivo            → #33127B  (exactamente el token)
+    sin este archivo            → #35157F
+    sin este archivo ni el pin de NormalTheme → #391687
+  Los tres son morados del aurora; ninguno fue blanco.
+
+  Entonces, ¿para qué queda el archivo? Porque ese aplanado es un detalle de
+  implementación sin documentar que ya se movió dos veces entre builds, y
+  porque `windowSplashScreenBackground` es la API soportada para decidirlo.
+  Con el pin el color del splash es EXACTO, determinista y atado por prueba
+  a RideTokens.aurora; sin él es lo que la versión de Android del día decida
+  promediar. No se conserva por un destello: se conserva por determinismo.
+
+  Se usa el color CENTRAL del aurora: es el punto medio del gradiente que
+  pinta el frame siguiente, así que el salto de plano a degradado es el más
+  chico posible.
+
+  NO se toca `windowSplashScreenAnimatedIcon`: el sistema usa el icono del
+  lanzador y así se queda hasta que Hector decida el tratamiento de marca
+  (lámina en curso). Nota para esa lámina: en el splash del sistema el icono
+  sale SIN el fondo blanco del adaptativo — el sistema usa solo la capa
+  foreground — o sea que ahí ya se ve la marca sobre morado, que es el
+  tratamiento que Diseño prefiere.
+-->
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@color/ride_aurora_start</item>
+        <item name="android:windowSplashScreenBackground">@color/ride_aurora_center</item>
+    </style>
+
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@color/ride_aurora_center</item>
+    </style>
+</resources>

@@ -851,8 +851,8 @@ abstract class AppLocalizations {
   /// No description provided for @emptyAllQueuesLabel.
   ///
   /// In es, this message translates to:
-  /// **'Las {count} colas, en cero'**
-  String emptyAllQueuesLabel(int count);
+  /// **'Todas las colas, en cero'**
+  String get emptyAllQueuesLabel;
 
   /// No description provided for @cardToday.
   ///
@@ -941,7 +941,7 @@ abstract class AppLocalizations {
   /// No description provided for @queueListShowingFirst.
   ///
   /// In es, this message translates to:
-  /// **'Mostrando los primeros {count} — puede haber más'**
+  /// **'{count, plural, one{Mostrando el primero — puede haber más} other{Mostrando los primeros {count} — puede haber más}}'**
   String queueListShowingFirst(int count);
 
   /// No description provided for @queueListShowingOf.
@@ -1361,7 +1361,7 @@ abstract class AppLocalizations {
   /// No description provided for @summaryQueueTitle.
   ///
   /// In es, this message translates to:
-  /// **'{photos} fotos · métricas · firma'**
+  /// **'{photos, plural, one{1 foto · métricas · firma} other{{photos} fotos · métricas · firma}}'**
   String summaryQueueTitle(int photos);
 
   /// No description provided for @summaryQueueBadgeOffline.
@@ -1445,7 +1445,7 @@ abstract class AppLocalizations {
   /// No description provided for @outboxDrainProgress.
   ///
   /// In es, this message translates to:
-  /// **'{done} de {total} enviados'**
+  /// **'{total, plural, one{{done} de 1 enviado} other{{done} de {total} enviados}}'**
   String outboxDrainProgress(int done, int total);
 
   /// No description provided for @outboxDrainRemaining.
@@ -1541,13 +1541,13 @@ abstract class AppLocalizations {
   /// 5xx/429 que agotó reintentos: hubo respuesta, pero no fue un rechazo de lo que se envió.
   ///
   /// In es, this message translates to:
-  /// **'El servidor contestó con un error y no pudo recibir este envío tras varios intentos. No es tu señal: vuelve a intentarlo más tarde.'**
+  /// **'No es tu señal: el servidor falló y no pudo recibir este envío. Reintenta más tarde.'**
   String get outboxReasonServerUnavailable;
 
   /// No description provided for @outboxReasonGeneric.
   ///
   /// In es, this message translates to:
-  /// **'El servidor rechazó este envío.'**
+  /// **'El servidor rechazó este envío. Abre el detalle técnico y pásaselo a soporte antes de descartarlo.'**
   String get outboxReasonGeneric;
 
   /// El hueco lo arma la pantalla con el code del backend y/o el status HTTP unidos por ' · ' — solo con lo que de verdad existe.
@@ -1721,7 +1721,7 @@ abstract class AppLocalizations {
   /// No description provided for @coStepsSheetTitle.
   ///
   /// In es, this message translates to:
-  /// **'{total} pasos + salida alterna'**
+  /// **'{total, plural, one{1 paso + salida alterna} other{{total} pasos + salida alterna}}'**
   String coStepsSheetTitle(int total);
 
   /// No description provided for @coStepsSheetSub.
@@ -4120,7 +4120,7 @@ abstract class AppLocalizations {
   /// No description provided for @coJoinDonePill.
   ///
   /// In es, this message translates to:
-  /// **'{done} de {total} fases'**
+  /// **'{total, plural, one{{done} de 1 fase} other{{done} de {total} fases}}'**
   String coJoinDonePill(int done, int total);
 
   /// No description provided for @coJoinPendingTitle.

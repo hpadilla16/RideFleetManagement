@@ -145,6 +145,29 @@ void main() {
     }
   });
 
+  test('Android 12+ tiene su propio splash pinneado al aurora', () {
+    // targetSdk 36: en API 31+ la plataforma pinta SU splash encima del
+    // nuestro y `@drawable/launch_background` no se ve hasta que lo retira.
+    // Sin `windowSplashScreenBackground` el color lo decide un aplanado sin
+    // documentar del windowBackground — medido en el AVD, se movió entre
+    // #33127B, #35157F y #391687 según qué pin hubiera. Con el pin es
+    // exacto y es el mismo token que el resto del arranque.
+    final v31 = leer('values-v31/styles.xml');
+    expect(
+      v31,
+      contains('android:windowSplashScreenBackground'),
+      reason: 'sin esto el color del splash de API 31+ lo elige Android',
+    );
+    // Y tiene que ser un color del aurora, no un hex suelto: así la prueba
+    // de colors.xml ↔ RideTokens.aurora también lo cubre.
+    expect(v31, contains('@color/ride_aurora_'));
+    expect(
+      RegExp(r'windowSplashScreenBackground">#').hasMatch(v31),
+      isFalse,
+      reason: 'hex suelto: se desataria de RideTokens sin que nadie lo note',
+    );
+  });
+
   test('modo oscuro del sistema no reintroduce el arranque negro', () {
     // La app no tiene darkTheme (app.dart): un LaunchTheme oscuro daba
     // negro → aurora → app clara, dos destellos antes del login.

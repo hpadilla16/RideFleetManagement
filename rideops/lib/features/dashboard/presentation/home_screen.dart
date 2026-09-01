@@ -791,7 +791,7 @@ class _EmptyAllView extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  l10n.emptyAllQueuesLabel(queues.length),
+                  l10n.emptyAllQueuesLabel,
                   style: const TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w800,
