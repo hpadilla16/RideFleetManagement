@@ -312,6 +312,19 @@ async function main() {
     logger.warn('[worker] shuttle alert scheduler not started', { message: err.message });
   }
 
+  // Notification Center daily sweep (2026-09-01) — maintenance-overdue +
+  // registration/marbete expiry edge events into the NotificationEvent feed,
+  // plus the 30-day auto-archive. Daily at 09:10 UTC, staggered off the
+  // 07:00 checkout and 08:30 retention sweeps. Emitter-only: it writes
+  // envelope rows and archives old ones; every existing surface is untouched.
+  try {
+    const notifSweepMod = await import('./modules/notifications/notifications.scheduler.js');
+    notifSweepMod.startNotificationsSweepScheduler();
+    logger.info('[worker] started: notifications sweep scheduler');
+  } catch (err) {
+    logger.warn('[worker] notifications sweep scheduler not started', { message: err.message });
+  }
+
   // Voltswitch GPS periodic pull (2026-08-13). Per-tenant interval from
   // Settings > Telematics; only tenants with the connector fully configured
   // (provider VOLTSWITCH + enabled + credentials) are touched. Each tenant

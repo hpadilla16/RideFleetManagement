@@ -14,6 +14,7 @@ import { countQueues } from './tolls-queue-counts.js';
 import { buildTollListWhere, buildTollExportWhere, tollsToCsv, tollExportFilename, TOLL_EXPORT_MAX_ROWS } from './tolls-export.js';
 import { scopeAllowedLocationIds, reservationLocationWhere, systemScope } from '../../lib/tenant-scope.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { emitNotificationSafe, ackNotificationBySourceRefSafe } from '../notifications/notifications-emit.js';
 // beta.357 latent fix: the agreement-mirror catch already called logger.error
 // but the import was missing - a mirror failure would have thrown
 // ReferenceError out of the sync instead of logging. Only the failure path
@@ -1560,6 +1561,31 @@ async function notifyStaffOfNewTolls(reservation, transactions = []) {
     if (claimed.count !== 1) continue;
     notified += 1;
 
+    // Notification Center emitter (2026-09-01) — ABOVE the alertEmailFor
+    // guard on purpose: a sede without a configured alertEmail gets no email
+    // today but the in-app alert still exists, and the envelope must match
+    // that. Deduped on the toll id, so the claim-release retry path below can
+    // re-run without duplicating the row. Safe emit — never breaks the sync.
+    await emitNotificationSafe({
+      tenantId: reservation.tenantId,
+      locationId: toll.locationId || pickupLocationId || null,
+      severity: 'NEEDS_ACTION',
+      sourceType: 'TOLL',
+      sourceRefId: toll.id,
+      title: agreementClosed
+        ? `New billable toll on a closed contract — $${toMoney(toll.amount).toFixed(2)}`
+        : `New billable toll — $${toMoney(toll.amount).toFixed(2)}`,
+      body: [
+        toll.plateRaw || toll.plateNormalized || null,
+        contractLabel ? `Contract ${contractLabel}` : null,
+        toll.location || null,
+      ].filter(Boolean).join(' · ') || null,
+      deepLink: `/reservations/${reservation.id}`,
+      dedupeKey: `toll:${toll.id}`,
+      templateKey: agreementClosed ? 'tollClosed' : 'tollNew',
+      paramsJson: { amt: `$${toMoney(toll.amount).toFixed(2)}` },
+    });
+
     const to = await alertEmailFor(toll.locationId);
     if (!to) continue;
 
@@ -2975,6 +3001,15 @@ export const tollsService = {
     await prisma.tollTransaction.update({
       where: { id: row.id },
       data: { staffAckAt: new Date(), staffAckByUserId: actorUserId || null }
+    });
+    // Notification Center mirror (2026-09-01): the tray ack IS the acknowledge
+    // for this toll — stamp the envelope so the center agrees about who
+    // handled it. Never fails the ack.
+    await ackNotificationBySourceRefSafe({
+      tenantId: row.tenantId,
+      sourceType: 'TOLL',
+      sourceRefId: row.id,
+      userId: actorUserId || null,
     });
     return { ok: true, alreadyAcknowledged: false };
   },

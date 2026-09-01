@@ -13,6 +13,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { sendEmail } from '../../lib/mailer.js';
 import logger from '../../lib/logger.js';
+import { emitNotificationSafe } from '../notifications/notifications-emit.js';
 // The list/notice DECISIONS live in a pure module so CI's DB-free step can
 // guard them — this suite needs embedded postgres and does not run there.
 import {
@@ -441,6 +442,30 @@ export const shuttleRequestsService = {
           deps.logger.warn('[shuttle-no-show] alert row insert failed', { tenantId: request.tenantId, requestId: request.id, message: err.message });
         }
       }
+
+      // 2b) Notification Center emitter (2026-09-01) — the envelope for the
+      //     staff bell/center. Deduped on the request id (same anchor as the
+      //     ShuttleAlert providerRef above), and the OPEN_STATUSES gate at
+      //     the top of this function already guarantees one no-show per
+      //     request. Safe emit — never breaks the fan-out. The shuttles page
+      //     feed/toast above stays untouched; the center only records.
+      await (depsOverride.emitNotification || emitNotificationSafe)({
+        tenantId: request.tenantId,
+        locationId: request.locationId || null,
+        severity: 'NEEDS_ACTION',
+        sourceType: 'SHUTTLE',
+        sourceRefId: request.id,
+        title: `Shuttle request no-show${zone?.name ? ` — ${zone.name}` : ''}`,
+        body: [
+          request.customerName || null,
+          request.partySize ? `party of ${request.partySize}` : null,
+          location?.name || null,
+        ].filter(Boolean).join(' · ') || null,
+        deepLink: '/shuttles',
+        dedupeKey: `shuttle-noshow:${request.id}`,
+        templateKey: 'noShow',
+        paramsJson: { stop: zone?.name || location?.name || '' },
+      });
 
       // 3) Optional staff email — EMAIL-channel recipients of the location's
       //    Phase-2 alert list. Best-effort per mailbox.
