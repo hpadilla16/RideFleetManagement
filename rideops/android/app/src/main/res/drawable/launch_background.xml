@@ -1,12 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@android:color/white" />
+<!--
+  Splash de arranque de RideOps.
 
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
+  Es la MISMA aurora que pinta SplashScreen (RideTokens.aurora) en el primer
+  frame de Flutter, así que el arranque no tiene destello: la plantilla de
+  Flutter dejaba blanco aquí y `?android:colorBackground` (negro en modo
+  oscuro) en drawable-v21, y el aparato de patio veía blanco-o-negro y luego
+  un salto a morado oscuro.
+
+  Sin logotipo a propósito: la marca de Ride es morada y sobre la aurora
+  morada oscura no tiene contraste; ponerla en blanco sería recolorearla, y
+  eso lo decide Hector, no esta historia.
+
+  Ojo: el drawable-v21/launch_background.xml de la plantilla SE BORRÓ. Con
+  minSdk 24 ese archivo siempre ganaba, así que editar solo este no cambiaba
+  nada en el teléfono — una trampa cara de depurar.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:angle="315"
+                android:centerColor="@color/ride_aurora_center"
+                android:endColor="@color/ride_aurora_end"
+                android:startColor="@color/ride_aurora_start"
+                android:type="linear" />
+        </shape>
+    </item>
 </layer-list>

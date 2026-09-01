@@ -1,18 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Theme applied to the Android Window while the process is starting when the OS's Dark Mode setting is on -->
-    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
-        <!-- Show a splash screen on the activity. Automatically removed when
-             the Flutter engine draws its first frame -->
-        <item name="android:windowBackground">@drawable/launch_background</item>
-    </style>
-    <!-- Theme applied to the Android Window as soon as the process has started.
-         This theme determines the color of the Android Window while your
-         Flutter UI initializes, as well as behind your Flutter UI while its
-         running.
+<!--
+  Modo oscuro del SISTEMA. Es IDÉNTICO a values/styles.xml a propósito.
 
-         This Theme is only used starting with V2 of Flutter's Android embedding. -->
-    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
-        <item name="android:windowBackground">?android:colorBackground</item>
+  RideOps no tiene tema oscuro: app.dart declara `theme:` y ningún
+  `darkTheme:`, así que la app se pinta clara sin importar el ajuste del
+  teléfono. La plantilla de Flutter dejaba aquí Theme.Black + un
+  windowBackground que resolvía a NEGRO, y en un teléfono en modo oscuro el
+  arranque era negro → aurora → app clara: dos destellos antes del login.
+
+  Este archivo no se borra para que quede escrito POR QUÉ es igual: si algún
+  día RideOps gana tema oscuro, es aquí donde se separan.
+-->
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@color/ride_aurora_start</item>
+    </style>
+
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@color/ride_aurora_center</item>
     </style>
 </resources>

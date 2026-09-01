@@ -73,7 +73,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String policyRuleMinLength(int count) {
-    return 'Mínimo $count caracteres';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Mínimo $count caracteres',
+      one: 'Mínimo 1 carácter',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -216,7 +222,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String outboxBadgeSemantics(int count) {
-    return '$count pendientes de envío';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pendientes de envío',
+      one: '1 pendiente de envío',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -497,9 +509,7 @@ class AppLocalizationsEs extends AppLocalizations {
       'No hay nada pendiente en ninguna cola ahora mismo. Desliza hacia abajo para actualizar cuando quieras.';
 
   @override
-  String emptyAllQueuesLabel(int count) {
-    return 'Las $count colas, en cero';
-  }
+  String get emptyAllQueuesLabel => 'Todas las colas, en cero';
 
   @override
   String cardToday(String time) {
@@ -563,7 +573,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String queueListShowingFirst(int count) {
-    return 'Mostrando los primeros $count — puede haber más';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Mostrando los primeros $count — puede haber más',
+      one: 'Mostrando el primero — puede haber más',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -811,7 +827,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String summaryQueueTitle(int photos) {
-    return '$photos fotos · métricas · firma';
+    String _temp0 = intl.Intl.pluralLogic(
+      photos,
+      locale: localeName,
+      other: '$photos fotos · métricas · firma',
+      one: '1 foto · métricas · firma',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -861,7 +883,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String outboxDrainProgress(int done, int total) {
-    return '$done de $total enviados';
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: '$done de $total enviados',
+      one: '$done de 1 enviado',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -901,7 +929,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String outboxAttempts(int count, String time) {
-    return 'intentado $count veces · último $time';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'intentado $count veces · último $time',
+      one: 'intentado 1 vez · último $time',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -925,11 +959,24 @@ class AppLocalizationsEs extends AppLocalizations {
       'No se pudo enviar tras varios intentos. Reintenta cuando haya señal.';
 
   @override
-  String get outboxReasonGeneric => 'El servidor rechazó este envío.';
+  String get outboxReasonServerUnavailable =>
+      'No es tu señal: el servidor falló y no pudo recibir este envío. Reintenta más tarde.';
 
   @override
-  String outboxTechnicalDetail(String code, String message) {
-    return 'Detalle técnico: $code · $message';
+  String get outboxReasonGeneric =>
+      'El servidor rechazó este envío. Abre el detalle técnico y pásaselo a soporte antes de descartarlo.';
+
+  @override
+  String outboxTechnicalDetail(String detail) {
+    return 'Detalle técnico: $detail';
+  }
+
+  @override
+  String get outboxTechnicalDetailBare => 'Detalle técnico';
+
+  @override
+  String outboxTechnicalHttp(int status) {
+    return 'HTTP $status';
   }
 
   @override
@@ -986,7 +1033,15 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String outboxFullBody(int count) {
-    return '$count envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.',
+      one:
+          '1 envío esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -1044,7 +1099,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String coStepsSheetTitle(int total) {
-    return '$total pasos + salida alterna';
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: '$total pasos + salida alterna',
+      one: '1 paso + salida alterna',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2563,7 +2624,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String coJoinDonePill(int done, int total) {
-    return '$done de $total fases';
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: '$done de $total fases',
+      one: '$done de 1 fase',
+    );
+    return '$_temp0';
   }
 
   @override

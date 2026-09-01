@@ -71,6 +71,10 @@ void main() {
     required String kind,
     String status = 'pending',
     String? code,
+    // Status HTTP de la respuesta que mató la fila, o null = no hubo
+    // respuesta. Es el dato que separa "sin señal" de "el servidor dijo que
+    // no": ver los casos de _DeadRow más abajo.
+    int? httpStatus,
     String? photoPath,
     String? dependsOn,
     int attempts = 0,
@@ -96,6 +100,7 @@ void main() {
           attempts: Value(attempts),
           lastError: Value(code == null && status == 'dead' ? 'red' : code),
           lastErrorCode: Value(code),
+          lastErrorStatus: Value(httpStatus),
           createdAt: now,
           updatedAt: now,
         ));
@@ -154,6 +159,152 @@ void main() {
         .single;
     expect(row.status, 'pending');
     expect(row.attempts, 0, reason: 'el humano decidió: contador de nuevo');
+  });
+
+  // ——— Defecto 2 de la prueba de humo en el emulador ———
+  //
+  // Un 404 del backend SIN `code` en el cuerpo (el backend no lo manda en
+  // todos los 4xx) caía en la rama `null =>` y la bandeja decía "Reintenta
+  // cuando haya señal" con cobertura perfecta. El empleado sale a buscar red
+  // por un problema que no está en su teléfono, y el envío no se recupera
+  // jamás. Lo que decide ahora es si HUBO respuesta (lastErrorStatus), no si
+  // el backend se acordó de mandar `code`.
+
+  testWidgets(
+      'rechazo del servidor SIN code (404): no lo llama falta de señal',
+      (tester) async {
+    await seedRow(
+      id: 'c404',
+      kind: OutboxKinds.inspectionComplete,
+      status: 'dead',
+      code: null, // el 404 vino sin `code` — como en el emulador
+      httpStatus: 404,
+      attempts: 1,
+    );
+    await tester.pumpWidget(tray());
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'The server rejected this item. Open the technical detail and send it to support before discarding it.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('Retry when there is signal'),
+      findsNothing,
+      reason: 'hubo respuesta del servidor: la señal no tiene nada que ver',
+    );
+    // Y el detalle plegado dice el hecho de transporte, sin separador
+    // colgando (defecto 3: antes se pasaba '' como segundo hueco).
+    expect(find.text('Technical detail: HTTP 404'), findsOneWidget);
+  });
+
+  testWidgets('sin respuesta del servidor: eso SÍ es falta de señal',
+      (tester) async {
+    await seedRow(
+      id: 'cnet',
+      kind: OutboxKinds.inspectionComplete,
+      status: 'dead',
+      code: null,
+      httpStatus: null, // nunca llegó una respuesta
+      attempts: 8,
+    );
+    await tester.pumpWidget(tray());
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('Retry when there is signal'),
+      findsOneWidget,
+      reason: 'este es el ÚNICO caso en que el consejo de la señal aplica',
+    );
+    expect(
+      find.textContaining('The server rejected this item'),
+      findsNothing,
+    );
+    // Sin code ni status no hay nada que juntar: la etiqueta sola.
+    expect(find.text('Technical detail'), findsOneWidget);
+  });
+
+  testWidgets('5xx agotado: el servidor contestó, pero no fue un rechazo',
+      (tester) async {
+    await seedRow(
+      id: 'c503',
+      kind: OutboxKinds.inspectionComplete,
+      status: 'dead',
+      code: null,
+      httpStatus: 503,
+      attempts: 8,
+    );
+    await tester.pumpWidget(tray());
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining("It's not your connection"),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Retry when there is signal'), findsNothing);
+    expect(find.textContaining('The server rejected this item'), findsNothing,
+        reason: 'un 503 no es un rechazo de lo que se mandó');
+    expect(find.text('Technical detail: HTTP 503'), findsOneWidget);
+  });
+
+  // Review GD-M1 + S4. Los dos brazos de status colgaban de `code == null`,
+  // así que un 5xx/429 que SÍ trae code — los 429 lo traen de rutina — se
+  // iba al genérico "El servidor rechazó este envío": la misma culpa mal
+  // repartida que este lote existe para matar, por la otra puerta. Nada lo
+  // probaba porque el único caso cubierto tenía code null.
+  //
+  // La fila se siembra directo porque `markFailed` acepta code y status por
+  // SEPARADO: la combinación es escribible por cualquier llamador del store
+  // aunque hoy el drenador no la genere, y el render no puede depender de
+  // que uno esté vacío para honrar el otro.
+  testWidgets('5xx CON code: sigue siendo "no es tu conexión", no un rechazo',
+      (tester) async {
+    await seedRow(
+      id: 'c429',
+      kind: OutboxKinds.inspectionComplete,
+      status: 'dead',
+      code: 'RATE_LIMITED',
+      httpStatus: 429,
+      attempts: 8,
+    );
+    await tester.pumpWidget(tray());
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining("It's not your connection"),
+      findsOneWidget,
+      reason: 'el status manda: que el backend mandara code no convierte '
+          'un 429 en un rechazo de lo que se envió',
+    );
+    expect(find.textContaining('The server rejected this item'), findsNothing);
+    expect(find.textContaining('Retry when there is signal'), findsNothing);
+    // El code sí viaja al detalle técnico: no se pierde información.
+    expect(find.text('Technical detail: RATE_LIMITED · HTTP 429'),
+        findsOneWidget);
+  });
+
+  testWidgets('code + status: el detalle junta los dos, con un solo separador',
+      (tester) async {
+    await seedRow(
+      id: 'c400',
+      kind: OutboxKinds.inspectionComplete,
+      status: 'dead',
+      code: 'REQUIRED_ANGLES_MISSING',
+      httpStatus: 400,
+      attempts: 1,
+    );
+    await tester.pumpWidget(tray());
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Technical detail: REQUIRED_ANGLES_MISSING · HTTP 400'),
+      findsOneWidget,
+    );
+    // El motivo lo sigue mandando el code, no el status.
+    expect(find.textContaining('front and rear angles are missing'),
+        findsOneWidget);
   });
 
   testWidgets('PHOTO_LOST: solo Descartar (no hay nada que reintentar)',

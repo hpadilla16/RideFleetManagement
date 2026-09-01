@@ -73,7 +73,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String policyRuleMinLength(int count) {
-    return 'At least $count characters';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'At least $count characters',
+      one: 'At least 1 character',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -216,7 +222,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String outboxBadgeSemantics(int count) {
-    return '$count pending to send';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pending to send',
+      one: '1 pending to send',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -495,9 +507,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Nothing pending in any queue right now. Pull down to refresh whenever you want.';
 
   @override
-  String emptyAllQueuesLabel(int count) {
-    return 'All $count queues at zero';
-  }
+  String get emptyAllQueuesLabel => 'All queues at zero';
 
   @override
   String cardToday(String time) {
@@ -561,7 +571,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String queueListShowingFirst(int count) {
-    return 'Showing the first $count — there may be more';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Showing the first $count — there may be more',
+      one: 'Showing the first one — there may be more',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -807,7 +823,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String summaryQueueTitle(int photos) {
-    return '$photos photos · metrics · signature';
+    String _temp0 = intl.Intl.pluralLogic(
+      photos,
+      locale: localeName,
+      other: '$photos photos · metrics · signature',
+      one: '1 photo · metrics · signature',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -897,7 +919,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String outboxAttempts(int count, String time) {
-    return 'tried $count times · last $time';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'tried $count times · last $time',
+      one: 'tried once · last $time',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -921,11 +949,24 @@ class AppLocalizationsEn extends AppLocalizations {
       'Could not send after several attempts. Retry when there is signal.';
 
   @override
-  String get outboxReasonGeneric => 'The server rejected this item.';
+  String get outboxReasonServerUnavailable =>
+      'It\'s not your connection: the server failed and could not take this item. Retry later.';
 
   @override
-  String outboxTechnicalDetail(String code, String message) {
-    return 'Technical detail: $code · $message';
+  String get outboxReasonGeneric =>
+      'The server rejected this item. Open the technical detail and send it to support before discarding it.';
+
+  @override
+  String outboxTechnicalDetail(String detail) {
+    return 'Technical detail: $detail';
+  }
+
+  @override
+  String get outboxTechnicalDetailBare => 'Technical detail';
+
+  @override
+  String outboxTechnicalHttp(int status) {
+    return 'HTTP $status';
   }
 
   @override
@@ -983,7 +1024,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String outboxFullBody(int count) {
-    return '$count items waiting (phone limit). Nothing more fits — connect to a network so it drains and you can keep capturing.';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count items waiting (phone limit). Nothing more fits — connect to a network so it drains and you can keep capturing.',
+      one:
+          '1 item waiting (phone limit). Nothing more fits — connect to a network so it drains and you can keep capturing.',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -1040,7 +1089,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String coStepsSheetTitle(int total) {
-    return '$total steps + alternate exit';
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: '$total steps + alternate exit',
+      one: '1 step + alternate exit',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2559,7 +2614,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String coJoinDonePill(int done, int total) {
-    return '$done of $total phases';
+    String _temp0 = intl.Intl.pluralLogic(
+      total,
+      locale: localeName,
+      other: '$done of $total phases',
+      one: '$done of 1 phase',
+    );
+    return '$_temp0';
   }
 
   @override

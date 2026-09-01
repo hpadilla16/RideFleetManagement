@@ -115,6 +115,28 @@ Map<String, dynamic> _payload(OutboxEntry row) {
   }
 }
 
+/// ¿El servidor CONTESTÓ pero no pudo con esto (5xx / 429)?
+///
+/// No es interpretar el error del servidor: es leer el status del transporte.
+/// Una fila así llega a dead-letter por agotar reintentos, no por un rechazo,
+/// y el empleado merece saber que el problema no es su señal ni su captura.
+bool _servidorNoPudo(int status) => status >= 500 || status == 429;
+
+/// Encabezado del detalle plegado, armado con lo que se sabe de verdad.
+///
+/// El `·` es puntuación de junta, no texto traducible (mismo criterio que el
+/// resto de la pantalla). Lo que sí es texto — la etiqueta y el prefijo del
+/// status — sale del l10n. Si no hay ni code ni status (fallo de red puro),
+/// se pinta la etiqueta sola: nunca un separador huérfano.
+String _detalleTecnico(AppLocalizations l10n, String? code, int? status) {
+  final partes = <String>[
+    ?code,
+    if (status != null) l10n.outboxTechnicalHttp(status),
+  ];
+  if (partes.isEmpty) return l10n.outboxTechnicalDetailBare;
+  return l10n.outboxTechnicalDetail(partes.join(' · '));
+}
+
 String _formatBytes(int bytes) {
   if (bytes >= 1024 * 1024) {
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
@@ -249,12 +271,34 @@ class _DeadRow extends ConsumerWidget {
     final isPhoto = row.kind == OutboxKinds.inspectionPhoto;
     final angle = _angleLabelFor(l10n, payload['angleKey'] as String?);
     final code = row.lastErrorCode;
+    final status = row.lastErrorStatus;
 
     // Motivo en humano + acción a la medida (nota 4 del mockup 7B). Codes
     // del drenador: REQUIRED_ANGLES_MISSING → abrir inspección; TOKEN_* →
     // reintentar como acción PRIMARIA (mockup 7B — es 100 % recuperable: el
     // drenado re-mintea con la sesión y el pre-check evita duplicados);
     // PHOTO_LOST / SESSION_GONE → solo descartar.
+    //
+    // Agotados los codes CONOCIDOS de arriba, quien decide es el TRANSPORTE
+    // (`lastErrorStatus`) y NADA MÁS. El hueco del code no significa "no
+    // hubo señal": el backend no lo manda en todos los 4xx y la prueba de
+    // humo pescó un 404 así, con cobertura perfecta y la bandeja diciendo
+    // "reintenta cuando haya señal" — mandando al empleado a caminar hacia
+    // la ventana por un problema que no estaba en el teléfono.
+    //   status null + sin code → nunca llegó respuesta ⇒ es la red.
+    //   status ≥ 500 / 429     → el servidor contestó pero no pudo con esto;
+    //                            se agotaron los reintentos, no es un rechazo.
+    //   resto (4xx)            → hubo respuesta y fue un rechazo.
+    //
+    // Review GD-M1: estos dos brazos NO pueden colgar de `code == null`. Un
+    // 5xx/429 que SÍ traiga code (los 429 lo traen de rutina) caería al
+    // genérico "El servidor rechazó este envío" — exactamente la culpa mal
+    // repartida que este arreglo existe para matar, solo que por la otra
+    // puerta. `markFailed` acepta code y status por separado, así que la
+    // combinación es escribible aunque hoy el drenador no la produzca.
+    //
+    // En ningún caso se traduce ni se clasifica el cuerpo del error: el
+    // detalle crudo del servidor sigue intacto tras el chevron.
     final (reason, canRetry, retryIsPrimary, canOpenInspection) =
         switch (code) {
       'REQUIRED_ANGLES_MISSING' => (
@@ -271,7 +315,18 @@ class _DeadRow extends ConsumerWidget {
         ),
       'PHOTO_LOST' => (l10n.outboxReasonPhotoLost, false, false, false),
       'SESSION_GONE' => (l10n.outboxReasonSessionGone, false, false, false),
-      null => (l10n.outboxReasonNetwork, true, false, false),
+      _ when code == null && status == null => (
+          l10n.outboxReasonNetwork,
+          true,
+          false,
+          false
+        ),
+      _ when status != null && _servidorNoPudo(status) => (
+          l10n.outboxReasonServerUnavailable,
+          true,
+          false,
+          false
+        ),
       _ => (l10n.outboxReasonGeneric, true, false, false),
     };
 
@@ -372,6 +427,10 @@ class _DeadRow extends ConsumerWidget {
           // Material transparente existe porque el ListTile del
           // ExpansionTile pinta su tinta en el Material más cercano — sin
           // él, el fondo del card lo taparía (assert del framework).
+          //
+          // El encabezado se ARMA con lo que de verdad se sabe: antes se le
+          // pasaba '' como segundo hueco de "…: {code} · {message}" y el
+          // separador quedaba colgando ("Detalle técnico: — · ").
           if (row.lastError != null)
             Material(
               type: MaterialType.transparency,
@@ -382,7 +441,7 @@ class _DeadRow extends ConsumerWidget {
                   tilePadding: EdgeInsets.zero,
                   childrenPadding: const EdgeInsets.only(bottom: 8),
                   title: Text(
-                    l10n.outboxTechnicalDetail(code ?? '—', ''),
+                    _detalleTecnico(l10n, code, status),
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,

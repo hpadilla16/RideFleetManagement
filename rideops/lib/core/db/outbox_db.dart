@@ -51,6 +51,18 @@ class OutboxEntries extends Table {
   IntColumn get attempts => integer().withDefault(const Constant(0))();
   TextColumn get lastError => text().nullable()();
   TextColumn get lastErrorCode => text().nullable()();
+
+  /// Status HTTP de la respuesta que causó el último fallo, o null si NO
+  /// HUBO RESPUESTA (timeout / sin red).
+  ///
+  /// Existe porque [lastErrorCode] no puede responder esa pregunta: el
+  /// backend no manda `code` en todos los 4xx, así que un rechazo real
+  /// (el 404 que cazó la prueba de humo en el emulador) quedaba
+  /// indistinguible de un fallo de red y la bandeja le decía al empleado
+  /// "reintenta cuando haya señal" con cobertura perfecta. Es un dato de
+  /// TRANSPORTE, no una clasificación del error del servidor: la app sigue
+  /// sin interpretar el cuerpo (regla de la casa).
+  IntColumn get lastErrorStatus => integer().nullable()();
   TextColumn get status => text().withDefault(const Constant('pending'))();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
@@ -95,11 +107,29 @@ class OutboxAuditEntries extends Table {
 class OutboxDb extends _$OutboxDb {
   OutboxDb(super.executor);
 
-  // v1 sigue siendo el esquema inicial: hasta H5 el provider devolvía null y
-  // la DB jamás se creó en ningún aparato — las tablas nuevas (audit,
-  // groupKey) entran en el CREATE inicial, no en una migración.
+  // v1 fue el esquema inicial: hasta H5 el provider devolvía null y la DB
+  // jamás se creó en ningún aparato — las tablas nuevas (audit, groupKey)
+  // entraron en el CREATE inicial, no en una migración.
+  //
+  // v2 agrega [OutboxEntries.lastErrorStatus]. Desde H5 sí hay teléfonos con
+  // el archivo creado (los de la prueba de humo), así que esta ya es una
+  // migración de verdad y no un rebautizo del CREATE.
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  /// Sin esto, drift LANZA al abrir una DB vieja (su `onUpgrade` por defecto
+  /// es un throw): un teléfono con la bandeja de H5 no abriría y perdería
+  /// fotos de daños pendientes. La columna es nullable y sin default, así
+  /// que las filas viejas quedan con null = "no sé si hubo respuesta", que
+  /// es exactamente la verdad para un fallo anterior a este cambio.
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            await m.addColumn(outboxEntries, outboxEntries.lastErrorStatus);
+          }
+        },
+      );
 
   /// Tope de la bandeja (política H5, mockup 7D): 50 filas / ~250 MB de
   /// fotos. Con la bandeja llena se PAUSA el encolado (antes de abrir la
@@ -252,6 +282,7 @@ class OutboxDb extends _$OutboxDb {
         attempts: const Value(0),
         lastError: const Value(null),
         lastErrorCode: const Value(null),
+        lastErrorStatus: const Value(null),
         updatedAt: Value(DateTime.now()),
       ),
     );
@@ -288,6 +319,7 @@ class OutboxDb extends _$OutboxDb {
     String id, {
     required String error,
     String? code,
+    int? status,
     required bool dead,
   }) {
     // Incremento ATÓMICO en SQL (`attempts = attempts + 1`), no
@@ -300,6 +332,7 @@ class OutboxDb extends _$OutboxDb {
         status: Constant(dead ? 'dead' : 'pending'),
         lastError: Constant(error),
         lastErrorCode: Constant(code),
+        lastErrorStatus: Constant(status),
         attempts: outboxEntries.attempts + const Constant(1),
         updatedAt: Constant(DateTime.now()),
       ),

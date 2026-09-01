@@ -107,6 +107,7 @@ class OutboxService {
         attempts: const Value(0),
         lastError: const Value(null),
         lastErrorCode: const Value(null),
+        lastErrorStatus: const Value(null),
         updatedAt: Value(DateTime.now()),
       ));
       if (oldPath != null && oldPath != photoName) await vault.delete(oldPath);
@@ -169,6 +170,7 @@ class OutboxService {
         attempts: const Value(0),
         lastError: const Value(null),
         lastErrorCode: const Value(null),
+        lastErrorStatus: const Value(null),
         updatedAt: Value(DateTime.now()),
       ));
     } else {

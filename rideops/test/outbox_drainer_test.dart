@@ -19,6 +19,10 @@ class FakeStore implements OutboxStore {
   final dead = <String, String?>{}; // id -> code
   final failedPending = <String>[];
 
+  /// id -> status HTTP persistido en CADA markFailed (dead o no). null aquí
+  /// significa "no hubo respuesta" — la bandeja depende de esa distinción.
+  final statuses = <String, int?>{};
+
   @override
   Future<List<OutboxRow>> pending() async {
     pendingCalls++;
@@ -43,7 +47,11 @@ class FakeStore implements OutboxStore {
 
   @override
   Future<void> markFailed(String id,
-      {required String error, String? code, required bool dead}) async {
+      {required String error,
+      String? code,
+      int? status,
+      required bool dead}) async {
+    statuses[id] = status;
     if (dead) {
       this.dead[id] = code;
       rows.removeWhere((r) => r.id == id);
@@ -208,6 +216,42 @@ void main() {
     final store = FakeStore([photoRow('a')]);
     await OutboxDrainer(store: store, ops: ops).drain();
     expect(store.dead, {'a': 'REQUIRED_ANGLES_MISSING'});
+  });
+
+  // El status HTTP tiene que SOBREVIVIR el viaje outcome → store. Si el
+  // drenador lo deja caer aquí, la columna queda null y la bandeja vuelve a
+  // decirle "no hay señal" al empleado por un 404 del servidor.
+  test('un rechazo SIN code guarda su status HTTP en la fila muerta',
+      () async {
+    final ops = FakeOps(
+      photoOutcome: const DrainReject(null, 'Not Found', status: 404),
+    );
+    final store = FakeStore([photoRow('a')]);
+    await OutboxDrainer(store: store, ops: ops).drain();
+
+    expect(store.dead, {'a': null}, reason: 'el backend no mandó code');
+    expect(store.statuses['a'], 404,
+        reason: 'sin el status la fila es indistinguible de un fallo de red');
+  });
+
+  test('un fallo transitorio SIN respuesta guarda status null', () async {
+    final ops = FakeOps(photoOutcome: const DrainTransient('sin red'));
+    final store = FakeStore([photoRow('a')]);
+    await OutboxDrainer(store: store, ops: ops).drain();
+
+    expect(store.failedPending, ['a']);
+    expect(store.statuses['a'], isNull);
+  });
+
+  test('un 5xx transitorio SÍ guarda su status (el servidor contestó)',
+      () async {
+    final ops = FakeOps(
+      photoOutcome: const DrainTransient('Service Unavailable', status: 503),
+    );
+    final store = FakeStore([photoRow('a')]);
+    await OutboxDrainer(store: store, ops: ops).drain();
+
+    expect(store.statuses['a'], 503);
   });
 
   test(

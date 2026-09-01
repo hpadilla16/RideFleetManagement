@@ -129,22 +129,28 @@ class ApiOutboxOps implements OutboxOps {
         _ => false,
       };
 
+  /// `e.status` viaja SIEMPRE con el outcome. Es null exactamente cuando no
+  /// hubo respuesta (ApiError.fromDio con `response == null`), y ese null es
+  /// el único indicio fiable de "no hay señal": el `code` no sirve para eso
+  /// porque el backend no lo manda en todos los 4xx (auth.js:75, y el 404 que
+  /// cazó la prueba de humo). La bandeja lee el status, no el hueco del code.
   static DrainOutcome _outcomeOf(ApiError e) {
     switch (e.kind) {
       case ApiErrorKind.network:
       case ApiErrorKind.server:
       case ApiErrorKind.rateLimited:
-        return DrainTransient(e.message);
+        return DrainTransient(e.message, status: e.status);
       case ApiErrorKind.gone:
         // 410 sin code no debería existir (loadToken siempre manda uno);
         // si pasara, TOKEN_INVALID dispara el re-mint único igual.
-        return DrainReject(e.code ?? 'TOKEN_INVALID', e.message);
+        return DrainReject(e.code ?? 'TOKEN_INVALID', e.message,
+            status: e.status);
       case ApiErrorKind.unauthorized:
       case ApiErrorKind.passwordChangeRequired:
       case ApiErrorKind.forbidden:
       case ApiErrorKind.conflict:
       case ApiErrorKind.badRequest:
-        return DrainReject(e.code, e.message);
+        return DrainReject(e.code, e.message, status: e.status);
     }
   }
 }

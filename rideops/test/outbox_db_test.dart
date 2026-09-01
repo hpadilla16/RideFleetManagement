@@ -45,8 +45,11 @@ class DbStore implements OutboxStore {
 
   @override
   Future<void> markFailed(String id,
-          {required String error, String? code, required bool dead}) =>
-      db.markFailed(id, error: error, code: code, dead: dead);
+          {required String error,
+          String? code,
+          int? status,
+          required bool dead}) =>
+      db.markFailed(id, error: error, code: code, status: status, dead: dead);
 }
 
 class TestOps implements OutboxOps {
@@ -128,6 +131,39 @@ void main() {
 
   Future<OutboxEntry> rowById(String id) =>
       (db.select(db.outboxEntries)..where((e) => e.id.equals(id))).getSingle();
+
+  test('markFailed persiste el status HTTP, y null cuando no hubo respuesta',
+      () async {
+    await db.into(db.outboxEntries).insert(entry('a'));
+    await db.into(db.outboxEntries).insert(entry('b'));
+
+    // Rechazo del servidor SIN code (el 404 de la prueba de humo): lo único
+    // que lo distingue de un fallo de red es este número.
+    await db.markFailed('a',
+        error: 'Not Found', code: null, status: 404, dead: true);
+    final a = await rowById('a');
+    expect(a.lastErrorCode, isNull);
+    expect(a.lastErrorStatus, 404);
+
+    // Fallo de red de verdad: nunca llegó respuesta.
+    await db.markFailed('b', error: 'sin red', code: null, dead: false);
+    expect((await rowById('b')).lastErrorStatus, isNull);
+  });
+
+  test('reintentar una fila muerta limpia también el status viejo', () async {
+    await db.into(db.outboxEntries).insert(entry('a'));
+    await db.markFailed('a',
+        error: 'Not Found', code: null, status: 404, dead: true);
+
+    await db.resetDeadToPending('a');
+
+    final a = await rowById('a');
+    expect(a.status, 'pending');
+    expect(a.lastErrorStatus, isNull,
+        reason: 'un status rancio pintaría el motivo del intento ANTERIOR');
+    expect(a.lastError, isNull);
+    expect(a.lastErrorCode, isNull);
+  });
 
   test('markFailed incrementa attempts atómicamente en cada fallo', () async {
     await db.into(db.outboxEntries).insert(entry('a'));
@@ -261,5 +297,94 @@ void main() {
 
     final remaining = await (db.select(db.outboxEntries)).get();
     expect(remaining.map((r) => r.id).toList(), ['c']);
+  });
+
+  // La parte MÁS cara de equivocarse de este cambio no es el texto: es el
+  // esquema. Un teléfono de patio con la bandeja de H5 ya tiene el archivo
+  // creado en v1; si la migración no corre, drift lanza al abrir y las fotos
+  // de daños pendientes se quedan encerradas. Aquí se construye un v1 REAL
+  // (derivado del DDL vivo de v2, no escrito a mano) y se abre con el código
+  // de hoy.
+  group('migración v1 → v2', () {
+    /// DDL real de la tabla en el esquema de HOY, leído de sqlite_master.
+    Future<Map<String, String>> ddlActual() async {
+      final v2 = OutboxDb(NativeDatabase.memory());
+      // Cualquier consulta fuerza el onCreate.
+      await v2.totalRows();
+      final filas = await v2
+          .customSelect(
+            'SELECT name, sql FROM sqlite_master '
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+          )
+          .get();
+      final ddl = {
+        for (final f in filas) f.read<String>('name'): f.read<String>('sql'),
+      };
+      await v2.close();
+      return ddl;
+    }
+
+    test('un archivo v1 se abre, conserva sus filas y gana la columna nueva',
+        () async {
+      final ddl = await ddlActual();
+      final ddlV2Entries = ddl['outbox_entries']!;
+
+      // v1 = el DDL de hoy MENOS la columna nueva. Derivarlo (en vez de
+      // teclearlo) es lo que hace que el fixture no pueda mentir sobre cómo
+      // era v1 de verdad.
+      final ddlV1Entries =
+          ddlV2Entries.replaceAll(RegExp(r'"last_error_status" INTEGER( NULL)?, '), '');
+      expect(ddlV1Entries, isNot(ddlV2Entries),
+          reason: 'si esto no recorta nada, la prueba no estaría probando la '
+              'migración: el DDL de drift cambió de forma');
+      expect(ddlV1Entries.contains('last_error_status'), isFalse);
+
+      final viejo = OutboxDb(NativeDatabase.memory(setup: (raw) {
+        raw.execute(ddlV1Entries);
+        raw.execute(ddl['outbox_audit_entries']!);
+        // Una fila que ya murió en v1, con la información que v1 sabía
+        // guardar: mensaje crudo, sin code y sin status.
+        raw.execute(
+          'INSERT INTO outbox_entries (id, user_id, tenant_id, kind, payload, '
+          'idempotency_key, attempts, last_error, status, created_at, updated_at) '
+          "VALUES ('vieja', 'u1', 't1', 'inspection_photo', '{}', 'ik-vieja', "
+          "8, 'error de antes', 'dead', 1, 1)",
+        );
+        raw.execute('PRAGMA user_version = 1');
+      }));
+      addTearDown(viejo.close);
+
+      // La columna, PREGUNTÁNDOLE A SQLITE. Hace falta preguntar así: el
+      // SELECT de drift es `SELECT *` y mapea una columna ausente a null sin
+      // quejarse, así que una migración que no corrió se vería idéntica a
+      // "fila vieja sin status" — y la bandeja volvería a decir "no hay
+      // señal" para siempre, en silencio.
+      final columnas = await viejo
+          .customSelect('PRAGMA table_info(outbox_entries)')
+          .get();
+      expect(
+        columnas.map((c) => c.read<String>('name')),
+        contains('last_error_status'),
+        reason: 'la migración v1 → v2 no corrió',
+      );
+
+      final fila = await (viejo.select(viejo.outboxEntries)
+            ..where((t) => t.id.equals('vieja')))
+          .getSingle();
+
+      expect(fila.lastError, 'error de antes',
+          reason: 'la migración no puede perder trabajo pendiente');
+      expect(fila.lastErrorStatus, isNull,
+          reason: 'de una fila de v1 NO se sabe si hubo respuesta, y null '
+              'dice exactamente eso');
+
+      // Y a partir de aquí la columna funciona.
+      await viejo.markFailed('vieja',
+          error: 'Not Found', code: null, status: 404, dead: true);
+      final tras = await (viejo.select(viejo.outboxEntries)
+            ..where((t) => t.id.equals('vieja')))
+          .getSingle();
+      expect(tras.lastErrorStatus, 404);
+    });
   });
 }

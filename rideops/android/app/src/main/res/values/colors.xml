@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Colores de marca del lado nativo. Son la MISMA rampa de
+  rideops/lib/core/theme/ride_tokens.dart (que a su vez viene de
+  frontend/src/app/globals.css): si allá cambia, aquí también, o el arranque
+  deja de empatar con el primer frame de Flutter y vuelve el destello.
+-->
+<resources>
+    <!-- Aurora del splash/login (RideTokens.aurora): linear topLeft →
+         bottomRight. Flutter tiene 4 paradas y GradientDrawable solo admite
+         3 (start/center/end); el centro es la interpolación de las dos de en
+         medio en t=0.5. La diferencia no es perceptible en los ~200 ms que
+         el splash está en pantalla, y a cambio el arranque nativo y el
+         primer frame de Flutter son el mismo fondo. -->
+    <color name="ride_aurora_start">#FF1C0F4A</color>
+    <color name="ride_aurora_center">#FF33127B</color>
+    <color name="ride_aurora_end">#FF5A26C9</color>
+
+    <!-- Fondo del icono adaptativo. Blanco porque la marca de Ride es
+         MORADA (#8752FE) y se usa así en la web: recolorearla para meterla
+         sobre un fondo morado sería rediseñar la marca, y la marca es de
+         Hector. Ver el reporte: Diseño puede querer otro tratamiento. -->
+    <color name="ride_launcher_background">#FFFFFFFF</color>
+</resources>

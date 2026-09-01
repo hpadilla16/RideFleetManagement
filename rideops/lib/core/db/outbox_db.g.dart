@@ -137,6 +137,17 @@ class $OutboxEntriesTable extends OutboxEntries
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _lastErrorStatusMeta = const VerificationMeta(
+    'lastErrorStatus',
+  );
+  @override
+  late final GeneratedColumn<int> lastErrorStatus = GeneratedColumn<int>(
+    'last_error_status',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _statusMeta = const VerificationMeta('status');
   @override
   late final GeneratedColumn<String> status = GeneratedColumn<String>(
@@ -183,6 +194,7 @@ class $OutboxEntriesTable extends OutboxEntries
     attempts,
     lastError,
     lastErrorCode,
+    lastErrorStatus,
     status,
     createdAt,
     updatedAt,
@@ -286,6 +298,15 @@ class $OutboxEntriesTable extends OutboxEntries
         ),
       );
     }
+    if (data.containsKey('last_error_status')) {
+      context.handle(
+        _lastErrorStatusMeta,
+        lastErrorStatus.isAcceptableOrUnknown(
+          data['last_error_status']!,
+          _lastErrorStatusMeta,
+        ),
+      );
+    }
     if (data.containsKey('status')) {
       context.handle(
         _statusMeta,
@@ -365,6 +386,10 @@ class $OutboxEntriesTable extends OutboxEntries
         DriftSqlType.string,
         data['${effectivePrefix}last_error_code'],
       ),
+      lastErrorStatus: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}last_error_status'],
+      ),
       status: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}status'],
@@ -417,6 +442,18 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
   final int attempts;
   final String? lastError;
   final String? lastErrorCode;
+
+  /// Status HTTP de la respuesta que causó el último fallo, o null si NO
+  /// HUBO RESPUESTA (timeout / sin red).
+  ///
+  /// Existe porque [lastErrorCode] no puede responder esa pregunta: el
+  /// backend no manda `code` en todos los 4xx, así que un rechazo real
+  /// (el 404 que cazó la prueba de humo en el emulador) quedaba
+  /// indistinguible de un fallo de red y la bandeja le decía al empleado
+  /// "reintenta cuando haya señal" con cobertura perfecta. Es un dato de
+  /// TRANSPORTE, no una clasificación del error del servidor: la app sigue
+  /// sin interpretar el cuerpo (regla de la casa).
+  final int? lastErrorStatus;
   final String status;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -433,6 +470,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
     required this.attempts,
     this.lastError,
     this.lastErrorCode,
+    this.lastErrorStatus,
     required this.status,
     required this.createdAt,
     required this.updatedAt,
@@ -461,6 +499,9 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
     }
     if (!nullToAbsent || lastErrorCode != null) {
       map['last_error_code'] = Variable<String>(lastErrorCode);
+    }
+    if (!nullToAbsent || lastErrorStatus != null) {
+      map['last_error_status'] = Variable<int>(lastErrorStatus);
     }
     map['status'] = Variable<String>(status);
     map['created_at'] = Variable<DateTime>(createdAt);
@@ -492,6 +533,9 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
       lastErrorCode: lastErrorCode == null && nullToAbsent
           ? const Value.absent()
           : Value(lastErrorCode),
+      lastErrorStatus: lastErrorStatus == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastErrorStatus),
       status: Value(status),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
@@ -516,6 +560,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
       attempts: serializer.fromJson<int>(json['attempts']),
       lastError: serializer.fromJson<String?>(json['lastError']),
       lastErrorCode: serializer.fromJson<String?>(json['lastErrorCode']),
+      lastErrorStatus: serializer.fromJson<int?>(json['lastErrorStatus']),
       status: serializer.fromJson<String>(json['status']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
@@ -537,6 +582,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
       'attempts': serializer.toJson<int>(attempts),
       'lastError': serializer.toJson<String?>(lastError),
       'lastErrorCode': serializer.toJson<String?>(lastErrorCode),
+      'lastErrorStatus': serializer.toJson<int?>(lastErrorStatus),
       'status': serializer.toJson<String>(status),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
@@ -556,6 +602,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
     int? attempts,
     Value<String?> lastError = const Value.absent(),
     Value<String?> lastErrorCode = const Value.absent(),
+    Value<int?> lastErrorStatus = const Value.absent(),
     String? status,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -574,6 +621,9 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
     lastErrorCode: lastErrorCode.present
         ? lastErrorCode.value
         : this.lastErrorCode,
+    lastErrorStatus: lastErrorStatus.present
+        ? lastErrorStatus.value
+        : this.lastErrorStatus,
     status: status ?? this.status,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -598,6 +648,9 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
       lastErrorCode: data.lastErrorCode.present
           ? data.lastErrorCode.value
           : this.lastErrorCode,
+      lastErrorStatus: data.lastErrorStatus.present
+          ? data.lastErrorStatus.value
+          : this.lastErrorStatus,
       status: data.status.present ? data.status.value : this.status,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
@@ -619,6 +672,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
           ..write('attempts: $attempts, ')
           ..write('lastError: $lastError, ')
           ..write('lastErrorCode: $lastErrorCode, ')
+          ..write('lastErrorStatus: $lastErrorStatus, ')
           ..write('status: $status, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -640,6 +694,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
     attempts,
     lastError,
     lastErrorCode,
+    lastErrorStatus,
     status,
     createdAt,
     updatedAt,
@@ -660,6 +715,7 @@ class OutboxEntry extends DataClass implements Insertable<OutboxEntry> {
           other.attempts == this.attempts &&
           other.lastError == this.lastError &&
           other.lastErrorCode == this.lastErrorCode &&
+          other.lastErrorStatus == this.lastErrorStatus &&
           other.status == this.status &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
@@ -678,6 +734,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
   final Value<int> attempts;
   final Value<String?> lastError;
   final Value<String?> lastErrorCode;
+  final Value<int?> lastErrorStatus;
   final Value<String> status;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
@@ -695,6 +752,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
     this.attempts = const Value.absent(),
     this.lastError = const Value.absent(),
     this.lastErrorCode = const Value.absent(),
+    this.lastErrorStatus = const Value.absent(),
     this.status = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -713,6 +771,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
     this.attempts = const Value.absent(),
     this.lastError = const Value.absent(),
     this.lastErrorCode = const Value.absent(),
+    this.lastErrorStatus = const Value.absent(),
     this.status = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
@@ -738,6 +797,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
     Expression<int>? attempts,
     Expression<String>? lastError,
     Expression<String>? lastErrorCode,
+    Expression<int>? lastErrorStatus,
     Expression<String>? status,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
@@ -756,6 +816,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
       if (attempts != null) 'attempts': attempts,
       if (lastError != null) 'last_error': lastError,
       if (lastErrorCode != null) 'last_error_code': lastErrorCode,
+      if (lastErrorStatus != null) 'last_error_status': lastErrorStatus,
       if (status != null) 'status': status,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -776,6 +837,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
     Value<int>? attempts,
     Value<String?>? lastError,
     Value<String?>? lastErrorCode,
+    Value<int?>? lastErrorStatus,
     Value<String>? status,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
@@ -794,6 +856,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
       attempts: attempts ?? this.attempts,
       lastError: lastError ?? this.lastError,
       lastErrorCode: lastErrorCode ?? this.lastErrorCode,
+      lastErrorStatus: lastErrorStatus ?? this.lastErrorStatus,
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -840,6 +903,9 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
     if (lastErrorCode.present) {
       map['last_error_code'] = Variable<String>(lastErrorCode.value);
     }
+    if (lastErrorStatus.present) {
+      map['last_error_status'] = Variable<int>(lastErrorStatus.value);
+    }
     if (status.present) {
       map['status'] = Variable<String>(status.value);
     }
@@ -870,6 +936,7 @@ class OutboxEntriesCompanion extends UpdateCompanion<OutboxEntry> {
           ..write('attempts: $attempts, ')
           ..write('lastError: $lastError, ')
           ..write('lastErrorCode: $lastErrorCode, ')
+          ..write('lastErrorStatus: $lastErrorStatus, ')
           ..write('status: $status, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
@@ -1531,6 +1598,7 @@ typedef $$OutboxEntriesTableCreateCompanionBuilder =
       Value<int> attempts,
       Value<String?> lastError,
       Value<String?> lastErrorCode,
+      Value<int?> lastErrorStatus,
       Value<String> status,
       required DateTime createdAt,
       required DateTime updatedAt,
@@ -1550,6 +1618,7 @@ typedef $$OutboxEntriesTableUpdateCompanionBuilder =
       Value<int> attempts,
       Value<String?> lastError,
       Value<String?> lastErrorCode,
+      Value<int?> lastErrorStatus,
       Value<String> status,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -1622,6 +1691,11 @@ class $$OutboxEntriesTableFilterComposer
 
   ColumnFilters<String> get lastErrorCode => $composableBuilder(
     column: $table.lastErrorCode,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get lastErrorStatus => $composableBuilder(
+    column: $table.lastErrorStatus,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1710,6 +1784,11 @@ class $$OutboxEntriesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get lastErrorStatus => $composableBuilder(
+    column: $table.lastErrorStatus,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get status => $composableBuilder(
     column: $table.status,
     builder: (column) => ColumnOrderings(column),
@@ -1777,6 +1856,11 @@ class $$OutboxEntriesTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<int> get lastErrorStatus => $composableBuilder(
+    column: $table.lastErrorStatus,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get status =>
       $composableBuilder(column: $table.status, builder: (column) => column);
 
@@ -1830,6 +1914,7 @@ class $$OutboxEntriesTableTableManager
                 Value<int> attempts = const Value.absent(),
                 Value<String?> lastError = const Value.absent(),
                 Value<String?> lastErrorCode = const Value.absent(),
+                Value<int?> lastErrorStatus = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -1847,6 +1932,7 @@ class $$OutboxEntriesTableTableManager
                 attempts: attempts,
                 lastError: lastError,
                 lastErrorCode: lastErrorCode,
+                lastErrorStatus: lastErrorStatus,
                 status: status,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -1866,6 +1952,7 @@ class $$OutboxEntriesTableTableManager
                 Value<int> attempts = const Value.absent(),
                 Value<String?> lastError = const Value.absent(),
                 Value<String?> lastErrorCode = const Value.absent(),
+                Value<int?> lastErrorStatus = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
@@ -1883,6 +1970,7 @@ class $$OutboxEntriesTableTableManager
                 attempts: attempts,
                 lastError: lastError,
                 lastErrorCode: lastErrorCode,
+                lastErrorStatus: lastErrorStatus,
                 status: status,
                 createdAt: createdAt,
                 updatedAt: updatedAt,

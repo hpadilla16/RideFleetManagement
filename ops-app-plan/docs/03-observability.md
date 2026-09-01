@@ -189,7 +189,7 @@ inventado.
 | `inspection.required_angle_dead` | una foto OBLIGATORIA (front/rear) murió en la bandeja (tag `angle`). El dead-letter no bloquea al resto, así que el `complete` sale igual y el servidor lo rechaza con `REQUIRED_ANGLES_MISSING`: su frecuencia mide el callejón sin salida del frame 17E — M2-H4 |
 | `outbox.enqueued` / `outbox.drained_ok` | tag `kind`, `queue_depth` |
 | `outbox.remint_token` | re-emisión del handoff al drenar (tag `reused`) |
-| `outbox.entry_dead` | dead-letter (tag `code` — TOKEN_*, REQUIRED_ANGLES_MISSING…) |
+| `outbox.entry_dead` | dead-letter (tag `code` — TOKEN_*, REQUIRED_ANGLES_MISSING… — y tag `status`: el HTTP de la respuesta, o null si NUNCA llegó una. `code` null + `status` null = murió sin red; `code` null + `status` presente = el backend rechazó sin mandar code) |
 | `outbox.purged_account_switch` | purga por cambio de cuenta (tag `rows`) |
 
 ### Salud

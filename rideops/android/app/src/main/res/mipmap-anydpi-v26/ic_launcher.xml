@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Icono adaptativo (API 26+). El foreground es la marca de Ride RECORTADA del
+  logo que ya vive en el repo (frontend/public/ride-logo.png) — no es arte
+  nuevo; ver tool/make_launcher_icons.py.
+
+  El foreground trae sus rayas de carretera en blanco OPACO: en el PNG de
+  origen eran huecos transparentes (frontend/public/_make_logo_png.py volvió
+  transparente todo lo casi-blanco), y así el icono habría dependido del
+  color del background para verse. Ahora no.
+
+  NO hay capa <monochrome>: el icono temático de Android 13 exige una
+  silueta de un solo color, y aplanar la flecha con sus rayas a una silueta
+  es una decisión de marca, no de ingeniería. Queda anotado en el reporte.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ride_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>
