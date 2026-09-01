@@ -190,6 +190,28 @@ void main() {
     expect(tester.testTextInput.isVisible, isFalse);
   });
 
+  testWidgets('SC-3: las NOTAS también cierran su teclado al tocar fuera — '
+      'son multilínea, así que su tecla de acción es un salto de línea y el '
+      'toque fuera es la ÚNICA salida que tienen', (tester) async {
+    await pumpMetrics(tester, height: 540, leading: 0);
+    // El segundo TextField del cuerpo es el de notas.
+    final notes = find.byType(TextField).last;
+
+    await tester.tap(notes);
+    await tester.pumpAndSettle();
+    expect(tester.testTextInput.isVisible, isTrue);
+
+    await tester.tap(find.text('4'));
+    await tester.pumpAndSettle();
+
+    expect(controller.cleanliness, 4);
+    expect(
+      tester.testTextInput.isVisible,
+      isFalse,
+      reason: 'desenfocar SOLO el odómetro dejaba este teclado puesto',
+    );
+  });
+
   testWidgets('la última lectura se escribe con el MISMO formato y unidad que '
       'el paso 1 (menor 1: "48,190 mi", no "48190 mi" ni "48.190 km")',
       (tester) async {

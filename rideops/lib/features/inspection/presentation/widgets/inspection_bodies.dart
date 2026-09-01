@@ -189,11 +189,18 @@ class _InspectionMetricsBodyState extends State<InspectionMetricsBody> {
     });
   }
 
-  /// Cierra el teclado. Lo llaman la tecla de acción del IME y el toque
-  /// fuera del campo: en Android el `onTapOutside` por defecto NO desenfoca
-  /// (solo lo hace en escritorio/web), así que sin esto un toque en el
-  /// selector de limpieza seleccionaba el número y dejaba el teclado puesto.
-  void _dismissKeyboard() => _odometerFocus.unfocus();
+  /// Cierra el teclado, sea de quien sea el foco.
+  ///
+  /// Lo llama el toque FUERA de un campo: en Android el `onTapOutside` por
+  /// defecto NO desenfoca (solo lo hace en escritorio/web), así que sin esto
+  /// un toque en el selector de limpieza seleccionaba el número y dejaba el
+  /// teclado puesto tapando media pantalla.
+  ///
+  /// Va por `FocusScope` y no por el nodo del odómetro (review SC-3): las
+  /// NOTAS son multilínea y ahí el IME no trae acción de cierre por
+  /// definición —la tecla es un salto de línea—, así que el toque fuera es la
+  /// única salida que tiene ese campo.
+  void _dismissKeyboard() => FocusScope.of(context).unfocus();
 
   @override
   Widget build(BuildContext context) {
@@ -220,8 +227,12 @@ class _InspectionMetricsBodyState extends State<InspectionMetricsBody> {
           // después: la acción del IME es "listo", no "siguiente". Explícita y
           // no heredada del default de Flutter, porque de este renglón depende
           // que el teclado tenga una salida propia.
+          //
+          // Sin `onEditingComplete` a propósito (review m-2): el default de
+          // EditableText para `done` ya desenfoca, y un handler que repite el
+          // comportamiento del framework es código que nadie puede romper y
+          // ninguna prueba puede distinguir.
           textInputAction: TextInputAction.done,
-          onEditingComplete: _dismissKeyboard,
           onTapOutside: (_) => _dismissKeyboard(),
           style: const TextStyle(
             fontSize: 24,
@@ -278,6 +289,9 @@ class _InspectionMetricsBodyState extends State<InspectionMetricsBody> {
           maxLength: 2000,
           style: const TextStyle(fontSize: 14, color: RideTokens.n800),
           decoration: _inputDecoration(counterText: ''),
+          // Multilínea: su tecla de acción ES un salto de línea, así que el
+          // toque fuera es la ÚNICA forma de cerrar este teclado (SC-3).
+          onTapOutside: (_) => _dismissKeyboard(),
           onChanged: controller.setNotes,
         ),
       ],

@@ -47,7 +47,7 @@ Convención: `dominio.acción[_resultado]`, snake_case, tags siempre presentes:
 | `checkout.reconciled` | UI reconciliada con el servidor — p.ej. 409 → re-fetch (tags `steps_jumped`, `via`) |
 | `checkout.money_attempt` / `checkout.money_ok` / `checkout.money_fail` | rutas de dinero (tag `kind`: charge_sale/hold_deposit/manual_*; NUNCA montos ni PAN) |
 | `checkout.preview_divergence` | cálculo local ≠ preview del servidor (compuerta ADR-6) |
-| `checkout.context_unreachable` | `GET /reservations/:id/display-data` no respondió (tags `status`: código del servidor / `network` / `none`; `stale`: había una respuesta previa en pantalla). `stale:false` es el grave — el paso 1 se queda SIN poder verificar identidad |
+| `checkout.context_unreachable` | `GET /reservations/:id/display-data` no respondió. Tags: `status` (código del servidor / `network` / `none`), `stale` (había una respuesta previa en pantalla) y `via` (`open`/`swap`/`confirm_retry`/`verify_handover`). El grave es `stale:false` + `via:open`: el paso 1 se queda SIN poder verificar identidad. `via:verify_handover` es OTRO incidente —la comprobación post-cierre, que ya tiene su propio veredicto— y sumarlos borraría los dos |
 | `checkout.context_retry` | "Reintentar la consulta" del paso 1 (tag `result`: answered/unreachable) — hermano de `checkout.handover_recheck` |
 | `checkout.declined_insurance_set` | `POST /:id/declined-insurance` aceptado (tag `declined`) |
 | `checkout.vehicle_swapped` | `POST /:id/vehicle` aceptado — sin tags: el id de la unidad es dato de operación, no de telemetría |

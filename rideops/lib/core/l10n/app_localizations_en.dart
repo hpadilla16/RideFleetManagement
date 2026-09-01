@@ -742,6 +742,23 @@ class AppLocalizationsEn extends AppLocalizations {
       'The reading is lower than the last recorded one. Double-check it — it will be sent as is.';
 
   @override
+  String get metricsFieldOdometer => 'the odometer';
+
+  @override
+  String get metricsFieldFuel => 'the fuel level';
+
+  @override
+  String get metricsFieldCleanliness => 'the cleanliness';
+
+  @override
+  String get metricsFieldJoin => 'and';
+
+  @override
+  String metricsBlockedWhy(String fields) {
+    return 'Still to capture: $fields.';
+  }
+
+  @override
   String get metricsFuel => 'Fuel';
 
   @override
@@ -1372,8 +1389,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get coPrecheckinPending => 'Pre-check-in pending';
 
   @override
-  String coOdometer(String km) {
-    return 'Odometer $km km';
+  String coOdometerReading(String reading) {
+    return 'Odometer $reading';
   }
 
   @override
@@ -1628,6 +1645,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get coConfirmStaleWhy =>
+      'This data is from the last lookup that did get through. The current one did not: check it against the license before handing over.';
+
+  @override
   String get coConfirmCheckingPill => 'Checking';
 
   @override
@@ -1644,12 +1665,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get coConfirmUnreachableWhy =>
-      'The customer\'s record could not be checked, so their identity cannot be confirmed. This says nothing about what data the server has.';
+      'The customer\'s record could not be checked, so their identity cannot be confirmed.';
 
   @override
-  String coConfirmUnreachableServer(String message) {
-    return 'The server replied: $message';
-  }
+  String get coConfirmServerReplyLabel => 'Server response';
 
   @override
   String get coConfirmRetryLookup => 'Retry the lookup';

@@ -156,9 +156,16 @@ abstract final class CheckoutEvents {
   ///  - `status`: el código del servidor cuando hubo respuesta, `network`
   ///    cuando murió sin ella, `none` cuando ni siquiera fue un ApiError.
   ///  - `stale` (bool): ya había una respuesta previa en pantalla. Con `true`
-  ///    el agente sigue trabajando sobre datos buenos (regla 8D); con `false`
-  ///    el paso 1 se queda SIN poder verificar identidad. Son dos incidentes
-  ///    de gravedad distinta y no se pueden sumar.
+  ///    el agente sigue trabajando sobre datos buenos, ahora fechados (regla
+  ///    8D); con `false` el paso 1 se queda SIN poder verificar identidad.
+  ///    Son dos incidentes de gravedad distinta y no se pueden sumar.
+  ///  - `via`: QUIÉN pidió la lectura — `open` (arranque del wizard), `swap`
+  ///    (re-lectura tras cambiar la unidad), `confirm_retry` (el botón del
+  ///    paso 1) o `verify_handover` (la comprobación de la entrega, ya en el
+  ///    cierre). Sin este tag el evento mezclaba "el paso 1 no puede
+  ///    verificar identidad" con "la comprobación post-cierre no llegó", que
+  ///    tienen dueño, gravedad y salida distintos — y esta última ya se
+  ///    cuenta aparte con `close_ok`/`handover_recheck` (review m-1).
   ///
   /// Es la señal del defecto que lo hizo nacer: sin esta consulta el paso 1 no
   /// puede verificar identidad, y hasta el hallazgo e2e lo convertía en una

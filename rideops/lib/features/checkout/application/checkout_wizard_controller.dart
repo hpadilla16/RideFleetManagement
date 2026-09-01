@@ -236,7 +236,7 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       }
       if (!_isStaleRead(session, epoch)) {
         _apply(session, detectForeign: false);
-        unawaited(_loadContext(gen));
+        unawaited(_loadContext(gen, via: 'open'));
       }
     } on ApiError catch (e) {
       if (gen != _generation || !ref.mounted) return;
@@ -350,10 +350,6 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
 
   static const _pollRoute = '/api/checkout-sessions/:id';
 
-  /// Re-lee display-data. Lo llama el swap: cambió la unidad de la reserva, y
-  /// el header + la tarjeta de vehículo tienen que dejar de mostrar la vieja.
-  Future<void> reloadContext() async => _loadContext(_generation);
-
   /// Re-lee display-data para VERIFICAR si la entrega quedó registrada (19A/
   /// 19B). No se usa `state.context` cacheado a propósito: la pregunta es qué
   /// dice el servidor AHORA, después del cierre.
@@ -363,7 +359,7 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
   /// registrada"**: es "no lo sé", y la UI lo dice así en vez de acusar a la
   /// cascada de algo que no vio.
   Future<bool?> verifyHandover() async {
-    final display = await _loadContext(_generation);
+    final display = await _loadContext(_generation, via: 'verify_handover');
     return ReservationStatus.tryParse(display?.reservation.status)
         ?.handoverRecorded;
   }
@@ -375,7 +371,7 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
   /// — "Volver a comprobar" es una consulta, jamás un reintento del cierre).
   /// Devuelve el veredicto que quedó, para que la pantalla lo cuente.
   Future<ContextVerdict> retryContext() async {
-    await _loadContext(_generation);
+    await _loadContext(_generation, via: 'confirm_retry');
     return state.contextVerdict;
   }
 
@@ -391,10 +387,19 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
   /// servidor sigue sin el nombre, la licencia y el teléfono" — con el
   /// servidor teniendo los tres. El fallo se anota en el estado (veredicto +
   /// negativa cruda) y la pantalla decide qué contar.
-  Future<ReservationDisplayData?> _loadContext(int gen) async {
+  ///
+  /// [via] identifica QUIÉN pidió la lectura. No es adorno: esta misma función
+  /// la llaman el arranque, el swap, el reintento del paso 1 y la
+  /// verificación de la entrega del cierre, y sin el tag el evento de fallo
+  /// mezclaría "el paso 1 no puede verificar identidad" con "la comprobación
+  /// post-cierre no llegó", que son dos incidentes distintos.
+  Future<ReservationDisplayData?> _loadContext(
+    int gen, {
+    required String via,
+  }) async {
     // Solo se declara "consultando" cuando NO hay nada en la mano. Con una
     // respuesta previa guardada manda la regla 8D del wizard: el dato viejo se
-    // queda: parpadear a "Consultando…" en cada re-lectura (la del swap, por
+    // queda, y parpadear a "Consultando…" en cada re-lectura (la del swap, por
     // ejemplo) vaciaría la tarjeta que el agente está leyendo en voz alta.
     if (gen == _generation && ref.mounted && state.context == null) {
       state = state.copyWith(contextVerdict: ContextVerdict.checking);
@@ -407,6 +412,10 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       state = state.copyWith(
         contextVerdict: ContextVerdict.answered,
         clearContextError: true,
+        // El sello de frescura del DATO DEL CLIENTE. Sin él, una consulta
+        // caída con el poll sano dejaba la tarjeta en verde sobre un payload
+        // de hace diez minutos y nadie podía decir cuánto.
+        contextFetchedAt: clock.now(),
         context: CheckoutReservationContext(
           reservationNumber: reservation.reservationNumber,
           customerName: reservation.customer?.fullName,
@@ -436,19 +445,22 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
     } catch (e) {
       if (gen != _generation || !ref.mounted) return null;
       final error = e is ApiError ? e : null;
-      // **El dato viejo NO se borra ni se degrada** (regla 8D del wizard). Si
-      // una lectura anterior SÍ respondió, esa respuesta sigue siendo lo que
-      // el servidor dijo y la tarjeta la sigue mostrando; la edad de la
-      // lectura ya la cuenta el shell. `unreachable` es para el caso que
-      // rompió en el patio: NUNCA hubo respuesta, y ahí no se sabe nada.
+      // **El dato viejo NO se borra** (regla 8D del wizard): si una lectura
+      // anterior SÍ respondió, esa respuesta sigue siendo lo que el servidor
+      // dijo y la tarjeta la sigue mostrando. Pero tampoco se queda igual —
+      // pasa a `stale`, que es lo que le devuelve la EDAD a la pantalla. El
+      // shell no puede hacerlo por ella: su vejez cuelga de `offline`, que
+      // sale del error de la SESIÓN, y display-data se cae por su cuenta.
       final stale = state.context != null;
-      state = stale
-          ? state
-          : state.copyWith(
-              contextVerdict: ContextVerdict.unreachable,
-              contextError: error,
-              clearContextError: error == null,
-            );
+      state = state.copyWith(
+        contextVerdict:
+            stale ? ContextVerdict.stale : ContextVerdict.unreachable,
+        // La negativa solo se guarda cuando es lo ÚNICO que hay que contar.
+        // Con datos en pantalla, citar un 500 al lado del nombre del cliente
+        // le da cuerpo de error a una tarjeta que sigue siendo utilizable.
+        contextError: stale ? null : error,
+        clearContextError: stale || error == null,
+      );
       _logger.log(
         CheckoutEvents.contextUnreachable,
         data: {
@@ -456,10 +468,11 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
           // tag es `network`, que es una causa distinta y se mide aparte.
           'status': error?.status?.toString() ??
               (error?.kind == ApiErrorKind.network ? 'network' : 'none'),
-          // Con `stale:true` el agente sigue viendo datos buenos y la entrega
-          // no se detiene; con `false` el paso 1 queda sin poder verificar.
-          // Son dos incidentes distintos y la métrica no puede sumarlos.
+          // Con `stale:true` el agente sigue viendo datos buenos (con su edad)
+          // y la entrega no se detiene; con `false` el paso 1 queda sin poder
+          // verificar. Son dos incidentes distintos y no se pueden sumar.
           'stale': stale,
+          'via': via,
         },
       );
       return null;
@@ -1214,7 +1227,9 @@ class CheckoutWizardController extends Notifier<CheckoutWizardState> {
       if (gen != _generation || !ref.mounted) return blocked;
       _apply(result.session, detectForeign: false, isWrite: true);
       _logger.log(CheckoutEvents.vehicleSwapped);
-      await reloadContext();
+      // Cambió la unidad de la reserva: el header y la tarjeta de
+      // vehículo tienen que dejar de mostrar la vieja.
+      await _loadContext(_generation, via: 'swap');
       return const CheckoutSwapAttempt(CheckoutSwapOutcome.ok);
     } on ApiError catch (e) {
       if (gen != _generation || !ref.mounted) return blocked;

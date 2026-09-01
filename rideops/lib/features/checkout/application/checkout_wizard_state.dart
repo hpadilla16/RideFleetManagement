@@ -289,6 +289,7 @@ class CheckoutWizardState {
     this.context,
     this.contextVerdict = ContextVerdict.checking,
     this.contextError,
+    this.contextFetchedAt,
     this.pending = false,
     this.baseline,
     this.joinAcknowledged = false,
@@ -357,6 +358,17 @@ class CheckoutWizardState {
   /// inventar diagnóstico (DoD #5). Null cuando la consulta fue bien o cuando
   /// murió sin cuerpo (red): ahí la pantalla pone su copy traducido.
   final ApiError? contextError;
+
+  /// Momento de la última consulta EXITOSA a display-data — la EDAD del dato
+  /// del cliente.
+  ///
+  /// Es un sello propio y no [fetchedAt]: ese mide la lectura de la SESIÓN, y
+  /// las dos se caen por separado. display-data puede devolver 404/5xx con el
+  /// poll de la sesión perfectamente sano, y entonces `offline` es false, el
+  /// shell no pinta ninguna vejez y la tarjeta del cliente se quedaba verde
+  /// con "Verificado" sobre datos de hace diez minutos — justo mientras el
+  /// agente la confronta con la licencia física.
+  final DateTime? contextFetchedAt;
 
   final bool pending;
 
@@ -473,6 +485,7 @@ class CheckoutWizardState {
     ContextVerdict? contextVerdict,
     ApiError? contextError,
     bool clearContextError = false,
+    DateTime? contextFetchedAt,
     bool? pending,
     CheckoutSessionDto? baseline,
     bool? joinAcknowledged,
@@ -494,6 +507,7 @@ class CheckoutWizardState {
       contextVerdict: contextVerdict ?? this.contextVerdict,
       contextError:
           clearContextError ? null : (contextError ?? this.contextError),
+      contextFetchedAt: contextFetchedAt ?? this.contextFetchedAt,
       // Se REENVÍA: sin esto, cualquier copyWith sobre un estado `.pending()`
       // lo apagaba en silencio (hoy lo enmascaran las otras condiciones de
       // [firstLoad], pero es una trampa puesta para H2-H7).

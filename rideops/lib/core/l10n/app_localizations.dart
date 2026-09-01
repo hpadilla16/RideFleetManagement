@@ -1250,6 +1250,36 @@ abstract class AppLocalizations {
   /// **'La lectura es menor que la última registrada. Revísala — se enviará tal cual.'**
   String get metricsOdometerLower;
 
+  /// No description provided for @metricsFieldOdometer.
+  ///
+  /// In es, this message translates to:
+  /// **'el odómetro'**
+  String get metricsFieldOdometer;
+
+  /// No description provided for @metricsFieldFuel.
+  ///
+  /// In es, this message translates to:
+  /// **'el combustible'**
+  String get metricsFieldFuel;
+
+  /// No description provided for @metricsFieldCleanliness.
+  ///
+  /// In es, this message translates to:
+  /// **'la limpieza'**
+  String get metricsFieldCleanliness;
+
+  /// No description provided for @metricsFieldJoin.
+  ///
+  /// In es, this message translates to:
+  /// **'y'**
+  String get metricsFieldJoin;
+
+  /// El pie del sub-paso de métricas NOMBRA lo que falta, como ya hace el paso 1. Con el teclado abierto tapando combustible y limpieza, el agente mira abajo y ve un CTA muerto: el why es lo que hace aceptable ese límite de viewport.
+  ///
+  /// In es, this message translates to:
+  /// **'Falta capturar {fields}.'**
+  String metricsBlockedWhy(String fields);
+
   /// No description provided for @metricsFuel.
   ///
   /// In es, this message translates to:
@@ -2234,11 +2264,11 @@ abstract class AppLocalizations {
   /// **'Pre-checkin pendiente'**
   String get coPrecheckinPending;
 
-  /// No description provided for @coOdometer.
+  /// Cabecera de sesión. {reading} llega ya compuesto por odometerValue: la unidad NO se escribe aquí. Decía 'Odómetro {km} km' y contradecía a la tarjeta del mismo wizard, que ya decía 'mi'.
   ///
   /// In es, this message translates to:
-  /// **'Odómetro {km} km'**
-  String coOdometer(String km);
+  /// **'Odómetro {reading}'**
+  String coOdometerReading(String reading);
 
   /// No description provided for @coExitWithoutPausing.
   ///
@@ -2660,6 +2690,12 @@ abstract class AppLocalizations {
   /// **'Consultado ahora: el servidor sigue sin {fields}.'**
   String coConfirmRecheckedStill(String fields);
 
+  /// Regla 8D aplicada al dato del cliente: el dato viejo se queda, pero diciendo que es viejo. No bloquea — bloquear una entrega porque un refresco de fondo falló sería una puerta falsa nueva.
+  ///
+  /// In es, this message translates to:
+  /// **'Estos datos son los de la última consulta que sí llegó. La de ahora no llegó: confírmalos contra la licencia antes de entregar.'**
+  String get coConfirmStaleWhy;
+
   /// No description provided for @coConfirmCheckingPill.
   ///
   /// In es, this message translates to:
@@ -2693,14 +2729,14 @@ abstract class AppLocalizations {
   /// Hallazgo e2e (MAJOR): el bloqueo cambia de naturaleza. No se bloquea por 'faltan datos' —que sería una acusación al servidor— sino porque sin consulta no hay identidad que confirmar.
   ///
   /// In es, this message translates to:
-  /// **'No se pudo consultar la ficha del cliente, así que no se puede confirmar su identidad. Esto no dice nada sobre qué datos tenga el servidor.'**
+  /// **'No se pudo consultar la ficha del cliente, así que no se puede confirmar su identidad.'**
   String get coConfirmUnreachableWhy;
 
-  /// Negativa CRUDA del servidor (DoD #5), sin diagnóstico inventado. Se omite cuando la petición murió sin cuerpo.
+  /// Clave de la fila que cita la negativa CRUDA (DoD #5). El valor es el mensaje del servidor tal cual, sin envoltorio: la clave ya dice qué es. La fila entera se omite cuando la petición murió sin cuerpo.
   ///
   /// In es, this message translates to:
-  /// **'El servidor respondió: {message}'**
-  String coConfirmUnreachableServer(String message);
+  /// **'Respuesta del servidor'**
+  String get coConfirmServerReplyLabel;
 
   /// Acción que SÍ puede tener éxito (nada de puertas falsas): repite el GET de display-data. Distinta de 'Actualizar datos del cliente', que se ofrece cuando el servidor sí contestó y faltan campos.
   ///

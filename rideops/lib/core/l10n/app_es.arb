@@ -357,6 +357,15 @@
     "placeholders": { "reading": { "type": "String" } }
   },
   "metricsOdometerLower": "La lectura es menor que la última registrada. Revísala — se enviará tal cual.",
+  "metricsFieldOdometer": "el odómetro",
+  "metricsFieldFuel": "el combustible",
+  "metricsFieldCleanliness": "la limpieza",
+  "metricsFieldJoin": "y",
+  "metricsBlockedWhy": "Falta capturar {fields}.",
+  "@metricsBlockedWhy": {
+    "description": "El pie del sub-paso de métricas NOMBRA lo que falta, como ya hace el paso 1. Con el teclado abierto tapando combustible y limpieza, el agente mira abajo y ve un CTA muerto: el why es lo que hace aceptable ese límite de viewport.",
+    "placeholders": { "fields": { "type": "String" } }
+  },
   "metricsFuel": "Combustible",
   "fuelEmpty": "Vacío",
   "fuelFull": "Lleno",
@@ -696,9 +705,10 @@
   },
   "coPrecheckinReady": "Pre-checkin listo",
   "coPrecheckinPending": "Pre-checkin pendiente",
-  "coOdometer": "Odómetro {km} km",
-  "@coOdometer": {
-    "placeholders": { "km": { "type": "String" } }
+  "coOdometerReading": "Odómetro {reading}",
+  "@coOdometerReading": {
+    "description": "Cabecera de sesión. {reading} llega ya compuesto por odometerValue: la unidad NO se escribe aquí. Decía 'Odómetro {km} km' y contradecía a la tarjeta del mismo wizard, que ya decía 'mi'.",
+    "placeholders": { "reading": { "type": "String" } }
   },
   "coExitWithoutPausing": "Salir sin pausar",
   "coExitWithoutPausingWhy": "Nada se bloquea: la sesión queda como está y el patio puede seguirla desde otra superficie.",
@@ -838,6 +848,10 @@
     "description": "Acuse del re-consultado (GD-MC-5b): el botón disparaba dos peticiones y NO mostraba nada. Reusa la misma lista legible de campos que el bloqueo. SOLO se usa cuando display-data RESPONDIÓ: afirmar esto sobre una consulta caída era la acusación falsa que encontró la corrida e2e.",
     "placeholders": { "fields": { "type": "String" } }
   },
+  "coConfirmStaleWhy": "Estos datos son los de la última consulta que sí llegó. La de ahora no llegó: confírmalos contra la licencia antes de entregar.",
+  "@coConfirmStaleWhy": {
+    "description": "Regla 8D aplicada al dato del cliente: el dato viejo se queda, pero diciendo que es viejo. No bloquea — bloquear una entrega porque un refresco de fondo falló sería una puerta falsa nueva."
+  },
   "coConfirmCheckingPill": "Consultando",
   "coConfirmCheckingValue": "Consultando…",
   "coConfirmCheckingWhy": "Consultando la ficha del cliente…",
@@ -849,14 +863,13 @@
   "@coConfirmUnknownValue": {
     "description": "Valor de cada fila cuando display-data no respondió. NO es 'Sin capturar': ese texto afirma que el servidor no tiene el dato, y aquí no se sabe."
   },
-  "coConfirmUnreachableWhy": "No se pudo consultar la ficha del cliente, así que no se puede confirmar su identidad. Esto no dice nada sobre qué datos tenga el servidor.",
+  "coConfirmUnreachableWhy": "No se pudo consultar la ficha del cliente, así que no se puede confirmar su identidad.",
   "@coConfirmUnreachableWhy": {
     "description": "Hallazgo e2e (MAJOR): el bloqueo cambia de naturaleza. No se bloquea por 'faltan datos' —que sería una acusación al servidor— sino porque sin consulta no hay identidad que confirmar."
   },
-  "coConfirmUnreachableServer": "El servidor respondió: {message}",
-  "@coConfirmUnreachableServer": {
-    "description": "Negativa CRUDA del servidor (DoD #5), sin diagnóstico inventado. Se omite cuando la petición murió sin cuerpo.",
-    "placeholders": { "message": { "type": "String" } }
+  "coConfirmServerReplyLabel": "Respuesta del servidor",
+  "@coConfirmServerReplyLabel": {
+    "description": "Clave de la fila que cita la negativa CRUDA (DoD #5). El valor es el mensaje del servidor tal cual, sin envoltorio: la clave ya dice qué es. La fila entera se omite cuando la petición murió sin cuerpo."
   },
   "coConfirmRetryLookup": "Reintentar la consulta",
   "@coConfirmRetryLookup": {

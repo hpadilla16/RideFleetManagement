@@ -92,28 +92,39 @@ enum ConfirmMissingField { customerName, license, phone }
 /// cliente al paso CONFIRMING.
 ///
 /// Existe por el mismo motivo que `HandoverVerdict` en el cierre (M2-H5/H6):
-/// sin un tercer valor, "no pude preguntar" y "pregunté y no está" colapsan en
-/// el mismo null, y la pantalla acaba ACUSANDO al servidor de no tener el
-/// nombre, la licencia y el teléfono cuando lo que falló fue la petición. Esa
-/// acusación además bloqueaba la entrega, así que el defecto costaba una
-/// salida del patio, no un renglón.
+/// sin más valores que un null, "no pude preguntar" y "pregunté y no está"
+/// colapsan en el mismo estado, y la pantalla acaba ACUSANDO al servidor de no
+/// tener el nombre, la licencia y el teléfono cuando lo que falló fue la
+/// petición. Esa acusación además bloqueaba la entrega, así que el defecto
+/// costaba una salida del patio, no un renglón.
 ///
-/// La regla que impone el tipo: **`missing` solo significa algo en
-/// [answered]**. En los otros dos veredictos la lista viene vacía y la
-/// pantalla no puede escribir nada sobre lo que el servidor tiene o deja de
-/// tener.
+/// El veredicto describe el **último intento**; qué se puede pintar sale de si
+/// alguna vez hubo respuesta. Las dos preguntas son distintas y por eso
+/// [stale] existe: una consulta caída DESPUÉS de una buena no borra el dato
+/// (regla 8D del wizard), pero tampoco puede seguir pintándose en verde como
+/// si acabara de confirmarse.
+///
+/// La regla que impone el tipo: **`missing` solo significa algo cuando hubo
+/// respuesta** ([answered] o [stale]). En los otros dos la lista viene vacía y
+/// la pantalla no puede escribir nada sobre lo que el servidor tenga.
 enum ContextVerdict {
-  /// La consulta está EN VUELO (o todavía no ha vuelto la primera de esta
-  /// visita). No se afirma nada: ni que falta, ni que está.
+  /// La consulta está EN VUELO y no hay nada en la mano todavía. No se afirma
+  /// nada: ni que falta, ni que está.
   checking,
 
-  /// `display-data` RESPONDIÓ. Lo que diga [ConfirmCustomerCheck.missing] es
-  /// un hecho del servidor y se puede nombrar.
+  /// La última consulta RESPONDIÓ. Lo que diga [ConfirmCustomerCheck.missing]
+  /// es un hecho fresco del servidor y se puede nombrar.
   answered,
 
-  /// `display-data` NO respondió (404, 5xx, red, 403 de sede…). **No es
-  /// "faltan datos"**: es "no lo sé", y la pantalla lo dice así — con el
-  /// mensaje crudo del servidor si lo hubo, y con una consulta que reintentar.
+  /// La última consulta falló, pero una anterior sí respondió. El dato viejo
+  /// **se queda** —regla 8D: nunca se borra ni se disfraza de vivo— y viaja
+  /// con su EDAD a la vista, porque es justo el momento en que el agente
+  /// confronta la pantalla con la licencia física.
+  stale,
+
+  /// NINGUNA consulta ha respondido. **No es "faltan datos"**: es "no lo sé",
+  /// y la pantalla lo dice así — con el mensaje crudo del servidor si lo hubo,
+  /// y con una consulta que reintentar.
   unreachable,
 }
 
@@ -128,7 +139,7 @@ class ConfirmCustomerCheck {
     required this.missing,
   });
 
-  /// Qué sabemos de la consulta que produjo (o no) estos campos.
+  /// Qué pasó con el ÚLTIMO intento de traer estos campos.
   final ContextVerdict verdict;
 
   final String? name;
@@ -137,22 +148,33 @@ class ConfirmCustomerCheck {
   final String? phone;
 
   /// En orden de lectura de la tarjeta (nombre → licencia → teléfono).
-  /// **Siempre vacía fuera de [ContextVerdict.answered]**.
+  /// **Siempre vacía cuando no hubo respuesta** ([checking]/[unreachable]).
   final List<ConfirmMissingField> missing;
 
-  /// El servidor respondió Y tiene los tres datos. Es la única combinación que
-  /// deja avanzar: `missing.isEmpty` por sí solo también es cierto cuando no
-  /// hubo respuesta, y ahí no hay nada verificado.
-  bool get complete =>
-      verdict == ContextVerdict.answered && missing.isEmpty;
+  /// ¿Hay una respuesta del servidor detrás de estos campos? Fresca o vieja,
+  /// pero suya. Es la pregunta que decide si `missing` quiere decir algo.
+  bool get hasAnswer =>
+      verdict == ContextVerdict.answered || verdict == ContextVerdict.stale;
 
-  /// La consulta no llegó. La pantalla cambia de NATURALEZA aquí: no bloquea
+  /// Hubo respuesta Y trae los tres datos. Es la única combinación que deja
+  /// avanzar: `missing.isEmpty` por sí solo también es cierto cuando NADIE
+  /// contestó, y ahí no hay nada verificado.
+  ///
+  /// [stale] sí deja avanzar: esos tres campos son lo que el servidor dijo, y
+  /// bloquear una entrega porque un refresco de fondo falló sería una puerta
+  /// falsa nueva. Lo que cambia es que la tarjeta lo pinta con su edad.
+  bool get complete => hasAnswer && missing.isEmpty;
+
+  /// Ninguna consulta llegó. La pantalla cambia de NATURALEZA aquí: no bloquea
   /// por "faltan datos" sino por "sin consulta no se puede confirmar la
   /// identidad".
   bool get unreachable => verdict == ContextVerdict.unreachable;
 
-  /// Hay una consulta viva y todavía no hay veredicto.
+  /// Hay una consulta viva y todavía no hay nada que mostrar.
   bool get checking => verdict == ContextVerdict.checking;
+
+  /// Datos buenos, consulta caída: se muestran CON su edad (regla 8D).
+  bool get stale => verdict == ContextVerdict.stale;
 }
 
 String? _clean(String? value) {
@@ -166,17 +188,19 @@ String? _clean(String? value) {
 /// ficha del cliente es el respaldo (una reserva puede llegar al wizard antes
 /// de que el contrato copie los datos del pre-checkin).
 ///
-/// [verdict] manda sobre todo lo demás: fuera de [ContextVerdict.answered] los
-/// campos se devuelven en null y `missing` VACÍA. Que vengan null sin
-/// respuesta no es un descuido — es que no hay nada que decir, y una lista de
-/// faltantes construida sobre una consulta que nunca volvió es exactamente la
-/// acusación falsa que este parámetro existe para impedir.
+/// [verdict] manda sobre todo lo demás: sin respuesta ([checking] /
+/// [unreachable]) los campos se devuelven en null y `missing` VACÍA. Que
+/// vengan null no es un descuido — es que no hay nada que decir, y una lista
+/// de faltantes construida sobre una consulta que nunca volvió es exactamente
+/// la acusación falsa que este parámetro existe para impedir.
 ConfirmCustomerCheck customerCheck({
   required ContextVerdict verdict,
   DisplayCustomer? customer,
   DisplayAgreement? agreement,
 }) {
-  if (verdict != ContextVerdict.answered) {
+  final answered = verdict == ContextVerdict.answered ||
+      verdict == ContextVerdict.stale;
+  if (!answered) {
     return ConfirmCustomerCheck(
       verdict: verdict,
       name: null,

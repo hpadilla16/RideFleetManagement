@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/l10n/app_localizations.dart';
+import '../../../../core/l10n/odometer_format.dart';
 import '../../../../core/api/enums.dart';
 import '../../../../core/theme/ride_tokens.dart';
 import '../../application/checkout_wizard_state.dart';
@@ -285,16 +286,24 @@ class SessionHead extends StatelessWidget {
       );
     }
 
-    // "Placa IKL-427 · Odómetro 48 190 km" — dato que ya se captura y que el
+    // "Placa IKL-427 · Odómetro 48,190 mi" — dato que ya se captura y que el
     // agente confronta con el tablero antes de entregar.
+    //
+    // La unidad sale del MISMO helper que la tarjeta del paso 1. Este renglón
+    // se quedó fuera del primer barrido y decía "km" a dos dedos de una
+    // tarjeta que ya decía "mi", en el mismo wizard y a veces en el mismo
+    // frame (el header completo se pinta en la entrada y en los pasos de
+    // pago/firma/cierre).
     final odometer = context_?.odometer;
     final plateLine = [
       if (context_?.plate != null && context_!.plate!.isNotEmpty)
         context_!.plate!,
       if (odometer != null)
-        l10n.coOdometer(NumberFormat.decimalPattern(
+        l10n.coOdometerReading(formatOdometer(
+          l10n,
           Localizations.localeOf(context).toString(),
-        ).format(odometer)),
+          odometer,
+        )),
     ].join(' · ');
 
     // La TERCERA respuesta del patio: para cuándo. El número de reserva NO se

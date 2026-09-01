@@ -1224,12 +1224,16 @@ void main() {
   // bajaba al paso 1 como "faltan el nombre, la licencia y el teléfono" y
   // bloqueaba la entrega acusando al servidor de algo que nadie comprobó.
   group('veredicto del contexto', () {
-    test('display-data que responde ⇒ answered, sin negativa que citar', () {
+    test('display-data que responde ⇒ answered, con SELLO de frescura y sin '
+        'negativa que citar', () {
       fakeAsync((async) {
         final h = harness();
         async.flushMicrotasks();
         expect(read(h.container).contextVerdict, ContextVerdict.answered);
         expect(read(h.container).contextError, isNull);
+        // El sello es propio del DATO DEL CLIENTE: `fetchedAt` mide la sesión
+        // y las dos consultas se caen por separado.
+        expect(read(h.container).contextFetchedAt, isNotNull);
         expect(h.logger.has(CheckoutEvents.contextUnreachable), isFalse);
       });
     });
@@ -1251,47 +1255,79 @@ void main() {
         // Y la sesión SIGUE viva: el wizard no se cae por esto — lo que cambia
         // es lo que el paso 1 puede afirmar.
         expect(state.session, isNotNull);
+        expect(read(h.container).contextFetchedAt, isNull,
+            reason: 'no hubo lectura buena que sellar');
         expect(
           h.logger.events
               .where((e) => e.$1 == CheckoutEvents.contextUnreachable)
-              .map((e) => (e.$2['status'], e.$2['stale'])),
-          [('404', false)],
+              .map((e) => (e.$2['status'], e.$2['stale'], e.$2['via'])),
+          [('404', false, 'open')],
         );
       });
     });
 
-    test('un fallo DESPUÉS de una lectura buena NO borra el dato ni cae a '
-        'unreachable (regla 8D: el dato viejo se queda)', () {
+    test('un fallo DESPUÉS de una lectura buena NO borra el dato, pero deja de '
+        'llamarlo fresco: cae a STALE con su sello viejo intacto (regla 8D)',
+        () {
       fakeAsync((async) {
         final reservations = FakeReservationsApi();
         final h = harness(reservations: reservations);
         async.flushMicrotasks();
         expect(read(h.container).context?.customerName, isNotNull);
+        final sealed = read(h.container).contextFetchedAt;
 
-        // El servidor se cae entre la primera lectura y la re-lectura del swap.
+        // El servidor se cae entre la primera lectura y la siguiente.
         reservations.failWith = displayDataDenial(status: 500);
-        unawaited(notifier(h.container).reloadContext());
+        unawaited(notifier(h.container).retryContext());
         async.flushMicrotasks();
 
         final state = read(h.container);
         expect(
           state.contextVerdict,
-          ContextVerdict.answered,
-          reason: 'la respuesta anterior sigue siendo lo que el servidor dijo',
+          ContextVerdict.stale,
+          reason: 'answered afirmaría que esto se acaba de comprobar',
         );
-        expect(state.context?.customerName, isNotNull);
+        expect(state.context?.customerName, isNotNull,
+            reason: 'el dato viejo NO se borra');
+        expect(
+          state.contextFetchedAt,
+          sealed,
+          reason: 'la edad se cuenta desde la última consulta que SÍ llegó',
+        );
         expect(
           state.contextError,
           isNull,
-          reason: 'no hay negativa que citar sobre datos que sí llegaron',
+          reason: 'con datos utilizables en pantalla no se cita un 500 al '
+              'lado del nombre del cliente',
         );
         // Pero el incidente SÍ se cuenta, marcado como stale: es de otra
         // gravedad, no de otra existencia.
         expect(
           h.logger.events
               .where((e) => e.$1 == CheckoutEvents.contextUnreachable)
-              .map((e) => e.$2['stale']),
-          [true],
+              .map((e) => (e.$2['stale'], e.$2['via'])),
+          [(true, 'confirm_retry')],
+        );
+      });
+    });
+
+    test('la verificación del CIERRE que no llega se cuenta con SU origen: '
+        'no es el paso 1 quedándose sin poder confirmar identidad', () {
+      fakeAsync((async) {
+        final reservations = FakeReservationsApi();
+        final h = harness(reservations: reservations);
+        async.flushMicrotasks();
+
+        reservations.failWith = displayDataDenial(status: 503);
+        unawaited(notifier(h.container).verifyHandover());
+        async.flushMicrotasks();
+
+        expect(
+          h.logger.events
+              .where((e) => e.$1 == CheckoutEvents.contextUnreachable)
+              .map((e) => e.$2['via']),
+          ['verify_handover'],
+          reason: 'sin el tag, el evento mezcla dos incidentes distintos',
         );
       });
     });

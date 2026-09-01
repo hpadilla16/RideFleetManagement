@@ -201,12 +201,28 @@ void main() {
     expect(rows.map((r) => r.locationId).toSet(), {activeLocationId});
     expect(rows.map((r) => r.groupKey).toSet(), {'cs1'});
 
+    // MC-5: el CTA bloqueado NOMBRA lo que falta también en esta superficie —
+    // el cuerpo es compartido y el motivo del bloqueo también tiene que serlo.
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'Still to capture: the odometer, the fuel level and the cleanliness.',
+      ),
+      findsOneWidget,
+    );
+
     // GD-5/INN S-4: el combustible SIN default no deja avanzar a firma —
     // odómetro y limpieza solos no bastan.
     controller.setOdometer(48212);
     controller.setCleanliness(4);
     expect(container.read(inspectionControllerProvider('r1')).metricsComplete,
         isFalse, reason: 'fuel sin capturar = evidencia sin capturar');
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Still to capture: the fuel level.'),
+      findsOneWidget,
+      reason: 'el gate del combustible es invisible sin una palabra que lo diga',
+    );
     controller.setFuelEighths(6);
     expect(container.read(inspectionControllerProvider('r1')).metricsComplete,
         isTrue);

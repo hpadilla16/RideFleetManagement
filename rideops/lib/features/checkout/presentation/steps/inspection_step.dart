@@ -556,6 +556,11 @@ class _CaptureDock extends ConsumerWidget {
 
       case InspectionStep.metrics:
         return WizardDock(
+          // El pie de al lado (fotos) SÍ nombra su gate y este no lo hacía.
+          // Es donde más falta hace: con el teclado numérico abierto tapando
+          // el combustible y la limpieza, el agente mira abajo y encuentra un
+          // "Continuar a la firma" muerto sin una palabra que lo explique.
+          why: metricsBlockedWhy(l10n, flow),
           primary: RidePrimaryButton(
             label: l10n.inspContinueSignature,
             onPressed: flow.metricsComplete

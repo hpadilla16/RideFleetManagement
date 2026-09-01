@@ -746,6 +746,23 @@ class AppLocalizationsEs extends AppLocalizations {
       'La lectura es menor que la última registrada. Revísala — se enviará tal cual.';
 
   @override
+  String get metricsFieldOdometer => 'el odómetro';
+
+  @override
+  String get metricsFieldFuel => 'el combustible';
+
+  @override
+  String get metricsFieldCleanliness => 'la limpieza';
+
+  @override
+  String get metricsFieldJoin => 'y';
+
+  @override
+  String metricsBlockedWhy(String fields) {
+    return 'Falta capturar $fields.';
+  }
+
+  @override
   String get metricsFuel => 'Combustible';
 
   @override
@@ -1377,8 +1394,8 @@ class AppLocalizationsEs extends AppLocalizations {
   String get coPrecheckinPending => 'Pre-checkin pendiente';
 
   @override
-  String coOdometer(String km) {
-    return 'Odómetro $km km';
+  String coOdometerReading(String reading) {
+    return 'Odómetro $reading';
   }
 
   @override
@@ -1631,6 +1648,10 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String get coConfirmStaleWhy =>
+      'Estos datos son los de la última consulta que sí llegó. La de ahora no llegó: confírmalos contra la licencia antes de entregar.';
+
+  @override
   String get coConfirmCheckingPill => 'Consultando';
 
   @override
@@ -1647,12 +1668,10 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get coConfirmUnreachableWhy =>
-      'No se pudo consultar la ficha del cliente, así que no se puede confirmar su identidad. Esto no dice nada sobre qué datos tenga el servidor.';
+      'No se pudo consultar la ficha del cliente, así que no se puede confirmar su identidad.';
 
   @override
-  String coConfirmUnreachableServer(String message) {
-    return 'El servidor respondió: $message';
-  }
+  String get coConfirmServerReplyLabel => 'Respuesta del servidor';
 
   @override
   String get coConfirmRetryLookup => 'Reintentar la consulta';

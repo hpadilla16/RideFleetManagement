@@ -894,4 +894,61 @@ void main() {
       expect(state.step, InspectionStep.summary);
     });
   });
+
+  // ── MC-5 · el CTA de métricas nombra su gate ──────────────────────────────
+  //
+  // El pie de FOTOS ya decía "Front and Rear are required" y el de métricas,
+  // al lado, dejaba el CTA muerto y mudo. Es donde más duele: con el teclado
+  // numérico abierto, combustible y limpieza quedan fuera del viewport, así
+  // que el agente mira abajo y lo único que ve es un botón gris.
+  testWidgets('MC-5: en métricas el CTA bloqueado dice QUÉ falta, y la frase '
+      'encoge conforme se captura', (tester) async {
+    api.current = sessionAt(CheckoutStep.inspectionInProgress);
+    await enqueuePhoto('front');
+    await enqueuePhoto('rear');
+    await pumpWizard(tester);
+
+    final controller = container(tester)
+        .read(inspectionControllerProvider(kReservationId).notifier);
+    controller.goToStep(InspectionStep.metrics);
+    await tester.pumpAndSettle();
+
+    // Nada capturado: los tres, en el orden en que están en pantalla.
+    expect(
+      find.text(
+        'Still to capture: the odometer, the fuel level and the cleanliness.',
+      ),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<RidePrimaryButton>(
+            find.widgetWithText(RidePrimaryButton, 'Continue to signature'),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    // El agente teclea el odómetro: la frase se acorta, no desaparece.
+    controller.setOdometer(48200);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Still to capture: the fuel level and the cleanliness.'),
+      findsOneWidget,
+    );
+
+    // Y con el último dato el subtexto se va con el bloqueo.
+    controller.setFuelEighths(6);
+    controller.setCleanliness(4);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Still to capture'), findsNothing);
+    expect(
+      tester
+          .widget<RidePrimaryButton>(
+            find.widgetWithText(RidePrimaryButton, 'Continue to signature'),
+          )
+          .onPressed,
+      isNotNull,
+    );
+  });
 }

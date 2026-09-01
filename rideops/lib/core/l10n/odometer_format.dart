@@ -9,6 +9,24 @@ import 'app_localizations.dart';
 /// MISMO número, «Última lectura registrada: 9800 mi» con sufijo `mi` en el
 /// campo. Dos unidades y dos formatos de miles para el mismo dato.
 ///
+/// El primer barrido dejó vivo un cuarto sitio —la cabecera de sesión
+/// (`wizard_chrome.dart`), que se pinta COMPLETA en los pasos de pago, firma y
+/// cierre— y con él la contradicción entera: «IKL-427 · Odometer 48,190 km» en
+/// el header sobre «48,190 mi» en la tarjeta. Los cuatro consumidores están
+/// enumerados aquí a propósito, para que el que venga a agregar el quinto vea
+/// la lista y no la afirmación suelta:
+///
+///  1. `steps/confirming_step.dart` — tarjeta de vehículo del paso 1.
+///  2. `steps/inspection_step.dart` — «última lectura» del handoff.
+///  3. `widgets/vehicle_swap_sheet.dart` — cada candidata del swap.
+///  4. `widgets/wizard_chrome.dart` — la cabecera de sesión.
+///  5. `inspection_bodies.dart` — el sufijo del campo y la lectura previa.
+///
+/// La prueba que sostiene la lista: `flutter analyze` no puede verlo, pero
+/// cada uno tiene una aserción de texto sobre la unidad (la del header es
+/// `checkout_wizard_screen_test.dart`, y no existía hasta el review MC-1: sin
+/// ella, cambiar `odometerUnit` a 'km' dejaba el header verde).
+///
 /// **La verdad es MILLAS**, y no es una preferencia de copy — es lo que el
 /// backend factura:
 ///  - `computeExcessMileage()` cobra el excedente *por milla*
