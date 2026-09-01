@@ -51,8 +51,13 @@ class PhotoVault {
 
   /// Saneo (QA NIT-2): el nombre viene de un payload PERSISTIDO — jamás se
   /// concatena un separador o `..` al path de la bóveda. Un nombre sucio se
-  /// trata como archivo perdido (read → null → PHOTO_LOST; delete → no-op),
-  /// nunca como acceso fuera del directorio.
+  /// trata como archivo perdido, nunca como acceso fuera del directorio, y
+  /// cada brazo tiene su respuesta segura:
+  ///  - [read] → null → PHOTO_LOST,
+  ///  - [delete] → no-op,
+  ///  - [exists] → false, que además le quita el "Reintentar" a esa fila en
+  ///    la bandeja: un `true` arrancado a un path de fuera sería una puerta
+  ///    falsa con permiso de lectura ajena.
   static bool _unsafeName(String name) =>
       name.contains('/') || name.contains('\\') || name.contains('..');
 
@@ -95,6 +100,19 @@ class PhotoVault {
       // MAC inválida (archivo truncado, llave rotada): tratar como perdido.
       return null;
     }
+  }
+
+  /// ¿El binario sigue en disco? Lo pregunta la BANDEJA antes de ofrecer
+  /// "Reintentar" sobre un dead-letter de foto: sin archivo, ese botón solo
+  /// puede volver a morir con PHOTO_LOST, y la regla de la casa es que una
+  /// acción ofrecida tiene que poder tener éxito. NO descifra (eso es
+  /// [read]): la pregunta es de presencia, y descifrar 600 KB por fila para
+  /// pintar una lista sería caro y además leería PII sin necesidad.
+  ///
+  /// Un nombre sucio cuenta como ausente, igual que en [read]/[delete].
+  Future<bool> exists(String name) async {
+    if (_unsafeName(name)) return false;
+    return (await _fileFor(name)).existsSync();
   }
 
   /// Borra el archivo. Best-effort e idempotente: si ya no existe NO es

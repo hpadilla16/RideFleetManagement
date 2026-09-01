@@ -1,5 +1,6 @@
 {
   "token": "9f2c1a7e4b8d3f6a0c5e2b9d7f4a1c8e",
   "expiresAt": "2026-08-16T14:27:00.000Z",
-  "kind": "MOBILE_INSPECTION"
+  "kind": "MOBILE_INSPECTION",
+  "signUrl": null
 }

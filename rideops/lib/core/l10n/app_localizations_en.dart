@@ -699,7 +699,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get inspOutboxFull =>
-      'The outbox is full. Connect to a network so it can drain before capturing more photos.';
+      'The outbox is full: no room for another photo. With signal, what\'s waiting sends itself; what the server rejected only leaves when you decide.';
+
+  @override
+  String get inspOutboxFullAction => 'Open the outbox';
 
   @override
   String camAnglePill(String angle, int n) {
@@ -727,6 +730,13 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get camErrorPermissionHint =>
       'Camera permission is denied. Enable it in the system Settings and try again.';
+
+  @override
+  String get camShutterStuckTitle => 'The camera never returned the photo';
+
+  @override
+  String get camShutterStuckHint =>
+      'The shot hung and never came back. We closed the camera; open it again and retry. If it keeps happening, use another phone for this vehicle.';
 
   @override
   String get langSpanish => 'Español';
@@ -952,7 +962,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get outboxReasonAnglesMissing =>
-      'The server rejected it: the front and rear angles are missing. Capture them and retry.';
+      'The server rejected it: the front and rear angles are missing. They are captured in the inspection; this item can\'t be resent from here.';
 
   @override
   String get outboxReasonToken =>
@@ -964,7 +974,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get outboxReasonSessionGone =>
-      'The checkout session no longer exists on the server.';
+      'The checkout session no longer exists on the server, so this item can\'t be retried from here. Whatever did upload is still on the reservation.';
+
+  @override
+  String get outboxReasonSessionSealed =>
+      'Another screen closed this inspection before this item, so it can no longer be sent. The inspection was sealed with what did arrive; this photo stays on the phone until you decide.';
 
   @override
   String get outboxReasonNetwork =>
@@ -1056,6 +1070,10 @@ class AppLocalizationsEn extends AppLocalizations {
     );
     return '$_temp0';
   }
+
+  @override
+  String get outboxFullDeadHint =>
+      'The rejected ones are waiting for your decision below: until you make it, their space stays taken.';
 
   @override
   String outboxFullChip(int count, int max, String size) {
@@ -1707,6 +1725,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String coConfirmStaleOldWhy(String age) {
     return 'This data is $age old and the current lookup did not get through. Check again before signing: the contract could have changed at the counter in that time.';
   }
+
+  @override
+  String get coConfirmSwapStaleWhy =>
+      'The unit change was saved, but the reservation could not be read back: the unit shown may be the one you just replaced. Refresh the data before handing over.';
+
+  @override
+  String get coConfirmSwapStaleLabel => 'Unit change';
+
+  @override
+  String get coConfirmSwapStaleValue =>
+      'The server has it · this screen hasn\'t refreshed';
 
   @override
   String get coConfirmCheckingPill => 'Checking';

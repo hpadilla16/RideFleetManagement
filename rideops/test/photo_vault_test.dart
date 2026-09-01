@@ -79,6 +79,47 @@ void main() {
     // delete: no-op silencioso, sin tocar nada fuera de la bóveda.
     await vault.delete('../evil.bin');
     await vault.delete('..');
+    // exists: el TERCER brazo del saneo. Los archivos existen DE VERDAD fuera
+    // de la bóveda —si no, la aserción pasaría por el motivo equivocado (un
+    // path que no lleva a nada también responde false)— y aun así la
+    // respuesta es false: la bandeja usa esto para decidir si ofrece
+    // "Reintentar", y un `true` arrancado a un archivo ajeno sería una puerta
+    // falsa con permiso de lectura fuera del directorio.
+    File('${tempDir.path}/evil.bin').writeAsBytesSync([1, 2, 3]);
+    Directory('${tempDir.path}/outbox_photos/a').createSync(recursive: true);
+    File('${tempDir.path}/outbox_photos/a/b.bin').writeAsBytesSync([4, 5]);
+    expect(File('${tempDir.path}/evil.bin').existsSync(), isTrue,
+        reason: 'sanidad: el blanco del traversal SÍ está ahí');
+
+    expect(await vault.exists('../evil.bin'), isFalse);
+    expect(await vault.exists('a/b.bin'), isFalse);
+    expect(await vault.exists(r'a\b.bin'), isFalse);
+    // Y no lo tocó: negarse a mirar no puede convertirse en borrarlo.
+    expect(File('${tempDir.path}/evil.bin').existsSync(), isTrue);
+  });
+
+  test('exists responde por la PRESENCIA del binario, sin descifrarlo',
+      () async {
+    final name = await vault.store(Uint8List.fromList([9, 9, 9, 9]));
+    expect(await vault.exists(name), isTrue);
+    expect(await vault.exists('ph_nunca_existio.bin'), isFalse);
+
+    // Tras borrarlo, deja de existir: es el caso del teléfono que viene de
+    // una versión anterior, donde el drenador SÍ borraba el binario al morir
+    // la fila y la bandeja no puede ofrecer reintentar sobre la nada.
+    await vault.delete(name);
+    expect(await vault.exists(name), isFalse);
+
+    // Y no descifra: un archivo con la MAC rota (read → null) sigue
+    // existiendo. La pregunta de la bandeja es de presencia, no de validez —
+    // si el archivo está pero corrupto, el drenador lo dirá con PHOTO_LOST
+    // en un intento que sí puede hacerse.
+    final roto = await vault.store(Uint8List.fromList([1, 2, 3, 4]));
+    final file = File('${tempDir.path}/outbox_photos/$roto');
+    final bytes = file.readAsBytesSync()..[0] ^= 0xFF;
+    file.writeAsBytesSync(bytes, flush: true);
+    expect(await vault.read(roto), isNull);
+    expect(await vault.exists(roto), isTrue);
   });
 
   test('sweepOrphans borra SOLO lo no referenciado', () async {

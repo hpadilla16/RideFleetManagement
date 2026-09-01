@@ -309,6 +309,59 @@ void main() {
     expect(audit.map((a) => a.reasonCode).toSet(), {'SESSION_COMPLETED'});
   });
 
+  test(
+      'F2 — discardSession NO se lleva los dead-letter: esa decisión es del '
+      'humano', () async {
+    // Cadena típica: una foto que el servidor rechazó (evidencia de daños
+    // esperando decisión) y otra todavía viva.
+    await service.enqueuePhoto(
+      checkoutSessionId: 'cs1',
+      reservationId: 'r1',
+      reservationNumber: 'R-42',
+      angleKey: 'front',
+      jpegBytes: photo(),
+    );
+    await service.enqueuePhoto(
+      checkoutSessionId: 'cs1',
+      reservationId: 'r1',
+      reservationNumber: 'R-42',
+      angleKey: 'rear',
+      jpegBytes: photo(7),
+    );
+    final rows = await db.allFor(userId: 'u1', tenantId: 't1');
+    final muerta = rows.firstWhere(
+      (r) =>
+          (json.decode(r.payload) as Map<String, dynamic>)['angleKey'] ==
+          'front',
+    );
+    await db.markFailed(muerta.id,
+        error: 'el servidor la rechazó', code: 'BAD_REQUEST', dead: true);
+
+    // Otra superficie selló la inspección (6F / frame 17F).
+    final removed = await service.discardSession('cs1');
+
+    expect(removed, 1, reason: 'solo la fila VIVA se retira');
+    final remaining = await db.allFor(userId: 'u1', tenantId: 't1');
+    expect(remaining.single.id, muerta.id);
+    expect(remaining.single.status, 'dead');
+    // Y su binario sigue ahí: las dos salidas de la decisión —reenviar o
+    // descartar— necesitan la foto.
+    final payload =
+        json.decode(remaining.single.payload) as Map<String, dynamic>;
+    expect(await vault.read(payload['photoPath'] as String), isNotNull);
+    // Lo único auditado es lo que de verdad se destruyó.
+    final audit = await db.auditRows();
+    expect(audit, hasLength(1));
+    expect(audit.single.reasonCode, 'SESSION_COMPLETED');
+
+    // Y la que se queda SE ENTERA (QA MINOR-2): con la sesión sellada, la
+    // bandeja tiene que quitarle el "Reintentar" antes de que el agente lo
+    // toque — contra una inspección cerrada el re-mint muere con
+    // SESSION_GONE. El code que la mató NO se pisa: es lo que soporte lee.
+    expect(remaining.single.sessionSealedAt, isNotNull);
+    expect(remaining.single.lastErrorCode, 'BAD_REQUEST');
+  });
+
   test('sweepOrphanFiles borra archivos sin fila y respeta los referenciados',
       () async {
     await service.enqueuePhoto(
@@ -367,6 +420,46 @@ void main() {
     final audit = await db.auditRows();
     expect(audit.single.reasonCode, 'TTL_EXPIRED',
         reason: 'nada se evapora sin registro');
+  });
+
+  test(
+      'MINOR-4 — el TTL de 14 días TAMBIÉN se lleva una dead-letter y su '
+      'binario: es la única válvula automática que queda', () async {
+    // Desde que morir ya no borra el archivo, el `dead` es la fila que más
+    // puede vivir en el teléfono. Si el TTL discriminara por estado —o si
+    // alguien lo hiciera discriminar más adelante— el sobre del ADR-7 (50
+    // filas / 250 MB) se quedaría sin su única salida automática y un
+    // teléfono de patio acumularía PII de daños para siempre.
+    await service.enqueuePhoto(
+      checkoutSessionId: 'cs-muerta',
+      reservationId: 'r-muerta',
+      reservationNumber: 'R-9',
+      angleKey: 'front',
+      jpegBytes: photo(3),
+    );
+    final row = (await db.byGroupKey('cs-muerta')).single;
+    await db.markFailed(row.id,
+        error: 'Gone', code: 'TOKEN_EXPIRED', status: 410, dead: true);
+    // Y sellada: ni así se queda para siempre.
+    await db.markSessionSealed(groupKey: 'cs-muerta', at: DateTime.now());
+    await (db.update(db.outboxEntries)..where((t) => t.id.equals(row.id)))
+        .write(OutboxEntriesCompanion(
+      createdAt: Value(DateTime.now().subtract(const Duration(days: 20))),
+    ));
+    final path = (json.decode(row.payload)
+        as Map<String, dynamic>)['photoPath'] as String;
+    expect(await vault.exists(path), isTrue,
+        reason: 'sanidad: el binario de una dead SÍ sigue en disco');
+
+    final purged = await service.purgeStale();
+
+    expect(purged, 1);
+    expect(await db.allFor(userId: 'u1', tenantId: 't1'), isEmpty);
+    expect(await vault.exists(path), isFalse,
+        reason: 'la PII se va con la fila, no queda huérfana en disco');
+    final audit = await db.auditRows();
+    expect(audit.single.reasonCode, 'TTL_EXPIRED',
+        reason: 'lo destruido pudo ser evidencia: jamás sin registro');
   });
 
   test('sin dueño de sesión, encolar truena (bug de orquestación, no dato)',

@@ -25,12 +25,17 @@ class AppConfig {
   /// Vive aparte de [apiBaseUrl] porque en prod son hosts distintos y NO se
   /// pueden derivar uno del otro sin adivinar.
   ///
-  /// **Gap declarado para backend (M2-H2):** que `POST /:id/terms-token`
-  /// devuelva la URL absoluta ya armada — el backend YA resuelve
-  /// `APP_BASE_URL` para todos los demás enlaces al cliente
-  /// (`customer-inspection.service.js:46`, `people.service.js:64`…). Mientras
-  /// no lo haga, esta constante de compilación es el único puente, y un tenant
-  /// con dominio propio necesitaría otro build — razón de peso para el pedido.
+  /// **Gap CERRADO (verificado el 2026-09-01).** `POST /:id/terms-token` ya
+  /// devuelve `signUrl` absoluta —`publicUrlForToken`,
+  /// `checkout-session.service.js:62-64`, sobre `APP_BASE_URL` →
+  /// `FRONTEND_BASE_URL` → `CUSTOMER_PORTAL_BASE_URL` (:45-52)— y el paso
+  /// T&C la consume (`TermsTokenController.signUrl`).
+  ///
+  /// Esta constante deja de ser el puente y pasa a ser el RESPALDO: un
+  /// backend anterior a ese cambio, o un kind al que el servidor no le arma
+  /// URL (solo `TERMS_SIGNING` la tiene). Con eso, un inquilino de dominio
+  /// propio ya no necesita un build suyo: el QR sale con el origen que el
+  /// servidor dice.
   final String webBaseUrl;
 
   /// Versión mostrada en el pie del login (mockup 1A). Manual y en sincronía

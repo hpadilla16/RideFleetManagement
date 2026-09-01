@@ -116,8 +116,10 @@ abstract class OutboxOps {
 
   /// Borra el archivo de foto cifrado en disco. Best-effort e idempotente:
   /// si el archivo ya no existe NO es error. El drenador lo llama cuando la
-  /// fila `inspection_photo` sale de la bandeja (DrainOk o dead-letter) —
-  /// la fila se va, el binario (PII) no puede quedarse huérfano en disco.
+  /// fila `inspection_photo` sale de la bandeja POR ÉXITO — la fila se va, el
+  /// binario (PII) no puede quedarse huérfano en disco. Un dead-letter NO lo
+  /// llama: la fila sigue en la bandeja esperando decisión, y sin binario esa
+  /// decisión se queda sin la mitad de sus salidas.
   Future<void> deletePhotoFile(String path);
 }
 
@@ -127,6 +129,14 @@ abstract class OutboxStore {
   /// Regresa a 'pending' las filas que quedaron en 'inflight' (proceso
   /// muerto entre markInflight y el outcome). Sin esto, [pending] jamás las
   /// volvería a servir y se perderían en silencio.
+  ///
+  /// **Cualquier compuerta que decida "¿hay trabajo?" mirando [pending]
+  /// tiene que llamar esto ANTES de contar** — si no, una fila huérfana
+  /// queda fuera de la cuenta, la compuerta se cierra, y este rescate (que
+  /// vive dentro de [OutboxDrainer.drain]) nunca llega a correr. Pasó: el
+  /// `pendingBefore == 0` del coordinador dejó una foto en "Subiendo" para
+  /// siempre, inmune a "Enviar ahora" y a un arranque en frío (corrida e2e 2).
+  /// Idempotente por diseño: llamarlo dos veces seguidas es gratis.
   Future<void> resetInflight();
   Future<void> markInflight(String id);
   Future<void> markDrained(String id);
@@ -216,22 +226,34 @@ class OutboxDrainer {
           failedThisRun.add(row.id);
           await store.markFailed(row.id,
               error: message, code: code, status: status, dead: true);
-          // La fila muere pero es visible en dead-letter; el archivo de foto
-          // ya no se va a subir jamás → se borra (PII fuera de disco).
-          await _deletePhotoFileIfAny(row);
+          // El binario SE QUEDA (aquí y en el brazo de abajo). Antes se
+          // borraba ("PII fuera de disco"), y eso convertía el "Reintentar"
+          // de la bandeja en una puerta falsa: el humano lo tocaba, la fila
+          // revivía sin archivo y volvía a morir con PHOTO_LOST (verificado
+          // en la corrida e2e 2). Una fila `dead` no está terminada: está
+          // ESPERANDO UNA DECISIÓN sobre evidencia de daños, y las dos
+          // salidas de esa decisión —reintentar o descartar— necesitan la
+          // foto viva. El disco se libera cuando el humano descarta
+          // (OutboxService.discardDead), cuando el TTL de 14 días la recoge,
+          // o cuando se purga la cuenta: los tres borran el archivo. El tope
+          // de la bandeja (ADR-7) sigue acotando el crecimiento — con la
+          // bandeja llena la captura se PAUSA y lo dice, que es la política
+          // de la casa (nada se purga solo).
         case DrainTransient(:final message, :final status):
           failedThisRun.add(row.id);
           final goesDead = row.attempts + 1 >= maxAttemptsBeforeDead;
           await store.markFailed(row.id,
               error: message, code: null, status: status, dead: goesDead);
-          if (goesDead) await _deletePhotoFileIfAny(row);
       }
     }
   }
 
-  /// Borra el binario de una fila `inspection_photo` que sale de la bandeja
-  /// (drenó OK o murió). Best-effort: un fallo al borrar no debe tirar el
+  /// Borra el binario de una fila `inspection_photo` que SALIÓ de la bandeja
+  /// con éxito (DrainOk). Best-effort: un fallo al borrar no debe tirar el
   /// drenado — el barrido de huérfanos de arranque (historia M1) lo recoge.
+  ///
+  /// Una fila que MUERE no pasa por aquí a propósito: ver el comentario del
+  /// `case DrainReject` en [_drain].
   Future<void> _deletePhotoFileIfAny(OutboxRow row) async {
     if (row.kind != 'inspection_photo') return;
     final path = row.payloadMap['photoPath'] as String?;

@@ -90,12 +90,18 @@ class DbOutboxStore implements OutboxStore {
     ];
   }
 
+  /// Cada rescate se CUENTA (`outbox.inflight_rescued`): una fila huérfana en
+  /// `inflight` es el rastro de una corrida que murió a media subida, y su
+  /// frecuencia es la métrica de salud del drenado — no un detalle interno.
   @override
   Future<void> resetInflight() async {
     final owner = ownerOf();
     if (owner == null) return;
-    await db.resetInflightToPending(
+    final rescued = await db.resetInflightToPending(
         userId: owner.userId, tenantId: owner.tenantId);
+    if (rescued > 0) {
+      logger.log(OutboxEvents.inflightRescued, data: {'rows': rescued});
+    }
   }
 
   @override
@@ -212,6 +218,28 @@ class DrainCoordinator extends Notifier<DrainStatus> {
     if (!ref.mounted) return;
     final store = ref.read(outboxStoreProvider);
     final drainer = ref.read(outboxDrainerProvider);
+    // RESCATE ANTES DE CONTAR. La compuerta de abajo mira `pending`, y una
+    // fila que quedó en `inflight` (corrida tumbada a media subida: un 401,
+    // el proceso muerto) NO está en `pending`. Contando solo pendientes, esa
+    // fila daba `pendingBefore == 0`, el kick se devolvía y `drain()` —el
+    // único sitio donde vive `resetInflight`— jamás llegaba a correr: la
+    // foto se quedaba "SUBIENDO" para siempre, con su barra animada, y ni
+    // "Enviar ahora" ni un arranque en frío la movían (verificado en el
+    // aparato, corrida e2e 2). Es exactamente el daño que el contrato de
+    // [OutboxStore.resetInflight] describe — "se perderían en silencio" —
+    // reintroducido por la compuerta.
+    //
+    // Rescatar aquí (y no solo contar las inflight) es deliberado: la cuenta
+    // alimenta el anillo "0/N" del 7A, y una fila que se rescata dentro de
+    // `drain()` ya llega tarde para ese total. `resetInflight` es idempotente
+    // y `drain()` la vuelve a llamar: dos llamadas seguidas no hacen daño.
+    try {
+      await store.resetInflight();
+    } catch (_) {
+      // Sin DB (tests, arranque raro) el drenado sigue con lo que haya en
+      // `pending`: el rescate se reintenta en el próximo kick.
+    }
+    if (!ref.mounted) return;
     final pendingBefore = (await store.pending()).length;
     if (!ref.mounted) return;
     if (!online) {

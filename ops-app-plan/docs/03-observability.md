@@ -193,12 +193,14 @@ inventado.
 | `outbox.remint_token` | re-emisión del handoff al drenar (tag `reused`) |
 | `outbox.entry_dead` | dead-letter (tag `code` — TOKEN_*, REQUIRED_ANGLES_MISSING… — y tag `status`: el HTTP de la respuesta, o null si NUNCA llegó una. `code` null + `status` null = murió sin red; `code` null + `status` presente = el backend rechazó sin mandar code) |
 | `outbox.purged_account_switch` | purga por cambio de cuenta (tag `rows`) |
+| `outbox.inflight_rescued` | filas que quedaron en `inflight` (corrida tumbada a media subida) y el arranque del drenado devolvió a `pending` (tag `rows`). Cada una fue una foto congelada en "Subiendo" en la cara de un empleado — corrida e2e 2. **Solo se ve desde FOREGROUND:** el worker de background construye su logger a mano y en release es `NoopEventLogger` (`background_drain.dart:127`), así que un rescate hecho por WorkManager no llega al tablero. La cifra es un PISO, no el total — si algún día importa el total, el pedido es un logger real en el isolate, no un cambio en este evento |
 
 ### Salud
 | Evento | Cuándo |
 |---|---|
 | `net.request_429_backoff` | backoff activado (tag `route`) |
 | `camera.oom_guard` | presión de memoria detectada al capturar |
+| `camera.shutter_timeout` | `takePicture()` no resolvió en `kShutterTimeout` (tag `timeout_s`). Salud de APARATO: la app suelta el controlador y lo dice; contarlo es la única forma de saber en qué teléfonos pasa |
 | `dashboard.poll_tick` | solo métrica de frecuencia — sample 1% |
 
 ## Compuertas de release

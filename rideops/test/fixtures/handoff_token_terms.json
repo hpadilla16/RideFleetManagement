@@ -1,0 +1,6 @@
+{
+  "token": "3d7b0e5c9a1f4268be03c7d1a5f2098e",
+  "expiresAt": "2026-08-16T14:27:00.000Z",
+  "kind": "TERMS_SIGNING",
+  "signUrl": "https://autosdelvalle.example.com/sign/3d7b0e5c9a1f4268be03c7d1a5f2098e"
+}

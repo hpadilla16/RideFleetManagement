@@ -1148,11 +1148,17 @@ abstract class AppLocalizations {
   /// **'Sin conexión. Para iniciar la inspección se necesita señal una vez; después todo funciona sin red.'**
   String get inspLoadOffline;
 
-  /// No description provided for @inspOutboxFull.
+  /// El muro de verdad: aquí es donde el agente descubre que no puede capturar. Decía solo «conéctate a una red para que se vacíe», y desde que un dead-letter conserva su binario esa frase puede mandar a caminar hacia la ventana por filas que la red no mueve (review GD-MC-5). Va con inspOutboxFullAction al lado.
   ///
   /// In es, this message translates to:
-  /// **'La bandeja está llena. Conéctate a una red para que se vacíe antes de capturar más fotos.'**
+  /// **'La bandeja está llena: no cabe otra foto. Con red, lo que espera se envía solo; lo que el servidor rechazó solo se va cuando tú decides.'**
   String get inspOutboxFull;
+
+  /// Salida real desde el muro (BannerAction, 44 dp). Sin ella el aviso describe un bloqueo y no ofrece dónde resolverlo — y la bandeja es la única pantalla donde se decide.
+  ///
+  /// In es, this message translates to:
+  /// **'Ver la bandeja'**
+  String get inspOutboxFullAction;
 
   /// No description provided for @camAnglePill.
   ///
@@ -1201,6 +1207,18 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'El permiso de cámara está denegado. Actívalo en los Ajustes del sistema y vuelve a intentar.'**
   String get camErrorPermissionHint;
+
+  /// Obturador colgado (corrida e2e 2, GPU por software): takePicture() nunca resuelve. NO se dice 'no se pudo abrir la cámara' —abrió y estaba mostrando imagen— para no mandar al agente a revisar un permiso que sí tiene.
+  ///
+  /// In es, this message translates to:
+  /// **'La cámara no devolvió la foto'**
+  String get camShutterStuckTitle;
+
+  /// Dice QUÉ pasó, qué hizo la app (soltó el controlador) y las dos salidas reales. La última frase existe porque la causa es del aparato: reintentar en el mismo teléfono puede no bastar.
+  ///
+  /// In es, this message translates to:
+  /// **'El disparo se quedó esperando y no volvió. Cerramos la cámara; vuelve a abrirla e inténtalo otra vez. Si se repite, usa otro teléfono para este vehículo.'**
+  String get camShutterStuckHint;
 
   /// No description provided for @langSpanish.
   ///
@@ -1544,10 +1562,10 @@ abstract class AppLocalizations {
   /// **'{count, plural, one{intentado 1 vez · último {time}} other{intentado {count} veces · último {time}}}'**
   String outboxAttempts(int count, String time);
 
-  /// No description provided for @outboxReasonAnglesMissing.
+  /// Esta fila NO ofrece Reintentar (canRetry:false) y sin reservationId tampoco ofrece 'Abrir inspección'. El texto anterior decía «Captúralos y reintenta» y nombraba un botón que no está — review GD-MC-4.
   ///
   /// In es, this message translates to:
-  /// **'El servidor lo rechazó: faltan los ángulos frontal y trasero. Captúralos y reintenta.'**
+  /// **'El servidor lo rechazó: faltan los ángulos frontal y trasero. Se capturan en la inspección; desde aquí este envío no se puede reenviar.'**
   String get outboxReasonAnglesMissing;
 
   /// No description provided for @outboxReasonToken.
@@ -1562,11 +1580,17 @@ abstract class AppLocalizations {
   /// **'La foto ya no está en este teléfono. Solo puedes descartar este envío.'**
   String get outboxReasonPhotoLost;
 
-  /// No description provided for @outboxReasonSessionGone.
+  /// Brazo sin Reintentar. Sigue el modelo de coCloseNoRetry (review GD-MC-4): por qué no hay reintento + qué NO se perdió. Antes era un hecho a secas y el agente se quedaba mirando una fila con una sola salida sin saber si estaba destruyendo algo.
   ///
   /// In es, this message translates to:
-  /// **'La sesión de checkout ya no existe en el servidor.'**
+  /// **'La sesión de checkout ya no existe en el servidor, así que este envío no se puede reintentar desde aquí. Lo que sí llegó a subirse sigue en la reserva.'**
   String get outboxReasonSessionGone;
+
+  /// Fila `dead` cuya sesión selló otra superficie (6F/17F, columna sessionSealedAt). Nace SIN Reintentar: contra una inspección cerrada el re-mint muere con SESSION_GONE. Dice las dos cosas que el agente necesita — que no se perdió la inspección, y que su evidencia sigue aquí esperándolo.
+  ///
+  /// In es, this message translates to:
+  /// **'Otra pantalla cerró esta inspección antes que este envío, así que ya no se puede reenviar. La inspección quedó sellada con lo que sí llegó; esta foto sigue en el teléfono hasta que decidas.'**
+  String get outboxReasonSessionSealed;
 
   /// SOLO cuando nunca llegó respuesta (lastErrorStatus null). Mandar a alguien a buscar señal por un rechazo del servidor es el defecto que arregló este texto.
   ///
@@ -1681,6 +1705,12 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'{count, plural, one{1 envío esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.} other{{count} envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.}}'**
   String outboxFullBody(int count);
+
+  /// Aparece en el cuerpo de bandeja llena SOLO si hay dead-letters ocupando cupo: desde 2026-09 el binario de un rechazado se conserva hasta que el humano decide, así que 'conéctate y se vaciará' sería media verdad. SIN conteo (review GD-SC-1): el número ya lo dice el banner rojo de arriba y repetirlo aquí era el mismo dato en dos colores. SIN nombrar botones (GD-SC-2): la decisión son las filas de abajo, y sus acciones cambian según por qué murió cada una.
+  ///
+  /// In es, this message translates to:
+  /// **'Los rechazados esperan tu decisión abajo: hasta que la tomes, su espacio no se libera.'**
+  String get outboxFullDeadHint;
 
   /// No description provided for @outboxFullChip.
   ///
@@ -2719,6 +2749,24 @@ abstract class AppLocalizations {
   /// In es, this message translates to:
   /// **'Estos datos son de hace {age} y la consulta de ahora no llegó. Vuelve a consultar antes de firmar: en ese tiempo el contrato pudo cambiar en el mostrador.'**
   String coConfirmStaleOldWhy(String age);
+
+  /// Vejez CON ORIGEN (corrida e2e 2): POST /vehicle devolvió 200 y la re-lectura de display-data se cayó. Gana a coConfirmStaleWhy/coConfirmStaleOldWhy porque esos dos hablan de la licencia y del contrato, y aquí lo que miente es la tarjeta del vehículo. No bloquea el CTA: el swap SÍ quedó en el servidor. SIN direcciones (review GD-MC-3): este texto se pinta en el DOCK, al pie, y las tarjetas están arriba — «el vehículo de abajo» apuntaba al lado contrario.
+  ///
+  /// In es, this message translates to:
+  /// **'El cambio de unidad se guardó, pero la reserva no se pudo volver a leer: la unidad que se muestra puede ser la que acabas de reemplazar. Actualiza los datos antes de entregar.'**
+  String get coConfirmSwapStaleWhy;
+
+  /// No description provided for @coConfirmSwapStaleLabel.
+  ///
+  /// In es, this message translates to:
+  /// **'Cambio de unidad'**
+  String get coConfirmSwapStaleLabel;
+
+  /// Fila dentro de la tarjeta del vehículo, ARRIBA de la unidad: avisa que el renglón siguiente puede ser la unidad reemplazada. El hecho es doble y las dos mitades importan: el cambio no se perdió, y lo que se ve no es lo que hay. «Releer» es vocabulario nuestro, no del mostrador (review GD-SC-6).
+  ///
+  /// In es, this message translates to:
+  /// **'El servidor ya lo tiene · esta pantalla no se ha actualizado'**
+  String get coConfirmSwapStaleValue;
 
   /// No description provided for @coConfirmCheckingPill.
   ///

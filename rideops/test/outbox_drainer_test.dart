@@ -397,15 +397,22 @@ void main() {
     expect(ops.deletedFiles, ['fotos/a.bin']);
   });
 
-  test('foto a dead-letter también borra el archivo (PII fuera de disco)',
-      () async {
+  test(
+      'foto a dead-letter CONSERVA el archivo: el "Reintentar" de la bandeja '
+      'tiene que poder tener éxito', () async {
     final ops = FakeOps(
       photoOutcome: const DrainReject('REQUIRED_ANGLES_MISSING', 'faltan'),
     );
     final store = FakeStore([photoRow('a', path: 'fotos/a.bin')]);
     await OutboxDrainer(store: store, ops: ops).drain();
     expect(store.dead.keys, ['a']);
-    expect(ops.deletedFiles, ['fotos/a.bin']);
+    // Antes se borraba aquí "para sacar la PII del disco", y eso convertía la
+    // acción principal del dead-letter en una puerta falsa: la fila revivía
+    // sin binario y volvía a morir con PHOTO_LOST (corrida e2e 2). La fila
+    // sigue EN la bandeja esperando una decisión sobre evidencia de daños;
+    // el disco se libera cuando el humano descarta, cuando el TTL de 14 días
+    // la recoge o cuando se purga la cuenta.
+    expect(ops.deletedFiles, isEmpty);
   });
 
   test('transitorio NO borra el archivo mientras la fila siga pending',
@@ -418,7 +425,8 @@ void main() {
         reason: 'la foto aún puede subir en la próxima corrida');
   });
 
-  test('transitorio que llega al tope (dead) borra el archivo', () async {
+  test('transitorio que llega al tope (dead) TAMPOCO borra el archivo',
+      () async {
     final ops = FakeOps(photoOutcome: const DrainTransient('red'));
     final store = FakeStore([
       OutboxRow(
@@ -435,7 +443,10 @@ void main() {
     await OutboxDrainer(store: store, ops: ops, maxAttemptsBeforeDead: 8)
         .drain();
     expect(store.dead.keys, ['a']);
-    expect(ops.deletedFiles, ['fotos/a.bin']);
+    // Morir por agotar reintentos es el caso MÁS recuperable de todos: lo que
+    // falló fue la red. Borrarle el binario dejaba al empleado con un botón
+    // "Reintentar" y ninguna foto detrás.
+    expect(ops.deletedFiles, isEmpty);
   });
 
   test('dead de un kind sin foto NO intenta borrar archivos', () async {

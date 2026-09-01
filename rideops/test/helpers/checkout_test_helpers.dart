@@ -55,15 +55,25 @@ ApiError displayDataDenial({
 
 /// La otra mitad: la petición que muere SIN respuesta. No hay cuerpo que citar
 /// y la pantalla tiene que decirlo con su copy, no con un hueco.
-ApiError displayDataNetworkDeath() => ApiError.fromDio(
-      DioException(
-        requestOptions: RequestOptions(
-          path: '/api/reservations/$kReservationId/display-data',
-        ),
-        type: DioExceptionType.connectionTimeout,
-        message: '',
-      ),
-    );
+///
+/// **Se construye con `DioException.connectionError`, no a mano con
+/// `message: ''`.** Ese hueco era una mentira de la prueba: Dio SIEMPRE
+/// rellena `message` en este camino, con su prosa en inglés ("The connection
+/// errored: … cannot be solved by the library"), y con el hueco la aserción
+/// "no aparece el renglón de cita" pasaba sin llegar nunca a la línea que la
+/// decide. En el aparato el renglón sí salía (corrida e2e 2). Un fixture que
+/// no reproduce el mensaje real no prueba nada.
+ApiError displayDataNetworkDeath() {
+  final request = RequestOptions(
+    path: '/api/reservations/$kReservationId/display-data',
+  );
+  return ApiError.fromDio(
+    DioException.connectionError(
+      requestOptions: request,
+      reason: "Failed host lookup: 'api.ridefleet.example'",
+    ),
+  );
+}
 
 /// Utilería compartida de los tests del wizard de checkout (M2-H1).
 
@@ -144,16 +154,21 @@ CheckoutSessionDto sessionFromRaw(Map<String, dynamic> raw) =>
 ///
 /// [reused] refleja el re-uso idempotente del backend (>2 min restantes
 /// devuelven el MISMO token) — es lo que decide la copy de la re-emisión.
+/// [signUrl] null por defecto = la rama de RESPALDO: un backend anterior al
+/// cambio que empezó a devolver la URL absoluta. La rama viva (servidor manda)
+/// se pide explícitamente, como en el test del dominio propio.
 HandoffToken termsToken({
   Duration ttl = const Duration(minutes: 15),
   bool reused = false,
   String token = 'tok_terms_fixture_0001',
+  String? signUrl,
 }) {
   return HandoffToken(
     token: token,
     expiresAt: clock.now().add(ttl),
     kind: 'TERMS_SIGNING',
     reused: reused,
+    signUrl: signUrl,
   );
 }
 

@@ -19,6 +19,7 @@ import 'package:rideops/core/session/kiosk_guard.dart';
 import 'package:rideops/core/session/pin_store.dart';
 import 'package:rideops/core/session/session_controller.dart';
 import 'package:rideops/core/session/session_state.dart';
+import 'package:rideops/core/telemetry/event_logger.dart';
 import 'package:rideops/core/widgets/ride_buttons.dart';
 import 'package:rideops/features/inspection/application/camera_service.dart';
 import 'package:rideops/features/inspection/application/inspection_controller.dart';
@@ -45,6 +46,7 @@ void main() {
   late Directory tempDir;
   late PhotoVault vault;
   late FakeCameraService camera;
+  late CapturingEventLogger logger;
   late ProviderContainer container;
 
   Map<String, dynamic> sessionJson({String? completedAt}) => {
@@ -91,8 +93,10 @@ void main() {
     tempDir = Directory.systemTemp.createTempSync('rideops_flow_test');
     vault = tempVault(tempDir);
     camera = FakeCameraService();
+    logger = CapturingEventLogger();
 
     container = ProviderContainer(overrides: [
+      eventLoggerProvider.overrideWithValue(logger),
       sessionControllerProvider.overrideWith(
         () => StubSessionController(
           SessionState.authenticated(
@@ -345,6 +349,68 @@ void main() {
   });
 
   testWidgets(
+      'F0 — el obturador colgado deja de ser silencio: timeout, mensaje '
+      'honesto y la cámara suelta', (tester) async {
+    routeHappyPath();
+    camera.hangOnCapture = true;
+    container.read(inspectionControllerProvider('r1').notifier);
+    await tester.pumpWidget(app(const SizedBox()));
+    await tester.pumpAndSettle();
+
+    await tester.pumpWidget(app(const CameraCaptureScreen(
+      reservationId: 'r1',
+      initialAngleKey: 'front',
+    )));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.bySemanticsLabel('Take photo'));
+    // Sin `pumpAndSettle`: mientras el disparo viaja hay un spinner vivo (y
+    // ANTES de este arreglo, un spinner que jamás terminaría).
+    await tester.pump();
+    expect(find.text('The camera never returned the photo'), findsNothing,
+        reason: 'a los 0 s todavía no hay nada que declarar colgado');
+
+    // El aparato nunca devuelve la foto (GPU por software). Hasta este
+    // cambio, aquí no pasaba NADA: ni spinner que acabara, ni error, ni
+    // salida — el agente tocando un botón muerto para siempre.
+    await tester.pump(kShutterTimeout + const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+
+    expect(find.text('The camera never returned the photo'), findsOneWidget);
+    expect(find.text('Could not open the camera'), findsNothing,
+        reason: 'la cámara SÍ abrió: ese título mandaría a revisar un permiso '
+            'que el agente ya tiene');
+    // Voz ACTIVA (review GD-SC-7): la app dice lo que hizo. "La cámara se
+    // cerró" deja al agente preguntándose si se rompió algo.
+    expect(find.textContaining('We closed the camera'), findsOneWidget);
+    // Salidas reales, las dos.
+    expect(find.text('Retry'), findsOneWidget);
+    expect(find.text('Close'), findsWidgets);
+    // Y el controlador se soltó: un plugin que no devolvió esta foto no va a
+    // devolver la siguiente (DoD #8 — además, cámara viva = memoria viva).
+    expect(camera.sessions.single.isDisposed, isTrue);
+    // El ángulo no se queda diciendo que está capturando.
+    expect(
+      container.read(inspectionControllerProvider('r1')).angles['front']!.status,
+      AngleStatus.failed,
+    );
+    expect(
+      logger.events
+          .firstWhere((e) => e.$1 == CameraEvents.shutterTimeout)
+          .$2['timeout_s'],
+      kShutterTimeout.inSeconds,
+    );
+
+    // Y "Reintentar" es una acción de VERDAD: reabre la cámara (una sesión
+    // nueva) en vez de repintar el mismo callejón.
+    camera.hangOnCapture = false;
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(camera.sessions, hasLength(2));
+    expect(find.text('The camera never returned the photo'), findsNothing);
+  });
+
+  testWidgets(
       'GD-MC-7: la firma de la INSPECCIÓN también dice QUÉ se firma — el '
       'cliente firma dos veces en el mismo teléfono con cinco minutos de '
       'diferencia', (tester) async {
@@ -459,5 +525,17 @@ void main() {
     // No se abrió la cámara: seguimos en el grid y el aviso está en pantalla.
     expect(camera.sessions, isEmpty);
     expect(find.text('Checkout inspection'), findsOneWidget);
+
+    // GD-MC-5: este es EL muro —el agente está junto al coche y la cámara no
+    // abre—, así que el aviso no puede prometer solo señal. Con dead-letters
+    // dentro, "conéctate y se vacía" manda a caminar hacia la ventana por
+    // filas que la red no va a mover nunca.
+    expect(
+      find.textContaining('what the server rejected only leaves when you '
+          'decide'),
+      findsWidgets,
+    );
+    // Y hay salida: la bandeja es la única pantalla donde se decide.
+    expect(find.text('Open the outbox'), findsWidgets);
   });
 }

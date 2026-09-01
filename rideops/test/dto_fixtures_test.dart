@@ -182,6 +182,9 @@ void main() {
     final t = HandoffToken.fromJson(readFixture('handoff_token.json'));
     expect(HandoffTokenKind.tryParse(t.kind), HandoffTokenKind.mobileInspection);
     expect(t.reused, isFalse);
+    // `signUrl` null NO es "backend viejo": este kind no tiene página pública
+    // y el servidor se niega a inventarle una ruta (publicUrlForToken:62-64).
+    expect(t.signUrl, isNull);
     // Vivo con margen de 2 min a las 14:20; muerto a las 14:26.
     expect(
       t.aliveFor(const Duration(minutes: 2),
@@ -192,6 +195,18 @@ void main() {
       t.aliveFor(const Duration(minutes: 2),
           now: () => DateTime.utc(2026, 8, 16, 14, 26)),
       isFalse,
+    );
+  });
+
+  test('handoff_token_terms.json → la URL del QR sale del SERVIDOR', () {
+    final t = HandoffToken.fromJson(readFixture('handoff_token_terms.json'));
+    expect(HandoffTokenKind.tryParse(t.kind), HandoffTokenKind.termsSigning);
+    // El dominio del INQUILINO, no el de la plataforma ni el del dart-define:
+    // el mint arma la URL con el origen que el backend conoce de sí mismo, y
+    // por eso un inquilino con dominio propio ya no necesita otro build.
+    expect(
+      t.signUrl,
+      'https://autosdelvalle.example.com/sign/${t.token}',
     );
   });
 

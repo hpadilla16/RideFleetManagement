@@ -137,6 +137,17 @@ void main() {
         tester.element(find.byType(CheckoutWizardScreen)),
       );
 
+  /// La tarjeta del VEHÍCULO, por su título. Se mira el widget y no un texto
+  /// suelto porque lo que se afirma es el tono y la pastilla —las dos señales
+  /// de vejez— y "Available" o "seen 3 min ago" sueltos en la pantalla no
+  /// dicen en cuál de las dos tarjetas salieron.
+  VerifyCard vehicleCard(WidgetTester tester) => tester.widget<VerifyCard>(
+        find.ancestor(
+          of: find.text('Vehicle'),
+          matching: find.byType(VerifyCard),
+        ),
+      );
+
   /// El cuerpo del paso es un scroll: en el lienzo del test (600 px de alto)
   /// el switch del seguro cae bajo la línea de flotación, igual que en un
   /// teléfono real con las dos tarjetas abiertas.
@@ -795,6 +806,133 @@ void main() {
     );
   });
 
+  testWidgets(
+      'F5 — swap aceptado + re-lectura caída: la tarjeta del VEHÍCULO dice su '
+      'edad y avisa que la unidad puede ser la reemplazada', (tester) async {
+    final f = fakes();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+    // Estado de partida: la unidad del fixture, sin una sola señal de vejez.
+    await scrollBody(tester, find.text('Change vehicle'));
+    expect(vehicleCard(tester).tone, VerifyTone.neutral);
+    expect(vehicleCard(tester).pillLabel, 'Available');
+
+    // El servidor ACEPTA el swap y, justo después, display-data se cae. La
+    // reserva ya tiene otra unidad; la pantalla sigue con la vieja.
+    await tester.tap(find.text('Change vehicle'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('U-118'));
+    await tester.pumpAndSettle();
+    f.reservations.failWith = displayDataNetworkDeath();
+    await tester.tap(find.textContaining('Switch to U-118'));
+    await tester.pumpAndSettle();
+
+    expect(f.api.swappedVehicleIds, ['cmea77xh20004vehu118'],
+        reason: 'el swap SÍ quedó en el servidor');
+
+    // La tarjeta del vehículo sigue enseñando la unidad REEMPLAZADA con su
+    // odómetro — eso no se puede evitar, la re-lectura no llegó. Lo que sí se
+    // puede es no pintarla como recién comprobada.
+    await scrollBody(tester, find.text('Unit change'));
+    expect(find.textContaining('IKL-427'), findsWidgets);
+    expect(vehicleCard(tester).tone, VerifyTone.warn,
+        reason: 'la tarjeta del vehículo también envejece');
+    expect(vehicleCard(tester).pillLabel, startsWith('seen'),
+        reason: 'ese "Available" es tan viejo como la unidad que acompaña');
+    expect(
+      find.text("The server has it · this screen hasn't refreshed"),
+      findsOneWidget,
+    );
+
+    // Y el subtexto del CTA habla de la UNIDAD, no de la licencia: el copy de
+    // stale genérico mandaba a confrontar el documento del cliente mientras
+    // el coche de la tarjeta era otro.
+    expect(
+      find.textContaining('may be the one you just replaced'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('check it against the license'),
+      findsNothing,
+      reason: 'lo que cambió no lo detecta una licencia en la mano',
+    );
+    // GD-MC-3: sin direcciones. Este texto se pinta en el DOCK, al pie, y las
+    // tarjetas están arriba — "el vehículo de abajo" apuntaba al lado
+    // contrario de donde está lo que describe.
+    expect(find.textContaining('vehicle below'), findsNothing);
+
+    // La entrega NO se bloquea: el swap quedó guardado y el dato del cliente
+    // sigue siendo el que el servidor dijo (regla 8D).
+    final cta = tester.widget<RidePrimaryButton>(
+      find.widgetWithText(RidePrimaryButton, 'Continue to T&C'),
+    );
+    expect(cta.onPressed, isNotNull);
+
+    // SEGUNDO intento que TAMPOCO llega (QA MINOR-1). Es la cláusula pegajosa
+    // del controller —`via == 'swap' || state.contextStaleAfterSwap`— y sin
+    // esta vuelta nadie la tocaba: con solo `via == 'swap'`, este reintento
+    // fallido APAGABA el aviso y la pantalla volvía a pintar la unidad
+    // reemplazada como si fuera un dato viejo cualquiera. La verdad no
+    // caduca: mientras la re-lectura no llegue, la unidad sigue siendo la
+    // otra, la haya pedido el swap o el botón.
+    await container(tester)
+        .read(checkoutWizardProvider(kReservationId).notifier)
+        .retryContext();
+    await tester.pumpAndSettle();
+    await scrollBody(tester, find.text('Unit change'));
+    expect(find.text('Unit change'), findsOneWidget);
+    expect(
+      find.textContaining('may be the one you just replaced'),
+      findsOneWidget,
+    );
+
+    // Una consulta que SÍ responde apaga el aviso — y es la única cosa que lo
+    // apaga.
+    f.reservations.failWith = null;
+    await container(tester)
+        .read(checkoutWizardProvider(kReservationId).notifier)
+        .retryContext();
+    await tester.pumpAndSettle();
+    await scrollBody(tester, find.text('Change vehicle'));
+    expect(find.text('Unit change'), findsNothing);
+    expect(vehicleCard(tester).pillLabel, 'Available');
+    expect(vehicleCard(tester).tone, VerifyTone.neutral);
+  });
+
+  testWidgets(
+      'F5 — la vejez SIN swap también tiñe la tarjeta del vehículo: sale de '
+      'la MISMA consulta que la del cliente', (tester) async {
+    final f = fakes();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    // Un refresco de fondo que se cae, sin swap de por medio (mismo escenario
+    // que MC-2, mirando la tarjeta de abajo).
+    f.reservations.failWith = displayDataDenial(status: 500);
+    await container(tester)
+        .read(checkoutWizardProvider(kReservationId).notifier)
+        .retryContext();
+    await tester.pumpAndSettle();
+    await scrollBody(tester, find.text('Change vehicle'));
+
+    expect(vehicleCard(tester).tone, VerifyTone.warn);
+    expect(vehicleCard(tester).pillLabel, startsWith('seen'),
+        reason: 'la unidad, la placa y el odómetro salen del mismo payload '
+            'que el nombre del cliente: envejecen juntos');
+    // Sin swap NO se acusa de nada a la unidad: solo es un dato viejo.
+    expect(find.text('Unit change'), findsNothing);
+  });
+
   testWidgets('9E — 409 sobre la unidad elegida: el sheet se QUEDA abierto con '
       'el mensaje del servidor y recarga su lista', (tester) async {
     final f = fakes();
@@ -1113,6 +1251,14 @@ void main() {
       find.text('Server response'),
       findsNothing,
       reason: 'no hubo respuesta: citar una sería inventarla',
+    );
+    // F1 — y en concreto, NADA de la prosa de la librería. Es el texto exacto
+    // que la corrida e2e 2 encontró bajo "Server response:": inglés, de Dio,
+    // sobre una petición que jamás llegó a un servidor.
+    expect(
+      find.textContaining('cannot be solved by the library'),
+      findsNothing,
+      reason: 'un mensaje de librería no es la palabra del servidor',
     );
     expect(find.text('Retry the lookup'), findsOneWidget);
     expect(

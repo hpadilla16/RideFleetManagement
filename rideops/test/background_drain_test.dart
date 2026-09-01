@@ -1,6 +1,15 @@
+import 'dart:convert';
+
+import 'package:drift/drift.dart' show Value;
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rideops/core/api/dto/session_user.dart';
+import 'package:rideops/core/db/outbox_db.dart';
 import 'package:rideops/core/outbox/background_drain.dart';
+import 'package:rideops/core/outbox/drain_coordinator.dart';
+import 'package:rideops/core/outbox/drainer.dart';
+import 'package:rideops/core/outbox/outbox_service.dart';
+import 'package:rideops/core/telemetry/event_logger.dart';
 
 import 'helpers/auth_test_helpers.dart';
 
@@ -108,4 +117,80 @@ void main() {
     expect(id.tenantId, user.tenantId,
         reason: 'tenant del claim == tenant de /me (aislamiento por tenant)');
   });
+
+  test(
+      'F4 — el worker tampoco puede cantar "bandeja limpia" con una fila '
+      'atorada en inflight', () async {
+    final db = OutboxDb(NativeDatabase.memory());
+    addTearDown(db.close);
+    final now = DateTime.now();
+    // El residuo de una corrida anterior que murió a media subida. No hay
+    // NADA en `pending`.
+    await db.into(db.outboxEntries).insert(OutboxEntriesCompanion.insert(
+          id: 'huerfana',
+          userId: 'u1',
+          tenantId: 't1',
+          kind: OutboxKinds.inspectionPhoto,
+          payload: json.encode({
+            'checkoutSessionId': 'cs1',
+            'reservationId': 'r1',
+            'angleKey': 'front',
+            'photoPath': 'p.bin',
+          }),
+          idempotencyKey: 'ik-huerfana',
+          status: const Value('inflight'),
+          createdAt: now,
+          updatedAt: now,
+        ));
+
+    final store = DbOutboxStore(
+      db: db,
+      ownerOf: () => const OutboxOwner(userId: 'u1', tenantId: 't1'),
+      logger: const NoopEventLogger(),
+    );
+    final ops = _CountingOps();
+    final clean = await drainWithStore(store, OutboxDrainer(store: store, ops: ops));
+
+    // Antes: `pending()` vacío ⇒ `return true` ⇒ el relevo del OS se
+    // cancelaba y la foto se quedaba en el teléfono sin que nada la mirara.
+    expect(ops.uploads, 1, reason: 'el POST tiene que salir');
+    expect(clean, isTrue, reason: 'ahora sí está limpia: porque drenó');
+    expect(await (db.select(db.outboxEntries)).get(), isEmpty);
+  });
+}
+
+/// Ops mínimas del worker: siempre hay token y la foto "existe".
+class _CountingOps implements OutboxOps {
+  int uploads = 0;
+
+  @override
+  Future<String?> mintInspectionToken(String checkoutSessionId) async => 'tok';
+
+  @override
+  Future<DrainOutcome> uploadPhoto({
+    required String token,
+    required String angleKey,
+    required String photoDataUrl,
+    String? notes,
+  }) async {
+    uploads++;
+    return const DrainOk();
+  }
+
+  @override
+  Future<bool> inspectionAlreadyCompleted(String reservationId) async => false;
+
+  @override
+  Future<DrainOutcome> completeInspection({
+    required String token,
+    required Map<String, dynamic> payload,
+  }) async =>
+      const DrainOk();
+
+  @override
+  Future<String?> readPhotoData(String path) async =>
+      'data:image/jpeg;base64,x';
+
+  @override
+  Future<void> deletePhotoFile(String path) async {}
 }

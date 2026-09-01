@@ -37,10 +37,29 @@ class CameraCaptureScreen extends ConsumerStatefulWidget {
       _CameraCaptureScreenState();
 }
 
+/// Cuánto se espera a que `takePicture()` resuelva antes de declarar colgado
+/// el obturador.
+///
+/// Existe porque se puede colgar PARA SIEMPRE: con GPU por software, el future
+/// del plugin nunca resolvió y la pantalla se quedó sin spinner, sin error y
+/// sin foto — el agente tocando un botón muerto (corrida e2e 2). No se caza la
+/// causa (es del aparato), se caza el SILENCIO.
+///
+/// 12 s es holgado a propósito: un teléfono de gama media con poca luz puede
+/// tardar 2-3 s entre el disparo y el JPEG, y cortar una captura buena por
+/// impaciencia sería peor que esperar de más una vez.
+const kShutterTimeout = Duration(seconds: 12);
+
 class _CameraCaptureScreenState extends ConsumerState<CameraCaptureScreen>
     with WidgetsBindingObserver {
   InspectionCameraSession? _session;
   Object? _cameraError;
+
+  /// El último error vino de un obturador colgado, no de abrir la cámara. Es
+  /// la MISMA pantalla de error con otro título: la salida (reintentar/cerrar)
+  /// es idéntica, pero "No se pudo abrir la cámara" sería falso — la cámara
+  /// estaba abierta y enseñando la imagen.
+  bool _shutterTimedOut = false;
   late String _angleKey;
   bool _flashOn = false;
   bool _shooting = false;
@@ -97,9 +116,15 @@ class _CameraCaptureScreenState extends ConsumerState<CameraCaptureScreen>
       setState(() {
         _session = session;
         _cameraError = null;
+        _shutterTimedOut = false;
       });
     } catch (e) {
-      if (mounted) setState(() => _cameraError = e);
+      if (mounted) {
+        setState(() {
+          _cameraError = e;
+          _shutterTimedOut = false;
+        });
+      }
     }
   }
 
@@ -118,7 +143,10 @@ class _CameraCaptureScreenState extends ConsumerState<CameraCaptureScreen>
     final angleKey = _angleKey;
     try {
       unawaited(HapticFeedback.lightImpact());
-      final tempPath = await session.takePicture();
+      // El timeout es la diferencia entre "tarda" y "no va a volver". Sin él
+      // un `takePicture()` que nunca resuelve deja `_shooting` en true para
+      // siempre: obturador muerto, cero señales, cero salidas.
+      final tempPath = await session.takePicture().timeout(kShutterTimeout);
       _controller.markCompressing(angleKey);
       // La compresión + cifrado + encolado corren SIN bloquear la cámara:
       // el tile del grid muestra el spinner y el agente sigue al siguiente
@@ -132,6 +160,18 @@ class _CameraCaptureScreenState extends ConsumerState<CameraCaptureScreen>
       } else {
         setState(() => _angleKey = next);
       }
+    } on TimeoutException {
+      // El obturador se colgó. Se cuenta (la taxonomía necesita saber en qué
+      // aparatos pasa) y se SUELTA EL CONTROLADOR: un plugin que no devolvió
+      // la foto no va a devolver la siguiente, así que la recuperación de
+      // verdad es abrir la cámara otra vez — que es justo lo que hace el
+      // "Reintentar" de la pantalla de error. `dispose` va sin await por
+      // contrato (_disposeCamera), no vaya a colgarse también.
+      ref.read(eventLoggerProvider).log(CameraEvents.shutterTimeout,
+          data: {'timeout_s': kShutterTimeout.inSeconds});
+      _controller.markCaptureFailed(angleKey);
+      _disposeCamera();
+      if (mounted) setState(() => _shutterTimedOut = true);
     } catch (_) {
       _controller.markCaptureFailed(angleKey);
     } finally {
@@ -175,6 +215,10 @@ class _CameraCaptureScreenState extends ConsumerState<CameraCaptureScreen>
     final l10n = AppLocalizations.of(context)!;
     final label = angleLabel(l10n, _angleKey);
     final position = kInspectionAngleKeys.indexOf(_angleKey) + 1;
+    // Los dos fallos comparten pantalla porque comparten salida (reintentar /
+    // cerrar); lo que NO comparten es el título, y ahí está la honestidad:
+    // con el obturador colgado la cámara sí abrió.
+    final failed = _cameraError != null || _shutterTimedOut;
 
     return Scaffold(
       backgroundColor: RideTokens.n900,
@@ -191,10 +235,11 @@ class _CameraCaptureScreenState extends ConsumerState<CameraCaptureScreen>
                     ColoredBox(
                       color: RideTokens.n900,
                       child: Center(
-                        child: _cameraError != null
+                        child: failed
                             ? _CameraErrorState(
                                 l10n: l10n,
-                                permissionDenied:
+                                timedOut: _shutterTimedOut,
+                                permissionDenied: _cameraError != null &&
                                     _looksLikePermissionError(_cameraError!),
                                 onRetry: _openCamera,
                                 onClose: () => Navigator.of(context).pop(),
@@ -206,7 +251,7 @@ class _CameraCaptureScreenState extends ConsumerState<CameraCaptureScreen>
                   // Guía de encuadre honesta (nota 6): esquinas + silueta
                   // del ángulo al 55 % — ayuda de composición, NO detección
                   // automática (el mockup aprobado la dibuja; decisión PM).
-                  if (_cameraError == null)
+                  if (!failed)
                     Positioned.fill(
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(28, 90, 28, 120),
@@ -303,6 +348,7 @@ class _CameraCaptureScreenState extends ConsumerState<CameraCaptureScreen>
                         child: Container(
                           width: 76,
                           height: 76,
+                          alignment: Alignment.center,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: _shooting
@@ -313,6 +359,24 @@ class _CameraCaptureScreenState extends ConsumerState<CameraCaptureScreen>
                               width: 5,
                             ),
                           ),
+                          // Disparo en curso: además del atenuado, MOVIMIENTO.
+                          // El atenuado solo dice "algo cambió"; a pleno sol y
+                          // con el brazo estirado, lo que separa "está
+                          // trabajando" de "no registró el toque" es que gire.
+                          // El estado no vive en la animación (el botón ya
+                          // ignora toques y hay timeout detrás): esto es
+                          // refuerzo, así que con reduced-motion desaparece.
+                          child: _shooting &&
+                                  !MediaQuery.disableAnimationsOf(context)
+                              ? const SizedBox(
+                                  width: 28,
+                                  height: 28,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 3,
+                                    color: RideTokens.p600,
+                                  ),
+                                )
+                              : null,
                         ),
                       ),
                     ),
@@ -395,12 +459,19 @@ class _CameraErrorState extends StatelessWidget {
     required this.permissionDenied,
     required this.onRetry,
     required this.onClose,
+    this.timedOut = false,
   });
 
   final AppLocalizations l10n;
   final bool permissionDenied;
   final Future<void> Function() onRetry;
   final VoidCallback onClose;
+
+  /// El fallo fue el OBTURADOR colgado, no la apertura. Cambia el título y el
+  /// cuerpo: la cámara abrió y estuvo enseñando la imagen, así que "No se
+  /// pudo abrir la cámara" sería un diagnóstico falso — y el agente que lo
+  /// lea va a ir a buscar el permiso que sí tiene.
+  final bool timedOut;
 
   @override
   Widget build(BuildContext context) {
@@ -410,11 +481,16 @@ class _CameraErrorState extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Icon(Icons.no_photography_outlined,
-              size: 40, color: Colors.white),
+          Icon(
+            timedOut
+                ? Icons.hourglass_disabled_rounded
+                : Icons.no_photography_outlined,
+            size: 40,
+            color: Colors.white,
+          ),
           const SizedBox(height: 12),
           Text(
-            l10n.camErrorTitle,
+            timedOut ? l10n.camShutterStuckTitle : l10n.camErrorTitle,
             textAlign: TextAlign.center,
             style: const TextStyle(
               color: Colors.white,
@@ -422,7 +498,19 @@ class _CameraErrorState extends StatelessWidget {
               fontWeight: FontWeight.w800,
             ),
           ),
-          if (permissionDenied) ...[
+          if (timedOut) ...[
+            const SizedBox(height: 8),
+            Text(
+              l10n.camShutterStuckHint,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xE0FFFFFF),
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+                height: 1.45,
+              ),
+            ),
+          ] else if (permissionDenied) ...[
             const SizedBox(height: 8),
             Text(
               l10n.camErrorPermissionHint,

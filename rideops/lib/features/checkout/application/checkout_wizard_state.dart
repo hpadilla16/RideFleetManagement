@@ -290,6 +290,7 @@ class CheckoutWizardState {
     this.contextVerdict = ContextVerdict.checking,
     this.contextError,
     this.contextFetchedAt,
+    this.contextStaleAfterSwap = false,
     this.pending = false,
     this.baseline,
     this.joinAcknowledged = false,
@@ -370,6 +371,21 @@ class CheckoutWizardState {
   /// agente la confronta con la licencia física.
   final DateTime? contextFetchedAt;
 
+  /// El display-data que hay en pantalla es ANTERIOR a un swap que el
+  /// servidor YA aceptó.
+  ///
+  /// Es una vejez con nombre y apellido, y por eso no basta con
+  /// [contextFetchedAt]: cuando el swap sale bien pero la re-lectura se cae,
+  /// la tarjeta del vehículo no está "un poco vieja" — está mostrando LA
+  /// UNIDAD REEMPLAZADA, con su placa y su odómetro, justo en la pantalla
+  /// donde el agente confronta lo que tiene en la mano. La edad sola no
+  /// distingue eso de un refresco de fondo fallido.
+  ///
+  /// Pegajoso: se enciende en el `_loadContext(via: 'swap')` que falla y NO
+  /// lo apaga otro intento fallido (la unidad sigue siendo la vieja); solo lo
+  /// apaga una lectura que SÍ responde.
+  final bool contextStaleAfterSwap;
+
   final bool pending;
 
   /// PRIMERA lectura de esta visita, congelada. Es el "desde que entraste" del
@@ -405,6 +421,18 @@ class CheckoutWizardState {
   ///
   /// [myUserId] null (sesión degradada sin `/me`) ⇒ no se afirma que la abrió
   /// otro; solo decide la posición.
+  ///
+  /// **Caso que la fórmula resuelve callando, y lo hace A PROPÓSITO** (queda
+  /// escrito porque en la corrida e2e 2 se leyó como un olvido): pausar en el
+  /// paso 1 y volver a entrar SIENDO EL MISMO USUARIO no muestra antesala.
+  /// `byOther` es false y la posición es 1, así que las dos ramas dan false.
+  /// Es la respuesta correcta, no un hueco: la antesala existe para contar
+  /// con qué te encontraste al llegar, y aquí no hay nada que contar —el
+  /// mismo agente, en el mismo paso donde lo dejó, sin una sola escritura
+  /// ajena que reconciliar—. Meterle una pantalla intermedia sería un toque
+  /// de más por cada pausa del día. Si algún día la antesala tuviera que
+  /// contar "reanudaste una pausa", eso es otra pregunta y necesita otro
+  /// dato (el `abandon`), no aflojar esta fórmula.
   bool showJoinGate(String? myUserId) {
     final entry = baseline;
     if (entry == null || joinAcknowledged) return false;
@@ -442,6 +470,12 @@ class CheckoutWizardState {
   /// Lo último mostrable tras una escritura fallida: el 409 ya reconciliado
   /// si lo hay, y si no el error de red/servidor. Vacío ⇒ null, para que la
   /// pantalla ponga su copy traducido en vez de un hueco (DoD #5).
+  ///
+  /// ⚠️ Es lo MOSTRABLE, no la palabra del servidor: `error.message` cae a la
+  /// prosa (en inglés, de librería) de Dio cuando la petición murió sin
+  /// respuesta. Una pantalla que lo presente como "el servidor respondió…"
+  /// tiene que leer `ApiError.serverMessage`, que es null cuando no hubo
+  /// cuerpo que citar.
   String? get conflictOrErrorMessage {
     final message = conflict?.message ?? error?.message ?? '';
     return message.isEmpty ? null : message;
@@ -486,6 +520,7 @@ class CheckoutWizardState {
     ApiError? contextError,
     bool clearContextError = false,
     DateTime? contextFetchedAt,
+    bool? contextStaleAfterSwap,
     bool? pending,
     CheckoutSessionDto? baseline,
     bool? joinAcknowledged,
@@ -508,6 +543,8 @@ class CheckoutWizardState {
       contextError:
           clearContextError ? null : (contextError ?? this.contextError),
       contextFetchedAt: contextFetchedAt ?? this.contextFetchedAt,
+      contextStaleAfterSwap:
+          contextStaleAfterSwap ?? this.contextStaleAfterSwap,
       // Se REENVÍA: sin esto, cualquier copyWith sobre un estado `.pending()`
       // lo apagaba en silencio (hoy lo enmascaran las otras condiciones de
       // [firstLoad], pero es una trampa puesta para H2-H7).

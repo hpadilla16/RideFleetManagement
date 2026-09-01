@@ -165,12 +165,29 @@ class TermsTokenController extends Notifier<TermsTokenState> {
   /// puede arreglarlo desde aquí, solo dejarlo escrito donde se emite el
   /// enlace.
   ///
-  /// Pedido de backend asociado (ver `AppConfig.webBaseUrl`): que el mint
-  /// devuelva la URL absoluta ya resuelta, para que la app no tenga que
-  /// adivinar el origen web de cada tenant.
+  /// **El pedido de backend ya aterrizó** (verificado el 2026-09-01 en
+  /// `checkout-session.service.js:1354` y `:1395`): el mint devuelve
+  /// `signUrl` absoluta, armada con el origen que el servidor conoce de sí
+  /// mismo (`APP_BASE_URL` → `FRONTEND_BASE_URL` → `CUSTOMER_PORTAL_BASE_URL`,
+  /// :45-52). Se consume: manda el servidor.
+  ///
+  /// La constante de compilación queda de RESPALDO para los dos huecos
+  /// reales: un backend anterior a ese cambio, y un kind sin página pública
+  /// (`publicUrlForToken` responde null fuera de `TERMS_SIGNING`).
+  ///
+  /// Por qué el servidor gana y no al revés: `RIDEOPS_WEB_BASE` se hornea en
+  /// el APK, así que un inquilino con dominio propio exigía otro build para
+  /// que su cliente firmara en SU dominio — y el QR es lo único que el
+  /// cliente ve de nosotros. Si en dev el enlace sale `http://localhost:3000`
+  /// es que ese backend no tiene `APP_BASE_URL`: se arregla en el entorno, no
+  /// adivinando en el cliente (misma regla que el backend aplica al negarse a
+  /// inventar la ruta de los otros kinds).
   String? get signUrl {
-    final token = state.token?.token;
-    return token == null ? null : AppConfig.current.signUrl(token);
+    final token = state.token;
+    if (token == null) return null;
+    final fromServer = token.signUrl?.trim();
+    if (fromServer != null && fromServer.isNotEmpty) return fromServer;
+    return AppConfig.current.signUrl(token.token);
   }
 }
 

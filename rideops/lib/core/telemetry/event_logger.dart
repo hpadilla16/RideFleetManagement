@@ -261,12 +261,23 @@ abstract final class OutboxEvents {
   static const remintToken = 'outbox.remint_token';
   static const entryDead = 'outbox.entry_dead';
   static const purgedAccountSwitch = 'outbox.purged_account_switch';
+
+  /// Filas que quedaron en `inflight` (corrida tumbada a media subida) y el
+  /// arranque del drenado devolvió a `pending`. Tag `rows`. No es ruido: cada
+  /// una fue una foto congelada en "Subiendo" en la cara de un empleado.
+  static const inflightRescued = 'outbox.inflight_rescued';
 }
 
 /// Salud de cámara (03-observability.md §Salud): presión de memoria durante
 /// la captura — el guard del OOM de gama media (DoD #8).
 abstract final class CameraEvents {
   static const oomGuard = 'camera.oom_guard';
+
+  /// `takePicture()` no resolvió dentro de `kShutterTimeout` (tag
+  /// `timeout_s`). Es salud de APARATO, no del empleado: la app ya no puede
+  /// hacer más que soltar el controlador y decirlo, así que la única forma de
+  /// saber en qué teléfonos pasa es contarlo.
+  static const shutterTimeout = 'camera.shutter_timeout';
 }
 
 /// Con DSN: cada evento de la taxonomía entra como breadcrumb, de modo que un
