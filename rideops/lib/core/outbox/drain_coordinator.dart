@@ -113,10 +113,17 @@ class DbOutboxStore implements OutboxStore {
 
   @override
   Future<void> markFailed(String id,
-      {required String error, String? code, required bool dead}) async {
-    await db.markFailed(id, error: error, code: code, dead: dead);
+      {required String error,
+      String? code,
+      int? status,
+      required bool dead}) async {
+    await db.markFailed(id, error: error, code: code, status: status, dead: dead);
     if (dead) {
-      logger.log(OutboxEvents.entryDead, data: {'code': code});
+      // `status` acompaña al `code` (taxonomía 03-observability): un dead con
+      // code null era indistinguible en el tablero entre "murió sin red" y
+      // "el backend lo rechazó sin mandar code" — que es justo el caso que
+      // el doc llama "bug de manejo de errores, no ruido".
+      logger.log(OutboxEvents.entryDead, data: {'code': code, 'status': status});
       // Un dead también "sale" de la cola drenable — cuenta para el anillo.
       onDrained?.call();
     }

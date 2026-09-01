@@ -215,7 +215,7 @@ abstract class AppLocalizations {
   /// No description provided for @policyRuleMinLength.
   ///
   /// In es, this message translates to:
-  /// **'Mínimo {count} caracteres'**
+  /// **'{count, plural, one{Mínimo 1 carácter} other{Mínimo {count} caracteres}}'**
   String policyRuleMinLength(int count);
 
   /// No description provided for @policyRuleLowercase.
@@ -455,7 +455,7 @@ abstract class AppLocalizations {
   /// Etiqueta de accesibilidad del badge de la tab Bandeja
   ///
   /// In es, this message translates to:
-  /// **'{count} pendientes de envío'**
+  /// **'{count, plural, one{1 pendiente de envío} other{{count} pendientes de envío}}'**
   String outboxBadgeSemantics(int count);
 
   /// No description provided for @shellPlaceholderBody.
@@ -1505,7 +1505,7 @@ abstract class AppLocalizations {
   /// No description provided for @outboxAttempts.
   ///
   /// In es, this message translates to:
-  /// **'intentado {count} veces · último {time}'**
+  /// **'{count, plural, one{intentado 1 vez · último {time}} other{intentado {count} veces · último {time}}}'**
   String outboxAttempts(int count, String time);
 
   /// No description provided for @outboxReasonAnglesMissing.
@@ -1532,11 +1532,17 @@ abstract class AppLocalizations {
   /// **'La sesión de checkout ya no existe en el servidor.'**
   String get outboxReasonSessionGone;
 
-  /// No description provided for @outboxReasonNetwork.
+  /// SOLO cuando nunca llegó respuesta (lastErrorStatus null). Mandar a alguien a buscar señal por un rechazo del servidor es el defecto que arregló este texto.
   ///
   /// In es, this message translates to:
   /// **'No se pudo enviar tras varios intentos. Reintenta cuando haya señal.'**
   String get outboxReasonNetwork;
+
+  /// 5xx/429 que agotó reintentos: hubo respuesta, pero no fue un rechazo de lo que se envió.
+  ///
+  /// In es, this message translates to:
+  /// **'El servidor contestó con un error y no pudo recibir este envío tras varios intentos. No es tu señal: vuelve a intentarlo más tarde.'**
+  String get outboxReasonServerUnavailable;
 
   /// No description provided for @outboxReasonGeneric.
   ///
@@ -1544,11 +1550,23 @@ abstract class AppLocalizations {
   /// **'El servidor rechazó este envío.'**
   String get outboxReasonGeneric;
 
-  /// No description provided for @outboxTechnicalDetail.
+  /// El hueco lo arma la pantalla con el code del backend y/o el status HTTP unidos por ' · ' — solo con lo que de verdad existe.
   ///
   /// In es, this message translates to:
-  /// **'Detalle técnico: {code} · {message}'**
-  String outboxTechnicalDetail(String code, String message);
+  /// **'Detalle técnico: {detail}'**
+  String outboxTechnicalDetail(String detail);
+
+  /// Sin code ni status (fallo de red puro): la etiqueta sola, jamás un separador colgando.
+  ///
+  /// In es, this message translates to:
+  /// **'Detalle técnico'**
+  String get outboxTechnicalDetailBare;
+
+  /// Dato de transporte para soporte. No se traduce el error del servidor: esto es el status, no su cuerpo.
+  ///
+  /// In es, this message translates to:
+  /// **'HTTP {status}'**
+  String outboxTechnicalHttp(int status);
 
   /// No description provided for @outboxActionOpenInspection.
   ///
@@ -1625,7 +1643,7 @@ abstract class AppLocalizations {
   /// No description provided for @outboxFullBody.
   ///
   /// In es, this message translates to:
-  /// **'{count} envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.'**
+  /// **'{count, plural, one{1 envío esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.} other{{count} envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.}}'**
   String outboxFullBody(int count);
 
   /// No description provided for @outboxFullChip.

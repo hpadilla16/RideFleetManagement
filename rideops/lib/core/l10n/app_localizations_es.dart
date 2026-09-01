@@ -73,7 +73,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String policyRuleMinLength(int count) {
-    return 'Mínimo $count caracteres';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Mínimo $count caracteres',
+      one: 'Mínimo 1 carácter',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -216,7 +222,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String outboxBadgeSemantics(int count) {
-    return '$count pendientes de envío';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pendientes de envío',
+      one: '1 pendiente de envío',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -901,7 +913,13 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String outboxAttempts(int count, String time) {
-    return 'intentado $count veces · último $time';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'intentado $count veces · último $time',
+      one: 'intentado 1 vez · último $time',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -925,11 +943,23 @@ class AppLocalizationsEs extends AppLocalizations {
       'No se pudo enviar tras varios intentos. Reintenta cuando haya señal.';
 
   @override
+  String get outboxReasonServerUnavailable =>
+      'El servidor contestó con un error y no pudo recibir este envío tras varios intentos. No es tu señal: vuelve a intentarlo más tarde.';
+
+  @override
   String get outboxReasonGeneric => 'El servidor rechazó este envío.';
 
   @override
-  String outboxTechnicalDetail(String code, String message) {
-    return 'Detalle técnico: $code · $message';
+  String outboxTechnicalDetail(String detail) {
+    return 'Detalle técnico: $detail';
+  }
+
+  @override
+  String get outboxTechnicalDetailBare => 'Detalle técnico';
+
+  @override
+  String outboxTechnicalHttp(int status) {
+    return 'HTTP $status';
   }
 
   @override
@@ -986,7 +1016,15 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String outboxFullBody(int count) {
-    return '$count envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.';
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other:
+          '$count envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.',
+      one:
+          '1 envío esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.',
+    );
+    return '$_temp0';
   }
 
   @override

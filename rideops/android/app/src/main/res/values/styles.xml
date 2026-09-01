@@ -1,18 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Theme applied to the Android Window while the process is starting when the OS's Dark Mode setting is off -->
+    <!-- Tema de la ventana mientras arranca el proceso: la aurora de Ride.
+         windowBackground es lo ÚNICO que se ve hasta el primer frame de
+         Flutter, y ese primer frame es la misma aurora (SplashScreen). -->
     <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
-        <!-- Show a splash screen on the activity. Automatically removed when
-             the Flutter engine draws its first frame -->
         <item name="android:windowBackground">@drawable/launch_background</item>
+        <!-- Iconos de la barra de estado en CLARO sobre la aurora oscura —
+             el mismo criterio que AnnotatedRegion en SplashScreen (GD
+             MUST-3). Sin esto, el arranque muestra medio segundo de iconos
+             negros ilegibles sobre morado oscuro. -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@color/ride_aurora_start</item>
     </style>
-    <!-- Theme applied to the Android Window as soon as the process has started.
-         This theme determines the color of the Android Window while your
-         Flutter UI initializes, as well as behind your Flutter UI while its
-         running.
 
-         This Theme is only used starting with V2 of Flutter's Android embedding. -->
+    <!-- Tema de la ventana YA con el proceso vivo: es lo que queda DETRÁS de
+         la UI de Flutter (overscroll, transiciones). La app no tiene tema
+         oscuro (app.dart declara `theme:` y nada más), así que aquí se fija
+         blanco en vez de `?android:colorBackground` para que no dependa del
+         ajuste del sistema. Ver values-night/styles.xml. -->
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
-        <item name="android:windowBackground">?android:colorBackground</item>
+        <item name="android:windowBackground">@android:color/white</item>
     </style>
 </resources>

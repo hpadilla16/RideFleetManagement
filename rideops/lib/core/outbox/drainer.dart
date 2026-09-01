@@ -52,15 +52,31 @@ class DrainOk extends DrainOutcome {
 
 /// El servidor rechazó de forma PERMANENTE (code del backend adjunto).
 class DrainReject extends DrainOutcome {
-  const DrainReject(this.code, this.message);
+  const DrainReject(this.code, this.message, {this.status});
+
+  /// `code` de máquina del backend, o null cuando la respuesta no traía uno
+  /// (el backend NO manda code en todos los 4xx). null aquí NO significa
+  /// "no hubo respuesta" — para eso está [status].
   final String? code;
   final String message;
+
+  /// Status HTTP de la respuesta que causó el rechazo, o null si el rechazo
+  /// lo sintetizó el cliente sin llamar a nadie (PHOTO_LOST, SESSION_GONE,
+  /// UNKNOWN_KIND). Ver [DrainTransient.status].
+  final int? status;
 }
 
 /// Fallo transitorio (red, 5xx) — reintentar en el próximo drenado.
 class DrainTransient extends DrainOutcome {
-  const DrainTransient(this.message);
+  const DrainTransient(this.message, {this.status});
   final String message;
+
+  /// Status HTTP de la respuesta, o null si NUNCA LLEGÓ UNA (timeout, sin
+  /// red). Esa distinción es la que la bandeja pinta: sin respuesta ⇒ "vuelve
+  /// cuando haya señal"; con respuesta ⇒ el servidor sí contestó y el
+  /// problema no es la señal. Antes se perdía y todo 4xx sin `code` salía
+  /// como falta de señal — con cobertura perfecta y un 404 en la mano.
+  final int? status;
 }
 
 /// Operaciones remotas + de disco que el drenador necesita.
@@ -114,8 +130,14 @@ abstract class OutboxStore {
   Future<void> resetInflight();
   Future<void> markInflight(String id);
   Future<void> markDrained(String id);
+  /// [status] es el HTTP de la respuesta que causó el fallo, o null si no
+  /// hubo respuesta. Se PERSISTE: la bandeja lo necesita para no llamarle
+  /// "falta de señal" a un rechazo del servidor.
   Future<void> markFailed(String id,
-      {required String error, String? code, required bool dead});
+      {required String error,
+      String? code,
+      int? status,
+      required bool dead});
 }
 
 class OutboxDrainer {
@@ -190,18 +212,18 @@ class OutboxDrainer {
           drained.add(row.id);
           await store.markDrained(row.id);
           await _deletePhotoFileIfAny(row);
-        case DrainReject(:final code, :final message):
+        case DrainReject(:final code, :final message, :final status):
           failedThisRun.add(row.id);
           await store.markFailed(row.id,
-              error: message, code: code, dead: true);
+              error: message, code: code, status: status, dead: true);
           // La fila muere pero es visible en dead-letter; el archivo de foto
           // ya no se va a subir jamás → se borra (PII fuera de disco).
           await _deletePhotoFileIfAny(row);
-        case DrainTransient(:final message):
+        case DrainTransient(:final message, :final status):
           failedThisRun.add(row.id);
           final goesDead = row.attempts + 1 >= maxAttemptsBeforeDead;
           await store.markFailed(row.id,
-              error: message, code: null, dead: goesDead);
+              error: message, code: null, status: status, dead: goesDead);
           if (goesDead) await _deletePhotoFileIfAny(row);
       }
     }

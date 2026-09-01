@@ -30,7 +30,7 @@
   "changePasswordBody": "Entraste con una contraseña temporal. Por seguridad, crea la tuya antes de continuar.",
   "currentPasswordLabel": "Contraseña temporal (actual)",
   "newPasswordLabel": "Nueva contraseña",
-  "policyRuleMinLength": "Mínimo {count} caracteres",
+  "policyRuleMinLength": "{count, plural, one{Mínimo 1 carácter} other{Mínimo {count} caracteres}}",
   "@policyRuleMinLength": {
     "placeholders": { "count": { "type": "int" } }
   },
@@ -86,7 +86,7 @@
   "tabIncidents": "Incidentes",
   "tabOutbox": "Bandeja",
   "tabProfile": "Perfil",
-  "outboxBadgeSemantics": "{count} pendientes de envío",
+  "outboxBadgeSemantics": "{count, plural, one{1 pendiente de envío} other{{count} pendientes de envío}}",
   "@outboxBadgeSemantics": {
     "description": "Etiqueta de accesibilidad del badge de la tab Bandeja",
     "placeholders": { "count": { "type": "int" } }
@@ -419,7 +419,7 @@
   "outboxStatusUploading": "Subiendo",
   "outboxStatusWaitsPhotos": "Espera sus fotos",
   "outboxStatusRejected": "Rechazado",
-  "outboxAttempts": "intentado {count} veces · último {time}",
+  "outboxAttempts": "{count, plural, one{intentado 1 vez · último {time}} other{intentado {count} veces · último {time}}}",
   "@outboxAttempts": {
     "placeholders": { "count": { "type": "int" }, "time": { "type": "String" } }
   },
@@ -428,10 +428,27 @@
   "outboxReasonPhotoLost": "La foto ya no está en este teléfono. Solo puedes descartar este envío.",
   "outboxReasonSessionGone": "La sesión de checkout ya no existe en el servidor.",
   "outboxReasonNetwork": "No se pudo enviar tras varios intentos. Reintenta cuando haya señal.",
+  "@outboxReasonNetwork": {
+    "description": "SOLO cuando nunca llegó respuesta (lastErrorStatus null). Mandar a alguien a buscar señal por un rechazo del servidor es el defecto que arregló este texto."
+  },
+  "outboxReasonServerUnavailable": "El servidor contestó con un error y no pudo recibir este envío tras varios intentos. No es tu señal: vuelve a intentarlo más tarde.",
+  "@outboxReasonServerUnavailable": {
+    "description": "5xx/429 que agotó reintentos: hubo respuesta, pero no fue un rechazo de lo que se envió."
+  },
   "outboxReasonGeneric": "El servidor rechazó este envío.",
-  "outboxTechnicalDetail": "Detalle técnico: {code} · {message}",
+  "outboxTechnicalDetail": "Detalle técnico: {detail}",
   "@outboxTechnicalDetail": {
-    "placeholders": { "code": { "type": "String" }, "message": { "type": "String" } }
+    "description": "El hueco lo arma la pantalla con el code del backend y/o el status HTTP unidos por ' · ' — solo con lo que de verdad existe.",
+    "placeholders": { "detail": { "type": "String" } }
+  },
+  "outboxTechnicalDetailBare": "Detalle técnico",
+  "@outboxTechnicalDetailBare": {
+    "description": "Sin code ni status (fallo de red puro): la etiqueta sola, jamás un separador colgando."
+  },
+  "outboxTechnicalHttp": "HTTP {status}",
+  "@outboxTechnicalHttp": {
+    "description": "Dato de transporte para soporte. No se traduce el error del servidor: esto es el status, no su cuerpo.",
+    "placeholders": { "status": { "type": "int" } }
   },
   "outboxActionOpenInspection": "Abrir inspección",
   "outboxActionDiscard": "Descartar",
@@ -457,7 +474,7 @@
     "placeholders": { "time": { "type": "String" } }
   },
   "outboxFullTitle": "La bandeja está llena",
-  "outboxFullBody": "{count} envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.",
+  "outboxFullBody": "{count, plural, one{1 envío esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.} other{{count} envíos esperando (límite del teléfono). No cabe más — conéctate a una red para que se vacíe y puedas seguir capturando.}}",
   "@outboxFullBody": {
     "placeholders": { "count": { "type": "int" } }
   },

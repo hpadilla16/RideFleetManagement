@@ -205,6 +205,50 @@ void main() {
         isA<DrainTransient>(),
       );
     });
+
+    // Defecto 2 de la prueba de humo: el 404 REAL que la bandeja pintaba
+    // como "reintenta cuando haya señal". El cuerpo no trae `code` — el
+    // backend no lo manda en todos los 4xx — así que el único hecho que
+    // distingue este caso de un teléfono sin red es el status, y tiene que
+    // llegar hasta el outcome o la pantalla no puede decidir nada.
+    test('404 sin code → DrainReject con status 404 (y code null)', () async {
+      publicAdapter.routes['POST /api/mobile-inspection/gone/photo'] =
+          (_) => jsonRes(404, {'error': 'Not Found'});
+
+      final out = await ops.uploadPhoto(
+          token: 'gone', angleKey: 'front', photoDataUrl: 'x');
+
+      expect(out, isA<DrainReject>());
+      expect((out as DrainReject).code, isNull,
+          reason: 'el backend no mandó code — así llegó en el emulador');
+      expect(out.status, 404, reason: 'sin esto la bandeja miente');
+    });
+
+    test('sin respuesta (conexión caída) → DrainTransient con status null',
+        () async {
+      // Sin ruta registrada el adapter lanza connectionError: response null.
+      final out = await ops.uploadPhoto(
+          token: 'nunca-responde', angleKey: 'front', photoDataUrl: 'x');
+
+      expect(out, isA<DrainTransient>());
+      expect((out as DrainTransient).status, isNull,
+          reason: 'null significa "no hubo respuesta", y solo eso');
+    });
+
+    test('5xx y 429 conservan su status (no son rechazos, pero contestaron)',
+        () async {
+      publicAdapter.routes['POST /api/mobile-inspection/s503/photo'] =
+          (_) => jsonRes(503, {'error': 'Service Unavailable'});
+      final s503 = await ops.uploadPhoto(
+          token: 's503', angleKey: 'front', photoDataUrl: 'x');
+      expect((s503 as DrainTransient).status, 503);
+
+      publicAdapter.routes['POST /api/mobile-inspection/s429b/photo'] =
+          (_) => jsonRes(429, {'error': 'Too many requests'});
+      final s429 = await ops.uploadPhoto(
+          token: 's429b', angleKey: 'front', photoDataUrl: 'x');
+      expect((s429 as DrainTransient).status, 429);
+    });
   });
 
   group('inspectionAlreadyCompleted (pre-check del complete condicional)', () {
@@ -402,7 +446,10 @@ class _ListStore implements OutboxStore {
 
   @override
   Future<void> markFailed(String id,
-      {required String error, String? code, required bool dead}) async {
+      {required String error,
+      String? code,
+      int? status,
+      required bool dead}) async {
     if (dead) rows.removeWhere((r) => r.id == id);
   }
 }
