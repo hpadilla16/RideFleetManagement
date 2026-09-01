@@ -438,6 +438,7 @@
   "coConfirmRecheckPending": "Asking the server…",
   "coConfirmRecheckedStill": "Checked just now: the server still doesn't have {fields}.",
   "coConfirmStaleWhy": "This data is from the last lookup that did get through. The current one did not: check it against the license before handing over.",
+  "coConfirmStaleOldWhy": "This data is {age} old and the current lookup did not get through. Check again before signing: the contract could have changed at the counter in that time.",
   "coConfirmCheckingPill": "Checking",
   "coConfirmCheckingValue": "Checking…",
   "coConfirmCheckingWhy": "Checking the customer's record…",

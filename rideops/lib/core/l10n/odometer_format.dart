@@ -12,9 +12,9 @@ import 'app_localizations.dart';
 /// El primer barrido dejó vivo un cuarto sitio —la cabecera de sesión
 /// (`wizard_chrome.dart`), que se pinta COMPLETA en los pasos de pago, firma y
 /// cierre— y con él la contradicción entera: «IKL-427 · Odometer 48,190 km» en
-/// el header sobre «48,190 mi» en la tarjeta. Los cuatro consumidores están
-/// enumerados aquí a propósito, para que el que venga a agregar el quinto vea
-/// la lista y no la afirmación suelta:
+/// el header sobre «48,190 mi» en la tarjeta. Los CINCO consumidores están
+/// enumerados aquí a propósito, para que quien venga a agregar el sexto vea la
+/// lista y no la afirmación suelta:
 ///
 ///  1. `steps/confirming_step.dart` — tarjeta de vehículo del paso 1.
 ///  2. `steps/inspection_step.dart` — «última lectura» del handoff.

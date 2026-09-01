@@ -1649,6 +1649,11 @@ class AppLocalizationsEn extends AppLocalizations {
       'This data is from the last lookup that did get through. The current one did not: check it against the license before handing over.';
 
   @override
+  String coConfirmStaleOldWhy(String age) {
+    return 'This data is $age old and the current lookup did not get through. Check again before signing: the contract could have changed at the counter in that time.';
+  }
+
+  @override
   String get coConfirmCheckingPill => 'Checking';
 
   @override

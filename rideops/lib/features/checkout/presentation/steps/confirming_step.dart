@@ -221,12 +221,18 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
                   // nunca por inferencia sobre el catálogo (ADR-4).
                   toStep: CheckoutStep.tcPending,
                   label: l10n.coConfirmCta,
+                  // El progreso vive en el PRIMARIO. Ocuparlo con el ghost
+                  // resolvía el salto del camino raro (checking→unreachable) y
+                  // lo creaba en el normal: en cada entrega el ghost aparecía y
+                  // se iba, y el pie encogía 57 px con el pulgar ya en camino.
+                  loading: check.checking,
+                  loadingLabel: l10n.coConfirmRecheckPending,
                   // Con datos viejos el CTA sigue VIVO y el subtexto explica
                   // qué se está mirando. `why` y `blockedWhy` no son dos
                   // formas de escribir lo mismo: el segundo APAGA el botón
                   // (transition_button.dart:78), y apagarlo aquí sería
                   // detener una entrega por un refresco de fondo fallido.
-                  why: check.stale ? l10n.coConfirmStaleWhy : null,
+                  why: _staleWhy(l10n, check, state),
                   blockedWhy: _blockedWhy(l10n, check),
                   // Bloquear sin salida sería dejar al agente encerrado: la
                   // captura de datos del cliente NO vive en esta app (ADR-1,
@@ -247,6 +253,30 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
   Future<void> _openSwapSheet(BuildContext context, WidgetRef ref) =>
       showVehicleSwapSheet(context, reservationId: widget.reservationId);
 
+  /// El subtexto del CTA cuando hay datos viejos en pantalla.
+  ///
+  /// Dos textos, no uno, porque a distinta antigüedad la pregunta es distinta
+  /// (ver `kStaleCustomerDataHorizon`): recién caída la consulta, lo que toca
+  /// es lo que el agente ya hace —confrontar con la licencia—; pasado un ciclo
+  /// de handoff completo, la licencia ya no alcanza, porque lo que pudo
+  /// cambiar es el CONTRATO, y eso se resuelve volviendo a consultar. El
+  /// secundario "Actualizar datos del cliente" sigue ahí en las dos ramas, así
+  /// que el texto escalado apunta a un botón que existe.
+  String? _staleWhy(
+    AppLocalizations l10n,
+    ConfirmCustomerCheck check,
+    CheckoutWizardState state,
+  ) {
+    if (!check.stale) return null;
+    final age = state.contextFetchedAt == null
+        ? null
+        : clock.now().difference(state.contextFetchedAt!);
+    if (!beyondStaleHorizon(age)) return l10n.coConfirmStaleWhy;
+    // La edad va en el texto, no el umbral: "hace 40 min" le dice al agente
+    // cuánto tiempo tuvo el mostrador, que es el dato con el que decide.
+    return l10n.coConfirmStaleOldWhy(checkoutAgeLabel(l10n, age!));
+  }
+
   /// El cuerpo crudo de la negativa de display-data, o null si no hay ninguno
   /// que citar (la petición murió sin respuesta, o el servidor mandó un cuerpo
   /// vacío). Null ⇒ la tarjeta no escribe un renglón hueco.
@@ -261,18 +291,14 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
   /// salida honesta de los tres bloqueos es idéntica: RideOps no captura datos
   /// de cliente (ADR-1). Lo que cambia es la etiqueta y si se puede tocar.
   Widget? _secondary(AppLocalizations l10n, ConfirmCustomerCheck check) {
-    if (check.checking) {
-      // El slot se OCUPA con el progreso, inerte. Las filas ya tienen su
-      // spinner, pero el pie —donde está el pulgar y adonde mira el ojo cuando
-      // el CTA no responde— no tenía ninguno, y el hueco hacía saltar el dock
-      // en cuanto caía el veredicto.
-      return RideGhostButton(
-        label: l10n.coConfirmRetryLookup,
-        loading: true,
-        loadingLabel: l10n.coConfirmRecheckPending,
-        onPressed: null,
-      );
-    }
+    // Mientras la consulta VIAJA el slot no existe, que era la decisión
+    // original contra las puertas falsas: reintentar algo en vuelo no es una
+    // acción. El progreso lo lleva el primario, así que ya no hace falta
+    // ocupar este hueco para evitar que el pie salte — y ocuparlo tenía el
+    // precio de un ghost deshabilitado al 55 % de opacidad
+    // (ride_buttons.dart:124), o sea ~3.5:1 para el ÚNICO elemento que dice
+    // "estoy trabajando", bajo el sol.
+    if (check.checking) return null;
     // Datos completos y FRESCOS: no hay nada que consultar.
     if (check.complete && !check.stale) return null;
     return RideGhostButton(

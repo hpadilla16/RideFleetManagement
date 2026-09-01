@@ -2696,6 +2696,12 @@ abstract class AppLocalizations {
   /// **'Estos datos son los de la última consulta que sí llegó. La de ahora no llegó: confírmalos contra la licencia antes de entregar.'**
   String get coConfirmStaleWhy;
 
+  /// Escalón del aviso de vejez a partir de kStaleCustomerDataHorizon (los 15 min de HANDOFF_TOKEN_TTL_MIN). A esa antigüedad la pregunta ya no es «¿coincide con la licencia?» —eso el agente lo está haciendo— sino «¿alguien reescribió el contrato?», que una licencia en la mano no detecta. Lleva la EDAD y no el umbral: es el dato con el que se decide.
+  ///
+  /// In es, this message translates to:
+  /// **'Estos datos son de hace {age} y la consulta de ahora no llegó. Vuelve a consultar antes de firmar: en ese tiempo el contrato pudo cambiar en el mostrador.'**
+  String coConfirmStaleOldWhy(String age);
+
   /// No description provided for @coConfirmCheckingPill.
   ///
   /// In es, this message translates to:

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1258,9 +1259,9 @@ void main() {
     );
   });
 
-  testWidgets('SC-1 — mientras la consulta viaja el pie YA tiene su botón, con '
-      'progreso y sin poder tocarse: el dock no salta al caer el veredicto',
-      (tester) async {
+  testWidgets('SC-1 — mientras la consulta viaja el progreso lo lleva el '
+      'PRIMARIO: el slot secundario no existe, así que no hay nada que '
+      'colapsar cuando cae el veredicto', (tester) async {
     final f = fakes();
     f.reservations.failWith = displayDataDenial();
     // display-data se queda EN VUELO: es el frame que esta lámina existe para
@@ -1281,24 +1282,137 @@ void main() {
       find.textContaining("Checking the customer's record"),
       findsOneWidget,
     );
-    final ghost = tester.widget<RideGhostButton>(find.byType(RideGhostButton));
-    expect(ghost.loading, isTrue);
+    // El progreso está EN EL PRIMARIO: altura fija, blanco sobre el gradiente
+    // a opacidad plena. En el ghost deshabilitado iba al 55 %
+    // (ride_buttons.dart:124) — ~3.5:1 para el único elemento que dice "estoy
+    // trabajando", en un patio con sol.
+    final primary = tester.widget<RidePrimaryButton>(
+      find.byType(RidePrimaryButton),
+    );
+    expect(primary.loading, isTrue);
+    expect(primary.onPressed, isNull);
+    expect(find.text('Asking the server…'), findsOneWidget);
     expect(
-      ghost.onPressed,
-      isNull,
+      find.byType(RideGhostButton),
+      findsNothing,
       reason: 'reintentar algo que ya está en vuelo es una puerta falsa',
     );
-    final slotBefore = tester.getRect(find.byType(RideGhostButton));
+    final primaryBefore = tester.getRect(find.byType(RidePrimaryButton));
 
     f.reservations.displayGate!.complete();
     await tester.pump();
     await tester.pump();
 
+    // Camino raro (checking → unreachable): aparece el reintento.
     expect(find.text('Retry the lookup'), findsOneWidget);
     expect(
-      tester.getRect(find.byType(RideGhostButton)).height,
-      slotBefore.height,
-      reason: 'el slot ya estaba ocupado: el pie no cambia de alto',
+      tester.getRect(find.byType(RidePrimaryButton)).height,
+      primaryBefore.height,
     );
+  });
+
+  testWidgets('SC-1-bis — el camino NORMAL (consultando → datos completos), '
+      'que es el que ocurre en cada entrega: el pie no encoge porque el slot '
+      'secundario nunca llegó a existir', (tester) async {
+    final f = fakes();
+    // Sin `failWith`: la consulta va a responder bien y completa. Solo se
+    // retiene para poder mirar el frame de "consultando".
+    f.reservations.displayGate = Completer<void>();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+      settle: false,
+    );
+    await tester.pump();
+
+    expect(find.text('Checking…'), findsWidgets);
+    expect(
+      find.byType(RideGhostButton),
+      findsNothing,
+      reason: 'un ghost aquí es un slot que DESAPARECE al llegar la respuesta',
+    );
+    final primaryBefore = tester.getRect(find.byType(RidePrimaryButton));
+
+    f.reservations.displayGate!.complete();
+    await tester.pumpAndSettle();
+
+    // Llegó todo: verde, CTA vivo y ningún secundario (no hay nada que
+    // consultar).
+    expect(find.text('Verified'), findsOneWidget);
+    expect(find.byType(RideGhostButton), findsNothing);
+    final cta = tester.widget<RidePrimaryButton>(
+      find.byType(RidePrimaryButton),
+    );
+    expect(cta.loading, isFalse);
+    expect(cta.onPressed, isNotNull);
+
+    // Y lo que este caso existe para medir: el CTA no da el salto de un botón
+    // entero. Con el progreso en el slot secundario, el ghost desaparecía al
+    // llegar la respuesta y el primario BAJABA 57 px (48 del botón + 9 de
+    // gap) con el pulgar ya en camino — y a diferencia del caso de arriba,
+    // eso pasaba en CADA entrega, no en el camino raro.
+    expect(find.text('Continue to T&C'), findsOneWidget);
+    final moved =
+        (tester.getRect(find.byType(RidePrimaryButton)).top - primaryBefore.top)
+            .abs();
+    expect(
+      moved,
+      lessThan(48),
+      reason: 'un desplazamiento de 48+ px ES el slot secundario colapsando',
+    );
+    // El resto que sí se mueve (~18 px, y hacia ARRIBA) es el `why` pasando de
+    // un renglón a dos: `coTransitionWhy` es más largo que el de "consultando".
+    // Es comportamiento del dock desde H1, igual en todos los pasos, y va en
+    // dirección contraria al pulgar — el dedo aterriza en el subtexto, no
+    // sobre otro botón. Se deja medido para que un cambio de copy que lo
+    // convierta en un salto de verdad no pase inadvertido.
+    expect(moved, lessThanOrEqualTo(20));
+  });
+
+  testWidgets('SHOULD — la vejez tiene horizonte: pasado un ciclo de handoff '
+      'completo el aviso deja de decir "confírmalo contra la licencia" y manda '
+      'a re-consultar antes de firmar', (tester) async {
+    final f = fakes();
+    // Reloj propio: el umbral son los 15 min de HANDOFF_TOKEN_TTL_MIN y no se
+    // esperan de verdad.
+    final start = DateTime.utc(2026, 9, 1, 10);
+    var now = start;
+    await withClock(Clock(() => now), () async {
+      await pumpConfirming(
+        tester,
+        api: f.api,
+        reservations: f.reservations,
+        network: f.network,
+        logger: f.logger,
+      );
+
+      // Recién caída la consulta: la comprobación es la que el agente ya hace.
+      f.reservations.failWith = displayDataDenial(status: 500);
+      now = start.add(const Duration(minutes: 2));
+      await container(tester)
+          .read(checkoutWizardProvider(kReservationId).notifier)
+          .retryContext();
+      await tester.pumpAndSettle();
+      expect(find.textContaining('check it against the license'), findsOneWidget);
+      expect(find.textContaining('Check again before signing'), findsNothing);
+
+      // Pasado el horizonte, lo que pudo cambiar es el CONTRATO, y eso una
+      // licencia en la mano no lo detecta.
+      now = start.add(const Duration(minutes: 40));
+      await container(tester)
+          .read(checkoutWizardProvider(kReservationId).notifier)
+          .retryContext();
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Check again before signing'), findsOneWidget);
+      expect(find.textContaining('check it against the license'), findsNothing);
+      // Con la EDAD dentro, no el umbral: es el dato con el que se decide.
+      // Sale en los DOS sitios que hablan de vejez, la pastilla y el why.
+      expect(find.textContaining('40 min'), findsNWidgets(2));
+      // Y apunta a un botón que EXISTE.
+      expect(find.text('Refresh customer data'), findsOneWidget);
+    });
   });
 }

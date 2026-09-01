@@ -128,6 +128,30 @@ enum ContextVerdict {
   unreachable,
 }
 
+/// A partir de esta antigüedad, un dato de cliente que no se pudo refrescar
+/// deja de ser "confírmalo contra la licencia" y pasa a ser "vuelve a
+/// consultar antes de firmar".
+///
+/// **La pregunta cambia de naturaleza, y por eso el copy también.** Con 40
+/// segundos, lo único que puede haber pasado es que el dato siga igual: la
+/// comprobación es la que el agente ya está haciendo, mirando la licencia
+/// física. Pasado un ciclo completo de handoff, lo que pudo pasar es que OTRA
+/// superficie reescribiera el contrato en el mostrador — y eso una licencia en
+/// la mano no lo detecta.
+///
+/// El número NO es una preferencia: son los 15 minutos de
+/// `HANDOFF_TOKEN_TTL_MIN` (`checkout-session.service.js:26`), el TTL del
+/// token que habilita a las otras superficies. Es exactamente el tiempo en el
+/// que un ciclo ajeno cabe entero, así que es el punto a partir del cual el
+/// snapshot que hay en pantalla pudo quedar obsoleto por una escritura que
+/// esta app no vio. Si el backend mueve ese TTL, este umbral se mueve con él.
+const kStaleCustomerDataHorizon = Duration(minutes: 15);
+
+/// ¿La vejez de [age] ya cruzó el horizonte? Null (sin sello de frescura) NO
+/// lo cruza: sin saber cuánto hace, no se escala la alarma.
+bool beyondStaleHorizon(Duration? age) =>
+    age != null && age >= kStaleCustomerDataHorizon;
+
 /// Verificación del cliente lista para pintar (9A/9B).
 class ConfirmCustomerCheck {
   const ConfirmCustomerCheck({

@@ -1652,6 +1652,11 @@ class AppLocalizationsEs extends AppLocalizations {
       'Estos datos son los de la última consulta que sí llegó. La de ahora no llegó: confírmalos contra la licencia antes de entregar.';
 
   @override
+  String coConfirmStaleOldWhy(String age) {
+    return 'Estos datos son de hace $age y la consulta de ahora no llegó. Vuelve a consultar antes de firmar: en ese tiempo el contrato pudo cambiar en el mostrador.';
+  }
+
+  @override
   String get coConfirmCheckingPill => 'Consultando';
 
   @override
