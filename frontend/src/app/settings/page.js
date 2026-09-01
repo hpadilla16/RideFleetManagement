@@ -165,6 +165,10 @@ function SettingsInner({ token, me, logout }) {
   const [reservationOptions, setReservationOptions] = useState({ autoAssignVehicleFromType: false, requireFranchiseSelection: false, tenantTimeZone: 'America/Puerto_Rico' });
   // Vehicle Profile pack (2026-06-10): tenant rule for "ready to rotate".
   const [fleetRotationRule, setFleetRotationRule] = useState('TIME');
+  // Idle-vehicle notification (2026-09-01, backlog #5): OFF by default; the
+  // daily sweep only emits for tenants that flip this on.
+  const [idleVehicleCfg, setIdleVehicleCfg] = useState({ enabled: false, thresholdDays: 7 });
+  const [idleVehicleSaving, setIdleVehicleSaving] = useState(false);
   // Customer-led inspection (2026-06-11).
   const [customerInspectionEnabled, setCustomerInspectionEnabled] = useState(false);
   // Check-in inspection model (Fase D, 2026-06-18): 'AGENT' (current) vs 'CUSTOMER' (agent-less).
@@ -269,6 +273,9 @@ function SettingsInner({ token, me, logout }) {
   useEffect(() => {
     api(scopedSettingsPath('/api/settings/fleet-rotation'), {}, token)
       .then((out) => setFleetRotationRule(out?.rule === 'MILEAGE' ? 'MILEAGE' : 'TIME'))
+      .catch(() => {});
+    api(scopedSettingsPath('/api/settings/idle-vehicles'), {}, token)
+      .then((out) => out && setIdleVehicleCfg({ enabled: out.enabled === true, thresholdDays: Number(out.thresholdDays) >= 1 ? Number(out.thresholdDays) : 7 }))
       .catch(() => {});
     api(scopedSettingsPath('/api/settings/customer-inspection'), {}, token)
       .then((out) => {
@@ -2897,6 +2904,93 @@ function SettingsInner({ token, me, logout }) {
                   Drives the "Ready to Rotate" dashboard tile and the /vehicles?rotation=ready batch. Per-vehicle targets (months / miles) are set in each vehicle's Edit form.
                 </div>
               </div>
+            </div>
+
+            {/*
+              Idle-vehicle notification (2026-09-01, backlog #5). Per-tenant,
+              OFF by default (ship inert, tenant opts in — shuttle-tracker
+              precedent). The daily 09:20 UTC sweep emits one Notification
+              Center envelope per vehicle per idle episode; new activity
+              self-resolves it on the next sweep.
+            */}
+            <div className="glass card" style={{ padding: 12 }}>
+              <h3 style={{ marginBottom: 8 }}>Idle Vehicle Alerts · Alertas de vehículo ocioso</h3>
+              <div className="form-grid-2">
+                <label className="label" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, textTransform: 'none', letterSpacing: 0, fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={!!idleVehicleCfg.enabled}
+                    disabled={idleVehicleSaving}
+                    onChange={async (e) => {
+                      const enabled = e.target.checked;
+                      const previous = idleVehicleCfg;
+                      setIdleVehicleCfg({ ...idleVehicleCfg, enabled });
+                      setIdleVehicleSaving(true);
+                      try {
+                        const out = await api(scopedSettingsPath('/api/settings/idle-vehicles'), { method: 'PUT', body: JSON.stringify({ enabled }) }, token);
+                        if (out) setIdleVehicleCfg({ enabled: out.enabled === true, thresholdDays: Number(out.thresholdDays) >= 1 ? Number(out.thresholdDays) : 7 });
+                        setMsg(enabled
+                          ? 'Idle vehicle alerts enabled · Alertas de vehículo ocioso activadas'
+                          : 'Idle vehicle alerts disabled · Alertas de vehículo ocioso desactivadas');
+                      } catch (err) {
+                        setIdleVehicleCfg(previous);
+                        setMsg(err?.message || 'Failed to save idle vehicle setting');
+                      } finally {
+                        setIdleVehicleSaving(false);
+                      }
+                    }}
+                  />
+                  Notify when a vehicle sits without a rental · Avisar cuando un vehículo pasa días sin renta
+                </label>
+                <div className="surface-note">
+                  Once a day, every <strong>available</strong> vehicle with no reservation activity for the
+                  threshold below raises one notification (per idle stretch, not per day) in the Notification
+                  Center. It self-resolves when the vehicle is rented or assigned again.
+                  <br />
+                  Una vez al día, cada vehículo <strong>disponible</strong> sin actividad de reservas por los
+                  días del umbral genera una notificación (por episodio, no por día) en el centro de
+                  notificaciones. Se resuelve sola cuando el vehículo vuelve a rentarse o asignarse.
+                </div>
+              </div>
+              {idleVehicleCfg.enabled ? (
+                <div className="form-grid-2" style={{ marginTop: 10 }}>
+                  <div className="stack">
+                    <label className="label">Days without activity · Días sin actividad</label>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={idleVehicleCfg.thresholdDays}
+                      disabled={idleVehicleSaving}
+                      onChange={(e) => setIdleVehicleCfg({ ...idleVehicleCfg, thresholdDays: e.target.value })}
+                      onBlur={async () => {
+                        const n = Math.floor(Number(idleVehicleCfg.thresholdDays));
+                        if (!Number.isFinite(n) || n < 1) {
+                          setIdleVehicleCfg({ ...idleVehicleCfg, thresholdDays: 7 });
+                          return;
+                        }
+                        setIdleVehicleSaving(true);
+                        try {
+                          const out = await api(scopedSettingsPath('/api/settings/idle-vehicles'), { method: 'PUT', body: JSON.stringify({ thresholdDays: n }) }, token);
+                          if (out) setIdleVehicleCfg({ enabled: out.enabled === true, thresholdDays: Number(out.thresholdDays) >= 1 ? Number(out.thresholdDays) : 7 });
+                          setMsg('Idle threshold saved · Umbral guardado');
+                        } catch (err) {
+                          setMsg(err?.message || 'Failed to save idle threshold');
+                        } finally {
+                          setIdleVehicleSaving(false);
+                        }
+                      }}
+                    />
+                  </div>
+                  <div className="surface-note">
+                    Default 7 days. Vehicles in maintenance, on rent, booked ahead, shuttles and
+                    car-sharing units are never counted as idle.
+                    <br />
+                    Por defecto 7 días. Vehículos en mantenimiento, rentados, con reserva próxima,
+                    shuttles y unidades de car sharing nunca cuentan como ociosos.
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="glass card" style={{ padding: 12 }}>

@@ -35,6 +35,7 @@
       "shuttle": "Shuttle",
       "documents": "Documents & marbete",
       "checkinAudit": "Check-in audit",
+      "fleet": "Idle vehicles",
       "billing": "Billing",
       "allInfo": "All informational",
       "all": "All notifications"
@@ -52,6 +53,7 @@
       "maintSnoozed": "Maintenance snoozed at check-in — {{unit}}",
       "maintCheckinSent": "Sent to maintenance at check-in — {{unit}} · {{ro}}",
       "checkinAuditEntryError": "Entry error — {{res}}. Odometer entered below checkout reading ({{out}} → {{in}}).",
+      "idleVehicle": "Idle vehicle — {{unit}}, {{days}} days without a rental",
       "billingSuspended": "Subscription suspended — payment past due"
     },
     "src": {
@@ -62,7 +64,8 @@
       "BILLING": "Billing",
       "MAINTENANCE": "Maintenance",
       "DOCUMENTS": "Documents",
-      "CHECKIN_AUDIT": "Check-in audit"
+      "CHECKIN_AUDIT": "Check-in audit",
+      "FLEET": "Fleet"
     },
     "ack": {
       "by": "Acknowledged by {{name}} · {{time}}",

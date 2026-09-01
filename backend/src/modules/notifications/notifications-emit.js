@@ -23,9 +23,11 @@ export const NOTIFICATION_SEVERITIES = Object.freeze(['CRITICAL', 'NEEDS_ACTION'
 // Sources wired in the MVP. DOCUMENTS covers registration/marbete expiry.
 // CHECKIN_AUDIT (2026-09-03): post-check-in T1 rules audit — entry-error
 // findings emit NEEDS_ACTION, deduped per reservation+check.
+// FLEET (2026-09-01, backlog #5): idle-vehicle daily sweep — one envelope per
+// vehicle per idle episode, severity from the tenant's idleVehicleConfig.
 export const NOTIFICATION_SOURCE_TYPES = Object.freeze([
   'GEOFENCE', 'TOLL', 'SHUTTLE', 'KIOSK', 'BILLING', 'MAINTENANCE', 'DOCUMENTS',
-  'CHECKIN_AUDIT',
+  'CHECKIN_AUDIT', 'FLEET',
 ]);
 
 /**

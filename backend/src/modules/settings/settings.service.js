@@ -1081,6 +1081,39 @@ export const settingsService = {
     return this.getCheckinAuditConfig(scope);
   },
 
+  // Idle-vehicle notification (2026-09-01, backlog #5): per-tenant config for
+  // the daily idle sweep. OFF by default — the sweep is a no-op until a tenant
+  // opts in (shuttle-tracker precedent). Defaults are echoed in
+  // idle-vehicle.service.js normalizeIdleVehicleConfig, same convention as
+  // checkinAuditConfig above.
+  async getIdleVehicleConfig(scope = {}) {
+    const cfg = await readJsonSetting(scopedKey('idleVehicleConfig', scope), null);
+    const n = Number(cfg?.thresholdDays);
+    const severity = String(cfg?.severity || 'NEEDS_ACTION').toUpperCase();
+    return {
+      enabled: cfg?.enabled === true,
+      thresholdDays: Number.isFinite(n) && n >= 1 ? Math.floor(n) : 7,
+      severity: ['CRITICAL', 'NEEDS_ACTION', 'INFO'].includes(severity) ? severity : 'NEEDS_ACTION',
+    };
+  },
+
+  async updateIdleVehicleConfig(payload = {}, scope = {}) {
+    const key = scopedKey('idleVehicleConfig', scope);
+    const current = await readJsonSetting(key, {});
+    const next = { ...current };
+    if (typeof payload?.enabled === 'boolean') next.enabled = payload.enabled;
+    if (payload?.thresholdDays !== undefined && payload.thresholdDays !== null && `${payload.thresholdDays}`.trim?.() !== '') {
+      const n = Number(payload.thresholdDays);
+      if (Number.isFinite(n) && n >= 1) next.thresholdDays = Math.floor(n);
+    }
+    if (payload?.severity !== undefined) {
+      const s = String(payload.severity || '').toUpperCase();
+      if (['CRITICAL', 'NEEDS_ACTION', 'INFO'].includes(s)) next.severity = s;
+    }
+    await writeJsonSetting(key, next);
+    return this.getIdleVehicleConfig(scope);
+  },
+
   // Citations OCR (2026-06-15): per-tenant vision-LLM credentials for the mail
   // intake. The API key is stored ENCRYPTED (integration-crypto, same as TL).
   // getCitationOcrConfig is the safe/masked read for the UI (NEVER returns the
