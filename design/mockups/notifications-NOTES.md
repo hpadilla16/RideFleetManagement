@@ -42,7 +42,7 @@ Scope discipline: design only. No application code touched. Everything below cit
 1. **Banner directly under the odometer field, re-evaluated per keystroke.** Cause above effect; zero new navigation. Client-side re-implementation of `evalSchedule` is ~20 lines of arithmetic on data the page can fetch once (`GET /maintenance/vehicles/:id/schedules`).
 2. **Concrete language**: "Oil change — 1,230 mi overdue", with baseline → due → now shown per row and a small gauge. Never "maintenance required" in the abstract; the owner's ask was *which* maintenance.
 3. **One primary action + explicit consequence sentence** ("moves out of the rentable pool… won't appear in availability or the planner until the RO is completed"). Same one-primary-action rule as the tolls redesign.
-4. **Decline is a recorded decision, not a dismissal**: reason presets (shop at capacity / needed for confirmed reservation / already booked / other) + optional note, stamped with agent, reservation, odometer, timestamp. Continue is gated until the agent either arms the action or records the decline — that's what makes "the agent saw it" true.
+4. **Decline is a SNOOZE until the next rental event** (owner refinement 2026-09-01): one confirm — "Continue — remind me at {unit}'s next check-out or check-in" — with the re-prompt rule as the consequence line and an *optional*, collapsed note. No mandatory reason. Semantics: no re-prompt for the rest of *this* check-in; the banner re-surfaces at the vehicle's next check-out **or** check-in wizard (whichever comes first), **recomputed at that event** against the then-current odometer — an event marker, not a timer. The stamp (agent, reservation, odometer, timestamp) is recorded **silently** — audit value kept at zero clicks. The Maintenance Due list never snoozes. Continue stays gated until the agent either arms Send-to-maintenance or snoozes — that's what makes "the agent saw it" true.
 5. **Armed, not fired**: the status change happens at check-in close, with Undo available until signature. Success step states the outcome in pool language, names the RO (RO-0007) and deep-links it.
 6. **Due-soon items ride along**: they don't gate, but are pre-checked into the same RO so the shop does one visit (oil change + tire rotation).
 7. **Failure isolation**: if the RO-open fails at close, the check-in still completes (money first) and the wizard offers a manual retry — never block the customer at the counter on a fleet-ops write.
@@ -51,7 +51,7 @@ Scope discipline: design only. No application code touched. Everything below cit
 
 | # | Gap | Notes |
 |---|-----|-------|
-| A1 | **NEW — Maintenance decision record at check-in** (the "agent saw it" trail: agentId, reservationId, odometer, decision SEND/DECLINE, reasonCode, note, timestamp). Nothing stores this today; `AuditLog` requires a reservationId so it *could* host it, but a dedicated table keeps it queryable from the Maintenance hub. | New table or AuditLog event type |
+| A1 | **NEW — Snooze stamp + per-vehicle snooze marker.** Two pieces: (a) the silent stamp (agentId, reservationId, odometer, decision SEND/SNOOZE, optional note, timestamp) — the "agent saw it" trail, queryable from the Maintenance hub; (b) a per-vehicle snooze marker (e.g. `maintenanceSnoozedAt`/`snoozedByUserId` on Vehicle, or a row in the stamp table flagged active) that the check-out AND check-in wizards read on open: marker present → clear it and re-evaluate the banner against the current odometer (re-prompt); marker absent → prompt normally. No reasonCode enum needed. Nothing stores any of this today. | Marker is cleared by the next wizard open, whichever comes first |
 | A2 | **NEW — checkin-close hook** to execute the armed decision post-close: create RO (`source: SCHEDULED`) with pre-selected service types + `odometerAtOpen`, relying on existing `setVehicleInMaintenance`. | Small addition to `checkin-close.service.js` |
 | A3 | **NEW (optional) — hypothetical-mileage eval**: `GET /maintenance/vehicles/:id/schedules?atMileage=48730`. Not strictly needed — the client can run the arithmetic — but keeps one evaluator. `evalSchedule` is already exported for tests. | Nice-to-have |
 | A4 | **Existing but worth knowing**: RO create does not accept multiple service types as structured data — service lines are free-text `RepairOrderLine`s. The "oil change + tire rotation in one visit" concept needs the line descriptions written by the hook (fine), or a `serviceType` tag on lines (better, NEW). | Decide at build |
@@ -70,13 +70,13 @@ Scope discipline: design only. No application code touched. Everything below cit
 | svc.BRAKES | Brakes | Frenos |
 | svc.INSPECTION | Inspection | Marbete / inspección |
 | action.send | Send to maintenance | Enviar a mantenimiento |
-| action.decline | Continue without action… | Continuar sin acción… |
+| action.snooze | Continue without action… | Continuar sin acción… |
 | consequence | When this return completes, {unit} moves out of the rentable pool (status → Maintenance) and a repair order opens for the checked items. | Al completar esta devolución, {unit} sale del pool rentable (estatus → Mantenimiento) y se abre una orden de reparación con los renglones marcados. |
-| decline.title | Keep {unit} rentable — record why | Mantener {unit} rentable — indica por qué |
-| decline.r1 | Shop at capacity — will schedule within 48h | Taller lleno — se agenda en 48h |
-| decline.r2 | Vehicle needed for a confirmed reservation | Se necesita para una reserva confirmada |
-| decline.r3 | Service already booked with vendor | Servicio ya coordinado con el suplidor |
-| decline.r4 | Other (add a note) | Otro (añade una nota) |
+| snooze.title | Snooze until {unit}'s next rental event | Posponer hasta el próximo evento de renta de {unit} |
+| snooze.body | This reminder re-surfaces automatically at the vehicle's next check-out or check-in — whichever comes first — recomputed against the odometer at that moment. The Maintenance Due list is untouched; it never snoozes. | Este recordatorio reaparece automáticamente en el próximo check-out o check-in del vehículo — lo que ocurra primero — recalculado con el odómetro de ese momento. La lista de Mantenimiento Pendiente no cambia; nunca se pospone. |
+| snooze.confirm | Continue — remind me at next check-out or check-in | Continuar — recuérdame en el próximo check-out o check-in |
+| snooze.note | Add a note for the maintenance board (optional) | Añade una nota para el taller (opcional) |
+| snooze.stamp | Snooze is stamped automatically — {who} · {res} · {odo} · {when} — no extra clicks. | El posponer se registra automáticamente — {who} · {res} · {odo} · {when} — sin clics extra. |
 | armed.msg | Will send to maintenance when the return completes. | Se enviará a mantenimiento al completar la devolución. |
 | success.handoff | {unit} is out of the rentable pool. {ro} opened. | {unit} salió del pool rentable. Se abrió {ro}. |
 
@@ -125,7 +125,7 @@ Shell context first: the sidebar is five sections in `frontend/src/components/Ap
 - **Placement**: bell in the topbar between search (`AppShell.jsx:699`) and the location picker (`:703`) — the one slot every staff screen shares; plus a `Notifications` nav entry (dailyOps section, under Dashboard) hosting the full center. The ShuttleBanner keeps its interrupt slot — a bell must never be the only path to a guest standing at a counter.
 - **Envelope** (NEW `NotificationEvent`): `{id, tenantId, locationId?, severity: CRITICAL|ACTION|INFO, category, title, body, deepLink, sourceType, sourceRefId, dedupeKey, audienceRoles?, createdAt, resolvedAt?, ackByUserId?, ackAt?}` + per-user `NotificationRead {userId, notificationId, readAt}` (or a per-user high-water mark + exceptions, cheaper).
 - **Events vs standing conditions**: the feed shows **events** (something happened at a time). Page-load-computed *conditions* (turn-ready ranking, registration counts, ops-hub) stay on dashboards; only their **edge transitions** may emit events (e.g. "registration entered 30-day window" — one event, deduped by `dedupeKey`).
-- **Severity contract**: CRITICAL = human/asset exposed now (badges the bell, unmutable): geofence-outside, kiosk escalation, suspension. ACTION = owned work with a deadline: unacked billable toll, maintenance overdue, no-show, doc expired, issue due-soon, Feature A declines. INFO = awareness: due-soon, back-on-route, receipts. Never badge INFO.
+- **Severity contract**: CRITICAL = human/asset exposed now (badges the bell, unmutable): geofence-outside, kiosk escalation, suspension. ACTION = owned work with a deadline: unacked billable toll, maintenance overdue, no-show, doc expired, issue due-soon, Feature A snoozes. INFO = awareness: due-soon, back-on-route, receipts. Never badge INFO.
 - **Read ≠ acknowledge**: read is per-user; acknowledge is per-tenant, shows who and when, and **delegates to the source endpoint** where one exists (`POST /vehicles/overdue-alerts/:id/dismiss`, `POST /tolls/transactions/:id/acknowledge`) so the center never forks state.
 - **Scoping**: feed filtered by the caller's `effectiveLocationIds` (`backend/src/lib/tenant-scope.js`) like every module; role-gated categories (billing → ADMIN) filtered at the API.
 - **Muted rules**: per-user, category × location, never for CRITICAL.
@@ -157,7 +157,7 @@ Shell context first: the sidebar is five sections in `frontend/src/components/Ap
 | evt.geofence | Overdue & outside geofence — {unit} | Vencido y fuera de geocerca — {unit} |
 | evt.kiosk | Guest waiting — kiosk session escalated | Cliente esperando — sesión de kiosco escalada |
 | evt.tollClosed | New billable toll on a closed contract — {amt} | Peaje facturable en contrato cerrado — {amt} |
-| evt.maintDeclined | Maintenance kept rentable at check-in — {unit} | Mantenimiento pospuesto en el check-in — {unit} |
+| evt.maintSnoozed | Maintenance snoozed at check-in — {unit} | Mantenimiento pospuesto en el check-in — {unit} |
 | evt.noShow | Shuttle request no-show — {stop} | No-show de shuttle — {stop} |
 | evt.regExpiring | Registration expires in {n} days — {unit} | Marbete vence en {n} días — {unit} |
 | ack.by | Acknowledged by {name} · {time} | Atendida por {name} · {time} |

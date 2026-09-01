@@ -241,29 +241,26 @@ a{color:inherit;text-decoration:none}
 /* ── decline popover ── */
 .pop-stage{position:relative}
 .pop{
-  position:absolute;z-index:20;top:8px;left:15px;width:360px;max-width:92%;
+  position:absolute;z-index:20;top:8px;left:15px;width:440px;max-width:92%;
   background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-md);
   box-shadow:var(--sh-2);padding:15px 16px 14px;
 }
 .pop h5{font-size:13px;font-weight:660;color:var(--text-1)}
 .pop p{font-size:11.5px;color:var(--text-3);margin-top:3px;line-height:1.5}
-.pop .opts{display:flex;flex-direction:column;gap:2px;margin-top:10px}
-.pop .opt{
-  display:flex;align-items:center;gap:10px;border:1px solid transparent;border-radius:var(--r-sm);
-  padding:8px 10px;font-size:12.5px;font-weight:560;color:var(--text-2);cursor:pointer;min-height:40px;text-align:left;background:transparent;
+.pop .opt-note{margin-top:10px}
+.pop .opt-note summary{
+  list-style:none;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:640;
+  color:var(--p-700);cursor:pointer;min-height:32px;border-radius:var(--r-xs);padding:4px 6px 4px 0;
 }
-.pop .opt:hover{background:var(--n-50)}
-.pop .opt.sel{background:var(--p-50);border-color:rgba(135,82,254,.35);color:var(--p-800);font-weight:640}
-.pop .opt .radio{
-  width:15px;height:15px;border-radius:50%;border:1.6px solid var(--n-400);flex:0 0 auto;position:relative;
-}
-.pop .opt.sel .radio{border-color:var(--brand)}
-.pop .opt.sel .radio::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--brand)}
+.pop .opt-note summary::before{content:"+";font-weight:700;font-size:13px}
+.pop .opt-note[open] summary::before{content:"–"}
+.pop .opt-note summary::-webkit-details-marker{display:none}
+.pop .opt-note summary:hover{color:var(--p-800)}
 .pop textarea{
-  width:100%;margin-top:8px;border:1px solid var(--border-strong);border-radius:var(--r-sm);
+  width:100%;margin-top:6px;border:1px solid var(--border-strong);border-radius:var(--r-sm);
   padding:8px 10px;font-size:12.5px;min-height:56px;resize:vertical;color:var(--text-1);font-family:inherit;
 }
-.pop .pop-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:11px}
+.pop .pop-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:11px;flex-wrap:wrap}
 .pop .pop-foot .btn{min-height:36px;font-size:12.5px;padding:6px 13px}
 .pop .audit{
   margin-top:10px;font-size:10.5px;color:var(--text-3);display:flex;gap:6px;align-items:flex-start;line-height:1.5;
@@ -312,14 +309,15 @@ a{color:inherit;text-decoration:none}
   <p>The odometer the agent just typed is the trigger: as soon as Step&nbsp;3's return
   mileage crosses a service interval, the wizard says <b>which</b> maintenance is due, how far
   over, and offers one decision — send the car to the maintenance pool when the return
-  completes, or continue with a recorded reason. No new screen; the banner lives inside the
-  existing 6-step check-in wizard.</p>
+  completes, or snooze until the vehicle's next rental event. No new screen; the banner lives
+  inside the existing 6-step check-in wizard.</p>
   <div class="note">
     Design only. Rules are the shipped ServiceSchedule engine (<code>evalSchedule</code>,
     mileage-driven; miles decide when a mileage basis exists, days only otherwise; "soon" =
     within 500&nbsp;mi / 14&nbsp;days). "Send to maintenance" = open a Repair Order (source
     SCHEDULED) after check-in close — the RO open flips the vehicle to IN_MAINTENANCE, a
-    locked status the reservation sync never clobbers. The decline record is NEW backend.
+    locked status the reservation sync never clobbers. The snooze stamp + per-vehicle
+    re-prompt marker are NEW backend.
   </div>
 </header>
 
@@ -438,16 +436,16 @@ a{color:inherit;text-decoration:none}
     <ul>
       <li>The banner mounts <em>inside Step 3</em>, directly under the odometer field it reacts to — cause above effect. It re-evaluates on every keystroke using the schedules already fetched for this vehicle; nothing is written until check-in close.</li>
       <li>Every schedule that is <b>overdue or due-soon at the typed reading</b> is listed — the agent sees <i>which</i> maintenance, the interval, the baseline, and the gap in the schedule's own basis (miles here; days for date-based rules).</li>
-      <li>The step's <b>Continue is gated</b> while the decision is "pending": the agent must either arm "Send to maintenance" or record a decline (state 2). Seeing the banner is not enough — the gate is what makes "the agent saw it" true.</li>
+      <li>The step's <b>Continue is gated</b> while the decision is "pending": the agent must either arm "Send to maintenance" or snooze (state 2). Seeing the banner is not enough — the gate is what makes "the agent saw it" true.</li>
       <li>One primary action, one consequence sentence. The destructive-adjacent fact (out of the rentable pool) is stated in words, not implied by color.</li>
       <li>Due-soon rows ride along informationally (amber) — they don't gate, but they're pre-checked into the RO if the agent sends the car in, so the shop does both in one visit.</li>
     </ul>
   </div>
 
-  <!-- ============ STATE 2 · decline popover ============ -->
-  <div class="mock-label">State 2 · "Continue without action" — the decline is a recorded decision, not a dismissal</div>
-  <section class="screen" aria-label="Decline maintenance popover">
-    <div class="wiz-body" style="grid-template-columns:1fr;padding-bottom:400px">
+  <!-- ============ STATE 2 · snooze confirm ============ -->
+  <div class="mock-label">State 2 · "Continue without action" — a snooze until the next rental event, not a justification form</div>
+  <section class="screen" aria-label="Snooze maintenance confirm">
+    <div class="wiz-body" style="grid-template-columns:1fr;padding-bottom:300px">
       <div class="col pop-stage" style="max-width:640px">
         <div class="maint" style="opacity:.55">
           <div class="maint-head">
@@ -455,24 +453,22 @@ a{color:inherit;text-decoration:none}
             <div class="t"><b>Maintenance due at this odometer</b><small>Oil change · 1,230 mi overdue</small></div>
           </div>
         </div>
-        <div class="pop" role="dialog" aria-label="Record why the car stays in service">
-          <h5>Keep UNIT-025 rentable — record why</h5>
-          <p>The overdue oil change stays on the Maintenance Due list either way. Your name,
-          the reason, and the odometer are stamped on the vehicle's record.</p>
-          <div class="opts">
-            <button class="opt sel"><span class="radio"></span>Shop at capacity — will schedule within 48h</button>
-            <button class="opt"><span class="radio"></span>Vehicle needed for a confirmed reservation</button>
-            <button class="opt"><span class="radio"></span>Service already booked with vendor</button>
-            <button class="opt"><span class="radio"></span>Other (add a note)</button>
-          </div>
-          <textarea placeholder="Optional note for the maintenance board…"></textarea>
+        <div class="pop" role="dialog" aria-label="Snooze this maintenance reminder">
+          <h5>Snooze until UNIT-025's next rental event</h5>
+          <p>This reminder re-surfaces automatically at the vehicle's <b>next check-out or
+          check-in</b> — whichever comes first — recomputed against the odometer at that
+          moment. The Maintenance Due list is untouched; it never snoozes.</p>
+          <details class="opt-note">
+            <summary>Add a note for the maintenance board (optional)</summary>
+            <textarea placeholder="e.g. shop at capacity, will schedule this week…"></textarea>
+          </details>
           <div class="audit">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            <span>Recorded as <b>J. Rivera · RES-849112 · 48,730 mi · Aug 31, 2:14 PM</b> — visible on the Maintenance hub and the vehicle profile.</span>
+            <span>Snooze is stamped automatically — <b>J. Rivera · RES-849112 · 48,730 mi · Aug 31, 2:14 PM</b> — no extra clicks.</span>
           </div>
           <div class="pop-foot">
             <button class="btn btn--secondary">Back</button>
-            <button class="btn btn--primary">Record &amp; continue</button>
+            <button class="btn btn--primary">Continue — remind me at next check-out or check-in</button>
           </div>
         </div>
       </div>
@@ -481,9 +477,11 @@ a{color:inherit;text-decoration:none}
   <div class="callouts">
     <h4>Behavior notes — state 2</h4>
     <ul>
-      <li>Declining is legitimate — a checked-in car may be pre-assigned to the next renter. The design's job is to make the decline <b>cost one honest sentence</b>, not to nag.</li>
-      <li>Reason presets are one tap (40px rows); free text is optional. The acknowledgment row (<em>who / reservation / odometer / when</em>) is NEW backend — nothing stores this today.</li>
-      <li>The overdue item does <b>not</b> disappear from <em>/maintenance</em>'s due list — the decline suppresses re-prompting <i>for this check-in only</i>.</li>
+      <li>Snoozing is legitimate — a checked-in car may be pre-assigned to the next renter. The path costs <b>one click</b>: a single confirm with the re-prompt rule spelled out. No mandatory reason, no presets.</li>
+      <li><b>Snooze semantics</b>: no re-prompt for the remainder of <i>this</i> check-in; the banner re-surfaces at the vehicle's next check-out or check-in wizard (whichever comes first), <b>recomputed at that event</b> against the then-current odometer — not a timer.</li>
+      <li>The stamp (<em>who / reservation / odometer / when</em>) is recorded <b>silently</b> on snooze — the audit trail survives, at zero extra cost to the agent. The stamp + per-vehicle snooze marker are NEW backend.</li>
+      <li>The overdue item does <b>not</b> disappear from <em>/maintenance</em>'s due list — the due list never snoozes.</li>
+      <li>The optional note stays collapsed by default; when written, it shows on the Maintenance hub next to the snooze stamp.</li>
     </ul>
   </div>
 
