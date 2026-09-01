@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RideFleet — Agent Copilot · Ask, then walk me through it</title>
+<style>
+/* Tokens — same family as tolls-redesign-A.html / design-system.css */
+:root{
+  --n-0:#ffffff; --n-25:#fbfaff; --n-50:#f7f5fd; --n-100:#f2eff9;
+  --n-200:#e9e4f4; --n-300:#d9d2ea; --n-400:#b3aac9; --n-500:#8a819f;
+  --n-600:#736a8b; --n-700:#4b4362; --n-800:#2e2745; --n-900:#17122b;
+
+  --brand:#8752FE;            /* brand core — fills only */
+  --p-50:#f4efff; --p-100:#ebe2ff; --p-600:#7440ea; --p-700:#5a26c9; --p-800:#45189e;
+
+  /* teal = the assistant voice (design-system.css: teal ramp = Voz AI) */
+  --teal-50:#e7faf6; --teal-100:#c9f2ea; --teal-400:#2dd4bf;
+  --teal-600:#0b8375; --teal-700:#086a5e; --teal-800:#064e46;
+
+  --gold-50:#fdf6e8; --gold-100:#fbe9c6; --gold-600:#a3660f; --gold-700:#7d4d08;
+  --ok:#0f8a68; --ok-bg:#e6f7f1; --ok-bd:#bfe8d9; --ok-tx:#08674e;
+  --warn:#b8760a; --warn-bg:#fdf3e2; --warn-bd:#f3dcb5; --warn-tx:#8a5606;
+  --danger:#c02626; --danger-bg:#fdecea; --danger-bd:#f6cdc9; --danger-tx:#9c1d1d;
+  --info:#0b63d6; --info-bg:#eaf2fe; --info-bd:#c5dcfb;
+
+  --border-subtle:var(--n-100); --border:var(--n-200); --border-strong:var(--n-300);
+  --text-1:var(--n-900); --text-2:var(--n-700); --text-3:var(--n-600);
+
+  --sh-1:0 1px 1px rgba(24,16,54,.04),0 1px 2px rgba(24,16,54,.05),0 2px 4px -2px rgba(38,20,90,.05);
+  --sh-2:0 1px 2px rgba(24,16,54,.05),0 6px 14px -4px rgba(38,20,90,.09),0 14px 28px -12px rgba(38,20,90,.10);
+  --sh-pop:0 12px 32px rgba(30,20,60,.22);
+
+  --r-xs:6px; --r-sm:8px; --r-md:11px; --r-lg:14px; --r-xl:18px; --r-pill:999px;
+  --font-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --focus:#0b63d6;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{background:var(--n-50)}
+body{
+  font-family:var(--font-sans);font-size:14px;line-height:1.55;color:var(--text-2);
+  background:var(--n-50);-webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{color:var(--text-1);letter-spacing:-.018em;line-height:1.15}
+a{color:var(--p-700);text-decoration:none}
+button{font-family:inherit}
+.wrap{max-width:1240px;margin:0 auto;padding:40px 28px 90px}
+::selection{background:var(--p-100)}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:var(--r-xs)}
+
+/* ------- mockup page chrome (not part of the product screen) ------- */
+.page-head .eyebrow{
+  display:inline-flex;align-items:center;gap:8px;font-family:var(--font-mono);
+  font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--p-800);background:var(--p-50);border:1px solid rgba(135,82,254,.22);
+  border-radius:var(--r-pill);padding:6px 13px 6px 10px;
+}
+.page-head .eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--brand)}
+.page-head h1{font-size:27px;font-weight:700;margin-top:14px}
+.page-head p{margin-top:10px;max-width:840px;color:var(--text-2);font-size:15px}
+.page-head .prov{
+  margin-top:14px;max-width:840px;font-size:12.5px;color:var(--text-3);
+  border-left:3px solid var(--n-300);padding-left:12px;line-height:1.6;
+}
+.page-head .prov code{font-family:var(--font-mono);font-size:11px;background:var(--n-100);border-radius:4px;padding:1px 5px}
+.sec-label{
+  font-family:var(--font-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--text-3);margin:44px 0 10px;
+}
+.sec-note{max-width:840px;font-size:13px;color:var(--text-2);margin:0 0 16px}
+.sec-note b{color:var(--text-1);font-weight:640}
+
+/* ------- the product screen frame ------- */
+.screen{
+  background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-xl);
+  box-shadow:var(--sh-2);overflow:hidden;position:relative;
+}
+.frame{display:flex;min-height:560px;position:relative}
+
+/* sidebar */
+.side{
+  width:200px;flex:0 0 200px;background:var(--n-25);border-right:1px solid var(--border-subtle);
+  padding:14px 10px;display:flex;flex-direction:column;gap:2px;
+}
+.side .logo{display:flex;align-items:center;gap:8px;padding:6px 10px 14px;font-weight:700;color:var(--text-1);font-size:14px}
+.side .logo i{width:22px;height:22px;border-radius:7px;background:var(--brand);display:inline-block;
+  box-shadow:0 2px 6px -1px rgba(135,82,254,.55)}
+.nav-it{
+  display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--r-sm);
+  font-size:13px;font-weight:560;color:var(--text-2);
+}
+.nav-it svg{width:15px;height:15px;color:var(--n-500);flex:0 0 auto}
+.nav-it.is-on{background:var(--n-0);border:1px solid var(--border);box-shadow:var(--sh-1);color:var(--p-800);font-weight:640}
+.nav-it.is-on svg{color:var(--p-700)}
+.side .grow{flex:1}
+.side .uni{
+  display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--r-sm);
+  font-size:13px;font-weight:560;color:var(--text-2);border-top:1px solid var(--border-subtle);margin-top:8px;padding-top:12px;
+}
+
+/* topbar */
+.main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--n-25)}
+.topbar{
+  display:flex;align-items:center;gap:12px;background:var(--n-0);
+  border-bottom:1px solid var(--border-subtle);padding:10px 18px;
+}
+.gsearch{
+  display:flex;align-items:center;gap:8px;flex:0 1 300px;border:1px solid var(--border-strong);
+  border-radius:var(--r-sm);padding:7px 11px;font-size:13px;color:var(--text-3);box-shadow:var(--sh-1);
+}
+.gsearch svg{width:14px;height:14px;color:var(--n-500)}
+.tenant{margin-left:auto;display:inline-flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-3)}
+.tenant b{color:var(--text-1);font-weight:640}
+.avatar{width:26px;height:26px;border-radius:50%;background:var(--p-100);color:var(--p-800);
+  display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+
+/* reservation detail content */
+.content{padding:18px 20px 24px;flex:1;position:relative}
+.crumb{font-size:12px;color:var(--text-3);font-family:var(--font-mono)}
+.res-head{display:flex;align-items:baseline;gap:12px;margin-top:6px;flex-wrap:wrap}
+.res-head h2{font-size:19px;font-weight:700}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:640;
+  border-radius:var(--r-pill);padding:3px 10px;border:1px solid;
+}
+.chip--on{color:var(--ok-tx);background:var(--ok-bg);border-color:var(--ok-bd)}
+.cards{display:grid;grid-template-columns:1.4fr 1fr;gap:12px;margin-top:14px}
+.card{background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--sh-1);padding:13px 15px}
+.card .clab{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--text-3)}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;margin-top:8px;font-size:13px}
+.kv dt{color:var(--text-3)}
+.kv dd{color:var(--text-1);font-weight:560}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.act{
+  display:inline-flex;align-items:center;gap:7px;min-height:36px;font-size:12.5px;font-weight:620;
+  padding:7px 13px;border-radius:var(--r-sm);border:1px solid var(--border-strong);
+  background:var(--n-0);color:var(--text-1);box-shadow:var(--sh-1);cursor:pointer;
+}
+.act--primary{background:var(--brand);border-color:transparent;color:#fff;
+  box-shadow:0 1px 2px rgba(56,20,130,.28),0 6px 14px -6px rgba(135,82,254,.55)}
+
+/* ------- the copilot launcher ------- */
+.copilot-fab{
+  position:absolute;right:18px;bottom:16px;z-index:5;
+  display:inline-flex;align-items:center;gap:9px;
+  background:var(--n-900);color:#fff;border:1px solid var(--n-700);
+  border-radius:var(--r-pill);padding:9px 16px 9px 11px;font-size:13px;font-weight:640;
+  box-shadow:0 8px 24px -6px rgba(23,18,43,.5);cursor:pointer;
+}
+.copilot-fab .dot{
+  width:22px;height:22px;border-radius:50%;background:var(--teal-400);
+  display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;
+}
+.copilot-fab .dot svg{width:13px;height:13px;color:var(--teal-800)}
+.copilot-fab kbd{
+  font-family:var(--font-mono);font-size:10px;background:rgba(255,255,255,.14);
+  border-radius:4px;padding:1px 6px;font-weight:500;color:var(--n-300)
+}
+
+/* minimized chip while a tour runs */
+.copilot-chip{
+  position:absolute;right:18px;bottom:16px;z-index:5;
+  display:inline-flex;align-items:center;gap:8px;
+  background:var(--teal-50);color:var(--teal-800);border:1px solid var(--teal-100);
+  border-radius:var(--r-pill);padding:7px 14px 7px 10px;font-size:12px;font-weight:640;box-shadow:var(--sh-1);
+}
+.copilot-chip i{width:7px;height:7px;border-radius:50%;background:var(--teal-400);
+  box-shadow:0 0 0 3px rgba(45,212,191,.25)}
+
+/* ------- the copilot panel ------- */
+.copilot{
+  position:absolute;right:16px;bottom:16px;top:16px;width:372px;z-index:6;
+  background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-lg);
+  box-shadow:var(--sh-pop);display:flex;flex-direction:column;overflow:hidden;
+}
+.cp-head{
+  display:flex;align-items:center;gap:10px;padding:12px 14px;
+  background:var(--n-900);color:#fff;
+}
+.cp-head .dot{width:26px;height:26px;border-radius:50%;background:var(--teal-400);
+  display:inline-flex;align-items:center;justify-content:center}
+.cp-head .dot svg{width:15px;height:15px;color:var(--teal-800)}
+.cp-head .who b{display:block;font-size:13.5px;font-weight:700;letter-spacing:-.01em}
+.cp-head .who span{display:block;font-size:10.5px;color:var(--n-400);font-family:var(--font-mono);letter-spacing:.08em;text-transform:uppercase}
+.cp-head .lang{
+  margin-left:auto;display:inline-flex;border:1px solid var(--n-700);border-radius:var(--r-pill);overflow:hidden;
+}
+.cp-head .lang b{font-size:10.5px;font-weight:640;padding:3px 9px;cursor:pointer;color:var(--n-400)}
+.cp-head .lang b.on{background:var(--teal-400);color:var(--teal-800)}
+.cp-head .x{margin-left:6px;background:none;border:none;color:var(--n-400);font-size:15px;cursor:pointer;line-height:1}
+
+.cp-body{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:12px;background:var(--n-25)}
+.msg{max-width:88%;font-size:13px;line-height:1.55}
+.msg--user{align-self:flex-end;background:var(--p-600);color:#fff;border-radius:14px 14px 4px 14px;padding:9px 13px;box-shadow:var(--sh-1)}
+.msg--bot{align-self:flex-start;background:var(--n-0);color:var(--text-2);border:1px solid var(--border);
+  border-radius:14px 14px 14px 4px;padding:11px 13px;box-shadow:var(--sh-1)}
+.msg--bot b{color:var(--text-1);font-weight:660}
+.msg--pre{border-left:3px solid var(--teal-400);background:var(--teal-50);color:var(--teal-800)}
+.msg--pre b{color:var(--teal-800)}
+.msg--pre .plab{display:block;font-family:var(--font-mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--teal-600);margin-bottom:3px}
+.pre-replies{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+.reply{font-size:11.5px;font-weight:660;border-radius:var(--r-pill);padding:5px 13px;cursor:pointer;
+  border:1px solid var(--teal-100);background:var(--n-0);color:var(--teal-800)}
+.reply--yes{background:var(--teal-400);border-color:transparent;color:var(--teal-800)}
+.msg--bot ol{margin:8px 0 0 18px;display:flex;flex-direction:column;gap:5px}
+.msg--bot ol li b{font-weight:640}
+.src{
+  display:inline-flex;align-items:center;gap:6px;margin-top:10px;
+  font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;color:var(--text-3);
+  background:var(--n-50);border:1px solid var(--border-subtle);border-radius:var(--r-pill);padding:3px 9px;
+}
+.src i{width:5px;height:5px;border-radius:50%;background:var(--teal-400)}
+.gotcha{
+  margin-top:10px;background:var(--gold-50);border:1px solid var(--gold-100);border-radius:var(--r-sm);
+  padding:8px 10px;font-size:12px;line-height:1.5;color:var(--text-2);
+}
+.gotcha b{display:block;font-family:var(--font-mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--gold-700);margin-bottom:3px}
+.cp-cta{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
+.cta{
+  display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:660;
+  border-radius:var(--r-sm);padding:8px 13px;cursor:pointer;border:1px solid transparent;
+}
+.cta svg{width:13px;height:13px}
+.cta--teach{background:var(--brand);color:#fff;box-shadow:0 1px 2px rgba(56,20,130,.28),0 5px 12px -5px rgba(135,82,254,.55)}
+.cta--go{background:var(--n-0);color:var(--p-700);border-color:var(--border-strong);box-shadow:var(--sh-1)}
+.cta--ghost{background:transparent;color:var(--text-3);font-weight:560}
+.quick{display:flex;flex-wrap:wrap;gap:6px}
+.quick button{
+  font-size:11.5px;font-weight:560;color:var(--teal-800);background:var(--teal-50);
+  border:1px solid var(--teal-100);border-radius:var(--r-pill);padding:5px 11px;cursor:pointer;
+}
+.cp-hello{font-size:12.5px;color:var(--text-3);line-height:1.5}
+.cp-foot{border-top:1px solid var(--border-subtle);background:var(--n-0);padding:10px 12px}
+.cp-input{
+  display:flex;align-items:center;gap:9px;border:1px solid var(--border-strong);border-radius:var(--r-md);
+  padding:9px 12px;font-size:13px;color:var(--text-3);box-shadow:var(--sh-1);background:var(--n-0);
+}
+.cp-input .send{
+  margin-left:auto;width:26px;height:26px;border-radius:50%;background:var(--brand);border:none;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;
+}
+.cp-input .send svg{width:13px;height:13px;color:#fff}
+.cp-legal{font-size:10px;color:var(--n-500);text-align:center;margin-top:7px;font-family:var(--font-mono);letter-spacing:.04em}
+
+/* ------- tour overlay reproduction (matches TourHost.jsx) ------- */
+.dim{position:absolute;inset:0;background:rgba(20,14,40,.45);z-index:3}
+.spot{
+  position:absolute;z-index:4;border:2px solid #8752FE;border-radius:10px;
+  box-shadow:0 0 0 3px rgba(135,82,254,.28);pointer-events:none;
+}
+.tour-card{
+  position:absolute;z-index:5;width:340px;background:#fff;color:var(--n-900);
+  border:1px solid var(--n-300);border-radius:12px;padding:14px 16px;box-shadow:var(--sh-pop);
+}
+.tour-card .step{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6d3de0;font-weight:700}
+.tour-card h4{font-size:15px;font-weight:700;margin:7px 0 4px}
+.tour-card p{font-size:13px;line-height:1.5;color:var(--n-700)}
+.tour-card .btns{display:flex;gap:8px;align-items:center;margin-top:12px}
+.tbtn{padding:5px 12px;border-radius:8px;font-size:12.5px;font-weight:600;cursor:pointer;border:1px solid var(--n-300);background:var(--n-50);color:var(--n-700)}
+.tbtn--primary{border:none;background:#8752FE;color:#fff}
+.tour-card .prog{margin-top:10px;height:3px;background:var(--n-100);border-radius:2px;overflow:hidden}
+.tour-card .prog i{display:block;height:100%;width:50%;background:#8752FE;border-radius:2px}
+
+/* parked bar reproduction (TourHost waiting state) */
+.park{
+  position:absolute;left:0;right:0;bottom:0;z-index:5;
+  display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;
+  padding:12px 16px;background:#1e1a2b;color:#fff;box-shadow:0 -2px 14px rgba(0,0,0,.3);
+}
+.park b{font-size:13.5px;font-weight:600}
+.park .pb{background:#fff;color:#1e1a2b;border:none;border-radius:999px;padding:6px 14px;font-size:12.5px;font-weight:700;cursor:pointer}
+.park .pg{background:transparent;color:#fff;border:1px solid #6d5f8a;border-radius:999px;padding:6px 12px;font-size:12.5px;cursor:pointer}
+
+/* ------- annotation callouts ------- */
+.annos{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-top:14px}
+.anno{
+  background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-md);
+  padding:11px 13px;font-size:12.5px;line-height:1.55;color:var(--text-2);box-shadow:var(--sh-1);
+}
+.anno b{color:var(--text-1);font-weight:640}
+.anno b.h{display:flex;align-items:center;gap:7px;font-weight:660;margin-bottom:4px;font-size:12.5px}
+.anno b i{
+  width:18px;height:18px;border-radius:50%;background:var(--p-50);color:var(--p-800);
+  display:inline-flex;align-items:center;justify-content:center;font-style:normal;
+  font-family:var(--font-mono);font-size:10px;font-weight:700;flex:0 0 auto;border:1px solid var(--p-100);
+}
+.anno code{font-family:var(--font-mono);font-size:10.5px;background:var(--n-100);border-radius:4px;padding:1px 5px}
+.pin{
+  position:absolute;z-index:7;width:20px;height:20px;border-radius:50%;
+  background:var(--p-800);color:#fff;display:inline-flex;align-items:center;justify-content:center;
+  font-family:var(--font-mono);font-size:10px;font-weight:700;box-shadow:0 2px 8px rgba(69,24,158,.4);
+  border:2px solid #fff;
+}
+
+/* small two-up grid */
+.duo{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:980px){.duo{grid-template-columns:1fr}.copilot{width:88%}}
+
+/* guardrails strip */
+.rails{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.rail-card{
+  background:var(--n-0);border:1px solid var(--border);border-radius:var(--r-md);
+  border-top:3px solid var(--teal-400);padding:13px 15px;font-size:12.5px;line-height:1.55;box-shadow:var(--sh-1);
+}
+.rail-card b{display:block;color:var(--text-1);font-weight:680;margin-bottom:4px;font-size:13px}
+.rail-card.rc-never{border-top-color:var(--danger)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="page-head">
+    <span class="eyebrow"><i></i>DESIGN · AGENT COPILOT · RIDE UNIVERSITY</span>
+    <h1>Ask, then walk me through it — the copilot that ends "how do I…?"</h1>
+    <p>
+      A chat panel that answers any "how do I…" from the knowledge Ride already ships — and then offers
+      <b>Te enseño</b>: it hands the person to the existing guided-tour engine, which navigates to the exact
+      screen, spotlights the exact button, and walks them step by step until the thing is done.
+    </p>
+    <p class="prov">
+      Nothing here invents machinery. Answers come from the 16 bilingual Ride University articles
+      (<code>backend/src/modules/knowledge-base/default-articles.js</code>) plus the ~35 playbooks on
+      <code>/knowledge-base</code>. "Te enseño" dispatches the production tour event
+      <code>ride-university:start</code> (<code>TourHost.jsx:41</code>) with a <code>moduleKey</code> from
+      <code>curriculum.js</code> — the spotlight, cross-route navigation, record parking and completion
+      verification all already exist and are live. The panel mounts beside <code>TourMount</code> in
+      <code>app/layout.js</code>, so it survives navigation the same way the tour does.
+    </p>
+  </div>
+
+  <!-- ================= SECTION 01 — LAUNCHER ================= -->
+  <div class="sec-label">01 · The launcher — quiet until asked</div>
+  <p class="sec-note">
+    A single dark pill, bottom-right, on every staff screen. It never auto-opens, never bounces, never
+    badges. At the counter the agent's screen belongs to the customer in front of them — the copilot earns
+    its space only when summoned (click or <b>?</b> key). It renders nothing at all on customer-facing
+    surfaces and while the screen lock is up, exactly like <code>TourMount</code> renders nothing without a
+    cached staff user.
+  </p>
+
+  <div class="screen">
+    <div class="frame">
+      <div class="side">
+        <div class="logo"><i></i>RideFleet</div>
+        <div class="nav-it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</div>
+        <div class="nav-it is-on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>Reservations</div>
+        <div class="nav-it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 17h14l-1.5-5.5a2 2 0 0 0-1.9-1.5H8.4a2 2 0 0 0-1.9 1.5L5 17Z"/><circle cx="8" cy="17" r="1.6"/><circle cx="16" cy="17" r="1.6"/></svg>Vehicles</div>
+        <div class="nav-it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v18M3 12h18"/></svg>Tolls</div>
+        <div class="nav-it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>People</div>
+        <div class="grow"></div>
+        <div class="uni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15"><path d="m12 4 9 4.5-9 4.5-9-4.5L12 4Z"/><path d="M7 11v4.5c0 1 2.2 2.5 5 2.5s5-1.5 5-2.5V11"/></svg>Ride University</div>
+      </div>
+      <div class="main">
+        <div class="topbar">
+          <div class="gsearch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>Search customer, reservation, plate…</div>
+          <div class="tenant">Viewing <b>SJU — Airport</b><span class="avatar">MR</span></div>
+        </div>
+        <div class="content">
+          <div class="crumb">RESERVATIONS / R-20841</div>
+          <div class="res-head"><h2>R-20841 · María Rodríguez</h2><span class="chip chip--on">CHECKED OUT</span></div>
+          <div class="cards">
+            <div class="card">
+              <div class="clab">Rental</div>
+              <dl class="kv">
+                <dt>Vehicle</dt><dd>Toyota Corolla · JVX-482</dd>
+                <dt>Pickup</dt><dd>Aug 29, 10:00 AM · SJU Airport</dd>
+                <dt>Return</dt><dd>Sep 03, 10:00 AM · SJU Airport</dd>
+                <dt>Balance</dt><dd>$0.00</dd>
+              </dl>
+            </div>
+            <div class="card">
+              <div class="clab">Customer</div>
+              <dl class="kv">
+                <dt>Phone</dt><dd>(787) 555-0184</dd>
+                <dt>License</dt><dd>Verified · exp 2029</dd>
+                <dt>Coverage</dt><dd>CDW — own policy</dd>
+              </dl>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="act act--primary">Check In</button>
+            <button class="act">View Payments</button>
+            <button class="act">Additional Drivers</button>
+            <button class="act">Extend Rental</button>
+            <button class="act">Documents</button>
+          </div>
+        </div>
+      </div>
+      <button class="copilot-fab">
+        <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.7-2.5 2-2.5 3.5"/><circle cx="12" cy="16.6" r=".4" fill="currentColor"/></svg></span>
+        ¿Cómo se hace…? <kbd>?</kbd>
+      </button>
+      <span class="pin" style="right:150px;bottom:44px">1</span>
+    </div>
+  </div>
+  <div class="annos">
+    <div class="anno"><b class="h"><i>1</i>One pill, one promise</b>
+      The label is the question it answers — "¿Cómo se hace…?" / "How do I…?" (follows the app language).
+      Teal dot = the assistant voice, the accent the design system already reserves for Voz AI; the product
+      itself stays purple.</div>
+    <div class="anno"><b class="h"><i>·</i>Where it never appears</b>
+      Kiosk and customer pages (no cached staff user → renders <code>null</code>), the screen-lock overlay,
+      and print views. While a tour is running the pill yields to the tour — see 03.</div>
+    <div class="anno"><b class="h"><i>·</i>Why not the sidebar</b>
+      Ride University in the nav is the <em>library</em>. The copilot is the <em>counter question</em> —
+      three seconds, mid-task, customer waiting. It has to be on every screen and closer than navigation.</div>
+  </div>
+
+  <!-- ================= SECTION 02 — ASK → ANSWER ================= -->
+  <div class="sec-label">02 · Ask → answer — the owner's example, verbatim</div>
+  <p class="sec-note">
+    "¿Cómo añado un conductor adicional?" The copilot answers in the asker's language with the exact steps,
+    the source it read them from, and the one mistake that costs money — then offers the two verbs that
+    matter: <b>Te enseño</b> (start the guided walkthrough) and <b>Llévame</b> (just navigate me there).
+    It explains and it guides. It never presses the buttons itself — and before it teaches on a record,
+    <b>it asks which one</b>.
+  </p>
+
+  <div class="screen">
+    <div class="frame" style="min-height:700px">
+      <div class="side">
+        <div class="logo"><i></i>RideFleet</div>
+        <div class="nav-it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</div>
+        <div class="nav-it is-on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>Reservations</div>
+        <div class="nav-it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 17h14l-1.5-5.5a2 2 0 0 0-1.9-1.5H8.4a2 2 0 0 0-1.9 1.5L5 17Z"/><circle cx="8" cy="17" r="1.6"/><circle cx="16" cy="17" r="1.6"/></svg>Vehicles</div>
+        <div class="nav-it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v18M3 12h18"/></svg>Tolls</div>
+        <div class="nav-it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>People</div>
+        <div class="grow"></div>
+        <div class="uni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15"><path d="m12 4 9 4.5-9 4.5-9-4.5L12 4Z"/><path d="M7 11v4.5c0 1 2.2 2.5 5 2.5s5-1.5 5-2.5V11"/></svg>Ride University</div>
+      </div>
+      <div class="main">
+        <div class="topbar">
+          <div class="gsearch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>Search customer, reservation, plate…</div>
+          <div class="tenant">Viewing <b>SJU — Airport</b><span class="avatar">MR</span></div>
+        </div>
+        <div class="content">
+          <div class="crumb">RESERVATIONS / R-20841</div>
+          <div class="res-head"><h2>R-20841 · María Rodríguez</h2><span class="chip chip--on">CHECKED OUT</span></div>
+          <div class="cards">
+            <div class="card">
+              <div class="clab">Rental</div>
+              <dl class="kv">
+                <dt>Vehicle</dt><dd>Toyota Corolla · JVX-482</dd>
+                <dt>Pickup</dt><dd>Aug 29, 10:00 AM · SJU Airport</dd>
+                <dt>Return</dt><dd>Sep 03, 10:00 AM · SJU Airport</dd>
+              </dl>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="act act--primary">Check In</button>
+            <button class="act">View Payments</button>
+            <button class="act">Additional Drivers</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- open panel -->
+      <div class="copilot">
+        <div class="cp-head">
+          <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.7-2.5 2-2.5 3.5"/><circle cx="12" cy="16.6" r=".4" fill="currentColor"/></svg></span>
+          <span class="who"><b>Copiloto</b><span>Ride University</span></span>
+          <span class="lang"><b class="on">ES</b><b>EN</b></span>
+          <button class="x" aria-label="Close">×</button>
+        </div>
+        <div class="cp-body">
+          <div class="quick">
+            <button>¿Cómo hago un check-out?</button>
+            <button>¿Cómo cobro un pago?</button>
+          </div>
+          <div class="msg msg--user">¿Cómo añado un conductor adicional?</div>
+          <div class="msg msg--bot">
+            <b>Desde la reserva misma:</b>
+            <ol>
+              <li>Abre la reserva del cliente.</li>
+              <li>Dale al botón <b>Additional Drivers</b>.</li>
+              <li>Añade el conductor con su licencia y guarda.</li>
+            </ol>
+            <div class="gotcha"><b>Donde se traba la gente</b>
+              Confirma los conductores adicionales <em>antes</em> de entregar el vehículo — un conductor
+              que no está en el contrato no está cubierto, y el fee configurado no se cobra solo después del cierre.</div>
+            <span class="src"><i></i>FUENTE · Playbook: Checkout, Inspection &amp; Payment</span>
+            <div class="cp-cta">
+              <button class="cta cta--teach"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 4 9 4.5-9 4.5-9-4.5L12 4Z"/><path d="M7 11v4.5c0 1 2.2 2.5 5 2.5s5-1.5 5-2.5V11"/></svg>Te enseño</button>
+              <button class="cta cta--go"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>Llévame allí</button>
+              <button class="cta cta--ghost">Ver artículo</button>
+            </div>
+          </div>
+          <div class="msg msg--bot msg--pre">
+            <span class="plab">Pre-flight · antes de enseñar</span>
+            ¿Te guío aquí mismo en <b>R-20841</b>?
+            <div class="pre-replies">
+              <button class="reply reply--yes">Sí, aquí</button>
+              <button class="reply">Es en otra reserva</button>
+            </div>
+          </div>
+        </div>
+        <div class="cp-foot">
+          <div class="cp-input">Escribe tu pregunta…
+            <button class="send" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h13M12 6l6 6-6 6"/></svg></button>
+          </div>
+          <div class="cp-legal">EXPLICA Y GUÍA · NUNCA EJECUTA ACCIONES</div>
+        </div>
+      </div>
+      <span class="pin" style="right:396px;top:230px">1</span>
+      <span class="pin" style="right:396px;top:330px">2</span>
+      <span class="pin" style="right:396px;bottom:56px">3</span>
+    </div>
+  </div>
+  <div class="annos">
+    <div class="anno"><b class="h"><i>1</i>Steps, then the gotcha</b>
+      The answer is the article's step list — short, numbered, in the asker's language (the bilingual body
+      splits on its own <code>## … (Español)</code> heading, so no translation layer is needed). The gold
+      box reuses the tour's "Where people trip" pattern: the one mistake that costs money, surfaced every time.</div>
+    <div class="anno"><b class="h"><i>2</i>Source chip = no inventing</b>
+      Every answer names the article or playbook it came from and links to it. An answer the copilot cannot
+      source is an answer it does not give — see 04.</div>
+    <div class="anno"><b class="h"><i>3</i>Two verbs, one guardrail</b>
+      <b>Te enseño</b> fires <code>ride-university:start</code> with the mapped <code>moduleKey</code>;
+      <b>Llévame allí</b> is a plain <code>router.push</code> to the mapped route. The footer line is a
+      product commitment, permanently visible: the copilot explains and points — the agent's hands do the work.</div>
+    <div class="anno"><b class="h"><i>·</i>Pre-flight: it asks, it doesn't assume</b>
+      For anything record-scoped the copilot <em>asks</em> before teaching — teal bubble above. At the
+      counter the question is almost always about a SPECIFIC customer's reservation; guiding on the wrong
+      record turns help into a demo. <b>Sí, aquí</b> (one tap) starts the tour on the open record.
+      <b>Es en otra reserva</b> collapses the panel and parks the tour — "Abre la reserva donde tienes el
+      problema y sigo ahí" — riding the engine's existing parking watcher. Wrong screen still gets
+      "Te llevo a … primero". Nobody is ever teleported, or taught on the wrong case, without being asked.</div>
+  </div>
+
+  <!-- ================= SECTION 03 — THE HANDOFF ================= -->
+  <div class="sec-label">03 · "Te enseño" — the handoff to the tour engine</div>
+  <p class="sec-note">
+    After the agent taps <b>Sí, aquí</b> on the pre-flight question, the panel collapses to a teal chip and the <b>existing</b> TourHost
+    takes the screen: scrim with a hole, purple spotlight, step card — pixel-for-pixel the production
+    overlay. If the walkthrough lives on another screen, the copilot has already said "Te llevo a …
+    primero" — the navigation itself is TourHost's own <code>step.route</code> push; the copilot only adds
+    the warning. When the walkthrough ends, <code>ride-university:module-walked</code> fires and the chip
+    re-opens with "¿Lo lograste?".
+  </p>
+
+  <div class="screen">
+    <div class="frame">
+      <div class="side" style="position:relative">
+        <div class="logo"><i></i>RideFleet</div>
+        <div class="nav-it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Dashboard</div>
+        <div class="nav-it is-on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>Reservations</div>
+        <div class="nav-it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 17h14l-1.5-5.5a2 2 0 0 0-1.9-1.5H8.4a2 2 0 0 0-1.9 1.5L5 17Z"/><circle cx="8" cy="17" r="1.6"/><circle cx="16" cy="17" r="1.6"/></svg>Vehicles</div>
+        <div class="nav-it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3v18M3 12h18"/></svg>Tolls</div>
+        <div class="grow"></div>
+        <div class="uni"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15"><path d="m12 4 9 4.5-9 4.5-9-4.5L12 4Z"/><path d="M7 11v4.5c0 1 2.2 2.5 5 2.5s5-1.5 5-2.5V11"/></svg>Ride University</div>
+      </div>
+      <div class="main">
+        <div class="topbar">
+          <div class="gsearch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>Search…</div>
+          <div class="tenant">Viewing <b>SJU — Airport</b><span class="avatar">MR</span></div>
+        </div>
+        <div class="content">
+          <div class="crumb">RESERVATIONS / R-20841</div>
+          <div class="res-head"><h2>R-20841 · María Rodríguez</h2><span class="chip chip--on">CHECKED OUT</span></div>
+          <div class="cards">
+            <div class="card">
+              <div class="clab">Rental</div>
+              <dl class="kv">
+                <dt>Vehicle</dt><dd>Toyota Corolla · JVX-482</dd>
+                <dt>Pickup</dt><dd>Aug 29, 10:00 AM · SJU Airport</dd>
+                <dt>Return</dt><dd>Sep 03, 10:00 AM · SJU Airport</dd>
+              </dl>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="act act--primary">Check In</button>
+            <button class="act">View Payments</button>
+            <button class="act" style="position:relative;z-index:4;background:#fff">Additional Drivers</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- tour overlay -->
+      <div class="dim"></div>
+      <div class="spot" style="left:422px;top:270px;width:139px;height:44px"></div>
+      <div class="tour-card" style="left:422px;top:326px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="step">Paso 1 de 2</span>
+          <span style="color:var(--n-500);font-size:15px;cursor:pointer">×</span>
+        </div>
+        <h4>Aquí viven los conductores adicionales</h4>
+        <p>Este botón abre la lista de conductores de esta renta. Dale para añadir, editar o quitar a alguien del contrato.</p>
+        <div class="btns">
+          <button class="tbtn">Back</button>
+          <button class="tbtn tbtn--primary">Next</button>
+          <span style="flex:1"></span>
+          <button class="tbtn" style="border:none;background:none;color:var(--n-500)">Skip</button>
+        </div>
+        <div class="prog"><i></i></div>
+      </div>
+
+      <span class="copilot-chip"><i></i>Copiloto · guía en curso</span>
+      <span class="pin" style="left:398px;top:336px">1</span>
+      <span class="pin" style="right:205px;bottom:18px">2</span>
+    </div>
+  </div>
+  <div class="annos">
+    <div class="anno"><b class="h"><i>1</i>This overlay already ships</b>
+      Scrim-with-a-hole, purple ring, 340px card, gotcha on the last step — this is <code>TourHost.jsx</code>
+      exactly as it runs in production today, launched by one <code>CustomEvent</code>. The copilot's entire
+      "guide me" feature is a dispatch call plus an intent→module map.</div>
+    <div class="anno"><b class="h"><i>2</i>The copilot steps aside</b>
+      While the tour owns the screen the panel is a chip. Clicking it re-opens the conversation
+      <em>without</em> killing the tour — the tour's state lives in <code>localStorage</code>
+      (<code>tour-state.js</code>) and survives everything, including navigation and refresh.</div>
+    <div class="anno"><b class="h"><i>·</i>Asked from the wrong screen?</b>
+      Same flow. The tour engine navigates first (<code>step.route</code>), then spotlights. Ask "how do I
+      add a driver" from the Dashboard and Te enseño still lands you on the reservation list, parked — next panel.</div>
+  </div>
+
+  <!-- ================= SECTION 04 — PARKING + HONESTY ================= -->
+  <div class="sec-label">04 · The two hard states — needs a record · doesn't know</div>
+  <div class="duo">
+    <div>
+      <p class="sec-note"><b>Needs a record.</b> "Additional drivers" lives inside one reservation's page, so
+      from Ride University the anchors don't exist yet. The copilot asks for THEIR case <em>before</em>
+      dispatching — "¿En qué reserva tienes el problema? Ábrela y sigo ahí", with a one-tap
+      [Llévame a Reservations] — and only then hands off to the tour engine, which already <em>parks</em>
+      and watches (production bar below, verbatim) until the person opens their reservation, then picks up
+      exactly where the walkthrough begins. Same path after "Es en otra reserva" in panel 02.</p>
+      <div class="screen">
+        <div class="frame" style="min-height:330px">
+          <div class="main">
+            <div class="topbar">
+              <div class="gsearch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>Search…</div>
+              <div class="tenant"><b>SJU — Airport</b><span class="avatar">MR</span></div>
+            </div>
+            <div class="content">
+              <div class="crumb">RESERVATIONS</div>
+              <div class="res-head"><h2>Reservations</h2></div>
+              <div class="cards" style="grid-template-columns:1fr">
+                <div class="card"><div class="clab">Today's pickups</div>
+                  <dl class="kv"><dt>R-20841</dt><dd>María Rodríguez · Corolla</dd><dt>R-20845</dt><dd>J. Vélez · RAV4</dd><dt>R-20848</dt><dd>A. Torres · Versa</dd></dl>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="park">
+            <span aria-hidden="true">🎓</span>
+            <b>Abre cualquier reserva para empezar "Conductores adicionales" — la guía sigue ahí.</b>
+            <button class="pb">Go to reservations</button>
+            <button class="pg">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <p class="sec-note"><b>Doesn't know.</b> No sourced match → no answer. The copilot says so in one line
+      and hands off to the knowledge-base search page with the query pre-filled. It never composes an answer
+      from nothing — an invented procedure at a rental counter costs real money.</p>
+      <div class="screen">
+        <div class="frame" style="min-height:330px;background:var(--n-25)">
+          <div class="copilot" style="position:relative;inset:auto;width:100%;max-width:420px;margin:18px auto;height:auto">
+            <div class="cp-head">
+              <span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.7-2.5 2-2.5 3.5"/><circle cx="12" cy="16.6" r=".4" fill="currentColor"/></svg></span>
+              <span class="who"><b>Copiloto</b><span>Ride University</span></span>
+              <span class="lang"><b class="on">ES</b><b>EN</b></span>
+              <button class="x">×</button>
+            </div>
+            <div class="cp-body">
+              <div class="msg msg--user">¿Cómo configuro el descuento de AAA?</div>
+              <div class="msg msg--bot">
+                Eso no lo tengo en los artículos todavía, y prefiero no inventarte pasos.
+                <div class="cp-cta">
+                  <button class="cta cta--go"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>Buscar en Ride University</button>
+                  <button class="cta cta--ghost">Avisar a un admin</button>
+                </div>
+                <span class="src"><i style="background:var(--warn)"></i>SIN FUENTE · NO SE RESPONDE</span>
+              </div>
+            </div>
+            <div class="cp-foot">
+              <div class="cp-legal">EXPLICA Y GUÍA · NUNCA EJECUTA ACCIONES</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= SECTION 05 — GUARDRAILS ================= -->
+  <div class="sec-label">05 · Guardrails — what the copilot will never do</div>
+  <div class="rails">
+    <div class="rail-card rc-never"><b>Never acts</b>
+      No clicking, no form-filling, no API writes. Its only two effects on the app are
+      <code style="font-family:var(--font-mono);font-size:10.5px">router.push()</code> and dispatching the
+      tour event. The agent's hands do every step — that's also how the training points stay honest
+      (OPPORTUNISTIC modules complete only when the backend sees the real record).</div>
+    <div class="rail-card"><b>Never invents</b>
+      Answers are retrieved, sourced, and linked. No match → the "doesn't know" state with a KB-search
+      handoff. Unanswered questions are logged per tenant — the miss list is the article backlog.</div>
+    <div class="rail-card"><b>Always bilingual</b>
+      The corpus is already bilingual in one body; the copilot answers in the language you asked in and the
+      EN/ES toggle re-renders the same sourced answer, not a machine translation.</div>
+    <div class="rail-card"><b>Respects role &amp; gates</b>
+      Intent matches filter through <code style="font-family:var(--font-mono);font-size:10.5px">modulesFor(viewer)</code> —
+      the same role + tenant-module gating the tour uses. An agent asking about Settings gets the honest
+      answer: "that needs an admin", not a tour they can't finish.</div>
+  </div>
+
+</div>
+</body>
+</html>

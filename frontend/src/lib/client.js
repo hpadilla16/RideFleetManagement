@@ -63,6 +63,14 @@ export const PASSWORD_CHANGE_REQUIRED_EVENT = 'ridefleet:password-change-require
 // Same contract as the line above, for the same reason: a live session must be
 // told WHY the app stopped working, not left with generic failures.
 export const TENANT_SUSPENDED_EVENT = 'ridefleet:tenant-suspended';
+// Agent Copilot Phase 1 (2026-09-01): AppShell dispatches this on every
+// screen-lock change so the copilot (which mounts in the layout, OUTSIDE
+// AppShell) can hide while the lock is up — the lock overlay sits at z-index
+// 120, far below the copilot, so hiding is the only honest option. The flag
+// key mirrors the localStorage entry AppShell already maintains; the event
+// exists because same-tab localStorage writes fire no 'storage' event.
+export const SCREEN_LOCK_EVENT = 'ridefleet:screen-lock';
+export const SCREEN_LOCK_FLAG_KEY = 'ui.screenLocked';
 const GET_CACHE_TTL_MS = 15000;
 const getResponseCache = new Map();
 const inflightGetRequests = new Map();

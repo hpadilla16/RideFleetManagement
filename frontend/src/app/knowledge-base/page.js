@@ -395,6 +395,22 @@ function DynamicArticles({ token }) {
   const [activeArticle, setActiveArticle] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Deep links from the Agent Copilot (2026-09-01): ?search= pre-fills the
+  // box (the copilot's "no lo tengo todavía" hand-off), ?article=<slug> opens
+  // that article directly ("Ver artículo"). Read from window.location rather
+  // than useSearchParams so this client page needs no Suspense boundary at
+  // build time.
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get('search') || params.get('q');
+      if (q) setSearch(q);
+      const slug = params.get('article');
+      if (slug) openArticle(slug);
+    } catch { /* no window / malformed query — the page works as before */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     Promise.all([
       api('/api/knowledge-base/categories', {}, token).catch(() => []),
