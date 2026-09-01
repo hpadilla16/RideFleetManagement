@@ -706,10 +706,6 @@ export function AppShell({ me, logout, children }) {
             >
               <NavIcon name="search" className="tb-search-mobile-icon" />
             </button>
-            {/* Notification Center bell (2026-09-01, approved mockup): between
-                search and the location picker — the one slot every staff
-                screen shares. Badge/panel logic lives in NotificationBell. */}
-            <NotificationBell />
             {viewLocations.length > 1 ? (
               <span className="tb-loc" title={t('appShell.viewLocation', 'Which location you are viewing')}>
                 <NavIcon name="pin" className="tb-loc-icon" />
@@ -757,6 +753,10 @@ export function AppShell({ me, logout, children }) {
               <span className="tb-display-label">{t('appShell.display')}</span>
             </button>
             <span className="tb-sep" aria-hidden="true" />
+            {/* Notification Center bell (moved 2026-09-01 per Hector): lives
+                next to the profile, where people expect notifications. Panel
+                is right-anchored so it opens inward from the edge. */}
+            <NotificationBell />
             <span className="tb-profile-anchor">
               <button
                 type="button"
