@@ -86,7 +86,11 @@ export default function Page() {
 
 function CaptureFlow({ token, data, onComplete, onError }) {
   const [angles, setAngles] = useState(data.angles);
-  const [odometer, setOdometer] = useState('');
+  // Counter-UX Item 2 (2026-08-31): pre-fill with the vehicle's last known
+  // mileage (vehicleMileage from the token payload). Still fully editable.
+  const [odometer, setOdometer] = useState(
+    data?.vehicleMileage != null ? String(data.vehicleMileage) : ''
+  );
   const [fuelLevel, setFuelLevel] = useState('FULL');
   // 2026-06-10 — mobile checkouts left cleanlinessOut blank on the contract
   // ("-") because this page never captured it. Mirrors the desktop wizard's

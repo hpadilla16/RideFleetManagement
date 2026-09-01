@@ -24,9 +24,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useTranslation } from 'react-i18next';
 import { AuthGate } from '../../../../components/AuthGate';
 import { AppShell } from '../../../../components/AppShell';
 import { api } from '../../../../lib/client';
+import { mileageGuard } from '../../../../lib/mileage-guard';
+import { ReportDamageWizard } from '../../../../components/reservations/ReportDamageWizard';
 import { formatTenantWallClock } from '../../../../lib/tenant-time';
 import { displayNoteLines, hasDisplayNotes, isRecentNote, relativeNoteAge } from '../../../../lib/reservation-notes';
 import { useFeePreview } from '../../../../components/wizard/useFeePreview';
@@ -44,6 +47,7 @@ export default function Page() {
 function CheckinWizard({ token, me, logout }) {
   const { id: reservationId } = useParams();
   const router = useRouter();
+  const { t } = useTranslation();
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(true);
   const [reservation, setReservation] = useState(null);
@@ -59,6 +63,11 @@ function CheckinWizard({ token, me, logout }) {
 
   // Form state
   const [odometerIn, setOdometerIn] = useState('');
+  // Counter-UX Item 2 (2026-08-31): the check-in odometer is PRE-FILLED with
+  // the vehicle's last known mileage (agreement.odometerOut, falling back to
+  // Vehicle.mileage — the "last odometer wins" mirror of VehicleMileageEntry).
+  // Kept editable; entering less only WARNS (see mileageGuard), never blocks.
+  const [odometerPrefill, setOdometerPrefill] = useState(null);
   const [fuelIn, setFuelIn] = useState(1);
   const [cleanlinessIn, setCleanlinessIn] = useState(5);
   const [smokingDetected, setSmokingDetected] = useState(false);
@@ -88,6 +97,13 @@ function CheckinWizard({ token, me, logout }) {
   // skip and close, or still add their own). Pure gating — no change to the close/money logic.
   const [checkinModel, setCheckinModel] = useState('AGENT');
   const [customerCheckinInspection, setCustomerCheckinInspection] = useState(null);
+  // Counter-UX Item 3 (2026-08-31): "Vehicle damage?" affordance inside the
+  // check-in. REUSES the ReportDamageWizard modal (Feature 3) with THIS
+  // reservation pre-selected — no second damage form. Same role roster as the
+  // reservation-detail launch point (report-damage.routes.js).
+  const canReportDamage = ['SUPER_ADMIN', 'ADMIN', 'OPS', 'AGENT'].includes(String(me?.role || '').toUpperCase());
+  const [damageWizardOpen, setDamageWizardOpen] = useState(false);
+  const [damageReported, setDamageReported] = useState(null);
   const [paymentMode, setPaymentMode] = useState('autocharge');  // 'autocharge' | 'manual'
   const [manualPayment, setManualPayment] = useState({ amount: '', method: 'card', last4: '', reference: '' });
   const [signerName, setSignerName] = useState('');
@@ -105,6 +121,16 @@ function CheckinWizard({ token, me, logout }) {
         if (agreementId) {
           const ag = await api(`/api/rental-agreements/${agreementId}`, {}, token);
           setAgreement(ag);
+
+          // Counter-UX Item 2: pre-fill the return odometer with the last
+          // known mileage. odometerOut (stamped at check-out) is authoritative
+          // for THIS rental; Vehicle.mileage covers agreements that never got
+          // a check-out reading. Only fills while the field is still untouched.
+          const lastKnown = Number(ag?.odometerOut ?? res?.vehicle?.mileage ?? 0);
+          if (lastKnown > 0) {
+            setOdometerPrefill(lastKnown);
+            setOdometerIn((curr) => (String(curr || '').trim() === '' ? String(lastKnown) : curr));
+          }
           // Default signer name to customer
           setSignerName([
             res?.customer?.firstName,
@@ -351,7 +377,10 @@ function CheckinWizard({ token, me, logout }) {
     switch (step) {
       case 0: return !!reservation && !!agreement;
       case 1: return photosCaptured >= 1 || agentInspectionOptional;  // staff override (≥1 photo) OR customer already self-inspected
-      case 2: return Number(odometerIn) > 0 && Number(odometerIn) >= Number(agreement?.odometerOut || 0);
+      // Counter-UX Item 2 (2026-08-31): a reading BELOW the check-out odometer
+      // no longer blocks — it warns inline instead (odometer swaps and
+      // corrections are real; the Admin Corrections module is the precedent).
+      case 2: return Number(odometerIn) > 0;
       case 3: return paymentMode === 'autocharge' || (paymentMode === 'manual' && Number(manualPayment.amount) > 0);
       // 2026-07-28 (LAX #9): the customer signature at check-IN is OPTIONAL —
       // it must never block completion (Hector). The pad stays available and
@@ -368,7 +397,6 @@ function CheckinWizard({ token, me, logout }) {
   // so the two never drift — fixes the QA "stuck with no explanation" P2.
   const blockedReason = () => {
     if (canAdvance()) return null;
-    const odoOut = Number(agreement?.odometerOut || 0);
     switch (step) {
       case 0:
         if (!reservation) return 'Cargando la reservación…';
@@ -377,8 +405,9 @@ function CheckinWizard({ token, me, logout }) {
       case 1:
         return 'Captura al menos 1 foto del return';
       case 2:
-        if (!(Number(odometerIn) > 0)) return 'Ingresa el odómetro de regreso (mayor a 0)';
-        return `El odómetro de regreso no puede ser menor al de salida (${odoOut.toLocaleString()} mi)`;
+        // Below-checkout readings WARN inline in Step3Metrics but never block
+        // (Counter-UX Item 2), so the only hard requirement left is > 0.
+        return 'Ingresa el odómetro de regreso (mayor a 0)';
       case 3:
         return 'En pago manual, ingresa un monto mayor a $0.00 (o elige auto-cobro en 24h)';
       // case 4 removed (LAX #9): signature is optional, the button never
@@ -475,6 +504,7 @@ function CheckinWizard({ token, me, logout }) {
           {step === 2 && (
             <Step3Metrics
               agreement={agreement}
+              odometerPrefill={odometerPrefill}
               odometerIn={odometerIn} onOdometerIn={setOdometerIn}
               fuelIn={fuelIn} onFuelIn={setFuelIn}
               cleanlinessIn={cleanlinessIn} onCleanlinessIn={setCleanlinessIn}
@@ -511,6 +541,37 @@ function CheckinWizard({ token, me, logout }) {
           )}
           {step === 5 && <Step6Success result={result} reservation={reservation} agreement={agreement} token={token} onDone={() => router.push('/reservations')} />}
 
+          {/* Counter-UX Item 3 (2026-08-31): visible damage affordance AFTER the
+              photo-inspection step and before the return closes. Opens the
+              existing ReportDamageWizard for THIS reservation in a modal —
+              the wizard's own steps are untouched (no blocking, no reorder). */}
+          {canReportDamage && step >= 2 && step <= 4 && (
+            <div style={{
+              marginTop: 16, padding: '12px 14px', borderRadius: 8,
+              border: '0.5px solid #FCA5A5', background: 'rgba(239,68,68,.05)',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap'
+            }}>
+              <div style={{ minWidth: 220, flex: 1 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, color: '#991B1B' }}>
+                  ⚠ {t('checkinWizard.damageTitle')}
+                </div>
+                <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
+                  {damageReported ? t('checkinWizard.damageRecorded') : t('checkinWizard.damageHint')}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDamageWizardOpen(true)}
+                style={{
+                  background: 'linear-gradient(180deg,#ff8a8a,#ef4444)', border: '1px solid #dc2626',
+                  color: '#fff', borderRadius: 8, padding: '8px 14px', fontWeight: 700, cursor: 'pointer', fontSize: 13
+                }}
+              >
+                {t('checkinWizard.damageCta')}
+              </button>
+            </div>
+          )}
+
           {/* Step navigation — same primary/ghost button styles as checkout-wizard-v2 */}
           <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', alignItems: 'center', marginTop: 16 }}>
             {/* Disabled-reason hint — tells staff exactly what's missing so they
@@ -534,6 +595,37 @@ function CheckinWizard({ token, me, logout }) {
             </button>
           </div>
         </div>
+
+        {/* Counter-UX Item 3: the damage-report modal itself — the SAME wizard
+            the reservation-detail page launches, reservation pre-selected. */}
+        {damageWizardOpen && reservation?.id ? (
+          <ReportDamageWizard
+            reservation={reservation}
+            token={token}
+            onClose={() => setDamageWizardOpen(false)}
+            onDone={async (res) => {
+              setDamageReported(res || true);
+              // The damage charge just landed on the contract — re-pull the
+              // agreement so Step 4's "prior balance" includes it instead of
+              // going stale mid-check-in.
+              try {
+                if (agreement?.id) {
+                  const ag = await api(`/api/rental-agreements/${agreement.id}`, { bypassCache: true }, token);
+                  setAgreement(ag);
+                }
+              } catch { /* non-fatal: backend still has the charge */ }
+            }}
+            onComplete={(res) => {
+              // "Complete now" → the incident DRAFT lives in the reservation-
+              // detail page's incident panel. Open it in a NEW tab so the
+              // in-progress check-in (photos, metrics) is never thrown away.
+              if (res?.incidentId) {
+                setDamageReported(res);
+                try { window.open(`/reservations/${reservationId}`, '_blank'); } catch { /* popup blocked — draft still listed on the detail page */ }
+              }
+            }}
+          />
+        ) : null}
       </div>
     </AppShell>
   );
@@ -706,6 +798,7 @@ function Step2Photos({
 // ─────────────────────────────────────────────────────────────────────────────
 function Step3Metrics({
   agreement,
+  odometerPrefill,
   odometerIn, onOdometerIn,
   fuelIn, onFuelIn,
   cleanlinessIn, onCleanlinessIn,
@@ -714,8 +807,14 @@ function Step3Metrics({
   canBackdate, actualReturnAt, onActualReturnAt,
   feePreview
 }) {
+  const { t } = useTranslation();
   const odoOut = Number(agreement?.odometerOut || 0);
   const driven = Number(odometerIn) - odoOut;
+  // Counter-UX Item 2: warn (never block) when the entered reading is below
+  // the check-out odometer. Pure rule in lib/mileage-guard.js (unit-tested).
+  const guard = mileageGuard({ entered: odometerIn, baseline: odoOut });
+  const showPrefillNote = odometerPrefill != null
+    && String(odometerIn || '').trim() === String(odometerPrefill);
   // Only show the waiver toggle when the rental is actually late — there's
   // no fee to waive otherwise. Late = now > returnAt + the 30-min grace
   // (mirrors LATE_RETURN_GRACE_MINUTES on the backend).
@@ -731,6 +830,25 @@ function Step3Metrics({
           allowOcr
           hint={driven > 0 ? `+${driven.toLocaleString()} mi driven · ${Math.max(0, driven - feePreview.includedMiles)} over allowance` : null}
         />
+        {showPrefillNote ? (
+          <div style={{ fontSize: 11, color: '#6B7280', marginTop: -6 }}>
+            {t('checkinWizard.mileagePrefilled')}
+          </div>
+        ) : null}
+        {guard.warn ? (
+          <div
+            role="alert"
+            style={{
+              padding: '10px 12px', background: '#FEF3C7', border: '0.5px solid #F59E0B',
+              borderRadius: 6, fontSize: 12, color: '#92400E', marginTop: -4
+            }}
+          >
+            {t('checkinWizard.mileageWarning', {
+              entered: Number(odometerIn).toLocaleString(),
+              baseline: odoOut.toLocaleString()
+            })}
+          </div>
+        ) : null}
         <FuelLevelInput
           value={fuelIn}
           onChange={onFuelIn}

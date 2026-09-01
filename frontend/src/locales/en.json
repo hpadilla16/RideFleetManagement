@@ -2044,5 +2044,20 @@
       "copiedSuffix": " and copied to clipboard",
       "autoReconciled": "Authorize.Net payment detected and posted automatically."
     }
+  },
+  "vehicleAssign": {
+    "filterNoteType": "Showing available {{type}} vehicles only",
+    "filterNote": "Showing only available vehicles of the reserved type",
+    "showingAll": "Showing all vehicles",
+    "showAll": "Show all vehicles",
+    "showMatching": "Show only available matches"
+  },
+  "checkinWizard": {
+    "mileagePrefilled": "Pre-filled with the vehicle's last known mileage — edit it if the odometer reads different.",
+    "mileageWarning": "Entered mileage ({{entered}} mi) is below the check-out reading ({{baseline}} mi). Double-check the odometer — continue only if this is a correction or the odometer was swapped.",
+    "damageTitle": "Vehicle damage?",
+    "damageHint": "Record damage found at return without leaving the check-in. It logs the damage, adds the charge to this contract and starts the incident draft.",
+    "damageCta": "Report damage",
+    "damageRecorded": "Damage report recorded — the charge was added to this contract."
   }
 }

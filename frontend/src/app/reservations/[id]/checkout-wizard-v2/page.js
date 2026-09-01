@@ -25,7 +25,9 @@ import { useParams, useRouter } from 'next/navigation';
 import { AuthGate } from '../../../../components/AuthGate';
 import { AppShell } from '../../../../components/AppShell';
 import { api } from '../../../../lib/client';
+import { useTranslation } from 'react-i18next';
 import { displayNoteLines, hasDisplayNotes, isRecentNote, relativeNoteAge } from '../../../../lib/reservation-notes';
+import { filterAssignableVehicles } from '../../../../lib/vehicle-assignment';
 import {
   createSession, getSessionByReservation, transition,
   mintTermsToken, mintHandoffToken, abandon,
@@ -363,9 +365,13 @@ function CheckoutWizardV2({ token, me, logout }) {
 // drift apart (the bug we fixed earlier today on the extensions flow).
 // ---------------------------------------------------------------------------
 function SwapVehicleModal({ session, reservation, token, onClose, onSwapped, onError }) {
+  const { t } = useTranslation();
   const [vehicles, setVehicles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  // Counter-UX Item 1 (2026-08-31): default to AVAILABLE units of the
+  // reservation's type; "Show all vehicles" is the deliberate-upgrade escape.
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -384,14 +390,19 @@ function SwapVehicleModal({ session, reservation, token, onClose, onSwapped, onE
     return () => { cancelled = true; };
   }, [token]);
 
+  const reservationTypeId = reservation.vehicleTypeId
+    || reservation.vehicleType?.id
+    || reservation.vehicle?.vehicleTypeId
+    || null;
   const eligible = useMemo(() => {
-    return vehicles.filter((v) => {
+    const base = vehicles.filter((v) => {
       const status = String(v?.status || '').toUpperCase();
       if (['SOLD', 'OUT_OF_SERVICE'].includes(status)) return false;
       if (v.id === reservation.vehicleId) return false;
       return true;
     });
-  }, [vehicles, reservation.vehicleId]);
+    return filterAssignableVehicles(base, { vehicleTypeId: reservationTypeId, showAll });
+  }, [vehicles, reservation.vehicleId, reservationTypeId, showAll]);
 
   const submit = async (vehicleId) => {
     setBusyId(vehicleId);
@@ -421,11 +432,37 @@ function SwapVehicleModal({ session, reservation, token, onClose, onSwapped, onE
           <h3 style={{ margin: 0 }}>Change vehicle</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer' }}>×</button>
         </div>
+        {/* Counter-UX Item 1: filter note + "Show all vehicles" escape hatch —
+            the counter sometimes deliberately upgrades to another type. */}
+        {reservationTypeId ? (
+          <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 10 }}>
+            {showAll
+              ? t('vehicleAssign.showingAll')
+              : (reservation.vehicleType?.name
+                  ? t('vehicleAssign.filterNoteType', { type: reservation.vehicleType.name })
+                  : t('vehicleAssign.filterNote'))}
+            {' · '}
+            <button
+              type="button"
+              onClick={() => setShowAll((v) => !v)}
+              style={{ background: 'none', border: 'none', padding: 0, color: '#4338CA', fontWeight: 600, cursor: 'pointer', fontSize: 12, textDecoration: 'underline' }}
+            >
+              {showAll ? t('vehicleAssign.showMatching') : t('vehicleAssign.showAll')}
+            </button>
+          </div>
+        ) : null}
         {loading ? (
           <div style={{ padding: 24, textAlign: 'center', color: '#6B7280' }}>Loading…</div>
         ) : eligible.length === 0 ? (
           <div style={{ padding: 24, textAlign: 'center', color: '#6B7280' }}>
             No alternative vehicles available.
+            {reservationTypeId && !showAll ? (
+              <div style={{ marginTop: 8 }}>
+                <button type="button" style={{ ...ghostBtn, fontSize: 12 }} onClick={() => setShowAll(true)}>
+                  {t('vehicleAssign.showAll')}
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
