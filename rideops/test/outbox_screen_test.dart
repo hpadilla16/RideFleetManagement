@@ -210,12 +210,20 @@ void main() {
   testWidgets(
       'F4 — fila en inflight SIN corrida viva: "En cola", no "Subiendo" con '
       'barra animada', (tester) async {
+    // ORDEN DELIBERADO: la bandeja se monta primero (su kick de arranque ya
+    // pasó) y la fila queda en `inflight` DESPUÉS. Sembrarla antes no prueba
+    // esta pantalla: el rescate del coordinador —el arreglo F4— la devuelve a
+    // `pending` antes del primer frame y la aserción pasaría sin llegar a la
+    // línea. El hueco que queda es el real: una corrida que muere a media
+    // subida en este proceso, o el isolate de background dejando la fila así
+    // mientras la bandeja está abierta.
+    await tester.pumpWidget(tray());
+    await tester.pumpAndSettle();
     await seedRow(
       id: 'phuerfana',
       kind: OutboxKinds.inspectionPhoto,
       status: 'inflight',
     );
-    await tester.pumpWidget(tray());
     await tester.pumpAndSettle();
 
     // `inflight` sobrevive a la muerte del proceso: la fila puede llevar

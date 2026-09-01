@@ -160,27 +160,39 @@ Future<bool> runBackgroundDrainOnce() async {
       ),
     );
 
-    // Rescate ANTES de contar — la misma compuerta que congelaba fotos en el
-    // foreground (ver DrainCoordinator.kick). Una fila huérfana en `inflight`
-    // no está en `pending`, así que este `isEmpty` daba "bandeja limpia", el
-    // worker devolvía éxito y el relevo del OS se cancelaba: la foto se
-    // quedaba en el teléfono sin que NADA volviera a mirarla.
-    try {
-      await store.resetInflight();
-    } catch (_) {
-      // Sin DB legible el worker sigue con lo que haya en `pending`.
-    }
-    if ((await store.pending()).isEmpty) return true;
-    try {
-      await drainer.drain();
-    } catch (_) {
-      // Corrida tumbada (mint caído por red): inflight vuelve a pending en
-      // el próximo intento vía resetInflight — reintento honesto.
-    }
-    return (await store.pending()).isEmpty;
+    return drainWithStore(store, drainer);
   } finally {
     await db.close();
   }
+}
+
+/// La mitad PROBABLE de una corrida de background: con el store y el drenador
+/// ya construidos, rescata las huérfanas, decide si hay trabajo y drena.
+///
+/// Está separada de [runBackgroundDrainOnce] porque esa función arma sus
+/// dependencias contra el Keystore, path_provider y la red reales — no hay
+/// dónde inyectar, así que la compuerta de "¿hay trabajo?" se quedaba sin
+/// prueba. Y esa compuerta tenía exactamente el mismo defecto que la del
+/// foreground: se cerraba con una foto atorada del otro lado.
+Future<bool> drainWithStore(OutboxStore store, OutboxDrainer drainer) async {
+  // Rescate ANTES de contar — la misma compuerta que congelaba fotos en el
+  // foreground (ver DrainCoordinator.kick). Una fila huérfana en `inflight`
+  // no está en `pending`, así que este `isEmpty` daba "bandeja limpia", el
+  // worker devolvía éxito y el relevo del OS se cancelaba: la foto se
+  // quedaba en el teléfono sin que NADA volviera a mirarla.
+  try {
+    await store.resetInflight();
+  } catch (_) {
+    // Sin DB legible el worker sigue con lo que haya en `pending`.
+  }
+  if ((await store.pending()).isEmpty) return true;
+  try {
+    await drainer.drain();
+  } catch (_) {
+    // Corrida tumbada (mint caído por red): inflight vuelve a pending en
+    // el próximo intento vía resetInflight — reintento honesto.
+  }
+  return (await store.pending()).isEmpty;
 }
 
 /// Agenda/cancela el relevo de background. Abstracto para que los tests del
