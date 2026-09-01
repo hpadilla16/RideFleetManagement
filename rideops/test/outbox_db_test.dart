@@ -306,7 +306,7 @@ void main() {
   // de daños pendientes se quedan encerradas. Aquí se construye un v1 REAL
   // (derivado del DDL vivo de v2, no escrito a mano) y se abre con el código
   // de hoy.
-  group('migración v1 → v2', () {
+  group('migraciones del esquema', () {
     /// DDL real de la tabla en el esquema de HOY, leído de sqlite_master.
     Future<Map<String, String>> ddlActual() async {
       final v2 = OutboxDb(NativeDatabase.memory());
@@ -325,20 +325,33 @@ void main() {
       return ddl;
     }
 
-    test('un archivo v1 se abre, conserva sus filas y gana la columna nueva',
-        () async {
-      final ddl = await ddlActual();
-      final ddlV2Entries = ddl['outbox_entries']!;
-
-      // v1 = el DDL de hoy MENOS la columna nueva. Derivarlo (en vez de
-      // teclearlo) es lo que hace que el fixture no pueda mentir sobre cómo
-      // era v1 de verdad.
-      final ddlV1Entries =
-          ddlV2Entries.replaceAll(RegExp(r'"last_error_status" INTEGER( NULL)?, '), '');
-      expect(ddlV1Entries, isNot(ddlV2Entries),
+    /// Recorta una columna del DDL de hoy. Derivar los esquemas viejos (en vez
+    /// de teclearlos) es lo que hace que el fixture no pueda mentir sobre cómo
+    /// eran de verdad.
+    String sinColumna(String ddl, String columna, String tipo) {
+      final recortado =
+          ddl.replaceAll(RegExp('"$columna" $tipo( NULL)?, '), '');
+      expect(recortado, isNot(ddl),
           reason: 'si esto no recorta nada, la prueba no estaría probando la '
               'migración: el DDL de drift cambió de forma');
-      expect(ddlV1Entries.contains('last_error_status'), isFalse);
+      expect(recortado.contains(columna), isFalse);
+      return recortado;
+    }
+
+    test('un archivo v1 se abre, conserva sus filas y gana las columnas nuevas',
+        () async {
+      final ddl = await ddlActual();
+      final ddlHoy = ddl['outbox_entries']!;
+
+      // v1 = el DDL de hoy MENOS las dos columnas que llegaron después. Un
+      // teléfono en v1 tiene que recibir las DOS migraciones en la misma
+      // apertura — por eso los `if` del onUpgrade son independientes y no un
+      // `else if`.
+      final ddlV1Entries = sinColumna(
+        sinColumna(ddlHoy, 'last_error_status', 'INTEGER'),
+        'session_sealed_at',
+        'INTEGER',
+      );
 
       final viejo = OutboxDb(NativeDatabase.memory(setup: (raw) {
         raw.execute(ddlV1Entries);
@@ -365,8 +378,8 @@ void main() {
           .get();
       expect(
         columnas.map((c) => c.read<String>('name')),
-        contains('last_error_status'),
-        reason: 'la migración v1 → v2 no corrió',
+        containsAll(['last_error_status', 'session_sealed_at']),
+        reason: 'un teléfono en v1 tiene que recibir las DOS migraciones',
       );
 
       final fila = await (viejo.select(viejo.outboxEntries)
@@ -386,6 +399,64 @@ void main() {
             ..where((t) => t.id.equals('vieja')))
           .getSingle();
       expect(tras.lastErrorStatus, 404);
+    });
+
+    test(
+        'un archivo v2 —el de los teléfonos de hoy— gana session_sealed_at sin '
+        'perder su dead-letter', () async {
+      final ddl = await ddlActual();
+      final ddlV2Entries =
+          sinColumna(ddl['outbox_entries']!, 'session_sealed_at', 'INTEGER');
+
+      final viejo = OutboxDb(NativeDatabase.memory(setup: (raw) {
+        raw.execute(ddlV2Entries);
+        raw.execute(ddl['outbox_audit_entries']!);
+        // Justo la fila que este cambio hace vivir más: un rechazo esperando
+        // decisión humana sobre evidencia de daños.
+        raw.execute(
+          'INSERT INTO outbox_entries (id, user_id, tenant_id, group_key, kind, '
+          'payload, idempotency_key, attempts, last_error, last_error_code, '
+          'last_error_status, status, created_at, updated_at) '
+          "VALUES ('muerta', 'u1', 't1', 'cs1', 'inspection_photo', "
+          "'{\"photoPath\":\"fotos/a.bin\"}', 'ik-muerta', 3, 'Gone', "
+          "'TOKEN_EXPIRED', 410, 'dead', 1, 1)",
+        );
+        raw.execute('PRAGMA user_version = 2');
+      }));
+      addTearDown(viejo.close);
+
+      final columnas =
+          await viejo.customSelect('PRAGMA table_info(outbox_entries)').get();
+      expect(
+        columnas.map((c) => c.read<String>('name')),
+        contains('session_sealed_at'),
+        reason: 'la migración v2 → v3 no corrió',
+      );
+
+      final fila = await (viejo.select(viejo.outboxEntries)
+            ..where((t) => t.id.equals('muerta')))
+          .getSingle();
+      expect(fila.status, 'dead');
+      expect(fila.lastErrorCode, 'TOKEN_EXPIRED',
+          reason: 'el diagnóstico que soporte va a leer no se toca');
+      expect(fila.sessionSealedAt, isNull,
+          reason: 'de una fila de v2 no se sabe si su sesión cerró, y null '
+              'dice exactamente eso — sigue ofreciendo Reintentar');
+
+      // Y a partir de aquí la columna funciona: sellar le quita el botón.
+      final selladas = await viejo.markSessionSealed(
+        groupKey: 'cs1',
+        at: DateTime.utc(2026, 9, 1, 10, 30),
+      );
+      expect(selladas, 1);
+      final tras = await (viejo.select(viejo.outboxEntries)
+            ..where((t) => t.id.equals('muerta')))
+          .getSingle();
+      // Drift guarda el instante como epoch y lo devuelve en hora LOCAL: se
+      // compara el MOMENTO, no la representación.
+      expect(tras.sessionSealedAt!.toUtc(), DateTime.utc(2026, 9, 1, 10, 30));
+      expect(tras.lastErrorCode, 'TOKEN_EXPIRED',
+          reason: 'sellar es un hecho NUEVO, no una corrección del anterior');
     });
   });
 }

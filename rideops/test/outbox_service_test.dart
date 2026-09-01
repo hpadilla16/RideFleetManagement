@@ -353,6 +353,13 @@ void main() {
     final audit = await db.auditRows();
     expect(audit, hasLength(1));
     expect(audit.single.reasonCode, 'SESSION_COMPLETED');
+
+    // Y la que se queda SE ENTERA (QA MINOR-2): con la sesión sellada, la
+    // bandeja tiene que quitarle el "Reintentar" antes de que el agente lo
+    // toque — contra una inspección cerrada el re-mint muere con
+    // SESSION_GONE. El code que la mató NO se pisa: es lo que soporte lee.
+    expect(remaining.single.sessionSealedAt, isNotNull);
+    expect(remaining.single.lastErrorCode, 'BAD_REQUEST');
   });
 
   test('sweepOrphanFiles borra archivos sin fila y respeta los referenciados',
@@ -413,6 +420,46 @@ void main() {
     final audit = await db.auditRows();
     expect(audit.single.reasonCode, 'TTL_EXPIRED',
         reason: 'nada se evapora sin registro');
+  });
+
+  test(
+      'MINOR-4 — el TTL de 14 días TAMBIÉN se lleva una dead-letter y su '
+      'binario: es la única válvula automática que queda', () async {
+    // Desde que morir ya no borra el archivo, el `dead` es la fila que más
+    // puede vivir en el teléfono. Si el TTL discriminara por estado —o si
+    // alguien lo hiciera discriminar más adelante— el sobre del ADR-7 (50
+    // filas / 250 MB) se quedaría sin su única salida automática y un
+    // teléfono de patio acumularía PII de daños para siempre.
+    await service.enqueuePhoto(
+      checkoutSessionId: 'cs-muerta',
+      reservationId: 'r-muerta',
+      reservationNumber: 'R-9',
+      angleKey: 'front',
+      jpegBytes: photo(3),
+    );
+    final row = (await db.byGroupKey('cs-muerta')).single;
+    await db.markFailed(row.id,
+        error: 'Gone', code: 'TOKEN_EXPIRED', status: 410, dead: true);
+    // Y sellada: ni así se queda para siempre.
+    await db.markSessionSealed(groupKey: 'cs-muerta', at: DateTime.now());
+    await (db.update(db.outboxEntries)..where((t) => t.id.equals(row.id)))
+        .write(OutboxEntriesCompanion(
+      createdAt: Value(DateTime.now().subtract(const Duration(days: 20))),
+    ));
+    final path = (json.decode(row.payload)
+        as Map<String, dynamic>)['photoPath'] as String;
+    expect(await vault.exists(path), isTrue,
+        reason: 'sanidad: el binario de una dead SÍ sigue en disco');
+
+    final purged = await service.purgeStale();
+
+    expect(purged, 1);
+    expect(await db.allFor(userId: 'u1', tenantId: 't1'), isEmpty);
+    expect(await vault.exists(path), isFalse,
+        reason: 'la PII se va con la fila, no queda huérfana en disco');
+    final audit = await db.auditRows();
+    expect(audit.single.reasonCode, 'TTL_EXPIRED',
+        reason: 'lo destruido pudo ser evidencia: jamás sin registro');
   });
 
   test('sin dueño de sesión, encolar truena (bug de orquestación, no dato)',

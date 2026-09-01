@@ -2,10 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/l10n/app_localizations.dart';
 import '../../../../core/l10n/odometer_format.dart';
+import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/ride_tokens.dart';
+import '../../../checkout/presentation/widgets/wizard_banners.dart';
 import '../../application/inspection_controller.dart';
 import '../../application/inspection_state.dart';
 import 'angle_grid.dart';
@@ -101,7 +104,7 @@ class InspectionPhotosBody extends StatelessWidget {
           const SizedBox(height: 10),
         ],
         if (state.outboxFull) ...[
-          InspectionWarnBanner(text: l10n.inspOutboxFull),
+          const OutboxFullBanner(),
           const SizedBox(height: 10),
         ],
         AngleGrid(
@@ -354,7 +357,7 @@ class InspectionSummaryBody extends StatelessWidget {
         // hereden las dos superficies —el paso 4 del wizard descarta el
         // resultado del enqueue— igual que en [InspectionPhotosBody].
         if (state.outboxFull) ...[
-          InspectionWarnBanner(text: l10n.inspOutboxFull),
+          const OutboxFullBanner(),
           const SizedBox(height: 10),
         ],
         InspectionQueueCard(photos: state.capturedCount, online: online),
@@ -451,9 +454,12 @@ class InspectionQueueCard extends StatelessWidget {
 /// Aviso ámbar del flujo de inspección (sin red, bandeja llena, odómetro más
 /// bajo que la última lectura).
 class InspectionWarnBanner extends StatelessWidget {
-  const InspectionWarnBanner({super.key, required this.text});
+  const InspectionWarnBanner({super.key, required this.text, this.action});
 
   final String text;
+
+  /// Acción opcional bajo el texto (patrón [BannerAction] del wizard, 44 dp).
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -471,17 +477,54 @@ class InspectionWarnBanner extends StatelessWidget {
               size: 18, color: RideTokens.warnTx),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w600,
-                color: RideTokens.warnTx,
-                height: 1.45,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  text,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: RideTokens.warnTx,
+                    height: 1.45,
+                  ),
+                ),
+                ?action,
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// El muro de la bandeja llena, CON salida (review GD-MC-5).
+///
+/// Esta es la superficie donde el bloqueo pega —el agente está junto al coche
+/// y la cámara no abre—, así que es donde el aviso tiene que ser más honesto y
+/// llevar a algún lado. Decía solo "conéctate a una red para que se vacíe", y
+/// desde que un dead-letter conserva su binario esa frase manda a caminar
+/// hacia la ventana por filas que la red no va a mover nunca.
+///
+/// Navega con `go` a la tab de la bandeja y no con un push: la bandeja es una
+/// SECCIÓN del shell, no un diálogo de este flujo. Se pierde el paso abierto,
+/// sí — y es el intercambio correcto: la captura ya está bloqueada aquí, y el
+/// flujo se re-abre desde la cola con el estado que el servidor tenga (ADR-4).
+/// Es el viaje simétrico del "Abrir inspección" que la propia bandeja ofrece.
+class OutboxFullBanner extends StatelessWidget {
+  const OutboxFullBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return InspectionWarnBanner(
+      text: l10n.inspOutboxFull,
+      action: BannerAction(
+        label: l10n.inspOutboxFullAction,
+        color: RideTokens.warnTx,
+        onTap: () => context.go(AppRoutes.outbox),
       ),
     );
   }

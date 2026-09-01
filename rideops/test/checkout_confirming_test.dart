@@ -844,7 +844,10 @@ void main() {
         reason: 'la tarjeta del vehículo también envejece');
     expect(vehicleCard(tester).pillLabel, startsWith('seen'),
         reason: 'ese "Available" es tan viejo como la unidad que acompaña');
-    expect(find.text('Saved on the server · not re-read here'), findsOneWidget);
+    expect(
+      find.text("The server has it · this screen hasn't refreshed"),
+      findsOneWidget,
+    );
 
     // Y el subtexto del CTA habla de la UNIDAD, no de la licencia: el copy de
     // stale genérico mandaba a confrontar el documento del cliente mientras
@@ -858,6 +861,10 @@ void main() {
       findsNothing,
       reason: 'lo que cambió no lo detecta una licencia en la mano',
     );
+    // GD-MC-3: sin direcciones. Este texto se pinta en el DOCK, al pie, y las
+    // tarjetas están arriba — "el vehículo de abajo" apuntaba al lado
+    // contrario de donde está lo que describe.
+    expect(find.textContaining('vehicle below'), findsNothing);
 
     // La entrega NO se bloquea: el swap quedó guardado y el dato del cliente
     // sigue siendo el que el servidor dijo (regla 8D).
@@ -865,6 +872,24 @@ void main() {
       find.widgetWithText(RidePrimaryButton, 'Continue to T&C'),
     );
     expect(cta.onPressed, isNotNull);
+
+    // SEGUNDO intento que TAMPOCO llega (QA MINOR-1). Es la cláusula pegajosa
+    // del controller —`via == 'swap' || state.contextStaleAfterSwap`— y sin
+    // esta vuelta nadie la tocaba: con solo `via == 'swap'`, este reintento
+    // fallido APAGABA el aviso y la pantalla volvía a pintar la unidad
+    // reemplazada como si fuera un dato viejo cualquiera. La verdad no
+    // caduca: mientras la re-lectura no llegue, la unidad sigue siendo la
+    // otra, la haya pedido el swap o el botón.
+    await container(tester)
+        .read(checkoutWizardProvider(kReservationId).notifier)
+        .retryContext();
+    await tester.pumpAndSettle();
+    await scrollBody(tester, find.text('Unit change'));
+    expect(find.text('Unit change'), findsOneWidget);
+    expect(
+      find.textContaining('may be the one you just replaced'),
+      findsOneWidget,
+    );
 
     // Una consulta que SÍ responde apaga el aviso — y es la única cosa que lo
     // apaga.

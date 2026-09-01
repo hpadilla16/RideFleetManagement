@@ -226,18 +226,19 @@ class OutboxDrainer {
           failedThisRun.add(row.id);
           await store.markFailed(row.id,
               error: message, code: code, status: status, dead: true);
-        // El binario SE QUEDA. Antes se borraba aquí ("PII fuera de disco"),
-        // y eso convertía el "Reintentar" de la bandeja en una puerta falsa:
-        // el humano lo tocaba, la fila revivía sin archivo y volvía a morir
-        // con PHOTO_LOST (verificado en la corrida e2e 2). Una fila `dead`
-        // no está terminada: está ESPERANDO UNA DECISIÓN sobre evidencia de
-        // daños, y las dos salidas de esa decisión —reintentar o descartar—
-        // necesitan la foto viva. El disco se libera cuando el humano
-        // descarta (OutboxService.discardDead), cuando el TTL de 14 días la
-        // recoge, o cuando se purga la cuenta: los tres borran el archivo.
-        // El tope de la bandeja (ADR-7) sigue acotando el crecimiento — con
-        // la bandeja llena la captura se PAUSA y lo dice, que es la política
-        // de la casa (nada se purga solo).
+          // El binario SE QUEDA (aquí y en el brazo de abajo). Antes se
+          // borraba ("PII fuera de disco"), y eso convertía el "Reintentar"
+          // de la bandeja en una puerta falsa: el humano lo tocaba, la fila
+          // revivía sin archivo y volvía a morir con PHOTO_LOST (verificado
+          // en la corrida e2e 2). Una fila `dead` no está terminada: está
+          // ESPERANDO UNA DECISIÓN sobre evidencia de daños, y las dos
+          // salidas de esa decisión —reintentar o descartar— necesitan la
+          // foto viva. El disco se libera cuando el humano descarta
+          // (OutboxService.discardDead), cuando el TTL de 14 días la recoge,
+          // o cuando se purga la cuenta: los tres borran el archivo. El tope
+          // de la bandeja (ADR-7) sigue acotando el crecimiento — con la
+          // bandeja llena la captura se PAUSA y lo dice, que es la política
+          // de la casa (nada se purga solo).
         case DrainTransient(:final message, :final status):
           failedThisRun.add(row.id);
           final goesDead = row.attempts + 1 >= maxAttemptsBeforeDead;

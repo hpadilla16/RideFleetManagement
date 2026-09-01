@@ -63,6 +63,21 @@ class OutboxEntries extends Table {
   /// TRANSPORTE, no una clasificación del error del servidor: la app sigue
   /// sin interpretar el cuerpo (regla de la casa).
   IntColumn get lastErrorStatus => integer().nullable()();
+
+  /// Cuándo supimos que OTRA superficie selló la inspección de la sesión de
+  /// esta fila, o null si sigue abierta.
+  ///
+  /// Solo lo llevan filas `dead` que sobrevivieron a la purga selectiva de 6F
+  /// (las vivas se retiran ahí mismo). Existe porque el "Reintentar" de la
+  /// bandeja tiene que poder tener éxito: contra una inspección ya sellada el
+  /// re-mint muere con `SESSION_GONE`, así que la fila debe NACER sin ese
+  /// botón y con su motivo escrito, no descubrirlo al fallar.
+  ///
+  /// Es columna propia y no un `lastErrorCode = 'SESSION_COMPLETED'` a
+  /// propósito: pisar el code destruiría el diagnóstico que la fila ya traía
+  /// (el TOKEN_EXPIRED que la mató) justo en la fila que soporte va a leer.
+  /// Un hecho nuevo se guarda en un campo nuevo.
+  DateTimeColumn get sessionSealedAt => dateTime().nullable()();
   TextColumn get status => text().withDefault(const Constant('pending'))();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
@@ -114,8 +129,12 @@ class OutboxDb extends _$OutboxDb {
   // v2 agrega [OutboxEntries.lastErrorStatus]. Desde H5 sí hay teléfonos con
   // el archivo creado (los de la prueba de humo), así que esta ya es una
   // migración de verdad y no un rebautizo del CREATE.
+  //
+  // v3 agrega [OutboxEntries.sessionSealedAt]. Llega con el mismo cambio que
+  // deja de borrar el binario de un dead-letter: ahora esas filas viven más y
+  // hay que poder decirles que su sesión ya se cerró.
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   /// Sin esto, drift LANZA al abrir una DB vieja (su `onUpgrade` por defecto
   /// es un throw): un teléfono con la bandeja de H5 no abriría y perdería
@@ -127,6 +146,14 @@ class OutboxDb extends _$OutboxDb {
         onUpgrade: (m, from, to) async {
           if (from < 2) {
             await m.addColumn(outboxEntries, outboxEntries.lastErrorStatus);
+          }
+          // Mismo criterio que la de arriba y misma forma (nullable, sin
+          // default): las filas viejas quedan con null = "que sepamos, su
+          // sesión sigue abierta", que es exactamente lo que se sabía de
+          // ellas antes de este cambio. Los `if` son independientes a
+          // propósito — un teléfono en v1 tiene que recibir las dos.
+          if (from < 3) {
+            await m.addColumn(outboxEntries, outboxEntries.sessionSealedAt);
           }
         },
       );
@@ -286,6 +313,21 @@ class OutboxDb extends _$OutboxDb {
         updatedAt: Value(DateTime.now()),
       ),
     );
+  }
+
+  /// Sella las filas que quedan de una sesión cuya inspección cerró OTRA
+  /// superficie (6F / frame 17F). Devuelve cuántas selló.
+  ///
+  /// Se llama DESPUÉS de retirar las vivas, así que en la práctica solo toca
+  /// dead-letters: los que esperan una decisión humana sobre evidencia de
+  /// daños. Marcarlos es lo que permite que la bandeja les quite el
+  /// "Reintentar" antes de que el agente lo toque y descubra el fracaso.
+  Future<int> markSessionSealed({
+    required String groupKey,
+    required DateTime at,
+  }) {
+    return (update(outboxEntries)..where((t) => t.groupKey.equals(groupKey)))
+        .write(OutboxEntriesCompanion(sessionSealedAt: Value(at)));
   }
 
   Future<void> markInflight(String id) => _setStatus(id, 'inflight');

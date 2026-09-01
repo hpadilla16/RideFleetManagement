@@ -320,7 +320,14 @@
     "placeholders": { "time": { "type": "String" } }
   },
   "inspLoadOffline": "Sin conexión. Para iniciar la inspección se necesita señal una vez; después todo funciona sin red.",
-  "inspOutboxFull": "La bandeja está llena. Conéctate a una red para que se vacíe antes de capturar más fotos.",
+  "inspOutboxFull": "La bandeja está llena: no cabe otra foto. Con red, lo que espera se envía solo; lo que el servidor rechazó solo se va cuando tú decides.",
+  "@inspOutboxFull": {
+    "description": "El muro de verdad: aquí es donde el agente descubre que no puede capturar. Decía solo «conéctate a una red para que se vacíe», y desde que un dead-letter conserva su binario esa frase puede mandar a caminar hacia la ventana por filas que la red no mueve (review GD-MC-5). Va con inspOutboxFullAction al lado."
+  },
+  "inspOutboxFullAction": "Ver la bandeja",
+  "@inspOutboxFullAction": {
+    "description": "Salida real desde el muro (BannerAction, 44 dp). Sin ella el aviso describe un bloqueo y no ofrece dónde resolverlo — y la bandeja es la única pantalla donde se decide."
+  },
   "camAnglePill": "{angle} · {n} de 8",
   "@camAnglePill": {
     "placeholders": { "angle": { "type": "String" }, "n": { "type": "int" } }
@@ -336,7 +343,7 @@
   "@camShutterStuckTitle": {
     "description": "Obturador colgado (corrida e2e 2, GPU por software): takePicture() nunca resuelve. NO se dice 'no se pudo abrir la cámara' —abrió y estaba mostrando imagen— para no mandar al agente a revisar un permiso que sí tiene."
   },
-  "camShutterStuckHint": "El disparo se quedó esperando y no volvió. La cámara se cerró; vuelve a abrirla e inténtalo otra vez. Si se repite, usa otro teléfono para este vehículo.",
+  "camShutterStuckHint": "El disparo se quedó esperando y no volvió. Cerramos la cámara; vuelve a abrirla e inténtalo otra vez. Si se repite, usa otro teléfono para este vehículo.",
   "@camShutterStuckHint": {
     "description": "Dice QUÉ pasó, qué hizo la app (soltó el controlador) y las dos salidas reales. La última frase existe porque la causa es del aparato: reintentar en el mismo teléfono puede no bastar."
   },
@@ -449,10 +456,20 @@
   "@outboxAttempts": {
     "placeholders": { "count": { "type": "int" }, "time": { "type": "String" } }
   },
-  "outboxReasonAnglesMissing": "El servidor lo rechazó: faltan los ángulos frontal y trasero. Captúralos y reintenta.",
+  "outboxReasonAnglesMissing": "El servidor lo rechazó: faltan los ángulos frontal y trasero. Se capturan en la inspección; desde aquí este envío no se puede reenviar.",
+  "@outboxReasonAnglesMissing": {
+    "description": "Esta fila NO ofrece Reintentar (canRetry:false) y sin reservationId tampoco ofrece 'Abrir inspección'. El texto anterior decía «Captúralos y reintenta» y nombraba un botón que no está — review GD-MC-4."
+  },
   "outboxReasonToken": "El permiso para subir venció o se consumió. Reintentar pedirá uno nuevo con tu sesión.",
   "outboxReasonPhotoLost": "La foto ya no está en este teléfono. Solo puedes descartar este envío.",
-  "outboxReasonSessionGone": "La sesión de checkout ya no existe en el servidor.",
+  "outboxReasonSessionGone": "La sesión de checkout ya no existe en el servidor, así que este envío no se puede reintentar desde aquí. Lo que sí llegó a subirse sigue en la reserva.",
+  "@outboxReasonSessionGone": {
+    "description": "Brazo sin Reintentar. Sigue el modelo de coCloseNoRetry (review GD-MC-4): por qué no hay reintento + qué NO se perdió. Antes era un hecho a secas y el agente se quedaba mirando una fila con una sola salida sin saber si estaba destruyendo algo."
+  },
+  "outboxReasonSessionSealed": "Otra pantalla cerró esta inspección antes que este envío, así que ya no se puede reenviar. La inspección quedó sellada con lo que sí llegó; esta foto sigue en el teléfono hasta que decidas.",
+  "@outboxReasonSessionSealed": {
+    "description": "Fila `dead` cuya sesión selló otra superficie (6F/17F, columna sessionSealedAt). Nace SIN Reintentar: contra una inspección cerrada el re-mint muere con SESSION_GONE. Dice las dos cosas que el agente necesita — que no se perdió la inspección, y que su evidencia sigue aquí esperándolo."
+  },
   "outboxReasonNetwork": "No se pudo enviar tras varios intentos. Reintenta cuando haya señal.",
   "@outboxReasonNetwork": {
     "description": "SOLO cuando nunca llegó respuesta (lastErrorStatus null). Mandar a alguien a buscar señal por un rechazo del servidor es el defecto que arregló este texto."
@@ -504,10 +521,9 @@
   "@outboxFullBody": {
     "placeholders": { "count": { "type": "int" } }
   },
-  "outboxFullDeadHint": "{count, plural, one{1 de ellos fue rechazado y espera tu decisión: reintenta o descártalo para liberar su espacio — la red sola no lo mueve.} other{{count} de ellos fueron rechazados y esperan tu decisión: reintenta o descártalos para liberar su espacio — la red sola no los mueve.}}",
+  "outboxFullDeadHint": "Los rechazados esperan tu decisión abajo: hasta que la tomes, su espacio no se libera.",
   "@outboxFullDeadHint": {
-    "description": "Aparece bajo el cuerpo de bandeja llena SOLO si hay dead-letters ocupando cupo: desde 2026-09 el binario de un rechazado se conserva hasta que el humano decide, así que 'conéctate y se vaciará' sería media verdad.",
-    "placeholders": { "count": { "type": "int" } }
+    "description": "Aparece en el cuerpo de bandeja llena SOLO si hay dead-letters ocupando cupo: desde 2026-09 el binario de un rechazado se conserva hasta que el humano decide, así que 'conéctate y se vaciará' sería media verdad. SIN conteo (review GD-SC-1): el número ya lo dice el banner rojo de arriba y repetirlo aquí era el mismo dato en dos colores. SIN nombrar botones (GD-SC-2): la decisión son las filas de abajo, y sus acciones cambian según por qué murió cada una."
   },
   "outboxFullChip": "{count} de {max} · ~{size} en espera",
   "@outboxFullChip": {
@@ -884,14 +900,14 @@
     "description": "Escalón del aviso de vejez a partir de kStaleCustomerDataHorizon (los 15 min de HANDOFF_TOKEN_TTL_MIN). A esa antigüedad la pregunta ya no es «¿coincide con la licencia?» —eso el agente lo está haciendo— sino «¿alguien reescribió el contrato?», que una licencia en la mano no detecta. Lleva la EDAD y no el umbral: es el dato con el que se decide.",
     "placeholders": { "age": { "type": "String" } }
   },
-  "coConfirmSwapStaleWhy": "El cambio de unidad se guardó, pero la reserva no se pudo volver a leer: el vehículo de abajo puede ser el que acabas de reemplazar. Actualiza los datos antes de entregar.",
+  "coConfirmSwapStaleWhy": "El cambio de unidad se guardó, pero la reserva no se pudo volver a leer: la unidad que se muestra puede ser la que acabas de reemplazar. Actualiza los datos antes de entregar.",
   "@coConfirmSwapStaleWhy": {
-    "description": "Vejez CON ORIGEN (corrida e2e 2): POST /vehicle devolvió 200 y la re-lectura de display-data se cayó. Gana a coConfirmStaleWhy/coConfirmStaleOldWhy porque esos dos hablan de la licencia y del contrato, y aquí lo que miente es la tarjeta del vehículo. No bloquea el CTA: el swap SÍ quedó en el servidor."
+    "description": "Vejez CON ORIGEN (corrida e2e 2): POST /vehicle devolvió 200 y la re-lectura de display-data se cayó. Gana a coConfirmStaleWhy/coConfirmStaleOldWhy porque esos dos hablan de la licencia y del contrato, y aquí lo que miente es la tarjeta del vehículo. No bloquea el CTA: el swap SÍ quedó en el servidor. SIN direcciones (review GD-MC-3): este texto se pinta en el DOCK, al pie, y las tarjetas están arriba — «el vehículo de abajo» apuntaba al lado contrario."
   },
   "coConfirmSwapStaleLabel": "Cambio de unidad",
-  "coConfirmSwapStaleValue": "Guardado en el servidor · sin releer aquí",
+  "coConfirmSwapStaleValue": "El servidor ya lo tiene · esta pantalla no se ha actualizado",
   "@coConfirmSwapStaleValue": {
-    "description": "Fila dentro de la tarjeta del vehículo, ARRIBA de la unidad: avisa que el renglón siguiente puede ser la unidad reemplazada. El hecho es doble y las dos mitades importan: el cambio no se perdió, y lo que se ve no es lo que hay."
+    "description": "Fila dentro de la tarjeta del vehículo, ARRIBA de la unidad: avisa que el renglón siguiente puede ser la unidad reemplazada. El hecho es doble y las dos mitades importan: el cambio no se perdió, y lo que se ve no es lo que hay. «Releer» es vocabulario nuestro, no del mostrador (review GD-SC-6)."
   },
   "coConfirmCheckingPill": "Consultando",
   "coConfirmCheckingValue": "Consultando…",

@@ -231,6 +231,16 @@ class OutboxService {
     for (final row in rows) {
       await _auditAndDelete(row, reasonCode: 'SESSION_COMPLETED');
     }
+    // Las que se quedan (las muertas) SÍ se enteran: sellar la sesión es lo
+    // que le quita a la bandeja el "Reintentar" antes de que el agente lo
+    // toque. Sin esto quedaba viva la última puerta falsa de la pantalla —
+    // reintentar contra una inspección ya cerrada re-acuña el token y muere
+    // con SESSION_GONE. Se corregía sola y la evidencia sobrevivía, pero la
+    // regla de la casa es que una acción ofrecida pueda tener éxito.
+    await db.markSessionSealed(
+      groupKey: checkoutSessionId,
+      at: DateTime.now(),
+    );
     return rows.length;
   }
 

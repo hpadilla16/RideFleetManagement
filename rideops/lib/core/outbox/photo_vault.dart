@@ -51,8 +51,13 @@ class PhotoVault {
 
   /// Saneo (QA NIT-2): el nombre viene de un payload PERSISTIDO — jamás se
   /// concatena un separador o `..` al path de la bóveda. Un nombre sucio se
-  /// trata como archivo perdido (read → null → PHOTO_LOST; delete → no-op),
-  /// nunca como acceso fuera del directorio.
+  /// trata como archivo perdido, nunca como acceso fuera del directorio, y
+  /// cada brazo tiene su respuesta segura:
+  ///  - [read] → null → PHOTO_LOST,
+  ///  - [delete] → no-op,
+  ///  - [exists] → false, que además le quita el "Reintentar" a esa fila en
+  ///    la bandeja: un `true` arrancado a un path de fuera sería una puerta
+  ///    falsa con permiso de lectura ajena.
   static bool _unsafeName(String name) =>
       name.contains('/') || name.contains('\\') || name.contains('..');
 

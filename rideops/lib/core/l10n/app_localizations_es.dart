@@ -701,7 +701,10 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get inspOutboxFull =>
-      'La bandeja está llena. Conéctate a una red para que se vacíe antes de capturar más fotos.';
+      'La bandeja está llena: no cabe otra foto. Con red, lo que espera se envía solo; lo que el servidor rechazó solo se va cuando tú decides.';
+
+  @override
+  String get inspOutboxFullAction => 'Ver la bandeja';
 
   @override
   String camAnglePill(String angle, int n) {
@@ -737,7 +740,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get camShutterStuckHint =>
-      'El disparo se quedó esperando y no volvió. La cámara se cerró; vuelve a abrirla e inténtalo otra vez. Si se repite, usa otro teléfono para este vehículo.';
+      'El disparo se quedó esperando y no volvió. Cerramos la cámara; vuelve a abrirla e inténtalo otra vez. Si se repite, usa otro teléfono para este vehículo.';
 
   @override
   String get langSpanish => 'Español';
@@ -969,7 +972,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get outboxReasonAnglesMissing =>
-      'El servidor lo rechazó: faltan los ángulos frontal y trasero. Captúralos y reintenta.';
+      'El servidor lo rechazó: faltan los ángulos frontal y trasero. Se capturan en la inspección; desde aquí este envío no se puede reenviar.';
 
   @override
   String get outboxReasonToken =>
@@ -981,7 +984,11 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get outboxReasonSessionGone =>
-      'La sesión de checkout ya no existe en el servidor.';
+      'La sesión de checkout ya no existe en el servidor, así que este envío no se puede reintentar desde aquí. Lo que sí llegó a subirse sigue en la reserva.';
+
+  @override
+  String get outboxReasonSessionSealed =>
+      'Otra pantalla cerró esta inspección antes que este envío, así que ya no se puede reenviar. La inspección quedó sellada con lo que sí llegó; esta foto sigue en el teléfono hasta que decidas.';
 
   @override
   String get outboxReasonNetwork =>
@@ -1074,17 +1081,8 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
-  String outboxFullDeadHint(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other:
-          '$count de ellos fueron rechazados y esperan tu decisión: reintenta o descártalos para liberar su espacio — la red sola no los mueve.',
-      one:
-          '1 de ellos fue rechazado y espera tu decisión: reintenta o descártalo para liberar su espacio — la red sola no lo mueve.',
-    );
-    return '$_temp0';
-  }
+  String get outboxFullDeadHint =>
+      'Los rechazados esperan tu decisión abajo: hasta que la tomes, su espacio no se libera.';
 
   @override
   String outboxFullChip(int count, int max, String size) {
@@ -1739,14 +1737,14 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get coConfirmSwapStaleWhy =>
-      'El cambio de unidad se guardó, pero la reserva no se pudo volver a leer: el vehículo de abajo puede ser el que acabas de reemplazar. Actualiza los datos antes de entregar.';
+      'El cambio de unidad se guardó, pero la reserva no se pudo volver a leer: la unidad que se muestra puede ser la que acabas de reemplazar. Actualiza los datos antes de entregar.';
 
   @override
   String get coConfirmSwapStaleLabel => 'Cambio de unidad';
 
   @override
   String get coConfirmSwapStaleValue =>
-      'Guardado en el servidor · sin releer aquí';
+      'El servidor ya lo tiene · esta pantalla no se ha actualizado';
 
   @override
   String get coConfirmCheckingPill => 'Consultando';

@@ -43,6 +43,17 @@ class OutboxScreen extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
       children: [
+        // La DECISIÓN va antes que la instrucción de red (review GD-SC-1). En
+        // la bandeja llena las dos cosas son ciertas —hay que conectarse y
+        // hay que decidir— pero solo una la puede hacer el agente ahí de pie:
+        // mandarlo primero a buscar señal, con el muro puesto por filas que
+        // la señal no mueve, es mandarlo a caminar en balde. Y el conteo de
+        // muertos vive AQUÍ y en ningún otro sitio: repetirlo dentro del
+        // bloque ámbar era el mismo número en dos colores.
+        if (dead.isNotEmpty) ...[
+          _DangerBanner(text: l10n.outboxDeadBanner(dead.length)),
+          const SizedBox(height: 10),
+        ],
         if (isFull) ...[
           _FullHeader(
             l10n: l10n,
@@ -50,16 +61,12 @@ class OutboxScreen extends ConsumerWidget {
             bytes: pendingPhotoBytes,
             // Con dead-letters dentro, "conéctate y se vaciará" sería falso:
             // una fila muerta no la mueve la red, la mueve una decisión.
-            deadCount: dead.length,
+            hasDead: dead.isNotEmpty,
           ),
           const SizedBox(height: 10),
         ],
         if (drain.running) ...[
           _DrainHeader(l10n: l10n, drain: drain, bytes: pendingPhotoBytes),
-          const SizedBox(height: 10),
-        ],
-        if (dead.isNotEmpty) ...[
-          _DangerBanner(text: l10n.outboxDeadBanner(dead.length)),
           const SizedBox(height: 10),
         ],
         // Los muertos ARRIBA (review GD): piden una decisión del humano; lo
@@ -251,17 +258,22 @@ class _LiveRow extends StatelessWidget {
               color: RideTokens.n600,
             ),
           ),
-          if (uploading) ...[
+          // TODO(M2): progreso determinista por bytes reales vía
+          // onSendProgress de Dio enchufado al drenador — hoy la barra es de
+          // ACTIVIDAD, no de avance.
+          //
+          // Con reduced-motion la barra NO se pinta (review GD-MC-6). Antes
+          // se congelaba en `value: 1`, o sea una barra llena: a quien no
+          // puede leer movimiento le afirmaba "completo" sobre un envío que
+          // apenas iba saliendo. Una barra de actividad sin movimiento no es
+          // una barra de progreso, es una mentira estática — y el estado ya
+          // lo dice el chip "Subiendo", con palabras.
+          if (uploading && !MediaQuery.disableAnimationsOf(context)) ...[
             const SizedBox(height: 6),
-            // TODO(M2): progreso determinista por bytes reales vía
-            // onSendProgress de Dio enchufado al drenador — hoy la barra es
-            // de actividad. Con reduced-motion se CONGELA (review GD): el
-            // estado ya lo dice el chip "Subiendo".
             ClipRRect(
               borderRadius: const BorderRadius.all(Radius.circular(4)),
-              child: LinearProgressIndicator(
+              child: const LinearProgressIndicator(
                 minHeight: 7,
-                value: MediaQuery.of(context).disableAnimations ? 1 : null,
                 color: RideTokens.p600,
                 backgroundColor: RideTokens.n200,
               ),
@@ -305,6 +317,13 @@ class _DeadRow extends ConsumerWidget {
         photoPath != null &&
         ref.watch(outboxPhotoPresentProvider(photoPath)).value == false;
 
+    // OTRA superficie cerró la inspección de esta sesión mientras la fila
+    // esperaba decisión (6F / frame 17F, sellado por `discardSession`).
+    // Reintentar contra una inspección cerrada re-acuña el token y muere con
+    // SESSION_GONE: se corrige solo y la evidencia sobrevive, pero es una
+    // puerta que no puede abrirse, y esta pantalla no ofrece de esas.
+    final sessionSealed = row.sessionSealedAt != null;
+
     // Motivo en humano + acción a la medida (nota 4 del mockup 7B). Codes
     // del drenador: REQUIRED_ANGLES_MISSING → abrir inspección; TOKEN_* →
     // reintentar como acción PRIMARIA (mockup 7B — es 100 % recuperable: el
@@ -341,48 +360,57 @@ class _DeadRow extends ConsumerWidget {
     // En ningún caso se traduce ni se clasifica el cuerpo del error: el
     // detalle crudo del servidor sigue intacto tras el chevron.
     //
-    // Sin binario manda la FALTA DE LA FOTO, sea cual sea el code que la
-    // mató: un TOKEN_EXPIRED sobre una foto que ya no está sigue sin poder
-    // subirse, y su "Reintentar" primario sería la puerta más falsa de todas.
-    // El copy de PHOTO_LOST ya dice exactamente esto ("La foto ya no está en
-    // este teléfono. Solo puedes descartar este envío"), así que se reusa: es
-    // el mismo hecho, llegue por el drenador o por el disco.
-    final (reason, canRetry, retryIsPrimary, canOpenInspection) = photoGone
-        ? (l10n.outboxReasonPhotoLost, false, false, false)
-        : switch (code) {
-            'REQUIRED_ANGLES_MISSING' => (
-                l10n.outboxReasonAnglesMissing,
-                false,
-                false,
-                true
-              ),
-            _ when code?.startsWith('TOKEN_') ?? false => (
-                l10n.outboxReasonToken,
-                true,
-                true,
-                false
-              ),
-            'PHOTO_LOST' => (l10n.outboxReasonPhotoLost, false, false, false),
-            'SESSION_GONE' => (
-                l10n.outboxReasonSessionGone,
-                false,
-                false,
-                false
-              ),
-            _ when code == null && status == null => (
-                l10n.outboxReasonNetwork,
-                true,
-                false,
-                false
-              ),
-            _ when status != null && _servidorNoPudo(status) => (
-                l10n.outboxReasonServerUnavailable,
-                true,
-                false,
-                false
-              ),
-            _ => (l10n.outboxReasonGeneric, true, false, false),
-          };
+    // Los dos hechos LOCALES mandan sobre el code que mató la fila, y en este
+    // orden, porque así se ordenan sus consecuencias:
+    //  1. sin binario no hay nada que subir a ninguna parte;
+    //  2. con la sesión sellada hay foto, pero ya no hay dónde ponerla.
+    // Un TOKEN_EXPIRED encima de cualquiera de los dos seguiría prometiendo
+    // un "Reintentar" primario — la puerta más falsa de todas. El copy de
+    // PHOTO_LOST ya dice exactamente el caso 1 ("La foto ya no está en este
+    // teléfono. Solo puedes descartar este envío"), así que se reusa: es el
+    // mismo hecho, llegue por el drenador o por el disco.
+    (String, bool, bool, bool) veredicto() {
+      if (photoGone) return (l10n.outboxReasonPhotoLost, false, false, false);
+      if (sessionSealed) {
+        return (l10n.outboxReasonSessionSealed, false, false, false);
+      }
+      return switch (code) {
+        'REQUIRED_ANGLES_MISSING' => (
+            l10n.outboxReasonAnglesMissing,
+            false,
+            false,
+            true
+          ),
+        _ when code?.startsWith('TOKEN_') ?? false => (
+            l10n.outboxReasonToken,
+            true,
+            true,
+            false
+          ),
+        'PHOTO_LOST' => (l10n.outboxReasonPhotoLost, false, false, false),
+        'SESSION_GONE' => (
+            l10n.outboxReasonSessionGone,
+            false,
+            false,
+            false
+          ),
+        _ when code == null && status == null => (
+            l10n.outboxReasonNetwork,
+            true,
+            false,
+            false
+          ),
+        _ when status != null && _servidorNoPudo(status) => (
+            l10n.outboxReasonServerUnavailable,
+            true,
+            false,
+            false
+          ),
+        _ => (l10n.outboxReasonGeneric, true, false, false),
+      };
+    }
+
+    final (reason, canRetry, retryIsPrimary, canOpenInspection) = veredicto();
 
     final title = isPhoto ? l10n.outboxItemPhoto(angle) : l10n.outboxItemComplete;
     final lastTime = TimeOfDay.fromDateTime(row.updatedAt.toLocal());
@@ -811,21 +839,25 @@ class _FullHeader extends StatelessWidget {
     required this.l10n,
     required this.count,
     required this.bytes,
-    required this.deadCount,
+    required this.hasDead,
   });
 
   final AppLocalizations l10n;
   final int count;
   final int bytes;
 
-  /// Cuántas de las filas que llenan la bandeja son dead-letters.
+  /// ¿Alguna de las filas que llenan la bandeja es un dead-letter?
   ///
   /// Desde que el binario de un dead-letter SE CONSERVA (esperando decisión
   /// del humano), esas filas ocupan cupo y bytes. Sin este dato el cuerpo
   /// diría solo "conéctate a una red para que se vacíe" — y la red no mueve
   /// una fila muerta: la mueve una decisión. Decir la mitad de la salida es
   /// mandar al empleado a caminar hacia la ventana otra vez.
-  final int deadCount;
+  ///
+  /// Es un bool y no un conteo (review GD-SC-1/SC-2): el número ya lo dice el
+  /// banner rojo de arriba, y decirlo otra vez aquí en ámbar era el mismo
+  /// dato pidiendo atención dos veces en dos colores.
+  final bool hasDead;
 
   @override
   Widget build(BuildContext context) {
@@ -859,10 +891,10 @@ class _FullHeader extends StatelessWidget {
               height: 1.45,
             ),
           ),
-          if (deadCount > 0) ...[
+          if (hasDead) ...[
             const SizedBox(height: 6),
             Text(
-              l10n.outboxFullDeadHint(deadCount),
+              l10n.outboxFullDeadHint,
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: 13,

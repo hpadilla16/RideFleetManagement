@@ -380,6 +380,9 @@ void main() {
     expect(find.text('Could not open the camera'), findsNothing,
         reason: 'la cámara SÍ abrió: ese título mandaría a revisar un permiso '
             'que el agente ya tiene');
+    // Voz ACTIVA (review GD-SC-7): la app dice lo que hizo. "La cámara se
+    // cerró" deja al agente preguntándose si se rompió algo.
+    expect(find.textContaining('We closed the camera'), findsOneWidget);
     // Salidas reales, las dos.
     expect(find.text('Retry'), findsOneWidget);
     expect(find.text('Close'), findsWidgets);
@@ -522,5 +525,17 @@ void main() {
     // No se abrió la cámara: seguimos en el grid y el aviso está en pantalla.
     expect(camera.sessions, isEmpty);
     expect(find.text('Checkout inspection'), findsOneWidget);
+
+    // GD-MC-5: este es EL muro —el agente está junto al coche y la cámara no
+    // abre—, así que el aviso no puede prometer solo señal. Con dead-letters
+    // dentro, "conéctate y se vacía" manda a caminar hacia la ventana por
+    // filas que la red no va a mover nunca.
+    expect(
+      find.textContaining('what the server rejected only leaves when you '
+          'decide'),
+      findsWidgets,
+    );
+    // Y hay salida: la bandeja es la única pantalla donde se decide.
+    expect(find.text('Open the outbox'), findsWidgets);
   });
 }
