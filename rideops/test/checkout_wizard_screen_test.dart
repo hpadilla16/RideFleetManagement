@@ -729,7 +729,13 @@ void main() {
 
       expect(find.textContaining('Departs'), findsOneWidget);
       expect(find.textContaining('Pre-check-in done'), findsOneWidget);
-      expect(find.textContaining('Odometer'), findsOneWidget);
+      // Y la unidad del odómetro del HEADER, que no tenía ninguna aserción:
+      // decía "km" mientras la tarjeta del paso 1 del MISMO wizard decía
+      // "mi", con el mismo entero del mismo `Vehicle.mileage`. El header
+      // completo se pinta justo en los pasos de pago/firma/cierre, así que el
+      // agente veía las dos unidades con segundos de diferencia.
+      expect(find.textContaining('Odometer 48,190 mi'), findsOneWidget);
+      expect(find.textContaining('km'), findsNothing);
       // El número vive SOLO en el wizbar.
       expect(find.textContaining('R-20260816-0042'), findsOneWidget);
     });

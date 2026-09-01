@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,6 +19,7 @@ import 'package:rideops/core/session/session_controller.dart';
 import 'package:rideops/core/session/session_state.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
 import 'package:rideops/core/widgets/ride_buttons.dart';
+import 'package:rideops/features/checkout/application/checkout_wizard_controller.dart';
 import 'package:rideops/features/checkout/presentation/checkout_wizard_screen.dart';
 import 'package:rideops/features/checkout/presentation/widgets/vehicle_swap_sheet.dart';
 import 'package:rideops/features/checkout/presentation/widgets/verify_cards.dart';
@@ -49,12 +51,17 @@ void main() {
         logger: CapturingEventLogger(),
       );
 
+  /// [settle] a false para los frames con un spinner VIVO: un
+  /// `CircularProgressIndicator` anima indefinidamente y `pumpAndSettle`
+  /// expira esperando un reposo que nunca llega (misma razón por la que la
+  /// prueba GD-MC-5 usa `pump()` a secas).
   Future<void> pumpConfirming(
     WidgetTester tester, {
     required FakeCheckoutApi api,
     required FakeReservationsApi reservations,
     required FakeNetworkStatus network,
     required CapturingEventLogger logger,
+    bool settle = true,
   }) async {
     final router = GoRouter(
       initialLocation: AppRoutes.checkout(kReservationId),
@@ -109,12 +116,26 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle();
+    if (settle) {
+      await tester.pumpAndSettle();
+    } else {
+      await tester.pump();
+      await tester.pump();
+    }
     // M2-H6: entrar a media sesión muestra primero la antesala de enganche
     // (23A). Estos tests prueban el CUERPO del paso, así que la cruzan; la
     // antesala tiene su propia suite (checkout_join_test.dart).
     await skipJoinGate(tester);
   }
+
+  /// El contenedor VIVO de la app montada — mismo patrón que
+  /// checkout_inspection_test.dart:123. MC-2 lo necesita porque su escenario
+  /// (datos completos, re-lectura que falla) no tiene botón que tocar: con la
+  /// tarjeta verde el pie no ofrece nada, que es justo el punto.
+  ProviderContainer container(WidgetTester tester) =>
+      ProviderScope.containerOf(
+        tester.element(find.byType(CheckoutWizardScreen)),
+      );
 
   /// El cuerpo del paso es un scroll: en el lienzo del test (600 px de alto)
   /// el switch del seguro cae bajo la línea de flotación, igual que en un
@@ -151,7 +172,9 @@ void main() {
     expect(find.text('+52 998 123 4567'), findsOneWidget);
     // El estado del vehículo se afirma solo porque el servidor dice AVAILABLE.
     expect(find.text('Available'), findsOneWidget);
-    expect(find.textContaining('48,190 km'), findsOneWidget);
+    // Millas, no kilómetros: es lo que factura el backend (computeExcessMileage
+    // cobra por milla) y lo que rotula el mostrador web.
+    expect(find.textContaining('48,190 mi'), findsOneWidget);
     // El switch dice su estado EN PALABRAS, no solo con color.
     await scrollBody(tester, find.text('Customer declines insurance'));
     expect(find.text('Customer declines insurance'), findsOneWidget);
@@ -913,8 +936,195 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('el paso se dibuja aunque display-data no responda: sin contexto '
-      'no se inventan datos, se nombran como faltantes', (tester) async {
+  // ── el dato inalcanzable NO es un dato faltante (hallazgo e2e, MAJOR) ──
+  //
+  // La corrida contra backend real pegó aquí: display-data devolvía 404 (el id
+  // de la reserva dev colisionaba con la ruta de `reservationNumber`, arreglado
+  // en 5ff8422e) y esta pantalla decía «Consultado ahora: el servidor sigue sin
+  // el nombre, la licencia y el teléfono» — con el servidor teniendo los tres —
+  // y bloqueaba la entrega. Cada aserción de aquí abajo cita el TEXTO, porque
+  // el defecto era exactamente el texto.
+
+  testWidgets('display-data 404: la pantalla NO acusa al servidor de no tener '
+      'los datos — dice que no pudo consultar, cita la negativa cruda y ofrece '
+      'reintentar', (tester) async {
+    final f = fakes();
+    f.reservations.failWith = displayDataDenial();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    // LO QUE NO PUEDE APARECER. Los tres textos son afirmaciones sobre lo que
+    // el servidor tiene, y aquí no se sabe nada de eso.
+    expect(
+      find.textContaining("the server still doesn't have"),
+      findsNothing,
+      reason: 'la petición falló: el servidor no dijo que le faltara nada',
+    );
+    expect(
+      find.textContaining('are missing'),
+      findsNothing,
+      reason: 'ese copy nombra campos faltantes; no hay respuesta que nombrar',
+    );
+    expect(find.text('Not captured'), findsNothing);
+    expect(find.text('Missing data'), findsNothing);
+
+    // LO QUE SÍ. Un veredicto de ignorancia, en palabras, no solo en color.
+    expect(find.text('Not checked'), findsWidgets);
+    expect(find.text('Could not be checked'), findsWidgets);
+    expect(
+      find.textContaining('identity cannot be confirmed'),
+      findsOneWidget,
+      reason: 'el bloqueo cambia de naturaleza: no falta un dato, falta la '
+          'consulta',
+    );
+    // Y para AHÍ (review MC-3b). La oración "esto no dice nada sobre qué datos
+    // tenga el servidor" era defensa técnica: cuatro renglones centrados a
+    // 12.5 px bajo un botón muerto. Que no se acusa a nadie ya lo dicen la
+    // pastilla ámbar y el valor de cada fila.
+    expect(
+      find.textContaining('says nothing about what data'),
+      findsNothing,
+      reason: 'el no-acusar lo hacen la pastilla y el ámbar, no un párrafo',
+    );
+    // La negativa del servidor, literal (DoD #5) — sin diagnóstico inventado
+    // y sin envoltorio: la CLAVE dice qué es la fila, el VALOR es el cuerpo
+    // del servidor tal cual.
+    expect(find.text('Server response'), findsOneWidget);
+    expect(find.text('Reservation not found'), findsOneWidget);
+    // Y una acción que PUEDE tener éxito, no una puerta falsa.
+    expect(find.text('Retry the lookup'), findsOneWidget);
+    expect(
+      find.text('Refresh customer data'),
+      findsNothing,
+      reason: 'ese botón promete refrescar DATOS; aquí se reintenta la consulta',
+    );
+
+    final cta = tester.widget<RidePrimaryButton>(
+      find.widgetWithText(RidePrimaryButton, 'Continue to T&C'),
+    );
+    expect(cta.onPressed, isNull, reason: 'sin consulta no se confirma nada');
+
+    // Telemetría del defecto: cuántas entregas se quedan sin poder confirmarse
+    // por una consulta caída (y con qué status), no por datos faltantes.
+    expect(
+      f.logger.events
+          .where((e) => e.$1 == 'checkout.context_unreachable')
+          .map((e) => e.$2['status']),
+      contains('404'),
+    );
+  });
+
+  testWidgets('el reintento con el backend ya sano deja la pantalla NORMAL: '
+      'datos reales, verde y CTA vivo', (tester) async {
+    final f = fakes();
+    f.reservations.failWith = displayDataDenial();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+    expect(find.text('Retry the lookup'), findsOneWidget);
+
+    // El backend vuelve en sí entre un toque y el siguiente.
+    f.reservations.failWith = null;
+    await tester.tap(find.text('Retry the lookup'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('María González'), findsOneWidget);
+    expect(find.textContaining('B-4482913'), findsOneWidget);
+    expect(find.text('+52 998 123 4567'), findsOneWidget);
+    expect(find.text('Verified'), findsOneWidget);
+    expect(find.text('Could not be checked'), findsNothing);
+    expect(find.text('Retry the lookup'), findsNothing);
+    expect(
+      find.text('Server response'),
+      findsNothing,
+      reason: 'la negativa vieja no puede sobrevivir a una consulta buena',
+    );
+    final cta = tester.widget<RidePrimaryButton>(
+      find.widgetWithText(RidePrimaryButton, 'Continue to T&C'),
+    );
+    expect(cta.onPressed, isNotNull);
+    expect(
+      f.logger.events
+          .where((e) => e.$1 == 'checkout.context_retry')
+          .map((e) => e.$2['result']),
+      ['answered'],
+    );
+  });
+
+  testWidgets('el reintento que vuelve a fallar acusa la CONSULTA, jamás los '
+      'datos', (tester) async {
+    final f = fakes();
+    f.reservations.failWith = displayDataDenial(
+      status: 500,
+      serverError: 'Internal Server Error',
+    );
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    await tester.tap(find.text('Retry the lookup'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining("still isn't getting through"),
+      findsOneWidget,
+      reason: 'el acuse habla del intento; el de campos faltantes sería falso',
+    );
+    expect(find.textContaining("the server still doesn't have"), findsNothing);
+    // El botón sigue vivo: reintentar OTRA vez es legítimo — la consulta puede
+    // funcionar en el siguiente toque, a diferencia de un FORWARD ya negado.
+    expect(find.text('Retry the lookup'), findsOneWidget);
+    expect(
+      f.logger.events
+          .where((e) => e.$1 == 'checkout.context_retry')
+          .map((e) => e.$2['result']),
+      ['unreachable'],
+    );
+  });
+
+  testWidgets('la petición que muere SIN respuesta no inventa un cuerpo: mismo '
+      'veredicto, sin renglón de cita', (tester) async {
+    final f = fakes();
+    f.reservations.failWith = displayDataNetworkDeath();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    expect(find.text('Could not be checked'), findsWidgets);
+    expect(find.textContaining('identity cannot be confirmed'), findsOneWidget);
+    expect(
+      find.text('Server response'),
+      findsNothing,
+      reason: 'no hubo respuesta: citar una sería inventarla',
+    );
+    expect(find.text('Retry the lookup'), findsOneWidget);
+    expect(
+      f.logger.events
+          .where((e) => e.$1 == 'checkout.context_unreachable')
+          .map((e) => e.$2['status']),
+      contains('network'),
+    );
+  });
+
+  testWidgets('un fallo SIN ApiError (parseo) cae en el mismo veredicto y '
+      'tampoco acusa', (tester) async {
     final f = fakes();
     await pumpConfirming(
       tester,
@@ -925,10 +1135,284 @@ void main() {
     );
 
     expect(find.byType(VerifyCard), findsWidgets);
-    expect(find.text('Not captured'), findsWidgets);
+    expect(find.text('Could not be checked'), findsWidgets);
+    expect(find.text('Not captured'), findsNothing);
     final cta = tester.widget<RidePrimaryButton>(
       find.widgetWithText(RidePrimaryButton, 'Continue to T&C'),
     );
     expect(cta.onPressed, isNull, reason: 'sin datos no se afirma verificado');
+  });
+
+  testWidgets('9B sigue intacto: cuando el servidor SÍ contesta y el campo '
+      'viene vacío, ahí sí se nombra', (tester) async {
+    final f = fakes();
+    f.reservations.patchDisplayData = (raw) {
+      final reservation = raw['reservation'] as Map<String, dynamic>;
+      (reservation['customer'] as Map<String, dynamic>)['phone'] = null;
+      (reservation['rentalAgreement'] as Map<String, dynamic>)['customerPhone'] =
+          null;
+      return raw;
+    };
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    expect(find.text('Not captured'), findsOneWidget);
+    expect(find.text('Missing data'), findsOneWidget);
+    expect(find.textContaining('the phone'), findsOneWidget);
+    expect(find.text('Could not be checked'), findsNothing);
+    expect(find.text('Retry the lookup'), findsNothing);
+    expect(find.text('Refresh customer data'), findsOneWidget);
+    expect(
+      f.logger.has('checkout.context_unreachable'),
+      isFalse,
+      reason: 'la consulta llegó perfectamente: no hay nada que reportar',
+    );
+  });
+
+  testWidgets('MC-4 — la PRIMERA respuesta tras un dato inalcanzable no puede '
+      'decir que el servidor "sigue" sin nada: no hay consulta anterior con '
+      'la que comparar', (tester) async {
+    final f = fakes();
+    f.reservations.failWith = displayDataDenial();
+    // Cuando por fin conteste, contestará sin teléfono.
+    f.reservations.patchDisplayData = (raw) {
+      final reservation = raw['reservation'] as Map<String, dynamic>;
+      (reservation['customer'] as Map<String, dynamic>)['phone'] = null;
+      (reservation['rentalAgreement'] as Map<String, dynamic>)['customerPhone'] =
+          null;
+      return raw;
+    };
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+
+    f.reservations.failWith = null;
+    await tester.tap(find.text('Retry the lookup'));
+    await tester.pumpAndSettle();
+
+    // Llegó la primera respuesta y sí le falta el teléfono: eso se nombra.
+    expect(find.text('Not captured'), findsOneWidget);
+    expect(find.textContaining('the phone'), findsOneWidget);
+    // Pero NO como un "sigue sin": esta es la primera respuesta que llega.
+    expect(
+      find.textContaining("still doesn't have"),
+      findsNothing,
+      reason: 'no hay ninguna consulta anterior que dijera lo mismo',
+    );
+    expect(find.textContaining('are missing'), findsOneWidget);
+  });
+
+  testWidgets('MC-2 — datos buenos con la consulta de ahora caída: NO se '
+      'borran ni se quedan en verde; la pastilla pasa a decir su edad y el '
+      'CTA sigue vivo', (tester) async {
+    final f = fakes();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+    );
+    expect(find.text('Verified'), findsOneWidget);
+
+    // display-data se cae mientras el poll de la SESIÓN sigue perfecto: el
+    // shell no pinta ninguna vejez porque `offline` sale del error de sesión.
+    // La re-lectura se empuja por el controller —la misma que dispara el
+    // swap— porque con la tarjeta completa el pie no ofrece ningún botón.
+    f.reservations.failWith = displayDataDenial(status: 500);
+    await container(tester)
+        .read(checkoutWizardProvider(kReservationId).notifier)
+        .retryContext();
+    await tester.pumpAndSettle();
+
+    // El dato NO se borra (regla 8D)…
+    expect(find.text('María González'), findsOneWidget);
+    expect(find.text('+52 998 123 4567'), findsOneWidget);
+    expect(find.text('Could not be checked'), findsNothing);
+    // …pero deja de afirmarse comprobado, y dice CUÁNTO hace que lo está.
+    expect(
+      find.text('Verified'),
+      findsNothing,
+      reason: 'ese pill afirma que esto se acaba de comprobar',
+    );
+    expect(find.textContaining('seen'), findsOneWidget);
+    expect(find.textContaining('ago'), findsOneWidget);
+    // Y no se bloquea: un refresco de fondo fallido no puede detener una
+    // entrega sobre datos que el servidor sí dio.
+    final cta = tester.widget<RidePrimaryButton>(
+      find.widgetWithText(RidePrimaryButton, 'Continue to T&C'),
+    );
+    expect(cta.onPressed, isNotNull);
+    expect(
+      find.text('Server response'),
+      findsNothing,
+      reason: 'con la tarjeta utilizable no se cita un 500 junto al cliente',
+    );
+  });
+
+  testWidgets('SC-1 — mientras la consulta viaja el progreso lo lleva el '
+      'PRIMARIO: el slot secundario no existe, así que no hay nada que '
+      'colapsar cuando cae el veredicto', (tester) async {
+    final f = fakes();
+    f.reservations.failWith = displayDataDenial();
+    // display-data se queda EN VUELO: es el frame que esta lámina existe para
+    // hacer expresable, y sin la compuerta la consulta resuelve en el mismo
+    // microtask y nunca se ve.
+    f.reservations.displayGate = Completer<void>();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+      settle: false,
+    );
+    await tester.pump();
+
+    expect(
+      find.textContaining("Checking the customer's record"),
+      findsOneWidget,
+    );
+    // El progreso está EN EL PRIMARIO: altura fija, blanco sobre el gradiente
+    // a opacidad plena. En el ghost deshabilitado iba al 55 %
+    // (ride_buttons.dart:124) — ~3.5:1 para el único elemento que dice "estoy
+    // trabajando", en un patio con sol.
+    final primary = tester.widget<RidePrimaryButton>(
+      find.byType(RidePrimaryButton),
+    );
+    expect(primary.loading, isTrue);
+    expect(primary.onPressed, isNull);
+    expect(find.text('Asking the server…'), findsOneWidget);
+    expect(
+      find.byType(RideGhostButton),
+      findsNothing,
+      reason: 'reintentar algo que ya está en vuelo es una puerta falsa',
+    );
+    final primaryBefore = tester.getRect(find.byType(RidePrimaryButton));
+
+    f.reservations.displayGate!.complete();
+    await tester.pump();
+    await tester.pump();
+
+    // Camino raro (checking → unreachable): aparece el reintento.
+    expect(find.text('Retry the lookup'), findsOneWidget);
+    expect(
+      tester.getRect(find.byType(RidePrimaryButton)).height,
+      primaryBefore.height,
+    );
+  });
+
+  testWidgets('SC-1-bis — el camino NORMAL (consultando → datos completos), '
+      'que es el que ocurre en cada entrega: el pie no encoge porque el slot '
+      'secundario nunca llegó a existir', (tester) async {
+    final f = fakes();
+    // Sin `failWith`: la consulta va a responder bien y completa. Solo se
+    // retiene para poder mirar el frame de "consultando".
+    f.reservations.displayGate = Completer<void>();
+    await pumpConfirming(
+      tester,
+      api: f.api,
+      reservations: f.reservations,
+      network: f.network,
+      logger: f.logger,
+      settle: false,
+    );
+    await tester.pump();
+
+    expect(find.text('Checking…'), findsWidgets);
+    expect(
+      find.byType(RideGhostButton),
+      findsNothing,
+      reason: 'un ghost aquí es un slot que DESAPARECE al llegar la respuesta',
+    );
+    final primaryBefore = tester.getRect(find.byType(RidePrimaryButton));
+
+    f.reservations.displayGate!.complete();
+    await tester.pumpAndSettle();
+
+    // Llegó todo: verde, CTA vivo y ningún secundario (no hay nada que
+    // consultar).
+    expect(find.text('Verified'), findsOneWidget);
+    expect(find.byType(RideGhostButton), findsNothing);
+    final cta = tester.widget<RidePrimaryButton>(
+      find.byType(RidePrimaryButton),
+    );
+    expect(cta.loading, isFalse);
+    expect(cta.onPressed, isNotNull);
+
+    // Y lo que este caso existe para medir: el CTA no da el salto de un botón
+    // entero. Con el progreso en el slot secundario, el ghost desaparecía al
+    // llegar la respuesta y el primario BAJABA 57 px (48 del botón + 9 de
+    // gap) con el pulgar ya en camino — y a diferencia del caso de arriba,
+    // eso pasaba en CADA entrega, no en el camino raro.
+    expect(find.text('Continue to T&C'), findsOneWidget);
+    final moved =
+        (tester.getRect(find.byType(RidePrimaryButton)).top - primaryBefore.top)
+            .abs();
+    expect(
+      moved,
+      lessThan(48),
+      reason: 'un desplazamiento de 48+ px ES el slot secundario colapsando',
+    );
+    // El resto que sí se mueve (~18 px, y hacia ARRIBA) es el `why` pasando de
+    // un renglón a dos: `coTransitionWhy` es más largo que el de "consultando".
+    // Es comportamiento del dock desde H1, igual en todos los pasos, y va en
+    // dirección contraria al pulgar — el dedo aterriza en el subtexto, no
+    // sobre otro botón. Se deja medido para que un cambio de copy que lo
+    // convierta en un salto de verdad no pase inadvertido.
+    expect(moved, lessThanOrEqualTo(20));
+  });
+
+  testWidgets('SHOULD — la vejez tiene horizonte: pasado un ciclo de handoff '
+      'completo el aviso deja de decir "confírmalo contra la licencia" y manda '
+      'a re-consultar antes de firmar', (tester) async {
+    final f = fakes();
+    // Reloj propio: el umbral son los 15 min de HANDOFF_TOKEN_TTL_MIN y no se
+    // esperan de verdad.
+    final start = DateTime.utc(2026, 9, 1, 10);
+    var now = start;
+    await withClock(Clock(() => now), () async {
+      await pumpConfirming(
+        tester,
+        api: f.api,
+        reservations: f.reservations,
+        network: f.network,
+        logger: f.logger,
+      );
+
+      // Recién caída la consulta: la comprobación es la que el agente ya hace.
+      f.reservations.failWith = displayDataDenial(status: 500);
+      now = start.add(const Duration(minutes: 2));
+      await container(tester)
+          .read(checkoutWizardProvider(kReservationId).notifier)
+          .retryContext();
+      await tester.pumpAndSettle();
+      expect(find.textContaining('check it against the license'), findsOneWidget);
+      expect(find.textContaining('Check again before signing'), findsNothing);
+
+      // Pasado el horizonte, lo que pudo cambiar es el CONTRATO, y eso una
+      // licencia en la mano no lo detecta.
+      now = start.add(const Duration(minutes: 40));
+      await container(tester)
+          .read(checkoutWizardProvider(kReservationId).notifier)
+          .retryContext();
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Check again before signing'), findsOneWidget);
+      expect(find.textContaining('check it against the license'), findsNothing);
+      // Con la EDAD dentro, no el umbral: es el dato con el que se decide.
+      // Sale en los DOS sitios que hablan de vejez, la pastilla y el why.
+      expect(find.textContaining('40 min'), findsNWidgets(2));
+      // Y apunta a un botón que EXISTE.
+      expect(find.text('Refresh customer data'), findsOneWidget);
+    });
   });
 }

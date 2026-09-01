@@ -1,3 +1,4 @@
+import 'package:clock/clock.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -5,11 +6,14 @@ import 'package:intl/intl.dart';
 import '../../../../core/api/dto/checkout_session.dart';
 import '../../../../core/api/enums.dart';
 import '../../../../core/l10n/app_localizations.dart';
+import '../../../../core/l10n/odometer_format.dart';
+import '../../../../core/telemetry/event_logger.dart';
 import '../../../../core/theme/ride_tokens.dart';
 import '../../../../core/widgets/ride_buttons.dart';
 import '../../application/checkout_wizard_controller.dart';
 import '../../application/checkout_wizard_state.dart';
 import '../../domain/checkout_confirm.dart';
+import '../checkout_labels.dart';
 import '../widgets/transition_button.dart';
 import '../widgets/vehicle_swap_sheet.dart';
 import '../widgets/verify_cards.dart';
@@ -46,15 +50,23 @@ class ConfirmingStep extends ConsumerStatefulWidget {
 class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
   final _scroll = ScrollController();
 
-  /// Hay una re-consulta del agente en vuelo ("Actualizar datos del cliente").
-  /// Vive aquí y no en el controller porque es una acción de PANTALLA: el
-  /// wizard no distingue este refresh de los del poll.
+  /// Hay una re-consulta del agente en vuelo ("Actualizar datos del cliente"
+  /// o "Reintentar la consulta"). Vive aquí y no en el controller porque es
+  /// una acción de PANTALLA: el wizard no distingue este refresh de los del
+  /// poll.
   bool _rechecking = false;
 
-  /// Ya terminó una re-consulta y el servidor SIGUE sin los datos. Es el acuse
-  /// que faltaba (review GD-MC-5): antes el botón disparaba dos peticiones y no
-  /// mostraba absolutamente nada, así que el agente lo volvía a tocar.
-  bool _recheckedStill = false;
+  /// Veredicto DESDE EL QUE se lanzó la última re-consulta manual, o null si
+  /// el agente todavía no ha tocado el botón.
+  ///
+  /// Guarda el veredicto y no un bool porque el acuse depende de los DOS
+  /// extremos, no solo del actual (review MC-4). "Consultado ahora: el
+  /// servidor SIGUE sin la licencia" solo es cierto si ya hubo una respuesta
+  /// anterior que tampoco la traía. Saliendo de `unreachable`, lo que acaba de
+  /// llegar es la PRIMERA respuesta: no hay ningún "sigue" que sostener, y
+  /// afirmarlo sería la misma clase de mentira que este cambio vino a matar,
+  /// una rama más adentro.
+  ContextVerdict? _recheckedFrom;
 
   @override
   void dispose() {
@@ -62,26 +74,42 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
     super.dispose();
   }
 
+  /// Vuelve a preguntarle al servidor. Es la MISMA acción para los dos
+  /// bloqueos —datos faltantes y consulta caída— porque la salida honesta de
+  /// ambos es idéntica: RideOps no captura datos de cliente (ADR-1), así que
+  /// lo único que puede hacer es volver a consultar.
   Future<void> _recheck() async {
     if (_rechecking) return;
     setState(() {
       _rechecking = true;
-      _recheckedStill = false;
+      _recheckedFrom = null;
     });
     final controller =
         ref.read(checkoutWizardProvider(widget.reservationId).notifier);
+    // De qué bloqueo salió el toque. Sirve para dos cosas: el evento mide si
+    // el reintento del dato inalcanzable sirve de algo en el patio, y el acuse
+    // sabe si puede decir "sigue".
+    final from = ref
+        .read(checkoutWizardProvider(widget.reservationId))
+        .contextVerdict;
     try {
       // Las dos lecturas: la sesión (por si otra superficie avanzó mientras
       // tanto) y display-data, que es donde viven los datos del cliente.
       await controller.refresh();
-      await controller.reloadContext();
+      final verdict = await controller.retryContext();
+      if (from == ContextVerdict.unreachable && mounted) {
+        ref.read(eventLoggerProvider).log(
+          CheckoutEvents.contextRetry,
+          data: {'result': verdict.name},
+        );
+      }
     } finally {
       // El acuse se enciende SIEMPRE que la consulta terminó; si los datos ya
       // llegaron, el bloqueo entero desaparece y con él este texto.
       if (mounted) {
         setState(() {
           _rechecking = false;
-          _recheckedStill = true;
+          _recheckedFrom = from;
         });
       }
     }
@@ -113,6 +141,7 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
 
     final ctx = state.context;
     final check = customerCheck(
+      verdict: state.contextVerdict,
       customer: ctx?.customer,
       agreement: ctx?.agreement,
     );
@@ -123,8 +152,20 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
 
     final customerCard = _CustomerCard(
       check: check,
+      // Sin consulta tampoco se sabe si hubo pre-checkin: `precheckinDone`
+      // es otro campo de display-data y su default `false` diría "Pendiente"
+      // sobre un dato que nadie leyó.
       precheckinDone: ctx?.precheckinDone ?? false,
       precheckinAt: ctx?.precheckinAt,
+      // El cuerpo CRUDO de la negativa (DoD #5). Vacío o ausente ⇒ la tarjeta
+      // no inventa diagnóstico y se queda con su copy traducido.
+      serverMessage: check.unreachable ? _serverMessage(state) : null,
+      // Regla 8D: con datos viejos en pantalla, la EDAD es parte del dato. Se
+      // calcula aquí y no en el shell porque la vejez del shell cuelga de
+      // `offline` —el error de la SESIÓN— y display-data se cae por su cuenta.
+      staleAge: check.stale && state.contextFetchedAt != null
+          ? clock.now().difference(state.contextFetchedAt!)
+          : null,
     );
 
     final cards = <Widget>[
@@ -180,28 +221,29 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
                   // nunca por inferencia sobre el catálogo (ADR-4).
                   toStep: CheckoutStep.tcPending,
                   label: l10n.coConfirmCta,
-                  // Tras una re-consulta que no trajo nada, el subtexto ES el
-                  // acuse: "consultado ahora, el servidor sigue sin X". Sigue
-                  // siendo non-null, así que el CTA sigue bloqueado con causa.
-                  blockedWhy: check.complete
-                      ? null
-                      : (_recheckedStill
-                          ? l10n.coConfirmRecheckedStill(
-                              _missingLabel(l10n, check))
-                          : l10n.coConfirmBlockedWhy(
-                              _missingLabel(l10n, check))),
+                  // El progreso vive en el PRIMARIO. Ocuparlo con el ghost
+                  // resolvía el salto del camino raro (checking→unreachable) y
+                  // lo creaba en el normal: en cada entrega el ghost aparecía y
+                  // se iba, y el pie encogía 57 px con el pulgar ya en camino.
+                  loading: check.checking,
+                  loadingLabel: l10n.coConfirmRecheckPending,
+                  // Con datos viejos el CTA sigue VIVO y el subtexto explica
+                  // qué se está mirando. `why` y `blockedWhy` no son dos
+                  // formas de escribir lo mismo: el segundo APAGA el botón
+                  // (transition_button.dart:78), y apagarlo aquí sería
+                  // detener una entrega por un refresco de fondo fallido.
+                  why: _staleWhy(l10n, check, state),
+                  blockedWhy: _blockedWhy(l10n, check),
                   // Bloquear sin salida sería dejar al agente encerrado: la
                   // captura de datos del cliente NO vive en esta app (ADR-1,
                   // se queda en el mostrador web / pre-checkin), así que la
                   // salida honesta es volver a preguntarle al servidor.
-                  secondary: check.complete
-                      ? null
-                      : RideGhostButton(
-                          label: l10n.coConfirmRecheck,
-                          loading: _rechecking,
-                          loadingLabel: l10n.coConfirmRecheckPending,
-                          onPressed: _recheck,
-                        ),
+                  //
+                  // Mientras la consulta VIAJA el botón está pero NO se puede
+                  // tocar (review SC-1): reintentar algo en vuelo es una
+                  // puerta falsa, y quitarlo del todo mueve el pie justo
+                  // cuando el veredicto cae — con el pulgar ya en camino.
+                  secondary: _secondary(l10n, check),
                 ),
         ),
       ],
@@ -210,6 +252,104 @@ class _ConfirmingStepState extends ConsumerState<ConfirmingStep> {
 
   Future<void> _openSwapSheet(BuildContext context, WidgetRef ref) =>
       showVehicleSwapSheet(context, reservationId: widget.reservationId);
+
+  /// El subtexto del CTA cuando hay datos viejos en pantalla.
+  ///
+  /// Dos textos, no uno, porque a distinta antigüedad la pregunta es distinta
+  /// (ver `kStaleCustomerDataHorizon`): recién caída la consulta, lo que toca
+  /// es lo que el agente ya hace —confrontar con la licencia—; pasado un ciclo
+  /// de handoff completo, la licencia ya no alcanza, porque lo que pudo
+  /// cambiar es el CONTRATO, y eso se resuelve volviendo a consultar. El
+  /// secundario "Actualizar datos del cliente" sigue ahí en las dos ramas, así
+  /// que el texto escalado apunta a un botón que existe.
+  String? _staleWhy(
+    AppLocalizations l10n,
+    ConfirmCustomerCheck check,
+    CheckoutWizardState state,
+  ) {
+    if (!check.stale) return null;
+    final age = state.contextFetchedAt == null
+        ? null
+        : clock.now().difference(state.contextFetchedAt!);
+    if (!beyondStaleHorizon(age)) return l10n.coConfirmStaleWhy;
+    // La edad va en el texto, no el umbral: "hace 40 min" le dice al agente
+    // cuánto tiempo tuvo el mostrador, que es el dato con el que decide.
+    return l10n.coConfirmStaleOldWhy(checkoutAgeLabel(l10n, age!));
+  }
+
+  /// El cuerpo crudo de la negativa de display-data, o null si no hay ninguno
+  /// que citar (la petición murió sin respuesta, o el servidor mandó un cuerpo
+  /// vacío). Null ⇒ la tarjeta no escribe un renglón hueco.
+  String? _serverMessage(CheckoutWizardState state) {
+    final message = state.contextError?.message.trim() ?? '';
+    return message.isEmpty ? null : message;
+  }
+
+  /// La acción de apoyo del pie, o null cuando no hay nada que ofrecer.
+  ///
+  /// Es SIEMPRE la misma llamada —volver a preguntarle al servidor— porque la
+  /// salida honesta de los tres bloqueos es idéntica: RideOps no captura datos
+  /// de cliente (ADR-1). Lo que cambia es la etiqueta y si se puede tocar.
+  Widget? _secondary(AppLocalizations l10n, ConfirmCustomerCheck check) {
+    // Mientras la consulta VIAJA el slot no existe, que era la decisión
+    // original contra las puertas falsas: reintentar algo en vuelo no es una
+    // acción. El progreso lo lleva el primario, así que ya no hace falta
+    // ocupar este hueco para evitar que el pie salte — y ocuparlo tenía el
+    // precio de un ghost deshabilitado al 55 % de opacidad
+    // (ride_buttons.dart:124), o sea ~3.5:1 para el ÚNICO elemento que dice
+    // "estoy trabajando", bajo el sol.
+    if (check.checking) return null;
+    // Datos completos y FRESCOS: no hay nada que consultar.
+    if (check.complete && !check.stale) return null;
+    return RideGhostButton(
+      // "Actualizar datos del cliente" promete refrescar DATOS; sin ninguna
+      // consulta que haya llegado, lo que se reintenta es la CONSULTA.
+      label:
+          check.hasAnswer ? l10n.coConfirmRecheck : l10n.coConfirmRetryLookup,
+      loading: _rechecking,
+      loadingLabel: l10n.coConfirmRecheckPending,
+      onPressed: _recheck,
+    );
+  }
+
+  /// La causa del bloqueo, y **de qué naturaleza es**.
+  ///
+  /// Las cuatro ramas son cuatro historias distintas y esa distinción es el
+  /// arreglo entero:
+  ///  - `checking`: nadie ha contestado todavía ⇒ no se afirma nada.
+  ///  - `unreachable`: la consulta no llegó ⇒ se bloquea porque sin ella no
+  ///    hay identidad que confirmar, NO porque falten datos. El texto no dice
+  ///    qué tiene el servidor porque no se sabe.
+  ///  - `stale`: hay datos buenos pero viejos ⇒ NO se bloquea (bloquear por un
+  ///    refresco fallido sería una puerta falsa nueva); se pide confrontarlos.
+  ///  - `answered`: el servidor contestó ⇒ y solo aquí se pueden nombrar los
+  ///    campos que faltan.
+  String? _blockedWhy(AppLocalizations l10n, ConfirmCustomerCheck check) =>
+      switch (check.verdict) {
+        ContextVerdict.checking => l10n.coConfirmCheckingWhy,
+        ContextVerdict.unreachable => _recheckedFrom != null
+            ? l10n.coConfirmRetryStillUnreachable
+            : l10n.coConfirmUnreachableWhy,
+        // Completo pero viejo NO bloquea: el subtexto sale por `why`.
+        ContextVerdict.stale =>
+          check.complete ? null : _missingWhy(l10n, check),
+        ContextVerdict.answered =>
+          check.complete ? null : _missingWhy(l10n, check),
+      };
+
+  /// El bloqueo por campos que el servidor SÍ reportó vacíos.
+  ///
+  /// El acuse "sigue sin" (GD-MC-5b) exige que la consulta ANTERIOR también
+  /// hubiera respondido. Saliendo de `unreachable` o de `checking`, lo que
+  /// acaba de llegar es la primera respuesta: ahí no hay "sigue" (MC-4).
+  String _missingWhy(AppLocalizations l10n, ConfirmCustomerCheck check) {
+    final fields = _missingLabel(l10n, check);
+    final answeredBefore = _recheckedFrom == ContextVerdict.answered ||
+        _recheckedFrom == ContextVerdict.stale;
+    return answeredBefore
+        ? l10n.coConfirmRecheckedStill(fields)
+        : l10n.coConfirmBlockedWhy(fields);
+  }
 
   /// "licencia y teléfono" — lista legible, no una enumeración de campos de
   /// base de datos.
@@ -233,6 +373,8 @@ class _CustomerCard extends StatelessWidget {
     required this.check,
     required this.precheckinDone,
     required this.precheckinAt,
+    required this.serverMessage,
+    required this.staleAge,
   });
 
   final ConfirmCustomerCheck check;
@@ -241,6 +383,14 @@ class _CustomerCard extends StatelessWidget {
   /// Cuándo se selló el pre-checkin. El controller ya leía este campo y solo
   /// guardaba el bool (review GD-MC-6).
   final DateTime? precheckinAt;
+
+  /// Negativa del servidor, sin tocar. Solo llega en el veredicto
+  /// `unreachable` y solo cuando hubo cuerpo que citar.
+  final String? serverMessage;
+
+  /// Cuánto hace de la última consulta que SÍ respondió. Non-null solo en
+  /// `stale`: es lo que convierte "Verificado" en "vista de hace 12 min".
+  final Duration? staleAge;
 
   @override
   Widget build(BuildContext context) {
@@ -255,26 +405,70 @@ class _CustomerCard extends StatelessWidget {
                 check.license!,
                 DateFormat.yMMM(locale).format(expiry.toLocal()),
               ));
+
+    // Los cuatro estados de la tarjeta. `unreachable` y `stale` toman el ámbar
+    // de 19A-bis —el escalón entre "todo bien" y "el servidor dijo que no"—
+    // porque eso es exactamente lo que hay: ignorancia, no un hecho negativo.
+    // Pintar `unreachable` en rojo con "Faltan datos" era el bug: mismo color
+    // y misma palabra para una acusación que nadie puede sostener.
+    //
+    // `stale` tampoco puede seguir en verde (review MC-2): "Verificado" afirma
+    // que esto se acaba de comprobar, y lo que hay es una lectura de hace un
+    // rato con la de ahora caída. La pastilla pasa a decir la EDAD, con el
+    // mismo vocabulario de vejez que ya usa la stepline.
+    final (tone, pill) = switch (check.verdict) {
+      ContextVerdict.checking =>
+        (VerifyTone.neutral, l10n.coConfirmCheckingPill),
+      ContextVerdict.unreachable =>
+        (VerifyTone.warn, l10n.coConfirmUnknownPill),
+      ContextVerdict.stale => (
+          VerifyTone.warn,
+          l10n.coStaleView(checkoutAgeLabel(l10n, staleAge ?? Duration.zero)),
+        ),
+      ContextVerdict.answered => check.complete
+          ? (VerifyTone.ok, l10n.coConfirmVerified)
+          : (VerifyTone.bad, l10n.coConfirmMissingPill),
+    };
+
+    // Valor de una fila que NO tiene dato. Con respuesta del servidor se dice
+    // "Sin capturar" (un hecho suyo); sin ella, "No se pudo consultar" — que
+    // es lo único cierto.
+    String blank() => switch (check.verdict) {
+          ContextVerdict.checking => l10n.coConfirmCheckingValue,
+          ContextVerdict.unreachable => l10n.coConfirmUnknownValue,
+          ContextVerdict.answered ||
+          ContextVerdict.stale =>
+            l10n.coConfirmMissingValue,
+        };
+    final answered = check.hasAnswer;
+
     return VerifyCard(
       title: l10n.coConfirmCustomer,
-      tone: check.complete ? VerifyTone.ok : VerifyTone.bad,
-      pillLabel:
-          check.complete ? l10n.coConfirmVerified : l10n.coConfirmMissingPill,
+      tone: tone,
+      pillLabel: pill,
       children: [
         KvRow(
           label: l10n.coConfirmName,
-          value: check.name ?? l10n.coConfirmMissingValue,
-          missing: check.name == null,
+          value: check.name ?? blank(),
+          // `missing` pinta en rojo "el servidor no lo tiene". Solo se puede
+          // afirmar cuando el servidor contestó.
+          missing: answered && check.name == null,
+          warn: check.unreachable,
+          busy: check.checking,
         ),
         KvRow(
           label: l10n.coConfirmLicense,
-          value: license ?? l10n.coConfirmMissingValue,
-          missing: license == null,
+          value: license ?? blank(),
+          missing: answered && license == null,
+          warn: check.unreachable,
+          busy: check.checking,
         ),
         KvRow(
           label: l10n.coConfirmPhone,
-          value: check.phone ?? l10n.coConfirmMissingValue,
-          missing: check.phone == null,
+          value: check.phone ?? blank(),
+          missing: answered && check.phone == null,
+          warn: check.unreachable,
+          busy: check.checking,
           tabular: check.phone != null,
         ),
         KvRow(
@@ -283,14 +477,35 @@ class _CustomerCard extends StatelessWidget {
           // listo" (review GD-MC-6): la clave ya nombró el campo, el valor solo
           // tiene que decir su estado — y la hora, que es el dato con el que el
           // agente decide si confía en esa captura.
-          value: !precheckinDone
-              ? l10n.coConfirmPrecheckinPending
-              : precheckinAt == null
-                  ? l10n.coConfirmPrecheckinDone
-                  : l10n.coConfirmPrecheckinDoneAt(
-                      DateFormat.Hm(locale).format(precheckinAt!.toLocal()),
-                    ),
+          //
+          // Sin consulta NO se dice "Pendiente": el sello del pre-checkin vive
+          // en el mismo payload que no llegó.
+          value: !answered
+              ? blank()
+              : !precheckinDone
+                  ? l10n.coConfirmPrecheckinPending
+                  : precheckinAt == null
+                      ? l10n.coConfirmPrecheckinDone
+                      : l10n.coConfirmPrecheckinDoneAt(
+                          DateFormat.Hm(locale).format(precheckinAt!.toLocal()),
+                        ),
+          warn: check.unreachable,
+          busy: check.checking,
         ),
+        // La negativa del servidor, literal. Va DENTRO de la tarjeta que no
+        // pudo llenarse: es la explicación de por qué está vacía, no un error
+        // suelto del paso.
+        //
+        // La clave dice QUÉ es la fila y el valor es el mensaje CRUDO, sin
+        // envoltorio (review MC-3a): la clave era "Sin consultar" sobre un
+        // valor que empezaba "El servidor respondió…" — una clave que negaba
+        // su propio valor, y un prefijo que repetía la clave.
+        if (serverMessage != null)
+          KvRow(
+            label: l10n.coConfirmServerReplyLabel,
+            value: serverMessage!,
+            warn: true,
+          ),
       ],
     );
   }
@@ -318,6 +533,12 @@ class _VehicleCard extends StatelessWidget {
         .nonNulls
         .where((p) => p.isNotEmpty)
         .join(' · ');
+    // La unidad viene del MISMO display-data que el cliente: sin consulta,
+    // "Sin capturar" sería la misma acusación falsa un renglón más abajo.
+    final unreachable =
+        state.contextVerdict == ContextVerdict.unreachable && unit.isEmpty;
+    final checking =
+        state.contextVerdict == ContextVerdict.checking && unit.isEmpty;
     return VerifyCard(
       title: l10n.coConfirmVehicle,
       tone: conflict ? VerifyTone.bad : VerifyTone.neutral,
@@ -331,15 +552,21 @@ class _VehicleCard extends StatelessWidget {
       children: [
         KvRow(
           label: l10n.coConfirmUnit,
-          value: unit.isEmpty ? l10n.coConfirmMissingValue : unit,
-          missing: unit.isEmpty,
+          value: unit.isNotEmpty
+              ? unit
+              : unreachable
+                  ? l10n.coConfirmUnknownValue
+                  : checking
+                      ? l10n.coConfirmCheckingValue
+                      : l10n.coConfirmMissingValue,
+          missing: unit.isEmpty && !unreachable && !checking,
+          warn: unreachable,
+          busy: checking,
         ),
         if (odometer != null)
           KvRow(
             label: l10n.coConfirmOdometerLabel,
-            value: l10n.coOdometerValue(
-              NumberFormat.decimalPattern(locale).format(odometer),
-            ),
+            value: formatOdometer(l10n, locale, odometer),
             tabular: true,
           ),
         if (onSwap != null)

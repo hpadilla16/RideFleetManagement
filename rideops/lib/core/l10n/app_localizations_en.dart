@@ -741,16 +741,38 @@ class AppLocalizationsEn extends AppLocalizations {
   String get metricsOdometer => 'Odometer';
 
   @override
-  String get metricsOdometerUnit => 'mi';
+  String get odometerUnit => 'mi';
 
   @override
-  String metricsPrevReading(String value) {
-    return 'Last recorded reading: $value mi';
+  String odometerValue(String value, String unit) {
+    return '$value $unit';
+  }
+
+  @override
+  String metricsPrevReading(String reading) {
+    return 'Last recorded reading: $reading';
   }
 
   @override
   String get metricsOdometerLower =>
       'The reading is lower than the last recorded one. Double-check it — it will be sent as is.';
+
+  @override
+  String get metricsFieldOdometer => 'the odometer';
+
+  @override
+  String get metricsFieldFuel => 'the fuel level';
+
+  @override
+  String get metricsFieldCleanliness => 'the cleanliness';
+
+  @override
+  String get metricsFieldJoin => 'and';
+
+  @override
+  String metricsBlockedWhy(String fields) {
+    return 'Still to capture: $fields.';
+  }
 
   @override
   String get metricsFuel => 'Fuel';
@@ -1422,8 +1444,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get coPrecheckinPending => 'Pre-check-in pending';
 
   @override
-  String coOdometer(String km) {
-    return 'Odometer $km km';
+  String coOdometerReading(String reading) {
+    return 'Odometer $reading';
   }
 
   @override
@@ -1641,11 +1663,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get coConfirmOdometerLabel => 'Odometer';
 
   @override
-  String coOdometerValue(String km) {
-    return '$km km';
-  }
-
-  @override
   String get coConfirmVehicleAvailable => 'Available';
 
   @override
@@ -1681,6 +1698,44 @@ class AppLocalizationsEn extends AppLocalizations {
   String coConfirmRecheckedStill(String fields) {
     return 'Checked just now: the server still doesn\'t have $fields.';
   }
+
+  @override
+  String get coConfirmStaleWhy =>
+      'This data is from the last lookup that did get through. The current one did not: check it against the license before handing over.';
+
+  @override
+  String coConfirmStaleOldWhy(String age) {
+    return 'This data is $age old and the current lookup did not get through. Check again before signing: the contract could have changed at the counter in that time.';
+  }
+
+  @override
+  String get coConfirmCheckingPill => 'Checking';
+
+  @override
+  String get coConfirmCheckingValue => 'Checking…';
+
+  @override
+  String get coConfirmCheckingWhy => 'Checking the customer\'s record…';
+
+  @override
+  String get coConfirmUnknownPill => 'Not checked';
+
+  @override
+  String get coConfirmUnknownValue => 'Could not be checked';
+
+  @override
+  String get coConfirmUnreachableWhy =>
+      'The customer\'s record could not be checked, so their identity cannot be confirmed.';
+
+  @override
+  String get coConfirmServerReplyLabel => 'Server response';
+
+  @override
+  String get coConfirmRetryLookup => 'Retry the lookup';
+
+  @override
+  String get coConfirmRetryStillUnreachable =>
+      'Retried just now: the lookup still isn\'t getting through.';
 
   @override
   String get coDeclineTitle => 'Customer declines insurance';

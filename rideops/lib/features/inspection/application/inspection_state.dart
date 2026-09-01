@@ -22,6 +22,10 @@ const kInspectionAngleKeys = [
 /// replica (nota 4 del mockup 6A).
 const kRequiredAngleKeys = {'front', 'rear'};
 
+/// Los tres datos del sub-paso de métricas, en orden de pantalla. Es
+/// evidencia contractual: ninguno tiene default (review GD-5/INN S-4).
+enum MetricsField { odometer, fuel, cleanliness }
+
 enum InspectionFlowPhase {
   loading,
 
@@ -180,8 +184,18 @@ class InspectionFlowState {
   double? get fuelFraction =>
       fuelEighths == null ? null : fuelEighths! / 8;
 
-  bool get metricsComplete =>
-      odometer != null && cleanliness != null && fuelEighths != null;
+  bool get metricsComplete => missingMetrics.isEmpty;
+
+  /// Qué falta capturar, en el ORDEN en que está en pantalla. Existe para que
+  /// el pie del sub-paso pueda NOMBRAR su bloqueo igual que el paso 1: con el
+  /// teclado tapando el combustible y la limpieza, un "Continuar a la firma"
+  /// muerto y sin una palabra es el callejón que el repo se prohíbe dos veces
+  /// (transition_button.dart:24-28, verify_cards.dart:333-334).
+  List<MetricsField> get missingMetrics => [
+        if (odometer == null) MetricsField.odometer,
+        if (fuelEighths == null) MetricsField.fuel,
+        if (cleanliness == null) MetricsField.cleanliness,
+      ];
 
   InspectionFlowState copyWith({
     InspectionFlowPhase? phase,

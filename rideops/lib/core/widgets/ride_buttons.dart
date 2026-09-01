@@ -11,8 +11,9 @@ import '../theme/ride_tokens.dart';
 /// re-exporta, así que los imports de H1 siguen funcionando.
 
 /// Botón primario del mockup (56 px, gradiente + glow). [loading] colapsa a
-/// spinner + texto de progreso; [onPressed] null = deshabilitado (opacidad
-/// .55 como el mockup, y sin ink).
+/// spinner + texto de progreso Y **se dibuja a opacidad plena**: trabajar no
+/// es estar apagado. [onPressed] null SIN [loading] = deshabilitado (opacidad
+/// .55 como el mockup). En ambos casos, sin tap y sin ink.
 class RidePrimaryButton extends StatelessWidget {
   const RidePrimaryButton({
     super.key,
@@ -31,7 +32,21 @@ class RidePrimaryButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final enabled = onPressed != null && !loading;
     return Opacity(
-      opacity: enabled ? 1 : 0.55,
+      // **Trabajando NO es apagado.** `enabled` mete `loading` en la misma
+      // expresión que el deshabilitado, y eso está bien para el TAP (un botón
+      // que trabaja no se vuelve a tocar) pero no para la TINTA: con
+      // `loading: true` se componía el botón ENTERO al 55 % sobre un pie casi
+      // blanco, así que el gradiente se aclaraba hacia blanco mientras el
+      // texto blanco seguía blanco — "Consultando al servidor…" quedaba a
+      // 2.43-2.62:1, peor todavía que el ghost deshabilitado (~3.5:1) al que
+      // este spinner sustituyó.
+      //
+      // Desacoplado: sigue sin tap y sin ink (eso lo decide `enabled`, abajo),
+      // pero se dibuja a opacidad plena — blanco sobre `#7442E8`, holgado
+      // sobre 4.5:1. El atenuado LEGÍTIMO (sin callback y sin trabajo) se
+      // conserva intacto. Va en la dirección correcta en los diez pasos que
+      // comparten este componente: un botón que trabaja debe verse activo.
+      opacity: onPressed == null && !loading ? 0.55 : 1,
       child: Material(
         color: Colors.transparent,
         child: Ink(

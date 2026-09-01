@@ -98,6 +98,7 @@ void main() {
   group('verificación del cliente (9A/9B)', () {
     test('el snapshot del contrato gana; la ficha del cliente es respaldo', () {
       final check = customerCheck(
+        verdict: ContextVerdict.answered,
         customer: const DisplayCustomer(
           firstName: 'Laura',
           lastName: 'Méndez',
@@ -120,6 +121,7 @@ void main() {
     test('sin snapshot cae a la ficha del cliente (reserva recién entrada al '
         'wizard)', () {
       final check = customerCheck(
+        verdict: ContextVerdict.answered,
         customer: const DisplayCustomer(
           firstName: 'Laura',
           lastName: 'Méndez',
@@ -133,6 +135,7 @@ void main() {
 
     test('vacío y espacios cuentan como FALTANTE, en orden de lectura', () {
       final check = customerCheck(
+        verdict: ContextVerdict.answered,
         customer: const DisplayCustomer(
           firstName: 'Jorge',
           lastName: 'Salas',
@@ -149,9 +152,45 @@ void main() {
     });
 
     test('sin cliente en display-data: falta todo, no se inventa nada', () {
-      final check = customerCheck();
+      final check = customerCheck(verdict: ContextVerdict.answered);
       expect(check.missing, hasLength(3));
       expect(check.name, isNull);
+    });
+
+    // El veredicto de tres valores (hallazgo e2e, MAJOR). "No pude preguntar"
+    // y "pregunté y no está" ya no comparten representación.
+    test('unreachable: missing VACÍA — sin respuesta no hay nada que declarar '
+        'faltante, aunque haya un cliente colgado del render anterior', () {
+      final check = customerCheck(
+        verdict: ContextVerdict.unreachable,
+        customer: const DisplayCustomer(
+          firstName: 'Laura',
+          lastName: 'Méndez',
+          licenseNumber: 'B-1',
+          phone: '+52 55 1',
+        ),
+      );
+      expect(check.missing, isEmpty);
+      expect(check.unreachable, isTrue);
+      // Y tampoco se filtran los campos: el veredicto manda sobre el payload.
+      expect(check.name, isNull);
+      expect(check.license, isNull);
+      expect(check.phone, isNull);
+    });
+
+    test('unreachable NO es complete: `missing.isEmpty` por sí solo dejaría '
+        'pasar la entrega sin haber verificado nada', () {
+      final check = customerCheck(verdict: ContextVerdict.unreachable);
+      expect(check.missing, isEmpty);
+      expect(check.complete, isFalse);
+    });
+
+    test('checking tampoco es complete ni faltante: se está preguntando', () {
+      final check = customerCheck(verdict: ContextVerdict.checking);
+      expect(check.checking, isTrue);
+      expect(check.complete, isFalse);
+      expect(check.missing, isEmpty);
+      expect(check.unreachable, isFalse);
     });
   });
 

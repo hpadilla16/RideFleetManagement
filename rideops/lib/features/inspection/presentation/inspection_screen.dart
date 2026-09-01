@@ -11,6 +11,7 @@ import '../../../core/widgets/ride_buttons.dart';
 import '../application/inspection_controller.dart';
 import '../application/inspection_state.dart';
 import 'camera_capture_screen.dart';
+import 'widgets/angle_labels.dart';
 import 'widgets/inspection_bodies.dart';
 import 'widgets/kiosk_signature_step.dart';
 
@@ -220,6 +221,20 @@ class _InspectionScreenState extends ConsumerState<InspectionScreen> {
                           ? () => controller.goToStep(InspectionStep.signature)
                           : null,
                     ),
+                    // Mismo gate, misma frase: el cuerpo es compartido y el
+                    // motivo del bloqueo también tiene que serlo.
+                    if (!state.metricsComplete) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        metricsBlockedWhy(l10n, state)!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: RideTokens.n700,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

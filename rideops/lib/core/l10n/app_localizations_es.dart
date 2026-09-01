@@ -745,16 +745,38 @@ class AppLocalizationsEs extends AppLocalizations {
   String get metricsOdometer => 'Odómetro';
 
   @override
-  String get metricsOdometerUnit => 'mi';
+  String get odometerUnit => 'mi';
 
   @override
-  String metricsPrevReading(String value) {
-    return 'Última lectura registrada: $value mi';
+  String odometerValue(String value, String unit) {
+    return '$value $unit';
+  }
+
+  @override
+  String metricsPrevReading(String reading) {
+    return 'Última lectura registrada: $reading';
   }
 
   @override
   String get metricsOdometerLower =>
       'La lectura es menor que la última registrada. Revísala — se enviará tal cual.';
+
+  @override
+  String get metricsFieldOdometer => 'el odómetro';
+
+  @override
+  String get metricsFieldFuel => 'el combustible';
+
+  @override
+  String get metricsFieldCleanliness => 'la limpieza';
+
+  @override
+  String get metricsFieldJoin => 'y';
+
+  @override
+  String metricsBlockedWhy(String fields) {
+    return 'Falta capturar $fields.';
+  }
 
   @override
   String get metricsFuel => 'Combustible';
@@ -1433,8 +1455,8 @@ class AppLocalizationsEs extends AppLocalizations {
   String get coPrecheckinPending => 'Pre-checkin pendiente';
 
   @override
-  String coOdometer(String km) {
-    return 'Odómetro $km km';
+  String coOdometerReading(String reading) {
+    return 'Odómetro $reading';
   }
 
   @override
@@ -1650,11 +1672,6 @@ class AppLocalizationsEs extends AppLocalizations {
   String get coConfirmOdometerLabel => 'Odómetro';
 
   @override
-  String coOdometerValue(String km) {
-    return '$km km';
-  }
-
-  @override
   String get coConfirmVehicleAvailable => 'Disponible';
 
   @override
@@ -1690,6 +1707,44 @@ class AppLocalizationsEs extends AppLocalizations {
   String coConfirmRecheckedStill(String fields) {
     return 'Consultado ahora: el servidor sigue sin $fields.';
   }
+
+  @override
+  String get coConfirmStaleWhy =>
+      'Estos datos son los de la última consulta que sí llegó. La de ahora no llegó: confírmalos contra la licencia antes de entregar.';
+
+  @override
+  String coConfirmStaleOldWhy(String age) {
+    return 'Estos datos son de hace $age y la consulta de ahora no llegó. Vuelve a consultar antes de firmar: en ese tiempo el contrato pudo cambiar en el mostrador.';
+  }
+
+  @override
+  String get coConfirmCheckingPill => 'Consultando';
+
+  @override
+  String get coConfirmCheckingValue => 'Consultando…';
+
+  @override
+  String get coConfirmCheckingWhy => 'Consultando la ficha del cliente…';
+
+  @override
+  String get coConfirmUnknownPill => 'Sin consultar';
+
+  @override
+  String get coConfirmUnknownValue => 'No se pudo consultar';
+
+  @override
+  String get coConfirmUnreachableWhy =>
+      'No se pudo consultar la ficha del cliente, así que no se puede confirmar su identidad.';
+
+  @override
+  String get coConfirmServerReplyLabel => 'Respuesta del servidor';
+
+  @override
+  String get coConfirmRetryLookup => 'Reintentar la consulta';
+
+  @override
+  String get coConfirmRetryStillUnreachable =>
+      'Reintentado ahora: la consulta sigue sin llegar.';
 
   @override
   String get coDeclineTitle => 'El cliente declina el seguro';

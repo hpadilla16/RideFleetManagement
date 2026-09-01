@@ -16,6 +16,7 @@ import 'package:rideops/core/session/session_state.dart';
 import 'package:rideops/core/telemetry/event_logger.dart';
 import 'package:rideops/features/checkout/application/checkout_wizard_controller.dart';
 import 'package:rideops/features/checkout/application/checkout_wizard_state.dart';
+import 'package:rideops/features/checkout/domain/checkout_confirm.dart';
 import 'package:rideops/features/checkout/domain/checkout_event_log.dart';
 import 'package:rideops/features/checkout/domain/checkout_step_catalog.dart';
 
@@ -63,13 +64,16 @@ void main() {
     CapturingEventLogger logger,
     FakeNetworkStatus network,
     MutableSessionController session,
+    FakeReservationsApi reservations,
   }) harness({
     ActiveLocation initialLocation = const ActiveLocation.all(),
     bool authenticated = true,
     bool online = true,
     Random? random,
+    FakeReservationsApi? reservations,
   }) {
     final api = FakeCheckoutApi();
+    final reservationsApi = reservations ?? FakeReservationsApi();
     final logger = CapturingEventLogger();
     final network = FakeNetworkStatus(online: online);
     final session = MutableSessionController(
@@ -83,7 +87,7 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         checkoutApiProvider.overrideWithValue(api),
-        reservationsApiProvider.overrideWithValue(FakeReservationsApi()),
+        reservationsApiProvider.overrideWithValue(reservationsApi),
         eventLoggerProvider.overrideWithValue(logger),
         networkStatusProvider.overrideWithValue(network),
         activeLocationProvider.overrideWith(
@@ -105,6 +109,7 @@ void main() {
       logger: logger,
       network: network,
       session: session,
+      reservations: reservationsApi,
     );
   }
 
@@ -1208,6 +1213,142 @@ void main() {
         async.flushMicrotasks();
         expect(h.api.getCalls, before + 1);
         expect(read(h.container).offline, isFalse);
+      });
+    });
+  });
+
+  // ── veredicto de display-data (hallazgo e2e, MAJOR) ────────────────────
+  //
+  // `_loadContext` se tragaba TODO fallo con `catch (_) { return null; }` y el
+  // comentario "el header muestra menos, nada más". No era verdad: ese null
+  // bajaba al paso 1 como "faltan el nombre, la licencia y el teléfono" y
+  // bloqueaba la entrega acusando al servidor de algo que nadie comprobó.
+  group('veredicto del contexto', () {
+    test('display-data que responde ⇒ answered, con SELLO de frescura y sin '
+        'negativa que citar', () {
+      fakeAsync((async) {
+        final h = harness();
+        async.flushMicrotasks();
+        expect(read(h.container).contextVerdict, ContextVerdict.answered);
+        expect(read(h.container).contextError, isNull);
+        // El sello es propio del DATO DEL CLIENTE: `fetchedAt` mide la sesión
+        // y las dos consultas se caen por separado.
+        expect(read(h.container).contextFetchedAt, isNotNull);
+        expect(h.logger.has(CheckoutEvents.contextUnreachable), isFalse);
+      });
+    });
+
+    test('404 sin respuesta previa ⇒ unreachable + negativa CRUDA guardada, y '
+        'el evento la cuenta como NO stale (el paso 1 se quedó sin verificar)',
+        () {
+      fakeAsync((async) {
+        final reservations = FakeReservationsApi()
+          ..failWith = displayDataDenial();
+        final h = harness(reservations: reservations);
+        async.flushMicrotasks();
+
+        final state = read(h.container);
+        expect(state.contextVerdict, ContextVerdict.unreachable);
+        expect(state.context, isNull);
+        expect(state.contextError!.status, 404);
+        expect(state.contextError!.message, 'Reservation not found');
+        // Y la sesión SIGUE viva: el wizard no se cae por esto — lo que cambia
+        // es lo que el paso 1 puede afirmar.
+        expect(state.session, isNotNull);
+        expect(read(h.container).contextFetchedAt, isNull,
+            reason: 'no hubo lectura buena que sellar');
+        expect(
+          h.logger.events
+              .where((e) => e.$1 == CheckoutEvents.contextUnreachable)
+              .map((e) => (e.$2['status'], e.$2['stale'], e.$2['via'])),
+          [('404', false, 'open')],
+        );
+      });
+    });
+
+    test('un fallo DESPUÉS de una lectura buena NO borra el dato, pero deja de '
+        'llamarlo fresco: cae a STALE con su sello viejo intacto (regla 8D)',
+        () {
+      fakeAsync((async) {
+        final reservations = FakeReservationsApi();
+        final h = harness(reservations: reservations);
+        async.flushMicrotasks();
+        expect(read(h.container).context?.customerName, isNotNull);
+        final sealed = read(h.container).contextFetchedAt;
+
+        // El servidor se cae entre la primera lectura y la siguiente.
+        reservations.failWith = displayDataDenial(status: 500);
+        unawaited(notifier(h.container).retryContext());
+        async.flushMicrotasks();
+
+        final state = read(h.container);
+        expect(
+          state.contextVerdict,
+          ContextVerdict.stale,
+          reason: 'answered afirmaría que esto se acaba de comprobar',
+        );
+        expect(state.context?.customerName, isNotNull,
+            reason: 'el dato viejo NO se borra');
+        expect(
+          state.contextFetchedAt,
+          sealed,
+          reason: 'la edad se cuenta desde la última consulta que SÍ llegó',
+        );
+        expect(
+          state.contextError,
+          isNull,
+          reason: 'con datos utilizables en pantalla no se cita un 500 al '
+              'lado del nombre del cliente',
+        );
+        // Pero el incidente SÍ se cuenta, marcado como stale: es de otra
+        // gravedad, no de otra existencia.
+        expect(
+          h.logger.events
+              .where((e) => e.$1 == CheckoutEvents.contextUnreachable)
+              .map((e) => (e.$2['stale'], e.$2['via'])),
+          [(true, 'confirm_retry')],
+        );
+      });
+    });
+
+    test('la verificación del CIERRE que no llega se cuenta con SU origen: '
+        'no es el paso 1 quedándose sin poder confirmar identidad', () {
+      fakeAsync((async) {
+        final reservations = FakeReservationsApi();
+        final h = harness(reservations: reservations);
+        async.flushMicrotasks();
+
+        reservations.failWith = displayDataDenial(status: 503);
+        unawaited(notifier(h.container).verifyHandover());
+        async.flushMicrotasks();
+
+        expect(
+          h.logger.events
+              .where((e) => e.$1 == CheckoutEvents.contextUnreachable)
+              .map((e) => e.$2['via']),
+          ['verify_handover'],
+          reason: 'sin el tag, el evento mezcla dos incidentes distintos',
+        );
+      });
+    });
+
+    test('retryContext devuelve el veredicto que quedó — es lo que la pantalla '
+        'necesita para contar el resultado sin releer el estado a ciegas', () {
+      fakeAsync((async) {
+        final reservations = FakeReservationsApi()
+          ..failWith = displayDataDenial();
+        final h = harness(reservations: reservations);
+        async.flushMicrotasks();
+        expect(read(h.container).contextVerdict, ContextVerdict.unreachable);
+
+        ContextVerdict? out;
+        reservations.failWith = null;
+        unawaited(notifier(h.container).retryContext().then((v) => out = v));
+        async.flushMicrotasks();
+
+        expect(out, ContextVerdict.answered);
+        expect(read(h.container).contextError, isNull);
+        expect(read(h.container).context?.customerName, isNotNull);
       });
     });
   });

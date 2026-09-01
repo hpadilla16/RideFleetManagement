@@ -189,8 +189,11 @@ void main() {
     await tester.tap(find.text('Continue to metrics'));
     await tester.pumpAndSettle();
     expect(find.text('Vehicle metrics'), findsOneWidget);
-    // Última lectura desde display-data (Vehicle.mileage del fixture).
-    expect(find.text('Last recorded reading: 48190 mi'), findsOneWidget);
+    // Última lectura desde display-data (Vehicle.mileage del fixture), con el
+    // MISMO formato y la MISMA unidad que la tarjeta del paso 1: antes esta
+    // línea decía "48190 mi" mientras confirmación decía "48,190 km" para el
+    // mismo entero (hallazgo e2e, menor 1).
+    expect(find.text('Last recorded reading: 48,190 mi'), findsOneWidget);
 
     // Las filas encoladas llevan la sede activa SELLADA (criterio H5).
     final rows = await db.allFor(userId: kFixtureUserId, tenantId: tenantId);
@@ -198,12 +201,28 @@ void main() {
     expect(rows.map((r) => r.locationId).toSet(), {activeLocationId});
     expect(rows.map((r) => r.groupKey).toSet(), {'cs1'});
 
+    // MC-5: el CTA bloqueado NOMBRA lo que falta también en esta superficie —
+    // el cuerpo es compartido y el motivo del bloqueo también tiene que serlo.
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'Still to capture: the odometer, the fuel level and the cleanliness.',
+      ),
+      findsOneWidget,
+    );
+
     // GD-5/INN S-4: el combustible SIN default no deja avanzar a firma —
     // odómetro y limpieza solos no bastan.
     controller.setOdometer(48212);
     controller.setCleanliness(4);
     expect(container.read(inspectionControllerProvider('r1')).metricsComplete,
         isFalse, reason: 'fuel sin capturar = evidencia sin capturar');
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Still to capture: the fuel level.'),
+      findsOneWidget,
+      reason: 'el gate del combustible es invisible sin una palabra que lo diga',
+    );
     controller.setFuelEighths(6);
     expect(container.read(inspectionControllerProvider('r1')).metricsComplete,
         isTrue);

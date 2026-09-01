@@ -38,6 +38,8 @@ class TransitionButton extends ConsumerWidget {
     this.why,
     this.blockedWhy,
     this.secondary,
+    this.loading = false,
+    this.loadingLabel,
   });
 
   final String reservationId;
@@ -63,15 +65,31 @@ class TransitionButton extends ConsumerWidget {
   /// diciendo QUÉ falta. Un botón ausente no se puede preguntar.
   final String? blockedWhy;
 
+  /// Qué dice el primario mientras [loading]. Null ⇒ conserva su etiqueta.
+  final String? loadingLabel;
+
   /// Acción secundaria del dock (9B "Volver a consultar", 9D "Elegir otro
   /// vehículo"). Va DEBAJO del primario y encima del `.why`.
   final Widget? secondary;
+
+  /// Trabajo del PASO en vuelo que no es la transición: el paso 1 lo usa
+  /// mientras display-data viaja.
+  ///
+  /// Existe porque el progreso tiene que vivir en el primario y no en el slot
+  /// secundario (review de diseño, 2ª ronda). Poner ahí un ghost que aparece
+  /// y desaparece hace que el pie ENCOJA 57 px —48 del botón más el gap de 9—
+  /// justo cuando el pulgar baja hacia el CTA, y eso pasaría en cada entrega
+  /// normal (entrar → consultando → datos completos), no en el camino raro.
+  /// El primario, en cambio, está en el pie en TODAS las ramas con altura
+  /// fija, y su spinner va en blanco sobre el gradiente a opacidad plena —
+  /// legible bajo el sol del patio, que es donde se lee.
+  final bool loading;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context)!;
     final state = ref.watch(checkoutWizardProvider(reservationId));
-    final enabled = state.canTransition && blockedWhy == null;
+    final enabled = state.canTransition && blockedWhy == null && !loading;
     final whyText = blockedWhy ??
         (state.offline
             ? l10n.coBlockedOfflineWhy
@@ -92,7 +110,8 @@ class TransitionButton extends ConsumerWidget {
         child: ExcludeSemantics(
           child: RidePrimaryButton(
             label: label,
-            loading: state.transitionInFlight,
+            loading: state.transitionInFlight || loading,
+            loadingLabel: loadingLabel,
             onPressed: enabled
                 ? () async {
                     final outcome = await ref

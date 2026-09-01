@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import '../../../../core/api/dto/checkout_session.dart';
 import '../../../../core/api/enums.dart';
 import '../../../../core/l10n/app_localizations.dart';
+import '../../../../core/l10n/odometer_format.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/telemetry/event_logger.dart';
 import '../../../../core/theme/ride_tokens.dart';
@@ -374,9 +375,7 @@ class _HandoffView extends ConsumerWidget {
                     if (odometer != null)
                       KvRow(
                         label: l10n.coInspLastReading,
-                        value: l10n.coOdometerValue(
-                          NumberFormat.decimalPattern(locale).format(odometer),
-                        ),
+                        value: formatOdometer(l10n, locale, odometer),
                         tabular: true,
                       ),
                   ],
@@ -557,6 +556,11 @@ class _CaptureDock extends ConsumerWidget {
 
       case InspectionStep.metrics:
         return WizardDock(
+          // El pie de al lado (fotos) SÍ nombra su gate y este no lo hacía.
+          // Es donde más falta hace: con el teclado numérico abierto tapando
+          // el combustible y la limpieza, el agente mira abajo y encuentra un
+          // "Continuar a la firma" muerto sin una palabra que lo explique.
+          why: metricsBlockedWhy(l10n, flow),
           primary: RidePrimaryButton(
             label: l10n.inspContinueSignature,
             onPressed: flow.metricsComplete
