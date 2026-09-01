@@ -132,6 +132,18 @@ jobs:
         #     customer sees. Shared by the counter display and the renter's
         #     phone, and its whole job is that neither of them ever falls
         #     through to this platform's name (2026-08-17).
+        #   - test:finalize-email: the claim/release around the auto-email on
+        #     checkout finalize. It holds three things at once — the customer
+        #     is never mailed the contract twice, a stamped autoEmailedAt
+        #     really means the send was accepted, and a send that was never
+        #     accepted lands in AuditLog. 33 closed checkouts across two
+        #     tenants sat marked "emailed" with no mail behind them for two
+        #     months because nothing watched any of the three (2026-08-18).
+        #     DB-free (prisma is mocked) and needs the dummy DATABASE_URL
+        #     below like test:kiosk does. It is appended to BOTH `run:` lines
+        #     of this step on purpose: the duplicate key is a live bug being
+        #     fixed on another branch, and naming the suite on both lines
+        #     means it survives whichever line that fix keeps.
         #   - test:checkout-multisurface (M2 P1/P2, 2026-08-17): the presence
         #     serializer must NEVER break the session poll, and STALE_VERSION
         #     must stay strictly opt-in — a regression here silently changes
@@ -214,7 +226,7 @@ jobs:
         #     workflow.
         env:
           DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/ci_unit_only?schema=public'
-        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance && npm run test:terms-signing && npm run test:tenant-brand && npm run test:tenant-status && npm run test:checkout-multisurface && npm run test:checkout-cas && npm run test:presence-boundary && npm run test:precheckin-tax-rate && npm run test:billing-suspension && npm run test:billing-panel && npm run test:billing-model
+        run: npm run test:payment-refs && npm run test:kiosk && npm run test:stale-preauth && npm run test:money-route-gate && npm run test:payment-actions && npm run test:module-defaults-drift && npm run test:smart-match && npm run test:shuttle-query && npm run test:cash-flow && npm run test:overdue-definition && npm run test:tolls-queue-counts && npm run test:extend-datetime && npm run test:toll-vehicle-swap && npm run test:with-timeout && npm run test:rate-limit && npm run test:imported-total && npm run test:prepaid-signal && npm run test:rental-minimum && npm run test:imported-fee-dedup && npm run test:backdated-return && npm run test:payment-search && npm run test:view-location && npm run test:declined-insurance && npm run test:terms-signing && npm run test:tenant-brand && npm run test:tenant-status && npm run test:checkout-multisurface && npm run test:checkout-cas && npm run test:presence-boundary && npm run test:precheckin-tax-rate && npm run test:billing-suspension && npm run test:billing-panel && npm run test:billing-model && npm run test:finalize-email
 
   precheckin-charges-embedded:
     # THE PRE-CHECK-IN CHARGE SHEET, AGAINST A REAL TRANSACTION.
