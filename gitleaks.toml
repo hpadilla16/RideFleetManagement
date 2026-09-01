@@ -70,6 +70,20 @@ regexes = [
   # ── placeholder / rejected-default secrets (never accepted at runtime) ──────
   '''change-this-secret''',
   '''dev-secret-change-me''',
+
+  # ── payment-capabilities redaction canaries ─────────────────────────────────
+  # Added 2026-09-01, after secret-scan went red on main from 75f818d0's window.
+  # payment-capabilities.test.mjs exists to prove that a config SATURATED with
+  # secret material never leaks through the capabilities endpoint — so its
+  # SECRET_MARKERS deliberately wear the real prefixes (sk_live_, pk_live_,
+  # whsec_) that gitleaks' stock Stripe rules match on. The SHAPE is
+  # load-bearing, same rationale as the Authorize.Net fixture above: reshape
+  # the canary and the test stops proving redaction of realistic material.
+  # Every value embeds the marker "LEAK…77xy", is visibly synthetic, and
+  # appears exactly once in the repo (verified with git grep 2026-09-01).
+  '''sk_live_LEAK77xy''',
+  '''pk_live_LEAK77xy''',
+  '''whsec_LEAK77xy''',
 ]
 
 # Example/template files that only ever contain placeholders.
