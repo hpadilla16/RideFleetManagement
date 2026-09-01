@@ -325,6 +325,21 @@ async function main() {
     logger.warn('[worker] notifications sweep scheduler not started', { message: err.message });
   }
 
+  // Idle-vehicle daily sweep (2026-09-01, backlog #5) — emits one FLEET
+  // envelope per vehicle per idle episode into the Notification Center and
+  // resolves the ones whose vehicle got activity again. Daily at 09:20 UTC
+  // (the 09:10 sweep family, staggered). Doubly gated: the
+  // IDLE_VEHICLE_SWEEP_ENABLED env kill-switch (default ON) and the
+  // per-tenant idleVehicleConfig.enabled setting (default OFF), so it is
+  // inert until a tenant opts in from Settings.
+  try {
+    const idleSweepMod = await import('./modules/vehicles/idle-vehicle.scheduler.js');
+    idleSweepMod.startIdleVehicleSweepScheduler();
+    logger.info('[worker] started: idle-vehicle sweep scheduler');
+  } catch (err) {
+    logger.warn('[worker] idle-vehicle sweep scheduler not started', { message: err.message });
+  }
+
   // Voltswitch GPS periodic pull (2026-08-13). Per-tenant interval from
   // Settings > Telematics; only tenants with the connector fully configured
   // (provider VOLTSWITCH + enabled + credentials) are touched. Each tenant

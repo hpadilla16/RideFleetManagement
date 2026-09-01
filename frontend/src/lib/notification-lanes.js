@@ -35,6 +35,10 @@ export const NOTIFICATION_LANE_GROUPS = [
       // Check-in audit (2026-09-03): entry-error findings from the T1 rules
       // pass — NEEDS_ACTION, deduped per reservation+check by the emitter.
       { id: 'checkinAudit', filter: { sourceType: 'CHECKIN_AUDIT' } },
+      // Idle vehicles (2026-09-01, backlog #5): one envelope per vehicle per
+      // idle episode from the daily sweep; severity is tenant-configurable so
+      // the lane filters by source only.
+      { id: 'fleet', filter: { sourceType: 'FLEET' } },
     ],
   },
   {

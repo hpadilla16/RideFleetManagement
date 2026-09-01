@@ -35,6 +35,7 @@
       "shuttle": "Shuttle",
       "documents": "Documentos y marbete",
       "checkinAudit": "Auditoría de check-in",
+      "fleet": "Vehículos ociosos",
       "billing": "Facturación",
       "allInfo": "Todo informativo",
       "all": "Todas las notificaciones"
@@ -52,6 +53,7 @@
       "maintSnoozed": "Mantenimiento pospuesto en el check-in — {{unit}}",
       "maintCheckinSent": "Enviado a mantenimiento en el check-in — {{unit}} · {{ro}}",
       "checkinAuditEntryError": "Error de captura — {{res}}. El odómetro quedó por debajo del de salida ({{out}} → {{in}}).",
+      "idleVehicle": "Vehículo ocioso — {{unit}}, {{days}} días sin renta",
       "billingSuspended": "Suscripción suspendida — pago vencido"
     },
     "src": {
@@ -62,7 +64,8 @@
       "BILLING": "Facturación",
       "MAINTENANCE": "Mantenimiento",
       "DOCUMENTS": "Documentos",
-      "CHECKIN_AUDIT": "Auditoría de check-in"
+      "CHECKIN_AUDIT": "Auditoría de check-in",
+      "FLEET": "Flota"
     },
     "ack": {
       "by": "Atendida por {{name}} · {{time}}",

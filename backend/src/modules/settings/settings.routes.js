@@ -328,6 +328,24 @@ settingsRouter.put('/fleet-rotation', requireRole('ADMIN'), async (req, res, nex
   }
 });
 
+// Idle-vehicle notification (2026-09-01, backlog #5): enable + threshold days
+// per tenant. OFF by default; the daily sweep no-ops until a tenant opts in.
+settingsRouter.get('/idle-vehicles', async (_req, res, next) => {
+  try {
+    res.json(await settingsService.getIdleVehicleConfig(scopeFor(_req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
+settingsRouter.put('/idle-vehicles', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json(await settingsService.updateIdleVehicleConfig(req.body || {}, scopeFor(req)));
+  } catch (e) {
+    next(e);
+  }
+});
+
 // Citations OCR — per-tenant vision-LLM credentials. GET returns masked config
 // (provider/model/hasKey, never the key). PUT (ADMIN) sets provider/model/apiKey
 // (key stored encrypted). { clearKey:true } removes the stored key.
