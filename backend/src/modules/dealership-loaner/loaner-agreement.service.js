@@ -6,6 +6,7 @@ import { decodePhotoValue, getPhotosBucket } from '../rental-agreements/inspecti
 // vehicle-status sync so loaner handoff/return can't drift Vehicle.status (bug #44 class).
 import logger from '../../lib/logger.js';
 import { normalizeDob } from '../../lib/dob.js';
+import { assertCustomerEmail } from '../../lib/customer-email.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 
 // =====================================================================
@@ -210,7 +211,15 @@ export const loanerAgreementService = {
         returnAt: parseDate(payload.returnAt) ?? reservation.returnAt,
         customerFirstName: firstName,
         customerLastName: lastName,
-        customerEmail: payload.customerEmail ?? reservation.customer?.email ?? null,
+        // Writer #17 of the customer-email inventory (lib/customer-email.js).
+        // MIXED, and only half of it is capture: payload.customerEmail is typed
+        // at the service desk, the fallback SNAPSHOTS the reservation customer.
+        // Validate the keyboard half only — refusing the snapshot would deny an
+        // agreement to a customer whose stored address is already bad, which is
+        // the same counter-outage the RentalAgreement snapshots avoid.
+        customerEmail: payload.customerEmail === undefined || payload.customerEmail === null
+          ? (reservation.customer?.email ?? null)
+          : assertCustomerEmail(payload.customerEmail, { audience: 'staff' }),
         customerPhone: payload.customerPhone ?? reservation.customer?.phone ?? null,
         dateOfBirth: normalizeDob(payload.dateOfBirth),
         licenseNumber: payload.licenseNumber || null,
@@ -244,11 +253,19 @@ export const loanerAgreementService = {
     const row = await findScoped(user, id);
     assertEditable(row);
     const data = {};
+    // Writer #18 of the customer-email inventory (lib/customer-email.js). Pure
+    // STAFF capture: this is the pre-signature edit screen, and customerEmail is
+    // the column loaner-agreement notifications and loaner-reminders.scheduler
+    // address directly. customerEmail is pulled OUT of the pass-through list so
+    // it cannot ride along unchecked the way it did until 2026-09-01.
     const passStr = [
-      'customerEmail', 'customerPhone', 'licenseNumber', 'licenseState', 'licenseImagePath',
+      'customerPhone', 'licenseNumber', 'licenseState', 'licenseImagePath',
       'insuranceCarrier', 'insurancePolicyNumber', 'insuranceImagePath', 'notes'
     ];
     for (const k of passStr) if (k in payload) data[k] = payload[k] || null;
+    if ('customerEmail' in payload) {
+      data.customerEmail = assertCustomerEmail(payload.customerEmail, { audience: 'staff' });
+    }
     if ('customerFirstName' in payload) data.customerFirstName = String(payload.customerFirstName || '').trim() || row.customerFirstName;
     if ('customerLastName' in payload) data.customerLastName = String(payload.customerLastName || '').trim() || row.customerLastName;
     for (const k of ['dateOfBirth', 'licenseExpiry', 'insuranceEffective', 'insuranceExpiry']) {

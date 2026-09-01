@@ -4232,6 +4232,14 @@ export const rentalAgreementsService = {
     });
   },
 
+  // OUT OF SCOPE, DECLARED (2026-09-01). This writes AgreementDriver.email — a
+  // FOURTH email column, captured from a keyboard, ungated. It is genuinely the
+  // same failure mode, and it is genuinely not this change: no send path
+  // addresses an additional driver today (grep for agreementDriver + sendEmail
+  // returns nothing), so it cannot produce the incident this branch closes, and
+  // pulling in a fourth column mid-review is how a fix stops being reviewable.
+  // Named here rather than left silent, because an undeclared gap reads as an
+  // overlooked one. Next batch: same lib/customer-email.js, STAFF policy.
   addDriver(id, input) {
     return prisma.agreementDriver.create({
       data: {

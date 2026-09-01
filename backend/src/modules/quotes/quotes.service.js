@@ -33,7 +33,13 @@ import { prisma as defaultPrisma } from '../../lib/prisma.js';
 import { parseDateTimeInTz } from '../../lib/date-utils.js';
 import { resolveTenantTimeZone } from '../../lib/tenant-tz.js';
 import { isQuoteNumber, normalizeQuoteNumber, quoteNumberCandidate } from './quote-number.js';
-import { normalizeCustomerEmail, messageFor, CUSTOMER_EMAIL_INVALID } from '../../lib/customer-email.js';
+import logger from '../../lib/logger.js';
+import {
+  normalizeCustomerEmail,
+  importCustomerEmailOrNull,
+  messageFor,
+  CUSTOMER_EMAIL_INVALID,
+} from '../../lib/customer-email.js';
 
 const DEFAULT_TTL_HOURS = 72;
 
@@ -77,6 +83,18 @@ function err(message, code, status) {
   if (code) e.code = code;
   if (status) e.status = status;
   return e;
+}
+
+/**
+ * The shared gate, spoken in this module's error dialect. quotes.routes.js
+ * classifies failures by `e.code` / `e.status` from err(), so throwing an
+ * AppError here would land as a 500. The sentence and the machine code still
+ * come from lib/customer-email.js — only the envelope is local.
+ */
+function assertQuoteEmail(value) {
+  const verdict = normalizeCustomerEmail(value);
+  if (!verdict.ok) throw err(messageFor('staff'), CUSTOMER_EMAIL_INVALID, 400);
+  return verdict.email;
 }
 
 function tenantWhere(scope) {
@@ -304,6 +322,17 @@ export function createQuotesService(deps = {}) {
       const { pickupLocationId, returnLocationId, vehicleTypeId, pickupAt, returnAt } = data;
       if (!vehicleTypeId) throw err('vehicleTypeId is required', 'VALIDATION', 400);
 
+      // Writer #19 of the customer-email inventory (lib/customer-email.js).
+      // Quote.contactEmail is not one of the three incident columns, but it is
+      // the SOURCE convert() draws Customer.email from — so this is where the
+      // keyboard actually is, and leaving it open is what forced convert() to
+      // police stored data instead.
+      //
+      // Up here with the rate-override gates, for the reason stated there: fail
+      // BEFORE any engine call and any write. A string that is plainly not an
+      // address should not cost a pricing round trip first.
+      const contactEmail = assertQuoteEmail(data.contactEmail);
+
       // Source is decided here (not inline in `base`) because the override gate
       // needs it: only a STAFF-sourced quote may carry a manual rate.
       const source = data.source === 'VOZIA' || data.source === 'PORTAL' ? data.source : 'STAFF';
@@ -412,7 +441,7 @@ export function createQuotesService(deps = {}) {
         customerId: data.customerId || null,
         contactName: (data.contactName || '').trim() || null,
         contactPhone: (data.contactPhone || '').trim() || null,
-        contactEmail: (data.contactEmail || '').trim() || null,
+        contactEmail,   // writer #19 — validated at the top of create()
         pickupLocationId,
         returnLocationId: returnLocationId || pickupLocationId,
         vehicleTypeId,
@@ -507,7 +536,10 @@ export function createQuotesService(deps = {}) {
           customerId: old.customerId,
           contactName: old.contactName,
           contactPhone: old.contactPhone,
-          contactEmail: old.contactEmail,
+          // A COPY of an existing quote, not a keyboard: an address captured
+          // before this gate existed must not make the Duplicate button fail.
+          // Drop it to null rather than refuse, and let the agent retype it.
+          contactEmail: normalizeCustomerEmail(old.contactEmail).email,
           source: 'STAFF'
         },
         scope,
@@ -629,9 +661,11 @@ export function createQuotesService(deps = {}) {
       if (!quote) throw err('Quote not found', 'NOT_FOUND', 404);
       if (quote.status === 'CONVERTED') throw err('Quote already converted', 'QUOTE_NOT_ACTIVE', 422);
       const data = {};
-      for (const k of ['contactName', 'contactPhone', 'contactEmail']) {
+      // Writer #20: the contact-detail edit screen. Same keyboard, same rule.
+      for (const k of ['contactName', 'contactPhone']) {
         if (patch[k] !== undefined) data[k] = String(patch[k] || '').trim() || null;
       }
+      if (patch.contactEmail !== undefined) data.contactEmail = assertQuoteEmail(patch.contactEmail);
       if (!Object.keys(data).length) throw err('Nothing to update', 'VALIDATION', 400);
       const updated = await db.quote.update({ where: { id: quote.id }, data });
       return withVehicleTypeNames(updated);
@@ -677,12 +711,35 @@ export function createQuotesService(deps = {}) {
         const name = String(input.contactName || quote.contactName || '').trim();
         const phone = String(input.contactPhone || quote.contactPhone || '').trim();
         // Writer #7 of the customer-email inventory (lib/customer-email.js).
-        // STAFF capture -> refuse, expressed in this module's own error dialect
-        // so the routes keep classifying it the way they already do. The
-        // sentence and the machine code come from the shared gate, not here.
-        const emailVerdict = normalizeCustomerEmail(input.contactEmail || quote.contactEmail);
-        if (!emailVerdict.ok) throw err(messageFor('staff'), CUSTOMER_EMAIL_INVALID, 400);
-        const email = emailVerdict.email;
+        // ONLY input.contactEmail is capture. The STORED quote.contactEmail is a
+        // dead zone by the same rule as the contract snapshots: validating it
+        // here would block a conversion over a value THIS request never typed —
+        // and the remedy the message offers ("or leave the field empty") could
+        // not work, because `input.contactEmail || quote.contactEmail` re-selects
+        // the stored bad value the instant the field is blanked. The keyboard is
+        // at create() and updateContact(); both now hold the gate.
+        //
+        // Present-but-empty is an explicit CLEAR, not "fall back to the quote":
+        // an agent who blanks the box means to drop the address.
+        let email;
+        if (Object.prototype.hasOwnProperty.call(input, 'contactEmail')) {
+          const emailVerdict = normalizeCustomerEmail(input.contactEmail);
+          if (!emailVerdict.ok) throw err(messageFor('staff'), CUSTOMER_EMAIL_INVALID, 400);
+          email = emailVerdict.email;
+        } else {
+          // Not refused — but not propagated either. The stored value is about
+          // to be written into a BRAND NEW Customer.email row, and copying a
+          // known-bad address forward would seed the very column this change
+          // exists to keep clean. So: the IMPORT policy, byte for byte the one
+          // the OTA workers use. Null, with a trace, and the conversion goes
+          // through. Refusing here is the mistake this branch already made once.
+          email = importCustomerEmailOrNull(quote.contactEmail, {
+            log: logger,
+            source: 'quote-convert',
+            tenantId: scope?.tenantId ?? null,
+            externalRef: quote.quoteNumber || quote.id || null,
+          });
+        }
         if (!name || !phone) {
           throw err('customerId, or contact name + phone, is required to convert', 'CUSTOMER_REQUIRED', 422);
         }

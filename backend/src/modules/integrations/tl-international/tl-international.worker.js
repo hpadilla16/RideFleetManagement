@@ -91,6 +91,7 @@ export async function maybeCreateCustomerFromTl(prisma, extRes) {
     source: 'tl-international',
     tenantId: extRes.tenantId,
     externalRef: extRes.externalRef,
+    reservationId: extRes.promotedToReservationId ?? null,
   }) || '';
   const phone     = (extRes.customerPhone     || '').trim();
 

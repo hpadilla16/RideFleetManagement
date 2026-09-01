@@ -81,6 +81,7 @@ export async function maybeCreateCustomerFromEconomy(prismaClient, extRes) {
     source: 'economy',
     tenantId: extRes.tenantId,
     externalRef: extRes.externalRef,
+    reservationId: extRes.promotedToReservationId ?? null,
   }) || '';
   const phone = (extRes.customerPhone || '').trim();
 

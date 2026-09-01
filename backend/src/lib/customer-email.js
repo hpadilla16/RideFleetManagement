@@ -15,12 +15,12 @@
  *   - modules/customers/vozia-customer-patch.js        (EMAIL_RE)
  *   - modules/incident-report/incident-report.service.js
  *   - modules/public-booking/public-booking.service.js (line ~1372)
- * and ELEVEN other paths that write Customer.email or
- * RentalAgreement.customerEmail had no check at all. A rule enforced in three
- * doors out of fourteen is not a rule; the same rule pasted into fourteen is a
- * rule that will drift. See lib/tenant-provider-credential.js for the last time
- * this project paid for a per-call-site fix (the inherited-credential bug shipped
- * twice). It lives here, once.
+ * and SEVENTEEN other paths that write one of the three customer-email columns
+ * had no check at all. A rule enforced in three doors out of twenty is not a
+ * rule; the same rule pasted into twenty is a rule that will drift. See
+ * lib/tenant-provider-credential.js for the last time this project paid for a
+ * per-call-site fix (the inherited-credential bug shipped twice). It lives here,
+ * once.
  *
  * WHY NOT A PRISMA QUERY EXTENSION (the lib/customer-phone-normalize.js shape).
  * Normalization could ride an extension, but the POLICY cannot: the same bad
@@ -36,24 +36,36 @@
  * mail-delivery bug into a booking-refusal bug. `user+tag@sub.example.co` must
  * pass, and does (see customer-email.test.mjs).
  *
- * WRITER INVENTORY as of 2026-09-01 — every path that writes Customer.email or
- * RentalAgreement.customerEmail, and the policy each one got. Ratcheted by
- * `customer-email-writers.test.mjs`, so a new writer fails the build until it
- * is classified here.
+ * WRITER INVENTORY as of 2026-09-01, second pass. THREE columns, not two: the
+ * first census said "every path" and covered Customer.email and
+ * RentalAgreement.customerEmail, then missed LoanerAgreement.customerEmail
+ * entirely — a keyboard-captured column that feeds the loaner confirmation mail
+ * and loaner-reminders.scheduler. Fifteen doors validated and the sixteenth left
+ * open is the same bug as one door validated and fifteen left open, only harder
+ * to notice. The claim below is now scoped to what was actually checked.
+ *
+ * Every entry is DRIVEN by customer-email-writers.test.mjs — the specimen goes
+ * in, the assertion is on what came out. The first version of that suite checked
+ * substrings instead, and reported green over a writer that called this module
+ * without importing it. Do not add an entry here without a driven test.
  *
  *   STAFF CAPTURE → 400 + CUSTOMER_EMAIL_INVALID, message audience 'staff'
- *     1. customers.service.js create()              POST   /customers
- *     2. customers.service.js update()              PATCH  /customers/:id
- *     3. vozia-customer-patch.js                    PATCH  /customers/:id (service acct)
- *     4. reservations.routes.js staff-complete      POST   /reservations/:id/precheckin/staff-complete
+ *     1. customers.service.js create()               POST  /customers
+ *     2. customers.service.js update()               PATCH /customers/:id
+ *     3. vozia-customer-patch.js                     PATCH /customers/:id (service acct)
+ *     4. reservations.routes.js staff-complete       POST  /reservations/:id/precheckin/staff-complete
  *     5. rental-agreements.service.js updateCustomer PUT   /rental-agreements/:id/customer
- *     6. dealership-loaner.service.js               loaner counter intake
- *     7. quotes.service.js convert()                quote → reservation
+ *     6. dealership-loaner.service.js resolveCustomer()    loaner counter intake
+ *     7. quotes.service.js convert()                 quote → reservation (INPUT only, see below)
+ *    17. loaner-agreement.service.js createForReservation()  (payload half only)
+ *    18. loaner-agreement.service.js update()        pre-signature edit screen
+ *    19. quotes.service.js create()                  Quote.contactEmail at capture
+ *    20. quotes.service.js updateContact()           Quote.contactEmail edit
  *
  *   CUSTOMER CAPTURE → 400 + CUSTOMER_EMAIL_INVALID, message audience 'customer'
  *     8. customer-portal.routes.js pre-check-in submit
  *     9. public-booking.service.js createGuestAccount()
- *    10. booking-engine.service.js upsertPublicCustomer() (public storefront booking)
+ *    10. booking-engine.service.js upsertPublicCustomer() (public storefront)
  *
  *   IMPORT / OTA → never rejects the batch; stores null and logs a warning
  *    11. integrations/booking-source/customer-autocreate.js  (advantage, flexways, mex)
@@ -64,26 +76,55 @@
  *
  *   STAFF BULK IMPORT → row-level rejection, batch survives
  *    16. customers.service.js buildCustomerImportRow()  POST /customers/bulk/validate|import
- *        Judgement call: this is neither of the three. It is staff-driven like
- *        (1)-(7), but it already has a validate-then-import report the operator
- *        reads BEFORE committing, and a 400 would discard 499 good rows over one
- *        bad cell. So the row is marked invalid with the same message the counter
- *        gets, the report surfaces it, and importBulk skips it — the operator sees
- *        and can fix it, and nothing else is lost.
+ *        Judgement call: neither 400 nor silence. Staff-driven like (1)-(7), but
+ *        it already has a validate-then-import report the operator reads BEFORE
+ *        committing, and a 400 would discard 499 good rows over one bad cell. The
+ *        row is marked invalid with the same sentence the counter gets, and
+ *        importBulk skips it.
  *
- *   NOT CAPTURE — deliberately untouched (a copy or a clear, never a keyboard):
- *     - rental-agreements.service.js rentalAgreement.create ×2: SNAPSHOTS
- *       reservation.customer.email onto the contract. Validating here would
- *       refuse to open an agreement for the 20 customers whose stored address is
- *       already bad — turning a mail bug into a counter outage. Those rows are a
- *       separate, Hector-approved cleanup.
+ *   WHY #7 AND #17 VALIDATE ONLY HALF THEIR INPUT. Both read a keyboard value
+ *   OR fall back to something already stored. Only the keyboard half is capture.
+ *   quotes.convert() originally validated `input.contactEmail || quote.contactEmail`
+ *   and so refused a conversion over a value the request never typed — with a
+ *   message offering a remedy ('or leave the field empty') that could not work,
+ *   because blanking the field re-selected the stored bad value through that
+ *   same `||`. '' answered 400 while '   ' converted by accident. Both now mean
+ *   the same thing: clear it. The stored value is validated where it is TYPED,
+ *   at #19 and #20.
+ *
+ *   NOT CAPTURE — a copy, a snapshot, or a clear; never a keyboard:
+ *     - rental-agreements.service.js rentalAgreement.create ×2, and
+ *       public-loaner.service.js loanerAgreement.create: SNAPSHOT
+ *       reservation.customer.email onto a contract. Validating here would refuse
+ *       to open an agreement for the customers whose STORED address is already
+ *       bad — a mail bug turned into a counter outage. Those rows are a separate,
+ *       Hector-approved cleanup.
  *     - kiosk-name-update.service.js customer.create: CLONES an existing row's
  *       email during a name correction. Same reasoning.
- *     - account-deletion.service.js: writes `email: null` (anonymiser).
- *     - public-booking.service.js issueGuestAccess(): email is in the WHERE, the
- *       data payload writes only guest-access tokens.
+ *     - account-deletion.service.js, customer-erasure.service.js and
+ *       retention.service.js: anonymisers. They write null and sentinels through
+ *       `tx[spec.model].updateMany`, so no line names a table or a column and the
+ *       scanner could not see two of the three. Declaring one and not the others
+ *       was an accident of grep, not a decision.
+ *     - kiosk-checkout.service.js / kiosk-staff-assist.service.js: `data: patch`
+ *       accumulated from a fixed key list (licence, DOB, ID-photo columns).
+ *     - vozia-reservation-patch.js: `data: { [column]: value }` where `column` is
+ *       the literal 'phone'.
+ *     - public-booking.service.js issueGuestAccess(): the email is in the WHERE;
+ *       the payload writes only guest-access tokens.
  *
- * Free of Prisma, Express and the mailer on purpose, so the whole matrix is
+ *   OUT OF SCOPE, DECLARED — a fourth column, deliberately not in this change:
+ *     - rental-agreements.service.js addDriver() writes AgreementDriver.email,
+ *       captured from a keyboard and ungated. Same failure mode; no send path
+ *       addresses an additional driver today, so it cannot produce this incident,
+ *       and adding a fourth column mid-review is how a fix stops being
+ *       reviewable. Named here because an undeclared gap reads as an overlooked
+ *       one. Next batch: this module, STAFF policy.
+ *     - incident-report.service.js, shuttle-zone-alerts.js and
+ *       public-booking.service.js submitContactMessage() still carry their own
+ *       local regex. Each checks an ad-hoc RECIPIENT for one send; none writes a
+ *       customer column. Consolidating them is its own change.
+ * * Free of Prisma, Express and the mailer on purpose, so the whole matrix is
  * unit-testable without any of them (customer-email.test.mjs). The one import is
  * lib/errors.js, which is itself pure.
  */

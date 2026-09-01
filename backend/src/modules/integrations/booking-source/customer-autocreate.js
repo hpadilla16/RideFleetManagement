@@ -8,7 +8,12 @@
  * flag is on, create a lightweight Customer from the staged row and let the
  * worker re-evaluate.
  *
- * NOT wired into economy/nu yet — R0 ships the shared code + tests only.
+ * WIRED (2026-09-01 audit): advantage, flexways and mex call this shared
+ * helper; economy, nu and tl-international still keep their own copies of the
+ * same function. All four hold the customer-email gate (writers #11-#14 in
+ * lib/customer-email.js) and booking-source.test.mjs asserts they stay in
+ * parity. The R0 note that used to sit here said none of them were wired,
+ * which had been false for long enough that nobody trusted the header.
  */
 
 import logger from '../../../lib/logger.js';
@@ -60,6 +65,7 @@ export async function maybeCreateCustomerFromSource(prismaClient, extRes, opts =
     source: sourceName,
     tenantId: extRes.tenantId,
     externalRef: extRes.externalRef,
+    reservationId: extRes.promotedToReservationId ?? null,
   }) || '';
   const phone = (extRes.customerPhone || '').trim();
 

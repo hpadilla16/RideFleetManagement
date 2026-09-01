@@ -72,6 +72,7 @@ export async function maybeCreateCustomerFromNu(prismaClient, extRes) {
     source: 'nu',
     tenantId: extRes.tenantId,
     externalRef: extRes.externalRef,
+    reservationId: extRes.promotedToReservationId ?? null,
   }) || '';
   const phone = (extRes.customerPhone || '').trim();
 
