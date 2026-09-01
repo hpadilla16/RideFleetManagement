@@ -371,10 +371,42 @@ describe('the wizard actually delegates the swallow decision', () => {
     dirname(fileURLToPath(import.meta.url)),
     '..', 'src', 'app', 'reservations', '[id]', 'checkout-wizard-v2', 'page.js',
   );
+  // TWO corpora, and an assertion's DIRECTION decides which one it gets, so
+  // that neither can manufacture a false green (2026-09-01).
+  //
+  // A source-level pin reads prose as readily as code. QA proved the cost on
+  // this very block: it applied the reversion the way a merge normally would —
+  // new call site in, old line parked above it as
+  // `// was: setClosedCheck(isFinalizeComplete(r) ? ...)` — and the positive
+  // assertion below matched the COMMENT. Thirty green tests over this ticket's
+  // original defect.
+  //
+  //   code() — comments stripped. Every POSITIVE match runs on it. Stripping
+  //            only ever REMOVES text, and removing text can only make a
+  //            `toMatch` fail, so an over-eager strip costs a false RED and
+  //            never a false green. Prose is not evidence that the screen
+  //            calls anything.
+  //   src()  — the raw file, comments included. Every NEGATIVE match runs on
+  //            it. Extra text can only make a `not.toMatch` fail, so the same
+  //            argument runs the other way: a banned pattern is caught even
+  //            where someone parked it in a comment.
+  //
+  // Same shape and same reasoning as ciWorkflowRunLines() in
+  // backend/src/lib/npm-test-chain.test.mjs — a guard that reads comments is a
+  // guard a comment can satisfy. That one strips whole lines only, because a
+  // `#` inside a YAML `run:` body is shell and cutting there would truncate a
+  // real command. Here the aggressive form is the safe one: page.js contains no
+  // `://` at all, and even if it grew one, truncating a line only takes text
+  // away from the corpus the positives run on.
   const src = () => readFileSync(WIZARD, 'utf8');
-  // advance() is the only place a transition 409 is handled.
+  const code = () => src()
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => (m.match(/\n/g) || []).join(''))
+    .replace(/\/\/[^\n]*/g, '');
+  // advance() is the only place a transition 409 is handled. Bounded on code()
+  // because the ordering assertion below compares POSITIONS: a comment naming
+  // setToast ahead of the real call would decide that test on prose too.
   const advanceBody = () => {
-    const s = src();
+    const s = code();
     const start = s.indexOf('const advance = async (toStep, metadata)');
     expect(start, 'advance() not found in the wizard').toBeGreaterThan(-1);
     const end = s.indexOf('const pauseAndExit', start);
@@ -383,7 +415,7 @@ describe('the wizard actually delegates the swallow decision', () => {
   };
 
   it('imports shouldSwallowTransitionConflict from the lib', () => {
-    expect(src()).toMatch(/import\s*\{[^}]*\bshouldSwallowTransitionConflict\b[^}]*\}\s*from\s*'[^']*lib\/checkout-session'/s);
+    expect(code()).toMatch(/import\s*\{[^}]*\bshouldSwallowTransitionConflict\b[^}]*\}\s*from\s*'[^']*lib\/checkout-session'/s);
   });
 
   it('asks the library, passing the error so FINALIZE_INCOMPLETE can be seen', () => {
@@ -411,20 +443,27 @@ describe('the wizard actually delegates the swallow decision', () => {
   // them, which is the same accident the block above was written for.
 
   it('asks the library for the CLOSED verdict instead of reading status inline', () => {
-    const s = src();
-    expect(s).toMatch(/setClosedCheck\(\s*isFinalizeComplete\(/);
-    // The two-clause verdict must not be re-inlined next to the setter. The
-    // one-clause version is the defect the whole ticket exists to remove.
-    expect(s).not.toMatch(/setClosedCheck\([^;]*status[^;]*===[^;]*'CHECKED_OUT'/);
+    // POSITIVE on code(): the call has to be in the SOURCE, not in a note
+    // about the source. This is the assertion QA satisfied with a comment.
+    expect(code()).toMatch(/setClosedCheck\(\s*isFinalizeComplete\(/);
+    // NEGATIVE on src(): the two-clause verdict must not be re-inlined next to
+    // the setter, and a commented-out copy is still a copy someone restores.
+    //
+    // The two word boundaries here are load-bearing, and they shipped once as
+    // two literal 0x08 bytes: the assertion parsed, ran, and could not match
+    // anything ever. Edit this line with an editor. A heredoc or `python -c`
+    // turns that escape into a BACKSPACE.
+    expect(src()).not.toMatch(/setClosedCheck\([^;]*\bstatus\b[^;]*===[^;]*'CHECKED_OUT'/);
   });
 
   it('asks the library what the CLOSED card may offer', () => {
-    const s = src();
-    expect(s).toMatch(/closedCardState\(\{\s*reservation,\s*terminalReason:/);
+    // POSITIVE on code(), NEGATIVE on src() — see the note on the corpora.
+    expect(code()).toMatch(/closedCardState\(\{\s*reservation,\s*terminalReason:/);
     // The retry allow-list mirrors the backend's self-heal list and lives in
-    // ONE place; a copy of it in the component is how the two drift apart.
-    expect(s).not.toMatch(/const\s+retryCanWork\s*=/);
-    expect(s).not.toMatch(/const\s+halfFinalized\s*=/);
+    // ONE place; a copy of it in the component is how the two drift apart,
+    // and a commented-out copy is still a copy someone can restore.
+    expect(src()).not.toMatch(/const\s+retryCanWork\s*=/);
+    expect(src()).not.toMatch(/const\s+halfFinalized\s*=/);
   });
 
   it('reconciles the screen to server truth before toasting the error', () => {

@@ -44,3 +44,69 @@ describe('Client utilities', () => {
     expect(mod.readStoredToken()).toBe('');
   });
 });
+
+/**
+ * The ADDITIVE members on a failed request (2026-09-01).
+ *
+ * `reason` and `session` are lifted off a handful of checkout 409s
+ * (checkout-session.routes.js spreads them only when set). parseApiResponse is
+ * the shared error path for EVERY request in the app, so "additive" has to
+ * mean additive: an unguarded `error.reason = reason` gives thousands of
+ * unrelated errors a `reason: null` member, which is a different thing from
+ * not having one for any caller using `in` or Object.keys.
+ *
+ * The claim was written as a comment in that file first. Comments are not
+ * checked, and this one is about a path every screen depends on.
+ */
+describe('api() error shape', () => {
+  const jsonResponse = (status, body) => ({
+    ok: false,
+    status,
+    headers: { get: () => 'application/json' },
+    text: async () => JSON.stringify(body),
+  });
+
+  const callApi = async (response) => {
+    vi.stubGlobal('fetch', vi.fn(async () => response));
+    const mod = await import('../src/lib/client');
+    try {
+      await mod.api('/api/anything', {}, 'tok');
+    } catch (err) {
+      return err;
+    }
+    throw new Error('api() resolved on a failed response');
+  };
+
+  it('leaves reason and session OFF an ordinary error', async () => {
+    const err = await callApi(jsonResponse(500, { error: 'boom' }));
+    expect(err.status).toBe(500);
+    // `in`, not `=== undefined`: assigning null would pass the loose check and
+    // is exactly the regression this pins.
+    expect('reason' in err).toBe(false);
+    expect('session' in err).toBe(false);
+    // `code` IS always present — it predates these two and callers read it
+    // unconditionally. The asymmetry is deliberate, so it gets asserted.
+    expect('code' in err).toBe(true);
+    expect(err.code).toBeNull();
+  });
+
+  it('carries reason through when the backend actually sends one', async () => {
+    const err = await callApi(jsonResponse(409, {
+      error: 'Checkout is closed but its finalize did not complete: no vehicle',
+      code: 'FINALIZE_INCOMPLETE',
+      reason: 'NO_VEHICLE_ASSIGNED',
+    }));
+    expect(err.code).toBe('FINALIZE_INCOMPLETE');
+    expect(err.reason).toBe('NO_VEHICLE_ASSIGNED');
+  });
+
+  it('carries the fresh session row through on a version conflict', async () => {
+    const err = await callApi(jsonResponse(409, {
+      error: 'Session is being changed by another surface',
+      code: 'CONCURRENT_MODIFICATION',
+      session: { id: 'cs1', currentStep: 'CLOSED' },
+    }));
+    expect(err.session).toEqual({ id: 'cs1', currentStep: 'CLOSED' });
+    expect('reason' in err).toBe(false);
+  });
+});
