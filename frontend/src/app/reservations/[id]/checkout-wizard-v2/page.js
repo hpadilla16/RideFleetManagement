@@ -28,6 +28,7 @@ import { AppShell } from '../../../../components/AppShell';
 import { api } from '../../../../lib/client';
 import { displayNoteLines, hasDisplayNotes, isRecentNote, relativeNoteAge } from '../../../../lib/reservation-notes';
 import { filterAssignableVehicles } from '../../../../lib/vehicle-assignment';
+import { MaintenanceSnoozeReprompt } from '../../../../components/wizard/MaintenanceSnoozeReprompt';
 import {
   createSession, getSessionByReservation, transition,
   mintTermsToken, mintHandoffToken, abandon,
@@ -466,6 +467,17 @@ function CheckoutWizardV2({ token, me, logout }) {
           swapLocked={swapLocked}
           closedCheck={closedCheck}
         />
+        {/* Maintenance snooze re-prompt (Feature A, 2026-09-01): a snooze
+            taken at check-in re-surfaces at the vehicle's NEXT rental event —
+            this wizard open consumes the marker and, when something is still
+            due at the current odometer, shows the reminder. Informational
+            only; the gate lives in the check-in wizard's Step 3. */}
+        {!isTerminal(session.currentStep) && (reservation.vehicleId || reservation.vehicle?.id) ? (
+          <MaintenanceSnoozeReprompt
+            vehicleId={reservation.vehicleId || reservation.vehicle?.id}
+            token={token}
+          />
+        ) : null}
         <StepRenderer
           session={session}
           reservation={reservation}

@@ -48,6 +48,8 @@
       "regExpiring": "Registration expires in {{days}} days — {{unit}}",
       "regExpired": "Registration expired — {{unit}}",
       "maintOverdue": "Maintenance overdue — {{service}}, {{unit}}",
+      "maintSnoozed": "Maintenance snoozed at check-in — {{unit}}",
+      "maintCheckinSent": "Sent to maintenance at check-in — {{unit}} · {{ro}}",
       "billingSuspended": "Subscription suspended — payment past due"
     },
     "src": {
@@ -2189,6 +2191,66 @@
     "showingAll": "Showing all vehicles",
     "showAll": "Show all vehicles",
     "showMatching": "Show only available matches"
+  },
+  "maintCheckin": {
+    "title": "Maintenance due at this odometer",
+    "sub": "Recomputed from the reading you just entered — {{odo}} mi",
+    "src": "Service rules · {{unit}}",
+    "prevSnooze": "Snoozed at the last rental event by {{who}} · {{when}} — re-evaluated fresh against this reading",
+    "chip": {
+      "overdueMi": "{{n}} mi overdue",
+      "overdueDays": "{{n}} days overdue",
+      "dueSoonMi": "due in {{n}} mi",
+      "dueSoonDays": "due in {{n}} days"
+    },
+    "svc": {
+      "LOF": "Oil change",
+      "TIRE_ROTATION": "Tire rotation",
+      "BRAKES": "Brakes",
+      "INSPECTION": "Inspection",
+      "OTHER": "Service"
+    },
+    "metaMiles": "last at {{last}} · due at {{due}} · now {{now}}",
+    "metaDays": "last {{last}} · due {{due}}",
+    "intervalMiles": "every {{n}} mi",
+    "intervalDays": "every {{n}} days",
+    "action": {
+      "send": "Send to maintenance",
+      "snooze": "Continue without action…"
+    },
+    "consequence": "When this return completes, {{unit}} moves out of the rentable pool (status → Maintenance) and a repair order opens for the listed items. It won't appear in availability or the planner until the RO is completed.",
+    "armed": {
+      "msg": "Will send to maintenance when the return completes.",
+      "sub": "Status change and repair order happen at close — nothing moves while the customer is still at the counter."
+    },
+    "snoozed": {
+      "msg": "Snoozed — re-surfaces at {{unit}}'s next check-out or check-in."
+    },
+    "undo": "Undo",
+    "gateHint": "Maintenance is overdue at this reading — choose Send to maintenance or snooze to continue.",
+    "snooze": {
+      "title": "Snooze until {{unit}}'s next rental event",
+      "body": "This reminder re-surfaces automatically at the vehicle's next check-out or check-in — whichever comes first — recomputed against the odometer at that moment. The Maintenance Due list is untouched; it never snoozes.",
+      "note": "Add a note for the maintenance board (optional)",
+      "notePlaceholder": "e.g. shop at capacity, will schedule this week…",
+      "stamp": "Snooze is stamped automatically — {{who}} · {{res}} · {{odo}} mi · {{when}} — no extra clicks.",
+      "back": "Back",
+      "confirm": "Continue — remind me at next check-out or check-in"
+    },
+    "poolMaintenance": "Maintenance",
+    "success": {
+      "handoff": "{{unit}} is out of the rentable pool. {{ro}} opened.",
+      "openRo": "Open {{ro}} →",
+      "snoozed": "Maintenance snoozed — re-surfaces at {{unit}}'s next rental event.",
+      "failed": "Couldn't move {{unit}} to maintenance — the check-in completed, open the repair order manually.",
+      "retry": "Retry",
+      "openManually": "Open Maintenance →"
+    },
+    "reprompt": {
+      "title": "Maintenance reminder — snoozed at the last check-in",
+      "body": "{{who}} snoozed this on {{when}} ({{res}}). Still due at the current odometer:",
+      "open": "Open Maintenance →"
+    }
   },
   "checkinWizard": {
     "mileagePrefilled": "Pre-filled with the vehicle's last known mileage — edit it if the odometer reads different.",
