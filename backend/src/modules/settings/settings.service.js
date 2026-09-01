@@ -1047,6 +1047,40 @@ export const settingsService = {
     return next;
   },
 
+  // Check-in audit (2026-09-03): per-tenant T1 rule thresholds. Rules default
+  // ON (arithmetic, no external calls — checkin-audit-NOTES.md Tier 1); the
+  // numeric defaults are echoed in checkin-audit.service.js so an absent or
+  // partial AppSetting row reads as the shipped behavior. Photo AI (T2) is
+  // NOT configured here yet — when it ships it follows the citationOcrConfig
+  // credential pattern below (resolveCitationOcrCredential, feature
+  // 'checkin-audit').
+  async getCheckinAuditConfig(scope = {}) {
+    const cfg = await readJsonSetting(scopedKey('checkinAuditConfig', scope), null);
+    const num = (v, fallback) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : fallback);
+    return {
+      rulesEnabled: cfg?.rulesEnabled !== false,
+      milesPerDayBand: num(cfg?.milesPerDayBand, 600),
+      fuelUpDelta: num(cfg?.fuelUpDelta, 0.25),
+      fuelDropDelta: num(cfg?.fuelDropDelta, 0.25),
+      backdateGapHours: num(cfg?.backdateGapHours, 6),
+    };
+  },
+
+  async updateCheckinAuditConfig(payload = {}, scope = {}) {
+    const key = scopedKey('checkinAuditConfig', scope);
+    const current = await readJsonSetting(key, {});
+    const next = { ...current };
+    if (typeof payload?.rulesEnabled === 'boolean') next.rulesEnabled = payload.rulesEnabled;
+    for (const k of ['milesPerDayBand', 'fuelUpDelta', 'fuelDropDelta', 'backdateGapHours']) {
+      if (payload?.[k] !== undefined && payload[k] !== null && `${payload[k]}`.trim?.() !== '') {
+        const n = Number(payload[k]);
+        if (Number.isFinite(n) && n > 0) next[k] = n;
+      }
+    }
+    await writeJsonSetting(key, next);
+    return this.getCheckinAuditConfig(scope);
+  },
+
   // Citations OCR (2026-06-15): per-tenant vision-LLM credentials for the mail
   // intake. The API key is stored ENCRYPTED (integration-crypto, same as TL).
   // getCitationOcrConfig is the safe/masked read for the UI (NEVER returns the

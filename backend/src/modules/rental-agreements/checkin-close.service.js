@@ -35,6 +35,7 @@ import { recordMileageEntrySafe } from '../vehicles/mileage-history.service.js';
 import { recordFuelReadingSafe } from '../vehicles/fuel-history.service.js';
 import { syncVehicleStatusForReservation } from '../vehicles/vehicle-status-sync.js';
 import { executeCheckinMaintenanceDecisionSafe } from '../maintenance/maintenance-checkin.service.js';
+import { runCheckinAuditForCloseSafe } from '../checkin-audit/checkin-audit.service.js';
 import { feeEngineService } from '../fees/fee-engine.service.js';
 import { settingsService } from '../settings/settings.service.js';
 import { sendInvoiceAfterCheckin, sendReceiptPaidInFull } from './checkin-emails.service.js';
@@ -508,6 +509,37 @@ export async function closeAgreementWithCheckinFees(
       actorUserId: actorUserId || null,
     });
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Step 6c — Post-check-in audit, Tier 1 rules (2026-09-03)
+  // ─────────────────────────────────────────────────────────────────────────
+  // The NOTES' pipeline: the close ENQUEUES the audit and returns — for T1
+  // (sub-second arithmetic, no external calls) "enqueue" is this inline
+  // best-effort run in the same post-close moment the fee engine and the
+  // maintenance hook (Step 6b) already occupy. Same never-throws contract as
+  // its neighbor above: a failed audit is a log line, never a failed close.
+  // Findings persist as CheckinAuditFinding rows (deduped per
+  // reservation+check) and entry errors emit NEEDS_ACTION into the
+  // notification center. Photo AI (T2) is a later, opt-in worker.
+  await runCheckinAuditForCloseSafe({
+    agreementId: agreement.id,
+    tenantId: agreement.tenantId,
+    reservationId: agreement.reservationId,
+    vehicleId: agreement.vehicleId || null,
+    locationId: agreement.returnLocationId || agreement.pickupLocationId || null,
+    reservationNumber: agreement.reservation?.reservationNumber || null,
+    odometerOut: agreement.odometerOut,
+    odometerIn: odometerIn ?? agreement.odometerIn,
+    fuelOut: agreement.fuelOut,
+    fuelIn: fuelIn ?? agreement.fuelIn,
+    rentalDays,
+    returnedAt,
+    feeItems: feeResult.items,
+    // Signature truth at this moment: either this close just wrote one, or
+    // one was already on file (the runner re-reads the reservation if null).
+    hasSignature: (payload.signerName && payload.signatureDataUrl) ? true : null,
+    closedByUserId: actorUserId || null,
+  });
 
   // ─────────────────────────────────────────────────────────────────────────
   // Step 7 — Audit logs

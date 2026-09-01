@@ -21,8 +21,11 @@ import logger from '../../lib/logger.js';
 export const NOTIFICATION_SEVERITIES = Object.freeze(['CRITICAL', 'NEEDS_ACTION', 'INFO']);
 
 // Sources wired in the MVP. DOCUMENTS covers registration/marbete expiry.
+// CHECKIN_AUDIT (2026-09-03): post-check-in T1 rules audit — entry-error
+// findings emit NEEDS_ACTION, deduped per reservation+check.
 export const NOTIFICATION_SOURCE_TYPES = Object.freeze([
   'GEOFENCE', 'TOLL', 'SHUTTLE', 'KIOSK', 'BILLING', 'MAINTENANCE', 'DOCUMENTS',
+  'CHECKIN_AUDIT',
 ]);
 
 /**

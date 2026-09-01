@@ -34,6 +34,7 @@
       "maintenance": "Maintenance",
       "shuttle": "Shuttle",
       "documents": "Documents & marbete",
+      "checkinAudit": "Check-in audit",
       "billing": "Billing",
       "allInfo": "All informational",
       "all": "All notifications"
@@ -50,6 +51,7 @@
       "maintOverdue": "Maintenance overdue — {{service}}, {{unit}}",
       "maintSnoozed": "Maintenance snoozed at check-in — {{unit}}",
       "maintCheckinSent": "Sent to maintenance at check-in — {{unit}} · {{ro}}",
+      "checkinAuditEntryError": "Entry error — {{res}}. Odometer entered below checkout reading ({{out}} → {{in}}).",
       "billingSuspended": "Subscription suspended — payment past due"
     },
     "src": {
@@ -59,7 +61,8 @@
       "KIOSK": "Kiosk",
       "BILLING": "Billing",
       "MAINTENANCE": "Maintenance",
-      "DOCUMENTS": "Documents"
+      "DOCUMENTS": "Documents",
+      "CHECKIN_AUDIT": "Check-in audit"
     },
     "ack": {
       "by": "Acknowledged by {{name}} · {{time}}",
@@ -82,6 +85,7 @@
   },
   "nav": {
     "notifications": "Notifications",
+    "checkinAudit": "Check-in Audit",
     "dashboard": "Dashboard",
     "reservations": "Reservations",
     "vehicles": "Vehicles",
@@ -2259,5 +2263,115 @@
     "damageHint": "Record damage found at return without leaving the check-in. It logs the damage, adds the charge to this contract and starts the incident draft.",
     "damageCta": "Report damage",
     "damageRecorded": "Damage report recorded — the charge was added to this contract."
+  },
+  "checkinAudit": {
+    "title": "Check-in Audit",
+    "sub": "Post-return review — rules audit on every close",
+    "rulesOn": "Rules audit · on",
+    "photoAiOff": "Photo AI not enabled",
+    "photoAi": "Photo AI",
+    "rules": "Rules",
+    "pass": "Pass",
+    "flagged": "Flagged",
+    "review": "Review",
+    "back": "Back to queue",
+    "dismissAction": "Dismiss…",
+    "dismissed": "Flag dismissed",
+    "dismissedBy": "Dismissed · {{name}}",
+    "laneEmpty": "Nothing in this lane.",
+    "damageLaneEmpty": "Photo AI is not enabled — this lane fills when the photo tier (T2) ships. Rules findings live in Entry errors and Mileage / fuel.",
+    "railNote": "A check-in is never held by the audit. Flags appear here after the close.",
+    "t2Placeholder": "Photo AI is not enabled. When the photo tier ships (opt-in per tenant, tenant key), checkout and check-in photos of each angle are compared here and possible new damage lands in the queue — a person always confirms; nothing is ever charged automatically.",
+    "lanes": {
+      "needsReview": "Needs review",
+      "resolved": "Resolved",
+      "everything": "Everything",
+      "damage": "Possible damage",
+      "entry": "Entry errors",
+      "mileageFuel": "Mileage / fuel",
+      "passed": "Passed clean",
+      "dismissed": "Dismissed",
+      "resolvedOther": "Resolved",
+      "all": "All audits"
+    },
+    "kpis": {
+      "auditedToday": "Audited · today",
+      "cleanPassToday": "Clean pass · today",
+      "openDamage": "Possible damage",
+      "openEntryErrors": "Entry errors"
+    },
+    "cols": {
+      "reservation": "Reservation",
+      "returned": "Returned",
+      "rules": "Rules audit · T1",
+      "photoAi": "Photo AI · T2",
+      "closedBy": "Checked in by"
+    },
+    "chips": {
+      "PASS": "Pass",
+      "ODO_IMPOSSIBLE": "Odometer < checkout",
+      "MILES_OUTLIER": "{{n}} mi/day",
+      "FUEL_UP_NO_RECORD": "Fuel ↑ no refuel recorded",
+      "FUEL_DROP_NO_FEE": "Fuel ↓ no refill fee",
+      "ENTRIES_INCOMPLETE": "Entries incomplete",
+      "BACKDATED_RETURN": "Backdated return · {{n}}h",
+      "UNKNOWN": "Finding"
+    },
+    "cards": {
+      "mileageFuel": "Mileage & fuel audit",
+      "entries": "Agent entry checks",
+      "photoPair": "Photo comparison"
+    },
+    "rows": {
+      "odometer": "Odometer",
+      "perDay": "{{n}}/day",
+      "fuel": "Fuel",
+      "refillBilled": "refill fee billed ✓",
+      "refillMissing": "no refill fee billed",
+      "impossible": "Impossible",
+      "impossibleRule": "Odometer in ≥ out",
+      "impossibleFail": "in < out — one entry is wrong",
+      "entries": "Entries",
+      "entriesComplete": "Complete",
+      "entriesMissing": "{{n}} angle photos missing",
+      "noSignature": "no signature",
+      "backdated": "Return time",
+      "backdatedOk": "Matches photo timestamps",
+      "backdatedGap": "{{n}}h from photo timestamps"
+    },
+    "dismiss": {
+      "title": "Dismiss this flag",
+      "q": "What is it?",
+      "notIssue": "Not an issue",
+      "notIssueSub": "The check misread the situation. Logged as reviewed — nothing else happens.",
+      "preexisting": "Real damage — but pre-existing",
+      "preexistingSub": "Adds it to this vehicle's damage baseline so it is never flagged again — and never charged to a customer.",
+      "preexistingT2": "Applies to photo-AI damage findings — awaits the photo tier (T2). Rules findings are numbers, not marks.",
+      "confirm": "Dismiss"
+    }
+  },
+  "damageBaseline": {
+    "title": "Damage baseline",
+    "sub": "Documented marks on this vehicle — the known-damage baseline. Entries leave the diagram by being repaired (photo required), by a completed repair order, or by clear-with-reason; everything stays in the history below.",
+    "open": "on record",
+    "fixedCount": "repaired",
+    "none": "No damage on record for this vehicle.",
+    "since": "on record since",
+    "source": {
+      "audit": "Check-in audit · marked pre-existing by {{user}}",
+      "onboarding": "Onboarding walk-around",
+      "manual": "Recorded from the profile",
+      "customer": "Customer inspection"
+    },
+    "sendRo": "Send to repair order",
+    "sendRoConfirm": "Group this damage into a new repair order? Completing the RO marks it repaired.",
+    "sentRo": "Sent to repair order {{ro}}",
+    "clearAction": "Clear with reason…",
+    "clearPrompt": "Clear WITHOUT a repair — why? (e.g. \"was dirt\", \"double entry\"). This is recorded in the audit log.",
+    "cleared": "Entry cleared — kept in history with the reason",
+    "clearedAt": "cleared",
+    "clearedReason": "Cleared: {{reason}}",
+    "repairedRo": "Repaired · RO {{ro}}",
+    "repaired": "Repaired"
   }
 }

@@ -5694,6 +5694,14 @@ model VehicleDamageReport {
   fixedAt          DateTime?
   fixedPhotoJson   Json?
 
+  // Damage baseline slice (2026-09-03, damage-baseline-NOTES.md §4.1) — all
+  // additive/nullable. `source` gains the string conventions ONBOARDING and
+  // AUDIT_PREEXISTING alongside the existing CUSTOMER / MANUAL origins.
+  sourceAuditFindingId String? // the CheckinAuditFinding a pre-existing dismissal was born from
+  lastVerifiedAt       DateTime? // last time a human confirmed the mark is still visible
+  lastVerifiedPhotoRef Json? // the photo that verification pointed at
+  clearedReason        String? // clear-with-reason (no repair photo): why this left the baseline
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -5702,6 +5710,57 @@ model VehicleDamageReport {
   @@index([tenantId, status])
   // Print-time acknowledgement lookup (incident PDF §9) queries by incidentId.
   @@index([incidentId])
+}
+
+/// Post-check-in audit (Tier 1 rules, 2026-09-03) — one OBSERVATION row per
+/// (reservation, check). Loose ids, no relations on purpose (the
+/// MaintenanceCheckinDecision precedent): a deleted reservation/vehicle/user
+/// must never cascade into the audit trail. A clean run writes the single
+/// checkKey='PASS' row so "Passed clean" counts real audits, not absences.
+/// Design: design/mockups/checkin-audit-NOTES.md (T1 table + pipeline).
+model CheckinAuditFinding {
+  id                String  @id @default(cuid())
+  tenantId          String
+  reservationId     String
+  rentalAgreementId String?
+  vehicleId         String?
+  locationId        String?
+  reservationNumber String?
+  vehicleLabel      String?
+
+  // ODO_IMPOSSIBLE | MILES_OUTLIER | FUEL_UP_NO_RECORD | FUEL_DROP_NO_FEE |
+  // ENTRIES_INCOMPLETE | BACKDATED_RETURN | PASS
+  checkKey String
+  // ENTRY | MILEAGE_FUEL | DAMAGE | PASS (lane routing; DAMAGE arrives with T2)
+  category String
+  // ERROR | WARN | INFO | NONE
+  severity String
+  tier     String @default("T1")
+  // OPEN | DISMISSED_NOT_ISSUE | RESOLVED
+  status   String @default("OPEN")
+
+  // The fields the check read + the numbers it compared (JSON string).
+  detailsJson String?
+  // RESOLVED provenance: e.g. PREEXISTING_BASELINED (dismiss fork verb 2).
+  resolution String?
+  // The HARD_APPROVED VehicleDamageReport born from a "real but pre-existing"
+  // dismissal (mirror of VehicleDamageReport.sourceAuditFindingId).
+  linkedDamageReportId String?
+
+  dismissedByUserId String?
+  dismissedByName   String?
+  dismissedAt       DateTime?
+
+  closedByUserId String?
+  closedByName   String?
+  returnedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  @@unique([reservationId, checkKey])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, category, status])
 }
 
 model HandoffToken {

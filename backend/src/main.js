@@ -48,6 +48,7 @@ import { assertAuthConfig } from './modules/auth/auth.config.js';
 import { settingsRouter, paymentCapabilitiesRouter } from './modules/settings/settings.routes.js';
 import { feeRatesRouter } from './modules/fees/fee-rates.routes.js';
 import { notificationsRouter } from './modules/notifications/notifications.routes.js';
+import { checkinAuditRouter } from './modules/checkin-audit/checkin-audit.routes.js';
 import { requireAuth, requireRole, requireModuleAccess } from './middleware/auth.js';
 import { tenantRateLimit } from './middleware/tenant-rate-limit.js';
 import { resolvePublicTenantToken } from './middleware/public-tenant-token.js';
@@ -503,6 +504,10 @@ app.use('/api/settings/payment-capabilities', requireAuth, tenantRateLimit, paym
 // as payment-capabilities above. DO NOT add requireModuleAccess here; role-
 // gated categories (billing → ADMIN) filter inside the service instead.
 app.use('/api/notifications', requireAuth, tenantRateLimit, notificationsRouter);
+// Check-in audit (2026-09-03): the post-return T1 review queue. Same
+// no-module-gate posture as notifications — the agents who close check-ins
+// are exactly the audience; every read is tenant-scoped inside the service.
+app.use('/api/checkin-audit', requireAuth, tenantRateLimit, checkinAuditRouter);
 app.use('/api/settings/loaner-rates', requireAuth, tenantRateLimit, requireModuleAccess('settings'), requireRole('ADMIN', 'OPS'), loanerRateRouter);
 app.use('/api/settings', requireAuth, tenantRateLimit, requireModuleAccess('settings'), settingsRouter);
 app.use('/api/tenants', requireAuth, tenantRateLimit, requireModuleAccess('tenants'), tenantsRouter);
